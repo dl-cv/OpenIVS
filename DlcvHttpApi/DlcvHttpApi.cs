@@ -10,6 +10,7 @@ using System.Drawing;
 using System.Net;
 using System.Drawing.Imaging;
 using dlcv_infer_csharp;
+using System.Net.Sockets;
 
 namespace DLCV
 {
@@ -71,14 +72,30 @@ namespace DLCV
         /// <returns>如果服务器已启动则返回true</returns>
         public static bool IsLocalServerRunning(int port = 9890)
         {
-            string url = $"http://127.0.0.1:{port}/api/health";
+            // 首先检查端口是否开放
             try
             {
-                using (var client = new HttpClient())
+                using (var client = new TcpClient())
                 {
-                    client.Timeout = TimeSpan.FromSeconds(2);
-                    var response = client.GetAsync(url).Result;
-                    return response.IsSuccessStatusCode;
+                    // 尝试连接指定端口，超时设置为2秒
+                    var result = client.BeginConnect("127.0.0.1", port, null, null);
+                    var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2));
+                    
+                    if (!success)
+                    {
+                        return false; // 连接超时
+                    }
+                    
+                    // 尝试完成连接
+                    client.EndConnect(result);
+                }
+                
+                // 端口开放，尝试访问文档页
+                using (var httpClient = new HttpClient())
+                {
+                    httpClient.Timeout = TimeSpan.FromSeconds(2);
+                    var response = httpClient.GetAsync($"http://127.0.0.1:{port}/docs").Result;
+                    return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound;
                 }
             }
             catch
@@ -94,14 +111,30 @@ namespace DLCV
         /// <returns>如果服务器已启动则返回true的任务</returns>
         public static async Task<bool> IsLocalServerRunningAsync(int port = 9890)
         {
-            string url = $"http://127.0.0.1:{port}/api/health";
+            // 首先检查端口是否开放
             try
             {
-                using (var client = new HttpClient())
+                using (var client = new TcpClient())
                 {
-                    client.Timeout = TimeSpan.FromSeconds(2);
-                    var response = await client.GetAsync(url);
-                    return response.IsSuccessStatusCode;
+                    // 异步方式尝试连接
+                    var connectTask = client.ConnectAsync("127.0.0.1", port);
+                    var completedTask = await Task.WhenAny(connectTask, Task.Delay(2000));
+                    
+                    if (completedTask != connectTask)
+                    {
+                        return false; // 连接超时
+                    }
+                    
+                    // 确保连接完成
+                    await connectTask;
+                }
+                
+                // 端口开放，尝试访问文档页
+                using (var httpClient = new HttpClient())
+                {
+                    httpClient.Timeout = TimeSpan.FromSeconds(2);
+                    var response = await httpClient.GetAsync($"http://127.0.0.1:{port}/docs");
+                    return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound;
                 }
             }
             catch
@@ -129,11 +162,28 @@ namespace DLCV
             
             try
             {
-                // 检查服务器健康状态
-                var client = GetHttpClient();
-                var response = await client.GetAsync($"{_serverUrl}/api/health");
-                _isConnected = response.IsSuccessStatusCode;
-                return _isConnected;
+                // 检查服务器健康状态 - 只检查端口是否开放
+                var uri = new Uri(_serverUrl);
+                string host = uri.Host;
+                int port = uri.Port;
+                
+                using (var client = new TcpClient())
+                {
+                    // 异步方式尝试连接
+                    var connectTask = client.ConnectAsync(host, port);
+                    var completedTask = await Task.WhenAny(connectTask, Task.Delay(2000));
+                    
+                    if (completedTask != connectTask)
+                    {
+                        _isConnected = false;
+                        return false; // 连接超时
+                    }
+                    
+                    // 确保连接完成
+                    await connectTask;
+                    _isConnected = true;
+                    return true;
+                }
             }
             catch
             {
