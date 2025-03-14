@@ -182,19 +182,19 @@ namespace DlcvHttpApiTest
         }
 
         // 检查服务器按钮点击事件
-        private async void BtnCheckServer_Click(object sender, EventArgs e)
+        private void BtnCheckServer_Click(object sender, EventArgs e)
         {
             using (new WaitCursor(this))
             {
                 try
                 {
                     LogMessage("正在检查服务器状态...");
-                    bool isRunning = await DlcvHttpApi.IsLocalServerRunningAsync();
+                    bool isRunning = DlcvHttpApi.IsLocalServerRunning();
                     
                     if (isRunning)
                     {
                         _isServerRunning = true;
-                        bool isConnected = await _api.ConnectAsync();
+                        bool isConnected = _api.Connect();
                         if (isConnected)
                         {
                             LogMessage("服务器运行正常，已连接成功！");
@@ -217,7 +217,7 @@ namespace DlcvHttpApiTest
         }
 
         // 推理按钮点击事件
-        private async void BtnInfer_Click(object sender, EventArgs e)
+        private void BtnInfer_Click(object sender, EventArgs e)
         {
             if (!CheckRequirements())
                 return;
@@ -229,7 +229,7 @@ namespace DlcvHttpApiTest
                     LogMessage("开始推理...");
                     Stopwatch sw = Stopwatch.StartNew();
                     
-                    var result = await _api.InferImageAsync(_imagePath, _modelPath);
+                    var result = _api.InferImage(_imagePath, _modelPath);
                     
                     sw.Stop();
                     
@@ -269,11 +269,11 @@ namespace DlcvHttpApiTest
                 var testRunner = new DLCV.PressureTestRunner(threadCount, targetRate);
                 
                 // 设置测试动作
-                testRunner.SetTestAction(async obj => 
+                testRunner.SetTestAction(obj => 
                 {
                     try
                     {
-                        await _api.InferImageAsync(_imagePath, _modelPath);
+                        _api.InferImage(_imagePath, _modelPath);
                     }
                     catch (Exception ex)
                     {
@@ -311,6 +311,11 @@ namespace DlcvHttpApiTest
                     {
                         timer.Stop();
                         testRunner.Stop();
+                        
+                        // 显式触发垃圾回收以帮助识别内存泄漏
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                        
                         LogMessage("多线程推理测试完成！");
                     }
                 };

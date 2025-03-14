@@ -105,42 +105,13 @@ namespace DLCV
         }
         
         /// <summary>
-        /// 异步检查本地DLCV服务器是否已启动
+        /// 检查本地DLCV服务器是否已启动 (同步方法保留异步版本，以便兼容)
         /// </summary>
         /// <param name="port">服务器端口号，默认为9890</param>
         /// <returns>如果服务器已启动则返回true的任务</returns>
-        public static async Task<bool> IsLocalServerRunningAsync(int port = 9890)
+        public static Task<bool> IsLocalServerRunningAsync(int port = 9890)
         {
-            // 首先检查端口是否开放
-            try
-            {
-                using (var client = new TcpClient())
-                {
-                    // 异步方式尝试连接
-                    var connectTask = client.ConnectAsync("127.0.0.1", port);
-                    var completedTask = await Task.WhenAny(connectTask, Task.Delay(2000));
-                    
-                    if (completedTask != connectTask)
-                    {
-                        return false; // 连接超时
-                    }
-                    
-                    // 确保连接完成
-                    await connectTask;
-                }
-                
-                // 端口开放，尝试访问文档页
-                using (var httpClient = new HttpClient())
-                {
-                    httpClient.Timeout = TimeSpan.FromSeconds(2);
-                    var response = await httpClient.GetAsync($"http://127.0.0.1:{port}/docs");
-                    return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound;
-                }
-            }
-            catch
-            {
-                return false;
-            }
+            return Task.FromResult(IsLocalServerRunning(port));
         }
 
         #endregion
@@ -153,10 +124,10 @@ namespace DLCV
         public bool IsConnected => _isConnected;
 
         /// <summary>
-        /// 异步初始化并检查与服务器的连接
+        /// 初始化并检查与服务器的连接
         /// </summary>
-        /// <returns>如果服务器可用则返回true的任务</returns>
-        public async Task<bool> ConnectAsync()
+        /// <returns>如果服务器可用则返回true</returns>
+        public bool Connect()
         {
             ThrowIfDisposed();
             
@@ -169,18 +140,18 @@ namespace DLCV
                 
                 using (var client = new TcpClient())
                 {
-                    // 异步方式尝试连接
-                    var connectTask = client.ConnectAsync(host, port);
-                    var completedTask = await Task.WhenAny(connectTask, Task.Delay(2000));
+                    // 尝试连接，超时设置为2秒
+                    var result = client.BeginConnect(host, port, null, null);
+                    var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2));
                     
-                    if (completedTask != connectTask)
+                    if (!success)
                     {
                         _isConnected = false;
                         return false; // 连接超时
                     }
                     
-                    // 确保连接完成
-                    await connectTask;
+                    // 完成连接
+                    client.EndConnect(result);
                     _isConnected = true;
                     return true;
                 }
@@ -193,17 +164,26 @@ namespace DLCV
         }
 
         /// <summary>
-        /// 异步使用图像文件执行推理
+        /// 初始化并检查与服务器的连接（异步版本，保留以兼容现有代码）
+        /// </summary>
+        /// <returns>如果服务器可用则返回true的任务</returns>
+        public Task<bool> ConnectAsync()
+        {
+            return Task.FromResult(Connect());
+        }
+
+        /// <summary>
+        /// 使用图像文件执行推理
         /// </summary>
         /// <param name="imagePath">图像文件路径</param>
         /// <param name="modelPath">模型文件路径</param>
-        /// <returns>推理结果任务</returns>
-        public async Task<Utils.CSharpResult> InferImageAsync(string imagePath, string modelPath)
+        /// <returns>推理结果</returns>
+        public Utils.CSharpResult InferImage(string imagePath, string modelPath)
         {
             ThrowIfDisposed();
             
             if (!_isConnected)
-                throw new InvalidOperationException("未连接到服务器，请先调用ConnectAsync()方法");
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
 
             if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
                 throw new ArgumentException("图像文件路径无效或文件不存在", nameof(imagePath));
@@ -219,21 +199,32 @@ namespace DLCV
             var request = CreateDefaultInferenceRequest(base64Image, modelPath);
 
             // 发送请求
-            return await SendInferenceRequestAsync(request);
+            return SendInferenceRequest(request);
+        }
+        
+        /// <summary>
+        /// 异步使用图像文件执行推理（保留以兼容现有代码）
+        /// </summary>
+        /// <param name="imagePath">图像文件路径</param>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>推理结果任务</returns>
+        public Task<Utils.CSharpResult> InferImageAsync(string imagePath, string modelPath)
+        {
+            return Task.FromResult(InferImage(imagePath, modelPath));
         }
 
         /// <summary>
-        /// 异步使用Bitmap对象执行推理
+        /// 使用Bitmap对象执行推理
         /// </summary>
         /// <param name="bitmap">要处理的Bitmap图像</param>
         /// <param name="modelPath">模型文件路径</param>
-        /// <returns>推理结果任务</returns>
-        public async Task<Utils.CSharpResult> InferBitmapAsync(Bitmap bitmap, string modelPath)
+        /// <returns>推理结果</returns>
+        public Utils.CSharpResult InferBitmap(Bitmap bitmap, string modelPath)
         {
             ThrowIfDisposed();
             
             if (!_isConnected)
-                throw new InvalidOperationException("未连接到服务器，请先调用ConnectAsync()方法");
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
 
             if (bitmap == null)
                 throw new ArgumentNullException(nameof(bitmap), "图像不能为空");
@@ -251,8 +242,19 @@ namespace DLCV
                 var request = CreateDefaultInferenceRequest(base64Image, modelPath);
 
                 // 发送请求
-                return await SendInferenceRequestAsync(request);
+                return SendInferenceRequest(request);
             }
+        }
+        
+        /// <summary>
+        /// 异步使用Bitmap对象执行推理（保留以兼容现有代码）
+        /// </summary>
+        /// <param name="bitmap">要处理的Bitmap图像</param>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>推理结果任务</returns>
+        public Task<Utils.CSharpResult> InferBitmapAsync(Bitmap bitmap, string modelPath)
+        {
+            return Task.FromResult(InferBitmap(bitmap, modelPath));
         }
 
         /// <summary>
@@ -266,6 +268,14 @@ namespace DLCV
         /// <param name="input">输入对象</param>
         /// <param name="modelPath">模型路径</param>
         /// <returns>推理结果</returns>
+        public Utils.CSharpResult InferCustomFormat<TInput>(TInput input, string modelPath)
+        {
+            throw new NotImplementedException("自定义格式推理接口尚未实现");
+        }
+        
+        /// <summary>
+        /// 异步版本保留接口（尚未实现）
+        /// </summary>
         public Task<Utils.CSharpResult> InferCustomFormatAsync<TInput>(TInput input, string modelPath)
         {
             throw new NotImplementedException("自定义格式推理接口尚未实现");
@@ -322,11 +332,11 @@ namespace DLCV
         }
         
         /// <summary>
-        /// 异步发送推理请求并处理响应
+        /// 发送推理请求并处理响应
         /// </summary>
         /// <param name="request">请求对象</param>
-        /// <returns>处理后的推理结果任务</returns>
-        private async Task<Utils.CSharpResult> SendInferenceRequestAsync(object request)
+        /// <returns>处理后的推理结果</returns>
+        private Utils.CSharpResult SendInferenceRequest(object request)
         {
             try
             {
@@ -336,14 +346,14 @@ namespace DLCV
                     System.Text.Encoding.UTF8,
                     "application/json");
 
-                var response = await client.PostAsync($"{_serverUrl}/api/inference", content);
+                var response = client.PostAsync($"{_serverUrl}/api/inference", content).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
                     HandleErrorResponse(response.StatusCode);
                 }
 
-                var responseString = await response.Content.ReadAsStringAsync();
+                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 var jsonResult = JObject.Parse(responseString);
 
                 if (jsonResult["code"]?.ToString() != "00000")
@@ -361,6 +371,16 @@ namespace DLCV
                 
                 throw new DlcvApiException("推理请求处理失败", ex);
             }
+        }
+        
+        /// <summary>
+        /// 异步发送推理请求并处理响应（保留以供内部使用）
+        /// </summary>
+        /// <param name="request">请求对象</param>
+        /// <returns>处理后的推理结果任务</returns>
+        private Task<Utils.CSharpResult> SendInferenceRequestAsync(object request)
+        {
+            return Task.FromResult(SendInferenceRequest(request));
         }
 
         /// <summary>
