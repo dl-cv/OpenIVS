@@ -8,7 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
-namespace PressureTestRunner.Properties
+namespace PressureTestRunnerTest.Properties
 {
 
 

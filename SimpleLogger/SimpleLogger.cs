@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 
-namespace SimpleLogger
+namespace DLCV
 {
     /// <summary>
     /// 日志级别枚举

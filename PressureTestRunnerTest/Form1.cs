@@ -7,12 +7,13 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using DLCV;
 
 namespace PressureTestRunner
 {
     public partial class Form1 : Form
     {
-        private PressureTestRunner _runner;
+        private DLCV.PressureTestRunner _runner;
         private Timer _updateTimer;
 
         public Form1()
@@ -72,7 +73,7 @@ namespace PressureTestRunner
                 int targetRate = (int)nudTargetRate.Value;
                 
                 // 创建新的压力测试实例
-                _runner = new PressureTestRunner(threadCount, targetRate);
+                _runner = new DLCV.PressureTestRunner(threadCount, targetRate);
                 _runner.SetTestAction(TestMethod);
                 
                 // 启动测试
@@ -124,6 +125,11 @@ namespace PressureTestRunner
             
             // 可以使用以下代码记录详细信息（在实际应用中）
             // Console.WriteLine($"执行了测试方法，线程ID: {Thread.CurrentThread.ManagedThreadId}");
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+
         }
     }
 }

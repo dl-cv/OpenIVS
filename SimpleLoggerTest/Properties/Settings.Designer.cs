@@ -8,7 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
-namespace SimpleLogger.Properties
+namespace SimpleLoggerTest.Properties
 {
 
 
