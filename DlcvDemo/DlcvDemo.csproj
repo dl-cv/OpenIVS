@@ -158,7 +158,6 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
-    <None Include="demo_TemporaryKey.pfx" />
     <None Include="packages.config" />
     <None Include="Properties\app.manifest" />
     <None Include="Properties\Settings.settings">
@@ -173,12 +172,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
-      <Project>{e3af1804-fbcb-4865-b656-fde76a7bcd25}</Project>
-      <Name>DlcvCsharpApi</Name>
-    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.7.2">
@@ -226,6 +219,12 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="ico.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
+      <Project>{e3af1804-fbcb-4865-b656-fde76a7bcd25}</Project>
+      <Name>DlcvCsharpApi</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
