@@ -31,6 +31,11 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CameraManagerTest", "CameraManagerTest\CameraManagerTest.csproj", "{23341F21-8781-472E-8D93-983224C8A248}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Test", "Test", "{E80043D7-0F8B-407E-86DF-F8789A514C45}"
+	ProjectSection(SolutionItems) = preProject
+		ImageViewer\Class1.cs = ImageViewer\Class1.cs
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImageViewer", "ImageViewer\ImageViewer.csproj", "{E11DDCC6-84D1-4CAF-9534-2266651E7787}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -39,7 +44,6 @@ Global
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{96A32C00-816E-43E7-B29A-237AF43558FC}.Debug|x64.ActiveCfg = Debug|x64
-		{96A32C00-816E-43E7-B29A-237AF43558FC}.Debug|x64.Build.0 = Debug|x64
 		{96A32C00-816E-43E7-B29A-237AF43558FC}.Release|x64.ActiveCfg = Release|x64
 		{96A32C00-816E-43E7-B29A-237AF43558FC}.Release|x64.Build.0 = Release|x64
 		{980F03F3-3648-4160-BF60-9668C7701785}.Debug|x64.ActiveCfg = Debug|x64
@@ -70,14 +74,15 @@ Global
 		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Debug|x64.Build.0 = Debug|x64
 		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Release|x64.ActiveCfg = Release|x64
 		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Release|x64.Build.0 = Release|x64
-		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Debug|x64.Build.0 = Debug|Any CPU
-		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Release|x64.ActiveCfg = Release|Any CPU
-		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Release|x64.Build.0 = Release|Any CPU
-		{23341F21-8781-472E-8D93-983224C8A248}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{23341F21-8781-472E-8D93-983224C8A248}.Debug|x64.Build.0 = Debug|Any CPU
-		{23341F21-8781-472E-8D93-983224C8A248}.Release|x64.ActiveCfg = Release|Any CPU
-		{23341F21-8781-472E-8D93-983224C8A248}.Release|x64.Build.0 = Release|Any CPU
+		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Debug|x64.ActiveCfg = Debug|x64
+		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Debug|x64.Build.0 = Debug|x64
+		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Release|x64.ActiveCfg = Release|x64
+		{23341F21-8781-472E-8D93-983224C8A248}.Debug|x64.ActiveCfg = Debug|x64
+		{23341F21-8781-472E-8D93-983224C8A248}.Debug|x64.Build.0 = Debug|x64
+		{23341F21-8781-472E-8D93-983224C8A248}.Release|x64.ActiveCfg = Release|x64
+		{E11DDCC6-84D1-4CAF-9534-2266651E7787}.Debug|x64.ActiveCfg = Debug|x64
+		{E11DDCC6-84D1-4CAF-9534-2266651E7787}.Debug|x64.Build.0 = Debug|x64
+		{E11DDCC6-84D1-4CAF-9534-2266651E7787}.Release|x64.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -92,6 +97,7 @@ Global
 		{57677B25-10F3-4156-B496-C95E21AC8B03} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 		{95C65B05-701A-443B-B7D1-2C0DD9A57811} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 		{23341F21-8781-472E-8D93-983224C8A248} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
+		{E11DDCC6-84D1-4CAF-9534-2266651E7787} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {ECC568E3-465E-4300-ADD1-27469BDF798F}
