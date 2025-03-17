@@ -26,6 +26,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvDemo", "DlcvDemo\DlcvDe
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "DLCV", "DLCV", "{BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CameraManager", "..\CameraManager\CameraManager.csproj", "{95C65B05-701A-443B-B7D1-2C0DD9A57811}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CameraManagerTest", "..\CameraManagerTest\CameraManagerTest.csproj", "{23341F21-8781-472E-8D93-983224C8A248}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -60,10 +64,14 @@ Global
 		{57677B25-10F3-4156-B496-C95E21AC8B03}.Debug|x64.ActiveCfg = Debug|x64
 		{57677B25-10F3-4156-B496-C95E21AC8B03}.Debug|x64.Build.0 = Debug|x64
 		{57677B25-10F3-4156-B496-C95E21AC8B03}.Release|x64.ActiveCfg = Release|x64
-		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Debug|x64.ActiveCfg = Debug|x64
-		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Debug|x64.Build.0 = Debug|x64
-		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Release|x64.ActiveCfg = Release|x64
-		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Release|x64.Build.0 = Release|x64
+		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Debug|x64.Build.0 = Debug|Any CPU
+		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Release|x64.ActiveCfg = Release|Any CPU
+		{95C65B05-701A-443B-B7D1-2C0DD9A57811}.Release|x64.Build.0 = Release|Any CPU
+		{23341F21-8781-472E-8D93-983224C8A248}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{23341F21-8781-472E-8D93-983224C8A248}.Debug|x64.Build.0 = Debug|Any CPU
+		{23341F21-8781-472E-8D93-983224C8A248}.Release|x64.ActiveCfg = Release|Any CPU
+		{23341F21-8781-472E-8D93-983224C8A248}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
