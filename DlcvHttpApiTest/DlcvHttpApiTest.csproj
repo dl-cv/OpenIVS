@@ -99,7 +99,7 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\dlcv_infer_csharp\DlcvCsharpApi.csproj">
+    <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
       <Project>{e3af1804-fbcb-4865-b656-fde76a7bcd25}</Project>
       <Name>DlcvCsharpApi</Name>
     </ProjectReference>
