@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.13.35825.156
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenIVS", "OpenIVS.csproj", "{96A32C00-816E-43E7-B29A-237AF43558FC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenIVS", "OpenIVS\OpenIVS.csproj", "{96A32C00-816E-43E7-B29A-237AF43558FC}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PressureTestRunner", "PressureTestRunner\PressureTestRunner.csproj", "{980F03F3-3648-4160-BF60-9668C7701785}"
 EndProject
@@ -18,9 +18,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleLoggerTest", "SimpleL
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvHttpApi", "DlcvHttpApi\DlcvHttpApi.csproj", "{DFC732A4-410A-453D-9790-30A4358D69BD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCsharpApi", "dlcv_infer_csharp\DlcvCsharpApi.csproj", "{E3AF1804-FBCB-4865-B656-FDE76A7BCD25}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCsharpApi", "DlcvCsharpApi\DlcvCsharpApi.csproj", "{E3AF1804-FBCB-4865-B656-FDE76A7BCD25}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvHttpApiTest", "DlcvHttpApiTest\DlcvHttpApiTest.csproj", "{57677B25-10F3-4156-B496-C95E21AC8B03}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvDemo", "DlcvDemo\DlcvDemo.csproj", "{948F3CAC-2D10-4B59-947C-8D00C7B9198A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "DLCV", "DLCV", "{BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -56,9 +60,19 @@ Global
 		{57677B25-10F3-4156-B496-C95E21AC8B03}.Debug|x64.ActiveCfg = Debug|x64
 		{57677B25-10F3-4156-B496-C95E21AC8B03}.Debug|x64.Build.0 = Debug|x64
 		{57677B25-10F3-4156-B496-C95E21AC8B03}.Release|x64.ActiveCfg = Release|x64
+		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Debug|x64.ActiveCfg = Debug|x64
+		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Debug|x64.Build.0 = Debug|x64
+		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Release|x64.ActiveCfg = Release|x64
+		{948F3CAC-2D10-4B59-947C-8D00C7B9198A}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{980F03F3-3648-4160-BF60-9668C7701785} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
+		{D202AD70-EA12-4662-AB14-E246250802D2} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
+		{DFC732A4-410A-453D-9790-30A4358D69BD} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
+		{E3AF1804-FBCB-4865-B656-FDE76A7BCD25} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {ECC568E3-465E-4300-ADD1-27469BDF798F}
