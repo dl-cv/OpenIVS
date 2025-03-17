@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
 
-namespace PressureTestRunner
+namespace DLCV
 {
     /// <summary>
     /// 压力测试运行器类，用于执行可配置的多线程压力测试

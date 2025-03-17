@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 // 有关程序集的一般信息由以下
 // 控制。更改这些特性值可修改
 // 与程序集关联的信息。
-[assembly: AssemblyTitle("SimpleLogger")]
+[assembly: AssemblyTitle("DlcvHttpApi")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("SimpleLogger")]
+[assembly: AssemblyProduct("DlcvHttpApi")]
 [assembly: AssemblyCopyright("Copyright ©  2025")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
@@ -20,7 +20,7 @@ using System.Runtime.InteropServices;
 [assembly: ComVisible(false)]
 
 // 如果此项目向 COM 公开，则下列 GUID 用于类型库的 ID
-[assembly: Guid("d202ad70-ea12-4662-ab14-e246250802d2")]
+[assembly: Guid("dfc732a4-410a-453d-9790-30a4358d69bd")]
 
 // 程序集的版本信息由下列四个值组成: 
 //

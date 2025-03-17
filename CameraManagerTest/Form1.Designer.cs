@@ -1,4 +1,4 @@
-﻿namespace PressureTestRunner
+﻿namespace CameraManagerTest
 {
     partial class Form1
     {
