@@ -8,6 +8,7 @@ using System.IO;
 using System.Diagnostics;
 using System.Collections.Generic;
 using static dlcv_infer_csharp.Utils;
+using DLCV;
 
 namespace demo
 {
@@ -55,6 +56,10 @@ namespace demo
         }
 
         private Model model;
+        private string image_path;
+        private int batch_size = 1;
+        private PressureTestRunner pressureTestRunner;
+        private System.Windows.Forms.Timer updateTimer;
 
         private void button_loadmodel_Click(object sender, EventArgs e)
         {
@@ -107,8 +112,6 @@ namespace demo
             richTextBox1.Text = result["model_info"].ToString();
         }
 
-        string image_path;
-        int batch_size = 1;
         private void button_openimage_Click(object sender, EventArgs e)
         {
             if (model == null)
@@ -168,10 +171,8 @@ namespace demo
                 Console.WriteLine("图像解码失败！");
                 return;
             }
-            lastTotalRuns = totalRuns;
-            stopwatch.Restart();
+
             CSharpResult result = model.InferBatch(image_list);
-            lastDelay = (double)(stopwatch.ElapsedTicks / (decimal)Stopwatch.Frequency * 1000);
 
             imagePanel1.UpdateImageAndResult(image, result);
 
@@ -188,67 +189,37 @@ namespace demo
                 s += "]\n";
             }
             richTextBox1.Text = s;
-
-            //richTextBox1.Text = result.ToString();
-
-            Interlocked.Add(ref totalRuns, batch_size);
-            UpdateSpeed();
         }
 
-        //private Thread[] threads = new Thread[5];
-        private List<Thread> threads = new List<Thread>();
-        private bool isRunning = false;
-        private long totalRuns = 0;
-        private long lastTotalRuns = 0;
-        private double lastDelay = 0;
-        private Stopwatch stopwatch = new Stopwatch();
-
-        private void UpdateSpeed()
+        /// <summary>
+        /// 执行模型推理的测试操作
+        /// </summary>
+        /// <param name="parameter">包含图像列表的参数</param>
+        private void ModelInferAction(object parameter)
         {
-            stopwatch.Stop();
-            long delta = totalRuns - lastTotalRuns;
-            double elapsed_seconds = (double)(stopwatch.ElapsedTicks / (decimal)Stopwatch.Frequency);
-            double speed = delta / elapsed_seconds;
-            lastTotalRuns = totalRuns;
-
-            Invoke((MethodInvoker)delegate
+            try
             {
-                label_speed.Text = $"总运行次数: {totalRuns} 每秒速度: {speed:F2} 延迟：{lastDelay:F2} ms";
-            });
-
-            stopwatch.Restart();
-        }
-
-        private void RunWatchSpeed()
-        {
-            while (isRunning)
+                // 执行批量推理
+                model.InferBatch((List<Mat>)parameter);
+            }
+            catch (Exception ex)
             {
-                UpdateSpeed();
-                Thread.Sleep(500);
+                Debug.WriteLine("模型推理出错: " + ex.Message);
             }
         }
 
-        private void RunThread()
+        /// <summary>
+        /// 定时更新UI上的统计信息
+        /// </summary>
+        private void UpdateStatisticsTimer_Tick(object sender, EventArgs e)
         {
-            Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
-            Cv2.CvtColor(image, image, ColorConversionCodes.BGR2RGB);
-            var image_list = new List<Mat>();
-            for (int i = 0; i < batch_size; i++)
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
-                image_list.Add(image);
-            }
-
-            while (isRunning)
-            {
-                Stopwatch stopwatch_once = new Stopwatch();
-                stopwatch_once.Start();
-
-                Utils.CSharpResult result = model.InferBatch(image_list);
-
-                stopwatch_once.Stop();
-                lastDelay = (double)(stopwatch_once.ElapsedTicks / (decimal)Stopwatch.Frequency * 1000);
-
-                Interlocked.Add(ref totalRuns, batch_size);
+                // 在UI上显示压测统计信息
+                Invoke((MethodInvoker)delegate
+                {
+                    richTextBox1.Text = pressureTestRunner.GetStatistics(false);
+                });
             }
         }
 
@@ -264,56 +235,85 @@ namespace demo
                 MessageBox.Show("请先选择图片文件！");
                 return;
             }
-            if (!isRunning)
+
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
-                lastTotalRuns = totalRuns;
-                batch_size = (int)numericUpDown_batch_size.Value;
-                StartThreads();
+                StopPressureTest();
             }
             else
             {
-                StopThreads();
+                StartPressureTest();
             }
         }
 
-        private void StartThreads()
+        /// <summary>
+        /// 启动压力测试
+        /// </summary>
+        private void StartPressureTest()
         {
-            isRunning = true;
-            stopwatch.Start();
-            threads.Clear();
-
-            for (int i = 0; i < numericUpDown_num_thread.Value; i++)
+            try
             {
-                Thread thread = new Thread(() => RunThread());
-                thread.IsBackground = true;
-                threads.Add(thread);
-                thread.Start();
-            }
+                // 准备测试数据
+                batch_size = (int)numericUpDown_batch_size.Value;
+                int threadCount = (int)numericUpDown_num_thread.Value;
 
-            Thread speed_thread = new Thread(RunWatchSpeed);
-            speed_thread.IsBackground = true;
-            threads.Add(speed_thread);
-            speed_thread.Start();
-
-            button_thread_test.Text = "停止";
-        }
-
-        private void StopThreads()
-        {
-            isRunning = false;
-            foreach (var thread in threads)
-            {
-                if (thread != null && thread.IsAlive)
+                // 读取图像并创建批处理列表
+                Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+                Cv2.CvtColor(image, image, ColorConversionCodes.BGR2RGB);
+                var image_list = new List<Mat>();
+                for (int i = 0; i < batch_size; i++)
                 {
-                    thread.Abort(); // Abort the thread
+                    image_list.Add(image);
                 }
-            }
 
-            button_thread_test.Text = "多线程测试";
+                // 创建压力测试实例
+                pressureTestRunner = new PressureTestRunner(threadCount, 1000000);
+                pressureTestRunner.SetTestAction(ModelInferAction, image_list);
+
+                // 创建并启动定时器更新UI
+                if (updateTimer == null)
+                {
+                    updateTimer = new System.Windows.Forms.Timer();
+                    updateTimer.Interval = 500;
+                    updateTimer.Tick += UpdateStatisticsTimer_Tick;
+                }
+                updateTimer.Start();
+
+                // 启动测试
+                pressureTestRunner.Start();
+                button_thread_test.Text = "停止";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("启动压力测试失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 停止压力测试
+        /// </summary>
+        private void StopPressureTest()
+        {
+            if (pressureTestRunner != null)
+            {
+                pressureTestRunner.Stop();
+
+                // 停止定时器
+                if (updateTimer != null)
+                {
+                    updateTimer.Stop();
+                }
+
+                // 显示最终统计信息
+                button_thread_test.Text = "多线程测试";
+            }
         }
 
         private void button_freemodel_Click(object sender, EventArgs e)
         {
+            // 如果存在正在运行的压力测试，先停止它
+            StopPressureTest();
+
             model = null;
             GC.Collect();
             richTextBox1.Text = "模型已释放";
@@ -331,10 +331,8 @@ namespace demo
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            if (isRunning)
-            {
-                StopThreads();
-            }
+            StopPressureTest();
         }
+
     }
 }
