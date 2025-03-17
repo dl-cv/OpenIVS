@@ -293,7 +293,7 @@ namespace dlcv_infer_csharp
                     {
                         IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
 
-                        mask_img = Mat.FromPixelData(mask_width, mask_height, MatType.CV_8UC1, mask_ptr);
+                        mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
                         mask_img = mask_img.Clone();
                     }
 
