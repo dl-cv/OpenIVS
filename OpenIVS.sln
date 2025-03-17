@@ -31,9 +31,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CameraManagerTest", "CameraManagerTest\CameraManagerTest.csproj", "{23341F21-8781-472E-8D93-983224C8A248}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Test", "Test", "{E80043D7-0F8B-407E-86DF-F8789A514C45}"
-	ProjectSection(SolutionItems) = preProject
-		ImageViewer\Class1.cs = ImageViewer\Class1.cs
-	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImageViewer", "ImageViewer\ImageViewer.csproj", "{E11DDCC6-84D1-4CAF-9534-2266651E7787}"
 EndProject
