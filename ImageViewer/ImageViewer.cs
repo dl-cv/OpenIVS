@@ -12,9 +12,9 @@ using OpenCvSharp;
 using OpenCvSharp.Extensions;
 using static dlcv_infer_csharp.Utils;
 
-namespace demo
+namespace DLCV
 {
-    public class ImagePanel : Panel
+    public class ImageViewer : Panel
     {
         private Image _image;
         private float _scale = 1.0f;
@@ -58,7 +58,7 @@ namespace demo
         public float MaxScale { get; set; } = 100.0f;
         public float MinScale { get; set; } = 0.5f;
 
-        public ImagePanel()
+        public ImageViewer()
         {
             this.DoubleBuffered = true; // Enable double buffering
             this.SetStyle(ControlStyles.ResizeRedraw, true); // Redraw on resize
