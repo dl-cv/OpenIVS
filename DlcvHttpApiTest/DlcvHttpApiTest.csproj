@@ -99,9 +99,9 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\dlcv_infer_csharp\dlcv_infer_csharp\dlcv_infer_csharp.csproj">
+    <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
       <Project>{e3af1804-fbcb-4865-b656-fde76a7bcd25}</Project>
-      <Name>dlcv_infer_csharp</Name>
+      <Name>DlcvCsharpApi</Name>
     </ProjectReference>
     <ProjectReference Include="..\DlcvHttpApi\DlcvHttpApi.csproj">
       <Project>{dfc732a4-410a-453d-9790-30a4358d69bd}</Project>
