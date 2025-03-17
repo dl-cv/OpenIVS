@@ -70,9 +70,9 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\dlcv_infer_csharp\dlcv_infer_csharp\dlcv_infer_csharp.csproj">
+    <ProjectReference Include="..\dlcv_infer_csharp\DlcvCsharpApi.csproj">
       <Project>{e3af1804-fbcb-4865-b656-fde76a7bcd25}</Project>
-      <Name>dlcv_infer_csharp</Name>
+      <Name>DlcvCsharpApi</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

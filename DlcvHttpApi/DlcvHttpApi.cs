@@ -80,16 +80,16 @@ namespace DLCV
                     // 尝试连接指定端口，超时设置为2秒
                     var result = client.BeginConnect("127.0.0.1", port, null, null);
                     var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2));
-                    
+
                     if (!success)
                     {
                         return false; // 连接超时
                     }
-                    
+
                     // 尝试完成连接
                     client.EndConnect(result);
                 }
-                
+
                 // 端口开放，尝试访问文档页
                 using (var httpClient = new HttpClient())
                 {
@@ -103,7 +103,7 @@ namespace DLCV
                 return false;
             }
         }
-        
+
         /// <summary>
         /// 检查本地DLCV服务器是否已启动 (同步方法保留异步版本，以便兼容)
         /// </summary>
@@ -130,26 +130,26 @@ namespace DLCV
         public bool Connect()
         {
             ThrowIfDisposed();
-            
+
             try
             {
                 // 检查服务器健康状态 - 只检查端口是否开放
                 var uri = new Uri(_serverUrl);
                 string host = uri.Host;
                 int port = uri.Port;
-                
+
                 using (var client = new TcpClient())
                 {
                     // 尝试连接，超时设置为2秒
                     var result = client.BeginConnect(host, port, null, null);
                     var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2));
-                    
+
                     if (!success)
                     {
                         _isConnected = false;
                         return false; // 连接超时
                     }
-                    
+
                     // 完成连接
                     client.EndConnect(result);
                     _isConnected = true;
@@ -181,7 +181,7 @@ namespace DLCV
         public Utils.CSharpResult InferImage(string imagePath, string modelPath)
         {
             ThrowIfDisposed();
-            
+
             if (!_isConnected)
                 throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
 
@@ -201,7 +201,7 @@ namespace DLCV
             // 发送请求
             return SendInferenceRequest(request);
         }
-        
+
         /// <summary>
         /// 异步使用图像文件执行推理（保留以兼容现有代码）
         /// </summary>
@@ -222,7 +222,7 @@ namespace DLCV
         public Utils.CSharpResult InferBitmap(Bitmap bitmap, string modelPath)
         {
             ThrowIfDisposed();
-            
+
             if (!_isConnected)
                 throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
 
@@ -237,7 +237,7 @@ namespace DLCV
             {
                 bitmap.Save(ms, ImageFormat.Png);
                 string base64Image = Convert.ToBase64String(ms.ToArray());
-                
+
                 // 创建请求
                 var request = CreateDefaultInferenceRequest(base64Image, modelPath);
 
@@ -245,7 +245,7 @@ namespace DLCV
                 return SendInferenceRequest(request);
             }
         }
-        
+
         /// <summary>
         /// 异步使用Bitmap对象执行推理（保留以兼容现有代码）
         /// </summary>
@@ -272,7 +272,7 @@ namespace DLCV
         {
             throw new NotImplementedException("自定义格式推理接口尚未实现");
         }
-        
+
         /// <summary>
         /// 异步版本保留接口（尚未实现）
         /// </summary>
@@ -330,7 +330,7 @@ namespace DLCV
                 model_path = modelPath
             };
         }
-        
+
         /// <summary>
         /// 发送推理请求并处理响应
         /// </summary>
@@ -368,11 +368,11 @@ namespace DLCV
             {
                 if (ex is DlcvApiException)
                     throw;
-                
+
                 throw new DlcvApiException("推理请求处理失败", ex);
             }
         }
-        
+
         /// <summary>
         /// 异步发送推理请求并处理响应（保留以供内部使用）
         /// </summary>
@@ -397,30 +397,38 @@ namespace DLCV
             {
                 foreach (JObject item in results)
                 {
-                    // 解析边界框
-                    var bbox = item["bbox"].ToObject<List<double>>();
-                    
-                    // 确保边界框格式是 [x, y, width, height]
-                    if (bbox.Count == 4)
+                    List<double> bbox;
+                    if (item.ContainsKey("bbox"))
                     {
-                        // 默认格式是 [x1, y1, x2, y2]，需要转换为 [x, y, width, height]
-                        var x1 = bbox[0];
-                        var y1 = bbox[1];
-                        var x2 = bbox[2];
-                        var y2 = bbox[3];
-                        bbox = new List<double> { x1, y1, x2 - x1, y2 - y1 };
+                        // 解析边界框
+                        bbox = item["bbox"].ToObject<List<double>>();
+
+                        // 确保边界框格式是 [x, y, width, height]
+                        if (bbox.Count == 4)
+                        {
+                            // 默认格式是 [x1, y1, x2, y2]，需要转换为 [x, y, width, height]
+                            var x1 = bbox[0];
+                            var y1 = bbox[1];
+                            var x2 = bbox[2];
+                            var y2 = bbox[3];
+                            bbox = new List<double> { x1, y1, x2 - x1, y2 - y1 };
+                        }
+                    }
+                    else
+                    {
+                        bbox = new List<double> { 0, 0, 0, 0 };
                     }
 
                     // 解析分类ID和分类名称
-                    int categoryId = item["category_id"].Value<int>();
+                    int categoryId = item.ContainsKey("category_id") ? item["category_id"].Value<int>() : 0;
                     string categoryName = item["category_name"].Value<string>();
-                    
+
                     // 解析置信度得分
                     float score = item["score"].Value<float>();
-                    
+
                     // 解析区域面积
                     float area = item.ContainsKey("area") ? item["area"].Value<float>() : 0;
-                    
+
                     // 检查是否有掩码
                     bool withMask = item.ContainsKey("with_mask") && item["with_mask"].Value<bool>();
 
@@ -441,7 +449,7 @@ namespace DLCV
 
             // 创建样本结果
             var sampleResults = new List<Utils.CSharpSampleResult> { new Utils.CSharpSampleResult(objectResults) };
-            
+
             // 返回推理结果
             return new Utils.CSharpResult(sampleResults);
         }
@@ -466,7 +474,7 @@ namespace DLCV
                     throw new DlcvApiException($"HTTP请求失败: {(int)statusCode}");
             }
         }
-        
+
         /// <summary>
         /// 如果对象已处置，则抛出异常
         /// </summary>
@@ -490,7 +498,7 @@ namespace DLCV
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-        
+
         /// <summary>
         /// 释放资源
         /// </summary>
