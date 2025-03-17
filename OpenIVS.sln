@@ -5,22 +5,22 @@ VisualStudioVersion = 17.13.35825.156
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenIVS", "OpenIVS.csproj", "{96A32C00-816E-43E7-B29A-237AF43558FC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PressureTestRunner", "..\PressureTestRunner\PressureTestRunner.csproj", "{980F03F3-3648-4160-BF60-9668C7701785}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PressureTestRunner", "PressureTestRunner\PressureTestRunner.csproj", "{980F03F3-3648-4160-BF60-9668C7701785}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PressureTestRunnerTest", "..\PressureTestRunnerTest\PressureTestRunnerTest.csproj", "{7C585718-40FE-41D3-A286-61C47D8AE827}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PressureTestRunnerTest", "PressureTestRunnerTest\PressureTestRunnerTest.csproj", "{7C585718-40FE-41D3-A286-61C47D8AE827}"
 	ProjectSection(ProjectDependencies) = postProject
 		{980F03F3-3648-4160-BF60-9668C7701785} = {980F03F3-3648-4160-BF60-9668C7701785}
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleLogger", "..\SimpleLogger\SimpleLogger.csproj", "{D202AD70-EA12-4662-AB14-E246250802D2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleLogger", "SimpleLogger\SimpleLogger.csproj", "{D202AD70-EA12-4662-AB14-E246250802D2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleLoggerTest", "..\SimpleLoggerTest\SimpleLoggerTest.csproj", "{5A5DD935-AF52-4238-847E-4424EFEC4D40}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleLoggerTest", "SimpleLoggerTest\SimpleLoggerTest.csproj", "{5A5DD935-AF52-4238-847E-4424EFEC4D40}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvHttpApi", "..\DlcvHttpApi\DlcvHttpApi.csproj", "{DFC732A4-410A-453D-9790-30A4358D69BD}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvHttpApi", "DlcvHttpApi\DlcvHttpApi.csproj", "{DFC732A4-410A-453D-9790-30A4358D69BD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "dlcv_infer_csharp", "..\..\dlcv_infer_csharp\dlcv_infer_csharp\dlcv_infer_csharp.csproj", "{E3AF1804-FBCB-4865-B656-FDE76A7BCD25}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCsharpApi", "dlcv_infer_csharp\DlcvCsharpApi.csproj", "{E3AF1804-FBCB-4865-B656-FDE76A7BCD25}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvHttpApiTest", "..\DlcvHttpApiTest\DlcvHttpApiTest.csproj", "{57677B25-10F3-4156-B496-C95E21AC8B03}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvHttpApiTest", "DlcvHttpApiTest\DlcvHttpApiTest.csproj", "{57677B25-10F3-4156-B496-C95E21AC8B03}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
