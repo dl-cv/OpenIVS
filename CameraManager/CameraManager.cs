@@ -737,19 +737,19 @@ namespace DLCV.Camera
             {
                 if (typeof(T) == typeof(string))
                 {
-                    string value;
+                    IStringValue value;
                     _device.Parameters.GetStringValue(name, out value);
                     return (T)(object)value;
                 }
                 else if (typeof(T) == typeof(int))
                 {
-                    long value;
+                    IIntValue value;
                     _device.Parameters.GetIntValue(name, out value);
-                    return (T)(object)(int)value;
+                    return (T)(object)value;
                 }
                 else if (typeof(T) == typeof(float))
                 {
-                    float value;
+                    IFloatValue value;
                     _device.Parameters.GetFloatValue(name, out value);
                     return (T)(object)value;
                 }
