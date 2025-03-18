@@ -282,7 +282,7 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.positionIndicator.BackColor = System.Drawing.Color.White;
             this.positionIndicator.Font = new System.Drawing.Font("Microsoft Sans Serif", 9F);
-            this.positionIndicator.Location = new System.Drawing.Point(20, 570);
+            this.positionIndicator.Location = new System.Drawing.Point(20, 582);
             this.positionIndicator.MarkerColor = System.Drawing.Color.Red;
             this.positionIndicator.MarkerSize = 16;
             this.positionIndicator.MaxPosition = 600F;
@@ -291,7 +291,7 @@
             this.positionIndicator.Position = 0F;
             this.positionIndicator.ProgressColor = System.Drawing.Color.DodgerBlue;
             this.positionIndicator.ShowPositionText = true;
-            this.positionIndicator.Size = new System.Drawing.Size(786, 70);
+            this.positionIndicator.Size = new System.Drawing.Size(767, 58);
             this.positionIndicator.TabIndex = 9;
             this.positionIndicator.Text = "positionIndicator1";
             this.positionIndicator.TrackColor = System.Drawing.Color.LightGray;
@@ -301,12 +301,12 @@
             // 
             this.lblCurrentPosition.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.lblCurrentPosition.AutoSize = true;
-            this.lblCurrentPosition.Location = new System.Drawing.Point(824, 604);
+            this.lblCurrentPosition.Location = new System.Drawing.Point(794, 604);
             this.lblCurrentPosition.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblCurrentPosition.Name = "lblCurrentPosition";
-            this.lblCurrentPosition.Size = new System.Drawing.Size(107, 18);
+            this.lblCurrentPosition.Size = new System.Drawing.Size(125, 18);
             this.lblCurrentPosition.TabIndex = 2;
-            this.lblCurrentPosition.Text = "当前位置：0";
+            this.lblCurrentPosition.Text = "当前位置：100";
             // 
             // timerUpdateStatus
             // 

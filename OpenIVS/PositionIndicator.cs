@@ -296,49 +296,6 @@ namespace OpenIVS
                     {
                         g.FillEllipse(brush, markRect);
                     }
-                    
-                    // 绘制标记点描述文本
-                    if (!string.IsNullOrEmpty(mark.Description))
-                    {
-                        using (var brush = new SolidBrush(ForeColor))
-                        {
-                            StringFormat sf = new StringFormat
-                            {
-                                Alignment = StringAlignment.Center,
-                                LineAlignment = StringAlignment.Center
-                            };
-                            
-                            Rectangle textRect = new Rectangle(
-                                markPos - 50, 
-                                trackTop + _trackHeight + 5, 
-                                100, 
-                                20);
-                            
-                            g.DrawString(mark.Description, Font, brush, textRect, sf);
-                        }
-                    }
-                }
-            }
-
-            // 绘制当前位置文本
-            if (_showPositionText)
-            {
-                string posText = $"{_position:F1}";
-                using (var brush = new SolidBrush(ForeColor))
-                {
-                    StringFormat sf = new StringFormat
-                    {
-                        Alignment = StringAlignment.Far,
-                        LineAlignment = StringAlignment.Center
-                    };
-                    
-                    Rectangle textRect = new Rectangle(
-                        Width - 80, 
-                        trackTop - 25, 
-                        75, 
-                        20);
-                    
-                    g.DrawString(posText, Font, brush, textRect, sf);
                 }
             }
         }
