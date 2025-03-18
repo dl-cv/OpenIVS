@@ -267,7 +267,7 @@ namespace demo
                 }
 
                 // 创建压力测试实例
-                pressureTestRunner = new PressureTestRunner(threadCount, 1000000);
+                pressureTestRunner = new PressureTestRunner(threadCount, 1000000, batch_size);
                 pressureTestRunner.SetTestAction(ModelInferAction, image_list);
 
                 // 创建并启动定时器更新UI
