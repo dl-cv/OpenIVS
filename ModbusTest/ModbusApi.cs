@@ -107,8 +107,6 @@ namespace DLCV
             {
                 try
                 {
-                    // 使用EasyModbus库不需要直接构造Modbus帧
-                    // 这里根据命令类型调用相应的方法
                     switch (command)
                     {
                         case 0x01: // 读线圈
