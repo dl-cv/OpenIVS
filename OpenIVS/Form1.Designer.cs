@@ -32,14 +32,17 @@
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
             this.panelMain = new System.Windows.Forms.Panel();
-            this.imageViewer1 = new DLCV.ImageViewer();
             this.btnStop = new System.Windows.Forms.Button();
+            this.imageViewer1 = new DLCV.ImageViewer();
             this.btnStart = new System.Windows.Forms.Button();
             this.groupBoxStatus = new System.Windows.Forms.GroupBox();
             this.lblModelStatus = new System.Windows.Forms.Label();
             this.lblCameraStatus = new System.Windows.Forms.Label();
             this.lblDeviceStatus = new System.Windows.Forms.Label();
             this.lblResult = new System.Windows.Forms.Label();
+            this.lblSpeed = new System.Windows.Forms.Label();
+            this.txtSpeed = new System.Windows.Forms.TextBox();
+            this.btnSetSpeed = new System.Windows.Forms.Button();
             this.progressBarPosition = new System.Windows.Forms.ProgressBar();
             this.lblCurrentPosition = new System.Windows.Forms.Label();
             this.timerUpdateStatus = new System.Windows.Forms.Timer(this.components);
@@ -82,6 +85,19 @@
             this.panelMain.Size = new System.Drawing.Size(1200, 644);
             this.panelMain.TabIndex = 1;
             // 
+            // btnStop
+            // 
+            this.btnStop.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnStop.Enabled = false;
+            this.btnStop.Location = new System.Drawing.Point(1067, 582);
+            this.btnStop.Margin = new System.Windows.Forms.Padding(4);
+            this.btnStop.Name = "btnStop";
+            this.btnStop.Size = new System.Drawing.Size(120, 62);
+            this.btnStop.TabIndex = 1;
+            this.btnStop.Text = "停止";
+            this.btnStop.UseVisualStyleBackColor = true;
+            this.btnStop.Click += new System.EventHandler(this.btnStop_Click);
+            // 
             // imageViewer1
             // 
             this.imageViewer1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
@@ -96,20 +112,9 @@
             this.imageViewer1.Size = new System.Drawing.Size(1159, 462);
             this.imageViewer1.TabIndex = 6;
             // 
-            // btnStop
-            // 
-            this.btnStop.Enabled = false;
-            this.btnStop.Location = new System.Drawing.Point(1067, 582);
-            this.btnStop.Margin = new System.Windows.Forms.Padding(4);
-            this.btnStop.Name = "btnStop";
-            this.btnStop.Size = new System.Drawing.Size(120, 62);
-            this.btnStop.TabIndex = 1;
-            this.btnStop.Text = "停止";
-            this.btnStop.UseVisualStyleBackColor = true;
-            this.btnStop.Click += new System.EventHandler(this.btnStop_Click);
-            // 
             // btnStart
             // 
+            this.btnStart.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnStart.Enabled = false;
             this.btnStart.Location = new System.Drawing.Point(939, 582);
             this.btnStart.Margin = new System.Windows.Forms.Padding(4);
@@ -128,6 +133,9 @@
             this.groupBoxStatus.Controls.Add(this.lblCameraStatus);
             this.groupBoxStatus.Controls.Add(this.lblDeviceStatus);
             this.groupBoxStatus.Controls.Add(this.lblResult);
+            this.groupBoxStatus.Controls.Add(this.lblSpeed);
+            this.groupBoxStatus.Controls.Add(this.txtSpeed);
+            this.groupBoxStatus.Controls.Add(this.btnSetSpeed);
             this.groupBoxStatus.Location = new System.Drawing.Point(20, 20);
             this.groupBoxStatus.Margin = new System.Windows.Forms.Padding(4);
             this.groupBoxStatus.Name = "groupBoxStatus";
@@ -140,7 +148,7 @@
             // lblModelStatus
             // 
             this.lblModelStatus.AutoSize = true;
-            this.lblModelStatus.Location = new System.Drawing.Point(675, 33);
+            this.lblModelStatus.Location = new System.Drawing.Point(434, 33);
             this.lblModelStatus.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblModelStatus.Name = "lblModelStatus";
             this.lblModelStatus.Size = new System.Drawing.Size(170, 18);
@@ -150,7 +158,7 @@
             // lblCameraStatus
             // 
             this.lblCameraStatus.AutoSize = true;
-            this.lblCameraStatus.Location = new System.Drawing.Point(362, 33);
+            this.lblCameraStatus.Location = new System.Drawing.Point(227, 33);
             this.lblCameraStatus.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblCameraStatus.Name = "lblCameraStatus";
             this.lblCameraStatus.Size = new System.Drawing.Size(170, 18);
@@ -177,6 +185,38 @@
             this.lblResult.Size = new System.Drawing.Size(116, 18);
             this.lblResult.TabIndex = 0;
             this.lblResult.Text = "检测结果：无";
+            // 
+            // lblSpeed
+            // 
+            this.lblSpeed.AutoSize = true;
+            this.lblSpeed.Location = new System.Drawing.Point(642, 33);
+            this.lblSpeed.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblSpeed.Name = "lblSpeed";
+            this.lblSpeed.Size = new System.Drawing.Size(107, 18);
+            this.lblSpeed.TabIndex = 3;
+            this.lblSpeed.Text = "速度(mm/s):";
+            this.lblSpeed.Click += new System.EventHandler(this.lblSpeed_Click);
+            // 
+            // txtSpeed
+            // 
+            this.txtSpeed.Location = new System.Drawing.Point(757, 28);
+            this.txtSpeed.Margin = new System.Windows.Forms.Padding(4);
+            this.txtSpeed.Name = "txtSpeed";
+            this.txtSpeed.Size = new System.Drawing.Size(100, 28);
+            this.txtSpeed.TabIndex = 4;
+            this.txtSpeed.Text = "100";
+            this.txtSpeed.TextChanged += new System.EventHandler(this.txtSpeed_TextChanged);
+            // 
+            // btnSetSpeed
+            // 
+            this.btnSetSpeed.Location = new System.Drawing.Point(867, 26);
+            this.btnSetSpeed.Margin = new System.Windows.Forms.Padding(4);
+            this.btnSetSpeed.Name = "btnSetSpeed";
+            this.btnSetSpeed.Size = new System.Drawing.Size(80, 32);
+            this.btnSetSpeed.TabIndex = 5;
+            this.btnSetSpeed.Text = "设置";
+            this.btnSetSpeed.UseVisualStyleBackColor = true;
+            this.btnSetSpeed.Click += new System.EventHandler(this.btnSetSpeed_Click);
             // 
             // progressBarPosition
             // 
@@ -239,9 +279,12 @@
         private System.Windows.Forms.Label lblModelStatus;
         private System.Windows.Forms.Label lblCameraStatus;
         private System.Windows.Forms.Label lblDeviceStatus;
+        private System.Windows.Forms.Label lblResult;
+        private System.Windows.Forms.Label lblSpeed;
+        private System.Windows.Forms.TextBox txtSpeed;
+        private System.Windows.Forms.Button btnSetSpeed;
         private System.Windows.Forms.ProgressBar progressBarPosition;
         private System.Windows.Forms.Label lblCurrentPosition;
-        private System.Windows.Forms.Label lblResult;
         private System.Windows.Forms.Timer timerUpdateStatus;
         private DLCV.ImageViewer imageViewer1;
     }

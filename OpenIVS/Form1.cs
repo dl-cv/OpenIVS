@@ -24,6 +24,7 @@ namespace OpenIVS
         // Modbus通信
         private ModbusApi _modbusApi;
         private bool _isModbusConnected = false;
+        private float _currentSpeed = 100.0f; // 当前速度值
 
         // 相机控制
         private CameraManager _cameraManager;
@@ -107,6 +108,10 @@ namespace OpenIVS
                     _isModbusConnected = true;
                     UpdateStatus($"Modbus设备已连接，串口：{ports[0]}");
                     UpdateDeviceStatus("已连接");
+                    
+                    // 读取当前速度
+                    _currentSpeed = _modbusApi.ReadFloat(0);
+                    UpdateSpeedDisplay(_currentSpeed);
                 }
                 else
                 {
@@ -524,6 +529,19 @@ namespace OpenIVS
             btnStart.Enabled = _isModbusConnected && _isCameraConnected && _isModelLoaded && !_isRunning;
             btnStop.Enabled = _isRunning;
         }
+
+        // 更新速度显示
+        private void UpdateSpeedDisplay(float speed)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<float>(UpdateSpeedDisplay), speed);
+                return;
+            }
+            
+            txtSpeed.Text = speed.ToString("F1");
+            _currentSpeed = speed;
+        }
         #endregion
 
         #region 事件处理
@@ -645,6 +663,41 @@ namespace OpenIVS
                 MessageBox.Show($"关闭过程中发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+
+        // 设置速度按钮点击事件
+        private void btnSetSpeed_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (!_isModbusConnected)
+                {
+                    MessageBox.Show("设备未连接，无法设置速度", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                if (!float.TryParse(txtSpeed.Text, out float speed))
+                {
+                    MessageBox.Show("请输入有效的速度值", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // 设置速度（地址0，浮点数）
+                bool result = _modbusApi.WriteFloat(0, speed);
+                if (result)
+                {
+                    _currentSpeed = speed;
+                    UpdateStatus($"速度已设置为：{speed:F1} mm/s");
+                }
+                else
+                {
+                    MessageBox.Show("设置速度失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"设置速度时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
         #endregion
 
         #region 主循环
@@ -706,5 +759,15 @@ namespace OpenIVS
             }
         }
         #endregion
+
+        private void lblSpeed_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void txtSpeed_TextChanged(object sender, EventArgs e)
+        {
+
+        }
     }
 }
