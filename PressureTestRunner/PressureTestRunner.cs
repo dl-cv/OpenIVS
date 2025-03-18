@@ -22,6 +22,7 @@ namespace DLCV
         private volatile bool _isRunning;
         private List<Thread> _workerThreads;
         private int _completedRequests;
+        private int _batchSize;
         private object _lockObject = new object();
         private DateTime _startTime;
         private TimeSpan _duration;
@@ -73,12 +74,13 @@ namespace DLCV
         /// </summary>
         /// <param name="threadCount">要使用的线程数量</param>
         /// <param name="targetRate">目标每秒请求数</param>
-        public PressureTestRunner(int threadCount, int targetRate)
+        public PressureTestRunner(int threadCount, int targetRate = 100, int batchSize = 1)
         {
             ThreadCount = threadCount;
             TargetRate = targetRate;
             _workerThreads = new List<Thread>();
             _completedRequests = 0;
+            _batchSize = batchSize;
         }
 
         #endregion
@@ -158,10 +160,11 @@ namespace DLCV
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("压力测试统计:");
             sb.AppendLine($"线程数: {_threadCount}");
+            sb.AppendLine($"批量大小: {_batchSize}");
             if (target_rate) sb.AppendLine($"目标速率: {_targetRate} 请求/秒");
             sb.AppendLine($"运行时间: {elapsed.TotalSeconds:F2} 秒");
-            sb.AppendLine($"完成请求: {_completedRequests}");
-            sb.AppendLine($"实际速率: {actualRate:F2} 请求/秒");
+            sb.AppendLine($"完成请求: {_completedRequests * _batchSize}");
+            sb.AppendLine($"实际速率: {actualRate * _batchSize:F2} 请求/秒");
 
             return sb.ToString();
         }
