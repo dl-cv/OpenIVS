@@ -122,7 +122,7 @@
             // 
             // groupBoxStatistics
             // 
-            this.groupBoxStatistics.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.groupBoxStatistics.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.groupBoxStatistics.Controls.Add(this.lblYieldRate);
             this.groupBoxStatistics.Controls.Add(this.lblNGCount);
             this.groupBoxStatistics.Controls.Add(this.lblOKCount);
