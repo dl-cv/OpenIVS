@@ -297,9 +297,8 @@
             // 
             // lblAddress
             // 
-            this.lblAddress.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.lblAddress.AutoSize = true;
-            this.lblAddress.Location = new System.Drawing.Point(61, 35);
+            this.lblAddress.Location = new System.Drawing.Point(8, 34);
             this.lblAddress.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblAddress.Name = "lblAddress";
             this.lblAddress.Size = new System.Drawing.Size(76, 22);
@@ -310,7 +309,7 @@
             // 
             this.nudAddress.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.nudAddress.Hexadecimal = true;
-            this.nudAddress.Location = new System.Drawing.Point(145, 32);
+            this.nudAddress.Location = new System.Drawing.Point(92, 32);
             this.nudAddress.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.nudAddress.Maximum = new decimal(new int[] {
             65535,
@@ -318,7 +317,7 @@
             0,
             0});
             this.nudAddress.Name = "nudAddress";
-            this.nudAddress.Size = new System.Drawing.Size(129, 32);
+            this.nudAddress.Size = new System.Drawing.Size(182, 32);
             this.nudAddress.TabIndex = 1;
             this.nudAddress.Value = new decimal(new int[] {
             1280,
@@ -328,9 +327,8 @@
             // 
             // lblOperation
             // 
-            this.lblOperation.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.lblOperation.AutoSize = true;
-            this.lblOperation.Location = new System.Drawing.Point(61, 75);
+            this.lblOperation.Location = new System.Drawing.Point(9, 75);
             this.lblOperation.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblOperation.Name = "lblOperation";
             this.lblOperation.Size = new System.Drawing.Size(76, 22);
@@ -345,17 +343,16 @@
             this.cmbOperation.Items.AddRange(new object[] {
             "读线圈寄存器(01H)",
             "写单个线圈寄存器(05H)"});
-            this.cmbOperation.Location = new System.Drawing.Point(145, 72);
+            this.cmbOperation.Location = new System.Drawing.Point(92, 72);
             this.cmbOperation.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.cmbOperation.Name = "cmbOperation";
-            this.cmbOperation.Size = new System.Drawing.Size(129, 30);
+            this.cmbOperation.Size = new System.Drawing.Size(182, 30);
             this.cmbOperation.TabIndex = 3;
             // 
             // lblValue
             // 
-            this.lblValue.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.lblValue.AutoSize = true;
-            this.lblValue.Location = new System.Drawing.Point(61, 115);
+            this.lblValue.Location = new System.Drawing.Point(9, 114);
             this.lblValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblValue.Name = "lblValue";
             this.lblValue.Size = new System.Drawing.Size(54, 22);
@@ -366,7 +363,7 @@
             // 
             this.nudValue.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.nudValue.Hexadecimal = true;
-            this.nudValue.Location = new System.Drawing.Point(145, 112);
+            this.nudValue.Location = new System.Drawing.Point(92, 112);
             this.nudValue.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.nudValue.Maximum = new decimal(new int[] {
             65535,
@@ -374,7 +371,7 @@
             0,
             0});
             this.nudValue.Name = "nudValue";
-            this.nudValue.Size = new System.Drawing.Size(129, 32);
+            this.nudValue.Size = new System.Drawing.Size(182, 32);
             this.nudValue.TabIndex = 5;
             // 
             // chkHex
@@ -579,17 +576,17 @@
             this.txtLog.Name = "txtLog";
             this.txtLog.ReadOnly = true;
             this.txtLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtLog.Size = new System.Drawing.Size(838, 109);
+            this.txtLog.Size = new System.Drawing.Size(806, 49);
             this.txtLog.TabIndex = 0;
             // 
             // btnClearLog
             // 
             this.btnClearLog.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnClearLog.Location = new System.Drawing.Point(15, 149);
+            this.btnClearLog.Location = new System.Drawing.Point(15, 89);
             this.btnClearLog.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.btnClearLog.Name = "btnClearLog";
-            this.btnClearLog.Size = new System.Drawing.Size(838, 40);
+            this.btnClearLog.Size = new System.Drawing.Size(806, 40);
             this.btnClearLog.TabIndex = 1;
             this.btnClearLog.Text = "清除日志";
             this.btnClearLog.UseVisualStyleBackColor = true;
