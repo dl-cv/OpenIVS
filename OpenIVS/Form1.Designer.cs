@@ -299,7 +299,7 @@
             // 
             // lblCurrentPosition
             // 
-            this.lblCurrentPosition.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.lblCurrentPosition.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.lblCurrentPosition.AutoSize = true;
             this.lblCurrentPosition.Location = new System.Drawing.Point(794, 604);
             this.lblCurrentPosition.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
