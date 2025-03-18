@@ -41,12 +41,13 @@ namespace OpenIVS
         private float _currentPosition = 0;
         
         // 位置序列定义 (1-2-3-2-1循环)
-        private readonly float[] _positionSequence = new float[] { 200, 310, 420, 310, 200 };
+        private readonly float[] _positionSequence = new float[] { 200, 310, 420, 310 };
         private int _currentPositionIndex = 0;
         
         // 上次拍照结果
         private Bitmap _lastCapturedImage = null;
         private string _lastDetectionResult = "";
+        
         #endregion
 
         public Form1()
@@ -354,7 +355,7 @@ namespace OpenIVS
                 // 执行推理
                 dlcv_infer_csharp.Utils.CSharpResult result = _model.InferBatch(imageList);
                 
-                // 提取结果
+                // 提取结果文本
                 StringBuilder sb = new StringBuilder();
                 var sampleResults = result.SampleResults[0];
                 
@@ -362,6 +363,9 @@ namespace OpenIVS
                 {
                     sb.AppendLine($"{item.CategoryName}: {item.Score:F2}");
                 }
+                
+                // 更新ImageViewer以显示检测结果
+                UpdateDisplayImage(image, result);
                 
                 // 返回结果文本
                 return sb.ToString();
@@ -458,9 +462,8 @@ namespace OpenIVS
             // 更新文本显示
             lblCurrentPosition.Text = $"当前位置：{position:F1}";
             
-            // 更新进度条，映射到0-100
-            // 假设位置范围是0-500
-            int progressValue = (int)Math.Max(0, Math.Min(100, position / 5));
+            // 更新进度条，映射到0-100，最大值600
+            int progressValue = (int)Math.Max(0, Math.Min(100, position / 6));
             progressBarPosition.Value = progressValue;
         }
 
@@ -478,24 +481,34 @@ namespace OpenIVS
         }
 
         // 更新显示图像
-        private void UpdateDisplayImage(Image image)
+        private void UpdateDisplayImage(Image image, dynamic result = null)
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new Action<Image>(UpdateDisplayImage), image);
+                BeginInvoke(new Action<Image, dynamic>(UpdateDisplayImage), image, result);
                 return;
             }
             
-            // 清理旧图像
-            if (pictureBoxDisplay.Image != null)
+            // 保存图像以供后续使用
+            if (image != null)
             {
-                var oldImage = pictureBoxDisplay.Image;
-                pictureBoxDisplay.Image = null;
-                oldImage.Dispose();
+                _lastCapturedImage = image.Clone() as Bitmap;
             }
-            
-            // 设置新图像
-            pictureBoxDisplay.Image = image;
+
+            // 使用ImageViewer更新图像和检测结果
+            imageViewer1.UpdateImage(image);
+
+            // 如果有检测结果，则更新显示
+            if (result is null)
+            {
+                imageViewer1.ClearResults(); 
+            }
+            else
+            {
+                imageViewer1.UpdateResults(result);
+            }
+
+            imageViewer1.Update();
         }
 
         // 更新控件状态
