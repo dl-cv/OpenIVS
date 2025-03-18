@@ -22,6 +22,7 @@ namespace DLCV
         private volatile bool _isRunning;
         private List<Thread> _workerThreads;
         private int _completedRequests;
+        private int _batchSize;
         private object _lockObject = new object();
         private DateTime _startTime;
         private TimeSpan _duration;
@@ -73,12 +74,13 @@ namespace DLCV
         /// </summary>
         /// <param name="threadCount">要使用的线程数量</param>
         /// <param name="targetRate">目标每秒请求数</param>
-        public PressureTestRunner(int threadCount, int targetRate)
+        public PressureTestRunner(int threadCount, int targetRate = 100, int batchSize = 1)
         {
             ThreadCount = threadCount;
             TargetRate = targetRate;
             _workerThreads = new List<Thread>();
             _completedRequests = 0;
+            _batchSize = batchSize;
         }
 
         #endregion
@@ -113,7 +115,7 @@ namespace DLCV
             _isRunning = true;
             _completedRequests = 0;
             _startTime = DateTime.Now;
-            
+
             // 创建并启动工作线程
             for (int i = 0; i < _threadCount; i++)
             {
@@ -134,14 +136,14 @@ namespace DLCV
 
             _isRunning = false;
             _duration = DateTime.Now - _startTime;
-            
+
             // 等待所有线程完成
             foreach (var thread in _workerThreads)
             {
                 if (thread.IsAlive)
                     thread.Join(1000);
             }
-            
+
             _workerThreads.Clear();
         }
 
@@ -149,19 +151,20 @@ namespace DLCV
         /// 获取测试结果统计信息
         /// </summary>
         /// <returns>包含测试统计数据的字符串</returns>
-        public string GetStatistics()
+        public string GetStatistics(bool target_rate = true)
         {
             TimeSpan elapsed = _isRunning ? (DateTime.Now - _startTime) : _duration;
-            double actualRate = elapsed.TotalSeconds > 0 ? 
+            double actualRate = elapsed.TotalSeconds > 0 ?
                 _completedRequests / elapsed.TotalSeconds : 0;
 
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("压力测试统计:");
             sb.AppendLine($"线程数: {_threadCount}");
-            sb.AppendLine($"目标速率: {_targetRate} 请求/秒");
+            sb.AppendLine($"批量大小: {_batchSize}");
+            if (target_rate) sb.AppendLine($"目标速率: {_targetRate} 请求/秒");
             sb.AppendLine($"运行时间: {elapsed.TotalSeconds:F2} 秒");
-            sb.AppendLine($"完成请求: {_completedRequests}");
-            sb.AppendLine($"实际速率: {actualRate:F2} 请求/秒");
+            sb.AppendLine($"完成请求: {_completedRequests * _batchSize}");
+            sb.AppendLine($"实际速率: {actualRate * _batchSize:F2} 请求/秒");
 
             return sb.ToString();
         }
@@ -178,20 +181,20 @@ namespace DLCV
             // 计算每个线程的目标速率
             double targetRatePerThread = (double)_targetRate / _threadCount;
             int requestsPerSecond = (int)Math.Ceiling(targetRatePerThread);
-            
+
             Stopwatch stopwatch = new Stopwatch();
-            
+
             while (_isRunning)
             {
                 stopwatch.Restart();
-                
+
                 // 执行当前批次的请求
                 for (int i = 0; i < requestsPerSecond && _isRunning; i++)
                 {
                     try
                     {
                         _testAction(_actionParameter);
-                        
+
                         lock (_lockObject)
                         {
                             _completedRequests++;
@@ -203,9 +206,9 @@ namespace DLCV
                         Debug.WriteLine($"线程 {threadId} 执行测试操作时出错: {ex.Message}");
                     }
                 }
-                
+
                 stopwatch.Stop();
-                
+
                 // 简单的速率控制 - 如果一秒内完成了所有请求，则等待剩余时间
                 long elapsedMs = stopwatch.ElapsedMilliseconds;
                 if (elapsedMs < 1000 && _isRunning)

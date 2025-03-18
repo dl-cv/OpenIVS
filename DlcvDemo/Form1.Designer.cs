@@ -34,7 +34,6 @@
             this.button_open_image = new System.Windows.Forms.Button();
             this.button_infer = new System.Windows.Forms.Button();
             this.button_thread_test = new System.Windows.Forms.Button();
-            this.label_speed = new System.Windows.Forms.Label();
             this.button_free_model = new System.Windows.Forms.Button();
             this.button_github = new System.Windows.Forms.Button();
             this.button_doc = new System.Windows.Forms.Button();
@@ -107,17 +106,6 @@
             this.button_thread_test.UseVisualStyleBackColor = true;
             this.button_thread_test.Click += new System.EventHandler(this.button_threadtest_Click);
             // 
-            // label_speed
-            // 
-            this.label_speed.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-            | System.Windows.Forms.AnchorStyles.Left)));
-            this.label_speed.AutoSize = true;
-            this.label_speed.Location = new System.Drawing.Point(12, 155);
-            this.label_speed.Name = "label_speed";
-            this.label_speed.Size = new System.Drawing.Size(46, 24);
-            this.label_speed.TabIndex = 6;
-            this.label_speed.Text = "测速";
-            // 
             // button_free_model
             // 
             this.button_free_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
@@ -181,7 +169,7 @@
             // 
             // comboBox1
             // 
-            this.comboBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.comboBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.comboBox1.FormattingEnabled = true;
             this.comboBox1.Location = new System.Drawing.Point(249, 34);
@@ -240,26 +228,26 @@
             // 
             // imagePanel1
             // 
-            this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-            | System.Windows.Forms.AnchorStyles.Left)
+            this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.imagePanel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imagePanel1.image = null;
-            this.imagePanel1.Location = new System.Drawing.Point(304, 182);
+            this.imagePanel1.Location = new System.Drawing.Point(304, 159);
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
-            this.imagePanel1.Size = new System.Drawing.Size(939, 649);
+            this.imagePanel1.Size = new System.Drawing.Size(939, 672);
             this.imagePanel1.TabIndex = 17;
             // 
             // richTextBox1
             // 
-            this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+            this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left)));
-            this.richTextBox1.Location = new System.Drawing.Point(12, 182);
+            this.richTextBox1.Location = new System.Drawing.Point(12, 158);
             this.richTextBox1.Margin = new System.Windows.Forms.Padding(3, 3, 3, 16);
             this.richTextBox1.Name = "richTextBox1";
-            this.richTextBox1.Size = new System.Drawing.Size(282, 649);
+            this.richTextBox1.Size = new System.Drawing.Size(282, 673);
             this.richTextBox1.TabIndex = 7;
             this.richTextBox1.Text = "";
             // 
@@ -279,7 +267,6 @@
             this.Controls.Add(this.button_github);
             this.Controls.Add(this.button_free_model);
             this.Controls.Add(this.richTextBox1);
-            this.Controls.Add(this.label_speed);
             this.Controls.Add(this.button_thread_test);
             this.Controls.Add(this.button_infer);
             this.Controls.Add(this.button_open_image);
@@ -307,7 +294,6 @@
         private System.Windows.Forms.Button button_open_image;
         private System.Windows.Forms.Button button_infer;
         private System.Windows.Forms.Button button_thread_test;
-        private System.Windows.Forms.Label label_speed;
         private System.Windows.Forms.Button button_free_model;
         private System.Windows.Forms.Button button_github;
         private System.Windows.Forms.Button button_doc;
