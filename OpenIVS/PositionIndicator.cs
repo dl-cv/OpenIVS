@@ -262,6 +262,29 @@ namespace OpenIVS
             //    }
             //}
 
+
+            // 绘制标记点
+            foreach (var mark in _positionMarks)
+            {
+                if (mark.Position >= _minPosition && mark.Position <= _maxPosition)
+                {
+                    float percent = (mark.Position - _minPosition) / (_maxPosition - _minPosition);
+                    int markPos = (int)(percent * Width);
+
+                    // 绘制标记点圆圈
+                    Rectangle markRect = new Rectangle(
+                        markPos - _markerSize / 2,
+                        trackTop + _trackHeight / 2 - _markerSize / 2,
+                        _markerSize,
+                        _markerSize);
+
+                    using (var brush = new SolidBrush(mark.Color))
+                    {
+                        g.FillEllipse(brush, markRect);
+                    }
+                }
+            }
+
             // 绘制位置指示器
             int indicatorPos = progressWidth;
             int indicatorSize = _markerSize * 3 / 2;
@@ -277,27 +300,6 @@ namespace OpenIVS
                 g.FillPolygon(brush, rect);
             }
 
-            // 绘制标记点
-            foreach (var mark in _positionMarks)
-            {
-                if (mark.Position >= _minPosition && mark.Position <= _maxPosition)
-                {
-                    float percent = (mark.Position - _minPosition) / (_maxPosition - _minPosition);
-                    int markPos = (int)(percent * Width);
-                    
-                    // 绘制标记点圆圈
-                    Rectangle markRect = new Rectangle(
-                        markPos - _markerSize / 2, 
-                        trackTop + _trackHeight / 2 - _markerSize / 2, 
-                        _markerSize, 
-                        _markerSize);
-                    
-                    using (var brush = new SolidBrush(mark.Color))
-                    {
-                        g.FillEllipse(brush, markRect);
-                    }
-                }
-            }
         }
         #endregion
 
