@@ -39,10 +39,7 @@
             this.cmbStopBits = new System.Windows.Forms.ComboBox();
             this.lblParity = new System.Windows.Forms.Label();
             this.cmbParity = new System.Windows.Forms.ComboBox();
-            this.lblDeviceId = new System.Windows.Forms.Label();
             this.nudDeviceId = new System.Windows.Forms.NumericUpDown();
-            this.btnConnect = new System.Windows.Forms.Button();
-            this.btnRefreshPorts = new System.Windows.Forms.Button();
             this.gbRegister = new System.Windows.Forms.GroupBox();
             this.lblAddress = new System.Windows.Forms.Label();
             this.nudAddress = new System.Windows.Forms.NumericUpDown();
@@ -64,6 +61,9 @@
             this.gbLog = new System.Windows.Forms.GroupBox();
             this.txtLog = new System.Windows.Forms.TextBox();
             this.btnClearLog = new System.Windows.Forms.Button();
+            this.lblDeviceId = new System.Windows.Forms.Label();
+            this.btnConnect = new System.Windows.Forms.Button();
+            this.btnRefreshPorts = new System.Windows.Forms.Button();
             this.gbSerialPort.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.nudDeviceId)).BeginInit();
             this.gbRegister.SuspendLayout();
@@ -75,8 +75,9 @@
             // 
             // gbSerialPort
             // 
-            this.gbSerialPort.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
+            this.gbSerialPort.Controls.Add(this.btnConnect);
+            this.gbSerialPort.Controls.Add(this.btnRefreshPorts);
+            this.gbSerialPort.Controls.Add(this.lblDeviceId);
             this.gbSerialPort.Controls.Add(this.lblPort);
             this.gbSerialPort.Controls.Add(this.cmbPort);
             this.gbSerialPort.Controls.Add(this.lblBaudRate);
@@ -87,13 +88,12 @@
             this.gbSerialPort.Controls.Add(this.cmbStopBits);
             this.gbSerialPort.Controls.Add(this.lblParity);
             this.gbSerialPort.Controls.Add(this.cmbParity);
-            this.gbSerialPort.Controls.Add(this.lblDeviceId);
             this.gbSerialPort.Controls.Add(this.nudDeviceId);
             this.gbSerialPort.Location = new System.Drawing.Point(15, 15);
             this.gbSerialPort.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.gbSerialPort.Name = "gbSerialPort";
             this.gbSerialPort.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.gbSerialPort.Size = new System.Drawing.Size(756, 240);
+            this.gbSerialPort.Size = new System.Drawing.Size(330, 331);
             this.gbSerialPort.TabIndex = 0;
             this.gbSerialPort.TabStop = false;
             this.gbSerialPort.Text = "串口设置";
@@ -110,14 +110,12 @@
             // 
             // cmbPort
             // 
-            this.cmbPort.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbPort.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbPort.FormattingEnabled = true;
             this.cmbPort.Location = new System.Drawing.Point(120, 32);
             this.cmbPort.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.cmbPort.Name = "cmbPort";
-            this.cmbPort.Size = new System.Drawing.Size(611, 30);
+            this.cmbPort.Size = new System.Drawing.Size(195, 30);
             this.cmbPort.TabIndex = 1;
             this.cmbPort.SelectedIndexChanged += new System.EventHandler(this.cmbPort_SelectedIndexChanged);
             // 
@@ -133,8 +131,6 @@
             // 
             // cmbBaudRate
             // 
-            this.cmbBaudRate.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbBaudRate.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbBaudRate.FormattingEnabled = true;
             this.cmbBaudRate.Items.AddRange(new object[] {
@@ -147,7 +143,7 @@
             this.cmbBaudRate.Location = new System.Drawing.Point(121, 72);
             this.cmbBaudRate.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.cmbBaudRate.Name = "cmbBaudRate";
-            this.cmbBaudRate.Size = new System.Drawing.Size(610, 30);
+            this.cmbBaudRate.Size = new System.Drawing.Size(194, 30);
             this.cmbBaudRate.TabIndex = 3;
             // 
             // lblDataBits
@@ -162,8 +158,6 @@
             // 
             // cmbDataBits
             // 
-            this.cmbDataBits.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbDataBits.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbDataBits.FormattingEnabled = true;
             this.cmbDataBits.Items.AddRange(new object[] {
@@ -172,7 +166,7 @@
             this.cmbDataBits.Location = new System.Drawing.Point(121, 112);
             this.cmbDataBits.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.cmbDataBits.Name = "cmbDataBits";
-            this.cmbDataBits.Size = new System.Drawing.Size(610, 30);
+            this.cmbDataBits.Size = new System.Drawing.Size(194, 30);
             this.cmbDataBits.TabIndex = 5;
             // 
             // lblStopBits
@@ -187,8 +181,6 @@
             // 
             // cmbStopBits
             // 
-            this.cmbStopBits.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbStopBits.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbStopBits.FormattingEnabled = true;
             this.cmbStopBits.Items.AddRange(new object[] {
@@ -197,7 +189,7 @@
             this.cmbStopBits.Location = new System.Drawing.Point(121, 152);
             this.cmbStopBits.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.cmbStopBits.Name = "cmbStopBits";
-            this.cmbStopBits.Size = new System.Drawing.Size(610, 30);
+            this.cmbStopBits.Size = new System.Drawing.Size(194, 30);
             this.cmbStopBits.TabIndex = 7;
             // 
             // lblParity
@@ -212,8 +204,6 @@
             // 
             // cmbParity
             // 
-            this.cmbParity.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbParity.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbParity.FormattingEnabled = true;
             this.cmbParity.Items.AddRange(new object[] {
@@ -223,23 +213,12 @@
             this.cmbParity.Location = new System.Drawing.Point(120, 192);
             this.cmbParity.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.cmbParity.Name = "cmbParity";
-            this.cmbParity.Size = new System.Drawing.Size(417, 30);
+            this.cmbParity.Size = new System.Drawing.Size(195, 30);
             this.cmbParity.TabIndex = 9;
-            // 
-            // lblDeviceId
-            // 
-            this.lblDeviceId.AutoSize = true;
-            this.lblDeviceId.Location = new System.Drawing.Point(545, 194);
-            this.lblDeviceId.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
-            this.lblDeviceId.Name = "lblDeviceId";
-            this.lblDeviceId.Size = new System.Drawing.Size(98, 22);
-            this.lblDeviceId.TabIndex = 10;
-            this.lblDeviceId.Text = "设备ID：";
             // 
             // nudDeviceId
             // 
-            this.nudDeviceId.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.nudDeviceId.Location = new System.Drawing.Point(651, 192);
+            this.nudDeviceId.Location = new System.Drawing.Point(121, 234);
             this.nudDeviceId.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.nudDeviceId.Maximum = new decimal(new int[] {
             255,
@@ -260,28 +239,6 @@
             0,
             0});
             // 
-            // btnConnect
-            // 
-            this.btnConnect.Location = new System.Drawing.Point(15, 265);
-            this.btnConnect.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.btnConnect.Name = "btnConnect";
-            this.btnConnect.Size = new System.Drawing.Size(150, 40);
-            this.btnConnect.TabIndex = 1;
-            this.btnConnect.Text = "打开串口";
-            this.btnConnect.UseVisualStyleBackColor = true;
-            this.btnConnect.Click += new System.EventHandler(this.BtnConnect_Click);
-            // 
-            // btnRefreshPorts
-            // 
-            this.btnRefreshPorts.Location = new System.Drawing.Point(175, 265);
-            this.btnRefreshPorts.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.btnRefreshPorts.Name = "btnRefreshPorts";
-            this.btnRefreshPorts.Size = new System.Drawing.Size(150, 40);
-            this.btnRefreshPorts.TabIndex = 2;
-            this.btnRefreshPorts.Text = "刷新串口";
-            this.btnRefreshPorts.UseVisualStyleBackColor = true;
-            this.btnRefreshPorts.Click += new System.EventHandler(this.BtnRefreshPorts_Click);
-            // 
             // gbRegister
             // 
             this.gbRegister.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
@@ -293,19 +250,20 @@
             this.gbRegister.Controls.Add(this.nudValue);
             this.gbRegister.Controls.Add(this.chkHex);
             this.gbRegister.Controls.Add(this.btnSend);
-            this.gbRegister.Location = new System.Drawing.Point(786, 15);
+            this.gbRegister.Location = new System.Drawing.Point(590, 29);
             this.gbRegister.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.gbRegister.Name = "gbRegister";
             this.gbRegister.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.gbRegister.Size = new System.Drawing.Size(400, 240);
+            this.gbRegister.Size = new System.Drawing.Size(294, 203);
             this.gbRegister.TabIndex = 3;
             this.gbRegister.TabStop = false;
             this.gbRegister.Text = "寄存器操作";
             // 
             // lblAddress
             // 
+            this.lblAddress.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.lblAddress.AutoSize = true;
-            this.lblAddress.Location = new System.Drawing.Point(15, 35);
+            this.lblAddress.Location = new System.Drawing.Point(61, 35);
             this.lblAddress.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblAddress.Name = "lblAddress";
             this.lblAddress.Size = new System.Drawing.Size(76, 22);
@@ -314,10 +272,9 @@
             // 
             // nudAddress
             // 
-            this.nudAddress.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
+            this.nudAddress.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.nudAddress.Hexadecimal = true;
-            this.nudAddress.Location = new System.Drawing.Point(99, 32);
+            this.nudAddress.Location = new System.Drawing.Point(145, 32);
             this.nudAddress.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.nudAddress.Maximum = new decimal(new int[] {
             65535,
@@ -325,7 +282,7 @@
             0,
             0});
             this.nudAddress.Name = "nudAddress";
-            this.nudAddress.Size = new System.Drawing.Size(281, 32);
+            this.nudAddress.Size = new System.Drawing.Size(129, 32);
             this.nudAddress.TabIndex = 1;
             this.nudAddress.Value = new decimal(new int[] {
             1280,
@@ -335,8 +292,9 @@
             // 
             // lblOperation
             // 
+            this.lblOperation.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.lblOperation.AutoSize = true;
-            this.lblOperation.Location = new System.Drawing.Point(15, 75);
+            this.lblOperation.Location = new System.Drawing.Point(61, 75);
             this.lblOperation.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblOperation.Name = "lblOperation";
             this.lblOperation.Size = new System.Drawing.Size(76, 22);
@@ -345,23 +303,23 @@
             // 
             // cmbOperation
             // 
-            this.cmbOperation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
+            this.cmbOperation.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbOperation.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbOperation.FormattingEnabled = true;
             this.cmbOperation.Items.AddRange(new object[] {
             "读线圈寄存器(01H)",
             "写单个线圈寄存器(05H)"});
-            this.cmbOperation.Location = new System.Drawing.Point(99, 72);
+            this.cmbOperation.Location = new System.Drawing.Point(145, 72);
             this.cmbOperation.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.cmbOperation.Name = "cmbOperation";
-            this.cmbOperation.Size = new System.Drawing.Size(281, 30);
+            this.cmbOperation.Size = new System.Drawing.Size(129, 30);
             this.cmbOperation.TabIndex = 3;
             // 
             // lblValue
             // 
+            this.lblValue.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.lblValue.AutoSize = true;
-            this.lblValue.Location = new System.Drawing.Point(15, 115);
+            this.lblValue.Location = new System.Drawing.Point(61, 115);
             this.lblValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblValue.Name = "lblValue";
             this.lblValue.Size = new System.Drawing.Size(54, 22);
@@ -370,10 +328,9 @@
             // 
             // nudValue
             // 
-            this.nudValue.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
+            this.nudValue.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.nudValue.Hexadecimal = true;
-            this.nudValue.Location = new System.Drawing.Point(99, 112);
+            this.nudValue.Location = new System.Drawing.Point(145, 112);
             this.nudValue.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.nudValue.Maximum = new decimal(new int[] {
             65535,
@@ -381,15 +338,16 @@
             0,
             0});
             this.nudValue.Name = "nudValue";
-            this.nudValue.Size = new System.Drawing.Size(281, 32);
+            this.nudValue.Size = new System.Drawing.Size(129, 32);
             this.nudValue.TabIndex = 5;
             // 
             // chkHex
             // 
+            this.chkHex.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.chkHex.AutoSize = true;
             this.chkHex.Checked = true;
             this.chkHex.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.chkHex.Location = new System.Drawing.Point(18, 155);
+            this.chkHex.Location = new System.Drawing.Point(13, 154);
             this.chkHex.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.chkHex.Name = "chkHex";
             this.chkHex.Size = new System.Drawing.Size(124, 26);
@@ -400,12 +358,11 @@
             // 
             // btnSend
             // 
-            this.btnSend.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnSend.Location = new System.Drawing.Point(150, 150);
+            this.btnSend.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnSend.Location = new System.Drawing.Point(145, 150);
             this.btnSend.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.btnSend.Name = "btnSend";
-            this.btnSend.Size = new System.Drawing.Size(230, 40);
+            this.btnSend.Size = new System.Drawing.Size(129, 40);
             this.btnSend.TabIndex = 7;
             this.btnSend.Text = "发送";
             this.btnSend.UseVisualStyleBackColor = true;
@@ -413,8 +370,7 @@
             // 
             // gbDirectOperations
             // 
-            this.gbDirectOperations.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
+            this.gbDirectOperations.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.gbDirectOperations.Controls.Add(this.lblRegValue);
             this.gbDirectOperations.Controls.Add(this.txtRegValue);
             this.gbDirectOperations.Controls.Add(this.btnReadReg);
@@ -423,11 +379,11 @@
             this.gbDirectOperations.Controls.Add(this.txtFloatValue);
             this.gbDirectOperations.Controls.Add(this.btnReadFloat);
             this.gbDirectOperations.Controls.Add(this.btnWriteFloat);
-            this.gbDirectOperations.Location = new System.Drawing.Point(666, 265);
+            this.gbDirectOperations.Location = new System.Drawing.Point(364, 242);
             this.gbDirectOperations.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.gbDirectOperations.Name = "gbDirectOperations";
             this.gbDirectOperations.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.gbDirectOperations.Size = new System.Drawing.Size(520, 130);
+            this.gbDirectOperations.Size = new System.Drawing.Size(519, 130);
             this.gbDirectOperations.TabIndex = 5;
             this.gbDirectOperations.TabStop = false;
             this.gbDirectOperations.Text = "直接操作";
@@ -525,7 +481,7 @@
             this.gbLog.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.gbLog.Name = "gbLog";
             this.gbLog.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.gbLog.Size = new System.Drawing.Size(1171, 347);
+            this.gbLog.Size = new System.Drawing.Size(868, 199);
             this.gbLog.TabIndex = 4;
             this.gbLog.TabStop = false;
             this.gbLog.Text = "通信日志";
@@ -542,36 +498,64 @@
             this.txtLog.Name = "txtLog";
             this.txtLog.ReadOnly = true;
             this.txtLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtLog.Size = new System.Drawing.Size(1141, 257);
+            this.txtLog.Size = new System.Drawing.Size(838, 109);
             this.txtLog.TabIndex = 0;
             // 
             // btnClearLog
             // 
             this.btnClearLog.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnClearLog.Location = new System.Drawing.Point(15, 297);
+            this.btnClearLog.Location = new System.Drawing.Point(15, 149);
             this.btnClearLog.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.btnClearLog.Name = "btnClearLog";
-            this.btnClearLog.Size = new System.Drawing.Size(1141, 40);
+            this.btnClearLog.Size = new System.Drawing.Size(838, 40);
             this.btnClearLog.TabIndex = 1;
             this.btnClearLog.Text = "清除日志";
             this.btnClearLog.UseVisualStyleBackColor = true;
             this.btnClearLog.Click += new System.EventHandler(this.btnClearLog_Click);
             // 
+            // lblDeviceId
+            // 
+            this.lblDeviceId.AutoSize = true;
+            this.lblDeviceId.Location = new System.Drawing.Point(15, 236);
+            this.lblDeviceId.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblDeviceId.Name = "lblDeviceId";
+            this.lblDeviceId.Size = new System.Drawing.Size(98, 22);
+            this.lblDeviceId.TabIndex = 12;
+            this.lblDeviceId.Text = "设备ID：";
+            // 
+            // btnConnect
+            // 
+            this.btnConnect.Location = new System.Drawing.Point(5, 274);
+            this.btnConnect.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.btnConnect.Name = "btnConnect";
+            this.btnConnect.Size = new System.Drawing.Size(150, 40);
+            this.btnConnect.TabIndex = 13;
+            this.btnConnect.Text = "打开串口";
+            this.btnConnect.UseVisualStyleBackColor = true;
+            // 
+            // btnRefreshPorts
+            // 
+            this.btnRefreshPorts.Location = new System.Drawing.Point(165, 274);
+            this.btnRefreshPorts.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.btnRefreshPorts.Name = "btnRefreshPorts";
+            this.btnRefreshPorts.Size = new System.Drawing.Size(150, 40);
+            this.btnRefreshPorts.TabIndex = 14;
+            this.btnRefreshPorts.Text = "刷新串口";
+            this.btnRefreshPorts.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 22F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1200, 767);
+            this.ClientSize = new System.Drawing.Size(897, 619);
             this.Controls.Add(this.gbSerialPort);
-            this.Controls.Add(this.btnConnect);
-            this.Controls.Add(this.btnRefreshPorts);
             this.Controls.Add(this.gbRegister);
             this.Controls.Add(this.gbDirectOperations);
             this.Controls.Add(this.gbLog);
             this.Font = new System.Drawing.Font("宋体", 10.8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.MinimumSize = new System.Drawing.Size(1000, 700);
+            this.MinimumSize = new System.Drawing.Size(800, 600);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Modbus 调试工具";
@@ -602,8 +586,6 @@
         private System.Windows.Forms.ComboBox cmbStopBits;
         private System.Windows.Forms.ComboBox cmbParity;
         private System.Windows.Forms.NumericUpDown nudDeviceId;
-        private System.Windows.Forms.Button btnConnect;
-        private System.Windows.Forms.Button btnRefreshPorts;
         private System.Windows.Forms.GroupBox gbRegister;
         private System.Windows.Forms.NumericUpDown nudAddress;
         private System.Windows.Forms.ComboBox cmbOperation;
@@ -627,10 +609,12 @@
         private System.Windows.Forms.Label lblDataBits;
         private System.Windows.Forms.Label lblStopBits;
         private System.Windows.Forms.Label lblParity;
-        private System.Windows.Forms.Label lblDeviceId;
         private System.Windows.Forms.Label lblAddress;
         private System.Windows.Forms.Label lblOperation;
         private System.Windows.Forms.Label lblValue;
+        private System.Windows.Forms.Label lblDeviceId;
+        private System.Windows.Forms.Button btnConnect;
+        private System.Windows.Forms.Button btnRefreshPorts;
     }
 }
 
