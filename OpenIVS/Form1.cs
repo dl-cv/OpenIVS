@@ -49,6 +49,12 @@ namespace OpenIVS
         private Bitmap _lastCapturedImage = null;
         private string _lastDetectionResult = "";
         
+        // 统计数据
+        private int _totalCount = 0;
+        private int _okCount = 0;
+        private int _ngCount = 0;
+        private double _yieldRate = 0.0;
+        
         #endregion
 
         public Form1()
@@ -61,7 +67,10 @@ namespace OpenIVS
         {
             // 启动状态更新定时器
             timerUpdateStatus.Start();
-
+            
+            // 设置位置指示器标记点
+            positionIndicator.SetPositionMarks(_positionSequence);
+            
             // 异步初始化各个组件
             Task.Run(() =>
             {
@@ -118,6 +127,10 @@ namespace OpenIVS
                     UpdateStatus("Modbus设备连接失败");
                     UpdateDeviceStatus("连接失败");
                 }
+
+                float currentPosition = _modbusApi.ReadFloat(32);
+                _currentPosition = currentPosition;
+                UpdatePositionDisplay(currentPosition);
             }
             catch (Exception ex)
             {
@@ -467,9 +480,8 @@ namespace OpenIVS
             // 更新文本显示
             lblCurrentPosition.Text = $"当前位置：{position:F1}";
             
-            // 更新进度条，映射到0-100，最大值600
-            int progressValue = (int)Math.Max(0, Math.Min(100, position / 6));
-            progressBarPosition.Value = progressValue;
+            // 更新位置指示器
+            positionIndicator.Position = position;
         }
 
         // 更新检测结果显示
@@ -483,6 +495,31 @@ namespace OpenIVS
             
             lblResult.Text = $"检测结果：\n{result}";
             _lastDetectionResult = result;
+        }
+        
+        // 更新统计信息
+        private void UpdateStatistics(bool isOK)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<bool>(UpdateStatistics), isOK);
+                return;
+            }
+            
+            _totalCount++;
+            if (isOK)
+                _okCount++;
+            else
+                _ngCount++;
+            
+            // 计算良率
+            _yieldRate = _totalCount > 0 ? (double)_okCount / _totalCount * 100 : 0;
+            
+            // 更新显示
+            lblTotalCount.Text = $"总数:{_totalCount}";
+            lblOKCount.Text = $"OK:{_okCount}";
+            lblNGCount.Text = $"NG:{_ngCount}";
+            lblYieldRate.Text = $"良率:{_yieldRate:F1}%";
         }
 
         // 更新显示图像

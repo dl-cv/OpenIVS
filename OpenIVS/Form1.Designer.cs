@@ -34,6 +34,11 @@
             this.panelMain = new System.Windows.Forms.Panel();
             this.btnStop = new System.Windows.Forms.Button();
             this.imageViewer1 = new DLCV.ImageViewer();
+            this.groupBoxStatistics = new System.Windows.Forms.GroupBox();
+            this.lblYieldRate = new System.Windows.Forms.Label();
+            this.lblNGCount = new System.Windows.Forms.Label();
+            this.lblOKCount = new System.Windows.Forms.Label();
+            this.lblTotalCount = new System.Windows.Forms.Label();
             this.btnStart = new System.Windows.Forms.Button();
             this.groupBoxStatus = new System.Windows.Forms.GroupBox();
             this.lblModelStatus = new System.Windows.Forms.Label();
@@ -43,11 +48,13 @@
             this.lblSpeed = new System.Windows.Forms.Label();
             this.txtSpeed = new System.Windows.Forms.TextBox();
             this.btnSetSpeed = new System.Windows.Forms.Button();
-            this.progressBarPosition = new System.Windows.Forms.ProgressBar();
+            this.positionIndicator = new OpenIVS.PositionIndicator();
             this.lblCurrentPosition = new System.Windows.Forms.Label();
             this.timerUpdateStatus = new System.Windows.Forms.Timer(this.components);
             this.statusStrip.SuspendLayout();
             this.panelMain.SuspendLayout();
+            this.imageViewer1.SuspendLayout();
+            this.groupBoxStatistics.SuspendLayout();
             this.groupBoxStatus.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -75,7 +82,7 @@
             this.panelMain.Controls.Add(this.imageViewer1);
             this.panelMain.Controls.Add(this.btnStart);
             this.panelMain.Controls.Add(this.groupBoxStatus);
-            this.panelMain.Controls.Add(this.progressBarPosition);
+            this.panelMain.Controls.Add(this.positionIndicator);
             this.panelMain.Controls.Add(this.lblCurrentPosition);
             this.panelMain.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelMain.Location = new System.Drawing.Point(0, 0);
@@ -104,6 +111,7 @@
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.imageViewer1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.imageViewer1.Controls.Add(this.groupBoxStatistics);
             this.imageViewer1.image = null;
             this.imageViewer1.Location = new System.Drawing.Point(22, 102);
             this.imageViewer1.MaxScale = 100F;
@@ -111,6 +119,56 @@
             this.imageViewer1.Name = "imageViewer1";
             this.imageViewer1.Size = new System.Drawing.Size(1159, 462);
             this.imageViewer1.TabIndex = 6;
+            // 
+            // groupBoxStatistics
+            // 
+            this.groupBoxStatistics.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.groupBoxStatistics.Controls.Add(this.lblYieldRate);
+            this.groupBoxStatistics.Controls.Add(this.lblNGCount);
+            this.groupBoxStatistics.Controls.Add(this.lblOKCount);
+            this.groupBoxStatistics.Controls.Add(this.lblTotalCount);
+            this.groupBoxStatistics.Location = new System.Drawing.Point(659, 3);
+            this.groupBoxStatistics.Name = "groupBoxStatistics";
+            this.groupBoxStatistics.Size = new System.Drawing.Size(500, 60);
+            this.groupBoxStatistics.TabIndex = 8;
+            this.groupBoxStatistics.TabStop = false;
+            this.groupBoxStatistics.Text = "统计";
+            // 
+            // lblYieldRate
+            // 
+            this.lblYieldRate.AutoSize = true;
+            this.lblYieldRate.Location = new System.Drawing.Point(350, 25);
+            this.lblYieldRate.Name = "lblYieldRate";
+            this.lblYieldRate.Size = new System.Drawing.Size(89, 18);
+            this.lblYieldRate.TabIndex = 3;
+            this.lblYieldRate.Text = "良率:0.0%";
+            // 
+            // lblNGCount
+            // 
+            this.lblNGCount.AutoSize = true;
+            this.lblNGCount.Location = new System.Drawing.Point(240, 25);
+            this.lblNGCount.Name = "lblNGCount";
+            this.lblNGCount.Size = new System.Drawing.Size(44, 18);
+            this.lblNGCount.TabIndex = 2;
+            this.lblNGCount.Text = "NG:0";
+            // 
+            // lblOKCount
+            // 
+            this.lblOKCount.AutoSize = true;
+            this.lblOKCount.Location = new System.Drawing.Point(130, 25);
+            this.lblOKCount.Name = "lblOKCount";
+            this.lblOKCount.Size = new System.Drawing.Size(44, 18);
+            this.lblOKCount.TabIndex = 1;
+            this.lblOKCount.Text = "OK:0";
+            // 
+            // lblTotalCount
+            // 
+            this.lblTotalCount.AutoSize = true;
+            this.lblTotalCount.Location = new System.Drawing.Point(15, 25);
+            this.lblTotalCount.Name = "lblTotalCount";
+            this.lblTotalCount.Size = new System.Drawing.Size(62, 18);
+            this.lblTotalCount.TabIndex = 0;
+            this.lblTotalCount.Text = "总数:0";
             // 
             // btnStart
             // 
@@ -218,21 +276,32 @@
             this.btnSetSpeed.UseVisualStyleBackColor = true;
             this.btnSetSpeed.Click += new System.EventHandler(this.btnSetSpeed_Click);
             // 
-            // progressBarPosition
+            // positionIndicator
             // 
-            this.progressBarPosition.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
+            this.positionIndicator.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.progressBarPosition.Location = new System.Drawing.Point(20, 600);
-            this.progressBarPosition.Margin = new System.Windows.Forms.Padding(4);
-            this.progressBarPosition.Name = "progressBarPosition";
-            this.progressBarPosition.Size = new System.Drawing.Size(911, 40);
-            this.progressBarPosition.TabIndex = 3;
+            this.positionIndicator.BackColor = System.Drawing.Color.White;
+            this.positionIndicator.Font = new System.Drawing.Font("Microsoft Sans Serif", 9F);
+            this.positionIndicator.Location = new System.Drawing.Point(20, 570);
+            this.positionIndicator.MarkerColor = System.Drawing.Color.Red;
+            this.positionIndicator.MarkerSize = 16;
+            this.positionIndicator.MaxPosition = 600F;
+            this.positionIndicator.MinPosition = 0F;
+            this.positionIndicator.Name = "positionIndicator";
+            this.positionIndicator.Position = 0F;
+            this.positionIndicator.ProgressColor = System.Drawing.Color.DodgerBlue;
+            this.positionIndicator.ShowPositionText = true;
+            this.positionIndicator.Size = new System.Drawing.Size(786, 70);
+            this.positionIndicator.TabIndex = 9;
+            this.positionIndicator.Text = "positionIndicator1";
+            this.positionIndicator.TrackColor = System.Drawing.Color.LightGray;
+            this.positionIndicator.TrackHeight = 10;
             // 
             // lblCurrentPosition
             // 
             this.lblCurrentPosition.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.lblCurrentPosition.AutoSize = true;
-            this.lblCurrentPosition.Location = new System.Drawing.Point(19, 578);
+            this.lblCurrentPosition.Location = new System.Drawing.Point(824, 604);
             this.lblCurrentPosition.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblCurrentPosition.Name = "lblCurrentPosition";
             this.lblCurrentPosition.Size = new System.Drawing.Size(107, 18);
@@ -261,6 +330,9 @@
             this.statusStrip.PerformLayout();
             this.panelMain.ResumeLayout(false);
             this.panelMain.PerformLayout();
+            this.imageViewer1.ResumeLayout(false);
+            this.groupBoxStatistics.ResumeLayout(false);
+            this.groupBoxStatistics.PerformLayout();
             this.groupBoxStatus.ResumeLayout(false);
             this.groupBoxStatus.PerformLayout();
             this.ResumeLayout(false);
@@ -283,10 +355,15 @@
         private System.Windows.Forms.Label lblSpeed;
         private System.Windows.Forms.TextBox txtSpeed;
         private System.Windows.Forms.Button btnSetSpeed;
-        private System.Windows.Forms.ProgressBar progressBarPosition;
+        private System.Windows.Forms.GroupBox groupBoxStatistics;
+        private System.Windows.Forms.Label lblTotalCount;
+        private System.Windows.Forms.Label lblNGCount;
+        private System.Windows.Forms.Label lblOKCount;
+        private System.Windows.Forms.Label lblYieldRate;
         private System.Windows.Forms.Label lblCurrentPosition;
         private System.Windows.Forms.Timer timerUpdateStatus;
         private DLCV.ImageViewer imageViewer1;
+        private OpenIVS.PositionIndicator positionIndicator;
     }
 }
 
