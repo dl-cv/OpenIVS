@@ -33,7 +33,6 @@
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
             this.panelMain = new System.Windows.Forms.Panel();
             this.imageViewer1 = new DLCV.ImageViewer();
-            this.groupBoxControls = new System.Windows.Forms.GroupBox();
             this.btnStop = new System.Windows.Forms.Button();
             this.btnStart = new System.Windows.Forms.Button();
             this.groupBoxStatus = new System.Windows.Forms.GroupBox();
@@ -46,7 +45,6 @@
             this.timerUpdateStatus = new System.Windows.Forms.Timer(this.components);
             this.statusStrip.SuspendLayout();
             this.panelMain.SuspendLayout();
-            this.groupBoxControls.SuspendLayout();
             this.groupBoxStatus.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -70,8 +68,9 @@
             // 
             // panelMain
             // 
+            this.panelMain.Controls.Add(this.btnStop);
             this.panelMain.Controls.Add(this.imageViewer1);
-            this.panelMain.Controls.Add(this.groupBoxControls);
+            this.panelMain.Controls.Add(this.btnStart);
             this.panelMain.Controls.Add(this.groupBoxStatus);
             this.panelMain.Controls.Add(this.progressBarPosition);
             this.panelMain.Controls.Add(this.lblCurrentPosition);
@@ -97,27 +96,13 @@
             this.imageViewer1.Size = new System.Drawing.Size(1159, 462);
             this.imageViewer1.TabIndex = 6;
             // 
-            // groupBoxControls
-            // 
-            this.groupBoxControls.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.groupBoxControls.Controls.Add(this.btnStop);
-            this.groupBoxControls.Controls.Add(this.btnStart);
-            this.groupBoxControls.Location = new System.Drawing.Point(1009, 571);
-            this.groupBoxControls.Margin = new System.Windows.Forms.Padding(4);
-            this.groupBoxControls.Name = "groupBoxControls";
-            this.groupBoxControls.Padding = new System.Windows.Forms.Padding(4);
-            this.groupBoxControls.Size = new System.Drawing.Size(178, 69);
-            this.groupBoxControls.TabIndex = 5;
-            this.groupBoxControls.TabStop = false;
-            this.groupBoxControls.Text = "控制";
-            // 
             // btnStop
             // 
             this.btnStop.Enabled = false;
-            this.btnStop.Location = new System.Drawing.Point(92, 30);
+            this.btnStop.Location = new System.Drawing.Point(1067, 582);
             this.btnStop.Margin = new System.Windows.Forms.Padding(4);
             this.btnStop.Name = "btnStop";
-            this.btnStop.Size = new System.Drawing.Size(78, 32);
+            this.btnStop.Size = new System.Drawing.Size(120, 62);
             this.btnStop.TabIndex = 1;
             this.btnStop.Text = "停止";
             this.btnStop.UseVisualStyleBackColor = true;
@@ -126,10 +111,10 @@
             // btnStart
             // 
             this.btnStart.Enabled = false;
-            this.btnStart.Location = new System.Drawing.Point(9, 30);
+            this.btnStart.Location = new System.Drawing.Point(939, 582);
             this.btnStart.Margin = new System.Windows.Forms.Padding(4);
             this.btnStart.Name = "btnStart";
-            this.btnStart.Size = new System.Drawing.Size(78, 32);
+            this.btnStart.Size = new System.Drawing.Size(120, 62);
             this.btnStart.TabIndex = 0;
             this.btnStart.Text = "启动";
             this.btnStart.UseVisualStyleBackColor = true;
@@ -186,7 +171,7 @@
             // 
             this.lblResult.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.lblResult.AutoSize = true;
-            this.lblResult.Location = new System.Drawing.Point(986, 25);
+            this.lblResult.Location = new System.Drawing.Point(990, 33);
             this.lblResult.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblResult.Name = "lblResult";
             this.lblResult.Size = new System.Drawing.Size(116, 18);
@@ -200,7 +185,7 @@
             this.progressBarPosition.Location = new System.Drawing.Point(20, 600);
             this.progressBarPosition.Margin = new System.Windows.Forms.Padding(4);
             this.progressBarPosition.Name = "progressBarPosition";
-            this.progressBarPosition.Size = new System.Drawing.Size(974, 40);
+            this.progressBarPosition.Size = new System.Drawing.Size(911, 40);
             this.progressBarPosition.TabIndex = 3;
             // 
             // lblCurrentPosition
@@ -236,7 +221,6 @@
             this.statusStrip.PerformLayout();
             this.panelMain.ResumeLayout(false);
             this.panelMain.PerformLayout();
-            this.groupBoxControls.ResumeLayout(false);
             this.groupBoxStatus.ResumeLayout(false);
             this.groupBoxStatus.PerformLayout();
             this.ResumeLayout(false);
@@ -249,7 +233,6 @@
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
         private System.Windows.Forms.Panel panelMain;
-        private System.Windows.Forms.GroupBox groupBoxControls;
         private System.Windows.Forms.Button btnStop;
         private System.Windows.Forms.Button btnStart;
         private System.Windows.Forms.GroupBox groupBoxStatus;
