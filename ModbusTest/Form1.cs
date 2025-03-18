@@ -252,6 +252,68 @@ namespace ModbusTest
             }
         }
 
+        private void BtnReadFloat_Click(object sender, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("请先打开串口", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            try
+            {
+                ushort address = Convert.ToUInt16(nudAddress.Value);
+
+                LogMessage(string.Format("发送: 读浮点数, 地址: 0x{0:X4}", address));
+
+                try
+                {
+                    float result = _modbusApi.ReadFloat(address);
+                    txtFloatValue.Text = result.ToString("F3");
+                    LogMessage(string.Format("接收: 浮点数[0x{0:X4}] = {1}", address, result));
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("错误: " + ex.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("发送命令时发生错误: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnWriteFloat_Click(object sender, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("请先打开串口", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            try
+            {
+                ushort address = Convert.ToUInt16(nudAddress.Value);
+                float value = Convert.ToSingle(txtFloatValue.Text);
+
+                LogMessage(string.Format("发送: 写浮点数, 地址: 0x{0:X4}, 值: {1}", address, value));
+
+                try
+                {
+                    bool result = _modbusApi.WriteFloat(address, value);
+                    LogMessage("接收: " + (result ? "成功" : "失败"));
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("错误: " + ex.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("发送命令时发生错误: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void LogMessage(string message)
         {
             txtLog.AppendText(DateTime.Now.ToString("HH:mm:ss.fff") + " " + message + Environment.NewLine);

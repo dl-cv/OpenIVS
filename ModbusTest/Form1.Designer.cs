@@ -57,6 +57,10 @@
             this.txtRegValue = new System.Windows.Forms.TextBox();
             this.btnReadReg = new System.Windows.Forms.Button();
             this.btnWriteReg = new System.Windows.Forms.Button();
+            this.lblFloatValue = new System.Windows.Forms.Label();
+            this.txtFloatValue = new System.Windows.Forms.TextBox();
+            this.btnReadFloat = new System.Windows.Forms.Button();
+            this.btnWriteFloat = new System.Windows.Forms.Button();
             this.gbLog = new System.Windows.Forms.GroupBox();
             this.txtLog = new System.Windows.Forms.TextBox();
             this.btnClearLog = new System.Windows.Forms.Button();
@@ -71,7 +75,7 @@
             // 
             // gbSerialPort
             // 
-            this.gbSerialPort.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.gbSerialPort.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.gbSerialPort.Controls.Add(this.lblPort);
             this.gbSerialPort.Controls.Add(this.cmbPort);
@@ -106,7 +110,7 @@
             // 
             // cmbPort
             // 
-            this.cmbPort.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.cmbPort.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbPort.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbPort.FormattingEnabled = true;
@@ -129,7 +133,7 @@
             // 
             // cmbBaudRate
             // 
-            this.cmbBaudRate.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.cmbBaudRate.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbBaudRate.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbBaudRate.FormattingEnabled = true;
@@ -158,7 +162,7 @@
             // 
             // cmbDataBits
             // 
-            this.cmbDataBits.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.cmbDataBits.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbDataBits.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbDataBits.FormattingEnabled = true;
@@ -183,7 +187,7 @@
             // 
             // cmbStopBits
             // 
-            this.cmbStopBits.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.cmbStopBits.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbStopBits.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbStopBits.FormattingEnabled = true;
@@ -208,7 +212,7 @@
             // 
             // cmbParity
             // 
-            this.cmbParity.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.cmbParity.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbParity.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbParity.FormattingEnabled = true;
@@ -310,7 +314,7 @@
             // 
             // nudAddress
             // 
-            this.nudAddress.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.nudAddress.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.nudAddress.Hexadecimal = true;
             this.nudAddress.Location = new System.Drawing.Point(99, 32);
@@ -341,7 +345,7 @@
             // 
             // cmbOperation
             // 
-            this.cmbOperation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.cmbOperation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbOperation.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbOperation.FormattingEnabled = true;
@@ -366,7 +370,7 @@
             // 
             // nudValue
             // 
-            this.nudValue.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.nudValue.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.nudValue.Hexadecimal = true;
             this.nudValue.Location = new System.Drawing.Point(99, 112);
@@ -396,7 +400,7 @@
             // 
             // btnSend
             // 
-            this.btnSend.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.btnSend.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSend.Location = new System.Drawing.Point(150, 150);
             this.btnSend.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
@@ -409,17 +413,21 @@
             // 
             // gbDirectOperations
             // 
-            this.gbDirectOperations.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.gbDirectOperations.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.gbDirectOperations.Controls.Add(this.lblRegValue);
             this.gbDirectOperations.Controls.Add(this.txtRegValue);
             this.gbDirectOperations.Controls.Add(this.btnReadReg);
             this.gbDirectOperations.Controls.Add(this.btnWriteReg);
+            this.gbDirectOperations.Controls.Add(this.lblFloatValue);
+            this.gbDirectOperations.Controls.Add(this.txtFloatValue);
+            this.gbDirectOperations.Controls.Add(this.btnReadFloat);
+            this.gbDirectOperations.Controls.Add(this.btnWriteFloat);
             this.gbDirectOperations.Location = new System.Drawing.Point(666, 265);
             this.gbDirectOperations.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.gbDirectOperations.Name = "gbDirectOperations";
             this.gbDirectOperations.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.gbDirectOperations.Size = new System.Drawing.Size(520, 100);
+            this.gbDirectOperations.Size = new System.Drawing.Size(520, 130);
             this.gbDirectOperations.TabIndex = 5;
             this.gbDirectOperations.TabStop = false;
             this.gbDirectOperations.Text = "直接操作";
@@ -465,26 +473,67 @@
             this.btnWriteReg.UseVisualStyleBackColor = true;
             this.btnWriteReg.Click += new System.EventHandler(this.BtnWriteReg_Click);
             // 
+            // lblFloatValue
+            // 
+            this.lblFloatValue.AutoSize = true;
+            this.lblFloatValue.Location = new System.Drawing.Point(15, 75);
+            this.lblFloatValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblFloatValue.Name = "lblFloatValue";
+            this.lblFloatValue.Size = new System.Drawing.Size(98, 22);
+            this.lblFloatValue.TabIndex = 6;
+            this.lblFloatValue.Text = "浮点值：";
+            // 
+            // txtFloatValue
+            // 
+            this.txtFloatValue.Location = new System.Drawing.Point(120, 72);
+            this.txtFloatValue.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.txtFloatValue.Name = "txtFloatValue";
+            this.txtFloatValue.Size = new System.Drawing.Size(93, 32);
+            this.txtFloatValue.TabIndex = 7;
+            this.txtFloatValue.Text = "0.0";
+            // 
+            // btnReadFloat
+            // 
+            this.btnReadFloat.Location = new System.Drawing.Point(225, 70);
+            this.btnReadFloat.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.btnReadFloat.Name = "btnReadFloat";
+            this.btnReadFloat.Size = new System.Drawing.Size(135, 40);
+            this.btnReadFloat.TabIndex = 8;
+            this.btnReadFloat.Text = "读取浮点数";
+            this.btnReadFloat.UseVisualStyleBackColor = true;
+            this.btnReadFloat.Click += new System.EventHandler(this.BtnReadFloat_Click);
+            // 
+            // btnWriteFloat
+            // 
+            this.btnWriteFloat.Location = new System.Drawing.Point(370, 70);
+            this.btnWriteFloat.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.btnWriteFloat.Name = "btnWriteFloat";
+            this.btnWriteFloat.Size = new System.Drawing.Size(135, 40);
+            this.btnWriteFloat.TabIndex = 9;
+            this.btnWriteFloat.Text = "写入浮点数";
+            this.btnWriteFloat.UseVisualStyleBackColor = true;
+            this.btnWriteFloat.Click += new System.EventHandler(this.BtnWriteFloat_Click);
+            // 
             // gbLog
             // 
-            this.gbLog.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-            | System.Windows.Forms.AnchorStyles.Left)
+            this.gbLog.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.gbLog.Controls.Add(this.txtLog);
             this.gbLog.Controls.Add(this.btnClearLog);
-            this.gbLog.Location = new System.Drawing.Point(15, 375);
+            this.gbLog.Location = new System.Drawing.Point(15, 405);
             this.gbLog.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.gbLog.Name = "gbLog";
             this.gbLog.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.gbLog.Size = new System.Drawing.Size(1171, 329);
+            this.gbLog.Size = new System.Drawing.Size(1171, 347);
             this.gbLog.TabIndex = 4;
             this.gbLog.TabStop = false;
             this.gbLog.Text = "通信日志";
             // 
             // txtLog
             // 
-            this.txtLog.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-            | System.Windows.Forms.AnchorStyles.Left)
+            this.txtLog.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtLog.Font = new System.Drawing.Font("宋体", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.txtLog.Location = new System.Drawing.Point(15, 30);
@@ -493,14 +542,14 @@
             this.txtLog.Name = "txtLog";
             this.txtLog.ReadOnly = true;
             this.txtLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtLog.Size = new System.Drawing.Size(1141, 239);
+            this.txtLog.Size = new System.Drawing.Size(1141, 257);
             this.txtLog.TabIndex = 0;
             // 
             // btnClearLog
             // 
-            this.btnClearLog.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)
+            this.btnClearLog.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnClearLog.Location = new System.Drawing.Point(15, 279);
+            this.btnClearLog.Location = new System.Drawing.Point(15, 297);
             this.btnClearLog.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.btnClearLog.Name = "btnClearLog";
             this.btnClearLog.Size = new System.Drawing.Size(1141, 40);
@@ -513,7 +562,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 22F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1200, 719);
+            this.ClientSize = new System.Drawing.Size(1200, 767);
             this.Controls.Add(this.gbSerialPort);
             this.Controls.Add(this.btnConnect);
             this.Controls.Add(this.btnRefreshPorts);
@@ -566,6 +615,10 @@
         private System.Windows.Forms.TextBox txtRegValue;
         private System.Windows.Forms.Button btnReadReg;
         private System.Windows.Forms.Button btnWriteReg;
+        private System.Windows.Forms.Label lblFloatValue;
+        private System.Windows.Forms.TextBox txtFloatValue;
+        private System.Windows.Forms.Button btnReadFloat;
+        private System.Windows.Forms.Button btnWriteFloat;
         private System.Windows.Forms.GroupBox gbLog;
         private System.Windows.Forms.TextBox txtLog;
         private System.Windows.Forms.Button btnClearLog;
