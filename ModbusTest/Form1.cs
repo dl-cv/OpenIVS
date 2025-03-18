@@ -9,6 +9,9 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using DLCV;
+using System.Configuration;
+using System.IO;
+using System.Xml;
 
 namespace ModbusTest
 {
@@ -16,6 +19,7 @@ namespace ModbusTest
     {
         private ModbusApi _modbusApi;
         private bool _isConnected = false;
+        private string _configFilePath = Path.Combine(Application.StartupPath, "ModbusSettings.xml");
 
         public Form1()
         {
@@ -103,6 +107,9 @@ namespace ModbusTest
                         // 启用操作控件
                         gbRegister.Enabled = true;
                         gbDirectOperations.Enabled = true;
+                        
+                        // 保存当前串口配置
+                        SaveSettings();
                     }
                     else
                     {
@@ -314,6 +321,68 @@ namespace ModbusTest
             }
         }
 
+        private void BtnReadInt_Click(object sender, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("请先打开串口", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            try
+            {
+                ushort address = Convert.ToUInt16(nudAddress.Value);
+
+                LogMessage(string.Format("发送: 读整型值, 地址: 0x{0:X4}", address));
+
+                try
+                {
+                    int[] results = _modbusApi.ReadHoldingRegisters(address, 1);
+                    txtIntValue.Text = results[0].ToString();
+                    LogMessage(string.Format("接收: 整型值[0x{0:X4}] = {1}", address, results[0]));
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("错误: " + ex.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("发送命令时发生错误: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnWriteInt_Click(object sender, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("请先打开串口", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            try
+            {
+                ushort address = Convert.ToUInt16(nudAddress.Value);
+                ushort value = Convert.ToUInt16(txtIntValue.Text);
+
+                LogMessage(string.Format("发送: 写整型值, 地址: 0x{0:X4}, 值: {1}", address, value));
+
+                try
+                {
+                    bool result = _modbusApi.WriteSingleRegister(address, value);
+                    LogMessage("接收: " + (result ? "成功" : "失败"));
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("错误: " + ex.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("发送命令时发生错误: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void LogMessage(string message)
         {
             txtLog.AppendText(DateTime.Now.ToString("HH:mm:ss.fff") + " " + message + Environment.NewLine);
@@ -346,6 +415,9 @@ namespace ModbusTest
             // 初始禁用操作控件
             gbRegister.Enabled = false;
             gbDirectOperations.Enabled = false;
+
+            // 加载上次保存的串口配置
+            LoadSettings();
 
             LogMessage("应用程序已启动");
         }
@@ -398,6 +470,141 @@ namespace ModbusTest
         {
             // 窗口大小调整时调整控件布局
             // 这部分在Designer文件中已通过Anchor属性实现
+        }
+
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            // 如果串口已连接，先关闭串口
+            if (_isConnected)
+            {
+                try
+                {
+                    _modbusApi.Close();
+                    _isConnected = false;
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("关闭串口时发生错误: " + ex.Message);
+                }
+            }
+            
+            // 保存当前串口配置
+            SaveSettings();
+        }
+
+        // 保存串口配置到XML文件
+        private void SaveSettings()
+        {
+            try
+            {
+                XmlDocument doc = new XmlDocument();
+                XmlElement root;
+
+                // 如果文件存在，则加载现有文件
+                if (File.Exists(_configFilePath))
+                {
+                    doc.Load(_configFilePath);
+                    root = doc.DocumentElement;
+                }
+                else
+                {
+                    // 创建新的XML文档
+                    root = doc.CreateElement("Settings");
+                    doc.AppendChild(root);
+                }
+
+                // 保存串口配置
+                SetSettingValue(doc, root, "Port", cmbPort.SelectedItem?.ToString() ?? "");
+                SetSettingValue(doc, root, "BaudRate", cmbBaudRate.SelectedItem?.ToString() ?? "9600");
+                SetSettingValue(doc, root, "DataBits", cmbDataBits.SelectedItem?.ToString() ?? "8");
+                SetSettingValue(doc, root, "StopBits", cmbStopBits.SelectedItem?.ToString() ?? "One");
+                SetSettingValue(doc, root, "Parity", cmbParity.SelectedItem?.ToString() ?? "None");
+                SetSettingValue(doc, root, "DeviceId", nudDeviceId.Value.ToString());
+
+                // 保存文件
+                doc.Save(_configFilePath);
+                LogMessage("串口配置已保存");
+            }
+            catch (Exception ex)
+            {
+                LogMessage("保存配置失败: " + ex.Message);
+            }
+        }
+
+        // 在XML文档中设置配置项的值
+        private void SetSettingValue(XmlDocument doc, XmlElement root, string key, string value)
+        {
+            XmlNode node = root.SelectSingleNode(key);
+            if (node == null)
+            {
+                // 如果节点不存在，则创建新节点
+                node = doc.CreateElement(key);
+                root.AppendChild(node);
+            }
+            node.InnerText = value;
+        }
+
+        // 从XML文件加载串口配置
+        private void LoadSettings()
+        {
+            try
+            {
+                if (File.Exists(_configFilePath))
+                {
+                    XmlDocument doc = new XmlDocument();
+                    doc.Load(_configFilePath);
+                    XmlElement root = doc.DocumentElement;
+
+                    // 加载保存的串口设置
+                    string portName = GetSettingValue(root, "Port", "");
+                    string baudRate = GetSettingValue(root, "BaudRate", "9600");
+                    string dataBits = GetSettingValue(root, "DataBits", "8");
+                    string stopBits = GetSettingValue(root, "StopBits", "One");
+                    string parity = GetSettingValue(root, "Parity", "None");
+                    string deviceId = GetSettingValue(root, "DeviceId", "1");
+
+                    // 设置串口
+                    if (!string.IsNullOrEmpty(portName) && cmbPort.Items.Contains(portName))
+                        cmbPort.SelectedItem = portName;
+
+                    // 设置波特率
+                    if (cmbBaudRate.Items.Contains(int.Parse(baudRate)))
+                        cmbBaudRate.SelectedItem = int.Parse(baudRate);
+
+                    // 设置数据位
+                    if (cmbDataBits.Items.Contains(int.Parse(dataBits)))
+                        cmbDataBits.SelectedItem = int.Parse(dataBits);
+
+                    // 设置停止位
+                    if (cmbStopBits.Items.Contains(stopBits))
+                        cmbStopBits.SelectedItem = stopBits;
+                    else
+                        cmbStopBits.SelectedIndex = 0;
+
+                    // 设置校验位
+                    if (cmbParity.Items.Contains(parity))
+                        cmbParity.SelectedItem = parity;
+                    else
+                        cmbParity.SelectedIndex = 0;
+
+                    // 设置设备ID
+                    if (!string.IsNullOrEmpty(deviceId))
+                        nudDeviceId.Value = decimal.Parse(deviceId);
+
+                    LogMessage("已加载上次保存的串口配置");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage("加载配置失败: " + ex.Message);
+            }
+        }
+
+        // 获取XML文档中配置项的值
+        private string GetSettingValue(XmlElement root, string key, string defaultValue)
+        {
+            XmlNode node = root.SelectSingleNode(key);
+            return node != null ? node.InnerText : defaultValue;
         }
     }
 }

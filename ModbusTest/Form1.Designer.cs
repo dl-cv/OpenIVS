@@ -29,6 +29,9 @@
         private void InitializeComponent()
         {
             this.gbSerialPort = new System.Windows.Forms.GroupBox();
+            this.btnConnect = new System.Windows.Forms.Button();
+            this.btnRefreshPorts = new System.Windows.Forms.Button();
+            this.lblDeviceId = new System.Windows.Forms.Label();
             this.lblPort = new System.Windows.Forms.Label();
             this.cmbPort = new System.Windows.Forms.ComboBox();
             this.lblBaudRate = new System.Windows.Forms.Label();
@@ -58,12 +61,13 @@
             this.txtFloatValue = new System.Windows.Forms.TextBox();
             this.btnReadFloat = new System.Windows.Forms.Button();
             this.btnWriteFloat = new System.Windows.Forms.Button();
+            this.lblIntValue = new System.Windows.Forms.Label();
+            this.txtIntValue = new System.Windows.Forms.TextBox();
+            this.btnReadInt = new System.Windows.Forms.Button();
+            this.btnWriteInt = new System.Windows.Forms.Button();
             this.gbLog = new System.Windows.Forms.GroupBox();
             this.txtLog = new System.Windows.Forms.TextBox();
             this.btnClearLog = new System.Windows.Forms.Button();
-            this.lblDeviceId = new System.Windows.Forms.Label();
-            this.btnConnect = new System.Windows.Forms.Button();
-            this.btnRefreshPorts = new System.Windows.Forms.Button();
             this.gbSerialPort.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.nudDeviceId)).BeginInit();
             this.gbRegister.SuspendLayout();
@@ -97,6 +101,38 @@
             this.gbSerialPort.TabIndex = 0;
             this.gbSerialPort.TabStop = false;
             this.gbSerialPort.Text = "串口设置";
+            // 
+            // btnConnect
+            // 
+            this.btnConnect.Location = new System.Drawing.Point(5, 274);
+            this.btnConnect.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.btnConnect.Name = "btnConnect";
+            this.btnConnect.Size = new System.Drawing.Size(150, 40);
+            this.btnConnect.TabIndex = 13;
+            this.btnConnect.Text = "打开串口";
+            this.btnConnect.UseVisualStyleBackColor = true;
+            this.btnConnect.Click += new System.EventHandler(this.BtnConnect_Click);
+            // 
+            // btnRefreshPorts
+            // 
+            this.btnRefreshPorts.Location = new System.Drawing.Point(165, 274);
+            this.btnRefreshPorts.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.btnRefreshPorts.Name = "btnRefreshPorts";
+            this.btnRefreshPorts.Size = new System.Drawing.Size(150, 40);
+            this.btnRefreshPorts.TabIndex = 14;
+            this.btnRefreshPorts.Text = "刷新串口";
+            this.btnRefreshPorts.UseVisualStyleBackColor = true;
+            this.btnRefreshPorts.Click += new System.EventHandler(this.BtnRefreshPorts_Click);
+            // 
+            // lblDeviceId
+            // 
+            this.lblDeviceId.AutoSize = true;
+            this.lblDeviceId.Location = new System.Drawing.Point(15, 236);
+            this.lblDeviceId.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblDeviceId.Name = "lblDeviceId";
+            this.lblDeviceId.Size = new System.Drawing.Size(98, 22);
+            this.lblDeviceId.TabIndex = 12;
+            this.lblDeviceId.Text = "设备ID：";
             // 
             // lblPort
             // 
@@ -379,11 +415,15 @@
             this.gbDirectOperations.Controls.Add(this.txtFloatValue);
             this.gbDirectOperations.Controls.Add(this.btnReadFloat);
             this.gbDirectOperations.Controls.Add(this.btnWriteFloat);
+            this.gbDirectOperations.Controls.Add(this.lblIntValue);
+            this.gbDirectOperations.Controls.Add(this.txtIntValue);
+            this.gbDirectOperations.Controls.Add(this.btnReadInt);
+            this.gbDirectOperations.Controls.Add(this.btnWriteInt);
             this.gbDirectOperations.Location = new System.Drawing.Point(364, 242);
             this.gbDirectOperations.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.gbDirectOperations.Name = "gbDirectOperations";
             this.gbDirectOperations.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.gbDirectOperations.Size = new System.Drawing.Size(519, 130);
+            this.gbDirectOperations.Size = new System.Drawing.Size(519, 170);
             this.gbDirectOperations.TabIndex = 5;
             this.gbDirectOperations.TabStop = false;
             this.gbDirectOperations.Text = "直接操作";
@@ -394,16 +434,16 @@
             this.lblRegValue.Location = new System.Drawing.Point(15, 35);
             this.lblRegValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblRegValue.Name = "lblRegValue";
-            this.lblRegValue.Size = new System.Drawing.Size(54, 22);
+            this.lblRegValue.Size = new System.Drawing.Size(98, 22);
             this.lblRegValue.TabIndex = 2;
-            this.lblRegValue.Text = "值：";
+            this.lblRegValue.Text = "布尔值：";
             // 
             // txtRegValue
             // 
-            this.txtRegValue.Location = new System.Drawing.Point(75, 32);
+            this.txtRegValue.Location = new System.Drawing.Point(120, 32);
             this.txtRegValue.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.txtRegValue.Name = "txtRegValue";
-            this.txtRegValue.Size = new System.Drawing.Size(138, 32);
+            this.txtRegValue.Size = new System.Drawing.Size(93, 32);
             this.txtRegValue.TabIndex = 3;
             this.txtRegValue.Text = "0";
             // 
@@ -470,6 +510,47 @@
             this.btnWriteFloat.UseVisualStyleBackColor = true;
             this.btnWriteFloat.Click += new System.EventHandler(this.BtnWriteFloat_Click);
             // 
+            // lblIntValue
+            // 
+            this.lblIntValue.AutoSize = true;
+            this.lblIntValue.Location = new System.Drawing.Point(15, 115);
+            this.lblIntValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblIntValue.Name = "lblIntValue";
+            this.lblIntValue.Size = new System.Drawing.Size(98, 22);
+            this.lblIntValue.TabIndex = 10;
+            this.lblIntValue.Text = "整型值：";
+            // 
+            // txtIntValue
+            // 
+            this.txtIntValue.Location = new System.Drawing.Point(120, 112);
+            this.txtIntValue.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.txtIntValue.Name = "txtIntValue";
+            this.txtIntValue.Size = new System.Drawing.Size(93, 32);
+            this.txtIntValue.TabIndex = 11;
+            this.txtIntValue.Text = "0";
+            // 
+            // btnReadInt
+            // 
+            this.btnReadInt.Location = new System.Drawing.Point(225, 110);
+            this.btnReadInt.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.btnReadInt.Name = "btnReadInt";
+            this.btnReadInt.Size = new System.Drawing.Size(135, 40);
+            this.btnReadInt.TabIndex = 12;
+            this.btnReadInt.Text = "读取整型值";
+            this.btnReadInt.UseVisualStyleBackColor = true;
+            this.btnReadInt.Click += new System.EventHandler(this.BtnReadInt_Click);
+            // 
+            // btnWriteInt
+            // 
+            this.btnWriteInt.Location = new System.Drawing.Point(370, 110);
+            this.btnWriteInt.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.btnWriteInt.Name = "btnWriteInt";
+            this.btnWriteInt.Size = new System.Drawing.Size(135, 40);
+            this.btnWriteInt.TabIndex = 13;
+            this.btnWriteInt.Text = "写入整型值";
+            this.btnWriteInt.UseVisualStyleBackColor = true;
+            this.btnWriteInt.Click += new System.EventHandler(this.BtnWriteInt_Click);
+            // 
             // gbLog
             // 
             this.gbLog.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
@@ -514,36 +595,6 @@
             this.btnClearLog.UseVisualStyleBackColor = true;
             this.btnClearLog.Click += new System.EventHandler(this.btnClearLog_Click);
             // 
-            // lblDeviceId
-            // 
-            this.lblDeviceId.AutoSize = true;
-            this.lblDeviceId.Location = new System.Drawing.Point(15, 236);
-            this.lblDeviceId.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
-            this.lblDeviceId.Name = "lblDeviceId";
-            this.lblDeviceId.Size = new System.Drawing.Size(98, 22);
-            this.lblDeviceId.TabIndex = 12;
-            this.lblDeviceId.Text = "设备ID：";
-            // 
-            // btnConnect
-            // 
-            this.btnConnect.Location = new System.Drawing.Point(5, 274);
-            this.btnConnect.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.btnConnect.Name = "btnConnect";
-            this.btnConnect.Size = new System.Drawing.Size(150, 40);
-            this.btnConnect.TabIndex = 13;
-            this.btnConnect.Text = "打开串口";
-            this.btnConnect.UseVisualStyleBackColor = true;
-            // 
-            // btnRefreshPorts
-            // 
-            this.btnRefreshPorts.Location = new System.Drawing.Point(165, 274);
-            this.btnRefreshPorts.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.btnRefreshPorts.Name = "btnRefreshPorts";
-            this.btnRefreshPorts.Size = new System.Drawing.Size(150, 40);
-            this.btnRefreshPorts.TabIndex = 14;
-            this.btnRefreshPorts.Text = "刷新串口";
-            this.btnRefreshPorts.UseVisualStyleBackColor = true;
-            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 22F);
@@ -559,6 +610,7 @@
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Modbus 调试工具";
+            this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
             this.Resize += new System.EventHandler(this.Form1_Resize);
             this.gbSerialPort.ResumeLayout(false);
@@ -615,6 +667,10 @@
         private System.Windows.Forms.Label lblDeviceId;
         private System.Windows.Forms.Button btnConnect;
         private System.Windows.Forms.Button btnRefreshPorts;
+        private System.Windows.Forms.Label lblIntValue;
+        private System.Windows.Forms.TextBox txtIntValue;
+        private System.Windows.Forms.Button btnReadInt;
+        private System.Windows.Forms.Button btnWriteInt;
     }
 }
 
