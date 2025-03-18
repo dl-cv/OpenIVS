@@ -7,7 +7,7 @@ using EasyModbus;
 
 namespace DLCV
 {
-    internal class ModbusApi
+    public class ModbusApi
     {
         private ModbusClient _modbusClient;
         private readonly object _lockObject = new object();
