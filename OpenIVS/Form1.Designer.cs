@@ -40,9 +40,9 @@
             this.lblModelStatus = new System.Windows.Forms.Label();
             this.lblCameraStatus = new System.Windows.Forms.Label();
             this.lblDeviceStatus = new System.Windows.Forms.Label();
+            this.lblResult = new System.Windows.Forms.Label();
             this.progressBarPosition = new System.Windows.Forms.ProgressBar();
             this.lblCurrentPosition = new System.Windows.Forms.Label();
-            this.lblResult = new System.Windows.Forms.Label();
             this.timerUpdateStatus = new System.Windows.Forms.Timer(this.components);
             this.statusStrip.SuspendLayout();
             this.panelMain.SuspendLayout();
@@ -75,7 +75,6 @@
             this.panelMain.Controls.Add(this.groupBoxStatus);
             this.panelMain.Controls.Add(this.progressBarPosition);
             this.panelMain.Controls.Add(this.lblCurrentPosition);
-            this.panelMain.Controls.Add(this.lblResult);
             this.panelMain.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelMain.Location = new System.Drawing.Point(0, 0);
             this.panelMain.Margin = new System.Windows.Forms.Padding(4);
@@ -95,7 +94,7 @@
             this.imageViewer1.MaxScale = 100F;
             this.imageViewer1.MinScale = 0.5F;
             this.imageViewer1.Name = "imageViewer1";
-            this.imageViewer1.Size = new System.Drawing.Size(1159, 413);
+            this.imageViewer1.Size = new System.Drawing.Size(1159, 462);
             this.imageViewer1.TabIndex = 6;
             // 
             // groupBoxControls
@@ -103,11 +102,11 @@
             this.groupBoxControls.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.groupBoxControls.Controls.Add(this.btnStop);
             this.groupBoxControls.Controls.Add(this.btnStart);
-            this.groupBoxControls.Location = new System.Drawing.Point(1002, 522);
+            this.groupBoxControls.Location = new System.Drawing.Point(1009, 571);
             this.groupBoxControls.Margin = new System.Windows.Forms.Padding(4);
             this.groupBoxControls.Name = "groupBoxControls";
             this.groupBoxControls.Padding = new System.Windows.Forms.Padding(4);
-            this.groupBoxControls.Size = new System.Drawing.Size(178, 102);
+            this.groupBoxControls.Size = new System.Drawing.Size(178, 69);
             this.groupBoxControls.TabIndex = 5;
             this.groupBoxControls.TabStop = false;
             this.groupBoxControls.Text = "控制";
@@ -118,7 +117,7 @@
             this.btnStop.Location = new System.Drawing.Point(92, 30);
             this.btnStop.Margin = new System.Windows.Forms.Padding(4);
             this.btnStop.Name = "btnStop";
-            this.btnStop.Size = new System.Drawing.Size(78, 63);
+            this.btnStop.Size = new System.Drawing.Size(78, 32);
             this.btnStop.TabIndex = 1;
             this.btnStop.Text = "停止";
             this.btnStop.UseVisualStyleBackColor = true;
@@ -130,7 +129,7 @@
             this.btnStart.Location = new System.Drawing.Point(9, 30);
             this.btnStart.Margin = new System.Windows.Forms.Padding(4);
             this.btnStart.Name = "btnStart";
-            this.btnStart.Size = new System.Drawing.Size(78, 63);
+            this.btnStart.Size = new System.Drawing.Size(78, 32);
             this.btnStart.TabIndex = 0;
             this.btnStart.Text = "启动";
             this.btnStart.UseVisualStyleBackColor = true;
@@ -143,6 +142,7 @@
             this.groupBoxStatus.Controls.Add(this.lblModelStatus);
             this.groupBoxStatus.Controls.Add(this.lblCameraStatus);
             this.groupBoxStatus.Controls.Add(this.lblDeviceStatus);
+            this.groupBoxStatus.Controls.Add(this.lblResult);
             this.groupBoxStatus.Location = new System.Drawing.Point(20, 20);
             this.groupBoxStatus.Margin = new System.Windows.Forms.Padding(4);
             this.groupBoxStatus.Name = "groupBoxStatus";
@@ -182,11 +182,22 @@
             this.lblDeviceStatus.TabIndex = 0;
             this.lblDeviceStatus.Text = "设备状态：未初始化";
             // 
+            // lblResult
+            // 
+            this.lblResult.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.lblResult.AutoSize = true;
+            this.lblResult.Location = new System.Drawing.Point(986, 25);
+            this.lblResult.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblResult.Name = "lblResult";
+            this.lblResult.Size = new System.Drawing.Size(116, 18);
+            this.lblResult.TabIndex = 0;
+            this.lblResult.Text = "检测结果：无";
+            // 
             // progressBarPosition
             // 
             this.progressBarPosition.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.progressBarPosition.Location = new System.Drawing.Point(20, 584);
+            this.progressBarPosition.Location = new System.Drawing.Point(20, 600);
             this.progressBarPosition.Margin = new System.Windows.Forms.Padding(4);
             this.progressBarPosition.Name = "progressBarPosition";
             this.progressBarPosition.Size = new System.Drawing.Size(974, 40);
@@ -196,23 +207,12 @@
             // 
             this.lblCurrentPosition.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.lblCurrentPosition.AutoSize = true;
-            this.lblCurrentPosition.Location = new System.Drawing.Point(16, 562);
+            this.lblCurrentPosition.Location = new System.Drawing.Point(19, 578);
             this.lblCurrentPosition.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblCurrentPosition.Name = "lblCurrentPosition";
             this.lblCurrentPosition.Size = new System.Drawing.Size(107, 18);
             this.lblCurrentPosition.TabIndex = 2;
             this.lblCurrentPosition.Text = "当前位置：0";
-            // 
-            // lblResult
-            // 
-            this.lblResult.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.lblResult.AutoSize = true;
-            this.lblResult.Location = new System.Drawing.Point(16, 522);
-            this.lblResult.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
-            this.lblResult.Name = "lblResult";
-            this.lblResult.Size = new System.Drawing.Size(116, 18);
-            this.lblResult.TabIndex = 0;
-            this.lblResult.Text = "检测结果：无";
             // 
             // timerUpdateStatus
             // 
@@ -229,7 +229,7 @@
             this.Margin = new System.Windows.Forms.Padding(4);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "OpenIVS - 智能视觉系统";
+            this.Text = "OpenIVS - 深度视觉 开源工业视觉系统";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
             this.statusStrip.ResumeLayout(false);
