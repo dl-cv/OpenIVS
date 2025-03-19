@@ -27,6 +27,7 @@ namespace OpenIVSWPF
         public Parity Parity { get; private set; }
         public int DeviceId { get; private set; }
         public int SelectedCameraIndex { get; private set; }
+        public string CameraUserDefinedName { get; private set; }
         public bool UseTrigger { get; private set; }
         public bool UseSoftTrigger { get; private set; }
         public string ModelPath { get; private set; }
@@ -76,6 +77,7 @@ namespace OpenIVSWPF
             
             // 相机设置
             SelectedCameraIndex = settings.CameraIndex;
+            CameraUserDefinedName = settings.CameraUserDefinedName;
             UseTrigger = settings.UseTrigger;
             UseSoftTrigger = settings.UseSoftTrigger;
             
@@ -180,13 +182,29 @@ namespace OpenIVSWPF
                 }
                 
                 // 选择当前相机
-                if (SelectedCameraIndex >= 0 && SelectedCameraIndex < cbCameraList.Items.Count)
+                if (!string.IsNullOrEmpty(CameraUserDefinedName))
                 {
-                    cbCameraList.SelectedIndex = SelectedCameraIndex;
+                    for (int i = 0; i < cbCameraList.Items.Count; i++)
+                    {
+                        if (cbCameraList.Items[i].ToString() == CameraUserDefinedName)
+                        {
+                            cbCameraList.SelectedIndex = i;
+                            break;
+                        }
+                    }
                 }
-                else if (cbCameraList.Items.Count > 0)
+                
+                // 如果没有找到匹配的相机名称，则尝试使用索引
+                if (cbCameraList.SelectedIndex < 0)
                 {
-                    cbCameraList.SelectedIndex = 0;
+                    if (SelectedCameraIndex >= 0 && SelectedCameraIndex < cbCameraList.Items.Count)
+                    {
+                        cbCameraList.SelectedIndex = SelectedCameraIndex;
+                    }
+                    else if (cbCameraList.Items.Count > 0)
+                    {
+                        cbCameraList.SelectedIndex = 0;
+                    }
                 }
             }
             
@@ -313,6 +331,7 @@ namespace OpenIVSWPF
             
             // 相机设置
             SelectedCameraIndex = cbCameraList.SelectedIndex;
+            CameraUserDefinedName = cbCameraList.SelectedItem?.ToString() ?? string.Empty;
             UseTrigger = chkUseTrigger.IsChecked == true;
             UseSoftTrigger = rbSoftTrigger.IsChecked == true;
             
@@ -353,6 +372,7 @@ namespace OpenIVSWPF
                 
                 // 保存相机设置
                 SetSettingValue(doc, root, "CameraIndex", SelectedCameraIndex.ToString());
+                SetSettingValue(doc, root, "CameraUserDefinedName", CameraUserDefinedName);
                 SetSettingValue(doc, root, "UseTrigger", UseTrigger.ToString());
                 SetSettingValue(doc, root, "UseSoftTrigger", UseSoftTrigger.ToString());
                 
@@ -406,6 +426,7 @@ namespace OpenIVSWPF
         
         // 相机设置
         public int CameraIndex { get; set; }
+        public string CameraUserDefinedName { get; set; }
         public bool UseTrigger { get; set; }
         public bool UseSoftTrigger { get; set; }
         
@@ -426,6 +447,7 @@ namespace OpenIVSWPF
             DeviceId = 1;
             
             CameraIndex = 0;
+            CameraUserDefinedName = string.Empty;
             UseTrigger = true;
             UseSoftTrigger = true;
             
