@@ -86,11 +86,11 @@
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="相机名称:" Margin="0,5,10,5" VerticalAlignment="Center"/>
                     <ComboBox Grid.Row="0" Grid.Column="1" x:Name="cbCameraList" Margin="0,5" />
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="触发模式:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="触发模式:" Margin="0,0,10,5" VerticalAlignment="Center"/>
                     <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Vertical" Margin="0,5">
                         <CheckBox x:Name="chkUseTrigger" Content="使用触发模式" IsChecked="True" Margin="0,0,0,5" 
                                   Checked="chkUseTrigger_Checked" Unchecked="chkUseTrigger_Unchecked"/>
-                        <StackPanel Orientation="Horizontal" Margin="20,0,0,0" x:Name="spTriggerOptions">
+                        <StackPanel Orientation="Horizontal" x:Name="spTriggerOptions">
                             <RadioButton x:Name="rbSoftTrigger" Content="软触发" IsChecked="True" Margin="0,0,10,0"/>
                             <RadioButton x:Name="rbHardTrigger" Content="硬触发" />
                         </StackPanel>
