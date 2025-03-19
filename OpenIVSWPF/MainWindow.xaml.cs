@@ -290,7 +290,7 @@ namespace OpenIVSWPF
                 if (success)
                 {
                     _isCameraConnected = true;
-                    UpdateStatus($"相机已连接：{deviceList[cameraIndex].ModelName}");
+                    UpdateStatus($"相机已连接：{deviceList[cameraIndex].UserDefinedName}");
                     UpdateCameraStatus("已连接");
                     
                     // 设置触发模式
