@@ -3,8 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.13.35825.156
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenIVS", "OpenIVS\OpenIVS.csproj", "{96A32C00-816E-43E7-B29A-237AF43558FC}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PressureTestRunner", "PressureTestRunner\PressureTestRunner.csproj", "{980F03F3-3648-4160-BF60-9668C7701785}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PressureTestRunnerTest", "PressureTestRunnerTest\PressureTestRunnerTest.csproj", "{7C585718-40FE-41D3-A286-61C47D8AE827}"
@@ -36,15 +34,18 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImageViewer", "ImageViewer\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ModbusTest", "ModbusTest\ModbusTest.csproj", "{4D20190F-2307-4B9D-9536-14A4F046B72B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenIVS", "OpenIVS\OpenIVS.csproj", "{4AAAB33E-1844-42B4-8120-23CBE92F60DF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ModbusApi", "ModbusApi\ModbusApi.csproj", "{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenIVSWPF", "OpenIVSWPF\OpenIVSWPF.csproj", "{A84EE213-5E39-4977-867E-EFD385841326}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
 		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{96A32C00-816E-43E7-B29A-237AF43558FC}.Debug|x64.ActiveCfg = Debug|x64
-		{96A32C00-816E-43E7-B29A-237AF43558FC}.Release|x64.ActiveCfg = Release|x64
-		{96A32C00-816E-43E7-B29A-237AF43558FC}.Release|x64.Build.0 = Release|x64
 		{980F03F3-3648-4160-BF60-9668C7701785}.Debug|x64.ActiveCfg = Debug|x64
 		{980F03F3-3648-4160-BF60-9668C7701785}.Debug|x64.Build.0 = Debug|x64
 		{980F03F3-3648-4160-BF60-9668C7701785}.Release|x64.ActiveCfg = Release|x64
@@ -82,10 +83,18 @@ Global
 		{E11DDCC6-84D1-4CAF-9534-2266651E7787}.Debug|x64.ActiveCfg = Debug|x64
 		{E11DDCC6-84D1-4CAF-9534-2266651E7787}.Debug|x64.Build.0 = Debug|x64
 		{E11DDCC6-84D1-4CAF-9534-2266651E7787}.Release|x64.ActiveCfg = Release|x64
-		{4D20190F-2307-4B9D-9536-14A4F046B72B}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{4D20190F-2307-4B9D-9536-14A4F046B72B}.Debug|x64.Build.0 = Debug|Any CPU
-		{4D20190F-2307-4B9D-9536-14A4F046B72B}.Release|x64.ActiveCfg = Release|Any CPU
-		{4D20190F-2307-4B9D-9536-14A4F046B72B}.Release|x64.Build.0 = Release|Any CPU
+		{4D20190F-2307-4B9D-9536-14A4F046B72B}.Debug|x64.ActiveCfg = Debug|x64
+		{4D20190F-2307-4B9D-9536-14A4F046B72B}.Debug|x64.Build.0 = Debug|x64
+		{4D20190F-2307-4B9D-9536-14A4F046B72B}.Release|x64.ActiveCfg = Release|x64
+		{4AAAB33E-1844-42B4-8120-23CBE92F60DF}.Debug|x64.ActiveCfg = Debug|x64
+		{4AAAB33E-1844-42B4-8120-23CBE92F60DF}.Debug|x64.Build.0 = Debug|x64
+		{4AAAB33E-1844-42B4-8120-23CBE92F60DF}.Release|x64.ActiveCfg = Release|x64
+		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Debug|x64.ActiveCfg = Debug|x64
+		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Debug|x64.Build.0 = Debug|x64
+		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Release|x64.ActiveCfg = Release|x64
+		{A84EE213-5E39-4977-867E-EFD385841326}.Debug|x64.ActiveCfg = Debug|x64
+		{A84EE213-5E39-4977-867E-EFD385841326}.Debug|x64.Build.0 = Debug|x64
+		{A84EE213-5E39-4977-867E-EFD385841326}.Release|x64.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -102,6 +111,7 @@ Global
 		{23341F21-8781-472E-8D93-983224C8A248} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 		{E11DDCC6-84D1-4CAF-9534-2266651E7787} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 		{4D20190F-2307-4B9D-9536-14A4F046B72B} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
+		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {ECC568E3-465E-4300-ADD1-27469BDF798F}
