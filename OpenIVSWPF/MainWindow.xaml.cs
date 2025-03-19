@@ -65,6 +65,9 @@ namespace OpenIVSWPF
         {
             InitializeComponent();
             Loaded += MainWindow_Loaded;
+            
+            // 初始化UI状态
+            InitializeUIState();
         }
 
         #region 初始化方法
@@ -208,6 +211,19 @@ namespace OpenIVSWPF
                 UpdateStatus($"AI模型加载错误：{ex.Message}");
                 UpdateModelStatus("加载错误");
             }
+        }
+
+        // 初始化UI状态
+        private void InitializeUIState()
+        {
+            // 设置初始状态显示
+            borderDeviceStatus.Background = System.Windows.Media.Brushes.Gray;
+            borderCameraStatus.Background = System.Windows.Media.Brushes.Gray;
+            borderModelStatus.Background = System.Windows.Media.Brushes.Gray;
+            
+            // 设置当前结果的初始状态
+            borderCurrentResult.Background = System.Windows.Media.Brushes.Gray;
+            lblCurrentResult.Text = "等待结果";
         }
         #endregion
 
@@ -430,6 +446,16 @@ namespace OpenIVSWPF
             if (Dispatcher.CheckAccess())
             {
                 lblDeviceStatus.Text = $"设备状态：{status}";
+                
+                // 根据状态设置颜色
+                if (status == "已连接")
+                {
+                    borderDeviceStatus.Background = System.Windows.Media.Brushes.ForestGreen;
+                }
+                else
+                {
+                    borderDeviceStatus.Background = System.Windows.Media.Brushes.Gray;
+                }
             }
             else
             {
@@ -443,6 +469,16 @@ namespace OpenIVSWPF
             if (Dispatcher.CheckAccess())
             {
                 lblCameraStatus.Text = $"相机状态：{status}";
+                
+                // 根据状态设置颜色
+                if (status == "已连接")
+                {
+                    borderCameraStatus.Background = System.Windows.Media.Brushes.ForestGreen;
+                }
+                else
+                {
+                    borderCameraStatus.Background = System.Windows.Media.Brushes.Gray;
+                }
             }
             else
             {
@@ -456,6 +492,16 @@ namespace OpenIVSWPF
             if (Dispatcher.CheckAccess())
             {
                 lblModelStatus.Text = $"模型状态：{status}";
+                
+                // 根据状态设置颜色
+                if (status == "已加载")
+                {
+                    borderModelStatus.Background = System.Windows.Media.Brushes.ForestGreen;
+                }
+                else
+                {
+                    borderModelStatus.Background = System.Windows.Media.Brushes.Gray;
+                }
             }
             else
             {
@@ -497,18 +543,30 @@ namespace OpenIVSWPF
             {
                 _totalCount++;
                 if (isOK)
+                {
                     _okCount++;
+                    
+                    // 更新当前结果为OK（绿色）
+                    borderCurrentResult.Background = System.Windows.Media.Brushes.ForestGreen;
+                    lblCurrentResult.Text = "OK";
+                }
                 else
+                {
                     _ngCount++;
+                    
+                    // 更新当前结果为NG（红色）
+                    borderCurrentResult.Background = System.Windows.Media.Brushes.Crimson;
+                    lblCurrentResult.Text = "NG";
+                }
                 
                 // 计算良率
                 _yieldRate = _totalCount > 0 ? (double)_okCount / _totalCount * 100 : 0;
                 
                 // 更新显示
-                lblTotalCount.Text = $"总数:{_totalCount}";
-                lblOKCount.Text = $"OK:{_okCount}";
-                lblNGCount.Text = $"NG:{_ngCount}";
-                lblYieldRate.Text = $"良率:{_yieldRate:F1}%";
+                lblTotalCount.Text = $"总数: {_totalCount}";
+                lblOKCount.Text = $"OK: {_okCount}";
+                lblNGCount.Text = $"NG: {_ngCount}";
+                lblYieldRate.Text = $"良率: {_yieldRate:F1}%";
             }
             else
             {

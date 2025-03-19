@@ -22,15 +22,10 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="10">
-                <TextBlock x:Name="lblDeviceStatus" Text="设备状态：未连接" Margin="0,0,20,0"/>
-                <TextBlock x:Name="lblCameraStatus" Text="相机状态：未连接" Margin="0,0,20,0"/>
-                <TextBlock x:Name="lblModelStatus" Text="模型状态：未加载" Margin="0,0,20,0"/>
-            </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10">
-                <TextBlock Text="速度(mm/s):" VerticalAlignment="Center"/>
-                <TextBox x:Name="txtSpeed" Width="60" Margin="5,0" Text="100.0"/>
-                <Button x:Name="btnSetSpeed" Content="设置" Width="60" Margin="5,0" Click="btnSetSpeed_Click"/>
+                <TextBlock Text="速度(mm/s):"/>
+                <TextBox x:Name="txtSpeed" Width="60" Text="100.0"/>
+                <Button x:Name="btnSetSpeed" Content="设置" Width="60" Click="btnSetSpeed_Click"/>
             </StackPanel>
         </Grid>
 
@@ -46,23 +41,21 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 
                 <!-- 使用WindowsFormsHost来托管ImageViewer控件 -->
                 <WindowsFormsHost Grid.Row="0" Margin="0">
                     <dlcv:ImageViewer x:Name="imageViewer1" BorderStyle="FixedSingle"/>
                 </WindowsFormsHost>
-                
-                <TextBlock Grid.Row="2" x:Name="lblCurrentPosition" Text="当前位置：0.0" Margin="0,5"/>
             </Grid>
 
             <!-- 右侧控制面板 -->
             <Grid Grid.Column="1" Margin="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
                 <!-- 控制按钮 -->
@@ -71,33 +64,68 @@
                     <Button x:Name="btnStop" Content="停止" Width="80" IsEnabled="False" Click="btnStop_Click" Height="33" Margin="5,0,5,0"/>
                 </StackPanel>
 
-                <!-- 检测结果显示 -->
-                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,10">
-                    <TextBox x:Name="txtResult" IsReadOnly="True" TextWrapping="Wrap" 
-                             VerticalScrollBarVisibility="Auto" Margin="5"/>
-                </Border>
-
-                <!-- 统计信息 -->
-                <Grid Grid.Row="2">
+                <!-- 当前结果显示 -->
+                <Grid Grid.Row="1" Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border x:Name="borderCurrentResult" Background="Gray" CornerRadius="4" Padding="5">
+                        <TextBlock x:Name="lblCurrentResult" Text="等待结果" Foreground="White" 
+                                   FontSize="18" FontWeight="Bold" TextAlignment="Center"/>
+                    </Border>
+                </Grid>
+
+                <!-- 统计信息 -->
+                <Grid Grid.Row="2" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Grid.Column="0" Grid.Row="0" x:Name="lblTotalCount" Text="总数: 0"/>
-                    <TextBlock Grid.Column="1" Grid.Row="0" x:Name="lblOKCount" Text="OK: 0"/>
-                    <TextBlock Grid.Column="0" Grid.Row="1" x:Name="lblNGCount" Text="NG: 0"/>
-                    <TextBlock Grid.Column="1" Grid.Row="1" x:Name="lblYieldRate" Text="良率: 0.0%"/>
+                    <TextBlock Grid.Row="0" x:Name="lblTotalCount" Text="总数: 0" FontSize="20" FontWeight="Bold" Margin="0,2"/>
+                    <TextBlock Grid.Row="1" x:Name="lblOKCount" Text="OK: 0" FontSize="20" FontWeight="Bold" Margin="0,2"/>
+                    <TextBlock Grid.Row="2" x:Name="lblNGCount" Text="NG: 0" FontSize="20" FontWeight="Bold" Margin="0,2"/>
+                    <TextBlock Grid.Row="3" x:Name="lblYieldRate" Text="良率: 0.0%" FontSize="16" Margin="0,2"/>
                 </Grid>
+
+                <!-- 检测结果显示 -->
+                <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="1" Margin="0">
+                    <TextBox x:Name="txtResult" IsReadOnly="True" TextWrapping="Wrap" 
+                             VerticalScrollBarVisibility="Auto" Margin="5"/>
+                </Border>
             </Grid>
         </Grid>
 
         <!-- 底部状态栏 -->
-        <StatusBar Grid.Row="2">
-            <TextBlock x:Name="lblStatus" Text="就绪"/>
-        </StatusBar>
+        <Grid Grid.Row="2" Background="#F0F0F0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            
+            <!-- 设备、相机、模型状态 -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="5">
+                <Border x:Name="borderDeviceStatus" Background="Gray" CornerRadius="4" Padding="5" Margin="0,0,10,0">
+                    <TextBlock x:Name="lblDeviceStatus" Text="设备状态：未连接" Foreground="White"/>
+                </Border>
+                <Border x:Name="borderCameraStatus" Background="Gray" CornerRadius="4" Padding="5" Margin="0,0,10,0">
+                    <TextBlock x:Name="lblCameraStatus" Text="相机状态：未连接" Foreground="White"/>
+                </Border>
+                <Border x:Name="borderModelStatus" Background="Gray" CornerRadius="4" Padding="5">
+                    <TextBlock x:Name="lblModelStatus" Text="模型状态：未加载" Foreground="White"/>
+                </Border>
+            </StackPanel>
+
+            <!-- 当前位置 -->
+            <TextBlock Grid.Column="1" x:Name="lblCurrentPosition" Text="当前位置：0.0" Margin="10,0" VerticalAlignment="Center"/>
+            
+            <!-- 状态信息 -->
+            <TextBlock Grid.Column="2" x:Name="lblStatus" Text="就绪" Margin="5" VerticalAlignment="Center"/>
+        </Grid>
     </Grid>
 </Window>
