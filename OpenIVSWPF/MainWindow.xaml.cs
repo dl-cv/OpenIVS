@@ -301,6 +301,7 @@ namespace OpenIVSWPF
                             : TriggerConfig.TriggerMode.Line0;
                         
                         _cameraManager.SetTriggerMode(mode);
+                        _cameraManager.StartGrabbing();
                         UpdateStatus($"相机设置为{(_settings.UseSoftTrigger ? "软触发" : "硬触发")}模式");
                     }
                     else
