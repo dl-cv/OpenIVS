@@ -799,6 +799,7 @@ namespace OpenIVSWPF
                 }
                 else
                 {
+                    // 将result转换为object类型
                     imageViewer1.UpdateResults(result);
                 }
 
@@ -807,23 +808,32 @@ namespace OpenIVSWPF
             }
             else
             {
-                Dispatcher.Invoke(() => UpdateDisplayImage(image, result));
+                // 显式指定Action类型避免类型转换错误
+                Dispatcher.Invoke(new Action(() => UpdateDisplayImage(image, result)));
             }
         }
 
         // 更新控件状态
         private void UpdateControlState()
         {
-            if (Dispatcher.CheckAccess())
+            Dispatcher.Invoke(() =>
             {
+                // 根据运行状态更新按钮
                 btnStart.IsEnabled = !_isRunning;
                 btnStop.IsEnabled = _isRunning;
+                btnStop.Background = _isRunning ? 
+                    new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(244, 67, 54)) : // 红色 #F44336
+                    new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(204, 204, 204)); // 灰色 #CCCCCC
+                btnStart.Background = !_isRunning ?
+                    new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80)) : // 绿色 #4CAF50
+                    new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(204, 204, 204)); // 灰色 #CCCCCC
+
+                // 设置按钮只能在系统停止状态下使用
                 btnSettings.IsEnabled = !_isRunning;
-            }
-            else
-            {
-                Dispatcher.Invoke(() => UpdateControlState());
-            }
+                
+                // 清零按钮随时可用
+                btnReset.IsEnabled = true;
+            });
         }
         #endregion
 
@@ -877,10 +887,6 @@ namespace OpenIVSWPF
             
             try
             {
-                // 禁用按钮
-                btnStart.IsEnabled = false;
-                btnSettings.IsEnabled = false;
-                
                 // 如果系统尚未初始化，则先初始化
                 if (!_isInitialized)
                 {
@@ -900,7 +906,7 @@ namespace OpenIVSWPF
                 
                 // 标记为正在运行
                 _isRunning = true;
-                UpdateControlState();
+                UpdateControlState(); // 更新所有按钮状态
                 UpdateStatus("系统启动");
                 
                 // 启动主循环任务
@@ -919,17 +925,55 @@ namespace OpenIVSWPF
         {
             try
             {
-                // 请求取消操作
-                _cts?.Cancel();
-                
-                // 标记为已停止运行
+                // 停止运行
                 _isRunning = false;
-                UpdateControlState();
+                if (_cts != null)
+                {
+                    _cts.Cancel();
+                    _cts.Dispose();
+                    _cts = null;
+                }
+                
                 UpdateStatus("系统已停止");
+                UpdateControlState();
             }
             catch (Exception ex)
             {
-                UpdateStatus($"停止过程中发生错误：{ex.Message}");
+                UpdateStatus($"停止时发生错误：{ex.Message}");
+            }
+        }
+
+        private void btnReset_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // 显示确认对话框
+                MessageBoxResult result = MessageBox.Show(
+                    "确定要清零所有计数吗？", 
+                    "确认清零", 
+                    MessageBoxButton.YesNo, 
+                    MessageBoxImage.Question);
+                
+                if (result == MessageBoxResult.Yes)
+                {
+                    // 重置所有计数
+                    _totalCount = 0;
+                    _okCount = 0;
+                    _ngCount = 0;
+                    _yieldRate = 0.0;
+                    
+                    // 更新UI显示
+                    lblTotalCount.Text = $"总数: {_totalCount}";
+                    lblOKCount.Text = $"OK: {_okCount}";
+                    lblNGCount.Text = $"NG: {_ngCount}";
+                    lblYieldRate.Text = $"良率: {_yieldRate:F1}%";
+                    
+                    UpdateStatus("计数已清零");
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"清零时发生错误：{ex.Message}");
             }
         }
 
@@ -1065,25 +1109,38 @@ namespace OpenIVSWPF
                         {
                             // 触发相机拍照
                             UpdateStatus($"在位置 {targetPosition} 进行拍照...");
-                            var image = await CaptureImageAsync(token);
                             
-                            if (image != null && !token.IsCancellationRequested)
+                            // 异步执行拍照和推理，但不等待结果
+                            _ = Task.Run(async () =>
                             {
-                                // 获取到图像后，执行AI推理
-                                UpdateStatus("执行AI推理...");
-                                string result = PerformInference(image);
-                                
-                                // 更新检测结果显示
-                                UpdateDetectionResult(result);
-                                
-                                // 根据结果更新统计信息
-                                bool isOK = string.IsNullOrEmpty(result);
-                                UpdateStatistics(isOK);
-                            }
+                                try
+                                {
+                                    // 拍照
+                                    var image = await CaptureImageAsync(token);
+                                    
+                                    if (image != null && !token.IsCancellationRequested)
+                                    {
+                                        // 获取到图像后，执行AI推理
+                                        UpdateStatus("执行AI推理...");
+                                        string result = PerformInference(image);
+                                        
+                                        // 更新检测结果显示
+                                        UpdateDetectionResult(result);
+                                        
+                                        // 根据结果更新统计信息
+                                        bool isOK = string.IsNullOrEmpty(result);
+                                        UpdateStatistics(isOK);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    if (!token.IsCancellationRequested)
+                                    {
+                                        UpdateStatus($"拍照或推理过程中发生错误：{ex.Message}");
+                                    }
+                                }
+                            }, token);
                         }
-                        
-                        // 等待一段时间，以便查看结果
-                        await Task.Delay(1000, token);
                     }
                     
                     if (token.IsCancellationRequested)

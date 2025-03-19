@@ -7,7 +7,7 @@
         xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"
         xmlns:dlcv="clr-namespace:DLCV;assembly=ImageViewer"
         mc:Ignorable="d"
-        Title="OpenIVS" Height="720" Width="1280"
+        Title="OpenIVS - 深度视觉 开源工业视觉系统" Height="720" Width="1280"
         Closing="Window_Closing">
     <Grid>
         <Grid.RowDefinitions>
@@ -15,16 +15,6 @@
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-
-        <!-- 顶部状态栏 -->
-        <Grid Grid.Row="0" Background="#F0F0F0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="OpenIVS - 视觉检测系统" FontSize="16" FontWeight="Bold" Margin="10" VerticalAlignment="Center"/>
-            <Button Grid.Column="1" x:Name="btnSettings" Content="设置" Width="80" Margin="10" Padding="10,5" Click="btnSettings_Click"/>
-        </Grid>
 
         <!-- 主要内容区域 -->
         <Grid Grid.Row="1">
@@ -39,7 +29,7 @@
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                
+
                 <!-- 使用WindowsFormsHost来托管ImageViewer控件 -->
                 <WindowsFormsHost Grid.Row="0" Margin="0">
                     <dlcv:ImageViewer x:Name="imageViewer1" BorderStyle="FixedSingle"/>
@@ -88,27 +78,46 @@
                     <TextBox x:Name="txtResult" IsReadOnly="True" TextWrapping="Wrap" 
                              VerticalScrollBarVisibility="Auto" Margin="5"/>
                 </Border>
-                
+
                 <!-- 控制按钮 -->
-                <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,5">
-                    <Button x:Name="btnStart" Content="开始" Width="120" Height="40" Margin="0,0,10,0" 
-                            Click="btnStart_Click" FontSize="14" Background="#4CAF50" Foreground="White"/>
-                    <Button x:Name="btnStop" Content="停止" Width="120" Height="40" 
-                            IsEnabled="False" Click="btnStop_Click" FontSize="14" Background="#F44336" Foreground="White"/>
-                </StackPanel>
+                <Grid Grid.Row="3" Margin="0,0,0,5">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Button Grid.Row="0" Grid.Column="0" x:Name="btnStart" Content="开始" Height="40" Margin="5" 
+                            Click="btnStart_Click" FontSize="14"/>
+                    <Button Grid.Row="0" Grid.Column="1" x:Name="btnStop" Content="停止" Height="40" Margin="5"
+                            IsEnabled="False" Click="btnStop_Click" FontSize="14"/>
+                    <Button Grid.Row="1" Grid.Column="0" x:Name="btnSettings" Content="设置" Height="40" Margin="5" 
+                            Click="btnSettings_Click" FontSize="14"/>
+                    <Button Grid.Row="1" Grid.Column="1" x:Name="btnReset" Content="计数清零" Height="40" Margin="5" 
+                            Click="btnReset_Click" FontSize="14"/>
+                </Grid>
             </Grid>
         </Grid>
 
         <!-- 底部状态栏 -->
         <Grid Grid.Row="2" Background="#F0F0F0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            
+
+            <!-- 日志信息 -->
+            <TextBlock Grid.Column="0" x:Name="lblStatus" Text="就绪" Margin="10,0,5,0" VerticalAlignment="Center"/>
+
+            <!-- 当前位置 -->
+
             <!-- 设备、相机、模型状态 -->
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="5">
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="5">
+                <TextBlock Grid.Column="1" x:Name="lblCurrentPosition" Text="当前位置：" Margin="10,0" VerticalAlignment="Center"/>
+
                 <Border x:Name="borderDeviceStatus" Background="Gray" CornerRadius="4" Padding="5" Margin="0,0,10,0">
                     <TextBlock x:Name="lblDeviceStatus" Text="设备状态：未连接" Foreground="White"/>
                 </Border>
@@ -119,12 +128,6 @@
                     <TextBlock x:Name="lblModelStatus" Text="模型状态：未加载" Foreground="White"/>
                 </Border>
             </StackPanel>
-
-            <!-- 当前位置 -->
-            <TextBlock Grid.Column="1" x:Name="lblCurrentPosition" Text="当前位置：0.0" Margin="10,0" VerticalAlignment="Center"/>
-            
-            <!-- 状态信息 -->
-            <TextBlock Grid.Column="2" x:Name="lblStatus" Text="就绪" Margin="5" VerticalAlignment="Center"/>
         </Grid>
     </Grid>
 </Window>
