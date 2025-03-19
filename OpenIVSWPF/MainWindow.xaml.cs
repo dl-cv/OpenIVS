@@ -851,7 +851,7 @@ namespace OpenIVSWPF
                             UpdateDetectionResult(result);
                             
                             // 根据结果更新统计信息
-                            bool isOK = !string.IsNullOrEmpty(result) && !result.Contains("无效") && !result.Contains("错误");
+                            bool isOK = string.IsNullOrEmpty(result);
                             UpdateStatistics(isOK);
                         }
                         else
