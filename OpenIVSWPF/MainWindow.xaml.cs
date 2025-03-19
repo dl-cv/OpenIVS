@@ -733,6 +733,7 @@ namespace OpenIVSWPF
             {
                 txtResult.Text = $"检测结果：\n{result}";
                 _lastDetectionResult = result;
+                UpdateStatus($"推理完成");
             }
             else
             {
@@ -856,7 +857,6 @@ namespace OpenIVSWPF
                         {
                             // 执行AI推理
                             string result = PerformInference(_lastCapturedImage);
-                            UpdateStatus($"推理完成");
 
                             // 更新检测结果显示
                             UpdateDetectionResult(result);
