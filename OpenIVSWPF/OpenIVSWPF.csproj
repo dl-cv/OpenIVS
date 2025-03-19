@@ -57,6 +57,7 @@
     <Reference Include="System.IO.Ports" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="WindowsFormsIntegration" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="OpenCvSharp4" Version="4.10.0.20241108" />
@@ -123,6 +124,10 @@
     <ProjectReference Include="..\ModbusApi\ModbusApi.csproj">
       <Project>{70a89ce8-ade7-42df-9762-19a896be3c1f}</Project>
       <Name>ModbusApi</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\OpenIVS\OpenIVS.csproj">
+      <Project>{4AAAB33E-1844-42B4-8120-23CBE92F60DF}</Project>
+      <Name>OpenIVS</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

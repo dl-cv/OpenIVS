@@ -4,6 +4,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:OpenIVSWPF"
+        xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"
+        xmlns:dlcv="clr-namespace:DLCV;assembly=ImageViewer"
         mc:Ignorable="d"
         Title="OpenIVS" Height="720" Width="1280"
         Closing="Window_Closing">
@@ -44,11 +46,15 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <Border Grid.Row="0" BorderBrush="Gray" BorderThickness="1">
-                    <Image x:Name="imgDisplay" Stretch="Uniform"/>
-                </Border>
-                <TextBlock Grid.Row="1" x:Name="lblCurrentPosition" Text="当前位置：0.0" Margin="0,5"/>
+                
+                <!-- 使用WindowsFormsHost来托管ImageViewer控件 -->
+                <WindowsFormsHost Grid.Row="0" Margin="0">
+                    <dlcv:ImageViewer x:Name="imageViewer1" BorderStyle="FixedSingle"/>
+                </WindowsFormsHost>
+                
+                <TextBlock Grid.Row="2" x:Name="lblCurrentPosition" Text="当前位置：0.0" Margin="0,5"/>
             </Grid>
 
             <!-- 右侧控制面板 -->

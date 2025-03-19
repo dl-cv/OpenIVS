@@ -59,7 +59,7 @@ namespace OpenIVSWPF
         private int _currentPositionIndex = 0;
         
         // 上次拍照结果
-        private Mat _lastCapturedImage = null;
+        private System.Drawing.Bitmap _lastCapturedImage = null;
         private string _lastDetectionResult = "";
         
         // 统计数据
@@ -292,7 +292,7 @@ namespace OpenIVSWPF
         }
 
         // 触发相机拍照
-        private async Task<Mat> CaptureImageAsync(CancellationToken token)
+        private async Task<Bitmap> CaptureImageAsync(CancellationToken token)
         {
             try
             {
@@ -311,17 +311,16 @@ namespace OpenIVSWPF
                 }
 
                 // 使用TaskCompletionSource等待图像更新事件
-                var tcs = new TaskCompletionSource<Mat>();
+                var tcs = new TaskCompletionSource<Bitmap>();
                 
                 // 设置图像捕获事件处理
                 EventHandler<ImageEventArgs> handler = null;
                 handler = (s, e) =>
                 {
-                    // 捕获到图像后，将其转换为Mat
+                    // 捕获到图像后，转换为Bitmap
                     if (e.Image != null)
                     {
-                        Mat mat = BitmapConverter.ToMat(e.Image);
-                        tcs.TrySetResult(mat);
+                        tcs.TrySetResult(e.Image.Clone() as Bitmap);
                     }
                     
                     // 移除事件处理器，防止多次触发
@@ -367,15 +366,18 @@ namespace OpenIVSWPF
         }
 
         // 执行AI模型推理
-        private string PerformInference(Mat image)
+        private string PerformInference(Bitmap image)
         {
             try
             {
                 if (!_isModelLoaded || image == null)
                     return "无效的输入";
 
+                // 将Bitmap转换为Mat
+                Mat mat = BitmapToMat(image);
+                
                 // 创建批处理列表
-                var imageList = new List<Mat> { image };
+                var imageList = new List<Mat> { mat };
 
                 // 执行推理
                 dlcv_infer_csharp.Utils.CSharpResult result = _model.InferBatch(imageList);
@@ -402,34 +404,17 @@ namespace OpenIVSWPF
             }
         }
 
-        // 更新显示图像
-        private void UpdateDisplayImage(Mat image, dynamic result = null)
+        // 将Bitmap转换为Mat
+        private Mat BitmapToMat(Bitmap bitmap)
         {
-            if (Dispatcher.CheckAccess())
+            try
             {
-                // 保存图像以供后续使用
-                if (image != null)
-                {
-                    _lastCapturedImage = image.Clone();
-                }
-
-                // 转换Mat为BitmapSource
-                if (_lastCapturedImage != null)
-                {
-                    using (var bitmap = BitmapConverter.ToBitmap(_lastCapturedImage))
-                    {
-                        var bitmapSource = System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(
-                            bitmap.GetHbitmap(),
-                            IntPtr.Zero,
-                            Int32Rect.Empty,
-                            BitmapSizeOptions.FromEmptyOptions());
-                        imgDisplay.Source = bitmapSource;
-                    }
-                }
+                return BitmapConverter.ToMat(bitmap);
             }
-            else
+            catch (Exception ex)
             {
-                Dispatcher.Invoke(() => UpdateDisplayImage(image, result));
+                UpdateStatus($"图像转换错误：{ex.Message}");
+                return null;
             }
         }
         #endregion
@@ -540,6 +525,39 @@ namespace OpenIVSWPF
             }
         }
 
+        // 更新显示图像
+        private void UpdateDisplayImage(System.Drawing.Image image, dynamic result = null)
+        {
+            if (Dispatcher.CheckAccess())
+            {
+                // 保存图像以供后续使用
+                if (image != null)
+                {
+                    _lastCapturedImage = image.Clone() as Bitmap;
+                }
+
+                // 使用ImageViewer更新图像和检测结果
+                imageViewer1.UpdateImage(image);
+
+                // 如果有检测结果，则更新显示
+                if (result is null)
+                {
+                    imageViewer1.ClearResults(); 
+                }
+                else
+                {
+                    imageViewer1.UpdateResults(result);
+                }
+
+                // 刷新ImageViewer的显示
+                imageViewer1.Invalidate();
+            }
+            else
+            {
+                Dispatcher.Invoke(() => UpdateDisplayImage(image, result));
+            }
+        }
+
         // 更新控件状态
         private void UpdateControlState()
         {
@@ -581,8 +599,7 @@ namespace OpenIVSWPF
                     // 更新显示图像
                     if (e.Image != null)
                     {
-                        _lastCapturedImage = e.Image.Clone() as Mat;
-                        UpdateDisplayImage(_lastCapturedImage);
+                        UpdateDisplayImage(e.Image.Clone() as Bitmap);
                     }
                 }
                 else
@@ -746,6 +763,10 @@ namespace OpenIVSWPF
                             
                             // 更新检测结果显示
                             UpdateDetectionResult(result);
+                            
+                            // 根据结果更新统计信息（这里简单地假设有结果就是OK）
+                            bool isOK = !string.IsNullOrEmpty(result) && !result.Contains("无效") && !result.Contains("错误");
+                            UpdateStatistics(isOK);
                             
                             // 等待一段时间，以便查看结果
                             await Task.Delay(1000, token);
