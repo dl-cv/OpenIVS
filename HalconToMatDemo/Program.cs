@@ -84,15 +84,43 @@ namespace HalconToMatDemo
 
             HOperatorSet.GetImageSize(halconImage, out width, out height);
             HOperatorSet.CountChannels(halconImage, out channels);
-            HOperatorSet.GetImagePointer1(halconImage, out imagePointer, out type, out width, out height);
             
-            IntPtr ptr = new IntPtr(imagePointer.L);
-            MatType matType;
-
+            Console.WriteLine($"Halcon图像通道数: {channels.I}");
+            
             if (channels.I == 1)
             {
-                // 单通道灰度图
-                matType = MatType.CV_8UC1;
+                // 单通道灰度图，需要转换为三通道
+                Console.WriteLine("检测到单通道图像，转换为三通道...");
+                
+                HOperatorSet.GetImagePointer1(halconImage, out imagePointer, out type, out width, out height);
+                IntPtr ptr = new IntPtr(imagePointer.L);
+                
+                // 创建一个空的三通道Mat
+                Mat matRGB = new Mat(height.I, width.I, MatType.CV_8UC3);
+                
+                // 将单通道数据复制到三通道中（灰度转RGB，所有通道值相同）
+                unsafe
+                {
+                    byte* ptrGray = (byte*)(imagePointer.L);
+                    byte* matData = (byte*)matRGB.Data.ToPointer();
+                    
+                    for (int y = 0; y < height.I; y++)
+                    {
+                        for (int x = 0; x < width.I; x++)
+                        {
+                            int grayIndex = y * width.I + x;
+                            int matIndex = (y * width.I + x) * 3;
+                            
+                            byte pixelValue = ptrGray[grayIndex];
+                            // 三个通道设置相同的值（R=G=B，形成灰度外观）
+                            matData[matIndex] = pixelValue;     // B 通道
+                            matData[matIndex + 1] = pixelValue; // G 通道
+                            matData[matIndex + 2] = pixelValue; // R 通道
+                        }
+                    }
+                }
+                
+                return matRGB;
             }
             else if (channels.I == 3)
             {
@@ -119,10 +147,10 @@ namespace HalconToMatDemo
                             int halconIndex = y * width.I + x;
                             int matIndex = (y * width.I + x) * 3;
                             
-                            // 注意OpenCV是BGR顺序
-                            matData[matIndex] = ptrR[halconIndex];     // 红色通道
-                            matData[matIndex + 1] = ptrG[halconIndex]; // 绿色通道
-                            matData[matIndex + 2] = ptrB[halconIndex]; // 蓝色通道
+                            // OpenCV是BGR顺序，而我们需要的是RGB
+                            matData[matIndex] = ptrB[halconIndex];     // B通道
+                            matData[matIndex + 1] = ptrG[halconIndex]; // G通道
+                            matData[matIndex + 2] = ptrR[halconIndex]; // R通道
                         }
                     }
                 }
@@ -132,17 +160,6 @@ namespace HalconToMatDemo
             else
             {
                 throw new Exception($"不支持的通道数: {channels.I}");
-            }
-
-            // 创建Mat封装Halcon内存，注意这里不复制内存
-            if (channels.I == 1)
-            {
-                // 单通道灰度图直接包装
-                return Mat.FromPixelData(height.I, width.I, matType, ptr);
-            }
-            else
-            {
-                throw new Exception("未处理的图像类型");
             }
         }
 
