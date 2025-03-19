@@ -1,0 +1,97 @@
+﻿<Window x:Class="OpenIVSWPF.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:OpenIVSWPF"
+        mc:Ignorable="d"
+        Title="OpenIVS" Height="720" Width="1280"
+        Closing="Window_Closing">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 顶部状态栏 -->
+        <Grid Grid.Row="0" Background="#F0F0F0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="10">
+                <TextBlock x:Name="lblDeviceStatus" Text="设备状态：未连接" Margin="0,0,20,0"/>
+                <TextBlock x:Name="lblCameraStatus" Text="相机状态：未连接" Margin="0,0,20,0"/>
+                <TextBlock x:Name="lblModelStatus" Text="模型状态：未加载" Margin="0,0,20,0"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10">
+                <TextBlock Text="速度(mm/s):" VerticalAlignment="Center"/>
+                <TextBox x:Name="txtSpeed" Width="60" Margin="5,0" Text="100.0"/>
+                <Button x:Name="btnSetSpeed" Content="设置" Width="60" Margin="5,0" Click="btnSetSpeed_Click"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- 主要内容区域 -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="300"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧图像显示区域 -->
+            <Grid Grid.Column="0" Margin="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" BorderBrush="Gray" BorderThickness="1">
+                    <Image x:Name="imgDisplay" Stretch="Uniform"/>
+                </Border>
+                <TextBlock Grid.Row="1" x:Name="lblCurrentPosition" Text="当前位置：0.0" Margin="0,5"/>
+            </Grid>
+
+            <!-- 右侧控制面板 -->
+            <Grid Grid.Column="1" Margin="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- 控制按钮 -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button x:Name="btnStart" Content="开始" Width="80" Margin="0,0,10,0" Click="btnStart_Click"/>
+                    <Button x:Name="btnStop" Content="停止" Width="80" IsEnabled="False" Click="btnStop_Click"/>
+                </StackPanel>
+
+                <!-- 检测结果显示 -->
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,10">
+                    <TextBox x:Name="txtResult" IsReadOnly="True" TextWrapping="Wrap" 
+                             VerticalScrollBarVisibility="Auto" Margin="5"/>
+                </Border>
+
+                <!-- 统计信息 -->
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Column="0" Grid.Row="0" x:Name="lblTotalCount" Text="总数: 0"/>
+                    <TextBlock Grid.Column="1" Grid.Row="0" x:Name="lblOKCount" Text="OK: 0"/>
+                    <TextBlock Grid.Column="0" Grid.Row="1" x:Name="lblNGCount" Text="NG: 0"/>
+                    <TextBlock Grid.Column="1" Grid.Row="1" x:Name="lblYieldRate" Text="良率: 0.0%"/>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- 底部状态栏 -->
+        <StatusBar Grid.Row="2">
+            <TextBlock x:Name="lblStatus" Text="就绪"/>
+        </StatusBar>
+    </Grid>
+</Window>
