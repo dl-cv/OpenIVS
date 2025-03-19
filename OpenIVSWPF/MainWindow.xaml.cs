@@ -67,10 +67,17 @@ namespace OpenIVSWPF
         private bool _isInitialized = false;
         #endregion
 
+        // 添加ViewModel属性
+        public MainWindowViewModel ViewModel { get; private set; }
+
         public MainWindow()
         {
             InitializeComponent();
             Loaded += MainWindow_Loaded;
+            
+            // 初始化ViewModel
+            ViewModel = new MainWindowViewModel();
+            DataContext = ViewModel;
             
             // 初始化UI状态
             InitializeUIState();
@@ -364,14 +371,7 @@ namespace OpenIVSWPF
         // 初始化UI状态
         private void InitializeUIState()
         {
-            // 设置初始状态显示
-            borderDeviceStatus.Background = System.Windows.Media.Brushes.Gray;
-            borderCameraStatus.Background = System.Windows.Media.Brushes.Gray;
-            borderModelStatus.Background = System.Windows.Media.Brushes.Gray;
-            
-            // 设置当前结果的初始状态
-            borderCurrentResult.Background = System.Windows.Media.Brushes.Gray;
-            lblCurrentResult.Text = "等待结果";
+            // 初始状态已在ViewModel中设置，不需在此处设置
         }
         #endregion
 
@@ -636,7 +636,7 @@ namespace OpenIVSWPF
         {
             if (Dispatcher.CheckAccess())
             {
-                lblStatus.Text = $"{DateTime.Now.ToString("HH:mm:ss")} - {message}";
+                ViewModel.UpdateStatus(message);
             }
             else
             {
@@ -649,17 +649,7 @@ namespace OpenIVSWPF
         {
             if (Dispatcher.CheckAccess())
             {
-                lblDeviceStatus.Text = $"设备状态：{status}";
-                
-                // 根据状态设置颜色
-                if (status == "已连接")
-                {
-                    borderDeviceStatus.Background = System.Windows.Media.Brushes.ForestGreen;
-                }
-                else
-                {
-                    borderDeviceStatus.Background = System.Windows.Media.Brushes.Gray;
-                }
+                ViewModel.UpdateDeviceStatus(status);
             }
             else
             {
@@ -672,17 +662,7 @@ namespace OpenIVSWPF
         {
             if (Dispatcher.CheckAccess())
             {
-                lblCameraStatus.Text = $"相机状态：{status}";
-                
-                // 根据状态设置颜色
-                if (status == "已连接")
-                {
-                    borderCameraStatus.Background = System.Windows.Media.Brushes.ForestGreen;
-                }
-                else
-                {
-                    borderCameraStatus.Background = System.Windows.Media.Brushes.Gray;
-                }
+                ViewModel.UpdateCameraStatus(status);
             }
             else
             {
@@ -695,17 +675,7 @@ namespace OpenIVSWPF
         {
             if (Dispatcher.CheckAccess())
             {
-                lblModelStatus.Text = $"模型状态：{status}";
-                
-                // 根据状态设置颜色
-                if (status == "已加载")
-                {
-                    borderModelStatus.Background = System.Windows.Media.Brushes.ForestGreen;
-                }
-                else
-                {
-                    borderModelStatus.Background = System.Windows.Media.Brushes.Gray;
-                }
+                ViewModel.UpdateModelStatus(status);
             }
             else
             {
@@ -718,7 +688,7 @@ namespace OpenIVSWPF
         {
             if (Dispatcher.CheckAccess())
             {
-                lblCurrentPosition.Text = $"当前位置：{position:F1}";
+                ViewModel.UpdatePosition(position);
             }
             else
             {
@@ -731,7 +701,7 @@ namespace OpenIVSWPF
         {
             if (Dispatcher.CheckAccess())
             {
-                txtResult.Text = $"检测结果：\n{result}";
+                ViewModel.UpdateDetectionResult(result);
                 _lastDetectionResult = result;
                 UpdateStatus($"推理完成");
             }
@@ -750,28 +720,18 @@ namespace OpenIVSWPF
                 if (isOK)
                 {
                     _okCount++;
-                    
-                    // 更新当前结果为OK（绿色）
-                    borderCurrentResult.Background = System.Windows.Media.Brushes.ForestGreen;
-                    lblCurrentResult.Text = "OK";
                 }
                 else
                 {
                     _ngCount++;
-                    
-                    // 更新当前结果为NG（红色）
-                    borderCurrentResult.Background = System.Windows.Media.Brushes.Crimson;
-                    lblCurrentResult.Text = "NG";
                 }
                 
                 // 计算良率
                 _yieldRate = _totalCount > 0 ? (double)_okCount / _totalCount * 100 : 0;
                 
-                // 更新显示
-                lblTotalCount.Text = $"总数: {_totalCount}";
-                lblOKCount.Text = $"OK: {_okCount}";
-                lblNGCount.Text = $"NG: {_ngCount}";
-                lblYieldRate.Text = $"良率: {_yieldRate:F1}%";
+                // 更新ViewModel
+                ViewModel.UpdateStatistics(_totalCount, _okCount, _ngCount, _yieldRate);
+                ViewModel.UpdateCurrentResult(isOK);
             }
             else
             {
@@ -779,38 +739,49 @@ namespace OpenIVSWPF
             }
         }
 
+        // 创建一个专门的方法用于处理图像更新，减少对UI控件的直接引用
+        private void HandleImageUpdated(System.Drawing.Image image, dynamic result = null)
+        {
+            if (image != null)
+            {
+                _lastCapturedImage = image.Clone() as Bitmap;
+            }
+            
+            // 在WPF线程上更新UI
+            Dispatcher.Invoke(() =>
+            {
+                // 使用ImageViewer更新图像和检测结果
+                if (imageViewer1 != null)
+                {
+                    imageViewer1.UpdateImage(image);
+                    
+                    // 如果有检测结果，则更新显示
+                    if (result is null)
+                    {
+                        imageViewer1.ClearResults(); 
+                    }
+                    else
+                    {
+                        // 将result转换为object类型
+                        imageViewer1.UpdateResults(result);
+                    }
+                    
+                    // 刷新ImageViewer的显示
+                    imageViewer1.Invalidate();
+                }
+            });
+        }
+
         // 更新显示图像
         private void UpdateDisplayImage(System.Drawing.Image image, dynamic result = null)
         {
             if (Dispatcher.CheckAccess())
             {
-                // 保存图像以供后续使用
-                if (image != null)
-                {
-                    _lastCapturedImage = image.Clone() as Bitmap;
-                }
-
-                // 使用ImageViewer更新图像和检测结果
-                imageViewer1.UpdateImage(image);
-
-                // 如果有检测结果，则更新显示
-                if (result is null)
-                {
-                    imageViewer1.ClearResults(); 
-                }
-                else
-                {
-                    // 将result转换为object类型
-                    imageViewer1.UpdateResults(result);
-                }
-
-                // 刷新ImageViewer的显示
-                imageViewer1.Invalidate();
+                HandleImageUpdated(image, result);
             }
             else
             {
-                // 显式指定Action类型避免类型转换错误
-                Dispatcher.Invoke(new Action(() => UpdateDisplayImage(image, result)));
+                Dispatcher.Invoke(new Action(() => HandleImageUpdated(image, result)));
             }
         }
 
@@ -819,21 +790,7 @@ namespace OpenIVSWPF
         {
             Dispatcher.Invoke(() =>
             {
-                // 根据运行状态更新按钮
-                btnStart.IsEnabled = !_isRunning;
-                btnStop.IsEnabled = _isRunning;
-                btnStop.Background = _isRunning ? 
-                    new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(244, 67, 54)) : // 红色 #F44336
-                    new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(204, 204, 204)); // 灰色 #CCCCCC
-                btnStart.Background = !_isRunning ?
-                    new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80)) : // 绿色 #4CAF50
-                    new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(204, 204, 204)); // 灰色 #CCCCCC
-
-                // 设置按钮只能在系统停止状态下使用
-                btnSettings.IsEnabled = !_isRunning;
-                
-                // 清零按钮随时可用
-                btnReset.IsEnabled = true;
+                ViewModel.UpdateRunningState(_isRunning);
             });
         }
         #endregion
@@ -963,11 +920,8 @@ namespace OpenIVSWPF
                     _ngCount = 0;
                     _yieldRate = 0.0;
                     
-                    // 更新UI显示
-                    lblTotalCount.Text = $"总数: {_totalCount}";
-                    lblOKCount.Text = $"OK: {_okCount}";
-                    lblNGCount.Text = $"NG: {_ngCount}";
-                    lblYieldRate.Text = $"良率: {_yieldRate:F1}%";
+                    // 更新ViewModel
+                    ViewModel.UpdateStatistics(_totalCount, _okCount, _ngCount, _yieldRate);
                     
                     UpdateStatus("计数已清零");
                 }

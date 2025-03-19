@@ -50,8 +50,8 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <Border x:Name="borderCurrentResult" Background="Gray" CornerRadius="4" Padding="5">
-                        <TextBlock x:Name="lblCurrentResult" Text="等待结果" Foreground="White" 
+                    <Border x:Name="borderCurrentResult" Background="{Binding CurrentResultBackground}" CornerRadius="4" Padding="5">
+                        <TextBlock x:Name="lblCurrentResult" Text="{Binding CurrentResult}" Foreground="White" 
                                    FontSize="36" FontWeight="Bold" TextAlignment="Center" TextWrapping="WrapWithOverflow" Margin="5,50,5,50"/>
                     </Border>
                 </Grid>
@@ -67,15 +67,15 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" x:Name="lblTotalCount" Text="总数: 0" FontSize="36" FontWeight="Bold" Margin="0,2"/>
-                    <TextBlock Grid.Row="1" x:Name="lblOKCount" Text="OK: 0" FontSize="36" FontWeight="Bold" Margin="0,2"/>
-                    <TextBlock Grid.Row="2" x:Name="lblNGCount" Text="NG: 0" FontSize="36" FontWeight="Bold" Margin="0,2"/>
-                    <TextBlock Grid.Row="3" x:Name="lblYieldRate" Text="良率: 0.0%" FontSize="36" Margin="0,2"/>
+                    <TextBlock Grid.Row="0" x:Name="lblTotalCount" Text="{Binding TotalCount}" FontSize="36" FontWeight="Bold" Margin="0,2"/>
+                    <TextBlock Grid.Row="1" x:Name="lblOKCount" Text="{Binding OkCount}" FontSize="36" FontWeight="Bold" Margin="0,2"/>
+                    <TextBlock Grid.Row="2" x:Name="lblNGCount" Text="{Binding NgCount}" FontSize="36" FontWeight="Bold" Margin="0,2"/>
+                    <TextBlock Grid.Row="3" x:Name="lblYieldRate" Text="{Binding YieldRate}" FontSize="36" Margin="0,2"/>
                 </Grid>
 
                 <!-- 检测结果显示 -->
                 <Border Grid.Row="2" BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,10">
-                    <TextBox x:Name="txtResult" IsReadOnly="True" TextWrapping="Wrap" 
+                    <TextBox x:Name="txtResult" Text="{Binding DetectionResult}" IsReadOnly="True" TextWrapping="Wrap" 
                              VerticalScrollBarVisibility="Auto" Margin="5"/>
                 </Border>
 
@@ -91,12 +91,18 @@
                     </Grid.ColumnDefinitions>
 
                     <Button Grid.Row="0" Grid.Column="0" x:Name="btnStart" Content="开始" Margin="5" 
-                            Click="btnStart_Click" FontSize="20"/>
+                            Click="btnStart_Click" FontSize="20" 
+                            IsEnabled="{Binding StartButtonEnabled}"
+                            Background="{Binding StartButtonBackground}"/>
                     <Button Grid.Row="0" Grid.Column="1" x:Name="btnStop" Content="停止" Height="40" Margin="5"
-                            IsEnabled="False" Click="btnStop_Click" FontSize="20"/>
+                            IsEnabled="{Binding StopButtonEnabled}" 
+                            Background="{Binding StopButtonBackground}"
+                            Click="btnStop_Click" FontSize="20"/>
                     <Button Grid.Row="1" Grid.Column="0" x:Name="btnSettings" Content="设置" Height="40" Margin="5" 
+                            IsEnabled="{Binding SettingsButtonEnabled}"
                             Click="btnSettings_Click" FontSize="20"/>
                     <Button Grid.Row="1" Grid.Column="1" x:Name="btnReset" Content="计数清零" Height="40" Margin="5" 
+                            IsEnabled="{Binding ResetButtonEnabled}"
                             Click="btnReset_Click" FontSize="20"/>
                 </Grid>
             </Grid>
@@ -110,22 +116,20 @@
             </Grid.ColumnDefinitions>
 
             <!-- 日志信息 -->
-            <TextBlock Grid.Column="0" x:Name="lblStatus" Text="就绪" Margin="10,0,5,0" VerticalAlignment="Center"/>
-
-            <!-- 当前位置 -->
+            <TextBlock Grid.Column="0" x:Name="lblStatus" Text="{Binding StatusMessage}" Margin="10,0,5,0" VerticalAlignment="Center"/>
 
             <!-- 设备、相机、模型状态 -->
             <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="5">
-                <TextBlock Grid.Column="1" x:Name="lblCurrentPosition" Text="当前位置：" Margin="10,0" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" x:Name="lblCurrentPosition" Text="{Binding CurrentPosition}" Margin="10,0" VerticalAlignment="Center"/>
 
-                <Border x:Name="borderDeviceStatus" Background="Gray" CornerRadius="4" Padding="5" Margin="0,0,10,0">
-                    <TextBlock x:Name="lblDeviceStatus" Text="设备状态：未连接" Foreground="White"/>
+                <Border x:Name="borderDeviceStatus" Background="{Binding DeviceStatusBackground}" CornerRadius="4" Padding="5" Margin="0,0,10,0">
+                    <TextBlock x:Name="lblDeviceStatus" Text="{Binding DeviceStatus}" Foreground="White"/>
                 </Border>
-                <Border x:Name="borderCameraStatus" Background="Gray" CornerRadius="4" Padding="5" Margin="0,0,10,0">
-                    <TextBlock x:Name="lblCameraStatus" Text="相机状态：未连接" Foreground="White"/>
+                <Border x:Name="borderCameraStatus" Background="{Binding CameraStatusBackground}" CornerRadius="4" Padding="5" Margin="0,0,10,0">
+                    <TextBlock x:Name="lblCameraStatus" Text="{Binding CameraStatus}" Foreground="White"/>
                 </Border>
-                <Border x:Name="borderModelStatus" Background="Gray" CornerRadius="4" Padding="5">
-                    <TextBlock x:Name="lblModelStatus" Text="模型状态：未加载" Foreground="White"/>
+                <Border x:Name="borderModelStatus" Background="{Binding ModelStatusBackground}" CornerRadius="4" Padding="5">
+                    <TextBlock x:Name="lblModelStatus" Text="{Binding ModelStatus}" Foreground="White"/>
                 </Border>
             </StackPanel>
         </Grid>
