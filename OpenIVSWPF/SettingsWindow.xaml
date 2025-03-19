@@ -1,0 +1,145 @@
+<Window x:Class="OpenIVSWPF.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:OpenIVSWPF"
+        mc:Ignorable="d"
+        Title="系统设置" Height="500" Width="600"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TabControl Grid.Row="0" Margin="0,0,0,10">
+            <!-- Modbus设置 -->
+            <TabItem Header="Modbus设置">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="串口号:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="0" Grid.Column="1" x:Name="cbPortName" Margin="0,5" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="波特率:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="1" Grid.Column="1" x:Name="cbBaudRate" Margin="0,5">
+                        <ComboBoxItem Content="9600"/>
+                        <ComboBoxItem Content="19200"/>
+                        <ComboBoxItem Content="38400" IsSelected="True"/>
+                        <ComboBoxItem Content="57600"/>
+                        <ComboBoxItem Content="115200"/>
+                    </ComboBox>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="数据位:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="2" Grid.Column="1" x:Name="cbDataBits" Margin="0,5">
+                        <ComboBoxItem Content="7"/>
+                        <ComboBoxItem Content="8" IsSelected="True"/>
+                    </ComboBox>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="停止位:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="3" Grid.Column="1" x:Name="cbStopBits" Margin="0,5">
+                        <ComboBoxItem Content="None"/>
+                        <ComboBoxItem Content="One" IsSelected="True"/>
+                        <ComboBoxItem Content="Two"/>
+                        <ComboBoxItem Content="OnePointFive"/>
+                    </ComboBox>
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="校验位:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="4" Grid.Column="1" x:Name="cbParity" Margin="0,5">
+                        <ComboBoxItem Content="None" IsSelected="True"/>
+                        <ComboBoxItem Content="Odd"/>
+                        <ComboBoxItem Content="Even"/>
+                        <ComboBoxItem Content="Mark"/>
+                        <ComboBoxItem Content="Space"/>
+                    </ComboBox>
+
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="设备ID:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="5" Grid.Column="1" x:Name="txtDeviceId" Text="1" Margin="0,5"/>
+                </Grid>
+            </TabItem>
+
+            <!-- 相机设置 -->
+            <TabItem Header="相机设置">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="相机名称:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="0" Grid.Column="1" x:Name="cbCameraList" Margin="0,5" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="触发模式:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Vertical" Margin="0,5">
+                        <CheckBox x:Name="chkUseTrigger" Content="使用触发模式" IsChecked="True" Margin="0,0,0,5" 
+                                  Checked="chkUseTrigger_Checked" Unchecked="chkUseTrigger_Unchecked"/>
+                        <StackPanel Orientation="Horizontal" Margin="20,0,0,0" x:Name="spTriggerOptions">
+                            <RadioButton x:Name="rbSoftTrigger" Content="软触发" IsChecked="True" Margin="0,0,10,0"/>
+                            <RadioButton x:Name="rbHardTrigger" Content="硬触发" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Button Grid.Row="2" Grid.Column="1" x:Name="btnRefreshCameras" Content="刷新相机列表" 
+                            HorizontalAlignment="Left" Margin="0,10,0,0" Padding="10,5" Click="btnRefreshCameras_Click"/>
+                </Grid>
+            </TabItem>
+
+            <!-- 模型设置 -->
+            <TabItem Header="模型设置">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="模型文件:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" x:Name="txtModelPath" Margin="0,5"/>
+                    <Button Grid.Column="2" x:Name="btnBrowseModel" Content="浏览..." Margin="5,5,0,5" Padding="10,0" Click="btnBrowseModel_Click"/>
+                </Grid>
+            </TabItem>
+
+            <!-- 设备设置 -->
+            <TabItem Header="设备设置">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="运动速度(mm/s):" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" x:Name="txtSpeed" Text="100.0" Margin="0,5"/>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <!-- 底部按钮 -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="btnSave" Content="保存" Width="80" Margin="0,0,10,0" Padding="10,5" Click="btnSave_Click"/>
+            <Button x:Name="btnCancel" Content="取消" Width="80" Padding="10,5" Click="btnCancel_Click" Margin="5,0,5,0"/>
+        </StackPanel>
+    </Grid>
+</Window> 

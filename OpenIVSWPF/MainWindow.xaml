@@ -22,11 +22,8 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10">
-                <TextBlock Text="速度(mm/s):"/>
-                <TextBox x:Name="txtSpeed" Width="60" Text="100.0"/>
-                <Button x:Name="btnSetSpeed" Content="设置" Width="60" Click="btnSetSpeed_Click"/>
-            </StackPanel>
+            <TextBlock Grid.Column="0" Text="OpenIVS - 视觉检测系统" FontSize="16" FontWeight="Bold" Margin="10" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" x:Name="btnSettings" Content="设置" Width="80" Margin="10" Padding="10,5" Click="btnSettings_Click"/>
         </Grid>
 
         <!-- 主要内容区域 -->
@@ -54,18 +51,12 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <!-- 控制按钮 -->
-                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button x:Name="btnStart" Content="开始" Width="80" Margin="0,0,10,0" Click="btnStart_Click"/>
-                    <Button x:Name="btnStop" Content="停止" Width="80" IsEnabled="False" Click="btnStop_Click" Height="33" Margin="5,0,5,0"/>
-                </StackPanel>
-
                 <!-- 当前结果显示 -->
-                <Grid Grid.Row="1" Margin="0,0,0,10">
+                <Grid Grid.Row="0" Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
@@ -76,7 +67,7 @@
                 </Grid>
 
                 <!-- 统计信息 -->
-                <Grid Grid.Row="2" Margin="0,0,0,10">
+                <Grid Grid.Row="1" Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
@@ -93,10 +84,18 @@
                 </Grid>
 
                 <!-- 检测结果显示 -->
-                <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="1" Margin="0">
+                <Border Grid.Row="2" BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,10">
                     <TextBox x:Name="txtResult" IsReadOnly="True" TextWrapping="Wrap" 
                              VerticalScrollBarVisibility="Auto" Margin="5"/>
                 </Border>
+                
+                <!-- 控制按钮 -->
+                <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,5">
+                    <Button x:Name="btnStart" Content="开始" Width="120" Height="40" Margin="0,0,10,0" 
+                            Click="btnStart_Click" FontSize="14" Background="#4CAF50" Foreground="White"/>
+                    <Button x:Name="btnStop" Content="停止" Width="120" Height="40" 
+                            IsEnabled="False" Click="btnStop_Click" FontSize="14" Background="#F44336" Foreground="White"/>
+                </StackPanel>
             </Grid>
         </Grid>
 

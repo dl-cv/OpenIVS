@@ -25,6 +25,9 @@ namespace OpenIVSWPF
     public partial class MainWindow : Window
     {
         #region 成员变量
+        // 系统设置
+        private Settings _settings;
+        
         // Modbus通信
         private ModbusApi _modbusApi;
         private bool _isModbusConnected = false;
@@ -38,7 +41,7 @@ namespace OpenIVSWPF
         // AI模型
         private Model _model;
         private bool _isModelLoaded = false;
-        private string _modelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"C:\Users\91550\Desktop\名片识别\模型\名片识别_20250318_161513.dvt");
+        private string _modelPath;
 
         // 运行控制
         private bool _isRunning = false;
@@ -59,6 +62,8 @@ namespace OpenIVSWPF
         private int _ngCount = 0;
         private double _yieldRate = 0.0;
         
+        // 是否已初始化
+        private bool _isInitialized = false;
         #endregion
 
         public MainWindow()
@@ -68,21 +73,74 @@ namespace OpenIVSWPF
             
             // 初始化UI状态
             InitializeUIState();
+            
+            // 创建设置对象
+            LoadOrCreateSettings();
         }
 
         #region 初始化方法
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            // 异步初始化各个组件
-            Task.Run(() =>
-            {
-                InitializeModbus();
-                InitializeCamera();
-                InitializeModel();
+            // 初始化相机管理器（但不连接相机）
+            _cameraManager = new CameraManager();
+            _cameraManager.ImageUpdated += CameraManager_ImageUpdated;
+            
+            // 更新界面状态
+            UpdateControlState();
+            UpdateStatus("系统已就绪，请点击开始按钮初始化设备");
+        }
 
-                // 如果所有设备都已准备就绪，启用开始按钮
+        // 加载或创建设置
+        private void LoadOrCreateSettings()
+        {
+            try
+            {
+                // 创建默认设置
+                _settings = new Settings();
+                
+                // 设置模型路径
+                string modelDefaultPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"C:\Users\91550\Desktop\名片识别\模型\名片识别_20250318_161513.dvt");
+                if (File.Exists(modelDefaultPath))
+                {
+                    _settings.ModelPath = modelDefaultPath;
+                }
+                
+                _modelPath = _settings.ModelPath;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"加载设置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                _settings = new Settings();
+            }
+        }
+
+        // 初始化系统
+        private async Task InitializeSystemAsync()
+        {
+            try
+            {
+                UpdateStatus("正在初始化系统...");
+                
+                // 初始化Modbus
+                await Task.Run(() => InitializeModbus());
+                
+                // 初始化相机
+                await Task.Run(() => InitializeCamera());
+                
+                // 初始化模型
+                await Task.Run(() => InitializeModel());
+                
+                _isInitialized = true;
+                UpdateStatus("系统初始化完成");
+                
+                // 更新界面控件状态
                 UpdateControlState();
-            });
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"系统初始化错误：{ex.Message}");
+                MessageBox.Show($"初始化系统时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void InitializeModbus()
@@ -91,53 +149,67 @@ namespace OpenIVSWPF
             {
                 UpdateStatus("正在初始化Modbus设备...");
                 
+                // 关闭已有连接
+                if (_isModbusConnected && _modbusApi != null)
+                {
+                    _modbusApi.Close();
+                    _isModbusConnected = false;
+                }
+                
                 // 初始化ModbusApi
                 _modbusApi = new ModbusApi();
                 
-                // 获取可用的串口
-                string[] ports = SerialPort.GetPortNames();
-                if (ports.Length == 0)
+                // 使用设置中的串口参数
+                if (string.IsNullOrEmpty(_settings.PortName))
                 {
-                    UpdateStatus("未检测到串口设备");
-                    UpdateDeviceStatus("未检测到串口");
-                    return;
+                    // 如果未设置串口，尝试获取第一个可用的串口
+                    string[] ports = SerialPort.GetPortNames();
+                    if (ports.Length == 0)
+                    {
+                        UpdateStatus("未检测到串口设备");
+                        UpdateDeviceStatus("未检测到串口");
+                        return;
+                    }
+                    _settings.PortName = ports[0];
                 }
 
-                // 使用第一个可用的串口，设置为38400,8,1,None
+                // 设置串口参数
                 _modbusApi.SetSerialPort(
-                    ports[0],     // 第一个可用的串口
-                    38400,        // 波特率
-                    8,            // 数据位
-                    StopBits.One, // 停止位
-                    Parity.None,  // 校验位
-                    1             // 设备ID
+                    _settings.PortName,  // 串口
+                    _settings.BaudRate,  // 波特率
+                    _settings.DataBits,  // 数据位
+                    _settings.StopBits,  // 停止位
+                    _settings.Parity,    // 校验位
+                    (byte)_settings.DeviceId   // 设备ID
                 );
 
                 // 打开串口
                 if (_modbusApi.Open())
                 {
                     _isModbusConnected = true;
-                    UpdateStatus($"Modbus设备已连接，串口：{ports[0]}");
+                    UpdateStatus($"Modbus设备已连接，串口：{_settings.PortName}");
                     UpdateDeviceStatus("已连接");
                     
-                    // 读取当前速度
-                    _currentSpeed = _modbusApi.ReadFloat(0);
-                    UpdateSpeedDisplay(_currentSpeed);
+                    // 设置当前速度
+                    _currentSpeed = _settings.Speed;
+                    _modbusApi.WriteFloat(0, _currentSpeed);
+                    
+                    // 读取当前位置
+                    float currentPosition = _modbusApi.ReadFloat(32);
+                    _currentPosition = currentPosition;
+                    UpdatePositionDisplay(currentPosition);
                 }
                 else
                 {
                     UpdateStatus("Modbus设备连接失败");
                     UpdateDeviceStatus("连接失败");
                 }
-
-                float currentPosition = _modbusApi.ReadFloat(32);
-                _currentPosition = currentPosition;
-                UpdatePositionDisplay(currentPosition);
             }
             catch (Exception ex)
             {
                 UpdateStatus($"Modbus初始化错误：{ex.Message}");
                 UpdateDeviceStatus("初始化错误");
+                throw;
             }
         }
 
@@ -146,10 +218,6 @@ namespace OpenIVSWPF
             try
             {
                 UpdateStatus("正在初始化相机...");
-                
-                // 初始化相机管理器
-                _cameraManager = new CameraManager();
-                _cameraManager.ImageUpdated += CameraManager_ImageUpdated;
                 
                 // 刷新设备列表
                 List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
@@ -161,16 +229,36 @@ namespace OpenIVSWPF
                     return;
                 }
 
-                // 连接第一个可用的相机
-                bool success = _cameraManager.ConnectDevice(0); // 连接第一个相机
+                // 检查相机索引是否有效
+                int cameraIndex = _settings.CameraIndex;
+                if (cameraIndex < 0 || cameraIndex >= deviceList.Count)
+                {
+                    cameraIndex = 0;
+                }
+
+                // 连接选中的相机
+                bool success = _cameraManager.ConnectDevice(cameraIndex);
                 if (success)
                 {
                     _isCameraConnected = true;
-                    UpdateStatus($"相机已连接：{deviceList[0].ModelName}");
+                    UpdateStatus($"相机已连接：{deviceList[cameraIndex].ModelName}");
                     UpdateCameraStatus("已连接");
                     
-                    // 设置为软触发模式
-                    _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Software);
+                    // 设置触发模式
+                    if (_settings.UseTrigger)
+                    {
+                        TriggerConfig.TriggerMode mode = _settings.UseSoftTrigger
+                            ? TriggerConfig.TriggerMode.Software
+                            : TriggerConfig.TriggerMode.Line0;
+                        
+                        _cameraManager.SetTriggerMode(mode);
+                        UpdateStatus($"相机已设为{(_settings.UseSoftTrigger ? "软触发" : "硬触发")}模式");
+                    }
+                    else
+                    {
+                        _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Off);
+                        UpdateStatus("相机已设为连续采集模式");
+                    }
                 }
                 else
                 {
@@ -182,6 +270,7 @@ namespace OpenIVSWPF
             {
                 UpdateStatus($"相机初始化错误：{ex.Message}");
                 UpdateCameraStatus("初始化错误");
+                throw;
             }
         }
 
@@ -192,16 +281,17 @@ namespace OpenIVSWPF
                 UpdateStatus("正在加载AI模型...");
                 
                 // 检查模型文件是否存在
-                if (!File.Exists(_modelPath))
+                if (!File.Exists(_settings.ModelPath))
                 {
-                    UpdateStatus($"模型文件不存在：{_modelPath}");
+                    UpdateStatus($"模型文件不存在：{_settings.ModelPath}");
                     UpdateModelStatus("模型文件不存在");
                     return;
                 }
 
                 // 加载模型
-                _model = new Model(_modelPath, 0); // 使用第一个GPU设备
+                _model = new Model(_settings.ModelPath, 0); // 使用第一个GPU设备
                 _isModelLoaded = true;
+                _modelPath = _settings.ModelPath;
                 
                 UpdateStatus("AI模型已加载");
                 UpdateModelStatus("已加载");
@@ -210,6 +300,7 @@ namespace OpenIVSWPF
             {
                 UpdateStatus($"AI模型加载错误：{ex.Message}");
                 UpdateModelStatus("加载错误");
+                throw;
             }
         }
 
@@ -612,27 +703,13 @@ namespace OpenIVSWPF
         {
             if (Dispatcher.CheckAccess())
             {
-                // 只有当所有设备都准备就绪时，才启用开始按钮
-                btnStart.IsEnabled = _isModbusConnected && _isCameraConnected && _isModelLoaded && !_isRunning;
+                btnStart.IsEnabled = !_isRunning;
                 btnStop.IsEnabled = _isRunning;
+                btnSettings.IsEnabled = !_isRunning;
             }
             else
             {
                 Dispatcher.Invoke(() => UpdateControlState());
-            }
-        }
-
-        // 更新速度显示
-        private void UpdateSpeedDisplay(float speed)
-        {
-            if (Dispatcher.CheckAccess())
-            {
-                txtSpeed.Text = speed.ToString("F1");
-                _currentSpeed = speed;
-            }
-            else
-            {
-                Dispatcher.Invoke(() => UpdateSpeedDisplay(speed));
             }
         }
         #endregion
@@ -667,6 +744,24 @@ namespace OpenIVSWPF
             
             try
             {
+                // 禁用按钮
+                btnStart.IsEnabled = false;
+                btnSettings.IsEnabled = false;
+                
+                // 如果系统尚未初始化，则先初始化
+                if (!_isInitialized)
+                {
+                    await InitializeSystemAsync();
+                    
+                    // 如果初始化失败，则返回
+                    if (!_isModbusConnected || !_isCameraConnected || !_isModelLoaded)
+                    {
+                        UpdateStatus("系统初始化失败，请检查设置");
+                        UpdateControlState();
+                        return;
+                    }
+                }
+                
                 // 创建取消令牌
                 _cts = new CancellationTokenSource();
                 
@@ -681,6 +776,8 @@ namespace OpenIVSWPF
             catch (Exception ex)
             {
                 UpdateStatus($"启动过程中发生错误：{ex.Message}");
+                _isRunning = false;
+                UpdateControlState();
             }
         }
 
@@ -703,38 +800,64 @@ namespace OpenIVSWPF
             }
         }
 
-        // 设置速度按钮点击事件
-        private void btnSetSpeed_Click(object sender, RoutedEventArgs e)
+        // 设置按钮点击事件
+        private void btnSettings_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                if (!_isModbusConnected)
+                // 创建设置窗口
+                SettingsWindow settingsWindow = new SettingsWindow(_settings, _cameraManager);
+                settingsWindow.Owner = this;
+                
+                // 显示设置窗口
+                bool? result = settingsWindow.ShowDialog();
+                
+                // 如果设置已保存，则更新设置
+                if (settingsWindow.IsSettingsSaved)
                 {
-                    MessageBox.Show("设备未连接，无法设置速度", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-
-                if (!float.TryParse(txtSpeed.Text, out float speed))
-                {
-                    MessageBox.Show("请输入有效的速度值", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-
-                // 设置速度（地址0，浮点数）
-                bool result = _modbusApi.WriteFloat(0, speed);
-                if (result)
-                {
-                    _currentSpeed = speed;
-                    UpdateStatus($"速度已设置为：{speed:F1} mm/s");
-                }
-                else
-                {
-                    MessageBox.Show("设置速度失败", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    // 更新设置
+                    _settings.PortName = settingsWindow.SelectedPortName;
+                    _settings.BaudRate = settingsWindow.BaudRate;
+                    _settings.DataBits = settingsWindow.DataBits;
+                    _settings.StopBits = settingsWindow.StopBits;
+                    _settings.Parity = settingsWindow.Parity;
+                    _settings.DeviceId = settingsWindow.DeviceId;
+                    _settings.CameraIndex = settingsWindow.SelectedCameraIndex;
+                    _settings.UseTrigger = settingsWindow.UseTrigger;
+                    _settings.UseSoftTrigger = settingsWindow.UseSoftTrigger;
+                    _settings.ModelPath = settingsWindow.ModelPath;
+                    _settings.Speed = settingsWindow.Speed;
+                    
+                    // 如果系统已初始化，则需要重新初始化
+                    if (_isInitialized)
+                    {
+                        // 弹出提示
+                        MessageBoxResult mbResult = MessageBox.Show(
+                            "设置已更改，需要重新初始化系统才能生效。\n是否立即重新初始化？",
+                            "设置已更改",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Question);
+                        
+                        if (mbResult == MessageBoxResult.Yes)
+                        {
+                            // 重置初始化标志
+                            _isInitialized = false;
+                            
+                            // 清理已有资源
+                            CleanupResources();
+                            
+                            // 重置UI状态
+                            InitializeUIState();
+                        }
+                    }
+                    
+                    UpdateStatus("设置已更新");
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"设置速度时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                UpdateStatus($"打开设置窗口时发生错误：{ex.Message}");
+                MessageBox.Show($"设置过程中发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -746,39 +869,43 @@ namespace OpenIVSWPF
                 // 取消所有操作
                 _cts?.Cancel();
                 
-                // 关闭Modbus连接
-                if (_isModbusConnected)
-                {
-                    _modbusApi.Close();
-                    _isModbusConnected = false;
-                }
-                
-                // 关闭相机
-                if (_isCameraConnected)
-                {
-                    if (_isGrabbing)
-                    {
-                        _cameraManager.StopGrabbing();
-                        _isGrabbing = false;
-                    }
-                    
-                    _cameraManager.DisconnectDevice();
-                    _isCameraConnected = false;
-                }
-                
-                // 释放AI模型
-                if (_isModelLoaded)
-                {
-                    _model = null;
-                    _isModelLoaded = false;
-                }
-                
-                // 释放资源
-                _cameraManager?.Dispose();
+                // 清理资源
+                CleanupResources();
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"关闭过程中发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        
+        // 清理资源
+        private void CleanupResources()
+        {
+            // 关闭Modbus连接
+            if (_isModbusConnected)
+            {
+                _modbusApi?.Close();
+                _isModbusConnected = false;
+            }
+            
+            // 关闭相机
+            if (_isCameraConnected)
+            {
+                if (_isGrabbing)
+                {
+                    _cameraManager?.StopGrabbing();
+                    _isGrabbing = false;
+                }
+                
+                _cameraManager?.DisconnectDevice();
+                _isCameraConnected = false;
+            }
+            
+            // 释放AI模型
+            if (_isModelLoaded)
+            {
+                _model = null;
+                _isModelLoaded = false;
             }
         }
         #endregion
