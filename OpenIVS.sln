@@ -38,6 +38,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenIVS", "OpenIVS\OpenIVS.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ModbusApi", "ModbusApi\ModbusApi.csproj", "{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenIVSWPF", "OpenIVSWPF\OpenIVSWPF.csproj", "{A84EE213-5E39-4977-867E-EFD385841326}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -87,10 +89,12 @@ Global
 		{4AAAB33E-1844-42B4-8120-23CBE92F60DF}.Debug|x64.ActiveCfg = Debug|x64
 		{4AAAB33E-1844-42B4-8120-23CBE92F60DF}.Debug|x64.Build.0 = Debug|x64
 		{4AAAB33E-1844-42B4-8120-23CBE92F60DF}.Release|x64.ActiveCfg = Release|x64
-		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Debug|x64.Build.0 = Debug|Any CPU
-		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Release|x64.ActiveCfg = Release|Any CPU
-		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Release|x64.Build.0 = Release|Any CPU
+		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Debug|x64.ActiveCfg = Debug|x64
+		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Debug|x64.Build.0 = Debug|x64
+		{70A89CE8-ADE7-42DF-9762-19A896BE3C1F}.Release|x64.ActiveCfg = Release|x64
+		{A84EE213-5E39-4977-867E-EFD385841326}.Debug|x64.ActiveCfg = Debug|x64
+		{A84EE213-5E39-4977-867E-EFD385841326}.Debug|x64.Build.0 = Debug|x64
+		{A84EE213-5E39-4977-867E-EFD385841326}.Release|x64.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
