@@ -62,7 +62,7 @@
                 <!-- 控制按钮 -->
                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
                     <Button x:Name="btnStart" Content="开始" Width="80" Margin="0,0,10,0" Click="btnStart_Click"/>
-                    <Button x:Name="btnStop" Content="停止" Width="80" IsEnabled="False" Click="btnStop_Click"/>
+                    <Button x:Name="btnStop" Content="停止" Width="80" IsEnabled="False" Click="btnStop_Click" Height="33" Margin="5,0,5,0"/>
                 </StackPanel>
 
                 <!-- 检测结果显示 -->

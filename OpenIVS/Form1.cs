@@ -15,6 +15,7 @@ using DLCV.Camera;
 using dlcv_infer_csharp;
 using OpenCvSharp;
 using MvCameraControl;
+using OpenCvSharp.Extensions;
 
 namespace OpenIVS
 {
@@ -400,16 +401,7 @@ namespace OpenIVS
         {
             try
             {
-                // 保存为临时文件
-                string tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ".png");
-                bitmap.Save(tempFile);
-                
-                // 读取为Mat
-                Mat mat = Cv2.ImRead(tempFile);
-                
-                // 删除临时文件
-                try { File.Delete(tempFile); } catch { }
-                
+                Mat mat = BitmapConverter.ToMat(bitmap);
                 return mat;
             }
             catch

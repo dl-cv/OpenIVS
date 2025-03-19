@@ -320,11 +320,8 @@ namespace OpenIVSWPF
                     // 捕获到图像后，将其转换为Mat
                     if (e.Image != null)
                     {
-                        using (var bitmap = new Bitmap(e.Image))
-                        {
-                            var mat = BitmapConverter.ToMat(bitmap);
-                            tcs.TrySetResult(mat);
-                        }
+                        Mat mat = BitmapConverter.ToMat(e.Image);
+                        tcs.TrySetResult(mat);
                     }
                     
                     // 移除事件处理器，防止多次触发
