@@ -13,6 +13,7 @@ using dlcv_infer_csharp;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
 using MvCameraControl;
+using System.Xml;
 
 using Window = System.Windows.Window;
 using Path = System.IO.Path;
@@ -98,11 +99,20 @@ namespace OpenIVSWPF
                 // 创建默认设置
                 _settings = new Settings();
                 
-                // 设置模型路径
-                string modelDefaultPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"C:\Users\91550\Desktop\名片识别\模型\名片识别_20250318_161513.dvt");
-                if (File.Exists(modelDefaultPath))
+                // 尝试从设置文件加载
+                string settingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
+                if (File.Exists(settingsFilePath))
                 {
-                    _settings.ModelPath = modelDefaultPath;
+                    LoadSettingsFromFile(settingsFilePath, _settings);
+                }
+                else
+                {
+                    // 设置默认模型路径
+                    string modelDefaultPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"C:\Users\91550\Desktop\名片识别\模型\名片识别_20250318_161513.dvt");
+                    if (File.Exists(modelDefaultPath))
+                    {
+                        _settings.ModelPath = modelDefaultPath;
+                    }
                 }
                 
                 _modelPath = _settings.ModelPath;
@@ -112,6 +122,45 @@ namespace OpenIVSWPF
                 MessageBox.Show($"加载设置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 _settings = new Settings();
             }
+        }
+        
+        private void LoadSettingsFromFile(string settingsFilePath, Settings settings)
+        {
+            try
+            {
+                XmlDocument doc = new XmlDocument();
+                doc.Load(settingsFilePath);
+                XmlElement root = doc.DocumentElement;
+                
+                // 加载Modbus设置
+                settings.PortName = GetSettingValue(root, "PortName", settings.PortName);
+                settings.BaudRate = int.Parse(GetSettingValue(root, "BaudRate", settings.BaudRate.ToString()));
+                settings.DataBits = int.Parse(GetSettingValue(root, "DataBits", settings.DataBits.ToString()));
+                settings.StopBits = (StopBits)Enum.Parse(typeof(StopBits), GetSettingValue(root, "StopBits", settings.StopBits.ToString()));
+                settings.Parity = (Parity)Enum.Parse(typeof(Parity), GetSettingValue(root, "Parity", settings.Parity.ToString()));
+                settings.DeviceId = int.Parse(GetSettingValue(root, "DeviceId", settings.DeviceId.ToString()));
+                
+                // 加载相机设置
+                settings.CameraIndex = int.Parse(GetSettingValue(root, "CameraIndex", settings.CameraIndex.ToString()));
+                settings.UseTrigger = bool.Parse(GetSettingValue(root, "UseTrigger", settings.UseTrigger.ToString()));
+                settings.UseSoftTrigger = bool.Parse(GetSettingValue(root, "UseSoftTrigger", settings.UseSoftTrigger.ToString()));
+                
+                // 加载模型设置
+                settings.ModelPath = GetSettingValue(root, "ModelPath", settings.ModelPath);
+                
+                // 加载设备设置
+                settings.Speed = float.Parse(GetSettingValue(root, "Speed", settings.Speed.ToString()));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"从文件加载设置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        
+        private string GetSettingValue(XmlElement root, string key, string defaultValue)
+        {
+            XmlNode node = root.SelectSingleNode(key);
+            return node != null ? node.InnerText : defaultValue;
         }
 
         // 初始化系统
@@ -252,12 +301,19 @@ namespace OpenIVSWPF
                             : TriggerConfig.TriggerMode.Line0;
                         
                         _cameraManager.SetTriggerMode(mode);
-                        UpdateStatus($"相机已设为{(_settings.UseSoftTrigger ? "软触发" : "硬触发")}模式");
+                        UpdateStatus($"相机设置为{(_settings.UseSoftTrigger ? "软触发" : "硬触发")}模式");
                     }
                     else
                     {
+                        // 关闭触发模式
                         _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Off);
-                        UpdateStatus("相机已设为连续采集模式");
+                        
+                        // 开始抓取图像
+                        if (_cameraManager.StartGrabbing())
+                        {
+                            _isGrabbing = true;
+                            UpdateStatus("相机设置为连续采集模式");
+                        }
                     }
                 }
                 else
@@ -394,65 +450,121 @@ namespace OpenIVSWPF
         {
             try
             {
+                UpdateStatus("正在捕获图像...");
+                
                 if (!_isCameraConnected)
-                    return null;
-
-                // 如果相机未采集，先开始采集
-                if (!_isGrabbing)
                 {
-                    _isGrabbing = _cameraManager.StartGrabbing();
-                    if (!_isGrabbing)
+                    UpdateStatus("相机未连接，无法捕获图像");
+                    return null;
+                }
+                
+                // 根据触发模式执行不同的捕获逻辑
+                if (_settings.UseTrigger)
+                {
+                    // 使用TaskCompletionSource等待图像更新事件
+                    var tcs = new TaskCompletionSource<Bitmap>();
+                    
+                    // 设置图像捕获事件处理
+                    EventHandler<ImageEventArgs> handler = null;
+                    handler = (s, e) =>
                     {
-                        UpdateStatus("开始图像采集失败");
-                        return null;
+                        // 捕获到图像后，转换为Bitmap
+                        if (e.Image != null)
+                        {
+                            tcs.TrySetResult(e.Image.Clone() as Bitmap);
+                        }
+                        
+                        // 移除事件处理器，防止多次触发
+                        _cameraManager.ImageUpdated -= handler;
+                    };
+                    
+                    // 添加事件处理
+                    _cameraManager.ImageUpdated += handler;
+                    
+                    // 执行软触发
+                    _cameraManager.TriggerOnce();
+                    
+                    // 添加超时处理，5秒内如果没有图像返回，则取消
+                    using (var timeoutCts = new CancellationTokenSource(1000))
+                    using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
+                    {
+                        // 注册取消操作
+                        linkedCts.Token.Register(() => 
+                        {
+                            _cameraManager.ImageUpdated -= handler;
+                            tcs.TrySetCanceled();
+                        });
+                        
+                        // 等待图像或取消
+                        try
+                        {
+                            var capturedImage = await tcs.Task;
+                            UpdateStatus("图像捕获成功");
+                            return capturedImage;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            UpdateStatus("图像捕获超时或被取消");
+                            return null;
+                        }
                     }
                 }
-
-                // 使用TaskCompletionSource等待图像更新事件
-                var tcs = new TaskCompletionSource<Bitmap>();
-                
-                // 设置图像捕获事件处理
-                EventHandler<ImageEventArgs> handler = null;
-                handler = (s, e) =>
+                else
                 {
-                    // 捕获到图像后，转换为Bitmap
-                    if (e.Image != null)
+                    // 非触发模式：使用最新的图像
+                    if (_lastCapturedImage != null)
                     {
-                        tcs.TrySetResult(e.Image.Clone() as Bitmap);
+                        UpdateStatus("使用最新捕获的图像");
+                        return _lastCapturedImage.Clone() as Bitmap;
                     }
-                    
-                    // 移除事件处理器，防止多次触发
-                    _cameraManager.ImageUpdated -= handler;
-                };
-                
-                // 添加事件处理
-                _cameraManager.ImageUpdated += handler;
-                
-                // 执行软触发
-                _cameraManager.TriggerOnce();
-                
-                // 添加超时处理，5秒内如果没有图像返回，则取消
-                using (var timeoutCts = new CancellationTokenSource(5000))
-                using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
-                {
-                    // 注册取消操作
-                    linkedCts.Token.Register(() => 
+                    else
                     {
-                        _cameraManager.ImageUpdated -= handler;
-                        tcs.TrySetCanceled();
-                    });
-                    
-                    // 等待图像或取消
-                    try
-                    {
-                        var capturedImage = await tcs.Task;
-                        UpdateStatus("图像捕获成功");
-                        return capturedImage;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        UpdateStatus("图像捕获超时或被取消");
-                        return null;
+                        UpdateStatus("等待首次图像捕获...");
+                        
+                        // 等待图像
+                        var tcs = new TaskCompletionSource<Bitmap>();
+                        
+                        // 设置图像捕获事件处理
+                        EventHandler<ImageEventArgs> handler = null;
+                        handler = (s, e) =>
+                        {
+                            // 捕获到图像后，转换为Bitmap
+                            if (e.Image != null)
+                            {
+                                tcs.TrySetResult(e.Image.Clone() as Bitmap);
+                            }
+                            
+                            // 移除事件处理器，防止多次触发
+                            _cameraManager.ImageUpdated -= handler;
+                        };
+                        
+                        // 添加事件处理
+                        _cameraManager.ImageUpdated += handler;
+                        
+                        // 添加超时处理，5秒内如果没有图像返回，则取消
+                        using (var timeoutCts = new CancellationTokenSource(5000))
+                        using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
+                        {
+                            // 注册取消操作
+                            linkedCts.Token.Register(() => 
+                            {
+                                _cameraManager.ImageUpdated -= handler;
+                                tcs.TrySetCanceled();
+                            });
+                            
+                            // 等待图像或取消
+                            try
+                            {
+                                var capturedImage = await tcs.Task;
+                                UpdateStatus("图像捕获成功");
+                                return capturedImage;
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                UpdateStatus("图像捕获超时或被取消");
+                                return null;
+                            }
+                        }
                     }
                 }
             }
@@ -725,7 +837,27 @@ namespace OpenIVSWPF
                     // 更新显示图像
                     if (e.Image != null)
                     {
-                        UpdateDisplayImage(e.Image.Clone() as Bitmap);
+                        // 保存最新图像，用于非触发模式
+                        _lastCapturedImage = e.Image.Clone() as Bitmap;
+                        
+                        // 如果是非触发模式，则立即执行推理
+                        if (_isRunning && !_settings.UseTrigger)
+                        {
+                            // 执行AI推理
+                            string result = PerformInference(_lastCapturedImage);
+                            
+                            // 更新检测结果显示
+                            UpdateDetectionResult(result);
+                            
+                            // 根据结果更新统计信息
+                            bool isOK = !string.IsNullOrEmpty(result) && !result.Contains("无效") && !result.Contains("错误");
+                            UpdateStatistics(isOK);
+                        }
+                        else
+                        {
+                            // 仅更新显示图像
+                            UpdateDisplayImage(e.Image.Clone() as Bitmap);
+                        }
                     }
                 }
                 else
@@ -927,26 +1059,30 @@ namespace OpenIVSWPF
                     
                     if (moveResult && !token.IsCancellationRequested)
                     {
-                        // 到达目标位置后，触发相机拍照
-                        UpdateStatus($"在位置 {targetPosition} 进行拍照...");
-                        var image = await CaptureImageAsync(token);
-                        
-                        if (image != null && !token.IsCancellationRequested)
+                        // 到达目标位置后，如果是触发模式才拍照和推理
+                        if (_settings.UseTrigger)
                         {
-                            // 获取到图像后，执行AI推理
-                            UpdateStatus("执行AI推理...");
-                            string result = PerformInference(image);
+                            // 触发相机拍照
+                            UpdateStatus($"在位置 {targetPosition} 进行拍照...");
+                            var image = await CaptureImageAsync(token);
                             
-                            // 更新检测结果显示
-                            UpdateDetectionResult(result);
-                            
-                            // 根据结果更新统计信息（这里简单地假设有结果就是OK）
-                            bool isOK = !string.IsNullOrEmpty(result) && !result.Contains("无效") && !result.Contains("错误");
-                            UpdateStatistics(isOK);
-                            
-                            // 等待一段时间，以便查看结果
-                            await Task.Delay(1000, token);
+                            if (image != null && !token.IsCancellationRequested)
+                            {
+                                // 获取到图像后，执行AI推理
+                                UpdateStatus("执行AI推理...");
+                                string result = PerformInference(image);
+                                
+                                // 更新检测结果显示
+                                UpdateDetectionResult(result);
+                                
+                                // 根据结果更新统计信息
+                                bool isOK = !string.IsNullOrEmpty(result) && !result.Contains("无效") && !result.Contains("错误");
+                                UpdateStatistics(isOK);
+                            }
                         }
+                        
+                        // 等待一段时间，以便查看结果
+                        await Task.Delay(1000, token);
                     }
                     
                     if (token.IsCancellationRequested)

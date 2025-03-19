@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using Microsoft.Win32;
 using DLCV.Camera;
 using MvCameraControl;
+using System.Xml;
 
 namespace OpenIVSWPF
 {
@@ -33,6 +34,10 @@ namespace OpenIVSWPF
         
         // 设置结果
         public bool IsSettingsSaved { get; private set; }
+        
+        // 设置文件路径
+        private readonly string _settingsFilePath = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
 
         public SettingsWindow(Settings currentSettings, CameraManager cameraManager = null)
         {
@@ -79,6 +84,22 @@ namespace OpenIVSWPF
             
             // 设备设置
             Speed = settings.Speed;
+
+            // 更新UI
+            cbPortName.Text = SelectedPortName;
+            cbBaudRate.Text = BaudRate.ToString();
+            cbDataBits.Text = DataBits.ToString();
+            cbStopBits.Text = StopBits.ToString();
+            cbParity.Text = Parity.ToString();
+
+            cbCameraList.SelectedIndex = SelectedCameraIndex;
+
+            chkUseTrigger.IsChecked = UseTrigger;
+            rbSoftTrigger.IsChecked = UseSoftTrigger;
+            rbHardTrigger.IsChecked = !UseSoftTrigger;
+
+            txtModelPath.Text = ModelPath;
+            txtSpeed.Text = Speed.ToString();
         }
 
         private void LoadSerialPorts()
@@ -155,7 +176,7 @@ namespace OpenIVSWPF
                 List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
                 foreach (IDeviceInfo device in deviceList)
                 {
-                    cbCameraList.Items.Add(device.ModelName);
+                    cbCameraList.Items.Add(device.UserDefinedName);
                 }
                 
                 // 选择当前相机
@@ -233,6 +254,9 @@ namespace OpenIVSWPF
                 // 读取设置值
                 SaveSettings();
                 
+                // 保存设置到XML文件
+                SaveSettingsToFile();
+                
                 // 标记为已保存
                 IsSettingsSaved = true;
                 
@@ -297,6 +321,66 @@ namespace OpenIVSWPF
             
             // 设备设置
             Speed = float.Parse(txtSpeed.Text);
+        }
+
+        private void SaveSettingsToFile()
+        {
+            try
+            {
+                XmlDocument doc = new XmlDocument();
+                XmlElement root;
+                
+                // 如果文件存在，则加载现有文件
+                if (File.Exists(_settingsFilePath))
+                {
+                    doc.Load(_settingsFilePath);
+                    root = doc.DocumentElement;
+                }
+                else
+                {
+                    // 创建新的XML文档
+                    root = doc.CreateElement("Settings");
+                    doc.AppendChild(root);
+                }
+
+                // 保存Modbus设置
+                SetSettingValue(doc, root, "PortName", SelectedPortName);
+                SetSettingValue(doc, root, "BaudRate", BaudRate.ToString());
+                SetSettingValue(doc, root, "DataBits", DataBits.ToString());
+                SetSettingValue(doc, root, "StopBits", StopBits.ToString());
+                SetSettingValue(doc, root, "Parity", Parity.ToString());
+                SetSettingValue(doc, root, "DeviceId", DeviceId.ToString());
+                
+                // 保存相机设置
+                SetSettingValue(doc, root, "CameraIndex", SelectedCameraIndex.ToString());
+                SetSettingValue(doc, root, "UseTrigger", UseTrigger.ToString());
+                SetSettingValue(doc, root, "UseSoftTrigger", UseSoftTrigger.ToString());
+                
+                // 保存模型设置
+                SetSettingValue(doc, root, "ModelPath", ModelPath);
+                
+                // 保存设备设置
+                SetSettingValue(doc, root, "Speed", Speed.ToString());
+                
+                // 保存文件
+                doc.Save(_settingsFilePath);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"保存设置文件时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        
+        private void SetSettingValue(XmlDocument doc, XmlElement root, string key, string value)
+        {
+            XmlNode node = root.SelectSingleNode(key);
+            if (node == null)
+            {
+                // 如果节点不存在，则创建新节点
+                node = doc.CreateElement(key);
+                root.AppendChild(node);
+            }
+            node.InnerText = value;
         }
 
         private void btnCancel_Click(object sender, RoutedEventArgs e)
