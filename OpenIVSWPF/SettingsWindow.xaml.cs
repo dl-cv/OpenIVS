@@ -976,7 +976,7 @@ namespace OpenIVSWPF
             SaveOKImage = true;
             SaveNGImage = true;
             ImageFormat = "JPG";
-            JpegQuality = "90";
+            JpegQuality = "98";
         }
     }
 } 
