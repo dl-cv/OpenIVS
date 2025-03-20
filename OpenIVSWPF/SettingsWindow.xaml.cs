@@ -10,6 +10,11 @@ using MvCameraControl;
 using System.Xml;
 using OpenIVSWPF.Managers;
 using DLCV;
+using System.Drawing;
+using System.Threading.Tasks;
+using System.Threading;
+using System.Linq;
+using WinForms = System.Windows.Forms;
 
 namespace OpenIVSWPF
 {
@@ -35,6 +40,11 @@ namespace OpenIVSWPF
         public bool UseSoftTrigger { get; private set; }
         public string ModelPath { get; private set; }
         public float Speed { get; private set; }
+        public string SavePath { get; private set; }
+        public bool SaveOKImage { get; private set; }
+        public bool SaveNGImage { get; private set; }
+        public string ImageFormat { get; private set; }
+        public string JpegQuality { get; private set; }
         
         // 设置结果
         public bool IsSettingsSaved { get; private set; }
@@ -88,6 +98,13 @@ namespace OpenIVSWPF
             // 设备设置
             Speed = settings.Speed;
 
+            // 图像保存设置
+            SavePath = settings.SavePath;
+            SaveOKImage = settings.SaveOKImage;
+            SaveNGImage = settings.SaveNGImage;
+            ImageFormat = settings.ImageFormat;
+            JpegQuality = settings.JpegQuality;
+
             // 更新UI
             cbPortName.Text = SelectedPortName;
             cbBaudRate.Text = BaudRate.ToString();
@@ -103,6 +120,12 @@ namespace OpenIVSWPF
 
             txtModelPath.Text = ModelPath;
             txtSpeed.Text = Speed.ToString();
+
+            txtSaveImagePath.Text = SavePath;
+            chkSaveOKImage.IsChecked = SaveOKImage;
+            chkSaveNGImage.IsChecked = SaveNGImage;
+            cbImageFormat.SelectedItem = cbImageFormat.Items.Cast<ComboBoxItem>().FirstOrDefault(item => item.Content.ToString() == ImageFormat);
+            txtJpegQuality.Text = JpegQuality;
         }
 
         private void LoadSerialPorts()
@@ -249,7 +272,7 @@ namespace OpenIVSWPF
         private void btnBrowseModel_Click(object sender, RoutedEventArgs e)
         {
             // 打开文件选择对话框
-            OpenFileDialog dialog = new OpenFileDialog();
+            Microsoft.Win32.OpenFileDialog dialog = new Microsoft.Win32.OpenFileDialog();
             dialog.Title = "选择模型文件";
             dialog.Filter = "模型文件 (*.dvt)|*.dvt|所有文件 (*.*)|*.*";
             dialog.CheckFileExists = true;
@@ -284,7 +307,7 @@ namespace OpenIVSWPF
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"保存设置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.MessageBox.Show($"保存设置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -293,27 +316,27 @@ namespace OpenIVSWPF
             // 验证Modbus设置
             if (cbPortName.SelectedItem == null)
             {
-                MessageBox.Show("请选择串口", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show("请选择串口", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
             
             if (!int.TryParse(txtDeviceId.Text, out int deviceId) || deviceId <= 0)
             {
-                MessageBox.Show("设备ID必须是正整数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show("设备ID必须是正整数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
             
             // 验证模型路径
             if (string.IsNullOrEmpty(txtModelPath.Text))
             {
-                MessageBox.Show("请选择模型文件", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show("请选择模型文件", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
             
             // 验证速度设置
             if (!float.TryParse(txtSpeed.Text, out float speed) || speed <= 0)
             {
-                MessageBox.Show("速度必须是正数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show("速度必须是正数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
             
@@ -341,6 +364,13 @@ namespace OpenIVSWPF
             
             // 设备设置
             Speed = float.Parse(txtSpeed.Text);
+
+            // 图像保存设置
+            SavePath = txtSaveImagePath.Text;
+            SaveOKImage = chkSaveOKImage.IsChecked == true;
+            SaveNGImage = chkSaveNGImage.IsChecked == true;
+            ImageFormat = ((ComboBoxItem)cbImageFormat.SelectedItem).Content.ToString();
+            JpegQuality = txtJpegQuality.Text;
         }
 
         private void SaveSettingsToFile()
@@ -376,6 +406,11 @@ namespace OpenIVSWPF
                 SetSettingValue(doc, root, "CameraUserDefinedName", CameraUserDefinedName);
                 SetSettingValue(doc, root, "UseTrigger", UseTrigger.ToString());
                 SetSettingValue(doc, root, "UseSoftTrigger", UseSoftTrigger.ToString());
+                SetSettingValue(doc, root, "SavePath", SavePath);
+                SetSettingValue(doc, root, "SaveOKImage", SaveOKImage.ToString());
+                SetSettingValue(doc, root, "SaveNGImage", SaveNGImage.ToString());
+                SetSettingValue(doc, root, "ImageFormat", ImageFormat);
+                SetSettingValue(doc, root, "JpegQuality", JpegQuality);
                 
                 // 保存模型设置
                 SetSettingValue(doc, root, "ModelPath", ModelPath);
@@ -388,7 +423,7 @@ namespace OpenIVSWPF
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"保存设置文件时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.MessageBox.Show($"保存设置文件时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         
@@ -410,6 +445,311 @@ namespace OpenIVSWPF
             IsSettingsSaved = false;
             Close();
         }
+
+        #region 图像保存相关功能
+
+        private void btnBrowseSavePath_Click(object sender, RoutedEventArgs e)
+        {
+            // 打开文件夹选择对话框
+            WinForms.FolderBrowserDialog dialog = new WinForms.FolderBrowserDialog();
+            dialog.Description = "选择图像保存路径";
+            
+            // 如果已有路径，则设置为初始路径
+            if (!string.IsNullOrEmpty(txtSaveImagePath.Text))
+            {
+                dialog.SelectedPath = txtSaveImagePath.Text;
+            }
+            
+            if (dialog.ShowDialog() == WinForms.DialogResult.OK)
+            {
+                txtSaveImagePath.Text = dialog.SelectedPath;
+            }
+        }
+
+        private void cbImageFormat_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // 根据图像格式更新UI
+            if (txtJpegQuality != null)
+            {
+                string selectedFormat = ((ComboBoxItem)cbImageFormat.SelectedItem).Content.ToString();
+                bool isJpeg = selectedFormat == "JPG";
+                
+                // 只有JPG格式才显示质量设置
+                txtJpegQuality.IsEnabled = isJpeg;
+            }
+        }
+
+        private void btnTestSaveImage_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // 验证保存路径
+                if (string.IsNullOrEmpty(txtSaveImagePath.Text))
+                {
+                    System.Windows.MessageBox.Show("请先选择图像保存路径", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // 确保路径存在
+                if (!Directory.Exists(txtSaveImagePath.Text))
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(txtSaveImagePath.Text);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Windows.MessageBox.Show($"创建目录失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+                }
+
+                // 获取当前相机图像
+                if (_cameraManager == null || _cameraManager.ActiveDevice == null || !_cameraManager.ActiveDevice.IsOpen)
+                {
+                    // 连接相机
+                    try
+                    {
+                        // 刷新设备列表
+                        List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
+
+                        if (deviceList.Count == 0)
+                        {
+                            return;
+                        }
+
+                        // 检查相机索引是否有效
+                        int cameraIndex = SelectedCameraIndex;
+                        if (cameraIndex < 0 || cameraIndex >= deviceList.Count)
+                        {
+                            cameraIndex = 0;
+                        }
+
+                        // 连接选中的相机
+                        bool success = _cameraManager.ConnectDevice(cameraIndex);
+                        if (success)
+                        {
+
+                            TriggerConfig.TriggerMode mode = TriggerConfig.TriggerMode.Software;
+                            _cameraManager.SetTriggerMode(mode);
+                            _cameraManager.StartGrabbing();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        throw;
+                    }
+
+                    // 触发拍照
+
+                    // 存图
+
+                    return;
+                }
+
+                // 捕获图像
+                Bitmap image = null;
+
+                // 触发相机拍照
+                _cameraManager.ActiveDevice.TriggerOnce();
+
+                // 等待图像更新
+                var waitEvent = new AutoResetEvent(false);
+                EventHandler<ImageEventArgs> handler = null;
+                handler = (s, args) => 
+                {
+                    if (args.Image != null)
+                    {
+                        image = args.Image.Clone() as Bitmap;
+                    }
+                    waitEvent.Set();
+                    _cameraManager.ImageUpdated -= handler;
+                };
+                    
+                _cameraManager.ImageUpdated += handler;
+                    
+                // 最多等待2秒
+                bool received = waitEvent.WaitOne(2000);
+                if (!received || image == null)
+                {
+                    System.Windows.MessageBox.Show("无法获取图像，请确保相机正常工作", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // 生成文件名（使用时间戳）
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string extension = ((ComboBoxItem)cbImageFormat.SelectedItem).Content.ToString().ToLower();
+                string filename = $"test_{timestamp}.{extension}";
+                string fullPath = Path.Combine(txtSaveImagePath.Text, filename);
+
+                // 根据格式保存图像
+                if (extension == "jpg")
+                {
+                    // 获取JPG质量设置
+                    int quality = 90;
+                    if (!string.IsNullOrEmpty(txtJpegQuality.Text) && int.TryParse(txtJpegQuality.Text, out int jpegQuality))
+                    {
+                        quality = Math.Min(100, Math.Max(1, jpegQuality)); // 确保在1-100范围内
+                    }
+
+                    // 创建编码器参数
+                    var encoderParams = new System.Drawing.Imaging.EncoderParameters(1);
+                    encoderParams.Param[0] = new System.Drawing.Imaging.EncoderParameter(
+                        System.Drawing.Imaging.Encoder.Quality, quality);
+
+                    // 获取JPG编码器
+                    var jpegCodec = GetEncoder(System.Drawing.Imaging.ImageFormat.Jpeg);
+                    
+                    // 保存图像
+                    image.Save(fullPath, jpegCodec, encoderParams);
+                }
+                else // BMP格式
+                {
+                    image.Save(fullPath, System.Drawing.Imaging.ImageFormat.Bmp);
+                }
+
+                // 显示成功信息
+                System.Windows.MessageBox.Show($"图像已保存到：\n{fullPath}", "保存成功", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"保存图像时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // 获取指定图像格式的编码器
+        private System.Drawing.Imaging.ImageCodecInfo GetEncoder(System.Drawing.Imaging.ImageFormat format)
+        {
+            foreach (var codec in System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders())
+            {
+                if (codec.FormatID == format.Guid)
+                {
+                    return codec;
+                }
+            }
+            return null;
+        }
+        #endregion
+
+        #region 设备控制相关功能
+        private void btnGoHome_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_modbusApi == null)
+                {
+                    System.Windows.MessageBox.Show("Modbus未连接，无法执行操作", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // 发送回原点命令（1到地址50）
+                bool result = _modbusApi.WriteSingleRegister(50, 1);
+                if (result)
+                {
+                    System.Windows.MessageBox.Show("已发送回原点命令", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    System.Windows.MessageBox.Show("发送回原点命令失败", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"回原点操作发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void btnGoToPosition_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_modbusApi == null)
+                {
+                    System.Windows.MessageBox.Show("Modbus未连接，无法执行操作", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // 获取目标位置
+                if (!float.TryParse(txtTargetPosition.Text, out float targetPosition))
+                {
+                    System.Windows.MessageBox.Show("请输入有效的目标位置", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // 禁用按钮，防止重复点击
+                btnGoToPosition.IsEnabled = false;
+                
+                try
+                {
+                    // 设置目标位置（地址8，浮点数）
+                    bool resultSetPosition = _modbusApi.WriteFloat(8, targetPosition);
+                    if (!resultSetPosition)
+                    {
+                        System.Windows.MessageBox.Show("设置目标位置失败", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+
+                    // 发送移动命令（地址50，整数2）
+                    bool resultCommand = _modbusApi.WriteSingleRegister(50, 2);
+                    if (!resultCommand)
+                    {
+                        System.Windows.MessageBox.Show("发送移动命令失败", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+
+                    // 等待移动完成（轮询当前位置）
+                    using (var cts = new CancellationTokenSource())
+                    {
+                        // 5秒超时
+                        cts.CancelAfter(TimeSpan.FromSeconds(5));
+                        
+                        bool isReached = false;
+                        while (!isReached && !cts.Token.IsCancellationRequested)
+                        {
+                            // 读取当前位置（地址32，浮点数）
+                            float currentPosition = _modbusApi.ReadFloat(32);
+                            
+                            // 更新位置显示
+                            txtCurrentPosition.Text = currentPosition.ToString("F1");
+                            
+                            // 判断是否到达目标位置（允许一定误差）
+                            if (Math.Abs(currentPosition - targetPosition) < 1.0f)
+                            {
+                                isReached = true;
+                            }
+                            else
+                            {
+                                // 等待100ms再次检查
+                                await Task.Delay(100, cts.Token);
+                            }
+                        }
+
+                        if (isReached)
+                        {
+                            System.Windows.MessageBox.Show($"已到达位置：{targetPosition}", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                        else
+                        {
+                            System.Windows.MessageBox.Show("移动超时，未到达目标位置", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        }
+                    }
+                }
+                finally
+                {
+                    // 恢复按钮状态
+                    btnGoToPosition.IsEnabled = true;
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                System.Windows.MessageBox.Show("移动操作已取消", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"移动过程中发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        #endregion
     }
 
     /// <summary>
@@ -437,6 +777,13 @@ namespace OpenIVSWPF
         // 设备设置
         public float Speed { get; set; }
         
+        // 图像保存设置
+        public string SavePath { get; set; }
+        public bool SaveOKImage { get; set; }
+        public bool SaveNGImage { get; set; }
+        public string ImageFormat { get; set; }
+        public string JpegQuality { get; set; }
+        
         public Settings()
         {
             // 默认设置
@@ -455,6 +802,13 @@ namespace OpenIVSWPF
             ModelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "default.dvt");
             
             Speed = 100.0f;
+
+            // 图像保存设置
+            SavePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "images");
+            SaveOKImage = true;
+            SaveNGImage = true;
+            ImageFormat = "JPG";
+            JpegQuality = "90";
         }
     }
 } 
