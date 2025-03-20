@@ -935,7 +935,7 @@ namespace OpenIVSWPF
             try
             {
                 // 创建设置窗口
-                SettingsWindow settingsWindow = new SettingsWindow(_settings, _cameraManager);
+                SettingsWindow settingsWindow = new SettingsWindow(_settings);
                 settingsWindow.Owner = this;
                 
                 // 显示设置窗口
