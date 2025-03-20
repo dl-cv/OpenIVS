@@ -15,6 +15,11 @@ using System.Threading.Tasks;
 using System.Threading;
 using System.Linq;
 using WinForms = System.Windows.Forms;
+using OpenCvSharp;
+using OpenCvSharp.Extensions;
+
+// 使用完全限定名避免命名冲突
+using Window = System.Windows.Window;
 
 namespace OpenIVSWPF
 {
@@ -45,6 +50,7 @@ namespace OpenIVSWPF
         public bool SaveNGImage { get; private set; }
         public string ImageFormat { get; private set; }
         public string JpegQuality { get; private set; }
+        public float TargetPosition { get; private set; }
         
         // 设置结果
         public bool IsSettingsSaved { get; private set; }
@@ -62,6 +68,107 @@ namespace OpenIVSWPF
             
             // 初始化界面
             InitializeUI();
+            
+            // 获取当前位置
+            GetCurrentPosition();
+        }
+
+        private void GetCurrentPosition()
+        {
+            try
+            {
+                // 如果Modbus未连接，则尝试连接
+                if (_modbusApi == null || !IsModbusConnected())
+                {
+                    InitializeModbus();
+                }
+
+                if (_modbusApi != null && IsModbusConnected())
+                {
+                    // 读取当前位置（地址32，浮点数）
+                    float currentPosition = _modbusApi.ReadFloat(32);
+                    
+                    // 这里不使用直接引用UI控件，而是在UI定义完成后更新
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        try {
+                            // 使用安全的方式访问控件
+                            var control = FindName("txtCurrentPosition") as TextBlock;
+                            if (control != null)
+                            {
+                                control.Text = currentPosition.ToString("F1");
+                            }
+                        }
+                        catch { /* 忽略UI更新错误 */ }
+                    }));
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"获取当前位置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // 检查Modbus是否已连接
+        private bool IsModbusConnected()
+        {
+            try
+            {
+                if (_modbusApi == null)
+                    return false;
+                
+                // 尝试读取保持寄存器来测试连接
+                _modbusApi.ReadHoldingRegisters(0, 1);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void InitializeModbus()
+        {
+            try
+            {
+                // 关闭已有连接
+                if (_modbusApi != null && IsModbusConnected())
+                {
+                    _modbusApi.Close();
+                }
+                
+                // 使用设置中的串口参数
+                if (string.IsNullOrEmpty(SelectedPortName))
+                {
+                    // 如果未设置串口，尝试获取第一个可用的串口
+                    string[] ports = SerialPort.GetPortNames();
+                    if (ports.Length == 0)
+                    {
+                        System.Windows.MessageBox.Show("未检测到串口设备", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+                    SelectedPortName = ports[0];
+                }
+
+                // 设置串口参数
+                _modbusApi.SetSerialPort(
+                    SelectedPortName,  // 串口
+                    BaudRate,         // 波特率
+                    DataBits,         // 数据位
+                    StopBits,         // 停止位
+                    Parity,           // 校验位
+                    (byte)DeviceId    // 设备ID
+                );
+
+                // 打开串口
+                if (!_modbusApi.Open())
+                {
+                    System.Windows.MessageBox.Show("Modbus设备连接失败", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"Modbus初始化错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void InitializeUI()
@@ -97,6 +204,7 @@ namespace OpenIVSWPF
             
             // 设备设置
             Speed = settings.Speed;
+            TargetPosition = settings.TargetPosition;
 
             // 图像保存设置
             SavePath = settings.SavePath;
@@ -120,6 +228,7 @@ namespace OpenIVSWPF
 
             txtModelPath.Text = ModelPath;
             txtSpeed.Text = Speed.ToString();
+            txtTargetPosition.Text = TargetPosition.ToString();
 
             txtSaveImagePath.Text = SavePath;
             chkSaveOKImage.IsChecked = SaveOKImage;
@@ -364,6 +473,12 @@ namespace OpenIVSWPF
             
             // 设备设置
             Speed = float.Parse(txtSpeed.Text);
+            
+            // 目标位置设置
+            if (float.TryParse(txtTargetPosition.Text, out float targetPos))
+            {
+                TargetPosition = targetPos;
+            }
 
             // 图像保存设置
             SavePath = txtSaveImagePath.Text;
@@ -417,6 +532,9 @@ namespace OpenIVSWPF
                 
                 // 保存设备设置
                 SetSettingValue(doc, root, "Speed", Speed.ToString());
+                
+                // 保存目标位置
+                SetSettingValue(doc, root, "TargetPosition", TargetPosition.ToString());
                 
                 // 保存文件
                 doc.Save(_settingsFilePath);
@@ -479,7 +597,7 @@ namespace OpenIVSWPF
             }
         }
 
-        private void btnTestSaveImage_Click(object sender, RoutedEventArgs e)
+        private async void btnTestSaveImage_Click(object sender, RoutedEventArgs e)
         {
             try
             {
@@ -505,6 +623,8 @@ namespace OpenIVSWPF
                 }
 
                 // 获取当前相机图像
+                Bitmap image = null;
+                
                 if (_cameraManager == null || _cameraManager.ActiveDevice == null || !_cameraManager.ActiveDevice.IsOpen)
                 {
                     // 连接相机
@@ -515,6 +635,7 @@ namespace OpenIVSWPF
 
                         if (deviceList.Count == 0)
                         {
+                            System.Windows.MessageBox.Show("未检测到相机设备", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                             return;
                         }
 
@@ -527,50 +648,76 @@ namespace OpenIVSWPF
 
                         // 连接选中的相机
                         bool success = _cameraManager.ConnectDevice(cameraIndex);
-                        if (success)
+                        if (!success)
                         {
-
-                            TriggerConfig.TriggerMode mode = TriggerConfig.TriggerMode.Software;
-                            _cameraManager.SetTriggerMode(mode);
-                            _cameraManager.StartGrabbing();
+                            System.Windows.MessageBox.Show("相机连接失败", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                            return;
                         }
+
+                        // 设置触发模式
+                        TriggerConfig.TriggerMode mode = TriggerConfig.TriggerMode.Software;
+                        _cameraManager.SetTriggerMode(mode);
+                        _cameraManager.StartGrabbing();
                     }
                     catch (Exception ex)
                     {
-                        throw;
+                        System.Windows.MessageBox.Show($"相机初始化错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
                     }
-
-                    // 触发拍照
-
-                    // 存图
-
-                    return;
                 }
 
                 // 捕获图像
-                Bitmap image = null;
-
-                // 触发相机拍照
-                _cameraManager.ActiveDevice.TriggerOnce();
-
-                // 等待图像更新
-                var waitEvent = new AutoResetEvent(false);
+                // 使用TaskCompletionSource等待图像更新事件
+                var tcs = new TaskCompletionSource<Bitmap>();
+                                    
+                // 设置图像捕获事件处理
                 EventHandler<ImageEventArgs> handler = null;
-                handler = (s, args) => 
+                handler = (s, args) =>
                 {
+                    // 捕获到图像后，转换为Bitmap
                     if (args.Image != null)
                     {
-                        image = args.Image.Clone() as Bitmap;
+                        tcs.TrySetResult(args.Image.Clone() as Bitmap);
                     }
-                    waitEvent.Set();
+                    
+                    // 移除事件处理器，防止多次触发
                     _cameraManager.ImageUpdated -= handler;
                 };
-                    
+                                    
+                // 添加事件处理
                 _cameraManager.ImageUpdated += handler;
-                    
-                // 最多等待2秒
-                bool received = waitEvent.WaitOne(2000);
-                if (!received || image == null)
+                                    
+                // 执行软触发
+                _cameraManager.TriggerOnce();
+                                    
+                // 添加超时处理，2秒内如果没有图像返回，则取消
+                using (var timeoutCts = new CancellationTokenSource(2000))
+                {
+                    try
+                    {
+                        // 注册取消操作
+                        timeoutCts.Token.Register(() => 
+                        {
+                            _cameraManager.ImageUpdated -= handler;
+                            tcs.TrySetCanceled();
+                        });
+                                            
+                        // 等待图像或取消
+                        image = await tcs.Task;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        System.Windows.MessageBox.Show("图像捕获超时或被取消", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Windows.MessageBox.Show($"图像捕获过程中发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+                }
+
+                if (image == null)
                 {
                     System.Windows.MessageBox.Show("无法获取图像，请确保相机正常工作", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
@@ -582,30 +729,30 @@ namespace OpenIVSWPF
                 string filename = $"test_{timestamp}.{extension}";
                 string fullPath = Path.Combine(txtSaveImagePath.Text, filename);
 
-                // 根据格式保存图像
-                if (extension == "jpg")
+                // 使用OpenCV保存图像
+                using (var mat = BitmapConverter.ToMat(image))
                 {
-                    // 获取JPG质量设置
-                    int quality = 90;
-                    if (!string.IsNullOrEmpty(txtJpegQuality.Text) && int.TryParse(txtJpegQuality.Text, out int jpegQuality))
+                    if (extension == "jpg")
                     {
-                        quality = Math.Min(100, Math.Max(1, jpegQuality)); // 确保在1-100范围内
+                        // 获取JPG质量设置
+                        int quality = 90;
+                        if (!string.IsNullOrEmpty(txtJpegQuality.Text) && int.TryParse(txtJpegQuality.Text, out int jpegQuality))
+                        {
+                            quality = Math.Min(100, Math.Max(1, jpegQuality)); // 确保在1-100范围内
+                        }
+
+                        // 保存为JPG格式
+                        var parameters = new int[] 
+                        { 
+                            (int)OpenCvSharp.ImwriteFlags.JpegQuality, quality,
+                            (int)OpenCvSharp.ImwriteFlags.JpegProgressive, 1
+                        };
+                        OpenCvSharp.Cv2.ImWrite(fullPath, mat, parameters);
                     }
-
-                    // 创建编码器参数
-                    var encoderParams = new System.Drawing.Imaging.EncoderParameters(1);
-                    encoderParams.Param[0] = new System.Drawing.Imaging.EncoderParameter(
-                        System.Drawing.Imaging.Encoder.Quality, quality);
-
-                    // 获取JPG编码器
-                    var jpegCodec = GetEncoder(System.Drawing.Imaging.ImageFormat.Jpeg);
-                    
-                    // 保存图像
-                    image.Save(fullPath, jpegCodec, encoderParams);
-                }
-                else // BMP格式
-                {
-                    image.Save(fullPath, System.Drawing.Imaging.ImageFormat.Bmp);
+                    else // BMP格式
+                    {
+                        OpenCvSharp.Cv2.ImWrite(fullPath, mat);
+                    }
                 }
 
                 // 显示成功信息
@@ -663,7 +810,13 @@ namespace OpenIVSWPF
         {
             try
             {
-                if (_modbusApi == null)
+                // 如果Modbus未连接，则尝试连接
+                if (_modbusApi == null || !IsModbusConnected())
+                {
+                    InitializeModbus();
+                }
+
+                if (_modbusApi == null || !IsModbusConnected())
                 {
                     System.Windows.MessageBox.Show("Modbus未连接，无法执行操作", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
@@ -700,8 +853,8 @@ namespace OpenIVSWPF
                     // 等待移动完成（轮询当前位置）
                     using (var cts = new CancellationTokenSource())
                     {
-                        // 5秒超时
-                        cts.CancelAfter(TimeSpan.FromSeconds(5));
+                        // 60秒超时
+                        cts.CancelAfter(TimeSpan.FromSeconds(60));
                         
                         bool isReached = false;
                         while (!isReached && !cts.Token.IsCancellationRequested)
@@ -710,7 +863,17 @@ namespace OpenIVSWPF
                             float currentPosition = _modbusApi.ReadFloat(32);
                             
                             // 更新位置显示
-                            txtCurrentPosition.Text = currentPosition.ToString("F1");
+                            Dispatcher.BeginInvoke(new Action(() => {
+                                try {
+                                    // 使用安全的方式访问控件
+                                    var control = FindName("txtCurrentPosition") as TextBlock;
+                                    if (control != null)
+                                    {
+                                        control.Text = currentPosition.ToString("F1");
+                                    }
+                                }
+                                catch { /* 忽略UI更新错误 */ }
+                            }));
                             
                             // 判断是否到达目标位置（允许一定误差）
                             if (Math.Abs(currentPosition - targetPosition) < 1.0f)
@@ -727,6 +890,9 @@ namespace OpenIVSWPF
                         if (isReached)
                         {
                             System.Windows.MessageBox.Show($"已到达位置：{targetPosition}", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                            
+                            // 保存到设置中
+                            TargetPosition = targetPosition;
                         }
                         else
                         {
@@ -776,6 +942,7 @@ namespace OpenIVSWPF
         
         // 设备设置
         public float Speed { get; set; }
+        public float TargetPosition { get; set; }
         
         // 图像保存设置
         public string SavePath { get; set; }
@@ -802,6 +969,7 @@ namespace OpenIVSWPF
             ModelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "default.dvt");
             
             Speed = 100.0f;
+            TargetPosition = 0.0f;
 
             // 图像保存设置
             SavePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "images");
