@@ -51,7 +51,7 @@ namespace OpenIVSWPF
         private float _currentPosition = 0;
         
         // 位置序列定义 (1-2-3-2-1循环)
-        private readonly float[] _positionSequence = new float[] { 200, 310, 420, 310 };
+        private readonly float[] _positionSequence = new float[] { 195, 300, 415, 300 };
         private int _currentPositionIndex = 0;
         
         // 上次拍照结果
