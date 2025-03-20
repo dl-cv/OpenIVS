@@ -8,6 +8,8 @@ using Microsoft.Win32;
 using DLCV.Camera;
 using MvCameraControl;
 using System.Xml;
+using OpenIVSWPF.Managers;
+using DLCV;
 
 namespace OpenIVSWPF
 {
@@ -17,7 +19,8 @@ namespace OpenIVSWPF
     public partial class SettingsWindow : Window
     {
         // 相机管理器引用
-        private CameraManager _cameraManager;
+        private CameraManager _cameraManager = CameraInstance.Instance;
+        private ModbusApi _modbusApi = ModbusManager.Instance;
         
         // 设置属性
         public string SelectedPortName { get; private set; }
@@ -40,11 +43,9 @@ namespace OpenIVSWPF
         private readonly string _settingsFilePath = Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
 
-        public SettingsWindow(Settings currentSettings, CameraManager cameraManager = null)
+        public SettingsWindow(Settings currentSettings)
         {
             InitializeComponent();
-            
-            _cameraManager = cameraManager;
             
             // 加载当前设置
             LoadSettings(currentSettings);
