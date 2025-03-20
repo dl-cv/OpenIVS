@@ -1127,6 +1127,8 @@ namespace OpenIVSWPF
             }
             finally
             {
+                _modbusApi.WriteSingleRegister(50, 4); // 发送停止命令
+
                 // 无论如何，确保标记为已停止
                 _isRunning = false;
                 UpdateControlState();
