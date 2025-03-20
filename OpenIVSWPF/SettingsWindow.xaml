@@ -77,10 +77,17 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="相机名称:" Margin="0,5,10,5" VerticalAlignment="Center"/>
@@ -98,6 +105,36 @@
 
                     <Button Grid.Row="2" Grid.Column="1" x:Name="btnRefreshCameras" Content="刷新相机列表" 
                             HorizontalAlignment="Left" Margin="0,10,0,0" Padding="10,5" Click="btnRefreshCameras_Click"/>
+
+                    <!-- 图像保存设置 -->
+                    <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Text="图像保存设置:" 
+                               FontWeight="Bold" Margin="0,20,0,5"/>
+                    
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="保存路径:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="4" Grid.Column="1" x:Name="txtSaveImagePath" Margin="0,5"/>
+                    <Button Grid.Row="4" Grid.Column="2" x:Name="btnBrowseSavePath" Content="浏览..." 
+                            Margin="5,5,0,5" Padding="10,0" Click="btnBrowseSavePath_Click"/>
+                    
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="保存选项:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,5">
+                        <CheckBox x:Name="chkSaveOKImage" Content="保存OK图像" Margin="0,0,20,0"/>
+                        <CheckBox x:Name="chkSaveNGImage" Content="保存NG图像" IsChecked="True"/>
+                    </StackPanel>
+                    
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="保存格式:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Margin="0,5">
+                        <ComboBox x:Name="cbImageFormat" Width="80" SelectionChanged="cbImageFormat_SelectionChanged">
+                            <ComboBoxItem Content="JPG" IsSelected="True"/>
+                            <ComboBoxItem Content="BMP"/>
+                        </ComboBox>
+                        <TextBlock Text="JPG质量:" Margin="20,0,10,0" VerticalAlignment="Center"/>
+                        <TextBox x:Name="txtJpegQuality" Width="50" Text="90"/>
+                        <TextBlock Text="%" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="测试保存:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <Button Grid.Row="7" Grid.Column="1" x:Name="btnTestSaveImage" Content="测试图像保存" 
+                            HorizontalAlignment="Left" Margin="0,5" Padding="10,5" Click="btnTestSaveImage_Click"/>
                 </Grid>
             </TabItem>
 
@@ -124,14 +161,31 @@
                 <Grid Margin="10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock Grid.Column="0" Text="运动速度(mm/s):" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <TextBox Grid.Column="1" x:Name="txtSpeed" Text="100.0" Margin="0,5"/>
+                    <TextBlock Grid.Column="0" Grid.Row="0" Text="运动速度(mm/s):" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" Grid.Row="0" x:Name="txtSpeed" Text="100.0" Margin="0,5"/>
+                    
+                    <TextBlock Grid.Column="0" Grid.Row="1" Text="回到原点:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Grid.Row="1" x:Name="btnGoHome" Content="回到原点" 
+                            HorizontalAlignment="Left" Margin="0,5" Padding="10,5" Click="btnGoHome_Click"/>
+                    
+                    <TextBlock Grid.Column="0" Grid.Row="2" Text="指定位置(mm):" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" Grid.Row="2" Orientation="Horizontal" Margin="0,5">
+                        <TextBox x:Name="txtTargetPosition" Width="100" Text="0.0"/>
+                        <Button x:Name="btnGoToPosition" Content="移动到位置" Margin="10,0,0,0" Padding="10,0" Click="btnGoToPosition_Click"/>
+                    </StackPanel>
+                    
+                    <TextBlock Grid.Column="0" Grid.Row="3" Text="当前位置:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Grid.Row="3" x:Name="txtCurrentPosition" Text="0.0" Margin="0,5" VerticalAlignment="Center"/>
                 </Grid>
             </TabItem>
         </TabControl>

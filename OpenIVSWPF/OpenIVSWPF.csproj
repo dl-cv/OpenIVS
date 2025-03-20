@@ -68,7 +68,9 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Compile Include="CameraManager.cs" />
     <Compile Include="MainWindowViewModel.cs" />
+    <Compile Include="ModbusManager.cs" />
     <Compile Include="SettingsWindow.xaml.cs">
       <DependentUpon>SettingsWindow.xaml</DependentUpon>
     </Compile>
