@@ -13,6 +13,7 @@ using dlcv_infer_csharp;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
 using MvCameraControl;
+using OpenIVSWPF.Managers;
 using System.Xml;
 
 using Window = System.Windows.Window;
@@ -30,12 +31,12 @@ namespace OpenIVSWPF
         private Settings _settings;
         
         // Modbus通信
-        private ModbusApi _modbusApi;
+        private ModbusApi _modbusApi = ModbusManager.Instance;
         private bool _isModbusConnected = false;
         private float _currentSpeed = 100.0f; // 当前速度值
 
         // 相机控制
-        private CameraManager _cameraManager;
+        private CameraManager _cameraManager = CameraInstance.Instance;
         private bool _isCameraConnected = false;
         private bool _isGrabbing = false;
 
@@ -90,7 +91,6 @@ namespace OpenIVSWPF
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             // 初始化相机管理器（但不连接相机）
-            _cameraManager = new CameraManager();
             _cameraManager.ImageUpdated += CameraManager_ImageUpdated;
             
             // 更新界面状态
@@ -211,9 +211,6 @@ namespace OpenIVSWPF
                     _modbusApi.Close();
                     _isModbusConnected = false;
                 }
-                
-                // 初始化ModbusApi
-                _modbusApi = new ModbusApi();
                 
                 // 使用设置中的串口参数
                 if (string.IsNullOrEmpty(_settings.PortName))
