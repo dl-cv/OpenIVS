@@ -829,9 +829,14 @@ namespace OpenIVSWPF
                             // 更新检测结果显示
                             UpdateDetectionResult(result);
                             
-                            // 根据结果更新统计信息
+                            // 判断检测结果
                             bool isOK = string.IsNullOrEmpty(result);
+                            
+                            // 更新统计信息
                             UpdateStatistics(isOK);
+                            
+                            // 根据设置保存图像
+                            SaveImage(_lastCapturedImage, isOK);
                         }
                         else
                         {
@@ -970,6 +975,14 @@ namespace OpenIVSWPF
                     _settings.UseSoftTrigger = settingsWindow.UseSoftTrigger;
                     _settings.ModelPath = settingsWindow.ModelPath;
                     _settings.Speed = settingsWindow.Speed;
+                    _settings.TargetPosition = settingsWindow.TargetPosition;
+                    
+                    // 图像保存设置
+                    _settings.SavePath = settingsWindow.SavePath;
+                    _settings.SaveOKImage = settingsWindow.SaveOKImage;
+                    _settings.SaveNGImage = settingsWindow.SaveNGImage;
+                    _settings.ImageFormat = settingsWindow.ImageFormat;
+                    _settings.JpegQuality = settingsWindow.JpegQuality;
                     
                     // 如果系统已初始化，则需要重新初始化
                     if (_isInitialized)
@@ -1093,9 +1106,14 @@ namespace OpenIVSWPF
                                         // 更新检测结果显示
                                         UpdateDetectionResult(result);
                                         
-                                        // 根据结果更新统计信息
+                                        // 判断检测结果
                                         bool isOK = string.IsNullOrEmpty(result);
+                                        
+                                        // 更新统计信息
                                         UpdateStatistics(isOK);
+                                        
+                                        // 根据设置保存图像
+                                        SaveImage(image, isOK);
                                     }
                                 }
                                 catch (Exception ex)
@@ -1135,5 +1153,74 @@ namespace OpenIVSWPF
             }
         }
         #endregion
+
+        // 保存图像方法
+        private void SaveImage(Bitmap image, bool isOK)
+        {
+            try
+            {
+                // 根据设置判断是否需要保存图像
+                if ((isOK && !_settings.SaveOKImage) || (!isOK && !_settings.SaveNGImage))
+                    return;
+
+                // 确保保存路径存在
+                if (string.IsNullOrEmpty(_settings.SavePath))
+                    return;
+
+                // 获取当前日期和时间
+                string currentDate = DateTime.Now.ToString("yyyyMMdd");
+                string timeString = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+                
+                // 结果文件夹
+                string resultFolder = isOK ? "OK" : "NG";
+                
+                // 创建日期和结果文件夹
+                string dateFolder = Path.Combine(_settings.SavePath, currentDate);
+                string resultPath = Path.Combine(dateFolder, resultFolder);
+                
+                if (!Directory.Exists(dateFolder))
+                    Directory.CreateDirectory(dateFolder);
+                
+                if (!Directory.Exists(resultPath))
+                    Directory.CreateDirectory(resultPath);
+                
+                // 生成文件名
+                string extension = _settings.ImageFormat.ToLower();
+                string filename = $"{timeString}.{extension}";
+                string fullPath = Path.Combine(resultPath, filename);
+                
+                // 使用OpenCV保存图像
+                using (var mat = BitmapConverter.ToMat(image))
+                {
+                    if (extension == "jpg")
+                    {
+                        // 获取JPG质量设置
+                        int quality = 90;
+                        if (!string.IsNullOrEmpty(_settings.JpegQuality) && int.TryParse(_settings.JpegQuality, out int jpegQuality))
+                        {
+                            quality = Math.Min(100, Math.Max(1, jpegQuality)); // 确保在1-100范围内
+                        }
+
+                        // 保存为JPG格式
+                        var parameters = new int[] 
+                        { 
+                            (int)OpenCvSharp.ImwriteFlags.JpegQuality, quality,
+                            (int)OpenCvSharp.ImwriteFlags.JpegProgressive, 1
+                        };
+                        OpenCvSharp.Cv2.ImWrite(fullPath, mat, parameters);
+                    }
+                    else // BMP格式
+                    {
+                        OpenCvSharp.Cv2.ImWrite(fullPath, mat);
+                    }
+                }
+                
+                UpdateStatus($"图像已保存到: {fullPath}");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"保存图像时发生错误: {ex.Message}");
+            }
+        }
     }
 }
