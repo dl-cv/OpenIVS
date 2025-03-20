@@ -1092,7 +1092,7 @@ namespace OpenIVSWPF
                             try
                             {
                                 // 等待运动稳定
-                                await Task.Delay(100, token);
+                                await Task.Delay(_settings.PreCaptureDelay, token);
 
                                 // 等待拍照操作完成
                                 var image = await CaptureImageAsync(token);
