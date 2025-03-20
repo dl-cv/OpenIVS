@@ -157,6 +157,20 @@ namespace OpenIVSWPF
                 
                 // 加载设备设置
                 settings.Speed = float.Parse(GetSettingValue(root, "Speed", settings.Speed.ToString()));
+                
+                // 加载目标位置设置
+                string targetPositionStr = GetSettingValue(root, "TargetPosition", settings.TargetPosition.ToString());
+                if (!string.IsNullOrEmpty(targetPositionStr) && float.TryParse(targetPositionStr, out float targetPos))
+                {
+                    settings.TargetPosition = targetPos;
+                }
+                
+                // 加载图像保存设置
+                settings.SavePath = GetSettingValue(root, "SavePath", settings.SavePath);
+                settings.SaveOKImage = bool.Parse(GetSettingValue(root, "SaveOKImage", settings.SaveOKImage.ToString()));
+                settings.SaveNGImage = bool.Parse(GetSettingValue(root, "SaveNGImage", settings.SaveNGImage.ToString()));
+                settings.ImageFormat = GetSettingValue(root, "ImageFormat", settings.ImageFormat);
+                settings.JpegQuality = GetSettingValue(root, "JpegQuality", settings.JpegQuality);
             }
             catch (Exception ex)
             {
