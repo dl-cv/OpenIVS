@@ -29,7 +29,7 @@ namespace OpenIVSWPF
         #region 成员变量
         // 系统设置
         private Settings _settings;
-        
+
         // Modbus通信
         private ModbusApi _modbusApi = ModbusManager.Instance;
         private bool _isModbusConnected = false;
@@ -49,21 +49,21 @@ namespace OpenIVSWPF
         private bool _isRunning = false;
         private CancellationTokenSource _cts;
         private float _currentPosition = 0;
-        
+
         // 位置序列定义 (1-2-3-2-1循环)
         private readonly float[] _positionSequence = new float[] { 195, 305, 415, 305 };
         private int _currentPositionIndex = 0;
-        
+
         // 上次拍照结果
         private System.Drawing.Bitmap _lastCapturedImage = null;
         private string _lastDetectionResult = "";
-        
+
         // 统计数据
         private int _totalCount = 0;
         private int _okCount = 0;
         private int _ngCount = 0;
         private double _yieldRate = 0.0;
-        
+
         // 是否已初始化
         private bool _isInitialized = false;
         #endregion
@@ -75,14 +75,14 @@ namespace OpenIVSWPF
         {
             InitializeComponent();
             Loaded += MainWindow_Loaded;
-            
+
             // 初始化ViewModel
             ViewModel = new MainWindowViewModel();
             DataContext = ViewModel;
-            
+
             // 初始化UI状态
             InitializeUIState();
-            
+
             // 创建设置对象
             LoadOrCreateSettings();
         }
@@ -92,7 +92,7 @@ namespace OpenIVSWPF
         {
             // 初始化相机管理器（但不连接相机）
             _cameraManager.ImageUpdated += CameraManager_ImageUpdated;
-            
+
             // 更新界面状态
             UpdateControlState();
             UpdateStatus("系统已就绪，请点击开始按钮初始化设备");
@@ -105,7 +105,7 @@ namespace OpenIVSWPF
             {
                 // 创建默认设置
                 _settings = new Settings();
-                
+
                 // 尝试从设置文件加载
                 string settingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
                 if (File.Exists(settingsFilePath))
@@ -121,7 +121,7 @@ namespace OpenIVSWPF
                         _settings.ModelPath = modelDefaultPath;
                     }
                 }
-                
+
                 _modelPath = _settings.ModelPath;
             }
             catch (Exception ex)
@@ -130,7 +130,7 @@ namespace OpenIVSWPF
                 _settings = new Settings();
             }
         }
-        
+
         private void LoadSettingsFromFile(string settingsFilePath, Settings settings)
         {
             try
@@ -138,7 +138,7 @@ namespace OpenIVSWPF
                 XmlDocument doc = new XmlDocument();
                 doc.Load(settingsFilePath);
                 XmlElement root = doc.DocumentElement;
-                
+
                 // 加载Modbus设置
                 settings.PortName = GetSettingValue(root, "PortName", settings.PortName);
                 settings.BaudRate = int.Parse(GetSettingValue(root, "BaudRate", settings.BaudRate.ToString()));
@@ -146,25 +146,25 @@ namespace OpenIVSWPF
                 settings.StopBits = (StopBits)Enum.Parse(typeof(StopBits), GetSettingValue(root, "StopBits", settings.StopBits.ToString()));
                 settings.Parity = (Parity)Enum.Parse(typeof(Parity), GetSettingValue(root, "Parity", settings.Parity.ToString()));
                 settings.DeviceId = int.Parse(GetSettingValue(root, "DeviceId", settings.DeviceId.ToString()));
-                
+
                 // 加载相机设置
                 settings.CameraIndex = int.Parse(GetSettingValue(root, "CameraIndex", settings.CameraIndex.ToString()));
                 settings.UseTrigger = bool.Parse(GetSettingValue(root, "UseTrigger", settings.UseTrigger.ToString()));
                 settings.UseSoftTrigger = bool.Parse(GetSettingValue(root, "UseSoftTrigger", settings.UseSoftTrigger.ToString()));
-                
+
                 // 加载模型设置
                 settings.ModelPath = GetSettingValue(root, "ModelPath", settings.ModelPath);
-                
+
                 // 加载设备设置
                 settings.Speed = float.Parse(GetSettingValue(root, "Speed", settings.Speed.ToString()));
-                
+
                 // 加载目标位置设置
                 string targetPositionStr = GetSettingValue(root, "TargetPosition", settings.TargetPosition.ToString());
                 if (!string.IsNullOrEmpty(targetPositionStr) && float.TryParse(targetPositionStr, out float targetPos))
                 {
                     settings.TargetPosition = targetPos;
                 }
-                
+
                 // 加载图像保存设置
                 settings.SavePath = GetSettingValue(root, "SavePath", settings.SavePath);
                 settings.SaveOKImage = bool.Parse(GetSettingValue(root, "SaveOKImage", settings.SaveOKImage.ToString()));
@@ -177,7 +177,7 @@ namespace OpenIVSWPF
                 MessageBox.Show($"从文件加载设置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-        
+
         private string GetSettingValue(XmlElement root, string key, string defaultValue)
         {
             XmlNode node = root.SelectSingleNode(key);
@@ -190,19 +190,19 @@ namespace OpenIVSWPF
             try
             {
                 UpdateStatus("正在初始化系统...");
-                
+
                 // 初始化Modbus
                 await Task.Run(() => InitializeModbus());
-                
+
                 // 初始化相机
                 await Task.Run(() => InitializeCamera());
-                
+
                 // 初始化模型
                 await Task.Run(() => InitializeModel());
-                
+
                 _isInitialized = true;
                 UpdateStatus("系统初始化完成");
-                
+
                 // 更新界面控件状态
                 UpdateControlState();
             }
@@ -218,14 +218,14 @@ namespace OpenIVSWPF
             try
             {
                 UpdateStatus("正在初始化Modbus设备...");
-                
+
                 // 关闭已有连接
                 if (_isModbusConnected && _modbusApi != null)
                 {
                     _modbusApi.Close();
                     _isModbusConnected = false;
                 }
-                
+
                 // 使用设置中的串口参数
                 if (string.IsNullOrEmpty(_settings.PortName))
                 {
@@ -256,11 +256,11 @@ namespace OpenIVSWPF
                     _isModbusConnected = true;
                     UpdateStatus($"Modbus设备已连接，串口：{_settings.PortName}");
                     UpdateDeviceStatus("已连接");
-                    
+
                     // 设置当前速度
                     _currentSpeed = _settings.Speed;
                     _modbusApi.WriteFloat(0, _currentSpeed);
-                    
+
                     // 读取当前位置
                     float currentPosition = _modbusApi.ReadFloat(32);
                     _currentPosition = currentPosition;
@@ -285,10 +285,10 @@ namespace OpenIVSWPF
             try
             {
                 UpdateStatus("正在初始化相机...");
-                
+
                 // 刷新设备列表
                 List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
-                
+
                 if (deviceList.Count == 0)
                 {
                     UpdateStatus("未检测到相机设备");
@@ -310,14 +310,14 @@ namespace OpenIVSWPF
                     _isCameraConnected = true;
                     UpdateStatus($"相机已连接：{deviceList[cameraIndex].UserDefinedName}");
                     UpdateCameraStatus("已连接");
-                    
+
                     // 设置触发模式
                     if (_settings.UseTrigger)
                     {
                         TriggerConfig.TriggerMode mode = _settings.UseSoftTrigger
                             ? TriggerConfig.TriggerMode.Software
                             : TriggerConfig.TriggerMode.Line0;
-                        
+
                         _cameraManager.SetTriggerMode(mode);
                         _cameraManager.StartGrabbing();
                         UpdateStatus($"相机设置为{(_settings.UseSoftTrigger ? "软触发" : "硬触发")}模式");
@@ -326,7 +326,7 @@ namespace OpenIVSWPF
                     {
                         // 关闭触发模式
                         _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Off);
-                        
+
                         // 开始抓取图像
                         if (_cameraManager.StartGrabbing())
                         {
@@ -354,7 +354,7 @@ namespace OpenIVSWPF
             try
             {
                 UpdateStatus("正在加载AI模型...");
-                
+
                 // 检查模型文件是否存在
                 if (!File.Exists(_settings.ModelPath))
                 {
@@ -367,7 +367,7 @@ namespace OpenIVSWPF
                 _model = new Model(_settings.ModelPath, 0); // 使用第一个GPU设备
                 _isModelLoaded = true;
                 _modelPath = _settings.ModelPath;
-                
+
                 UpdateStatus("AI模型已加载");
                 UpdateModelStatus("已加载");
             }
@@ -419,10 +419,10 @@ namespace OpenIVSWPF
                     // 读取当前位置（地址32，浮点数）
                     float currentPosition = _modbusApi.ReadFloat(32);
                     _currentPosition = currentPosition;
-                    
+
                     // 更新位置显示
                     UpdatePositionDisplay(currentPosition);
-                    
+
                     // 判断是否到达目标位置（允许一定误差）
                     if (Math.Abs(currentPosition - position) < 1.0f)
                     {
@@ -463,19 +463,19 @@ namespace OpenIVSWPF
             try
             {
                 UpdateStatus("正在捕获图像...");
-                
+
                 if (!_isCameraConnected)
                 {
                     UpdateStatus("相机未连接，无法捕获图像");
                     return null;
                 }
-                
+
                 // 根据触发模式执行不同的捕获逻辑
                 if (_settings.UseTrigger)
                 {
                     // 使用TaskCompletionSource等待图像更新事件
                     var tcs = new TaskCompletionSource<Bitmap>();
-                    
+
                     // 设置图像捕获事件处理
                     EventHandler<ImageEventArgs> handler = null;
                     handler = (s, e) =>
@@ -485,28 +485,28 @@ namespace OpenIVSWPF
                         {
                             tcs.TrySetResult(e.Image.Clone() as Bitmap);
                         }
-                        
+
                         // 移除事件处理器，防止多次触发
                         _cameraManager.ImageUpdated -= handler;
                     };
-                    
+
                     // 添加事件处理
                     _cameraManager.ImageUpdated += handler;
-                    
+
                     // 执行软触发
                     _cameraManager.TriggerOnce();
-                    
+
                     // 添加超时处理，5秒内如果没有图像返回，则取消
                     using (var timeoutCts = new CancellationTokenSource(1000))
                     using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
                     {
                         // 注册取消操作
-                        linkedCts.Token.Register(() => 
+                        linkedCts.Token.Register(() =>
                         {
                             _cameraManager.ImageUpdated -= handler;
                             tcs.TrySetCanceled();
                         });
-                        
+
                         // 等待图像或取消
                         try
                         {
@@ -532,10 +532,10 @@ namespace OpenIVSWPF
                     else
                     {
                         UpdateStatus("等待首次图像捕获...");
-                        
+
                         // 等待图像
                         var tcs = new TaskCompletionSource<Bitmap>();
-                        
+
                         // 设置图像捕获事件处理
                         EventHandler<ImageEventArgs> handler = null;
                         handler = (s, e) =>
@@ -545,25 +545,25 @@ namespace OpenIVSWPF
                             {
                                 tcs.TrySetResult(e.Image.Clone() as Bitmap);
                             }
-                            
+
                             // 移除事件处理器，防止多次触发
                             _cameraManager.ImageUpdated -= handler;
                         };
-                        
+
                         // 添加事件处理
                         _cameraManager.ImageUpdated += handler;
-                        
+
                         // 添加超时处理，5秒内如果没有图像返回，则取消
                         using (var timeoutCts = new CancellationTokenSource(5000))
                         using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
                         {
                             // 注册取消操作
-                            linkedCts.Token.Register(() => 
+                            linkedCts.Token.Register(() =>
                             {
                                 _cameraManager.ImageUpdated -= handler;
                                 tcs.TrySetCanceled();
                             });
-                            
+
                             // 等待图像或取消
                             try
                             {
@@ -597,25 +597,25 @@ namespace OpenIVSWPF
 
                 // 将Bitmap转换为Mat
                 Mat mat = BitmapToMat(image);
-                
+
                 // 创建批处理列表
                 var imageList = new List<Mat> { mat };
 
                 // 执行推理
                 dlcv_infer_csharp.Utils.CSharpResult result = _model.InferBatch(imageList);
-                
+
                 // 提取结果文本
                 StringBuilder sb = new StringBuilder();
                 var sampleResults = result.SampleResults[0];
-                
+
                 foreach (var item in sampleResults.Results)
                 {
                     sb.AppendLine($"{item.CategoryName}: {item.Score:F2}");
                 }
-                
+
                 // 更新ImageViewer以显示检测结果
                 UpdateDisplayImage(image, result);
-                
+
                 // 返回结果文本
                 return sb.ToString();
             }
@@ -721,7 +721,7 @@ namespace OpenIVSWPF
                 Dispatcher.Invoke(() => UpdateDetectionResult(result));
             }
         }
-        
+
         // 更新统计信息
         private void UpdateStatistics(bool isOK)
         {
@@ -736,10 +736,10 @@ namespace OpenIVSWPF
                 {
                     _ngCount++;
                 }
-                
+
                 // 计算良率
                 _yieldRate = _totalCount > 0 ? (double)_okCount / _totalCount * 100 : 0;
-                
+
                 // 更新ViewModel
                 ViewModel.UpdateStatistics(_totalCount, _okCount, _ngCount, _yieldRate);
                 ViewModel.UpdateCurrentResult(isOK);
@@ -757,7 +757,7 @@ namespace OpenIVSWPF
             {
                 _lastCapturedImage = image.Clone() as Bitmap;
             }
-            
+
             // 在WPF线程上更新UI
             Dispatcher.Invoke(() =>
             {
@@ -765,18 +765,18 @@ namespace OpenIVSWPF
                 if (imageViewer1 != null)
                 {
                     imageViewer1.UpdateImage(image);
-                    
+
                     // 如果有检测结果，则更新显示
                     if (result is null)
                     {
-                        imageViewer1.ClearResults(); 
+                        imageViewer1.ClearResults();
                     }
                     else
                     {
                         // 将result转换为object类型
                         imageViewer1.UpdateResults(result);
                     }
-                    
+
                     // 刷新ImageViewer的显示
                     imageViewer1.Invalidate();
                 }
@@ -819,7 +819,7 @@ namespace OpenIVSWPF
                     {
                         // 保存最新图像，用于非触发模式
                         _lastCapturedImage = e.Image.Clone() as Bitmap;
-                        
+
                         // 如果是非触发模式，则立即执行推理
                         if (_isRunning && !_settings.UseTrigger)
                         {
@@ -828,13 +828,13 @@ namespace OpenIVSWPF
 
                             // 更新检测结果显示
                             UpdateDetectionResult(result);
-                            
+
                             // 判断检测结果
                             bool isOK = string.IsNullOrEmpty(result);
-                            
+
                             // 更新统计信息
                             UpdateStatistics(isOK);
-                            
+
                             // 根据设置保存图像
                             SaveImage(_lastCapturedImage, isOK);
                         }
@@ -858,14 +858,14 @@ namespace OpenIVSWPF
         {
             if (_isRunning)
                 return;
-            
+
             try
             {
                 // 如果系统尚未初始化，则先初始化
                 if (!_isInitialized)
                 {
                     await InitializeSystemAsync();
-                    
+
                     // 如果初始化失败，则返回
                     if (!_isModbusConnected || !_isCameraConnected || !_isModelLoaded)
                     {
@@ -874,15 +874,15 @@ namespace OpenIVSWPF
                         return;
                     }
                 }
-                
+
                 // 创建取消令牌
                 _cts = new CancellationTokenSource();
-                
+
                 // 标记为正在运行
                 _isRunning = true;
                 UpdateControlState(); // 更新所有按钮状态
                 UpdateStatus("系统启动");
-                
+
                 // 启动主循环任务
                 await RunMainLoopAsync(_cts.Token);
             }
@@ -907,7 +907,7 @@ namespace OpenIVSWPF
                     _cts.Dispose();
                     _cts = null;
                 }
-                
+
                 UpdateStatus("系统已停止");
                 UpdateControlState();
             }
@@ -923,11 +923,11 @@ namespace OpenIVSWPF
             {
                 // 显示确认对话框
                 MessageBoxResult result = MessageBox.Show(
-                    "确定要清零所有计数吗？", 
-                    "确认清零", 
-                    MessageBoxButton.YesNo, 
+                    "确定要清零所有计数吗？",
+                    "确认清零",
+                    MessageBoxButton.YesNo,
                     MessageBoxImage.Question);
-                
+
                 if (result == MessageBoxResult.Yes)
                 {
                     // 重置所有计数
@@ -935,10 +935,10 @@ namespace OpenIVSWPF
                     _okCount = 0;
                     _ngCount = 0;
                     _yieldRate = 0.0;
-                    
+
                     // 更新ViewModel
                     ViewModel.UpdateStatistics(_totalCount, _okCount, _ngCount, _yieldRate);
-                    
+
                     UpdateStatus("计数已清零");
                 }
             }
@@ -956,10 +956,10 @@ namespace OpenIVSWPF
                 // 创建设置窗口
                 SettingsWindow settingsWindow = new SettingsWindow(_settings);
                 settingsWindow.Owner = this;
-                
+
                 // 显示设置窗口
                 bool? result = settingsWindow.ShowDialog();
-                
+
                 // 如果设置已保存，则更新设置
                 if (settingsWindow.IsSettingsSaved)
                 {
@@ -976,14 +976,14 @@ namespace OpenIVSWPF
                     _settings.ModelPath = settingsWindow.ModelPath;
                     _settings.Speed = settingsWindow.Speed;
                     _settings.TargetPosition = settingsWindow.TargetPosition;
-                    
+
                     // 图像保存设置
                     _settings.SavePath = settingsWindow.SavePath;
                     _settings.SaveOKImage = settingsWindow.SaveOKImage;
                     _settings.SaveNGImage = settingsWindow.SaveNGImage;
                     _settings.ImageFormat = settingsWindow.ImageFormat;
                     _settings.JpegQuality = settingsWindow.JpegQuality;
-                    
+
                     // 如果系统已初始化，则需要重新初始化
                     if (_isInitialized)
                     {
@@ -993,20 +993,20 @@ namespace OpenIVSWPF
                             "设置已更改",
                             MessageBoxButton.YesNo,
                             MessageBoxImage.Question);
-                        
+
                         if (mbResult == MessageBoxResult.Yes)
                         {
                             // 重置初始化标志
                             _isInitialized = false;
-                            
+
                             // 清理已有资源
                             CleanupResources();
-                            
+
                             // 重置UI状态
                             InitializeUIState();
                         }
                     }
-                    
+
                     UpdateStatus("设置已更新");
                 }
             }
@@ -1024,7 +1024,7 @@ namespace OpenIVSWPF
             {
                 // 取消所有操作
                 _cts?.Cancel();
-                
+
                 // 清理资源
                 CleanupResources();
             }
@@ -1033,7 +1033,7 @@ namespace OpenIVSWPF
                 MessageBox.Show($"关闭过程中发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-        
+
         // 清理资源
         private void CleanupResources()
         {
@@ -1043,7 +1043,7 @@ namespace OpenIVSWPF
                 _modbusApi?.Close();
                 _isModbusConnected = false;
             }
-            
+
             // 关闭相机
             if (_isCameraConnected)
             {
@@ -1052,11 +1052,11 @@ namespace OpenIVSWPF
                     _cameraManager?.StopGrabbing();
                     _isGrabbing = false;
                 }
-                
+
                 _cameraManager?.DisconnectDevice();
                 _isCameraConnected = false;
             }
-            
+
             // 释放AI模型
             if (_isModelLoaded)
             {
@@ -1077,10 +1077,10 @@ namespace OpenIVSWPF
                 {
                     // 获取当前位置索引
                     float targetPosition = _positionSequence[_currentPositionIndex];
-                    
+
                     // 移动到目标位置
                     bool moveResult = await MoveToPositionAsync(targetPosition, token);
-                    
+
                     if (moveResult && !token.IsCancellationRequested)
                     {
                         // 到达目标位置后，如果是触发模式才拍照和推理
@@ -1088,7 +1088,7 @@ namespace OpenIVSWPF
                         {
                             // 触发相机拍照
                             UpdateStatus($"在位置 {targetPosition} 进行拍照...");
-                            
+
                             try
                             {
                                 // 等待运动稳定
@@ -1107,19 +1107,19 @@ namespace OpenIVSWPF
                                             // 获取到图像后，执行AI推理
                                             UpdateStatus("执行AI推理...");
                                             string result = PerformInference(image);
-                                            
+
                                             // 更新检测结果显示
                                             UpdateDetectionResult(result);
-                                            
+
                                             // 判断检测结果
                                             bool isOK = string.IsNullOrEmpty(result);
-                                            
+
                                             // 更新统计信息
                                             UpdateStatistics(isOK);
-                                            
+
                                             // 根据设置保存图像
                                             SaveImage(image, isOK);
-                                            
+
                                             // 添加完成信息
                                             UpdateStatus($"位置 {targetPosition} 的推理和保存已完成");
                                         }
@@ -1128,7 +1128,7 @@ namespace OpenIVSWPF
                                             UpdateStatus($"图像处理过程中发生错误：{ex.Message}");
                                         }
                                     });
-                                    
+
                                     // 提示拍照已完成
                                     UpdateStatus($"位置 {targetPosition} 的拍照已完成，准备移动到下一位置");
                                 }
@@ -1142,10 +1142,10 @@ namespace OpenIVSWPF
                             }
                         }
                     }
-                    
+
                     if (token.IsCancellationRequested)
                         break;
-                    
+
                     // 更新位置索引，实现1-2-3-2-1循环
                     _currentPositionIndex = (_currentPositionIndex + 1) % _positionSequence.Length;
                 }
@@ -1186,25 +1186,25 @@ namespace OpenIVSWPF
                 // 获取当前日期和时间
                 string currentDate = DateTime.Now.ToString("yyyyMMdd");
                 string timeString = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
-                
+
                 // 结果文件夹
                 string resultFolder = isOK ? "OK" : "NG";
-                
+
                 // 创建日期和结果文件夹
                 string dateFolder = Path.Combine(_settings.SavePath, currentDate);
                 string resultPath = Path.Combine(dateFolder, resultFolder);
-                
+
                 if (!Directory.Exists(dateFolder))
                     Directory.CreateDirectory(dateFolder);
-                
+
                 if (!Directory.Exists(resultPath))
                     Directory.CreateDirectory(resultPath);
-                
+
                 // 生成文件名
                 string extension = _settings.ImageFormat.ToLower();
                 string filename = $"{timeString}.{extension}";
                 string fullPath = Path.Combine(resultPath, filename);
-                
+
                 // 使用OpenCV保存图像
                 using (var mat = BitmapConverter.ToMat(image))
                 {
@@ -1218,8 +1218,8 @@ namespace OpenIVSWPF
                         }
 
                         // 保存为JPG格式
-                        var parameters = new int[] 
-                        { 
+                        var parameters = new int[]
+                        {
                             (int)OpenCvSharp.ImwriteFlags.JpegQuality, quality,
                             (int)OpenCvSharp.ImwriteFlags.JpegProgressive, 1
                         };
@@ -1230,7 +1230,7 @@ namespace OpenIVSWPF
                         OpenCvSharp.Cv2.ImWrite(fullPath, mat);
                     }
                 }
-                
+
                 UpdateStatus($"图像已保存到: {fullPath}");
             }
             catch (Exception ex)
