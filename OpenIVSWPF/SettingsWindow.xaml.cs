@@ -30,7 +30,7 @@ namespace OpenIVSWPF
     {
         // 相机管理器引用
         private CameraManager _cameraManager = CameraInstance.Instance;
-        private ModbusApi _modbusApi = ModbusManager.Instance;
+        private ModbusApi _modbusApi = ModbusInstance.Instance;
         
         // 设置属性
         public string SelectedPortName { get; private set; }

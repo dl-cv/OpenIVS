@@ -13,7 +13,7 @@ namespace OpenIVSWPF.Managers
     /// </summary>
     public class MainLoopManager
     {
-        private ModbusInitializer _modbusInitializer;
+        private ModbusManager _modbusInitializer;
         private CameraInitializer _cameraInitializer;
         private ModelManager _modelManager;
         private Settings _settings;
@@ -27,7 +27,7 @@ namespace OpenIVSWPF.Managers
         private int _currentPositionIndex = 0;
 
         public MainLoopManager(
-            ModbusInitializer modbusInitializer, 
+            ModbusManager modbusInitializer, 
             CameraInitializer cameraInitializer, 
             ModelManager modelManager, 
             Settings settings,

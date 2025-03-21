@@ -32,7 +32,7 @@ namespace OpenIVSWPF
         private Settings _settings;
 
         // Modbus通信管理器
-        private ModbusInitializer _modbusInitializer;
+        private ModbusManager _modbusInitializer;
         private bool _isModbusConnected = false;
 
         // 相机控制管理器
@@ -99,7 +99,7 @@ namespace OpenIVSWPF
         private void InitializeManagers()
         {
             // 初始化Modbus管理器
-            _modbusInitializer = new ModbusInitializer(
+            _modbusInitializer = new ModbusManager(
                 UpdateStatus,
                 ViewModel.UpdateDeviceStatus,
                 ViewModel.UpdatePosition
