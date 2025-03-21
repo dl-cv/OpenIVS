@@ -57,17 +57,13 @@ namespace OpenIVSWPF
         
         // 设置结果
         public bool IsSettingsSaved { get; private set; }
-        
-        // 设置文件路径
-        private readonly string _settingsFilePath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
 
-        public SettingsWindow(Settings currentSettings)
+        public SettingsWindow()
         {
             InitializeComponent();
             
             // 加载当前设置
-            LoadSettings(currentSettings);
+            LoadSettings();
             
             // 初始化界面
             InitializeUI();
@@ -140,7 +136,8 @@ namespace OpenIVSWPF
                 }
                 
                 // 使用设置中的串口参数
-                if (string.IsNullOrEmpty(SelectedPortName))
+                var settings = SettingsManager.Instance.Settings;
+                if (string.IsNullOrEmpty(settings.PortName))
                 {
                     // 如果未设置串口，尝试获取第一个可用的串口
                     string[] ports = SerialPort.GetPortNames();
@@ -149,17 +146,17 @@ namespace OpenIVSWPF
                         System.Windows.MessageBox.Show("未检测到串口设备", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
                         return;
                     }
-                    SelectedPortName = ports[0];
+                    settings.PortName = ports[0];
                 }
 
                 // 设置串口参数
                 _modbusApi.SetSerialPort(
-                    SelectedPortName,  // 串口
-                    BaudRate,         // 波特率
-                    DataBits,         // 数据位
-                    StopBits,         // 停止位
-                    Parity,           // 校验位
-                    (byte)DeviceId    // 设备ID
+                    settings.PortName,  // 串口
+                    settings.BaudRate,  // 波特率
+                    settings.DataBits,  // 数据位
+                    settings.StopBits,  // 停止位
+                    settings.Parity,    // 校验位
+                    (byte)settings.DeviceId // 设备ID
                 );
 
                 // 打开串口
@@ -186,8 +183,10 @@ namespace OpenIVSWPF
             UpdateTriggerOptions();
         }
 
-        private void LoadSettings(Settings settings)
+        private void LoadSettings()
         {
+            var settings = SettingsManager.Instance.Settings;
+            
             // Modbus设置
             SelectedPortName = settings.PortName;
             BaudRate = settings.BaudRate;
@@ -409,11 +408,11 @@ namespace OpenIVSWPF
                     return;
                 }
                 
-                // 读取设置值
+                // 读取UI中的设置值到临时变量
                 SaveSettings();
                 
-                // 保存设置到XML文件
-                SaveSettingsToFile();
+                // 保存设置到文件
+                SettingsManager.Instance.SaveSettings();
                 
                 // 标记为已保存
                 IsSettingsSaved = true;
@@ -461,116 +460,46 @@ namespace OpenIVSWPF
 
         private void SaveSettings()
         {
+            var settings = SettingsManager.Instance.Settings;
+            
             // Modbus设置
-            SelectedPortName = cbPortName.SelectedItem.ToString();
-            BaudRate = int.Parse(((ComboBoxItem)cbBaudRate.SelectedItem).Content.ToString());
-            DataBits = int.Parse(((ComboBoxItem)cbDataBits.SelectedItem).Content.ToString());
-            StopBits = (StopBits)Enum.Parse(typeof(StopBits), ((ComboBoxItem)cbStopBits.SelectedItem).Content.ToString());
-            Parity = (Parity)Enum.Parse(typeof(Parity), ((ComboBoxItem)cbParity.SelectedItem).Content.ToString());
-            DeviceId = int.Parse(txtDeviceId.Text);
+            settings.PortName = cbPortName.SelectedItem.ToString();
+            settings.BaudRate = int.Parse(((ComboBoxItem)cbBaudRate.SelectedItem).Content.ToString());
+            settings.DataBits = int.Parse(((ComboBoxItem)cbDataBits.SelectedItem).Content.ToString());
+            settings.StopBits = (StopBits)Enum.Parse(typeof(StopBits), ((ComboBoxItem)cbStopBits.SelectedItem).Content.ToString());
+            settings.Parity = (Parity)Enum.Parse(typeof(Parity), ((ComboBoxItem)cbParity.SelectedItem).Content.ToString());
+            settings.DeviceId = int.Parse(txtDeviceId.Text);
             
             // 相机设置
-            SelectedCameraIndex = cbCameraList.SelectedIndex;
-            CameraUserDefinedName = cbCameraList.SelectedItem?.ToString() ?? string.Empty;
-            UseTrigger = chkUseTrigger.IsChecked == true;
-            UseSoftTrigger = rbSoftTrigger.IsChecked == true;
+            settings.CameraIndex = cbCameraList.SelectedIndex;
+            settings.CameraUserDefinedName = cbCameraList.SelectedItem?.ToString() ?? string.Empty;
+            settings.UseTrigger = chkUseTrigger.IsChecked == true;
+            settings.UseSoftTrigger = rbSoftTrigger.IsChecked == true;
             
             // 模型设置
-            ModelPath = txtModelPath.Text;
+            settings.ModelPath = txtModelPath.Text;
             
             // 设备设置
-            Speed = float.Parse(txtSpeed.Text);
+            settings.Speed = float.Parse(txtSpeed.Text);
             
             // 目标位置设置
             if (float.TryParse(txtTargetPosition.Text, out float targetPos))
             {
-                TargetPosition = targetPos;
+                settings.TargetPosition = targetPos;
             }
 
             // 拍照设置
             if (int.TryParse(txtPreCaptureDelay.Text, out int delay))
             {
-                PreCaptureDelay = Math.Max(0, delay); // 确保不会小于0
+                settings.PreCaptureDelay = Math.Max(0, delay); // 确保不会小于0
             }
 
             // 图像保存设置
-            SavePath = txtSaveImagePath.Text;
-            SaveOKImage = chkSaveOKImage.IsChecked == true;
-            SaveNGImage = chkSaveNGImage.IsChecked == true;
-            ImageFormat = ((ComboBoxItem)cbImageFormat.SelectedItem).Content.ToString();
-            JpegQuality = txtJpegQuality.Text;
-        }
-
-        private void SaveSettingsToFile()
-        {
-            try
-            {
-                XmlDocument doc = new XmlDocument();
-                XmlElement root;
-                
-                // 如果文件存在，则加载现有文件
-                if (File.Exists(_settingsFilePath))
-                {
-                    doc.Load(_settingsFilePath);
-                    root = doc.DocumentElement;
-                }
-                else
-                {
-                    // 创建新的XML文档
-                    root = doc.CreateElement("Settings");
-                    doc.AppendChild(root);
-                }
-
-                // 保存Modbus设置
-                SetSettingValue(doc, root, "PortName", SelectedPortName);
-                SetSettingValue(doc, root, "BaudRate", BaudRate.ToString());
-                SetSettingValue(doc, root, "DataBits", DataBits.ToString());
-                SetSettingValue(doc, root, "StopBits", StopBits.ToString());
-                SetSettingValue(doc, root, "Parity", Parity.ToString());
-                SetSettingValue(doc, root, "DeviceId", DeviceId.ToString());
-                
-                // 保存相机设置
-                SetSettingValue(doc, root, "CameraIndex", SelectedCameraIndex.ToString());
-                SetSettingValue(doc, root, "CameraUserDefinedName", CameraUserDefinedName);
-                SetSettingValue(doc, root, "UseTrigger", UseTrigger.ToString());
-                SetSettingValue(doc, root, "UseSoftTrigger", UseSoftTrigger.ToString());
-                SetSettingValue(doc, root, "SavePath", SavePath);
-                SetSettingValue(doc, root, "SaveOKImage", SaveOKImage.ToString());
-                SetSettingValue(doc, root, "SaveNGImage", SaveNGImage.ToString());
-                SetSettingValue(doc, root, "ImageFormat", ImageFormat);
-                SetSettingValue(doc, root, "JpegQuality", JpegQuality);
-                
-                // 保存模型设置
-                SetSettingValue(doc, root, "ModelPath", ModelPath);
-                
-                // 保存设备设置
-                SetSettingValue(doc, root, "Speed", Speed.ToString());
-                
-                // 保存目标位置
-                SetSettingValue(doc, root, "TargetPosition", TargetPosition.ToString());
-                
-                // 保存拍照设置
-                SetSettingValue(doc, root, "PreCaptureDelay", PreCaptureDelay.ToString());
-                
-                // 保存文件
-                doc.Save(_settingsFilePath);
-            }
-            catch (Exception ex)
-            {
-                System.Windows.MessageBox.Show($"保存设置文件时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-        
-        private void SetSettingValue(XmlDocument doc, XmlElement root, string key, string value)
-        {
-            XmlNode node = root.SelectSingleNode(key);
-            if (node == null)
-            {
-                // 如果节点不存在，则创建新节点
-                node = doc.CreateElement(key);
-                root.AppendChild(node);
-            }
-            node.InnerText = value;
+            settings.SavePath = txtSaveImagePath.Text;
+            settings.SaveOKImage = chkSaveOKImage.IsChecked == true;
+            settings.SaveNGImage = chkSaveNGImage.IsChecked == true;
+            settings.ImageFormat = ((ComboBoxItem)cbImageFormat.SelectedItem).Content.ToString();
+            settings.JpegQuality = txtJpegQuality.Text;
         }
 
         private void btnCancel_Click(object sender, RoutedEventArgs e)
@@ -908,7 +837,7 @@ namespace OpenIVSWPF
                             System.Windows.MessageBox.Show($"已到达位置：{targetPosition}", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                             
                             // 保存到设置中
-                            TargetPosition = targetPosition;
+                            SettingsManager.Instance.Settings.TargetPosition = targetPosition;
                         }
                         else
                         {
@@ -932,73 +861,5 @@ namespace OpenIVSWPF
             }
         }
         #endregion
-    }
-
-    /// <summary>
-    /// 系统设置类，用于保存和加载设置
-    /// </summary>
-    public class Settings
-    {
-        // Modbus设置
-        public string PortName { get; set; }
-        public int BaudRate { get; set; }
-        public int DataBits { get; set; }
-        public StopBits StopBits { get; set; }
-        public Parity Parity { get; set; }
-        public int DeviceId { get; set; }
-        
-        // 相机设置
-        public int CameraIndex { get; set; }
-        public string CameraUserDefinedName { get; set; }
-        public bool UseTrigger { get; set; }
-        public bool UseSoftTrigger { get; set; }
-        
-        // 模型设置
-        public string ModelPath { get; set; }
-        
-        // 设备设置
-        public float Speed { get; set; }
-        public float TargetPosition { get; set; }
-        
-        // 图像保存设置
-        public string SavePath { get; set; }
-        public bool SaveOKImage { get; set; }
-        public bool SaveNGImage { get; set; }
-        public string ImageFormat { get; set; }
-        public string JpegQuality { get; set; }
-        
-        // 拍照设置
-        public int PreCaptureDelay { get; set; }  // 拍照前等待时间（毫秒）
-        
-        public Settings()
-        {
-            // 默认设置
-            PortName = "";
-            BaudRate = 38400;
-            DataBits = 8;
-            StopBits = StopBits.One;
-            Parity = Parity.None;
-            DeviceId = 1;
-            
-            CameraIndex = 0;
-            CameraUserDefinedName = string.Empty;
-            UseTrigger = true;
-            UseSoftTrigger = true;
-            
-            ModelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "default.dvt");
-            
-            Speed = 100.0f;
-            TargetPosition = 0.0f;
-
-            // 图像保存设置
-            SavePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "images");
-            SaveOKImage = true;
-            SaveNGImage = true;
-            ImageFormat = "JPG";
-            JpegQuality = "98";
-
-            // 拍照设置
-            PreCaptureDelay = 100;  // 默认等待100ms
-        }
     }
 } 

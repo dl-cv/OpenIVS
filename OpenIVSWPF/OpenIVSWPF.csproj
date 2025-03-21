@@ -76,6 +76,7 @@
     <Compile Include="Managers\MainLoopManager.cs" />
     <Compile Include="Managers\ModbusManager.cs" />
     <Compile Include="Managers\ModelManager.cs" />
+    <Compile Include="Managers\SettingsManager.cs" />
     <Compile Include="SettingsWindow.xaml.cs">
       <DependentUpon>SettingsWindow.xaml</DependentUpon>
     </Compile>

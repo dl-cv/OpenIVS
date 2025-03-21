@@ -28,9 +28,6 @@ namespace OpenIVSWPF
     public partial class MainWindow : Window
     {
         #region 成员变量
-        // 系统设置
-        private Settings _settings;
-
         // Modbus通信管理器
         private ModbusManager _modbusInitializer;
         private bool _isModbusConnected = false;
@@ -79,9 +76,9 @@ namespace OpenIVSWPF
 
             // 初始化UI状态
             InitializeUIState();
-
-            // 创建设置对象
-            LoadOrCreateSettings();
+            
+            // 添加设置变更事件处理
+            SettingsManager.Instance.SettingsChanged += SettingsManager_SettingsChanged;
             
             // 初始化管理器
             InitializeManagers();
@@ -122,95 +119,26 @@ namespace OpenIVSWPF
             // 初始化主循环管理器（延迟创建，需要等其他管理器就绪后）
         }
 
-        // 加载或创建设置
-        private void LoadOrCreateSettings()
+        // 设置变更事件处理
+        private void SettingsManager_SettingsChanged(object sender, EventArgs e)
         {
-            try
+            // 如果系统已初始化且正在运行，则提示需要重新初始化
+            if (_isInitialized)
             {
-                // 创建默认设置
-                _settings = new Settings();
-
-                // 尝试从设置文件加载
-                string settingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
-                if (File.Exists(settingsFilePath))
+                Dispatcher.Invoke(() =>
                 {
-                    LoadSettingsFromFile(settingsFilePath, _settings);
-                }
-                else
-                {
-                    // 设置默认模型路径
-                    string modelDefaultPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"test.dvt");
-                    if (File.Exists(modelDefaultPath))
+                    // 如果正在运行，则停止
+                    if (_isRunning)
                     {
-                        _settings.ModelPath = modelDefaultPath;
+                        btnStop_Click(this, new RoutedEventArgs());
                     }
-                }
+
+                    UpdateStatus("设置已更改，需要重新初始化系统");
+                    
+                    // 重置初始化标志
+                    _isInitialized = false;
+                });
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"加载设置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                _settings = new Settings();
-            }
-        }
-
-        private void LoadSettingsFromFile(string settingsFilePath, Settings settings)
-        {
-            try
-            {
-                XmlDocument doc = new XmlDocument();
-                doc.Load(settingsFilePath);
-                XmlElement root = doc.DocumentElement;
-
-                // 加载Modbus设置
-                settings.PortName = GetSettingValue(root, "PortName", settings.PortName);
-                settings.BaudRate = int.Parse(GetSettingValue(root, "BaudRate", settings.BaudRate.ToString()));
-                settings.DataBits = int.Parse(GetSettingValue(root, "DataBits", settings.DataBits.ToString()));
-                settings.StopBits = (StopBits)Enum.Parse(typeof(StopBits), GetSettingValue(root, "StopBits", settings.StopBits.ToString()));
-                settings.Parity = (Parity)Enum.Parse(typeof(Parity), GetSettingValue(root, "Parity", settings.Parity.ToString()));
-                settings.DeviceId = int.Parse(GetSettingValue(root, "DeviceId", settings.DeviceId.ToString()));
-
-                // 加载相机设置
-                settings.CameraIndex = int.Parse(GetSettingValue(root, "CameraIndex", settings.CameraIndex.ToString()));
-                settings.UseTrigger = bool.Parse(GetSettingValue(root, "UseTrigger", settings.UseTrigger.ToString()));
-                settings.UseSoftTrigger = bool.Parse(GetSettingValue(root, "UseSoftTrigger", settings.UseSoftTrigger.ToString()));
-
-                // 加载模型设置
-                settings.ModelPath = GetSettingValue(root, "ModelPath", settings.ModelPath);
-
-                // 加载设备设置
-                settings.Speed = float.Parse(GetSettingValue(root, "Speed", settings.Speed.ToString()));
-
-                // 加载目标位置设置
-                string targetPositionStr = GetSettingValue(root, "TargetPosition", settings.TargetPosition.ToString());
-                if (!string.IsNullOrEmpty(targetPositionStr) && float.TryParse(targetPositionStr, out float targetPos))
-                {
-                    settings.TargetPosition = targetPos;
-                }
-
-                // 加载图像保存设置
-                settings.SavePath = GetSettingValue(root, "SavePath", settings.SavePath);
-                settings.SaveOKImage = bool.Parse(GetSettingValue(root, "SaveOKImage", settings.SaveOKImage.ToString()));
-                settings.SaveNGImage = bool.Parse(GetSettingValue(root, "SaveNGImage", settings.SaveNGImage.ToString()));
-                settings.ImageFormat = GetSettingValue(root, "ImageFormat", settings.ImageFormat);
-                settings.JpegQuality = GetSettingValue(root, "JpegQuality", settings.JpegQuality);
-                
-                // 加载拍照延迟设置
-                string preCaptureDelayStr = GetSettingValue(root, "PreCaptureDelay", settings.PreCaptureDelay.ToString());
-                if (!string.IsNullOrEmpty(preCaptureDelayStr) && int.TryParse(preCaptureDelayStr, out int delay))
-                {
-                    settings.PreCaptureDelay = delay;
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"从文件加载设置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private string GetSettingValue(XmlElement root, string key, string defaultValue)
-        {
-            XmlNode node = root.SelectSingleNode(key);
-            return node != null ? node.InnerText : defaultValue;
         }
 
         // 初始化系统
@@ -221,16 +149,16 @@ namespace OpenIVSWPF
                 UpdateStatus("正在初始化系统...");
 
                 // 初始化Modbus
-                await Task.Run(() => _modbusInitializer.InitializeModbus(_settings));
+                await Task.Run(() => _modbusInitializer.InitializeModbus(SettingsManager.Instance.Settings));
                 _isModbusConnected = _modbusInitializer.IsConnected;
 
                 // 初始化相机
-                await Task.Run(() => _cameraInitializer.InitializeCamera(_settings));
+                await Task.Run(() => _cameraInitializer.InitializeCamera(SettingsManager.Instance.Settings));
                 _isCameraConnected = _cameraInitializer.IsConnected;
                 _isGrabbing = _cameraInitializer.IsGrabbing;
 
                 // 初始化模型
-                await Task.Run(() => _modelManager.InitializeModel(_settings));
+                await Task.Run(() => _modelManager.InitializeModel(SettingsManager.Instance.Settings));
                 _isModelLoaded = _modelManager.IsLoaded;
 
                 // 创建主循环管理器
@@ -238,7 +166,7 @@ namespace OpenIVSWPF
                     _modbusInitializer,
                     _cameraInitializer,
                     _modelManager,
-                    _settings,
+                    SettingsManager.Instance.Settings,
                     UpdateStatus,
                     UpdateDetectionResult,
                     UpdateStatisticsCallback,
@@ -395,7 +323,7 @@ namespace OpenIVSWPF
                         _lastCapturedImage = e.Image.Clone() as Bitmap;
 
                         // 如果是非触发模式，则立即执行推理
-                        if (_isRunning && !_settings.UseTrigger)
+                        if (_isRunning && !SettingsManager.Instance.Settings.UseTrigger)
                         {
                             // 执行AI推理
                             string result = _modelManager.PerformInference(_lastCapturedImage);
@@ -528,36 +456,14 @@ namespace OpenIVSWPF
             try
             {
                 // 创建设置窗口
-                SettingsWindow settingsWindow = new SettingsWindow(_settings);
+                SettingsWindow settingsWindow = new SettingsWindow();
                 settingsWindow.Owner = this;
 
                 // 显示设置窗口
                 bool? result = settingsWindow.ShowDialog();
 
-                // 如果设置已保存，则更新设置
-                if (settingsWindow.IsSettingsSaved)
-                {
-                    // 弹出提示
-                    MessageBoxResult mbResult = MessageBox.Show(
-                        "设置已更改，需要重新初始化系统才能生效。\n是否立即重新初始化？",
-                        "设置已更改",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Question);
-
-                    if (mbResult == MessageBoxResult.Yes)
-                    {
-                        // 重置初始化标志
-                        _isInitialized = false;
-
-                        // 清理已有资源
-                        CleanupResources();
-
-                        // 重置UI状态
-                        InitializeUIState();
-                    }
-
-                    UpdateStatus("设置已更新");
-                }
+                // 更新状态
+                UpdateStatus("设置窗口已关闭");
             }
             catch (Exception ex)
             {
@@ -576,6 +482,9 @@ namespace OpenIVSWPF
 
                 // 清理资源
                 CleanupResources();
+                
+                // 移除设置变更事件
+                SettingsManager.Instance.SettingsChanged -= SettingsManager_SettingsChanged;
             }
             catch (Exception ex)
             {
