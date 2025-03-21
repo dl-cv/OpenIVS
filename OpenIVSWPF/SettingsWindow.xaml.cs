@@ -52,6 +52,9 @@ namespace OpenIVSWPF
         public string JpegQuality { get; private set; }
         public float TargetPosition { get; private set; }
         
+        // 拍照设置
+        public int PreCaptureDelay { get; private set; }  // 拍照前等待时间（毫秒）
+        
         // 设置结果
         public bool IsSettingsSaved { get; private set; }
         
@@ -213,6 +216,9 @@ namespace OpenIVSWPF
             ImageFormat = settings.ImageFormat;
             JpegQuality = settings.JpegQuality;
 
+            // 拍照设置
+            PreCaptureDelay = settings.PreCaptureDelay;
+
             // 更新UI
             cbPortName.Text = SelectedPortName;
             cbBaudRate.Text = BaudRate.ToString();
@@ -229,6 +235,7 @@ namespace OpenIVSWPF
             txtModelPath.Text = ModelPath;
             txtSpeed.Text = Speed.ToString();
             txtTargetPosition.Text = TargetPosition.ToString();
+            txtPreCaptureDelay.Text = PreCaptureDelay.ToString();
 
             txtSaveImagePath.Text = SavePath;
             chkSaveOKImage.IsChecked = SaveOKImage;
@@ -480,6 +487,12 @@ namespace OpenIVSWPF
                 TargetPosition = targetPos;
             }
 
+            // 拍照设置
+            if (int.TryParse(txtPreCaptureDelay.Text, out int delay))
+            {
+                PreCaptureDelay = Math.Max(0, delay); // 确保不会小于0
+            }
+
             // 图像保存设置
             SavePath = txtSaveImagePath.Text;
             SaveOKImage = chkSaveOKImage.IsChecked == true;
@@ -535,6 +548,9 @@ namespace OpenIVSWPF
                 
                 // 保存目标位置
                 SetSettingValue(doc, root, "TargetPosition", TargetPosition.ToString());
+                
+                // 保存拍照设置
+                SetSettingValue(doc, root, "PreCaptureDelay", PreCaptureDelay.ToString());
                 
                 // 保存文件
                 doc.Save(_settingsFilePath);
@@ -863,7 +879,7 @@ namespace OpenIVSWPF
                             float currentPosition = _modbusApi.ReadFloat(32);
                             
                             // 更新位置显示
-                            Dispatcher.BeginInvoke(new Action(() => {
+                            await Dispatcher.BeginInvoke(new Action(() => {
                                 try {
                                     // 使用安全的方式访问控件
                                     var control = FindName("txtCurrentPosition") as TextBlock;
@@ -951,6 +967,9 @@ namespace OpenIVSWPF
         public string ImageFormat { get; set; }
         public string JpegQuality { get; set; }
         
+        // 拍照设置
+        public int PreCaptureDelay { get; set; }  // 拍照前等待时间（毫秒）
+        
         public Settings()
         {
             // 默认设置
@@ -977,6 +996,9 @@ namespace OpenIVSWPF
             SaveNGImage = true;
             ImageFormat = "JPG";
             JpegQuality = "98";
+
+            // 拍照设置
+            PreCaptureDelay = 100;  // 默认等待100ms
         }
     }
 } 

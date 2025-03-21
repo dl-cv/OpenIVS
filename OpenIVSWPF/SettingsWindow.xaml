@@ -164,6 +164,7 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -173,19 +174,22 @@
 
                     <TextBlock Grid.Column="0" Grid.Row="0" Text="运动速度(mm/s):" Margin="0,5,10,5" VerticalAlignment="Center"/>
                     <TextBox Grid.Column="1" Grid.Row="0" x:Name="txtSpeed" Text="100.0" Margin="0,5"/>
-                    
-                    <TextBlock Grid.Column="0" Grid.Row="1" Text="回到原点:" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <Button Grid.Column="1" Grid.Row="1" x:Name="btnGoHome" Content="回到原点" 
+
+                    <TextBlock Grid.Column="0" Grid.Row="1" Text="拍照前等待时间（ms）:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" Grid.Row="1" x:Name="txtPreCaptureDelay" Text="100.0" Margin="0,5"/>
+
+                    <TextBlock Grid.Column="0" Grid.Row="2" Text="回到原点:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Grid.Row="2" x:Name="btnGoHome" Content="回到原点" 
                             HorizontalAlignment="Left" Margin="0,5" Padding="10,5" Click="btnGoHome_Click"/>
                     
-                    <TextBlock Grid.Column="0" Grid.Row="2" Text="指定位置(mm):" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <StackPanel Grid.Column="1" Grid.Row="2" Orientation="Horizontal" Margin="0,5">
+                    <TextBlock Grid.Column="0" Grid.Row="3" Text="指定位置(mm):" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" Grid.Row="3" Orientation="Horizontal" Margin="0,5">
                         <TextBox x:Name="txtTargetPosition" Width="100" Text="0.0"/>
                         <Button x:Name="btnGoToPosition" Content="移动到位置" Margin="10,0,0,0" Padding="10,0" Click="btnGoToPosition_Click"/>
                     </StackPanel>
                     
-                    <TextBlock Grid.Column="0" Grid.Row="3" Text="当前位置:" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1" Grid.Row="3" x:Name="txtCurrentPosition" Text="0.0" Margin="0,5" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="0" Grid.Row="4" Text="当前位置:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Grid.Row="4" x:Name="txtCurrentPosition" Text="0.0" Margin="0,5" VerticalAlignment="Center"/>
                 </Grid>
             </TabItem>
         </TabControl>

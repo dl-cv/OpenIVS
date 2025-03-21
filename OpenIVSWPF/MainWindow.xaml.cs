@@ -51,7 +51,7 @@ namespace OpenIVSWPF
         private float _currentPosition = 0;
         
         // 位置序列定义 (1-2-3-2-1循环)
-        private readonly float[] _positionSequence = new float[] { 195, 300, 415, 300 };
+        private readonly float[] _positionSequence = new float[] { 195, 305, 415, 305 };
         private int _currentPositionIndex = 0;
         
         // 上次拍照结果
@@ -1089,41 +1089,57 @@ namespace OpenIVSWPF
                             // 触发相机拍照
                             UpdateStatus($"在位置 {targetPosition} 进行拍照...");
                             
-                            // 异步执行拍照和推理，但不等待结果
-                            _ = Task.Run(async () =>
+                            try
                             {
-                                try
+                                // 等待运动稳定
+                                await Task.Delay(_settings.PreCaptureDelay, token);
+
+                                // 等待拍照操作完成
+                                var image = await CaptureImageAsync(token);
+
+                                if (image != null && !token.IsCancellationRequested)
                                 {
-                                    // 拍照
-                                    var image = await CaptureImageAsync(token);
+                                    // 拍照完成后，异步处理图像（不等待完成）
+                                    _ = Task.Run(() =>
+                                    {
+                                        try
+                                        {
+                                            // 获取到图像后，执行AI推理
+                                            UpdateStatus("执行AI推理...");
+                                            string result = PerformInference(image);
+                                            
+                                            // 更新检测结果显示
+                                            UpdateDetectionResult(result);
+                                            
+                                            // 判断检测结果
+                                            bool isOK = string.IsNullOrEmpty(result);
+                                            
+                                            // 更新统计信息
+                                            UpdateStatistics(isOK);
+                                            
+                                            // 根据设置保存图像
+                                            SaveImage(image, isOK);
+                                            
+                                            // 添加完成信息
+                                            UpdateStatus($"位置 {targetPosition} 的推理和保存已完成");
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            UpdateStatus($"图像处理过程中发生错误：{ex.Message}");
+                                        }
+                                    });
                                     
-                                    if (image != null && !token.IsCancellationRequested)
-                                    {
-                                        // 获取到图像后，执行AI推理
-                                        UpdateStatus("执行AI推理...");
-                                        string result = PerformInference(image);
-                                        
-                                        // 更新检测结果显示
-                                        UpdateDetectionResult(result);
-                                        
-                                        // 判断检测结果
-                                        bool isOK = string.IsNullOrEmpty(result);
-                                        
-                                        // 更新统计信息
-                                        UpdateStatistics(isOK);
-                                        
-                                        // 根据设置保存图像
-                                        SaveImage(image, isOK);
-                                    }
+                                    // 提示拍照已完成
+                                    UpdateStatus($"位置 {targetPosition} 的拍照已完成，准备移动到下一位置");
                                 }
-                                catch (Exception ex)
+                            }
+                            catch (Exception ex)
+                            {
+                                if (!token.IsCancellationRequested)
                                 {
-                                    if (!token.IsCancellationRequested)
-                                    {
-                                        UpdateStatus($"拍照或推理过程中发生错误：{ex.Message}");
-                                    }
+                                    UpdateStatus($"拍照过程中发生错误：{ex.Message}");
                                 }
-                            }, token);
+                            }
                         }
                     }
                     
