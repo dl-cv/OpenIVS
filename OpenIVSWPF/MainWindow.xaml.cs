@@ -225,7 +225,7 @@ namespace OpenIVSWPF
 
         #region UI更新方法
         // 更新状态栏显示
-        private void UpdateStatus(string message)
+        public void UpdateStatus(string message)
         {
             if (Dispatcher.CheckAccess())
             {
