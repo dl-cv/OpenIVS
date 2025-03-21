@@ -8,6 +8,38 @@ using MvCameraControl;
 namespace OpenIVSWPF.Managers
 {
     /// <summary>
+    /// 相机管理单例类
+    /// </summary>
+    public class CameraInstance
+    {
+        #region 单例模式实现
+        private static CameraManager _instance;
+        private static readonly object _lock = new object();
+
+        /// <summary>
+        /// 获取CameraInstance的单例实例
+        /// </summary>
+        public static CameraManager Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    lock (_lock)
+                    {
+                        if (_instance == null)
+                        {
+                            _instance = new CameraManager();
+                        }
+                    }
+                }
+                return _instance;
+            }
+        }
+        #endregion
+    }
+
+    /// <summary>
     /// 相机初始化和控制管理类
     /// </summary>
     public class CameraInitializer
