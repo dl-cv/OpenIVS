@@ -700,8 +700,8 @@ namespace OpenIVSWPF
                     }
                 }
 
-                // 显示成功信息
-                System.Windows.MessageBox.Show($"图像已保存到：\n{fullPath}", "保存成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                // 更新右下角日志，不再弹窗显示
+                UpdateStatus($"图像已保存到：{fullPath}");
             }
             catch (Exception ex)
             {
@@ -795,6 +795,9 @@ namespace OpenIVSWPF
                         return;
                     }
 
+                    // 更新日志状态
+                    UpdateStatus($"开始移动到位置：{targetPosition}");
+
                     // 等待移动完成（轮询当前位置）
                     using (var cts = new CancellationTokenSource())
                     {
@@ -834,14 +837,16 @@ namespace OpenIVSWPF
 
                         if (isReached)
                         {
-                            System.Windows.MessageBox.Show($"已到达位置：{targetPosition}", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                            // 更新日志状态
+                            UpdateStatus($"已到达位置：{targetPosition}");
                             
                             // 保存到设置中
                             SettingsManager.Instance.Settings.TargetPosition = targetPosition;
                         }
                         else
                         {
-                            System.Windows.MessageBox.Show("移动超时，未到达目标位置", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+                            // 更新日志状态
+                            UpdateStatus($"移动超时，未到达目标位置：{targetPosition}");
                         }
                     }
                 }
@@ -853,7 +858,7 @@ namespace OpenIVSWPF
             }
             catch (TaskCanceledException)
             {
-                System.Windows.MessageBox.Show("移动操作已取消", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                UpdateStatus("移动操作已取消");
             }
             catch (Exception ex)
             {
@@ -861,5 +866,16 @@ namespace OpenIVSWPF
             }
         }
         #endregion
+
+        // 添加更新状态的方法，将消息传递给主窗口的状态栏
+        private void UpdateStatus(string message)
+        {
+            // 通过Owner属性获取主窗口引用
+            if (Owner is MainWindow mainWindow)
+            {
+                // 调用主窗口的UpdateStatus方法
+                mainWindow.UpdateStatus(message);
+            }
+        }
     }
 } 
