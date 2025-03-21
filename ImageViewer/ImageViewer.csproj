@@ -82,7 +82,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
-      <Project>{e3af1804-fbcb-4865-b656-fde76a7bcd25}</Project>
+      <Project>{73d82dbe-59d3-46f9-a8b3-87e13eb220ec}</Project>
       <Name>DlcvCsharpApi</Name>
     </ProjectReference>
   </ItemGroup>
