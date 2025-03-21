@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+我用的是 .Net Framework 4.7.2，所以不能用高级 .Net 版本。
+如果是 .Net Framework，UI定义在Form1.Designer.cs写，代码逻辑在Form1.cs写。
+如果是 WPF，要尽量用WPF的风格写，比如使用绑定显示。
+我们写的代码要开源，所以要写得很规范，很有逻辑。
