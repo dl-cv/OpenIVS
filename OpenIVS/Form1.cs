@@ -35,7 +35,7 @@ namespace OpenIVS
         // AI模型
         private Model _model;
         private bool _isModelLoaded = false;
-        private string _modelPath = Path.Combine(Application.StartupPath, @"C:\Users\91550\Desktop\名片识别\模型\名片识别_20250318_161513.dvt");
+        private string _modelPath = Path.Combine(Application.StartupPath, @"test.dvt");
 
         // 运行控制
         private bool _isRunning = false;
