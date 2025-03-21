@@ -71,12 +71,11 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
-    <Compile Include="CameraInitializer.cs" />
-    <Compile Include="CameraManager.cs" />
-    <Compile Include="MainLoopManager.cs" />
     <Compile Include="MainWindowViewModel.cs" />
-    <Compile Include="ModbusManager.cs" />
-    <Compile Include="ModelManager.cs" />
+    <Compile Include="Managers\CameraInitializer.cs" />
+    <Compile Include="Managers\MainLoopManager.cs" />
+    <Compile Include="Managers\ModbusManager.cs" />
+    <Compile Include="Managers\ModelManager.cs" />
     <Compile Include="SettingsWindow.xaml.cs">
       <DependentUpon>SettingsWindow.xaml</DependentUpon>
     </Compile>

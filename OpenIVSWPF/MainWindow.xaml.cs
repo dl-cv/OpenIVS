@@ -410,7 +410,7 @@ namespace OpenIVSWPF
                             UpdateStatisticsCallback(isOK);
 
                             // 根据设置保存图像
-                            SaveImageAsync(_lastCapturedImage, isOK);
+                            _ = SaveImageAsync(_lastCapturedImage, isOK);
                         }
                         else
                         {
