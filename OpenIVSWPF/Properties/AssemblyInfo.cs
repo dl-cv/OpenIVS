@@ -10,9 +10,9 @@ using System.Windows;
 [assembly: AssemblyTitle("OpenIVSWPF")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("OpenIVSWPF")]
-[assembly: AssemblyCopyright("Copyright ©  2025")]
+[assembly: AssemblyCompany("OpenIVS")]
+[assembly: AssemblyProduct("OpenIVS")]
+[assembly: AssemblyCopyright("Copyright © DLCV.AI  2025")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

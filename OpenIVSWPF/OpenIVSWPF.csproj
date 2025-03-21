@@ -35,6 +35,9 @@
     <ErrorReport>prompt</ErrorReport>
     <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>logo.ico</ApplicationIcon>
+  </PropertyGroup>
   <ItemGroup>
     <Reference Include="MvCameraControl.Net, Version=3.4.0.1, Culture=neutral, PublicKeyToken=52fddfb3f94be800, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
@@ -123,7 +126,7 @@
       <Name>CameraManager</Name>
     </ProjectReference>
     <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
-      <Project>{e3af1804-fbcb-4865-b656-fde76a7bcd25}</Project>
+      <Project>{73d82dbe-59d3-46f9-a8b3-87e13eb220ec}</Project>
       <Name>DlcvCsharpApi</Name>
     </ProjectReference>
     <ProjectReference Include="..\ImageViewer\ImageViewer.csproj">
@@ -134,6 +137,9 @@
       <Project>{70a89ce8-ade7-42df-9762-19a896be3c1f}</Project>
       <Name>ModbusApi</Name>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="logo.ico" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
