@@ -15,6 +15,7 @@ using OpenCvSharp.Extensions;
 using MvCameraControl;
 using OpenIVSWPF.Managers;
 using System.Xml;
+using System.Windows.Forms.Integration;
 
 using Window = System.Windows.Window;
 using Path = System.IO.Path;
@@ -30,30 +31,26 @@ namespace OpenIVSWPF
         // 系统设置
         private Settings _settings;
 
-        // Modbus通信
-        private ModbusApi _modbusApi = ModbusManager.Instance;
+        // Modbus通信管理器
+        private ModbusInitializer _modbusInitializer;
         private bool _isModbusConnected = false;
-        private float _currentSpeed = 100.0f; // 当前速度值
 
-        // 相机控制
-        private CameraManager _cameraManager = CameraInstance.Instance;
+        // 相机控制管理器
+        private CameraInitializer _cameraInitializer;
         private bool _isCameraConnected = false;
         private bool _isGrabbing = false;
 
-        // AI模型
-        private Model _model;
+        // AI模型管理器
+        private ModelManager _modelManager;
         private bool _isModelLoaded = false;
-        private string _modelPath;
+
+        // 主循环管理器
+        private MainLoopManager _mainLoopManager;
 
         // 运行控制
         private bool _isRunning = false;
         private CancellationTokenSource _cts;
-        private float _currentPosition = 0;
-
-        // 位置序列定义 (1-2-3-2-1循环)
-        private readonly float[] _positionSequence = new float[] { 195, 305, 415, 305 };
-        private int _currentPositionIndex = 0;
-
+        
         // 上次拍照结果
         private System.Drawing.Bitmap _lastCapturedImage = null;
         private string _lastDetectionResult = "";
@@ -85,17 +82,44 @@ namespace OpenIVSWPF
 
             // 创建设置对象
             LoadOrCreateSettings();
+            
+            // 初始化管理器
+            InitializeManagers();
         }
 
         #region 初始化方法
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            // 初始化相机管理器（但不连接相机）
-            _cameraManager.ImageUpdated += CameraManager_ImageUpdated;
-
             // 更新界面状态
             UpdateControlState();
             UpdateStatus("系统已就绪，请点击开始按钮初始化设备");
+        }
+
+        // 初始化各个管理器
+        private void InitializeManagers()
+        {
+            // 初始化Modbus管理器
+            _modbusInitializer = new ModbusInitializer(
+                UpdateStatus,
+                ViewModel.UpdateDeviceStatus,
+                ViewModel.UpdatePosition
+            );
+
+            // 初始化相机管理器
+            _cameraInitializer = new CameraInitializer(
+                UpdateStatus,
+                ViewModel.UpdateCameraStatus
+            );
+            _cameraInitializer.ImageUpdated += CameraManager_ImageUpdated;
+
+            // 初始化模型管理器
+            _modelManager = new ModelManager(
+                UpdateStatus,
+                ViewModel.UpdateModelStatus,
+                UpdateDisplayImage
+            );
+
+            // 初始化主循环管理器（延迟创建，需要等其他管理器就绪后）
         }
 
         // 加载或创建设置
@@ -121,8 +145,6 @@ namespace OpenIVSWPF
                         _settings.ModelPath = modelDefaultPath;
                     }
                 }
-
-                _modelPath = _settings.ModelPath;
             }
             catch (Exception ex)
             {
@@ -171,6 +193,13 @@ namespace OpenIVSWPF
                 settings.SaveNGImage = bool.Parse(GetSettingValue(root, "SaveNGImage", settings.SaveNGImage.ToString()));
                 settings.ImageFormat = GetSettingValue(root, "ImageFormat", settings.ImageFormat);
                 settings.JpegQuality = GetSettingValue(root, "JpegQuality", settings.JpegQuality);
+                
+                // 加载拍照延迟设置
+                string preCaptureDelayStr = GetSettingValue(root, "PreCaptureDelay", settings.PreCaptureDelay.ToString());
+                if (!string.IsNullOrEmpty(preCaptureDelayStr) && int.TryParse(preCaptureDelayStr, out int delay))
+                {
+                    settings.PreCaptureDelay = delay;
+                }
             }
             catch (Exception ex)
             {
@@ -192,13 +221,29 @@ namespace OpenIVSWPF
                 UpdateStatus("正在初始化系统...");
 
                 // 初始化Modbus
-                await Task.Run(() => InitializeModbus());
+                await Task.Run(() => _modbusInitializer.InitializeModbus(_settings));
+                _isModbusConnected = _modbusInitializer.IsConnected;
 
                 // 初始化相机
-                await Task.Run(() => InitializeCamera());
+                await Task.Run(() => _cameraInitializer.InitializeCamera(_settings));
+                _isCameraConnected = _cameraInitializer.IsConnected;
+                _isGrabbing = _cameraInitializer.IsGrabbing;
 
                 // 初始化模型
-                await Task.Run(() => InitializeModel());
+                await Task.Run(() => _modelManager.InitializeModel(_settings));
+                _isModelLoaded = _modelManager.IsLoaded;
+
+                // 创建主循环管理器
+                _mainLoopManager = new MainLoopManager(
+                    _modbusInitializer,
+                    _cameraInitializer,
+                    _modelManager,
+                    _settings,
+                    UpdateStatus,
+                    UpdateDetectionResult,
+                    UpdateStatisticsCallback,
+                    SaveImageAsync
+                );
 
                 _isInitialized = true;
                 UpdateStatus("系统初始化完成");
@@ -213,172 +258,6 @@ namespace OpenIVSWPF
             }
         }
 
-        private void InitializeModbus()
-        {
-            try
-            {
-                UpdateStatus("正在初始化Modbus设备...");
-
-                // 关闭已有连接
-                if (_isModbusConnected && _modbusApi != null)
-                {
-                    _modbusApi.Close();
-                    _isModbusConnected = false;
-                }
-
-                // 使用设置中的串口参数
-                if (string.IsNullOrEmpty(_settings.PortName))
-                {
-                    // 如果未设置串口，尝试获取第一个可用的串口
-                    string[] ports = SerialPort.GetPortNames();
-                    if (ports.Length == 0)
-                    {
-                        UpdateStatus("未检测到串口设备");
-                        UpdateDeviceStatus("未检测到串口");
-                        return;
-                    }
-                    _settings.PortName = ports[0];
-                }
-
-                // 设置串口参数
-                _modbusApi.SetSerialPort(
-                    _settings.PortName,  // 串口
-                    _settings.BaudRate,  // 波特率
-                    _settings.DataBits,  // 数据位
-                    _settings.StopBits,  // 停止位
-                    _settings.Parity,    // 校验位
-                    (byte)_settings.DeviceId   // 设备ID
-                );
-
-                // 打开串口
-                if (_modbusApi.Open())
-                {
-                    _isModbusConnected = true;
-                    UpdateStatus($"Modbus设备已连接，串口：{_settings.PortName}");
-                    UpdateDeviceStatus("已连接");
-
-                    // 设置当前速度
-                    _currentSpeed = _settings.Speed;
-                    _modbusApi.WriteFloat(0, _currentSpeed);
-
-                    // 读取当前位置
-                    float currentPosition = _modbusApi.ReadFloat(32);
-                    _currentPosition = currentPosition;
-                    UpdatePositionDisplay(currentPosition);
-                }
-                else
-                {
-                    UpdateStatus("Modbus设备连接失败");
-                    UpdateDeviceStatus("连接失败");
-                }
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"Modbus初始化错误：{ex.Message}");
-                UpdateDeviceStatus("初始化错误");
-                throw;
-            }
-        }
-
-        private void InitializeCamera()
-        {
-            try
-            {
-                UpdateStatus("正在初始化相机...");
-
-                // 刷新设备列表
-                List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
-
-                if (deviceList.Count == 0)
-                {
-                    UpdateStatus("未检测到相机设备");
-                    UpdateCameraStatus("未检测到相机");
-                    return;
-                }
-
-                // 检查相机索引是否有效
-                int cameraIndex = _settings.CameraIndex;
-                if (cameraIndex < 0 || cameraIndex >= deviceList.Count)
-                {
-                    cameraIndex = 0;
-                }
-
-                // 连接选中的相机
-                bool success = _cameraManager.ConnectDevice(cameraIndex);
-                if (success)
-                {
-                    _isCameraConnected = true;
-                    UpdateStatus($"相机已连接：{deviceList[cameraIndex].UserDefinedName}");
-                    UpdateCameraStatus("已连接");
-
-                    // 设置触发模式
-                    if (_settings.UseTrigger)
-                    {
-                        TriggerConfig.TriggerMode mode = _settings.UseSoftTrigger
-                            ? TriggerConfig.TriggerMode.Software
-                            : TriggerConfig.TriggerMode.Line0;
-
-                        _cameraManager.SetTriggerMode(mode);
-                        _cameraManager.StartGrabbing();
-                        UpdateStatus($"相机设置为{(_settings.UseSoftTrigger ? "软触发" : "硬触发")}模式");
-                    }
-                    else
-                    {
-                        // 关闭触发模式
-                        _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Off);
-
-                        // 开始抓取图像
-                        if (_cameraManager.StartGrabbing())
-                        {
-                            _isGrabbing = true;
-                            UpdateStatus("相机设置为连续采集模式");
-                        }
-                    }
-                }
-                else
-                {
-                    UpdateStatus("相机连接失败");
-                    UpdateCameraStatus("连接失败");
-                }
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"相机初始化错误：{ex.Message}");
-                UpdateCameraStatus("初始化错误");
-                throw;
-            }
-        }
-
-        private void InitializeModel()
-        {
-            try
-            {
-                UpdateStatus("正在加载AI模型...");
-
-                // 检查模型文件是否存在
-                if (!File.Exists(_settings.ModelPath))
-                {
-                    UpdateStatus($"模型文件不存在：{_settings.ModelPath}");
-                    UpdateModelStatus("模型文件不存在");
-                    return;
-                }
-
-                // 加载模型
-                _model = new Model(_settings.ModelPath, 0); // 使用第一个GPU设备
-                _isModelLoaded = true;
-                _modelPath = _settings.ModelPath;
-
-                UpdateStatus("AI模型已加载");
-                UpdateModelStatus("已加载");
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"AI模型加载错误：{ex.Message}");
-                UpdateModelStatus("加载错误");
-                throw;
-            }
-        }
-
         // 初始化UI状态
         private void InitializeUIState()
         {
@@ -386,258 +265,33 @@ namespace OpenIVSWPF
         }
         #endregion
 
-        #region 设备控制方法
-        // 移动到指定位置
-        private async Task<bool> MoveToPositionAsync(float position, CancellationToken token)
+        #region 回调方法
+        // 更新统计信息的回调方法
+        private void UpdateStatisticsCallback(bool isOK)
         {
-            try
+            // 更新统计信息
+            _totalCount++;
+            if (isOK)
             {
-                if (!_isModbusConnected)
-                    return false;
-
-                // 设置目标位置（地址8，浮点数）
-                UpdateStatus($"正在移动到位置：{position}");
-                bool resultSetPosition = _modbusApi.WriteFloat(8, position);
-                if (!resultSetPosition)
-                {
-                    UpdateStatus("设置目标位置失败");
-                    return false;
-                }
-
-                // 发送移动命令（地址50，整数2）
-                bool resultCommand = _modbusApi.WriteSingleRegister(50, 2);
-                if (!resultCommand)
-                {
-                    UpdateStatus("发送移动命令失败");
-                    return false;
-                }
-
-                // 等待移动完成（轮询当前位置）
-                bool isReached = false;
-                while (!isReached && !token.IsCancellationRequested)
-                {
-                    // 读取当前位置（地址32，浮点数）
-                    float currentPosition = _modbusApi.ReadFloat(32);
-                    _currentPosition = currentPosition;
-
-                    // 更新位置显示
-                    UpdatePositionDisplay(currentPosition);
-
-                    // 判断是否到达目标位置（允许一定误差）
-                    if (Math.Abs(currentPosition - position) < 1.0f)
-                    {
-                        isReached = true;
-                    }
-                    else
-                    {
-                        // 等待100ms再次检查
-                        await Task.Delay(100, token);
-                    }
-                }
-
-                if (isReached)
-                {
-                    UpdateStatus($"已到达位置：{position}");
-                    return true;
-                }
-                else
-                {
-                    return false;
-                }
+                _okCount++;
             }
-            catch (OperationCanceledException)
+            else
             {
-                UpdateStatus("移动操作已取消");
-                return false;
+                _ngCount++;
             }
-            catch (Exception ex)
-            {
-                UpdateStatus($"移动过程中发生错误：{ex.Message}");
-                return false;
-            }
+
+            // 计算良率
+            _yieldRate = _totalCount > 0 ? (double)_okCount / _totalCount * 100 : 0;
+
+            // 更新ViewModel
+            ViewModel.UpdateStatistics(_totalCount, _okCount, _ngCount, _yieldRate);
+            ViewModel.UpdateCurrentResult(isOK);
         }
 
-        // 触发相机拍照
-        private async Task<Bitmap> CaptureImageAsync(CancellationToken token)
+        // 保存图像的异步方法
+        private async Task SaveImageAsync(Bitmap image, bool isOK)
         {
-            try
-            {
-                UpdateStatus("正在捕获图像...");
-
-                if (!_isCameraConnected)
-                {
-                    UpdateStatus("相机未连接，无法捕获图像");
-                    return null;
-                }
-
-                // 根据触发模式执行不同的捕获逻辑
-                if (_settings.UseTrigger)
-                {
-                    // 使用TaskCompletionSource等待图像更新事件
-                    var tcs = new TaskCompletionSource<Bitmap>();
-
-                    // 设置图像捕获事件处理
-                    EventHandler<ImageEventArgs> handler = null;
-                    handler = (s, e) =>
-                    {
-                        // 捕获到图像后，转换为Bitmap
-                        if (e.Image != null)
-                        {
-                            tcs.TrySetResult(e.Image.Clone() as Bitmap);
-                        }
-
-                        // 移除事件处理器，防止多次触发
-                        _cameraManager.ImageUpdated -= handler;
-                    };
-
-                    // 添加事件处理
-                    _cameraManager.ImageUpdated += handler;
-
-                    // 执行软触发
-                    _cameraManager.TriggerOnce();
-
-                    // 添加超时处理，5秒内如果没有图像返回，则取消
-                    using (var timeoutCts = new CancellationTokenSource(1000))
-                    using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
-                    {
-                        // 注册取消操作
-                        linkedCts.Token.Register(() =>
-                        {
-                            _cameraManager.ImageUpdated -= handler;
-                            tcs.TrySetCanceled();
-                        });
-
-                        // 等待图像或取消
-                        try
-                        {
-                            var capturedImage = await tcs.Task;
-                            UpdateStatus("图像捕获成功");
-                            return capturedImage;
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            UpdateStatus("图像捕获超时或被取消");
-                            return null;
-                        }
-                    }
-                }
-                else
-                {
-                    // 非触发模式：使用最新的图像
-                    if (_lastCapturedImage != null)
-                    {
-                        UpdateStatus("使用最新捕获的图像");
-                        return _lastCapturedImage.Clone() as Bitmap;
-                    }
-                    else
-                    {
-                        UpdateStatus("等待首次图像捕获...");
-
-                        // 等待图像
-                        var tcs = new TaskCompletionSource<Bitmap>();
-
-                        // 设置图像捕获事件处理
-                        EventHandler<ImageEventArgs> handler = null;
-                        handler = (s, e) =>
-                        {
-                            // 捕获到图像后，转换为Bitmap
-                            if (e.Image != null)
-                            {
-                                tcs.TrySetResult(e.Image.Clone() as Bitmap);
-                            }
-
-                            // 移除事件处理器，防止多次触发
-                            _cameraManager.ImageUpdated -= handler;
-                        };
-
-                        // 添加事件处理
-                        _cameraManager.ImageUpdated += handler;
-
-                        // 添加超时处理，5秒内如果没有图像返回，则取消
-                        using (var timeoutCts = new CancellationTokenSource(5000))
-                        using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
-                        {
-                            // 注册取消操作
-                            linkedCts.Token.Register(() =>
-                            {
-                                _cameraManager.ImageUpdated -= handler;
-                                tcs.TrySetCanceled();
-                            });
-
-                            // 等待图像或取消
-                            try
-                            {
-                                var capturedImage = await tcs.Task;
-                                UpdateStatus("图像捕获成功");
-                                return capturedImage;
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                UpdateStatus("图像捕获超时或被取消");
-                                return null;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"图像捕获过程中发生错误：{ex.Message}");
-                return null;
-            }
-        }
-
-        // 执行AI模型推理
-        private string PerformInference(Bitmap image)
-        {
-            try
-            {
-                if (!_isModelLoaded || image == null)
-                    return "无效的输入";
-
-                // 将Bitmap转换为Mat
-                Mat mat = BitmapToMat(image);
-
-                // 创建批处理列表
-                var imageList = new List<Mat> { mat };
-
-                // 执行推理
-                dlcv_infer_csharp.Utils.CSharpResult result = _model.InferBatch(imageList);
-
-                // 提取结果文本
-                StringBuilder sb = new StringBuilder();
-                var sampleResults = result.SampleResults[0];
-
-                foreach (var item in sampleResults.Results)
-                {
-                    sb.AppendLine($"{item.CategoryName}: {item.Score:F2}");
-                }
-
-                // 更新ImageViewer以显示检测结果
-                UpdateDisplayImage(image, result);
-
-                // 返回结果文本
-                return sb.ToString();
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"AI推理过程中发生错误：{ex.Message}");
-                return $"推理错误: {ex.Message}";
-            }
-        }
-
-        // 将Bitmap转换为Mat
-        private Mat BitmapToMat(Bitmap bitmap)
-        {
-            try
-            {
-                return BitmapConverter.ToMat(bitmap);
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"图像转换错误：{ex.Message}");
-                return null;
-            }
+            await _mainLoopManager.SaveImageAsync(image, isOK);
         }
         #endregion
 
@@ -655,58 +309,6 @@ namespace OpenIVSWPF
             }
         }
 
-        // 更新设备状态显示
-        private void UpdateDeviceStatus(string status)
-        {
-            if (Dispatcher.CheckAccess())
-            {
-                ViewModel.UpdateDeviceStatus(status);
-            }
-            else
-            {
-                Dispatcher.Invoke(() => UpdateDeviceStatus(status));
-            }
-        }
-
-        // 更新相机状态显示
-        private void UpdateCameraStatus(string status)
-        {
-            if (Dispatcher.CheckAccess())
-            {
-                ViewModel.UpdateCameraStatus(status);
-            }
-            else
-            {
-                Dispatcher.Invoke(() => UpdateCameraStatus(status));
-            }
-        }
-
-        // 更新模型状态显示
-        private void UpdateModelStatus(string status)
-        {
-            if (Dispatcher.CheckAccess())
-            {
-                ViewModel.UpdateModelStatus(status);
-            }
-            else
-            {
-                Dispatcher.Invoke(() => UpdateModelStatus(status));
-            }
-        }
-
-        // 更新位置显示
-        private void UpdatePositionDisplay(float position)
-        {
-            if (Dispatcher.CheckAccess())
-            {
-                ViewModel.UpdatePosition(position);
-            }
-            else
-            {
-                Dispatcher.Invoke(() => UpdatePositionDisplay(position));
-            }
-        }
-
         // 更新检测结果显示
         private void UpdateDetectionResult(string result)
         {
@@ -719,34 +321,6 @@ namespace OpenIVSWPF
             else
             {
                 Dispatcher.Invoke(() => UpdateDetectionResult(result));
-            }
-        }
-
-        // 更新统计信息
-        private void UpdateStatistics(bool isOK)
-        {
-            if (Dispatcher.CheckAccess())
-            {
-                _totalCount++;
-                if (isOK)
-                {
-                    _okCount++;
-                }
-                else
-                {
-                    _ngCount++;
-                }
-
-                // 计算良率
-                _yieldRate = _totalCount > 0 ? (double)_okCount / _totalCount * 100 : 0;
-
-                // 更新ViewModel
-                ViewModel.UpdateStatistics(_totalCount, _okCount, _ngCount, _yieldRate);
-                ViewModel.UpdateCurrentResult(isOK);
-            }
-            else
-            {
-                Dispatcher.Invoke(() => UpdateStatistics(isOK));
             }
         }
 
@@ -824,7 +398,7 @@ namespace OpenIVSWPF
                         if (_isRunning && !_settings.UseTrigger)
                         {
                             // 执行AI推理
-                            string result = PerformInference(_lastCapturedImage);
+                            string result = _modelManager.PerformInference(_lastCapturedImage);
 
                             // 更新检测结果显示
                             UpdateDetectionResult(result);
@@ -833,10 +407,10 @@ namespace OpenIVSWPF
                             bool isOK = string.IsNullOrEmpty(result);
 
                             // 更新统计信息
-                            UpdateStatistics(isOK);
+                            UpdateStatisticsCallback(isOK);
 
                             // 根据设置保存图像
-                            SaveImage(_lastCapturedImage, isOK);
+                            SaveImageAsync(_lastCapturedImage, isOK);
                         }
                         else
                         {
@@ -884,7 +458,7 @@ namespace OpenIVSWPF
                 UpdateStatus("系统启动");
 
                 // 启动主循环任务
-                await RunMainLoopAsync(_cts.Token);
+                await _mainLoopManager.RunMainLoopAsync(_cts.Token, _lastCapturedImage);
             }
             catch (Exception ex)
             {
@@ -963,48 +537,23 @@ namespace OpenIVSWPF
                 // 如果设置已保存，则更新设置
                 if (settingsWindow.IsSettingsSaved)
                 {
-                    // 更新设置
-                    _settings.PortName = settingsWindow.SelectedPortName;
-                    _settings.BaudRate = settingsWindow.BaudRate;
-                    _settings.DataBits = settingsWindow.DataBits;
-                    _settings.StopBits = settingsWindow.StopBits;
-                    _settings.Parity = settingsWindow.Parity;
-                    _settings.DeviceId = settingsWindow.DeviceId;
-                    _settings.CameraIndex = settingsWindow.SelectedCameraIndex;
-                    _settings.UseTrigger = settingsWindow.UseTrigger;
-                    _settings.UseSoftTrigger = settingsWindow.UseSoftTrigger;
-                    _settings.ModelPath = settingsWindow.ModelPath;
-                    _settings.Speed = settingsWindow.Speed;
-                    _settings.TargetPosition = settingsWindow.TargetPosition;
+                    // 弹出提示
+                    MessageBoxResult mbResult = MessageBox.Show(
+                        "设置已更改，需要重新初始化系统才能生效。\n是否立即重新初始化？",
+                        "设置已更改",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
 
-                    // 图像保存设置
-                    _settings.SavePath = settingsWindow.SavePath;
-                    _settings.SaveOKImage = settingsWindow.SaveOKImage;
-                    _settings.SaveNGImage = settingsWindow.SaveNGImage;
-                    _settings.ImageFormat = settingsWindow.ImageFormat;
-                    _settings.JpegQuality = settingsWindow.JpegQuality;
-
-                    // 如果系统已初始化，则需要重新初始化
-                    if (_isInitialized)
+                    if (mbResult == MessageBoxResult.Yes)
                     {
-                        // 弹出提示
-                        MessageBoxResult mbResult = MessageBox.Show(
-                            "设置已更改，需要重新初始化系统才能生效。\n是否立即重新初始化？",
-                            "设置已更改",
-                            MessageBoxButton.YesNo,
-                            MessageBoxImage.Question);
+                        // 重置初始化标志
+                        _isInitialized = false;
 
-                        if (mbResult == MessageBoxResult.Yes)
-                        {
-                            // 重置初始化标志
-                            _isInitialized = false;
+                        // 清理已有资源
+                        CleanupResources();
 
-                            // 清理已有资源
-                            CleanupResources();
-
-                            // 重置UI状态
-                            InitializeUIState();
-                        }
+                        // 重置UI状态
+                        InitializeUIState();
                     }
 
                     UpdateStatus("设置已更新");
@@ -1040,203 +589,25 @@ namespace OpenIVSWPF
             // 关闭Modbus连接
             if (_isModbusConnected)
             {
-                _modbusApi?.Close();
+                _modbusInitializer?.Close();
                 _isModbusConnected = false;
             }
 
             // 关闭相机
             if (_isCameraConnected)
             {
-                if (_isGrabbing)
-                {
-                    _cameraManager?.StopGrabbing();
-                    _isGrabbing = false;
-                }
-
-                _cameraManager?.DisconnectDevice();
+                _cameraInitializer?.Close();
                 _isCameraConnected = false;
+                _isGrabbing = false;
             }
 
             // 释放AI模型
             if (_isModelLoaded)
             {
-                _model = null;
+                _modelManager?.Dispose();
                 _isModelLoaded = false;
             }
         }
         #endregion
-
-        #region 主循环
-        // 主循环任务
-        private async Task RunMainLoopAsync(CancellationToken token)
-        {
-            try
-            {
-                // 持续运行，直到取消
-                while (!token.IsCancellationRequested)
-                {
-                    // 获取当前位置索引
-                    float targetPosition = _positionSequence[_currentPositionIndex];
-
-                    // 移动到目标位置
-                    bool moveResult = await MoveToPositionAsync(targetPosition, token);
-
-                    if (moveResult && !token.IsCancellationRequested)
-                    {
-                        // 到达目标位置后，如果是触发模式才拍照和推理
-                        if (_settings.UseTrigger)
-                        {
-                            // 触发相机拍照
-                            UpdateStatus($"在位置 {targetPosition} 进行拍照...");
-
-                            try
-                            {
-                                // 等待运动稳定
-                                await Task.Delay(_settings.PreCaptureDelay, token);
-
-                                // 等待拍照操作完成
-                                var image = await CaptureImageAsync(token);
-
-                                if (image != null && !token.IsCancellationRequested)
-                                {
-                                    // 拍照完成后，异步处理图像（不等待完成）
-                                    _ = Task.Run(() =>
-                                    {
-                                        try
-                                        {
-                                            // 获取到图像后，执行AI推理
-                                            UpdateStatus("执行AI推理...");
-                                            string result = PerformInference(image);
-
-                                            // 更新检测结果显示
-                                            UpdateDetectionResult(result);
-
-                                            // 判断检测结果
-                                            bool isOK = string.IsNullOrEmpty(result);
-
-                                            // 更新统计信息
-                                            UpdateStatistics(isOK);
-
-                                            // 根据设置保存图像
-                                            SaveImage(image, isOK);
-
-                                            // 添加完成信息
-                                            UpdateStatus($"位置 {targetPosition} 的推理和保存已完成");
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            UpdateStatus($"图像处理过程中发生错误：{ex.Message}");
-                                        }
-                                    });
-
-                                    // 提示拍照已完成
-                                    UpdateStatus($"位置 {targetPosition} 的拍照已完成，准备移动到下一位置");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                if (!token.IsCancellationRequested)
-                                {
-                                    UpdateStatus($"拍照过程中发生错误：{ex.Message}");
-                                }
-                            }
-                        }
-                    }
-
-                    if (token.IsCancellationRequested)
-                        break;
-
-                    // 更新位置索引，实现1-2-3-2-1循环
-                    _currentPositionIndex = (_currentPositionIndex + 1) % _positionSequence.Length;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // 操作被取消，正常退出
-                UpdateStatus("运行被取消");
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"运行过程中发生错误：{ex.Message}");
-            }
-            finally
-            {
-                _modbusApi.WriteSingleRegister(50, 4); // 发送停止命令
-
-                // 无论如何，确保标记为已停止
-                _isRunning = false;
-                UpdateControlState();
-            }
-        }
-        #endregion
-
-        // 保存图像方法
-        private void SaveImage(Bitmap image, bool isOK)
-        {
-            try
-            {
-                // 根据设置判断是否需要保存图像
-                if ((isOK && !_settings.SaveOKImage) || (!isOK && !_settings.SaveNGImage))
-                    return;
-
-                // 确保保存路径存在
-                if (string.IsNullOrEmpty(_settings.SavePath))
-                    return;
-
-                // 获取当前日期和时间
-                string currentDate = DateTime.Now.ToString("yyyyMMdd");
-                string timeString = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
-
-                // 结果文件夹
-                string resultFolder = isOK ? "OK" : "NG";
-
-                // 创建日期和结果文件夹
-                string dateFolder = Path.Combine(_settings.SavePath, currentDate);
-                string resultPath = Path.Combine(dateFolder, resultFolder);
-
-                if (!Directory.Exists(dateFolder))
-                    Directory.CreateDirectory(dateFolder);
-
-                if (!Directory.Exists(resultPath))
-                    Directory.CreateDirectory(resultPath);
-
-                // 生成文件名
-                string extension = _settings.ImageFormat.ToLower();
-                string filename = $"{timeString}.{extension}";
-                string fullPath = Path.Combine(resultPath, filename);
-
-                // 使用OpenCV保存图像
-                using (var mat = BitmapConverter.ToMat(image))
-                {
-                    if (extension == "jpg")
-                    {
-                        // 获取JPG质量设置
-                        int quality = 90;
-                        if (!string.IsNullOrEmpty(_settings.JpegQuality) && int.TryParse(_settings.JpegQuality, out int jpegQuality))
-                        {
-                            quality = Math.Min(100, Math.Max(1, jpegQuality)); // 确保在1-100范围内
-                        }
-
-                        // 保存为JPG格式
-                        var parameters = new int[]
-                        {
-                            (int)OpenCvSharp.ImwriteFlags.JpegQuality, quality,
-                            (int)OpenCvSharp.ImwriteFlags.JpegProgressive, 1
-                        };
-                        OpenCvSharp.Cv2.ImWrite(fullPath, mat, parameters);
-                    }
-                    else // BMP格式
-                    {
-                        OpenCvSharp.Cv2.ImWrite(fullPath, mat);
-                    }
-                }
-
-                UpdateStatus($"图像已保存到: {fullPath}");
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"保存图像时发生错误: {ex.Message}");
-            }
-        }
     }
 }
