@@ -139,7 +139,7 @@ namespace OpenIVSWPF
                 else
                 {
                     // 设置默认模型路径
-                    string modelDefaultPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"C:\Users\91550\Desktop\名片识别\模型\名片识别_20250318_161513.dvt");
+                    string modelDefaultPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"test.dvt");
                     if (File.Exists(modelDefaultPath))
                     {
                         _settings.ModelPath = modelDefaultPath;
