@@ -113,7 +113,6 @@
                             <Button Grid.Column="1" x:Name="btnBrowseLocalFolder" Content="浏览..." 
                                     Margin="5,5,0,5" Padding="10,0" Click="btnBrowseLocalFolder_Click"/>
                         </Grid>
-                        <CheckBox x:Name="chkLoopImages" Content="循环播放图像" IsChecked="True" Margin="0,5"/>
                     </StackPanel>
                     
                     <!-- 相机设置 -->
