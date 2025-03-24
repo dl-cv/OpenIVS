@@ -500,8 +500,10 @@ namespace OpenIVSWPF.Managers
                 Bitmap bitmap = LoadAndSendNextImage();
                 if (bitmap != null)
                 {
-                    // 发送图像事件
-                    _cameraManager.RaiseImageUpdatedEvent(bitmap);
+                    // 注意：在这里我们不直接触发RaiseImageUpdatedEvent事件
+                    // 而是仅返回图像，由主循环中的逻辑处理推理
+                    // 这样避免了重复推理的问题
+                    
                     _statusCallback?.Invoke($"已加载图像: {_currentImageIndex}/{_imageFiles.Count}");
                     return bitmap;
                 }

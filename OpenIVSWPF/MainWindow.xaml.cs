@@ -341,9 +341,13 @@ namespace OpenIVSWPF
                         // 保存最新图像，用于非触发模式
                         _lastCapturedImage = e.Image.Clone() as Bitmap;
 
-                        // 如果是非触发模式，或者是离线模式，则立即执行推理
+                        // 获取当前设置
                         bool isOfflineMode = SettingsManager.Instance.Settings.UseLocalFolder;
-                        if (_isRunning && (!SettingsManager.Instance.Settings.UseTrigger || isOfflineMode))
+                        bool isTriggerMode = SettingsManager.Instance.Settings.UseTrigger;
+
+                        // 只有在"在线非触发模式"下才在这里执行推理
+                        // 离线模式和触发模式的推理由MainLoopManager处理
+                        if (_isRunning && !isOfflineMode && !isTriggerMode)
                         {
                             // 执行AI推理
                             string result = _modelManager.PerformInference(_lastCapturedImage);
@@ -362,7 +366,7 @@ namespace OpenIVSWPF
                         }
                         else
                         {
-                            // 仅更新显示图像
+                            // 其他模式：仅更新显示图像，不执行推理
                             UpdateDisplayImage(e.Image.Clone() as Bitmap);
                         }
                     }
@@ -420,8 +424,8 @@ namespace OpenIVSWPF
                     // 离线模式下，在启动时先重置图像索引，确保从第一张图像开始
                     _cameraInitializer.ResetImageIndex();
 
-                    // 在离线模式下，无论是否配置了触发器，都主动触发第一张图像加载
-                    _cameraInitializer.TriggerLocalImage();
+                    // 在离线模式下，不要在这里主动触发第一张图像加载
+                    // 由MainLoopManager统一处理所有图像的加载和推理
                 }
                 else
                 {

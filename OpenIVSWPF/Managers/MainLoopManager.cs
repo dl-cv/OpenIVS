@@ -81,8 +81,8 @@ namespace OpenIVSWPF.Managers
 
                     if (moveResult && !token.IsCancellationRequested)
                     {
-                        // 离线模式下，无论是否是触发模式，都执行拍照和推理
-                        // 在线模式下，只有在触发模式才拍照和推理
+                        // 触发模式（在线触发模式或离线模式）下的图像捕获和处理
+                        // 在线非触发模式不走这里，由事件回调处理
                         if (isOfflineMode || _settings.UseTrigger)
                         {
                             // 触发相机拍照
@@ -121,38 +121,27 @@ namespace OpenIVSWPF.Managers
                                     // 更新lastCapturedImage
                                     lastCapturedImage = image.Clone() as Bitmap;
                                     
-                                    // 拍照完成后，异步处理图像（不等待完成）
-                                    _ = Task.Run(() =>
-                                    {
-                                        try
-                                        {
-                                            // 获取到图像后，执行AI推理
-                                            _statusCallback?.Invoke("执行AI推理...");
-                                            string result = _modelManager.PerformInference(image);
+                                    // 执行AI推理（所有触发模式和离线模式的推理都在这里进行）
+                                    _statusCallback?.Invoke("执行AI推理...");
+                                    string result = _modelManager.PerformInference(image);
 
-                                            // 更新检测结果显示
-                                            _detectionResultCallback?.Invoke(result);
+                                    // 更新检测结果显示
+                                    _detectionResultCallback?.Invoke(result);
 
-                                            // 判断检测结果
-                                            bool isOK = string.IsNullOrEmpty(result);
+                                    // 判断检测结果
+                                    bool isOK = string.IsNullOrEmpty(result);
 
-                                            // 更新统计信息
-                                            _statisticsCallback?.Invoke(isOK);
+                                    // 更新统计信息
+                                    _statisticsCallback?.Invoke(isOK);
 
-                                            // 根据设置保存图像
-                                            _ = _saveImageCallback?.Invoke(image, isOK);
+                                    // 根据设置保存图像
+                                    await _saveImageCallback?.Invoke(image, isOK);
 
-                                            // 添加完成信息
-                                            _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的推理和保存已完成");
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            _statusCallback?.Invoke($"图像处理过程中发生错误：{ex.Message}");
-                                        }
-                                    });
-
+                                    // 添加完成信息
+                                    _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的推理和保存已完成");
+                                    
                                     // 提示拍照已完成
-                                    _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的拍照已完成，准备移动到下一位置");
+                                    _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的处理已完成，准备移动到下一位置");
                                 }
                             }
                             catch (Exception ex)
