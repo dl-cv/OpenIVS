@@ -64,6 +64,8 @@ namespace OpenIVSWPF
         // 本地图像文件夹设置
         public bool UseLocalFolder { get; private set; }
         public string LocalFolderPath { get; private set; }
+        public int LocalImageDelay { get; private set; } // 本地图像间隔时间（毫秒）
+        public bool LoopLocalImages { get; private set; } // 是否循环遍历本地图像
 
         // 加载标志
         private bool _isLoading = false;
@@ -280,7 +282,7 @@ namespace OpenIVSWPF
             {
                 // 不再弹窗显示错误，改为记录日志
                 System.Diagnostics.Debug.WriteLine($"获取当前位置时发生错误：{ex.Message}");
-                
+
                 // 更新UI显示离线状态
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
@@ -420,6 +422,10 @@ namespace OpenIVSWPF
             // 拍照设置
             PreCaptureDelay = settings.PreCaptureDelay;
 
+            // 本地图像间隔时间
+            LocalImageDelay = settings.LocalImageDelay;
+            LoopLocalImages = settings.LoopLocalImages;
+
             // 更新UI
             cbPortName.Text = SelectedPortName;
             cbBaudRate.Text = BaudRate.ToString();
@@ -447,6 +453,8 @@ namespace OpenIVSWPF
             // 更新本地图像文件夹UI
             chkUseLocalFolder.IsChecked = UseLocalFolder;
             txtLocalFolderPath.Text = LocalFolderPath;
+            txtLocalImageDelay.Text = LocalImageDelay.ToString();
+            chkLoopLocalImages.IsChecked = LoopLocalImages;
 
             // 根据是否使用本地文件夹更新UI状态
             UpdateImageSourceUI();
@@ -460,14 +468,14 @@ namespace OpenIVSWPF
 
                 // 获取可用的串口
                 string[] ports = SerialPort.GetPortNames();
-                
+
                 // 如果没有可用的串口，添加一个空项
                 if (ports.Length == 0)
                 {
                     // 记录日志，但不显示弹窗
                     System.Diagnostics.Debug.WriteLine("没有检测到可用的串口设备");
                     UpdateStatus("没有检测到可用的串口设备，将使用离线模式");
-                    
+
                     // 可以选择添加一个提示项
                     // cbPortName.Items.Add("无可用串口");
                 }
@@ -729,28 +737,28 @@ namespace OpenIVSWPF
                 // 离线模式下允许没有串口
                 settings.PortName = string.Empty;
             }
-            
+
             // 其他Modbus设置
             if (cbBaudRate.SelectedItem != null)
             {
                 settings.BaudRate = int.Parse(((ComboBoxItem)cbBaudRate.SelectedItem).Content.ToString());
             }
-            
+
             if (cbDataBits.SelectedItem != null)
             {
                 settings.DataBits = int.Parse(((ComboBoxItem)cbDataBits.SelectedItem).Content.ToString());
             }
-            
+
             if (cbStopBits.SelectedItem != null)
             {
                 settings.StopBits = (StopBits)Enum.Parse(typeof(StopBits), ((ComboBoxItem)cbStopBits.SelectedItem).Content.ToString());
             }
-            
+
             if (cbParity.SelectedItem != null)
             {
                 settings.Parity = (Parity)Enum.Parse(typeof(Parity), ((ComboBoxItem)cbParity.SelectedItem).Content.ToString());
             }
-            
+
             if (!string.IsNullOrEmpty(txtDeviceId.Text))
             {
                 if (int.TryParse(txtDeviceId.Text, out int deviceId))
@@ -769,6 +777,17 @@ namespace OpenIVSWPF
             settings.UseLocalFolder = chkUseLocalFolder.IsChecked == true;
             settings.LocalFolderPath = txtLocalFolderPath.Text;
 
+            // 本地图像高级设置
+            if (!string.IsNullOrEmpty(txtLocalImageDelay.Text) && int.TryParse(txtLocalImageDelay.Text, out int delay))
+            {
+                settings.LocalImageDelay = Math.Max(100, delay); // 确保不会小于100ms
+            }
+            else
+            {
+                settings.LocalImageDelay = 500; // 默认值
+            }
+            settings.LoopLocalImages = chkLoopLocalImages.IsChecked == true;
+
             // 模型设置
             settings.ModelPath = txtModelPath.Text;
 
@@ -784,22 +803,16 @@ namespace OpenIVSWPF
                 settings.TargetPosition = targetPos;
             }
 
-            // 拍照设置
-            if (!string.IsNullOrEmpty(txtPreCaptureDelay.Text) && int.TryParse(txtPreCaptureDelay.Text, out int delay))
-            {
-                settings.PreCaptureDelay = Math.Max(0, delay); // 确保不会小于0
-            }
-
             // 图像保存设置
             settings.SavePath = txtSaveImagePath.Text;
             settings.SaveOKImage = chkSaveOKImage.IsChecked == true;
             settings.SaveNGImage = chkSaveNGImage.IsChecked == true;
-            
+
             if (cbImageFormat.SelectedItem != null)
             {
                 settings.ImageFormat = ((ComboBoxItem)cbImageFormat.SelectedItem).Content.ToString();
             }
-            
+
             settings.JpegQuality = txtJpegQuality.Text;
         }
 
@@ -878,7 +891,7 @@ namespace OpenIVSWPF
 
                 // 检查是否为离线模式
                 bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
-                
+
                 // 获取当前相机图像
                 Bitmap image = null;
 
@@ -1086,7 +1099,7 @@ namespace OpenIVSWPF
             {
                 // 检查是否为离线模式
                 bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
-                
+
                 if (isOfflineMode || _modbusApi == null || !IsModbusConnected())
                 {
                     // 在离线模式下使用更友好的提示
@@ -1119,7 +1132,7 @@ namespace OpenIVSWPF
             {
                 // 检查是否为离线模式
                 bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
-                
+
                 // 如果Modbus未连接，则尝试连接
                 if (!isOfflineMode && (_modbusApi == null || !IsModbusConnected()))
                 {

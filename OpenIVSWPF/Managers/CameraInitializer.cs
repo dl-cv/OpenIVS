@@ -99,6 +99,8 @@ namespace OpenIVSWPF.Managers
         private CancellationTokenSource _localImagesCts;
         private Task _localImagesTask;
         private object _lock = new object();
+        private int _localImageDelay = 500; // 默认间隔为500ms
+        private bool _loopLocalImages = true; // 默认循环遍历
 
         public bool IsConnected => _isCameraConnected || _useLocalFolder;
         public bool IsGrabbing => _isGrabbing;
@@ -154,6 +156,9 @@ namespace OpenIVSWPF.Managers
 
                 // 获取文件夹路径
                 _localFolderPath = settings.LocalFolderPath;
+                _localImageDelay = settings.LocalImageDelay;
+                _loopLocalImages = settings.LoopLocalImages;
+                
                 if (string.IsNullOrEmpty(_localFolderPath) || !Directory.Exists(_localFolderPath))
                 {
                     _statusCallback?.Invoke($"图像文件夹不存在：{_localFolderPath}");
@@ -264,10 +269,19 @@ namespace OpenIVSWPF.Managers
                 if (_imageFiles.Count == 0)
                     return null;
 
-                // 如果已经到达图像列表末尾，则重置索引
+                // 检查索引是否已到末尾
                 if (_currentImageIndex >= _imageFiles.Count)
                 {
+                    // 如果不循环遍历，则直接返回null
+                    if (!_loopLocalImages)
+                    {
+                        _statusCallback?.Invoke("已到达图像列表末尾，停止遍历");
+                        return null;
+                    }
+                    
+                    // 如果循环遍历，则重置索引
                     _currentImageIndex = 0;
+                    _statusCallback?.Invoke("图像列表已遍历完毕，重新开始");
                 }
 
                 // 读取图像文件
@@ -468,6 +482,13 @@ namespace OpenIVSWPF.Managers
                 {
                     _statusCallback?.Invoke("本地文件夹中没有图像文件");
                     return null;
+                }
+
+                // 应用图像延迟
+                if (_localImageDelay > 0)
+                {
+                    _statusCallback?.Invoke($"等待图像间隔时间 {_localImageDelay}ms...");
+                    await Task.Delay(_localImageDelay, token);
                 }
 
                 // 获取下一张图像

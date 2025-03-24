@@ -117,6 +117,8 @@ namespace OpenIVSWPF.Managers
                 // 加载本地图像文件夹设置
                 Settings.UseLocalFolder = bool.Parse(GetSettingValue(root, "UseLocalFolder", Settings.UseLocalFolder.ToString()));
                 Settings.LocalFolderPath = GetSettingValue(root, "LocalFolderPath", Settings.LocalFolderPath);
+                Settings.LocalImageDelay = int.Parse(GetSettingValue(root, "LocalImageDelay", Settings.LocalImageDelay.ToString()));
+                Settings.LoopLocalImages = bool.Parse(GetSettingValue(root, "LoopLocalImages", Settings.LoopLocalImages.ToString()));
 
                 // 加载模型设置
                 Settings.ModelPath = GetSettingValue(root, "ModelPath", Settings.ModelPath);
@@ -198,6 +200,8 @@ namespace OpenIVSWPF.Managers
                 SetSettingValue(doc, root, "UseSoftTrigger", Settings.UseSoftTrigger.ToString());
                 SetSettingValue(doc, root, "UseLocalFolder", Settings.UseLocalFolder.ToString());
                 SetSettingValue(doc, root, "LocalFolderPath", Settings.LocalFolderPath);
+                SetSettingValue(doc, root, "LocalImageDelay", Settings.LocalImageDelay.ToString());
+                SetSettingValue(doc, root, "LoopLocalImages", Settings.LoopLocalImages.ToString());
                 SetSettingValue(doc, root, "SavePath", Settings.SavePath);
                 SetSettingValue(doc, root, "SaveOKImage", Settings.SaveOKImage.ToString());
                 SetSettingValue(doc, root, "SaveNGImage", Settings.SaveNGImage.ToString());
@@ -271,6 +275,8 @@ namespace OpenIVSWPF.Managers
         // 本地图像文件夹设置
         public bool UseLocalFolder { get; set; }
         public string LocalFolderPath { get; set; }
+        public int LocalImageDelay { get; set; } // 本地图像间隔时间（毫秒）
+        public bool LoopLocalImages { get; set; } // 是否循环遍历本地图像
 
         // 模型设置
         public string ModelPath { get; set; }
@@ -307,6 +313,8 @@ namespace OpenIVSWPF.Managers
             // 本地图像文件夹设置
             UseLocalFolder = false;
             LocalFolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "images");
+            LocalImageDelay = 500; // 默认500毫秒
+            LoopLocalImages = true; // 默认循环遍历
 
             ModelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "default.dvt");
 
