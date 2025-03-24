@@ -52,10 +52,10 @@ namespace OpenIVSWPF.Managers
         {
             // 设置文件路径
             _settingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
-            
+
             // 初始化设置
             Settings = new Settings();
-            
+
             // 尝试从文件加载设置
             LoadSettings();
         }
@@ -114,6 +114,12 @@ namespace OpenIVSWPF.Managers
                 Settings.UseTrigger = bool.Parse(GetSettingValue(root, "UseTrigger", Settings.UseTrigger.ToString()));
                 Settings.UseSoftTrigger = bool.Parse(GetSettingValue(root, "UseSoftTrigger", Settings.UseSoftTrigger.ToString()));
 
+                // 加载本地图像文件夹设置
+                Settings.UseLocalFolder = bool.Parse(GetSettingValue(root, "UseLocalFolder", Settings.UseLocalFolder.ToString()));
+                Settings.LocalFolderPath = GetSettingValue(root, "LocalFolderPath", Settings.LocalFolderPath);
+                Settings.LocalImageDelay = int.Parse(GetSettingValue(root, "LocalImageDelay", Settings.LocalImageDelay.ToString()));
+                Settings.LoopLocalImages = bool.Parse(GetSettingValue(root, "LoopLocalImages", Settings.LoopLocalImages.ToString()));
+
                 // 加载模型设置
                 Settings.ModelPath = GetSettingValue(root, "ModelPath", Settings.ModelPath);
 
@@ -133,7 +139,7 @@ namespace OpenIVSWPF.Managers
                 Settings.SaveNGImage = bool.Parse(GetSettingValue(root, "SaveNGImage", Settings.SaveNGImage.ToString()));
                 Settings.ImageFormat = GetSettingValue(root, "ImageFormat", Settings.ImageFormat);
                 Settings.JpegQuality = GetSettingValue(root, "JpegQuality", Settings.JpegQuality);
-                
+
                 // 加载拍照延迟设置
                 string preCaptureDelayStr = GetSettingValue(root, "PreCaptureDelay", Settings.PreCaptureDelay.ToString());
                 if (!string.IsNullOrEmpty(preCaptureDelayStr) && int.TryParse(preCaptureDelayStr, out int delay))
@@ -165,7 +171,7 @@ namespace OpenIVSWPF.Managers
             {
                 XmlDocument doc = new XmlDocument();
                 XmlElement root;
-                
+
                 // 如果文件存在，则加载现有文件
                 if (File.Exists(_settingsFilePath))
                 {
@@ -186,33 +192,37 @@ namespace OpenIVSWPF.Managers
                 SetSettingValue(doc, root, "StopBits", Settings.StopBits.ToString());
                 SetSettingValue(doc, root, "Parity", Settings.Parity.ToString());
                 SetSettingValue(doc, root, "DeviceId", Settings.DeviceId.ToString());
-                
+
                 // 保存相机设置
                 SetSettingValue(doc, root, "CameraIndex", Settings.CameraIndex.ToString());
                 SetSettingValue(doc, root, "CameraUserDefinedName", Settings.CameraUserDefinedName);
                 SetSettingValue(doc, root, "UseTrigger", Settings.UseTrigger.ToString());
                 SetSettingValue(doc, root, "UseSoftTrigger", Settings.UseSoftTrigger.ToString());
+                SetSettingValue(doc, root, "UseLocalFolder", Settings.UseLocalFolder.ToString());
+                SetSettingValue(doc, root, "LocalFolderPath", Settings.LocalFolderPath);
+                SetSettingValue(doc, root, "LocalImageDelay", Settings.LocalImageDelay.ToString());
+                SetSettingValue(doc, root, "LoopLocalImages", Settings.LoopLocalImages.ToString());
                 SetSettingValue(doc, root, "SavePath", Settings.SavePath);
                 SetSettingValue(doc, root, "SaveOKImage", Settings.SaveOKImage.ToString());
                 SetSettingValue(doc, root, "SaveNGImage", Settings.SaveNGImage.ToString());
                 SetSettingValue(doc, root, "ImageFormat", Settings.ImageFormat);
                 SetSettingValue(doc, root, "JpegQuality", Settings.JpegQuality);
-                
+
                 // 保存模型设置
                 SetSettingValue(doc, root, "ModelPath", Settings.ModelPath);
-                
+
                 // 保存设备设置
                 SetSettingValue(doc, root, "Speed", Settings.Speed.ToString());
-                
+
                 // 保存目标位置
                 SetSettingValue(doc, root, "TargetPosition", Settings.TargetPosition.ToString());
-                
+
                 // 保存拍照设置
                 SetSettingValue(doc, root, "PreCaptureDelay", Settings.PreCaptureDelay.ToString());
-                
+
                 // 保存文件
                 doc.Save(_settingsFilePath);
-                
+
                 // 触发设置变更事件
                 OnSettingsChanged();
             }
@@ -221,7 +231,7 @@ namespace OpenIVSWPF.Managers
                 throw new Exception($"保存设置文件时发生错误：{ex.Message}", ex);
             }
         }
-        
+
         private void SetSettingValue(XmlDocument doc, XmlElement root, string key, string value)
         {
             XmlNode node = root.SelectSingleNode(key);
@@ -233,7 +243,7 @@ namespace OpenIVSWPF.Managers
             }
             node.InnerText = value;
         }
-        
+
         /// <summary>
         /// 触发设置变更事件
         /// </summary>
@@ -255,30 +265,36 @@ namespace OpenIVSWPF.Managers
         public StopBits StopBits { get; set; }
         public Parity Parity { get; set; }
         public int DeviceId { get; set; }
-        
+
         // 相机设置
         public int CameraIndex { get; set; }
         public string CameraUserDefinedName { get; set; }
         public bool UseTrigger { get; set; }
         public bool UseSoftTrigger { get; set; }
-        
+
+        // 本地图像文件夹设置
+        public bool UseLocalFolder { get; set; }
+        public string LocalFolderPath { get; set; }
+        public int LocalImageDelay { get; set; } // 本地图像间隔时间（毫秒）
+        public bool LoopLocalImages { get; set; } // 是否循环遍历本地图像
+
         // 模型设置
         public string ModelPath { get; set; }
-        
+
         // 设备设置
         public float Speed { get; set; }
         public float TargetPosition { get; set; }
-        
+
         // 图像保存设置
         public string SavePath { get; set; }
         public bool SaveOKImage { get; set; }
         public bool SaveNGImage { get; set; }
         public string ImageFormat { get; set; }
         public string JpegQuality { get; set; }
-        
+
         // 拍照设置
         public int PreCaptureDelay { get; set; }  // 拍照前等待时间（毫秒）
-        
+
         public Settings()
         {
             // 默认设置
@@ -288,16 +304,22 @@ namespace OpenIVSWPF.Managers
             StopBits = StopBits.One;
             Parity = Parity.None;
             DeviceId = 1;
-            
+
             CameraIndex = 0;
             CameraUserDefinedName = string.Empty;
             UseTrigger = true;
             UseSoftTrigger = true;
-            
+
+            // 本地图像文件夹设置
+            UseLocalFolder = false;
+            LocalFolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "images");
+            LocalImageDelay = 500; // 默认500毫秒
+            LoopLocalImages = true; // 默认循环遍历
+
             ModelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "default.dvt");
-            
+
             Speed = 100.0f;
-            TargetPosition = 0.0f;
+            TargetPosition = 200.0f;
 
             // 图像保存设置
             SavePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "images");
@@ -310,4 +332,4 @@ namespace OpenIVSWPF.Managers
             PreCaptureDelay = 100;  // 默认等待100ms
         }
     }
-} 
+}

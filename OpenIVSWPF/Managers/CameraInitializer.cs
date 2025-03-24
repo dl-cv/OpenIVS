@@ -4,9 +4,50 @@ using System.Drawing;
 using System.Threading.Tasks;
 using DLCV.Camera;
 using MvCameraControl;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Reflection;
+using OpenCvSharp;
 
 namespace OpenIVSWPF.Managers
 {
+    /// <summary>
+    /// 为CameraManager类提供扩展方法
+    /// </summary>
+    public static class CameraManagerExtensions
+    {
+        /// <summary>
+        /// 手动触发图像更新事件
+        /// </summary>
+        /// <param name="cameraManager">相机管理器实例</param>
+        /// <param name="image">要发送的图像</param>
+        public static void RaiseImageUpdatedEvent(this CameraManager cameraManager, Bitmap image)
+        {
+            // 创建事件参数
+            var eventArgs = new ImageEventArgs(image);
+
+            // 获取ImageUpdated事件字段
+            var type = cameraManager.GetType();
+            var eventField = type.GetField("ImageUpdated", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            // 获取事件委托
+            var eventDelegate = eventField?.GetValue(cameraManager) as MulticastDelegate;
+            if (eventDelegate != null)
+            {
+                // 调用所有订阅的事件处理器
+                foreach (var handler in eventDelegate.GetInvocationList())
+                {
+                    try
+                    {
+                        handler.Method.Invoke(handler.Target, new object[] { cameraManager, eventArgs });
+                    }
+                    catch { }
+                }
+            }
+        }
+    }
+
     /// <summary>
     /// 相机管理单例类
     /// </summary>
@@ -50,11 +91,23 @@ namespace OpenIVSWPF.Managers
         private Action<string> _statusCallback;
         private Action<string> _cameraStatusCallback;
 
-        public bool IsConnected => _isCameraConnected;
+        // 本地图像文件夹相关
+        private bool _useLocalFolder = false;
+        private string _localFolderPath = string.Empty;
+        private List<string> _imageFiles = new List<string>();
+        private int _currentImageIndex = 0;
+        private CancellationTokenSource _localImagesCts;
+        private Task _localImagesTask;
+        private object _lock = new object();
+        private int _localImageDelay = 500; // 默认间隔为500ms
+        private bool _loopLocalImages = true; // 默认循环遍历
+
+        public bool IsConnected => _isCameraConnected || _useLocalFolder;
         public bool IsGrabbing => _isGrabbing;
         public CameraManager CameraManager => _cameraManager;
+        public bool UseLocalFolder => _useLocalFolder;
 
-        public event EventHandler<ImageEventArgs> ImageUpdated 
+        public event EventHandler<ImageEventArgs> ImageUpdated
         {
             add { _cameraManager.ImageUpdated += value; }
             remove { _cameraManager.ImageUpdated -= value; }
@@ -74,68 +127,199 @@ namespace OpenIVSWPF.Managers
         {
             try
             {
-                _statusCallback?.Invoke("正在初始化相机...");
-
-                // 刷新设备列表
-                List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
-
-                if (deviceList.Count == 0)
+                // 根据设置决定是使用本地文件夹还是相机
+                if (settings.UseLocalFolder)
                 {
-                    _statusCallback?.Invoke("未检测到相机设备");
-                    _cameraStatusCallback?.Invoke("未检测到相机");
-                    return;
-                }
-
-                // 检查相机索引是否有效
-                int cameraIndex = settings.CameraIndex;
-                if (cameraIndex < 0 || cameraIndex >= deviceList.Count)
-                {
-                    cameraIndex = 0;
-                }
-
-                // 连接选中的相机
-                bool success = _cameraManager.ConnectDevice(cameraIndex);
-                if (success)
-                {
-                    _isCameraConnected = true;
-                    _statusCallback?.Invoke($"相机已连接：{deviceList[cameraIndex].UserDefinedName}");
-                    _cameraStatusCallback?.Invoke("已连接");
-
-                    // 设置触发模式
-                    if (settings.UseTrigger)
-                    {
-                        TriggerConfig.TriggerMode mode = settings.UseSoftTrigger
-                            ? TriggerConfig.TriggerMode.Software
-                            : TriggerConfig.TriggerMode.Line0;
-
-                        _cameraManager.SetTriggerMode(mode);
-                        _cameraManager.StartGrabbing();
-                        _statusCallback?.Invoke($"相机设置为{(settings.UseSoftTrigger ? "软触发" : "硬触发")}模式");
-                    }
-                    else
-                    {
-                        // 关闭触发模式
-                        _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Off);
-
-                        // 开始抓取图像
-                        if (_cameraManager.StartGrabbing())
-                        {
-                            _isGrabbing = true;
-                            _statusCallback?.Invoke("相机设置为连续采集模式");
-                        }
-                    }
+                    InitializeLocalFolder(settings);
                 }
                 else
                 {
-                    _statusCallback?.Invoke("相机连接失败");
-                    _cameraStatusCallback?.Invoke("连接失败");
+                    InitializeCameraDevice(settings);
                 }
             }
             catch (Exception ex)
             {
-                _statusCallback?.Invoke($"相机初始化错误：{ex.Message}");
+                _statusCallback?.Invoke($"初始化错误：{ex.Message}");
                 _cameraStatusCallback?.Invoke("初始化错误");
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// 初始化本地图像文件夹
+        /// </summary>
+        private void InitializeLocalFolder(Settings settings)
+        {
+            try
+            {
+                _statusCallback?.Invoke("正在初始化本地图像文件夹...");
+
+                // 获取文件夹路径
+                _localFolderPath = settings.LocalFolderPath;
+                _localImageDelay = settings.LocalImageDelay;
+                _loopLocalImages = settings.LoopLocalImages;
+                
+                if (string.IsNullOrEmpty(_localFolderPath) || !Directory.Exists(_localFolderPath))
+                {
+                    _statusCallback?.Invoke($"图像文件夹不存在：{_localFolderPath}");
+                    _cameraStatusCallback?.Invoke("文件夹不存在");
+                    return;
+                }
+
+                // 查找所有图片文件
+                _imageFiles.Clear();
+                _imageFiles.AddRange(Directory.GetFiles(_localFolderPath, "*.jpg", SearchOption.TopDirectoryOnly));
+                _imageFiles.AddRange(Directory.GetFiles(_localFolderPath, "*.jpeg", SearchOption.TopDirectoryOnly));
+                _imageFiles.AddRange(Directory.GetFiles(_localFolderPath, "*.png", SearchOption.TopDirectoryOnly));
+                _imageFiles.AddRange(Directory.GetFiles(_localFolderPath, "*.bmp", SearchOption.TopDirectoryOnly));
+
+                // 按文件名排序
+                _imageFiles = _imageFiles.OrderBy(f => f).ToList();
+
+                if (_imageFiles.Count == 0)
+                {
+                    _statusCallback?.Invoke($"图像文件夹中没有支持的图像文件");
+                    _cameraStatusCallback?.Invoke("没有图像文件");
+                    return;
+                }
+
+                _statusCallback?.Invoke($"已找到 {_imageFiles.Count} 个图像文件");
+                _currentImageIndex = 0;
+                _useLocalFolder = true;
+                _cameraStatusCallback?.Invoke($"本地文件夹: {_imageFiles.Count}张");
+            }
+            catch (Exception ex)
+            {
+                _statusCallback?.Invoke($"初始化本地图像文件夹错误：{ex.Message}");
+                _cameraStatusCallback?.Invoke("初始化错误");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// 初始化相机设备
+        /// </summary>
+        private void InitializeCameraDevice(Settings settings)
+        {
+            _statusCallback?.Invoke("正在初始化相机...");
+
+            // 刷新设备列表
+            List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
+
+            if (deviceList.Count == 0)
+            {
+                _statusCallback?.Invoke("未检测到相机设备");
+                _cameraStatusCallback?.Invoke("未检测到相机");
+                return;
+            }
+
+            // 检查相机索引是否有效
+            int cameraIndex = settings.CameraIndex;
+            if (cameraIndex < 0 || cameraIndex >= deviceList.Count)
+            {
+                cameraIndex = 0;
+            }
+
+            // 连接选中的相机
+            bool success = _cameraManager.ConnectDevice(cameraIndex);
+            if (success)
+            {
+                _isCameraConnected = true;
+                _statusCallback?.Invoke($"相机已连接：{deviceList[cameraIndex].UserDefinedName}");
+                _cameraStatusCallback?.Invoke("已连接");
+
+                // 设置触发模式
+                if (settings.UseTrigger)
+                {
+                    TriggerConfig.TriggerMode mode = settings.UseSoftTrigger
+                        ? TriggerConfig.TriggerMode.Software
+                        : TriggerConfig.TriggerMode.Line0;
+
+                    _cameraManager.SetTriggerMode(mode);
+                    _cameraManager.StartGrabbing();
+                    _statusCallback?.Invoke($"相机设置为{(settings.UseSoftTrigger ? "软触发" : "硬触发")}模式");
+                }
+                else
+                {
+                    // 关闭触发模式
+                    _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Off);
+
+                    // 开始抓取图像
+                    if (_cameraManager.StartGrabbing())
+                    {
+                        _isGrabbing = true;
+                        _statusCallback?.Invoke("相机设置为连续采集模式");
+                    }
+                }
+            }
+            else
+            {
+                _statusCallback?.Invoke("相机连接失败");
+                _cameraStatusCallback?.Invoke("连接失败");
+            }
+        }
+
+        /// <summary>
+        /// 加载并发送下一张图像
+        /// </summary>
+        private Bitmap LoadAndSendNextImage()
+        {
+            try
+            {
+                if (_imageFiles.Count == 0)
+                    return null;
+
+                // 检查索引是否已到末尾
+                if (_currentImageIndex >= _imageFiles.Count)
+                {
+                    // 如果不循环遍历，则直接返回null
+                    if (!_loopLocalImages)
+                    {
+                        _statusCallback?.Invoke("已到达图像列表末尾，停止遍历");
+                        return null;
+                    }
+                    
+                    // 如果循环遍历，则重置索引
+                    _currentImageIndex = 0;
+                    _statusCallback?.Invoke("图像列表已遍历完毕，重新开始");
+                }
+
+                // 读取图像文件
+                lock (_lock)
+                {
+                    if (_currentImageIndex < _imageFiles.Count)
+                    {
+                        string imagePath = _imageFiles[_currentImageIndex];
+                        _currentImageIndex++;
+
+                        try
+                        {
+                            // 使用OpenCV读取三通道图像
+                            using (var mat = new Mat(imagePath))
+                            {
+                                if (mat.Empty())
+                                {
+                                    _statusCallback?.Invoke($"无法读取图像文件：{imagePath}");
+                                    return null;
+                                }
+
+                                // 转换为Bitmap并返回
+                                var bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(mat);
+                                return bitmap;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _statusCallback?.Invoke($"加载图像文件错误：{ex.Message}");
+                            return null;
+                        }
+                    }
+                }
+                return null;
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -152,12 +336,20 @@ namespace OpenIVSWPF.Managers
             {
                 _statusCallback?.Invoke("正在捕获图像...");
 
-                if (!_isCameraConnected)
+                if (!IsConnected)
                 {
-                    _statusCallback?.Invoke("相机未连接，无法捕获图像");
+                    _statusCallback?.Invoke("相机未连接且未配置本地图像，无法捕获图像");
                     return null;
                 }
 
+                // 处理本地图像文件夹模式
+                if (_useLocalFolder)
+                {
+                    // 确保每次都获取新图像，不使用lastCapturedImage
+                    return await CaptureLocalImageAsync(token, null);
+                }
+
+                // 处理相机模式，保持原有逻辑
                 // 根据触发模式执行不同的捕获逻辑
                 if (settings.UseTrigger)
                 {
@@ -276,6 +468,76 @@ namespace OpenIVSWPF.Managers
         }
 
         /// <summary>
+        /// 捕获本地文件夹中的图像
+        /// </summary>
+        private async Task<Bitmap> CaptureLocalImageAsync(CancellationToken token, Bitmap lastCapturedImage)
+        {
+            try
+            {
+                // 离线模式下，每次调用都加载新图像，不使用lastCapturedImage
+                lastCapturedImage = null;
+
+                // 如果没有图像文件，返回null
+                if (_imageFiles.Count == 0)
+                {
+                    _statusCallback?.Invoke("本地文件夹中没有图像文件");
+                    return null;
+                }
+
+                // 应用图像延迟
+                if (_localImageDelay > 0)
+                {
+                    _statusCallback?.Invoke($"等待图像间隔时间 {_localImageDelay}ms...");
+                    await Task.Delay(_localImageDelay, token);
+                }
+
+                // 获取下一张图像
+                Bitmap bitmap = LoadAndSendNextImage();
+                if (bitmap != null)
+                {
+                    // 发送图像事件
+                    _cameraManager.RaiseImageUpdatedEvent(bitmap);
+                    _statusCallback?.Invoke($"已加载图像: {_currentImageIndex}/{_imageFiles.Count}");
+                    return bitmap;
+                }
+                else
+                {
+                    // 无法加载下一张图像，检查是否因为已到末尾且不循环遍历
+                    if (_currentImageIndex >= _imageFiles.Count && !_loopLocalImages)
+                    {
+                        _statusCallback?.Invoke("图像列表已遍历完毕，不再循环遍历");
+                    }
+                    else
+                    {
+                        _statusCallback?.Invoke("无法加载下一张图像");
+                    }
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _statusCallback?.Invoke($"本地图像捕获过程中发生错误：{ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 手动触发本地图像
+        /// </summary>
+        public void TriggerLocalImage()
+        {
+            if (_useLocalFolder && _imageFiles.Count > 0)
+            {
+                // 加载下一张图像并发送事件
+                Bitmap bitmap = LoadAndSendNextImage();
+                if (bitmap != null)
+                {
+                    _cameraManager.RaiseImageUpdatedEvent(bitmap);
+                }
+            }
+        }
+
+        /// <summary>
         /// 关闭相机连接
         /// </summary>
         public void Close()
@@ -291,6 +553,12 @@ namespace OpenIVSWPF.Managers
                 _cameraManager?.DisconnectDevice();
                 _isCameraConnected = false;
             }
+
+            // 停止本地图像流
+            if (_useLocalFolder)
+            {
+                _useLocalFolder = false;
+            }
         }
     }
-} 
+}
