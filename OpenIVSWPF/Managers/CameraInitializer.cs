@@ -502,7 +502,15 @@ namespace OpenIVSWPF.Managers
                 }
                 else
                 {
-                    _statusCallback?.Invoke("无法加载下一张图像");
+                    // 无法加载下一张图像，检查是否因为已到末尾且不循环遍历
+                    if (_currentImageIndex >= _imageFiles.Count && !_loopLocalImages)
+                    {
+                        _statusCallback?.Invoke("图像列表已遍历完毕，不再循环遍历");
+                    }
+                    else
+                    {
+                        _statusCallback?.Invoke("无法加载下一张图像");
+                    }
                     return null;
                 }
             }

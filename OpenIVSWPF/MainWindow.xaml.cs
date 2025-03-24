@@ -431,6 +431,16 @@ namespace OpenIVSWPF
 
                 // 启动主循环任务
                 await _mainLoopManager.RunMainLoopAsync(_cts.Token, _lastCapturedImage);
+                
+                // 检查是否是因为图像用完而返回（只有在离线模式下会出现）
+                if (_isRunning && SettingsManager.Instance.Settings.UseLocalFolder 
+                    && !SettingsManager.Instance.Settings.LoopLocalImages)
+                {
+                    // 由于图像已经处理完毕，自动停止运行
+                    _isRunning = false;
+                    UpdateStatus("离线模式: 所有图像已处理完毕，停止检测。");
+                    UpdateControlState();
+                }
             }
             catch (Exception ex)
             {
