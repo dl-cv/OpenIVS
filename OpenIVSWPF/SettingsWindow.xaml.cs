@@ -64,7 +64,6 @@ namespace OpenIVSWPF
         // 本地图像文件夹设置
         public bool UseLocalFolder { get; private set; }
         public string LocalFolderPath { get; private set; }
-        public bool LoopImages { get; private set; }
 
         // 加载标志
         private bool _isLoading = false;
@@ -364,7 +363,6 @@ namespace OpenIVSWPF
             // 本地图像文件夹设置
             UseLocalFolder = settings.UseLocalFolder;
             LocalFolderPath = settings.LocalFolderPath;
-            LoopImages = settings.LoopImages;
 
             // 模型设置
             ModelPath = settings.ModelPath;
@@ -410,7 +408,6 @@ namespace OpenIVSWPF
             // 更新本地图像文件夹UI
             chkUseLocalFolder.IsChecked = UseLocalFolder;
             txtLocalFolderPath.Text = LocalFolderPath;
-            chkLoopImages.IsChecked = LoopImages;
 
             // 根据是否使用本地文件夹更新UI状态
             UpdateImageSourceUI();
@@ -602,7 +599,6 @@ namespace OpenIVSWPF
             // 本地图像文件夹设置
             settings.UseLocalFolder = chkUseLocalFolder.IsChecked == true;
             settings.LocalFolderPath = txtLocalFolderPath.Text;
-            settings.LoopImages = chkLoopImages.IsChecked == true;
 
             // 模型设置
             settings.ModelPath = txtModelPath.Text;
