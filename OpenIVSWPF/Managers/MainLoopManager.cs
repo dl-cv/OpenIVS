@@ -106,7 +106,7 @@ namespace OpenIVSWPF.Managers
                                     if (isOfflineMode && !_settings.LoopLocalImages && _cameraInitializer.IsImageListExhausted)
                                     {
                                         // 离线模式下，非循环遍历模式，且图像已用完，说明已到末尾
-                                        _statusCallback?.Invoke("离线模式: 所有图像已处理完毕，停止检测。");
+                                        _statusCallback?.Invoke("离线模式: 所有图像已处理完毕，停止检测");
                                         return; // 退出方法，停止检测
                                     }
                                     else

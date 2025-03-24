@@ -427,7 +427,7 @@ namespace OpenIVSWPF
                 {
                     // 由于图像已经处理完毕，自动停止运行
                     _isRunning = false;
-                    UpdateStatus("离线模式: 所有图像已处理完毕，停止检测。");
+                    UpdateStatus("离线模式: 所有图像已处理完毕，停止检测");
                     UpdateControlState();
                 }
             }
