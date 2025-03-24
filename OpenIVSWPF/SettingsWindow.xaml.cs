@@ -561,7 +561,7 @@ namespace OpenIVSWPF
                 return;
 
             // 直接调用异步加载方法
-            LoadCameraListAsync();
+            await Task.Run(new Action(LoadCameraListAsync));
         }
 
         private void chkUseTrigger_Checked(object sender, RoutedEventArgs e)
