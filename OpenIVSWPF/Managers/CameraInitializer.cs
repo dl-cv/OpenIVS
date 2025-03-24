@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Reflection;
+using OpenCvSharp;
 
 namespace OpenIVSWPF.Managers
 {
@@ -25,11 +26,11 @@ namespace OpenIVSWPF.Managers
         {
             // 创建事件参数
             var eventArgs = new ImageEventArgs(image);
-            
+
             // 获取ImageUpdated事件字段
             var type = cameraManager.GetType();
             var eventField = type.GetField("ImageUpdated", BindingFlags.Instance | BindingFlags.NonPublic);
-            
+
             // 获取事件委托
             var eventDelegate = eventField?.GetValue(cameraManager) as MulticastDelegate;
             if (eventDelegate != null)
@@ -89,7 +90,7 @@ namespace OpenIVSWPF.Managers
         private bool _isGrabbing = false;
         private Action<string> _statusCallback;
         private Action<string> _cameraStatusCallback;
-        
+
         // 本地图像文件夹相关
         private bool _useLocalFolder = false;
         private string _localFolderPath = string.Empty;
@@ -106,7 +107,7 @@ namespace OpenIVSWPF.Managers
         public CameraManager CameraManager => _cameraManager;
         public bool UseLocalFolder => _useLocalFolder;
 
-        public event EventHandler<ImageEventArgs> ImageUpdated 
+        public event EventHandler<ImageEventArgs> ImageUpdated
         {
             add { _cameraManager.ImageUpdated += value; }
             remove { _cameraManager.ImageUpdated -= value; }
@@ -152,7 +153,7 @@ namespace OpenIVSWPF.Managers
             try
             {
                 _statusCallback?.Invoke("正在初始化本地图像文件夹...");
-                
+
                 // 获取文件夹路径
                 _localFolderPath = settings.LocalFolderPath;
                 if (string.IsNullOrEmpty(_localFolderPath) || !Directory.Exists(_localFolderPath))
@@ -161,30 +162,30 @@ namespace OpenIVSWPF.Managers
                     _cameraStatusCallback?.Invoke("文件夹不存在");
                     return;
                 }
-                
+
                 // 查找所有图片文件
                 _imageFiles.Clear();
                 _imageFiles.AddRange(Directory.GetFiles(_localFolderPath, "*.jpg", SearchOption.TopDirectoryOnly));
                 _imageFiles.AddRange(Directory.GetFiles(_localFolderPath, "*.jpeg", SearchOption.TopDirectoryOnly));
                 _imageFiles.AddRange(Directory.GetFiles(_localFolderPath, "*.png", SearchOption.TopDirectoryOnly));
                 _imageFiles.AddRange(Directory.GetFiles(_localFolderPath, "*.bmp", SearchOption.TopDirectoryOnly));
-                
+
                 // 按文件名排序
                 _imageFiles = _imageFiles.OrderBy(f => f).ToList();
-                
+
                 if (_imageFiles.Count == 0)
                 {
                     _statusCallback?.Invoke($"图像文件夹中没有支持的图像文件");
                     _cameraStatusCallback?.Invoke("没有图像文件");
                     return;
                 }
-                
+
                 _statusCallback?.Invoke($"已找到 {_imageFiles.Count} 个图像文件");
                 _currentImageIndex = 0;
                 _loopImages = settings.LoopImages;
                 _useLocalFolder = true;
                 _cameraStatusCallback?.Invoke($"本地文件夹: {_imageFiles.Count}张");
-                
+
                 // 初始化成功后，根据触发模式决定是否自动开始传输图像
                 if (!settings.UseTrigger)
                 {
@@ -198,7 +199,7 @@ namespace OpenIVSWPF.Managers
                 throw;
             }
         }
-        
+
         /// <summary>
         /// 初始化相机设备
         /// </summary>
@@ -272,7 +273,7 @@ namespace OpenIVSWPF.Managers
 
             _isGrabbing = true;
             _localImagesCts = new CancellationTokenSource();
-            
+
             // 创建一个定时器，定期加载并发送图像
             _imageTimer = new Timer(LoadAndSendNextImage, null, 0, 1000); // 每秒一张图片
         }
@@ -296,7 +297,7 @@ namespace OpenIVSWPF.Managers
                         return;
                     }
                 }
-                
+
                 // 读取图像文件
                 lock (_lock)
                 {
@@ -304,15 +305,23 @@ namespace OpenIVSWPF.Managers
                     {
                         string imagePath = _imageFiles[_currentImageIndex];
                         _currentImageIndex++;
-                        
+
                         try
                         {
-                            using (Bitmap image = new Bitmap(imagePath))
+                            // 使用OpenCV读取三通道图像
+                            using (var mat = new Mat(imagePath))
                             {
-                                // 克隆图像，因为原始Bitmap会在using块结束时被释放
-                                Bitmap clonedImage = new Bitmap(image);
+                                if (mat.Empty())
+                                {
+                                    _statusCallback?.Invoke($"无法读取图像文件：{imagePath}");
+                                    return;
+                                }
+
+                                // 转换为Bitmap（如果需要保持原有接口）
+                                var bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(mat);
+
                                 // 发送图像事件
-                                _cameraManager.RaiseImageUpdatedEvent(clonedImage);
+                                _cameraManager.RaiseImageUpdatedEvent(bitmap);
                             }
                         }
                         catch (Exception ex)
@@ -525,10 +534,17 @@ namespace OpenIVSWPF.Managers
                     try
                     {
                         _statusCallback?.Invoke($"加载图像文件：{Path.GetFileName(imagePath)}");
-                        using (Bitmap image = new Bitmap(imagePath))
+                        using (var mat = new Mat(imagePath))
                         {
-                            // 克隆图像，因为原始Bitmap会在using块结束时被释放
-                            return new Bitmap(image);
+                            if (mat.Empty())
+                            {
+                                _statusCallback?.Invoke($"无法读取图像文件：{Path.GetFileName(imagePath)}");
+                                return null;
+                            }
+
+                            // 转换为Bitmap（如果需要保持原有接口）
+                            var bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(mat);
+                            return bitmap;
                         }
                     }
                     catch (Exception ex)
@@ -544,7 +560,7 @@ namespace OpenIVSWPF.Managers
                 return null;
             }
         }
-        
+
         /// <summary>
         /// 手动触发本地图像
         /// </summary>
@@ -581,4 +597,4 @@ namespace OpenIVSWPF.Managers
             }
         }
     }
-} 
+}
