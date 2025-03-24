@@ -531,17 +531,21 @@ namespace OpenIVSWPF.Managers
         /// <summary>
         /// 手动触发本地图像
         /// </summary>
-        public void TriggerLocalImage()
+        /// <returns>加载的图像，若失败则返回null</returns>
+        public Bitmap TriggerLocalImage()
         {
             if (_useLocalFolder && _imageFiles.Count > 0)
             {
-                // 加载下一张图像并发送事件
+                // 加载下一张图像
                 Bitmap bitmap = LoadAndSendNextImage();
                 if (bitmap != null)
                 {
+                    // 触发事件，以便更新UI显示
                     _cameraManager.RaiseImageUpdatedEvent(bitmap);
+                    return bitmap;
                 }
             }
+            return null;
         }
 
         /// <summary>

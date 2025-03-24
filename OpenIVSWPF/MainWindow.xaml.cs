@@ -349,20 +349,8 @@ namespace OpenIVSWPF
                         // 离线模式和触发模式的推理由MainLoopManager处理
                         if (_isRunning && !isOfflineMode && !isTriggerMode)
                         {
-                            // 执行AI推理
-                            string result = _modelManager.PerformInference(_lastCapturedImage);
-
-                            // 更新检测结果显示
-                            UpdateDetectionResult(result);
-
-                            // 判断检测结果
-                            bool isOK = string.IsNullOrEmpty(result);
-
-                            // 更新统计信息
-                            UpdateStatisticsCallback(isOK);
-
-                            // 根据设置保存图像
-                            _ = SaveImageAsync(_lastCapturedImage, isOK);
+                            // 使用MainLoopManager进行统一的图像处理
+                            _ = _mainLoopManager.ProcessImageAsync(_lastCapturedImage, "连续模式");
                         }
                         else
                         {

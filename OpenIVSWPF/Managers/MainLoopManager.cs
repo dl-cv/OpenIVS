@@ -121,27 +121,12 @@ namespace OpenIVSWPF.Managers
                                     // 更新lastCapturedImage
                                     lastCapturedImage = image.Clone() as Bitmap;
                                     
-                                    // 执行AI推理（所有触发模式和离线模式的推理都在这里进行）
-                                    _statusCallback?.Invoke("执行AI推理...");
-                                    string result = _modelManager.PerformInference(image);
-
-                                    // 更新检测结果显示
-                                    _detectionResultCallback?.Invoke(result);
-
-                                    // 判断检测结果
-                                    bool isOK = string.IsNullOrEmpty(result);
-
-                                    // 更新统计信息
-                                    _statisticsCallback?.Invoke(isOK);
-
-                                    // 根据设置保存图像
-                                    await _saveImageCallback?.Invoke(image, isOK);
-
-                                    // 添加完成信息
-                                    _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的推理和保存已完成");
+                                    // 使用统一的图像处理方法处理图像
+                                    string positionInfo = $"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition}";
+                                    await ProcessImageAsync(image, positionInfo);
                                     
-                                    // 提示拍照已完成
-                                    _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的处理已完成，准备移动到下一位置");
+                                    // 提示处理已完成
+                                    _statusCallback?.Invoke($"{positionInfo} 的处理已完成，准备移动到下一位置");
                                 }
                             }
                             catch (Exception ex)
@@ -272,6 +257,50 @@ namespace OpenIVSWPF.Managers
             catch (Exception ex)
             {
                 _statusCallback?.Invoke($"保存图像时发生错误: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// 处理图像并执行推理 - 所有模式的统一处理入口
+        /// </summary>
+        /// <param name="image">需要处理的图像</param>
+        /// <param name="positionInfo">位置信息（可选，用于日志）</param>
+        /// <returns>处理任务</returns>
+        public async Task ProcessImageAsync(Bitmap image, string positionInfo = null)
+        {
+            if (image == null)
+                return;
+                
+            try
+            {
+                // 复制图像以避免潜在的并发访问问题
+                using (Bitmap processImage = image.Clone() as Bitmap)
+                {
+                    // 执行AI推理
+                    string logPrefix = string.IsNullOrEmpty(positionInfo) ? "" : $"{positionInfo}：";
+                    _statusCallback?.Invoke($"{logPrefix}执行AI推理...");
+                    
+                    string result = _modelManager.PerformInference(processImage);
+
+                    // 更新检测结果显示
+                    _detectionResultCallback?.Invoke(result);
+
+                    // 判断检测结果
+                    bool isOK = string.IsNullOrEmpty(result);
+
+                    // 更新统计信息
+                    _statisticsCallback?.Invoke(isOK);
+
+                    // 根据设置保存图像
+                    await _saveImageCallback?.Invoke(processImage, isOK);
+
+                    // 添加完成信息
+                    _statusCallback?.Invoke($"{logPrefix}推理和保存已完成");
+                }
+            }
+            catch (Exception ex)
+            {
+                _statusCallback?.Invoke($"图像处理过程中发生错误：{ex.Message}");
             }
         }
     }
