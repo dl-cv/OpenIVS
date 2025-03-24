@@ -96,7 +96,6 @@ namespace OpenIVSWPF.Managers
         private string _localFolderPath = string.Empty;
         private List<string> _imageFiles = new List<string>();
         private int _currentImageIndex = 0;
-        private bool _loopImages = true;
         private CancellationTokenSource _localImagesCts;
         private Task _localImagesTask;
         private Timer _imageTimer;
@@ -182,7 +181,6 @@ namespace OpenIVSWPF.Managers
 
                 _statusCallback?.Invoke($"已找到 {_imageFiles.Count} 个图像文件");
                 _currentImageIndex = 0;
-                _loopImages = settings.LoopImages;
                 _useLocalFolder = true;
                 _cameraStatusCallback?.Invoke($"本地文件夹: {_imageFiles.Count}张");
 
@@ -268,14 +266,17 @@ namespace OpenIVSWPF.Managers
         /// </summary>
         private void StartLocalImageStream()
         {
-            if (_imageFiles.Count == 0 || _localImagesTask != null)
+            if (_imageFiles.Count == 0)
                 return;
+
+            // 先停止任何现有的图像流
+            StopLocalImageStream();
 
             _isGrabbing = true;
             _localImagesCts = new CancellationTokenSource();
 
             // 创建一个定时器，定期加载并发送图像
-            _imageTimer = new Timer(LoadAndSendNextImage, null, 0, 1000); // 每秒一张图片
+            _imageTimer = new Timer(LoadAndSendNextImage, null, 0, 500); // 每500毫秒一张图片，加快循环速度
         }
 
         /// <summary>
@@ -285,17 +286,13 @@ namespace OpenIVSWPF.Managers
         {
             try
             {
-                if (_imageFiles.Count == 0 || _currentImageIndex >= _imageFiles.Count)
+                if (_imageFiles.Count == 0)
+                    return;
+
+                // 如果已经到达图像列表末尾，则重置索引
+                if (_currentImageIndex >= _imageFiles.Count)
                 {
-                    if (_loopImages)
-                    {
-                        _currentImageIndex = 0;
-                    }
-                    else
-                    {
-                        StopLocalImageStream();
-                        return;
-                    }
+                    _currentImageIndex = 0;
                 }
 
                 // 读取图像文件
@@ -515,17 +512,10 @@ namespace OpenIVSWPF.Managers
                 // 获取下一张图像
                 lock (_lock)
                 {
+                    // 如果已经到达图像列表末尾，则重置索引
                     if (_currentImageIndex >= _imageFiles.Count)
                     {
-                        if (_loopImages)
-                        {
-                            _currentImageIndex = 0;
-                        }
-                        else
-                        {
-                            _statusCallback?.Invoke("已到达图像文件末尾");
-                            return null;
-                        }
+                        _currentImageIndex = 0;
                     }
 
                     string imagePath = _imageFiles[_currentImageIndex];
