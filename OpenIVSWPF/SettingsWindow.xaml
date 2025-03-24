@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:OpenIVSWPF"
+        xmlns:shell="clr-namespace:Microsoft.WindowsAPICodePack.Dialogs;assembly=Microsoft.WindowsAPICodePack.Shell"
         mc:Ignorable="d"
         Title="系统设置" Height="600" Width="800"
         WindowStartupLocation="CenterOwner">
