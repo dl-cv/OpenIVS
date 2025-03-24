@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:OpenIVSWPF"
         mc:Ignorable="d"
-        Title="系统设置" Height="500" Width="600"
+        Title="系统设置" Height="600" Width="800"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="10">
         <Grid.RowDefinitions>
