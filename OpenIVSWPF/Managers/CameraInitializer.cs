@@ -106,6 +106,11 @@ namespace OpenIVSWPF.Managers
         public bool IsGrabbing => _isGrabbing;
         public CameraManager CameraManager => _cameraManager;
         public bool UseLocalFolder => _useLocalFolder;
+        
+        /// <summary>
+        /// 判断图像列表是否已用完（仅在非循环模式下有效）
+        /// </summary>
+        public bool IsImageListExhausted => _useLocalFolder && _currentImageIndex >= _imageFiles.Count && !_loopLocalImages;
 
         public event EventHandler<ImageEventArgs> ImageUpdated
         {
@@ -557,8 +562,19 @@ namespace OpenIVSWPF.Managers
             // 停止本地图像流
             if (_useLocalFolder)
             {
+                // 重置图像索引，以便下次启动时从头开始
+                ResetImageIndex();
                 _useLocalFolder = false;
             }
+        }
+        
+        /// <summary>
+        /// 重置图像索引，使得下次从第一张图像开始处理
+        /// </summary>
+        public void ResetImageIndex()
+        {
+            _currentImageIndex = 0;
+            _statusCallback?.Invoke("已重置图像索引，下次将从第一张图像开始");
         }
     }
 }

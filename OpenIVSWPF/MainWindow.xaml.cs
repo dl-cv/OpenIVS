@@ -341,8 +341,9 @@ namespace OpenIVSWPF
                         // 保存最新图像，用于非触发模式
                         _lastCapturedImage = e.Image.Clone() as Bitmap;
 
-                        // 如果是非触发模式，则立即执行推理
-                        if (_isRunning && !SettingsManager.Instance.Settings.UseTrigger)
+                        // 如果是非触发模式，或者是离线模式，则立即执行推理
+                        bool isOfflineMode = SettingsManager.Instance.Settings.UseLocalFolder;
+                        if (_isRunning && (!SettingsManager.Instance.Settings.UseTrigger || isOfflineMode))
                         {
                             // 执行AI推理
                             string result = _modelManager.PerformInference(_lastCapturedImage);
@@ -415,18 +416,16 @@ namespace OpenIVSWPF
                 if (SettingsManager.Instance.Settings.UseLocalFolder)
                 {
                     UpdateStatus("离线模式系统启动");
+
+                    // 离线模式下，在启动时先重置图像索引，确保从第一张图像开始
+                    _cameraInitializer.ResetImageIndex();
+
+                    // 在离线模式下，无论是否配置了触发器，都主动触发第一张图像加载
+                    _cameraInitializer.TriggerLocalImage();
                 }
                 else
                 {
                     UpdateStatus("系统启动");
-                }
-
-                // 如果是软触发模式，且使用本地图像文件夹，手动触发一次
-                if (SettingsManager.Instance.Settings.UseLocalFolder && 
-                    SettingsManager.Instance.Settings.UseTrigger &&
-                    SettingsManager.Instance.Settings.UseSoftTrigger)
-                {
-                    _cameraInitializer.TriggerLocalImage();
                 }
 
                 // 启动主循环任务
@@ -462,6 +461,12 @@ namespace OpenIVSWPF
                     _cts.Cancel();
                     _cts.Dispose();
                     _cts = null;
+                }
+
+                // 若是离线模式，确保重置图像索引，使下次从头开始
+                if (SettingsManager.Instance.Settings.UseLocalFolder)
+                {
+                    _cameraInitializer.ResetImageIndex();
                 }
 
                 UpdateStatus("系统已停止");

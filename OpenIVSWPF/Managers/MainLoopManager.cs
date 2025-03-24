@@ -100,11 +100,20 @@ namespace OpenIVSWPF.Managers
                                 var image = await _cameraInitializer.CaptureImageAsync(token, lastCapturedImage, _settings);
 
                                 // 检查图像是否为空
-                                if (image == null && isOfflineMode && !_settings.LoopLocalImages)
+                                if (image == null)
                                 {
-                                    // 离线模式下，非循环遍历模式，且图像为空，说明图像已用完
-                                    _statusCallback?.Invoke("离线模式: 所有图像已处理完毕，停止检测。");
-                                    return; // 退出方法，停止检测
+                                    if (isOfflineMode && !_settings.LoopLocalImages && _cameraInitializer.IsImageListExhausted)
+                                    {
+                                        // 离线模式下，非循环遍历模式，且图像已用完，说明已到末尾
+                                        _statusCallback?.Invoke("离线模式: 所有图像已处理完毕，停止检测。");
+                                        return; // 退出方法，停止检测
+                                    }
+                                    else
+                                    {
+                                        // 只是当前图像处理失败，继续循环
+                                        _statusCallback?.Invoke("无法获取图像，继续下一个位置...");
+                                        continue;
+                                    }
                                 }
 
                                 if (image != null && !token.IsCancellationRequested)
