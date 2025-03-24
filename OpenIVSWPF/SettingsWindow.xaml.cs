@@ -259,10 +259,41 @@ namespace OpenIVSWPF
                         catch { /* 忽略UI更新错误 */ }
                     }));
                 }
+                else
+                {
+                    // Modbus未连接或连接失败，更新UI显示离线状态
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            var control = FindName("txtCurrentPosition") as TextBlock;
+                            if (control != null)
+                            {
+                                control.Text = "离线";
+                            }
+                        }
+                        catch { /* 忽略UI更新错误 */ }
+                    }));
+                }
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show($"获取当前位置时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                // 不再弹窗显示错误，改为记录日志
+                System.Diagnostics.Debug.WriteLine($"获取当前位置时发生错误：{ex.Message}");
+                
+                // 更新UI显示离线状态
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        var control = FindName("txtCurrentPosition") as TextBlock;
+                        if (control != null)
+                        {
+                            control.Text = "离线";
+                        }
+                    }
+                    catch { /* 忽略UI更新错误 */ }
+                }));
             }
         }
 
@@ -302,7 +333,9 @@ namespace OpenIVSWPF
                     string[] ports = SerialPort.GetPortNames();
                     if (ports.Length == 0)
                     {
-                        System.Windows.MessageBox.Show("未检测到串口设备", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        // 无串口设备时不再弹出提示，支持离线模式
+                        // 记录日志
+                        System.Diagnostics.Debug.WriteLine("未检测到串口设备，将使用离线模式");
                         return;
                     }
                     settings.PortName = ports[0];
@@ -321,12 +354,18 @@ namespace OpenIVSWPF
                 // 打开串口
                 if (!_modbusApi.Open())
                 {
-                    System.Windows.MessageBox.Show("Modbus设备连接失败", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    // 不再弹窗提示，支持离线模式
+                    System.Diagnostics.Debug.WriteLine("Modbus设备连接失败，将使用离线模式");
+                    // 更新状态栏（如果需要）
+                    UpdateStatus("Modbus设备未连接，将使用离线模式");
                 }
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show($"Modbus初始化错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                // 不再弹窗提示错误，而是记录日志
+                System.Diagnostics.Debug.WriteLine($"Modbus初始化错误：{ex.Message}");
+                // 更新状态栏（如果需要）
+                UpdateStatus("Modbus连接失败，将使用离线模式");
             }
         }
 
@@ -548,8 +587,11 @@ namespace OpenIVSWPF
 
         private bool ValidateSettings()
         {
-            // 验证Modbus设置
-            if (cbPortName.SelectedItem == null)
+            // 检查是否是离线模式（使用本地图像文件夹）
+            bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
+
+            // 验证Modbus设置（仅在非离线模式下强制要求）
+            if (!isOfflineMode && cbPortName.SelectedItem == null)
             {
                 System.Windows.MessageBox.Show("请选择串口", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
@@ -572,6 +614,13 @@ namespace OpenIVSWPF
             if (!float.TryParse(txtSpeed.Text, out float speed) || speed <= 0)
             {
                 System.Windows.MessageBox.Show("速度必须是正数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            // 在离线模式下，验证本地图像文件夹路径
+            if (isOfflineMode && string.IsNullOrEmpty(txtLocalFolderPath.Text))
+            {
+                System.Windows.MessageBox.Show("请选择本地图像文件夹路径", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
@@ -699,104 +748,147 @@ namespace OpenIVSWPF
                     }
                 }
 
+                // 检查是否为离线模式
+                bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
+                
                 // 获取当前相机图像
                 Bitmap image = null;
 
-                if (_cameraManager == null || _cameraManager.ActiveDevice == null || !_cameraManager.ActiveDevice.IsOpen)
+                if (isOfflineMode)
                 {
-                    // 连接相机
+                    // 尝试从本地文件夹加载测试图像
+                    if (string.IsNullOrEmpty(txtLocalFolderPath.Text) || !Directory.Exists(txtLocalFolderPath.Text))
+                    {
+                        System.Windows.MessageBox.Show("请先选择有效的本地图像文件夹", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
+                    // 尝试从文件夹获取第一张图像
+                    string[] imageFiles = Directory.GetFiles(txtLocalFolderPath.Text, "*.jpg")
+                                .Concat(Directory.GetFiles(txtLocalFolderPath.Text, "*.jpeg"))
+                                .Concat(Directory.GetFiles(txtLocalFolderPath.Text, "*.png"))
+                                .Concat(Directory.GetFiles(txtLocalFolderPath.Text, "*.bmp"))
+                                .ToArray();
+
+                    if (imageFiles.Length == 0)
+                    {
+                        System.Windows.MessageBox.Show("本地图像文件夹中未找到图像文件", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
                     try
                     {
-                        // 刷新设备列表
-                        List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
-
-                        if (deviceList.Count == 0)
-                        {
-                            System.Windows.MessageBox.Show("未检测到相机设备", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
-                            return;
-                        }
-
-                        // 检查相机索引是否有效
-                        int cameraIndex = SelectedCameraIndex;
-                        if (cameraIndex < 0 || cameraIndex >= deviceList.Count)
-                        {
-                            cameraIndex = 0;
-                        }
-
-                        // 连接选中的相机
-                        bool success = _cameraManager.ConnectDevice(cameraIndex);
-                        if (!success)
-                        {
-                            System.Windows.MessageBox.Show("相机连接失败", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
-                            return;
-                        }
-
-                        // 设置触发模式
-                        TriggerConfig.TriggerMode mode = TriggerConfig.TriggerMode.Software;
-                        _cameraManager.SetTriggerMode(mode);
-                        _cameraManager.StartGrabbing();
+                        // 加载第一张图像
+                        image = new Bitmap(imageFiles[0]);
+                        UpdateStatus($"已从本地文件夹加载图像：{Path.GetFileName(imageFiles[0])}");
                     }
                     catch (Exception ex)
                     {
-                        System.Windows.MessageBox.Show($"相机初始化错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        System.Windows.MessageBox.Show($"加载本地图像失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                         return;
                     }
                 }
-
-                // 捕获图像
-                // 使用TaskCompletionSource等待图像更新事件
-                var tcs = new TaskCompletionSource<Bitmap>();
-
-                // 设置图像捕获事件处理
-                EventHandler<ImageEventArgs> handler = null;
-                handler = (s, args) =>
+                else
                 {
-                    // 捕获到图像后，转换为Bitmap
-                    if (args.Image != null)
+                    // 使用相机捕获图像
+                    if (_cameraManager == null || _cameraManager.ActiveDevice == null || !_cameraManager.ActiveDevice.IsOpen)
                     {
-                        tcs.TrySetResult(args.Image.Clone() as Bitmap);
-                    }
-
-                    // 移除事件处理器，防止多次触发
-                    _cameraManager.ImageUpdated -= handler;
-                };
-
-                // 添加事件处理
-                _cameraManager.ImageUpdated += handler;
-
-                // 执行软触发
-                _cameraManager.TriggerOnce();
-
-                // 添加超时处理，2秒内如果没有图像返回，则取消
-                using (var timeoutCts = new CancellationTokenSource(2000))
-                {
-                    try
-                    {
-                        // 注册取消操作
-                        timeoutCts.Token.Register(() =>
+                        // 连接相机
+                        try
                         {
-                            _cameraManager.ImageUpdated -= handler;
-                            tcs.TrySetCanceled();
-                        });
+                            // 刷新设备列表
+                            List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
 
-                        // 等待图像或取消
-                        image = await tcs.Task;
+                            if (deviceList.Count == 0)
+                            {
+                                UpdateStatus("未检测到相机设备，请检查相机连接");
+                                return;
+                            }
+
+                            // 检查相机索引是否有效
+                            int cameraIndex = SelectedCameraIndex;
+                            if (cameraIndex < 0 || cameraIndex >= deviceList.Count)
+                            {
+                                cameraIndex = 0;
+                            }
+
+                            // 连接选中的相机
+                            bool success = _cameraManager.ConnectDevice(cameraIndex);
+                            if (!success)
+                            {
+                                UpdateStatus("相机连接失败，请检查相机状态");
+                                return;
+                            }
+
+                            // 设置触发模式
+                            TriggerConfig.TriggerMode mode = TriggerConfig.TriggerMode.Software;
+                            _cameraManager.SetTriggerMode(mode);
+                            _cameraManager.StartGrabbing();
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"相机初始化错误：{ex.Message}");
+                            UpdateStatus("相机初始化失败，请检查相机连接");
+                            return;
+                        }
                     }
-                    catch (OperationCanceledException)
+
+                    // 捕获图像
+                    // 使用TaskCompletionSource等待图像更新事件
+                    var tcs = new TaskCompletionSource<Bitmap>();
+
+                    // 设置图像捕获事件处理
+                    EventHandler<ImageEventArgs> handler = null;
+                    handler = (s, args) =>
                     {
-                        System.Windows.MessageBox.Show("图像捕获超时或被取消", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        return;
-                    }
-                    catch (Exception ex)
+                        // 捕获到图像后，转换为Bitmap
+                        if (args.Image != null)
+                        {
+                            tcs.TrySetResult(args.Image.Clone() as Bitmap);
+                        }
+
+                        // 移除事件处理器，防止多次触发
+                        _cameraManager.ImageUpdated -= handler;
+                    };
+
+                    // 添加事件处理
+                    _cameraManager.ImageUpdated += handler;
+
+                    // 执行软触发
+                    _cameraManager.TriggerOnce();
+
+                    // 添加超时处理，2秒内如果没有图像返回，则取消
+                    using (var timeoutCts = new CancellationTokenSource(2000))
                     {
-                        System.Windows.MessageBox.Show($"图像捕获过程中发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                        return;
+                        try
+                        {
+                            // 注册取消操作
+                            timeoutCts.Token.Register(() =>
+                            {
+                                _cameraManager.ImageUpdated -= handler;
+                                tcs.TrySetCanceled();
+                            });
+
+                            // 等待图像或取消
+                            image = await tcs.Task;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            UpdateStatus("图像捕获超时，请检查相机是否正常工作");
+                            return;
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"图像捕获过程中发生错误：{ex.Message}");
+                            UpdateStatus("图像捕获失败，请检查相机状态");
+                            return;
+                        }
                     }
                 }
 
                 if (image == null)
                 {
-                    System.Windows.MessageBox.Show("无法获取图像，请确保相机正常工作", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    UpdateStatus("无法获取图像，请确保相机正常工作或选择有效的本地图像文件夹");
                     return;
                 }
 
@@ -832,12 +924,16 @@ namespace OpenIVSWPF
                     }
                 }
 
-                // 更新右下角日志，不再弹窗显示
+                // 清理资源
+                image.Dispose();
+
+                // 更新状态
                 UpdateStatus($"图像已保存到：{fullPath}");
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show($"保存图像时发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Diagnostics.Debug.WriteLine($"保存图像时发生错误：{ex.Message}");
+                UpdateStatus("保存图像过程中发生错误");
             }
         }
 
@@ -860,9 +956,13 @@ namespace OpenIVSWPF
         {
             try
             {
-                if (_modbusApi == null)
+                // 检查是否为离线模式
+                bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
+                
+                if (isOfflineMode || _modbusApi == null || !IsModbusConnected())
                 {
-                    System.Windows.MessageBox.Show("Modbus未连接，无法执行操作", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    // 在离线模式下使用更友好的提示
+                    UpdateStatus("当前处于离线模式，无法执行回原点操作");
                     return;
                 }
 
@@ -870,16 +970,18 @@ namespace OpenIVSWPF
                 bool result = _modbusApi.WriteSingleRegister(50, 1);
                 if (result)
                 {
-                    System.Windows.MessageBox.Show("已发送回原点命令", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    UpdateStatus("已发送回原点命令");
                 }
                 else
                 {
-                    System.Windows.MessageBox.Show("发送回原点命令失败", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    UpdateStatus("发送回原点命令失败");
                 }
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show($"回原点操作发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                // 记录日志并使用更友好的提示
+                System.Diagnostics.Debug.WriteLine($"回原点操作发生错误：{ex.Message}");
+                UpdateStatus("回原点操作失败，请检查设备连接");
             }
         }
 
@@ -887,15 +989,19 @@ namespace OpenIVSWPF
         {
             try
             {
+                // 检查是否为离线模式
+                bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
+                
                 // 如果Modbus未连接，则尝试连接
-                if (_modbusApi == null || !IsModbusConnected())
+                if (!isOfflineMode && (_modbusApi == null || !IsModbusConnected()))
                 {
                     InitializeModbus();
                 }
 
-                if (_modbusApi == null || !IsModbusConnected())
+                if (isOfflineMode || _modbusApi == null || !IsModbusConnected())
                 {
-                    System.Windows.MessageBox.Show("Modbus未连接，无法执行操作", "错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    // 在离线模式下或连接失败时，使用更友好的提示
+                    UpdateStatus("当前处于离线模式，无法执行移动操作");
                     return;
                 }
 
@@ -992,7 +1098,9 @@ namespace OpenIVSWPF
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show($"移动过程中发生错误：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                // 使用更友好的方式处理错误
+                System.Diagnostics.Debug.WriteLine($"移动过程中发生错误：{ex.Message}");
+                UpdateStatus($"移动过程中发生错误，请检查设备连接");
             }
         }
         #endregion
