@@ -98,7 +98,6 @@ namespace OpenIVSWPF.Managers
         private int _currentImageIndex = 0;
         private CancellationTokenSource _localImagesCts;
         private Task _localImagesTask;
-        private Timer _imageTimer;
         private object _lock = new object();
 
         public bool IsConnected => _isCameraConnected || _useLocalFolder;
@@ -183,12 +182,6 @@ namespace OpenIVSWPF.Managers
                 _currentImageIndex = 0;
                 _useLocalFolder = true;
                 _cameraStatusCallback?.Invoke($"本地文件夹: {_imageFiles.Count}张");
-
-                // 初始化成功后，根据触发模式决定是否自动开始传输图像
-                if (!settings.UseTrigger)
-                {
-                    StartLocalImageStream();
-                }
             }
             catch (Exception ex)
             {
@@ -262,32 +255,14 @@ namespace OpenIVSWPF.Managers
         }
 
         /// <summary>
-        /// 开始本地图像流
-        /// </summary>
-        private void StartLocalImageStream()
-        {
-            if (_imageFiles.Count == 0)
-                return;
-
-            // 先停止任何现有的图像流
-            StopLocalImageStream();
-
-            _isGrabbing = true;
-            _localImagesCts = new CancellationTokenSource();
-
-            // 创建一个定时器，定期加载并发送图像
-            _imageTimer = new Timer(LoadAndSendNextImage, null, 0, 500); // 每500毫秒一张图片，加快循环速度
-        }
-
-        /// <summary>
         /// 加载并发送下一张图像
         /// </summary>
-        private void LoadAndSendNextImage(object state)
+        private Bitmap LoadAndSendNextImage()
         {
             try
             {
                 if (_imageFiles.Count == 0)
-                    return;
+                    return null;
 
                 // 如果已经到达图像列表末尾，则重置索引
                 if (_currentImageIndex >= _imageFiles.Count)
@@ -311,38 +286,27 @@ namespace OpenIVSWPF.Managers
                                 if (mat.Empty())
                                 {
                                     _statusCallback?.Invoke($"无法读取图像文件：{imagePath}");
-                                    return;
+                                    return null;
                                 }
 
-                                // 转换为Bitmap（如果需要保持原有接口）
+                                // 转换为Bitmap并返回
                                 var bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(mat);
-
-                                // 发送图像事件
-                                _cameraManager.RaiseImageUpdatedEvent(bitmap);
+                                return bitmap;
                             }
                         }
                         catch (Exception ex)
                         {
                             _statusCallback?.Invoke($"加载图像文件错误：{ex.Message}");
+                            return null;
                         }
                     }
                 }
+                return null;
             }
-            catch { }
-        }
-
-        /// <summary>
-        /// 停止本地图像流
-        /// </summary>
-        private void StopLocalImageStream()
-        {
-            if (_imageTimer != null)
+            catch
             {
-                _imageTimer.Dispose();
-                _imageTimer = null;
+                return null;
             }
-
-            _isGrabbing = false;
         }
 
         /// <summary>
@@ -367,7 +331,8 @@ namespace OpenIVSWPF.Managers
                 // 处理本地图像文件夹模式
                 if (_useLocalFolder)
                 {
-                    return await CaptureLocalImageAsync(token, lastCapturedImage);
+                    // 确保每次都获取新图像，不使用lastCapturedImage
+                    return await CaptureLocalImageAsync(token, null);
                 }
 
                 // 处理相机模式，保持原有逻辑
@@ -495,12 +460,8 @@ namespace OpenIVSWPF.Managers
         {
             try
             {
-                // 如果有上次捕获的图像，直接返回
-                if (lastCapturedImage != null)
-                {
-                    _statusCallback?.Invoke("使用最新捕获的图像");
-                    return lastCapturedImage.Clone() as Bitmap;
-                }
+                // 离线模式下，每次调用都加载新图像，不使用lastCapturedImage
+                lastCapturedImage = null;
 
                 // 如果没有图像文件，返回null
                 if (_imageFiles.Count == 0)
@@ -510,38 +471,18 @@ namespace OpenIVSWPF.Managers
                 }
 
                 // 获取下一张图像
-                lock (_lock)
+                Bitmap bitmap = LoadAndSendNextImage();
+                if (bitmap != null)
                 {
-                    // 如果已经到达图像列表末尾，则重置索引
-                    if (_currentImageIndex >= _imageFiles.Count)
-                    {
-                        _currentImageIndex = 0;
-                    }
-
-                    string imagePath = _imageFiles[_currentImageIndex];
-                    _currentImageIndex++;
-
-                    try
-                    {
-                        _statusCallback?.Invoke($"加载图像文件：{Path.GetFileName(imagePath)}");
-                        using (var mat = new Mat(imagePath))
-                        {
-                            if (mat.Empty())
-                            {
-                                _statusCallback?.Invoke($"无法读取图像文件：{Path.GetFileName(imagePath)}");
-                                return null;
-                            }
-
-                            // 转换为Bitmap（如果需要保持原有接口）
-                            var bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(mat);
-                            return bitmap;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _statusCallback?.Invoke($"加载图像文件错误：{ex.Message}");
-                        return null;
-                    }
+                    // 发送图像事件
+                    _cameraManager.RaiseImageUpdatedEvent(bitmap);
+                    _statusCallback?.Invoke($"已加载图像: {_currentImageIndex}/{_imageFiles.Count}");
+                    return bitmap;
+                }
+                else
+                {
+                    _statusCallback?.Invoke("无法加载下一张图像");
+                    return null;
                 }
             }
             catch (Exception ex)
@@ -558,7 +499,12 @@ namespace OpenIVSWPF.Managers
         {
             if (_useLocalFolder && _imageFiles.Count > 0)
             {
-                LoadAndSendNextImage(null);
+                // 加载下一张图像并发送事件
+                Bitmap bitmap = LoadAndSendNextImage();
+                if (bitmap != null)
+                {
+                    _cameraManager.RaiseImageUpdatedEvent(bitmap);
+                }
             }
         }
 
@@ -582,7 +528,6 @@ namespace OpenIVSWPF.Managers
             // 停止本地图像流
             if (_useLocalFolder)
             {
-                StopLocalImageStream();
                 _useLocalFolder = false;
             }
         }
