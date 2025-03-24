@@ -454,67 +454,90 @@ namespace OpenIVSWPF
 
         private void LoadSerialPorts()
         {
-            cbPortName.Items.Clear();
+            try
+            {
+                cbPortName.Items.Clear();
 
-            // 获取可用的串口
-            string[] ports = SerialPort.GetPortNames();
-            foreach (string port in ports)
-            {
-                cbPortName.Items.Add(port);
-            }
-
-            // 选择当前串口
-            if (!string.IsNullOrEmpty(SelectedPortName) && cbPortName.Items.Contains(SelectedPortName))
-            {
-                cbPortName.SelectedItem = SelectedPortName;
-            }
-            else if (cbPortName.Items.Count > 0)
-            {
-                cbPortName.SelectedIndex = 0;
-            }
-
-            // 设置波特率
-            foreach (ComboBoxItem item in cbBaudRate.Items)
-            {
-                if (item.Content.ToString() == BaudRate.ToString())
+                // 获取可用的串口
+                string[] ports = SerialPort.GetPortNames();
+                
+                // 如果没有可用的串口，添加一个空项
+                if (ports.Length == 0)
                 {
-                    item.IsSelected = true;
-                    break;
+                    // 记录日志，但不显示弹窗
+                    System.Diagnostics.Debug.WriteLine("没有检测到可用的串口设备");
+                    UpdateStatus("没有检测到可用的串口设备，将使用离线模式");
+                    
+                    // 可以选择添加一个提示项
+                    // cbPortName.Items.Add("无可用串口");
                 }
-            }
-
-            // 设置数据位
-            foreach (ComboBoxItem item in cbDataBits.Items)
-            {
-                if (item.Content.ToString() == DataBits.ToString())
+                else
                 {
-                    item.IsSelected = true;
-                    break;
+                    foreach (string port in ports)
+                    {
+                        cbPortName.Items.Add(port);
+                    }
                 }
-            }
 
-            // 设置停止位
-            foreach (ComboBoxItem item in cbStopBits.Items)
-            {
-                if (item.Content.ToString() == StopBits.ToString())
+                // 选择当前串口
+                if (!string.IsNullOrEmpty(SelectedPortName) && cbPortName.Items.Contains(SelectedPortName))
                 {
-                    item.IsSelected = true;
-                    break;
+                    cbPortName.SelectedItem = SelectedPortName;
                 }
-            }
-
-            // 设置校验位
-            foreach (ComboBoxItem item in cbParity.Items)
-            {
-                if (item.Content.ToString() == Parity.ToString())
+                else if (cbPortName.Items.Count > 0)
                 {
-                    item.IsSelected = true;
-                    break;
+                    cbPortName.SelectedIndex = 0;
                 }
-            }
 
-            // 设置设备ID
-            txtDeviceId.Text = DeviceId.ToString();
+                // 设置波特率
+                foreach (ComboBoxItem item in cbBaudRate.Items)
+                {
+                    if (item.Content.ToString() == BaudRate.ToString())
+                    {
+                        item.IsSelected = true;
+                        break;
+                    }
+                }
+
+                // 设置数据位
+                foreach (ComboBoxItem item in cbDataBits.Items)
+                {
+                    if (item.Content.ToString() == DataBits.ToString())
+                    {
+                        item.IsSelected = true;
+                        break;
+                    }
+                }
+
+                // 设置停止位
+                foreach (ComboBoxItem item in cbStopBits.Items)
+                {
+                    if (item.Content.ToString() == StopBits.ToString())
+                    {
+                        item.IsSelected = true;
+                        break;
+                    }
+                }
+
+                // 设置校验位
+                foreach (ComboBoxItem item in cbParity.Items)
+                {
+                    if (item.Content.ToString() == Parity.ToString())
+                    {
+                        item.IsSelected = true;
+                        break;
+                    }
+                }
+
+                // 设置设备ID
+                txtDeviceId.Text = DeviceId.ToString();
+            }
+            catch (Exception ex)
+            {
+                // 记录异常但不弹窗
+                System.Diagnostics.Debug.WriteLine($"加载串口列表时出错: {ex.Message}");
+                UpdateStatus("加载串口设备失败，将使用离线模式");
+            }
         }
 
         private void UpdateTriggerOptions()
@@ -591,37 +614,99 @@ namespace OpenIVSWPF
             bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
 
             // 验证Modbus设置（仅在非离线模式下强制要求）
-            if (!isOfflineMode && cbPortName.SelectedItem == null)
+            if (!isOfflineMode)
             {
-                System.Windows.MessageBox.Show("请选择串口", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return false;
+                // 在非离线模式下，检查是否有选择串口
+                if (cbPortName.Items.Count > 0 && cbPortName.SelectedItem == null)
+                {
+                    System.Windows.MessageBox.Show("请选择串口", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return false;
+                }
             }
 
-            if (!int.TryParse(txtDeviceId.Text, out int deviceId) || deviceId <= 0)
+            // 检查设备ID（无论离线与否都需要）
+            if (string.IsNullOrEmpty(txtDeviceId.Text) || !int.TryParse(txtDeviceId.Text, out int deviceId) || deviceId <= 0)
             {
-                System.Windows.MessageBox.Show("设备ID必须是正整数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return false;
+                // 在离线模式下可以设置默认值而不是报错
+                if (isOfflineMode)
+                {
+                    txtDeviceId.Text = "1";  // 设置默认值
+                }
+                else
+                {
+                    System.Windows.MessageBox.Show("设备ID必须是正整数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return false;
+                }
             }
 
-            // 验证模型路径
+            // 验证模型路径（通常无论离线与否都需要）
             if (string.IsNullOrEmpty(txtModelPath.Text))
             {
                 System.Windows.MessageBox.Show("请选择模型文件", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
-            // 验证速度设置
-            if (!float.TryParse(txtSpeed.Text, out float speed) || speed <= 0)
+            // 验证速度设置（可以在离线模式下设置默认值）
+            if (string.IsNullOrEmpty(txtSpeed.Text) || !float.TryParse(txtSpeed.Text, out float speed) || speed <= 0)
             {
-                System.Windows.MessageBox.Show("速度必须是正数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return false;
+                if (isOfflineMode)
+                {
+                    txtSpeed.Text = "100.0";  // 设置默认值
+                }
+                else
+                {
+                    System.Windows.MessageBox.Show("速度必须是正数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return false;
+                }
             }
 
             // 在离线模式下，验证本地图像文件夹路径
-            if (isOfflineMode && string.IsNullOrEmpty(txtLocalFolderPath.Text))
+            if (isOfflineMode)
             {
-                System.Windows.MessageBox.Show("请选择本地图像文件夹路径", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (string.IsNullOrEmpty(txtLocalFolderPath.Text))
+                {
+                    System.Windows.MessageBox.Show("请选择本地图像文件夹路径", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return false;
+                }
+
+                // 验证本地图像文件夹是否存在
+                if (!Directory.Exists(txtLocalFolderPath.Text))
+                {
+                    try
+                    {
+                        // 尝试创建文件夹
+                        Directory.CreateDirectory(txtLocalFolderPath.Text);
+                        UpdateStatus($"已创建图像文件夹: {txtLocalFolderPath.Text}");
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Windows.MessageBox.Show($"无法创建文件夹: {ex.Message}", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return false;
+                    }
+                }
+            }
+
+            // 验证图像保存路径
+            if (string.IsNullOrEmpty(txtSaveImagePath.Text))
+            {
+                System.Windows.MessageBox.Show("请选择图像保存路径", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
+            }
+
+            // 验证图像保存路径是否存在
+            if (!Directory.Exists(txtSaveImagePath.Text))
+            {
+                try
+                {
+                    // 尝试创建文件夹
+                    Directory.CreateDirectory(txtSaveImagePath.Text);
+                    UpdateStatus($"已创建图像保存文件夹: {txtSaveImagePath.Text}");
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show($"无法创建图像保存文件夹: {ex.Message}", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return false;
+                }
             }
 
             return true;
@@ -631,13 +716,48 @@ namespace OpenIVSWPF
         {
             var settings = SettingsManager.Instance.Settings;
 
+            // 检查是否是离线模式
+            bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
+
             // Modbus设置
-            settings.PortName = cbPortName.SelectedItem.ToString();
-            settings.BaudRate = int.Parse(((ComboBoxItem)cbBaudRate.SelectedItem).Content.ToString());
-            settings.DataBits = int.Parse(((ComboBoxItem)cbDataBits.SelectedItem).Content.ToString());
-            settings.StopBits = (StopBits)Enum.Parse(typeof(StopBits), ((ComboBoxItem)cbStopBits.SelectedItem).Content.ToString());
-            settings.Parity = (Parity)Enum.Parse(typeof(Parity), ((ComboBoxItem)cbParity.SelectedItem).Content.ToString());
-            settings.DeviceId = int.Parse(txtDeviceId.Text);
+            if (cbPortName.SelectedItem != null)
+            {
+                settings.PortName = cbPortName.SelectedItem.ToString();
+            }
+            else
+            {
+                // 离线模式下允许没有串口
+                settings.PortName = string.Empty;
+            }
+            
+            // 其他Modbus设置
+            if (cbBaudRate.SelectedItem != null)
+            {
+                settings.BaudRate = int.Parse(((ComboBoxItem)cbBaudRate.SelectedItem).Content.ToString());
+            }
+            
+            if (cbDataBits.SelectedItem != null)
+            {
+                settings.DataBits = int.Parse(((ComboBoxItem)cbDataBits.SelectedItem).Content.ToString());
+            }
+            
+            if (cbStopBits.SelectedItem != null)
+            {
+                settings.StopBits = (StopBits)Enum.Parse(typeof(StopBits), ((ComboBoxItem)cbStopBits.SelectedItem).Content.ToString());
+            }
+            
+            if (cbParity.SelectedItem != null)
+            {
+                settings.Parity = (Parity)Enum.Parse(typeof(Parity), ((ComboBoxItem)cbParity.SelectedItem).Content.ToString());
+            }
+            
+            if (!string.IsNullOrEmpty(txtDeviceId.Text))
+            {
+                if (int.TryParse(txtDeviceId.Text, out int deviceId))
+                {
+                    settings.DeviceId = deviceId;
+                }
+            }
 
             // 相机设置
             settings.CameraIndex = cbCameraList.SelectedIndex;
@@ -653,16 +773,19 @@ namespace OpenIVSWPF
             settings.ModelPath = txtModelPath.Text;
 
             // 设备设置
-            settings.Speed = float.Parse(txtSpeed.Text);
+            if (!string.IsNullOrEmpty(txtSpeed.Text) && float.TryParse(txtSpeed.Text, out float speed))
+            {
+                settings.Speed = speed;
+            }
 
             // 目标位置设置
-            if (float.TryParse(txtTargetPosition.Text, out float targetPos))
+            if (!string.IsNullOrEmpty(txtTargetPosition.Text) && float.TryParse(txtTargetPosition.Text, out float targetPos))
             {
                 settings.TargetPosition = targetPos;
             }
 
             // 拍照设置
-            if (int.TryParse(txtPreCaptureDelay.Text, out int delay))
+            if (!string.IsNullOrEmpty(txtPreCaptureDelay.Text) && int.TryParse(txtPreCaptureDelay.Text, out int delay))
             {
                 settings.PreCaptureDelay = Math.Max(0, delay); // 确保不会小于0
             }
@@ -671,7 +794,12 @@ namespace OpenIVSWPF
             settings.SavePath = txtSaveImagePath.Text;
             settings.SaveOKImage = chkSaveOKImage.IsChecked == true;
             settings.SaveNGImage = chkSaveNGImage.IsChecked == true;
-            settings.ImageFormat = ((ComboBoxItem)cbImageFormat.SelectedItem).Content.ToString();
+            
+            if (cbImageFormat.SelectedItem != null)
+            {
+                settings.ImageFormat = ((ComboBoxItem)cbImageFormat.SelectedItem).Content.ToString();
+            }
+            
             settings.JpegQuality = txtJpegQuality.Text;
         }
 
