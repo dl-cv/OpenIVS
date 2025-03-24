@@ -97,8 +97,6 @@ namespace OpenIVSWPF.Managers
         private string _localFolderPath = string.Empty;
         private List<string> _imageFiles = new List<string>();
         private int _currentImageIndex = 0;
-        private CancellationTokenSource _localImagesCts;
-        private Task _localImagesTask;
         private object _lock = new object();
         private int _localImageDelay = 500; // 默认间隔为500ms
         private bool _loopLocalImages = true; // 默认循环遍历
