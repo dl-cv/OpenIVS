@@ -17,6 +17,9 @@ using System.Linq;
 using WinForms = System.Windows.Forms;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using Microsoft.WindowsAPICodePack.Dialogs;
 
 // 使用完全限定名避免命名冲突
 using Window = System.Windows.Window;
@@ -31,7 +34,7 @@ namespace OpenIVSWPF
         // 相机管理器引用
         private CameraManager _cameraManager = CameraInstance.Instance;
         private ModbusApi _modbusApi = ModbusInstance.Instance;
-        
+
         // 设置属性
         public string SelectedPortName { get; private set; }
         public int BaudRate { get; private set; }
@@ -51,10 +54,10 @@ namespace OpenIVSWPF
         public string ImageFormat { get; private set; }
         public string JpegQuality { get; private set; }
         public float TargetPosition { get; private set; }
-        
+
         // 拍照设置
         public int PreCaptureDelay { get; private set; }  // 拍照前等待时间（毫秒）
-        
+
         // 设置结果
         public bool IsSettingsSaved { get; private set; }
 
@@ -62,29 +65,30 @@ namespace OpenIVSWPF
         public bool UseLocalFolder { get; private set; }
         public string LocalFolderPath { get; private set; }
         public bool LoopImages { get; private set; }
-        
+
         // 加载标志
         private bool _isLoading = false;
-        
+
         // 文件对话框 Helper
         private const int FOS_PICKFOLDERS = 0x20;
-        
+
         public SettingsWindow()
         {
             // 初始化WPF组件
             InitializeComponent();
-            
+
             // 加载当前设置
             LoadSettings();
-            
+
             // 在UI初始化中只加载不会阻塞的组件（串口列表等）
             InitializeUIBasic();
-            
+
             // 获取当前位置（不阻塞UI）
             Task.Run(() => GetCurrentPosition());
-            
+
             // 相机加载完成后启动，使用Loaded事件确保所有控件已初始化
-            this.Loaded += (s, e) => {
+            this.Loaded += (s, e) =>
+            {
                 // 异步加载相机列表
                 LoadCameraListAsync();
             };
@@ -96,22 +100,24 @@ namespace OpenIVSWPF
             {
                 // 设置加载状态
                 _isLoading = true;
-                
+
                 // 显示加载指示器
-                this.Dispatcher.Invoke(() => {
+                this.Dispatcher.Invoke(() =>
+                {
                     if (cameraLoadingIndicator != null)
                         cameraLoadingIndicator.Visibility = Visibility.Visible;
-                    
+
                     if (cbCameraList != null)
                         cbCameraList.IsEnabled = false;
-                    
+
                     if (btnRefreshCameras != null)
                         btnRefreshCameras.IsEnabled = false;
                 });
-                
+
                 // 在后台线程执行相机扫描
                 List<IDeviceInfo> deviceList = null;
-                await Task.Run(() => {
+                await Task.Run(() =>
+                {
                     try
                     {
                         if (_cameraManager != null)
@@ -124,16 +130,17 @@ namespace OpenIVSWPF
                         System.Diagnostics.Debug.WriteLine($"相机扫描异常: {ex.Message}");
                     }
                 });
-                
+
                 // 更新UI
-                this.Dispatcher.Invoke(() => {
+                this.Dispatcher.Invoke(() =>
+                {
                     try
                     {
                         if (cbCameraList != null)
                         {
                             // 清空当前列表
                             cbCameraList.Items.Clear();
-                            
+
                             // 添加扫描到的设备
                             if (deviceList != null && deviceList.Count > 0)
                             {
@@ -141,7 +148,7 @@ namespace OpenIVSWPF
                                 {
                                     cbCameraList.Items.Add(device.UserDefinedName);
                                 }
-                                
+
                                 // 选择当前相机
                                 if (!string.IsNullOrEmpty(CameraUserDefinedName))
                                 {
@@ -154,7 +161,7 @@ namespace OpenIVSWPF
                                         }
                                     }
                                 }
-                                
+
                                 // 如果没有找到匹配的相机名称，则尝试使用索引
                                 if (cbCameraList.SelectedIndex < 0)
                                 {
@@ -169,14 +176,14 @@ namespace OpenIVSWPF
                                 }
                             }
                         }
-                        
+
                         // 设置触发模式
                         if (chkUseTrigger != null)
                             chkUseTrigger.IsChecked = UseTrigger;
-                            
+
                         if (rbSoftTrigger != null)
                             rbSoftTrigger.IsChecked = UseSoftTrigger;
-                            
+
                         if (rbHardTrigger != null)
                             rbHardTrigger.IsChecked = !UseSoftTrigger;
                     }
@@ -189,14 +196,14 @@ namespace OpenIVSWPF
                         // 隐藏加载指示器
                         if (cameraLoadingIndicator != null)
                             cameraLoadingIndicator.Visibility = Visibility.Collapsed;
-                        
+
                         // 恢复控件状态
                         if (cbCameraList != null)
                             cbCameraList.IsEnabled = true;
-                            
+
                         if (btnRefreshCameras != null)
                             btnRefreshCameras.IsEnabled = true;
-                        
+
                         // 重置加载状态
                         _isLoading = false;
                     }
@@ -205,18 +212,19 @@ namespace OpenIVSWPF
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"相机列表加载异常: {ex.Message}");
-                
+
                 // 确保UI状态恢复
-                this.Dispatcher.Invoke(() => {
+                this.Dispatcher.Invoke(() =>
+                {
                     if (cameraLoadingIndicator != null)
                         cameraLoadingIndicator.Visibility = Visibility.Collapsed;
-                    
+
                     if (cbCameraList != null)
                         cbCameraList.IsEnabled = true;
-                    
+
                     if (btnRefreshCameras != null)
                         btnRefreshCameras.IsEnabled = true;
-                    
+
                     _isLoading = false;
                 });
             }
@@ -236,10 +244,12 @@ namespace OpenIVSWPF
                 {
                     // 读取当前位置（地址32，浮点数）
                     float currentPosition = _modbusApi.ReadFloat(32);
-                    
+
                     // 这里不使用直接引用UI控件，而是在UI定义完成后更新
-                    Dispatcher.BeginInvoke(new Action(() => {
-                        try {
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
                             // 使用安全的方式访问控件
                             var control = FindName("txtCurrentPosition") as TextBlock;
                             if (control != null)
@@ -264,7 +274,7 @@ namespace OpenIVSWPF
             {
                 if (_modbusApi == null)
                     return false;
-                
+
                 // 尝试读取保持寄存器来测试连接
                 _modbusApi.ReadHoldingRegisters(0, 1);
                 return true;
@@ -284,7 +294,7 @@ namespace OpenIVSWPF
                 {
                     _modbusApi.Close();
                 }
-                
+
                 // 使用设置中的串口参数
                 var settings = SettingsManager.Instance.Settings;
                 if (string.IsNullOrEmpty(settings.PortName))
@@ -325,10 +335,10 @@ namespace OpenIVSWPF
         {
             // 初始化串口列表
             LoadSerialPorts();
-            
+
             // 设置触发模式选项的可用性
             UpdateTriggerOptions();
-            
+
             // 更新图像源UI状态
             UpdateImageSourceUI();
         }
@@ -336,7 +346,7 @@ namespace OpenIVSWPF
         private void LoadSettings()
         {
             var settings = SettingsManager.Instance.Settings;
-            
+
             // Modbus设置
             SelectedPortName = settings.PortName;
             BaudRate = settings.BaudRate;
@@ -344,21 +354,21 @@ namespace OpenIVSWPF
             StopBits = settings.StopBits;
             Parity = settings.Parity;
             DeviceId = settings.DeviceId;
-            
+
             // 相机设置
             SelectedCameraIndex = settings.CameraIndex;
             CameraUserDefinedName = settings.CameraUserDefinedName;
             UseTrigger = settings.UseTrigger;
             UseSoftTrigger = settings.UseSoftTrigger;
-            
+
             // 本地图像文件夹设置
             UseLocalFolder = settings.UseLocalFolder;
             LocalFolderPath = settings.LocalFolderPath;
             LoopImages = settings.LoopImages;
-            
+
             // 模型设置
             ModelPath = settings.ModelPath;
-            
+
             // 设备设置
             Speed = settings.Speed;
             TargetPosition = settings.TargetPosition;
@@ -401,7 +411,7 @@ namespace OpenIVSWPF
             chkUseLocalFolder.IsChecked = UseLocalFolder;
             txtLocalFolderPath.Text = LocalFolderPath;
             chkLoopImages.IsChecked = LoopImages;
-            
+
             // 根据是否使用本地文件夹更新UI状态
             UpdateImageSourceUI();
         }
@@ -409,14 +419,14 @@ namespace OpenIVSWPF
         private void LoadSerialPorts()
         {
             cbPortName.Items.Clear();
-            
+
             // 获取可用的串口
             string[] ports = SerialPort.GetPortNames();
             foreach (string port in ports)
             {
                 cbPortName.Items.Add(port);
             }
-            
+
             // 选择当前串口
             if (!string.IsNullOrEmpty(SelectedPortName) && cbPortName.Items.Contains(SelectedPortName))
             {
@@ -426,7 +436,7 @@ namespace OpenIVSWPF
             {
                 cbPortName.SelectedIndex = 0;
             }
-            
+
             // 设置波特率
             foreach (ComboBoxItem item in cbBaudRate.Items)
             {
@@ -436,7 +446,7 @@ namespace OpenIVSWPF
                     break;
                 }
             }
-            
+
             // 设置数据位
             foreach (ComboBoxItem item in cbDataBits.Items)
             {
@@ -446,7 +456,7 @@ namespace OpenIVSWPF
                     break;
                 }
             }
-            
+
             // 设置停止位
             foreach (ComboBoxItem item in cbStopBits.Items)
             {
@@ -456,7 +466,7 @@ namespace OpenIVSWPF
                     break;
                 }
             }
-            
+
             // 设置校验位
             foreach (ComboBoxItem item in cbParity.Items)
             {
@@ -466,7 +476,7 @@ namespace OpenIVSWPF
                     break;
                 }
             }
-            
+
             // 设置设备ID
             txtDeviceId.Text = DeviceId.ToString();
         }
@@ -482,7 +492,7 @@ namespace OpenIVSWPF
             // 防止重复点击
             if (_isLoading)
                 return;
-                
+
             // 直接调用异步加载方法
             LoadCameraListAsync();
         }
@@ -504,7 +514,7 @@ namespace OpenIVSWPF
             dialog.Title = "选择模型文件";
             dialog.Filter = "模型文件 (*.dvt)|*.dvt|所有文件 (*.*)|*.*";
             dialog.CheckFileExists = true;
-            
+
             if (dialog.ShowDialog() == true)
             {
                 txtModelPath.Text = dialog.FileName;
@@ -520,16 +530,16 @@ namespace OpenIVSWPF
                 {
                     return;
                 }
-                
+
                 // 读取UI中的设置值到临时变量
                 SaveSettings();
-                
+
                 // 保存设置到文件
                 SettingsManager.Instance.SaveSettings();
-                
+
                 // 标记为已保存
                 IsSettingsSaved = true;
-                
+
                 // 关闭窗口
                 Close();
             }
@@ -547,34 +557,34 @@ namespace OpenIVSWPF
                 System.Windows.MessageBox.Show("请选择串口", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
-            
+
             if (!int.TryParse(txtDeviceId.Text, out int deviceId) || deviceId <= 0)
             {
                 System.Windows.MessageBox.Show("设备ID必须是正整数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
-            
+
             // 验证模型路径
             if (string.IsNullOrEmpty(txtModelPath.Text))
             {
                 System.Windows.MessageBox.Show("请选择模型文件", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
-            
+
             // 验证速度设置
             if (!float.TryParse(txtSpeed.Text, out float speed) || speed <= 0)
             {
                 System.Windows.MessageBox.Show("速度必须是正数", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
-            
+
             return true;
         }
 
         private void SaveSettings()
         {
             var settings = SettingsManager.Instance.Settings;
-            
+
             // Modbus设置
             settings.PortName = cbPortName.SelectedItem.ToString();
             settings.BaudRate = int.Parse(((ComboBoxItem)cbBaudRate.SelectedItem).Content.ToString());
@@ -582,24 +592,24 @@ namespace OpenIVSWPF
             settings.StopBits = (StopBits)Enum.Parse(typeof(StopBits), ((ComboBoxItem)cbStopBits.SelectedItem).Content.ToString());
             settings.Parity = (Parity)Enum.Parse(typeof(Parity), ((ComboBoxItem)cbParity.SelectedItem).Content.ToString());
             settings.DeviceId = int.Parse(txtDeviceId.Text);
-            
+
             // 相机设置
             settings.CameraIndex = cbCameraList.SelectedIndex;
             settings.CameraUserDefinedName = cbCameraList.SelectedItem?.ToString() ?? string.Empty;
             settings.UseTrigger = chkUseTrigger.IsChecked == true;
             settings.UseSoftTrigger = rbSoftTrigger.IsChecked == true;
-            
+
             // 本地图像文件夹设置
             settings.UseLocalFolder = chkUseLocalFolder.IsChecked == true;
             settings.LocalFolderPath = txtLocalFolderPath.Text;
             settings.LoopImages = chkLoopImages.IsChecked == true;
-            
+
             // 模型设置
             settings.ModelPath = txtModelPath.Text;
-            
+
             // 设备设置
             settings.Speed = float.Parse(txtSpeed.Text);
-            
+
             // 目标位置设置
             if (float.TryParse(txtTargetPosition.Text, out float targetPos))
             {
@@ -639,79 +649,20 @@ namespace OpenIVSWPF
             }
         }
 
-        // 选择文件夹的通用方法
         private string SelectFolder(string title, string initialFolder = "")
         {
-            // 使用OpenFileDialog来选择文件夹
-            Microsoft.Win32.OpenFileDialog dialog = new Microsoft.Win32.OpenFileDialog();
-            dialog.Title = title;
-            dialog.CheckFileExists = false;
-            dialog.CheckPathExists = true;
-            dialog.FileName = "选择此文件夹";  // 提示用户选择文件夹
-            
-            // 设置为初始路径
-            if (!string.IsNullOrEmpty(initialFolder) && Directory.Exists(initialFolder))
+            var dialog = new Microsoft.WindowsAPICodePack.Dialogs.CommonOpenFileDialog
             {
-                dialog.InitialDirectory = initialFolder;
-            }
+                Title = title,
+                IsFolderPicker = true,
+                InitialDirectory = initialFolder,
+                EnsurePathExists = true,
+                AllowNonFileSystemItems = false
+            };
 
-            // 设置过滤器
-            dialog.Filter = "文件夹|*."; // 不显示任何文件
-
-            try
-            {
-                // 反射获取私有字段
-                var dialogType = typeof(Microsoft.Win32.FileDialog);
-                var options = dialogType.GetField("options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                
-                if (options != null)
-                {
-                    // 设置只选择文件夹选项
-                    // FOS_PICKFOLDERS = 0x20
-                    uint currentOptions = (uint)options.GetValue(dialog);
-                    options.SetValue(dialog, currentOptions | FOS_PICKFOLDERS);
-
-                    if (dialog.ShowDialog() == true)
-                    {
-                        // 返回选中的文件夹路径
-                        return Path.GetDirectoryName(dialog.FileName);
-                    }
-                }
-                else
-                {
-                    // 如果反射失败，回退到WinForms.FolderBrowserDialog
-                    WinForms.FolderBrowserDialog fallbackDialog = new WinForms.FolderBrowserDialog();
-                    fallbackDialog.Description = title;
-                    if (!string.IsNullOrEmpty(initialFolder) && Directory.Exists(initialFolder))
-                    {
-                        fallbackDialog.SelectedPath = initialFolder;
-                    }
-                    
-                    if (fallbackDialog.ShowDialog() == WinForms.DialogResult.OK)
-                    {
-                        return fallbackDialog.SelectedPath;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // 异常处理，回退到WinForms.FolderBrowserDialog
-                System.Diagnostics.Debug.WriteLine($"选择文件夹异常: {ex.Message}");
-                
-                WinForms.FolderBrowserDialog fallbackDialog = new WinForms.FolderBrowserDialog();
-                fallbackDialog.Description = title;
-                if (!string.IsNullOrEmpty(initialFolder) && Directory.Exists(initialFolder))
-                {
-                    fallbackDialog.SelectedPath = initialFolder;
-                }
-                
-                if (fallbackDialog.ShowDialog() == WinForms.DialogResult.OK)
-                {
-                    return fallbackDialog.SelectedPath;
-                }
-            }
-            
-            return null;
+            return dialog.ShowDialog() == Microsoft.WindowsAPICodePack.Dialogs.CommonFileDialogResult.Ok
+                ? dialog.FileName
+                : null;
         }
 
         private void cbImageFormat_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -721,7 +672,7 @@ namespace OpenIVSWPF
             {
                 string selectedFormat = ((ComboBoxItem)cbImageFormat.SelectedItem).Content.ToString();
                 bool isJpeg = selectedFormat == "JPG";
-                
+
                 // 只有JPG格式才显示质量设置
                 txtJpegQuality.IsEnabled = isJpeg;
             }
@@ -754,7 +705,7 @@ namespace OpenIVSWPF
 
                 // 获取当前相机图像
                 Bitmap image = null;
-                
+
                 if (_cameraManager == null || _cameraManager.ActiveDevice == null || !_cameraManager.ActiveDevice.IsOpen)
                 {
                     // 连接相机
@@ -799,7 +750,7 @@ namespace OpenIVSWPF
                 // 捕获图像
                 // 使用TaskCompletionSource等待图像更新事件
                 var tcs = new TaskCompletionSource<Bitmap>();
-                                    
+
                 // 设置图像捕获事件处理
                 EventHandler<ImageEventArgs> handler = null;
                 handler = (s, args) =>
@@ -809,29 +760,29 @@ namespace OpenIVSWPF
                     {
                         tcs.TrySetResult(args.Image.Clone() as Bitmap);
                     }
-                    
+
                     // 移除事件处理器，防止多次触发
                     _cameraManager.ImageUpdated -= handler;
                 };
-                                    
+
                 // 添加事件处理
                 _cameraManager.ImageUpdated += handler;
-                                    
+
                 // 执行软触发
                 _cameraManager.TriggerOnce();
-                                    
+
                 // 添加超时处理，2秒内如果没有图像返回，则取消
                 using (var timeoutCts = new CancellationTokenSource(2000))
                 {
                     try
                     {
                         // 注册取消操作
-                        timeoutCts.Token.Register(() => 
+                        timeoutCts.Token.Register(() =>
                         {
                             _cameraManager.ImageUpdated -= handler;
                             tcs.TrySetCanceled();
                         });
-                                            
+
                         // 等待图像或取消
                         image = await tcs.Task;
                     }
@@ -872,8 +823,8 @@ namespace OpenIVSWPF
                         }
 
                         // 保存为JPG格式
-                        var parameters = new int[] 
-                        { 
+                        var parameters = new int[]
+                        {
                             (int)OpenCvSharp.ImwriteFlags.JpegQuality, quality,
                             (int)OpenCvSharp.ImwriteFlags.JpegProgressive, 1
                         };
@@ -961,7 +912,7 @@ namespace OpenIVSWPF
 
                 // 禁用按钮，防止重复点击
                 btnGoToPosition.IsEnabled = false;
-                
+
                 try
                 {
                     // 设置目标位置（地址8，浮点数）
@@ -988,22 +939,24 @@ namespace OpenIVSWPF
                     {
                         // 60秒超时
                         cts.CancelAfter(TimeSpan.FromSeconds(60));
-                        
+
                         bool isReached = false;
                         while (!isReached && !cts.Token.IsCancellationRequested)
                         {
                             // 读取当前位置（地址32，浮点数）
                             float currentPosition = _modbusApi.ReadFloat(32);
-                            
+
                             // 更新位置显示
-                            await Dispatcher.BeginInvoke(new Action(() => {
-                                try {
+                            await Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                try
+                                {
                                     // 使用安全的方式访问控件
                                     txtCurrentPosition.Text = currentPosition.ToString("F1");
                                 }
                                 catch { /* 忽略UI更新错误 */ }
                             }));
-                            
+
                             // 判断是否到达目标位置（允许一定误差）
                             if (Math.Abs(currentPosition - targetPosition) < 1.0f)
                             {
@@ -1020,7 +973,7 @@ namespace OpenIVSWPF
                         {
                             // 更新日志状态
                             UpdateStatus($"已到达位置：{targetPosition}");
-                            
+
                             // 保存到设置中
                             SettingsManager.Instance.Settings.TargetPosition = targetPosition;
                         }
@@ -1065,27 +1018,27 @@ namespace OpenIVSWPF
         private void UpdateImageSourceUI()
         {
             bool useLocalFolder = chkUseLocalFolder.IsChecked == true;
-            
+
             // 本地文件夹控件
             spLocalFolderOptions.IsEnabled = useLocalFolder;
-            
+
             // 相机控件
             cbCameraList.IsEnabled = !useLocalFolder;
             btnRefreshCameras.IsEnabled = !useLocalFolder;
             chkUseTrigger.IsEnabled = !useLocalFolder;
             spTriggerOptions.IsEnabled = !useLocalFolder && chkUseTrigger.IsChecked == true;
         }
-        
+
         private void chkUseLocalFolder_Checked(object sender, RoutedEventArgs e)
         {
             UpdateImageSourceUI();
         }
-        
+
         private void chkUseLocalFolder_Unchecked(object sender, RoutedEventArgs e)
         {
             UpdateImageSourceUI();
         }
-        
+
         private void btnBrowseLocalFolder_Click(object sender, RoutedEventArgs e)
         {
             // 使用统一文件夹选择对话框
@@ -1093,13 +1046,13 @@ namespace OpenIVSWPF
             if (!string.IsNullOrEmpty(selectedFolder))
             {
                 txtLocalFolderPath.Text = selectedFolder;
-                
+
                 // 检查文件夹中是否有图像文件
                 int imageCount = CountImageFiles(selectedFolder);
                 UpdateStatus($"已在文件夹中找到 {imageCount} 个图像文件");
             }
         }
-        
+
         /// <summary>
         /// 计算文件夹中图像文件的数量
         /// </summary>
@@ -1107,7 +1060,7 @@ namespace OpenIVSWPF
         {
             if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
                 return 0;
-                
+
             try
             {
                 int count = 0;
@@ -1123,4 +1076,4 @@ namespace OpenIVSWPF
             }
         }
     }
-} 
+}
