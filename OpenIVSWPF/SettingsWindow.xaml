@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:OpenIVSWPF"
         xmlns:shell="clr-namespace:Microsoft.WindowsAPICodePack.Dialogs;assembly=Microsoft.WindowsAPICodePack.Shell"
         mc:Ignorable="d"
-        Title="系统设置" Height="600" Width="800"
+        Title="系统设置" Height="640" Width="800"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="10">
         <Grid.RowDefinitions>
@@ -75,6 +75,7 @@
             <TabItem Header="相机设置">
                 <Grid Margin="10">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
