@@ -58,18 +58,168 @@ namespace OpenIVSWPF
         // 设置结果
         public bool IsSettingsSaved { get; private set; }
 
+        // 本地图像文件夹设置
+        public bool UseLocalFolder { get; private set; }
+        public string LocalFolderPath { get; private set; }
+        public bool LoopImages { get; private set; }
+        
+        // 加载标志
+        private bool _isLoading = false;
+        
+        // 文件对话框 Helper
+        private const int FOS_PICKFOLDERS = 0x20;
+        
         public SettingsWindow()
         {
+            // 初始化WPF组件
             InitializeComponent();
             
             // 加载当前设置
             LoadSettings();
             
-            // 初始化界面
-            InitializeUI();
+            // 在UI初始化中只加载不会阻塞的组件（串口列表等）
+            InitializeUIBasic();
             
-            // 获取当前位置
-            GetCurrentPosition();
+            // 获取当前位置（不阻塞UI）
+            Task.Run(() => GetCurrentPosition());
+            
+            // 相机加载完成后启动，使用Loaded事件确保所有控件已初始化
+            this.Loaded += (s, e) => {
+                // 异步加载相机列表
+                LoadCameraListAsync();
+            };
+        }
+
+        private async void LoadCameraListAsync()
+        {
+            try
+            {
+                // 设置加载状态
+                _isLoading = true;
+                
+                // 显示加载指示器
+                this.Dispatcher.Invoke(() => {
+                    if (cameraLoadingIndicator != null)
+                        cameraLoadingIndicator.Visibility = Visibility.Visible;
+                    
+                    if (cbCameraList != null)
+                        cbCameraList.IsEnabled = false;
+                    
+                    if (btnRefreshCameras != null)
+                        btnRefreshCameras.IsEnabled = false;
+                });
+                
+                // 在后台线程执行相机扫描
+                List<IDeviceInfo> deviceList = null;
+                await Task.Run(() => {
+                    try
+                    {
+                        if (_cameraManager != null)
+                        {
+                            deviceList = _cameraManager.RefreshDeviceList();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"相机扫描异常: {ex.Message}");
+                    }
+                });
+                
+                // 更新UI
+                this.Dispatcher.Invoke(() => {
+                    try
+                    {
+                        if (cbCameraList != null)
+                        {
+                            // 清空当前列表
+                            cbCameraList.Items.Clear();
+                            
+                            // 添加扫描到的设备
+                            if (deviceList != null && deviceList.Count > 0)
+                            {
+                                foreach (IDeviceInfo device in deviceList)
+                                {
+                                    cbCameraList.Items.Add(device.UserDefinedName);
+                                }
+                                
+                                // 选择当前相机
+                                if (!string.IsNullOrEmpty(CameraUserDefinedName))
+                                {
+                                    for (int i = 0; i < cbCameraList.Items.Count; i++)
+                                    {
+                                        if (cbCameraList.Items[i].ToString() == CameraUserDefinedName)
+                                        {
+                                            cbCameraList.SelectedIndex = i;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                // 如果没有找到匹配的相机名称，则尝试使用索引
+                                if (cbCameraList.SelectedIndex < 0)
+                                {
+                                    if (SelectedCameraIndex >= 0 && SelectedCameraIndex < cbCameraList.Items.Count)
+                                    {
+                                        cbCameraList.SelectedIndex = SelectedCameraIndex;
+                                    }
+                                    else if (cbCameraList.Items.Count > 0)
+                                    {
+                                        cbCameraList.SelectedIndex = 0;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // 设置触发模式
+                        if (chkUseTrigger != null)
+                            chkUseTrigger.IsChecked = UseTrigger;
+                            
+                        if (rbSoftTrigger != null)
+                            rbSoftTrigger.IsChecked = UseSoftTrigger;
+                            
+                        if (rbHardTrigger != null)
+                            rbHardTrigger.IsChecked = !UseSoftTrigger;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"更新UI异常: {ex.Message}");
+                    }
+                    finally
+                    {
+                        // 隐藏加载指示器
+                        if (cameraLoadingIndicator != null)
+                            cameraLoadingIndicator.Visibility = Visibility.Collapsed;
+                        
+                        // 恢复控件状态
+                        if (cbCameraList != null)
+                            cbCameraList.IsEnabled = true;
+                            
+                        if (btnRefreshCameras != null)
+                            btnRefreshCameras.IsEnabled = true;
+                        
+                        // 重置加载状态
+                        _isLoading = false;
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"相机列表加载异常: {ex.Message}");
+                
+                // 确保UI状态恢复
+                this.Dispatcher.Invoke(() => {
+                    if (cameraLoadingIndicator != null)
+                        cameraLoadingIndicator.Visibility = Visibility.Collapsed;
+                    
+                    if (cbCameraList != null)
+                        cbCameraList.IsEnabled = true;
+                    
+                    if (btnRefreshCameras != null)
+                        btnRefreshCameras.IsEnabled = true;
+                    
+                    _isLoading = false;
+                });
+            }
         }
 
         private void GetCurrentPosition()
@@ -171,16 +321,16 @@ namespace OpenIVSWPF
             }
         }
 
-        private void InitializeUI()
+        private void InitializeUIBasic()
         {
             // 初始化串口列表
             LoadSerialPorts();
             
-            // 初始化相机列表
-            LoadCameraList();
-            
             // 设置触发模式选项的可用性
             UpdateTriggerOptions();
+            
+            // 更新图像源UI状态
+            UpdateImageSourceUI();
         }
 
         private void LoadSettings()
@@ -200,6 +350,11 @@ namespace OpenIVSWPF
             CameraUserDefinedName = settings.CameraUserDefinedName;
             UseTrigger = settings.UseTrigger;
             UseSoftTrigger = settings.UseSoftTrigger;
+            
+            // 本地图像文件夹设置
+            UseLocalFolder = settings.UseLocalFolder;
+            LocalFolderPath = settings.LocalFolderPath;
+            LoopImages = settings.LoopImages;
             
             // 模型设置
             ModelPath = settings.ModelPath;
@@ -241,6 +396,14 @@ namespace OpenIVSWPF
             chkSaveNGImage.IsChecked = SaveNGImage;
             cbImageFormat.SelectedItem = cbImageFormat.Items.Cast<ComboBoxItem>().FirstOrDefault(item => item.Content.ToString() == ImageFormat);
             txtJpegQuality.Text = JpegQuality;
+
+            // 更新本地图像文件夹UI
+            chkUseLocalFolder.IsChecked = UseLocalFolder;
+            txtLocalFolderPath.Text = LocalFolderPath;
+            chkLoopImages.IsChecked = LoopImages;
+            
+            // 根据是否使用本地文件夹更新UI状态
+            UpdateImageSourceUI();
         }
 
         private void LoadSerialPorts()
@@ -308,70 +471,20 @@ namespace OpenIVSWPF
             txtDeviceId.Text = DeviceId.ToString();
         }
 
-        private void LoadCameraList()
-        {
-            cbCameraList.Items.Clear();
-            
-            if (_cameraManager != null)
-            {
-                List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
-                foreach (IDeviceInfo device in deviceList)
-                {
-                    cbCameraList.Items.Add(device.UserDefinedName);
-                }
-                
-                // 选择当前相机
-                if (!string.IsNullOrEmpty(CameraUserDefinedName))
-                {
-                    for (int i = 0; i < cbCameraList.Items.Count; i++)
-                    {
-                        if (cbCameraList.Items[i].ToString() == CameraUserDefinedName)
-                        {
-                            cbCameraList.SelectedIndex = i;
-                            break;
-                        }
-                    }
-                }
-                
-                // 如果没有找到匹配的相机名称，则尝试使用索引
-                if (cbCameraList.SelectedIndex < 0)
-                {
-                    if (SelectedCameraIndex >= 0 && SelectedCameraIndex < cbCameraList.Items.Count)
-                    {
-                        cbCameraList.SelectedIndex = SelectedCameraIndex;
-                    }
-                    else if (cbCameraList.Items.Count > 0)
-                    {
-                        cbCameraList.SelectedIndex = 0;
-                    }
-                }
-            }
-            
-            // 设置触发模式
-            chkUseTrigger.IsChecked = UseTrigger;
-            rbSoftTrigger.IsChecked = UseSoftTrigger;
-            rbHardTrigger.IsChecked = !UseSoftTrigger;
-        }
-
         private void UpdateTriggerOptions()
         {
             // 根据是否使用触发模式更新选项的可用性
             //spTriggerOptions.IsEnabled = chkUseTrigger.IsChecked == true;
         }
 
-        private void btnRefreshCameras_Click(object sender, RoutedEventArgs e)
+        private async void btnRefreshCameras_Click(object sender, RoutedEventArgs e)
         {
-            // 记住当前选中的索引
-            int currentIndex = cbCameraList.SelectedIndex;
-            
-            // 重新加载相机列表
-            LoadCameraList();
-            
-            // 如果有可能，保持原来的选择
-            if (currentIndex >= 0 && currentIndex < cbCameraList.Items.Count)
-            {
-                cbCameraList.SelectedIndex = currentIndex;
-            }
+            // 防止重复点击
+            if (_isLoading)
+                return;
+                
+            // 直接调用异步加载方法
+            LoadCameraListAsync();
         }
 
         private void chkUseTrigger_Checked(object sender, RoutedEventArgs e)
@@ -476,6 +589,11 @@ namespace OpenIVSWPF
             settings.UseTrigger = chkUseTrigger.IsChecked == true;
             settings.UseSoftTrigger = rbSoftTrigger.IsChecked == true;
             
+            // 本地图像文件夹设置
+            settings.UseLocalFolder = chkUseLocalFolder.IsChecked == true;
+            settings.LocalFolderPath = txtLocalFolderPath.Text;
+            settings.LoopImages = chkLoopImages.IsChecked == true;
+            
             // 模型设置
             settings.ModelPath = txtModelPath.Text;
             
@@ -513,20 +631,87 @@ namespace OpenIVSWPF
 
         private void btnBrowseSavePath_Click(object sender, RoutedEventArgs e)
         {
-            // 打开文件夹选择对话框
-            WinForms.FolderBrowserDialog dialog = new WinForms.FolderBrowserDialog();
-            dialog.Description = "选择图像保存路径";
-            
-            // 如果已有路径，则设置为初始路径
-            if (!string.IsNullOrEmpty(txtSaveImagePath.Text))
+            // 使用Windows选择文件夹对话框
+            string selectedFolder = SelectFolder("选择图像保存路径", txtSaveImagePath.Text);
+            if (!string.IsNullOrEmpty(selectedFolder))
             {
-                dialog.SelectedPath = txtSaveImagePath.Text;
+                txtSaveImagePath.Text = selectedFolder;
+            }
+        }
+
+        // 选择文件夹的通用方法
+        private string SelectFolder(string title, string initialFolder = "")
+        {
+            // 使用OpenFileDialog来选择文件夹
+            Microsoft.Win32.OpenFileDialog dialog = new Microsoft.Win32.OpenFileDialog();
+            dialog.Title = title;
+            dialog.CheckFileExists = false;
+            dialog.CheckPathExists = true;
+            dialog.FileName = "选择此文件夹";  // 提示用户选择文件夹
+            
+            // 设置为初始路径
+            if (!string.IsNullOrEmpty(initialFolder) && Directory.Exists(initialFolder))
+            {
+                dialog.InitialDirectory = initialFolder;
+            }
+
+            // 设置过滤器
+            dialog.Filter = "文件夹|*."; // 不显示任何文件
+
+            try
+            {
+                // 反射获取私有字段
+                var dialogType = typeof(Microsoft.Win32.FileDialog);
+                var options = dialogType.GetField("options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                
+                if (options != null)
+                {
+                    // 设置只选择文件夹选项
+                    // FOS_PICKFOLDERS = 0x20
+                    uint currentOptions = (uint)options.GetValue(dialog);
+                    options.SetValue(dialog, currentOptions | FOS_PICKFOLDERS);
+
+                    if (dialog.ShowDialog() == true)
+                    {
+                        // 返回选中的文件夹路径
+                        return Path.GetDirectoryName(dialog.FileName);
+                    }
+                }
+                else
+                {
+                    // 如果反射失败，回退到WinForms.FolderBrowserDialog
+                    WinForms.FolderBrowserDialog fallbackDialog = new WinForms.FolderBrowserDialog();
+                    fallbackDialog.Description = title;
+                    if (!string.IsNullOrEmpty(initialFolder) && Directory.Exists(initialFolder))
+                    {
+                        fallbackDialog.SelectedPath = initialFolder;
+                    }
+                    
+                    if (fallbackDialog.ShowDialog() == WinForms.DialogResult.OK)
+                    {
+                        return fallbackDialog.SelectedPath;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // 异常处理，回退到WinForms.FolderBrowserDialog
+                System.Diagnostics.Debug.WriteLine($"选择文件夹异常: {ex.Message}");
+                
+                WinForms.FolderBrowserDialog fallbackDialog = new WinForms.FolderBrowserDialog();
+                fallbackDialog.Description = title;
+                if (!string.IsNullOrEmpty(initialFolder) && Directory.Exists(initialFolder))
+                {
+                    fallbackDialog.SelectedPath = initialFolder;
+                }
+                
+                if (fallbackDialog.ShowDialog() == WinForms.DialogResult.OK)
+                {
+                    return fallbackDialog.SelectedPath;
+                }
             }
             
-            if (dialog.ShowDialog() == WinForms.DialogResult.OK)
-            {
-                txtSaveImagePath.Text = dialog.SelectedPath;
-            }
+            return null;
         }
 
         private void cbImageFormat_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -814,11 +999,7 @@ namespace OpenIVSWPF
                             await Dispatcher.BeginInvoke(new Action(() => {
                                 try {
                                     // 使用安全的方式访问控件
-                                    var control = FindName("txtCurrentPosition") as TextBlock;
-                                    if (control != null)
-                                    {
-                                        control.Text = currentPosition.ToString("F1");
-                                    }
+                                    txtCurrentPosition.Text = currentPosition.ToString("F1");
                                 }
                                 catch { /* 忽略UI更新错误 */ }
                             }));
@@ -875,6 +1056,70 @@ namespace OpenIVSWPF
             {
                 // 调用主窗口的UpdateStatus方法
                 mainWindow.UpdateStatus(message);
+            }
+        }
+
+        /// <summary>
+        /// 更新图像源UI状态
+        /// </summary>
+        private void UpdateImageSourceUI()
+        {
+            bool useLocalFolder = chkUseLocalFolder.IsChecked == true;
+            
+            // 本地文件夹控件
+            spLocalFolderOptions.IsEnabled = useLocalFolder;
+            
+            // 相机控件
+            cbCameraList.IsEnabled = !useLocalFolder;
+            btnRefreshCameras.IsEnabled = !useLocalFolder;
+            chkUseTrigger.IsEnabled = !useLocalFolder;
+            spTriggerOptions.IsEnabled = !useLocalFolder && chkUseTrigger.IsChecked == true;
+        }
+        
+        private void chkUseLocalFolder_Checked(object sender, RoutedEventArgs e)
+        {
+            UpdateImageSourceUI();
+        }
+        
+        private void chkUseLocalFolder_Unchecked(object sender, RoutedEventArgs e)
+        {
+            UpdateImageSourceUI();
+        }
+        
+        private void btnBrowseLocalFolder_Click(object sender, RoutedEventArgs e)
+        {
+            // 使用统一文件夹选择对话框
+            string selectedFolder = SelectFolder("选择图像文件夹", txtLocalFolderPath.Text);
+            if (!string.IsNullOrEmpty(selectedFolder))
+            {
+                txtLocalFolderPath.Text = selectedFolder;
+                
+                // 检查文件夹中是否有图像文件
+                int imageCount = CountImageFiles(selectedFolder);
+                UpdateStatus($"已在文件夹中找到 {imageCount} 个图像文件");
+            }
+        }
+        
+        /// <summary>
+        /// 计算文件夹中图像文件的数量
+        /// </summary>
+        private int CountImageFiles(string folderPath)
+        {
+            if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
+                return 0;
+                
+            try
+            {
+                int count = 0;
+                count += Directory.GetFiles(folderPath, "*.jpg", SearchOption.TopDirectoryOnly).Length;
+                count += Directory.GetFiles(folderPath, "*.jpeg", SearchOption.TopDirectoryOnly).Length;
+                count += Directory.GetFiles(folderPath, "*.png", SearchOption.TopDirectoryOnly).Length;
+                count += Directory.GetFiles(folderPath, "*.bmp", SearchOption.TopDirectoryOnly).Length;
+                return count;
+            }
+            catch
+            {
+                return 0;
             }
         }
     }

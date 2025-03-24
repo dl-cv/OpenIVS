@@ -56,33 +56,54 @@ namespace OpenIVSWPF.Managers
         {
             try
             {
+                // 判断是否是离线模式
+                bool isOfflineMode = _settings.UseLocalFolder;
+                
                 // 持续运行，直到取消
                 while (!token.IsCancellationRequested)
                 {
                     // 获取当前位置索引
                     float targetPosition = _positionSequence[_currentPositionIndex];
-
-                    // 移动到目标位置
-                    bool moveResult = await _modbusInitializer.MoveToPositionAsync(targetPosition, token);
+                    
+                    bool moveResult = true;
+                    
+                    // 在线模式下才执行移动操作
+                    if (!isOfflineMode)
+                    {
+                        // 移动到目标位置
+                        moveResult = await _modbusInitializer.MoveToPositionAsync(targetPosition, token);
+                    }
+                    else
+                    {
+                        // 离线模式下提示当前位置
+                        _statusCallback?.Invoke($"离线模式: 模拟位置 {targetPosition}");
+                    }
 
                     if (moveResult && !token.IsCancellationRequested)
                     {
-                        // 到达目标位置后，如果是触发模式才拍照和推理
-                        if (_settings.UseTrigger)
+                        // 离线模式下，无论是否是触发模式，都执行拍照和推理
+                        // 在线模式下，只有在触发模式才拍照和推理
+                        if (isOfflineMode || _settings.UseTrigger)
                         {
                             // 触发相机拍照
-                            _statusCallback?.Invoke($"在位置 {targetPosition} 进行拍照...");
+                            _statusCallback?.Invoke($"在{(isOfflineMode ? "模拟" : "")}位置 {targetPosition} 进行拍照...");
 
                             try
                             {
                                 // 等待运动稳定
-                                await Task.Delay(_settings.PreCaptureDelay, token);
+                                if (!isOfflineMode)
+                                {
+                                    await Task.Delay(_settings.PreCaptureDelay, token);
+                                }
 
                                 // 等待拍照操作完成
                                 var image = await _cameraInitializer.CaptureImageAsync(token, lastCapturedImage, _settings);
 
                                 if (image != null && !token.IsCancellationRequested)
                                 {
+                                    // 更新lastCapturedImage
+                                    lastCapturedImage = image.Clone() as Bitmap;
+                                    
                                     // 拍照完成后，异步处理图像（不等待完成）
                                     _ = Task.Run(() =>
                                     {
@@ -105,7 +126,7 @@ namespace OpenIVSWPF.Managers
                                             _ = _saveImageCallback?.Invoke(image, isOK);
 
                                             // 添加完成信息
-                                            _statusCallback?.Invoke($"位置 {targetPosition} 的推理和保存已完成");
+                                            _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的推理和保存已完成");
                                         }
                                         catch (Exception ex)
                                         {
@@ -114,7 +135,7 @@ namespace OpenIVSWPF.Managers
                                     });
 
                                     // 提示拍照已完成
-                                    _statusCallback?.Invoke($"位置 {targetPosition} 的拍照已完成，准备移动到下一位置");
+                                    _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的拍照已完成，准备移动到下一位置");
                                 }
                             }
                             catch (Exception ex)
@@ -132,6 +153,19 @@ namespace OpenIVSWPF.Managers
 
                     // 更新位置索引，实现1-2-3-2-1循环
                     _currentPositionIndex = (_currentPositionIndex + 1) % _positionSequence.Length;
+                    
+                    // 在离线模式下，添加一个延迟，模拟移动时间
+                    if (isOfflineMode)
+                    {
+                        try
+                        {
+                            await Task.Delay(500, token); // 500ms延迟
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            break; // 循环被取消
+                        }
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -145,7 +179,10 @@ namespace OpenIVSWPF.Managers
             }
             finally
             {
-                _modbusInitializer.SendStopCommand();
+                if (!_settings.UseLocalFolder)
+                {
+                    _modbusInitializer.SendStopCommand();
+                }
             }
         }
 

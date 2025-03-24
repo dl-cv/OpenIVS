@@ -147,18 +147,29 @@ namespace OpenIVSWPF
             try
             {
                 UpdateStatus("正在初始化系统...");
+                
+                var settings = SettingsManager.Instance.Settings;
+                bool isOfflineMode = settings.UseLocalFolder;
 
-                // 初始化Modbus
-                await Task.Run(() => _modbusInitializer.InitializeModbus(SettingsManager.Instance.Settings));
-                _isModbusConnected = _modbusInitializer.IsConnected;
+                // 初始化Modbus (仅在在线模式下)
+                if (!isOfflineMode)
+                {
+                    await Task.Run(() => _modbusInitializer.InitializeModbus(settings));
+                    _isModbusConnected = _modbusInitializer.IsConnected;
+                }
+                else
+                {
+                    _isModbusConnected = true; // 离线模式下默认为已连接
+                    UpdateStatus("离线模式：跳过Modbus初始化");
+                }
 
-                // 初始化相机
-                await Task.Run(() => _cameraInitializer.InitializeCamera(SettingsManager.Instance.Settings));
+                // 初始化相机或本地图像文件夹
+                await Task.Run(() => _cameraInitializer.InitializeCamera(settings));
                 _isCameraConnected = _cameraInitializer.IsConnected;
                 _isGrabbing = _cameraInitializer.IsGrabbing;
 
                 // 初始化模型
-                await Task.Run(() => _modelManager.InitializeModel(SettingsManager.Instance.Settings));
+                await Task.Run(() => _modelManager.InitializeModel(settings));
                 _isModelLoaded = _modelManager.IsLoaded;
 
                 // 创建主循环管理器
@@ -166,7 +177,7 @@ namespace OpenIVSWPF
                     _modbusInitializer,
                     _cameraInitializer,
                     _modelManager,
-                    SettingsManager.Instance.Settings,
+                    settings,
                     UpdateStatus,
                     UpdateDetectionResult,
                     UpdateStatisticsCallback,
@@ -174,7 +185,15 @@ namespace OpenIVSWPF
                 );
 
                 _isInitialized = true;
-                UpdateStatus("系统初始化完成");
+                
+                if (isOfflineMode)
+                {
+                    UpdateStatus("离线模式系统初始化完成");
+                }
+                else
+                {
+                    UpdateStatus("系统初始化完成");
+                }
 
                 // 更新界面控件状态
                 UpdateControlState();
@@ -368,8 +387,17 @@ namespace OpenIVSWPF
                 {
                     await InitializeSystemAsync();
 
-                    // 如果初始化失败，则返回
-                    if (!_isModbusConnected || !_isCameraConnected || !_isModelLoaded)
+                    // 如果模型初始化失败，则返回
+                    if (!_isModelLoaded)
+                    {
+                        UpdateStatus("模型初始化失败，请检查设置");
+                        UpdateControlState();
+                        return;
+                    }
+                    
+                    // 判断初始化结果：在线模式需要检查所有组件，离线模式只需要检查模型
+                    bool isOfflineMode = SettingsManager.Instance.Settings.UseLocalFolder;
+                    if (!isOfflineMode && (!_isModbusConnected || !_isCameraConnected))
                     {
                         UpdateStatus("系统初始化失败，请检查设置");
                         UpdateControlState();
@@ -383,7 +411,23 @@ namespace OpenIVSWPF
                 // 标记为正在运行
                 _isRunning = true;
                 UpdateControlState(); // 更新所有按钮状态
-                UpdateStatus("系统启动");
+                
+                if (SettingsManager.Instance.Settings.UseLocalFolder)
+                {
+                    UpdateStatus("离线模式系统启动");
+                }
+                else
+                {
+                    UpdateStatus("系统启动");
+                }
+
+                // 如果是软触发模式，且使用本地图像文件夹，手动触发一次
+                if (SettingsManager.Instance.Settings.UseLocalFolder && 
+                    SettingsManager.Instance.Settings.UseTrigger &&
+                    SettingsManager.Instance.Settings.UseSoftTrigger)
+                {
+                    _cameraInitializer.TriggerLocalImage();
+                }
 
                 // 启动主循环任务
                 await _mainLoopManager.RunMainLoopAsync(_cts.Token, _lastCapturedImage);
