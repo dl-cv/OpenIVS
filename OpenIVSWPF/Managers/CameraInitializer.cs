@@ -90,6 +90,7 @@ namespace OpenIVSWPF.Managers
         private bool _isGrabbing = false;
         private Action<string> _statusCallback;
         private Action<string> _cameraStatusCallback;
+        private Settings _settings; // 添加设置引用
 
         // 本地图像文件夹相关
         private bool _useLocalFolder = false;
@@ -107,16 +108,60 @@ namespace OpenIVSWPF.Managers
         public CameraManager CameraManager => _cameraManager;
         public bool UseLocalFolder => _useLocalFolder;
 
+        /// <summary>
+        /// 判断图像列表是否已用完（仅在非循环模式下有效）
+        /// </summary>
+        public bool IsImageListExhausted => _useLocalFolder && _currentImageIndex >= _imageFiles.Count && !_loopLocalImages;
+
+        /// <summary>
+        /// 原有的相机图像更新事件（保留用于兼容）
+        /// </summary>
         public event EventHandler<ImageEventArgs> ImageUpdated
         {
             add { _cameraManager.ImageUpdated += value; }
             remove { _cameraManager.ImageUpdated -= value; }
         }
 
+        /// <summary>
+        /// 统一的图像捕获事件 - 所有模式下都通过这个事件通知外部有新图像
+        /// </summary>
+        public event EventHandler<ImageEventArgs> ImageCaptured;
+
         public CameraInitializer(Action<string> statusCallback, Action<string> cameraStatusCallback)
         {
             _statusCallback = statusCallback;
             _cameraStatusCallback = cameraStatusCallback;
+
+            // 订阅相机的原始图像事件，转发为统一的图像捕获事件
+            _cameraManager.ImageUpdated += OnCameraManagerImageUpdated;
+        }
+
+        /// <summary>
+        /// 处理相机原始图像更新事件
+        /// </summary>
+        private void OnCameraManagerImageUpdated(object sender, ImageEventArgs e)
+        {
+            if (e.Image != null)
+            {
+                // 触发统一的图像捕获事件
+                RaiseImageCapturedEvent(e.Image.Clone() as Bitmap);
+            }
+        }
+
+        /// <summary>
+        /// 触发统一的图像捕获事件
+        /// </summary>
+        /// <param name="image">捕获的图像</param>
+        private void RaiseImageCapturedEvent(Bitmap image)
+        {
+            if (image != null)
+            {
+                // 创建事件参数
+                var eventArgs = new ImageEventArgs(image);
+
+                // 触发事件
+                ImageCaptured?.Invoke(this, eventArgs);
+            }
         }
 
         /// <summary>
@@ -127,6 +172,9 @@ namespace OpenIVSWPF.Managers
         {
             try
             {
+                // 保存设置引用
+                _settings = settings;
+
                 // 根据设置决定是使用本地文件夹还是相机
                 if (settings.UseLocalFolder)
                 {
@@ -158,7 +206,7 @@ namespace OpenIVSWPF.Managers
                 _localFolderPath = settings.LocalFolderPath;
                 _localImageDelay = settings.LocalImageDelay;
                 _loopLocalImages = settings.LoopLocalImages;
-                
+
                 if (string.IsNullOrEmpty(_localFolderPath) || !Directory.Exists(_localFolderPath))
                 {
                     _statusCallback?.Invoke($"图像文件夹不存在：{_localFolderPath}");
@@ -278,7 +326,7 @@ namespace OpenIVSWPF.Managers
                         _statusCallback?.Invoke("已到达图像列表末尾，停止遍历");
                         return null;
                     }
-                    
+
                     // 如果循环遍历，则重置索引
                     _currentImageIndex = 0;
                     _statusCallback?.Invoke("图像列表已遍历完毕，重新开始");
@@ -367,11 +415,11 @@ namespace OpenIVSWPF.Managers
                         }
 
                         // 移除事件处理器，防止多次触发
-                        _cameraManager.ImageUpdated -= handler;
+                        ImageCaptured -= handler;
                     };
 
                     // 添加事件处理
-                    _cameraManager.ImageUpdated += handler;
+                    ImageCaptured += handler;
 
                     // 执行软触发
                     _cameraManager.TriggerOnce();
@@ -383,7 +431,7 @@ namespace OpenIVSWPF.Managers
                         // 注册取消操作
                         linkedCts.Token.Register(() =>
                         {
-                            _cameraManager.ImageUpdated -= handler;
+                            ImageCaptured -= handler;
                             tcs.TrySetCanceled();
                         });
 
@@ -427,11 +475,11 @@ namespace OpenIVSWPF.Managers
                             }
 
                             // 移除事件处理器，防止多次触发
-                            _cameraManager.ImageUpdated -= handler;
+                            ImageCaptured -= handler;
                         };
 
                         // 添加事件处理
-                        _cameraManager.ImageUpdated += handler;
+                        ImageCaptured += handler;
 
                         // 添加超时处理，5秒内如果没有图像返回，则取消
                         using (var timeoutCts = new System.Threading.CancellationTokenSource(5000))
@@ -440,7 +488,7 @@ namespace OpenIVSWPF.Managers
                             // 注册取消操作
                             linkedCts.Token.Register(() =>
                             {
-                                _cameraManager.ImageUpdated -= handler;
+                                ImageCaptured -= handler;
                                 tcs.TrySetCanceled();
                             });
 
@@ -495,8 +543,9 @@ namespace OpenIVSWPF.Managers
                 Bitmap bitmap = LoadAndSendNextImage();
                 if (bitmap != null)
                 {
-                    // 发送图像事件
-                    _cameraManager.RaiseImageUpdatedEvent(bitmap);
+                    // 通过统一的事件通知图像捕获
+                    RaiseImageCapturedEvent(bitmap);
+
                     _statusCallback?.Invoke($"已加载图像: {_currentImageIndex}/{_imageFiles.Count}");
                     return bitmap;
                 }
@@ -524,17 +573,22 @@ namespace OpenIVSWPF.Managers
         /// <summary>
         /// 手动触发本地图像
         /// </summary>
-        public void TriggerLocalImage()
+        /// <returns>加载的图像，若失败则返回null</returns>
+        public Bitmap TriggerLocalImage()
         {
             if (_useLocalFolder && _imageFiles.Count > 0)
             {
-                // 加载下一张图像并发送事件
+                // 加载下一张图像
                 Bitmap bitmap = LoadAndSendNextImage();
                 if (bitmap != null)
                 {
-                    _cameraManager.RaiseImageUpdatedEvent(bitmap);
+                    // 通过统一的事件通知图像捕获
+                    RaiseImageCapturedEvent(bitmap);
+
+                    return bitmap;
                 }
             }
+            return null;
         }
 
         /// <summary>
@@ -557,8 +611,19 @@ namespace OpenIVSWPF.Managers
             // 停止本地图像流
             if (_useLocalFolder)
             {
+                // 重置图像索引，以便下次启动时从头开始
+                ResetImageIndex();
                 _useLocalFolder = false;
             }
+        }
+
+        /// <summary>
+        /// 重置图像索引，使得下次从第一张图像开始处理
+        /// </summary>
+        public void ResetImageIndex()
+        {
+            _currentImageIndex = 0;
+            _statusCallback?.Invoke("已重置图像索引，下次将从第一张图像开始");
         }
     }
 }

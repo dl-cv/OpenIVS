@@ -47,7 +47,7 @@ namespace OpenIVSWPF
         // 运行控制
         private bool _isRunning = false;
         private CancellationTokenSource _cts;
-        
+
         // 上次拍照结果
         private System.Drawing.Bitmap _lastCapturedImage = null;
         private string _lastDetectionResult = "";
@@ -76,10 +76,10 @@ namespace OpenIVSWPF
 
             // 初始化UI状态
             InitializeUIState();
-            
+
             // 添加设置变更事件处理
             SettingsManager.Instance.SettingsChanged += SettingsManager_SettingsChanged;
-            
+
             // 初始化管理器
             InitializeManagers();
         }
@@ -107,7 +107,9 @@ namespace OpenIVSWPF
                 UpdateStatus,
                 ViewModel.UpdateCameraStatus
             );
-            _cameraInitializer.ImageUpdated += CameraManager_ImageUpdated;
+
+            // 使用统一的图像捕获事件
+            _cameraInitializer.ImageCaptured += CameraInitializer_ImageCaptured;
 
             // 初始化模型管理器
             _modelManager = new ModelManager(
@@ -134,7 +136,7 @@ namespace OpenIVSWPF
                     }
 
                     UpdateStatus("设置已更改，需要重新初始化系统");
-                    
+
                     // 重置初始化标志
                     _isInitialized = false;
                 });
@@ -147,7 +149,7 @@ namespace OpenIVSWPF
             try
             {
                 UpdateStatus("正在初始化系统...");
-                
+
                 var settings = SettingsManager.Instance.Settings;
                 bool isOfflineMode = settings.UseLocalFolder;
 
@@ -185,7 +187,7 @@ namespace OpenIVSWPF
                 );
 
                 _isInitialized = true;
-                
+
                 if (isOfflineMode)
                 {
                     UpdateStatus("离线模式系统初始化完成");
@@ -329,7 +331,7 @@ namespace OpenIVSWPF
 
         #region 事件处理
         // 相机图像更新事件处理
-        private void CameraManager_ImageUpdated(object sender, ImageEventArgs e)
+        private void CameraInitializer_ImageCaptured(object sender, ImageEventArgs e)
         {
             try
             {
@@ -338,37 +340,26 @@ namespace OpenIVSWPF
                     // 更新显示图像
                     if (e.Image != null)
                     {
-                        // 保存最新图像，用于非触发模式
+                        // 保存最新图像
                         _lastCapturedImage = e.Image.Clone() as Bitmap;
 
-                        // 如果是非触发模式，则立即执行推理
-                        if (_isRunning && !SettingsManager.Instance.Settings.UseTrigger)
+                        // 如果系统已启动，则由MainLoopManager统一处理推理
+                        if (_isRunning)
                         {
-                            // 执行AI推理
-                            string result = _modelManager.PerformInference(_lastCapturedImage);
-
-                            // 更新检测结果显示
-                            UpdateDetectionResult(result);
-
-                            // 判断检测结果
-                            bool isOK = string.IsNullOrEmpty(result);
-
-                            // 更新统计信息
-                            UpdateStatisticsCallback(isOK);
-
-                            // 根据设置保存图像
-                            _ = SaveImageAsync(_lastCapturedImage, isOK);
+                            // 无论何种模式，都统一使用MainLoopManager处理图像
+                            // 获取当前模式信息
+                            _ = _mainLoopManager.ProcessImageAsync(_lastCapturedImage);
                         }
                         else
                         {
-                            // 仅更新显示图像
+                            // 系统未启动时，仅更新显示图像
                             UpdateDisplayImage(e.Image.Clone() as Bitmap);
                         }
                     }
                 }
                 else
                 {
-                    Dispatcher.Invoke(() => CameraManager_ImageUpdated(sender, e));
+                    Dispatcher.Invoke(() => CameraInitializer_ImageCaptured(sender, e));
                 }
             }
             catch { }
@@ -394,7 +385,7 @@ namespace OpenIVSWPF
                         UpdateControlState();
                         return;
                     }
-                    
+
                     // 判断初始化结果：在线模式需要检查所有组件，离线模式只需要检查模型
                     bool isOfflineMode = SettingsManager.Instance.Settings.UseLocalFolder;
                     if (!isOfflineMode && (!_isModbusConnected || !_isCameraConnected))
@@ -411,34 +402,32 @@ namespace OpenIVSWPF
                 // 标记为正在运行
                 _isRunning = true;
                 UpdateControlState(); // 更新所有按钮状态
-                
+
                 if (SettingsManager.Instance.Settings.UseLocalFolder)
                 {
                     UpdateStatus("离线模式系统启动");
+
+                    // 离线模式下，在启动时先重置图像索引，确保从第一张图像开始
+                    _cameraInitializer.ResetImageIndex();
+
+                    // 在离线模式下，不要在这里主动触发第一张图像加载
+                    // 由MainLoopManager统一处理所有图像的加载和推理
                 }
                 else
                 {
                     UpdateStatus("系统启动");
                 }
 
-                // 如果是软触发模式，且使用本地图像文件夹，手动触发一次
-                if (SettingsManager.Instance.Settings.UseLocalFolder && 
-                    SettingsManager.Instance.Settings.UseTrigger &&
-                    SettingsManager.Instance.Settings.UseSoftTrigger)
-                {
-                    _cameraInitializer.TriggerLocalImage();
-                }
-
                 // 启动主循环任务
                 await _mainLoopManager.RunMainLoopAsync(_cts.Token, _lastCapturedImage);
-                
+
                 // 检查是否是因为图像用完而返回（只有在离线模式下会出现）
-                if (_isRunning && SettingsManager.Instance.Settings.UseLocalFolder 
+                if (_isRunning && SettingsManager.Instance.Settings.UseLocalFolder
                     && !SettingsManager.Instance.Settings.LoopLocalImages)
                 {
                     // 由于图像已经处理完毕，自动停止运行
                     _isRunning = false;
-                    UpdateStatus("离线模式: 所有图像已处理完毕，停止检测。");
+                    UpdateStatus("离线模式: 所有图像已处理完毕，停止检测");
                     UpdateControlState();
                 }
             }
@@ -462,6 +451,12 @@ namespace OpenIVSWPF
                     _cts.Cancel();
                     _cts.Dispose();
                     _cts = null;
+                }
+
+                // 若是离线模式，确保重置图像索引，使下次从头开始
+                if (SettingsManager.Instance.Settings.UseLocalFolder)
+                {
+                    _cameraInitializer.ResetImageIndex();
                 }
 
                 UpdateStatus("系统已停止");
@@ -536,7 +531,7 @@ namespace OpenIVSWPF
 
                 // 清理资源
                 CleanupResources();
-                
+
                 // 移除设置变更事件
                 SettingsManager.Instance.SettingsChanged -= SettingsManager_SettingsChanged;
             }

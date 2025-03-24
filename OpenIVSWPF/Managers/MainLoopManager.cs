@@ -27,9 +27,9 @@ namespace OpenIVSWPF.Managers
         private int _currentPositionIndex = 0;
 
         public MainLoopManager(
-            ModbusManager modbusInitializer, 
-            CameraInitializer cameraInitializer, 
-            ModelManager modelManager, 
+            ModbusManager modbusInitializer,
+            CameraInitializer cameraInitializer,
+            ModelManager modelManager,
             Settings settings,
             Action<string> statusCallback,
             Action<string> detectionResultCallback,
@@ -58,15 +58,15 @@ namespace OpenIVSWPF.Managers
             {
                 // 判断是否是离线模式
                 bool isOfflineMode = _settings.UseLocalFolder;
-                
+
                 // 持续运行，直到取消
                 while (!token.IsCancellationRequested)
                 {
                     // 获取当前位置索引
                     float targetPosition = _positionSequence[_currentPositionIndex];
-                    
+
                     bool moveResult = true;
-                    
+
                     // 在线模式下才执行移动操作
                     if (!isOfflineMode)
                     {
@@ -81,8 +81,8 @@ namespace OpenIVSWPF.Managers
 
                     if (moveResult && !token.IsCancellationRequested)
                     {
-                        // 离线模式下，无论是否是触发模式，都执行拍照和推理
-                        // 在线模式下，只有在触发模式才拍照和推理
+                        // 触发模式（在线触发模式或离线模式）下的图像捕获
+                        // 在线非触发模式不走这里，由事件回调处理
                         if (isOfflineMode || _settings.UseTrigger)
                         {
                             // 触发相机拍照
@@ -96,55 +96,36 @@ namespace OpenIVSWPF.Managers
                                     await Task.Delay(_settings.PreCaptureDelay, token);
                                 }
 
-                                // 等待拍照操作完成
+                                // 只触发拍照，图像处理由统一的事件处理
+                                // 等待拍照操作完成，但不处理返回的图像
                                 var image = await _cameraInitializer.CaptureImageAsync(token, lastCapturedImage, _settings);
 
                                 // 检查图像是否为空
-                                if (image == null && isOfflineMode && !_settings.LoopLocalImages)
+                                if (image == null)
                                 {
-                                    // 离线模式下，非循环遍历模式，且图像为空，说明图像已用完
-                                    _statusCallback?.Invoke("离线模式: 所有图像已处理完毕，停止检测。");
-                                    return; // 退出方法，停止检测
-                                }
-
-                                if (image != null && !token.IsCancellationRequested)
-                                {
-                                    // 更新lastCapturedImage
-                                    lastCapturedImage = image.Clone() as Bitmap;
-                                    
-                                    // 拍照完成后，异步处理图像（不等待完成）
-                                    _ = Task.Run(() =>
+                                    if (isOfflineMode && !_settings.LoopLocalImages && _cameraInitializer.IsImageListExhausted)
                                     {
-                                        try
-                                        {
-                                            // 获取到图像后，执行AI推理
-                                            _statusCallback?.Invoke("执行AI推理...");
-                                            string result = _modelManager.PerformInference(image);
-
-                                            // 更新检测结果显示
-                                            _detectionResultCallback?.Invoke(result);
-
-                                            // 判断检测结果
-                                            bool isOK = string.IsNullOrEmpty(result);
-
-                                            // 更新统计信息
-                                            _statisticsCallback?.Invoke(isOK);
-
-                                            // 根据设置保存图像
-                                            _ = _saveImageCallback?.Invoke(image, isOK);
-
-                                            // 添加完成信息
-                                            _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的推理和保存已完成");
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            _statusCallback?.Invoke($"图像处理过程中发生错误：{ex.Message}");
-                                        }
-                                    });
-
-                                    // 提示拍照已完成
-                                    _statusCallback?.Invoke($"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition} 的拍照已完成，准备移动到下一位置");
+                                        // 离线模式下，非循环遍历模式，且图像已用完，说明已到末尾
+                                        _statusCallback?.Invoke("离线模式: 所有图像已处理完毕，停止检测");
+                                        return; // 退出方法，停止检测
+                                    }
+                                    else
+                                    {
+                                        // 只是当前图像处理失败，继续循环
+                                        _statusCallback?.Invoke("无法获取图像，继续下一个位置...");
+                                        continue;
+                                    }
                                 }
+
+                                if (image != null)
+                                {
+                                    // 更新lastCapturedImage，以便下次捕获时使用
+                                    lastCapturedImage = image.Clone() as Bitmap;
+                                }
+
+                                // 提示拍照已完成，准备移动到下一个位置
+                                string positionInfo = $"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition}";
+                                _statusCallback?.Invoke($"{positionInfo} 的拍照已完成，准备移动到下一位置");
                             }
                             catch (Exception ex)
                             {
@@ -161,7 +142,7 @@ namespace OpenIVSWPF.Managers
 
                     // 更新位置索引，实现1-2-3-2-1循环
                     _currentPositionIndex = (_currentPositionIndex + 1) % _positionSequence.Length;
-                    
+
                     // 在离线模式下，添加一个延迟，模拟移动时间
                     if (isOfflineMode)
                     {
@@ -276,5 +257,44 @@ namespace OpenIVSWPF.Managers
                 _statusCallback?.Invoke($"保存图像时发生错误: {ex.Message}");
             }
         }
+
+        /// <summary>
+        /// 处理图像并执行推理 - 所有模式的统一处理入口
+        /// </summary>
+        /// <param name="image">需要处理的图像</param>
+        /// <returns>处理任务</returns>
+        public async Task ProcessImageAsync(Bitmap image)
+        {
+            if (image == null)
+                return;
+
+            try
+            {
+                // 执行AI推理
+                _statusCallback?.Invoke("执行AI推理...");
+
+                // 执行推理
+                string result = _modelManager.PerformInference(image);
+
+                // 更新检测结果显示
+                _detectionResultCallback?.Invoke(result);
+
+                // 判断检测结果
+                bool isOK = string.IsNullOrEmpty(result);
+
+                // 更新统计信息
+                _statisticsCallback?.Invoke(isOK);
+
+                // 根据设置保存图像
+                await _saveImageCallback?.Invoke(image, isOK);
+
+                // 添加完成信息
+                _statusCallback?.Invoke("推理已完成");
+            }
+            catch (Exception ex)
+            {
+                _statusCallback?.Invoke($"图像处理过程中发生错误：{ex.Message}");
+            }
+        }
     }
-} 
+}
