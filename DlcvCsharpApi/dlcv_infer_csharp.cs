@@ -158,187 +158,253 @@ namespace dlcv_infer_csharp
 
         public Utils.CSharpResult Infer(Mat image, bool with_mask = false)
         {
-            int width = image.Width;
-            int height = image.Height;
-            int channels = image.Channels();
-
-            var imageInfo = new JObject
+            // 检查图像是否连续，如果不连续则创建连续副本
+            Mat processImage = image;
+            bool needDispose = false;
+            if (!image.IsContinuous())
             {
-                ["width"] = width,
-                ["height"] = height,
-                ["channels"] = channels,
-                ["image_ptr"] = (ulong)image.Data.ToInt64()
-            };
-
-            var inferRequest = new JObject
-            {
-                ["model_index"] = modelIndex,
-                ["with_mask"] = with_mask,
-                ["image_list"] = new JArray { imageInfo }
-            };
-
-            string jsonStr = inferRequest.ToString();
-            IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
-            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-            JObject resultObject = JObject.Parse(resultJson);
-
-            // 解析 json 结果
-            var sampleResults = new List<Utils.CSharpSampleResult>();
-
-            var sampleResultsArray = resultObject["sample_results"] as JArray;
-
-            foreach (var sampleResult in sampleResultsArray)
-            {
-                var results = new List<Utils.CSharpObjectResult>();
-                var resultsArray = sampleResult["results"] as JArray;
-
-                foreach (var result in resultsArray)
-                {
-                    var categoryId = (int)result["category_id"];
-                    var categoryName = (string)result["category_name"];
-                    var score = (float)(double)result["score"];
-                    var area = (float)(double)result["area"];
-                    var bbox = result["bbox"].ToObject<List<double>>();
-                    var withMask = (bool)result["with_mask"];
-
-                    var mask = result["mask"];
-                    int mask_width = (int)mask["width"];
-                    int mask_height = (int)mask["height"];
-                    Mat mask_img = new Mat();
-                    if (withMask)
-                    {
-                        IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
-                        mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                        //mask_img = new Mat(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                        mask_img = mask_img.Clone();
-                    }
-
-                    var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img);
-                    results.Add(objectResult);
-                }
-
-                var sampleResultObj = new Utils.CSharpSampleResult(results);
-                sampleResults.Add(sampleResultObj);
+                processImage = image.Clone();
+                needDispose = true;
             }
 
-            //Console.WriteLine("Inference result: " + resultObject.ToString());
-            DllLoader.Instance.dlcv_free_model_result(resultPtr);
-
-            Utils.CSharpResult cSharpResult = new Utils.CSharpResult(sampleResults);
-
-            return cSharpResult;
-        }
-
-        public Utils.CSharpResult InferBatch(List<Mat> image_list)
-        {
-            var imageInfoList = new JArray();
-
-            foreach (var image in image_list)
+            try
             {
-                int width = image.Width;
-                int height = image.Height;
-                int channels = image.Channels();
+                int width = processImage.Width;
+                int height = processImage.Height;
+                int channels = processImage.Channels();
 
                 var imageInfo = new JObject
                 {
                     ["width"] = width,
                     ["height"] = height,
                     ["channels"] = channels,
-                    ["image_ptr"] = (ulong)image.Data.ToInt64()
+                    ["image_ptr"] = (ulong)processImage.Data.ToInt64()
                 };
 
-                imageInfoList.Add(imageInfo);
-            }
-
-            var inferRequest = new JObject
-            {
-                ["model_index"] = modelIndex,
-                ["image_list"] = imageInfoList
-            };
-
-            string jsonStr = inferRequest.ToString();
-            IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
-            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-            JObject resultObject = JObject.Parse(resultJson);
-
-            if (resultObject["code"] != null && resultObject["code"].Value<int>() != 0)
-            {
-                throw new Exception("Inference failed: " + resultObject["message"]);
-            }
-
-            // 解析 json 结果
-            var sampleResults = new List<Utils.CSharpSampleResult>();
-
-            var sampleResultsArray = resultObject["sample_results"] as JArray;
-
-            foreach (var sampleResult in sampleResultsArray)
-            {
-                var results = new List<Utils.CSharpObjectResult>();
-                var resultsArray = sampleResult["results"] as JArray;
-
-                foreach (var result in resultsArray)
+                var inferRequest = new JObject
                 {
-                    var categoryId = (int)result["category_id"];
-                    var categoryName = (string)result["category_name"];
-                    var score = (float)(double)result["score"];
-                    var area = (float)(double)result["area"];
-                    var bbox = result["bbox"].ToObject<List<double>>();
-                    var withMask = (bool)result["with_mask"];
+                    ["model_index"] = modelIndex,
+                    ["with_mask"] = with_mask,
+                    ["image_list"] = new JArray { imageInfo }
+                };
 
-                    var mask = result["mask"];
-                    int mask_width = (int)mask["width"];
-                    int mask_height = (int)mask["height"];
-                    Mat mask_img = new Mat();
-                    if (withMask)
+                string jsonStr = inferRequest.ToString();
+                IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
+                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                JObject resultObject = JObject.Parse(resultJson);
+
+                // 解析 json 结果
+                var sampleResults = new List<Utils.CSharpSampleResult>();
+
+                var sampleResultsArray = resultObject["sample_results"] as JArray;
+
+                foreach (var sampleResult in sampleResultsArray)
+                {
+                    var results = new List<Utils.CSharpObjectResult>();
+                    var resultsArray = sampleResult["results"] as JArray;
+
+                    foreach (var result in resultsArray)
                     {
-                        IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
+                        var categoryId = (int)result["category_id"];
+                        var categoryName = (string)result["category_name"];
+                        var score = (float)(double)result["score"];
+                        var area = (float)(double)result["area"];
+                        var bbox = result["bbox"].ToObject<List<double>>();
+                        var withMask = (bool)result["with_mask"];
 
-                        mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                        mask_img = mask_img.Clone();
+                        var mask = result["mask"];
+                        int mask_width = (int)mask["width"];
+                        int mask_height = (int)mask["height"];
+                        Mat mask_img = new Mat();
+                        if (withMask)
+                        {
+                            IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
+                            mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
+                            //mask_img = new Mat(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
+                            mask_img = mask_img.Clone();
+                        }
+
+                        var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img);
+                        results.Add(objectResult);
                     }
 
-                    var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img);
-                    results.Add(objectResult);
+                    var sampleResultObj = new Utils.CSharpSampleResult(results);
+                    sampleResults.Add(sampleResultObj);
                 }
 
-                var sampleResultObj = new Utils.CSharpSampleResult(results);
-                sampleResults.Add(sampleResultObj);
+                //Console.WriteLine("Inference result: " + resultObject.ToString());
+                DllLoader.Instance.dlcv_free_model_result(resultPtr);
+
+                Utils.CSharpResult cSharpResult = new Utils.CSharpResult(sampleResults);
+
+                return cSharpResult;
             }
+            finally
+            {
+                // 如果创建了临时图像，释放资源
+                if (needDispose)
+                {
+                    processImage.Dispose();
+                }
+            }
+        }
 
-            DllLoader.Instance.dlcv_free_model_result(resultPtr);
+        public Utils.CSharpResult InferBatch(List<Mat> image_list)
+        {
+            var imageInfoList = new JArray();
+            var processImages = new List<Tuple<Mat, bool>>();
 
-            Utils.CSharpResult cSharpResult = new Utils.CSharpResult(sampleResults);
+            try
+            {
+                foreach (var image in image_list)
+                {
+                    // 检查图像是否连续，如果不连续则创建连续副本
+                    Mat processImage = image;
+                    bool needDispose = false;
+                    if (!image.IsContinuous())
+                    {
+                        processImage = image.Clone();
+                        needDispose = true;
+                    }
 
-            return cSharpResult;
+                    processImages.Add(new Tuple<Mat, bool>(processImage, needDispose));
+
+                    int width = processImage.Width;
+                    int height = processImage.Height;
+                    int channels = processImage.Channels();
+
+                    var imageInfo = new JObject
+                    {
+                        ["width"] = width,
+                        ["height"] = height,
+                        ["channels"] = channels,
+                        ["image_ptr"] = (ulong)processImage.Data.ToInt64()
+                    };
+
+                    imageInfoList.Add(imageInfo);
+                }
+
+                var inferRequest = new JObject
+                {
+                    ["model_index"] = modelIndex,
+                    ["image_list"] = imageInfoList
+                };
+
+                string jsonStr = inferRequest.ToString();
+                IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
+                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                JObject resultObject = JObject.Parse(resultJson);
+
+                if (resultObject["code"] != null && resultObject["code"].Value<int>() != 0)
+                {
+                    throw new Exception("Inference failed: " + resultObject["message"]);
+                }
+
+                // 解析 json 结果
+                var sampleResults = new List<Utils.CSharpSampleResult>();
+
+                var sampleResultsArray = resultObject["sample_results"] as JArray;
+
+                foreach (var sampleResult in sampleResultsArray)
+                {
+                    var results = new List<Utils.CSharpObjectResult>();
+                    var resultsArray = sampleResult["results"] as JArray;
+
+                    foreach (var result in resultsArray)
+                    {
+                        var categoryId = (int)result["category_id"];
+                        var categoryName = (string)result["category_name"];
+                        var score = (float)(double)result["score"];
+                        var area = (float)(double)result["area"];
+                        var bbox = result["bbox"].ToObject<List<double>>();
+                        var withMask = (bool)result["with_mask"];
+
+                        var mask = result["mask"];
+                        int mask_width = (int)mask["width"];
+                        int mask_height = (int)mask["height"];
+                        Mat mask_img = new Mat();
+                        if (withMask)
+                        {
+                            IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
+
+                            mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
+                            mask_img = mask_img.Clone();
+                        }
+
+                        var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img);
+                        results.Add(objectResult);
+                    }
+
+                    var sampleResultObj = new Utils.CSharpSampleResult(results);
+                    sampleResults.Add(sampleResultObj);
+                }
+
+                DllLoader.Instance.dlcv_free_model_result(resultPtr);
+
+                Utils.CSharpResult cSharpResult = new Utils.CSharpResult(sampleResults);
+
+                return cSharpResult;
+            }
+            finally
+            {
+                // 释放所有临时创建的图像资源
+                foreach (var pair in processImages)
+                {
+                    if (pair.Item2) // 如果需要释放
+                    {
+                        pair.Item1.Dispose();
+                    }
+                }
+            }
         }
 
         public dynamic InferOneOutJson(Mat image)
         {
-            int width = image.Width;
-            int height = image.Height;
-            int channels = image.Channels();
-
-            var imageInfo = new JObject
+            // 检查图像是否连续，如果不连续则创建连续副本
+            Mat processImage = image;
+            bool needDispose = false;
+            if (!image.IsContinuous())
             {
-                ["width"] = width,
-                ["height"] = height,
-                ["channels"] = channels,
-                ["image_ptr"] = (ulong)image.Data.ToInt64()
-            };
+                processImage = image.Clone();
+                needDispose = true;
+            }
 
-            var inferRequest = new JObject
+            try
             {
-                ["model_index"] = modelIndex,
-                ["with_mask"] = false,
-                ["image_list"] = new JArray { imageInfo }
-            };
+                int width = processImage.Width;
+                int height = processImage.Height;
+                int channels = processImage.Channels();
 
-            string jsonStr = inferRequest.ToString();
-            IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
-            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-            dynamic resultObject = JObject.Parse(resultJson);
-            DllLoader.Instance.dlcv_free_model_result(resultPtr);
-            return resultObject["sample_results"][0]["results"];
+                var imageInfo = new JObject
+                {
+                    ["width"] = width,
+                    ["height"] = height,
+                    ["channels"] = channels,
+                    ["image_ptr"] = (ulong)processImage.Data.ToInt64()
+                };
+
+                var inferRequest = new JObject
+                {
+                    ["model_index"] = modelIndex,
+                    ["with_mask"] = false,
+                    ["image_list"] = new JArray { imageInfo }
+                };
+
+                string jsonStr = inferRequest.ToString();
+                IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
+                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                dynamic resultObject = JObject.Parse(resultJson);
+                DllLoader.Instance.dlcv_free_model_result(resultPtr);
+                return resultObject["sample_results"][0]["results"];
+            }
+            finally
+            {
+                // 如果创建了临时图像，释放资源
+                if (needDispose)
+                {
+                    processImage.Dispose();
+                }
+            }
         }
     }
 

@@ -23,7 +23,7 @@ namespace OpenIVSWPF.Managers
         private Func<Bitmap, bool, Task> _saveImageCallback;
 
         // 位置序列定义 (1-2-3-2-1循环)
-        private readonly float[] _positionSequence = new float[] { 195, 305, 415, 305 };
+        private readonly float[] _positionSequence = new float[] { 220, 330, 440, 330 };
         private int _currentPositionIndex = 0;
 
         public MainLoopManager(
