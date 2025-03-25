@@ -166,7 +166,7 @@ namespace dlcv_infer_csharp
                 processImage = image.Clone();
                 needDispose = true;
             }
-            
+
             try
             {
                 int width = processImage.Width;
@@ -266,9 +266,9 @@ namespace dlcv_infer_csharp
                         processImage = image.Clone();
                         needDispose = true;
                     }
-                    
+
                     processImages.Add(new Tuple<Mat, bool>(processImage, needDispose));
-                    
+
                     int width = processImage.Width;
                     int height = processImage.Height;
                     int channels = processImage.Channels();
@@ -368,7 +368,7 @@ namespace dlcv_infer_csharp
                 processImage = image.Clone();
                 needDispose = true;
             }
-            
+
             try
             {
                 int width = processImage.Width;
