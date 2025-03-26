@@ -323,10 +323,10 @@ namespace OpenIVSWPF.Managers
 
             // 图像保存设置
             SavePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "images");
-            SaveOKImage = true;
-            SaveNGImage = true;
+            SaveOKImage = false;
+            SaveNGImage = false;
             ImageFormat = "JPG";
-            JpegQuality = "98";
+            JpegQuality = "95";
 
             // 拍照设置
             PreCaptureDelay = 100;  // 默认等待100ms
