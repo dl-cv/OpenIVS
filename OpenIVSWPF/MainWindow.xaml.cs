@@ -108,7 +108,13 @@ namespace OpenIVSWPF
                 ViewModel.UpdateCameraStatus
             );
 
-            // 使用统一的图像捕获事件
+            // 移除之前的事件订阅
+            if (_cameraInitializer != null)
+            {
+                _cameraInitializer.ImageCaptured -= CameraInitializer_ImageCaptured;
+            }
+            
+            // 重新订阅事件
             _cameraInitializer.ImageCaptured += CameraInitializer_ImageCaptured;
 
             // 初始化模型管理器
@@ -459,6 +465,13 @@ namespace OpenIVSWPF
                     _cameraInitializer.ResetImageIndex();
                 }
 
+                // 清理最后一次捕获的图像，防止重复处理
+                if (_lastCapturedImage != null)
+                {
+                    _lastCapturedImage.Dispose();
+                    _lastCapturedImage = null;
+                }
+
                 UpdateStatus("系统已停止");
                 UpdateControlState();
             }
@@ -544,6 +557,12 @@ namespace OpenIVSWPF
         // 清理资源
         private void CleanupResources()
         {
+            // 取消相机图像事件订阅
+            if (_cameraInitializer != null)
+            {
+                _cameraInitializer.ImageCaptured -= CameraInitializer_ImageCaptured;
+            }
+
             // 关闭Modbus连接
             if (_isModbusConnected)
             {
@@ -565,6 +584,10 @@ namespace OpenIVSWPF
                 _modelManager?.Dispose();
                 _isModelLoaded = false;
             }
+            
+            // 重置状态
+            _isInitialized = false;
+            _isRunning = false;
         }
         #endregion
     }
