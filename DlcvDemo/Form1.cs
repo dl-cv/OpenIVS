@@ -163,7 +163,7 @@ namespace demo
             var image_list = new List<Mat>();
             for (int i = 0; i < batch_size; i++)
             {
-                image_list.Add(image);
+                image_list.Add(image_rgb);
             }
 
             if (image.Empty())
