@@ -176,7 +176,7 @@ namespace demo
             data["threshold"] = float.Parse(textBox_threshold.Text);
             data["with_mask"] = true;
 
-            CSharpResult result = model.InferBatch(image_list);
+            CSharpResult result = model.InferBatch(image_list, data);
 
             imagePanel1.UpdateImageAndResult(image, result);
 
