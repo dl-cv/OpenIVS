@@ -45,6 +45,8 @@
             this.numericUpDown_batch_size = new System.Windows.Forms.NumericUpDown();
             this.imagePanel1 = new DLCV.ImageViewer();
             this.richTextBox1 = new System.Windows.Forms.RichTextBox();
+            this.label4 = new System.Windows.Forms.Label();
+            this.textBox_threshold = new System.Windows.Forms.TextBox();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             this.SuspendLayout();
@@ -65,7 +67,7 @@
             // 
             this.button_get_model_info.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_get_model_info.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_get_model_info.Location = new System.Drawing.Point(553, 92);
+            this.button_get_model_info.Location = new System.Drawing.Point(723, 92);
             this.button_get_model_info.Margin = new System.Windows.Forms.Padding(4);
             this.button_get_model_info.Name = "button_get_model_info";
             this.button_get_model_info.Size = new System.Drawing.Size(140, 60);
@@ -77,7 +79,7 @@
             // button_open_image
             // 
             this.button_open_image.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_open_image.Location = new System.Drawing.Point(1103, 19);
+            this.button_open_image.Location = new System.Drawing.Point(1273, 19);
             this.button_open_image.Name = "button_open_image";
             this.button_open_image.Size = new System.Drawing.Size(140, 60);
             this.button_open_image.TabIndex = 3;
@@ -88,7 +90,7 @@
             // button_infer
             // 
             this.button_infer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_infer.Location = new System.Drawing.Point(700, 92);
+            this.button_infer.Location = new System.Drawing.Point(870, 92);
             this.button_infer.Name = "button_infer";
             this.button_infer.Size = new System.Drawing.Size(140, 60);
             this.button_infer.TabIndex = 4;
@@ -110,7 +112,7 @@
             // 
             this.button_free_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_free_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_free_model.Location = new System.Drawing.Point(847, 92);
+            this.button_free_model.Location = new System.Drawing.Point(1017, 92);
             this.button_free_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_free_model.Name = "button_free_model";
             this.button_free_model.Size = new System.Drawing.Size(140, 60);
@@ -123,7 +125,7 @@
             // 
             this.button_github.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_github.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_github.Location = new System.Drawing.Point(995, 92);
+            this.button_github.Location = new System.Drawing.Point(1165, 92);
             this.button_github.Margin = new System.Windows.Forms.Padding(4);
             this.button_github.Name = "button_github";
             this.button_github.Size = new System.Drawing.Size(120, 60);
@@ -136,7 +138,7 @@
             // 
             this.button_doc.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_doc.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_doc.Location = new System.Drawing.Point(1123, 92);
+            this.button_doc.Location = new System.Drawing.Point(1293, 92);
             this.button_doc.Margin = new System.Windows.Forms.Padding(4);
             this.button_doc.Name = "button_doc";
             this.button_doc.Size = new System.Drawing.Size(120, 60);
@@ -174,7 +176,7 @@
             this.comboBox1.FormattingEnabled = true;
             this.comboBox1.Location = new System.Drawing.Point(249, 34);
             this.comboBox1.Name = "comboBox1";
-            this.comboBox1.Size = new System.Drawing.Size(564, 32);
+            this.comboBox1.Size = new System.Drawing.Size(734, 32);
             this.comboBox1.TabIndex = 12;
             // 
             // label1
@@ -237,7 +239,7 @@
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
-            this.imagePanel1.Size = new System.Drawing.Size(939, 672);
+            this.imagePanel1.Size = new System.Drawing.Size(1109, 672);
             this.imagePanel1.TabIndex = 17;
             // 
             // richTextBox1
@@ -251,11 +253,30 @@
             this.richTextBox1.TabIndex = 7;
             this.richTextBox1.Text = "";
             // 
+            // label4
+            // 
+            this.label4.AutoSize = true;
+            this.label4.Location = new System.Drawing.Point(474, 110);
+            this.label4.Name = "label4";
+            this.label4.Size = new System.Drawing.Size(92, 24);
+            this.label4.TabIndex = 18;
+            this.label4.Text = "threshold";
+            // 
+            // textBox_threshold
+            // 
+            this.textBox_threshold.Location = new System.Drawing.Point(572, 108);
+            this.textBox_threshold.Name = "textBox_threshold";
+            this.textBox_threshold.Size = new System.Drawing.Size(66, 31);
+            this.textBox_threshold.TabIndex = 19;
+            this.textBox_threshold.Text = "0.5";
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1258, 844);
+            this.ClientSize = new System.Drawing.Size(1428, 844);
+            this.Controls.Add(this.textBox_threshold);
+            this.Controls.Add(this.label4);
             this.Controls.Add(this.imagePanel1);
             this.Controls.Add(this.numericUpDown_batch_size);
             this.Controls.Add(this.label3);
@@ -305,6 +326,8 @@
         private System.Windows.Forms.NumericUpDown numericUpDown_batch_size;
         private DLCV.ImageViewer imagePanel1;
         private System.Windows.Forms.RichTextBox richTextBox1;
+        private System.Windows.Forms.Label label4;
+        private System.Windows.Forms.TextBox textBox_threshold;
     }
 }
 

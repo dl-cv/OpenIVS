@@ -26,6 +26,8 @@ namespace DLCV
         private object _lockObject = new object();
         private DateTime _startTime;
         private TimeSpan _duration;
+        private Queue<double> _recentLatencies;
+        private const int MAX_LATENCY_SAMPLES = 100; // 保存最近几次请求的延迟
 
         #endregion
 
@@ -81,6 +83,7 @@ namespace DLCV
             _workerThreads = new List<Thread>();
             _completedRequests = 0;
             _batchSize = batchSize;
+            _recentLatencies = new Queue<double>(MAX_LATENCY_SAMPLES);
         }
 
         #endregion
@@ -164,6 +167,17 @@ namespace DLCV
             if (target_rate) sb.AppendLine($"目标速率: {_targetRate} 请求/秒");
             sb.AppendLine($"运行时间: {elapsed.TotalSeconds:F2} 秒");
             sb.AppendLine($"完成请求: {_completedRequests * _batchSize}");
+            
+            // 计算最近请求的平均延迟（毫秒）
+            double averageLatency = 0;
+            lock (_lockObject)
+            {
+                if (_recentLatencies.Count > 0)
+                {
+                    averageLatency = _recentLatencies.Average();
+                }
+            }
+            sb.AppendLine($"平均延迟: {averageLatency:F2}ms");
             sb.AppendLine($"实际速率: {actualRate * _batchSize:F2} 请求/秒");
 
             return sb.ToString();
@@ -193,11 +207,22 @@ namespace DLCV
                 {
                     try
                     {
+                        Stopwatch requestStopwatch = Stopwatch.StartNew();
                         _testAction(_actionParameter);
-
+                        requestStopwatch.Stop();
+                        
+                        double latency = requestStopwatch.Elapsed.TotalMilliseconds;
+                        
                         lock (_lockObject)
                         {
                             _completedRequests++;
+                            
+                            // 记录请求延迟
+                            if (_recentLatencies.Count >= MAX_LATENCY_SAMPLES)
+                            {
+                                _recentLatencies.Dequeue(); // 移除最早的样本
+                            }
+                            _recentLatencies.Enqueue(latency);
                         }
                     }
                     catch (Exception ex)
