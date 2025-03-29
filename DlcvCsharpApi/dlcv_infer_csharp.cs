@@ -157,7 +157,7 @@ namespace dlcv_infer_csharp
         }
 
         // 内部通用推理方法，处理单张或多张图像
-        private JObject InferInternal(List<Mat> images, JObject params_json)
+        private Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject params_json)
         {
             var imageInfoList = new JArray();
             var processImages = new List<Tuple<Mat, bool>>();
@@ -222,8 +222,8 @@ namespace dlcv_infer_csharp
                     throw new Exception("Inference failed: " + resultObject["message"]);
                 }
 
-                DllLoader.Instance.dlcv_free_model_result(resultPtr);
-                return resultObject;
+                // 不在这里释放结果，而是返回结果对象和指针
+                return new Tuple<JObject, IntPtr>(resultObject, resultPtr);
             }
             finally
             {
@@ -284,20 +284,44 @@ namespace dlcv_infer_csharp
         public Utils.CSharpResult Infer(Mat image, JObject params_json = null)
         {
             // 将单张图像放入列表中处理
-            var result = InferInternal(new List<Mat> { image }, params_json);
-            return ParseToStructResult(result);
+            var resultTuple = InferInternal(new List<Mat> { image }, params_json);
+            try
+            {
+                return ParseToStructResult(resultTuple.Item1);
+            }
+            finally
+            {
+                // 处理完后释放结果
+                DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+            }
         }
 
         public Utils.CSharpResult InferBatch(List<Mat> image_list, JObject params_json = null)
         {
-            var result = InferInternal(image_list, params_json);
-            return ParseToStructResult(result);
+            var resultTuple = InferInternal(image_list, params_json);
+            try
+            {
+                return ParseToStructResult(resultTuple.Item1);
+            }
+            finally
+            {
+                // 处理完后释放结果
+                DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+            }
         }
 
         public dynamic InferOneOutJson(Mat image, JObject params_json = null)
         {
-            var result = InferInternal(new List<Mat> { image }, params_json);
-            return result["sample_results"][0]["results"];
+            var resultTuple = InferInternal(new List<Mat> { image }, params_json);
+            try
+            {
+                return resultTuple.Item1["sample_results"][0]["results"];
+            }
+            finally
+            {
+                // 处理完后释放结果
+                DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+            }
         }
     }
 
