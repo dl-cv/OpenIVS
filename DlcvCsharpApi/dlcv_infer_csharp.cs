@@ -156,115 +156,16 @@ namespace dlcv_infer_csharp
             return resultObject;
         }
 
-        public Utils.CSharpResult Infer(Mat image, JObject params_json = null)
-        {
-            // 检查图像是否连续，如果不连续则创建连续副本
-            Mat processImage = image;
-            bool needDispose = false;
-            if (!image.IsContinuous())
-            {
-                processImage = image.Clone();
-                needDispose = true;
-            }
-
-            try
-            {
-                int width = processImage.Width;
-                int height = processImage.Height;
-                int channels = processImage.Channels();
-
-                var imageInfo = new JObject
-                {
-                    ["width"] = width,
-                    ["height"] = height,
-                    ["channels"] = channels,
-                    ["image_ptr"] = (ulong)processImage.Data.ToInt64()
-                };
-
-                var inferRequest = new JObject
-                {
-                    ["model_index"] = modelIndex,
-                    ["image_list"] = new JArray { imageInfo }
-                };
-
-                // 如果提供了参数JSON，合并到inferRequest
-                if (params_json != null)
-                {
-                    foreach (var param in params_json)
-                    {
-                        inferRequest[param.Key] = param.Value;
-                    }
-                }
-
-                string jsonStr = inferRequest.ToString();
-                IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
-                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-                JObject resultObject = JObject.Parse(resultJson);
-
-                // 解析 json 结果
-                var sampleResults = new List<Utils.CSharpSampleResult>();
-
-                var sampleResultsArray = resultObject["sample_results"] as JArray;
-
-                foreach (var sampleResult in sampleResultsArray)
-                {
-                    var results = new List<Utils.CSharpObjectResult>();
-                    var resultsArray = sampleResult["results"] as JArray;
-
-                    foreach (var result in resultsArray)
-                    {
-                        var categoryId = (int)result["category_id"];
-                        var categoryName = (string)result["category_name"];
-                        var score = (float)(double)result["score"];
-                        var area = (float)(double)result["area"];
-                        var bbox = result["bbox"].ToObject<List<double>>();
-                        var withMask = (bool)result["with_mask"];
-
-                        var mask = result["mask"];
-                        int mask_width = (int)mask["width"];
-                        int mask_height = (int)mask["height"];
-                        Mat mask_img = new Mat();
-                        if (withMask)
-                        {
-                            IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
-                            mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                            //mask_img = new Mat(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                            mask_img = mask_img.Clone();
-                        }
-
-                        var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img);
-                        results.Add(objectResult);
-                    }
-
-                    var sampleResultObj = new Utils.CSharpSampleResult(results);
-                    sampleResults.Add(sampleResultObj);
-                }
-
-                //Console.WriteLine("Inference result: " + resultObject.ToString());
-                DllLoader.Instance.dlcv_free_model_result(resultPtr);
-
-                Utils.CSharpResult cSharpResult = new Utils.CSharpResult(sampleResults);
-
-                return cSharpResult;
-            }
-            finally
-            {
-                // 如果创建了临时图像，释放资源
-                if (needDispose)
-                {
-                    processImage.Dispose();
-                }
-            }
-        }
-
-        public Utils.CSharpResult InferBatch(List<Mat> image_list, JObject params_json = null)
+        // 内部通用推理方法，处理单张或多张图像
+        private JObject InferInternal(List<Mat> images, JObject params_json)
         {
             var imageInfoList = new JArray();
             var processImages = new List<Tuple<Mat, bool>>();
 
             try
             {
-                foreach (var image in image_list)
+                // 处理所有图像
+                foreach (var image in images)
                 {
                     // 检查图像是否连续，如果不连续则创建连续副本
                     Mat processImage = image;
@@ -292,6 +193,7 @@ namespace dlcv_infer_csharp
                     imageInfoList.Add(imageInfo);
                 }
 
+                // 创建推理请求
                 var inferRequest = new JObject
                 {
                     ["model_index"] = modelIndex,
@@ -307,60 +209,21 @@ namespace dlcv_infer_csharp
                     }
                 }
 
+                // 执行推理
                 string jsonStr = inferRequest.ToString();
                 IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
                 var resultJson = Marshal.PtrToStringAnsi(resultPtr);
                 JObject resultObject = JObject.Parse(resultJson);
 
+                // 检查是否返回错误
                 if (resultObject["code"] != null && resultObject["code"].Value<int>() != 0)
                 {
+                    DllLoader.Instance.dlcv_free_model_result(resultPtr);
                     throw new Exception("Inference failed: " + resultObject["message"]);
                 }
 
-                // 解析 json 结果
-                var sampleResults = new List<Utils.CSharpSampleResult>();
-
-                var sampleResultsArray = resultObject["sample_results"] as JArray;
-
-                foreach (var sampleResult in sampleResultsArray)
-                {
-                    var results = new List<Utils.CSharpObjectResult>();
-                    var resultsArray = sampleResult["results"] as JArray;
-
-                    foreach (var result in resultsArray)
-                    {
-                        var categoryId = (int)result["category_id"];
-                        var categoryName = (string)result["category_name"];
-                        var score = (float)(double)result["score"];
-                        var area = (float)(double)result["area"];
-                        var bbox = result["bbox"].ToObject<List<double>>();
-                        var withMask = (bool)result["with_mask"];
-
-                        var mask = result["mask"];
-                        int mask_width = (int)mask["width"];
-                        int mask_height = (int)mask["height"];
-                        Mat mask_img = new Mat();
-                        if (withMask)
-                        {
-                            IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
-
-                            mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                            mask_img = mask_img.Clone();
-                        }
-
-                        var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img);
-                        results.Add(objectResult);
-                    }
-
-                    var sampleResultObj = new Utils.CSharpSampleResult(results);
-                    sampleResults.Add(sampleResultObj);
-                }
-
                 DllLoader.Instance.dlcv_free_model_result(resultPtr);
-
-                Utils.CSharpResult cSharpResult = new Utils.CSharpResult(sampleResults);
-
-                return cSharpResult;
+                return resultObject;
             }
             finally
             {
@@ -375,61 +238,66 @@ namespace dlcv_infer_csharp
             }
         }
 
+        // 处理推理结果到CSharpResult对象
+        private Utils.CSharpResult ParseToStructResult(JObject resultObject)
+        {
+            // 解析 json 结果
+            var sampleResults = new List<Utils.CSharpSampleResult>();
+            var sampleResultsArray = resultObject["sample_results"] as JArray;
+
+            foreach (var sampleResult in sampleResultsArray)
+            {
+                var results = new List<Utils.CSharpObjectResult>();
+                var resultsArray = sampleResult["results"] as JArray;
+
+                foreach (var result in resultsArray)
+                {
+                    var categoryId = (int)result["category_id"];
+                    var categoryName = (string)result["category_name"];
+                    var score = (float)(double)result["score"];
+                    var area = (float)(double)result["area"];
+                    var bbox = result["bbox"].ToObject<List<double>>();
+                    var withMask = (bool)result["with_mask"];
+
+                    var mask = result["mask"];
+                    int mask_width = (int)mask["width"];
+                    int mask_height = (int)mask["height"];
+                    Mat mask_img = new Mat();
+                    if (withMask)
+                    {
+                        IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
+                        mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
+                        mask_img = mask_img.Clone();
+                    }
+
+                    var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img);
+                    results.Add(objectResult);
+                }
+
+                var sampleResultObj = new Utils.CSharpSampleResult(results);
+                sampleResults.Add(sampleResultObj);
+            }
+
+            return new Utils.CSharpResult(sampleResults);
+        }
+
+        public Utils.CSharpResult Infer(Mat image, JObject params_json = null)
+        {
+            // 将单张图像放入列表中处理
+            var result = InferInternal(new List<Mat> { image }, params_json);
+            return ParseToStructResult(result);
+        }
+
+        public Utils.CSharpResult InferBatch(List<Mat> image_list, JObject params_json = null)
+        {
+            var result = InferInternal(image_list, params_json);
+            return ParseToStructResult(result);
+        }
+
         public dynamic InferOneOutJson(Mat image, JObject params_json = null)
         {
-            // 检查图像是否连续，如果不连续则创建连续副本
-            Mat processImage = image;
-            bool needDispose = false;
-            if (!image.IsContinuous())
-            {
-                processImage = image.Clone();
-                needDispose = true;
-            }
-
-            try
-            {
-                int width = processImage.Width;
-                int height = processImage.Height;
-                int channels = processImage.Channels();
-
-                var imageInfo = new JObject
-                {
-                    ["width"] = width,
-                    ["height"] = height,
-                    ["channels"] = channels,
-                    ["image_ptr"] = (ulong)processImage.Data.ToInt64()
-                };
-
-                var inferRequest = new JObject
-                {
-                    ["model_index"] = modelIndex,
-                    ["image_list"] = new JArray { imageInfo }
-                };
-
-                // 如果提供了参数JSON，合并到inferRequest
-                if (params_json != null)
-                {
-                    foreach (var param in params_json)
-                    {
-                        inferRequest[param.Key] = param.Value;
-                    }
-                }
-
-                string jsonStr = inferRequest.ToString();
-                IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
-                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-                dynamic resultObject = JObject.Parse(resultJson);
-                DllLoader.Instance.dlcv_free_model_result(resultPtr);
-                return resultObject["sample_results"][0]["results"];
-            }
-            finally
-            {
-                // 如果创建了临时图像，释放资源
-                if (needDispose)
-                {
-                    processImage.Dispose();
-                }
-            }
+            var result = InferInternal(new List<Mat> { image }, params_json);
+            return result["sample_results"][0]["results"];
         }
     }
 
