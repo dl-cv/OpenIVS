@@ -172,6 +172,10 @@ namespace demo
                 return;
             }
 
+            JObject data = new JObject();
+            data["threshold"] = float.Parse(textBox_threshold.Text);
+            data["with_mask"] = true;
+
             CSharpResult result = model.InferBatch(image_list);
 
             imagePanel1.UpdateImageAndResult(image, result);
