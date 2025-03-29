@@ -156,7 +156,7 @@ namespace dlcv_infer_csharp
             return resultObject;
         }
 
-        public Utils.CSharpResult Infer(Mat image, bool with_mask = false)
+        public Utils.CSharpResult Infer(Mat image, JObject params_json = null)
         {
             // 检查图像是否连续，如果不连续则创建连续副本
             Mat processImage = image;
@@ -184,9 +184,17 @@ namespace dlcv_infer_csharp
                 var inferRequest = new JObject
                 {
                     ["model_index"] = modelIndex,
-                    ["with_mask"] = with_mask,
                     ["image_list"] = new JArray { imageInfo }
                 };
+
+                // 如果提供了参数JSON，合并到inferRequest
+                if (params_json != null)
+                {
+                    foreach (var param in params_json)
+                    {
+                        inferRequest[param.Key] = param.Value;
+                    }
+                }
 
                 string jsonStr = inferRequest.ToString();
                 IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
@@ -249,7 +257,7 @@ namespace dlcv_infer_csharp
             }
         }
 
-        public Utils.CSharpResult InferBatch(List<Mat> image_list)
+        public Utils.CSharpResult InferBatch(List<Mat> image_list, JObject params_json = null)
         {
             var imageInfoList = new JArray();
             var processImages = new List<Tuple<Mat, bool>>();
@@ -289,6 +297,15 @@ namespace dlcv_infer_csharp
                     ["model_index"] = modelIndex,
                     ["image_list"] = imageInfoList
                 };
+
+                // 如果提供了参数JSON，合并到inferRequest
+                if (params_json != null)
+                {
+                    foreach (var param in params_json)
+                    {
+                        inferRequest[param.Key] = param.Value;
+                    }
+                }
 
                 string jsonStr = inferRequest.ToString();
                 IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
@@ -358,7 +375,7 @@ namespace dlcv_infer_csharp
             }
         }
 
-        public dynamic InferOneOutJson(Mat image)
+        public dynamic InferOneOutJson(Mat image, JObject params_json = null)
         {
             // 检查图像是否连续，如果不连续则创建连续副本
             Mat processImage = image;
@@ -386,9 +403,17 @@ namespace dlcv_infer_csharp
                 var inferRequest = new JObject
                 {
                     ["model_index"] = modelIndex,
-                    ["with_mask"] = false,
                     ["image_list"] = new JArray { imageInfo }
                 };
+
+                // 如果提供了参数JSON，合并到inferRequest
+                if (params_json != null)
+                {
+                    foreach (var param in params_json)
+                    {
+                        inferRequest[param.Key] = param.Value;
+                    }
+                }
 
                 string jsonStr = inferRequest.ToString();
                 IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
