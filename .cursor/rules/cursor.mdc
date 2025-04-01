@@ -1,6 +1,11 @@
 ---
 description: 
 globs: 
+alwaysApply: false
+---
+---
+description: 
+globs: 
 alwaysApply: true
 ---
 我用的是 .Net Framework 4.7.2，所以不能用高级 .Net 版本。
