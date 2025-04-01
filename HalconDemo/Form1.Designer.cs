@@ -28,7 +28,6 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.components = new System.ComponentModel.Container();
             this.hWindowControl = new HalconDotNet.HWindowControl();
             this.btnSelectImage = new System.Windows.Forms.Button();
             this.btnSelectModel = new System.Windows.Forms.Button();
@@ -51,13 +50,16 @@
             this.hWindowControl.BorderColor = System.Drawing.Color.Black;
             this.hWindowControl.ImagePart = new System.Drawing.Rectangle(0, 0, 640, 480);
             this.hWindowControl.Location = new System.Drawing.Point(12, 12);
+            this.hWindowControl.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.hWindowControl.Name = "hWindowControl";
             this.hWindowControl.Size = new System.Drawing.Size(776, 323);
             this.hWindowControl.TabIndex = 0;
             this.hWindowControl.WindowSize = new System.Drawing.Size(776, 323);
+            this.hWindowControl.SizeChanged += new System.EventHandler(this.hWindowControl_SizeChanged);
             // 
             // btnSelectImage
             // 
+            this.btnSelectImage.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSelectImage.Location = new System.Drawing.Point(690, 14);
             this.btnSelectImage.Name = "btnSelectImage";
             this.btnSelectImage.Size = new System.Drawing.Size(75, 23);
@@ -68,6 +70,7 @@
             // 
             // btnSelectModel
             // 
+            this.btnSelectModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSelectModel.Location = new System.Drawing.Point(690, 43);
             this.btnSelectModel.Name = "btnSelectModel";
             this.btnSelectModel.Size = new System.Drawing.Size(75, 23);
@@ -78,6 +81,7 @@
             // 
             // btnInfer
             // 
+            this.btnInfer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnInfer.Location = new System.Drawing.Point(690, 72);
             this.btnInfer.Name = "btnInfer";
             this.btnInfer.Size = new System.Drawing.Size(75, 23);
@@ -106,6 +110,8 @@
             // 
             // txtImagePath
             // 
+            this.txtImagePath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.txtImagePath.Location = new System.Drawing.Point(83, 14);
             this.txtImagePath.Name = "txtImagePath";
             this.txtImagePath.Size = new System.Drawing.Size(601, 21);
@@ -113,6 +119,8 @@
             // 
             // txtModelPath
             // 
+            this.txtModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.txtModelPath.Location = new System.Drawing.Point(83, 45);
             this.txtModelPath.Name = "txtModelPath";
             this.txtModelPath.Size = new System.Drawing.Size(601, 21);
@@ -152,8 +160,11 @@
             this.ClientSize = new System.Drawing.Size(800, 450);
             this.Controls.Add(this.panel1);
             this.Controls.Add(this.hWindowControl);
+            this.MinimumSize = new System.Drawing.Size(640, 480);
             this.Name = "Form1";
+            this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Halcon推理演示";
+            this.Resize += new System.EventHandler(this.Form1_Resize);
             this.panel1.ResumeLayout(false);
             this.panel1.PerformLayout();
             this.ResumeLayout(false);
