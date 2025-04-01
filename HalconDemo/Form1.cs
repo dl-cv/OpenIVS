@@ -22,6 +22,19 @@ namespace HalconDemo
         private string currentModelPath = ""; // 当前模型路径
         private Model model = null; // DLCV模型对象
         private int deviceId = 0;  // 默认使用GPU 0
+        
+        // 保存原始图像尺寸
+        private int imageWidth = 0;
+        private int imageHeight = 0;
+        
+        // 保存图像显示的变换信息
+        private double scaleX = 1.0;  // X方向缩放比例
+        private double scaleY = 1.0;  // Y方向缩放比例
+        private double offsetX = 0.0;  // X方向偏移
+        private double offsetY = 0.0;  // Y方向偏移
+        
+        // 边界框容差值
+        private const double BOX_TOLERANCE = 1.0;  // 允许边界框尺寸有1像素的容差
 
         public Form1()
         {
@@ -65,48 +78,69 @@ namespace HalconDemo
                     HTuple width = new HTuple(), height = new HTuple();
                     HOperatorSet.GetImageSize(halconImage, out width, out height);
                     
-                    // 计算适合的显示区域
-                    double imageRatio = (double)width.I / height.I;
-                    double windowRatio = (double)hWindowControl.Width / hWindowControl.Height;
+                    // 保存原始图像尺寸以便后续处理
+                    imageWidth = width.I;
+                    imageHeight = height.I;
                     
                     // 清空显示窗口
                     hWindowControl.HalconWindow.ClearWindow();
                     
-                    // 设置显示窗口的大小
+                    // 确保窗口大小设置正确
                     hWindowControl.WindowSize = new System.Drawing.Size(hWindowControl.Width, hWindowControl.Height);
                     
-                    // 设置图像部分并显示
+                    // 计算缩放比例，使图像保持原始比例且完全显示在控件中
+                    double imageRatio = (double)width.I / height.I;
+                    double windowRatio = (double)hWindowControl.Width / hWindowControl.Height;
+                    
+                    int displayWidth, displayHeight;
+                    
                     if (imageRatio >= windowRatio)
                     {
-                        // 图像较宽，宽度撑满，高度自适应
-                        int displayWidth = hWindowControl.Width;
-                        int displayHeight = (int)(displayWidth / imageRatio);
-                        
-                        // 居中显示
-                        int offsetY = (hWindowControl.Height - displayHeight) / 2;
-                        
-                        hWindowControl.ImagePart = new Rectangle(0, 0, width.I, height.I);
-                        
-                        // 调整显示区域
-                        HOperatorSet.SetPart(hWindowControl.HalconWindow, 0, 0, hWindowControl.Height - 1, hWindowControl.Width - 1);
+                        // 图像较宽，以窗口宽度为基准
+                        displayWidth = hWindowControl.Width;
+                        displayHeight = (int)(displayWidth / imageRatio);
+                        offsetX = 0;
+                        offsetY = (hWindowControl.Height - displayHeight) / 2.0;
                     }
                     else
                     {
-                        // 图像较高，高度撑满，宽度自适应
-                        int displayHeight = hWindowControl.Height;
-                        int displayWidth = (int)(displayHeight * imageRatio);
-                        
-                        // 居中显示
-                        int offsetX = (hWindowControl.Width - displayWidth) / 2;
-                        
-                        hWindowControl.ImagePart = new Rectangle(0, 0, width.I, height.I);
-                        
-                        // 调整显示区域
-                        HOperatorSet.SetPart(hWindowControl.HalconWindow, 0, 0, hWindowControl.Height - 1, hWindowControl.Width - 1);
+                        // 图像较高，以窗口高度为基准
+                        displayHeight = hWindowControl.Height;
+                        displayWidth = (int)(displayHeight * imageRatio);
+                        offsetX = (hWindowControl.Width - displayWidth) / 2.0;
+                        offsetY = 0;
                     }
                     
-                    // 显示图像
-                    HOperatorSet.DispObj(halconImage, hWindowControl.HalconWindow);
+                    // 计算缩放比例
+                    scaleX = (double)displayWidth / width.I;
+                    scaleY = (double)displayHeight / height.I;
+                    
+                    // 清空窗口并设置背景色
+                    HOperatorSet.SetColor(hWindowControl.HalconWindow, "black");
+                    HOperatorSet.SetPaint(hWindowControl.HalconWindow, new HTuple("default"));
+                    hWindowControl.HalconWindow.ClearWindow();
+                    
+                    // 设置显示区域，令图像居中显示且保持比例
+                    HOperatorSet.SetPart(hWindowControl.HalconWindow, 
+                                        0, 0, 
+                                        hWindowControl.Height - 1, 
+                                        hWindowControl.Width - 1);
+                    
+                    // 创建同等大小的缩放变换矩阵
+                    HHomMat2D homMat2D = new HHomMat2D();
+                    homMat2D.HomMat2dIdentity();
+                    homMat2D.HomMat2dScale(scaleX, scaleY, 0, 0);
+                    homMat2D.HomMat2dTranslate(offsetX, offsetY);
+                    
+                    // 使用仿射变换将图像显示在窗口中
+                    HOperatorSet.SetSystem("clip_region", "false");
+                    HOperatorSet.AffineTransImage(halconImage, out HObject transformedImage, homMat2D, "constant", "false");
+                    
+                    // 显示变换后的图像
+                    HOperatorSet.DispObj(transformedImage, hWindowControl.HalconWindow);
+                    
+                    // 清理资源
+                    transformedImage.Dispose();
                 }
                 catch (Exception ex)
                 {
@@ -120,7 +154,7 @@ namespace HalconDemo
         {
             using (OpenFileDialog openFileDialog = new OpenFileDialog())
             {
-                openFileDialog.Filter = "图像文件|*.png;*.bmp;*.tif;*.tiff|所有文件|*.*";
+                openFileDialog.Filter = "图像文件|*.png;*.bmp;*.tif;*.tiff;*.jpg;*.jpeg|所有文件|*.*";
                 openFileDialog.Title = "选择图像文件";
 
                 if (openFileDialog.ShowDialog() == DialogResult.OK)
@@ -278,6 +312,12 @@ namespace HalconDemo
                     }
                 }
                 
+                // 记录图像尺寸
+                HTuple width = new HTuple(), height = new HTuple();
+                HOperatorSet.GetImageSize(halconImage, out width, out height);
+                imageWidth = width.I;
+                imageHeight = height.I;
+                
                 // 刷新显示图像
                 RefreshDisplayImage();
             }
@@ -426,7 +466,8 @@ namespace HalconDemo
                 RefreshDisplayImage();
                 
                 // 如果没有结果，直接返回
-                if (result.SampleResults == null || result.SampleResults.Count == 0 || result.SampleResults[0].Results == null || result.SampleResults[0].Results.Count == 0)
+                if (result.SampleResults == null || result.SampleResults.Count == 0 || 
+                    result.SampleResults[0].Results == null || result.SampleResults[0].Results.Count == 0)
                 {
                     lblResult.Text = "推理结果：未检测到任何目标";
                     return;
@@ -457,35 +498,80 @@ namespace HalconDemo
                     // 如果有边界框，绘制边界框
                     if (obj.Bbox != null && obj.Bbox.Count >= 4)
                     {
-                        // 边界框坐标 [x_min, y_min, x_max, y_max]
-                        double x1 = obj.Bbox[0];
-                        double y1 = obj.Bbox[1];
-                        double x2 = obj.Bbox[2];
-                        double y2 = obj.Bbox[3];
-                        
-                        // 创建矩形ROI
-                        HObject rectangle;
-                        HOperatorSet.GenRectangle1(out rectangle, y1, x1, y2, x2);
-                        
-                        // 设置线宽
-                        HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 2);
-                        
-                        // 绘制矩形
-                        HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
-                        
-                        // 释放资源
-                        rectangle.Dispose();
-                        
-                        // 显示类别和置信度
-                        string text = $"{obj.CategoryName}: {obj.Score:F2}";
-                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "image", y1 - 12, x1, color, new HTuple(), new HTuple());
+                        try {
+                            // 边界框坐标 [x, y, width, height]
+                            double x = obj.Bbox[0];
+                            double y = obj.Bbox[1];
+                            double width = obj.Bbox[2];
+                            double height = obj.Bbox[3];
+                            
+                            // 验证坐标值的有效性
+                            if (double.IsNaN(x) || double.IsNaN(y) || double.IsNaN(width) || double.IsNaN(height))
+                            {
+                                Console.WriteLine("检测到无效的边界框坐标 (NaN)");
+                                continue;
+                            }
+                            
+                            // 验证宽度和高度
+                            if (width <= BOX_TOLERANCE || height <= BOX_TOLERANCE)
+                            {
+                                // 尝试修复太小的边界框
+                                if (width <= BOX_TOLERANCE)
+                                    width = BOX_TOLERANCE;
+                                if (height <= BOX_TOLERANCE)
+                                    height = BOX_TOLERANCE;
+                                
+                                Console.WriteLine($"修复了过小的边界框: ({x},{y},{width},{height})");
+                            }
+                            
+                            // 计算边界框的左上和右下坐标
+                            double x1 = x;
+                            double y1 = y;
+                            double x2 = x + width;
+                            double y2 = y + height;
+                            
+                            // 确保坐标在图像范围内
+                            x1 = Math.Max(0, Math.Min(x1, imageWidth-1));
+                            y1 = Math.Max(0, Math.Min(y1, imageHeight-1));
+                            x2 = Math.Max(0, Math.Min(x2, imageWidth-1));
+                            y2 = Math.Max(0, Math.Min(y2, imageHeight-1));
+                            
+                            // 应用显示区域变换
+                            double displayX1 = x1 * scaleX + offsetX;
+                            double displayY1 = y1 * scaleY + offsetY;
+                            double displayX2 = x2 * scaleX + offsetX;
+                            double displayY2 = y2 * scaleY + offsetY;
+                            
+                            // 创建矩形ROI
+                            HObject rectangle;
+                            
+                            // 注意：Halcon的GenRectangle1参数顺序为 Row1, Column1, Row2, Column2
+                            // 参数含义是：(行1, 列1, 行2, 列2)，即(y1, x1, y2, x2)
+                            HOperatorSet.GenRectangle1(out rectangle, displayY1, displayX1, displayY2, displayX2);
+                            
+                            // 设置线宽
+                            HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 2);
+                            
+                            // 绘制矩形
+                            HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
+                            
+                            // 释放资源
+                            rectangle.Dispose();
+                            
+                            // 显示类别和置信度
+                            string text = $"{obj.CategoryName}: {obj.Score:F2}";
+                            double textY = Math.Max(0, displayY1 - 15); // 确保文本位置不越界
+                            HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", textY, displayX1, color, new HTuple(), new HTuple());
+                        } 
+                        catch (Exception ex) 
+                        {
+                            Console.WriteLine($"绘制边界框时出错: {ex.Message}");
+                        }
                     }
                     else
                     {
                         // 如果没有边界框，只在图像上方显示类别和分数
                         string text = $"{obj.CategoryName}: {obj.Score:F2}";
-                        HTuple width = new HTuple(), height = new HTuple();
-                        HOperatorSet.GetImageSize(halconImage, out width, out height);
                         int yPos = 20 + i * 30; // 每行文本的垂直位置
                         HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", yPos, 10, color, new HTuple(), new HTuple());
                     }
@@ -497,8 +583,6 @@ namespace HalconDemo
                         {
                             // 将OpenCV掩码转换为Halcon区域
                             HObject maskRegion;
-                            HTuple width = new HTuple(), height = new HTuple();
-                            HOperatorSet.GetImageSize(halconImage, out width, out height);
                             
                             // 创建临时文件保存掩码
                             string tempMaskFile = Path.GetTempFileName() + ".png";
@@ -511,17 +595,28 @@ namespace HalconDemo
                             // 转换为区域
                             HOperatorSet.Threshold(maskImage, out maskRegion, 1, 255);
                             
+                            // 创建仿射变换，将掩码缩放到显示尺寸
+                            HHomMat2D homMat2D = new HHomMat2D();
+                            homMat2D.HomMat2dIdentity();
+                            homMat2D.HomMat2dScale(scaleX, scaleY, 0, 0);
+                            homMat2D.HomMat2dTranslate(offsetX, offsetY);
+                            
+                            // 应用变换到区域
+                            HObject transformedRegion;
+                            HOperatorSet.AffineTransRegion(maskRegion, out transformedRegion, homMat2D, "nearest_neighbor");
+                            
                             // 设置显示属性
                             HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
                             HOperatorSet.SetDraw(hWindowControl.HalconWindow, "margin");
                             HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 1);
                             
-                            // 显示区域轮廓
-                            HOperatorSet.DispObj(maskRegion, hWindowControl.HalconWindow);
+                            // 显示变换后的区域轮廓
+                            HOperatorSet.DispObj(transformedRegion, hWindowControl.HalconWindow);
                             
                             // 释放资源
                             maskRegion.Dispose();
                             maskImage.Dispose();
+                            transformedRegion.Dispose();
                             
                             // 删除临时文件
                             try { File.Delete(tempMaskFile); } catch { }
