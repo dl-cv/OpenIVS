@@ -85,15 +85,11 @@ namespace HalconDemo
                     // 清空显示窗口
                     hWindowControl.HalconWindow.ClearWindow();
                     
-                    // 确保窗口大小设置正确
-                    hWindowControl.WindowSize = new System.Drawing.Size(hWindowControl.Width, hWindowControl.Height);
+                    // 重要：设置窗口显示区域为图像的实际尺寸，而不是窗口尺寸
+                    // 这样图像会按原始比例显示，控件会自动处理缩放
+                    HOperatorSet.SetPart(hWindowControl.HalconWindow, 0, 0, height.I - 1, width.I - 1);
                     
-                    // 重置显示区域，使用控件默认显示能力
-                    hWindowControl.HalconWindow.SetPart(0, 0, 
-                                                      hWindowControl.Height - 1, 
-                                                      hWindowControl.Width - 1);
-                    
-                    // 显示图像，让HWindowControl自动处理缩放
+                    // 显示图像
                     HOperatorSet.DispObj(halconImage, hWindowControl.HalconWindow);
                 }
                 catch (Exception ex)
@@ -507,42 +503,46 @@ namespace HalconDemo
                                     HObject maskImage;
                                     HOperatorSet.ReadImage(out maskImage, tempMaskFile);
                                     
-                                    // 从maskImage直接获取区域，不先转换为区域
+                                    // 将掩码转换为区域
                                     HObject maskRegion;
                                     HOperatorSet.Threshold(maskImage, out maskRegion, 1, 255);
                                     
-                                    // 获取掩码尺寸
-                                    HTuple maskWidth = new HTuple(), maskHeight = new HTuple();
-                                    HOperatorSet.GetImageSize(maskImage, out maskWidth, out maskHeight);
+                                    // 修改方法：使用区域操作直接创建与边界框对应的区域
                                     
-                                    // 创建掩码变换所需的仿射变换矩阵
-                                    HHomMat2D homMat2D = new HHomMat2D();
-                                    homMat2D.HomMat2dIdentity();
+                                    // 1. 获取掩码的连通区域
+                                    HObject connectedRegions;
+                                    HOperatorSet.Connection(maskRegion, out connectedRegions);
                                     
-                                    // 计算缩放因子 - 将掩码缩放到边界框大小
-                                    double scaleFactorX = width / maskWidth.I;
-                                    double scaleFactorY = height / maskHeight.I;
-                                    homMat2D.HomMat2dScale(scaleFactorX, scaleFactorY, 0, 0);
+                                    // 2. 创建边界框区域
+                                    HObject targetRect;
+                                    HOperatorSet.GenRectangle1(out targetRect, y, x, y + height, x + width);
                                     
-                                    // 将掩码平移到边界框位置
-                                    homMat2D.HomMat2dTranslate(x, y);
+                                    // 3. 裁剪区域，确保不超出图像范围
+                                    HObject clippedRect;
+                                    HOperatorSet.ClipRegion(targetRect, out clippedRect, 0, 0, imageHeight-1, imageWidth-1);
                                     
-                                    // 应用变换
-                                    HObject transformedRegion;
-                                    HOperatorSet.AffineTransImage(maskImage, out HObject transformedImage, homMat2D, "constant", "false");
-                                    HOperatorSet.Threshold(transformedImage, out transformedRegion, 1, 255);
+                                    // 4. 如果区域包含多个部分，将它们合并显示在边界框内
+                                    HObject finalMask;
+                                    
+                                    // 与边界框区域相交，将掩码限制在边界框内
+                                    HOperatorSet.Intersection(connectedRegions, clippedRect, out finalMask);
                                     
                                     // 设置显示属性
                                     HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
-                                    HOperatorSet.SetDraw(hWindowControl.HalconWindow, "fill");
-                                    HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 1);
+                                    // 使用轮廓模式代替填充模式
+                                    HOperatorSet.SetDraw(hWindowControl.HalconWindow, "margin");
                                     
-                                    // 显示变换后的区域
-                                    HOperatorSet.DispObj(transformedRegion, hWindowControl.HalconWindow);
+                                    // 显示区域
+                                    HOperatorSet.DispObj(finalMask, hWindowControl.HalconWindow);
+                                    
+                                    // 重置合成操作
+                                    // HOperatorSet.SetComposeOp(hWindowControl.HalconWindow, "copy", 1.0);
                                     
                                     // 释放资源
-                                    transformedImage.Dispose();
-                                    transformedRegion.Dispose();
+                                    connectedRegions.Dispose();
+                                    targetRect.Dispose();
+                                    clippedRect.Dispose();
+                                    finalMask.Dispose();
                                     maskRegion.Dispose();
                                     maskImage.Dispose();
                                     
