@@ -11,6 +11,7 @@ using OpenCvSharp;
 
 namespace HalconDLL
 {
+    [ComVisible(true)]
     public class HalconInference
     {
         // 模型对象
@@ -19,6 +20,17 @@ namespace HalconDLL
         private string modelPath = string.Empty;
         // GPU设备ID
         private int deviceId = 0;
+        // 最后的错误信息
+        private string lastErrorMessage = string.Empty;
+
+        /// <summary>
+        /// 获取最后的错误信息
+        /// </summary>
+        /// <returns>错误信息</returns>
+        public string GetLastError()
+        {
+            return lastErrorMessage;
+        }
 
         /// <summary>
         /// 加载深度学习模型
@@ -37,7 +49,8 @@ namespace HalconDLL
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"加载模型失败: {ex.Message}");
+                lastErrorMessage = $"加载模型失败: {ex.Message}";
+                Console.WriteLine(lastErrorMessage);
                 return false;
             }
         }
@@ -50,7 +63,8 @@ namespace HalconDLL
         {
             if (model == null)
             {
-                return "模型未加载";
+                lastErrorMessage = "模型未加载";
+                return lastErrorMessage;
             }
 
             try
@@ -60,7 +74,8 @@ namespace HalconDLL
             }
             catch (Exception ex)
             {
-                return $"获取模型信息失败: {ex.Message}";
+                lastErrorMessage = $"获取模型信息失败: {ex.Message}";
+                return lastErrorMessage;
             }
         }
 
@@ -73,7 +88,8 @@ namespace HalconDLL
         {
             if (model == null)
             {
-                return new InferenceResult { Success = false, ErrorMessage = "模型未加载" };
+                lastErrorMessage = "模型未加载";
+                return new InferenceResult { Success = false, ErrorMessage = lastErrorMessage };
             }
 
             try
@@ -92,8 +108,47 @@ namespace HalconDLL
             }
             catch (Exception ex)
             {
-                return new InferenceResult { Success = false, ErrorMessage = ex.Message };
+                lastErrorMessage = $"推理失败: {ex.Message}";
+                return new InferenceResult { Success = false, ErrorMessage = lastErrorMessage };
             }
+        }
+
+        /// <summary>
+        /// 获取检测到的对象数量
+        /// </summary>
+        /// <param name="result">推理结果</param>
+        /// <returns>对象数量</returns>
+        public int GetDetectedObjectCount(InferenceResult result)
+        {
+            if (result == null || !result.Success)
+            {
+                return 0;
+            }
+            return result.Objects.Count;
+        }
+
+        /// <summary>
+        /// 获取检测对象的信息文本
+        /// </summary>
+        /// <param name="result">推理结果</param>
+        /// <returns>信息文本</returns>
+        public string GetResultInfoText(InferenceResult result)
+        {
+            if (result == null || !result.Success || result.Objects.Count == 0)
+            {
+                return "没有检测到目标";
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"检测到 {result.Objects.Count} 个目标:");
+            
+            foreach (var obj in result.Objects)
+            {
+                sb.AppendLine($"- 类别: {obj.CategoryName}, 置信度: {obj.Score:F2}");
+                sb.AppendLine($"  区域: {obj.Area:F0}, 位置: [{string.Join(", ", obj.Bbox.Select(v => v.ToString("F0")))}]");
+            }
+
+            return sb.ToString();
         }
 
         /// <summary>
@@ -101,8 +156,16 @@ namespace HalconDLL
         /// </summary>
         public void FreeModel()
         {
-            Utils.FreeAllModels();
-            model = null;
+            try 
+            {
+                Utils.FreeAllModels();
+                model = null;
+            }
+            catch (Exception ex)
+            {
+                lastErrorMessage = $"释放模型失败: {ex.Message}";
+                Console.WriteLine(lastErrorMessage);
+            }
         }
 
         /// <summary>
