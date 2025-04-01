@@ -434,8 +434,8 @@ namespace HalconDemo
                     "deep pink", "medium sea green", "slate blue"
                 };
 
-                // 设置文本显示参数
-                HOperatorSet.SetFont(hWindowControl.HalconWindow, "Arial-Bold-12");
+                // 设置文本显示参数 - 使用更大的字体
+                HOperatorSet.SetFont(hWindowControl.HalconWindow, "Arial-Bold-16");
                 
                 // 处理每个检测结果
                 for (int i = 0; i < sampleResult.Results.Count; i++)
@@ -446,7 +446,7 @@ namespace HalconDemo
                     // 设置当前的绘图颜色
                     HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
                     
-                    // 如果有边界框，绘制边界框
+                    // 如果有边界框，处理边界框和掩码
                     if (obj.Bbox != null && obj.Bbox.Count >= 4)
                     {
                         try {
@@ -483,14 +483,10 @@ namespace HalconDemo
                             HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 2);
                             HOperatorSet.SetDraw(hWindowControl.HalconWindow, "margin");
                             
-                            // 显示矩形
-                            HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
-                            
-                            // 显示类别和置信度
+                            // 准备类别和置信度文本
                             string text = $"{obj.CategoryName}: {obj.Score:F2}";
-                            HOperatorSet.DispText(hWindowControl.HalconWindow, text, "image", Math.Max(0, y - 10), x, color, new HTuple(), new HTuple());
                             
-                            // 如果有掩码，显示掩码，将掩码放置在边界框的位置
+                            // 先处理掩码，再绘制边界框和文字
                             if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
                             {
                                 try
@@ -546,6 +542,18 @@ namespace HalconDemo
                                     else
                                     {
                                         Console.WriteLine("无效的ROI区域，跳过掩码显示");
+                                        fullSizeMask.Dispose();
+                                        resizedMask.Dispose();
+                                        
+                                        // 如果没有掩码，直接显示边界框和文字
+                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
+                                        HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
+                                        
+                                        // 显示类别和置信度 - 使用白色
+                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
+                                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 5), x, color, new HTuple(), new HTuple());
+                                        
+                                        rectangle.Dispose();
                                         continue;
                                     }
                                     
@@ -619,13 +627,15 @@ namespace HalconDemo
                                         // 显示掩码
                                         HOperatorSet.DispObj(maskRegion, hWindowControl.HalconWindow);
                                         
-                                        // 显示完后还原颜色设置
+                                        // 然后再显示边界框
                                         HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
                                         HOperatorSet.SetDraw(hWindowControl.HalconWindow, "margin");
                                         HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 2);
+                                        HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
                                         
-                                        // 重新绘制边界框，确保边框显示在掩码上面
-                                        HOperatorSet.DispRectangle1(hWindowControl.HalconWindow, y, x, y + height, x + width);
+                                        // 最后显示文本 - 使用白色
+                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
+                                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
                                         
                                         // 释放资源
                                         coloredMask.Dispose();
@@ -638,7 +648,15 @@ namespace HalconDemo
                                     }
                                     else
                                     {
-                                        Console.WriteLine("区域为空，无法显示掩码");
+                                        Console.WriteLine("区域为空，只显示边界框和文字");
+                                        
+                                        // 显示边界框
+                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
+                                        HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
+                                        
+                                        // 显示类别和置信度 - 使用白色
+                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
+                                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
                                     }
                                     
                                     // 释放资源
@@ -650,7 +668,25 @@ namespace HalconDemo
                                 catch (Exception ex)
                                 {
                                     Console.WriteLine($"显示掩码时出错: {ex.Message}\n{ex.StackTrace}");
+                                    
+                                    // 出错时仍显示边界框和文字
+                                    HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
+                                    HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
+                                    
+                                    // 显示类别和置信度 - 使用白色
+                                    HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
+                                    HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
                                 }
+                            }
+                            else
+                            {
+                                // 没有掩码时，直接显示边界框和文字
+                                HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
+                                HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
+                                
+                                // 显示类别和置信度 - 使用白色
+                                HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
+                                HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
                             }
                             
                             // 释放矩形资源
@@ -663,10 +699,11 @@ namespace HalconDemo
                     }
                     else
                     {
-                        // 如果没有边界框，只在图像上方显示类别和分数
+                        // 如果没有边界框，只在图像上方显示类别和分数 - 使用白色
                         string text = $"{obj.CategoryName}: {obj.Score:F2}";
                         int yPos = 20 + i * 30; // 每行文本的垂直位置
-                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "image", yPos, 10, color, new HTuple(), new HTuple());
+                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
+                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "image", yPos, 10, "white", new HTuple(), new HTuple());
                     }
                 }
             }
