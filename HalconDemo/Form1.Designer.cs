@@ -56,6 +56,7 @@
             this.hWindowControl.TabIndex = 0;
             this.hWindowControl.WindowSize = new System.Drawing.Size(776, 323);
             this.hWindowControl.SizeChanged += new System.EventHandler(this.hWindowControl_SizeChanged);
+            this.hWindowControl.MouseWheel += new System.Windows.Forms.MouseEventHandler(this.hWindowControl_MouseWheel);
             // 
             // btnSelectImage
             // 

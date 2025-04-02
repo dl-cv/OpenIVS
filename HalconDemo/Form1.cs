@@ -12,6 +12,7 @@ using OpenCvSharp;
 using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using System.IO;
+using System.Runtime.InteropServices; // 添加此行用于DllImport
 
 namespace HalconDemo
 {
@@ -72,22 +73,70 @@ namespace HalconDemo
         {
             if (halconImage != null && halconImage.IsInitialized())
             {
-                // 获取图像尺寸
-                HTuple width = new HTuple(), height = new HTuple();
-                HOperatorSet.GetImageSize(halconImage, out width, out height);
-                
-                // 保存原始图像尺寸以便后续处理
-                imageWidth = width.I;
-                imageHeight = height.I;
-                
-                // 清空显示窗口
-                hWindowControl.HalconWindow.ClearWindow();
-                
-                // 设置窗口显示区域为图像的实际尺寸，控件会自动处理缩放
-                HOperatorSet.SetPart(hWindowControl.HalconWindow, 0, 0, height.I - 1, width.I - 1);
-                
-                // 显示图像
-                HOperatorSet.DispObj(halconImage, hWindowControl.HalconWindow);
+                try
+                {
+                    // 获取图像尺寸
+                    HTuple width = new HTuple(), height = new HTuple();
+                    HOperatorSet.GetImageSize(halconImage, out width, out height);
+                    
+                    // 保存原始图像尺寸以便后续处理
+                    imageWidth = width.I;
+                    imageHeight = height.I;
+                    
+                    // 关闭图形刷新，避免闪烁
+                    HOperatorSet.SetSystem("flush_graphic", "false");
+                    
+                    // 清空显示窗口
+                    hWindowControl.HalconWindow.ClearWindow();
+                    
+                    // 获取窗口尺寸
+                    HTuple winRow = new HTuple(), winCol = new HTuple(), winWidth = new HTuple(), winHeight = new HTuple();
+                    HOperatorSet.GetWindowExtents(hWindowControl.HalconWindow, out winRow, out winCol, out winWidth, out winHeight);
+                    
+                    // 计算保持长宽比的显示区域
+                    int partWidth, partHeight;
+                    if (winWidth.I < winHeight.I)
+                    {
+                        partWidth = imageWidth;
+                        partHeight = (int)((double)imageWidth * winHeight.I / winWidth.I);
+                        
+                        // 确保高度不超过图像实际高度的范围
+                        if (partHeight < imageHeight)
+                        {
+                            partHeight = imageHeight;
+                            partWidth = (int)((double)imageHeight * winWidth.I / winHeight.I);
+                        }
+                    }
+                    else
+                    {
+                        partHeight = imageHeight;
+                        partWidth = (int)((double)imageHeight * winWidth.I / winHeight.I);
+                        
+                        // 确保宽度不超过图像实际宽度的范围
+                        if (partWidth < imageWidth)
+                        {
+                            partWidth = imageWidth;
+                            partHeight = (int)((double)imageWidth * winHeight.I / winWidth.I);
+                        }
+                    }
+                    
+                    // 计算居中显示的起始位置
+                    int startRow = (partHeight - imageHeight) / 2;
+                    int startCol = (partWidth - imageWidth) / 2;
+                    
+                    // 设置窗口显示区域，保持图像的长宽比
+                    HOperatorSet.SetPart(hWindowControl.HalconWindow, -startRow, -startCol, partHeight - startRow - 1, partWidth - startCol - 1);
+                    
+                    // 显示图像
+                    HOperatorSet.DispObj(halconImage, hWindowControl.HalconWindow);
+                    
+                    // 重新开启图形刷新
+                    HOperatorSet.SetSystem("flush_graphic", "true");
+                }
+                catch (HalconDotNet.HOperatorException ex)
+                {
+                    MessageBox.Show($"显示图像时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 
@@ -395,6 +444,9 @@ namespace HalconDemo
         {
             try
             {
+                // 关闭图形刷新，避免闪烁
+                HOperatorSet.SetSystem("flush_graphic", "false");
+                
                 // 首先重新显示原始图像
                 RefreshDisplayImage();
                 
@@ -403,6 +455,8 @@ namespace HalconDemo
                     result.SampleResults[0].Results == null || result.SampleResults[0].Results.Count == 0)
                 {
                     lblResult.Text = "推理结果：未检测到任何目标";
+                    // 开启图形刷新
+                    HOperatorSet.SetSystem("flush_graphic", "true");
                     return;
                 }
 
@@ -604,15 +658,20 @@ namespace HalconDemo
                         HOperatorSet.DispText(hWindowControl.HalconWindow, text, "image", yPos, 10, "white", new HTuple(), new HTuple());
                     }
                 }
+                
+                // 开启图形刷新，一次性更新所有绘制内容
+                HOperatorSet.SetSystem("flush_graphic", "true");
             }
             catch (Exception ex)
             {
+                // 确保图形刷新被重新开启
+                HOperatorSet.SetSystem("flush_graphic", "true");
                 MessageBox.Show($"显示结果时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
         // CopyMemory方法，用于内存复制
-        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll")]
         public static extern void CopyMemory(IntPtr dest, IntPtr source, int size);
 
         // Mat转换为Halcon图像
@@ -666,6 +725,106 @@ namespace HalconDemo
             }
             
             return hImage;
+        }
+
+        // 添加一个新方法，用于保持长宽比例显示图像（参考博客文章实现）
+        private void DispImageWithRatio(HObject image, HWindow window)
+        {
+            try
+            {
+                // 获取图像尺寸
+                HTuple imgWidth = new HTuple(), imgHeight = new HTuple();
+                HOperatorSet.GetImageSize(image, out imgWidth, out imgHeight);
+                
+                // 获取窗口尺寸
+                HTuple winRow = new HTuple(), winCol = new HTuple(), winWidth = new HTuple(), winHeight = new HTuple();
+                HOperatorSet.GetWindowExtents(window, out winRow, out winCol, out winWidth, out winHeight);
+                
+                // 按照窗口与图像的比例关系，计算适合显示的区域大小
+                int partWidth, partHeight;
+                if (winWidth.I < winHeight.I)
+                {
+                    partWidth = imgWidth.I;
+                    partHeight = imgWidth.I * winHeight.I / winWidth.I;
+                }
+                else
+                {
+                    partWidth = imgHeight.I * winWidth.I / winHeight.I;
+                    partHeight = imgHeight.I;
+                }
+                
+                // 设置显示区域
+                HOperatorSet.SetPart(window, 0, 0, partHeight - 1, partWidth - 1);
+                
+                // 显示图像
+                HOperatorSet.DispObj(image, window);
+            }
+            catch (HalconDotNet.HOperatorException ex)
+            {
+                MessageBox.Show($"显示图像时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // 鼠标滚轮事件处理
+        private void hWindowControl_MouseWheel(object sender, MouseEventArgs e)
+        {
+            if (halconImage == null || !halconImage.IsInitialized())
+                return;
+        
+            try
+            {
+                // 获取当前显示区域
+                HTuple row1 = new HTuple(), col1 = new HTuple(), row2 = new HTuple(), col2 = new HTuple();
+                HOperatorSet.GetPart(hWindowControl.HalconWindow, out row1, out col1, out row2, out col2);
+            
+                // 计算当前显示的宽度和高度
+                double currentWidth = col2.D - col1.D + 1;
+                double currentHeight = row2.D - row1.D + 1;
+            
+                // 计算缩放因子（滚轮向上放大，向下缩小）
+                double zoomFactor = e.Delta > 0 ? 0.9 : 1.1; // 缩放比例
+            
+                // 计算鼠标位置对应的图像坐标
+                HTuple mouseRow = new HTuple(), mouseCol = new HTuple();
+                HOperatorSet.ConvertCoordinatesWindowToImage(
+                    hWindowControl.HalconWindow, 
+                    e.Y, e.X, 
+                    out mouseRow, out mouseCol);
+            
+                // 计算新的显示区域
+                double newWidth = currentWidth * zoomFactor;
+                double newHeight = currentHeight * zoomFactor;
+            
+                // 计算新的显示区域的起始位置，使鼠标位置保持在同一个图像点上
+                double rowDiff = mouseRow.D - row1.D;
+                double colDiff = mouseCol.D - col1.D;
+            
+                double newRow1 = mouseRow.D - rowDiff * zoomFactor;
+                double newCol1 = mouseCol.D - colDiff * zoomFactor;
+                double newRow2 = newRow1 + newHeight - 1;
+                double newCol2 = newCol1 + newWidth - 1;
+            
+                // 关闭图形刷新，避免闪烁
+                HOperatorSet.SetSystem("flush_graphic", "false");
+            
+                // 清空窗口
+                hWindowControl.HalconWindow.ClearWindow();
+            
+                // 设置新的显示区域
+                HOperatorSet.SetPart(hWindowControl.HalconWindow, newRow1, newCol1, newRow2, newCol2);
+            
+                // 显示图像
+                HOperatorSet.DispObj(halconImage, hWindowControl.HalconWindow);
+            
+                // 开启图形刷新
+                HOperatorSet.SetSystem("flush_graphic", "true");
+            }
+            catch (HalconDotNet.HOperatorException ex)
+            {
+                // 确保图形刷新被重新开启
+                HOperatorSet.SetSystem("flush_graphic", "true");
+                MessageBox.Show($"缩放图像时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 }
