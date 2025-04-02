@@ -72,31 +72,22 @@ namespace HalconDemo
         {
             if (halconImage != null && halconImage.IsInitialized())
             {
-                try
-                {
-                    // 获取图像尺寸
-                    HTuple width = new HTuple(), height = new HTuple();
-                    HOperatorSet.GetImageSize(halconImage, out width, out height);
-                    
-                    // 保存原始图像尺寸以便后续处理
-                    imageWidth = width.I;
-                    imageHeight = height.I;
-                    
-                    // 清空显示窗口
-                    hWindowControl.HalconWindow.ClearWindow();
-                    
-                    // 重要：设置窗口显示区域为图像的实际尺寸，而不是窗口尺寸
-                    // 这样图像会按原始比例显示，控件会自动处理缩放
-                    HOperatorSet.SetPart(hWindowControl.HalconWindow, 0, 0, height.I - 1, width.I - 1);
-                    
-                    // 显示图像
-                    HOperatorSet.DispObj(halconImage, hWindowControl.HalconWindow);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"刷新图像时出错: {ex.Message}");
-                    Console.WriteLine($"错误堆栈: {ex.StackTrace}");
-                }
+                // 获取图像尺寸
+                HTuple width = new HTuple(), height = new HTuple();
+                HOperatorSet.GetImageSize(halconImage, out width, out height);
+                
+                // 保存原始图像尺寸以便后续处理
+                imageWidth = width.I;
+                imageHeight = height.I;
+                
+                // 清空显示窗口
+                hWindowControl.HalconWindow.ClearWindow();
+                
+                // 设置窗口显示区域为图像的实际尺寸，控件会自动处理缩放
+                HOperatorSet.SetPart(hWindowControl.HalconWindow, 0, 0, height.I - 1, width.I - 1);
+                
+                // 显示图像
+                HOperatorSet.DispObj(halconImage, hWindowControl.HalconWindow);
             }
         }
 
@@ -229,11 +220,9 @@ namespace HalconDemo
                     // 读取Halcon图像
                     HOperatorSet.ReadImage(out halconImage, imagePath);
                 }
-                catch (HalconDotNet.HOperatorException ex)
+                catch (HalconDotNet.HOperatorException)
                 {
                     // Halcon无法读取图像时，尝试使用OpenCV读取然后转换
-                    MessageBox.Show($"Halcon无法直接读取该图像，尝试使用OpenCV读取：{ex.Message}", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    
                     try
                     {
                         // 使用OpenCV读取图像
@@ -241,13 +230,13 @@ namespace HalconDemo
                         {
                             if (opencvImage.Empty())
                             {
-                                throw new Exception("OpenCV无法读取图像");
+                                throw new Exception("无法读取图像");
                             }
                             
                             // 创建临时文件
                             string tempFile = Path.GetTempFileName() + ".png";
                             
-                            // 保存为PNG格式（Halcon可以读取）
+                            // 保存为PNG格式
                             Cv2.ImWrite(tempFile, opencvImage);
                             
                             // 读取临时文件
@@ -324,33 +313,26 @@ namespace HalconDemo
         // 使用Halcon图像进行推理
         private Utils.CSharpResult InferWithHalconImage(HObject halconImage)
         {
-            try
+            if (model == null)
             {
-                if (model == null)
-                {
-                    throw new Exception("模型未加载");
-                }
-                
-                // 将Halcon图像转换为OpenCV Mat
-                Mat halconAsMat = HalconImageToMat(halconImage);
-                
-                if (halconAsMat == null || halconAsMat.Empty())
-                {
-                    throw new Exception("图像转换失败");
-                }
-                
-                // 执行推理
-                Utils.CSharpResult result = model.Infer(halconAsMat);
-                
-                // 释放Mat资源
-                halconAsMat.Dispose();
-                
-                return result;
+                throw new Exception("模型未加载");
             }
-            catch (Exception ex)
+            
+            // 将Halcon图像转换为OpenCV Mat
+            Mat halconAsMat = HalconImageToMat(halconImage);
+            
+            if (halconAsMat == null || halconAsMat.Empty())
             {
-                throw new Exception($"推理过程中发生错误：{ex.Message}");
+                throw new Exception("图像转换失败");
             }
+            
+            // 执行推理
+            Utils.CSharpResult result = model.Infer(halconAsMat);
+            
+            // 释放Mat资源
+            halconAsMat.Dispose();
+            
+            return result;
         }
 
         // Halcon图像转换为OpenCV Mat（参考自程序示例）
@@ -434,7 +416,7 @@ namespace HalconDemo
                     "deep pink", "medium sea green", "slate blue"
                 };
 
-                // 设置文本显示参数 - 使用更大的字体
+                // 设置文本显示参数
                 HOperatorSet.SetFont(hWindowControl.HalconWindow, "Arial-Bold-16");
                 
                 // 处理每个检测结果
@@ -449,143 +431,94 @@ namespace HalconDemo
                     // 如果有边界框，处理边界框和掩码
                     if (obj.Bbox != null && obj.Bbox.Count >= 4)
                     {
-                        try {
-                            // 边界框坐标 [x, y, width, height]
-                            double x = obj.Bbox[0];
-                            double y = obj.Bbox[1];
-                            double width = obj.Bbox[2];
-                            double height = obj.Bbox[3];
-                            
-                            // 验证坐标值的有效性
-                            if (double.IsNaN(x) || double.IsNaN(y) || double.IsNaN(width) || double.IsNaN(height))
+                        // 边界框坐标 [x, y, width, height]
+                        double x = obj.Bbox[0];
+                        double y = obj.Bbox[1];
+                        double width = obj.Bbox[2];
+                        double height = obj.Bbox[3];
+                        
+                        // 验证坐标值的有效性
+                        if (double.IsNaN(x) || double.IsNaN(y) || double.IsNaN(width) || double.IsNaN(height))
+                        {
+                            continue;
+                        }
+                        
+                        // 验证宽度和高度
+                        if (width <= BOX_TOLERANCE || height <= BOX_TOLERANCE)
+                        {
+                            // 修复太小的边界框
+                            if (width <= BOX_TOLERANCE) width = BOX_TOLERANCE;
+                            if (height <= BOX_TOLERANCE) height = BOX_TOLERANCE;
+                        }
+                        
+                        // 生成矩形区域
+                        HObject rectangle;
+                        HOperatorSet.GenRectangle1(out rectangle, y, x, y + height, x + width);
+                        
+                        // 设置线宽和绘制样式
+                        HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 2);
+                        HOperatorSet.SetDraw(hWindowControl.HalconWindow, "margin");
+                        
+                        // 准备类别和置信度文本
+                        string text = $"{obj.CategoryName}: {obj.Score:F2}";
+                        
+                        // 处理掩码
+                        if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
+                        {
+                            try
                             {
-                                Console.WriteLine("检测到无效的边界框坐标 (NaN)");
-                                continue;
-                            }
-                            
-                            // 验证宽度和高度
-                            if (width <= BOX_TOLERANCE || height <= BOX_TOLERANCE)
-                            {
-                                // 尝试修复太小的边界框
-                                if (width <= BOX_TOLERANCE)
-                                    width = BOX_TOLERANCE;
-                                if (height <= BOX_TOLERANCE)
-                                    height = BOX_TOLERANCE;
+                                // 创建与原图像尺寸相同的空白Mat
+                                Mat fullSizeMask = new Mat(imageHeight, imageWidth, MatType.CV_8UC1, Scalar.Black);
                                 
-                                Console.WriteLine($"修复了过小的边界框: ({x},{y},{width},{height})");
-                            }
-                            
-                            // 生成矩形区域
-                            HObject rectangle;
-                            HOperatorSet.GenRectangle1(out rectangle, y, x, y + height, x + width);
-                            
-                            // 设置线宽和绘制样式
-                            HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 2);
-                            HOperatorSet.SetDraw(hWindowControl.HalconWindow, "margin");
-                            
-                            // 准备类别和置信度文本
-                            string text = $"{obj.CategoryName}: {obj.Score:F2}";
-                            
-                            // 先处理掩码，再绘制边界框和文字
-                            if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
-                            {
-                                try
+                                // 将掩码调整为目标尺寸
+                                Mat resizedMask = new Mat();
+                                Cv2.Resize(obj.Mask, resizedMask, new OpenCvSharp.Size(width, height));
+                                
+                                // 如果掩码全为0，则应用阈值处理
+                                double minVal, maxVal;
+                                OpenCvSharp.Point minLoc, maxLoc;
+                                Cv2.MinMaxLoc(resizedMask, out minVal, out maxVal, out minLoc, out maxLoc);
+                                if (maxVal < 1)
                                 {
-                                    Console.WriteLine("开始处理掩码...");
+                                    Cv2.Threshold(resizedMask, resizedMask, 0, 255, ThresholdTypes.Binary);
+                                }
+                                
+                                // 创建目标区域的ROI
+                                Rect roiRect = new Rect(
+                                    (int)Math.Max(0, Math.Min(x, imageWidth - 1)), 
+                                    (int)Math.Max(0, Math.Min(y, imageHeight - 1)),
+                                    (int)Math.Min(width, imageWidth - (int)x),
+                                    (int)Math.Min(height, imageHeight - (int)y)
+                                );
+                                
+                                // 确保ROI有效
+                                if (roiRect.Width > 0 && roiRect.Height > 0)
+                                {
+                                    Mat maskRoi = resizedMask[
+                                        new Rect(0, 0, Math.Min(resizedMask.Width, roiRect.Width), 
+                                                 Math.Min(resizedMask.Height, roiRect.Height))];
                                     
-                                    // 步骤1：创建与原图像尺寸相同的空白Mat
-                                    Mat fullSizeMask = new Mat(imageHeight, imageWidth, MatType.CV_8UC1, Scalar.Black);
+                                    // 复制到目标位置
+                                    maskRoi.CopyTo(fullSizeMask[roiRect]);
                                     
-                                    // 步骤2：将掩码复制到正确位置
-                                    // 确保掩码和目标区域尺寸一致
-                                    Mat resizedMask = new Mat();
-                                    Cv2.Resize(obj.Mask, resizedMask, new OpenCvSharp.Size(width, height));
-                                    
-                                    // 检查调整后的掩码是否有非零像素
-                                    double minVal, maxVal;
-                                    OpenCvSharp.Point minLoc, maxLoc;
-                                    Cv2.MinMaxLoc(resizedMask, out minVal, out maxVal, out minLoc, out maxLoc);
-                                    Console.WriteLine($"调整大小后的掩码像素值范围：{minVal} - {maxVal}");
-                                    
-                                    // 如果掩码全为0，则应用阈值处理以确保有值
-                                    if (maxVal < 1)
-                                    {
-                                        Console.WriteLine("掩码值全为0，应用阈值处理以生成有效掩码");
-                                        Cv2.Threshold(resizedMask, resizedMask, 0, 255, ThresholdTypes.Binary);
-                                    }
-                                    
-                                    // 创建目标区域的ROI
-                                    Rect roiRect = new Rect(
-                                        (int)Math.Max(0, Math.Min(x, imageWidth - 1)), 
-                                        (int)Math.Max(0, Math.Min(y, imageHeight - 1)),
-                                        (int)Math.Min(width, imageWidth - (int)x),
-                                        (int)Math.Min(height, imageHeight - (int)y)
-                                    );
-                                    
-                                    // 检查ROI是否有效
-                                    if (roiRect.Width > 0 && roiRect.Height > 0)
-                                    {
-                                        Console.WriteLine($"有效ROI: X={roiRect.X}, Y={roiRect.Y}, Width={roiRect.Width}, Height={roiRect.Height}");
-                                        
-                                        // 处理边界情况，确保复制区域不会超出边界
-                                        Mat maskRoi = resizedMask[
-                                            new Rect(0, 0, Math.Min(resizedMask.Width, roiRect.Width), 
-                                                     Math.Min(resizedMask.Height, roiRect.Height))];
-                                        
-                                        // 复制到目标位置
-                                        maskRoi.CopyTo(fullSizeMask[roiRect]);
-                                        
-                                        // 检查复制后的掩码是否有非零像素
-                                        Cv2.MinMaxLoc(fullSizeMask, out minVal, out maxVal, out minLoc, out maxLoc);
-                                        Console.WriteLine($"完整掩码像素值范围：{minVal} - {maxVal}");
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine("无效的ROI区域，跳过掩码显示");
-                                        fullSizeMask.Dispose();
-                                        resizedMask.Dispose();
-                                        
-                                        // 如果没有掩码，直接显示边界框和文字
-                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
-                                        HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
-                                        
-                                        // 显示类别和置信度 - 使用白色
-                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
-                                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 5), x, color, new HTuple(), new HTuple());
-                                        
-                                        rectangle.Dispose();
-                                        continue;
-                                    }
-                                    
-                                    // 步骤3：转换为Halcon图像
+                                    // 转换为Halcon图像和区域
                                     HObject maskHalcon = MatToHalcon(fullSizeMask);
-                                    
-                                    // 步骤4：转换为区域 - 使用更低的阈值确保能生成区域
                                     HObject maskRegion;
                                     HOperatorSet.Threshold(maskHalcon, out maskRegion, 1, 255);
                                     
                                     // 检查区域是否为空
                                     HTuple area, row, column;
                                     HOperatorSet.AreaCenter(maskRegion, out area, out row, out column);
-                                    Console.WriteLine($"生成的区域面积：{area.D}");
                                     
                                     if (area.D <= 0)
                                     {
-                                        Console.WriteLine("生成的区域为空，尝试使用更低的阈值");
                                         HOperatorSet.Threshold(maskHalcon, out maskRegion, 0, 255);
                                         HOperatorSet.AreaCenter(maskRegion, out area, out row, out column);
-                                        Console.WriteLine($"新阈值生成的区域面积：{area.D}");
                                     }
                                     
-                                    // 绘制掩码 - 使用兼容Halcon 20.11的方法
+                                    // 显示掩码
                                     if (area.D > 0)
                                     {
-                                        Console.WriteLine("显示掩码...");
-                                        
-                                        // 方法1：使用彩色填充
-                                        // 为掩码创建彩色图像
-                                        HObject coloredMask;
-                                        
                                         // 根据颜色名称设置RGB值
                                         int r = 0, g = 0, b = 0;
                                         switch (color.ToLower())
@@ -603,39 +536,26 @@ namespace HalconDemo
                                             default: r = 255; g = 0; b = 0; break; // 默认红色
                                         }
                                         
-                                        // 使用PaintRegion填充区域颜色
-                                        // 修正：Halcon 20.11版本中PaintRegion的参数不同
                                         // 创建相应颜色的多通道图像
                                         HObject redChannel, greenChannel, blueChannel;
                                         HOperatorSet.GenImageConst(out redChannel, "byte", imageWidth, imageHeight);
                                         HOperatorSet.GenImageConst(out greenChannel, "byte", imageWidth, imageHeight);
                                         HOperatorSet.GenImageConst(out blueChannel, "byte", imageWidth, imageHeight);
                                         
-                                        // 在各个通道上绘制区域 - 添加缺少的type参数
+                                        // 在各个通道上绘制区域
                                         HObject redFilled, greenFilled, blueFilled;
                                         HOperatorSet.PaintRegion(maskRegion, redChannel, out redFilled, r, "fill");
                                         HOperatorSet.PaintRegion(maskRegion, greenChannel, out greenFilled, g, "fill");
                                         HOperatorSet.PaintRegion(maskRegion, blueChannel, out blueFilled, b, "fill");
                                         
                                         // 合并为彩色图像
+                                        HObject coloredMask;
                                         HOperatorSet.Compose3(redFilled, greenFilled, blueFilled, out coloredMask);
                                         
-                                        // 设置绘制模式
+                                        // 设置绘制模式并显示掩码
                                         HOperatorSet.SetDraw(hWindowControl.HalconWindow, "fill");
                                         HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
-                                        
-                                        // 显示掩码
                                         HOperatorSet.DispObj(maskRegion, hWindowControl.HalconWindow);
-                                        
-                                        // 然后再显示边界框
-                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
-                                        HOperatorSet.SetDraw(hWindowControl.HalconWindow, "margin");
-                                        HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 2);
-                                        HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
-                                        
-                                        // 最后显示文本 - 使用白色
-                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
-                                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
                                         
                                         // 释放资源
                                         coloredMask.Dispose();
@@ -646,60 +566,38 @@ namespace HalconDemo
                                         greenFilled.Dispose();
                                         blueFilled.Dispose();
                                     }
-                                    else
-                                    {
-                                        Console.WriteLine("区域为空，只显示边界框和文字");
-                                        
-                                        // 显示边界框
-                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
-                                        HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
-                                        
-                                        // 显示类别和置信度 - 使用白色
-                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
-                                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
-                                    }
                                     
                                     // 释放资源
-                                    fullSizeMask.Dispose();
-                                    resizedMask.Dispose();
                                     maskHalcon.Dispose();
                                     maskRegion.Dispose();
                                 }
-                                catch (Exception ex)
-                                {
-                                    Console.WriteLine($"显示掩码时出错: {ex.Message}\n{ex.StackTrace}");
-                                    
-                                    // 出错时仍显示边界框和文字
-                                    HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
-                                    HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
-                                    
-                                    // 显示类别和置信度 - 使用白色
-                                    HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
-                                    HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
-                                }
-                            }
-                            else
-                            {
-                                // 没有掩码时，直接显示边界框和文字
-                                HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
-                                HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
                                 
-                                // 显示类别和置信度 - 使用白色
-                                HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
-                                HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
+                                // 释放资源
+                                fullSizeMask.Dispose();
+                                resizedMask.Dispose();
                             }
-                            
-                            // 释放矩形资源
-                            rectangle.Dispose();
-                        } 
-                        catch (Exception ex) 
-                        {
-                            Console.WriteLine($"绘制边界框时出错: {ex.Message}\n{ex.StackTrace}");
+                            catch (Exception)
+                            {
+                                // 出错时继续，显示边界框和文字
+                            }
                         }
+                        
+                        // 显示边界框
+                        HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
+                        HOperatorSet.SetDraw(hWindowControl.HalconWindow, "margin");
+                        HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 2);
+                        HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
+                        
+                        // 显示类别和置信度 - 使用白色
+                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
+                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
+                        
+                        // 释放矩形资源
+                        rectangle.Dispose();
                     }
                     else
                     {
-                        // 如果没有边界框，只在图像上方显示类别和分数 - 使用白色
+                        // 如果没有边界框，只在图像上方显示类别和分数
                         string text = $"{obj.CategoryName}: {obj.Score:F2}";
                         int yPos = 20 + i * 30; // 每行文本的垂直位置
                         HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
@@ -710,7 +608,6 @@ namespace HalconDemo
             catch (Exception ex)
             {
                 MessageBox.Show($"显示结果时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Console.WriteLine($"显示结果时出错: {ex.Message}\n{ex.StackTrace}");
             }
         }
 
