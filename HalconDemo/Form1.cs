@@ -264,14 +264,25 @@ namespace HalconDemo
                     halconImage.Dispose();
                 }
                 
+                // 尝试使用Halcon原生方法读取图像
+                bool halconReadSuccess = false;
                 try
                 {
-                    // 读取Halcon图像
                     HOperatorSet.ReadImage(out halconImage, imagePath);
+                    if (halconImage.IsInitialized())
+                    {
+                        halconReadSuccess = true;
+                    }
                 }
                 catch (HalconDotNet.HOperatorException)
                 {
-                    // Halcon无法读取图像时，尝试使用OpenCV读取然后转换
+                    // Halcon读取失败，稍后会使用OpenCV读取
+                    halconReadSuccess = false;
+                }
+                
+                // 如果Halcon无法读取，尝试使用OpenCV读取
+                if (!halconReadSuccess)
+                {
                     try
                     {
                         // 使用OpenCV读取图像
@@ -282,17 +293,13 @@ namespace HalconDemo
                                 throw new Exception("无法读取图像");
                             }
                             
-                            // 创建临时文件
-                            string tempFile = Path.GetTempFileName() + ".png";
+                            // 直接使用MatToHalcon方法转换图像
+                            halconImage = MatToHalcon(opencvImage);
                             
-                            // 保存为PNG格式
-                            Cv2.ImWrite(tempFile, opencvImage);
-                            
-                            // 读取临时文件
-                            HOperatorSet.ReadImage(out halconImage, tempFile);
-                            
-                            // 删除临时文件
-                            try { File.Delete(tempFile); } catch { }
+                            if (!halconImage.IsInitialized())
+                            {
+                                throw new Exception("OpenCV图像转换Halcon图像失败");
+                            }
                         }
                     }
                     catch (Exception cvEx)
@@ -691,17 +698,20 @@ namespace HalconDemo
                 }
                 else if (mat.Channels() == 3)
                 {
-                    // 三通道彩色图处理
+                    // 三通道彩色图处理 - 注意OpenCV是BGR顺序，Halcon是RGB顺序
                     Mat[] channels = new Mat[3];
                     Cv2.Split(mat, out channels);
                     
-                    IntPtr ptrR = channels[0].Data;
+                    // OpenCV的顺序是BGR，而Halcon需要RGB顺序
+                    // 所以channels[0]是B通道，channels[1]是G通道，channels[2]是R通道
+                    IntPtr ptrB = channels[0].Data;
                     IntPtr ptrG = channels[1].Data;
-                    IntPtr ptrB = channels[2].Data;
+                    IntPtr ptrR = channels[2].Data;
                     
                     int width = mat.Cols;
                     int height = mat.Rows;
                     
+                    // GenImage3的参数顺序应该是红绿蓝
                     HOperatorSet.GenImage3(out hImage, "byte", width, height, ptrR, ptrG, ptrB);
                     
                     // 释放通道资源
