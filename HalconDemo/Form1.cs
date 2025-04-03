@@ -1,11 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using HalconDotNet;
 using OpenCvSharp;
@@ -27,12 +20,6 @@ namespace HalconDemo
         // 保存原始图像尺寸
         private int imageWidth = 0;
         private int imageHeight = 0;
-        
-        // 保存图像显示的变换信息
-        private double scaleX = 1.0;  // X方向缩放比例
-        private double scaleY = 1.0;  // Y方向缩放比例
-        private double offsetX = 0.0;  // X方向偏移
-        private double offsetY = 0.0;  // Y方向偏移
         
         // 边界框容差值
         private const double BOX_TOLERANCE = 1.0;  // 允许边界框尺寸有1像素的容差
@@ -735,44 +722,6 @@ namespace HalconDemo
             }
             
             return hImage;
-        }
-
-        // 添加一个新方法，用于保持长宽比例显示图像（参考博客文章实现）
-        private void DispImageWithRatio(HObject image, HWindow window)
-        {
-            try
-            {
-                // 获取图像尺寸
-                HTuple imgWidth = new HTuple(), imgHeight = new HTuple();
-                HOperatorSet.GetImageSize(image, out imgWidth, out imgHeight);
-                
-                // 获取窗口尺寸
-                HTuple winRow = new HTuple(), winCol = new HTuple(), winWidth = new HTuple(), winHeight = new HTuple();
-                HOperatorSet.GetWindowExtents(window, out winRow, out winCol, out winWidth, out winHeight);
-                
-                // 按照窗口与图像的比例关系，计算适合显示的区域大小
-                int partWidth, partHeight;
-                if (winWidth.I < winHeight.I)
-                {
-                    partWidth = imgWidth.I;
-                    partHeight = imgWidth.I * winHeight.I / winWidth.I;
-                }
-                else
-                {
-                    partWidth = imgHeight.I * winWidth.I / winHeight.I;
-                    partHeight = imgHeight.I;
-                }
-                
-                // 设置显示区域
-                HOperatorSet.SetPart(window, 0, 0, partHeight - 1, partWidth - 1);
-                
-                // 显示图像
-                HOperatorSet.DispObj(image, window);
-            }
-            catch (HalconDotNet.HOperatorException ex)
-            {
-                MessageBox.Show($"显示图像时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
         }
 
         // 鼠标滚轮事件处理
