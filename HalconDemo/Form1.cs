@@ -577,9 +577,12 @@ namespace HalconDemo
                         HOperatorSet.SetLineWidth(hWindowControl.HalconWindow, 2);
                         HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
                         
-                        // 显示类别和置信度 - 使用白色
+                        // 显示类别和置信度 - 使用正确的位置
                         HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
-                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, color, new HTuple(), new HTuple());
+                        // 将"window"改为"image"，确保文本位置与图像坐标系一致
+                        // 同时调整文本位置，确保显示在边界框正上方
+                        double textY = Math.Max(5, y - 15); // 确保文本不会超出图像顶部
+                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "image", textY, x, color, new HTuple(), new HTuple());
                         
                         // 释放矩形资源
                         rectangle.Dispose();
