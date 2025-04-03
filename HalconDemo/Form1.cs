@@ -637,8 +637,8 @@ namespace HalconDemo
                         HOperatorSet.DispObj(rectangle, hWindowControl.HalconWindow);
                         
                         // 显示类别和置信度 - 使用白色
-                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
-                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, "white", new HTuple(), new HTuple());
+                        HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
+                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "window", Math.Max(0, y - 25), x, color, new HTuple(), new HTuple());
                         
                         // 释放矩形资源
                         rectangle.Dispose();
@@ -648,8 +648,8 @@ namespace HalconDemo
                         // 如果没有边界框，只在图像上方显示类别和分数
                         string text = $"{obj.CategoryName}: {obj.Score:F2}";
                         int yPos = 20 + i * 30; // 每行文本的垂直位置
-                        HOperatorSet.SetColor(hWindowControl.HalconWindow, "white");
-                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "image", yPos, 10, "white", new HTuple(), new HTuple());
+                        HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
+                        HOperatorSet.DispText(hWindowControl.HalconWindow, text, "image", yPos, 10, color, new HTuple(), new HTuple());
                     }
                 }
                 
