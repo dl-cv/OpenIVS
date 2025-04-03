@@ -551,7 +551,7 @@ namespace HalconDemo
                                     HOperatorSet.MoveRegion(scaledRegion, out movedRegion, y, x);
                                     
                                     // 设置绘制属性并显示区域
-                                    HOperatorSet.SetDraw(hWindowControl.HalconWindow, "fill");
+                                    HOperatorSet.SetDraw(hWindowControl.HalconWindow, "margin");
                                     HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
                                     HOperatorSet.DispObj(movedRegion, hWindowControl.HalconWindow);
                                     
