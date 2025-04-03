@@ -515,118 +515,59 @@ namespace HalconDemo
                         {
                             try
                             {
-                                // 创建与原图像尺寸相同的空白Mat
-                                Mat fullSizeMask = new Mat(imageHeight, imageWidth, MatType.CV_8UC1, Scalar.Black);
+                                // 直接将OpenCV掩码转换为Halcon图像
+                                HObject maskHalcon = MatToHalcon(obj.Mask);
                                 
-                                // 将掩码调整为目标尺寸
-                                Mat resizedMask = new Mat();
-                                Cv2.Resize(obj.Mask, resizedMask, new OpenCvSharp.Size(width, height));
+                                // 对掩码进行阈值分割，创建区域
+                                HObject maskRegion;
+                                // 使用binary_threshold而不是简单的threshold
+                                HTuple usedThreshold = new HTuple();
+                                HOperatorSet.BinaryThreshold(maskHalcon, out maskRegion, "max_separability", "light", out usedThreshold);
                                 
-                                // 如果掩码全为0，则应用阈值处理
-                                double minVal, maxVal;
-                                OpenCvSharp.Point minLoc, maxLoc;
-                                Cv2.MinMaxLoc(resizedMask, out minVal, out maxVal, out minLoc, out maxLoc);
-                                if (maxVal < 1)
+                                // 检查区域是否为空
+                                HTuple area, row, column;
+                                HOperatorSet.AreaCenter(maskRegion, out area, out row, out column);
+                                
+                                if (area.D <= 0)
                                 {
-                                    Cv2.Threshold(resizedMask, resizedMask, 0, 255, ThresholdTypes.Binary);
+                                    // 如果区域为空，尝试反转阈值
+                                    HOperatorSet.BinaryThreshold(maskHalcon, out maskRegion, "max_separability", "dark", out usedThreshold);
+                                    HOperatorSet.AreaCenter(maskRegion, out area, out row, out column);
                                 }
                                 
-                                // 创建目标区域的ROI
-                                Rect roiRect = new Rect(
-                                    (int)Math.Max(0, Math.Min(x, imageWidth - 1)), 
-                                    (int)Math.Max(0, Math.Min(y, imageHeight - 1)),
-                                    (int)Math.Min(width, imageWidth - (int)x),
-                                    (int)Math.Min(height, imageHeight - (int)y)
-                                );
-                                
-                                // 确保ROI有效
-                                if (roiRect.Width > 0 && roiRect.Height > 0)
+                                // 如果提取到有效区域
+                                if (area.D > 0)
                                 {
-                                    Mat maskRoi = resizedMask[
-                                        new Rect(0, 0, Math.Min(resizedMask.Width, roiRect.Width), 
-                                                 Math.Min(resizedMask.Height, roiRect.Height))];
+                                    // 缩放区域到正确的尺寸和位置
+                                    HObject scaledRegion;
+                                    double scaleX = width / obj.Mask.Width;
+                                    double scaleY = height / obj.Mask.Height;
                                     
-                                    // 复制到目标位置
-                                    maskRoi.CopyTo(fullSizeMask[roiRect]);
+                                    // 缩放区域
+                                    HOperatorSet.ZoomRegion(maskRegion, out scaledRegion, scaleY, scaleX);
                                     
-                                    // 转换为Halcon图像和区域
-                                    HObject maskHalcon = MatToHalcon(fullSizeMask);
-                                    HObject maskRegion;
-                                    HOperatorSet.Threshold(maskHalcon, out maskRegion, 1, 255);
+                                    // 移动区域到目标位置
+                                    HObject movedRegion;
+                                    HOperatorSet.MoveRegion(scaledRegion, out movedRegion, y, x);
                                     
-                                    // 检查区域是否为空
-                                    HTuple area, row, column;
-                                    HOperatorSet.AreaCenter(maskRegion, out area, out row, out column);
-                                    
-                                    if (area.D <= 0)
-                                    {
-                                        HOperatorSet.Threshold(maskHalcon, out maskRegion, 0, 255);
-                                        HOperatorSet.AreaCenter(maskRegion, out area, out row, out column);
-                                    }
-                                    
-                                    // 显示掩码
-                                    if (area.D > 0)
-                                    {
-                                        // 根据颜色名称设置RGB值
-                                        int r = 0, g = 0, b = 0;
-                                        switch (color.ToLower())
-                                        {
-                                            case "red": r = 255; g = 0; b = 0; break;
-                                            case "green": r = 0; g = 255; b = 0; break;
-                                            case "blue": r = 0; g = 0; b = 255; break;
-                                            case "yellow": r = 255; g = 255; b = 0; break;
-                                            case "cyan": r = 0; g = 255; b = 255; break;
-                                            case "magenta": r = 255; g = 0; b = 255; break;
-                                            case "orange": r = 255; g = 165; b = 0; break;
-                                            case "deep pink": r = 255; g = 20; b = 147; break;
-                                            case "medium sea green": r = 60; g = 179; b = 113; break;
-                                            case "slate blue": r = 106; g = 90; b = 205; break;
-                                            default: r = 255; g = 0; b = 0; break; // 默认红色
-                                        }
-                                        
-                                        // 创建相应颜色的多通道图像
-                                        HObject redChannel, greenChannel, blueChannel;
-                                        HOperatorSet.GenImageConst(out redChannel, "byte", imageWidth, imageHeight);
-                                        HOperatorSet.GenImageConst(out greenChannel, "byte", imageWidth, imageHeight);
-                                        HOperatorSet.GenImageConst(out blueChannel, "byte", imageWidth, imageHeight);
-                                        
-                                        // 在各个通道上绘制区域
-                                        HObject redFilled, greenFilled, blueFilled;
-                                        HOperatorSet.PaintRegion(maskRegion, redChannel, out redFilled, r, "fill");
-                                        HOperatorSet.PaintRegion(maskRegion, greenChannel, out greenFilled, g, "fill");
-                                        HOperatorSet.PaintRegion(maskRegion, blueChannel, out blueFilled, b, "fill");
-                                        
-                                        // 合并为彩色图像
-                                        HObject coloredMask;
-                                        HOperatorSet.Compose3(redFilled, greenFilled, blueFilled, out coloredMask);
-                                        
-                                        // 设置绘制模式并显示掩码
-                                        HOperatorSet.SetDraw(hWindowControl.HalconWindow, "fill");
-                                        HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
-                                        HOperatorSet.DispObj(maskRegion, hWindowControl.HalconWindow);
-                                        
-                                        // 释放资源
-                                        coloredMask.Dispose();
-                                        redChannel.Dispose();
-                                        greenChannel.Dispose();
-                                        blueChannel.Dispose();
-                                        redFilled.Dispose();
-                                        greenFilled.Dispose();
-                                        blueFilled.Dispose();
-                                    }
+                                    // 设置绘制属性并显示区域
+                                    HOperatorSet.SetDraw(hWindowControl.HalconWindow, "fill");
+                                    HOperatorSet.SetColor(hWindowControl.HalconWindow, color);
+                                    HOperatorSet.DispObj(movedRegion, hWindowControl.HalconWindow);
                                     
                                     // 释放资源
-                                    maskHalcon.Dispose();
-                                    maskRegion.Dispose();
+                                    scaledRegion.Dispose();
+                                    movedRegion.Dispose();
                                 }
                                 
                                 // 释放资源
-                                fullSizeMask.Dispose();
-                                resizedMask.Dispose();
+                                maskHalcon.Dispose();
+                                maskRegion.Dispose();
                             }
-                            catch (Exception)
+                            catch (Exception ex)
                             {
-                                // 出错时继续，显示边界框和文字
+                                // 出错时继续，只显示边界框和文字
+                                System.Diagnostics.Debug.WriteLine($"掩码处理错误: {ex.Message}");
                             }
                         }
                         
