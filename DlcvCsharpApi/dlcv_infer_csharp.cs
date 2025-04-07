@@ -343,12 +343,20 @@ namespace dlcv_infer_csharp
                     var mask = result["mask"];
                     int mask_width = (int)mask["width"];
                     int mask_height = (int)mask["height"];
+                    int width = (int)bbox[2];
+                    int height = (int)bbox[3];
+
                     Mat mask_img = new Mat();
                     if (withMask)
                     {
                         IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
                         mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
                         mask_img = mask_img.Clone();
+                    }
+
+                    if (mask_img.Cols != width || mask_img.Rows != height)
+                    {
+                        mask_img = mask_img.Resize(new Size(width, height));
                     }
 
                     Point[][] points = mask_img.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
