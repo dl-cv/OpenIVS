@@ -8,7 +8,7 @@
     <ProjectGuid>{948F3CAC-2D10-4B59-947C-8D00C7B9198A}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <RootNamespace>demo</RootNamespace>
-    <AssemblyName>深度视觉部署SDK C# 测试程序</AssemblyName>
+    <AssemblyName>C# 测试程序</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -87,7 +87,7 @@
     <SignManifests>false</SignManifests>
   </PropertyGroup>
   <PropertyGroup>
-    <ApplicationIcon>ico.ico</ApplicationIcon>
+    <ApplicationIcon>c_sharp.ico</ApplicationIcon>
   </PropertyGroup>
   <PropertyGroup>
     <TargetZone>LocalIntranet</TargetZone>
@@ -215,7 +215,9 @@
     </PublishFile>
   </ItemGroup>
   <ItemGroup>
+    <Content Include="c_sharp.ico" />
     <Content Include="ico.ico" />
+    <Content Include="logo.ico" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
