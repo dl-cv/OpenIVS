@@ -139,6 +139,21 @@ namespace dlcv_infer_csharp
             DllLoader.Instance.dlcv_free_result(resultPtr);
         }
 
+        public void FreeModel()
+        {
+            var config = new JObject
+            {
+                ["model_index"] = modelIndex
+            };
+            string jsonStr = config.ToString();
+            IntPtr resultPtr = DllLoader.Instance.dlcv_free_model(jsonStr);
+            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+            var resultObject = JObject.Parse(resultJson);
+            Console.WriteLine(
+                "Model free result: " + resultObject.ToString());
+            DllLoader.Instance.dlcv_free_result(resultPtr);
+        }
+
         public JObject GetModelInfo()
         {
             var config = new JObject
@@ -315,7 +330,41 @@ namespace dlcv_infer_csharp
             var resultTuple = InferInternal(new List<Mat> { image }, params_json);
             try
             {
-                return resultTuple.Item1["sample_results"][0]["results"];
+                var results = resultTuple.Item1["sample_results"][0]["results"] as JArray;
+                foreach (var result in results)
+                {
+                    var categoryId = (int)result["category_id"];
+                    var categoryName = (string)result["category_name"];
+                    var score = (float)(double)result["score"];
+                    var area = (float)(double)result["area"];
+                    var bbox = result["bbox"].ToObject<List<double>>();
+                    var withMask = (bool)result["with_mask"];
+
+                    var mask = result["mask"];
+                    int mask_width = (int)mask["width"];
+                    int mask_height = (int)mask["height"];
+                    Mat mask_img = new Mat();
+                    if (withMask)
+                    {
+                        IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
+                        mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
+                        mask_img = mask_img.Clone();
+                    }
+
+                    Point[][] points = mask_img.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+                    JArray pointsJson = new JArray();
+                    foreach (var point in points[0])
+                    {
+                        JObject point_obj = new JObject
+                        {
+                            ["x"] = (int)(point.X + bbox[0]),
+                            ["y"] = (int)(point.Y + bbox[1])
+                        };
+                        pointsJson.Add(point_obj);
+                    }
+                    result["mask"] = pointsJson;
+                }
+                return results;
             }
             finally
             {
@@ -370,6 +419,25 @@ namespace dlcv_infer_csharp
             }
         }
 
+        public static String jsonToString(JObject json)
+        {
+            var settings = new JsonSerializerSettings
+            {
+                StringEscapeHandling = StringEscapeHandling.EscapeNonAscii // 关键配置
+            };
+            string unicodeJson = JsonConvert.SerializeObject(json, Formatting.Indented, settings);
+            return unicodeJson;
+        }
+
+        public static String jsonToString(JArray json)
+        {
+            var settings = new JsonSerializerSettings
+            {
+                StringEscapeHandling = StringEscapeHandling.EscapeNonAscii // 关键配置
+            };
+            string unicodeJson = JsonConvert.SerializeObject(json, Formatting.Indented, settings);
+            return unicodeJson;
+        }
 
         public static void FreeAllModels()
         {
