@@ -36,7 +36,6 @@
             this.button_thread_test = new System.Windows.Forms.Button();
             this.button_free_model = new System.Windows.Forms.Button();
             this.button_github = new System.Windows.Forms.Button();
-            this.button_doc = new System.Windows.Forms.Button();
             this.numericUpDown_num_thread = new System.Windows.Forms.NumericUpDown();
             this.comboBox1 = new System.Windows.Forms.ComboBox();
             this.label1 = new System.Windows.Forms.Label();
@@ -67,7 +66,7 @@
             // 
             this.button_get_model_info.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_get_model_info.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_get_model_info.Location = new System.Drawing.Point(723, 92);
+            this.button_get_model_info.Location = new System.Drawing.Point(694, 93);
             this.button_get_model_info.Margin = new System.Windows.Forms.Padding(4);
             this.button_get_model_info.Name = "button_get_model_info";
             this.button_get_model_info.Size = new System.Drawing.Size(140, 60);
@@ -79,7 +78,7 @@
             // button_open_image
             // 
             this.button_open_image.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_open_image.Location = new System.Drawing.Point(1273, 19);
+            this.button_open_image.Location = new System.Drawing.Point(1116, 19);
             this.button_open_image.Name = "button_open_image";
             this.button_open_image.Size = new System.Drawing.Size(140, 60);
             this.button_open_image.TabIndex = 3;
@@ -90,7 +89,7 @@
             // button_infer
             // 
             this.button_infer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_infer.Location = new System.Drawing.Point(870, 92);
+            this.button_infer.Location = new System.Drawing.Point(841, 93);
             this.button_infer.Name = "button_infer";
             this.button_infer.Size = new System.Drawing.Size(140, 60);
             this.button_infer.TabIndex = 4;
@@ -112,7 +111,7 @@
             // 
             this.button_free_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_free_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_free_model.Location = new System.Drawing.Point(1017, 92);
+            this.button_free_model.Location = new System.Drawing.Point(988, 93);
             this.button_free_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_free_model.Name = "button_free_model";
             this.button_free_model.Size = new System.Drawing.Size(140, 60);
@@ -125,7 +124,7 @@
             // 
             this.button_github.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_github.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_github.Location = new System.Drawing.Point(1165, 92);
+            this.button_github.Location = new System.Drawing.Point(1136, 93);
             this.button_github.Margin = new System.Windows.Forms.Padding(4);
             this.button_github.Name = "button_github";
             this.button_github.Size = new System.Drawing.Size(120, 60);
@@ -133,19 +132,6 @@
             this.button_github.Text = "文档";
             this.button_github.UseVisualStyleBackColor = true;
             this.button_github.Click += new System.EventHandler(this.button_github_Click);
-            // 
-            // button_doc
-            // 
-            this.button_doc.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_doc.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_doc.Location = new System.Drawing.Point(1293, 92);
-            this.button_doc.Margin = new System.Windows.Forms.Padding(4);
-            this.button_doc.Name = "button_doc";
-            this.button_doc.Size = new System.Drawing.Size(120, 60);
-            this.button_doc.TabIndex = 10;
-            this.button_doc.Text = "论坛文档";
-            this.button_doc.UseVisualStyleBackColor = true;
-            this.button_doc.Click += new System.EventHandler(this.button_bbs_Click);
             // 
             // numericUpDown_num_thread
             // 
@@ -176,7 +162,7 @@
             this.comboBox1.FormattingEnabled = true;
             this.comboBox1.Location = new System.Drawing.Point(249, 34);
             this.comboBox1.Name = "comboBox1";
-            this.comboBox1.Size = new System.Drawing.Size(734, 32);
+            this.comboBox1.Size = new System.Drawing.Size(577, 32);
             this.comboBox1.TabIndex = 12;
             // 
             // label1
@@ -239,7 +225,7 @@
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
-            this.imagePanel1.Size = new System.Drawing.Size(1109, 672);
+            this.imagePanel1.Size = new System.Drawing.Size(952, 672);
             this.imagePanel1.TabIndex = 17;
             // 
             // richTextBox1
@@ -274,7 +260,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1428, 844);
+            this.ClientSize = new System.Drawing.Size(1271, 844);
             this.Controls.Add(this.textBox_threshold);
             this.Controls.Add(this.label4);
             this.Controls.Add(this.imagePanel1);
@@ -284,7 +270,6 @@
             this.Controls.Add(this.label1);
             this.Controls.Add(this.comboBox1);
             this.Controls.Add(this.numericUpDown_num_thread);
-            this.Controls.Add(this.button_doc);
             this.Controls.Add(this.button_github);
             this.Controls.Add(this.button_free_model);
             this.Controls.Add(this.richTextBox1);
@@ -299,7 +284,7 @@
             this.MinimumSize = new System.Drawing.Size(1280, 900);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "深度视觉部署SDK C# 测试程序";
+            this.Text = "C# 测试程序";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).EndInit();
@@ -317,7 +302,6 @@
         private System.Windows.Forms.Button button_thread_test;
         private System.Windows.Forms.Button button_free_model;
         private System.Windows.Forms.Button button_github;
-        private System.Windows.Forms.Button button_doc;
         private System.Windows.Forms.NumericUpDown numericUpDown_num_thread;
         private System.Windows.Forms.ComboBox comboBox1;
         private System.Windows.Forms.Label label1;

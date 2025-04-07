@@ -7,6 +7,4 @@ xcopy DlcvDemo\bin\dll\x64\OpenCvSharpExtern.dll dlcvpro_infer_csharp\ /Y
 
 python -m build --wheel --outdir ./dist
 
-twine upload -r dlcvpro dist/*
-
 pause

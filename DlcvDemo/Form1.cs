@@ -328,11 +328,6 @@ namespace demo
             Process.Start("https://docs.dlcv.com.cn/deploy/csharp_sdk");
         }
 
-        private void button_bbs_Click(object sender, EventArgs e)
-        {
-            Process.Start("https://bbs.dlcv.ai/t/topic/340");
-        }
-
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
             StopPressureTest();

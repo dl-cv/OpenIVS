@@ -6,13 +6,13 @@ using System.Runtime.InteropServices;
 // 有关程序集的一般信息由以下
 // 控制。更改这些特性值可修改
 // 与程序集关联的信息。
-[assembly: AssemblyTitle("深度视觉部署SDK C# 测试程序")]
-[assembly: AssemblyDescription("深度视觉部署SDK C# 测试程序")]
+[assembly: AssemblyTitle("C# 测试程序")]
+[assembly: AssemblyDescription("C# 测试程序")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("深圳市深度视觉科技有限公司")]
-[assembly: AssemblyProduct("深度视觉部署SDK C# 测试程序")]
-[assembly: AssemblyCopyright("Copyright © 深圳市深度视觉科技有限公司 2024")]
-[assembly: AssemblyTrademark("深圳市深度视觉科技有限公司")]
+[assembly: AssemblyCompany("")]
+[assembly: AssemblyProduct("C# 测试程序")]
+[assembly: AssemblyCopyright("")]
+[assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
 // 将 ComVisible 设置为 false 会使此程序集中的类型

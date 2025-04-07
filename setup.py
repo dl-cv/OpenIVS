@@ -4,7 +4,7 @@ import shutil
 
 from setuptools import setup
 
-version = '2025.3.29.0'
+version = '2025.4.7.0'
 
 package_name = "dlcvpro_infer_csharp"  # 包名
 packages: list = [package_name]  # 需要打包的包
@@ -15,11 +15,11 @@ def main():
     setup(
         name=package_name,
         version=version,
-        description="深度视觉部署SDK C# 测试程序",
-        author="DLCV",
+        description="C# 测试程序",
+        author="AI平台",
         author_email="ypw@dlcv.ai",
         url="",
-        keywords="DLCV, Machine Learning",
+        keywords="AI, Deep Learning, Computer Vision",
         packages=packages,
         package_data=package_data,
         options={
