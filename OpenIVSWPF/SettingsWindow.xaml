@@ -25,17 +25,20 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="串口号:" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <ComboBox Grid.Row="0" Grid.Column="1" x:Name="cbPortName" Margin="0,5" />
+                    <CheckBox Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" x:Name="chkUsePLC" Content="启用PLC通信" IsChecked="True" Margin="0,5,0,15"/>
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="波特率:" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <ComboBox Grid.Row="1" Grid.Column="1" x:Name="cbBaudRate" Margin="0,5">
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="串口号:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="1" Grid.Column="1" x:Name="cbPortName" Margin="0,5" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="波特率:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="2" Grid.Column="1" x:Name="cbBaudRate" Margin="0,5">
                         <ComboBoxItem Content="9600"/>
                         <ComboBoxItem Content="19200"/>
                         <ComboBoxItem Content="38400" IsSelected="True"/>
@@ -43,22 +46,22 @@
                         <ComboBoxItem Content="115200"/>
                     </ComboBox>
 
-                    <TextBlock Grid.Row="2" Grid.Column="0" Text="数据位:" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <ComboBox Grid.Row="2" Grid.Column="1" x:Name="cbDataBits" Margin="0,5">
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="数据位:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="3" Grid.Column="1" x:Name="cbDataBits" Margin="0,5">
                         <ComboBoxItem Content="7"/>
                         <ComboBoxItem Content="8" IsSelected="True"/>
                     </ComboBox>
 
-                    <TextBlock Grid.Row="3" Grid.Column="0" Text="停止位:" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <ComboBox Grid.Row="3" Grid.Column="1" x:Name="cbStopBits" Margin="0,5">
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="停止位:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="4" Grid.Column="1" x:Name="cbStopBits" Margin="0,5">
                         <ComboBoxItem Content="None"/>
                         <ComboBoxItem Content="One" IsSelected="True"/>
                         <ComboBoxItem Content="Two"/>
                         <ComboBoxItem Content="OnePointFive"/>
                     </ComboBox>
 
-                    <TextBlock Grid.Row="4" Grid.Column="0" Text="校验位:" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <ComboBox Grid.Row="4" Grid.Column="1" x:Name="cbParity" Margin="0,5">
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="校验位:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="5" Grid.Column="1" x:Name="cbParity" Margin="0,5">
                         <ComboBoxItem Content="None" IsSelected="True"/>
                         <ComboBoxItem Content="Odd"/>
                         <ComboBoxItem Content="Even"/>
@@ -66,8 +69,8 @@
                         <ComboBoxItem Content="Space"/>
                     </ComboBox>
 
-                    <TextBlock Grid.Row="5" Grid.Column="0" Text="设备ID:" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="5" Grid.Column="1" x:Name="txtDeviceId" Text="1" Margin="0,5"/>
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="设备ID:" Margin="0,5,10,5" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="6" Grid.Column="1" x:Name="txtDeviceId" Text="1" Margin="0,5"/>
                 </Grid>
             </TabItem>
 

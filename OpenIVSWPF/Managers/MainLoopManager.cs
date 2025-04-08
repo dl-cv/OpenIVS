@@ -58,6 +58,8 @@ namespace OpenIVSWPF.Managers
             {
                 // 判断是否是离线模式
                 bool isOfflineMode = _settings.UseLocalFolder;
+                // 判断是否使用PLC
+                bool usePLC = _settings.UsePLC;
 
                 // 持续运行，直到取消
                 while (!token.IsCancellationRequested)
@@ -67,16 +69,17 @@ namespace OpenIVSWPF.Managers
 
                     bool moveResult = true;
 
-                    // 在线模式下才执行移动操作
-                    if (!isOfflineMode)
+                    // 在线模式下且启用PLC时才执行移动操作
+                    if (!isOfflineMode && usePLC)
                     {
                         // 移动到目标位置
                         moveResult = await _modbusInitializer.MoveToPositionAsync(targetPosition, token);
                     }
                     else
                     {
-                        // 离线模式下提示当前位置
-                        _statusCallback?.Invoke($"离线模式: 模拟位置 {targetPosition}");
+                        // 离线模式或未启用PLC下提示当前位置
+                        string modeInfo = isOfflineMode ? "离线模式" : "未启用PLC";
+                        _statusCallback?.Invoke($"{modeInfo}: 模拟位置 {targetPosition}");
                     }
 
                     if (moveResult && !token.IsCancellationRequested)
@@ -91,7 +94,7 @@ namespace OpenIVSWPF.Managers
                             try
                             {
                                 // 等待运动稳定
-                                if (!isOfflineMode)
+                                if (!isOfflineMode && usePLC)
                                 {
                                     await Task.Delay(_settings.PreCaptureDelay, token);
                                 }
@@ -144,7 +147,7 @@ namespace OpenIVSWPF.Managers
                     _currentPositionIndex = (_currentPositionIndex + 1) % _positionSequence.Length;
 
                     // 在离线模式下，添加一个延迟，模拟移动时间
-                    if (isOfflineMode)
+                    if (isOfflineMode || !usePLC)
                     {
                         try
                         {
@@ -168,7 +171,7 @@ namespace OpenIVSWPF.Managers
             }
             finally
             {
-                if (!_settings.UseLocalFolder)
+                if (!_settings.UseLocalFolder && _settings.UsePLC)
                 {
                     _modbusInitializer.SendStopCommand();
                 }

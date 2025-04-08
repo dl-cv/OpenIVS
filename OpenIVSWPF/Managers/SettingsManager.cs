@@ -107,6 +107,7 @@ namespace OpenIVSWPF.Managers
                 Settings.StopBits = (StopBits)Enum.Parse(typeof(StopBits), GetSettingValue(root, "StopBits", Settings.StopBits.ToString()));
                 Settings.Parity = (Parity)Enum.Parse(typeof(Parity), GetSettingValue(root, "Parity", Settings.Parity.ToString()));
                 Settings.DeviceId = int.Parse(GetSettingValue(root, "DeviceId", Settings.DeviceId.ToString()));
+                Settings.UsePLC = bool.Parse(GetSettingValue(root, "UsePLC", Settings.UsePLC.ToString()));
 
                 // 加载相机设置
                 Settings.CameraIndex = int.Parse(GetSettingValue(root, "CameraIndex", Settings.CameraIndex.ToString()));
@@ -192,6 +193,7 @@ namespace OpenIVSWPF.Managers
                 SetSettingValue(doc, root, "StopBits", Settings.StopBits.ToString());
                 SetSettingValue(doc, root, "Parity", Settings.Parity.ToString());
                 SetSettingValue(doc, root, "DeviceId", Settings.DeviceId.ToString());
+                SetSettingValue(doc, root, "UsePLC", Settings.UsePLC.ToString());
 
                 // 保存相机设置
                 SetSettingValue(doc, root, "CameraIndex", Settings.CameraIndex.ToString());
@@ -265,6 +267,7 @@ namespace OpenIVSWPF.Managers
         public StopBits StopBits { get; set; }
         public Parity Parity { get; set; }
         public int DeviceId { get; set; }
+        public bool UsePLC { get; set; } // 是否使用PLC通信
 
         // 相机设置
         public int CameraIndex { get; set; }
@@ -304,6 +307,7 @@ namespace OpenIVSWPF.Managers
             StopBits = StopBits.One;
             Parity = Parity.None;
             DeviceId = 1;
+            UsePLC = true; // 默认启用PLC通信
 
             CameraIndex = 0;
             CameraUserDefinedName = string.Empty;
