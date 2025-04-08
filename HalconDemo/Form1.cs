@@ -460,7 +460,7 @@ namespace HalconDemo
 
                 // 为每个检测结果设置不同的颜色
                 string[] colors = new string[] {
-                    "red", "green", "blue", "yellow", "cyan", "magenta", "orange",
+                    "red", "blue", "yellow", "cyan", "magenta", "orange",
                     "deep pink", "medium sea green", "slate blue"
                 };
 
