@@ -42,9 +42,6 @@
             this._txtInterval = new System.Windows.Forms.TextBox();
             this._lblInterval = new System.Windows.Forms.Label();
             this._lblStatus = new System.Windows.Forms.Label();
-            this._tabCameras = new System.Windows.Forms.TabControl();
-            this._btnAddCamera = new System.Windows.Forms.Button();
-            this._btnRemoveCamera = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this._pictureBox)).BeginInit();
             this._groupCamera.SuspendLayout();
             this.SuspendLayout();
@@ -62,7 +59,6 @@
             this._pictureBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this._pictureBox.TabIndex = 0;
             this._pictureBox.TabStop = false;
-            this._pictureBox.Visible = false;
             // 
             // _comboDevices
             // 
@@ -80,29 +76,7 @@
             this._btnConnect.TabIndex = 2;
             this._btnConnect.Text = "连接";
             this._btnConnect.UseVisualStyleBackColor = true;
-            this._btnConnect.Visible = false;
             this._btnConnect.Click += new System.EventHandler(this.BtnConnect_Click);
-            // 
-            // _btnAddCamera
-            // 
-            this._btnAddCamera.Location = new System.Drawing.Point(370, 12);
-            this._btnAddCamera.Name = "_btnAddCamera";
-            this._btnAddCamera.Size = new System.Drawing.Size(100, 34);
-            this._btnAddCamera.TabIndex = 5;
-            this._btnAddCamera.Text = "添加相机";
-            this._btnAddCamera.UseVisualStyleBackColor = true;
-            this._btnAddCamera.Click += new System.EventHandler(this.BtnAddCamera_Click);
-            // 
-            // _btnRemoveCamera
-            // 
-            this._btnRemoveCamera.Location = new System.Drawing.Point(476, 12);
-            this._btnRemoveCamera.Name = "_btnRemoveCamera";
-            this._btnRemoveCamera.Size = new System.Drawing.Size(100, 34);
-            this._btnRemoveCamera.TabIndex = 6;
-            this._btnRemoveCamera.Text = "移除相机";
-            this._btnRemoveCamera.UseVisualStyleBackColor = true;
-            this._btnRemoveCamera.Enabled = false;
-            this._btnRemoveCamera.Click += new System.EventHandler(this.BtnRemoveCamera_Click);
             // 
             // _btnStartGrab
             // 
@@ -187,7 +161,6 @@
             this._groupCamera.TabIndex = 3;
             this._groupCamera.TabStop = false;
             this._groupCamera.Text = "相机控制";
-            this._groupCamera.Visible = false;
             // 
             // _lblTriggerMode
             // 
@@ -227,34 +200,20 @@
             this._lblStatus.TabIndex = 4;
             this._lblStatus.Text = "准备就绪";
             // 
-            // _tabCameras
-            // 
-            this._tabCameras.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this._tabCameras.Location = new System.Drawing.Point(12, 50);
-            this._tabCameras.Name = "_tabCameras";
-            this._tabCameras.SelectedIndex = 0;
-            this._tabCameras.Size = new System.Drawing.Size(1234, 880);
-            this._tabCameras.TabIndex = 7;
-            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 18F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1258, 968);
-            this.Controls.Add(this._tabCameras);
-            this.Controls.Add(this._btnRemoveCamera);
-            this.Controls.Add(this._btnAddCamera);
+            this.Controls.Add(this._groupCamera);
             this.Controls.Add(this._btnConnect);
             this.Controls.Add(this._comboDevices);
             this.Controls.Add(this._pictureBox);
-            this.Controls.Add(this._groupCamera);
             this.Controls.Add(this._lblStatus);
             this.MinimumSize = new System.Drawing.Size(820, 650);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "多相机测试";
+            this.Text = "相机测试";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
             ((System.ComponentModel.ISupportInitialize)(this._pictureBox)).EndInit();
@@ -280,9 +239,6 @@
         private System.Windows.Forms.Label _lblInterval;
         private System.Windows.Forms.Label _lblStatus;
         private System.Windows.Forms.Label _lblTriggerMode;
-        private System.Windows.Forms.TabControl _tabCameras;
-        private System.Windows.Forms.Button _btnAddCamera;
-        private System.Windows.Forms.Button _btnRemoveCamera;
     }
 }
 
