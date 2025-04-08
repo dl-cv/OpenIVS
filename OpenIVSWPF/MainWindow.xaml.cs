@@ -124,6 +124,10 @@ namespace OpenIVSWPF
         // 设置变更事件处理
         private void SettingsManager_SettingsChanged(object sender, EventArgs e)
         {
+            // 更新PLC状态
+            var settings = SettingsManager.Instance.Settings;
+            ViewModel.UpdatePLCStatus(settings.UsePLC);
+            
             // 如果系统已初始化且正在运行，则提示需要重新初始化
             if (_isInitialized)
             {
@@ -152,18 +156,25 @@ namespace OpenIVSWPF
 
                 var settings = SettingsManager.Instance.Settings;
                 bool isOfflineMode = settings.UseLocalFolder;
+                bool usePLC = settings.UsePLC;
 
-                // 初始化Modbus (仅在在线模式下)
-                if (!isOfflineMode)
+                // 初始化Modbus (仅在在线模式且启用PLC时)
+                if (!isOfflineMode && usePLC)
                 {
                     await Task.Run(() => _modbusInitializer.InitializeModbus(settings));
                     _isModbusConnected = _modbusInitializer.IsConnected;
                 }
                 else
                 {
-                    _isModbusConnected = true; // 离线模式下默认为已连接
-                    UpdateStatus("离线模式：跳过Modbus初始化");
+                    _isModbusConnected = true; // 离线模式或不使用PLC时默认为已连接
+                    if (isOfflineMode)
+                        UpdateStatus("离线模式：跳过Modbus初始化");
+                    else if (!usePLC)
+                        UpdateStatus("未启用PLC：跳过Modbus初始化");
                 }
+
+                // 更新PLC状态显示
+                ViewModel.UpdatePLCStatus(usePLC);
 
                 // 初始化相机或本地图像文件夹
                 await Task.Run(() => _cameraInitializer.InitializeCamera(settings));
@@ -210,6 +221,10 @@ namespace OpenIVSWPF
         // 初始化UI状态
         private void InitializeUIState()
         {
+            // 设置PLC状态初始值
+            var settings = SettingsManager.Instance.Settings;
+            ViewModel.UpdatePLCStatus(settings.UsePLC);
+            
             // 初始状态已在ViewModel中设置，不需在此处设置
         }
         #endregion
@@ -373,6 +388,11 @@ namespace OpenIVSWPF
 
             try
             {
+                // 获取设置信息用于整个方法
+                var settings = SettingsManager.Instance.Settings;
+                bool isOfflineMode = settings.UseLocalFolder;
+                bool usePLC = settings.UsePLC;
+
                 // 如果系统尚未初始化，则先初始化
                 if (!_isInitialized)
                 {
@@ -386,9 +406,11 @@ namespace OpenIVSWPF
                         return;
                     }
 
-                    // 判断初始化结果：在线模式需要检查所有组件，离线模式只需要检查模型
-                    bool isOfflineMode = SettingsManager.Instance.Settings.UseLocalFolder;
-                    if (!isOfflineMode && (!_isModbusConnected || !_isCameraConnected))
+                    // 判断初始化结果：需要根据不同模式检查不同组件                    
+                    // 在线模式需要检查相机，使用PLC时还需要检查Modbus连接
+                    if (!isOfflineMode && 
+                        ((!usePLC && !_isCameraConnected) || // 不使用PLC时只检查相机
+                         (usePLC && (!_isModbusConnected || !_isCameraConnected)))) // 使用PLC时检查相机和Modbus
                     {
                         UpdateStatus("系统初始化失败，请检查设置");
                         UpdateControlState();
@@ -403,7 +425,8 @@ namespace OpenIVSWPF
                 _isRunning = true;
                 UpdateControlState(); // 更新所有按钮状态
 
-                if (SettingsManager.Instance.Settings.UseLocalFolder)
+                // 显示启动状态，根据模式不同提供不同的提示
+                if (isOfflineMode)
                 {
                     UpdateStatus("离线模式系统启动");
 
@@ -412,6 +435,10 @@ namespace OpenIVSWPF
 
                     // 在离线模式下，不要在这里主动触发第一张图像加载
                     // 由MainLoopManager统一处理所有图像的加载和推理
+                }
+                else if (!usePLC)
+                {
+                    UpdateStatus("无PLC模式系统启动");
                 }
                 else
                 {
@@ -422,8 +449,7 @@ namespace OpenIVSWPF
                 await _mainLoopManager.RunMainLoopAsync(_cts.Token, _lastCapturedImage);
 
                 // 检查是否是因为图像用完而返回（只有在离线模式下会出现）
-                if (_isRunning && SettingsManager.Instance.Settings.UseLocalFolder
-                    && !SettingsManager.Instance.Settings.LoopLocalImages)
+                if (_isRunning && isOfflineMode && !settings.LoopLocalImages)
                 {
                     // 由于图像已经处理完毕，自动停止运行
                     _isRunning = false;
@@ -459,7 +485,17 @@ namespace OpenIVSWPF
                     _cameraInitializer.ResetImageIndex();
                 }
 
-                UpdateStatus("系统已停止");
+                // 更新状态消息
+                bool isOfflineMode = SettingsManager.Instance.Settings.UseLocalFolder;
+                bool usePLC = SettingsManager.Instance.Settings.UsePLC;
+
+                if (isOfflineMode)
+                    UpdateStatus("离线模式系统已停止");
+                else if (!usePLC)
+                    UpdateStatus("无PLC模式系统已停止");
+                else
+                    UpdateStatus("系统已停止");
+
                 UpdateControlState();
             }
             catch (Exception ex)
