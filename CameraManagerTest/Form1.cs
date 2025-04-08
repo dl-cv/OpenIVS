@@ -29,167 +29,26 @@ namespace CameraManagerTest
         private TextBox _txtInterval;
         private Label _lblInterval;
         private Label _lblStatus;
+        private Label _lblTriggerMode;
 
         public Form1()
         {
             InitializeComponent();
-            InitializeCustomComponents();
-        }
-
-        private void InitializeCustomComponents()
-        {
-            // 设置窗体属性
-            this.Text = "相机管理器测试";
-            this.Size = new Size(800, 600);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormClosing += Form1_FormClosing;
-            this.Load += Form1_Load;
-
-            // 创建状态标签
-            _lblStatus = new Label
-            {
-                Text = "准备就绪",
-                Location = new Point(12, 540),
-                AutoSize = true
-            };
-            this.Controls.Add(_lblStatus);
-
-            // 创建相机管理器
-            _cameraManager = new CameraManager();
-            _cameraManager.ImageUpdated += CameraManager_ImageUpdated;
-
-            // 创建设备选择组合框
-            _comboDevices = new ComboBox
-            {
-                Location = new Point(12, 12),
-                Width = 300,
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            this.Controls.Add(_comboDevices);
-
-            // 创建连接按钮
-            _btnConnect = new Button
-            {
-                Text = "连接",
-                Location = new Point(320, 12),
-                Width = 80
-            };
-            _btnConnect.Click += BtnConnect_Click;
-            this.Controls.Add(_btnConnect);
-
-            // 创建相机控制组
-            _groupCamera = new GroupBox
-            {
-                Text = "相机控制",
-                Location = new Point(12, 50),
-                Size = new Size(400, 140),
-                Enabled = false
-            };
-            this.Controls.Add(_groupCamera);
-
-            // 创建触发模式选择
-            Label lblTriggerMode = new Label
-            {
-                Text = "触发模式:",
-                Location = new Point(15, 25),
-                AutoSize = true
-            };
-            _groupCamera.Controls.Add(lblTriggerMode);
-
-            _comboTriggerMode = new ComboBox
-            {
-                Location = new Point(90, 22),
-                Width = 150,
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
+            
+            // 添加触发模式选项
             _comboTriggerMode.Items.Add("关闭触发");
             _comboTriggerMode.Items.Add("软触发");
             _comboTriggerMode.Items.Add("Line0");
             _comboTriggerMode.Items.Add("Line1");
             _comboTriggerMode.SelectedIndex = 0;
-            _comboTriggerMode.SelectedIndexChanged += ComboTriggerMode_SelectedIndexChanged;
-            _groupCamera.Controls.Add(_comboTriggerMode);
-
-            // 创建开始/停止采集按钮
-            _btnStartGrab = new Button
-            {
-                Text = "开始采集",
-                Location = new Point(15, 60),
-                Width = 100
-            };
-            _btnStartGrab.Click += BtnStartGrab_Click;
-            _groupCamera.Controls.Add(_btnStartGrab);
-
-            _btnStopGrab = new Button
-            {
-                Text = "停止采集",
-                Location = new Point(125, 60),
-                Width = 100,
-                Enabled = false
-            };
-            _btnStopGrab.Click += BtnStopGrab_Click;
-            _groupCamera.Controls.Add(_btnStopGrab);
-
-            // 创建触发控制
-            _btnTriggerOnce = new Button
-            {
-                Text = "单次触发",
-                Location = new Point(15, 95),
-                Width = 100,
-                Enabled = false
-            };
-            _btnTriggerOnce.Click += BtnTriggerOnce_Click;
-            _groupCamera.Controls.Add(_btnTriggerOnce);
-
-            _lblInterval = new Label
-            {
-                Text = "间隔(ms):",
-                Location = new Point(125, 98),
-                AutoSize = true,
-                Enabled = false
-            };
-            _groupCamera.Controls.Add(_lblInterval);
-
-            _txtInterval = new TextBox
-            {
-                Text = "1000",
-                Location = new Point(190, 95),
-                Width = 50,
-                Enabled = false
-            };
-            _groupCamera.Controls.Add(_txtInterval);
-
-            _btnStartContinuous = new Button
-            {
-                Text = "开始",
-                Location = new Point(250, 95),
-                Width = 60,
-                Enabled = false
-            };
-            _btnStartContinuous.Click += BtnStartContinuous_Click;
-            _groupCamera.Controls.Add(_btnStartContinuous);
-
-            _btnStopContinuous = new Button
-            {
-                Text = "停止",
-                Location = new Point(315, 95),
-                Width = 60,
-                Enabled = false
-            };
-            _btnStopContinuous.Click += BtnStopContinuous_Click;
-            _groupCamera.Controls.Add(_btnStopContinuous);
-
-            // 创建图像显示区域
-            _pictureBox = new PictureBox
-            {
-                Location = new Point(12, 200),
-                Size = new Size(760, 320),
-                SizeMode = PictureBoxSizeMode.Zoom,
-                BorderStyle = BorderStyle.FixedSingle
-            };
-            this.Controls.Add(_pictureBox);
+            
+            // 创建相机管理器并绑定事件
+            _cameraManager = new CameraManager();
+            _cameraManager.ImageUpdated += CameraManager_ImageUpdated;
+            
+            // 绑定窗体事件
+            this.FormClosing += Form1_FormClosing;
+            this.Load += Form1_Load;
         }
 
         private void Form1_Load(object sender, EventArgs e)
@@ -457,11 +316,6 @@ namespace CameraManagerTest
                 return;
             }
             _lblStatus.Text = $"状态: {message}";
-        }
-
-        private void Form1_Load_1(object sender, EventArgs e)
-        {
-
         }
     }
 }
