@@ -48,26 +48,25 @@
             // 
             // _pictureBox
             // 
-            this._pictureBox.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this._pictureBox.Location = new System.Drawing.Point(12, 225);
-            this._pictureBox.Name = "_pictureBox";
-            this._pictureBox.Size = new System.Drawing.Size(776, 328);
-            this._pictureBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
-            this._pictureBox.BackColor = System.Drawing.SystemColors.Control;
-            this._pictureBox.TabIndex = 0;
-            this._pictureBox.TabStop = false;
             this._pictureBox.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
+            this._pictureBox.BackColor = System.Drawing.SystemColors.Control;
+            this._pictureBox.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this._pictureBox.Location = new System.Drawing.Point(12, 225);
+            this._pictureBox.Name = "_pictureBox";
+            this._pictureBox.Size = new System.Drawing.Size(1234, 696);
+            this._pictureBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+            this._pictureBox.TabIndex = 0;
+            this._pictureBox.TabStop = false;
             // 
             // _comboDevices
             // 
             this._comboDevices.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this._comboDevices.Location = new System.Drawing.Point(12, 12);
             this._comboDevices.Name = "_comboDevices";
-            this._comboDevices.Size = new System.Drawing.Size(350, 30);
+            this._comboDevices.Size = new System.Drawing.Size(350, 26);
             this._comboDevices.TabIndex = 1;
-            this._comboDevices.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _btnConnect
             // 
@@ -78,7 +77,6 @@
             this._btnConnect.Text = "连接";
             this._btnConnect.UseVisualStyleBackColor = true;
             this._btnConnect.Click += new System.EventHandler(this.BtnConnect_Click);
-            this._btnConnect.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top)));
             // 
             // _btnStartGrab
             // 
@@ -89,7 +87,6 @@
             this._btnStartGrab.Text = "开始采集";
             this._btnStartGrab.UseVisualStyleBackColor = true;
             this._btnStartGrab.Click += new System.EventHandler(this.BtnStartGrab_Click);
-            this._btnStartGrab.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _btnStopGrab
             // 
@@ -101,7 +98,6 @@
             this._btnStopGrab.Text = "停止采集";
             this._btnStopGrab.UseVisualStyleBackColor = true;
             this._btnStopGrab.Click += new System.EventHandler(this.BtnStopGrab_Click);
-            this._btnStopGrab.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _btnTriggerOnce
             // 
@@ -113,7 +109,6 @@
             this._btnTriggerOnce.Text = "单次触发";
             this._btnTriggerOnce.UseVisualStyleBackColor = true;
             this._btnTriggerOnce.Click += new System.EventHandler(this.BtnTriggerOnce_Click);
-            this._btnTriggerOnce.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _btnStartContinuous
             // 
@@ -125,7 +120,6 @@
             this._btnStartContinuous.Text = "开始";
             this._btnStartContinuous.UseVisualStyleBackColor = true;
             this._btnStartContinuous.Click += new System.EventHandler(this.BtnStartContinuous_Click);
-            this._btnStartContinuous.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _btnStopContinuous
             // 
@@ -137,20 +131,20 @@
             this._btnStopContinuous.Text = "停止";
             this._btnStopContinuous.UseVisualStyleBackColor = true;
             this._btnStopContinuous.Click += new System.EventHandler(this.BtnStopContinuous_Click);
-            this._btnStopContinuous.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _comboTriggerMode
             // 
             this._comboTriggerMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this._comboTriggerMode.Location = new System.Drawing.Point(115, 25);
             this._comboTriggerMode.Name = "_comboTriggerMode";
-            this._comboTriggerMode.Size = new System.Drawing.Size(180, 30);
+            this._comboTriggerMode.Size = new System.Drawing.Size(180, 26);
             this._comboTriggerMode.TabIndex = 0;
             this._comboTriggerMode.SelectedIndexChanged += new System.EventHandler(this.ComboTriggerMode_SelectedIndexChanged);
-            this._comboTriggerMode.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _groupCamera
             // 
+            this._groupCamera.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this._groupCamera.Controls.Add(this._lblTriggerMode);
             this._groupCamera.Controls.Add(this._btnStopContinuous);
             this._groupCamera.Controls.Add(this._btnStartContinuous);
@@ -163,31 +157,28 @@
             this._groupCamera.Enabled = false;
             this._groupCamera.Location = new System.Drawing.Point(12, 50);
             this._groupCamera.Name = "_groupCamera";
-            this._groupCamera.Size = new System.Drawing.Size(450, 165);
+            this._groupCamera.Size = new System.Drawing.Size(448, 165);
             this._groupCamera.TabIndex = 3;
             this._groupCamera.TabStop = false;
             this._groupCamera.Text = "相机控制";
-            this._groupCamera.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
             // 
             // _lblTriggerMode
             // 
             this._lblTriggerMode.AutoSize = true;
             this._lblTriggerMode.Location = new System.Drawing.Point(15, 28);
             this._lblTriggerMode.Name = "_lblTriggerMode";
-            this._lblTriggerMode.Size = new System.Drawing.Size(91, 23);
+            this._lblTriggerMode.Size = new System.Drawing.Size(89, 18);
             this._lblTriggerMode.TabIndex = 8;
             this._lblTriggerMode.Text = "触发模式:";
-            this._lblTriggerMode.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _txtInterval
             // 
             this._txtInterval.Enabled = false;
             this._txtInterval.Location = new System.Drawing.Point(210, 115);
             this._txtInterval.Name = "_txtInterval";
-            this._txtInterval.Size = new System.Drawing.Size(55, 29);
+            this._txtInterval.Size = new System.Drawing.Size(55, 28);
             this._txtInterval.TabIndex = 5;
             this._txtInterval.Text = "1000";
-            this._txtInterval.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _lblInterval
             // 
@@ -195,36 +186,31 @@
             this._lblInterval.Enabled = false;
             this._lblInterval.Location = new System.Drawing.Point(135, 120);
             this._lblInterval.Name = "_lblInterval";
-            this._lblInterval.Size = new System.Drawing.Size(71, 23);
+            this._lblInterval.Size = new System.Drawing.Size(89, 18);
             this._lblInterval.TabIndex = 4;
             this._lblInterval.Text = "间隔(ms):";
-            this._lblInterval.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
             // _lblStatus
             // 
-            this._lblStatus.AutoSize = false;
             this._lblStatus.BorderStyle = System.Windows.Forms.BorderStyle.Fixed3D;
-            this._lblStatus.Location = new System.Drawing.Point(0, 569);
+            this._lblStatus.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this._lblStatus.Location = new System.Drawing.Point(0, 938);
             this._lblStatus.Name = "_lblStatus";
-            this._lblStatus.Size = new System.Drawing.Size(800, 30);
+            this._lblStatus.Size = new System.Drawing.Size(1258, 30);
             this._lblStatus.TabIndex = 4;
             this._lblStatus.Text = "准备就绪";
-            this._lblStatus.Dock = System.Windows.Forms.DockStyle.Bottom;
             // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 18F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 600);
+            this.ClientSize = new System.Drawing.Size(1258, 968);
             this.Controls.Add(this._groupCamera);
             this.Controls.Add(this._btnConnect);
             this.Controls.Add(this._comboDevices);
             this.Controls.Add(this._pictureBox);
             this.Controls.Add(this._lblStatus);
-            //this.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
             this.MinimumSize = new System.Drawing.Size(820, 650);
-            this.MaximizeBox = true;
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "相机测试";
