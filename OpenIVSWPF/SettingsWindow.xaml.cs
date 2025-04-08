@@ -98,12 +98,14 @@ namespace OpenIVSWPF
 
         private async void LoadCameraListAsync()
         {
+            if (_isLoading)
+                return;
+
             try
             {
-                // 设置加载状态
                 _isLoading = true;
 
-                // 显示加载指示器
+                // 显示加载指示器，禁用相关控件
                 this.Dispatcher.Invoke(() =>
                 {
                     if (cameraLoadingIndicator != null)
@@ -116,8 +118,8 @@ namespace OpenIVSWPF
                         btnRefreshCameras.IsEnabled = false;
                 });
 
-                // 在后台线程执行相机扫描
-                List<IDeviceInfo> deviceList = null;
+                // 异步加载相机列表
+                List<DLCV.Camera.DeviceInfoWrapper> deviceList = null;
                 await Task.Run(() =>
                 {
                     try
@@ -146,9 +148,9 @@ namespace OpenIVSWPF
                             // 添加扫描到的设备
                             if (deviceList != null && deviceList.Count > 0)
                             {
-                                foreach (IDeviceInfo device in deviceList)
+                                foreach (var device in deviceList)
                                 {
-                                    cbCameraList.Items.Add(device.UserDefinedName);
+                                    cbCameraList.Items.Add($"{device.ManufacturerName} {device.ModelName} ({device.SerialNumber})");
                                 }
 
                                 // 选择当前相机
@@ -972,7 +974,7 @@ namespace OpenIVSWPF
                         try
                         {
                             // 刷新设备列表
-                            List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
+                            List<DLCV.Camera.DeviceInfoWrapper> deviceList = _cameraManager.RefreshDeviceList();
 
                             if (deviceList.Count == 0)
                             {

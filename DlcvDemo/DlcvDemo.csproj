@@ -216,8 +216,6 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="c_sharp.ico" />
-    <Content Include="ico.ico" />
-    <Content Include="logo.ico" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">

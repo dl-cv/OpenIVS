@@ -250,7 +250,7 @@ namespace OpenIVSWPF.Managers
             _statusCallback?.Invoke("正在初始化相机...");
 
             // 刷新设备列表
-            List<IDeviceInfo> deviceList = _cameraManager.RefreshDeviceList();
+            List<DLCV.Camera.DeviceInfoWrapper> deviceList = _cameraManager.RefreshDeviceList();
 
             if (deviceList.Count == 0)
             {
@@ -271,7 +271,7 @@ namespace OpenIVSWPF.Managers
             if (success)
             {
                 _isCameraConnected = true;
-                _statusCallback?.Invoke($"相机已连接：{deviceList[cameraIndex].UserDefinedName}");
+                _statusCallback?.Invoke($"相机已连接：{deviceList[cameraIndex].ModelName} ({deviceList[cameraIndex].SerialNumber})");
                 _cameraStatusCallback?.Invoke("已连接");
 
                 // 设置触发模式
