@@ -122,6 +122,10 @@
             <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="5">
                 <TextBlock Grid.Column="1" x:Name="lblCurrentPosition" Text="{Binding CurrentPosition}" Margin="10,0" VerticalAlignment="Center"/>
 
+                <Border x:Name="borderPLCStatus" Background="{Binding PLCStatusBackground}" CornerRadius="4" Padding="5" Margin="0,0,10,0">
+                    <TextBlock x:Name="lblPLCStatus" Text="{Binding PLCStatus}" Foreground="White"/>
+                </Border>
+                
                 <Border x:Name="borderDeviceStatus" Background="{Binding DeviceStatusBackground}" CornerRadius="4" Padding="5" Margin="0,0,10,0">
                     <TextBlock x:Name="lblDeviceStatus" Text="{Binding DeviceStatus}" Foreground="White"/>
                 </Border>

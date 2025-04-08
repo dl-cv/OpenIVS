@@ -42,6 +42,7 @@ namespace OpenIVSWPF
         public StopBits StopBits { get; private set; }
         public Parity Parity { get; private set; }
         public int DeviceId { get; private set; }
+        public bool UsePLC { get; private set; } // 添加是否使用PLC属性
         public int SelectedCameraIndex { get; private set; }
         public string CameraUserDefinedName { get; private set; }
         public bool UseTrigger { get; private set; }
@@ -381,6 +382,33 @@ namespace OpenIVSWPF
 
             // 更新图像源UI状态
             UpdateImageSourceUI();
+
+            // 更新PLC UI状态
+            UpdatePLCUI();
+
+            // 添加PLC复选框事件
+            chkUsePLC.Checked += chkUsePLC_CheckedChanged;
+            chkUsePLC.Unchecked += chkUsePLC_CheckedChanged;
+        }
+
+        // 处理PLC复选框状态变化
+        private void chkUsePLC_CheckedChanged(object sender, RoutedEventArgs e)
+        {
+            UpdatePLCUI();
+        }
+
+        // 更新PLC相关控件状态
+        private void UpdatePLCUI()
+        {
+            bool usePLC = chkUsePLC.IsChecked == true;
+
+            // 只禁用UI控件，不影响存储的值
+            cbPortName.IsEnabled = usePLC;
+            cbBaudRate.IsEnabled = usePLC;
+            cbDataBits.IsEnabled = usePLC;
+            cbStopBits.IsEnabled = usePLC;
+            cbParity.IsEnabled = usePLC;
+            txtDeviceId.IsEnabled = usePLC;
         }
 
         private void LoadSettings()
@@ -394,6 +422,7 @@ namespace OpenIVSWPF
             StopBits = settings.StopBits;
             Parity = settings.Parity;
             DeviceId = settings.DeviceId;
+            UsePLC = settings.UsePLC; // 加载是否使用PLC设置
 
             // 相机设置
             SelectedCameraIndex = settings.CameraIndex;
@@ -432,6 +461,8 @@ namespace OpenIVSWPF
             cbDataBits.Text = DataBits.ToString();
             cbStopBits.Text = StopBits.ToString();
             cbParity.Text = Parity.ToString();
+            txtDeviceId.Text = DeviceId.ToString();
+            chkUsePLC.IsChecked = UsePLC; // 设置PLC复选框状态
 
             cbCameraList.SelectedIndex = SelectedCameraIndex;
 
@@ -723,6 +754,9 @@ namespace OpenIVSWPF
         private void SaveSettings()
         {
             var settings = SettingsManager.Instance.Settings;
+
+            // 保存PLC使用设置
+            settings.UsePLC = chkUsePLC.IsChecked == true;
 
             // 检查是否是离线模式
             bool isOfflineMode = chkUseLocalFolder.IsChecked == true;
