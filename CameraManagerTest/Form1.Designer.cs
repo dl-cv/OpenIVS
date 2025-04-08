@@ -66,7 +66,6 @@
             this._comboDevices.Location = new System.Drawing.Point(12, 12);
             this._comboDevices.Name = "_comboDevices";
             this._comboDevices.Size = new System.Drawing.Size(350, 30);
-            this._comboDevices.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._comboDevices.TabIndex = 1;
             this._comboDevices.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
             // 
@@ -75,7 +74,6 @@
             this._btnConnect.Location = new System.Drawing.Point(370, 12);
             this._btnConnect.Name = "_btnConnect";
             this._btnConnect.Size = new System.Drawing.Size(90, 34);
-            this._btnConnect.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._btnConnect.TabIndex = 2;
             this._btnConnect.Text = "连接";
             this._btnConnect.UseVisualStyleBackColor = true;
@@ -87,7 +85,6 @@
             this._btnStartGrab.Location = new System.Drawing.Point(15, 70);
             this._btnStartGrab.Name = "_btnStartGrab";
             this._btnStartGrab.Size = new System.Drawing.Size(110, 34);
-            this._btnStartGrab.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._btnStartGrab.TabIndex = 1;
             this._btnStartGrab.Text = "开始采集";
             this._btnStartGrab.UseVisualStyleBackColor = true;
@@ -100,7 +97,6 @@
             this._btnStopGrab.Location = new System.Drawing.Point(135, 70);
             this._btnStopGrab.Name = "_btnStopGrab";
             this._btnStopGrab.Size = new System.Drawing.Size(110, 34);
-            this._btnStopGrab.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._btnStopGrab.TabIndex = 2;
             this._btnStopGrab.Text = "停止采集";
             this._btnStopGrab.UseVisualStyleBackColor = true;
@@ -113,7 +109,6 @@
             this._btnTriggerOnce.Location = new System.Drawing.Point(15, 115);
             this._btnTriggerOnce.Name = "_btnTriggerOnce";
             this._btnTriggerOnce.Size = new System.Drawing.Size(110, 34);
-            this._btnTriggerOnce.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._btnTriggerOnce.TabIndex = 3;
             this._btnTriggerOnce.Text = "单次触发";
             this._btnTriggerOnce.UseVisualStyleBackColor = true;
@@ -126,7 +121,6 @@
             this._btnStartContinuous.Location = new System.Drawing.Point(270, 115);
             this._btnStartContinuous.Name = "_btnStartContinuous";
             this._btnStartContinuous.Size = new System.Drawing.Size(70, 34);
-            this._btnStartContinuous.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._btnStartContinuous.TabIndex = 6;
             this._btnStartContinuous.Text = "开始";
             this._btnStartContinuous.UseVisualStyleBackColor = true;
@@ -139,7 +133,6 @@
             this._btnStopContinuous.Location = new System.Drawing.Point(350, 115);
             this._btnStopContinuous.Name = "_btnStopContinuous";
             this._btnStopContinuous.Size = new System.Drawing.Size(70, 34);
-            this._btnStopContinuous.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._btnStopContinuous.TabIndex = 7;
             this._btnStopContinuous.Text = "停止";
             this._btnStopContinuous.UseVisualStyleBackColor = true;
@@ -152,7 +145,6 @@
             this._comboTriggerMode.Location = new System.Drawing.Point(115, 25);
             this._comboTriggerMode.Name = "_comboTriggerMode";
             this._comboTriggerMode.Size = new System.Drawing.Size(180, 30);
-            this._comboTriggerMode.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._comboTriggerMode.TabIndex = 0;
             this._comboTriggerMode.SelectedIndexChanged += new System.EventHandler(this.ComboTriggerMode_SelectedIndexChanged);
             this._comboTriggerMode.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
@@ -172,7 +164,6 @@
             this._groupCamera.Location = new System.Drawing.Point(12, 50);
             this._groupCamera.Name = "_groupCamera";
             this._groupCamera.Size = new System.Drawing.Size(450, 165);
-            this._groupCamera.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._groupCamera.TabIndex = 3;
             this._groupCamera.TabStop = false;
             this._groupCamera.Text = "相机控制";
@@ -184,7 +175,6 @@
             this._lblTriggerMode.Location = new System.Drawing.Point(15, 28);
             this._lblTriggerMode.Name = "_lblTriggerMode";
             this._lblTriggerMode.Size = new System.Drawing.Size(91, 23);
-            this._lblTriggerMode.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._lblTriggerMode.TabIndex = 8;
             this._lblTriggerMode.Text = "触发模式:";
             this._lblTriggerMode.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
@@ -195,7 +185,6 @@
             this._txtInterval.Location = new System.Drawing.Point(210, 115);
             this._txtInterval.Name = "_txtInterval";
             this._txtInterval.Size = new System.Drawing.Size(55, 29);
-            this._txtInterval.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._txtInterval.TabIndex = 5;
             this._txtInterval.Text = "1000";
             this._txtInterval.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
@@ -207,7 +196,6 @@
             this._lblInterval.Location = new System.Drawing.Point(135, 120);
             this._lblInterval.Name = "_lblInterval";
             this._lblInterval.Size = new System.Drawing.Size(71, 23);
-            this._lblInterval.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._lblInterval.TabIndex = 4;
             this._lblInterval.Text = "间隔(ms):";
             this._lblInterval.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left))));
@@ -219,7 +207,6 @@
             this._lblStatus.Location = new System.Drawing.Point(0, 569);
             this._lblStatus.Name = "_lblStatus";
             this._lblStatus.Size = new System.Drawing.Size(800, 30);
-            this._lblStatus.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._lblStatus.TabIndex = 4;
             this._lblStatus.Text = "准备就绪";
             this._lblStatus.Dock = System.Windows.Forms.DockStyle.Bottom;
@@ -234,7 +221,7 @@
             this.Controls.Add(this._comboDevices);
             this.Controls.Add(this._pictureBox);
             this.Controls.Add(this._lblStatus);
-            this.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            //this.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
             this.MinimumSize = new System.Drawing.Size(820, 650);
             this.MaximizeBox = true;
