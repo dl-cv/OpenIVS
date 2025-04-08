@@ -85,11 +85,13 @@ namespace OpenIVSWPF.Managers
                     if (moveResult && !token.IsCancellationRequested)
                     {
                         // 触发模式（在线触发模式或离线模式）下的图像捕获
-                        // 在线非触发模式不走这里，由事件回调处理
-                        if (isOfflineMode || _settings.UseTrigger)
+                        // 或在不使用PLC的情况下也需要进行图像捕获
+                        // 在线非触发模式且使用PLC时不走这里，由事件回调处理
+                        if (isOfflineMode || _settings.UseTrigger || !usePLC)
                         {
                             // 触发相机拍照
-                            _statusCallback?.Invoke($"在{(isOfflineMode ? "模拟" : "")}位置 {targetPosition} 进行拍照...");
+                            string positionDesc = isOfflineMode ? "模拟" : (!usePLC ? "无PLC" : "");
+                            _statusCallback?.Invoke($"在{positionDesc}位置 {targetPosition} 进行拍照...");
 
                             try
                             {
@@ -124,11 +126,19 @@ namespace OpenIVSWPF.Managers
                                 {
                                     // 更新lastCapturedImage，以便下次捕获时使用
                                     lastCapturedImage = image.Clone() as Bitmap;
+                                    
+                                    // 对于不使用PLC的情况，直接在这里处理图像进行推理
+                                    // 在在线使用PLC模式下，图像处理一般由事件回调处理
+                                    if (!usePLC || isOfflineMode)
+                                    {
+                                        // 进行图像处理和推理
+                                        await ProcessImageAsync(image);
+                                    }
                                 }
 
                                 // 提示拍照已完成，准备移动到下一个位置
-                                string positionInfo = $"{(isOfflineMode ? "离线模式: " : "")}位置 {targetPosition}";
-                                _statusCallback?.Invoke($"{positionInfo} 的拍照已完成，准备移动到下一位置");
+                                string positionInfo = isOfflineMode ? "离线模式: " : (!usePLC ? "无PLC模式: " : "");
+                                _statusCallback?.Invoke($"{positionInfo}位置 {targetPosition} 的拍照已完成，准备移动到下一位置");
                             }
                             catch (Exception ex)
                             {
