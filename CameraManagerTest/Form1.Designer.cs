@@ -219,6 +219,21 @@
         }
 
         #endregion
+
+        private System.Windows.Forms.PictureBox _pictureBox;
+        private System.Windows.Forms.ComboBox _comboDevices;
+        private System.Windows.Forms.Button _btnConnect;
+        private System.Windows.Forms.Button _btnStartGrab;
+        private System.Windows.Forms.Button _btnStopGrab;
+        private System.Windows.Forms.Button _btnTriggerOnce;
+        private System.Windows.Forms.Button _btnStartContinuous;
+        private System.Windows.Forms.Button _btnStopContinuous;
+        private System.Windows.Forms.ComboBox _comboTriggerMode;
+        private System.Windows.Forms.GroupBox _groupCamera;
+        private System.Windows.Forms.TextBox _txtInterval;
+        private System.Windows.Forms.Label _lblInterval;
+        private System.Windows.Forms.Label _lblStatus;
+        private System.Windows.Forms.Label _lblTriggerMode;
     }
 }
 

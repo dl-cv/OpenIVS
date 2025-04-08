@@ -8,6 +8,78 @@ using MvCameraControl;
 
 namespace DLCV.Camera
 {
+    #region 设备信息包装类
+
+    /// <summary>
+    /// 相机设备信息包装类，提供对设备基本信息的访问
+    /// </summary>
+    public class DeviceInfoWrapper
+    {
+        internal IDeviceInfo OriginalDeviceInfo { get; private set; }
+
+        /// <summary>
+        /// 制造商名称
+        /// </summary>
+        public string ManufacturerName { get; private set; }
+
+        /// <summary>
+        /// 型号
+        /// </summary>
+        public string ModelName { get; private set; }
+
+        /// <summary>
+        /// 序列号
+        /// </summary>
+        public string SerialNumber { get; private set; }
+
+        /// <summary>
+        /// 设备类型
+        /// </summary>
+        public string DeviceType { get; private set; }
+
+        /// <summary>
+        /// 构造函数
+        /// </summary>
+        /// <param name="deviceInfo">原始设备信息</param>
+        internal DeviceInfoWrapper(IDeviceInfo deviceInfo)
+        {
+            OriginalDeviceInfo = deviceInfo;
+            ManufacturerName = deviceInfo.ManufacturerName;
+            ModelName = deviceInfo.ModelName;
+            SerialNumber = deviceInfo.SerialNumber;
+            
+            switch (deviceInfo.TLayerType)
+            {
+                case DeviceTLayerType.MvGigEDevice:
+                    DeviceType = "GigE";
+                    break;
+                case DeviceTLayerType.MvUsbDevice:
+                    DeviceType = "USB";
+                    break;
+                case DeviceTLayerType.MvGenTLGigEDevice:
+                    DeviceType = "GenTL GigE";
+                    break;
+                case DeviceTLayerType.MvCameraLinkDevice:
+                    DeviceType = "CameraLink";
+                    break;
+                default:
+                    DeviceType = "其他";
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 获取设备的完整显示名称
+        /// </summary>
+        /// <returns>设备显示名称</returns>
+        public override string ToString()
+        {
+            return $"{ManufacturerName} {ModelName} ({SerialNumber})";
+        }
+    }
+
+    #endregion
+
     #region 接口定义
 
     /// <summary>
@@ -254,8 +326,8 @@ namespace DLCV.Camera
         /// <summary>
         /// 枚举所有设备
         /// </summary>
-        /// <returns>设备列表</returns>
-        public static List<IDeviceInfo> EnumerateDevices()
+        /// <returns>设备信息包装列表</returns>
+        public static List<DeviceInfoWrapper> EnumerateDevices()
         {
             // 支持的设备类型
             DeviceTLayerType enumTLayerType = DeviceTLayerType.MvGigEDevice | DeviceTLayerType.MvUsbDevice
@@ -269,17 +341,27 @@ namespace DLCV.Camera
                 throw new Exception($"枚举设备失败，错误码: {nRet}");
             }
 
-            return deviceInfoList;
+            // 转换为包装类列表
+            List<DeviceInfoWrapper> wrapperList = new List<DeviceInfoWrapper>();
+            foreach (var deviceInfo in deviceInfoList)
+            {
+                wrapperList.Add(new DeviceInfoWrapper(deviceInfo));
+            }
+
+            return wrapperList;
         }
 
         /// <summary>
         /// 创建相机设备
         /// </summary>
-        /// <param name="deviceInfo">设备信息</param>
+        /// <param name="deviceInfo">设备信息包装类</param>
         /// <returns>相机设备</returns>
-        public static ICameraDevice CreateDevice(IDeviceInfo deviceInfo)
+        public static ICameraDevice CreateDevice(DeviceInfoWrapper deviceInfo)
         {
-            return new CameraDevice(deviceInfo);
+            if (deviceInfo == null)
+                throw new ArgumentNullException(nameof(deviceInfo));
+
+            return new CameraDevice(deviceInfo.OriginalDeviceInfo);
         }
 
         /// <summary>
@@ -289,13 +371,30 @@ namespace DLCV.Camera
         /// <returns>相机设备</returns>
         public static ICameraDevice CreateDevice(int index)
         {
-            var devices = EnumerateDevices();
+            var devices = EnumerateDevicesInternal();
             if (index < 0 || index >= devices.Count)
             {
                 throw new ArgumentOutOfRangeException(nameof(index), "设备索引超出范围");
             }
 
             return new CameraDevice(devices[index]);
+        }
+
+        // 内部方法，用于获取原始设备列表
+        private static List<IDeviceInfo> EnumerateDevicesInternal()
+        {
+            DeviceTLayerType enumTLayerType = DeviceTLayerType.MvGigEDevice | DeviceTLayerType.MvUsbDevice
+                | DeviceTLayerType.MvGenTLGigEDevice | DeviceTLayerType.MvGenTLCXPDevice 
+                | DeviceTLayerType.MvGenTLCameraLinkDevice | DeviceTLayerType.MvGenTLXoFDevice;
+
+            List<IDeviceInfo> deviceInfoList = new List<IDeviceInfo>();
+            int nRet = DeviceEnumerator.EnumDevices(enumTLayerType, out deviceInfoList);
+            if (nRet != MvError.MV_OK)
+            {
+                throw new Exception($"枚举设备失败，错误码: {nRet}");
+            }
+
+            return deviceInfoList;
         }
 
         /// <summary>
@@ -853,8 +952,8 @@ namespace DLCV.Camera
         /// <summary>
         /// 刷新设备列表
         /// </summary>
-        /// <returns>设备信息列表</returns>
-        public List<IDeviceInfo> RefreshDeviceList()
+        /// <returns>设备信息包装列表</returns>
+        public List<DeviceInfoWrapper> RefreshDeviceList()
         {
             try
             {
@@ -878,15 +977,8 @@ namespace DLCV.Camera
                 // 断开当前连接
                 DisconnectDevice();
 
-                // 获取设备列表
-                var deviceInfoList = RefreshDeviceList();
-                if (deviceIndex < 0 || deviceIndex >= deviceInfoList.Count)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(deviceIndex), "设备索引超出范围");
-                }
-
-                // 创建设备并打开
-                _activeDevice = CameraUtils.CreateDevice(deviceInfoList[deviceIndex]);
+                // 直接通过索引创建设备
+                _activeDevice = CameraUtils.CreateDevice(deviceIndex);
                 _activeDevice.Open();
 
                 // 订阅事件
@@ -905,9 +997,9 @@ namespace DLCV.Camera
         /// <summary>
         /// 连接设备
         /// </summary>
-        /// <param name="deviceInfo">设备信息</param>
+        /// <param name="deviceInfo">设备信息包装类</param>
         /// <returns>是否连接成功</returns>
-        public bool ConnectDevice(IDeviceInfo deviceInfo)
+        public bool ConnectDevice(DeviceInfoWrapper deviceInfo)
         {
             try
             {

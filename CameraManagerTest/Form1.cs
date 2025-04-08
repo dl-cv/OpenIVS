@@ -8,28 +8,13 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using DLCV.Camera;
-using MvCameraControl;
 
 namespace CameraManagerTest
 {
     public partial class Form1 : Form
     {
         private CameraManager _cameraManager;
-        private List<IDeviceInfo> _deviceList;
-        private PictureBox _pictureBox;
-        private ComboBox _comboDevices;
-        private Button _btnConnect;
-        private Button _btnStartGrab;
-        private Button _btnStopGrab;
-        private Button _btnTriggerOnce;
-        private Button _btnStartContinuous;
-        private Button _btnStopContinuous;
-        private ComboBox _comboTriggerMode;
-        private GroupBox _groupCamera;
-        private TextBox _txtInterval;
-        private Label _lblInterval;
-        private Label _lblStatus;
-        private Label _lblTriggerMode;
+        private List<DeviceInfoWrapper> _deviceList;
 
         public Form1()
         {
@@ -92,8 +77,7 @@ namespace CameraManagerTest
                 {
                     foreach (var device in _deviceList)
                     {
-                        string deviceName = $"{device.ManufacturerName} {device.ModelName} ({device.SerialNumber})";
-                        _comboDevices.Items.Add(deviceName);
+                        _comboDevices.Items.Add(device.ToString());
                     }
                     _comboDevices.SelectedIndex = 0;
                     _comboDevices.Enabled = true;
