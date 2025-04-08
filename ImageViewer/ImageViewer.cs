@@ -49,6 +49,9 @@ namespace DLCV
                     // 计算图像初始位置以居中
                     _imagePosition.X = (this.Width - _image.Width * _scale) / 2;
                     _imagePosition.Y = (this.Height - _image.Height * _scale) / 2;
+
+                    // 计算MinScale
+                    CalculateMinScale();
                 }
                 //Invalidate();
             }
@@ -57,6 +60,9 @@ namespace DLCV
 
         public float MaxScale { get; set; } = 100.0f;
         public float MinScale { get; set; } = 0.5f;
+
+        // 新增参数控制是否显示状态文本
+        public bool ShowStatusText { get; set; } = false;
 
         public ImageViewer()
         {
@@ -208,6 +214,7 @@ namespace DLCV
         public void UpdateImage(Image image)
         {
             this.image = image;
+            CalculateMinScale(); // 新图像加载时计算MinScale
         }
 
         // 支持 opencv 的 Mat 类型
@@ -316,14 +323,17 @@ namespace DLCV
             }
 
             // 绘制状态文本
-            var originalTransform = e.Graphics.Transform;
-            e.Graphics.ResetTransform();
-            using (Font font = new Font("微软雅黑", 24))
-            using (SolidBrush brush = new SolidBrush(_statusText == "OK" ? Color.Green : Color.Red))
+            if (ShowStatusText) // 根据ShowStatusText决定是否显示状态文本
             {
-                e.Graphics.DrawString(_statusText, font, brush, 10, 10);
+                var originalTransform = e.Graphics.Transform;
+                e.Graphics.ResetTransform();
+                using (Font font = new Font("微软雅黑", 24))
+                using (SolidBrush brush = new SolidBrush(_statusText == "OK" ? Color.Green : Color.Red))
+                {
+                    e.Graphics.DrawString(_statusText, font, brush, 10, 10);
+                }
+                e.Graphics.Transform = originalTransform;
             }
-            e.Graphics.Transform = originalTransform;
         }
 
         // 操作Mat数据创建透明蒙版
@@ -385,6 +395,61 @@ namespace DLCV
         new public void Update()
         {
             Invalidate();
+        }
+
+        // 新增的计算MinScale的方法
+        private void CalculateMinScale()
+        {
+            if (_image == null) return;
+
+            // 计算面板的最短边长度
+            float panelMinDimension = Math.Min(this.Width, this.Height);
+
+            // 计算图像的最长边长度
+            float imageMaxDimension = Math.Max(_image.Width, _image.Height);
+
+            // 计算MinScale，使得图像能缩小到panel最短边的一半大小
+            MinScale = (panelMinDimension / 2) / imageMaxDimension;
+        }
+
+        // 当Panel大小改变时重新计算MinScale
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            CalculateMinScale();
+        }
+
+        // 添加右键点击事件处理
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            if (e.Button == MouseButtons.Right && _image != null)
+            {
+                // 计算缩放比例以填充整个面板，与image设置时的逻辑一致
+                float panelAspect = (float)this.Width / this.Height;
+                float imageAspect = (float)_image.Width / _image.Height;
+
+                if (panelAspect > imageAspect)
+                {
+                    // 面板更宽，按高度填充
+                    _scale = (float)this.Height / _image.Height;
+                }
+                else
+                {
+                    // 面板更高，按宽度填充
+                    _scale = (float)this.Width / _image.Width;
+                }
+
+                // 重新计算图像位置以居中
+                _imagePosition.X = (this.Width - _image.Width * _scale) / 2;
+                _imagePosition.Y = (this.Height - _image.Height * _scale) / 2;
+
+                // 调整位置确保图像始终可见
+                AdjustImagePosition();
+
+                // 重绘
+                Invalidate();
+            }
         }
     }
 }
