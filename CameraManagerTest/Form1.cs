@@ -20,16 +20,31 @@ namespace CameraManagerTest
         {
             InitializeComponent();
             
+            // 确保所有控件已正确初始化
+            if (_comboTriggerMode == null || _comboDevices == null || 
+                _btnTriggerOnce == null || _btnStartContinuous == null || 
+                _btnStopContinuous == null || _pictureBox == null)
+            {
+                MessageBox.Show("控件初始化失败，程序可能无法正常工作", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            
             // 添加触发模式选项
+            _comboTriggerMode.Items.Clear(); // 确保列表为空
             _comboTriggerMode.Items.Add("关闭触发");
             _comboTriggerMode.Items.Add("软触发");
             _comboTriggerMode.Items.Add("Line0");
             _comboTriggerMode.Items.Add("Line1");
-            _comboTriggerMode.SelectedIndex = 0;
             
             // 创建相机管理器并绑定事件
             _cameraManager = new CameraManager();
             _cameraManager.ImageUpdated += CameraManager_ImageUpdated;
+            
+            // 禁用相机控制直到连接相机
+            _groupCamera.Enabled = false;
+            
+            // 在所有初始化完成后，设置默认选项
+            _comboTriggerMode.SelectedIndex = 0;
             
             // 绑定窗体事件
             this.FormClosing += Form1_FormClosing;
@@ -138,6 +153,12 @@ namespace CameraManagerTest
         {
             try
             {
+                if (_cameraManager == null || _cameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                
                 bool success = _cameraManager.StartGrabbing();
                 if (success)
                 {
@@ -160,6 +181,11 @@ namespace CameraManagerTest
         {
             try
             {
+                if (_cameraManager == null || _cameraManager.ActiveDevice == null)
+                {
+                    return;
+                }
+                
                 _cameraManager.StopGrabbing();
                 _btnStartGrab.Enabled = true;
                 _btnStopGrab.Enabled = false;
@@ -176,10 +202,17 @@ namespace CameraManagerTest
             try
             {
                 int index = _comboTriggerMode.SelectedIndex;
+                
+                // 若相机未连接，仅设置UI状态，不执行相机操作
+                bool isCameraConnected = _cameraManager != null && _cameraManager.ActiveDevice != null;
+                
+                // 根据不同模式设置UI状态
                 switch (index)
                 {
                     case 0: // 关闭触发
-                        _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Off);
+                        if (isCameraConnected)
+                            _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Off);
+                        
                         _btnTriggerOnce.Enabled = false;
                         _lblInterval.Enabled = false;
                         _txtInterval.Enabled = false;
@@ -187,15 +220,19 @@ namespace CameraManagerTest
                         _btnStopContinuous.Enabled = false;
                         break;
                     case 1: // 软触发
-                        _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Software);
-                        _btnTriggerOnce.Enabled = true;
-                        _lblInterval.Enabled = true;
-                        _txtInterval.Enabled = true;
-                        _btnStartContinuous.Enabled = true;
+                        if (isCameraConnected)
+                            _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Software);
+                        
+                        _btnTriggerOnce.Enabled = isCameraConnected;
+                        _lblInterval.Enabled = isCameraConnected;
+                        _txtInterval.Enabled = isCameraConnected;
+                        _btnStartContinuous.Enabled = isCameraConnected;
                         _btnStopContinuous.Enabled = false;
                         break;
                     case 2: // Line0
-                        _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Line0);
+                        if (isCameraConnected)
+                            _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Line0);
+                        
                         _btnTriggerOnce.Enabled = false;
                         _lblInterval.Enabled = false;
                         _txtInterval.Enabled = false;
@@ -203,7 +240,9 @@ namespace CameraManagerTest
                         _btnStopContinuous.Enabled = false;
                         break;
                     case 3: // Line1
-                        _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Line1);
+                        if (isCameraConnected)
+                            _cameraManager.SetTriggerMode(TriggerConfig.TriggerMode.Line1);
+                        
                         _btnTriggerOnce.Enabled = false;
                         _lblInterval.Enabled = false;
                         _txtInterval.Enabled = false;
@@ -211,7 +250,9 @@ namespace CameraManagerTest
                         _btnStopContinuous.Enabled = false;
                         break;
                 }
-                UpdateStatus($"触发模式已切换到: {_comboTriggerMode.SelectedItem}");
+                
+                if (isCameraConnected)
+                    UpdateStatus($"触发模式已切换到: {_comboTriggerMode.SelectedItem}");
             }
             catch (Exception ex)
             {
@@ -223,6 +264,12 @@ namespace CameraManagerTest
         {
             try
             {
+                if (_cameraManager == null || _cameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                
                 _cameraManager.TriggerOnce();
                 UpdateStatus("执行一次软触发");
             }
@@ -236,6 +283,12 @@ namespace CameraManagerTest
         {
             try
             {
+                if (_cameraManager == null || _cameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                
                 if (!int.TryParse(_txtInterval.Text, out int interval) || interval <= 0)
                 {
                     MessageBox.Show("请输入有效的间隔时间", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -260,6 +313,11 @@ namespace CameraManagerTest
         {
             try
             {
+                if (_cameraManager == null || _cameraManager.ActiveDevice == null)
+                {
+                    return;
+                }
+                
                 _cameraManager.StopContinuousTrigger();
                 _btnStartContinuous.Enabled = true;
                 _btnStopContinuous.Enabled = false;

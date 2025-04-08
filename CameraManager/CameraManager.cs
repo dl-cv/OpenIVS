@@ -1114,7 +1114,10 @@ namespace DLCV.Camera
         /// <param name="mode">触发模式</param>
         public void SetTriggerMode(TriggerConfig.TriggerMode mode)
         {
-            _activeDevice?.SetTriggerMode(new TriggerConfig(mode));
+            if (_activeDevice == null)
+                return;
+
+            _activeDevice.SetTriggerMode(new TriggerConfig(mode));
         }
 
         /// <summary>
