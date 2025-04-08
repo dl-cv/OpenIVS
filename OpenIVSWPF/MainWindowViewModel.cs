@@ -46,6 +46,22 @@ namespace OpenIVSWPF
         }
         #endregion
 
+        #region PLC状态
+        private string _plcStatus = "未启用";
+        public string PLCStatus
+        {
+            get => _plcStatus;
+            set => SetProperty(ref _plcStatus, value);
+        }
+
+        private SolidColorBrush _plcStatusBackground = Brushes.Gray;
+        public SolidColorBrush PLCStatusBackground
+        {
+            get => _plcStatusBackground;
+            set => SetProperty(ref _plcStatusBackground, value);
+        }
+        #endregion
+
         #region 相机状态
         private string _cameraStatus = "未连接";
         public string CameraStatus
@@ -200,6 +216,15 @@ namespace OpenIVSWPF
         {
             DeviceStatus = $"设备状态：{status}";
             DeviceStatusBackground = status == "已连接" ? Brushes.ForestGreen : Brushes.Gray;
+        }
+
+        /// <summary>
+        /// 更新PLC状态
+        /// </summary>
+        public void UpdatePLCStatus(bool isEnabled)
+        {
+            PLCStatus = isEnabled ? "已启用" : "未启用";
+            PLCStatusBackground = isEnabled ? Brushes.ForestGreen : Brushes.Orange;
         }
 
         /// <summary>
