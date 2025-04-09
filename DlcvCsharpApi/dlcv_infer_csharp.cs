@@ -351,26 +351,25 @@ namespace dlcv_infer_csharp
                     {
                         IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
                         mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                        mask_img = mask_img.Clone();
-                    }
 
-                    if (mask_img.Cols != width || mask_img.Rows != height)
-                    {
-                        mask_img = mask_img.Resize(new Size(width, height));
-                    }
-
-                    Point[][] points = mask_img.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-                    JArray pointsJson = new JArray();
-                    foreach (var point in points[0])
-                    {
-                        JObject point_obj = new JObject
+                        if (mask_img.Cols != width || mask_img.Rows != height)
                         {
-                            ["x"] = (int)(point.X + bbox[0]),
-                            ["y"] = (int)(point.Y + bbox[1])
-                        };
-                        pointsJson.Add(point_obj);
+                            mask_img = mask_img.Resize(new Size(width, height));
+                        }
+
+                        Point[][] points = mask_img.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+                        JArray pointsJson = new JArray();
+                        foreach (var point in points[0])
+                        {
+                            JObject point_obj = new JObject
+                            {
+                                ["x"] = (int)(point.X + bbox[0]),
+                                ["y"] = (int)(point.Y + bbox[1])
+                            };
+                            pointsJson.Add(point_obj);
+                        }
+                        result["mask"] = pointsJson;
                     }
-                    result["mask"] = pointsJson;
                 }
                 return results;
             }
