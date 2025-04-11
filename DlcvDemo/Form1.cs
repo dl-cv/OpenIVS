@@ -184,7 +184,9 @@ namespace demo
             string s = "";
             foreach (var b in a.Results)
             {
-                s += b.CategoryName + ", " + b.Score.ToString();
+                s += b.CategoryName + ", ";
+                s += b.Score + ", ";
+                s += b.Area + ", ";
                 s += ", bbox: [";
                 foreach (var x in b.Bbox)
                 {
@@ -192,7 +194,7 @@ namespace demo
                 }
                 s += "]\n";
             }
-            richTextBox1.Text = s;
+            richTextBox1.Text += s;
         }
 
         /// <summary>
