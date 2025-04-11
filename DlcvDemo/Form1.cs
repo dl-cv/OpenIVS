@@ -333,5 +333,11 @@ namespace demo
             StopPressureTest();
         }
 
+        private void button1_Click(object sender, EventArgs e)
+        {
+            sntl_admin_csharp.SNTL sntl = new sntl_admin_csharp.SNTL();
+            JArray sntl_info = sntl.GetDeviceList();
+            richTextBox1.Text = sntl_info.ToString();
+        }
     }
 }

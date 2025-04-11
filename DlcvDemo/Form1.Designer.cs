@@ -46,6 +46,7 @@
             this.richTextBox1 = new System.Windows.Forms.RichTextBox();
             this.label4 = new System.Windows.Forms.Label();
             this.textBox_threshold = new System.Windows.Forms.TextBox();
+            this.button1 = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             this.SuspendLayout();
@@ -225,6 +226,7 @@
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
+            this.imagePanel1.ShowStatusText = false;
             this.imagePanel1.Size = new System.Drawing.Size(952, 672);
             this.imagePanel1.TabIndex = 17;
             // 
@@ -256,11 +258,23 @@
             this.textBox_threshold.TabIndex = 19;
             this.textBox_threshold.Text = "0.5";
             // 
+            // button1
+            // 
+            this.button1.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.button1.Location = new System.Drawing.Point(970, 19);
+            this.button1.Name = "button1";
+            this.button1.Size = new System.Drawing.Size(140, 60);
+            this.button1.TabIndex = 20;
+            this.button1.Text = "检查加密狗";
+            this.button1.UseVisualStyleBackColor = true;
+            this.button1.Click += new System.EventHandler(this.button1_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1271, 844);
+            this.Controls.Add(this.button1);
             this.Controls.Add(this.textBox_threshold);
             this.Controls.Add(this.label4);
             this.Controls.Add(this.imagePanel1);
@@ -312,6 +326,7 @@
         private System.Windows.Forms.RichTextBox richTextBox1;
         private System.Windows.Forms.Label label4;
         private System.Windows.Forms.TextBox textBox_threshold;
+        private System.Windows.Forms.Button button1;
     }
 }
 
