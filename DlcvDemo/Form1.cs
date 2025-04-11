@@ -194,7 +194,7 @@ namespace demo
                 }
                 s += "]\n";
             }
-            richTextBox1.Text += s;
+            richTextBox1.Text = s;
         }
 
         /// <summary>
