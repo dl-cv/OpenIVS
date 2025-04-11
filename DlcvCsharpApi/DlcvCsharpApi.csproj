@@ -66,6 +66,7 @@
   <ItemGroup>
     <Compile Include="dlcv_infer_csharp.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="sntl_admin_csharp.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
