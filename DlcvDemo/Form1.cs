@@ -187,7 +187,7 @@ namespace demo
                 s += b.CategoryName + ", ";
                 s += b.Score + ", ";
                 s += b.Area + ", ";
-                s += ", bbox: [";
+                s += "bbox: [";
                 foreach (var x in b.Bbox)
                 {
                     s += x + ", ";
