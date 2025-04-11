@@ -128,11 +128,8 @@ namespace DlcvHttpApiTest
 
                 if (_loadedModelIndex >= 0)
                 {
-                    LogMessage($"使用已加载的模型 (索引: {_loadedModelIndex}) 进行推理");
-                    
-                    // 这里需要直接调用用模型索引的推理方法，但当前API未提供
-                    // 为了兼容，仍使用模型路径进行推理
-                    result = _api.InferImage(_imagePath, _modelPath);
+                    LogMessage($"使用已加载的模型进行推理 (模型索引: {_loadedModelIndex})");
+                    result = _api.InferImageWithModelIndex(_imagePath, _loadedModelIndex);
                 }
                 else
                 {
@@ -147,6 +144,10 @@ namespace DlcvHttpApiTest
             catch (Exception ex)
             {
                 LogMessage($"推理出错: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    LogMessage($"内部错误: {ex.InnerException.Message}");
+                }
             }
         }
 
@@ -335,6 +336,31 @@ namespace DlcvHttpApiTest
             catch (Exception ex)
             {
                 LogMessage($"获取模型信息出错: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    LogMessage($"内部错误: {ex.InnerException.Message}");
+                }
+                
+                // 当使用模型索引失败时，尝试使用模型路径
+                if (_loadedModelIndex >= 0)
+                {
+                    try
+                    {
+                        LogMessage("尝试使用模型路径获取模型信息...");
+                        Stopwatch sw = Stopwatch.StartNew();
+                        
+                        var result = _api.GetModelInfo(_modelPath);
+                        
+                        sw.Stop();
+                        
+                        LogMessage($"获取模型信息成功！耗时: {sw.ElapsedMilliseconds} 毫秒");
+                        LogMessage(result.ToString(Formatting.Indented));
+                    }
+                    catch (Exception ex2)
+                    {
+                        LogMessage($"使用模型路径获取信息也失败: {ex2.Message}");
+                    }
+                }
             }
         }
 

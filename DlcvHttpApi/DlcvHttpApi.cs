@@ -356,22 +356,13 @@ namespace DLCV
             if (modelIndex < 0)
                 throw new ArgumentException("模型索引无效", nameof(modelIndex));
 
-            // 创建请求
-            var request = new
-            {
-                model_index = modelIndex
-            };
-
             try
             {
                 var client = GetHttpClient();
-                var content = new StringContent(
-                    JsonConvert.SerializeObject(request),
-                    System.Text.Encoding.UTF8,
-                    "application/json");
-
-                // 修改API路径，与后端一致
-                var response = client.PostAsync($"{_serverUrl}/get_model_info", content).GetAwaiter().GetResult();
+                
+                // 使用GET请求和查询参数，与Python调用保持一致
+                string url = $"{_serverUrl}/get_model_info?model_index={modelIndex}";
+                var response = client.GetAsync(url).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
