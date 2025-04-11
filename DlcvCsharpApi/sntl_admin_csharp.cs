@@ -316,18 +316,12 @@ namespace sntl_admin_csharp
             "  </hasp>" +
             "</admin>";
 
-        /// <summary>
-        /// 将JSON对象转换为带格式的字符串
-        /// </summary>
-        public static string JsonToString(JObject json)
+        public static JArray GetDeviceList()
         {
-            var settings = new JsonSerializerSettings
-            {
-                StringEscapeHandling = StringEscapeHandling.EscapeNonAscii,
-                Formatting = Newtonsoft.Json.Formatting.Indented
-            };
-            string unicodeJson = JsonConvert.SerializeObject(json, settings);
-            return unicodeJson;
+            SNTL sntl = new SNTL();
+            JArray deviceList = sntl.GetDeviceList();
+            sntl.Dispose();
+            return deviceList;
         }
     }
 }

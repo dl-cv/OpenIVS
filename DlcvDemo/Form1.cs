@@ -335,8 +335,7 @@ namespace demo
 
         private void button1_Click(object sender, EventArgs e)
         {
-            sntl_admin_csharp.SNTL sntl = new sntl_admin_csharp.SNTL();
-            JArray sntl_info = sntl.GetDeviceList();
+            JArray sntl_info = sntl_admin_csharp.SNTLUtils.GetDeviceList();
             richTextBox1.Text = sntl_info.ToString();
         }
     }
