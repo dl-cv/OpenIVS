@@ -184,8 +184,10 @@ namespace demo
             string s = "";
             foreach (var b in a.Results)
             {
-                s += b.CategoryName + ", " + b.Score.ToString();
-                s += ", bbox: [";
+                s += b.CategoryName + ", ";
+                s += b.Score + ", ";
+                s += b.Area + ", ";
+                s += "bbox: [";
                 foreach (var x in b.Bbox)
                 {
                     s += x + ", ";
