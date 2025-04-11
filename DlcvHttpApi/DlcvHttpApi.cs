@@ -310,7 +310,8 @@ namespace DLCV
                     System.Text.Encoding.UTF8,
                     "application/json");
 
-                var response = client.PostAsync($"{_serverUrl}/api/load_model", content).GetAwaiter().GetResult();
+                // 修改API路径，与后端一致
+                var response = client.PostAsync($"{_serverUrl}/load_model", content).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -375,7 +376,8 @@ namespace DLCV
                     System.Text.Encoding.UTF8,
                     "application/json");
 
-                var response = client.PostAsync($"{_serverUrl}/api/get_model_info", content).GetAwaiter().GetResult();
+                // 修改API路径，与后端一致
+                var response = client.PostAsync($"{_serverUrl}/get_model_info", content).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -435,12 +437,10 @@ namespace DLCV
             try
             {
                 var client = GetHttpClient();
-                var content = new StringContent(
-                    JsonConvert.SerializeObject(request),
-                    System.Text.Encoding.UTF8,
-                    "application/json");
-
-                var response = client.PostAsync($"{_serverUrl}/api/get_model_info", content).GetAwaiter().GetResult();
+                
+                // 根据后端代码，get_model_info是GET请求，需要使用查询参数
+                string url = $"{_serverUrl}/get_model_info?model_path={Uri.EscapeDataString(modelPath)}";
+                var response = client.GetAsync(url).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
