@@ -32,6 +32,8 @@
             this.btnSelectModel = new System.Windows.Forms.Button();
             this.btnSelectImage = new System.Windows.Forms.Button();
             this.btnCheckServer = new System.Windows.Forms.Button();
+            this.btnLoadModel = new System.Windows.Forms.Button();
+            this.btnGetModelInfo = new System.Windows.Forms.Button();
             this.btnInfer = new System.Windows.Forms.Button();
             this.btnPressureTest = new System.Windows.Forms.Button();
             this.txtThreads = new System.Windows.Forms.TextBox();
@@ -69,11 +71,29 @@
             this.btnCheckServer.UseVisualStyleBackColor = true;
             this.btnCheckServer.Click += new System.EventHandler(this.BtnCheckServer_Click);
             
+            // btnLoadModel
+            this.btnLoadModel.Location = new System.Drawing.Point(410, 20);
+            this.btnLoadModel.Name = "btnLoadModel";
+            this.btnLoadModel.Size = new System.Drawing.Size(120, 30);
+            this.btnLoadModel.TabIndex = 3;
+            this.btnLoadModel.Text = "加载模型";
+            this.btnLoadModel.UseVisualStyleBackColor = true;
+            this.btnLoadModel.Click += new System.EventHandler(this.BtnLoadModel_Click);
+            
+            // btnGetModelInfo
+            this.btnGetModelInfo.Location = new System.Drawing.Point(540, 20);
+            this.btnGetModelInfo.Name = "btnGetModelInfo";
+            this.btnGetModelInfo.Size = new System.Drawing.Size(120, 30);
+            this.btnGetModelInfo.TabIndex = 4;
+            this.btnGetModelInfo.Text = "获取模型信息";
+            this.btnGetModelInfo.UseVisualStyleBackColor = true;
+            this.btnGetModelInfo.Click += new System.EventHandler(this.BtnGetModelInfo_Click);
+            
             // btnInfer
             this.btnInfer.Location = new System.Drawing.Point(20, 70);
             this.btnInfer.Name = "btnInfer";
             this.btnInfer.Size = new System.Drawing.Size(120, 30);
-            this.btnInfer.TabIndex = 3;
+            this.btnInfer.TabIndex = 5;
             this.btnInfer.Text = "单线程推理";
             this.btnInfer.UseVisualStyleBackColor = true;
             this.btnInfer.Click += new System.EventHandler(this.BtnInfer_Click);
@@ -82,7 +102,7 @@
             this.btnPressureTest.Location = new System.Drawing.Point(150, 70);
             this.btnPressureTest.Name = "btnPressureTest";
             this.btnPressureTest.Size = new System.Drawing.Size(120, 30);
-            this.btnPressureTest.TabIndex = 4;
+            this.btnPressureTest.TabIndex = 6;
             this.btnPressureTest.Text = "多线程推理";
             this.btnPressureTest.UseVisualStyleBackColor = true;
             this.btnPressureTest.Click += new System.EventHandler(this.BtnPressureTest_Click);
@@ -91,7 +111,7 @@
             this.txtThreads.Location = new System.Drawing.Point(280, 70);
             this.txtThreads.Name = "txtThreads";
             this.txtThreads.Size = new System.Drawing.Size(50, 20);
-            this.txtThreads.TabIndex = 5;
+            this.txtThreads.TabIndex = 7;
             this.txtThreads.Text = "5";
             
             // lblThreads
@@ -99,14 +119,14 @@
             lblThreads.Location = new System.Drawing.Point(340, 75);
             lblThreads.Name = "lblThreads";
             lblThreads.Size = new System.Drawing.Size(41, 13);
-            lblThreads.TabIndex = 6;
+            lblThreads.TabIndex = 8;
             lblThreads.Text = "线程数";
             
             // txtRate
             this.txtRate.Location = new System.Drawing.Point(400, 70);
             this.txtRate.Name = "txtRate";
             this.txtRate.Size = new System.Drawing.Size(50, 20);
-            this.txtRate.TabIndex = 7;
+            this.txtRate.TabIndex = 9;
             this.txtRate.Text = "10";
             
             // lblRate
@@ -114,25 +134,27 @@
             lblRate.Location = new System.Drawing.Point(460, 75);
             lblRate.Name = "lblRate";
             lblRate.Size = new System.Drawing.Size(65, 13);
-            lblRate.TabIndex = 8;
+            lblRate.TabIndex = 10;
             lblRate.Text = "每秒请求数";
             
             // txtResult
             this.txtResult.Location = new System.Drawing.Point(20, 120);
             this.txtResult.Name = "txtResult";
-            this.txtResult.Size = new System.Drawing.Size(540, 300);
-            this.txtResult.TabIndex = 9;
+            this.txtResult.Size = new System.Drawing.Size(640, 300);
+            this.txtResult.TabIndex = 11;
             this.txtResult.ReadOnly = true;
             
             // Form1
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(600, 500);
+            this.ClientSize = new System.Drawing.Size(700, 500);
             
             // 添加控件到窗体
             this.Controls.Add(this.btnSelectModel);
             this.Controls.Add(this.btnSelectImage);
             this.Controls.Add(this.btnCheckServer);
+            this.Controls.Add(this.btnLoadModel);
+            this.Controls.Add(this.btnGetModelInfo);
             this.Controls.Add(this.btnInfer);
             this.Controls.Add(this.btnPressureTest);
             this.Controls.Add(this.txtThreads);
@@ -156,6 +178,8 @@
         private System.Windows.Forms.Button btnSelectModel;
         private System.Windows.Forms.Button btnSelectImage;
         private System.Windows.Forms.Button btnCheckServer;
+        private System.Windows.Forms.Button btnLoadModel;
+        private System.Windows.Forms.Button btnGetModelInfo;
         private System.Windows.Forms.Button btnInfer;
         private System.Windows.Forms.Button btnPressureTest;
         private System.Windows.Forms.TextBox txtThreads;

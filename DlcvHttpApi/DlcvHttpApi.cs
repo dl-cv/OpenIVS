@@ -281,6 +281,201 @@ namespace DLCV
             throw new NotImplementedException("自定义格式推理接口尚未实现");
         }
 
+        /// <summary>
+        /// 加载模型到服务器
+        /// </summary>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>返回模型加载结果，包含model_index等信息</returns>
+        public JObject LoadModel(string modelPath)
+        {
+            ThrowIfDisposed();
+
+            if (!_isConnected)
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
+
+            if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
+                throw new ArgumentException("模型文件路径无效或文件不存在", nameof(modelPath));
+
+            // 创建请求
+            var request = new
+            {
+                model_path = modelPath
+            };
+
+            try
+            {
+                var client = GetHttpClient();
+                var content = new StringContent(
+                    JsonConvert.SerializeObject(request),
+                    System.Text.Encoding.UTF8,
+                    "application/json");
+
+                var response = client.PostAsync($"{_serverUrl}/api/load_model", content).GetAwaiter().GetResult();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    HandleErrorResponse(response.StatusCode);
+                }
+
+                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var jsonResult = JObject.Parse(responseString);
+
+                if (jsonResult["code"]?.ToString() != "00000")
+                {
+                    throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
+                }
+
+                return jsonResult;
+            }
+            catch (Exception ex)
+            {
+                if (ex is DlcvApiException)
+                    throw;
+
+                throw new DlcvApiException("加载模型请求处理失败", ex);
+            }
+        }
+
+        /// <summary>
+        /// 异步加载模型到服务器（保留以兼容现有代码）
+        /// </summary>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>返回模型加载结果任务</returns>
+        public Task<JObject> LoadModelAsync(string modelPath)
+        {
+            return Task.FromResult(LoadModel(modelPath));
+        }
+
+        /// <summary>
+        /// 获取已加载模型的信息
+        /// </summary>
+        /// <param name="modelIndex">模型索引，通过LoadModel方法获取</param>
+        /// <returns>返回模型信息</returns>
+        public JObject GetModelInfo(int modelIndex)
+        {
+            ThrowIfDisposed();
+
+            if (!_isConnected)
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
+
+            if (modelIndex < 0)
+                throw new ArgumentException("模型索引无效", nameof(modelIndex));
+
+            // 创建请求
+            var request = new
+            {
+                model_index = modelIndex
+            };
+
+            try
+            {
+                var client = GetHttpClient();
+                var content = new StringContent(
+                    JsonConvert.SerializeObject(request),
+                    System.Text.Encoding.UTF8,
+                    "application/json");
+
+                var response = client.PostAsync($"{_serverUrl}/api/get_model_info", content).GetAwaiter().GetResult();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    HandleErrorResponse(response.StatusCode);
+                }
+
+                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var jsonResult = JObject.Parse(responseString);
+
+                if (jsonResult["code"]?.ToString() != "00000")
+                {
+                    throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
+                }
+
+                return jsonResult;
+            }
+            catch (Exception ex)
+            {
+                if (ex is DlcvApiException)
+                    throw;
+
+                throw new DlcvApiException("获取模型信息请求处理失败", ex);
+            }
+        }
+
+        /// <summary>
+        /// 异步获取已加载模型的信息（保留以兼容现有代码）
+        /// </summary>
+        /// <param name="modelIndex">模型索引，通过LoadModel方法获取</param>
+        /// <returns>返回模型信息任务</returns>
+        public Task<JObject> GetModelInfoAsync(int modelIndex)
+        {
+            return Task.FromResult(GetModelInfo(modelIndex));
+        }
+
+        /// <summary>
+        /// 获取模型文件的信息，无需先加载模型
+        /// </summary>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>返回模型信息</returns>
+        public JObject GetModelInfo(string modelPath)
+        {
+            ThrowIfDisposed();
+
+            if (!_isConnected)
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
+
+            if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
+                throw new ArgumentException("模型文件路径无效或文件不存在", nameof(modelPath));
+
+            // 创建请求
+            var request = new
+            {
+                model_path = modelPath
+            };
+
+            try
+            {
+                var client = GetHttpClient();
+                var content = new StringContent(
+                    JsonConvert.SerializeObject(request),
+                    System.Text.Encoding.UTF8,
+                    "application/json");
+
+                var response = client.PostAsync($"{_serverUrl}/api/get_model_info", content).GetAwaiter().GetResult();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    HandleErrorResponse(response.StatusCode);
+                }
+
+                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var jsonResult = JObject.Parse(responseString);
+
+                if (jsonResult["code"]?.ToString() != "00000")
+                {
+                    throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
+                }
+
+                return jsonResult;
+            }
+            catch (Exception ex)
+            {
+                if (ex is DlcvApiException)
+                    throw;
+
+                throw new DlcvApiException("获取模型信息请求处理失败", ex);
+            }
+        }
+
+        /// <summary>
+        /// 异步获取模型文件的信息（保留以兼容现有代码）
+        /// </summary>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>返回模型信息任务</returns>
+        public Task<JObject> GetModelInfoAsync(string modelPath)
+        {
+            return Task.FromResult(GetModelInfo(modelPath));
+        }
+
         #endregion
 
         #region 私有方法
