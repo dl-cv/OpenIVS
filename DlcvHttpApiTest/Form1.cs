@@ -269,14 +269,39 @@ namespace DlcvHttpApiTest
                 
                 sw.Stop();
                 
-                _loadedModelIndex = (int)result["model_index"];
-                LogMessage($"模型加载成功！耗时: {sw.ElapsedMilliseconds} 毫秒");
-                LogMessage($"模型索引: {_loadedModelIndex}");
+                // 检查返回的结果中是否包含model_index或model_path
+                if (result.ContainsKey("model_index"))
+                {
+                    _loadedModelIndex = (int)result["model_index"];
+                    LogMessage($"模型加载成功！耗时: {sw.ElapsedMilliseconds} 毫秒");
+                    LogMessage($"模型索引: {_loadedModelIndex}");
+                }
+                else if (result.ContainsKey("model_path"))
+                {
+                    LogMessage($"模型加载成功！耗时: {sw.ElapsedMilliseconds} 毫秒");
+                    LogMessage($"模型路径: {result["model_path"]}");
+                    
+                    // 我们没有获得model_index，但模型已经加载，使用默认值
+                    _loadedModelIndex = 0;
+                }
+                else
+                {
+                    LogMessage($"模型加载成功，但未获得模型索引。耗时: {sw.ElapsedMilliseconds} 毫秒");
+                    // 无法确定模型索引
+                    _loadedModelIndex = -1;
+                }
+                
+                // 展示完整响应
                 LogMessage(result.ToString(Formatting.Indented));
             }
             catch (Exception ex)
             {
                 LogMessage($"加载模型出错: {ex.Message}");
+                // 显示内部异常
+                if (ex.InnerException != null)
+                {
+                    LogMessage($"内部异常: {ex.InnerException.Message}");
+                }
             }
         }
 

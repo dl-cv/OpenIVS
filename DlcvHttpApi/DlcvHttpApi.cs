@@ -296,22 +296,16 @@ namespace DLCV
             if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
                 throw new ArgumentException("模型文件路径无效或文件不存在", nameof(modelPath));
 
-            // 创建请求
-            var request = new
-            {
-                model_path = modelPath
-            };
-
             try
             {
                 var client = GetHttpClient();
-                var content = new StringContent(
-                    JsonConvert.SerializeObject(request),
-                    System.Text.Encoding.UTF8,
-                    "application/json");
-
-                // 修改API路径，与后端一致
-                var response = client.PostAsync($"{_serverUrl}/load_model", content).GetAwaiter().GetResult();
+                
+                // 使用URL查询参数，与Python调用保持一致
+                string url = $"{_serverUrl}/load_model?model_path={Uri.EscapeDataString(modelPath)}";
+                
+                // 使用空内容发送POST请求
+                var content = new StringContent("", System.Text.Encoding.UTF8, "application/json");
+                var response = client.PostAsync(url, content).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -474,6 +468,40 @@ namespace DLCV
         public Task<JObject> GetModelInfoAsync(string modelPath)
         {
             return Task.FromResult(GetModelInfo(modelPath));
+        }
+
+        /// <summary>
+        /// 使用已加载的模型索引进行图像推理
+        /// </summary>
+        /// <param name="imagePath">图像文件路径</param>
+        /// <param name="modelIndex">模型索引，通过LoadModel获取</param>
+        /// <returns>推理结果</returns>
+        public Utils.CSharpResult InferImageWithModelIndex(string imagePath, int modelIndex)
+        {
+            ThrowIfDisposed();
+
+            if (!_isConnected)
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
+
+            if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
+                throw new ArgumentException("图像文件路径无效或文件不存在", nameof(imagePath));
+
+            if (modelIndex < 0)
+                throw new ArgumentException("模型索引无效", nameof(modelIndex));
+
+            // 将图像转换为Base64
+            byte[] imageBytes = File.ReadAllBytes(imagePath);
+            string base64Image = Convert.ToBase64String(imageBytes);
+
+            // 创建请求，使用模型索引代替模型路径
+            var request = new
+            {
+                img = base64Image,
+                model_index = modelIndex
+            };
+
+            // 发送请求
+            return SendInferenceRequest(request);
         }
 
         #endregion
