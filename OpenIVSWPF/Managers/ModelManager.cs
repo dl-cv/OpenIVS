@@ -85,6 +85,26 @@ namespace OpenIVSWPF.Managers
                         return;
                     }
                     
+                    // 尝试加载模型到服务器
+                    try
+                    {
+                        _statusCallback?.Invoke("正在加载模型到服务器...");
+                        var loadResult = _httpApi.LoadModel(settings.ModelPath);
+                        if (loadResult == null || loadResult["code"]?.ToString() != "00000")
+                        {
+                            _statusCallback?.Invoke("模型服务器加载失败");
+                            _modelStatusCallback?.Invoke("加载失败");
+                            return;
+                        }
+                        _statusCallback?.Invoke($"模型已加载到服务器: {loadResult["message"]}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _statusCallback?.Invoke($"加载模型到服务器失败: {ex.Message}");
+                        _modelStatusCallback?.Invoke("加载失败");
+                        return;
+                    }
+                    
                     // 尝试加载模型，测试连接和模型有效性
                     try
                     {
