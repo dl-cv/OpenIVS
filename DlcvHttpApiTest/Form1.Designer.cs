@@ -28,7 +28,6 @@
         /// </summary>
         private void InitializeComponent()
         {
-            // 控件声明
             this.btnSelectModel = new System.Windows.Forms.Button();
             this.btnSelectImage = new System.Windows.Forms.Button();
             this.btnCheckServer = new System.Windows.Forms.Button();
@@ -39,117 +38,140 @@
             this.txtThreads = new System.Windows.Forms.TextBox();
             this.txtRate = new System.Windows.Forms.TextBox();
             this.txtResult = new System.Windows.Forms.RichTextBox();
-            System.Windows.Forms.Label lblThreads = new System.Windows.Forms.Label();
-            System.Windows.Forms.Label lblRate = new System.Windows.Forms.Label();
-            
+            this.lblThreads = new System.Windows.Forms.Label();
+            this.lblRate = new System.Windows.Forms.Label();
             this.SuspendLayout();
-            
+            // 
             // btnSelectModel
-            this.btnSelectModel.Location = new System.Drawing.Point(20, 20);
+            // 
+            this.btnSelectModel.Location = new System.Drawing.Point(30, 28);
+            this.btnSelectModel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnSelectModel.Name = "btnSelectModel";
-            this.btnSelectModel.Size = new System.Drawing.Size(120, 30);
+            this.btnSelectModel.Size = new System.Drawing.Size(180, 42);
             this.btnSelectModel.TabIndex = 0;
             this.btnSelectModel.Text = "选择模型";
             this.btnSelectModel.UseVisualStyleBackColor = true;
             this.btnSelectModel.Click += new System.EventHandler(this.BtnSelectModel_Click);
-            
+            // 
             // btnSelectImage
-            this.btnSelectImage.Location = new System.Drawing.Point(150, 20);
+            // 
+            this.btnSelectImage.Location = new System.Drawing.Point(225, 28);
+            this.btnSelectImage.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnSelectImage.Name = "btnSelectImage";
-            this.btnSelectImage.Size = new System.Drawing.Size(120, 30);
+            this.btnSelectImage.Size = new System.Drawing.Size(180, 42);
             this.btnSelectImage.TabIndex = 1;
             this.btnSelectImage.Text = "选择图像";
             this.btnSelectImage.UseVisualStyleBackColor = true;
             this.btnSelectImage.Click += new System.EventHandler(this.BtnSelectImage_Click);
-            
+            // 
             // btnCheckServer
-            this.btnCheckServer.Location = new System.Drawing.Point(280, 20);
+            // 
+            this.btnCheckServer.Location = new System.Drawing.Point(420, 28);
+            this.btnCheckServer.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnCheckServer.Name = "btnCheckServer";
-            this.btnCheckServer.Size = new System.Drawing.Size(120, 30);
+            this.btnCheckServer.Size = new System.Drawing.Size(180, 42);
             this.btnCheckServer.TabIndex = 2;
             this.btnCheckServer.Text = "检查服务器";
             this.btnCheckServer.UseVisualStyleBackColor = true;
             this.btnCheckServer.Click += new System.EventHandler(this.BtnCheckServer_Click);
-            
+            // 
             // btnLoadModel
-            this.btnLoadModel.Location = new System.Drawing.Point(410, 20);
+            // 
+            this.btnLoadModel.Location = new System.Drawing.Point(615, 28);
+            this.btnLoadModel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnLoadModel.Name = "btnLoadModel";
-            this.btnLoadModel.Size = new System.Drawing.Size(120, 30);
+            this.btnLoadModel.Size = new System.Drawing.Size(180, 42);
             this.btnLoadModel.TabIndex = 3;
             this.btnLoadModel.Text = "加载模型";
             this.btnLoadModel.UseVisualStyleBackColor = true;
             this.btnLoadModel.Click += new System.EventHandler(this.BtnLoadModel_Click);
-            
+            // 
             // btnGetModelInfo
-            this.btnGetModelInfo.Location = new System.Drawing.Point(540, 20);
+            // 
+            this.btnGetModelInfo.Location = new System.Drawing.Point(810, 28);
+            this.btnGetModelInfo.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnGetModelInfo.Name = "btnGetModelInfo";
-            this.btnGetModelInfo.Size = new System.Drawing.Size(120, 30);
+            this.btnGetModelInfo.Size = new System.Drawing.Size(180, 42);
             this.btnGetModelInfo.TabIndex = 4;
             this.btnGetModelInfo.Text = "获取模型信息";
             this.btnGetModelInfo.UseVisualStyleBackColor = true;
             this.btnGetModelInfo.Click += new System.EventHandler(this.BtnGetModelInfo_Click);
-            
+            // 
             // btnInfer
-            this.btnInfer.Location = new System.Drawing.Point(20, 70);
+            // 
+            this.btnInfer.Location = new System.Drawing.Point(30, 97);
+            this.btnInfer.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnInfer.Name = "btnInfer";
-            this.btnInfer.Size = new System.Drawing.Size(120, 30);
+            this.btnInfer.Size = new System.Drawing.Size(180, 42);
             this.btnInfer.TabIndex = 5;
             this.btnInfer.Text = "单线程推理";
             this.btnInfer.UseVisualStyleBackColor = true;
             this.btnInfer.Click += new System.EventHandler(this.BtnInfer_Click);
-            
+            // 
             // btnPressureTest
-            this.btnPressureTest.Location = new System.Drawing.Point(150, 70);
+            // 
+            this.btnPressureTest.Location = new System.Drawing.Point(225, 97);
+            this.btnPressureTest.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnPressureTest.Name = "btnPressureTest";
-            this.btnPressureTest.Size = new System.Drawing.Size(120, 30);
+            this.btnPressureTest.Size = new System.Drawing.Size(180, 42);
             this.btnPressureTest.TabIndex = 6;
             this.btnPressureTest.Text = "多线程推理";
             this.btnPressureTest.UseVisualStyleBackColor = true;
             this.btnPressureTest.Click += new System.EventHandler(this.BtnPressureTest_Click);
-            
+            // 
             // txtThreads
-            this.txtThreads.Location = new System.Drawing.Point(280, 70);
+            // 
+            this.txtThreads.Location = new System.Drawing.Point(420, 97);
+            this.txtThreads.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.txtThreads.Name = "txtThreads";
-            this.txtThreads.Size = new System.Drawing.Size(50, 20);
+            this.txtThreads.Size = new System.Drawing.Size(73, 28);
             this.txtThreads.TabIndex = 7;
             this.txtThreads.Text = "5";
-            
-            // lblThreads
-            lblThreads.AutoSize = true;
-            lblThreads.Location = new System.Drawing.Point(340, 75);
-            lblThreads.Name = "lblThreads";
-            lblThreads.Size = new System.Drawing.Size(41, 13);
-            lblThreads.TabIndex = 8;
-            lblThreads.Text = "线程数";
-            
+            // 
             // txtRate
-            this.txtRate.Location = new System.Drawing.Point(400, 70);
+            // 
+            this.txtRate.Location = new System.Drawing.Point(600, 97);
+            this.txtRate.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.txtRate.Name = "txtRate";
-            this.txtRate.Size = new System.Drawing.Size(50, 20);
+            this.txtRate.Size = new System.Drawing.Size(73, 28);
             this.txtRate.TabIndex = 9;
             this.txtRate.Text = "10";
-            
-            // lblRate
-            lblRate.AutoSize = true;
-            lblRate.Location = new System.Drawing.Point(460, 75);
-            lblRate.Name = "lblRate";
-            lblRate.Size = new System.Drawing.Size(65, 13);
-            lblRate.TabIndex = 10;
-            lblRate.Text = "每秒请求数";
-            
+            // 
             // txtResult
-            this.txtResult.Location = new System.Drawing.Point(20, 120);
+            // 
+            this.txtResult.Location = new System.Drawing.Point(30, 166);
+            this.txtResult.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.txtResult.Name = "txtResult";
-            this.txtResult.Size = new System.Drawing.Size(640, 300);
-            this.txtResult.TabIndex = 11;
             this.txtResult.ReadOnly = true;
-            
+            this.txtResult.Size = new System.Drawing.Size(960, 489);
+            this.txtResult.TabIndex = 11;
+            this.txtResult.Text = "";
+            // 
+            // lblThreads
+            // 
+            this.lblThreads.AutoSize = true;
+            this.lblThreads.Location = new System.Drawing.Point(510, 104);
+            this.lblThreads.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblThreads.Name = "lblThreads";
+            this.lblThreads.Size = new System.Drawing.Size(62, 18);
+            this.lblThreads.TabIndex = 8;
+            this.lblThreads.Text = "线程数";
+            // 
+            // lblRate
+            // 
+            this.lblRate.AutoSize = true;
+            this.lblRate.Location = new System.Drawing.Point(690, 104);
+            this.lblRate.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblRate.Name = "lblRate";
+            this.lblRate.Size = new System.Drawing.Size(98, 18);
+            this.lblRate.TabIndex = 10;
+            this.lblRate.Text = "每秒请求数";
+            // 
             // Form1
-            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
+            // 
+            this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 18F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(700, 500);
-            
-            // 添加控件到窗体
+            this.ClientSize = new System.Drawing.Size(1050, 692);
             this.Controls.Add(this.btnSelectModel);
             this.Controls.Add(this.btnSelectImage);
             this.Controls.Add(this.btnCheckServer);
@@ -158,18 +180,19 @@
             this.Controls.Add(this.btnInfer);
             this.Controls.Add(this.btnPressureTest);
             this.Controls.Add(this.txtThreads);
-            this.Controls.Add(lblThreads);
+            this.Controls.Add(this.lblThreads);
             this.Controls.Add(this.txtRate);
-            this.Controls.Add(lblRate);
+            this.Controls.Add(this.lblRate);
             this.Controls.Add(this.txtResult);
-            
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
+            this.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.MaximizeBox = false;
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "DLCV HTTP API 测试工具";
             this.ResumeLayout(false);
             this.PerformLayout();
+
         }
 
         #endregion
@@ -185,5 +208,7 @@
         private System.Windows.Forms.TextBox txtThreads;
         private System.Windows.Forms.TextBox txtRate;
         private System.Windows.Forms.RichTextBox txtResult;
+        private System.Windows.Forms.Label lblThreads;
+        private System.Windows.Forms.Label lblRate;
     }
 }
