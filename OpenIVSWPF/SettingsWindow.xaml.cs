@@ -476,15 +476,8 @@ namespace OpenIVSWPF
             rbHardTrigger.IsChecked = !UseSoftTrigger;
 
             txtModelPath.Text = ModelPath;
-            // 设置模型类型
-            foreach (ComboBoxItem item in cbModelType.Items)
-            {
-                if (item.Content.ToString() == settings.ModelType)
-                {
-                    cbModelType.SelectedItem = item;
-                    break;
-                }
-            }
+            // 更新模型类型显示
+            UpdateModelTypeDisplay(ModelPath);
             
             txtSpeed.Text = Speed.ToString();
             txtTargetPosition.Text = TargetPosition.ToString();
@@ -504,6 +497,32 @@ namespace OpenIVSWPF
 
             // 根据是否使用本地文件夹更新UI状态
             UpdateImageSourceUI();
+        }
+        
+        /// <summary>
+        /// 根据文件扩展名更新模型类型显示
+        /// </summary>
+        private void UpdateModelTypeDisplay(string modelPath)
+        {
+            if (string.IsNullOrEmpty(modelPath))
+            {
+                txtModelType.Text = "（未选择模型）";
+                return;
+            }
+            
+            string extension = System.IO.Path.GetExtension(modelPath).ToLower();
+            if (extension == ".dvt")
+            {
+                txtModelType.Text = "DVT（高性能tensor推理接口）";
+            }
+            else if (extension == ".dvp")
+            {
+                txtModelType.Text = "DVP（本地AI-server接口）";
+            }
+            else
+            {
+                txtModelType.Text = "（未知模型格式）";
+            }
         }
 
         private void LoadSerialPorts()
@@ -632,30 +651,8 @@ namespace OpenIVSWPF
             {
                 txtModelPath.Text = dialog.FileName;
                 
-                // 根据文件扩展名自动设置模型类型
-                string extension = System.IO.Path.GetExtension(dialog.FileName).ToLower();
-                if (extension == ".dvt")
-                {
-                    foreach (ComboBoxItem item in cbModelType.Items)
-                    {
-                        if (item.Content.ToString() == "DVT")
-                        {
-                            cbModelType.SelectedItem = item;
-                            break;
-                        }
-                    }
-                }
-                else if (extension == ".dvp")
-                {
-                    foreach (ComboBoxItem item in cbModelType.Items)
-                    {
-                        if (item.Content.ToString() == "DVP")
-                        {
-                            cbModelType.SelectedItem = item;
-                            break;
-                        }
-                    }
-                }
+                // 更新模型类型显示
+                UpdateModelTypeDisplay(dialog.FileName);
             }
         }
 
@@ -722,6 +719,21 @@ namespace OpenIVSWPF
             if (string.IsNullOrEmpty(txtModelPath.Text))
             {
                 System.Windows.MessageBox.Show("请选择模型文件", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+            
+            // 检查模型文件是否存在
+            if (!File.Exists(txtModelPath.Text))
+            {
+                System.Windows.MessageBox.Show("模型文件不存在，请选择有效的模型文件", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+            
+            // 检查模型文件类型
+            string extension = System.IO.Path.GetExtension(txtModelPath.Text).ToLower();
+            if (extension != ".dvt" && extension != ".dvp")
+            {
+                System.Windows.MessageBox.Show("不支持的模型文件格式，请选择.dvt或.dvp格式的模型文件", "验证错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
@@ -864,10 +876,20 @@ namespace OpenIVSWPF
 
             // 模型设置
             settings.ModelPath = txtModelPath.Text;
-            // 保存模型类型
-            if (cbModelType.SelectedItem != null)
+            // 根据文件扩展名自动设置模型类型
+            string extension = System.IO.Path.GetExtension(settings.ModelPath).ToLower();
+            if (extension == ".dvt")
             {
-                settings.ModelType = ((ComboBoxItem)cbModelType.SelectedItem).Content.ToString();
+                settings.ModelType = "DVT";
+            }
+            else if (extension == ".dvp")
+            {
+                settings.ModelType = "DVP";
+            }
+            else
+            {
+                // 默认为DVT
+                settings.ModelType = "DVT";
             }
 
             // 设备设置

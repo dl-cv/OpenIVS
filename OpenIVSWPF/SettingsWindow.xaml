@@ -209,10 +209,7 @@
                     <Button Grid.Row="0" Grid.Column="2" x:Name="btnBrowseModel" Content="浏览..." Margin="5,5,0,5" Padding="10,0" Click="btnBrowseModel_Click"/>
                     
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="模型类型:" Margin="0,5,10,5" VerticalAlignment="Center"/>
-                    <ComboBox Grid.Row="1" Grid.Column="1" x:Name="cbModelType" Margin="0,5">
-                        <ComboBoxItem Content="DVT" IsSelected="True"/>
-                        <ComboBoxItem Content="DVP"/>
-                    </ComboBox>
+                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="txtModelType" Text="（自动识别）" Margin="0,5" VerticalAlignment="Center"/>
                 </Grid>
             </TabItem>
 
