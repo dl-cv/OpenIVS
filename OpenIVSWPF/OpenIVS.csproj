@@ -140,11 +140,15 @@
     </ProjectReference>
     <ProjectReference Include="..\ImageViewer\ImageViewer.csproj">
       <Project>{e11ddcc6-84d1-4caf-9534-2266651e7787}</Project>
-      <Name>ImageViewer</Name>
+      <n>ImageViewer</n>
     </ProjectReference>
     <ProjectReference Include="..\ModbusApi\ModbusApi.csproj">
       <Project>{70a89ce8-ade7-42df-9762-19a896be3c1f}</Project>
-      <Name>ModbusApi</Name>
+      <n>ModbusApi</n>
+    </ProjectReference>
+    <ProjectReference Include="..\DlcvHttpApi\DlcvHttpApi.csproj">
+      <Project>{C686627C-02CE-4131-BAB0-FF1841BDEE71}</Project>
+      <n>DlcvHttpApi</n>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

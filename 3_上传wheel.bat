@@ -1,2 +1,2 @@
-twine upload -r dlcv dist/*
+twine upload -r dlcvpro dist/*
 pause

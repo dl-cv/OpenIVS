@@ -77,9 +77,9 @@ namespace DLCV
             {
                 using (var client = new TcpClient())
                 {
-                    // 尝试连接指定端口，超时设置为2秒
+                    // 尝试连接指定端口，超时设置为0.5秒
                     var result = client.BeginConnect("127.0.0.1", port, null, null);
-                    var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2));
+                    var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(0.5));
 
                     if (!success)
                     {
@@ -279,6 +279,220 @@ namespace DLCV
         public Task<Utils.CSharpResult> InferCustomFormatAsync<TInput>(TInput input, string modelPath)
         {
             throw new NotImplementedException("自定义格式推理接口尚未实现");
+        }
+
+        /// <summary>
+        /// 加载模型到服务器
+        /// </summary>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>返回模型加载结果，包含model_index等信息</returns>
+        public JObject LoadModel(string modelPath)
+        {
+            ThrowIfDisposed();
+
+            if (!_isConnected)
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
+
+            if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
+                throw new ArgumentException("模型文件路径无效或文件不存在", nameof(modelPath));
+
+            try
+            {
+                var client = GetHttpClient();
+                
+                // 使用URL查询参数，与Python调用保持一致
+                string url = $"{_serverUrl}/load_model?model_path={Uri.EscapeDataString(modelPath)}";
+                
+                // 使用空内容发送POST请求
+                var content = new StringContent("", System.Text.Encoding.UTF8, "application/json");
+                var response = client.PostAsync(url, content).GetAwaiter().GetResult();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    HandleErrorResponse(response.StatusCode);
+                }
+
+                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var jsonResult = JObject.Parse(responseString);
+
+                if (jsonResult["code"]?.ToString() != "00000")
+                {
+                    throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
+                }
+
+                return jsonResult;
+            }
+            catch (Exception ex)
+            {
+                if (ex is DlcvApiException)
+                    throw;
+
+                throw new DlcvApiException("加载模型请求处理失败", ex);
+            }
+        }
+
+        /// <summary>
+        /// 异步加载模型到服务器（保留以兼容现有代码）
+        /// </summary>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>返回模型加载结果任务</returns>
+        public Task<JObject> LoadModelAsync(string modelPath)
+        {
+            return Task.FromResult(LoadModel(modelPath));
+        }
+
+        /// <summary>
+        /// 获取已加载模型的信息
+        /// </summary>
+        /// <param name="modelIndex">模型索引，通过LoadModel方法获取</param>
+        /// <returns>返回模型信息</returns>
+        public JObject GetModelInfo(int modelIndex)
+        {
+            ThrowIfDisposed();
+
+            if (!_isConnected)
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
+
+            if (modelIndex < 0)
+                throw new ArgumentException("模型索引无效", nameof(modelIndex));
+
+            try
+            {
+                var client = GetHttpClient();
+                
+                // 使用GET请求和查询参数，与Python调用保持一致
+                string url = $"{_serverUrl}/get_model_info?model_index={modelIndex}";
+                var response = client.GetAsync(url).GetAwaiter().GetResult();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    HandleErrorResponse(response.StatusCode);
+                }
+
+                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var jsonResult = JObject.Parse(responseString);
+
+                if (jsonResult["code"]?.ToString() != "00000")
+                {
+                    throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
+                }
+
+                return jsonResult;
+            }
+            catch (Exception ex)
+            {
+                if (ex is DlcvApiException)
+                    throw;
+
+                throw new DlcvApiException("获取模型信息请求处理失败", ex);
+            }
+        }
+
+        /// <summary>
+        /// 异步获取已加载模型的信息（保留以兼容现有代码）
+        /// </summary>
+        /// <param name="modelIndex">模型索引，通过LoadModel方法获取</param>
+        /// <returns>返回模型信息任务</returns>
+        public Task<JObject> GetModelInfoAsync(int modelIndex)
+        {
+            return Task.FromResult(GetModelInfo(modelIndex));
+        }
+
+        /// <summary>
+        /// 获取模型文件的信息，无需先加载模型
+        /// </summary>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>返回模型信息</returns>
+        public JObject GetModelInfo(string modelPath)
+        {
+            ThrowIfDisposed();
+
+            if (!_isConnected)
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
+
+            if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
+                throw new ArgumentException("模型文件路径无效或文件不存在", nameof(modelPath));
+
+            // 创建请求
+            var request = new
+            {
+                model_path = modelPath
+            };
+
+            try
+            {
+                var client = GetHttpClient();
+                
+                // 根据后端代码，get_model_info是GET请求，需要使用查询参数
+                string url = $"{_serverUrl}/get_model_info?model_path={Uri.EscapeDataString(modelPath)}";
+                var response = client.GetAsync(url).GetAwaiter().GetResult();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    HandleErrorResponse(response.StatusCode);
+                }
+
+                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var jsonResult = JObject.Parse(responseString);
+
+                if (jsonResult["code"]?.ToString() != "00000")
+                {
+                    throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
+                }
+
+                return jsonResult;
+            }
+            catch (Exception ex)
+            {
+                if (ex is DlcvApiException)
+                    throw;
+
+                throw new DlcvApiException("获取模型信息请求处理失败", ex);
+            }
+        }
+
+        /// <summary>
+        /// 异步获取模型文件的信息（保留以兼容现有代码）
+        /// </summary>
+        /// <param name="modelPath">模型文件路径</param>
+        /// <returns>返回模型信息任务</returns>
+        public Task<JObject> GetModelInfoAsync(string modelPath)
+        {
+            return Task.FromResult(GetModelInfo(modelPath));
+        }
+
+        /// <summary>
+        /// 使用已加载的模型索引进行图像推理
+        /// </summary>
+        /// <param name="imagePath">图像文件路径</param>
+        /// <param name="modelIndex">模型索引，通过LoadModel获取</param>
+        /// <returns>推理结果</returns>
+        public Utils.CSharpResult InferImageWithModelIndex(string imagePath, int modelIndex)
+        {
+            ThrowIfDisposed();
+
+            if (!_isConnected)
+                throw new InvalidOperationException("未连接到服务器，请先调用Connect()方法");
+
+            if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
+                throw new ArgumentException("图像文件路径无效或文件不存在", nameof(imagePath));
+
+            if (modelIndex < 0)
+                throw new ArgumentException("模型索引无效", nameof(modelIndex));
+
+            // 将图像转换为Base64
+            byte[] imageBytes = File.ReadAllBytes(imagePath);
+            string base64Image = Convert.ToBase64String(imageBytes);
+
+            // 创建请求，使用模型索引代替模型路径
+            var request = new
+            {
+                img = base64Image,
+                model_index = modelIndex
+            };
+
+            // 发送请求
+            return SendInferenceRequest(request);
         }
 
         #endregion
