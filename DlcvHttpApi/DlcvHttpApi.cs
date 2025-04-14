@@ -77,9 +77,9 @@ namespace DLCV
             {
                 using (var client = new TcpClient())
                 {
-                    // 尝试连接指定端口，超时设置为2秒
+                    // 尝试连接指定端口，超时设置为0.5秒
                     var result = client.BeginConnect("127.0.0.1", port, null, null);
-                    var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2));
+                    var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(0.5));
 
                     if (!success)
                     {

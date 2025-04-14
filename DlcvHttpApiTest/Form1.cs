@@ -126,17 +126,9 @@ namespace DlcvHttpApiTest
                 // 如果模型已加载，使用索引进行推理，否则使用模型路径
                 dlcv_infer_csharp.Utils.CSharpResult result;
 
-                if (_loadedModelIndex >= 0)
-                {
-                    LogMessage($"使用已加载的模型进行推理 (模型索引: {_loadedModelIndex})");
-                    result = _api.InferImageWithModelIndex(_imagePath, _loadedModelIndex);
-                }
-                else
-                {
-                    LogMessage("使用模型路径进行推理");
-                    result = _api.InferImage(_imagePath, _modelPath);
-                }
-                
+                LogMessage("使用模型路径进行推理");
+                result = _api.InferImage(_imagePath, _modelPath);
+
                 sw.Stop();
                 
                 DisplayResult(result, sw.ElapsedMilliseconds);
