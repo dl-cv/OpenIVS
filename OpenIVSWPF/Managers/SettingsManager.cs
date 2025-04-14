@@ -123,6 +123,7 @@ namespace OpenIVSWPF.Managers
 
                 // 加载模型设置
                 Settings.ModelPath = GetSettingValue(root, "ModelPath", Settings.ModelPath);
+                Settings.ModelType = GetSettingValue(root, "ModelType", Settings.ModelType);
 
                 // 加载设备设置
                 Settings.Speed = float.Parse(GetSettingValue(root, "Speed", Settings.Speed.ToString()));
@@ -212,6 +213,7 @@ namespace OpenIVSWPF.Managers
 
                 // 保存模型设置
                 SetSettingValue(doc, root, "ModelPath", Settings.ModelPath);
+                SetSettingValue(doc, root, "ModelType", Settings.ModelType);
 
                 // 保存设备设置
                 SetSettingValue(doc, root, "Speed", Settings.Speed.ToString());
@@ -283,6 +285,7 @@ namespace OpenIVSWPF.Managers
 
         // 模型设置
         public string ModelPath { get; set; }
+        public string ModelType { get; set; } // 模型类型：DVT 或 DVP
 
         // 设备设置
         public float Speed { get; set; }
@@ -321,6 +324,7 @@ namespace OpenIVSWPF.Managers
             LoopLocalImages = true; // 默认循环遍历
 
             ModelPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "default.dvt");
+            ModelType = "DVT";
 
             Speed = 100.0f;
             TargetPosition = 200.0f;
