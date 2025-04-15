@@ -11,13 +11,13 @@ namespace sntl_admin_csharp
     public enum SntlAdminStatus
     {
         SNTL_ADMIN_STATUS_OK = 0,
-        SNTL_ADMIN_INSUF_MEM = 1,
-        SNTL_ADMIN_INVALID_CONTEXT = 2,
-        SNTL_ADMIN_LM_NOT_FOUND = 3,
-        SNTL_ADMIN_LM_TOO_OLD = 4,
-        SNTL_ADMIN_BAD_PARAMETERS = 5,
-        SNTL_ADMIN_LOCAL_NETWORK_ERR = 6,
-        SNTL_ADMIN_CANNOT_READ_FILE = 7
+        SNTL_ADMIN_INSUF_MEM = 3,
+        SNTL_ADMIN_INVALID_CONTEXT = 6001,
+        SNTL_ADMIN_LM_NOT_FOUND = 6002,
+        SNTL_ADMIN_LM_TOO_OLD = 6003,
+        SNTL_ADMIN_BAD_PARAMETERS = 6004,
+        SNTL_ADMIN_LOCAL_NETWORK_ERR = 6005,
+        SNTL_ADMIN_CANNOT_READ_FILE = 6006
     }
 
     public class SNTLDllLoader
