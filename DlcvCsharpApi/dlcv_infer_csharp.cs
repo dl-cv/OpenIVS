@@ -4,14 +4,17 @@ using System.Runtime.InteropServices;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
-
+using sntl_admin_csharp;
+using System.Linq;
 
 namespace dlcv_infer_csharp
 {
     public class DllLoader
     {
-        private const string DllName = "dlcv_infer.dll";
-        private const string DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll";
+        private string DllName = "dlcv_infer.dll";
+        private string DllName2 = "dlcv_infer2.dll";
+        private string DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll";
+        private string DllPath2 = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer2.dll";
         private const CallingConvention calling_method = CallingConvention.StdCall;
 
         // 定义导入方法的委托
@@ -49,6 +52,19 @@ namespace dlcv_infer_csharp
 
         private void LoadDll()
         {
+            SNTL sNTL = new SNTL();
+            var feature_list = sNTL.GetFeatureList();
+
+            if (feature_list.Any(item => item.ToString() == "1"))
+            {
+
+            }
+            else if (feature_list.Any(item => item.ToString() == "2"))
+            {
+                DllName = DllName2;
+                DllPath = DllPath2;
+            }
+
             IntPtr hModule = LoadLibrary(DllName);
             if (hModule == IntPtr.Zero)
             {
