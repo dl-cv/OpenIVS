@@ -206,11 +206,21 @@ namespace demo
             try
             {
                 // 执行批量推理
-                model.InferBatch((List<Mat>)parameter);
+                var result = model.InferBatch((List<Mat>)parameter);
+                
+                // InferBatch方法内部已经检查了code并抛出异常，
+                // 如果执行到这里就说明推理成功了
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("模型推理出错: " + ex.Message);
+                // 向主线程报告错误
+                Invoke((MethodInvoker)delegate
+                {
+                    StopPressureTest();
+                    MessageBox.Show($"压力测试过程中发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    richTextBox1.Text = $"推理错误: {ex.Message}";
+                });
             }
         }
 

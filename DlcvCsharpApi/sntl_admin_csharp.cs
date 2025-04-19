@@ -262,6 +262,54 @@ namespace sntl_admin_csharp
             }
         }
 
+        /// <summary>
+        /// 获取特性ID和对应的HASP ID列表
+        /// </summary>
+        /// <returns>包含特性ID和HASP ID列表的对象</returns>
+        public JArray GetFeatureList()
+        {
+            JArray featureList = new JArray();
+
+            // 使用特性格式XML
+            string scope = SNTLUtils.DefaultScope;
+            string format = SNTLUtils.FeatureIdFormat;
+
+            // 获取特性信息
+            JObject sntlInfo = Get(scope, format);
+
+            // 检查是否获取成功
+            if (sntlInfo["code"].Value<int>() != 0)
+            {
+                return featureList; // 如果失败，直接返回空列表
+            }
+
+            try
+            {
+                // 获取feature节点
+                JToken featureNode = sntlInfo["data"]["admin_response"]["feature"];
+
+                // 处理单个特性的情况
+                if (featureNode is JObject)
+                {
+                    featureList.Add(featureNode["featureid"].ToString());
+                }
+                // 处理多个特性的情况
+                else if (featureNode is JArray featureArray)
+                {
+                    foreach (var feature in featureArray)
+                    {
+                        featureList.Add(feature["featureid"].ToString());
+                    }
+                }
+
+                return featureList;
+            }
+            catch (Exception ex)
+            {
+                return featureList;
+            }
+        }
+
         #region IDisposable Support
         protected virtual void Dispose(bool disposing)
         {
@@ -316,12 +364,32 @@ namespace sntl_admin_csharp
             "  </hasp>" +
             "</admin>";
 
+        /// <summary>
+        /// 获取特性ID和HASP ID的格式XML
+        /// </summary>
+        public static string FeatureIdFormat =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>" +
+            "<admin>" +
+            "  <feature>" +
+            "    <element name=\"featureid\"/>" +
+            "    <element name=\"haspid\"/>" +
+            "  </feature>" +
+            "</admin>";
+
         public static JArray GetDeviceList()
         {
             SNTL sntl = new SNTL();
             JArray deviceList = sntl.GetDeviceList();
             sntl.Dispose();
             return deviceList;
+        }
+
+        public static JArray GetFeatureList()
+        {
+            SNTL sntl = new SNTL();
+            JArray featureList = sntl.GetFeatureList();
+            sntl.Dispose();
+            return featureList;
         }
     }
 }
