@@ -273,7 +273,7 @@ namespace sntl_admin_csharp
             // 使用特性格式XML
             string scope = SNTLUtils.DefaultScope;
             string format = SNTLUtils.FeatureIdFormat;
-            
+
             // 获取特性信息
             JObject sntlInfo = Get(scope, format);
 
@@ -291,24 +291,14 @@ namespace sntl_admin_csharp
                 // 处理单个特性的情况
                 if (featureNode is JObject)
                 {
-                    JObject featureObj = new JObject
-                    {
-                        ["featureid"] = featureNode["featureid"].ToString(),
-                        ["haspid"] = featureNode["haspid"].ToString()
-                    };
-                    featureList.Add(featureObj);
+                    featureList.Add(featureNode["featureid"].ToString());
                 }
                 // 处理多个特性的情况
                 else if (featureNode is JArray featureArray)
                 {
                     foreach (var feature in featureArray)
                     {
-                        JObject featureObj = new JObject
-                        {
-                            ["featureid"] = feature["featureid"].ToString(),
-                            ["haspid"] = feature["haspid"].ToString()
-                        };
-                        featureList.Add(featureObj);
+                        featureList.Add(feature["featureid"].ToString());
                     }
                 }
 
