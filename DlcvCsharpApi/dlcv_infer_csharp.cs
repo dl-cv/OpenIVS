@@ -52,17 +52,24 @@ namespace dlcv_infer_csharp
 
         private void LoadDll()
         {
-            SNTL sNTL = new SNTL();
-            var feature_list = sNTL.GetFeatureList();
+            JArray feature_list = new JArray();
+            try{
+                SNTL sNTL = new SNTL();
+                feature_list = sNTL.GetFeatureList();
 
-            if (feature_list.Any(item => item.ToString() == "1"))
-            {
+                if (feature_list.Any(item => item.ToString() == "1"))
+                {
 
+                }
+                else if (feature_list.Any(item => item.ToString() == "2"))
+                {
+                    DllName = DllName2;
+                    DllPath = DllPath2;
+                }
             }
-            else if (feature_list.Any(item => item.ToString() == "2"))
+            catch (Exception ex)
             {
-                DllName = DllName2;
-                DllPath = DllPath2;
+                // 如果获取特征列表失败，则使用默认的 DLL 路径
             }
 
             IntPtr hModule = LoadLibrary(DllName);
