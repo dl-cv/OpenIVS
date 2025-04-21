@@ -52,6 +52,8 @@ namespace sntl_admin_csharp
                 hModule = LoadLibrary(DllPath);
                 if (hModule == IntPtr.Zero)
                 {
+                    // DLL加载失败，创建空的代理方法
+                    CreateEmptyDelegates();
                     //throw new Exception("无法加载 SNTL DLL");
                 }
                 else
@@ -63,11 +65,39 @@ namespace sntl_admin_csharp
                     sntl_admin_free = GetDelegate<SntlAdminFreeDelegate>(hModule, "sntl_admin_free");
                 }
             }
+            else
+            {
+                // 获取函数指针
+                sntl_admin_context_new = GetDelegate<SntlAdminContextNewDelegate>(hModule, "sntl_admin_context_new");
+                sntl_admin_context_delete = GetDelegate<SntlAdminContextDeleteDelegate>(hModule, "sntl_admin_context_delete");
+                sntl_admin_get = GetDelegate<SntlAdminGetDelegate>(hModule, "sntl_admin_get");
+                sntl_admin_free = GetDelegate<SntlAdminFreeDelegate>(hModule, "sntl_admin_free");
+            }
+        }
+
+        // 创建空的代理方法，以便即使DLL加载失败也不会返回null
+        private void CreateEmptyDelegates()
+        {
+            sntl_admin_context_new = (ref IntPtr context, string hostname, ushort port, string password) =>
+                (int)SntlAdminStatus.SNTL_ADMIN_LM_NOT_FOUND;
+
+            sntl_admin_context_delete = (IntPtr context) =>
+                (int)SntlAdminStatus.SNTL_ADMIN_STATUS_OK;
+
+            sntl_admin_get = (IntPtr context, string scope, string format, ref IntPtr info) =>
+                (int)SntlAdminStatus.SNTL_ADMIN_LM_NOT_FOUND;
+
+            sntl_admin_free = (IntPtr info) => { };
         }
 
         private T GetDelegate<T>(IntPtr hModule, string procedureName) where T : Delegate
         {
             IntPtr pAddressOfFunctionToCall = GetProcAddress(hModule, procedureName);
+            if (pAddressOfFunctionToCall == IntPtr.Zero)
+            {
+                // 如果函数指针获取失败，返回null
+                return null;
+            }
             return (T)Marshal.GetDelegateForFunctionPointer(pAddressOfFunctionToCall, typeof(T));
         }
 
@@ -99,14 +129,11 @@ namespace sntl_admin_csharp
         /// <param name="password">密码</param>
         public SNTL(string hostname = "", ushort port = 0, string password = "")
         {
-            if (SNTLDllLoader.Instance.sntl_admin_context_new != null)
-            {
-                int status = SNTLDllLoader.Instance.sntl_admin_context_new(ref _context, hostname, port, password);
+            int status = SNTLDllLoader.Instance.sntl_admin_context_new(ref _context, hostname, port, password);
 
-                if (status != (int)SntlAdminStatus.SNTL_ADMIN_STATUS_OK)
-                {
-                    throw new Exception($"初始化SNTL失败，错误码：{status}，{GetStatusDescription(status)}");
-                }
+            if (status != (int)SntlAdminStatus.SNTL_ADMIN_STATUS_OK)
+            {
+                throw new Exception($"初始化SNTL失败，错误码：{status}，{GetStatusDescription(status)}");
             }
         }
 
@@ -229,11 +256,6 @@ namespace sntl_admin_csharp
         {
             JArray deviceList = new JArray();
 
-            if (SNTLDllLoader.Instance.sntl_admin_get == null)
-            {
-                return deviceList;
-            }
-
             // 获取加密狗信息
             JObject sntlInfo = GetSntlInfo();
 
@@ -279,11 +301,6 @@ namespace sntl_admin_csharp
         public JArray GetFeatureList()
         {
             JArray featureList = new JArray();
-
-            if(SNTLDllLoader.Instance.sntl_admin_get == null)
-            {
-                return featureList;
-            }
 
             // 使用特性格式XML
             string scope = SNTLUtils.DefaultScope;
@@ -400,7 +417,8 @@ namespace sntl_admin_csharp
                 sntl.Dispose();
                 return deviceList;
             }
-            catch {
+            catch
+            {
                 return new JArray();
             }
         }
