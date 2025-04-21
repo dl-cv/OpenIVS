@@ -42,19 +42,21 @@
             this.tabImage = new System.Windows.Forms.TabPage();
             this.tabCamera = new System.Windows.Forms.TabPage();
             this.groupCameraControl = new System.Windows.Forms.GroupBox();
-            this.lblCameraInterface = new System.Windows.Forms.Label();
-            this.cmbCameraInterface = new System.Windows.Forms.ComboBox();
-            this.btnRefreshCameras = new System.Windows.Forms.Button();
-            this.lblCameraDevice = new System.Windows.Forms.Label();
-            this.cmbCameraDevice = new System.Windows.Forms.ComboBox();
-            this.btnConnectCamera = new System.Windows.Forms.Button();
-            this.btnStartLive = new System.Windows.Forms.Button();
             this.btnInferLive = new System.Windows.Forms.Button();
+            this.btnStartLive = new System.Windows.Forms.Button();
+            this.btnConnectCamera = new System.Windows.Forms.Button();
+            this.cmbCameraDevice = new System.Windows.Forms.ComboBox();
+            this.lblCameraDevice = new System.Windows.Forms.Label();
+            this.btnRefreshCameras = new System.Windows.Forms.Button();
+            this.cmbCameraInterface = new System.Windows.Forms.ComboBox();
+            this.lblCameraInterface = new System.Windows.Forms.Label();
+            this.panelTop = new System.Windows.Forms.Panel();
             this.panel1.SuspendLayout();
             this.tabControl.SuspendLayout();
             this.tabImage.SuspendLayout();
             this.tabCamera.SuspendLayout();
             this.groupCameraControl.SuspendLayout();
+            this.panelTop.SuspendLayout();
             this.SuspendLayout();
             // 
             // hWindowControl
@@ -65,12 +67,12 @@
             this.hWindowControl.BackColor = System.Drawing.Color.Black;
             this.hWindowControl.BorderColor = System.Drawing.Color.Black;
             this.hWindowControl.ImagePart = new System.Drawing.Rectangle(0, 0, 640, 480);
-            this.hWindowControl.Location = new System.Drawing.Point(12, 12);
+            this.hWindowControl.Location = new System.Drawing.Point(12, 61);
             this.hWindowControl.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.hWindowControl.Name = "hWindowControl";
-            this.hWindowControl.Size = new System.Drawing.Size(776, 323);
+            this.hWindowControl.Size = new System.Drawing.Size(776, 274);
             this.hWindowControl.TabIndex = 0;
-            this.hWindowControl.WindowSize = new System.Drawing.Size(776, 323);
+            this.hWindowControl.WindowSize = new System.Drawing.Size(776, 274);
             this.hWindowControl.SizeChanged += new System.EventHandler(this.hWindowControl_SizeChanged);
             this.hWindowControl.MouseWheel += new System.Windows.Forms.MouseEventHandler(this.hWindowControl_MouseWheel);
             // 
@@ -88,9 +90,9 @@
             // btnSelectModel
             // 
             this.btnSelectModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnSelectModel.Location = new System.Drawing.Point(604, 14);
+            this.btnSelectModel.Location = new System.Drawing.Point(685, 15);
             this.btnSelectModel.Name = "btnSelectModel";
-            this.btnSelectModel.Size = new System.Drawing.Size(75, 23);
+            this.btnSelectModel.Size = new System.Drawing.Size(85, 23);
             this.btnSelectModel.TabIndex = 2;
             this.btnSelectModel.Text = "选择模型";
             this.btnSelectModel.UseVisualStyleBackColor = true;
@@ -99,7 +101,7 @@
             // btnInfer
             // 
             this.btnInfer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnInfer.Location = new System.Drawing.Point(675, 44);
+            this.btnInfer.Location = new System.Drawing.Point(685, 44);
             this.btnInfer.Name = "btnInfer";
             this.btnInfer.Size = new System.Drawing.Size(85, 23);
             this.btnInfer.TabIndex = 3;
@@ -119,7 +121,7 @@
             // lblModelPath
             // 
             this.lblModelPath.AutoSize = true;
-            this.lblModelPath.Location = new System.Drawing.Point(6, 19);
+            this.lblModelPath.Location = new System.Drawing.Point(12, 18);
             this.lblModelPath.Name = "lblModelPath";
             this.lblModelPath.Size = new System.Drawing.Size(65, 12);
             this.lblModelPath.TabIndex = 5;
@@ -138,9 +140,9 @@
             // 
             this.txtModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtModelPath.Location = new System.Drawing.Point(77, 15);
+            this.txtModelPath.Location = new System.Drawing.Point(83, 15);
             this.txtModelPath.Name = "txtModelPath";
-            this.txtModelPath.Size = new System.Drawing.Size(521, 21);
+            this.txtModelPath.Size = new System.Drawing.Size(596, 21);
             this.txtModelPath.TabIndex = 7;
             // 
             // panel1
@@ -205,7 +207,8 @@
             // 
             // groupCameraControl
             // 
-            this.groupCameraControl.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            this.groupCameraControl.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.groupCameraControl.Controls.Add(this.btnInferLive);
             this.groupCameraControl.Controls.Add(this.btnStartLive);
@@ -262,16 +265,19 @@
             // 
             // cmbCameraDevice
             // 
+            this.cmbCameraDevice.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbCameraDevice.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbCameraDevice.FormattingEnabled = true;
             this.cmbCameraDevice.Location = new System.Drawing.Point(272, 21);
             this.cmbCameraDevice.Name = "cmbCameraDevice";
-            this.cmbCameraDevice.Size = new System.Drawing.Size(257, 20);
+            this.cmbCameraDevice.Size = new System.Drawing.Size(217, 20);
             this.cmbCameraDevice.TabIndex = 4;
             // 
             // btnConnectCamera
             // 
-            this.btnConnectCamera.Location = new System.Drawing.Point(535, 20);
+            this.btnConnectCamera.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnConnectCamera.Location = new System.Drawing.Point(495, 20);
             this.btnConnectCamera.Name = "btnConnectCamera";
             this.btnConnectCamera.Size = new System.Drawing.Size(75, 23);
             this.btnConnectCamera.TabIndex = 5;
@@ -281,8 +287,9 @@
             // 
             // btnStartLive
             // 
+            this.btnStartLive.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnStartLive.Enabled = false;
-            this.btnStartLive.Location = new System.Drawing.Point(616, 20);
+            this.btnStartLive.Location = new System.Drawing.Point(576, 20);
             this.btnStartLive.Name = "btnStartLive";
             this.btnStartLive.Size = new System.Drawing.Size(75, 23);
             this.btnStartLive.TabIndex = 6;
@@ -292,26 +299,37 @@
             // 
             // btnInferLive
             // 
+            this.btnInferLive.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnInferLive.Enabled = false;
-            this.btnInferLive.Location = new System.Drawing.Point(697, 20);
+            this.btnInferLive.Location = new System.Drawing.Point(657, 20);
             this.btnInferLive.Name = "btnInferLive";
-            this.btnInferLive.Size = new System.Drawing.Size(75, 23);
+            this.btnInferLive.Size = new System.Drawing.Size(85, 23);
             this.btnInferLive.TabIndex = 7;
             this.btnInferLive.Text = "实时推理";
             this.btnInferLive.UseVisualStyleBackColor = true;
             this.btnInferLive.Click += new System.EventHandler(this.btnInferLive_Click);
+            // 
+            // panelTop
+            // 
+            this.panelTop.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.panelTop.Controls.Add(this.lblModelPath);
+            this.panelTop.Controls.Add(this.txtModelPath);
+            this.panelTop.Controls.Add(this.btnSelectModel);
+            this.panelTop.Controls.Add(this.btnInfer);
+            this.panelTop.Location = new System.Drawing.Point(12, 12);
+            this.panelTop.Name = "panelTop";
+            this.panelTop.Size = new System.Drawing.Size(776, 44);
+            this.panelTop.TabIndex = 9;
             // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(800, 480);
+            this.Controls.Add(this.panelTop);
             this.Controls.Add(this.panel1);
             this.Controls.Add(this.hWindowControl);
-            this.Controls.Add(this.btnInfer);
-            this.Controls.Add(this.btnSelectModel);
-            this.Controls.Add(this.txtModelPath);
-            this.Controls.Add(this.lblModelPath);
             this.MinimumSize = new System.Drawing.Size(816, 519);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
@@ -326,6 +344,8 @@
             this.tabCamera.ResumeLayout(false);
             this.groupCameraControl.ResumeLayout(false);
             this.groupCameraControl.PerformLayout();
+            this.panelTop.ResumeLayout(false);
+            this.panelTop.PerformLayout();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -355,6 +375,7 @@
         private System.Windows.Forms.Button btnRefreshCameras;
         private System.Windows.Forms.ComboBox cmbCameraInterface;
         private System.Windows.Forms.Label lblCameraInterface;
+        private System.Windows.Forms.Panel panelTop;
     }
 }
 
