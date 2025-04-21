@@ -6,6 +6,7 @@ using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using System.IO;
 using System.Runtime.InteropServices; // 添加此行用于DllImport
+using System.Collections.Generic; // 添加此行用于List
 
 namespace HalconDemo
 {
@@ -16,6 +17,14 @@ namespace HalconDemo
         private string currentModelPath = ""; // 当前模型路径
         private Model model = null; // DLCV模型对象
         private int deviceId = 0;  // 默认使用GPU 0
+
+        // 摄像机相关变量
+        private HTuple acqHandle = null; // 采集设备句柄
+        private bool isLiveMode = false; // 是否处于实时模式
+        private bool isInferenceEnabled = false; // 是否启用实时推理
+        private Timer liveTimer = null; // 实时显示定时器
+        private List<string> availableCameras = new List<string>(); // 可用摄像机列表
+        private string currentCameraType = ""; // 当前摄像机类型
 
         // 保存原始图像尺寸
         private int imageWidth = 0;
@@ -31,11 +40,284 @@ namespace HalconDemo
             // 初始化Halcon图像对象
             halconImage = new HObject();
 
+            // 初始化实时显示定时器
+            liveTimer = new Timer();
+            liveTimer.Interval = 50; // 20帧每秒
+            liveTimer.Tick += LiveTimer_Tick;
+
             // 设置异常处理
             AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
             {
                 MessageBox.Show($"发生未处理的异常：{e.ExceptionObject}", "严重错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             };
+        }
+
+        // 表单关闭事件
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            // 停止实时采集
+            StopLiveAcquisition();
+
+            // 关闭摄像机
+            CloseCamera();
+
+            base.OnFormClosing(e);
+        }
+
+        // 获取可用的摄像机接口
+        private void GetAvailableCameraInterfaces()
+        {
+            try
+            {
+                HTuple interfaces = null;
+                HTuple values = null;
+
+                // 尝试获取所有可用的接口
+                try
+                {
+                    HOperatorSet.InfoFramegrabber("all", "info_boards", out interfaces, out values);
+                }
+                catch (HalconDotNet.HOperatorException)
+                {
+                    // 如果"all"不起作用，则尝试常见的接口类型
+                    List<string> commonInterfaces = new List<string>
+                    {
+                        "GigEVision", "GigEVision2", "USB3Vision", "DirectShow", "File",
+                        "GenICam", "GenTL", "HALCON", "HDS", "PYLON"
+                    };
+
+                    // 更新下拉框
+                    cmbCameraInterface.Items.Clear();
+                    availableCameras.Clear();
+
+                    foreach (string interfaceName in commonInterfaces)
+                    {
+                        try
+                        {
+                            HOperatorSet.InfoFramegrabber(interfaceName, "info_boards", out HTuple info, out HTuple vals);
+                            if (info != null && info.Length > 0)
+                            {
+                                cmbCameraInterface.Items.Add(interfaceName);
+                                availableCameras.Add(interfaceName);
+                            }
+                        }
+                        catch (HalconDotNet.HOperatorException)
+                        {
+                            // 忽略不支持的接口
+                        }
+                    }
+
+                    if (cmbCameraInterface.Items.Count > 0)
+                    {
+                        cmbCameraInterface.SelectedIndex = 0;
+                    }
+                    return;
+                }
+
+                // 更新下拉框
+                cmbCameraInterface.Items.Clear();
+                availableCameras.Clear();
+
+                if (interfaces != null && interfaces.Length > 0)
+                {
+                    for (int i = 0; i < interfaces.Length; i++)
+                    {
+                        string interfaceName = interfaces[i].S;
+                        cmbCameraInterface.Items.Add(interfaceName);
+                        availableCameras.Add(interfaceName);
+                    }
+
+                    if (cmbCameraInterface.Items.Count > 0)
+                    {
+                        cmbCameraInterface.SelectedIndex = 0;
+                    }
+                }
+            }
+            catch (HalconDotNet.HOperatorException ex)
+            {
+                MessageBox.Show($"获取摄像机接口时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // 获取指定接口的摄像机设备列表
+        private List<string> GetCameraDevices(string interfaceName)
+        {
+            List<string> devices = new List<string>();
+            try
+            {
+                HTuple information = null;
+                HTuple valueList = null;
+
+                // 获取设备信息
+                HOperatorSet.InfoFramegrabber(interfaceName, "info_boards", out information, out valueList);
+
+                if (valueList != null && valueList.Length > 0)
+                {
+                    string deviceInfo = valueList[0].S;
+                    string[] deviceItems = deviceInfo.Split('|');
+
+                    foreach (string item in deviceItems)
+                    {
+                        if (item.Trim().StartsWith("device:"))
+                        {
+                            string deviceId = item.Trim().Substring(7).Trim();
+                            if (!string.IsNullOrEmpty(deviceId))
+                            {
+                                devices.Add(deviceId);
+                            }
+                        }
+                    }
+                }
+
+                // 如果没有找到任何设备，添加一个默认设备
+                if (devices.Count == 0)
+                {
+                    devices.Add("default");
+                }
+            }
+            catch (HalconDotNet.HOperatorException ex)
+            {
+                MessageBox.Show($"获取摄像机设备列表时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                
+                // 错误情况下至少添加一个默认设备
+                devices.Add("default");
+            }
+
+            return devices;
+        }
+
+        // 打开摄像机
+        private bool OpenCamera(string interfaceName, string deviceId = "default")
+        {
+            try
+            {
+                // 关闭之前的摄像机
+                CloseCamera();
+
+                // 打开新的摄像机
+                HOperatorSet.OpenFramegrabber(
+                    interfaceName,        // 接口名称
+                    1, 1,                // 水平和垂直分辨率
+                    0, 0, 0, 0,          // 图像宽度、高度、起始行、起始列
+                    "default",           // 场（interlace）
+                    -1,                  // 位深度
+                    "default",           // 颜色空间
+                    -1.0,                // 通用参数
+                    "default",           // 外部触发
+                    "default",           // 相机类型
+                    deviceId,            // 设备ID
+                    -1, -1,              // 端口和线路输入
+                    out acqHandle);
+
+                currentCameraType = interfaceName;
+                return true;
+            }
+            catch (HalconDotNet.HOperatorException ex)
+            {
+                MessageBox.Show($"打开摄像机时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
+        // 关闭摄像机
+        private void CloseCamera()
+        {
+            try
+            {
+                if (acqHandle != null)
+                {
+                    HOperatorSet.CloseFramegrabber(acqHandle);
+                    acqHandle = null;
+                }
+            }
+            catch (HalconDotNet.HOperatorException ex)
+            {
+                MessageBox.Show($"关闭摄像机时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // 启动实时显示
+        private void StartLiveAcquisition()
+        {
+            if (acqHandle == null)
+                return;
+
+            try
+            {
+                // 开始图像采集
+                HOperatorSet.GrabImageStart(acqHandle, -1);
+                
+                // 启动定时器
+                isLiveMode = true;
+                liveTimer.Start();
+                
+                // 更新按钮状态
+                btnStartLive.Text = "停止实时";
+                btnInfer.Enabled = false;
+                btnInferLive.Enabled = true;
+            }
+            catch (HalconDotNet.HOperatorException ex)
+            {
+                MessageBox.Show($"启动实时显示时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // 停止实时显示
+        private void StopLiveAcquisition()
+        {
+            try
+            {
+                // 停止定时器
+                liveTimer.Stop();
+                isLiveMode = false;
+                isInferenceEnabled = false;
+                
+                // 更新按钮状态
+                btnStartLive.Text = "开始实时";
+                btnInferLive.Text = "实时推理";
+                btnInfer.Enabled = true;
+                btnInferLive.Enabled = false;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"停止实时显示时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // 定时器事件 - 抓取和显示图像
+        private void LiveTimer_Tick(object sender, EventArgs e)
+        {
+            if (!isLiveMode || acqHandle == null)
+                return;
+
+            try
+            {
+                // 获取图像
+                HOperatorSet.GrabImageAsync(out halconImage, acqHandle, -1);
+                
+                // 获取图像尺寸
+                HTuple width = new HTuple(), height = new HTuple();
+                HOperatorSet.GetImageSize(halconImage, out width, out height);
+                imageWidth = width.I;
+                imageHeight = height.I;
+
+                // 显示图像
+                RefreshDisplayImage();
+                
+                // 如果开启了实时推理，执行推理
+                if (isInferenceEnabled && model != null)
+                {
+                    Utils.CSharpResult result = InferWithHalconImage(halconImage);
+                    DisplayResults(result);
+                }
+            }
+            catch (HalconDotNet.HOperatorException ex)
+            {
+                // 采集错误，停止实时显示
+                liveTimer.Stop();
+                isLiveMode = false;
+                MessageBox.Show($"图像采集时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         // 窗口大小改变事件处理
@@ -53,6 +335,135 @@ namespace HalconDemo
 
             // 重新显示图像
             RefreshDisplayImage();
+        }
+
+        // 窗口加载事件
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            // 获取可用的摄像机接口
+            GetAvailableCameraInterfaces();
+        }
+
+        // 刷新摄像机按钮点击事件
+        private void btnRefreshCameras_Click(object sender, EventArgs e)
+        {
+            GetAvailableCameraInterfaces();
+        }
+
+        // 摄像机接口选择变更事件
+        private void cmbCameraInterface_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (cmbCameraInterface.SelectedItem != null)
+            {
+                string selectedInterface = cmbCameraInterface.SelectedItem.ToString();
+                List<string> devices = GetCameraDevices(selectedInterface);
+                
+                cmbCameraDevice.Items.Clear();
+                
+                if (devices.Count > 0)
+                {
+                    foreach (string device in devices)
+                    {
+                        cmbCameraDevice.Items.Add(device);
+                    }
+                    cmbCameraDevice.SelectedIndex = 0;
+                }
+                else
+                {
+                    // 如果没有找到设备，添加一个默认选项
+                    cmbCameraDevice.Items.Add("default");
+                    cmbCameraDevice.SelectedIndex = 0;
+                }
+            }
+        }
+
+        // 连接摄像机按钮点击事件
+        private void btnConnectCamera_Click(object sender, EventArgs e)
+        {
+            if (cmbCameraInterface.SelectedItem == null)
+            {
+                MessageBox.Show("请先选择摄像机接口！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string selectedInterface = cmbCameraInterface.SelectedItem.ToString();
+            string selectedDevice = "default";
+            
+            if (cmbCameraDevice.SelectedItem != null)
+            {
+                selectedDevice = cmbCameraDevice.SelectedItem.ToString();
+            }
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                Application.DoEvents();
+
+                // 尝试打开摄像机
+                if (OpenCamera(selectedInterface, selectedDevice))
+                {
+                    MessageBox.Show("摄像机连接成功！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    btnStartLive.Enabled = true;
+                }
+                
+                Cursor = Cursors.Default;
+            }
+            catch (Exception ex)
+            {
+                Cursor = Cursors.Default;
+                MessageBox.Show($"连接摄像机时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // 开始/停止实时显示按钮点击事件
+        private void btnStartLive_Click(object sender, EventArgs e)
+        {
+            if (acqHandle == null)
+            {
+                MessageBox.Show("请先连接摄像机！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (isLiveMode)
+            {
+                // 如果当前是实时模式，则停止
+                StopLiveAcquisition();
+            }
+            else
+            {
+                // 如果当前不是实时模式，则启动
+                StartLiveAcquisition();
+            }
+        }
+
+        // 实时推理按钮点击事件
+        private void btnInferLive_Click(object sender, EventArgs e)
+        {
+            if (!isLiveMode)
+            {
+                MessageBox.Show("请先开始实时显示！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (model == null)
+            {
+                MessageBox.Show("请先加载模型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 切换实时推理状态
+            isInferenceEnabled = !isInferenceEnabled;
+            
+            if (isInferenceEnabled)
+            {
+                btnInferLive.Text = "停止推理";
+            }
+            else
+            {
+                btnInferLive.Text = "实时推理";
+                // 重新显示图像，清除推理结果
+                RefreshDisplayImage();
+            }
         }
 
         // 刷新显示图像
@@ -130,6 +541,12 @@ namespace HalconDemo
         // 选择图像按钮点击事件
         private void btnSelectImage_Click(object sender, EventArgs e)
         {
+            // 如果处于实时模式，先停止
+            if (isLiveMode)
+            {
+                StopLiveAcquisition();
+            }
+
             using (OpenFileDialog openFileDialog = new OpenFileDialog())
             {
                 openFileDialog.Filter = "图像文件|*.png;*.bmp;*.tif;*.tiff;*.jpg;*.jpeg|所有文件|*.*";
@@ -177,6 +594,12 @@ namespace HalconDemo
                         Application.DoEvents();
 
                         LoadModel();
+
+                        // 如果当前正在进行实时显示，启用实时推理按钮
+                        if (isLiveMode)
+                        {
+                            btnInferLive.Enabled = true;
+                        }
 
                         Cursor = Cursors.Default;
                     }
