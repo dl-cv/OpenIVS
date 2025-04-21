@@ -52,15 +52,17 @@ namespace sntl_admin_csharp
                 hModule = LoadLibrary(DllPath);
                 if (hModule == IntPtr.Zero)
                 {
-                    throw new Exception("无法加载 SNTL DLL");
+                    //throw new Exception("无法加载 SNTL DLL");
+                }
+                else
+                {
+                    // 获取函数指针
+                    sntl_admin_context_new = GetDelegate<SntlAdminContextNewDelegate>(hModule, "sntl_admin_context_new");
+                    sntl_admin_context_delete = GetDelegate<SntlAdminContextDeleteDelegate>(hModule, "sntl_admin_context_delete");
+                    sntl_admin_get = GetDelegate<SntlAdminGetDelegate>(hModule, "sntl_admin_get");
+                    sntl_admin_free = GetDelegate<SntlAdminFreeDelegate>(hModule, "sntl_admin_free");
                 }
             }
-
-            // 获取函数指针
-            sntl_admin_context_new = GetDelegate<SntlAdminContextNewDelegate>(hModule, "sntl_admin_context_new");
-            sntl_admin_context_delete = GetDelegate<SntlAdminContextDeleteDelegate>(hModule, "sntl_admin_context_delete");
-            sntl_admin_get = GetDelegate<SntlAdminGetDelegate>(hModule, "sntl_admin_get");
-            sntl_admin_free = GetDelegate<SntlAdminFreeDelegate>(hModule, "sntl_admin_free");
         }
 
         private T GetDelegate<T>(IntPtr hModule, string procedureName) where T : Delegate
@@ -97,11 +99,14 @@ namespace sntl_admin_csharp
         /// <param name="password">密码</param>
         public SNTL(string hostname = "", ushort port = 0, string password = "")
         {
-            int status = SNTLDllLoader.Instance.sntl_admin_context_new(ref _context, hostname, port, password);
-
-            if (status != (int)SntlAdminStatus.SNTL_ADMIN_STATUS_OK)
+            if (SNTLDllLoader.Instance.sntl_admin_context_new != null)
             {
-                throw new Exception($"初始化SNTL失败，错误码：{status}，{GetStatusDescription(status)}");
+                int status = SNTLDllLoader.Instance.sntl_admin_context_new(ref _context, hostname, port, password);
+
+                if (status != (int)SntlAdminStatus.SNTL_ADMIN_STATUS_OK)
+                {
+                    throw new Exception($"初始化SNTL失败，错误码：{status}，{GetStatusDescription(status)}");
+                }
             }
         }
 
@@ -224,6 +229,11 @@ namespace sntl_admin_csharp
         {
             JArray deviceList = new JArray();
 
+            if (SNTLDllLoader.Instance.sntl_admin_get == null)
+            {
+                return deviceList;
+            }
+
             // 获取加密狗信息
             JObject sntlInfo = GetSntlInfo();
 
@@ -269,6 +279,11 @@ namespace sntl_admin_csharp
         public JArray GetFeatureList()
         {
             JArray featureList = new JArray();
+
+            if(SNTLDllLoader.Instance.sntl_admin_get == null)
+            {
+                return featureList;
+            }
 
             // 使用特性格式XML
             string scope = SNTLUtils.DefaultScope;
@@ -378,18 +393,31 @@ namespace sntl_admin_csharp
 
         public static JArray GetDeviceList()
         {
-            SNTL sntl = new SNTL();
-            JArray deviceList = sntl.GetDeviceList();
-            sntl.Dispose();
-            return deviceList;
+            try
+            {
+                SNTL sntl = new SNTL();
+                JArray deviceList = sntl.GetDeviceList();
+                sntl.Dispose();
+                return deviceList;
+            }
+            catch {
+                return new JArray();
+            }
         }
 
         public static JArray GetFeatureList()
         {
-            SNTL sntl = new SNTL();
-            JArray featureList = sntl.GetFeatureList();
-            sntl.Dispose();
-            return featureList;
+            try
+            {
+                SNTL sntl = new SNTL();
+                JArray featureList = sntl.GetFeatureList();
+                sntl.Dispose();
+                return featureList;
+            }
+            catch
+            {
+                return new JArray();
+            }
         }
     }
 }
