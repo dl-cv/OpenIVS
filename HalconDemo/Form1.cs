@@ -292,6 +292,9 @@ namespace HalconDemo
 
             try
             {
+                // 释放halconImage
+                halconImage.Dispose();
+
                 // 获取图像
                 HOperatorSet.GrabImageAsync(out halconImage, acqHandle, -1);
                 
