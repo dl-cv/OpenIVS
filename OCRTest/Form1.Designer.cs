@@ -121,14 +121,15 @@
             this.imageViewer.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
+            this.imageViewer.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imageViewer.image = null;
-            this.imageViewer.Location = new System.Drawing.Point(275, 126);
+            this.imageViewer.Location = new System.Drawing.Point(274, 126);
             this.imageViewer.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.imageViewer.MaxScale = 100F;
             this.imageViewer.MinScale = 0.5F;
             this.imageViewer.Name = "imageViewer";
             this.imageViewer.ShowStatusText = false;
-            this.imageViewer.Size = new System.Drawing.Size(820, 940);
+            this.imageViewer.Size = new System.Drawing.Size(821, 940);
             this.imageViewer.TabIndex = 15;
             // 
             // richTextBoxResult
