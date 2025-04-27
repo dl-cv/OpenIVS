@@ -158,12 +158,12 @@ namespace OCRTest
                 _imagePath = openFileDialog.FileName;
                 try
                 {
+                    Mat image = Cv2.ImRead(_imagePath, ImreadModes.Color);
                     // 加载并显示图像
-                    using (Bitmap bitmap = new Bitmap(_imagePath))
-                    {
-                        imageViewer.UpdateImage(bitmap);
-                        richTextBoxResult.Text = $"已加载图片：{Path.GetFileName(_imagePath)}";
-                    }
+
+                    imageViewer.UpdateImage(image);
+                    richTextBoxResult.Text = $"已加载图片：{Path.GetFileName(_imagePath)}";
+
                 }
                 catch (Exception ex)
                 {
@@ -207,10 +207,8 @@ namespace OCRTest
                 CSharpResult result = Utils.OcrInfer(_detectModel, _recognizeModel, imageRgb);
 
                 // 更新图像显示
-                using (Bitmap bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(image))
-                {
-                    imageViewer.UpdateImageAndResult(bitmap, result);
-                }
+                imageViewer.UpdateImageAndResult(image, result);
+
 
                 // 显示结果
                 StringBuilder sb = new StringBuilder();
