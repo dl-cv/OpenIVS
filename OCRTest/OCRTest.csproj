@@ -37,7 +37,9 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
-    <Reference Include="System.Drawing.Common, Version=8.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL" />
+    <Reference Include="System.Drawing.Common, Version=8.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Drawing.Common.8.0.0\lib\net462\System.Drawing.Common.dll</HintPath>
+    </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
@@ -110,11 +112,11 @@
   <ItemGroup>
     <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
       <Project>{C9B49F58-4F03-4B6D-9099-0FB92CC26E22}</Project>
-      <Name>DlcvCsharpApi</Name>
+      <n>DlcvCsharpApi</n>
     </ProjectReference>
     <ProjectReference Include="..\ImageViewer\ImageViewer.csproj">
       <Project>{62C2B535-C99B-4EB5-8E11-4EFF7130A86F}</Project>
-      <Name>ImageViewer</Name>
+      <n>ImageViewer</n>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

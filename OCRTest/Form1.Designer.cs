@@ -44,7 +44,6 @@
             // 
             // btnLoadDetectModel
             // 
-            this.btnLoadDetectModel.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.btnLoadDetectModel.Location = new System.Drawing.Point(14, 19);
             this.btnLoadDetectModel.Margin = new System.Windows.Forms.Padding(4);
             this.btnLoadDetectModel.Name = "btnLoadDetectModel";
@@ -56,7 +55,6 @@
             // 
             // btnLoadRecognizeModel
             // 
-            this.btnLoadRecognizeModel.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.btnLoadRecognizeModel.Location = new System.Drawing.Point(14, 70);
             this.btnLoadRecognizeModel.Margin = new System.Windows.Forms.Padding(4);
             this.btnLoadRecognizeModel.Name = "btnLoadRecognizeModel";
@@ -90,7 +88,6 @@
             // 
             // btnFreeModel
             // 
-            this.btnFreeModel.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.btnFreeModel.Location = new System.Drawing.Point(14, 121);
             this.btnFreeModel.Margin = new System.Windows.Forms.Padding(4);
             this.btnFreeModel.Name = "btnFreeModel";
@@ -176,7 +173,6 @@
             this.Controls.Add(this.btnOpenImage);
             this.Controls.Add(this.btnLoadRecognizeModel);
             this.Controls.Add(this.btnLoadDetectModel);
-            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "Form1";
             this.Text = "OCR测试程序";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
