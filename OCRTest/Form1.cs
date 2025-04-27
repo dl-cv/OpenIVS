@@ -207,7 +207,7 @@ namespace OCRTest
                 CSharpResult result = Utils.OcrInfer(_detectModel, _recognizeModel, imageRgb);
 
                 // 更新图像显示
-                using (Bitmap bitmap = BitmapConverter.ToBitmap(image))
+                using (Bitmap bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(image))
                 {
                     imageViewer.UpdateImageAndResult(bitmap, result);
                 }

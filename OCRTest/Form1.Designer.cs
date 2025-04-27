@@ -129,16 +129,16 @@
             this.imageViewer.MinScale = 0.5F;
             this.imageViewer.Name = "imageViewer";
             this.imageViewer.ShowStatusText = false;
-            this.imageViewer.Size = new System.Drawing.Size(513, 269);
+            this.imageViewer.Size = new System.Drawing.Size(733, 419);
             this.imageViewer.TabIndex = 15;
             // 
             // richTextBoxResult
             // 
             this.richTextBoxResult.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.richTextBoxResult.Location = new System.Drawing.Point(533, 169);
+            this.richTextBoxResult.Location = new System.Drawing.Point(753, 169);
             this.richTextBoxResult.Name = "richTextBoxResult";
-            this.richTextBoxResult.Size = new System.Drawing.Size(255, 269);
+            this.richTextBoxResult.Size = new System.Drawing.Size(259, 419);
             this.richTextBoxResult.TabIndex = 16;
             this.richTextBoxResult.Text = "";
             // 
@@ -164,7 +164,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 450);
+            this.ClientSize = new System.Drawing.Size(1024, 600);
             this.Controls.Add(this.labelRecognizeModel);
             this.Controls.Add(this.labelDetectModel);
             this.Controls.Add(this.richTextBoxResult);
