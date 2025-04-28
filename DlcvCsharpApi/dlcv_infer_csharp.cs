@@ -483,6 +483,85 @@ namespace dlcv_infer_csharp
             return resultObject;
         }
 
+        /// <summary>
+        /// OCR推理函数，使用检测模型和识别模型进行推理
+        /// </summary>
+        /// <param name="detectModel">检测模型</param>
+        /// <param name="recognizeModel">识别模型</param>
+        /// <param name="image">输入图像</param>
+        /// <returns>包含OCR结果的CSharpResult</returns>
+        public static CSharpResult OcrInfer(Model detectModel, Model recognizeModel, Mat image)
+        {
+            try
+            {
+                // 使用检测模型进行推理
+                var imageList = new List<Mat> { image };
+                CSharpResult result = detectModel.InferBatch(imageList);
+
+                // 遍历第一个模型的检测结果
+                foreach (var sampleResult in result.SampleResults)
+                {
+                    for (int i = 0; i < sampleResult.Results.Count; i++)
+                    {
+                        var detection = sampleResult.Results[i];
+                        
+                        // 获取边界框坐标 (x, y, w, h)
+                        double x = detection.Bbox[0];
+                        double y = detection.Bbox[1];
+                        double w = detection.Bbox[2];
+                        double h = detection.Bbox[3];
+                        
+                        // 确保坐标在有效范围内
+                        x = Math.Max(0, x);
+                        y = Math.Max(0, y);
+                        w = Math.Min(w, image.Width - x);
+                        h = Math.Min(h, image.Height - y);
+                        
+                        if (w <= 0 || h <= 0)
+                            continue;
+                        
+                        // 提取ROI区域
+                        Rect roi = new Rect((int)x, (int)y, (int)w, (int)h);
+                        // 创建连续的Mat对象（Clone确保内存连续）
+                        Mat roiMat = new Mat(image, roi).Clone();
+                        
+                        // 使用识别模型进行推理
+                        var roiList = new List<Mat> { roiMat };
+                        var recognizeResult = recognizeModel.InferBatch(roiList);
+                        
+                        // 如果识别模型有检测结果，更新检测模型的分类名称
+                        if (recognizeResult.SampleResults.Count > 0 && 
+                            recognizeResult.SampleResults[0].Results.Count > 0)
+                        {
+                            // 获取识别模型的第一个检测结果
+                            var topResult = recognizeResult.SampleResults[0].Results[0];
+                            
+                            // 更新原始检测结果的分类名称
+                            var updatedDetection = new CSharpObjectResult(
+                                detection.CategoryId, 
+                                topResult.CategoryName, // 使用识别模型的分类名称
+                                detection.Score,
+                                detection.Area,
+                                detection.Bbox,
+                                detection.WithMask,
+                                detection.Mask
+                            );
+                            
+                            // 替换原始检测结果
+                            sampleResult.Results[i] = updatedDetection;
+                        }
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"OCR推理失败：{ex.Message}");
+                throw;
+            }
+        }
+
         // 新增方法：获取 GPU 信息
         public static JObject GetGpuInfo()
         {
