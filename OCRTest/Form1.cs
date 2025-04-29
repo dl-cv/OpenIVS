@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Diagnostics;
 using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -204,7 +205,10 @@ namespace OCRTest
 
                 // 执行OCR推理
                 richTextBoxResult.Text = "开始执行OCR推理...";
+                Stopwatch stopwatch = new Stopwatch();
+                stopwatch.Start();
                 CSharpResult result = Utils.OcrInfer(_detectModel, _recognizeModel, imageRgb);
+                stopwatch.Stop();
 
                 // 更新图像显示
                 imageViewer.UpdateImageAndResult(image, result);
@@ -231,7 +235,7 @@ namespace OCRTest
                     sb.AppendLine("未检测到文本");
                 }
 
-                richTextBoxResult.Text = sb.ToString();
+                richTextBoxResult.Text = sb.ToString() + $"\n推理耗时：{stopwatch.ElapsedMilliseconds}毫秒";
             }
             catch (Exception ex)
             {
