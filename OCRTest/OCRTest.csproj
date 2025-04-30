@@ -118,6 +118,10 @@
       <Project>{62C2B535-C99B-4EB5-8E11-4EFF7130A86F}</Project>
       <n>ImageViewer</n>
     </ProjectReference>
+    <ProjectReference Include="..\PressureTestRunner\PressureTestRunner.csproj">
+      <Project>{980f03f3-3648-4160-bf60-9668c7701785}</Project>
+      <Name>PressureTestRunner</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
