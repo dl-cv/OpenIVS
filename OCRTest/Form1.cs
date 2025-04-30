@@ -29,6 +29,7 @@ namespace OCRTest
         private int _deviceId = 0; // GPU设备ID
         private PressureTestRunner _pressureTestRunner;
         private System.Windows.Forms.Timer _updateTimer;
+        private Stopwatch _pressureTestStopwatch;  // 计时器用于统计压测耗时
 
         public Form1()
         {
@@ -328,16 +329,12 @@ namespace OCRTest
             {
                 // 准备测试数据
                 int batchSize = 1; // 可根据需求调整批量大小
-                int threadCount = 1; // 可根据需求调整线程数量
+                //int threadCount = 1; // 可根据需求调整线程数量
+                int threadCount = (int)numericUpDown1.Value;;
 
                 // 读取图像并创建批处理列表
                 Mat image = Cv2.ImRead(_imagePath, ImreadModes.Color);
                 Cv2.CvtColor(image, image, ColorConversionCodes.BGR2RGB);
-                //var imageList = new List<Mat>();
-                //for (int i = 0; i < batchSize; i++)
-                //{
-                //    imageList.Add(image);
-                //}
 
                 // 创建压力测试实例
                 _pressureTestRunner = new PressureTestRunner(threadCount, 1000, batchSize);
@@ -415,6 +412,35 @@ namespace OCRTest
                     richTextBoxResult.Text = _pressureTestRunner.GetStatistics(false);
                 });
             }
+        }
+
+        private void label1_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void numericUpDown1_ValueChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void numericUpDownThreadCount_ValueChanged(object sender, EventArgs e)
+        {
+            this.numericUpDown1.Minimum = new decimal(new int[] {
+                1,
+                0,
+                0,
+                0});
+            this.numericUpDown1.Maximum = new decimal(new int[] {
+                32,
+                0,
+                0,
+                0});
+            this.numericUpDown1.Value = new decimal(new int[] {
+                4,
+                0,
+                0,
+                0});
         }
     }
 }
