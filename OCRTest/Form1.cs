@@ -426,21 +426,7 @@ namespace OCRTest
 
         private void numericUpDownThreadCount_ValueChanged(object sender, EventArgs e)
         {
-            this.numericUpDown1.Minimum = new decimal(new int[] {
-                1,
-                0,
-                0,
-                0});
-            this.numericUpDown1.Maximum = new decimal(new int[] {
-                32,
-                0,
-                0,
-                0});
-            this.numericUpDown1.Value = new decimal(new int[] {
-                4,
-                0,
-                0,
-                0});
+
         }
     }
 }
