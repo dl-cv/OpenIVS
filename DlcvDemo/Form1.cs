@@ -356,7 +356,9 @@ namespace DlcvDemo
         private void button1_Click(object sender, EventArgs e)
         {
             JArray sntl_info = sntl_admin_csharp.SNTLUtils.GetDeviceList();
-            richTextBox1.Text = sntl_info.ToString();
+            JArray sntl_features = sntl_admin_csharp.SNTLUtils.GetFeatureList();
+            richTextBox1.Text = "加密狗ID：\n" + sntl_info.ToString() + "\n\n" +
+                "加密狗特性：\n" + sntl_features.ToString();
         }
 
         private void button_load_sliding_window_model_Click(object sender, EventArgs e)
