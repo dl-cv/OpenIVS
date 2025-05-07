@@ -53,6 +53,8 @@ namespace DlcvDemo
                 }
                 comboBox1.SelectedIndex = 0;
             });
+
+            Utils.GetDeviceInfo();
         }
 
         private Model model;
@@ -112,6 +114,7 @@ namespace DlcvDemo
             if (result.ContainsKey("model_info"))
             {
                 result = (JObject)result["model_info"];
+                richTextBox1.Text = result.ToString();
             }
             else if (result.ContainsKey("code"))
             {
