@@ -55,7 +55,7 @@
             // button_load_model
             // 
             this.button_load_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_load_model.Location = new System.Drawing.Point(14, 19);
+            this.button_load_model.Location = new System.Drawing.Point(12, 19);
             this.button_load_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_load_model.Name = "button_load_model";
             this.button_load_model.Size = new System.Drawing.Size(140, 60);
@@ -68,7 +68,7 @@
             // 
             this.button_get_model_info.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_get_model_info.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_get_model_info.Location = new System.Drawing.Point(694, 93);
+            this.button_get_model_info.Location = new System.Drawing.Point(875, 160);
             this.button_get_model_info.Margin = new System.Windows.Forms.Padding(4);
             this.button_get_model_info.Name = "button_get_model_info";
             this.button_get_model_info.Size = new System.Drawing.Size(140, 60);
@@ -80,7 +80,7 @@
             // button_open_image
             // 
             this.button_open_image.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_open_image.Location = new System.Drawing.Point(1116, 19);
+            this.button_open_image.Location = new System.Drawing.Point(1023, 19);
             this.button_open_image.Name = "button_open_image";
             this.button_open_image.Size = new System.Drawing.Size(140, 60);
             this.button_open_image.TabIndex = 3;
@@ -90,8 +90,7 @@
             // 
             // button_infer
             // 
-            this.button_infer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_infer.Location = new System.Drawing.Point(841, 93);
+            this.button_infer.Location = new System.Drawing.Point(159, 88);
             this.button_infer.Name = "button_infer";
             this.button_infer.Size = new System.Drawing.Size(140, 60);
             this.button_infer.TabIndex = 4;
@@ -101,7 +100,7 @@
             // 
             // button_thread_test
             // 
-            this.button_thread_test.Location = new System.Drawing.Point(12, 92);
+            this.button_thread_test.Location = new System.Drawing.Point(12, 154);
             this.button_thread_test.Name = "button_thread_test";
             this.button_thread_test.Size = new System.Drawing.Size(140, 60);
             this.button_thread_test.TabIndex = 5;
@@ -113,7 +112,7 @@
             // 
             this.button_free_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_free_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_free_model.Location = new System.Drawing.Point(988, 93);
+            this.button_free_model.Location = new System.Drawing.Point(1023, 93);
             this.button_free_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_free_model.Name = "button_free_model";
             this.button_free_model.Size = new System.Drawing.Size(140, 60);
@@ -126,10 +125,10 @@
             // 
             this.button_github.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_github.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_github.Location = new System.Drawing.Point(1136, 93);
+            this.button_github.Location = new System.Drawing.Point(1023, 161);
             this.button_github.Margin = new System.Windows.Forms.Padding(4);
             this.button_github.Name = "button_github";
-            this.button_github.Size = new System.Drawing.Size(120, 60);
+            this.button_github.Size = new System.Drawing.Size(140, 60);
             this.button_github.TabIndex = 9;
             this.button_github.Text = "文档";
             this.button_github.UseVisualStyleBackColor = true;
@@ -137,7 +136,7 @@
             // 
             // numericUpDown_num_thread
             // 
-            this.numericUpDown_num_thread.Location = new System.Drawing.Point(231, 108);
+            this.numericUpDown_num_thread.Location = new System.Drawing.Point(231, 170);
             this.numericUpDown_num_thread.Maximum = new decimal(new int[] {
             32,
             0,
@@ -159,12 +158,12 @@
             // 
             // comboBox1
             // 
-            this.comboBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.comboBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.comboBox1.FormattingEnabled = true;
             this.comboBox1.Location = new System.Drawing.Point(249, 34);
             this.comboBox1.Name = "comboBox1";
-            this.comboBox1.Size = new System.Drawing.Size(555, 32);
+            this.comboBox1.Size = new System.Drawing.Size(760, 32);
             this.comboBox1.TabIndex = 12;
             // 
             // label1
@@ -179,7 +178,7 @@
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(161, 110);
+            this.label2.Location = new System.Drawing.Point(161, 172);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(64, 24);
             this.label2.TabIndex = 14;
@@ -188,7 +187,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(300, 110);
+            this.label3.Location = new System.Drawing.Point(482, 105);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(99, 24);
             this.label3.TabIndex = 15;
@@ -196,7 +195,7 @@
             // 
             // numericUpDown_batch_size
             // 
-            this.numericUpDown_batch_size.Location = new System.Drawing.Point(405, 108);
+            this.numericUpDown_batch_size.Location = new System.Drawing.Point(587, 103);
             this.numericUpDown_batch_size.Maximum = new decimal(new int[] {
             1024,
             0,
@@ -218,34 +217,34 @@
             // 
             // imagePanel1
             // 
-            this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-            | System.Windows.Forms.AnchorStyles.Left)
+            this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.imagePanel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imagePanel1.image = null;
-            this.imagePanel1.Location = new System.Drawing.Point(304, 159);
+            this.imagePanel1.Location = new System.Drawing.Point(304, 228);
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
             this.imagePanel1.ShowStatusText = false;
-            this.imagePanel1.Size = new System.Drawing.Size(952, 672);
+            this.imagePanel1.Size = new System.Drawing.Size(859, 603);
             this.imagePanel1.TabIndex = 17;
             // 
             // richTextBox1
             // 
-            this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+            this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left)));
-            this.richTextBox1.Location = new System.Drawing.Point(12, 158);
+            this.richTextBox1.Location = new System.Drawing.Point(12, 228);
             this.richTextBox1.Margin = new System.Windows.Forms.Padding(3, 3, 3, 16);
             this.richTextBox1.Name = "richTextBox1";
-            this.richTextBox1.Size = new System.Drawing.Size(282, 673);
+            this.richTextBox1.Size = new System.Drawing.Size(282, 603);
             this.richTextBox1.TabIndex = 7;
             this.richTextBox1.Text = "";
             // 
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(474, 110);
+            this.label4.Location = new System.Drawing.Point(312, 105);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(92, 24);
             this.label4.TabIndex = 18;
@@ -253,7 +252,7 @@
             // 
             // textBox_threshold
             // 
-            this.textBox_threshold.Location = new System.Drawing.Point(572, 108);
+            this.textBox_threshold.Location = new System.Drawing.Point(410, 103);
             this.textBox_threshold.Name = "textBox_threshold";
             this.textBox_threshold.Size = new System.Drawing.Size(66, 31);
             this.textBox_threshold.TabIndex = 19;
@@ -262,7 +261,7 @@
             // button1
             // 
             this.button1.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button1.Location = new System.Drawing.Point(970, 19);
+            this.button1.Location = new System.Drawing.Point(875, 93);
             this.button1.Name = "button1";
             this.button1.Size = new System.Drawing.Size(140, 60);
             this.button1.TabIndex = 20;
@@ -272,9 +271,8 @@
             // 
             // button_load_sliding_window_model
             // 
-            this.button_load_sliding_window_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_load_sliding_window_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_load_sliding_window_model.Location = new System.Drawing.Point(823, 19);
+            this.button_load_sliding_window_model.Location = new System.Drawing.Point(12, 87);
             this.button_load_sliding_window_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_load_sliding_window_model.Name = "button_load_sliding_window_model";
             this.button_load_sliding_window_model.Size = new System.Drawing.Size(140, 60);
@@ -287,7 +285,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1271, 844);
+            this.ClientSize = new System.Drawing.Size(1178, 844);
             this.Controls.Add(this.button_load_sliding_window_model);
             this.Controls.Add(this.button1);
             this.Controls.Add(this.textBox_threshold);
@@ -310,7 +308,7 @@
             this.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Margin = new System.Windows.Forms.Padding(4);
-            this.MinimumSize = new System.Drawing.Size(1280, 900);
+            this.MinimumSize = new System.Drawing.Size(1024, 700);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "C# 测试程序";
