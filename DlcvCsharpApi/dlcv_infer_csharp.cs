@@ -117,7 +117,7 @@ namespace dlcv_infer_csharp
     }
     public class Model
     {
-        private int modelIndex = -1;
+        protected int modelIndex = -1;
 
         public Model()
         {
@@ -411,8 +411,6 @@ namespace dlcv_infer_csharp
 
     public class SlidingWindowModel : Model
     {
-        private int modelIndex = -1;
-
         public SlidingWindowModel(
             string modelPath,
             int device_id,
