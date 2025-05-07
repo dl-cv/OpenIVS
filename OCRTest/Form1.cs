@@ -4,11 +4,13 @@ using System.ComponentModel;
 using System.Data;
 using System.Drawing;
 using System.IO;
+using DLCV;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Diagnostics;
 using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -25,6 +27,9 @@ namespace OCRTest
         private bool _isDetectModelLoaded = false; // 检测模型是否加载
         private bool _isRecognizeModelLoaded = false; // 识别模型是否加载
         private int _deviceId = 0; // GPU设备ID
+        private PressureTestRunner _pressureTestRunner;
+        private System.Windows.Forms.Timer _updateTimer;
+        private Stopwatch _pressureTestStopwatch;  // 计时器用于统计压测耗时
 
         public Form1()
         {
@@ -95,6 +100,7 @@ namespace OCRTest
                     }
 
                     // 加载新模型
+                    richTextBoxResult.Text = "模型加载中";
                     _detectModel = new Model(selectedFilePath, _deviceId);
                     _isDetectModelLoaded = true;
                     labelDetectModel.Text = $"检测模型：{Path.GetFileName(selectedFilePath)}";
@@ -117,11 +123,14 @@ namespace OCRTest
 
             openFileDialog.Filter = "深度视觉加速模型文件 (*.dvt)|*.dvt";
             openFileDialog.Title = "选择识别模型";
+            //labelRecognizeModel.Text = "模型加载中";
 
             if (openFileDialog.ShowDialog() == DialogResult.OK)
             {
+                
                 string selectedFilePath = openFileDialog.FileName;
                 _deviceId = comboBoxDevices.SelectedIndex;
+                
                 try
                 {
                     // 释放之前的模型资源（如果有）
@@ -132,20 +141,21 @@ namespace OCRTest
                     }
 
                     // 加载新模型
+                    
                     _recognizeModel = new Model(selectedFilePath, _deviceId);
                     _isRecognizeModelLoaded = true;
                     labelRecognizeModel.Text = $"识别模型：{Path.GetFileName(selectedFilePath)}";
-                    richTextBoxResult.Text = "识别模型加载成功！";
+                    richTextBoxResult.Text = "OCR模型加载成功！";
                 }
                 catch (Exception ex)
                 {
-                    richTextBoxResult.Text = $"识别模型加载错误：{ex.Message}";
+                    richTextBoxResult.Text = $"OCR模型加载错误：{ex.Message}";
                 }
             }
         }
 
         /// <summary>
-        /// 打开图片
+        /// 打开图片，并执行OCR推理
         /// </summary>
         private void btnOpenImage_Click(object sender, EventArgs e)
         {
@@ -170,16 +180,10 @@ namespace OCRTest
                     richTextBoxResult.Text = $"加载图片失败：{ex.Message}";
                 }
             }
-        }
 
-        /// <summary>
-        /// 执行OCR推理
-        /// </summary>
-        private void btnInfer_Click(object sender, EventArgs e)
-        {
             if (!_isDetectModelLoaded || !_isRecognizeModelLoaded)
             {
-                MessageBox.Show("请先加载检测模型和识别模型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("请先加载目标检测模型和OCR识别模型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -204,7 +208,10 @@ namespace OCRTest
 
                 // 执行OCR推理
                 richTextBoxResult.Text = "开始执行OCR推理...";
+                Stopwatch stopwatch = new Stopwatch();
+                stopwatch.Start();
                 CSharpResult result = Utils.OcrInfer(_detectModel, _recognizeModel, imageRgb);
+                stopwatch.Stop();
 
                 // 更新图像显示
                 imageViewer.UpdateImageAndResult(image, result);
@@ -231,13 +238,15 @@ namespace OCRTest
                     sb.AppendLine("未检测到文本");
                 }
 
-                richTextBoxResult.Text = sb.ToString();
+                richTextBoxResult.Text = sb.ToString() + $"\n推理耗时：{stopwatch.ElapsedMilliseconds}毫秒";
             }
             catch (Exception ex)
             {
                 richTextBoxResult.Text = $"OCR推理失败：{ex.Message}";
             }
         }
+
+
 
         /// <summary>
         /// 释放模型资源
@@ -288,6 +297,136 @@ namespace OCRTest
             }
 
             GC.Collect();
+        }
+
+        private void btnStartStressTest_Click(object sender, EventArgs e)
+        {
+            if (_pressureTestRunner != null && _pressureTestRunner.IsRunning)
+            {
+                StopPressureTest();
+            }
+            else
+            {
+                StartPressureTest();
+            }
+        }
+
+        private void StartPressureTest()
+        {
+            if (!_isDetectModelLoaded || !_isRecognizeModelLoaded)
+            {
+                MessageBox.Show("请先加载目标检测模型和OCR识别模型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(_imagePath))
+            {
+                MessageBox.Show("请先选择图片文件！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                // 准备测试数据
+                int batchSize = 1; // 可根据需求调整批量大小
+                //int threadCount = 1; // 可根据需求调整线程数量
+                int threadCount = (int)numericUpDown1.Value;;
+
+                // 读取图像并创建批处理列表
+                Mat image = Cv2.ImRead(_imagePath, ImreadModes.Color);
+                Cv2.CvtColor(image, image, ColorConversionCodes.BGR2RGB);
+
+                // 创建压力测试实例
+                _pressureTestRunner = new PressureTestRunner(threadCount, 1000, batchSize);
+                //_pressureTestRunner.SetTestAction(ModelInferAction, image);
+                _pressureTestRunner.SetTestAction(o => ModelInferAction((Mat)o), image);
+
+                // 创建并启动定时器更新UI
+                if (_updateTimer == null)
+                {
+                    _updateTimer = new System.Windows.Forms.Timer();
+                    _updateTimer.Interval = 500;
+                    _updateTimer.Tick += UpdateStatisticsTimer_Tick;
+                }
+                _updateTimer.Start();
+
+                // 启动测试
+                _pressureTestRunner.Start();
+                btnStartStressTest.Text = "停止压力测试";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("启动压力测试失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+
+        private void StopPressureTest()
+        {
+            if (_pressureTestRunner != null)
+            {
+                _pressureTestRunner.Stop();
+
+                // 停止定时器
+                if (_updateTimer != null)
+                {
+                    _updateTimer.Stop();
+                }
+
+                // 显示最终统计信息
+                btnStartStressTest.Text = "开始压力测试";
+                richTextBoxResult.Text = _pressureTestRunner.GetStatistics();
+            }
+        }
+
+        private void ModelInferAction(Mat parameter)
+        {
+            try
+            {
+                // 执行批量推理
+                //var result = _detectModel.InferBatch((List<Mat>)parameter); //_recognizeModel
+                CSharpResult result = Utils.OcrInfer(_detectModel, _recognizeModel, parameter);
+
+
+                // 推理成功，无需额外处理
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("模型推理出错: " + ex.Message);
+                Invoke((MethodInvoker)delegate
+                {
+                    StopPressureTest();
+                    MessageBox.Show($"压力测试过程中发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    richTextBoxResult.Text = $"推理错误: {ex.Message}";
+                });
+            }
+        }
+
+
+        private void UpdateStatisticsTimer_Tick(object sender, EventArgs e)
+        {
+            if (_pressureTestRunner != null && _pressureTestRunner.IsRunning)
+            {
+                Invoke((MethodInvoker)delegate
+                {
+                    richTextBoxResult.Text = _pressureTestRunner.GetStatistics(false);
+                });
+            }
+        }
+
+        private void label1_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void numericUpDown1_ValueChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void numericUpDownThreadCount_ValueChanged(object sender, EventArgs e)
+        {
+
         }
     }
 }
