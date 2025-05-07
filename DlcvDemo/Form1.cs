@@ -109,7 +109,15 @@ namespace DlcvDemo
                 return;
             }
             JObject result = model.GetModelInfo();
-            richTextBox1.Text = result["model_info"].ToString();
+            if (result.ContainsKey("model_info"))
+            {
+                result = (JObject)result["model_info"];
+            }
+            else if (result.ContainsKey("code"))
+            {
+                richTextBox1.Text = result.ToString();
+                return;
+            }
         }
 
         private void button_openimage_Click(object sender, EventArgs e)
