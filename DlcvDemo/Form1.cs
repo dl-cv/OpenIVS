@@ -188,12 +188,19 @@ namespace DlcvDemo
             data["threshold"] = float.Parse(textBox_threshold.Text);
             data["with_mask"] = true;
 
+            Stopwatch stopwatch = new Stopwatch();
+            stopwatch.Start();
+
             CSharpResult result = model.InferBatch(image_list, data);
+
+            stopwatch.Stop();
+            double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
+            Console.WriteLine($"推理时间: {delay_ms:F2}ms");
 
             imagePanel1.UpdateImageAndResult(image, result);
 
             var a = result.SampleResults[0];
-            string s = "";
+            string s = $"推理时间: {delay_ms:F2}ms\n\n";
             foreach (var b in a.Results)
             {
                 s += b.CategoryName + ", ";
