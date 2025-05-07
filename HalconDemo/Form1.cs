@@ -7,6 +7,8 @@ using Newtonsoft.Json.Linq;
 using System.IO;
 using System.Runtime.InteropServices; // 添加此行用于DllImport
 using System.Collections.Generic; // 添加此行用于List
+using System.Diagnostics; // 用于性能监控
+using DLCV; // 引用SimpleLogger命名空间
 
 namespace HalconDemo
 {
@@ -33,12 +35,30 @@ namespace HalconDemo
         // 边界框容差值
         private const double BOX_TOLERANCE = 1.0;  // 允许边界框尺寸有1像素的容差
 
+        // 性能监控变量
+        private Stopwatch refreshStopwatch = new Stopwatch(); // 图像刷新计时器
+        private Stopwatch inferenceStopwatch = new Stopwatch(); // 推理计时器
+        private int totalFrameCount = 0; // 总刷新帧数
+        private int totalInferenceCount = 0; // 总推理次数
+        private double lastRefreshTime = 0; // 上次刷新时间(ms)
+        private double lastInferenceTime = 0; // 上次推理时间(ms)
+        private double avgRefreshFPS = 0; // 平均刷新帧率
+        private double avgInferenceFPS = 0; // 平均推理帧率
+        
+        // 日志记录器
+        private Logger logger = null;
+
         public Form1()
         {
             InitializeComponent();
 
             // 初始化Halcon图像对象
             halconImage = new HObject();
+
+            // 初始化日志记录器
+            string logDir = Path.Combine(Application.StartupPath, "logs");
+            logger = new Logger(logDir, false, DLCV.LogLevel.Info);
+            logger.Info("应用程序启动");
 
             // 初始化实时显示定时器
             liveTimer = new Timer();
@@ -48,6 +68,8 @@ namespace HalconDemo
             // 设置异常处理
             AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
             {
+                Exception ex = e.ExceptionObject as Exception;
+                logger.LogException(ex, "未处理的异常");
                 MessageBox.Show($"发生未处理的异常：{e.ExceptionObject}", "严重错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             };
         }
@@ -55,6 +77,8 @@ namespace HalconDemo
         // 表单关闭事件
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            logger.Info("应用程序关闭");
+            
             // 停止实时采集
             StopLiveAcquisition();
 
@@ -191,6 +215,8 @@ namespace HalconDemo
         {
             try
             {
+                logger.Info($"尝试打开摄像机 - 接口: {interfaceName}, 设备ID: {deviceId}");
+                
                 // 关闭之前的摄像机
                 CloseCamera();
 
@@ -210,10 +236,13 @@ namespace HalconDemo
                     out acqHandle);
 
                 currentCameraType = interfaceName;
+                
+                logger.Info($"摄像机打开成功 - 接口: {interfaceName}, 设备ID: {deviceId}");
                 return true;
             }
             catch (HalconDotNet.HOperatorException ex)
             {
+                logger.LogException(ex, $"打开摄像机失败 - 接口: {interfaceName}, 设备ID: {deviceId}");
                 MessageBox.Show($"打开摄像机时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
@@ -226,12 +255,14 @@ namespace HalconDemo
             {
                 if (acqHandle != null)
                 {
+                    logger.Info("关闭摄像机");
                     HOperatorSet.CloseFramegrabber(acqHandle);
                     acqHandle = null;
                 }
             }
             catch (HalconDotNet.HOperatorException ex)
             {
+                logger.LogException(ex, "关闭摄像机失败");
                 MessageBox.Show($"关闭摄像机时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -244,12 +275,18 @@ namespace HalconDemo
 
             try
             {
+                logger.Info("开始实时采集");
+                
                 // 开始图像采集
                 HOperatorSet.GrabImageStart(acqHandle, -1);
                 
                 // 启动定时器
                 isLiveMode = true;
                 liveTimer.Start();
+                
+                // 重置性能统计数据
+                avgRefreshFPS = 0;
+                avgInferenceFPS = 0;
                 
                 // 更新按钮状态
                 btnStartLive.Text = "停止实时";
@@ -258,6 +295,7 @@ namespace HalconDemo
             }
             catch (HalconDotNet.HOperatorException ex)
             {
+                logger.LogException(ex, "启动实时显示失败");
                 MessageBox.Show($"启动实时显示时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -272,6 +310,13 @@ namespace HalconDemo
                 isLiveMode = false;
                 isInferenceEnabled = false;
                 
+                // 记录性能统计信息
+                if(totalFrameCount > 0)
+                {
+                    logger.Info($"停止实时采集 - 总计处理帧数: {totalFrameCount}, 总计推理帧数: {totalInferenceCount}, " +
+                               $"平均刷新帧率: {avgRefreshFPS:F1} FPS, 平均推理帧率: {avgInferenceFPS:F1} FPS");
+                }
+                
                 // 更新按钮状态
                 btnStartLive.Text = "开始实时";
                 btnInferLive.Text = "实时推理";
@@ -280,6 +325,7 @@ namespace HalconDemo
             }
             catch (Exception ex)
             {
+                logger.LogException(ex, "停止实时显示失败");
                 MessageBox.Show($"停止实时显示时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -292,6 +338,9 @@ namespace HalconDemo
 
             try
             {
+                // 开始图像刷新计时
+                refreshStopwatch.Restart();
+                
                 // 释放halconImage
                 halconImage.Dispose();
 
@@ -307,11 +356,46 @@ namespace HalconDemo
                 // 显示图像
                 RefreshDisplayImage();
                 
+                // 图像刷新计时结束
+                refreshStopwatch.Stop();
+                lastRefreshTime = refreshStopwatch.ElapsedMilliseconds;
+                totalFrameCount++;
+                
+                // 计算平均刷新帧率（使用移动平均）
+                avgRefreshFPS = 0.9 * avgRefreshFPS + 0.1 * (1000.0 / Math.Max(1, lastRefreshTime));
+                
                 // 如果开启了实时推理，执行推理
                 if (isInferenceEnabled && model != null)
                 {
+                    // 开始推理计时
+                    inferenceStopwatch.Restart();
+                    
                     Utils.CSharpResult result = InferWithHalconImage(halconImage);
                     DisplayResults(result);
+                    
+                    // 推理计时结束
+                    inferenceStopwatch.Stop();
+                    lastInferenceTime = inferenceStopwatch.ElapsedMilliseconds;
+                    totalInferenceCount++;
+                    
+                    // 计算平均推理帧率（使用移动平均）
+                    avgInferenceFPS = 0.9 * avgInferenceFPS + 0.1 * (1000.0 / Math.Max(1, lastInferenceTime));
+                    
+                    // 更新性能信息显示
+                    UpdatePerformanceDisplay();
+                    
+                    // 每100帧记录一次性能数据
+                    if(totalInferenceCount % 100 == 0)
+                    {
+                        logger.Info($"性能统计 - 已处理帧数: {totalFrameCount}, 已推理帧数: {totalInferenceCount}, " +
+                                   $"刷新帧率: {avgRefreshFPS:F1} FPS, 推理帧率: {avgInferenceFPS:F1} FPS, " +
+                                   $"刷新耗时: {lastRefreshTime:F1} ms, 推理耗时: {lastInferenceTime:F1} ms");
+                    }
+                }
+                else
+                {
+                    // 仅更新图像刷新性能信息
+                    UpdatePerformanceDisplay();
                 }
             }
             catch (HalconDotNet.HOperatorException ex)
@@ -319,6 +403,7 @@ namespace HalconDemo
                 // 采集错误，停止实时显示
                 liveTimer.Stop();
                 isLiveMode = false;
+                logger.LogException(ex, "图像采集错误");
                 MessageBox.Show($"图像采集时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -459,10 +544,12 @@ namespace HalconDemo
             
             if (isInferenceEnabled)
             {
+                logger.Info("开始实时推理");
                 btnInferLive.Text = "停止推理";
             }
             else
             {
+                logger.Info($"停止实时推理 - 已推理帧数: {totalInferenceCount}, 平均推理帧率: {avgInferenceFPS:F1} FPS");
                 btnInferLive.Text = "实时推理";
                 // 重新显示图像，清除推理结果
                 RefreshDisplayImage();
@@ -609,6 +696,7 @@ namespace HalconDemo
                     catch (Exception ex)
                     {
                         Cursor = Cursors.Default;
+                        logger.LogException(ex, "选择并加载模型失败");
                         MessageBox.Show($"加载模型时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         lblResult.Text = "模型加载失败";
                     }
@@ -643,17 +731,32 @@ namespace HalconDemo
                 lblResult.Text = "推理结果：正在推理中...";
                 Application.DoEvents();
 
+                // 开始推理计时
+                inferenceStopwatch.Restart();
+                
                 // 执行推理
                 Utils.CSharpResult result = InferWithHalconImage(halconImage);
 
+                // 推理计时结束
+                inferenceStopwatch.Stop();
+                lastInferenceTime = inferenceStopwatch.ElapsedMilliseconds;
+                totalInferenceCount++;
+                
                 // 显示推理结果
                 DisplayResults(result);
+                
+                // 更新性能信息
+                UpdatePerformanceDisplay();
+                
+                // 记录推理信息
+                logger.Info($"单张图像推理完成 - 图像: {Path.GetFileName(currentImagePath)}, 耗时: {lastInferenceTime:F1} ms");
 
                 Cursor = Cursors.Default;
             }
             catch (Exception ex)
             {
                 Cursor = Cursors.Default;
+                logger.LogException(ex, "单张图像推理失败");
                 MessageBox.Show($"推理过程中发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblResult.Text = "推理结果：推理失败";
             }
@@ -752,6 +855,8 @@ namespace HalconDemo
                     throw new Exception($"模型文件不存在：{currentModelPath}");
                 }
 
+                logger.Info($"开始加载模型: {Path.GetFileName(currentModelPath)}");
+                
                 // 释放之前的模型（如果有）
                 if (model != null)
                 {
@@ -769,12 +874,15 @@ namespace HalconDemo
                 }
 
                 string modelType = modelInfo["model_type"]?.ToString() ?? "未知";
+                
+                logger.Info($"模型加载成功 - 类型: {modelType}, 设备ID: {deviceId}");
 
                 lblResult.Text = $"推理结果：模型加载成功，类型：{modelType}";
             }
             catch (Exception ex)
             {
                 model = null;
+                logger.LogException(ex, "加载模型失败");
                 throw new Exception($"加载模型失败：{ex.Message}");
             }
         }
@@ -784,24 +892,36 @@ namespace HalconDemo
         {
             if (model == null)
             {
-                throw new Exception("模型未加载");
+                string errorMsg = "模型未加载";
+                logger.Error(errorMsg);
+                throw new Exception(errorMsg);
             }
 
-            // 将Halcon图像转换为OpenCV Mat
-            Mat halconAsMat = HalconImageToMat(halconImage);
-
-            if (halconAsMat == null || halconAsMat.Empty())
+            try
             {
-                throw new Exception("图像转换失败");
+                // 将Halcon图像转换为OpenCV Mat
+                Mat halconAsMat = HalconImageToMat(halconImage);
+
+                if (halconAsMat == null || halconAsMat.Empty())
+                {
+                    string errorMsg = "图像转换失败";
+                    logger.Error(errorMsg);
+                    throw new Exception(errorMsg);
+                }
+
+                // 执行推理
+                Utils.CSharpResult result = model.Infer(halconAsMat);
+
+                // 释放Mat资源
+                halconAsMat.Dispose();
+
+                return result;
             }
-
-            // 执行推理
-            Utils.CSharpResult result = model.Infer(halconAsMat);
-
-            // 释放Mat资源
-            halconAsMat.Dispose();
-
-            return result;
+            catch (Exception ex)
+            {
+                logger.LogException(ex, "推理过程异常");
+                throw;
+            }
         }
 
         // Halcon图像转换为OpenCV Mat（参考自程序示例）
@@ -886,8 +1006,7 @@ namespace HalconDemo
 
                 // 为每个检测结果设置不同的颜色
                 string[] colors = new string[] {
-                    "red", "blue", "yellow", "cyan", "magenta", "orange",
-                    "deep pink", "medium sea green", "slate blue"
+                    "red", "blue", "yellow", "cyan", "magenta", "orange"
                 };
 
                 // 设置文本显示参数
@@ -1158,6 +1277,24 @@ namespace HalconDemo
                 // 确保图形刷新被重新开启
                 HOperatorSet.SetSystem("flush_graphic", "true");
                 MessageBox.Show($"缩放图像时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // 更新性能显示信息
+        private void UpdatePerformanceDisplay()
+        {
+            if (isInferenceEnabled && model != null)
+            {
+                // 显示完整的性能信息
+                lblResult.Text = $"推理结果: 刷新速度: {avgRefreshFPS:F1} FPS ({lastRefreshTime:F1} ms), " +
+                                $"推理速度: {avgInferenceFPS:F1} FPS ({lastInferenceTime:F1} ms), " +
+                                $"累计推理: {totalInferenceCount} 帧";
+            }
+            else
+            {
+                // 仅显示图像刷新性能
+                lblResult.Text = $"推理结果: 刷新速度: {avgRefreshFPS:F1} FPS ({lastRefreshTime:F1} ms), " +
+                                $"累计推理: {totalInferenceCount} 帧";
             }
         }
     }
