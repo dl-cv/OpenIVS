@@ -1,4 +1,4 @@
-﻿namespace demo
+﻿namespace DlcvDemo
 {
     partial class Form1
     {
@@ -47,6 +47,7 @@
             this.label4 = new System.Windows.Forms.Label();
             this.textBox_threshold = new System.Windows.Forms.TextBox();
             this.button1 = new System.Windows.Forms.Button();
+            this.button_load_sliding_window_model = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             this.SuspendLayout();
@@ -158,12 +159,12 @@
             // 
             // comboBox1
             // 
-            this.comboBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            this.comboBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.comboBox1.FormattingEnabled = true;
             this.comboBox1.Location = new System.Drawing.Point(249, 34);
             this.comboBox1.Name = "comboBox1";
-            this.comboBox1.Size = new System.Drawing.Size(577, 32);
+            this.comboBox1.Size = new System.Drawing.Size(555, 32);
             this.comboBox1.TabIndex = 12;
             // 
             // label1
@@ -217,8 +218,8 @@
             // 
             // imagePanel1
             // 
-            this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left) 
+            this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+            | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.imagePanel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imagePanel1.image = null;
@@ -232,7 +233,7 @@
             // 
             // richTextBox1
             // 
-            this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
             | System.Windows.Forms.AnchorStyles.Left)));
             this.richTextBox1.Location = new System.Drawing.Point(12, 158);
             this.richTextBox1.Margin = new System.Windows.Forms.Padding(3, 3, 3, 16);
@@ -269,11 +270,25 @@
             this.button1.UseVisualStyleBackColor = true;
             this.button1.Click += new System.EventHandler(this.button1_Click);
             // 
+            // button_load_sliding_window_model
+            // 
+            this.button_load_sliding_window_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.button_load_sliding_window_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.button_load_sliding_window_model.Location = new System.Drawing.Point(823, 19);
+            this.button_load_sliding_window_model.Margin = new System.Windows.Forms.Padding(4);
+            this.button_load_sliding_window_model.Name = "button_load_sliding_window_model";
+            this.button_load_sliding_window_model.Size = new System.Drawing.Size(140, 60);
+            this.button_load_sliding_window_model.TabIndex = 21;
+            this.button_load_sliding_window_model.Text = "加载\r\n滑窗裁图模型";
+            this.button_load_sliding_window_model.UseVisualStyleBackColor = true;
+            this.button_load_sliding_window_model.Click += new System.EventHandler(this.button_load_sliding_window_model_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1271, 844);
+            this.Controls.Add(this.button_load_sliding_window_model);
             this.Controls.Add(this.button1);
             this.Controls.Add(this.textBox_threshold);
             this.Controls.Add(this.label4);
@@ -327,6 +342,7 @@
         private System.Windows.Forms.Label label4;
         private System.Windows.Forms.TextBox textBox_threshold;
         private System.Windows.Forms.Button button1;
+        private System.Windows.Forms.Button button_load_sliding_window_model;
     }
 }
 

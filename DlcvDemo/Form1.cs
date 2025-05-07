@@ -10,7 +10,7 @@ using System.Collections.Generic;
 using static dlcv_infer_csharp.Utils;
 using DLCV;
 
-namespace demo
+namespace DlcvDemo
 {
     public partial class Form1 : Form
     {
@@ -207,7 +207,7 @@ namespace demo
             {
                 // 执行批量推理
                 var result = model.InferBatch((List<Mat>)parameter);
-                
+
                 // InferBatch方法内部已经检查了code并抛出异常，
                 // 如果执行到这里就说明推理成功了
             }
@@ -349,6 +349,64 @@ namespace demo
         {
             JArray sntl_info = sntl_admin_csharp.SNTLUtils.GetDeviceList();
             richTextBox1.Text = sntl_info.ToString();
+        }
+
+        private void button_load_sliding_window_model_Click(object sender, EventArgs e)
+        {
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.RestoreDirectory = true;
+
+            openFileDialog.Filter = "深度视觉加速模型文件 (*.dvt)|*.dvt";
+            openFileDialog.Title = "选择模型";
+            try
+            {
+                openFileDialog.InitialDirectory = Path.GetDirectoryName(Properties.Settings.Default.LastModelPath);
+                openFileDialog.FileName = Path.GetFileName(Properties.Settings.Default.LastModelPath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+
+            if (openFileDialog.ShowDialog() == DialogResult.OK)
+            {
+                string selectedFilePath = openFileDialog.FileName;
+                Properties.Settings.Default.LastModelPath = selectedFilePath;
+                Properties.Settings.Default.Save();
+                int device_id = comboBox1.SelectedIndex;
+
+                // 显示参数配置窗口
+                using (var configForm = new SlidingWindowConfigForm())
+                {
+                    if (configForm.ShowDialog() == DialogResult.OK)
+                    {
+                        try
+                        {
+                            if (model != null)
+                            {
+                                model = null;
+                                GC.Collect();
+                            }
+                            model = new SlidingWindowModel(
+                                selectedFilePath,
+                                device_id,
+                                configForm.SmallImgWidth,
+                                configForm.SmallImgHeight,
+                                configForm.HorizontalOverlap,
+                                configForm.VerticalOverlap,
+                                configForm.Threshold,
+                                configForm.IouThreshold,
+                                configForm.CombineIosThreshold
+                            );
+                            button_getmodelinfo_Click(sender, e);
+                        }
+                        catch (Exception ex)
+                        {
+                            richTextBox1.Text = ex.Message;
+                        }
+                    }
+                }
+            }
         }
     }
 }

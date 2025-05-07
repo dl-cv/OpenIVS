@@ -8,7 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
-namespace demo.Properties
+namespace DlcvDemo.Properties
 {
 
 
