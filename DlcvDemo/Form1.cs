@@ -10,7 +10,7 @@ using System.Collections.Generic;
 using static dlcv_infer_csharp.Utils;
 using DLCV;
 
-namespace demo
+namespace DlcvDemo
 {
     public partial class Form1 : Form
     {
@@ -53,6 +53,9 @@ namespace demo
                 }
                 comboBox1.SelectedIndex = 0;
             });
+
+            var info = Utils.GetDeviceInfo();
+            Console.WriteLine(info.ToString());
         }
 
         private Model model;
@@ -109,7 +112,16 @@ namespace demo
                 return;
             }
             JObject result = model.GetModelInfo();
-            richTextBox1.Text = result["model_info"].ToString();
+            if (result.ContainsKey("model_info"))
+            {
+                result = (JObject)result["model_info"];
+                richTextBox1.Text = result.ToString();
+            }
+            else if (result.ContainsKey("code"))
+            {
+                richTextBox1.Text = result.ToString();
+                return;
+            }
         }
 
         private void button_openimage_Click(object sender, EventArgs e)
@@ -176,12 +188,19 @@ namespace demo
             data["threshold"] = float.Parse(textBox_threshold.Text);
             data["with_mask"] = true;
 
+            Stopwatch stopwatch = new Stopwatch();
+            stopwatch.Start();
+
             CSharpResult result = model.InferBatch(image_list, data);
+
+            stopwatch.Stop();
+            double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
+            Console.WriteLine($"推理时间: {delay_ms:F2}ms");
 
             imagePanel1.UpdateImageAndResult(image, result);
 
             var a = result.SampleResults[0];
-            string s = "";
+            string s = $"推理时间: {delay_ms:F2}ms\n\n";
             foreach (var b in a.Results)
             {
                 s += b.CategoryName + ", ";
@@ -207,7 +226,7 @@ namespace demo
             {
                 // 执行批量推理
                 var result = model.InferBatch((List<Mat>)parameter);
-                
+
                 // InferBatch方法内部已经检查了code并抛出异常，
                 // 如果执行到这里就说明推理成功了
             }
@@ -348,7 +367,72 @@ namespace demo
         private void button1_Click(object sender, EventArgs e)
         {
             JArray sntl_info = sntl_admin_csharp.SNTLUtils.GetDeviceList();
-            richTextBox1.Text = sntl_info.ToString();
+            JArray sntl_features = sntl_admin_csharp.SNTLUtils.GetFeatureList();
+            richTextBox1.Text = "加密狗ID：\n" + sntl_info.ToString() + "\n\n" +
+                "加密狗特性：\n" + sntl_features.ToString();
+        }
+
+        private void button_load_sliding_window_model_Click(object sender, EventArgs e)
+        {
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.RestoreDirectory = true;
+
+            openFileDialog.Filter = "深度视觉加速模型文件 (*.dvt)|*.dvt";
+            openFileDialog.Title = "选择模型";
+            try
+            {
+                openFileDialog.InitialDirectory = Path.GetDirectoryName(Properties.Settings.Default.LastModelPath);
+                openFileDialog.FileName = Path.GetFileName(Properties.Settings.Default.LastModelPath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+
+            if (openFileDialog.ShowDialog() == DialogResult.OK)
+            {
+                string selectedFilePath = openFileDialog.FileName;
+                Properties.Settings.Default.LastModelPath = selectedFilePath;
+                Properties.Settings.Default.Save();
+                int device_id = comboBox1.SelectedIndex;
+
+                // 显示参数配置窗口
+                using (var configForm = new SlidingWindowConfigForm())
+                {
+                    if (configForm.ShowDialog() == DialogResult.OK)
+                    {
+                        try
+                        {
+                            if (model != null)
+                            {
+                                model = null;
+                                GC.Collect();
+                            }
+                            model = new SlidingWindowModel(
+                                selectedFilePath,
+                                device_id,
+                                configForm.SmallImgWidth,
+                                configForm.SmallImgHeight,
+                                configForm.HorizontalOverlap,
+                                configForm.VerticalOverlap,
+                                configForm.Threshold,
+                                configForm.IouThreshold,
+                                configForm.CombineIosThreshold
+                            );
+                            button_getmodelinfo_Click(sender, e);
+                        }
+                        catch (Exception ex)
+                        {
+                            richTextBox1.Text = ex.Message;
+                        }
+                    }
+                }
+            }
+        }
+
+        private void button_free_all_model_Click(object sender, EventArgs e)
+        {
+            Utils.FreeAllModels();
         }
     }
 }

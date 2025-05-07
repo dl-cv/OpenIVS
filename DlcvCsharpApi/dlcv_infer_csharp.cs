@@ -53,7 +53,8 @@ namespace dlcv_infer_csharp
         private void LoadDll()
         {
             JArray feature_list = new JArray();
-            try{
+            try
+            {
                 SNTL sNTL = new SNTL();
                 feature_list = sNTL.GetFeatureList();
 
@@ -116,8 +117,12 @@ namespace dlcv_infer_csharp
     }
     public class Model
     {
+        protected int modelIndex = -1;
 
-        private int modelIndex = -1;
+        public Model()
+        {
+
+        }
 
         public Model(string modelPath, int device_id)
         {
@@ -404,6 +409,54 @@ namespace dlcv_infer_csharp
         }
     }
 
+    public class SlidingWindowModel : Model
+    {
+        public SlidingWindowModel(
+            string modelPath,
+            int device_id,
+            int small_img_width = 832,
+            int small_img_height = 704,
+            int horizontal_overlap = 16,
+            int vertical_overlap = 16,
+            float threshold = 0.5f,
+            float iou_threshold = 0.2f,
+            float combine_ios_threshold = 0.2f)
+        {
+            var config = new JObject
+            {
+                ["type"] = "sliding_window_pipeline",
+                ["model_path"] = modelPath,
+                ["device_id"] = device_id,
+                ["small_img_width"] = small_img_width,
+                ["small_img_height"] = small_img_height,
+                ["horizontal_overlap"] = horizontal_overlap,
+                ["vertical_overlap"] = vertical_overlap,
+                ["threshold"] = threshold,
+                ["iou_threshold"] = iou_threshold,
+                ["combine_ios_threshold"] = combine_ios_threshold
+            };
+
+            var setting = new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii };
+
+            string jsonStr = JsonConvert.SerializeObject(config, setting);
+
+            IntPtr resultPtr = DllLoader.Instance.dlcv_load_model(jsonStr);
+            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+            var resultObject = JObject.Parse(resultJson);
+
+            Console.WriteLine("SlidingWindowModel load result: " + resultObject.ToString());
+            if (resultObject.ContainsKey("model_index"))
+            {
+                modelIndex = resultObject["model_index"].Value<int>();
+            }
+            else
+            {
+                throw new Exception("加载滑窗裁图模型失败：" + resultObject.ToString());
+            }
+            DllLoader.Instance.dlcv_free_result(resultPtr);
+        }
+    }
+
     public class Utils
     {
 
@@ -504,41 +557,41 @@ namespace dlcv_infer_csharp
                     for (int i = 0; i < sampleResult.Results.Count; i++)
                     {
                         var detection = sampleResult.Results[i];
-                        
+
                         // 获取边界框坐标 (x, y, w, h)
                         double x = detection.Bbox[0];
                         double y = detection.Bbox[1];
                         double w = detection.Bbox[2];
                         double h = detection.Bbox[3];
-                        
+
                         // 确保坐标在有效范围内
                         x = Math.Max(0, x);
                         y = Math.Max(0, y);
                         w = Math.Min(w, image.Width - x);
                         h = Math.Min(h, image.Height - y);
-                        
+
                         if (w <= 0 || h <= 0)
                             continue;
-                        
+
                         // 提取ROI区域
                         Rect roi = new Rect((int)x, (int)y, (int)w, (int)h);
                         // 创建连续的Mat对象（Clone确保内存连续）
                         Mat roiMat = new Mat(image, roi).Clone();
-                        
+
                         // 使用识别模型进行推理
                         var roiList = new List<Mat> { roiMat };
                         var recognizeResult = recognizeModel.InferBatch(roiList);
-                        
+
                         // 如果识别模型有检测结果，更新检测模型的分类名称
-                        if (recognizeResult.SampleResults.Count > 0 && 
+                        if (recognizeResult.SampleResults.Count > 0 &&
                             recognizeResult.SampleResults[0].Results.Count > 0)
                         {
                             // 获取识别模型的第一个检测结果
                             var topResult = recognizeResult.SampleResults[0].Results[0];
-                            
+
                             // 更新原始检测结果的分类名称
                             var updatedDetection = new CSharpObjectResult(
-                                detection.CategoryId, 
+                                detection.CategoryId,
                                 topResult.CategoryName, // 使用识别模型的分类名称
                                 detection.Score,
                                 detection.Area,
@@ -546,7 +599,7 @@ namespace dlcv_infer_csharp
                                 detection.WithMask,
                                 detection.Mask
                             );
-                            
+
                             // 替换原始检测结果
                             sampleResult.Results[i] = updatedDetection;
                         }
