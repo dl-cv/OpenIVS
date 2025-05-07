@@ -429,5 +429,10 @@ namespace DlcvDemo
                 }
             }
         }
+
+        private void button_free_all_model_Click(object sender, EventArgs e)
+        {
+            Utils.FreeAllModels();
+        }
     }
 }

@@ -48,6 +48,7 @@
             this.textBox_threshold = new System.Windows.Forms.TextBox();
             this.button_check_dog = new System.Windows.Forms.Button();
             this.button_load_sliding_window_model = new System.Windows.Forms.Button();
+            this.button_free_all_model = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             this.SuspendLayout();
@@ -281,11 +282,25 @@
             this.button_load_sliding_window_model.UseVisualStyleBackColor = true;
             this.button_load_sliding_window_model.Click += new System.EventHandler(this.button_load_sliding_window_model_Click);
             // 
+            // button_free_all_model
+            // 
+            this.button_free_all_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.button_free_all_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.button_free_all_model.Location = new System.Drawing.Point(1023, 161);
+            this.button_free_all_model.Margin = new System.Windows.Forms.Padding(4);
+            this.button_free_all_model.Name = "button_free_all_model";
+            this.button_free_all_model.Size = new System.Drawing.Size(140, 60);
+            this.button_free_all_model.TabIndex = 22;
+            this.button_free_all_model.Text = "释放所有模型";
+            this.button_free_all_model.UseVisualStyleBackColor = true;
+            this.button_free_all_model.Click += new System.EventHandler(this.button_free_all_model_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1178, 844);
+            this.Controls.Add(this.button_free_all_model);
             this.Controls.Add(this.button_load_sliding_window_model);
             this.Controls.Add(this.button_check_dog);
             this.Controls.Add(this.textBox_threshold);
@@ -341,6 +356,7 @@
         private System.Windows.Forms.TextBox textBox_threshold;
         private System.Windows.Forms.Button button_check_dog;
         private System.Windows.Forms.Button button_load_sliding_window_model;
+        private System.Windows.Forms.Button button_free_all_model;
     }
 }
 
