@@ -54,7 +54,8 @@ namespace DlcvDemo
                 comboBox1.SelectedIndex = 0;
             });
 
-            Utils.GetDeviceInfo();
+            var info = Utils.GetDeviceInfo();
+            Console.WriteLine(info.ToString());
         }
 
         private Model model;
