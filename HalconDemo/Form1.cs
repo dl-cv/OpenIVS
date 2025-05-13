@@ -44,7 +44,7 @@ namespace HalconDemo
         private double lastInferenceTime = 0; // 上次推理时间(ms)
         private double avgRefreshFPS = 0; // 平均刷新帧率
         private double avgInferenceFPS = 0; // 平均推理帧率
-        
+
         // 日志记录器
         private Logger logger = null;
 
@@ -78,7 +78,7 @@ namespace HalconDemo
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             logger.Info("应用程序关闭");
-            
+
             // 停止实时采集
             StopLiveAcquisition();
 
@@ -202,7 +202,7 @@ namespace HalconDemo
             catch (HalconDotNet.HOperatorException ex)
             {
                 MessageBox.Show($"获取摄像机设备列表时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                
+
                 // 错误情况下至少添加一个默认设备
                 devices.Add("default");
             }
@@ -216,7 +216,7 @@ namespace HalconDemo
             try
             {
                 logger.Info($"尝试打开摄像机 - 接口: {interfaceName}, 设备ID: {deviceId}");
-                
+
                 // 关闭之前的摄像机
                 CloseCamera();
 
@@ -236,7 +236,7 @@ namespace HalconDemo
                     out acqHandle);
 
                 currentCameraType = interfaceName;
-                
+
                 logger.Info($"摄像机打开成功 - 接口: {interfaceName}, 设备ID: {deviceId}");
                 return true;
             }
@@ -276,18 +276,18 @@ namespace HalconDemo
             try
             {
                 logger.Info("开始实时采集");
-                
+
                 // 开始图像采集
                 HOperatorSet.GrabImageStart(acqHandle, -1);
-                
+
                 // 启动定时器
                 isLiveMode = true;
                 liveTimer.Start();
-                
+
                 // 重置性能统计数据
                 avgRefreshFPS = 0;
                 avgInferenceFPS = 0;
-                
+
                 // 更新按钮状态
                 btnStartLive.Text = "停止实时";
                 btnInfer.Enabled = false;
@@ -309,14 +309,14 @@ namespace HalconDemo
                 liveTimer.Stop();
                 isLiveMode = false;
                 isInferenceEnabled = false;
-                
+
                 // 记录性能统计信息
-                if(totalFrameCount > 0)
+                if (totalFrameCount > 0)
                 {
                     logger.Info($"停止实时采集 - 总计处理帧数: {totalFrameCount}, 总计推理帧数: {totalInferenceCount}, " +
                                $"平均刷新帧率: {avgRefreshFPS:F1} FPS, 平均推理帧率: {avgInferenceFPS:F1} FPS");
                 }
-                
+
                 // 更新按钮状态
                 btnStartLive.Text = "开始实时";
                 btnInferLive.Text = "实时推理";
@@ -340,13 +340,13 @@ namespace HalconDemo
             {
                 // 开始图像刷新计时
                 refreshStopwatch.Restart();
-                
+
                 // 释放halconImage
                 halconImage.Dispose();
 
                 // 获取图像
                 HOperatorSet.GrabImageAsync(out halconImage, acqHandle, -1);
-                
+
                 // 获取图像尺寸
                 HTuple width = new HTuple(), height = new HTuple();
                 HOperatorSet.GetImageSize(halconImage, out width, out height);
@@ -355,37 +355,37 @@ namespace HalconDemo
 
                 // 显示图像
                 RefreshDisplayImage();
-                
+
                 // 图像刷新计时结束
                 refreshStopwatch.Stop();
                 lastRefreshTime = refreshStopwatch.ElapsedMilliseconds;
                 totalFrameCount++;
-                
+
                 // 计算平均刷新帧率（使用移动平均）
                 avgRefreshFPS = 0.9 * avgRefreshFPS + 0.1 * (1000.0 / Math.Max(1, lastRefreshTime));
-                
+
                 // 如果开启了实时推理，执行推理
                 if (isInferenceEnabled && model != null)
                 {
                     // 开始推理计时
                     inferenceStopwatch.Restart();
-                    
+
                     Utils.CSharpResult result = InferWithHalconImage(halconImage);
                     DisplayResults(result);
-                    
+
                     // 推理计时结束
                     inferenceStopwatch.Stop();
                     lastInferenceTime = inferenceStopwatch.ElapsedMilliseconds;
                     totalInferenceCount++;
-                    
+
                     // 计算平均推理帧率（使用移动平均）
                     avgInferenceFPS = 0.9 * avgInferenceFPS + 0.1 * (1000.0 / Math.Max(1, lastInferenceTime));
-                    
+
                     // 更新性能信息显示
                     UpdatePerformanceDisplay();
-                    
+
                     // 每100帧记录一次性能数据
-                    if(totalInferenceCount % 100 == 0)
+                    if (totalInferenceCount % 100 == 0)
                     {
                         logger.Info($"性能统计 - 已处理帧数: {totalFrameCount}, 已推理帧数: {totalInferenceCount}, " +
                                    $"刷新帧率: {avgRefreshFPS:F1} FPS, 推理帧率: {avgInferenceFPS:F1} FPS, " +
@@ -445,9 +445,9 @@ namespace HalconDemo
             {
                 string selectedInterface = cmbCameraInterface.SelectedItem.ToString();
                 List<string> devices = GetCameraDevices(selectedInterface);
-                
+
                 cmbCameraDevice.Items.Clear();
-                
+
                 if (devices.Count > 0)
                 {
                     foreach (string device in devices)
@@ -476,7 +476,7 @@ namespace HalconDemo
 
             string selectedInterface = cmbCameraInterface.SelectedItem.ToString();
             string selectedDevice = "default";
-            
+
             if (cmbCameraDevice.SelectedItem != null)
             {
                 selectedDevice = cmbCameraDevice.SelectedItem.ToString();
@@ -493,7 +493,7 @@ namespace HalconDemo
                     MessageBox.Show("摄像机连接成功！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     btnStartLive.Enabled = true;
                 }
-                
+
                 Cursor = Cursors.Default;
             }
             catch (Exception ex)
@@ -541,7 +541,7 @@ namespace HalconDemo
 
             // 切换实时推理状态
             isInferenceEnabled = !isInferenceEnabled;
-            
+
             if (isInferenceEnabled)
             {
                 logger.Info("开始实时推理");
@@ -733,7 +733,7 @@ namespace HalconDemo
 
                 // 开始推理计时
                 inferenceStopwatch.Restart();
-                
+
                 // 执行推理
                 Utils.CSharpResult result = InferWithHalconImage(halconImage);
 
@@ -741,13 +741,13 @@ namespace HalconDemo
                 inferenceStopwatch.Stop();
                 lastInferenceTime = inferenceStopwatch.ElapsedMilliseconds;
                 totalInferenceCount++;
-                
+
                 // 显示推理结果
                 DisplayResults(result);
-                
+
                 // 更新性能信息
                 UpdatePerformanceDisplay();
-                
+
                 // 记录推理信息
                 logger.Info($"单张图像推理完成 - 图像: {Path.GetFileName(currentImagePath)}, 耗时: {lastInferenceTime:F1} ms");
 
@@ -856,7 +856,7 @@ namespace HalconDemo
                 }
 
                 logger.Info($"开始加载模型: {Path.GetFileName(currentModelPath)}");
-                
+
                 // 释放之前的模型（如果有）
                 if (model != null)
                 {
@@ -874,7 +874,7 @@ namespace HalconDemo
                 }
 
                 string modelType = modelInfo["model_info"]["task_type"]?.ToString() ?? "未知";
-                
+
                 logger.Info($"模型加载成功 - 类型: {modelType}, 设备ID: {deviceId}");
 
                 lblResult.Text = $"推理结果：模型加载成功，类型：{modelType}";

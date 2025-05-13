@@ -67,21 +67,22 @@
             this.hWindowControl.BackColor = System.Drawing.Color.Black;
             this.hWindowControl.BorderColor = System.Drawing.Color.Black;
             this.hWindowControl.ImagePart = new System.Drawing.Rectangle(0, 0, 640, 480);
-            this.hWindowControl.Location = new System.Drawing.Point(12, 61);
-            this.hWindowControl.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
+            this.hWindowControl.Location = new System.Drawing.Point(18, 92);
+            this.hWindowControl.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
             this.hWindowControl.Name = "hWindowControl";
-            this.hWindowControl.Size = new System.Drawing.Size(776, 274);
+            this.hWindowControl.Size = new System.Drawing.Size(1164, 411);
             this.hWindowControl.TabIndex = 0;
-            this.hWindowControl.WindowSize = new System.Drawing.Size(776, 274);
+            this.hWindowControl.WindowSize = new System.Drawing.Size(1164, 411);
             this.hWindowControl.SizeChanged += new System.EventHandler(this.hWindowControl_SizeChanged);
             this.hWindowControl.MouseWheel += new System.Windows.Forms.MouseEventHandler(this.hWindowControl_MouseWheel);
             // 
             // btnSelectImage
             // 
             this.btnSelectImage.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnSelectImage.Location = new System.Drawing.Point(604, 14);
+            this.btnSelectImage.Location = new System.Drawing.Point(888, 21);
+            this.btnSelectImage.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnSelectImage.Name = "btnSelectImage";
-            this.btnSelectImage.Size = new System.Drawing.Size(75, 23);
+            this.btnSelectImage.Size = new System.Drawing.Size(112, 34);
             this.btnSelectImage.TabIndex = 1;
             this.btnSelectImage.Text = "选择图像";
             this.btnSelectImage.UseVisualStyleBackColor = true;
@@ -90,9 +91,10 @@
             // btnSelectModel
             // 
             this.btnSelectModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnSelectModel.Location = new System.Drawing.Point(685, 15);
+            this.btnSelectModel.Location = new System.Drawing.Point(1028, 22);
+            this.btnSelectModel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnSelectModel.Name = "btnSelectModel";
-            this.btnSelectModel.Size = new System.Drawing.Size(85, 23);
+            this.btnSelectModel.Size = new System.Drawing.Size(128, 34);
             this.btnSelectModel.TabIndex = 2;
             this.btnSelectModel.Text = "选择模型";
             this.btnSelectModel.UseVisualStyleBackColor = true;
@@ -101,9 +103,10 @@
             // btnInfer
             // 
             this.btnInfer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnInfer.Location = new System.Drawing.Point(685, 44);
+            this.btnInfer.Location = new System.Drawing.Point(1008, 21);
+            this.btnInfer.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.btnInfer.Name = "btnInfer";
-            this.btnInfer.Size = new System.Drawing.Size(85, 23);
+            this.btnInfer.Size = new System.Drawing.Size(128, 34);
             this.btnInfer.TabIndex = 3;
             this.btnInfer.Text = "开始推理";
             this.btnInfer.UseVisualStyleBackColor = true;
@@ -112,18 +115,20 @@
             // lblImagePath
             // 
             this.lblImagePath.AutoSize = true;
-            this.lblImagePath.Location = new System.Drawing.Point(6, 17);
+            this.lblImagePath.Location = new System.Drawing.Point(9, 26);
+            this.lblImagePath.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblImagePath.Name = "lblImagePath";
-            this.lblImagePath.Size = new System.Drawing.Size(65, 12);
+            this.lblImagePath.Size = new System.Drawing.Size(98, 18);
             this.lblImagePath.TabIndex = 4;
             this.lblImagePath.Text = "图像路径：";
             // 
             // lblModelPath
             // 
             this.lblModelPath.AutoSize = true;
-            this.lblModelPath.Location = new System.Drawing.Point(12, 18);
+            this.lblModelPath.Location = new System.Drawing.Point(18, 27);
+            this.lblModelPath.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblModelPath.Name = "lblModelPath";
-            this.lblModelPath.Size = new System.Drawing.Size(65, 12);
+            this.lblModelPath.Size = new System.Drawing.Size(98, 18);
             this.lblModelPath.TabIndex = 5;
             this.lblModelPath.Text = "模型路径：";
             // 
@@ -131,18 +136,20 @@
             // 
             this.txtImagePath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtImagePath.Location = new System.Drawing.Point(77, 14);
+            this.txtImagePath.Location = new System.Drawing.Point(116, 21);
+            this.txtImagePath.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.txtImagePath.Name = "txtImagePath";
-            this.txtImagePath.Size = new System.Drawing.Size(521, 21);
+            this.txtImagePath.Size = new System.Drawing.Size(764, 28);
             this.txtImagePath.TabIndex = 6;
             // 
             // txtModelPath
             // 
             this.txtModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtModelPath.Location = new System.Drawing.Point(83, 15);
+            this.txtModelPath.Location = new System.Drawing.Point(124, 22);
+            this.txtModelPath.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.txtModelPath.Name = "txtModelPath";
-            this.txtModelPath.Size = new System.Drawing.Size(596, 21);
+            this.txtModelPath.Size = new System.Drawing.Size(892, 28);
             this.txtModelPath.TabIndex = 7;
             // 
             // panel1
@@ -152,9 +159,10 @@
             this.panel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.panel1.Controls.Add(this.lblResult);
             this.panel1.Controls.Add(this.tabControl);
-            this.panel1.Location = new System.Drawing.Point(12, 341);
+            this.panel1.Location = new System.Drawing.Point(18, 512);
+            this.panel1.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.panel1.Name = "panel1";
-            this.panel1.Size = new System.Drawing.Size(776, 127);
+            this.panel1.Size = new System.Drawing.Size(1163, 190);
             this.panel1.TabIndex = 8;
             // 
             // lblResult
@@ -162,9 +170,10 @@
             this.lblResult.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.lblResult.AutoSize = true;
-            this.lblResult.Location = new System.Drawing.Point(6, 105);
+            this.lblResult.Location = new System.Drawing.Point(9, 158);
+            this.lblResult.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblResult.Name = "lblResult";
-            this.lblResult.Size = new System.Drawing.Size(65, 12);
+            this.lblResult.Size = new System.Drawing.Size(98, 18);
             this.lblResult.TabIndex = 8;
             this.lblResult.Text = "推理结果：";
             // 
@@ -175,10 +184,11 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.tabControl.Controls.Add(this.tabImage);
             this.tabControl.Controls.Add(this.tabCamera);
-            this.tabControl.Location = new System.Drawing.Point(3, 3);
+            this.tabControl.Location = new System.Drawing.Point(4, 4);
+            this.tabControl.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.tabControl.Name = "tabControl";
             this.tabControl.SelectedIndex = 0;
-            this.tabControl.Size = new System.Drawing.Size(768, 99);
+            this.tabControl.Size = new System.Drawing.Size(1152, 148);
             this.tabControl.TabIndex = 9;
             // 
             // tabImage
@@ -186,10 +196,12 @@
             this.tabImage.Controls.Add(this.lblImagePath);
             this.tabImage.Controls.Add(this.txtImagePath);
             this.tabImage.Controls.Add(this.btnSelectImage);
-            this.tabImage.Location = new System.Drawing.Point(4, 22);
+            this.tabImage.Controls.Add(this.btnInfer);
+            this.tabImage.Location = new System.Drawing.Point(4, 28);
+            this.tabImage.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.tabImage.Name = "tabImage";
-            this.tabImage.Padding = new System.Windows.Forms.Padding(3);
-            this.tabImage.Size = new System.Drawing.Size(760, 73);
+            this.tabImage.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.tabImage.Size = new System.Drawing.Size(1144, 116);
             this.tabImage.TabIndex = 0;
             this.tabImage.Text = "图像";
             this.tabImage.UseVisualStyleBackColor = true;
@@ -197,10 +209,11 @@
             // tabCamera
             // 
             this.tabCamera.Controls.Add(this.groupCameraControl);
-            this.tabCamera.Location = new System.Drawing.Point(4, 22);
+            this.tabCamera.Location = new System.Drawing.Point(4, 28);
+            this.tabCamera.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.tabCamera.Name = "tabCamera";
-            this.tabCamera.Padding = new System.Windows.Forms.Padding(3);
-            this.tabCamera.Size = new System.Drawing.Size(760, 73);
+            this.tabCamera.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.tabCamera.Size = new System.Drawing.Size(1144, 116);
             this.tabCamera.TabIndex = 1;
             this.tabCamera.Text = "摄像机";
             this.tabCamera.UseVisualStyleBackColor = true;
@@ -218,50 +231,52 @@
             this.groupCameraControl.Controls.Add(this.btnRefreshCameras);
             this.groupCameraControl.Controls.Add(this.cmbCameraInterface);
             this.groupCameraControl.Controls.Add(this.lblCameraInterface);
-            this.groupCameraControl.Location = new System.Drawing.Point(6, 6);
+            this.groupCameraControl.Location = new System.Drawing.Point(9, 9);
+            this.groupCameraControl.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.groupCameraControl.Name = "groupCameraControl";
-            this.groupCameraControl.Size = new System.Drawing.Size(748, 61);
+            this.groupCameraControl.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.groupCameraControl.Size = new System.Drawing.Size(1122, 92);
             this.groupCameraControl.TabIndex = 0;
             this.groupCameraControl.TabStop = false;
             this.groupCameraControl.Text = "摄像机控制";
             // 
-            // lblCameraInterface
+            // btnInferLive
             // 
-            this.lblCameraInterface.AutoSize = true;
-            this.lblCameraInterface.Location = new System.Drawing.Point(6, 24);
-            this.lblCameraInterface.Name = "lblCameraInterface";
-            this.lblCameraInterface.Size = new System.Drawing.Size(41, 12);
-            this.lblCameraInterface.TabIndex = 0;
-            this.lblCameraInterface.Text = "接口：";
+            this.btnInferLive.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnInferLive.Enabled = false;
+            this.btnInferLive.Location = new System.Drawing.Point(986, 30);
+            this.btnInferLive.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnInferLive.Name = "btnInferLive";
+            this.btnInferLive.Size = new System.Drawing.Size(128, 34);
+            this.btnInferLive.TabIndex = 7;
+            this.btnInferLive.Text = "实时推理";
+            this.btnInferLive.UseVisualStyleBackColor = true;
+            this.btnInferLive.Click += new System.EventHandler(this.btnInferLive_Click);
             // 
-            // cmbCameraInterface
+            // btnStartLive
             // 
-            this.cmbCameraInterface.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cmbCameraInterface.FormattingEnabled = true;
-            this.cmbCameraInterface.Location = new System.Drawing.Point(53, 21);
-            this.cmbCameraInterface.Name = "cmbCameraInterface";
-            this.cmbCameraInterface.Size = new System.Drawing.Size(121, 20);
-            this.cmbCameraInterface.TabIndex = 1;
-            this.cmbCameraInterface.SelectedIndexChanged += new System.EventHandler(this.cmbCameraInterface_SelectedIndexChanged);
+            this.btnStartLive.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnStartLive.Enabled = false;
+            this.btnStartLive.Location = new System.Drawing.Point(864, 30);
+            this.btnStartLive.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnStartLive.Name = "btnStartLive";
+            this.btnStartLive.Size = new System.Drawing.Size(112, 34);
+            this.btnStartLive.TabIndex = 6;
+            this.btnStartLive.Text = "开始实时";
+            this.btnStartLive.UseVisualStyleBackColor = true;
+            this.btnStartLive.Click += new System.EventHandler(this.btnStartLive_Click);
             // 
-            // btnRefreshCameras
+            // btnConnectCamera
             // 
-            this.btnRefreshCameras.Location = new System.Drawing.Point(180, 20);
-            this.btnRefreshCameras.Name = "btnRefreshCameras";
-            this.btnRefreshCameras.Size = new System.Drawing.Size(39, 23);
-            this.btnRefreshCameras.TabIndex = 2;
-            this.btnRefreshCameras.Text = "刷新";
-            this.btnRefreshCameras.UseVisualStyleBackColor = true;
-            this.btnRefreshCameras.Click += new System.EventHandler(this.btnRefreshCameras_Click);
-            // 
-            // lblCameraDevice
-            // 
-            this.lblCameraDevice.AutoSize = true;
-            this.lblCameraDevice.Location = new System.Drawing.Point(225, 24);
-            this.lblCameraDevice.Name = "lblCameraDevice";
-            this.lblCameraDevice.Size = new System.Drawing.Size(41, 12);
-            this.lblCameraDevice.TabIndex = 3;
-            this.lblCameraDevice.Text = "设备：";
+            this.btnConnectCamera.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnConnectCamera.Location = new System.Drawing.Point(742, 30);
+            this.btnConnectCamera.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnConnectCamera.Name = "btnConnectCamera";
+            this.btnConnectCamera.Size = new System.Drawing.Size(112, 34);
+            this.btnConnectCamera.TabIndex = 5;
+            this.btnConnectCamera.Text = "连接";
+            this.btnConnectCamera.UseVisualStyleBackColor = true;
+            this.btnConnectCamera.Click += new System.EventHandler(this.btnConnectCamera_Click);
             // 
             // cmbCameraDevice
             // 
@@ -269,45 +284,53 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbCameraDevice.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbCameraDevice.FormattingEnabled = true;
-            this.cmbCameraDevice.Location = new System.Drawing.Point(272, 21);
+            this.cmbCameraDevice.Location = new System.Drawing.Point(408, 32);
+            this.cmbCameraDevice.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.cmbCameraDevice.Name = "cmbCameraDevice";
-            this.cmbCameraDevice.Size = new System.Drawing.Size(217, 20);
+            this.cmbCameraDevice.Size = new System.Drawing.Size(324, 26);
             this.cmbCameraDevice.TabIndex = 4;
             // 
-            // btnConnectCamera
+            // lblCameraDevice
             // 
-            this.btnConnectCamera.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnConnectCamera.Location = new System.Drawing.Point(495, 20);
-            this.btnConnectCamera.Name = "btnConnectCamera";
-            this.btnConnectCamera.Size = new System.Drawing.Size(75, 23);
-            this.btnConnectCamera.TabIndex = 5;
-            this.btnConnectCamera.Text = "连接";
-            this.btnConnectCamera.UseVisualStyleBackColor = true;
-            this.btnConnectCamera.Click += new System.EventHandler(this.btnConnectCamera_Click);
+            this.lblCameraDevice.AutoSize = true;
+            this.lblCameraDevice.Location = new System.Drawing.Point(338, 36);
+            this.lblCameraDevice.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblCameraDevice.Name = "lblCameraDevice";
+            this.lblCameraDevice.Size = new System.Drawing.Size(62, 18);
+            this.lblCameraDevice.TabIndex = 3;
+            this.lblCameraDevice.Text = "设备：";
             // 
-            // btnStartLive
+            // btnRefreshCameras
             // 
-            this.btnStartLive.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnStartLive.Enabled = false;
-            this.btnStartLive.Location = new System.Drawing.Point(576, 20);
-            this.btnStartLive.Name = "btnStartLive";
-            this.btnStartLive.Size = new System.Drawing.Size(75, 23);
-            this.btnStartLive.TabIndex = 6;
-            this.btnStartLive.Text = "开始实时";
-            this.btnStartLive.UseVisualStyleBackColor = true;
-            this.btnStartLive.Click += new System.EventHandler(this.btnStartLive_Click);
+            this.btnRefreshCameras.Location = new System.Drawing.Point(270, 30);
+            this.btnRefreshCameras.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnRefreshCameras.Name = "btnRefreshCameras";
+            this.btnRefreshCameras.Size = new System.Drawing.Size(58, 34);
+            this.btnRefreshCameras.TabIndex = 2;
+            this.btnRefreshCameras.Text = "刷新";
+            this.btnRefreshCameras.UseVisualStyleBackColor = true;
+            this.btnRefreshCameras.Click += new System.EventHandler(this.btnRefreshCameras_Click);
             // 
-            // btnInferLive
+            // cmbCameraInterface
             // 
-            this.btnInferLive.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnInferLive.Enabled = false;
-            this.btnInferLive.Location = new System.Drawing.Point(657, 20);
-            this.btnInferLive.Name = "btnInferLive";
-            this.btnInferLive.Size = new System.Drawing.Size(85, 23);
-            this.btnInferLive.TabIndex = 7;
-            this.btnInferLive.Text = "实时推理";
-            this.btnInferLive.UseVisualStyleBackColor = true;
-            this.btnInferLive.Click += new System.EventHandler(this.btnInferLive_Click);
+            this.cmbCameraInterface.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbCameraInterface.FormattingEnabled = true;
+            this.cmbCameraInterface.Location = new System.Drawing.Point(80, 32);
+            this.cmbCameraInterface.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.cmbCameraInterface.Name = "cmbCameraInterface";
+            this.cmbCameraInterface.Size = new System.Drawing.Size(180, 26);
+            this.cmbCameraInterface.TabIndex = 1;
+            this.cmbCameraInterface.SelectedIndexChanged += new System.EventHandler(this.cmbCameraInterface_SelectedIndexChanged);
+            // 
+            // lblCameraInterface
+            // 
+            this.lblCameraInterface.AutoSize = true;
+            this.lblCameraInterface.Location = new System.Drawing.Point(9, 36);
+            this.lblCameraInterface.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblCameraInterface.Name = "lblCameraInterface";
+            this.lblCameraInterface.Size = new System.Drawing.Size(62, 18);
+            this.lblCameraInterface.TabIndex = 0;
+            this.lblCameraInterface.Text = "接口：";
             // 
             // panelTop
             // 
@@ -316,21 +339,22 @@
             this.panelTop.Controls.Add(this.lblModelPath);
             this.panelTop.Controls.Add(this.txtModelPath);
             this.panelTop.Controls.Add(this.btnSelectModel);
-            this.panelTop.Controls.Add(this.btnInfer);
-            this.panelTop.Location = new System.Drawing.Point(12, 12);
+            this.panelTop.Location = new System.Drawing.Point(18, 18);
+            this.panelTop.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
             this.panelTop.Name = "panelTop";
-            this.panelTop.Size = new System.Drawing.Size(776, 44);
+            this.panelTop.Size = new System.Drawing.Size(1164, 66);
             this.panelTop.TabIndex = 9;
             // 
             // Form1
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 18F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 480);
+            this.ClientSize = new System.Drawing.Size(1200, 720);
             this.Controls.Add(this.panelTop);
             this.Controls.Add(this.panel1);
             this.Controls.Add(this.hWindowControl);
-            this.MinimumSize = new System.Drawing.Size(816, 519);
+            this.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.MinimumSize = new System.Drawing.Size(1213, 750);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Halcon推理演示";
@@ -347,7 +371,6 @@
             this.panelTop.ResumeLayout(false);
             this.panelTop.PerformLayout();
             this.ResumeLayout(false);
-            this.PerformLayout();
 
         }
 
