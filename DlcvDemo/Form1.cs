@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.Collections.Generic;
 using static dlcv_infer_csharp.Utils;
 using DLCV;
+using System.Text;
 
 namespace DlcvDemo
 {
@@ -199,21 +200,11 @@ namespace DlcvDemo
 
             imagePanel1.UpdateImageAndResult(image, result);
 
-            var a = result.SampleResults[0];
-            string s = $"推理时间: {delay_ms:F2}ms\n\n";
-            foreach (var b in a.Results)
-            {
-                s += b.CategoryName + ", ";
-                s += b.Score + ", ";
-                s += b.Area + ", ";
-                s += "bbox: [";
-                foreach (var x in b.Bbox)
-                {
-                    s += x + ", ";
-                }
-                s += "]\n";
-            }
-            richTextBox1.Text = s;
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"推理时间: {delay_ms:F2}ms\n");
+            sb.AppendLine($"推理结果: ");
+            sb.AppendLine(result.SampleResults[0].ToString());
+            richTextBox1.Text = sb.ToString();
         }
 
         /// <summary>
