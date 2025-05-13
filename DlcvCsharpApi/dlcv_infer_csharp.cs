@@ -330,7 +330,14 @@ namespace dlcv_infer_csharp
                     float angle = -100;
                     if (withAngle && result.ContainsKey("angle"))
                     {
-                        angle = (float)result["angle"];
+                        try
+                        {
+                            angle = (float)result["angle"];
+                        }
+                        catch
+                        {
+
+                        }
                     }
 
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
