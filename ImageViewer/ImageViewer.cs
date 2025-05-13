@@ -261,17 +261,10 @@ namespace DLCV
 
                 if (bbox.Count < 4)
                 {
-                    //Debug.WriteLine($"无效的bbox数据: {string.Join(", ", bbox)}");
-                    //continue;
                     // 这个是分类结果，没有bbox
                     _statusText = categoryName;
                     break;
                 }
-
-                float x = (float)bbox[0];
-                float y = (float)bbox[1];
-                float w = (float)bbox[2];
-                float h = (float)bbox[3];
 
                 // 颜色处理（假设根据类别ID设置颜色）
                 Color color = Color.Green;
@@ -282,48 +275,119 @@ namespace DLCV
                 if (color != Color.Lime)
                     _statusText = "NG";
 
-                // 处理Mask
-                if (objResult.WithMask && objResult.Mask != null)
+                // 处理旋转框检测
+                if (!float.IsNaN(objResult.Angle))
                 {
-                    // 使用新函数处理Mask
-                    //using (var maskBitmap = ConvertMaskToTransparentBitmap(objResult.Mask, Color.FromArgb(128, 0, 255, 0)))
-                    using (var maskBitmap = CreateTransparentMaskDirect(objResult.Mask))
+                    // 旋转框检测：[cx, cy, w, h]
+                    float cx = (float)bbox[0];
+                    float cy = (float)bbox[1];
+                    float w = (float)bbox[2];
+                    float h = (float)bbox[3];
+                    float angle = objResult.Angle;
+
+                    // 计算旋转框的四个角点
+                    PointF[] points = new PointF[4];
+                    float cos = (float)Math.Cos(angle);
+                    float sin = (float)Math.Sin(angle);
+
+                    // 计算相对于中心点的偏移
+                    float[] offsets = new float[] {
+                        -w/2, -h/2,  // 左上
+                        w/2, -h/2,   // 右上
+                        w/2, h/2,    // 右下
+                        -w/2, h/2    // 左下
+                    };
+
+                    // 计算旋转后的四个角点
+                    for (int i = 0; i < 4; i++)
                     {
-                        e.Graphics.DrawImage(maskBitmap, x, y, w, h);
+                        float x = offsets[i * 2];
+                        float y = offsets[i * 2 + 1];
+                        points[i] = new PointF(
+                            cx + x * cos - y * sin,
+                            cy + x * sin + y * cos
+                        );
+                    }
+
+                    // 绘制旋转框
+                    using (Pen pen = new Pen(color, borderWidth))
+                    {
+                        // 绘制四条边
+                        for (int i = 0; i < 4; i++)
+                        {
+                            e.Graphics.DrawLine(pen, points[i], points[(i + 1) % 4]);
+                        }
+                    }
+
+                    // 绘制标签文本
+                    string label = $"{categoryName} {score:F2}";
+                    using (Font font = new Font("Microsoft YaHei", fontSize))
+                    {
+                        SizeF textSize = e.Graphics.MeasureString(label, font);
+                        // 将文本位置放在旋转框上方
+                        float textX = cx - textSize.Width / 2;
+                        float textY = cy - h/2 - textSize.Height - 2;
+
+                        // 绘制半透明黑色背景
+                        using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                        {
+                            e.Graphics.FillRectangle(backgroundBrush, textX, textY, textSize.Width, textSize.Height);
+                        }
+
+                        // 绘制文字
+                        using (SolidBrush textBrush = new SolidBrush(color))
+                        {
+                            e.Graphics.DrawString(label, font, textBrush, textX, textY);
+                        }
                     }
                 }
-
-                // 绘制边界框
-                using (Pen pen = new Pen(color, borderWidth))
+                else
                 {
-                    e.Graphics.DrawRectangle(pen, x, y, w, h);
-                }
+                    // 普通检测框：[x, y, w, h]
+                    float x = (float)bbox[0];
+                    float y = (float)bbox[1];
+                    float w = (float)bbox[2];
+                    float h = (float)bbox[3];
 
-                // 绘制标签文本
-                string label = $"{categoryName} {score:F2}";
-                using (Font font = new Font("Microsoft YaHei", fontSize)) // 微软雅黑字体
-                {
-                    SizeF textSize = e.Graphics.MeasureString(label, font);
-                    // 修正文本位置，确保紧贴bbox上沿
-                    float textY = y - textSize.Height - 2; // 直接使用测量的高度，并留出2像素的间距
-                                                           //if (textY < 0) textY = y + h + 2;
-
-                    // 绘制半透明黑色背景
-                    using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                    // 处理Mask
+                    if (objResult.WithMask && objResult.Mask != null)
                     {
-                        e.Graphics.FillRectangle(backgroundBrush, x, textY, textSize.Width, textSize.Height);
+                        using (var maskBitmap = CreateTransparentMaskDirect(objResult.Mask))
+                        {
+                            e.Graphics.DrawImage(maskBitmap, x, y, w, h);
+                        }
                     }
 
-                    // 绘制文字
-                    using (SolidBrush textBrush = new SolidBrush(color))
+                    // 绘制边界框
+                    using (Pen pen = new Pen(color, borderWidth))
                     {
-                        e.Graphics.DrawString(label, font, textBrush, x, textY);
+                        e.Graphics.DrawRectangle(pen, x, y, w, h);
+                    }
+
+                    // 绘制标签文本
+                    string label = $"{categoryName} {score:F2}";
+                    using (Font font = new Font("Microsoft YaHei", fontSize))
+                    {
+                        SizeF textSize = e.Graphics.MeasureString(label, font);
+                        float textY = y - textSize.Height - 2;
+
+                        // 绘制半透明黑色背景
+                        using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                        {
+                            e.Graphics.FillRectangle(backgroundBrush, x, textY, textSize.Width, textSize.Height);
+                        }
+
+                        // 绘制文字
+                        using (SolidBrush textBrush = new SolidBrush(color))
+                        {
+                            e.Graphics.DrawString(label, font, textBrush, x, textY);
+                        }
                     }
                 }
             }
 
             // 绘制状态文本
-            if (ShowStatusText) // 根据ShowStatusText决定是否显示状态文本
+            if (ShowStatusText)
             {
                 var originalTransform = e.Graphics.Transform;
                 e.Graphics.ResetTransform();
