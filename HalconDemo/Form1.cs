@@ -873,7 +873,7 @@ namespace HalconDemo
                     throw new Exception("无法获取模型信息");
                 }
 
-                string modelType = modelInfo["model_type"]?.ToString() ?? "未知";
+                string modelType = modelInfo["model_info"]["task_type"]?.ToString() ?? "未知";
                 
                 logger.Info($"模型加载成功 - 类型: {modelType}, 设备ID: {deviceId}");
 
