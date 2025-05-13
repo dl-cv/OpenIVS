@@ -354,6 +354,24 @@ namespace dlcv_infer_csharp
             }
         }
 
+        /// <summary>
+        /// 对单张图片进行推理，返回JSON格式的结果
+        /// </summary>
+        /// <param name="image">输入图像</param>
+        /// <param name="params_json">可选的推理参数，用于配置推理过程</param>
+        /// <returns>
+        /// 返回JSON格式的检测结果数组，每个元素包含：
+        /// - category_id: 类别ID
+        /// - category_name: 类别名称
+        /// - score: 检测置信度
+        /// - area: 检测框面积
+        /// - bbox: 检测框坐标 [x,y,w,h] 或 [cx,cy,w,h]
+        /// - with_mask: 是否包含mask
+        /// - mask: 如果with_mask为true，则包含mask信息
+        ///   - 对于实例分割/语义分割：返回mask的多边形点集
+        ///   - 每个点包含x,y坐标，坐标是相对于原图的绝对坐标
+        /// - angle: 如果是旋转框检测，则包含旋转角度（弧度）
+        /// </returns>
         public dynamic InferOneOutJson(Mat image, JObject params_json = null)
         {
             var resultTuple = InferInternal(new List<Mat> { image }, params_json);
