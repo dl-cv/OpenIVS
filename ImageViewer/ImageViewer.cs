@@ -276,7 +276,7 @@ namespace DLCV
                     _statusText = "NG";
 
                 // 处理旋转框检测
-                if (!float.IsNaN(objResult.Angle))
+                if (objResult.WithAngle)
                 {
                     // 旋转框检测：[cx, cy, w, h]
                     float cx = (float)bbox[0];
@@ -326,7 +326,7 @@ namespace DLCV
                         SizeF textSize = e.Graphics.MeasureString(label, font);
                         // 将文本位置放在旋转框上方
                         float textX = cx - textSize.Width / 2;
-                        float textY = cy - h/2 - textSize.Height - 2;
+                        float textY = cy - h / 2 - textSize.Height - 2;
 
                         // 绘制半透明黑色背景
                         using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
