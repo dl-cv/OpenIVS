@@ -297,10 +297,11 @@ namespace dlcv_infer_csharp
                 {
                     var categoryId = (int)result["category_id"];
                     var categoryName = (string)result["category_name"];
-                    var score = (float)(double)result["score"];
-                    var area = (float)(double)result["area"];
+                    var score = (float)result["score"];
+                    var area = (float)result["area"];
                     var bbox = result["bbox"].ToObject<List<double>>();
                     var withMask = (bool)result["with_mask"];
+                    var angle = result.Contains("angle") ? (float)result["angle"] : 0;
 
                     var mask = result["mask"];
                     int mask_width = (int)mask["width"];
@@ -313,7 +314,7 @@ namespace dlcv_infer_csharp
                         mask_img = mask_img.Clone();
                     }
 
-                    var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img);
+                    var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img, angle);
                     results.Add(objectResult);
                 }
 
@@ -361,10 +362,6 @@ namespace dlcv_infer_csharp
                 var results = resultTuple.Item1["sample_results"][0]["results"] as JArray;
                 foreach (var result in results)
                 {
-                    var categoryId = (int)result["category_id"];
-                    var categoryName = (string)result["category_name"];
-                    var score = (float)(double)result["score"];
-                    var area = (float)(double)result["area"];
                     var bbox = result["bbox"].ToObject<List<double>>();
                     var withMask = (bool)result["with_mask"];
 
@@ -470,7 +467,9 @@ namespace dlcv_infer_csharp
             public bool WithMask { get; set; }
             public Mat Mask { get; set; }
 
-            public CSharpObjectResult(int categoryId, string categoryName, float score, float area, List<double> bbox, bool withMask, Mat mask)
+            public float Angle { get; set; }
+
+            public CSharpObjectResult(int categoryId, string categoryName, float score, float area, List<double> bbox, bool withMask, Mat mask, float angle = 0.0f)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;
@@ -479,6 +478,7 @@ namespace dlcv_infer_csharp
                 Bbox = bbox;
                 WithMask = withMask;
                 Mask = mask;
+                Angle = angle;
             }
         }
 
