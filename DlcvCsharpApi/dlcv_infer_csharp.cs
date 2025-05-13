@@ -293,7 +293,7 @@ namespace dlcv_infer_csharp
                 var results = new List<Utils.CSharpObjectResult>();
                 var resultsArray = sampleResult["results"] as JArray;
 
-                foreach (var result in resultsArray)
+                foreach (JObject result in resultsArray)
                 {
                     var categoryId = (int)result["category_id"];
                     var categoryName = (string)result["category_name"];
@@ -301,8 +301,11 @@ namespace dlcv_infer_csharp
                     var area = (float)result["area"];
                     var bbox = result["bbox"].ToObject<List<double>>();
                     var withMask = (bool)result["with_mask"];
-                    var angle = result.Contains("angle") ? (float)result["angle"] : float.NaN;
-
+                    float angle = float.NaN;
+                    if (result.ContainsKey("angle"))
+                    {
+                        angle = (float)result["angle"];
+                    }
                     var mask = result["mask"];
                     int mask_width = (int)mask["width"];
                     int mask_height = (int)mask["height"];
