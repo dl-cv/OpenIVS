@@ -1297,5 +1297,54 @@ namespace HalconDemo
                                 $"累计推理: {totalInferenceCount} 帧";
             }
         }
+
+        private void btnLoadSlidingWindowModel_Click(object sender, EventArgs e)
+        {
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.RestoreDirectory = true;
+
+            openFileDialog.Filter = "深度视觉加速模型文件 (*.dvt)|*.dvt";
+            openFileDialog.Title = "选择模型";
+
+            if (openFileDialog.ShowDialog() == DialogResult.OK)
+            {
+                string selectedFilePath = openFileDialog.FileName;
+                int device_id = 0; // 默认使用GPU 0
+
+                // 显示参数配置窗口
+                using (var configForm = new SlidingWindowConfigForm())
+                {
+                    if (configForm.ShowDialog() == DialogResult.OK)
+                    {
+                        try
+                        {
+                            if (model != null)
+                            {
+                                model = null;
+                                GC.Collect();
+                            }
+                            model = new SlidingWindowModel(
+                                selectedFilePath,
+                                device_id,
+                                configForm.SmallImgWidth,
+                                configForm.SmallImgHeight,
+                                configForm.HorizontalOverlap,
+                                configForm.VerticalOverlap,
+                                configForm.Threshold,
+                                configForm.IouThreshold,
+                                configForm.CombineIosThreshold
+                            );
+                            txtModelPath.Text = selectedFilePath;
+                            lblResult.Text = "模型加载成功";
+                        }
+                        catch (Exception ex)
+                        {
+                            lblResult.Text = $"模型加载失败: {ex.Message}";
+                            MessageBox.Show($"加载模型时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                }
+            }
+        }
     }
 }

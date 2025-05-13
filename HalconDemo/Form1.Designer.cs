@@ -51,6 +51,7 @@
             this.cmbCameraInterface = new System.Windows.Forms.ComboBox();
             this.lblCameraInterface = new System.Windows.Forms.Label();
             this.panelTop = new System.Windows.Forms.Panel();
+            this.btnLoadSlidingWindowModel = new System.Windows.Forms.Button();
             this.panel1.SuspendLayout();
             this.tabControl.SuspendLayout();
             this.tabImage.SuspendLayout();
@@ -80,7 +81,7 @@
             // 
             this.btnSelectImage.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSelectImage.Location = new System.Drawing.Point(888, 21);
-            this.btnSelectImage.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnSelectImage.Margin = new System.Windows.Forms.Padding(4);
             this.btnSelectImage.Name = "btnSelectImage";
             this.btnSelectImage.Size = new System.Drawing.Size(112, 34);
             this.btnSelectImage.TabIndex = 1;
@@ -91,12 +92,12 @@
             // btnSelectModel
             // 
             this.btnSelectModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnSelectModel.Location = new System.Drawing.Point(1028, 22);
-            this.btnSelectModel.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnSelectModel.Location = new System.Drawing.Point(865, 19);
+            this.btnSelectModel.Margin = new System.Windows.Forms.Padding(4);
             this.btnSelectModel.Name = "btnSelectModel";
             this.btnSelectModel.Size = new System.Drawing.Size(128, 34);
             this.btnSelectModel.TabIndex = 2;
-            this.btnSelectModel.Text = "选择模型";
+            this.btnSelectModel.Text = "加载模型";
             this.btnSelectModel.UseVisualStyleBackColor = true;
             this.btnSelectModel.Click += new System.EventHandler(this.btnSelectModel_Click);
             // 
@@ -104,7 +105,7 @@
             // 
             this.btnInfer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnInfer.Location = new System.Drawing.Point(1008, 21);
-            this.btnInfer.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnInfer.Margin = new System.Windows.Forms.Padding(4);
             this.btnInfer.Name = "btnInfer";
             this.btnInfer.Size = new System.Drawing.Size(128, 34);
             this.btnInfer.TabIndex = 3;
@@ -137,7 +138,7 @@
             this.txtImagePath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtImagePath.Location = new System.Drawing.Point(116, 21);
-            this.txtImagePath.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.txtImagePath.Margin = new System.Windows.Forms.Padding(4);
             this.txtImagePath.Name = "txtImagePath";
             this.txtImagePath.Size = new System.Drawing.Size(764, 28);
             this.txtImagePath.TabIndex = 6;
@@ -147,9 +148,9 @@
             this.txtModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtModelPath.Location = new System.Drawing.Point(124, 22);
-            this.txtModelPath.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.txtModelPath.Margin = new System.Windows.Forms.Padding(4);
             this.txtModelPath.Name = "txtModelPath";
-            this.txtModelPath.Size = new System.Drawing.Size(892, 28);
+            this.txtModelPath.Size = new System.Drawing.Size(733, 28);
             this.txtModelPath.TabIndex = 7;
             // 
             // panel1
@@ -160,7 +161,7 @@
             this.panel1.Controls.Add(this.lblResult);
             this.panel1.Controls.Add(this.tabControl);
             this.panel1.Location = new System.Drawing.Point(18, 512);
-            this.panel1.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.panel1.Margin = new System.Windows.Forms.Padding(4);
             this.panel1.Name = "panel1";
             this.panel1.Size = new System.Drawing.Size(1163, 190);
             this.panel1.TabIndex = 8;
@@ -185,7 +186,7 @@
             this.tabControl.Controls.Add(this.tabImage);
             this.tabControl.Controls.Add(this.tabCamera);
             this.tabControl.Location = new System.Drawing.Point(4, 4);
-            this.tabControl.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.tabControl.Margin = new System.Windows.Forms.Padding(4);
             this.tabControl.Name = "tabControl";
             this.tabControl.SelectedIndex = 0;
             this.tabControl.Size = new System.Drawing.Size(1152, 148);
@@ -198,9 +199,9 @@
             this.tabImage.Controls.Add(this.btnSelectImage);
             this.tabImage.Controls.Add(this.btnInfer);
             this.tabImage.Location = new System.Drawing.Point(4, 28);
-            this.tabImage.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.tabImage.Margin = new System.Windows.Forms.Padding(4);
             this.tabImage.Name = "tabImage";
-            this.tabImage.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.tabImage.Padding = new System.Windows.Forms.Padding(4);
             this.tabImage.Size = new System.Drawing.Size(1144, 116);
             this.tabImage.TabIndex = 0;
             this.tabImage.Text = "图像";
@@ -210,9 +211,9 @@
             // 
             this.tabCamera.Controls.Add(this.groupCameraControl);
             this.tabCamera.Location = new System.Drawing.Point(4, 28);
-            this.tabCamera.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.tabCamera.Margin = new System.Windows.Forms.Padding(4);
             this.tabCamera.Name = "tabCamera";
-            this.tabCamera.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.tabCamera.Padding = new System.Windows.Forms.Padding(4);
             this.tabCamera.Size = new System.Drawing.Size(1144, 116);
             this.tabCamera.TabIndex = 1;
             this.tabCamera.Text = "摄像机";
@@ -232,9 +233,9 @@
             this.groupCameraControl.Controls.Add(this.cmbCameraInterface);
             this.groupCameraControl.Controls.Add(this.lblCameraInterface);
             this.groupCameraControl.Location = new System.Drawing.Point(9, 9);
-            this.groupCameraControl.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.groupCameraControl.Margin = new System.Windows.Forms.Padding(4);
             this.groupCameraControl.Name = "groupCameraControl";
-            this.groupCameraControl.Padding = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.groupCameraControl.Padding = new System.Windows.Forms.Padding(4);
             this.groupCameraControl.Size = new System.Drawing.Size(1122, 92);
             this.groupCameraControl.TabIndex = 0;
             this.groupCameraControl.TabStop = false;
@@ -245,7 +246,7 @@
             this.btnInferLive.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnInferLive.Enabled = false;
             this.btnInferLive.Location = new System.Drawing.Point(986, 30);
-            this.btnInferLive.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnInferLive.Margin = new System.Windows.Forms.Padding(4);
             this.btnInferLive.Name = "btnInferLive";
             this.btnInferLive.Size = new System.Drawing.Size(128, 34);
             this.btnInferLive.TabIndex = 7;
@@ -258,7 +259,7 @@
             this.btnStartLive.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnStartLive.Enabled = false;
             this.btnStartLive.Location = new System.Drawing.Point(864, 30);
-            this.btnStartLive.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnStartLive.Margin = new System.Windows.Forms.Padding(4);
             this.btnStartLive.Name = "btnStartLive";
             this.btnStartLive.Size = new System.Drawing.Size(112, 34);
             this.btnStartLive.TabIndex = 6;
@@ -270,7 +271,7 @@
             // 
             this.btnConnectCamera.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnConnectCamera.Location = new System.Drawing.Point(742, 30);
-            this.btnConnectCamera.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnConnectCamera.Margin = new System.Windows.Forms.Padding(4);
             this.btnConnectCamera.Name = "btnConnectCamera";
             this.btnConnectCamera.Size = new System.Drawing.Size(112, 34);
             this.btnConnectCamera.TabIndex = 5;
@@ -285,7 +286,7 @@
             this.cmbCameraDevice.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbCameraDevice.FormattingEnabled = true;
             this.cmbCameraDevice.Location = new System.Drawing.Point(408, 32);
-            this.cmbCameraDevice.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.cmbCameraDevice.Margin = new System.Windows.Forms.Padding(4);
             this.cmbCameraDevice.Name = "cmbCameraDevice";
             this.cmbCameraDevice.Size = new System.Drawing.Size(324, 26);
             this.cmbCameraDevice.TabIndex = 4;
@@ -303,7 +304,7 @@
             // btnRefreshCameras
             // 
             this.btnRefreshCameras.Location = new System.Drawing.Point(270, 30);
-            this.btnRefreshCameras.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.btnRefreshCameras.Margin = new System.Windows.Forms.Padding(4);
             this.btnRefreshCameras.Name = "btnRefreshCameras";
             this.btnRefreshCameras.Size = new System.Drawing.Size(58, 34);
             this.btnRefreshCameras.TabIndex = 2;
@@ -316,7 +317,7 @@
             this.cmbCameraInterface.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbCameraInterface.FormattingEnabled = true;
             this.cmbCameraInterface.Location = new System.Drawing.Point(80, 32);
-            this.cmbCameraInterface.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.cmbCameraInterface.Margin = new System.Windows.Forms.Padding(4);
             this.cmbCameraInterface.Name = "cmbCameraInterface";
             this.cmbCameraInterface.Size = new System.Drawing.Size(180, 26);
             this.cmbCameraInterface.TabIndex = 1;
@@ -339,11 +340,24 @@
             this.panelTop.Controls.Add(this.lblModelPath);
             this.panelTop.Controls.Add(this.txtModelPath);
             this.panelTop.Controls.Add(this.btnSelectModel);
+            this.panelTop.Controls.Add(this.btnLoadSlidingWindowModel);
             this.panelTop.Location = new System.Drawing.Point(18, 18);
-            this.panelTop.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.panelTop.Margin = new System.Windows.Forms.Padding(4);
             this.panelTop.Name = "panelTop";
             this.panelTop.Size = new System.Drawing.Size(1164, 66);
             this.panelTop.TabIndex = 9;
+            // 
+            // btnLoadSlidingWindowModel
+            // 
+            this.btnLoadSlidingWindowModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnLoadSlidingWindowModel.Location = new System.Drawing.Point(1001, 19);
+            this.btnLoadSlidingWindowModel.Margin = new System.Windows.Forms.Padding(4);
+            this.btnLoadSlidingWindowModel.Name = "btnLoadSlidingWindowModel";
+            this.btnLoadSlidingWindowModel.Size = new System.Drawing.Size(152, 34);
+            this.btnLoadSlidingWindowModel.TabIndex = 10;
+            this.btnLoadSlidingWindowModel.Text = "加载滑窗模型";
+            this.btnLoadSlidingWindowModel.UseVisualStyleBackColor = true;
+            this.btnLoadSlidingWindowModel.Click += new System.EventHandler(this.btnLoadSlidingWindowModel_Click);
             // 
             // Form1
             // 
@@ -353,7 +367,7 @@
             this.Controls.Add(this.panelTop);
             this.Controls.Add(this.panel1);
             this.Controls.Add(this.hWindowControl);
-            this.Margin = new System.Windows.Forms.Padding(4, 4, 4, 4);
+            this.Margin = new System.Windows.Forms.Padding(4);
             this.MinimumSize = new System.Drawing.Size(1213, 750);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
@@ -399,6 +413,7 @@
         private System.Windows.Forms.ComboBox cmbCameraInterface;
         private System.Windows.Forms.Label lblCameraInterface;
         private System.Windows.Forms.Panel panelTop;
+        private System.Windows.Forms.Button btnLoadSlidingWindowModel;
     }
 }
 
