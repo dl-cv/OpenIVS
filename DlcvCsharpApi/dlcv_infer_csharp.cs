@@ -301,7 +301,7 @@ namespace dlcv_infer_csharp
                     var area = (float)result["area"];
                     var bbox = result["bbox"].ToObject<List<double>>();
                     var withMask = (bool)result["with_mask"];
-                    var angle = result.Contains("angle") ? (float)result["angle"] : 0;
+                    var angle = result.Contains("angle") ? (float)result["angle"] : float.NaN;
 
                     var mask = result["mask"];
                     int mask_width = (int)mask["width"];
@@ -469,7 +469,7 @@ namespace dlcv_infer_csharp
 
             public float Angle { get; set; }
 
-            public CSharpObjectResult(int categoryId, string categoryName, float score, float area, List<double> bbox, bool withMask, Mat mask, float angle = 0.0f)
+            public CSharpObjectResult(int categoryId, string categoryName, float score, float area, List<double> bbox, bool withMask, Mat mask, float angle = float.NaN)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;
