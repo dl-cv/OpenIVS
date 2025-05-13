@@ -7,6 +7,7 @@ using OpenCvSharp;
 using sntl_admin_csharp;
 using System.Linq;
 using System.Text;
+using Newtonsoft.Json.Schema;
 
 namespace dlcv_infer_csharp
 {
@@ -300,25 +301,40 @@ namespace dlcv_infer_csharp
                     var categoryName = (string)result["category_name"];
                     var score = (float)result["score"];
                     var area = (float)result["area"];
+
                     var bbox = result["bbox"].ToObject<List<double>>();
-                    var withMask = (bool)result["with_mask"];
-                    float angle = float.NaN;
-                    if (result.ContainsKey("angle"))
+                    bool withBbox = false;
+                    if (result.ContainsKey("with_bbox"))
                     {
-                        angle = (float)result["angle"];
+                        withBbox = (bool)result["with_bbox"];
                     }
+                    else
+                    {
+                        withBbox = bbox.Count() > 0;
+                    }
+
+                    var withMask = (bool)result["with_mask"];
                     var mask = result["mask"];
-                    int mask_width = (int)mask["width"];
-                    int mask_height = (int)mask["height"];
                     Mat mask_img = new Mat();
                     if (withMask)
                     {
                         IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
+                        int mask_width = (int)mask["width"];
+                        int mask_height = (int)mask["height"];
                         mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
                         mask_img = mask_img.Clone();
                     }
 
-                    var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img, angle);
+                    bool withAngle = false;
+                    withAngle = result.ContainsKey("with_angle") && (bool)result["with_angle"];
+                    float angle = -100;
+                    if (withAngle && result.ContainsKey("angle"))
+                    {
+                        angle = (float)result["angle"];
+                    }
+
+                    var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
+                        withMask, mask_img, withBbox, withAngle, angle);
                     results.Add(objectResult);
                 }
 
@@ -503,6 +519,11 @@ namespace dlcv_infer_csharp
             /// </summary>
             public float Area { get; set; }
 
+            // <summary>
+            // 是否有检测框
+            // </summary>
+            public bool WithBbox { get; set; }
+
             /// <summary>
             /// 检测框坐标
             /// 对于普通目标检测/实例分割/语义分割：[x, y, w, h]，其中(x,y)为左上角坐标
@@ -522,13 +543,20 @@ namespace dlcv_infer_csharp
             /// </summary>
             public Mat Mask { get; set; }
 
+            // <summary>
+            // 是否有角度
+            // </summary>
+            public bool WithAngle { get; set; }
+
             /// <summary>
             /// 旋转框的角度（弧度制）
-            /// 仅旋转框检测任务会有此值，其他任务为NaN
+            /// 仅旋转框检测任务会有此值，其他任务为-100
             /// </summary>
             public float Angle { get; set; }
 
-            public CSharpObjectResult(int categoryId, string categoryName, float score, float area, List<double> bbox, bool withMask, Mat mask, float angle = float.NaN)
+            public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
+                List<double> bbox, bool withMask, Mat mask,
+                bool withBbox = false, bool withAngle = false, float angle = -100)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;
@@ -538,21 +566,33 @@ namespace dlcv_infer_csharp
                 WithMask = withMask;
                 Mask = mask;
                 Angle = angle;
+                WithBbox = withBbox;
+                WithAngle = withAngle;
             }
 
             public override String ToString()
             {
                 StringBuilder sb = new StringBuilder();
                 sb.Append($"{CategoryName}, ");
-                sb.Append($"Score: {Score*100:F1}, ");
+                sb.Append($"Score: {Score * 100:F1}, ");
                 sb.Append($"Area: {Area:F1}, ");
-                sb.Append($"Angle: {Angle * 180 / Math.PI:F1}, ");
-                sb.Append("Bbox: [");
-                foreach (var x in Bbox)
+                if (WithAngle)
                 {
-                    sb.Append($"{x:F1}, ");
+                    sb.Append($"Angle: {Angle * 180 / Math.PI:F1}, ");
                 }
-                sb.Append("], ");
+                if (WithBbox)
+                {
+                    sb.Append("Bbox: [");
+                    foreach (var x in Bbox)
+                    {
+                        sb.Append($"{x:F1}, ");
+                    }
+                    sb.Append("], ");
+                }
+                if (WithMask)
+                {
+                    sb.Append($"Mask size: {Mask.Width}x{Mask.Height}, ");
+                }
                 return sb.ToString();
             }
         }
