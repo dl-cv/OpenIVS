@@ -6,6 +6,7 @@ using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using sntl_admin_csharp;
 using System.Linq;
+using System.Text;
 
 namespace dlcv_infer_csharp
 {
@@ -538,6 +539,22 @@ namespace dlcv_infer_csharp
                 Mask = mask;
                 Angle = angle;
             }
+
+            public override String ToString()
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.Append($"{CategoryName}, ");
+                sb.Append($"Score: {Score*100:F1}, ");
+                sb.Append($"Area: {Area:F1}, ");
+                sb.Append($"Angle: {Angle * 180 / Math.PI:F1}, ");
+                sb.Append("Bbox: [");
+                foreach (var x in Bbox)
+                {
+                    sb.Append($"{x:F1}, ");
+                }
+                sb.Append("], ");
+                return sb.ToString();
+            }
         }
 
         /// <summary>
@@ -554,6 +571,17 @@ namespace dlcv_infer_csharp
             public CSharpSampleResult(List<CSharpObjectResult> results)
             {
                 Results = results;
+            }
+
+            public override String ToString()
+            {
+                StringBuilder sb = new StringBuilder();
+                foreach (var a in Results)
+                {
+                    sb.Append(a.ToString());
+                    sb.AppendLine();
+                }
+                return sb.ToString();
             }
         }
 
