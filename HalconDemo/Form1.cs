@@ -9,6 +9,7 @@ using System.Runtime.InteropServices; // 添加此行用于DllImport
 using System.Collections.Generic; // 添加此行用于List
 using System.Diagnostics; // 用于性能监控
 using DLCV; // 引用SimpleLogger命名空间
+using System.Threading.Tasks; // 添加此行用于Task
 
 namespace HalconDemo
 {
@@ -93,6 +94,7 @@ namespace HalconDemo
         {
             try
             {
+                List<string> foundInterfaces = new List<string>();
                 HTuple interfaces = null;
                 HTuple values = null;
 
@@ -100,6 +102,14 @@ namespace HalconDemo
                 try
                 {
                     HOperatorSet.InfoFramegrabber("all", "info_boards", out interfaces, out values);
+                    
+                    if (interfaces != null && interfaces.Length > 0)
+                    {
+                        for (int i = 0; i < interfaces.Length; i++)
+                        {
+                            foundInterfaces.Add(interfaces[i].S);
+                        }
+                    }
                 }
                 catch (HalconDotNet.HOperatorException)
                 {
@@ -110,10 +120,6 @@ namespace HalconDemo
                         "GenICam", "GenTL", "HALCON", "HDS", "PYLON"
                     };
 
-                    // 更新下拉框
-                    cmbCameraInterface.Items.Clear();
-                    availableCameras.Clear();
-
                     foreach (string interfaceName in commonInterfaces)
                     {
                         try
@@ -121,8 +127,7 @@ namespace HalconDemo
                             HOperatorSet.InfoFramegrabber(interfaceName, "info_boards", out HTuple info, out HTuple vals);
                             if (info != null && info.Length > 0)
                             {
-                                cmbCameraInterface.Items.Add(interfaceName);
-                                availableCameras.Add(interfaceName);
+                                foundInterfaces.Add(interfaceName);
                             }
                         }
                         catch (HalconDotNet.HOperatorException)
@@ -130,23 +135,16 @@ namespace HalconDemo
                             // 忽略不支持的接口
                         }
                     }
-
-                    if (cmbCameraInterface.Items.Count > 0)
-                    {
-                        cmbCameraInterface.SelectedIndex = 0;
-                    }
-                    return;
                 }
 
-                // 更新下拉框
-                cmbCameraInterface.Items.Clear();
-                availableCameras.Clear();
-
-                if (interfaces != null && interfaces.Length > 0)
+                // 使用Invoke确保在UI线程上更新控件
+                this.Invoke((MethodInvoker)delegate
                 {
-                    for (int i = 0; i < interfaces.Length; i++)
+                    cmbCameraInterface.Items.Clear();
+                    availableCameras.Clear();
+
+                    foreach (string interfaceName in foundInterfaces)
                     {
-                        string interfaceName = interfaces[i].S;
                         cmbCameraInterface.Items.Add(interfaceName);
                         availableCameras.Add(interfaceName);
                     }
@@ -154,12 +152,17 @@ namespace HalconDemo
                     if (cmbCameraInterface.Items.Count > 0)
                     {
                         cmbCameraInterface.SelectedIndex = 0;
+                        btnConnectCamera.Enabled = true;
                     }
-                }
+                });
             }
             catch (HalconDotNet.HOperatorException ex)
             {
-                MessageBox.Show($"获取摄像机接口时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // 使用Invoke确保在UI线程上显示错误消息
+                this.Invoke((MethodInvoker)delegate
+                {
+                    MessageBox.Show($"获取摄像机接口时发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                });
             }
         }
 
@@ -428,8 +431,8 @@ namespace HalconDemo
         // 窗口加载事件
         private void Form1_Load(object sender, EventArgs e)
         {
-            // 获取可用的摄像机接口
-            GetAvailableCameraInterfaces();
+            // 使用Task.Run在后台线程中获取摄像机接口
+            Task.Run(() => GetAvailableCameraInterfaces());
         }
 
         // 刷新摄像机按钮点击事件
