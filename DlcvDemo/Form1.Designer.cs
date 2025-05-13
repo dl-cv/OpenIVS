@@ -223,12 +223,12 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.imagePanel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imagePanel1.image = null;
-            this.imagePanel1.Location = new System.Drawing.Point(304, 228);
+            this.imagePanel1.Location = new System.Drawing.Point(441, 228);
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
             this.imagePanel1.ShowStatusText = false;
-            this.imagePanel1.Size = new System.Drawing.Size(859, 603);
+            this.imagePanel1.Size = new System.Drawing.Size(722, 603);
             this.imagePanel1.TabIndex = 17;
             // 
             // richTextBox1
@@ -238,7 +238,7 @@
             this.richTextBox1.Location = new System.Drawing.Point(12, 228);
             this.richTextBox1.Margin = new System.Windows.Forms.Padding(3, 3, 3, 16);
             this.richTextBox1.Name = "richTextBox1";
-            this.richTextBox1.Size = new System.Drawing.Size(282, 603);
+            this.richTextBox1.Size = new System.Drawing.Size(423, 603);
             this.richTextBox1.TabIndex = 7;
             this.richTextBox1.Text = "";
             // 

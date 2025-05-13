@@ -6,6 +6,8 @@ using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using sntl_admin_csharp;
 using System.Linq;
+using System.Text;
+using Newtonsoft.Json.Schema;
 
 namespace dlcv_infer_csharp
 {
@@ -293,27 +295,53 @@ namespace dlcv_infer_csharp
                 var results = new List<Utils.CSharpObjectResult>();
                 var resultsArray = sampleResult["results"] as JArray;
 
-                foreach (var result in resultsArray)
+                foreach (JObject result in resultsArray)
                 {
                     var categoryId = (int)result["category_id"];
                     var categoryName = (string)result["category_name"];
-                    var score = (float)(double)result["score"];
-                    var area = (float)(double)result["area"];
-                    var bbox = result["bbox"].ToObject<List<double>>();
-                    var withMask = (bool)result["with_mask"];
+                    var score = (float)result["score"];
+                    var area = (float)result["area"];
 
+                    var bbox = result["bbox"].ToObject<List<double>>();
+                    bool withBbox = false;
+                    if (result.ContainsKey("with_bbox"))
+                    {
+                        withBbox = (bool)result["with_bbox"];
+                    }
+                    else
+                    {
+                        withBbox = bbox.Count() > 0;
+                    }
+
+                    var withMask = (bool)result["with_mask"];
                     var mask = result["mask"];
-                    int mask_width = (int)mask["width"];
-                    int mask_height = (int)mask["height"];
                     Mat mask_img = new Mat();
                     if (withMask)
                     {
                         IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
+                        int mask_width = (int)mask["width"];
+                        int mask_height = (int)mask["height"];
                         mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
                         mask_img = mask_img.Clone();
                     }
 
-                    var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox, withMask, mask_img);
+                    bool withAngle = false;
+                    withAngle = result.ContainsKey("with_angle") && (bool)result["with_angle"];
+                    float angle = -100;
+                    if (withAngle && result.ContainsKey("angle"))
+                    {
+                        try
+                        {
+                            angle = (float)result["angle"];
+                        }
+                        catch
+                        {
+
+                        }
+                    }
+
+                    var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
+                        withMask, mask_img, withBbox, withAngle, angle);
                     results.Add(objectResult);
                 }
 
@@ -353,6 +381,24 @@ namespace dlcv_infer_csharp
             }
         }
 
+        /// <summary>
+        /// 对单张图片进行推理，返回JSON格式的结果
+        /// </summary>
+        /// <param name="image">输入图像</param>
+        /// <param name="params_json">可选的推理参数，用于配置推理过程</param>
+        /// <returns>
+        /// 返回JSON格式的检测结果数组，每个元素包含：
+        /// - category_id: 类别ID
+        /// - category_name: 类别名称
+        /// - score: 检测置信度
+        /// - area: 检测框面积
+        /// - bbox: 检测框坐标 [x,y,w,h] 或 [cx,cy,w,h]
+        /// - with_mask: 是否包含mask
+        /// - mask: 如果with_mask为true，则包含mask信息
+        ///   - 对于实例分割/语义分割：返回mask的多边形点集
+        ///   - 每个点包含x,y坐标，坐标是相对于原图的绝对坐标
+        /// - angle: 如果是旋转框检测，则包含旋转角度（弧度）
+        /// </returns>
         public dynamic InferOneOutJson(Mat image, JObject params_json = null)
         {
             var resultTuple = InferInternal(new List<Mat> { image }, params_json);
@@ -361,10 +407,6 @@ namespace dlcv_infer_csharp
                 var results = resultTuple.Item1["sample_results"][0]["results"] as JArray;
                 foreach (var result in results)
                 {
-                    var categoryId = (int)result["category_id"];
-                    var categoryName = (string)result["category_name"];
-                    var score = (float)(double)result["score"];
-                    var area = (float)(double)result["area"];
                     var bbox = result["bbox"].ToObject<List<double>>();
                     var withMask = (bool)result["with_mask"];
 
@@ -459,18 +501,69 @@ namespace dlcv_infer_csharp
 
     public class Utils
     {
-
+        /// <summary>
+        /// 单个检测物体的结果
+        /// </summary>
         public struct CSharpObjectResult
         {
+            /// <summary>
+            /// 类别ID
+            /// </summary>
             public int CategoryId { get; set; }
+
+            /// <summary>
+            /// 类别名称
+            /// </summary>
             public string CategoryName { get; set; }
+
+            /// <summary>
+            /// 检测置信度
+            /// </summary>
             public float Score { get; set; }
+
+            /// <summary>
+            /// 检测框的面积
+            /// </summary>
             public float Area { get; set; }
+
+            // <summary>
+            // 是否有检测框
+            // </summary>
+            public bool WithBbox { get; set; }
+
+            /// <summary>
+            /// 检测框坐标
+            /// 对于普通目标检测/实例分割/语义分割：[x, y, w, h]，其中(x,y)为左上角坐标
+            /// 对于旋转框检测：[cx, cy, w, h]，其中(cx,cy)为中心点坐标
+            /// </summary>
             public List<double> Bbox { get; set; }
+
+            /// <summary>
+            /// 是否包含mask信息（仅实例分割和语义分割任务会有）
+            /// </summary>
             public bool WithMask { get; set; }
+
+            /// <summary>
+            /// 实例分割或语义分割的mask
+            /// 0表示非目标像素，255表示目标像素
+            /// 尺寸与Bbox中的宽高一致
+            /// </summary>
             public Mat Mask { get; set; }
 
-            public CSharpObjectResult(int categoryId, string categoryName, float score, float area, List<double> bbox, bool withMask, Mat mask)
+            // <summary>
+            // 是否有角度
+            // </summary>
+            public bool WithAngle { get; set; }
+
+            /// <summary>
+            /// 旋转框的角度（弧度制）
+            /// 仅旋转框检测任务会有此值，其他任务为-100
+            /// </summary>
+            public float Angle { get; set; }
+
+            public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
+                List<double> bbox, bool withMask, Mat mask,
+                bool withBbox = false, bool withAngle = false, float angle = -100)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;
@@ -479,21 +572,75 @@ namespace dlcv_infer_csharp
                 Bbox = bbox;
                 WithMask = withMask;
                 Mask = mask;
+                Angle = angle;
+                WithBbox = withBbox;
+                WithAngle = withAngle;
+            }
+
+            public override String ToString()
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.Append($"{CategoryName}, ");
+                sb.Append($"Score: {Score * 100:F1}, ");
+                sb.Append($"Area: {Area:F1}, ");
+                if (WithAngle)
+                {
+                    sb.Append($"Angle: {Angle * 180 / Math.PI:F1}, ");
+                }
+                if (WithBbox)
+                {
+                    sb.Append("Bbox: [");
+                    foreach (var x in Bbox)
+                    {
+                        sb.Append($"{x:F1}, ");
+                    }
+                    sb.Append("], ");
+                }
+                if (WithMask)
+                {
+                    sb.Append($"Mask size: {Mask.Width}x{Mask.Height}, ");
+                }
+                return sb.ToString();
             }
         }
 
+        /// <summary>
+        /// 单张图片的检测结果
+        /// 包含该图片中所有检测到的物体信息
+        /// </summary>
         public struct CSharpSampleResult
         {
+            /// <summary>
+            /// 该图片中所有检测到的物体列表
+            /// </summary>
             public List<CSharpObjectResult> Results { get; set; }
 
             public CSharpSampleResult(List<CSharpObjectResult> results)
             {
                 Results = results;
             }
+
+            public override String ToString()
+            {
+                StringBuilder sb = new StringBuilder();
+                foreach (var a in Results)
+                {
+                    sb.Append(a.ToString());
+                    sb.AppendLine();
+                }
+                return sb.ToString();
+            }
         }
 
+        /// <summary>
+        /// 批量图片的检测结果
+        /// 每个元素对应一张图片的检测结果
+        /// </summary>
         public struct CSharpResult
         {
+            /// <summary>
+            /// 所有图片的检测结果列表
+            /// </summary>
             public List<CSharpSampleResult> SampleResults { get; set; }
 
             public CSharpResult(List<CSharpSampleResult> sampleResults)
