@@ -217,3 +217,6 @@ public void InitializeMultipleCameras(Settings settings)
    }
    ```
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=dl-cv/OpenIVS&type=Date)](https://www.star-history.com/#dl-cv/OpenIVS&Date)
