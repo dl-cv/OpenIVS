@@ -297,47 +297,47 @@ namespace dlcv_infer_csharp
 
                 foreach (JObject result in resultsArray)
                 {
-                    var categoryId = (int)result["category_id"];
-                    var categoryName = (string)result["category_name"];
-                    var score = (float)result["score"];
-                    var area = (float)result["area"];
+                    var categoryId = result["category_id"]?.Value<int>() ?? 0;
+                    var categoryName = result["category_name"]?.Value<string>() ?? "";
+                    var score = result["score"]?.Value<float>() ?? 0.0f;
+                    var area = result["area"]?.Value<float>() ?? 0.0f;
 
                     var bbox = result["bbox"].ToObject<List<double>>();
                     bool withBbox = false;
                     if (result.ContainsKey("with_bbox"))
                     {
-                        withBbox = (bool)result["with_bbox"];
+                        withBbox = result["with_bbox"]?.Value<bool>() ?? false;
                     }
                     else
                     {
                         withBbox = bbox.Count() > 0;
                     }
 
-                    var withMask = (bool)result["with_mask"];
+                    var withMask = result["with_mask"]?.Value<bool>() ?? false;
                     var mask = result["mask"];
                     Mat mask_img = new Mat();
-                    if (withMask)
+                    if (withMask && mask != null)
                     {
-                        IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
-                        int mask_width = (int)mask["width"];
-                        int mask_height = (int)mask["height"];
-                        mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                        mask_img = mask_img.Clone();
+                        long maskPtrValue = mask["mask_ptr"]?.Value<long>() ?? 0;
+                        if (maskPtrValue != 0)
+                        {
+                            IntPtr mask_ptr = new IntPtr(maskPtrValue);
+                            int mask_width = mask["width"]?.Value<int>() ?? 0;
+                            int mask_height = mask["height"]?.Value<int>() ?? 0;
+                            if (mask_width > 0 && mask_height > 0)
+                            {
+                                mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
+                                mask_img = mask_img.Clone();
+                            }
+                        }
                     }
 
                     bool withAngle = false;
-                    withAngle = result.ContainsKey("with_angle") && (bool)result["with_angle"];
+                    withAngle = result.ContainsKey("with_angle") && (result["with_angle"]?.Value<bool>() ?? false);
                     float angle = -100;
                     if (withAngle && result.ContainsKey("angle"))
                     {
-                        try
-                        {
-                            angle = (float)result["angle"];
-                        }
-                        catch
-                        {
-
-                        }
+                        angle = result["angle"]?.Value<float>() ?? -100f;
                     }
 
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
@@ -408,37 +408,41 @@ namespace dlcv_infer_csharp
                 foreach (var result in results)
                 {
                     var bbox = result["bbox"].ToObject<List<double>>();
-                    var withMask = (bool)result["with_mask"];
+                    var withMask = result["with_mask"]?.Value<bool>() ?? false;
 
                     var mask = result["mask"];
-                    int mask_width = (int)mask["width"];
-                    int mask_height = (int)mask["height"];
-                    int width = (int)bbox[2];
-                    int height = (int)bbox[3];
+                    int mask_width = mask?["width"]?.Value<int>() ?? 0;
+                    int mask_height = mask?["height"]?.Value<int>() ?? 0;
+                    int width = bbox != null && bbox.Count > 2 ? (int)bbox[2] : 0;
+                    int height = bbox != null && bbox.Count > 3 ? (int)bbox[3] : 0;
 
                     Mat mask_img = new Mat();
-                    if (withMask)
+                    if (withMask && mask != null && mask_width > 0 && mask_height > 0)
                     {
-                        IntPtr mask_ptr = new IntPtr((long)mask["mask_ptr"]);
-                        mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-
-                        if (mask_img.Cols != width || mask_img.Rows != height)
+                        long maskPtrValue = mask["mask_ptr"]?.Value<long>() ?? 0;
+                        if (maskPtrValue != 0)
                         {
-                            mask_img = mask_img.Resize(new Size(width, height));
-                        }
+                            IntPtr mask_ptr = new IntPtr(maskPtrValue);
+                            mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
 
-                        Point[][] points = mask_img.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-                        JArray pointsJson = new JArray();
-                        foreach (var point in points[0])
-                        {
-                            JObject point_obj = new JObject
+                            if (mask_img.Cols != width || mask_img.Rows != height)
                             {
-                                ["x"] = (int)(point.X + bbox[0]),
-                                ["y"] = (int)(point.Y + bbox[1])
-                            };
-                            pointsJson.Add(point_obj);
+                                mask_img = mask_img.Resize(new Size(width, height));
+                            }
+
+                            Point[][] points = mask_img.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+                            JArray pointsJson = new JArray();
+                            foreach (var point in points[0])
+                            {
+                                JObject point_obj = new JObject
+                                {
+                                    ["x"] = (int)(point.X + (bbox != null && bbox.Count > 0 ? bbox[0] : 0)),
+                                    ["y"] = (int)(point.Y + (bbox != null && bbox.Count > 1 ? bbox[1] : 0))
+                                };
+                                pointsJson.Add(point_obj);
+                            }
+                            result["mask"] = pointsJson;
                         }
-                        result["mask"] = pointsJson;
                     }
                 }
                 return results;
