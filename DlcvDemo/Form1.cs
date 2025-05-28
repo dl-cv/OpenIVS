@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using static dlcv_infer_csharp.Utils;
 using DLCV;
 using System.Text;
+using Newtonsoft.Json;
 
 namespace DlcvDemo
 {
@@ -64,6 +65,7 @@ namespace DlcvDemo
         private int batch_size = 1;
         private PressureTestRunner pressureTestRunner;
         private System.Windows.Forms.Timer updateTimer;
+        private dynamic baselineJsonResult = null;
 
         private void button_loadmodel_Click(object sender, EventArgs e)
         {
@@ -215,11 +217,53 @@ namespace DlcvDemo
         {
             try
             {
-                // 执行批量推理
-                var result = model.InferBatch((List<Mat>)parameter);
+                var image_list = (List<Mat>)parameter;
+                if (image_list == null)
+                {
+                    return;
+                }
 
-                // InferBatch方法内部已经检查了code并抛出异常，
-                // 如果执行到这里就说明推理成功了
+                // 调用InferInternal进行推理
+                var resultTuple = model.InferInternal(image_list, null);
+                IntPtr currentResultPtr = resultTuple.Item2;
+
+                try
+                {
+                    // 第一次推理时获取基准结果
+                    if (baselineJsonResult == null)
+                    {
+                        baselineJsonResult = resultTuple.Item1;
+                        return; // 第一次推理，获取基准后直接返回
+                    }
+
+                    // 直比较JSON字符串
+                    string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
+                    string currentJson = JsonConvert.SerializeObject(resultTuple.Item1, Formatting.None);
+
+                    if (baselineJson != currentJson)
+                    {
+                        // 发现不一致，向主线程报告
+                        Invoke((MethodInvoker)delegate
+                        {
+                            StopPressureTest();
+
+                            StringBuilder sb = new StringBuilder();
+                            sb.AppendLine("发现推理结果不一致！");
+                            sb.AppendLine("=== 基准结果 ===");
+                            sb.AppendLine(JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented));
+                            sb.AppendLine("\n=== 当前结果 ===");
+                            sb.AppendLine(JsonConvert.SerializeObject(resultTuple.Item1, Formatting.Indented));
+
+                            richTextBox1.Text = sb.ToString();
+                            MessageBox.Show("检测到推理结果不一致，压力测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        });
+                    }
+                }
+                finally
+                {
+                    // 总是释放当前推理结果
+                    DllLoader.Instance.dlcv_free_model_result(currentResultPtr);
+                }
             }
             catch (Exception ex)
             {
@@ -244,7 +288,14 @@ namespace DlcvDemo
                 // 在UI上显示压测统计信息
                 Invoke((MethodInvoker)delegate
                 {
-                    richTextBox1.Text = pressureTestRunner.GetStatistics(false);
+                    string stats = pressureTestRunner.GetStatistics(false);
+                    if (baselineJsonResult != null)
+                    {
+                        stats = stats + "\n\n" +
+                                "基准结果:\n" +
+                                JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented);
+                    }
+                    richTextBox1.Text = stats;
                 });
             }
         }
@@ -283,13 +334,16 @@ namespace DlcvDemo
                 batch_size = (int)numericUpDown_batch_size.Value;
                 int threadCount = (int)numericUpDown_num_thread.Value;
 
-                // 读取图像并创建批处理列表
+                // 读取图像并转换为RGB格式
                 Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
-                Cv2.CvtColor(image, image, ColorConversionCodes.BGR2RGB);
+                Mat image_rgb = new Mat();
+                Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
+
+                // 创建批量图像列表
                 var image_list = new List<Mat>();
                 for (int i = 0; i < batch_size; i++)
                 {
-                    image_list.Add(image);
+                    image_list.Add(image_rgb);
                 }
 
                 // 创建压力测试实例
@@ -329,6 +383,9 @@ namespace DlcvDemo
                 {
                     updateTimer.Stop();
                 }
+
+                // 清理资源
+                baselineJsonResult = null;
 
                 // 显示最终统计信息
                 button_thread_test.Text = "多线程测试";
