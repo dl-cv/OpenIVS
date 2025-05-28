@@ -202,7 +202,7 @@ namespace dlcv_infer_csharp
         }
 
         // 内部通用推理方法，处理单张或多张图像
-        private Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject params_json)
+        public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject params_json)
         {
             var imageInfoList = new JArray();
             var processImages = new List<Tuple<Mat, bool>>();
@@ -284,7 +284,7 @@ namespace dlcv_infer_csharp
         }
 
         // 处理推理结果到CSharpResult对象
-        private Utils.CSharpResult ParseToStructResult(JObject resultObject)
+        public Utils.CSharpResult ParseToStructResult(JObject resultObject)
         {
             // 解析 json 结果
             var sampleResults = new List<Utils.CSharpSampleResult>();
