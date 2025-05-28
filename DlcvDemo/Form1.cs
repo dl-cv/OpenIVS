@@ -235,28 +235,33 @@ namespace DlcvDemo
                         baselineJsonResult = resultTuple.Item1;
                         return; // 第一次推理，获取基准后直接返回
                     }
-
-                    // 直比较JSON字符串
-                    string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
-                    string currentJson = JsonConvert.SerializeObject(resultTuple.Item1, Formatting.None);
-
-                    if (baselineJson != currentJson)
+                    else
                     {
-                        // 发现不一致，向主线程报告
-                        Invoke((MethodInvoker)delegate
+
+                        // 直比较JSON字符串
+                        string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
+                        string currentJson = JsonConvert.SerializeObject(resultTuple.Item1, Formatting.None);
+
+                        if (baselineJson != currentJson)
                         {
-                            StopPressureTest();
+                            // 发现不一致，向主线程报告
+                            Invoke((MethodInvoker)delegate
+                            {
 
-                            StringBuilder sb = new StringBuilder();
-                            sb.AppendLine("发现推理结果不一致！");
-                            sb.AppendLine("=== 基准结果 ===");
-                            sb.AppendLine(JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented));
-                            sb.AppendLine("\n=== 当前结果 ===");
-                            sb.AppendLine(JsonConvert.SerializeObject(resultTuple.Item1, Formatting.Indented));
+                                StringBuilder sb = new StringBuilder();
+                                sb.AppendLine("发现推理结果不一致！");
+                                sb.AppendLine("=== 基准结果 ===");
+                                sb.AppendLine(JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented));
+                                sb.AppendLine("\n=== 当前结果 ===");
+                                sb.AppendLine(JsonConvert.SerializeObject(resultTuple.Item1, Formatting.Indented));
+                                string s = sb.ToString();
 
-                            richTextBox1.Text = sb.ToString();
-                            MessageBox.Show("检测到推理结果不一致，压力测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        });
+                                richTextBox1.Text = s;
+                                MessageBox.Show("检测到推理结果不一致，压力测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                                StopPressureTest();
+                            });
+                        }
                     }
                 }
                 finally
