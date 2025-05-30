@@ -66,6 +66,7 @@ namespace DlcvDemo
         private PressureTestRunner pressureTestRunner;
         private System.Windows.Forms.Timer updateTimer;
         private dynamic baselineJsonResult = null;
+        private volatile bool shouldStopPressureTest = false;
 
         private void button_loadmodel_Click(object sender, EventArgs e)
         {
@@ -217,6 +218,12 @@ namespace DlcvDemo
         {
             try
             {
+                // 如果需要停止压测，立即返回，不执行后续推理
+                if (shouldStopPressureTest)
+                {
+                    return;
+                }
+
                 var image_list = (List<Mat>)parameter;
                 if (image_list == null)
                 {
@@ -237,6 +244,11 @@ namespace DlcvDemo
                     }
                     else
                     {
+                        // 再次检查是否需要停止压测（可能在其他线程中被设置）
+                        if (shouldStopPressureTest)
+                        {
+                            return;
+                        }
 
                         // 直比较JSON字符串
                         string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
@@ -244,12 +256,17 @@ namespace DlcvDemo
 
                         if (baselineJson != currentJson)
                         {
+                            // 立即设置停止标志，防止其他线程继续执行
+                            shouldStopPressureTest = true;
+
                             // 发现不一致，向主线程报告
                             Invoke((MethodInvoker)delegate
                             {
+                                // 立即停止压力测试
+                                StopPressureTest();
 
                                 StringBuilder sb = new StringBuilder();
-                                sb.AppendLine("发现推理结果不一致！");
+                                sb.AppendLine("发现推理结果不一致！测试已停止。");
                                 sb.AppendLine("=== 基准结果 ===");
                                 sb.AppendLine(JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented));
                                 sb.AppendLine("\n=== 当前结果 ===");
@@ -258,8 +275,6 @@ namespace DlcvDemo
 
                                 richTextBox1.Text = s;
                                 MessageBox.Show("检测到推理结果不一致，压力测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
-                                StopPressureTest();
                             });
                         }
                     }
@@ -273,6 +288,9 @@ namespace DlcvDemo
             catch (Exception ex)
             {
                 Debug.WriteLine("模型推理出错: " + ex.Message);
+                // 设置停止标志
+                shouldStopPressureTest = true;
+                
                 // 向主线程报告错误
                 Invoke((MethodInvoker)delegate
                 {
@@ -335,6 +353,9 @@ namespace DlcvDemo
         {
             try
             {
+                // 重置压测停止标志
+                shouldStopPressureTest = false;
+                
                 // 准备测试数据
                 batch_size = (int)numericUpDown_batch_size.Value;
                 int threadCount = (int)numericUpDown_num_thread.Value;
@@ -391,6 +412,7 @@ namespace DlcvDemo
 
                 // 清理资源
                 baselineJsonResult = null;
+                shouldStopPressureTest = false; // 重置压测停止标志
 
                 // 显示最终统计信息
                 button_thread_test.Text = "多线程测试";
