@@ -67,6 +67,7 @@ namespace DlcvDemo
         private System.Windows.Forms.Timer updateTimer;
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
+        private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
 
         private void button_loadmodel_Click(object sender, EventArgs e)
         {
@@ -218,7 +219,7 @@ namespace DlcvDemo
         {
             try
             {
-                // 如果需要停止压测，立即返回，不执行后续推理
+                // 如果需要停止测试，立即返回，不执行后续推理
                 if (shouldStopPressureTest)
                 {
                     return;
@@ -236,48 +237,54 @@ namespace DlcvDemo
 
                 try
                 {
-                    // 第一次推理时获取基准结果
-                    if (baselineJsonResult == null)
+                    // 根据模式决定是否进行一致性检查
+                    if (isConsistencyTestMode)
                     {
-                        baselineJsonResult = resultTuple.Item1;
-                        return; // 第一次推理，获取基准后直接返回
-                    }
-                    else
-                    {
-                        // 再次检查是否需要停止压测（可能在其他线程中被设置）
-                        if (shouldStopPressureTest)
+                        // 一致性测试模式：比较推理结果
+                        // 第一次推理时获取基准结果
+                        if (baselineJsonResult == null)
                         {
-                            return;
+                            baselineJsonResult = resultTuple.Item1;
+                            return; // 第一次推理，获取基准后直接返回
                         }
-
-                        // 直比较JSON字符串
-                        string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
-                        string currentJson = JsonConvert.SerializeObject(resultTuple.Item1, Formatting.None);
-
-                        if (baselineJson != currentJson)
+                        else
                         {
-                            // 立即设置停止标志，防止其他线程继续执行
-                            shouldStopPressureTest = true;
-
-                            // 发现不一致，向主线程报告
-                            Invoke((MethodInvoker)delegate
+                            // 再次检查是否需要停止测试（可能在其他线程中被设置）
+                            if (shouldStopPressureTest)
                             {
-                                // 立即停止压力测试
-                                StopPressureTest();
+                                return;
+                            }
 
-                                StringBuilder sb = new StringBuilder();
-                                sb.AppendLine("发现推理结果不一致！测试已停止。");
-                                sb.AppendLine("=== 基准结果 ===");
-                                sb.AppendLine(JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented));
-                                sb.AppendLine("\n=== 当前结果 ===");
-                                sb.AppendLine(JsonConvert.SerializeObject(resultTuple.Item1, Formatting.Indented));
-                                string s = sb.ToString();
+                            // 直接比较JSON字符串
+                            string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
+                            string currentJson = JsonConvert.SerializeObject(resultTuple.Item1, Formatting.None);
 
-                                richTextBox1.Text = s;
-                                MessageBox.Show("检测到推理结果不一致，压力测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                            });
+                            if (baselineJson != currentJson)
+                            {
+                                // 立即设置停止标志，防止其他线程继续执行
+                                shouldStopPressureTest = true;
+
+                                // 发现不一致，向主线程报告
+                                Invoke((MethodInvoker)delegate
+                                {
+                                    // 立即停止测试
+                                    StopPressureTest();
+
+                                    StringBuilder sb = new StringBuilder();
+                                    sb.AppendLine("发现推理结果不一致！测试已停止。");
+                                    sb.AppendLine("=== 基准结果 ===");
+                                    sb.AppendLine(JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented));
+                                    sb.AppendLine("\n=== 当前结果 ===");
+                                    sb.AppendLine(JsonConvert.SerializeObject(resultTuple.Item1, Formatting.Indented));
+                                    string s = sb.ToString();
+
+                                    richTextBox1.Text = s;
+                                    MessageBox.Show("检测到推理结果不一致，测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                });
+                            }
                         }
                     }
+                    // 性能测试模式：不保存或比较结果，直接继续
                 }
                 finally
                 {
@@ -295,7 +302,8 @@ namespace DlcvDemo
                 Invoke((MethodInvoker)delegate
                 {
                     StopPressureTest();
-                    MessageBox.Show($"压力测试过程中发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    string testType = isConsistencyTestMode ? "一致性测试" : "压力测试";
+                    MessageBox.Show($"{testType}过程中发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     richTextBox1.Text = $"推理错误: {ex.Message}";
                 });
             }
@@ -308,11 +316,11 @@ namespace DlcvDemo
         {
             if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
-                // 在UI上显示压测统计信息
+                // 在UI上显示统计信息
                 Invoke((MethodInvoker)delegate
                 {
                     string stats = pressureTestRunner.GetStatistics(false);
-                    if (baselineJsonResult != null)
+                    if (isConsistencyTestMode && baselineJsonResult != null)
                     {
                         stats = stats + "\n\n" +
                                 "基准结果:\n" +
@@ -342,18 +350,21 @@ namespace DlcvDemo
             }
             else
             {
-                StartPressureTest();
+                StartPressureTest(false); // 性能测试模式
             }
         }
 
         /// <summary>
-        /// 启动压力测试
+        /// 启动测试
         /// </summary>
-        private void StartPressureTest()
+        private void StartPressureTest(bool consistencyTestMode)
         {
             try
             {
-                // 重置压测停止标志
+                // 设置测试模式
+                this.isConsistencyTestMode = consistencyTestMode;
+                
+                // 重置测试停止标志
                 shouldStopPressureTest = false;
                 
                 // 准备测试数据
@@ -372,7 +383,7 @@ namespace DlcvDemo
                     image_list.Add(image_rgb);
                 }
 
-                // 创建压力测试实例
+                // 创建测试实例
                 pressureTestRunner = new PressureTestRunner(threadCount, 1000000, batch_size);
                 pressureTestRunner.SetTestAction(ModelInferAction, image_list);
 
@@ -387,16 +398,26 @@ namespace DlcvDemo
 
                 // 启动测试
                 pressureTestRunner.Start();
-                button_thread_test.Text = "停止";
+                
+                // 根据模式设置按钮文本
+                if (consistencyTestMode)
+                {
+                    button_consistency_test.Text = "停止";
+                }
+                else
+                {
+                    button_thread_test.Text = "停止";
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show("启动压力测试失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                string testType = consistencyTestMode ? "一致性测试" : "压力测试";
+                MessageBox.Show($"启动{testType}失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
         /// <summary>
-        /// 停止压力测试
+        /// 停止测试
         /// </summary>
         private void StopPressureTest()
         {
@@ -412,10 +433,46 @@ namespace DlcvDemo
 
                 // 清理资源
                 baselineJsonResult = null;
-                shouldStopPressureTest = false; // 重置压测停止标志
+                shouldStopPressureTest = false; // 重置测试停止标志
 
-                // 显示最终统计信息
-                button_thread_test.Text = "多线程测试";
+                // 根据模式重置按钮文本
+                if (isConsistencyTestMode)
+                {
+                    button_consistency_test.Text = "一致性测试";
+                }
+                else
+                {
+                    button_thread_test.Text = "多线程测试";
+                }
+                
+                // 重置测试模式
+                isConsistencyTestMode = false;
+            }
+        }
+
+        /// <summary>
+        /// 一致性测试按钮点击事件
+        /// </summary>
+        private void button_consistency_test_Click(object sender, EventArgs e)
+        {
+            if (model == null)
+            {
+                MessageBox.Show("请先加载模型文件！");
+                return;
+            }
+            if (image_path == null)
+            {
+                MessageBox.Show("请先选择图片文件！");
+                return;
+            }
+
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
+            {
+                StopPressureTest();
+            }
+            else
+            {
+                StartPressureTest(true); // 一致性测试模式
             }
         }
 
