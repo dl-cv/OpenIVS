@@ -13,3 +13,4 @@ C:\sign-tool\signtool.exe sign /n 深圳市深度视觉科技有限公司 /t http://time.cert
 python -m build --wheel --outdir ./dist
 
 pause
+
