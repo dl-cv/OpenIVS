@@ -34,6 +34,7 @@
             this.button_open_image = new System.Windows.Forms.Button();
             this.button_infer = new System.Windows.Forms.Button();
             this.button_thread_test = new System.Windows.Forms.Button();
+            this.button_consistency_test = new System.Windows.Forms.Button();
             this.button_free_model = new System.Windows.Forms.Button();
             this.button_github = new System.Windows.Forms.Button();
             this.numericUpDown_num_thread = new System.Windows.Forms.NumericUpDown();
@@ -109,6 +110,16 @@
             this.button_thread_test.UseVisualStyleBackColor = true;
             this.button_thread_test.Click += new System.EventHandler(this.button_threadtest_Click);
             // 
+            // button_consistency_test
+            // 
+            this.button_consistency_test.Location = new System.Drawing.Point(165, 154);
+            this.button_consistency_test.Name = "button_consistency_test";
+            this.button_consistency_test.Size = new System.Drawing.Size(140, 60);
+            this.button_consistency_test.TabIndex = 23;
+            this.button_consistency_test.Text = "一致性测试";
+            this.button_consistency_test.UseVisualStyleBackColor = true;
+            this.button_consistency_test.Click += new System.EventHandler(this.button_consistency_test_Click);
+            // 
             // button_free_model
             // 
             this.button_free_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
@@ -137,7 +148,7 @@
             // 
             // numericUpDown_num_thread
             // 
-            this.numericUpDown_num_thread.Location = new System.Drawing.Point(231, 170);
+            this.numericUpDown_num_thread.Location = new System.Drawing.Point(388, 170);
             this.numericUpDown_num_thread.Maximum = new decimal(new int[] {
             32,
             0,
@@ -179,7 +190,7 @@
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(161, 172);
+            this.label2.Location = new System.Drawing.Point(318, 172);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(64, 24);
             this.label2.TabIndex = 14;
@@ -316,6 +327,7 @@
             this.Controls.Add(this.button_free_model);
             this.Controls.Add(this.richTextBox1);
             this.Controls.Add(this.button_thread_test);
+            this.Controls.Add(this.button_consistency_test);
             this.Controls.Add(this.button_infer);
             this.Controls.Add(this.button_open_image);
             this.Controls.Add(this.button_get_model_info);
@@ -342,6 +354,7 @@
         private System.Windows.Forms.Button button_open_image;
         private System.Windows.Forms.Button button_infer;
         private System.Windows.Forms.Button button_thread_test;
+        private System.Windows.Forms.Button button_consistency_test;
         private System.Windows.Forms.Button button_free_model;
         private System.Windows.Forms.Button button_github;
         private System.Windows.Forms.NumericUpDown numericUpDown_num_thread;
