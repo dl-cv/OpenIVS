@@ -27,7 +27,9 @@ namespace DLCV
         private DateTime _startTime;
         private TimeSpan _duration;
         private Queue<double> _recentLatencies;
+        private Queue<DateTime> _requestTimestamps; // 记录请求完成时间戳
         private const int MAX_LATENCY_SAMPLES = 100; // 保存最近几次请求的延迟
+        private const int RECENT_RATE_WINDOW_SECONDS = 3; // 最近速率统计窗口（秒）
 
         #endregion
 
@@ -84,6 +86,7 @@ namespace DLCV
             _completedRequests = 0;
             _batchSize = batchSize;
             _recentLatencies = new Queue<double>(MAX_LATENCY_SAMPLES);
+            _requestTimestamps = new Queue<DateTime>();
         }
 
         #endregion
@@ -118,6 +121,13 @@ namespace DLCV
             _isRunning = true;
             _completedRequests = 0;
             _startTime = DateTime.Now;
+            
+            // 清理之前的数据
+            lock (_lockObject)
+            {
+                _recentLatencies.Clear();
+                _requestTimestamps.Clear();
+            }
 
             // 创建并启动工作线程
             for (int i = 0; i < _threadCount; i++)
@@ -157,8 +167,37 @@ namespace DLCV
         public string GetStatistics(bool target_rate = true)
         {
             TimeSpan elapsed = _isRunning ? (DateTime.Now - _startTime) : _duration;
-            double actualRate = elapsed.TotalSeconds > 0 ?
-                _completedRequests / elapsed.TotalSeconds : 0;
+            
+            // 计算最近3秒的速率
+            double recentRate = 0;
+            DateTime now = DateTime.Now;
+            DateTime cutoffTime = now.AddSeconds(-RECENT_RATE_WINDOW_SECONDS);
+            
+            lock (_lockObject)
+            {
+                // 清理过期的时间戳
+                while (_requestTimestamps.Count > 0 && _requestTimestamps.Peek() < cutoffTime)
+                {
+                    _requestTimestamps.Dequeue();
+                }
+                
+                // 计算最近时间窗口内的请求数量和速率
+                int recentRequestCount = _requestTimestamps.Count;
+                if (recentRequestCount > 0)
+                {
+                    // 获取最早的时间戳
+                    DateTime earliestTime = _requestTimestamps.Peek();
+                    
+                    // 计算实际的时间窗口（秒）
+                    double actualTimeWindow = (now - earliestTime).TotalSeconds;
+                    
+                    // 确保时间窗口不为0
+                    if (actualTimeWindow > 0)
+                    {
+                        recentRate = (double)(recentRequestCount * _batchSize) / actualTimeWindow;
+                    }
+                }
+            }
 
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("压力测试统计:");
@@ -178,7 +217,7 @@ namespace DLCV
                 }
             }
             sb.AppendLine($"平均延迟: {averageLatency:F2}ms");
-            sb.AppendLine($"实际速率: {actualRate * _batchSize:F2} 请求/秒");
+            sb.AppendLine($"实时速率: {recentRate:F2} 请求/秒");
 
             return sb.ToString();
         }
@@ -212,6 +251,7 @@ namespace DLCV
                         requestStopwatch.Stop();
                         
                         double latency = requestStopwatch.Elapsed.TotalMilliseconds;
+                        DateTime requestCompletionTime = DateTime.Now;
                         
                         lock (_lockObject)
                         {
@@ -223,6 +263,9 @@ namespace DLCV
                                 _recentLatencies.Dequeue(); // 移除最早的样本
                             }
                             _recentLatencies.Enqueue(latency);
+                            
+                            // 记录请求完成时间戳
+                            _requestTimestamps.Enqueue(requestCompletionTime);
                         }
                     }
                     catch (Exception ex)
