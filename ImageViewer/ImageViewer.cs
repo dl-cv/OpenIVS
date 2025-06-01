@@ -263,16 +263,37 @@ namespace DLCV
                 {
                     // 这个是分类结果，没有bbox
                     _statusText = categoryName;
+                    
+                    // 根据分类结果设置状态
+                    string classificationResultLower = categoryName.ToLower();
+                    if (!classificationResultLower.Contains("ok"))
+                    {
+                        _statusText = "NG";
+                    }
+                    else
+                    {
+                        _statusText = "OK";
+                    }
                     break;
                 }
 
-                // 颜色处理（假设根据类别ID设置颜色）
-                Color color = Color.Green;
-                if (objResult.CategoryId == 1) // 示例：根据类别ID设置颜色
+                // 颜色处理（根据结果内容设置颜色）
+                Color color = Color.Red; // 默认红色
+                
+                // 判断categoryName内容（忽略大小写）
+                string categoryNameLower = categoryName.ToLower();
+                if (categoryNameLower.Contains("ok"))
+                {
+                    color = Color.Green;
+                }
+                else if (categoryNameLower.Contains("ng"))
+                {
                     color = Color.Red;
+                }
+                // 其他情况保持默认红色
 
                 // 判断是否显示NG状态
-                if (color != Color.Lime)
+                if (!categoryNameLower.Contains("ok"))
                     _statusText = "NG";
 
                 // 处理旋转框检测
