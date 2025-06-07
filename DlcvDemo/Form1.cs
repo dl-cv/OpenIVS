@@ -74,7 +74,7 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "深度视觉加速模型文件 (*.dvt)|*.dvt";
+            openFileDialog.Filter = "深度视觉模型文件 (*.dvt;*.dvp)|*.dvt;*.dvp";
             openFileDialog.Title = "选择模型";
             try
             {
