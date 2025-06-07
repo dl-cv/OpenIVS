@@ -8,6 +8,8 @@ using sntl_admin_csharp;
 using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Schema;
+using System.Net.Http;
+using System.IO;
 
 namespace dlcv_infer_csharp
 {
@@ -117,9 +119,16 @@ namespace dlcv_infer_csharp
             LoadDll();
         }
     }
-    public class Model
+    public class Model : IDisposable
     {
         protected int modelIndex = -1;
+        
+        // DVP mode fields
+        private bool _isDvpMode = false;
+        private string _modelPath;
+        private string _serverUrl = "http://127.0.0.1:9890";
+        private HttpClient _httpClient;
+        private bool _disposed = false;
 
         public Model()
         {
@@ -127,6 +136,76 @@ namespace dlcv_infer_csharp
         }
 
         public Model(string modelPath, int device_id)
+        {
+            _modelPath = modelPath;
+            
+            // 根据模型文件后缀判断是否使用 DVP 模式
+            if (string.IsNullOrEmpty(modelPath))
+            {
+                throw new ArgumentException("模型路径不能为空", nameof(modelPath));
+            }
+            
+            string extension = Path.GetExtension(modelPath).ToLower();
+            _isDvpMode = extension == ".dvp";
+            
+            if (_isDvpMode)
+            {
+                // DVP 模式：使用 HTTP API
+                InitializeDvpMode(modelPath, device_id);
+            }
+            else
+            {
+                // DVT 模式：使用原来的 DLL 接口
+                InitializeDvtMode(modelPath, device_id);
+            }
+        }
+        
+        private void InitializeDvpMode(string modelPath, int device_id)
+        {
+            _httpClient = new HttpClient();
+            _httpClient.Timeout = TimeSpan.FromSeconds(30);
+            
+            // 加载模型到服务器
+            try
+            {
+                var request = new
+                {
+                    model_path = modelPath
+                };
+
+                string jsonContent = JsonConvert.SerializeObject(request);
+                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                var response = _httpClient.PostAsync($"{_serverUrl}/load_model", content).Result;
+                var responseJson = response.Content.ReadAsStringAsync().Result;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new Exception($"加载模型失败: {response.StatusCode} - {responseJson}");
+                }
+
+                var resultObject = JObject.Parse(responseJson);
+                
+                if (resultObject.ContainsKey("code") && 
+                    resultObject["code"].Value<string>() == "00000")
+                {
+                    Console.WriteLine($"Model load result: {resultObject}");
+                    modelIndex = 1; // DVP模式设置默认值表示模型已加载
+                }
+                else
+                {
+                    string errorCode = resultObject.ContainsKey("code") ? 
+                        resultObject["code"].Value<string>() : "未知错误码";
+                    throw new Exception($"加载模型失败，错误码: {errorCode}，详细信息：{resultObject}");
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"加载模型失败: {ex.Message}", ex);
+            }
+        }
+        
+        private void InitializeDvtMode(string modelPath, int device_id)
         {
             var config = new JObject
             {
@@ -156,35 +235,101 @@ namespace dlcv_infer_csharp
 
         ~Model()
         {
-            var config = new JObject
-            {
-                ["model_index"] = modelIndex
-            };
-            string jsonStr = config.ToString();
-            IntPtr resultPtr = DllLoader.Instance.dlcv_free_model(jsonStr);
-            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-            var resultObject = JObject.Parse(resultJson);
-            Console.WriteLine(
-                "Model free result: " + resultObject.ToString());
-            DllLoader.Instance.dlcv_free_result(resultPtr);
+            Dispose(false);
         }
 
         public void FreeModel()
         {
-            var config = new JObject
+            if (_isDvpMode)
             {
-                ["model_index"] = modelIndex
-            };
-            string jsonStr = config.ToString();
-            IntPtr resultPtr = DllLoader.Instance.dlcv_free_model(jsonStr);
-            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-            var resultObject = JObject.Parse(resultJson);
-            Console.WriteLine(
-                "Model free result: " + resultObject.ToString());
-            DllLoader.Instance.dlcv_free_result(resultPtr);
+                // DVP 模式：调用HTTP API释放模型
+                if (_disposed || modelIndex == -1)
+                    return;
+
+                try
+                {
+                    var request = new
+                    {
+                        model_index = modelIndex
+                    };
+
+                    string jsonContent = JsonConvert.SerializeObject(request);
+                    var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                    var response = _httpClient.PostAsync($"{_serverUrl}/free_model", content).Result;
+                    var responseJson = response.Content.ReadAsStringAsync().Result;
+
+                    Console.WriteLine($"DVP Model free result: {responseJson}");
+                    modelIndex = -1;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"DVP 释放模型失败: {ex.Message}");
+                }
+            }
+            else
+            {
+                // DVT 模式：使用原来的释放逻辑
+                if (modelIndex != -1)
+                {
+                    var config = new JObject
+                    {
+                        ["model_index"] = modelIndex
+                    };
+                    string jsonStr = config.ToString();
+                    IntPtr resultPtr = DllLoader.Instance.dlcv_free_model(jsonStr);
+                    var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                    var resultObject = JObject.Parse(resultJson);
+                    Console.WriteLine("DVT Model free result: " + resultObject.ToString());
+                    DllLoader.Instance.dlcv_free_result(resultPtr);
+                    modelIndex = -1;
+                }
+            }
         }
 
         public JObject GetModelInfo()
+        {
+            if (_isDvpMode)
+            {
+                return GetModelInfoDvp();
+            }
+            else
+            {
+                return GetModelInfoDvt();
+            }
+        }
+        
+        private JObject GetModelInfoDvp()
+        {
+            try
+            {
+                var request = new
+                {
+                    model_path = _modelPath
+                };
+
+                string jsonContent = JsonConvert.SerializeObject(request);
+                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                var response = _httpClient.PostAsync($"{_serverUrl}/get_model_info", content).Result;
+                var responseJson = response.Content.ReadAsStringAsync().Result;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new Exception($"获取模型信息失败: {response.StatusCode} - {responseJson}");
+                }
+
+                var resultObject = JObject.Parse(responseJson);
+                Console.WriteLine($"Model info: {resultObject}");
+                return resultObject;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"获取模型信息失败: {ex.Message}", ex);
+            }
+        }
+        
+        private JObject GetModelInfoDvt()
         {
             var config = new JObject
             {
@@ -203,6 +348,87 @@ namespace dlcv_infer_csharp
 
         // 内部通用推理方法，处理单张或多张图像
         public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject params_json)
+        {
+            if (_isDvpMode)
+            {
+                return InferInternalDvp(images, params_json);
+            }
+            else
+            {
+                return InferInternalDvt(images, params_json);
+            }
+        }
+        
+        private Tuple<JObject, IntPtr> InferInternalDvp(List<Mat> images, JObject params_json)
+        {
+            try
+            {
+                // DVP 模式只支持单张图片，如果有多张图片需要分别处理
+                var allResults = new List<JObject>();
+                
+                foreach (var image in images)
+                {
+                    if (image.Empty())
+                        throw new ArgumentException("图像列表中包含空图像");
+
+                    byte[] imageBytes = image.ToBytes(".png");
+                    string base64Image = Convert.ToBase64String(imageBytes);
+                    
+                    // 创建推理请求，添加 return_polygon=true 参数
+                    var request = new JObject
+                    {
+                        ["img"] = base64Image,
+                        ["model_path"] = _modelPath,
+                        ["return_polygon"] = true
+                    };
+
+                    // 如果提供了参数JSON，合并到request
+                    if (params_json != null)
+                    {
+                        foreach (var param in params_json)
+                        {
+                            request[param.Key] = param.Value;
+                        }
+                    }
+
+                    string jsonContent = JsonConvert.SerializeObject(request);
+                    var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                    var response = _httpClient.PostAsync($"{_serverUrl}/api/inference", content).Result;
+                    var responseJson = response.Content.ReadAsStringAsync().Result;
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        throw new Exception($"推理失败: {response.StatusCode} - {responseJson}");
+                    }
+
+                    var resultObject = JObject.Parse(responseJson);
+                    allResults.Add(resultObject);
+                }
+
+                // 将多个结果合并为统一格式
+                var mergedResult = new JObject();
+                var sampleResults = new JArray();
+                
+                foreach (var result in allResults)
+                {
+                    var sampleResult = new JObject();
+                    sampleResult["results"] = result["results"];
+                    sampleResults.Add(sampleResult);
+                }
+                
+                mergedResult["sample_results"] = sampleResults;
+                
+                // DVP 模式返回空指针，不需要释放
+                return new Tuple<JObject, IntPtr>(mergedResult, IntPtr.Zero);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"DVP 推理失败: {ex.Message}", ex);
+            }
+        }
+        
+        private Tuple<JObject, IntPtr> InferInternalDvt(List<Mat> images, JObject params_json)
         {
             var imageInfoList = new JArray();
             var processImages = new List<Tuple<Mat, bool>>();
@@ -314,20 +540,30 @@ namespace dlcv_infer_csharp
                     }
 
                     var withMask = result["with_mask"]?.Value<bool>() ?? false;
-                    var mask = result["mask"];
                     Mat mask_img = new Mat();
-                    if (withMask && mask != null)
+                    
+                    if (withMask)
                     {
-                        long maskPtrValue = mask["mask_ptr"]?.Value<long>() ?? 0;
-                        if (maskPtrValue != 0)
+                        if (_isDvpMode && result.ContainsKey("polygon"))
                         {
-                            IntPtr mask_ptr = new IntPtr(maskPtrValue);
-                            int mask_width = mask["width"]?.Value<int>() ?? 0;
-                            int mask_height = mask["height"]?.Value<int>() ?? 0;
-                            if (mask_width > 0 && mask_height > 0)
+                            // DVP 模式：从 polygon 数据生成 mask
+                            mask_img = CreateMaskFromPolygon(result["polygon"] as JArray, bbox);
+                        }
+                        else if (!_isDvpMode && result["mask"] != null)
+                        {
+                            // DVT 模式：从指针数据生成 mask
+                            var mask = result["mask"];
+                            long maskPtrValue = mask["mask_ptr"]?.Value<long>() ?? 0;
+                            if (maskPtrValue != 0)
                             {
-                                mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                                mask_img = mask_img.Clone();
+                                IntPtr mask_ptr = new IntPtr(maskPtrValue);
+                                int mask_width = mask["width"]?.Value<int>() ?? 0;
+                                int mask_height = mask["height"]?.Value<int>() ?? 0;
+                                if (mask_width > 0 && mask_height > 0)
+                                {
+                                    mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
+                                    mask_img = mask_img.Clone();
+                                }
                             }
                         }
                     }
@@ -351,6 +587,68 @@ namespace dlcv_infer_csharp
 
             return new Utils.CSharpResult(sampleResults);
         }
+        
+        /// <summary>
+        /// 从多边形数据创建mask图像
+        /// </summary>
+        /// <param name="polygonArray">多边形点集</param>
+        /// <param name="bbox">边界框信息</param>
+        /// <returns>生成的mask图像</returns>
+        private Mat CreateMaskFromPolygon(JArray polygonArray, List<double> bbox)
+        {
+            if (polygonArray == null || polygonArray.Count == 0 || bbox == null || bbox.Count < 4)
+            {
+                return new Mat();
+            }
+
+            try
+            {
+                // 解析边界框
+                int x = (int)bbox[0];
+                int y = (int)bbox[1];
+                int width = (int)bbox[2];
+                int height = (int)bbox[3];
+
+                if (width <= 0 || height <= 0)
+                {
+                    return new Mat();
+                }
+
+                // 创建mask图像
+                Mat mask = Mat.Zeros(height, width, MatType.CV_8UC1);
+
+                // 解析多边形点
+                var points = new List<Point>();
+                foreach (var pointArray in polygonArray)
+                {
+                    if (pointArray is JArray point && point.Count >= 2)
+                    {
+                        int px = point[0].Value<int>() - x; // 转换为相对于bbox的坐标
+                        int py = point[1].Value<int>() - y;
+                        
+                        // 确保点在mask范围内
+                        px = Math.Max(0, Math.Min(width - 1, px));
+                        py = Math.Max(0, Math.Min(height - 1, py));
+                        
+                        points.Add(new Point(px, py));
+                    }
+                }
+
+                if (points.Count > 0)
+                {
+                    // 填充多边形
+                    var pointsArray = new Point[][] { points.ToArray() };
+                    Cv2.FillPoly(mask, pointsArray, Scalar.White);
+                }
+
+                return mask;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"创建mask失败: {ex.Message}");
+                return new Mat();
+            }
+        }
 
         public Utils.CSharpResult Infer(Mat image, JObject params_json = null)
         {
@@ -362,8 +660,11 @@ namespace dlcv_infer_csharp
             }
             finally
             {
-                // 处理完后释放结果
-                DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                // 处理完后释放结果，DVP模式下指针为空，不需要释放
+                if (resultTuple.Item2 != IntPtr.Zero)
+                {
+                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                }
             }
         }
 
@@ -376,8 +677,11 @@ namespace dlcv_infer_csharp
             }
             finally
             {
-                // 处理完后释放结果
-                DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                // 处理完后释放结果，DVP模式下指针为空，不需要释放
+                if (resultTuple.Item2 != IntPtr.Zero)
+                {
+                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                }
             }
         }
 
@@ -405,54 +709,97 @@ namespace dlcv_infer_csharp
             try
             {
                 var results = resultTuple.Item1["sample_results"][0]["results"] as JArray;
-                foreach (var result in results)
+                
+                if (_isDvpMode)
                 {
-                    var bbox = result["bbox"].ToObject<List<double>>();
-                    var withMask = result["with_mask"]?.Value<bool>() ?? false;
-
-                    var mask = result["mask"];
-                    int mask_width = mask?["width"]?.Value<int>() ?? 0;
-                    int mask_height = mask?["height"]?.Value<int>() ?? 0;
-                    int width = bbox != null && bbox.Count > 2 ? (int)bbox[2] : 0;
-                    int height = bbox != null && bbox.Count > 3 ? (int)bbox[3] : 0;
-
-                    Mat mask_img = new Mat();
-                    if (withMask && mask != null && mask_width > 0 && mask_height > 0)
+                    // DVP 模式：polygon 数据已经在返回结果中，直接返回
+                    return results;
+                }
+                else
+                {
+                    // DVT 模式：需要将mask转换为多边形点集
+                    foreach (var result in results)
                     {
-                        long maskPtrValue = mask["mask_ptr"]?.Value<long>() ?? 0;
-                        if (maskPtrValue != 0)
+                        var bbox = result["bbox"].ToObject<List<double>>();
+                        var withMask = result["with_mask"]?.Value<bool>() ?? false;
+
+                        var mask = result["mask"];
+                        int mask_width = mask?["width"]?.Value<int>() ?? 0;
+                        int mask_height = mask?["height"]?.Value<int>() ?? 0;
+                        int width = bbox != null && bbox.Count > 2 ? (int)bbox[2] : 0;
+                        int height = bbox != null && bbox.Count > 3 ? (int)bbox[3] : 0;
+
+                        Mat mask_img = new Mat();
+                        if (withMask && mask != null && mask_width > 0 && mask_height > 0)
                         {
-                            IntPtr mask_ptr = new IntPtr(maskPtrValue);
-                            mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-
-                            if (mask_img.Cols != width || mask_img.Rows != height)
+                            long maskPtrValue = mask["mask_ptr"]?.Value<long>() ?? 0;
+                            if (maskPtrValue != 0)
                             {
-                                mask_img = mask_img.Resize(new Size(width, height));
-                            }
+                                IntPtr mask_ptr = new IntPtr(maskPtrValue);
+                                mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
 
-                            Point[][] points = mask_img.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-                            JArray pointsJson = new JArray();
-                            foreach (var point in points[0])
-                            {
-                                JObject point_obj = new JObject
+                                if (mask_img.Cols != width || mask_img.Rows != height)
                                 {
-                                    ["x"] = (int)(point.X + (bbox != null && bbox.Count > 0 ? bbox[0] : 0)),
-                                    ["y"] = (int)(point.Y + (bbox != null && bbox.Count > 1 ? bbox[1] : 0))
-                                };
-                                pointsJson.Add(point_obj);
+                                    mask_img = mask_img.Resize(new Size(width, height));
+                                }
+
+                                Point[][] points = mask_img.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+                                JArray pointsJson = new JArray();
+                                if (points.Length > 0 && points[0].Length > 0)
+                                {
+                                    foreach (var point in points[0])
+                                    {
+                                        JObject point_obj = new JObject
+                                        {
+                                            ["x"] = (int)(point.X + (bbox != null && bbox.Count > 0 ? bbox[0] : 0)),
+                                            ["y"] = (int)(point.Y + (bbox != null && bbox.Count > 1 ? bbox[1] : 0))
+                                        };
+                                        pointsJson.Add(point_obj);
+                                    }
+                                }
+                                result["mask"] = pointsJson;
                             }
-                            result["mask"] = pointsJson;
                         }
                     }
+                    return results;
                 }
-                return results;
             }
             finally
             {
-                // 处理完后释放结果
-                DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                // 处理完后释放结果，DVP模式下指针为空，不需要释放
+                if (resultTuple.Item2 != IntPtr.Zero)
+                {
+                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                }
             }
         }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    // 释放托管资源
+                    FreeModel();
+                    _httpClient?.Dispose();
+                }
+
+                // 设置处置标志
+                _disposed = true;
+            }
+        }
+
+        /// <summary>
+        /// 获取当前模型是否为DVP模式
+        /// </summary>
+        public bool IsDvpMode => _isDvpMode;
     }
 
     public class SlidingWindowModel : Model
