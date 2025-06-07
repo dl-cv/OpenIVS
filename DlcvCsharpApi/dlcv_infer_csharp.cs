@@ -532,6 +532,17 @@ namespace dlcv_infer_csharp
                     var area = result["area"]?.Value<float>() ?? 0.0f;
 
                     var bbox = result["bbox"].ToObject<List<double>>();
+                    
+                    // DVP模式下bbox格式是[x1,y1,x2,y2]，需要转换为[x,y,w,h]
+                    if (_isDvpMode && bbox != null && bbox.Count == 4)
+                    {
+                        double x1 = bbox[0];
+                        double y1 = bbox[1];
+                        double x2 = bbox[2];
+                        double y2 = bbox[3];
+                        bbox = new List<double> { x1, y1, x2 - x1, y2 - y1 };
+                    }
+                    
                     bool withBbox = false;
                     if (result.ContainsKey("with_bbox"))
                     {
@@ -549,7 +560,7 @@ namespace dlcv_infer_csharp
                     {
                         if (_isDvpMode && result.ContainsKey("polygon"))
                         {
-                            // DVP 模式：从 polygon 数据生成 mask
+                            // DVP 模式：从 polygon 数据生成 mask，使用转换后的bbox
                             mask_img = CreateMaskFromPolygon(result["polygon"] as JArray, bbox);
                         }
                         else if (!_isDvpMode && result["mask"] != null)
@@ -595,7 +606,7 @@ namespace dlcv_infer_csharp
         /// 从多边形数据创建mask图像
         /// </summary>
         /// <param name="polygonArray">多边形点集</param>
-        /// <param name="bbox">边界框信息</param>
+        /// <param name="bbox">边界框信息 [x, y, w, h]</param>
         /// <returns>生成的mask图像</returns>
         private Mat CreateMaskFromPolygon(JArray polygonArray, List<double> bbox)
         {
@@ -606,7 +617,7 @@ namespace dlcv_infer_csharp
 
             try
             {
-                // 解析边界框
+                // 解析边界框 [x, y, w, h]
                 int x = (int)bbox[0];
                 int y = (int)bbox[1];
                 int width = (int)bbox[2];
@@ -715,7 +726,26 @@ namespace dlcv_infer_csharp
                 
                 if (_isDvpMode)
                 {
-                    // DVP 模式：polygon 数据已经在返回结果中，直接返回
+                    // DVP 模式：需要将bbox从[x1,y1,x2,y2]转换为[x,y,w,h]，并处理polygon数据
+                    foreach (JObject result in results)
+                    {
+                        // 转换bbox格式
+                        var bbox = result["bbox"]?.ToObject<List<double>>();
+                        if (bbox != null && bbox.Count == 4)
+                        {
+                            double x1 = bbox[0];
+                            double y1 = bbox[1];
+                            double x2 = bbox[2];
+                            double y2 = bbox[3];
+                            result["bbox"] = new JArray { x1, y1, x2 - x1, y2 - y1 };
+                        }
+                        
+                        // polygon数据已经在返回结果中，直接保留
+                        if (result.ContainsKey("polygon"))
+                        {
+                            result["mask"] = result["polygon"];
+                        }
+                    }
                     return results;
                 }
                 else
