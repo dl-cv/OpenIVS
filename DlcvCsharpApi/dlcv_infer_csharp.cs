@@ -371,7 +371,10 @@ namespace dlcv_infer_csharp
                     if (image.Empty())
                         throw new ArgumentException("图像列表中包含空图像");
 
-                    byte[] imageBytes = image.ToBytes(".png");
+                    // 将图像转换为 BGR 格式
+                    Mat image_bgr = new Mat();
+                    Cv2.CvtColor(image, image_bgr, ColorConversionCodes.RGB2BGR);
+                    byte[] imageBytes = image_bgr.ToBytes(".png");
                     string base64Image = Convert.ToBase64String(imageBytes);
                     
                     // 创建推理请求，添加 return_polygon=true 参数
