@@ -119,7 +119,16 @@ namespace DlcvDvpHttpApi
 
             try
             {
-                var response = _httpClient.GetAsync($"{_serverUrl}/model_info/{_modelIndex}").Result;
+                // 创建获取模型信息的请求 - 后端期望的格式
+                var request = new
+                {
+                    model_path = _modelPath
+                };
+
+                string jsonContent = JsonConvert.SerializeObject(request);
+                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                var response = _httpClient.PostAsync($"{_serverUrl}/get_model_info", content).Result;
                 var responseJson = response.Content.ReadAsStringAsync().Result;
 
                 if (!response.IsSuccessStatusCode)
