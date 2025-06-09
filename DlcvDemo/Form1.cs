@@ -494,6 +494,7 @@ namespace DlcvDemo
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
             StopPressureTest();
+            Utils.FreeAllModels();
         }
 
         private void button1_Click(object sender, EventArgs e)
