@@ -288,8 +288,10 @@ namespace DlcvDemo
                 }
                 finally
                 {
-                    // 总是释放当前推理结果
-                    DllLoader.Instance.dlcv_free_model_result(currentResultPtr);
+                    if (currentResultPtr != IntPtr.Zero)
+                    {
+                        DllLoader.Instance.dlcv_free_model_result(currentResultPtr);
+                    }
                 }
             }
             catch (Exception ex)
@@ -297,7 +299,7 @@ namespace DlcvDemo
                 Debug.WriteLine("模型推理出错: " + ex.Message);
                 // 设置停止标志
                 shouldStopPressureTest = true;
-                
+
                 // 向主线程报告错误
                 Invoke((MethodInvoker)delegate
                 {
@@ -363,10 +365,10 @@ namespace DlcvDemo
             {
                 // 设置测试模式
                 this.isConsistencyTestMode = consistencyTestMode;
-                
+
                 // 重置测试停止标志
                 shouldStopPressureTest = false;
-                
+
                 // 准备测试数据
                 batch_size = (int)numericUpDown_batch_size.Value;
                 int threadCount = (int)numericUpDown_num_thread.Value;
@@ -398,7 +400,7 @@ namespace DlcvDemo
 
                 // 启动测试
                 pressureTestRunner.Start();
-                
+
                 // 根据模式设置按钮文本
                 if (consistencyTestMode)
                 {
@@ -444,7 +446,7 @@ namespace DlcvDemo
                 {
                     button_thread_test.Text = "多线程测试";
                 }
-                
+
                 // 重置测试模式
                 isConsistencyTestMode = false;
             }
