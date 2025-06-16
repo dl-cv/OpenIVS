@@ -581,7 +581,7 @@ namespace dlcv_infer_csharp
                     var score = result["score"]?.Value<float>() ?? 0.0f;
                     var area = result["area"]?.Value<float>() ?? 0.0f;
 
-                    var bbox = result["bbox"].ToObject<List<double>>();
+                    var bbox = result["bbox"]?.ToObject<List<double>>() ?? new List<double>();
                     
                     // DVP模式下bbox格式是[x1,y1,x2,y2]，需要转换为[x,y,w,h]
                     if (_isDvpMode && bbox != null && bbox.Count == 4)
