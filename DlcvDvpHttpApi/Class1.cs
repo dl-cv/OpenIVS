@@ -71,7 +71,10 @@ namespace DlcvDvpHttpApi
             {
                 // 启动后端服务
                 StartBackendService();
-                throw new Exception("检测到后端未启动，正在启动推理后端，请10秒钟后再次尝试");
+                
+                // 循环等待后端服务启动完成
+                Console.WriteLine("正在等待后端服务启动...");
+                WaitForBackendService();
             }
 
             try
@@ -182,6 +185,31 @@ namespace DlcvDvpHttpApi
             {
                 Console.WriteLine($"调用版本接口失败: {ex.Message}");
             }
+        }
+        
+        /// <summary>
+        /// 等待后端服务启动完成
+        /// </summary>
+        private void WaitForBackendService()
+        {
+            const int maxWaitTime = 30; // 最大等待30秒
+            const int checkInterval = 1; // 每1秒检查一次
+            int waitedTime = 0;
+            
+            while (waitedTime < maxWaitTime)
+            {
+                if (CheckBackendService())
+                {
+                    Console.WriteLine("后端服务已启动，继续加载模型...");
+                    return;
+                }
+                
+                Console.WriteLine($"等待后端服务启动中... ({waitedTime + checkInterval}/{maxWaitTime}秒)");
+                System.Threading.Thread.Sleep(checkInterval * 1000);
+                waitedTime += checkInterval;
+            }
+            
+            throw new Exception($"等待后端服务启动超时（{maxWaitTime}秒），请检查后端服务是否正常启动");
         }
 
         /// <summary>

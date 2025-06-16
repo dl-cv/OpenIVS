@@ -93,11 +93,15 @@ namespace DlcvDvpHttpApiTest
                 UpdateStatus("模型加载失败");
                 AppendResult($"[{DateTime.Now:HH:mm:ss}] 模型加载失败: {ex.Message}");
                 
-                // 检查是否是后端服务未启动的错误
-                if (ex.Message.Contains("检测到后端未启动"))
+                // 检查是否是后端服务启动超时的错误
+                if (ex.Message.Contains("等待后端服务启动超时"))
                 {
-                    MessageBox.Show($"{ex.Message}\n\n后端服务正在启动中，请稍等片刻后重试。", "后端服务启动", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    AppendResult("提示：后端服务正在启动中，请等待10秒钟后重新尝试加载模型");
+                    MessageBox.Show($"后端服务启动超时：{ex.Message}\n\n请检查后端服务程序是否能正常启动。", "后端服务超时", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    AppendResult("提示：后端服务启动超时，请检查系统环境或手动启动后端服务");
+                }
+                else if (ex.Message.Contains("连接") || ex.Message.Contains("网络") || ex.Message.Contains("超时"))
+                {
+                    MessageBox.Show($"无法连接到后端服务：{ex.Message}\n\n请确认后端服务是否正常运行。", "连接错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 else
                 {
