@@ -92,7 +92,17 @@ namespace DlcvDvpHttpApiTest
             {
                 UpdateStatus("模型加载失败");
                 AppendResult($"[{DateTime.Now:HH:mm:ss}] 模型加载失败: {ex.Message}");
-                MessageBox.Show($"模型加载失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                
+                // 检查是否是后端服务未启动的错误
+                if (ex.Message.Contains("检测到后端未启动"))
+                {
+                    MessageBox.Show($"{ex.Message}\n\n后端服务正在启动中，请稍等片刻后重试。", "后端服务启动", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    AppendResult("提示：后端服务正在启动中，请等待10秒钟后重新尝试加载模型");
+                }
+                else
+                {
+                    MessageBox.Show($"模型加载失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 
@@ -118,7 +128,16 @@ namespace DlcvDvpHttpApiTest
             {
                 UpdateStatus("获取模型信息失败");
                 AppendResult($"[{DateTime.Now:HH:mm:ss}] 获取模型信息失败: {ex.Message}");
-                MessageBox.Show($"获取模型信息失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                
+                // 检查是否是网络连接相关的错误
+                if (ex.Message.Contains("连接") || ex.Message.Contains("网络") || ex.Message.Contains("超时"))
+                {
+                    MessageBox.Show($"无法连接到后端服务：{ex.Message}\n\n请确认后端服务是否正常运行。", "连接错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else
+                {
+                    MessageBox.Show($"获取模型信息失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 
@@ -217,7 +236,16 @@ namespace DlcvDvpHttpApiTest
             {
                 UpdateStatus("推理失败");
                 AppendResult($"[{DateTime.Now:HH:mm:ss}] 推理失败: {ex.Message}");
-                MessageBox.Show($"推理失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                
+                // 检查是否是网络连接相关的错误
+                if (ex.Message.Contains("连接") || ex.Message.Contains("网络") || ex.Message.Contains("超时"))
+                {
+                    MessageBox.Show($"无法连接到后端服务：{ex.Message}\n\n请确认后端服务是否正常运行。", "连接错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else
+                {
+                    MessageBox.Show($"推理失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 

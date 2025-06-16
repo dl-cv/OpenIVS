@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using dlcv_infer_csharp;
+using System.Diagnostics;
 
 namespace DlcvDvpHttpApi
 {
@@ -65,6 +66,14 @@ namespace DlcvDvpHttpApi
             if (string.IsNullOrEmpty(_modelPath) || !File.Exists(_modelPath))
                 throw new ArgumentException("模型文件路径无效或文件不存在", nameof(_modelPath));
 
+            // 检查后端服务是否启动
+            if (!CheckBackendService())
+            {
+                // 启动后端服务
+                StartBackendService();
+                throw new Exception("检测到后端未启动，正在启动推理后端，请10秒钟后再次尝试");
+            }
+
             try
             {
                 var request = new
@@ -103,6 +112,47 @@ namespace DlcvDvpHttpApi
             catch (Exception ex)
             {
                 throw new Exception($"加载模型失败: {ex.Message}", ex);
+            }
+        }
+        
+        /// <summary>
+        /// 检查后端服务是否已启动
+        /// </summary>
+        /// <returns>服务是否可用</returns>
+        private bool CheckBackendService()
+        {
+            try
+            {
+                var response = _httpClient.GetAsync($"{_serverUrl}/docs").GetAwaiter().GetResult();
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// 启动后端服务程序
+        /// </summary>
+        private void StartBackendService()
+        {
+            try
+            {
+                var processStartInfo = new ProcessStartInfo
+                {
+                    FileName = @"C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe",
+                    UseShellExecute = true,
+                    CreateNoWindow = false,
+                    WindowStyle = ProcessWindowStyle.Normal
+                };
+                
+                Process.Start(processStartInfo);
+                Console.WriteLine("已启动后端推理服务");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"启动后端服务失败: {ex.Message}");
             }
         }
 
