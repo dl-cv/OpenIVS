@@ -200,6 +200,9 @@ namespace dlcv_infer_csharp
                 {
                     Console.WriteLine($"Model load result: {resultObject}");
                     modelIndex = 1; // DVP模式设置默认值表示模型已加载
+                    
+                    // 模型加载成功后，调用 /version 接口
+                    CallVersionAPI();
                 }
                 else
                 {
@@ -280,6 +283,31 @@ namespace dlcv_infer_csharp
             catch (Exception ex)
             {
                 Console.WriteLine($"启动后端服务失败: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// 调用后端服务的 /version 接口
+        /// </summary>
+        private void CallVersionAPI()
+        {
+            try
+            {
+                var response = _httpClient.GetAsync($"{_serverUrl}/version").GetAwaiter().GetResult();
+                var responseJson = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"后端版本信息: {responseJson}");
+                }
+                else
+                {
+                    Console.WriteLine($"获取版本信息失败: {response.StatusCode} - {responseJson}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"调用版本接口失败: {ex.Message}");
             }
         }
 
