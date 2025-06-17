@@ -320,7 +320,7 @@ namespace dlcv_infer_csharp
         private void WaitForBackendService()
         {
             const int maxWaitTime = 30; // 最大等待30秒
-            const double checkInterval = 0.1;
+            const double checkInterval = 0.2;
             double waitedTime = 0;
 
             while (waitedTime < maxWaitTime)
