@@ -123,7 +123,7 @@ namespace dlcv_infer_csharp
     public class Model : IDisposable
     {
         protected int modelIndex = -1;
-        
+
         // DVP mode fields
         private bool _isDvpMode = false;
         private string _modelPath;
@@ -139,16 +139,16 @@ namespace dlcv_infer_csharp
         public Model(string modelPath, int device_id)
         {
             _modelPath = modelPath;
-            
+
             // 根据模型文件后缀判断是否使用 DVP 模式
             if (string.IsNullOrEmpty(modelPath))
             {
                 throw new ArgumentException("模型路径不能为空", nameof(modelPath));
             }
-            
+
             string extension = Path.GetExtension(modelPath).ToLower();
             _isDvpMode = extension == ".dvp";
-            
+
             if (_isDvpMode)
             {
                 // DVP 模式：使用 HTTP API
@@ -160,23 +160,23 @@ namespace dlcv_infer_csharp
                 InitializeDvtMode(modelPath, device_id);
             }
         }
-        
+
         private void InitializeDvpMode(string modelPath, int device_id)
         {
             _httpClient = new HttpClient();
             _httpClient.Timeout = TimeSpan.FromSeconds(30);
-            
+
             // 检查后端服务是否启动
             if (!CheckBackendService())
             {
                 // 启动后端服务
                 StartBackendService();
-                
+
                 // 循环等待后端服务启动完成
                 Console.WriteLine("正在等待后端服务启动...");
                 WaitForBackendService();
             }
-            
+
             // 加载模型到服务器
             try
             {
@@ -197,19 +197,19 @@ namespace dlcv_infer_csharp
                 }
 
                 var resultObject = JObject.Parse(responseJson);
-                
-                if (resultObject.ContainsKey("code") && 
+
+                if (resultObject.ContainsKey("code") &&
                     resultObject["code"].Value<string>() == "00000")
                 {
                     Console.WriteLine($"Model load result: {resultObject}");
                     modelIndex = 1; // DVP模式设置默认值表示模型已加载
-                    
+
                     // 模型加载成功后，调用 /version 接口
                     CallVersionAPI();
                 }
                 else
                 {
-                    string errorCode = resultObject.ContainsKey("code") ? 
+                    string errorCode = resultObject.ContainsKey("code") ?
                         resultObject["code"].Value<string>() : "未知错误码";
                     throw new Exception($"加载模型失败，错误码: {errorCode}，详细信息：{resultObject}");
                 }
@@ -219,7 +219,7 @@ namespace dlcv_infer_csharp
                 throw new Exception($"加载模型失败: {ex.Message}", ex);
             }
         }
-        
+
         private void InitializeDvtMode(string modelPath, int device_id)
         {
             var config = new JObject
@@ -247,7 +247,7 @@ namespace dlcv_infer_csharp
             }
             DllLoader.Instance.dlcv_free_result(resultPtr);
         }
-        
+
         /// <summary>
         /// 检查后端服务是否已启动
         /// </summary>
@@ -264,7 +264,7 @@ namespace dlcv_infer_csharp
                 return false;
             }
         }
-        
+
         /// <summary>
         /// 启动后端服务程序
         /// </summary>
@@ -279,7 +279,7 @@ namespace dlcv_infer_csharp
                     CreateNoWindow = false,
                     WindowStyle = ProcessWindowStyle.Normal
                 };
-                
+
                 Process.Start(processStartInfo);
                 Console.WriteLine("已启动后端推理服务");
             }
@@ -288,7 +288,7 @@ namespace dlcv_infer_csharp
                 Console.WriteLine($"启动后端服务失败: {ex.Message}");
             }
         }
-        
+
         /// <summary>
         /// 调用后端服务的 /version 接口
         /// </summary>
@@ -313,16 +313,16 @@ namespace dlcv_infer_csharp
                 Console.WriteLine($"调用版本接口失败: {ex.Message}");
             }
         }
-        
+
         /// <summary>
         /// 等待后端服务启动完成
         /// </summary>
         private void WaitForBackendService()
         {
             const int maxWaitTime = 30; // 最大等待30秒
-            const int checkInterval = 1; // 每1秒检查一次
-            int waitedTime = 0;
-            
+            const double checkInterval = 0.1;
+            double waitedTime = 0;
+
             while (waitedTime < maxWaitTime)
             {
                 if (CheckBackendService())
@@ -330,12 +330,12 @@ namespace dlcv_infer_csharp
                     Console.WriteLine("后端服务已启动，继续加载模型...");
                     return;
                 }
-                
+
                 Console.WriteLine($"等待后端服务启动中... ({waitedTime + checkInterval}/{maxWaitTime}秒)");
-                System.Threading.Thread.Sleep(checkInterval * 1000);
+                System.Threading.Thread.Sleep((int)(checkInterval * 1000));
                 waitedTime += checkInterval;
             }
-            
+
             throw new Exception($"等待后端服务启动超时（{maxWaitTime}秒），请检查后端服务是否正常启动");
         }
 
@@ -404,7 +404,7 @@ namespace dlcv_infer_csharp
                 return GetModelInfoDvt();
             }
         }
-        
+
         private JObject GetModelInfoDvp()
         {
             try
@@ -434,7 +434,7 @@ namespace dlcv_infer_csharp
                 throw new Exception($"获取模型信息失败: {ex.Message}", ex);
             }
         }
-        
+
         private JObject GetModelInfoDvt()
         {
             var config = new JObject
@@ -464,14 +464,14 @@ namespace dlcv_infer_csharp
                 return InferInternalDvt(images, params_json);
             }
         }
-        
+
         private Tuple<JObject, IntPtr> InferInternalDvp(List<Mat> images, JObject params_json)
         {
             try
             {
                 // DVP 模式只支持单张图片，如果有多张图片需要分别处理
                 var allResults = new List<JObject>();
-                
+
                 foreach (var image in images)
                 {
                     if (image.Empty())
@@ -482,7 +482,7 @@ namespace dlcv_infer_csharp
                     Cv2.CvtColor(image, image_bgr, ColorConversionCodes.RGB2BGR);
                     byte[] imageBytes = image_bgr.ToBytes(".png");
                     string base64Image = Convert.ToBase64String(imageBytes);
-                    
+
                     // 创建推理请求，添加 return_polygon=true 参数
                     var request = new JObject
                     {
@@ -518,16 +518,16 @@ namespace dlcv_infer_csharp
                 // 将多个结果合并为统一格式
                 var mergedResult = new JObject();
                 var sampleResults = new JArray();
-                
+
                 foreach (var result in allResults)
                 {
                     var sampleResult = new JObject();
                     sampleResult["results"] = result["results"];
                     sampleResults.Add(sampleResult);
                 }
-                
+
                 mergedResult["sample_results"] = sampleResults;
-                
+
                 // DVP 模式返回空指针，不需要释放
                 return new Tuple<JObject, IntPtr>(mergedResult, IntPtr.Zero);
             }
@@ -536,7 +536,7 @@ namespace dlcv_infer_csharp
                 throw new Exception($"DVP 推理失败: {ex.Message}", ex);
             }
         }
-        
+
         private Tuple<JObject, IntPtr> InferInternalDvt(List<Mat> images, JObject params_json)
         {
             var imageInfoList = new JArray();
@@ -638,7 +638,7 @@ namespace dlcv_infer_csharp
                     var area = result["area"]?.Value<float>() ?? 0.0f;
 
                     var bbox = result["bbox"]?.ToObject<List<double>>() ?? new List<double>();
-                    
+
                     // DVP模式下bbox格式是[x1,y1,x2,y2]，需要转换为[x,y,w,h]
                     if (_isDvpMode && bbox != null && bbox.Count == 4)
                     {
@@ -648,7 +648,7 @@ namespace dlcv_infer_csharp
                         double y2 = bbox[3];
                         bbox = new List<double> { x1, y1, x2 - x1, y2 - y1 };
                     }
-                    
+
                     bool withBbox = false;
                     if (result.ContainsKey("with_bbox"))
                     {
@@ -661,7 +661,7 @@ namespace dlcv_infer_csharp
 
                     var withMask = result["with_mask"]?.Value<bool>() ?? false;
                     Mat mask_img = new Mat();
-                    
+
                     if (withMask)
                     {
                         if (_isDvpMode && result.ContainsKey("polygon"))
@@ -707,7 +707,7 @@ namespace dlcv_infer_csharp
 
             return new Utils.CSharpResult(sampleResults);
         }
-        
+
         /// <summary>
         /// 从多边形数据创建mask图像
         /// </summary>
@@ -745,11 +745,11 @@ namespace dlcv_infer_csharp
                     {
                         int px = point[0].Value<int>() - x; // 转换为相对于bbox的坐标
                         int py = point[1].Value<int>() - y;
-                        
+
                         // 确保点在mask范围内
                         px = Math.Max(0, Math.Min(width - 1, px));
                         py = Math.Max(0, Math.Min(height - 1, py));
-                        
+
                         points.Add(new Point(px, py));
                     }
                 }
@@ -829,7 +829,7 @@ namespace dlcv_infer_csharp
             try
             {
                 var results = resultTuple.Item1["sample_results"][0]["results"] as JArray;
-                
+
                 if (_isDvpMode)
                 {
                     // DVP 模式：需要将bbox从[x1,y1,x2,y2]转换为[x,y,w,h]，并处理polygon数据
@@ -845,7 +845,7 @@ namespace dlcv_infer_csharp
                             double y2 = bbox[3];
                             result["bbox"] = new JArray { x1, y1, x2 - x1, y2 - y1 };
                         }
-                        
+
                         // polygon数据已经在返回结果中，直接保留
                         if (result.ContainsKey("polygon"))
                         {
