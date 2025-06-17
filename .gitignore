@@ -411,3 +411,5 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+.remember/memory/self.md
+.remember/memory/project.md

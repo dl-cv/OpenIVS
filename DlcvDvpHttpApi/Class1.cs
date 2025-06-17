@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using dlcv_infer_csharp;
+using System.Diagnostics;
 
 namespace DlcvDvpHttpApi
 {
@@ -65,6 +66,17 @@ namespace DlcvDvpHttpApi
             if (string.IsNullOrEmpty(_modelPath) || !File.Exists(_modelPath))
                 throw new ArgumentException("模型文件路径无效或文件不存在", nameof(_modelPath));
 
+            // 检查后端服务是否启动
+            if (!CheckBackendService())
+            {
+                // 启动后端服务
+                StartBackendService();
+                
+                // 循环等待后端服务启动完成
+                Console.WriteLine("正在等待后端服务启动...");
+                WaitForBackendService();
+            }
+
             try
             {
                 var request = new
@@ -92,6 +104,9 @@ namespace DlcvDvpHttpApi
                     Console.WriteLine($"Model load result: {resultObject}");
                     // HTTP版本不需要model_index，加载成功即可
                     _modelIndex = 1; // 设置一个默认值表示模型已加载
+                    
+                    // 模型加载成功后，调用 /version 接口
+                    CallVersionAPI();
                 }
                 else
                 {
@@ -104,6 +119,97 @@ namespace DlcvDvpHttpApi
             {
                 throw new Exception($"加载模型失败: {ex.Message}", ex);
             }
+        }
+        
+        /// <summary>
+        /// 检查后端服务是否已启动
+        /// </summary>
+        /// <returns>服务是否可用</returns>
+        private bool CheckBackendService()
+        {
+            try
+            {
+                var response = _httpClient.GetAsync($"{_serverUrl}/docs").GetAwaiter().GetResult();
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// 启动后端服务程序
+        /// </summary>
+        private void StartBackendService()
+        {
+            try
+            {
+                var processStartInfo = new ProcessStartInfo
+                {
+                    FileName = @"C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe",
+                    UseShellExecute = true,
+                    CreateNoWindow = false,
+                    WindowStyle = ProcessWindowStyle.Normal
+                };
+                
+                Process.Start(processStartInfo);
+                Console.WriteLine("已启动后端推理服务");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"启动后端服务失败: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// 调用后端服务的 /version 接口
+        /// </summary>
+        private void CallVersionAPI()
+        {
+            try
+            {
+                var response = _httpClient.GetAsync($"{_serverUrl}/version").GetAwaiter().GetResult();
+                var responseJson = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"后端版本信息: {responseJson}");
+                }
+                else
+                {
+                    Console.WriteLine($"获取版本信息失败: {response.StatusCode} - {responseJson}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"调用版本接口失败: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// 等待后端服务启动完成
+        /// </summary>
+        private void WaitForBackendService()
+        {
+            const int maxWaitTime = 30; // 最大等待30秒
+            const int checkInterval = 1; // 每1秒检查一次
+            int waitedTime = 0;
+            
+            while (waitedTime < maxWaitTime)
+            {
+                if (CheckBackendService())
+                {
+                    Console.WriteLine("后端服务已启动，继续加载模型...");
+                    return;
+                }
+                
+                Console.WriteLine($"等待后端服务启动中... ({waitedTime + checkInterval}/{maxWaitTime}秒)");
+                System.Threading.Thread.Sleep(checkInterval * 1000);
+                waitedTime += checkInterval;
+            }
+            
+            throw new Exception($"等待后端服务启动超时（{maxWaitTime}秒），请检查后端服务是否正常启动");
         }
 
         /// <summary>
