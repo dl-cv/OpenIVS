@@ -50,6 +50,8 @@
             this.button_check_dog = new System.Windows.Forms.Button();
             this.button_load_sliding_window_model = new System.Windows.Forms.Button();
             this.button_free_all_model = new System.Windows.Forms.Button();
+            this.button_load_ocr_model = new System.Windows.Forms.Button();
+            this.button_ocr_infer = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             this.SuspendLayout();
@@ -306,11 +308,37 @@
             this.button_free_all_model.UseVisualStyleBackColor = true;
             this.button_free_all_model.Click += new System.EventHandler(this.button_free_all_model_Click);
             // 
+            // button_load_ocr_model
+            // 
+            this.button_load_ocr_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.button_load_ocr_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.button_load_ocr_model.Location = new System.Drawing.Point(580, 19);
+            this.button_load_ocr_model.Margin = new System.Windows.Forms.Padding(4);
+            this.button_load_ocr_model.Name = "button_load_ocr_model";
+            this.button_load_ocr_model.Size = new System.Drawing.Size(140, 60);
+            this.button_load_ocr_model.TabIndex = 23;
+            this.button_load_ocr_model.Text = "加载OCR模型";
+            this.button_load_ocr_model.UseVisualStyleBackColor = true;
+            this.button_load_ocr_model.Click += new System.EventHandler(this.button_load_ocr_model_Click);
+            // 
+            // button_ocr_infer
+            // 
+            this.button_ocr_infer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.button_ocr_infer.Location = new System.Drawing.Point(580, 93);
+            this.button_ocr_infer.Name = "button_ocr_infer";
+            this.button_ocr_infer.Size = new System.Drawing.Size(140, 60);
+            this.button_ocr_infer.TabIndex = 24;
+            this.button_ocr_infer.Text = "OCR推理";
+            this.button_ocr_infer.UseVisualStyleBackColor = true;
+            this.button_ocr_infer.Click += new System.EventHandler(this.button_ocr_infer_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1178, 844);
+            this.Controls.Add(this.button_ocr_infer);
+            this.Controls.Add(this.button_load_ocr_model);
             this.Controls.Add(this.button_free_all_model);
             this.Controls.Add(this.button_load_sliding_window_model);
             this.Controls.Add(this.button_check_dog);
@@ -370,6 +398,8 @@
         private System.Windows.Forms.Button button_check_dog;
         private System.Windows.Forms.Button button_load_sliding_window_model;
         private System.Windows.Forms.Button button_free_all_model;
+        private System.Windows.Forms.Button button_load_ocr_model;
+        private System.Windows.Forms.Button button_ocr_infer;
     }
 }
 

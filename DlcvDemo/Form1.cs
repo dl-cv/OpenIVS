@@ -68,6 +68,7 @@ namespace DlcvDemo
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
+        private OcrWithDetModel ocrModel; // OCR模型
 
         private void button_loadmodel_Click(object sender, EventArgs e)
         {
@@ -496,6 +497,12 @@ namespace DlcvDemo
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
             StopPressureTest();
+            // 释放OCR模型
+            if (ocrModel != null)
+            {
+                ocrModel.Dispose();
+                ocrModel = null;
+            }
             Utils.FreeAllModels();
         }
 
@@ -565,9 +572,192 @@ namespace DlcvDemo
             }
         }
 
+        private void button_load_ocr_model_Click(object sender, EventArgs e)
+        {
+            // 创建一个新的对话框实例，用于选择两个模型文件
+            using (var ocrModelDialog = new Form())
+            {
+                ocrModelDialog.Text = "选择OCR模型文件";
+                ocrModelDialog.Size = new System.Drawing.Size(500, 300);
+                ocrModelDialog.StartPosition = FormStartPosition.CenterParent;
+
+                // 创建控件
+                var lblDetModel = new Label { Text = "检测模型:", Location = new System.Drawing.Point(20, 20), Size = new System.Drawing.Size(80, 25) };
+                var txtDetModel = new TextBox { Location = new System.Drawing.Point(100, 20), Size = new System.Drawing.Size(280, 25) };
+                var btnBrowseDet = new Button { Text = "浏览", Location = new System.Drawing.Point(390, 18), Size = new System.Drawing.Size(70, 28) };
+
+                var lblOcrModel = new Label { Text = "OCR模型:", Location = new System.Drawing.Point(20, 60), Size = new System.Drawing.Size(80, 25) };
+                var txtOcrModel = new TextBox { Location = new System.Drawing.Point(100, 60), Size = new System.Drawing.Size(280, 25) };
+                var btnBrowseOcr = new Button { Text = "浏览", Location = new System.Drawing.Point(390, 58), Size = new System.Drawing.Size(70, 28) };
+
+                var lblDevice = new Label { Text = "设备ID:", Location = new System.Drawing.Point(20, 100), Size = new System.Drawing.Size(80, 25) };
+                var numDevice = new NumericUpDown { Location = new System.Drawing.Point(100, 100), Size = new System.Drawing.Size(60, 25), Minimum = 0, Maximum = 10, Value = comboBox1.SelectedIndex };
+
+                var btnOK = new Button { Text = "确定", Location = new System.Drawing.Point(150, 150), Size = new System.Drawing.Size(80, 30), DialogResult = DialogResult.OK };
+                var btnCancel = new Button { Text = "取消", Location = new System.Drawing.Point(250, 150), Size = new System.Drawing.Size(80, 30), DialogResult = DialogResult.Cancel };
+
+                // 添加控件到窗体
+                ocrModelDialog.Controls.AddRange(new Control[] { lblDetModel, txtDetModel, btnBrowseDet, lblOcrModel, txtOcrModel, btnBrowseOcr, lblDevice, numDevice, btnOK, btnCancel });
+
+                // 浏览按钮事件
+                btnBrowseDet.Click += (s, args) =>
+                {
+                    using (var ofd = new OpenFileDialog())
+                    {
+                        ofd.Filter = "深度视觉模型文件 (*.dvt;*.dvp)|*.dvt;*.dvp";
+                        ofd.Title = "选择检测模型";
+                        if (ofd.ShowDialog() == DialogResult.OK)
+                        {
+                            txtDetModel.Text = ofd.FileName;
+                        }
+                    }
+                };
+
+                btnBrowseOcr.Click += (s, args) =>
+                {
+                    using (var ofd = new OpenFileDialog())
+                    {
+                        ofd.Filter = "深度视觉模型文件 (*.dvt;*.dvp)|*.dvt;*.dvp";
+                        ofd.Title = "选择OCR模型";
+                        if (ofd.ShowDialog() == DialogResult.OK)
+                        {
+                            txtOcrModel.Text = ofd.FileName;
+                        }
+                    }
+                };
+
+                // 显示对话框
+                if (ocrModelDialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    string detModelPath = txtDetModel.Text;
+                    string ocrModelPath = txtOcrModel.Text;
+                    int deviceId = (int)numDevice.Value;
+
+                    if (string.IsNullOrEmpty(detModelPath) || string.IsNullOrEmpty(ocrModelPath))
+                    {
+                        MessageBox.Show("请选择两个模型文件！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    try
+                    {
+                        // 释放旧的OCR模型
+                        if (ocrModel != null)
+                        {
+                            ocrModel.Dispose();
+                            ocrModel = null;
+                        }
+
+                        // 创建新的OCR模型
+                        ocrModel = new OcrWithDetModel();
+                        ocrModel.Load(detModelPath, ocrModelPath, deviceId);
+
+                        richTextBox1.Text = "OCR模型加载成功！\n" +
+                                          $"检测模型: {Path.GetFileName(detModelPath)}\n" +
+                                          $"OCR模型: {Path.GetFileName(ocrModelPath)}";
+                    }
+                    catch (Exception ex)
+                    {
+                        richTextBox1.Text = $"加载OCR模型失败：{ex.Message}";
+                        if (ocrModel != null)
+                        {
+                            ocrModel.Dispose();
+                            ocrModel = null;
+                        }
+                    }
+                }
+            }
+        }
+
+        private void button_ocr_infer_Click(object sender, EventArgs e)
+        {
+            if (ocrModel == null || !ocrModel.IsLoaded)
+            {
+                MessageBox.Show("请先加载OCR模型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(image_path))
+            {
+                // 如果没有图片，则打开文件选择对话框
+                OpenFileDialog openFileDialog = new OpenFileDialog();
+                openFileDialog.Filter = "图片文件 (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif|所有文件 (*.*)|*.*";
+                openFileDialog.Title = "选择图片文件";
+
+                if (openFileDialog.ShowDialog() == DialogResult.OK)
+                {
+                    image_path = openFileDialog.FileName;
+                }
+                else
+                {
+                    return;
+                }
+            }
+
+            try
+            {
+                // 读取图像
+                Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+                if (image.Empty())
+                {
+                    MessageBox.Show("图像读取失败！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // 转换为RGB
+                Mat image_rgb = new Mat();
+                Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
+
+                // 执行OCR推理
+                Stopwatch stopwatch = new Stopwatch();
+                stopwatch.Start();
+
+                CSharpResult result = ocrModel.Infer(image_rgb);
+
+                stopwatch.Stop();
+                double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
+
+                // 更新显示
+                imagePanel1.UpdateImageAndResult(image, result);
+
+                // 显示结果
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine($"OCR推理时间: {delay_ms:F2}ms\n");
+                sb.AppendLine("OCR识别结果:");
+                
+                if (result.SampleResults != null && result.SampleResults.Count > 0)
+                {
+                    foreach (var obj in result.SampleResults[0].Results)
+                    {
+                        sb.AppendLine($"文本: {obj.CategoryName} (置信度: {obj.Score:F2})");
+                        sb.AppendLine($"位置: [{obj.Bbox[0]:F0}, {obj.Bbox[1]:F0}, {obj.Bbox[2]:F0}, {obj.Bbox[3]:F0}]");
+                        sb.AppendLine();
+                    }
+                }
+
+                richTextBox1.Text = sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                richTextBox1.Text = $"OCR推理错误：{ex.Message}";
+                MessageBox.Show($"OCR推理失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void button_free_all_model_Click(object sender, EventArgs e)
         {
+            // 如果存在正在运行的压力测试，先停止它
+            StopPressureTest();
+
+            model = null;
+            // 释放OCR模型
+            if (ocrModel != null)
+            {
+                ocrModel.Dispose();
+                ocrModel = null;
+            }
             Utils.FreeAllModels();
+            richTextBox1.Text = "所有模型已释放";
         }
     }
 }

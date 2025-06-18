@@ -989,6 +989,190 @@ namespace dlcv_infer_csharp
         }
     }
 
+    /// <summary>
+    /// OCR with Detection Model 封装类
+    /// 结合检测模型和OCR识别模型进行端到端的文字检测和识别
+    /// </summary>
+    public class OcrWithDetModel : IDisposable
+    {
+        private Model _detModel;
+        private Model _ocrModel;
+        private bool _disposed = false;
+
+        /// <summary>
+        /// 获取检测模型是否已加载
+        /// </summary>
+        public bool IsDetModelLoaded => _detModel != null;
+
+        /// <summary>
+        /// 获取OCR模型是否已加载
+        /// </summary>
+        public bool IsOcrModelLoaded => _ocrModel != null;
+
+        /// <summary>
+        /// 获取两个模型是否都已加载
+        /// </summary>
+        public bool IsLoaded => IsDetModelLoaded && IsOcrModelLoaded;
+
+        /// <summary>
+        /// 加载检测模型和OCR模型
+        /// </summary>
+        /// <param name="detModelPath">检测模型路径</param>
+        /// <param name="ocrModelPath">OCR识别模型路径</param>
+        /// <param name="deviceId">设备ID，默认为0</param>
+        public void Load(string detModelPath, string ocrModelPath, int deviceId = 0)
+        {
+            try
+            {
+                // 加载检测模型
+                Console.WriteLine($"正在加载检测模型: {detModelPath}");
+                _detModel = new Model(detModelPath, deviceId);
+                Console.WriteLine("检测模型加载成功");
+
+                // 加载OCR模型
+                Console.WriteLine($"正在加载OCR模型: {ocrModelPath}");
+                _ocrModel = new Model(ocrModelPath, deviceId);
+                Console.WriteLine("OCR模型加载成功");
+            }
+            catch (Exception ex)
+            {
+                // 如果加载失败，释放已加载的模型
+                _detModel?.Dispose();
+                _ocrModel?.Dispose();
+                _detModel = null;
+                _ocrModel = null;
+                throw new Exception($"加载模型失败: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// 执行推理，返回结构化结果
+        /// </summary>
+        /// <param name="image">输入图像</param>
+        /// <param name="paramsJson">推理参数（可选）</param>
+        /// <returns>OCR推理结果</returns>
+        public Utils.CSharpResult Infer(Mat image, JObject paramsJson = null)
+        {
+            if (!IsLoaded)
+            {
+                throw new InvalidOperationException("模型未加载，请先调用Load方法加载模型");
+            }
+
+            if (image == null || image.Empty())
+            {
+                throw new ArgumentException("输入图像无效", nameof(image));
+            }
+
+            return Utils.OcrInfer(_detModel, _ocrModel, image);
+        }
+
+        /// <summary>
+        /// 批量推理
+        /// </summary>
+        /// <param name="imageList">输入图像列表</param>
+        /// <param name="paramsJson">推理参数（可选）</param>
+        /// <returns>批量OCR推理结果</returns>
+        public Utils.CSharpResult InferBatch(List<Mat> imageList, JObject paramsJson = null)
+        {
+            if (!IsLoaded)
+            {
+                throw new InvalidOperationException("模型未加载，请先调用Load方法加载模型");
+            }
+
+            if (imageList == null || imageList.Count == 0)
+            {
+                throw new ArgumentException("输入图像列表为空", nameof(imageList));
+            }
+
+            // 处理每张图像
+            var allSampleResults = new List<Utils.CSharpSampleResult>();
+            
+            foreach (var image in imageList)
+            {
+                if (image == null || image.Empty())
+                {
+                    // 空图像添加空结果
+                    allSampleResults.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
+                    continue;
+                }
+
+                // 对单张图像进行OCR推理
+                var singleResult = Utils.OcrInfer(_detModel, _ocrModel, image);
+                if (singleResult.SampleResults != null && singleResult.SampleResults.Count > 0)
+                {
+                    allSampleResults.Add(singleResult.SampleResults[0]);
+                }
+                else
+                {
+                    allSampleResults.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
+                }
+            }
+
+            return new Utils.CSharpResult(allSampleResults);
+        }
+
+        /// <summary>
+        /// 释放模型资源
+        /// </summary>
+        public void FreeModel()
+        {
+            _detModel?.FreeModel();
+            _ocrModel?.FreeModel();
+        }
+
+        /// <summary>
+        /// 获取检测模型信息
+        /// </summary>
+        /// <returns>检测模型信息</returns>
+        public JObject GetDetModelInfo()
+        {
+            if (!IsDetModelLoaded)
+            {
+                throw new InvalidOperationException("检测模型未加载");
+            }
+            return _detModel.GetModelInfo();
+        }
+
+        /// <summary>
+        /// 获取OCR模型信息
+        /// </summary>
+        /// <returns>OCR模型信息</returns>
+        public JObject GetOcrModelInfo()
+        {
+            if (!IsOcrModelLoaded)
+            {
+                throw new InvalidOperationException("OCR模型未加载");
+            }
+            return _ocrModel.GetModelInfo();
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    // 释放托管资源
+                    _detModel?.Dispose();
+                    _ocrModel?.Dispose();
+                }
+
+                _disposed = true;
+            }
+        }
+
+        ~OcrWithDetModel()
+        {
+            Dispose(false);
+        }
+    }
+
     public class Utils
     {
         /// <summary>
