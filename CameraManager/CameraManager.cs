@@ -626,20 +626,38 @@ namespace DLCV.Camera
             {
                 while (!token.IsCancellationRequested && _device != null)
                 {
-                    IFrameOut frame;
+                    IFrameOut frame = null;
                     int ret = _device.StreamGrabber.GetImageBuffer(1000, out frame);
 
-                    if (ret == MvError.MV_OK)
+                    if (ret == MvError.MV_OK && frame != null)
                     {
-                        using (var bitmap = frame.Image.ToBitmap())
+                        try
                         {
-                            var clonedBitmap = bitmap.Clone() as Bitmap;
-                            ImageUpdated?.Invoke(this, new ImageEventArgs(clonedBitmap));
+                            // 检查 frame.Image 是否为 null
+                            if (frame.Image != null)
+                            {
+                                using (var bitmap = frame.Image.ToBitmap())
+                                {
+                                    // 检查 bitmap 是否为 null
+                                    if (bitmap != null)
+                                    {
+                                        var clonedBitmap = bitmap.Clone() as Bitmap;
+                                        ImageUpdated?.Invoke(this, new ImageEventArgs(clonedBitmap));
+                                    }
+                                }
+                            }
                         }
-                        
-                        if (_device != null)
+                        catch (Exception)
                         {
-                            _device.StreamGrabber.FreeImageBuffer(frame);
+                            // 图像处理异常，继续下一帧
+                        }
+                        finally
+                        {
+                            // 确保释放图像缓冲区
+                            if (_device != null && frame != null)
+                            {
+                                _device.StreamGrabber.FreeImageBuffer(frame);
+                            }
                         }
                     }
                     else if (ret != MvError.MV_E_GC_TIMEOUT)
