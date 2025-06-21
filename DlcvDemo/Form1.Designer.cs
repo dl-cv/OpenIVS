@@ -51,7 +51,6 @@
             this.button_load_sliding_window_model = new System.Windows.Forms.Button();
             this.button_free_all_model = new System.Windows.Forms.Button();
             this.button_load_ocr_model = new System.Windows.Forms.Button();
-            this.button_ocr_infer = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             this.SuspendLayout();
@@ -94,7 +93,7 @@
             // 
             // button_infer
             // 
-            this.button_infer.Location = new System.Drawing.Point(165, 87);
+            this.button_infer.Location = new System.Drawing.Point(311, 87);
             this.button_infer.Name = "button_infer";
             this.button_infer.Size = new System.Drawing.Size(140, 60);
             this.button_infer.TabIndex = 4;
@@ -104,7 +103,7 @@
             // 
             // button_thread_test
             // 
-            this.button_thread_test.Location = new System.Drawing.Point(12, 221);
+            this.button_thread_test.Location = new System.Drawing.Point(12, 154);
             this.button_thread_test.Name = "button_thread_test";
             this.button_thread_test.Size = new System.Drawing.Size(140, 60);
             this.button_thread_test.TabIndex = 5;
@@ -114,7 +113,7 @@
             // 
             // button_consistency_test
             // 
-            this.button_consistency_test.Location = new System.Drawing.Point(165, 221);
+            this.button_consistency_test.Location = new System.Drawing.Point(165, 154);
             this.button_consistency_test.Name = "button_consistency_test";
             this.button_consistency_test.Size = new System.Drawing.Size(140, 60);
             this.button_consistency_test.TabIndex = 23;
@@ -139,7 +138,7 @@
             // 
             this.button_github.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_github.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_github.Location = new System.Drawing.Point(1083, 229);
+            this.button_github.Location = new System.Drawing.Point(787, 161);
             this.button_github.Margin = new System.Windows.Forms.Padding(4);
             this.button_github.Name = "button_github";
             this.button_github.Size = new System.Drawing.Size(140, 60);
@@ -150,7 +149,7 @@
             // 
             // numericUpDown_num_thread
             // 
-            this.numericUpDown_num_thread.Location = new System.Drawing.Point(388, 237);
+            this.numericUpDown_num_thread.Location = new System.Drawing.Point(388, 170);
             this.numericUpDown_num_thread.Maximum = new decimal(new int[] {
             32,
             0,
@@ -192,7 +191,7 @@
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(318, 239);
+            this.label2.Location = new System.Drawing.Point(318, 172);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(64, 24);
             this.label2.TabIndex = 14;
@@ -201,7 +200,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(488, 104);
+            this.label3.Location = new System.Drawing.Point(627, 105);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(99, 24);
             this.label3.TabIndex = 15;
@@ -209,7 +208,7 @@
             // 
             // numericUpDown_batch_size
             // 
-            this.numericUpDown_batch_size.Location = new System.Drawing.Point(593, 102);
+            this.numericUpDown_batch_size.Location = new System.Drawing.Point(732, 103);
             this.numericUpDown_batch_size.Maximum = new decimal(new int[] {
             1024,
             0,
@@ -236,29 +235,29 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.imagePanel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imagePanel1.image = null;
-            this.imagePanel1.Location = new System.Drawing.Point(441, 298);
+            this.imagePanel1.Location = new System.Drawing.Point(441, 228);
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
             this.imagePanel1.ShowStatusText = false;
-            this.imagePanel1.Size = new System.Drawing.Size(782, 603);
+            this.imagePanel1.Size = new System.Drawing.Size(782, 604);
             this.imagePanel1.TabIndex = 17;
             // 
             // richTextBox1
             // 
             this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left)));
-            this.richTextBox1.Location = new System.Drawing.Point(12, 298);
+            this.richTextBox1.Location = new System.Drawing.Point(12, 228);
             this.richTextBox1.Margin = new System.Windows.Forms.Padding(3, 3, 3, 16);
             this.richTextBox1.Name = "richTextBox1";
-            this.richTextBox1.Size = new System.Drawing.Size(423, 603);
+            this.richTextBox1.Size = new System.Drawing.Size(423, 604);
             this.richTextBox1.TabIndex = 7;
             this.richTextBox1.Text = "";
             // 
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(318, 104);
+            this.label4.Location = new System.Drawing.Point(457, 105);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(92, 24);
             this.label4.TabIndex = 18;
@@ -266,7 +265,7 @@
             // 
             // textBox_threshold
             // 
-            this.textBox_threshold.Location = new System.Drawing.Point(416, 102);
+            this.textBox_threshold.Location = new System.Drawing.Point(555, 103);
             this.textBox_threshold.Name = "textBox_threshold";
             this.textBox_threshold.Size = new System.Drawing.Size(66, 31);
             this.textBox_threshold.TabIndex = 19;
@@ -286,7 +285,7 @@
             // button_load_sliding_window_model
             // 
             this.button_load_sliding_window_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_load_sliding_window_model.Location = new System.Drawing.Point(12, 87);
+            this.button_load_sliding_window_model.Location = new System.Drawing.Point(165, 87);
             this.button_load_sliding_window_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_load_sliding_window_model.Name = "button_load_sliding_window_model";
             this.button_load_sliding_window_model.Size = new System.Drawing.Size(140, 60);
@@ -311,7 +310,7 @@
             // button_load_ocr_model
             // 
             this.button_load_ocr_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_load_ocr_model.Location = new System.Drawing.Point(12, 154);
+            this.button_load_ocr_model.Location = new System.Drawing.Point(12, 87);
             this.button_load_ocr_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_load_ocr_model.Name = "button_load_ocr_model";
             this.button_load_ocr_model.Size = new System.Drawing.Size(140, 60);
@@ -320,22 +319,11 @@
             this.button_load_ocr_model.UseVisualStyleBackColor = true;
             this.button_load_ocr_model.Click += new System.EventHandler(this.button_load_ocr_model_Click);
             // 
-            // button_ocr_infer
-            // 
-            this.button_ocr_infer.Location = new System.Drawing.Point(165, 154);
-            this.button_ocr_infer.Name = "button_ocr_infer";
-            this.button_ocr_infer.Size = new System.Drawing.Size(140, 60);
-            this.button_ocr_infer.TabIndex = 24;
-            this.button_ocr_infer.Text = "OCR推理";
-            this.button_ocr_infer.UseVisualStyleBackColor = true;
-            this.button_ocr_infer.Click += new System.EventHandler(this.button_ocr_infer_Click);
-            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1238, 914);
-            this.Controls.Add(this.button_ocr_infer);
+            this.ClientSize = new System.Drawing.Size(1238, 844);
             this.Controls.Add(this.button_load_ocr_model);
             this.Controls.Add(this.button_free_all_model);
             this.Controls.Add(this.button_load_sliding_window_model);
@@ -397,7 +385,6 @@
         private System.Windows.Forms.Button button_load_sliding_window_model;
         private System.Windows.Forms.Button button_free_all_model;
         private System.Windows.Forms.Button button_load_ocr_model;
-        private System.Windows.Forms.Button button_ocr_infer;
     }
 }
 
