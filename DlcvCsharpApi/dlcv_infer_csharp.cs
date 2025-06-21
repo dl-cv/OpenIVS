@@ -407,7 +407,7 @@ namespace dlcv_infer_csharp
             var filteredInfo = (JObject)modelInfo.DeepClone();
 
             // 移除指定字段
-            var fieldsToRemove = new[] { "characters", "dict", "classes" };
+            var fieldsToRemove = new[] { "character", "dict", "classes" };
             
             foreach (var field in fieldsToRemove)
             {

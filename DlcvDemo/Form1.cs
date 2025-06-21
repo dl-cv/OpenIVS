@@ -122,6 +122,13 @@ namespace DlcvDemo
                 result = (JObject)result["model_info"];
                 richTextBox1.Text = result.ToString();
             }
+            else if (result.ContainsKey("det_model"))
+            {
+                JObject new_result = new JObject();
+                new_result["det_model"] = (JObject)result["det_model"]["model_info"];
+                new_result["ocr_model"] = (JObject)result["ocr_model"]["model_info"];
+                richTextBox1.Text = new_result.ToString();
+            }
             else if (result.ContainsKey("code"))
             {
                 richTextBox1.Text = result.ToString();
