@@ -51,25 +51,28 @@ namespace DlcvDemo
             this.lblDetModel.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.lblDetModel.Location = new System.Drawing.Point(15, 30);
             this.lblDetModel.Name = "lblDetModel";
-            this.lblDetModel.Size = new System.Drawing.Size(68, 17);
+            this.lblDetModel.Size = new System.Drawing.Size(100, 24);
             this.lblDetModel.TabIndex = 0;
             this.lblDetModel.Text = "检测模型：";
             // 
             // txtDetModel
             // 
+            this.txtDetModel.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.txtDetModel.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.txtDetModel.Location = new System.Drawing.Point(90, 27);
+            this.txtDetModel.Location = new System.Drawing.Point(121, 27);
             this.txtDetModel.Name = "txtDetModel";
             this.txtDetModel.ReadOnly = true;
-            this.txtDetModel.Size = new System.Drawing.Size(350, 23);
+            this.txtDetModel.Size = new System.Drawing.Size(319, 31);
             this.txtDetModel.TabIndex = 1;
             // 
             // btnBrowseDet
             // 
+            this.btnBrowseDet.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnBrowseDet.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.btnBrowseDet.Location = new System.Drawing.Point(450, 25);
             this.btnBrowseDet.Name = "btnBrowseDet";
-            this.btnBrowseDet.Size = new System.Drawing.Size(75, 28);
+            this.btnBrowseDet.Size = new System.Drawing.Size(84, 34);
             this.btnBrowseDet.TabIndex = 2;
             this.btnBrowseDet.Text = "浏览...";
             this.btnBrowseDet.UseVisualStyleBackColor = true;
@@ -81,25 +84,28 @@ namespace DlcvDemo
             this.lblOcrModel.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.lblOcrModel.Location = new System.Drawing.Point(15, 70);
             this.lblOcrModel.Name = "lblOcrModel";
-            this.lblOcrModel.Size = new System.Drawing.Size(68, 17);
+            this.lblOcrModel.Size = new System.Drawing.Size(103, 24);
             this.lblOcrModel.TabIndex = 3;
             this.lblOcrModel.Text = "OCR模型：";
             // 
             // txtOcrModel
             // 
+            this.txtOcrModel.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.txtOcrModel.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.txtOcrModel.Location = new System.Drawing.Point(90, 67);
+            this.txtOcrModel.Location = new System.Drawing.Point(121, 67);
             this.txtOcrModel.Name = "txtOcrModel";
             this.txtOcrModel.ReadOnly = true;
-            this.txtOcrModel.Size = new System.Drawing.Size(350, 23);
+            this.txtOcrModel.Size = new System.Drawing.Size(319, 31);
             this.txtOcrModel.TabIndex = 4;
             // 
             // btnBrowseOcr
             // 
+            this.btnBrowseOcr.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnBrowseOcr.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.btnBrowseOcr.Location = new System.Drawing.Point(450, 65);
             this.btnBrowseOcr.Name = "btnBrowseOcr";
-            this.btnBrowseOcr.Size = new System.Drawing.Size(75, 28);
+            this.btnBrowseOcr.Size = new System.Drawing.Size(84, 33);
             this.btnBrowseOcr.TabIndex = 5;
             this.btnBrowseOcr.Text = "浏览...";
             this.btnBrowseOcr.UseVisualStyleBackColor = true;
@@ -111,30 +117,31 @@ namespace DlcvDemo
             this.lblDevice.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.lblDevice.Location = new System.Drawing.Point(15, 30);
             this.lblDevice.Name = "lblDevice";
-            this.lblDevice.Size = new System.Drawing.Size(56, 17);
+            this.lblDevice.Size = new System.Drawing.Size(83, 24);
             this.lblDevice.TabIndex = 6;
             this.lblDevice.Text = "设备ID：";
             // 
             // numDevice
             // 
             this.numDevice.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.numDevice.Location = new System.Drawing.Point(90, 28);
+            this.numDevice.Location = new System.Drawing.Point(121, 30);
             this.numDevice.Maximum = new decimal(new int[] {
             10,
             0,
             0,
             0});
             this.numDevice.Name = "numDevice";
-            this.numDevice.Size = new System.Drawing.Size(80, 23);
+            this.numDevice.Size = new System.Drawing.Size(80, 31);
             this.numDevice.TabIndex = 7;
             // 
             // btnOK
             // 
+            this.btnOK.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.btnOK.DialogResult = System.Windows.Forms.DialogResult.OK;
             this.btnOK.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.btnOK.Location = new System.Drawing.Point(180, 270);
+            this.btnOK.Location = new System.Drawing.Point(170, 226);
             this.btnOK.Name = "btnOK";
-            this.btnOK.Size = new System.Drawing.Size(90, 35);
+            this.btnOK.Size = new System.Drawing.Size(120, 40);
             this.btnOK.TabIndex = 8;
             this.btnOK.Text = "确定";
             this.btnOK.UseVisualStyleBackColor = true;
@@ -142,17 +149,20 @@ namespace DlcvDemo
             // 
             // btnCancel
             // 
+            this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
             this.btnCancel.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.btnCancel.Location = new System.Drawing.Point(290, 270);
+            this.btnCancel.Location = new System.Drawing.Point(296, 226);
             this.btnCancel.Name = "btnCancel";
-            this.btnCancel.Size = new System.Drawing.Size(90, 35);
+            this.btnCancel.Size = new System.Drawing.Size(120, 40);
             this.btnCancel.TabIndex = 9;
             this.btnCancel.Text = "取消";
             this.btnCancel.UseVisualStyleBackColor = true;
             // 
             // groupBox1
             // 
+            this.groupBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.groupBox1.Controls.Add(this.lblDetModel);
             this.groupBox1.Controls.Add(this.txtDetModel);
             this.groupBox1.Controls.Add(this.btnBrowseDet);
@@ -169,6 +179,8 @@ namespace DlcvDemo
             // 
             // groupBox2
             // 
+            this.groupBox2.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.groupBox2.Controls.Add(this.lblDevice);
             this.groupBox2.Controls.Add(this.numDevice);
             this.groupBox2.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
@@ -182,10 +194,10 @@ namespace DlcvDemo
             // OcrModelConfigForm
             // 
             this.AcceptButton = this.btnOK;
-            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 17F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(580, 330);
+            this.ClientSize = new System.Drawing.Size(580, 280);
             this.Controls.Add(this.groupBox2);
             this.Controls.Add(this.groupBox1);
             this.Controls.Add(this.btnCancel);
