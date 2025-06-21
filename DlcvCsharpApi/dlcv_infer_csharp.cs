@@ -393,16 +393,56 @@ namespace dlcv_infer_csharp
             }
         }
 
+        /// <summary>
+        /// 过滤OCR模型信息，移除不需要的字段
+        /// </summary>
+        /// <param name="modelInfo">原始OCR模型信息</param>
+        /// <returns>过滤后的OCR模型信息</returns>
+        private JObject FilterOcrModelInfo(JObject modelInfo)
+        {
+            if (modelInfo == null)
+                return modelInfo;
+
+            // 创建副本以避免修改原始对象
+            var filteredInfo = (JObject)modelInfo.DeepClone();
+
+            // 移除指定字段
+            var fieldsToRemove = new[] { "characters", "dict", "classes" };
+            
+            foreach (var field in fieldsToRemove)
+            {
+                if (filteredInfo.ContainsKey(field))
+                {
+                    filteredInfo.Remove(field);
+                }
+            }
+
+            return filteredInfo;
+        }
+
         public JObject GetModelInfo()
         {
+            JObject modelInfo = null;
             if (_isDvpMode)
             {
-                return GetModelInfoDvp();
+                modelInfo = GetModelInfoDvp();
             }
             else
             {
-                return GetModelInfoDvt();
+                modelInfo = GetModelInfoDvt();
             }
+            // 过滤OCR模型信息，移除不需要的字段
+            if (modelInfo.ContainsKey("model_info"))
+            {
+                string task_type = modelInfo["model_info"]["task_type"].Value<string>();
+                if (task_type == "OCR")
+                {
+                    JObject real_model_info = modelInfo["model_info"] as JObject;
+                    real_model_info = FilterOcrModelInfo(real_model_info);
+                    modelInfo["model_info"] = real_model_info;
+                }
+            }
+            return modelInfo;
         }
 
         private JObject GetModelInfoDvp()
@@ -1106,21 +1146,21 @@ namespace dlcv_infer_csharp
             try
             {
                 var allResults = new List<JObject>();
-
+            
                 foreach (var image in images)
+            {
+                if (image == null || image.Empty())
                 {
-                    if (image == null || image.Empty())
-                    {
-                        // 空图像添加空结果
+                    // 空图像添加空结果
                         var emptyResult = new JObject
                         {
                             ["results"] = new JArray()
                         };
                         allResults.Add(emptyResult);
-                        continue;
-                    }
+                    continue;
+                }
 
-                    // 对单张图像进行OCR推理
+                // 对单张图像进行OCR推理
                     var singleResult = OcrInferInternal(image, params_json);
                     allResults.Add(singleResult);
                 }
@@ -1177,9 +1217,9 @@ namespace dlcv_infer_csharp
                             // 处理旋转框裁剪
                             var rotatedRoi = ExtractRotatedROI(image, detection, out globalX, out globalY);
                             roiMat = rotatedRoi;
-                        }
-                        else
-                        {
+                }
+                else
+                {
                             // 处理普通边界框
                             double x = Math.Max(0, detection.Bbox[0]);
                             double y = Math.Max(0, detection.Bbox[1]);
