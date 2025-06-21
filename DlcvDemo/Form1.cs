@@ -574,70 +574,14 @@ namespace DlcvDemo
 
         private void button_load_ocr_model_Click(object sender, EventArgs e)
         {
-            // 创建一个新的对话框实例，用于选择两个模型文件
-            using (var ocrModelDialog = new Form())
+            // 使用新的OCR模型配置窗口
+            using (var ocrConfigForm = new OcrModelConfigForm(comboBox1.SelectedIndex))
             {
-                ocrModelDialog.Text = "选择OCR模型文件";
-                ocrModelDialog.Size = new System.Drawing.Size(500, 300);
-                ocrModelDialog.StartPosition = FormStartPosition.CenterParent;
-
-                // 创建控件
-                var lblDetModel = new Label { Text = "检测模型:", Location = new System.Drawing.Point(20, 20), Size = new System.Drawing.Size(80, 25) };
-                var txtDetModel = new TextBox { Location = new System.Drawing.Point(100, 20), Size = new System.Drawing.Size(280, 25) };
-                var btnBrowseDet = new Button { Text = "浏览", Location = new System.Drawing.Point(390, 18), Size = new System.Drawing.Size(70, 28) };
-
-                var lblOcrModel = new Label { Text = "OCR模型:", Location = new System.Drawing.Point(20, 60), Size = new System.Drawing.Size(80, 25) };
-                var txtOcrModel = new TextBox { Location = new System.Drawing.Point(100, 60), Size = new System.Drawing.Size(280, 25) };
-                var btnBrowseOcr = new Button { Text = "浏览", Location = new System.Drawing.Point(390, 58), Size = new System.Drawing.Size(70, 28) };
-
-                var lblDevice = new Label { Text = "设备ID:", Location = new System.Drawing.Point(20, 100), Size = new System.Drawing.Size(80, 25) };
-                var numDevice = new NumericUpDown { Location = new System.Drawing.Point(100, 100), Size = new System.Drawing.Size(60, 25), Minimum = 0, Maximum = 10, Value = comboBox1.SelectedIndex };
-
-                var btnOK = new Button { Text = "确定", Location = new System.Drawing.Point(150, 150), Size = new System.Drawing.Size(80, 30), DialogResult = DialogResult.OK };
-                var btnCancel = new Button { Text = "取消", Location = new System.Drawing.Point(250, 150), Size = new System.Drawing.Size(80, 30), DialogResult = DialogResult.Cancel };
-
-                // 添加控件到窗体
-                ocrModelDialog.Controls.AddRange(new Control[] { lblDetModel, txtDetModel, btnBrowseDet, lblOcrModel, txtOcrModel, btnBrowseOcr, lblDevice, numDevice, btnOK, btnCancel });
-
-                // 浏览按钮事件
-                btnBrowseDet.Click += (s, args) =>
+                if (ocrConfigForm.ShowDialog(this) == DialogResult.OK)
                 {
-                    using (var ofd = new OpenFileDialog())
-                    {
-                        ofd.Filter = "深度视觉模型文件 (*.dvt;*.dvp)|*.dvt;*.dvp";
-                        ofd.Title = "选择检测模型";
-                        if (ofd.ShowDialog() == DialogResult.OK)
-                        {
-                            txtDetModel.Text = ofd.FileName;
-                        }
-                    }
-                };
-
-                btnBrowseOcr.Click += (s, args) =>
-                {
-                    using (var ofd = new OpenFileDialog())
-                    {
-                        ofd.Filter = "深度视觉模型文件 (*.dvt;*.dvp)|*.dvt;*.dvp";
-                        ofd.Title = "选择OCR模型";
-                        if (ofd.ShowDialog() == DialogResult.OK)
-                        {
-                            txtOcrModel.Text = ofd.FileName;
-                        }
-                    }
-                };
-
-                // 显示对话框
-                if (ocrModelDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    string detModelPath = txtDetModel.Text;
-                    string ocrModelPath = txtOcrModel.Text;
-                    int deviceId = (int)numDevice.Value;
-
-                    if (string.IsNullOrEmpty(detModelPath) || string.IsNullOrEmpty(ocrModelPath))
-                    {
-                        MessageBox.Show("请选择两个模型文件！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
-                    }
+                    string detModelPath = ocrConfigForm.DetModelPath;
+                    string ocrModelPath = ocrConfigForm.OcrModelPath;
+                    int deviceId = ocrConfigForm.DeviceId;
 
                     try
                     {
@@ -654,7 +598,8 @@ namespace DlcvDemo
 
                         richTextBox1.Text = "OCR模型加载成功！\n" +
                                           $"检测模型: {Path.GetFileName(detModelPath)}\n" +
-                                          $"OCR模型: {Path.GetFileName(ocrModelPath)}";
+                                          $"OCR模型: {Path.GetFileName(ocrModelPath)}\n" +
+                                          $"设备ID: {deviceId}";
                     }
                     catch (Exception ex)
                     {
@@ -664,6 +609,7 @@ namespace DlcvDemo
                             ocrModel.Dispose();
                             ocrModel = null;
                         }
+                        MessageBox.Show($"加载OCR模型失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
             }
