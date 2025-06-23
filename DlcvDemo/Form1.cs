@@ -60,7 +60,7 @@ namespace DlcvDemo
             Console.WriteLine(info.ToString());
         }
 
-        private Model model;
+        private dynamic model;
         private string image_path;
         private int batch_size = 1;
         private PressureTestRunner pressureTestRunner;
@@ -121,6 +121,13 @@ namespace DlcvDemo
             {
                 result = (JObject)result["model_info"];
                 richTextBox1.Text = result.ToString();
+            }
+            else if (result.ContainsKey("det_model"))
+            {
+                JObject new_result = new JObject();
+                new_result["det_model"] = (JObject)result["det_model"]["model_info"];
+                new_result["ocr_model"] = (JObject)result["ocr_model"]["model_info"];
+                richTextBox1.Text = new_result.ToString();
             }
             else if (result.ContainsKey("code"))
             {
@@ -496,6 +503,12 @@ namespace DlcvDemo
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
             StopPressureTest();
+            // 释放模型
+            if (model != null && model is IDisposable disposable)
+            {
+                model.Dispose();
+                model = null;
+            }
             Utils.FreeAllModels();
         }
 
@@ -565,9 +578,68 @@ namespace DlcvDemo
             }
         }
 
+        private void button_load_ocr_model_Click(object sender, EventArgs e)
+        {
+            // 使用新的OCR模型配置窗口
+            using (var ocrConfigForm = new OcrModelConfigForm(comboBox1.SelectedIndex))
+            {
+                if (ocrConfigForm.ShowDialog(this) == DialogResult.OK)
+                {
+                    string detModelPath = ocrConfigForm.DetModelPath;
+                    string ocrModelPath = ocrConfigForm.OcrModelPath;
+                    int deviceId = ocrConfigForm.DeviceId;
+                    float horizontalScale = ocrConfigForm.HorizontalScale;
+
+                    try
+                    {
+                        // 释放旧模型
+                        if (model != null)
+                        {
+                            if (model is IDisposable disposable)
+                            {
+                                disposable.Dispose();
+                            }
+                            model = null;
+                        }
+
+                        // 创建新的OCR模型
+                        model = new OcrWithDetModel();
+                        model.Load(detModelPath, ocrModelPath, deviceId);
+                        model.SetHorizontalScale(horizontalScale);
+
+                        richTextBox1.Text = "OCR模型加载成功！\n" +
+                                          $"检测模型: {Path.GetFileName(detModelPath)}\n" +
+                                          $"OCR模型: {Path.GetFileName(ocrModelPath)}\n" +
+                                          $"设备ID: {deviceId}\n" +
+                                          $"水平缩放比例: {horizontalScale}";
+                    }
+                    catch (Exception ex)
+                    {
+                        richTextBox1.Text = $"加载OCR模型失败：{ex.Message}";
+                        if (model != null && model is IDisposable disposable)
+                        {
+                            model.Dispose();
+                            model = null;
+                        }
+                        MessageBox.Show($"加载OCR模型失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
         private void button_free_all_model_Click(object sender, EventArgs e)
         {
+            // 如果存在正在运行的压力测试，先停止它
+            StopPressureTest();
+
+            // 释放模型
+            if (model != null && model is IDisposable disposable)
+            {
+                model.Dispose();
+            }
+            model = null;
             Utils.FreeAllModels();
+            richTextBox1.Text = "所有模型已释放";
         }
     }
 }

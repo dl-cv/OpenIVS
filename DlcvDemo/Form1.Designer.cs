@@ -50,6 +50,7 @@
             this.button_check_dog = new System.Windows.Forms.Button();
             this.button_load_sliding_window_model = new System.Windows.Forms.Button();
             this.button_free_all_model = new System.Windows.Forms.Button();
+            this.button_load_ocr_model = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             this.SuspendLayout();
@@ -70,7 +71,7 @@
             // 
             this.button_get_model_info.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_get_model_info.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_get_model_info.Location = new System.Drawing.Point(727, 160);
+            this.button_get_model_info.Location = new System.Drawing.Point(935, 161);
             this.button_get_model_info.Margin = new System.Windows.Forms.Padding(4);
             this.button_get_model_info.Name = "button_get_model_info";
             this.button_get_model_info.Size = new System.Drawing.Size(140, 60);
@@ -82,7 +83,7 @@
             // button_open_image
             // 
             this.button_open_image.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_open_image.Location = new System.Drawing.Point(1023, 19);
+            this.button_open_image.Location = new System.Drawing.Point(1083, 19);
             this.button_open_image.Name = "button_open_image";
             this.button_open_image.Size = new System.Drawing.Size(140, 60);
             this.button_open_image.TabIndex = 3;
@@ -92,7 +93,7 @@
             // 
             // button_infer
             // 
-            this.button_infer.Location = new System.Drawing.Point(165, 87);
+            this.button_infer.Location = new System.Drawing.Point(311, 87);
             this.button_infer.Name = "button_infer";
             this.button_infer.Size = new System.Drawing.Size(140, 60);
             this.button_infer.TabIndex = 4;
@@ -124,7 +125,7 @@
             // 
             this.button_free_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_free_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_free_model.Location = new System.Drawing.Point(1023, 93);
+            this.button_free_model.Location = new System.Drawing.Point(1083, 93);
             this.button_free_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_free_model.Name = "button_free_model";
             this.button_free_model.Size = new System.Drawing.Size(140, 60);
@@ -137,7 +138,7 @@
             // 
             this.button_github.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_github.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_github.Location = new System.Drawing.Point(875, 161);
+            this.button_github.Location = new System.Drawing.Point(787, 161);
             this.button_github.Margin = new System.Windows.Forms.Padding(4);
             this.button_github.Name = "button_github";
             this.button_github.Size = new System.Drawing.Size(140, 60);
@@ -199,7 +200,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(488, 104);
+            this.label3.Location = new System.Drawing.Point(627, 105);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(99, 24);
             this.label3.TabIndex = 15;
@@ -207,7 +208,7 @@
             // 
             // numericUpDown_batch_size
             // 
-            this.numericUpDown_batch_size.Location = new System.Drawing.Point(593, 102);
+            this.numericUpDown_batch_size.Location = new System.Drawing.Point(732, 103);
             this.numericUpDown_batch_size.Maximum = new decimal(new int[] {
             1024,
             0,
@@ -239,7 +240,7 @@
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
             this.imagePanel1.ShowStatusText = false;
-            this.imagePanel1.Size = new System.Drawing.Size(722, 603);
+            this.imagePanel1.Size = new System.Drawing.Size(782, 604);
             this.imagePanel1.TabIndex = 17;
             // 
             // richTextBox1
@@ -249,14 +250,14 @@
             this.richTextBox1.Location = new System.Drawing.Point(12, 228);
             this.richTextBox1.Margin = new System.Windows.Forms.Padding(3, 3, 3, 16);
             this.richTextBox1.Name = "richTextBox1";
-            this.richTextBox1.Size = new System.Drawing.Size(423, 603);
+            this.richTextBox1.Size = new System.Drawing.Size(423, 604);
             this.richTextBox1.TabIndex = 7;
             this.richTextBox1.Text = "";
             // 
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(318, 104);
+            this.label4.Location = new System.Drawing.Point(457, 105);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(92, 24);
             this.label4.TabIndex = 18;
@@ -264,7 +265,7 @@
             // 
             // textBox_threshold
             // 
-            this.textBox_threshold.Location = new System.Drawing.Point(416, 102);
+            this.textBox_threshold.Location = new System.Drawing.Point(555, 103);
             this.textBox_threshold.Name = "textBox_threshold";
             this.textBox_threshold.Size = new System.Drawing.Size(66, 31);
             this.textBox_threshold.TabIndex = 19;
@@ -273,7 +274,7 @@
             // button_check_dog
             // 
             this.button_check_dog.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_check_dog.Location = new System.Drawing.Point(875, 93);
+            this.button_check_dog.Location = new System.Drawing.Point(935, 93);
             this.button_check_dog.Name = "button_check_dog";
             this.button_check_dog.Size = new System.Drawing.Size(140, 60);
             this.button_check_dog.TabIndex = 20;
@@ -284,7 +285,7 @@
             // button_load_sliding_window_model
             // 
             this.button_load_sliding_window_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_load_sliding_window_model.Location = new System.Drawing.Point(12, 87);
+            this.button_load_sliding_window_model.Location = new System.Drawing.Point(165, 87);
             this.button_load_sliding_window_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_load_sliding_window_model.Name = "button_load_sliding_window_model";
             this.button_load_sliding_window_model.Size = new System.Drawing.Size(140, 60);
@@ -297,7 +298,7 @@
             // 
             this.button_free_all_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_free_all_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_free_all_model.Location = new System.Drawing.Point(1023, 161);
+            this.button_free_all_model.Location = new System.Drawing.Point(1083, 161);
             this.button_free_all_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_free_all_model.Name = "button_free_all_model";
             this.button_free_all_model.Size = new System.Drawing.Size(140, 60);
@@ -306,11 +307,24 @@
             this.button_free_all_model.UseVisualStyleBackColor = true;
             this.button_free_all_model.Click += new System.EventHandler(this.button_free_all_model_Click);
             // 
+            // button_load_ocr_model
+            // 
+            this.button_load_ocr_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.button_load_ocr_model.Location = new System.Drawing.Point(12, 87);
+            this.button_load_ocr_model.Margin = new System.Windows.Forms.Padding(4);
+            this.button_load_ocr_model.Name = "button_load_ocr_model";
+            this.button_load_ocr_model.Size = new System.Drawing.Size(140, 60);
+            this.button_load_ocr_model.TabIndex = 23;
+            this.button_load_ocr_model.Text = "加载OCR模型";
+            this.button_load_ocr_model.UseVisualStyleBackColor = true;
+            this.button_load_ocr_model.Click += new System.EventHandler(this.button_load_ocr_model_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1178, 844);
+            this.ClientSize = new System.Drawing.Size(1238, 844);
+            this.Controls.Add(this.button_load_ocr_model);
             this.Controls.Add(this.button_free_all_model);
             this.Controls.Add(this.button_load_sliding_window_model);
             this.Controls.Add(this.button_check_dog);
@@ -335,7 +349,7 @@
             this.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Margin = new System.Windows.Forms.Padding(4);
-            this.MinimumSize = new System.Drawing.Size(1024, 700);
+            this.MinimumSize = new System.Drawing.Size(1200, 900);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "C# 测试程序";
@@ -370,6 +384,7 @@
         private System.Windows.Forms.Button button_check_dog;
         private System.Windows.Forms.Button button_load_sliding_window_model;
         private System.Windows.Forms.Button button_free_all_model;
+        private System.Windows.Forms.Button button_load_ocr_model;
     }
 }
 
