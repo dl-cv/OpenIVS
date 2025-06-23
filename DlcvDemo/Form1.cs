@@ -588,6 +588,7 @@ namespace DlcvDemo
                     string detModelPath = ocrConfigForm.DetModelPath;
                     string ocrModelPath = ocrConfigForm.OcrModelPath;
                     int deviceId = ocrConfigForm.DeviceId;
+                    float horizontalScale = ocrConfigForm.HorizontalScale;
 
                     try
                     {
@@ -604,11 +605,13 @@ namespace DlcvDemo
                         // 创建新的OCR模型
                         model = new OcrWithDetModel();
                         model.Load(detModelPath, ocrModelPath, deviceId);
+                        model.SetHorizontalScale(horizontalScale);
 
                         richTextBox1.Text = "OCR模型加载成功！\n" +
                                           $"检测模型: {Path.GetFileName(detModelPath)}\n" +
                                           $"OCR模型: {Path.GetFileName(ocrModelPath)}\n" +
-                                          $"设备ID: {deviceId}";
+                                          $"设备ID: {deviceId}\n" +
+                                          $"水平缩放比例: {horizontalScale}";
                     }
                     catch (Exception ex)
                     {
@@ -623,8 +626,6 @@ namespace DlcvDemo
                 }
             }
         }
-
-
 
         private void button_free_all_model_Click(object sender, EventArgs e)
         {

@@ -40,9 +40,12 @@ namespace DlcvDemo
             this.btnCancel = new System.Windows.Forms.Button();
             this.groupBox1 = new System.Windows.Forms.GroupBox();
             this.groupBox2 = new System.Windows.Forms.GroupBox();
+            this.lblHorizontalScale = new System.Windows.Forms.Label();
+            this.numHorizontalScale = new System.Windows.Forms.NumericUpDown();
             ((System.ComponentModel.ISupportInitialize)(this.numDevice)).BeginInit();
             this.groupBox1.SuspendLayout();
             this.groupBox2.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.numHorizontalScale)).BeginInit();
             this.SuspendLayout();
             // 
             // lblDetModel
@@ -124,7 +127,7 @@ namespace DlcvDemo
             // numDevice
             // 
             this.numDevice.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.numDevice.Location = new System.Drawing.Point(121, 30);
+            this.numDevice.Location = new System.Drawing.Point(104, 30);
             this.numDevice.Maximum = new decimal(new int[] {
             10,
             0,
@@ -139,10 +142,10 @@ namespace DlcvDemo
             this.btnOK.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.btnOK.DialogResult = System.Windows.Forms.DialogResult.OK;
             this.btnOK.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.btnOK.Location = new System.Drawing.Point(170, 226);
+            this.btnOK.Location = new System.Drawing.Point(170, 276);
             this.btnOK.Name = "btnOK";
             this.btnOK.Size = new System.Drawing.Size(120, 40);
-            this.btnOK.TabIndex = 8;
+            this.btnOK.TabIndex = 10;
             this.btnOK.Text = "确定";
             this.btnOK.UseVisualStyleBackColor = true;
             this.btnOK.Click += new System.EventHandler(this.btnOK_Click);
@@ -152,10 +155,10 @@ namespace DlcvDemo
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
             this.btnCancel.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.btnCancel.Location = new System.Drawing.Point(296, 226);
+            this.btnCancel.Location = new System.Drawing.Point(296, 276);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(120, 40);
-            this.btnCancel.TabIndex = 9;
+            this.btnCancel.TabIndex = 11;
             this.btnCancel.Text = "取消";
             this.btnCancel.UseVisualStyleBackColor = true;
             // 
@@ -173,7 +176,7 @@ namespace DlcvDemo
             this.groupBox1.Location = new System.Drawing.Point(20, 20);
             this.groupBox1.Name = "groupBox1";
             this.groupBox1.Size = new System.Drawing.Size(540, 110);
-            this.groupBox1.TabIndex = 10;
+            this.groupBox1.TabIndex = 12;
             this.groupBox1.TabStop = false;
             this.groupBox1.Text = "模型文件选择";
             // 
@@ -183,13 +186,54 @@ namespace DlcvDemo
             | System.Windows.Forms.AnchorStyles.Right)));
             this.groupBox2.Controls.Add(this.lblDevice);
             this.groupBox2.Controls.Add(this.numDevice);
+            this.groupBox2.Controls.Add(this.lblHorizontalScale);
+            this.groupBox2.Controls.Add(this.numHorizontalScale);
             this.groupBox2.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.groupBox2.Location = new System.Drawing.Point(20, 150);
             this.groupBox2.Name = "groupBox2";
-            this.groupBox2.Size = new System.Drawing.Size(540, 70);
-            this.groupBox2.TabIndex = 11;
+            this.groupBox2.Size = new System.Drawing.Size(540, 110);
+            this.groupBox2.TabIndex = 13;
             this.groupBox2.TabStop = false;
             this.groupBox2.Text = "推理设置";
+            // 
+            // lblHorizontalScale
+            // 
+            this.lblHorizontalScale.AutoSize = true;
+            this.lblHorizontalScale.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.lblHorizontalScale.Location = new System.Drawing.Point(15, 70);
+            this.lblHorizontalScale.Name = "lblHorizontalScale";
+            this.lblHorizontalScale.Size = new System.Drawing.Size(136, 24);
+            this.lblHorizontalScale.TabIndex = 8;
+            this.lblHorizontalScale.Text = "水平缩放比例：";
+            // 
+            // numHorizontalScale
+            // 
+            this.numHorizontalScale.DecimalPlaces = 1;
+            this.numHorizontalScale.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.numHorizontalScale.Increment = new decimal(new int[] {
+            1,
+            0,
+            0,
+            65536});
+            this.numHorizontalScale.Location = new System.Drawing.Point(157, 70);
+            this.numHorizontalScale.Maximum = new decimal(new int[] {
+            3,
+            0,
+            0,
+            0});
+            this.numHorizontalScale.Minimum = new decimal(new int[] {
+            5,
+            0,
+            0,
+            65536});
+            this.numHorizontalScale.Name = "numHorizontalScale";
+            this.numHorizontalScale.Size = new System.Drawing.Size(80, 31);
+            this.numHorizontalScale.TabIndex = 9;
+            this.numHorizontalScale.Value = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
             // 
             // OcrModelConfigForm
             // 
@@ -197,7 +241,7 @@ namespace DlcvDemo
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(580, 280);
+            this.ClientSize = new System.Drawing.Size(580, 330);
             this.Controls.Add(this.groupBox2);
             this.Controls.Add(this.groupBox1);
             this.Controls.Add(this.btnCancel);
@@ -214,6 +258,7 @@ namespace DlcvDemo
             this.groupBox1.PerformLayout();
             this.groupBox2.ResumeLayout(false);
             this.groupBox2.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.numHorizontalScale)).EndInit();
             this.ResumeLayout(false);
 
         }
@@ -232,5 +277,7 @@ namespace DlcvDemo
         private System.Windows.Forms.Button btnCancel;
         private System.Windows.Forms.GroupBox groupBox1;
         private System.Windows.Forms.GroupBox groupBox2;
+        private System.Windows.Forms.Label lblHorizontalScale;
+        private System.Windows.Forms.NumericUpDown numHorizontalScale;
     }
 } 

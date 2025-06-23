@@ -9,6 +9,7 @@ namespace DlcvDemo
         public string DetModelPath { get; private set; }
         public string OcrModelPath { get; private set; }
         public int DeviceId { get; private set; }
+        public float HorizontalScale { get; private set; }
 
         public OcrModelConfigForm()
         {
@@ -25,12 +26,14 @@ namespace DlcvDemo
         {
             // 设置默认值
             DeviceId = 0;
+            HorizontalScale = 1.0f;
             
             // 设置文本框的ToolTip提示
             ToolTip toolTip = new ToolTip();
             toolTip.SetToolTip(txtDetModel, "选择用于文本检测的模型文件");
             toolTip.SetToolTip(txtOcrModel, "选择用于文本识别的OCR模型文件");
             toolTip.SetToolTip(numDevice, "选择用于推理的GPU设备ID（0表示第一个GPU）");
+            toolTip.SetToolTip(numHorizontalScale, "水平缩放比例，默认1.0。当OCR文字比较密集时，建议设置为1.5");
         }
 
         private void btnBrowseDet_Click(object sender, EventArgs e)
@@ -127,6 +130,7 @@ namespace DlcvDemo
             DetModelPath = txtDetModel.Text;
             OcrModelPath = txtOcrModel.Text;
             DeviceId = (int)numDevice.Value;
+            HorizontalScale = (float)numHorizontalScale.Value;
 
             // 关闭对话框
             this.DialogResult = DialogResult.OK;
