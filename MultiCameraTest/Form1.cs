@@ -261,12 +261,12 @@ namespace CameraManagerTest
                         if (success)
                         {
                             successCount++;
-                            // 更新UI显示
+                            // 更新UI显示 (int格式)
                             if (tab._txtRedRatio != null && tab._txtGreenRatio != null && tab._txtBlueRatio != null)
                             {
-                                tab._txtRedRatio.Text = red.ToString("F2");
-                                tab._txtGreenRatio.Text = green.ToString("F2");
-                                tab._txtBlueRatio.Text = blue.ToString("F2");
+                                tab._txtRedRatio.Text = ((int)red).ToString();
+                                tab._txtGreenRatio.Text = ((int)green).ToString();
+                                tab._txtBlueRatio.Text = ((int)blue).ToString();
                             }
                         }
                         else
@@ -600,7 +600,7 @@ namespace CameraManagerTest
             {
                 Text = "白平衡设置",
                 Location = new Point(510, 10),
-                Size = new Size(240, 200),
+                Size = new Size(240, 140),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             
@@ -618,9 +618,17 @@ namespace CameraManagerTest
                 Size = new Size(100, 30)
             };
             
+            var lblRatioRange = new Label()
+            {
+                Text = "比例值范围: 1~16376",
+                Location = new Point(15, 115),
+                AutoSize = true,
+                ForeColor = Color.Gray
+            };
+            
             _lblRedRatio = new Label()
             {
-                Text = "红色比例:",
+                Text = "红色(int):",
                 Location = new Point(15, 65),
                 AutoSize = true
             };
@@ -634,7 +642,7 @@ namespace CameraManagerTest
             
             _lblGreenRatio = new Label()
             {
-                Text = "绿色比例:",
+                Text = "绿色(int):",
                 Location = new Point(85, 65),
                 AutoSize = true
             };
@@ -648,7 +656,7 @@ namespace CameraManagerTest
             
             _lblBlueRatio = new Label()
             {
-                Text = "蓝色比例:",
+                Text = "蓝色(int):",
                 Location = new Point(155, 65),
                 AutoSize = true
             };
@@ -663,6 +671,7 @@ namespace CameraManagerTest
             // 添加控件到组
             _groupWhiteBalance.Controls.Add(_btnAutoWhiteBalance);
             _groupWhiteBalance.Controls.Add(_btnSyncWhiteBalance);
+            _groupWhiteBalance.Controls.Add(lblRatioRange);
             _groupWhiteBalance.Controls.Add(_lblRedRatio);
             _groupWhiteBalance.Controls.Add(_txtRedRatio);
             _groupWhiteBalance.Controls.Add(_lblGreenRatio);
@@ -857,22 +866,22 @@ namespace CameraManagerTest
                     Console.WriteLine("曝光时间获取失败，使用默认值10000μs");
                 }
 
-                // 初始化白平衡显示
+                // 初始化白平衡显示 (海康相机BalanceRatio是int类型)
                 Console.WriteLine("正在获取白平衡比例...");
                 var (red, green, blue) = CameraManager.GetBalanceRatio();
                 if (red > 0 && green > 0 && blue > 0)
                 {
-                    _txtRedRatio.Text = red.ToString("F2");
-                    _txtGreenRatio.Text = green.ToString("F2");
-                    _txtBlueRatio.Text = blue.ToString("F2");
-                    Console.WriteLine($"白平衡比例初始化: R={red:F2}, G={green:F2}, B={blue:F2}");
+                    _txtRedRatio.Text = ((int)red).ToString();
+                    _txtGreenRatio.Text = ((int)green).ToString();
+                    _txtBlueRatio.Text = ((int)blue).ToString();
+                    Console.WriteLine($"白平衡比例初始化: R={red:F0}, G={green:F0}, B={blue:F0}");
                 }
                 else
                 {
-                    _txtRedRatio.Text = "1.00";
-                    _txtGreenRatio.Text = "1.00";
-                    _txtBlueRatio.Text = "1.00";
-                    Console.WriteLine("白平衡比例获取失败，使用默认值1.00");
+                    _txtRedRatio.Text = "1024";
+                    _txtGreenRatio.Text = "1024";
+                    _txtBlueRatio.Text = "1024";
+                    Console.WriteLine("白平衡比例获取失败，使用默认值1024");
                 }
 
                 // 初始化ROI显示
@@ -1162,13 +1171,13 @@ namespace CameraManagerTest
                 bool success = CameraManager.ExecuteBalanceWhiteAuto();
                 if (success)
                 {
-                    // 获取白平衡结果
+                    // 获取白平衡结果 (int类型显示)
                     var (red, green, blue) = CameraManager.GetBalanceRatio();
-                    _txtRedRatio.Text = red.ToString("F2");
-                    _txtGreenRatio.Text = green.ToString("F2");
-                    _txtBlueRatio.Text = blue.ToString("F2");
+                    _txtRedRatio.Text = ((int)red).ToString();
+                    _txtGreenRatio.Text = ((int)green).ToString();
+                    _txtBlueRatio.Text = ((int)blue).ToString();
                     
-                    MessageBox.Show("一键白平衡执行成功", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show($"一键白平衡执行成功\nR:{(int)red} G:{(int)green} B:{(int)blue}", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
