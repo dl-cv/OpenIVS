@@ -20,6 +20,11 @@ namespace CameraManagerTest
         {
             InitializeComponent();
             
+            // 设置窗体最小大小，确保UI有足够空间
+            this.MinimumSize = new Size(1130, 850);
+            this.Size = new Size(1130, 850);
+            this.StartPosition = FormStartPosition.CenterScreen;
+            
             // 确保所有控件已正确初始化
             if (_comboDevices == null || _tabCameras == null)
             {
@@ -415,16 +420,16 @@ namespace CameraManagerTest
         
         private void InitializeControls()
         {
-            // 设置标签页大小
-            TabPage.Size = new Size(1000, 700);
+            // 设置标签页大小 - 参考右侧窗口的合理大小
+            TabPage.Size = new Size(1400, 800);
             
-            // 创建图像显示控件
+            // 创建图像显示控件 - 调整到更大的显示区域
             _pictureBox = new PictureBox()
             {
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 BorderStyle = BorderStyle.FixedSingle,
-                Location = new Point(10, 220),
-                Size = new Size(TabPage.Width - 20, TabPage.Height - 230),
+                Location = new Point(10, 160),
+                Size = new Size(TabPage.Width - 20, TabPage.Height - 170),
                 SizeMode = PictureBoxSizeMode.Zoom
             };
             
@@ -457,7 +462,7 @@ namespace CameraManagerTest
             {
                 Text = "相机控制",
                 Location = new Point(10, 10),
-                Size = new Size(240, 200),
+                Size = new Size(240, 145),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             
@@ -493,7 +498,7 @@ namespace CameraManagerTest
             _btnTriggerOnce = new Button()
             {
                 Text = "单次触发",
-                Location = new Point(15, 120),
+                Location = new Point(15, 115),
                 Size = new Size(85, 30),
                 Enabled = false
             };
@@ -501,7 +506,7 @@ namespace CameraManagerTest
             _lblInterval = new Label()
             {
                 Text = "间隔(ms):",
-                Location = new Point(15, 155),
+                Location = new Point(110, 120),
                 AutoSize = true,
                 Enabled = false
             };
@@ -509,7 +514,7 @@ namespace CameraManagerTest
             _txtInterval = new TextBox()
             {
                 Text = "1000",
-                Location = new Point(75, 152),
+                Location = new Point(165, 117),
                 Size = new Size(55, 23),
                 Enabled = false
             };
@@ -517,16 +522,16 @@ namespace CameraManagerTest
             _btnStartContinuous = new Button()
             {
                 Text = "开始",
-                Location = new Point(140, 150),
-                Size = new Size(50, 26),
+                Location = new Point(15, 150),
+                Size = new Size(70, 26),
                 Enabled = false
             };
             
             _btnStopContinuous = new Button()
             {
                 Text = "停止",
-                Location = new Point(195, 150),
-                Size = new Size(50, 26),
+                Location = new Point(95, 150),
+                Size = new Size(70, 26),
                 Enabled = false
             };
             
@@ -555,7 +560,7 @@ namespace CameraManagerTest
             {
                 Text = "曝光时间设置",
                 Location = new Point(260, 10),
-                Size = new Size(240, 100),
+                Size = new Size(240, 145),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             
@@ -583,8 +588,16 @@ namespace CameraManagerTest
             _btnSyncExposure = new Button()
             {
                 Text = "同步到其他相机",
-                Location = new Point(15, 70),
+                Location = new Point(15, 75),
                 Size = new Size(120, 26)
+            };
+            
+            var lblExposureRange = new Label()
+            {
+                Text = "范围: 0~33000μs",
+                Location = new Point(15, 110),
+                AutoSize = true,
+                ForeColor = Color.Gray
             };
             
             // 添加控件到组
@@ -592,6 +605,7 @@ namespace CameraManagerTest
             _groupExposure.Controls.Add(_txtExposureTime);
             _groupExposure.Controls.Add(_btnSetExposure);
             _groupExposure.Controls.Add(_btnSyncExposure);
+            _groupExposure.Controls.Add(lblExposureRange);
         }
         
         private void InitializeWhiteBalanceGroup()
@@ -686,7 +700,7 @@ namespace CameraManagerTest
             {
                 Text = "ROI设置",
                 Location = new Point(760, 10),
-                Size = new Size(230, 200),
+                Size = new Size(320, 145),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             
@@ -770,6 +784,15 @@ namespace CameraManagerTest
                 Size = new Size(70, 26)
             };
             
+            var lblROITip = new Label()
+            {
+                Text = "提示: 可在图像上拖拽画框",
+                Location = new Point(170, 118),
+                Size = new Size(140, 20),
+                ForeColor = Color.Gray,
+                Font = new Font("Microsoft YaHei", 8)
+            };
+            
             // 添加控件到组
             _groupROI.Controls.Add(_lblOffsetX);
             _groupROI.Controls.Add(_txtOffsetX);
@@ -783,6 +806,7 @@ namespace CameraManagerTest
             _groupROI.Controls.Add(_btnSyncROI);
             _groupROI.Controls.Add(_btnRestoreROI);
             _groupROI.Controls.Add(_btnDrawROI);
+            _groupROI.Controls.Add(lblROITip);
         }
         
         private void BindEvents()
