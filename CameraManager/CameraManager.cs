@@ -962,28 +962,61 @@ namespace DLCV.Camera
         public bool SetExposureTime(float exposureTime)
         {
             if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("SetExposureTime: 设备未打开");
                 return false;
+            }
 
             try
             {
+                Console.WriteLine($"设置曝光时间: {exposureTime}μs");
+                
                 // 限制曝光时间上限为33ms(33000微秒)
                 if (exposureTime > 33000)
+                {
+                    Console.WriteLine($"曝光时间超过上限，调整为33000μs: {exposureTime} -> 33000");
                     exposureTime = 33000;
+                }
                 
                 if (exposureTime < 0)
+                {
+                    Console.WriteLine($"曝光时间不能为负，调整为0: {exposureTime} -> 0");
                     exposureTime = 0;
+                }
 
                 // 关闭自动曝光
                 int result = _device.Parameters.SetEnumValue("ExposureAuto", 0);
+                Console.WriteLine($"SetEnumValue ExposureAuto=0 结果: 0x{result:X8}");
                 if (result != MvError.MV_OK)
-                    return false;
+                {
+                    // 尝试字符串方式
+                    result = _device.Parameters.SetEnumValueByString("ExposureAuto", "Off");
+                    Console.WriteLine($"SetEnumValueByString ExposureAuto=Off 结果: 0x{result:X8}");
+                    if (result != MvError.MV_OK)
+                    {
+                        Console.WriteLine("关闭自动曝光失败");
+                        return false;
+                    }
+                }
 
                 // 设置曝光时间
                 result = _device.Parameters.SetFloatValue("ExposureTime", exposureTime);
-                return result == MvError.MV_OK;
+                Console.WriteLine($"SetFloatValue ExposureTime={exposureTime} 结果: 0x{result:X8}");
+                
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine("曝光时间设置成功");
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine("曝光时间设置失败");
+                    return false;
+                }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"SetExposureTime异常: {ex.Message}");
                 return false;
             }
         }
@@ -995,16 +1028,32 @@ namespace DLCV.Camera
         public float GetExposureTime()
         {
             if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("GetExposureTime: 设备未打开");
                 return 0;
+            }
 
             try
             {
+                Console.WriteLine("获取当前曝光时间...");
                 IFloatValue value;
                 int result = _device.Parameters.GetFloatValue("ExposureTime", out value);
-                return result == MvError.MV_OK ? value.CurValue : 0;
+                Console.WriteLine($"GetFloatValue ExposureTime 结果: 0x{result:X8}");
+                
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine($"当前曝光时间: {value.CurValue}μs");
+                    return value.CurValue;
+                }
+                else
+                {
+                    Console.WriteLine("获取曝光时间失败");
+                    return 0;
+                }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"GetExposureTime异常: {ex.Message}");
                 return 0;
             }
         }
@@ -1016,21 +1065,49 @@ namespace DLCV.Camera
         public bool ExecuteBalanceWhiteAuto()
         {
             if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("ExecuteBalanceWhiteAuto: 设备未打开");
                 return false;
+            }
 
             try
             {
-                // 设置白平衡模式为一次性自动
-                int result = _device.Parameters.SetEnumValueByString("BalanceWhiteAuto", "Once");
+                Console.WriteLine("开始执行一键白平衡...");
+                
+                // 方法1: 尝试使用枚举值设置白平衡模式为一次性自动
+                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 2); // 2通常代表Once
+                Console.WriteLine($"SetEnumValue BalanceWhiteAuto=2 结果: 0x{result:X8}");
+                
                 if (result != MvError.MV_OK)
-                    return false;
+                {
+                    // 方法2: 如果数字枚举失败，尝试字符串方式
+                    result = _device.Parameters.SetEnumValueByString("BalanceWhiteAuto", "Once");
+                    Console.WriteLine($"SetEnumValueByString BalanceWhiteAuto=Once 结果: 0x{result:X8}");
+                    
+                    if (result != MvError.MV_OK)
+                    {
+                        // 方法3: 尝试其他可能的值
+                        result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 1);
+                        Console.WriteLine($"SetEnumValue BalanceWhiteAuto=1 结果: 0x{result:X8}");
+                        
+                        if (result != MvError.MV_OK)
+                        {
+                            Console.WriteLine("白平衡设置失败，所有方法都尝试过了");
+                            return false;
+                        }
+                    }
+                }
 
+                Console.WriteLine("白平衡命令发送成功，等待2秒钟完成...");
                 // 等待白平衡完成
                 System.Threading.Thread.Sleep(2000);
+                
+                Console.WriteLine("一键白平衡执行完成");
                 return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"ExecuteBalanceWhiteAuto异常: {ex.Message}");
                 return false;
             }
         }
@@ -1043,22 +1120,44 @@ namespace DLCV.Camera
         public float GetBalanceRatio(string selector)
         {
             if (!IsOpen || _device == null)
+            {
+                Console.WriteLine($"GetBalanceRatio({selector}): 设备未打开");
                 return 0;
+            }
 
             try
             {
+                Console.WriteLine($"获取白平衡比例值: {selector}");
+                
                 // 设置颜色选择器
                 int result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", selector);
+                Console.WriteLine($"SetEnumValueByString BalanceRatioSelector={selector} 结果: 0x{result:X8}");
+                
                 if (result != MvError.MV_OK)
+                {
+                    Console.WriteLine($"设置BalanceRatioSelector失败: {selector}");
                     return 0;
+                }
 
                 // 获取白平衡比例值
                 IFloatValue value;
                 result = _device.Parameters.GetFloatValue("BalanceRatio", out value);
-                return result == MvError.MV_OK ? value.CurValue : 0;
+                Console.WriteLine($"GetFloatValue BalanceRatio 结果: 0x{result:X8}");
+                
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine($"白平衡比例值 {selector}: {value.CurValue}");
+                    return value.CurValue;
+                }
+                else
+                {
+                    Console.WriteLine($"获取BalanceRatio失败: {selector}");
+                    return 0;
+                }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"GetBalanceRatio({selector})异常: {ex.Message}");
                 return 0;
             }
         }
@@ -1073,46 +1172,94 @@ namespace DLCV.Camera
         public bool SetBalanceRatio(float redRatio, float greenRatio, float blueRatio)
         {
             if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("SetBalanceRatio: 设备未打开");
                 return false;
+            }
 
             try
             {
+                Console.WriteLine($"设置手动白平衡: R={redRatio}, G={greenRatio}, B={blueRatio}");
+                
                 // 关闭自动白平衡
-                int result = _device.Parameters.SetEnumValueByString("BalanceWhiteAuto", "Off");
+                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 0); // 0通常代表Off
+                Console.WriteLine($"SetEnumValue BalanceWhiteAuto=0 结果: 0x{result:X8}");
+                
                 if (result != MvError.MV_OK)
-                    return false;
+                {
+                    // 尝试字符串方式
+                    result = _device.Parameters.SetEnumValueByString("BalanceWhiteAuto", "Off");
+                    Console.WriteLine($"SetEnumValueByString BalanceWhiteAuto=Off 结果: 0x{result:X8}");
+                    if (result != MvError.MV_OK)
+                    {
+                        Console.WriteLine("关闭自动白平衡失败");
+                        return false;
+                    }
+                }
 
                 // 设置红色比例
                 result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", "Red");
+                Console.WriteLine($"SetEnumValueByString BalanceRatioSelector=Red 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
                     result = _device.Parameters.SetFloatValue("BalanceRatio", redRatio);
+                    Console.WriteLine($"SetFloatValue BalanceRatio={redRatio} 结果: 0x{result:X8}");
                     if (result != MvError.MV_OK)
+                    {
+                        Console.WriteLine($"设置红色比例失败: {redRatio}");
                         return false;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("选择红色通道失败");
+                    return false;
                 }
 
                 // 设置绿色比例
                 result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", "Green");
+                Console.WriteLine($"SetEnumValueByString BalanceRatioSelector=Green 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
                     result = _device.Parameters.SetFloatValue("BalanceRatio", greenRatio);
+                    Console.WriteLine($"SetFloatValue BalanceRatio={greenRatio} 结果: 0x{result:X8}");
                     if (result != MvError.MV_OK)
+                    {
+                        Console.WriteLine($"设置绿色比例失败: {greenRatio}");
                         return false;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("选择绿色通道失败");
+                    return false;
                 }
 
                 // 设置蓝色比例
                 result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", "Blue");
+                Console.WriteLine($"SetEnumValueByString BalanceRatioSelector=Blue 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
                     result = _device.Parameters.SetFloatValue("BalanceRatio", blueRatio);
+                    Console.WriteLine($"SetFloatValue BalanceRatio={blueRatio} 结果: 0x{result:X8}");
                     if (result != MvError.MV_OK)
+                    {
+                        Console.WriteLine($"设置蓝色比例失败: {blueRatio}");
                         return false;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("选择蓝色通道失败");
+                    return false;
                 }
 
+                Console.WriteLine("手动白平衡设置成功");
                 return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"SetBalanceRatio异常: {ex.Message}");
                 return false;
             }
         }
@@ -1128,31 +1275,92 @@ namespace DLCV.Camera
         public bool SetROI(int offsetX, int offsetY, int width, int height)
         {
             if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("SetROI: 设备未打开");
                 return false;
+            }
 
             try
             {
-                // 设置ROI参数
-                int result = _device.Parameters.SetIntValue("OffsetX", offsetX);
-                if (result != MvError.MV_OK)
+                Console.WriteLine($"设置ROI: X={offsetX}, Y={offsetY}, W={width}, H={height}");
+                
+                // 获取当前最大分辨率
+                var (maxWidth, maxHeight) = GetMaxResolution();
+                Console.WriteLine($"相机最大分辨率: W={maxWidth}, H={maxHeight}");
+                
+                // 验证ROI参数
+                if (offsetX < 0 || offsetY < 0 || width <= 0 || height <= 0)
+                {
+                    Console.WriteLine("ROI参数无效：偏移量不能为负，宽高必须大于0");
                     return false;
-
-                result = _device.Parameters.SetIntValue("OffsetY", offsetY);
-                if (result != MvError.MV_OK)
+                }
+                
+                if (offsetX + width > maxWidth || offsetY + height > maxHeight)
+                {
+                    Console.WriteLine($"ROI超出范围: X+W={offsetX + width} > {maxWidth} 或 Y+H={offsetY + height} > {maxHeight}");
                     return false;
+                }
 
+                int result;
+                
+                // 根据海康相机的特性，按照特定顺序设置ROI参数
+                // 步骤1: 先设置偏移量为0（如果当前不是0的话）
+                IIntValue currentOffsetX, currentOffsetY;
+                _device.Parameters.GetIntValue("OffsetX", out currentOffsetX);
+                _device.Parameters.GetIntValue("OffsetY", out currentOffsetY);
+                
+                if (currentOffsetX.CurValue != 0)
+                {
+                    result = _device.Parameters.SetIntValue("OffsetX", 0);
+                    Console.WriteLine($"重置OffsetX=0 结果: 0x{result:X8}");
+                }
+                
+                if (currentOffsetY.CurValue != 0)
+                {
+                    result = _device.Parameters.SetIntValue("OffsetY", 0);
+                    Console.WriteLine($"重置OffsetY=0 结果: 0x{result:X8}");
+                }
+
+                // 步骤2: 设置宽度和高度
                 result = _device.Parameters.SetIntValue("Width", width);
+                Console.WriteLine($"SetIntValue Width={width} 结果: 0x{result:X8}");
                 if (result != MvError.MV_OK)
+                {
+                    Console.WriteLine($"设置Width失败: {width}");
                     return false;
+                }
 
                 result = _device.Parameters.SetIntValue("Height", height);
+                Console.WriteLine($"SetIntValue Height={height} 结果: 0x{result:X8}");
                 if (result != MvError.MV_OK)
+                {
+                    Console.WriteLine($"设置Height失败: {height}");
                     return false;
+                }
 
+                // 步骤3: 最后设置偏移量
+                result = _device.Parameters.SetIntValue("OffsetX", offsetX);
+                Console.WriteLine($"SetIntValue OffsetX={offsetX} 结果: 0x{result:X8}");
+                if (result != MvError.MV_OK)
+                {
+                    Console.WriteLine($"设置OffsetX失败: {offsetX}");
+                    return false;
+                }
+
+                result = _device.Parameters.SetIntValue("OffsetY", offsetY);
+                Console.WriteLine($"SetIntValue OffsetY={offsetY} 结果: 0x{result:X8}");
+                if (result != MvError.MV_OK)
+                {
+                    Console.WriteLine($"设置OffsetY失败: {offsetY}");
+                    return false;
+                }
+
+                Console.WriteLine("ROI设置成功");
                 return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"SetROI异常: {ex.Message}");
                 return false;
             }
         }
@@ -1164,22 +1372,48 @@ namespace DLCV.Camera
         public (int offsetX, int offsetY, int width, int height) GetROI()
         {
             if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("GetROI: 设备未打开");
                 return (0, 0, 0, 0);
+            }
 
             try
             {
+                Console.WriteLine("获取当前ROI参数...");
                 IIntValue offsetXValue, offsetYValue, widthValue, heightValue;
                 
-                _device.Parameters.GetIntValue("OffsetX", out offsetXValue);
-                _device.Parameters.GetIntValue("OffsetY", out offsetYValue);
-                _device.Parameters.GetIntValue("Width", out widthValue);
-                _device.Parameters.GetIntValue("Height", out heightValue);
+                int result1 = _device.Parameters.GetIntValue("OffsetX", out offsetXValue);
+                Console.WriteLine($"GetIntValue OffsetX 结果: 0x{result1:X8}");
+                
+                int result2 = _device.Parameters.GetIntValue("OffsetY", out offsetYValue);
+                Console.WriteLine($"GetIntValue OffsetY 结果: 0x{result2:X8}");
+                
+                int result3 = _device.Parameters.GetIntValue("Width", out widthValue);
+                Console.WriteLine($"GetIntValue Width 结果: 0x{result3:X8}");
+                
+                int result4 = _device.Parameters.GetIntValue("Height", out heightValue);
+                Console.WriteLine($"GetIntValue Height 结果: 0x{result4:X8}");
 
-                return ((int)offsetXValue.CurValue, (int)offsetYValue.CurValue, 
-                       (int)widthValue.CurValue, (int)heightValue.CurValue);
+                if (result1 == MvError.MV_OK && result2 == MvError.MV_OK && 
+                    result3 == MvError.MV_OK && result4 == MvError.MV_OK)
+                {
+                    int offsetX = (int)offsetXValue.CurValue;
+                    int offsetY = (int)offsetYValue.CurValue;
+                    int width = (int)widthValue.CurValue;
+                    int height = (int)heightValue.CurValue;
+                    
+                    Console.WriteLine($"当前ROI: X={offsetX}, Y={offsetY}, W={width}, H={height}");
+                    return (offsetX, offsetY, width, height);
+                }
+                else
+                {
+                    Console.WriteLine("获取ROI参数失败");
+                    return (0, 0, 0, 0);
+                }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"GetROI异常: {ex.Message}");
                 return (0, 0, 0, 0);
             }
         }
@@ -1191,19 +1425,38 @@ namespace DLCV.Camera
         public (int width, int height) GetMaxResolution()
         {
             if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("GetMaxResolution: 设备未打开");
                 return (0, 0);
+            }
 
             try
             {
+                Console.WriteLine("获取相机最大分辨率...");
                 IIntValue widthMaxValue, heightMaxValue;
                 
-                _device.Parameters.GetIntValue("WidthMax", out widthMaxValue);
-                _device.Parameters.GetIntValue("HeightMax", out heightMaxValue);
+                int result1 = _device.Parameters.GetIntValue("WidthMax", out widthMaxValue);
+                Console.WriteLine($"GetIntValue WidthMax 结果: 0x{result1:X8}");
+                
+                int result2 = _device.Parameters.GetIntValue("HeightMax", out heightMaxValue);
+                Console.WriteLine($"GetIntValue HeightMax 结果: 0x{result2:X8}");
 
-                return ((int)widthMaxValue.CurValue, (int)heightMaxValue.CurValue);
+                if (result1 == MvError.MV_OK && result2 == MvError.MV_OK)
+                {
+                    int maxWidth = (int)widthMaxValue.CurValue;
+                    int maxHeight = (int)heightMaxValue.CurValue;
+                    Console.WriteLine($"最大分辨率: {maxWidth}x{maxHeight}");
+                    return (maxWidth, maxHeight);
+                }
+                else
+                {
+                    Console.WriteLine("获取最大分辨率失败");
+                    return (0, 0);
+                }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"GetMaxResolution异常: {ex.Message}");
                 return (0, 0);
             }
         }
@@ -1235,21 +1488,42 @@ namespace DLCV.Camera
         public bool SaveToUserSet1()
         {
             if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("SaveToUserSet1: 设备未打开");
                 return false;
+            }
 
             try
             {
+                Console.WriteLine("保存参数到用户集1...");
+                
                 // 选择用户集1
                 int result = _device.Parameters.SetEnumValueByString("UserSetSelector", "UserSet1");
+                Console.WriteLine($"SetEnumValueByString UserSetSelector=UserSet1 结果: 0x{result:X8}");
                 if (result != MvError.MV_OK)
+                {
+                    Console.WriteLine("选择用户集1失败");
                     return false;
+                }
 
                 // 保存参数
                 result = _device.Parameters.SetCommandValue("UserSetSave");
-                return result == MvError.MV_OK;
+                Console.WriteLine($"SetCommandValue UserSetSave 结果: 0x{result:X8}");
+                
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine("参数保存到用户集1成功");
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine("参数保存到用户集1失败");
+                    return false;
+                }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"SaveToUserSet1异常: {ex.Message}");
                 return false;
             }
         }

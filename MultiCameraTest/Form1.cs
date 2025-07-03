@@ -836,26 +836,55 @@ namespace CameraManagerTest
             try
             {
                 if (CameraManager?.ActiveDevice == null)
+                {
+                    Console.WriteLine("InitializeParameterDisplay: 相机未连接");
                     return;
+                }
+
+                Console.WriteLine($"初始化相机参数显示: {DeviceName}");
 
                 // 初始化曝光时间显示
+                Console.WriteLine("正在获取曝光时间...");
                 float exposureTime = CameraManager.GetExposureTime();
                 if (exposureTime > 0)
-                    _txtExposureTime.Text = exposureTime.ToString();
+                {
+                    _txtExposureTime.Text = exposureTime.ToString("F0");
+                    Console.WriteLine($"曝光时间初始化: {exposureTime}μs");
+                }
+                else
+                {
+                    _txtExposureTime.Text = "10000"; // 默认值
+                    Console.WriteLine("曝光时间获取失败，使用默认值10000μs");
+                }
 
                 // 初始化白平衡显示
+                Console.WriteLine("正在获取白平衡比例...");
                 var (red, green, blue) = CameraManager.GetBalanceRatio();
                 if (red > 0 && green > 0 && blue > 0)
                 {
                     _txtRedRatio.Text = red.ToString("F2");
                     _txtGreenRatio.Text = green.ToString("F2");
                     _txtBlueRatio.Text = blue.ToString("F2");
+                    Console.WriteLine($"白平衡比例初始化: R={red:F2}, G={green:F2}, B={blue:F2}");
+                }
+                else
+                {
+                    _txtRedRatio.Text = "1.00";
+                    _txtGreenRatio.Text = "1.00";
+                    _txtBlueRatio.Text = "1.00";
+                    Console.WriteLine("白平衡比例获取失败，使用默认值1.00");
                 }
 
                 // 初始化ROI显示
+                Console.WriteLine("正在获取ROI参数...");
                 UpdateROIControls();
+                
+                Console.WriteLine("参数显示初始化完成");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"InitializeParameterDisplay异常: {ex.Message}");
+            }
         }
         
         private void CameraManager_ImageUpdated(object sender, ImageEventArgs e)
@@ -1435,14 +1464,37 @@ namespace CameraManagerTest
             {
                 if (CameraManager?.ActiveDevice != null)
                 {
+                    Console.WriteLine("正在更新ROI控件显示...");
                     var (offsetX, offsetY, width, height) = CameraManager.GetROI();
-                    _txtOffsetX.Text = offsetX.ToString();
-                    _txtOffsetY.Text = offsetY.ToString();
-                    _txtWidth.Text = width.ToString();
-                    _txtHeight.Text = height.ToString();
+                    
+                    if (width > 0 && height > 0)
+                    {
+                        _txtOffsetX.Text = offsetX.ToString();
+                        _txtOffsetY.Text = offsetY.ToString();
+                        _txtWidth.Text = width.ToString();
+                        _txtHeight.Text = height.ToString();
+                        Console.WriteLine($"ROI控件更新: X={offsetX}, Y={offsetY}, W={width}, H={height}");
+                    }
+                    else
+                    {
+                        // 如果获取失败，尝试获取最大分辨率作为默认值
+                        var (maxWidth, maxHeight) = CameraManager.GetMaxResolution();
+                        _txtOffsetX.Text = "0";
+                        _txtOffsetY.Text = "0";
+                        _txtWidth.Text = maxWidth > 0 ? maxWidth.ToString() : "1280";
+                        _txtHeight.Text = maxHeight > 0 ? maxHeight.ToString() : "1024";
+                        Console.WriteLine($"ROI获取失败，使用默认值: X=0, Y=0, W={_txtWidth.Text}, H={_txtHeight.Text}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("UpdateROIControls: 相机未连接");
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"UpdateROIControls异常: {ex.Message}");
+            }
         }
         
         // 同步方法（需要访问Form1中的其他CameraTab）
