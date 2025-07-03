@@ -1075,8 +1075,8 @@ namespace DLCV.Camera
                 Console.WriteLine("开始执行一键白平衡...");
                 
                 // 方法1: 尝试使用枚举值设置白平衡模式为一次性自动
-                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 2); // 2通常代表Once
-                Console.WriteLine($"SetEnumValue BalanceWhiteAuto=2 结果: 0x{result:X8}");
+                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 1); // 1代表Once (根据海康文档)
+                Console.WriteLine($"SetEnumValue BalanceWhiteAuto=1 结果: 0x{result:X8}");
                 
                 if (result != MvError.MV_OK)
                 {
@@ -1139,15 +1139,16 @@ namespace DLCV.Camera
                     return 0;
                 }
 
-                // 获取白平衡比例值
-                IFloatValue value;
-                result = _device.Parameters.GetFloatValue("BalanceRatio", out value);
-                Console.WriteLine($"GetFloatValue BalanceRatio 结果: 0x{result:X8}");
+                // 获取白平衡比例值 (海康相机的BalanceRatio是int类型)
+                IIntValue value;
+                result = _device.Parameters.GetIntValue("BalanceRatio", out value);
+                Console.WriteLine($"GetIntValue BalanceRatio 结果: 0x{result:X8}");
                 
                 if (result == MvError.MV_OK)
                 {
-                    Console.WriteLine($"白平衡比例值 {selector}: {value.CurValue}");
-                    return value.CurValue;
+                    float ratio = (float)value.CurValue; // 转换为float返回
+                    Console.WriteLine($"白平衡比例值 {selector}: {ratio} (原始int值: {value.CurValue})");
+                    return ratio;
                 }
                 else
                 {
@@ -1202,11 +1203,12 @@ namespace DLCV.Camera
                 Console.WriteLine($"SetEnumValueByString BalanceRatioSelector=Red 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
-                    result = _device.Parameters.SetFloatValue("BalanceRatio", redRatio);
-                    Console.WriteLine($"SetFloatValue BalanceRatio={redRatio} 结果: 0x{result:X8}");
+                    int intRedRatio = (int)redRatio; // 转换为int类型
+                    result = _device.Parameters.SetIntValue("BalanceRatio", intRedRatio);
+                    Console.WriteLine($"SetIntValue BalanceRatio={intRedRatio} 结果: 0x{result:X8}");
                     if (result != MvError.MV_OK)
                     {
-                        Console.WriteLine($"设置红色比例失败: {redRatio}");
+                        Console.WriteLine($"设置红色比例失败: {intRedRatio}");
                         return false;
                     }
                 }
@@ -1221,11 +1223,12 @@ namespace DLCV.Camera
                 Console.WriteLine($"SetEnumValueByString BalanceRatioSelector=Green 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
-                    result = _device.Parameters.SetFloatValue("BalanceRatio", greenRatio);
-                    Console.WriteLine($"SetFloatValue BalanceRatio={greenRatio} 结果: 0x{result:X8}");
+                    int intGreenRatio = (int)greenRatio; // 转换为int类型
+                    result = _device.Parameters.SetIntValue("BalanceRatio", intGreenRatio);
+                    Console.WriteLine($"SetIntValue BalanceRatio={intGreenRatio} 结果: 0x{result:X8}");
                     if (result != MvError.MV_OK)
                     {
-                        Console.WriteLine($"设置绿色比例失败: {greenRatio}");
+                        Console.WriteLine($"设置绿色比例失败: {intGreenRatio}");
                         return false;
                     }
                 }
@@ -1240,11 +1243,12 @@ namespace DLCV.Camera
                 Console.WriteLine($"SetEnumValueByString BalanceRatioSelector=Blue 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
-                    result = _device.Parameters.SetFloatValue("BalanceRatio", blueRatio);
-                    Console.WriteLine($"SetFloatValue BalanceRatio={blueRatio} 结果: 0x{result:X8}");
+                    int intBlueRatio = (int)blueRatio; // 转换为int类型
+                    result = _device.Parameters.SetIntValue("BalanceRatio", intBlueRatio);
+                    Console.WriteLine($"SetIntValue BalanceRatio={intBlueRatio} 结果: 0x{result:X8}");
                     if (result != MvError.MV_OK)
                     {
-                        Console.WriteLine($"设置蓝色比例失败: {blueRatio}");
+                        Console.WriteLine($"设置蓝色比例失败: {intBlueRatio}");
                         return false;
                     }
                 }
@@ -1301,57 +1305,110 @@ namespace DLCV.Camera
                     return false;
                 }
 
+                // 海康相机ROI参数可能需要满足特定的对齐要求（通常是4或8的倍数）
+                // 调整宽度到4的倍数
+                int adjustedWidth = (width / 4) * 4;
+                int adjustedHeight = (height / 4) * 4;
+                int adjustedOffsetX = (offsetX / 4) * 4;
+                int adjustedOffsetY = (offsetY / 4) * 4;
+                
+                if (adjustedWidth != width || adjustedHeight != height || 
+                    adjustedOffsetX != offsetX || adjustedOffsetY != offsetY)
+                {
+                    Console.WriteLine($"ROI参数已调整到4的倍数: " +
+                        $"原始({offsetX},{offsetY},{width},{height}) -> " +
+                        $"调整后({adjustedOffsetX},{adjustedOffsetY},{adjustedWidth},{adjustedHeight})");
+                    
+                    offsetX = adjustedOffsetX;
+                    offsetY = adjustedOffsetY;
+                    width = adjustedWidth;
+                    height = adjustedHeight;
+                }
+
+                // 确保最小尺寸
+                if (width < 64) width = 64;
+                if (height < 64) height = 64;
+
                 int result;
                 
-                // 根据海康相机的特性，按照特定顺序设置ROI参数
-                // 步骤1: 先设置偏移量为0（如果当前不是0的话）
-                IIntValue currentOffsetX, currentOffsetY;
-                _device.Parameters.GetIntValue("OffsetX", out currentOffsetX);
-                _device.Parameters.GetIntValue("OffsetY", out currentOffsetY);
+                // 根据海康相机的特性，按照更安全的顺序设置ROI参数
+                Console.WriteLine("开始设置ROI，按照海康相机安全顺序...");
                 
-                if (currentOffsetX.CurValue != 0)
+                // 步骤1: 首先将偏移量设置为0，避免冲突
+                result = _device.Parameters.SetIntValue("OffsetX", 0);
+                Console.WriteLine($"步骤1: SetIntValue OffsetX=0 结果: 0x{result:X8}");
+                if (result != MvError.MV_OK)
                 {
-                    result = _device.Parameters.SetIntValue("OffsetX", 0);
-                    Console.WriteLine($"重置OffsetX=0 结果: 0x{result:X8}");
+                    Console.WriteLine("步骤1失败: 无法将OffsetX设置为0");
+                    return false;
                 }
                 
-                if (currentOffsetY.CurValue != 0)
+                result = _device.Parameters.SetIntValue("OffsetY", 0);
+                Console.WriteLine($"步骤1: SetIntValue OffsetY=0 结果: 0x{result:X8}");
+                if (result != MvError.MV_OK)
                 {
-                    result = _device.Parameters.SetIntValue("OffsetY", 0);
-                    Console.WriteLine($"重置OffsetY=0 结果: 0x{result:X8}");
+                    Console.WriteLine("步骤1失败: 无法将OffsetY设置为0");
+                    return false;
                 }
 
-                // 步骤2: 设置宽度和高度
+                // 步骤2: 然后设置Width（先设置较小的值，避免超范围）
                 result = _device.Parameters.SetIntValue("Width", width);
-                Console.WriteLine($"SetIntValue Width={width} 结果: 0x{result:X8}");
+                Console.WriteLine($"步骤2: SetIntValue Width={width} 结果: 0x{result:X8}");
                 if (result != MvError.MV_OK)
                 {
-                    Console.WriteLine($"设置Width失败: {width}");
+                    Console.WriteLine($"步骤2失败: 设置Width={width}失败，错误码: 0x{result:X8}");
+                    
+                    // 尝试获取Width的范围信息
+                    try
+                    {
+                        IIntValue widthInfo;
+                        int getResult = _device.Parameters.GetIntValue("Width", out widthInfo);
+                        if (getResult == MvError.MV_OK)
+                        {
+                            Console.WriteLine($"Width范围: Min={widthInfo.Min}, Max={widthInfo.Max}, 当前={widthInfo.CurValue}");
+                        }
+                    }
+                    catch { }
+                    
                     return false;
                 }
 
+                // 步骤3: 设置Height
                 result = _device.Parameters.SetIntValue("Height", height);
-                Console.WriteLine($"SetIntValue Height={height} 结果: 0x{result:X8}");
+                Console.WriteLine($"步骤3: SetIntValue Height={height} 结果: 0x{result:X8}");
                 if (result != MvError.MV_OK)
                 {
-                    Console.WriteLine($"设置Height失败: {height}");
+                    Console.WriteLine($"步骤3失败: 设置Height={height}失败，错误码: 0x{result:X8}");
+                    
+                    // 尝试获取Height的范围信息
+                    try
+                    {
+                        IIntValue heightInfo;
+                        int getResult = _device.Parameters.GetIntValue("Height", out heightInfo);
+                        if (getResult == MvError.MV_OK)
+                        {
+                            Console.WriteLine($"Height范围: Min={heightInfo.Min}, Max={heightInfo.Max}, 当前={heightInfo.CurValue}");
+                        }
+                    }
+                    catch { }
+                    
                     return false;
                 }
 
-                // 步骤3: 最后设置偏移量
+                // 步骤4: 最后设置偏移量
                 result = _device.Parameters.SetIntValue("OffsetX", offsetX);
-                Console.WriteLine($"SetIntValue OffsetX={offsetX} 结果: 0x{result:X8}");
+                Console.WriteLine($"步骤4: SetIntValue OffsetX={offsetX} 结果: 0x{result:X8}");
                 if (result != MvError.MV_OK)
                 {
-                    Console.WriteLine($"设置OffsetX失败: {offsetX}");
+                    Console.WriteLine($"步骤4失败: 设置OffsetX={offsetX}失败，错误码: 0x{result:X8}");
                     return false;
                 }
 
                 result = _device.Parameters.SetIntValue("OffsetY", offsetY);
-                Console.WriteLine($"SetIntValue OffsetY={offsetY} 结果: 0x{result:X8}");
+                Console.WriteLine($"步骤4: SetIntValue OffsetY={offsetY} 结果: 0x{result:X8}");
                 if (result != MvError.MV_OK)
                 {
-                    Console.WriteLine($"设置OffsetY失败: {offsetY}");
+                    Console.WriteLine($"步骤4失败: 设置OffsetY={offsetY}失败，错误码: 0x{result:X8}");
                     return false;
                 }
 
