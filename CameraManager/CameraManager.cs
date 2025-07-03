@@ -169,6 +169,75 @@ namespace DLCV.Camera
         /// <param name="name">参数名称</param>
         /// <returns>参数值</returns>
         T GetParameter<T>(string name);
+
+        /// <summary>
+        /// 设置曝光时间
+        /// </summary>
+        /// <param name="exposureTime">曝光时间(微秒)，最大33000</param>
+        /// <returns>是否设置成功</returns>
+        bool SetExposureTime(float exposureTime);
+
+        /// <summary>
+        /// 获取曝光时间
+        /// </summary>
+        /// <returns>曝光时间(微秒)</returns>
+        float GetExposureTime();
+
+        /// <summary>
+        /// 执行一键白平衡
+        /// </summary>
+        /// <returns>是否成功</returns>
+        bool ExecuteBalanceWhiteAuto();
+
+        /// <summary>
+        /// 获取白平衡比例值
+        /// </summary>
+        /// <param name="selector">颜色选择器(Red/Green/Blue)</param>
+        /// <returns>白平衡比例值</returns>
+        float GetBalanceRatio(string selector);
+
+        /// <summary>
+        /// 设置手动白平衡
+        /// </summary>
+        /// <param name="redRatio">红色比例</param>
+        /// <param name="greenRatio">绿色比例</param>
+        /// <param name="blueRatio">蓝色比例</param>
+        /// <returns>是否设置成功</returns>
+        bool SetBalanceRatio(float redRatio, float greenRatio, float blueRatio);
+
+        /// <summary>
+        /// 设置ROI区域
+        /// </summary>
+        /// <param name="offsetX">X偏移</param>
+        /// <param name="offsetY">Y偏移</param>
+        /// <param name="width">宽度</param>
+        /// <param name="height">高度</param>
+        /// <returns>是否设置成功</returns>
+        bool SetROI(int offsetX, int offsetY, int width, int height);
+
+        /// <summary>
+        /// 获取ROI区域
+        /// </summary>
+        /// <returns>ROI区域(offsetX, offsetY, width, height)</returns>
+        (int offsetX, int offsetY, int width, int height) GetROI();
+
+        /// <summary>
+        /// 获取相机最大分辨率
+        /// </summary>
+        /// <returns>最大分辨率(width, height)</returns>
+        (int width, int height) GetMaxResolution();
+
+        /// <summary>
+        /// 恢复ROI到最大分辨率
+        /// </summary>
+        /// <returns>是否设置成功</returns>
+        bool RestoreMaxROI();
+
+        /// <summary>
+        /// 保存参数到用户集1
+        /// </summary>
+        /// <returns>是否保存成功</returns>
+        bool SaveToUserSet1();
     }
 
     #endregion
@@ -886,6 +955,306 @@ namespace DLCV.Camera
         }
 
         /// <summary>
+        /// 设置曝光时间
+        /// </summary>
+        /// <param name="exposureTime">曝光时间(微秒)，最大33000</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetExposureTime(float exposureTime)
+        {
+            if (!IsOpen || _device == null)
+                return false;
+
+            try
+            {
+                // 限制曝光时间上限为33ms(33000微秒)
+                if (exposureTime > 33000)
+                    exposureTime = 33000;
+                
+                if (exposureTime < 0)
+                    exposureTime = 0;
+
+                // 关闭自动曝光
+                int result = _device.Parameters.SetEnumValue("ExposureAuto", 0);
+                if (result != MvError.MV_OK)
+                    return false;
+
+                // 设置曝光时间
+                result = _device.Parameters.SetFloatValue("ExposureTime", exposureTime);
+                return result == MvError.MV_OK;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取曝光时间
+        /// </summary>
+        /// <returns>曝光时间(微秒)</returns>
+        public float GetExposureTime()
+        {
+            if (!IsOpen || _device == null)
+                return 0;
+
+            try
+            {
+                IFloatValue value;
+                int result = _device.Parameters.GetFloatValue("ExposureTime", out value);
+                return result == MvError.MV_OK ? value.CurValue : 0;
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 执行一键白平衡
+        /// </summary>
+        /// <returns>是否成功</returns>
+        public bool ExecuteBalanceWhiteAuto()
+        {
+            if (!IsOpen || _device == null)
+                return false;
+
+            try
+            {
+                // 设置白平衡模式为一次性自动
+                int result = _device.Parameters.SetEnumValueByString("BalanceWhiteAuto", "Once");
+                if (result != MvError.MV_OK)
+                    return false;
+
+                // 等待白平衡完成
+                System.Threading.Thread.Sleep(2000);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取白平衡比例值
+        /// </summary>
+        /// <param name="selector">颜色选择器(Red/Green/Blue)</param>
+        /// <returns>白平衡比例值</returns>
+        public float GetBalanceRatio(string selector)
+        {
+            if (!IsOpen || _device == null)
+                return 0;
+
+            try
+            {
+                // 设置颜色选择器
+                int result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", selector);
+                if (result != MvError.MV_OK)
+                    return 0;
+
+                // 获取白平衡比例值
+                IFloatValue value;
+                result = _device.Parameters.GetFloatValue("BalanceRatio", out value);
+                return result == MvError.MV_OK ? value.CurValue : 0;
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 设置手动白平衡
+        /// </summary>
+        /// <param name="redRatio">红色比例</param>
+        /// <param name="greenRatio">绿色比例</param>
+        /// <param name="blueRatio">蓝色比例</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetBalanceRatio(float redRatio, float greenRatio, float blueRatio)
+        {
+            if (!IsOpen || _device == null)
+                return false;
+
+            try
+            {
+                // 关闭自动白平衡
+                int result = _device.Parameters.SetEnumValueByString("BalanceWhiteAuto", "Off");
+                if (result != MvError.MV_OK)
+                    return false;
+
+                // 设置红色比例
+                result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", "Red");
+                if (result == MvError.MV_OK)
+                {
+                    result = _device.Parameters.SetFloatValue("BalanceRatio", redRatio);
+                    if (result != MvError.MV_OK)
+                        return false;
+                }
+
+                // 设置绿色比例
+                result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", "Green");
+                if (result == MvError.MV_OK)
+                {
+                    result = _device.Parameters.SetFloatValue("BalanceRatio", greenRatio);
+                    if (result != MvError.MV_OK)
+                        return false;
+                }
+
+                // 设置蓝色比例
+                result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", "Blue");
+                if (result == MvError.MV_OK)
+                {
+                    result = _device.Parameters.SetFloatValue("BalanceRatio", blueRatio);
+                    if (result != MvError.MV_OK)
+                        return false;
+                }
+
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 设置ROI区域
+        /// </summary>
+        /// <param name="offsetX">X偏移</param>
+        /// <param name="offsetY">Y偏移</param>
+        /// <param name="width">宽度</param>
+        /// <param name="height">高度</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetROI(int offsetX, int offsetY, int width, int height)
+        {
+            if (!IsOpen || _device == null)
+                return false;
+
+            try
+            {
+                // 设置ROI参数
+                int result = _device.Parameters.SetIntValue("OffsetX", offsetX);
+                if (result != MvError.MV_OK)
+                    return false;
+
+                result = _device.Parameters.SetIntValue("OffsetY", offsetY);
+                if (result != MvError.MV_OK)
+                    return false;
+
+                result = _device.Parameters.SetIntValue("Width", width);
+                if (result != MvError.MV_OK)
+                    return false;
+
+                result = _device.Parameters.SetIntValue("Height", height);
+                if (result != MvError.MV_OK)
+                    return false;
+
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取ROI区域
+        /// </summary>
+        /// <returns>ROI区域(offsetX, offsetY, width, height)</returns>
+        public (int offsetX, int offsetY, int width, int height) GetROI()
+        {
+            if (!IsOpen || _device == null)
+                return (0, 0, 0, 0);
+
+            try
+            {
+                IIntValue offsetXValue, offsetYValue, widthValue, heightValue;
+                
+                _device.Parameters.GetIntValue("OffsetX", out offsetXValue);
+                _device.Parameters.GetIntValue("OffsetY", out offsetYValue);
+                _device.Parameters.GetIntValue("Width", out widthValue);
+                _device.Parameters.GetIntValue("Height", out heightValue);
+
+                return ((int)offsetXValue.CurValue, (int)offsetYValue.CurValue, 
+                       (int)widthValue.CurValue, (int)heightValue.CurValue);
+            }
+            catch (Exception)
+            {
+                return (0, 0, 0, 0);
+            }
+        }
+
+        /// <summary>
+        /// 获取相机最大分辨率
+        /// </summary>
+        /// <returns>最大分辨率(width, height)</returns>
+        public (int width, int height) GetMaxResolution()
+        {
+            if (!IsOpen || _device == null)
+                return (0, 0);
+
+            try
+            {
+                IIntValue widthMaxValue, heightMaxValue;
+                
+                _device.Parameters.GetIntValue("WidthMax", out widthMaxValue);
+                _device.Parameters.GetIntValue("HeightMax", out heightMaxValue);
+
+                return ((int)widthMaxValue.CurValue, (int)heightMaxValue.CurValue);
+            }
+            catch (Exception)
+            {
+                return (0, 0);
+            }
+        }
+
+        /// <summary>
+        /// 恢复ROI到最大分辨率
+        /// </summary>
+        /// <returns>是否设置成功</returns>
+        public bool RestoreMaxROI()
+        {
+            if (!IsOpen || _device == null)
+                return false;
+
+            try
+            {
+                var (maxWidth, maxHeight) = GetMaxResolution();
+                return SetROI(0, 0, maxWidth, maxHeight);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 保存参数到用户集1
+        /// </summary>
+        /// <returns>是否保存成功</returns>
+        public bool SaveToUserSet1()
+        {
+            if (!IsOpen || _device == null)
+                return false;
+
+            try
+            {
+                // 选择用户集1
+                int result = _device.Parameters.SetEnumValueByString("UserSetSelector", "UserSet1");
+                if (result != MvError.MV_OK)
+                    return false;
+
+                // 保存参数
+                result = _device.Parameters.SetCommandValue("UserSetSave");
+                return result == MvError.MV_OK;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// 释放资源
         /// </summary>
         public void Dispose()
@@ -1165,6 +1534,137 @@ namespace DLCV.Camera
         public void StopContinuousTrigger()
         {
             _activeDevice?.StopContinuousTrigger();
+        }
+
+        /// <summary>
+        /// 设置曝光时间
+        /// </summary>
+        /// <param name="exposureTime">曝光时间(微秒)，最大33000</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetExposureTime(float exposureTime)
+        {
+            if (_activeDevice == null)
+                return false;
+            
+            bool result = _activeDevice.SetExposureTime(exposureTime);
+            if (result)
+                _activeDevice.SaveToUserSet1();
+            
+            return result;
+        }
+
+        /// <summary>
+        /// 获取曝光时间
+        /// </summary>
+        /// <returns>曝光时间(微秒)</returns>
+        public float GetExposureTime()
+        {
+            return _activeDevice?.GetExposureTime() ?? 0;
+        }
+
+        /// <summary>
+        /// 执行一键白平衡
+        /// </summary>
+        /// <returns>是否成功</returns>
+        public bool ExecuteBalanceWhiteAuto()
+        {
+            if (_activeDevice == null)
+                return false;
+            
+            bool result = _activeDevice.ExecuteBalanceWhiteAuto();
+            if (result)
+                _activeDevice.SaveToUserSet1();
+            
+            return result;
+        }
+
+        /// <summary>
+        /// 获取白平衡比例值
+        /// </summary>
+        /// <returns>白平衡比例值(红, 绿, 蓝)</returns>
+        public (float red, float green, float blue) GetBalanceRatio()
+        {
+            if (_activeDevice == null)
+                return (0, 0, 0);
+
+            float red = _activeDevice.GetBalanceRatio("Red");
+            float green = _activeDevice.GetBalanceRatio("Green");
+            float blue = _activeDevice.GetBalanceRatio("Blue");
+            
+            return (red, green, blue);
+        }
+
+        /// <summary>
+        /// 设置手动白平衡
+        /// </summary>
+        /// <param name="redRatio">红色比例</param>
+        /// <param name="greenRatio">绿色比例</param>
+        /// <param name="blueRatio">蓝色比例</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetBalanceRatio(float redRatio, float greenRatio, float blueRatio)
+        {
+            if (_activeDevice == null)
+                return false;
+            
+            bool result = _activeDevice.SetBalanceRatio(redRatio, greenRatio, blueRatio);
+            if (result)
+                _activeDevice.SaveToUserSet1();
+            
+            return result;
+        }
+
+        /// <summary>
+        /// 设置ROI区域
+        /// </summary>
+        /// <param name="offsetX">X偏移</param>
+        /// <param name="offsetY">Y偏移</param>
+        /// <param name="width">宽度</param>
+        /// <param name="height">高度</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetROI(int offsetX, int offsetY, int width, int height)
+        {
+            if (_activeDevice == null)
+                return false;
+            
+            bool result = _activeDevice.SetROI(offsetX, offsetY, width, height);
+            if (result)
+                _activeDevice.SaveToUserSet1();
+            
+            return result;
+        }
+
+        /// <summary>
+        /// 获取ROI区域
+        /// </summary>
+        /// <returns>ROI区域(offsetX, offsetY, width, height)</returns>
+        public (int offsetX, int offsetY, int width, int height) GetROI()
+        {
+            return _activeDevice?.GetROI() ?? (0, 0, 0, 0);
+        }
+
+        /// <summary>
+        /// 获取相机最大分辨率
+        /// </summary>
+        /// <returns>最大分辨率(width, height)</returns>
+        public (int width, int height) GetMaxResolution()
+        {
+            return _activeDevice?.GetMaxResolution() ?? (0, 0);
+        }
+
+        /// <summary>
+        /// 恢复ROI到最大分辨率
+        /// </summary>
+        /// <returns>是否设置成功</returns>
+        public bool RestoreMaxROI()
+        {
+            if (_activeDevice == null)
+                return false;
+            
+            bool result = _activeDevice.RestoreMaxROI();
+            if (result)
+                _activeDevice.SaveToUserSet1();
+            
+            return result;
         }
 
         /// <summary>
