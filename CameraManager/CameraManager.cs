@@ -985,7 +985,7 @@ namespace DLCV.Camera
                 }
 
                 // 关闭自动曝光
-                int result = _device.Parameters.SetEnumValue("ExposureAuto", 0);
+                int result = _device.Parameters.SetEnumValue("ExposureAuto", 0u);
                 Console.WriteLine($"SetEnumValue ExposureAuto=0 结果: 0x{result:X8}");
                 if (result != MvError.MV_OK)
                 {
@@ -1075,7 +1075,7 @@ namespace DLCV.Camera
                 Console.WriteLine("开始执行一键白平衡...");
                 
                 // 方法1: 尝试使用枚举值设置白平衡模式为一次性自动
-                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 2); // 2代表Once (根据海康官方文档)
+                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 2u); // 2代表Once (根据海康官方文档)
                 Console.WriteLine($"SetEnumValue BalanceWhiteAuto=2 结果: 0x{result:X8}");
                 
                 if (result != MvError.MV_OK)
@@ -1087,7 +1087,7 @@ namespace DLCV.Camera
                     if (result != MvError.MV_OK)
                     {
                         // 方法3: 尝试连续模式
-                        result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 1); // 1=Continuous
+                        result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 1u); // 1=Continuous
                         Console.WriteLine($"SetEnumValue BalanceWhiteAuto=1 结果: 0x{result:X8}");
                         
                         if (result != MvError.MV_OK)
@@ -1103,7 +1103,7 @@ namespace DLCV.Camera
                 System.Threading.Thread.Sleep(2000);
                 
                 // 白平衡完成后，将模式调整回Off (0)
-                result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 0); // 0=Off
+                result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 0u); // 0=Off
                 Console.WriteLine($"白平衡完成，设置BalanceWhiteAuto=0 结果: 0x{result:X8}");
                 
                 Console.WriteLine("一键白平衡执行完成");
@@ -1145,7 +1145,7 @@ namespace DLCV.Camera
                         return 0;
                 }
                 
-                int result = _device.Parameters.SetEnumValue("BalanceRatioSelector", selectorValue);
+                int result = _device.Parameters.SetEnumValue("BalanceRatioSelector", (uint)selectorValue);
                 Console.WriteLine($"SetEnumValue BalanceRatioSelector={selectorValue}({selector}) 结果: 0x{result:X8}");
                 
                 if (result != MvError.MV_OK)
@@ -1198,7 +1198,7 @@ namespace DLCV.Camera
                 Console.WriteLine($"设置手动白平衡: R={redRatio}, G={greenRatio}, B={blueRatio}");
                 
                 // 关闭自动白平衡
-                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 0); // 0通常代表Off
+                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 0u); // 0通常代表Off
                 Console.WriteLine($"SetEnumValue BalanceWhiteAuto=0 结果: 0x{result:X8}");
                 
                 if (result != MvError.MV_OK)
@@ -1214,7 +1214,7 @@ namespace DLCV.Camera
                 }
 
                 // 设置红色比例
-                result = _device.Parameters.SetEnumValue("BalanceRatioSelector", 0); // Red=0
+                result = _device.Parameters.SetEnumValue("BalanceRatioSelector", 0u); // Red=0
                 Console.WriteLine($"SetEnumValue BalanceRatioSelector=0(Red) 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
@@ -1234,7 +1234,7 @@ namespace DLCV.Camera
                 }
 
                 // 设置绿色比例
-                result = _device.Parameters.SetEnumValue("BalanceRatioSelector", 1); // Green=1
+                result = _device.Parameters.SetEnumValue("BalanceRatioSelector", 1u); // Green=1
                 Console.WriteLine($"SetEnumValue BalanceRatioSelector=1(Green) 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
@@ -1254,7 +1254,7 @@ namespace DLCV.Camera
                 }
 
                 // 设置蓝色比例
-                result = _device.Parameters.SetEnumValue("BalanceRatioSelector", 2); // Blue=2
+                result = _device.Parameters.SetEnumValue("BalanceRatioSelector", 2u); // Blue=2
                 Console.WriteLine($"SetEnumValue BalanceRatioSelector=2(Blue) 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
