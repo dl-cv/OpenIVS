@@ -1075,8 +1075,8 @@ namespace DLCV.Camera
                 Console.WriteLine("开始执行一键白平衡...");
                 
                 // 方法1: 尝试使用枚举值设置白平衡模式为一次性自动
-                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 1); // 1代表Once (根据海康文档)
-                Console.WriteLine($"SetEnumValue BalanceWhiteAuto=1 结果: 0x{result:X8}");
+                int result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 2); // 2代表Once (根据海康官方文档)
+                Console.WriteLine($"SetEnumValue BalanceWhiteAuto=2 结果: 0x{result:X8}");
                 
                 if (result != MvError.MV_OK)
                 {
@@ -1086,8 +1086,8 @@ namespace DLCV.Camera
                     
                     if (result != MvError.MV_OK)
                     {
-                        // 方法3: 尝试其他可能的值
-                        result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 1);
+                        // 方法3: 尝试连续模式
+                        result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 1); // 1=Continuous
                         Console.WriteLine($"SetEnumValue BalanceWhiteAuto=1 结果: 0x{result:X8}");
                         
                         if (result != MvError.MV_OK)
@@ -1101,6 +1101,10 @@ namespace DLCV.Camera
                 Console.WriteLine("白平衡命令发送成功，等待2秒钟完成...");
                 // 等待白平衡完成
                 System.Threading.Thread.Sleep(2000);
+                
+                // 白平衡完成后，将模式调整回Off (0)
+                result = _device.Parameters.SetEnumValue("BalanceWhiteAuto", 0); // 0=Off
+                Console.WriteLine($"白平衡完成，设置BalanceWhiteAuto=0 结果: 0x{result:X8}");
                 
                 Console.WriteLine("一键白平衡执行完成");
                 return true;
@@ -1129,13 +1133,24 @@ namespace DLCV.Camera
             {
                 Console.WriteLine($"获取白平衡比例值: {selector}");
                 
-                // 设置颜色选择器
-                int result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", selector);
-                Console.WriteLine($"SetEnumValueByString BalanceRatioSelector={selector} 结果: 0x{result:X8}");
+                // 设置颜色选择器 (根据海康文档: Red=0, Green=1, Blue=2)
+                int selectorValue;
+                switch (selector.ToUpper())
+                {
+                    case "RED": selectorValue = 0; break;
+                    case "GREEN": selectorValue = 1; break;
+                    case "BLUE": selectorValue = 2; break;
+                    default:
+                        Console.WriteLine($"无效的颜色选择器: {selector}");
+                        return 0;
+                }
+                
+                int result = _device.Parameters.SetEnumValue("BalanceRatioSelector", selectorValue);
+                Console.WriteLine($"SetEnumValue BalanceRatioSelector={selectorValue}({selector}) 结果: 0x{result:X8}");
                 
                 if (result != MvError.MV_OK)
                 {
-                    Console.WriteLine($"设置BalanceRatioSelector失败: {selector}");
+                    Console.WriteLine($"设置BalanceRatioSelector失败: {selector}({selectorValue})");
                     return 0;
                 }
 
@@ -1199,8 +1214,8 @@ namespace DLCV.Camera
                 }
 
                 // 设置红色比例
-                result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", "Red");
-                Console.WriteLine($"SetEnumValueByString BalanceRatioSelector=Red 结果: 0x{result:X8}");
+                result = _device.Parameters.SetEnumValue("BalanceRatioSelector", 0); // Red=0
+                Console.WriteLine($"SetEnumValue BalanceRatioSelector=0(Red) 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
                     int intRedRatio = (int)redRatio; // 转换为int类型
@@ -1219,8 +1234,8 @@ namespace DLCV.Camera
                 }
 
                 // 设置绿色比例
-                result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", "Green");
-                Console.WriteLine($"SetEnumValueByString BalanceRatioSelector=Green 结果: 0x{result:X8}");
+                result = _device.Parameters.SetEnumValue("BalanceRatioSelector", 1); // Green=1
+                Console.WriteLine($"SetEnumValue BalanceRatioSelector=1(Green) 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
                     int intGreenRatio = (int)greenRatio; // 转换为int类型
@@ -1239,8 +1254,8 @@ namespace DLCV.Camera
                 }
 
                 // 设置蓝色比例
-                result = _device.Parameters.SetEnumValueByString("BalanceRatioSelector", "Blue");
-                Console.WriteLine($"SetEnumValueByString BalanceRatioSelector=Blue 结果: 0x{result:X8}");
+                result = _device.Parameters.SetEnumValue("BalanceRatioSelector", 2); // Blue=2
+                Console.WriteLine($"SetEnumValue BalanceRatioSelector=2(Blue) 结果: 0x{result:X8}");
                 if (result == MvError.MV_OK)
                 {
                     int intBlueRatio = (int)blueRatio; // 转换为int类型
