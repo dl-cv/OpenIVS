@@ -45,6 +45,7 @@
             this._tabCameras = new System.Windows.Forms.TabControl();
             this._btnAddCamera = new System.Windows.Forms.Button();
             this._btnRemoveCamera = new System.Windows.Forms.Button();
+            this._btnLoadAllCameras = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this._pictureBox)).BeginInit();
             this._groupCamera.SuspendLayout();
             this.SuspendLayout();
@@ -95,7 +96,7 @@
             // 
             // _btnRemoveCamera
             // 
-            this._btnRemoveCamera.Location = new System.Drawing.Point(476, 12);
+            this._btnRemoveCamera.Location = new System.Drawing.Point(582, 12);
             this._btnRemoveCamera.Name = "_btnRemoveCamera";
             this._btnRemoveCamera.Size = new System.Drawing.Size(100, 34);
             this._btnRemoveCamera.TabIndex = 6;
@@ -103,6 +104,16 @@
             this._btnRemoveCamera.UseVisualStyleBackColor = true;
             this._btnRemoveCamera.Enabled = false;
             this._btnRemoveCamera.Click += new System.EventHandler(this.BtnRemoveCamera_Click);
+            // 
+            // _btnLoadAllCameras
+            // 
+            this._btnLoadAllCameras.Location = new System.Drawing.Point(476, 12);
+            this._btnLoadAllCameras.Name = "_btnLoadAllCameras";
+            this._btnLoadAllCameras.Size = new System.Drawing.Size(100, 34);
+            this._btnLoadAllCameras.TabIndex = 7;
+            this._btnLoadAllCameras.Text = "全部加载";
+            this._btnLoadAllCameras.UseVisualStyleBackColor = true;
+            this._btnLoadAllCameras.Click += new System.EventHandler(this.BtnLoadAllCameras_Click);
             // 
             // _btnStartGrab
             // 
@@ -245,6 +256,7 @@
             this.ClientSize = new System.Drawing.Size(1258, 968);
             this.Controls.Add(this._tabCameras);
             this.Controls.Add(this._btnRemoveCamera);
+            this.Controls.Add(this._btnLoadAllCameras);
             this.Controls.Add(this._btnAddCamera);
             this.Controls.Add(this._btnConnect);
             this.Controls.Add(this._comboDevices);
@@ -283,6 +295,7 @@
         private System.Windows.Forms.TabControl _tabCameras;
         private System.Windows.Forms.Button _btnAddCamera;
         private System.Windows.Forms.Button _btnRemoveCamera;
+        private System.Windows.Forms.Button _btnLoadAllCameras;
     }
 }
 
