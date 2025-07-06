@@ -51,9 +51,9 @@ namespace DlcvDemo
 
                 if (comboBox1.Items.Count == 0)
                 {
-                    comboBox1.Items.Add("Unknown");
+                    comboBox1.Text = "CPU";
+                    comboBox1.SelectedIndex = -1;
                 }
-                comboBox1.SelectedIndex = 0;
             });
 
             var info = Utils.GetDeviceInfo();
