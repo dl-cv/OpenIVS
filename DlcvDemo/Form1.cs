@@ -16,6 +16,29 @@ namespace DlcvDemo
 {
     public partial class Form1 : Form
     {
+        // 设备映射表：设备名称 -> 设备ID
+        private Dictionary<string, int> deviceNameToIdMap = new Dictionary<string, int>();
+        
+        /// <summary>
+        /// 获取当前选中的设备ID
+        /// </summary>
+        /// <returns>设备ID，如果没有选中则返回-1</returns>
+        private int GetSelectedDeviceId()
+        {
+            if (comboBox1.SelectedItem == null)
+            {
+                return -1; // 默认使用CPU
+            }
+            
+            string selectedDeviceName = comboBox1.SelectedItem.ToString();
+            if (deviceNameToIdMap.ContainsKey(selectedDeviceName))
+            {
+                return deviceNameToIdMap[selectedDeviceName];
+            }
+            
+            return -1; // 默认使用CPU
+        }
+        
         public Form1()
         {
             InitializeComponent();
@@ -36,24 +59,43 @@ namespace DlcvDemo
 
             Invoke((MethodInvoker)delegate
             {
+                // 清空现有项目和映射表
+                comboBox1.Items.Clear();
+                deviceNameToIdMap.Clear();
+
+                // 始终先添加CPU选项
+                comboBox1.Items.Add("CPU");
+                deviceNameToIdMap["CPU"] = -1; // CPU对应device_id = -1
+
+                // 添加GPU设备
+                bool hasGpu = false;
                 if (device_info.GetValue("code").ToString() == "0")
                 {
-
+                    int gpuIndex = 0;
                     foreach (var item in device_info.GetValue("devices"))
                     {
-                        comboBox1.Items.Add(item["device_name"].ToString());
+                        string deviceName = item["device_name"].ToString();
+                        comboBox1.Items.Add(deviceName);
+                        deviceNameToIdMap[deviceName] = gpuIndex; // GPU设备名称对应device_id = 0, 1, 2...
+                        gpuIndex++;
+                        hasGpu = true;
                     }
                 }
                 else
                 {
-                    richTextBox1.Text = device_info.ToString();
+                    // 如果获取GPU信息失败，在richTextBox1中显示错误信息
+                    richTextBox1.Text = "GPU信息获取失败：\n" + device_info.ToString();
                 }
 
-                if (comboBox1.Items.Count == 0)
+                // 默认选择第一个显卡，如果没有显卡则选择CPU
+                if (hasGpu)
                 {
-                    comboBox1.Items.Add("Unknown");
+                    comboBox1.SelectedIndex = 1; // 选择第一个GPU
                 }
-                comboBox1.SelectedIndex = 0;
+                else
+                {
+                    comboBox1.SelectedIndex = 0; // 选择CPU
+                }
             });
 
             var info = Utils.GetDeviceInfo();
@@ -91,7 +133,7 @@ namespace DlcvDemo
                 string selectedFilePath = openFileDialog.FileName;
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
                 Properties.Settings.Default.Save();
-                int device_id = comboBox1.SelectedIndex;
+                int device_id = GetSelectedDeviceId();
                 try
                 {
                     if (model != null)
@@ -542,7 +584,7 @@ namespace DlcvDemo
                 string selectedFilePath = openFileDialog.FileName;
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
                 Properties.Settings.Default.Save();
-                int device_id = comboBox1.SelectedIndex;
+                int device_id = GetSelectedDeviceId();
 
                 // 显示参数配置窗口
                 using (var configForm = new SlidingWindowConfigForm())
@@ -581,7 +623,7 @@ namespace DlcvDemo
         private void button_load_ocr_model_Click(object sender, EventArgs e)
         {
             // 使用新的OCR模型配置窗口
-            using (var ocrConfigForm = new OcrModelConfigForm(comboBox1.SelectedIndex))
+            using (var ocrConfigForm = new OcrModelConfigForm(GetSelectedDeviceId()))
             {
                 if (ocrConfigForm.ShowDialog(this) == DialogResult.OK)
                 {
