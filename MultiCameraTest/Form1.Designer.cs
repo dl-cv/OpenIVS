@@ -84,37 +84,6 @@
             this._btnConnect.Visible = false;
             this._btnConnect.Click += new System.EventHandler(this.BtnConnect_Click);
             // 
-            // _btnAddCamera
-            // 
-            this._btnAddCamera.Location = new System.Drawing.Point(370, 12);
-            this._btnAddCamera.Name = "_btnAddCamera";
-            this._btnAddCamera.Size = new System.Drawing.Size(100, 34);
-            this._btnAddCamera.TabIndex = 5;
-            this._btnAddCamera.Text = "添加相机";
-            this._btnAddCamera.UseVisualStyleBackColor = true;
-            this._btnAddCamera.Click += new System.EventHandler(this.BtnAddCamera_Click);
-            // 
-            // _btnRemoveCamera
-            // 
-            this._btnRemoveCamera.Location = new System.Drawing.Point(582, 12);
-            this._btnRemoveCamera.Name = "_btnRemoveCamera";
-            this._btnRemoveCamera.Size = new System.Drawing.Size(100, 34);
-            this._btnRemoveCamera.TabIndex = 6;
-            this._btnRemoveCamera.Text = "移除相机";
-            this._btnRemoveCamera.UseVisualStyleBackColor = true;
-            this._btnRemoveCamera.Enabled = false;
-            this._btnRemoveCamera.Click += new System.EventHandler(this.BtnRemoveCamera_Click);
-            // 
-            // _btnLoadAllCameras
-            // 
-            this._btnLoadAllCameras.Location = new System.Drawing.Point(476, 12);
-            this._btnLoadAllCameras.Name = "_btnLoadAllCameras";
-            this._btnLoadAllCameras.Size = new System.Drawing.Size(100, 34);
-            this._btnLoadAllCameras.TabIndex = 7;
-            this._btnLoadAllCameras.Text = "全部加载";
-            this._btnLoadAllCameras.UseVisualStyleBackColor = true;
-            this._btnLoadAllCameras.Click += new System.EventHandler(this.BtnLoadAllCameras_Click);
-            // 
             // _btnStartGrab
             // 
             this._btnStartGrab.Location = new System.Drawing.Point(15, 70);
@@ -249,6 +218,37 @@
             this._tabCameras.Size = new System.Drawing.Size(1234, 880);
             this._tabCameras.TabIndex = 7;
             // 
+            // _btnAddCamera
+            // 
+            this._btnAddCamera.Location = new System.Drawing.Point(370, 12);
+            this._btnAddCamera.Name = "_btnAddCamera";
+            this._btnAddCamera.Size = new System.Drawing.Size(100, 34);
+            this._btnAddCamera.TabIndex = 5;
+            this._btnAddCamera.Text = "添加相机";
+            this._btnAddCamera.UseVisualStyleBackColor = true;
+            this._btnAddCamera.Click += new System.EventHandler(this.BtnAddCamera_Click);
+            // 
+            // _btnRemoveCamera
+            // 
+            this._btnRemoveCamera.Enabled = false;
+            this._btnRemoveCamera.Location = new System.Drawing.Point(582, 12);
+            this._btnRemoveCamera.Name = "_btnRemoveCamera";
+            this._btnRemoveCamera.Size = new System.Drawing.Size(100, 34);
+            this._btnRemoveCamera.TabIndex = 6;
+            this._btnRemoveCamera.Text = "移除相机";
+            this._btnRemoveCamera.UseVisualStyleBackColor = true;
+            this._btnRemoveCamera.Click += new System.EventHandler(this.BtnRemoveCamera_Click);
+            // 
+            // _btnLoadAllCameras
+            // 
+            this._btnLoadAllCameras.Location = new System.Drawing.Point(476, 12);
+            this._btnLoadAllCameras.Name = "_btnLoadAllCameras";
+            this._btnLoadAllCameras.Size = new System.Drawing.Size(100, 34);
+            this._btnLoadAllCameras.TabIndex = 7;
+            this._btnLoadAllCameras.Text = "全部加载";
+            this._btnLoadAllCameras.UseVisualStyleBackColor = true;
+            this._btnLoadAllCameras.Click += new System.EventHandler(this.BtnLoadAllCameras_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 18F);
@@ -266,7 +266,7 @@
             this.MinimumSize = new System.Drawing.Size(820, 650);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "多相机测试";
+            this.Text = "相机参数同步软件";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
             ((System.ComponentModel.ISupportInitialize)(this._pictureBox)).EndInit();
