@@ -1320,12 +1320,12 @@ namespace DLCV.Camera
                     return false;
                 }
 
-                // 海康相机ROI参数可能需要满足特定的对齐要求（通常是4或8的倍数）
+                // 海康相机ROI参数可能需要满足特定的对齐要求（8的倍数）
                 // 调整宽度到4的倍数
-                int adjustedWidth = (width / 16) * 16;
-                int adjustedHeight = (height / 16) * 16;
-                int adjustedOffsetX = (offsetX / 16) * 16;
-                int adjustedOffsetY = (offsetY / 16) * 16;
+                int adjustedWidth = (width / 8) * 8;
+                int adjustedHeight = (height / 8) * 8;
+                int adjustedOffsetX = (offsetX / 8) * 8;
+                int adjustedOffsetY = (offsetY / 8) * 8;
 
                 if (adjustedWidth != width || adjustedHeight != height || 
                     adjustedOffsetX != offsetX || adjustedOffsetY != offsetY)

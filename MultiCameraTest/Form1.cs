@@ -746,14 +746,16 @@ namespace CameraManagerTest
                         if (success)
                         {
                             successCount++;
-                            // 更新UI显示
-                            if (tab._txtOffsetX != null && tab._txtOffsetY != null && 
+                            // 更新UI显示为实际设置的ROI值（16倍数对齐后的值）
+                            var (actualX, actualY, actualWidth, actualHeight) = tab.CameraManager.GetROI();
+                            if (actualWidth > 0 && actualHeight > 0 &&
+                                tab._txtOffsetX != null && tab._txtOffsetY != null && 
                                 tab._txtWidth != null && tab._txtHeight != null)
                             {
-                                tab._txtOffsetX.Text = offsetX.ToString();
-                                tab._txtOffsetY.Text = offsetY.ToString();
-                                tab._txtWidth.Text = width.ToString();
-                                tab._txtHeight.Text = height.ToString();
+                                tab._txtOffsetX.Text = actualX.ToString();
+                                tab._txtOffsetY.Text = actualY.ToString();
+                                tab._txtWidth.Text = actualWidth.ToString();
+                                tab._txtHeight.Text = actualHeight.ToString();
                             }
                         }
                         else
@@ -1762,9 +1764,20 @@ namespace CameraManagerTest
                 
                 if (success)
                 {
-                    // 更新UI显示
+                    // 更新UI显示为实际的ROI值
                     UpdateROIControls();
-                    MessageBox.Show("ROI已恢复到最大分辨率", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    
+                    // 获取实际设置的ROI值用于消息显示
+                    var (actualX, actualY, actualWidth, actualHeight) = CameraManager.GetROI();
+                    if (actualWidth > 0 && actualHeight > 0)
+                    {
+                        MessageBox.Show($"ROI已恢复到最大分辨率\n实际值: ({actualX}, {actualY}, {actualWidth}, {actualHeight})", 
+                                      "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        MessageBox.Show("ROI已恢复到最大分辨率", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
                 }
                 else
                 {
@@ -1794,8 +1807,20 @@ namespace CameraManagerTest
                 
                 if (success)
                 {
-                    MessageBox.Show($"ROI设置成功: ({offsetX}, {offsetY}, {width}, {height})", "成功", 
-                                  MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // 更新界面显示为实际设置的ROI值（16倍数对齐后的值）
+                    UpdateROIControls();
+                    
+                    // 获取实际设置的ROI值用于消息显示
+                    var (actualX, actualY, actualWidth, actualHeight) = CameraManager.GetROI();
+                    if (actualWidth > 0 && actualHeight > 0)
+                    {
+                        MessageBox.Show($"ROI设置成功\n请求值: ({offsetX}, {offsetY}, {width}, {height})\n实际值: ({actualX}, {actualY}, {actualWidth}, {actualHeight})", 
+                                      "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        MessageBox.Show("ROI设置成功，但无法获取实际设置值", "成功", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                 }
                 else
                 {
