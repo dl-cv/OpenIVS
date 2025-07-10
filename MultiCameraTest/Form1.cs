@@ -810,7 +810,7 @@ namespace CameraManagerTest
         // ROI控件
         private Label _lblOffsetX, _lblOffsetY, _lblWidth, _lblHeight;
         internal TextBox _txtOffsetX, _txtOffsetY, _txtWidth, _txtHeight;
-        private Button _btnSetROI, _btnSyncROI, _btnRestoreROI, _btnDrawROI;
+        private Button _btnSetROI, _btnSyncROI, _btnRestoreROI;
         
         // ROI绘制相关
         private bool _isDrawingROI = false;
@@ -1269,16 +1269,9 @@ namespace CameraManagerTest
                 Size = new Size(70, 26)
             };
             
-            _btnDrawROI = new Button()
-            {
-                Text = "画框设置",
-                Location = new Point(90, 115),
-                Size = new Size(70, 26)
-            };
-            
             var lblROITip = new Label()
             {
-                Text = "提示: 可在图像上拖拽画框",
+                Text = "提示: 点击设置ROI可画框选择区域",
                 Location = new Point(170, 118),
                 Size = new Size(140, 20),
                 ForeColor = Color.Gray,
@@ -1297,7 +1290,6 @@ namespace CameraManagerTest
             _groupROI.Controls.Add(_btnSetROI);
             _groupROI.Controls.Add(_btnSyncROI);
             _groupROI.Controls.Add(_btnRestoreROI);
-            _groupROI.Controls.Add(_btnDrawROI);
             _groupROI.Controls.Add(lblROITip);
         }
         
@@ -1323,7 +1315,6 @@ namespace CameraManagerTest
             _btnSetROI.Click += BtnSetROI_Click;
             _btnSyncROI.Click += BtnSyncROI_Click;
             _btnRestoreROI.Click += BtnRestoreROI_Click;
-            _btnDrawROI.Click += BtnDrawROI_Click;
             
             // PictureBox鼠标事件（用于ROI绘制）
             _pictureBox.MouseDown += PictureBox_MouseDown;
@@ -1698,34 +1689,22 @@ namespace CameraManagerTest
                     return;
                 }
                 
-                if (!int.TryParse(_txtOffsetX.Text, out int offsetX) || offsetX < 0 ||
-                    !int.TryParse(_txtOffsetY.Text, out int offsetY) || offsetY < 0 ||
-                    !int.TryParse(_txtWidth.Text, out int width) || width <= 0 ||
-                    !int.TryParse(_txtHeight.Text, out int height) || height <= 0)
+                if (_isDrawingROI)
                 {
-                    MessageBox.Show("请输入有效的ROI参数", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-                
-                // 停止采集
-                bool wasGrabbing = CameraManager.ActiveDevice.IsGrabbing;
-                if (wasGrabbing)
-                    CameraManager.StopGrabbing();
-                
-                bool success = CameraManager.SetROI(offsetX, offsetY, width, height);
-                
-                // 恢复采集
-                if (wasGrabbing)
-                    CameraManager.StartGrabbing();
-                
-                if (success)
-                {
-                    MessageBox.Show($"ROI设置成功: ({offsetX}, {offsetY}, {width}, {height})", "成功", 
-                                  MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // 如果正在画框，退出画框模式
+                    _isDrawingROI = false;
+                    _btnSetROI.Text = "设置ROI";
+                    _pictureBox.Cursor = Cursors.Default;
+                    MessageBox.Show("已退出画框模式", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
-                    MessageBox.Show("ROI设置失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    // 进入画框模式
+                    _isDrawingROI = true;
+                    _btnSetROI.Text = "退出画框";
+                    _pictureBox.Cursor = Cursors.Cross;
+                    MessageBox.Show("请在图像上拖拽鼠标画出ROI区域", "设置ROI", 
+                                  MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             catch (Exception ex)
@@ -1798,28 +1777,34 @@ namespace CameraManagerTest
             }
         }
         
-        private void BtnDrawROI_Click(object sender, EventArgs e)
+        private void ApplyROISettings(int offsetX, int offsetY, int width, int height)
         {
             try
             {
-                if (_isDrawingROI)
+                // 停止采集
+                bool wasGrabbing = CameraManager.ActiveDevice.IsGrabbing;
+                if (wasGrabbing)
+                    CameraManager.StopGrabbing();
+                
+                bool success = CameraManager.SetROI(offsetX, offsetY, width, height);
+                
+                // 恢复采集
+                if (wasGrabbing)
+                    CameraManager.StartGrabbing();
+                
+                if (success)
                 {
-                    _isDrawingROI = false;
-                    _btnDrawROI.Text = "画框设置";
-                    _pictureBox.Cursor = Cursors.Default;
-                    MessageBox.Show("已退出画框模式", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show($"ROI设置成功: ({offsetX}, {offsetY}, {width}, {height})", "成功", 
+                                  MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
-                    _isDrawingROI = true;
-                    _btnDrawROI.Text = "退出画框";
-                    _pictureBox.Cursor = Cursors.Cross;
-                    MessageBox.Show("请在图像上拖拽鼠标画出ROI区域", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("ROI设置失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"画框模式切换失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"应用ROI设置失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
         
@@ -1863,8 +1848,23 @@ namespace CameraManagerTest
                     _txtWidth.Text = imageROI.Width.ToString();
                     _txtHeight.Text = imageROI.Height.ToString();
                     
-                    MessageBox.Show($"ROI区域已设置: ({imageROI.X}, {imageROI.Y}, {imageROI.Width}, {imageROI.Height})", 
-                                  "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // 询问用户是否应用当前ROI设置
+                    var result = MessageBox.Show(
+                        $"检测到ROI区域: ({imageROI.X}, {imageROI.Y}, {imageROI.Width}, {imageROI.Height})\n\n是否按照当前ROI设置应用到相机？", 
+                        "确认ROI设置", 
+                        MessageBoxButtons.YesNo, 
+                        MessageBoxIcon.Question);
+                    
+                    if (result == DialogResult.Yes)
+                    {
+                        // 应用ROI设置
+                        ApplyROISettings(imageROI.X, imageROI.Y, imageROI.Width, imageROI.Height);
+                    }
+                    
+                    // 退出画框模式
+                    _isDrawingROI = false;
+                    _btnSetROI.Text = "设置ROI";
+                    _pictureBox.Cursor = Cursors.Default;
                 }
             }
             
