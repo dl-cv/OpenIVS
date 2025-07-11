@@ -527,7 +527,6 @@ namespace MultiCameraTest
                     _isDrawingROI = false;
                     _btnSetROI.Text = "设置ROI";
                     _pictureBox.Cursor = Cursors.Default;
-                    MessageBox.Show("已退出画框模式", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
@@ -535,8 +534,6 @@ namespace MultiCameraTest
                     _isDrawingROI = true;
                     _btnSetROI.Text = "退出画框";
                     _pictureBox.Cursor = Cursors.Cross;
-                    MessageBox.Show("请在图像上拖拽鼠标画出ROI区域", "设置ROI", 
-                                  MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             catch (Exception ex)
@@ -637,29 +634,25 @@ namespace MultiCameraTest
                 
                 if (success)
                 {
-                    // 更新界面显示为实际设置的ROI值（16倍数对齐后的值）
-                    UpdateROIControls();
-                    
-                    // 获取实际设置的ROI值用于消息显示
-                    var (actualX, actualY, actualWidth, actualHeight) = CameraManager.GetROI();
-                    if (actualWidth > 0 && actualHeight > 0)
-                    {
-                        MessageBox.Show($"ROI设置成功\n请求值: ({offsetX}, {offsetY}, {width}, {height})\n实际值: ({actualX}, {actualY}, {actualWidth}, {actualHeight})", 
-                                      "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    else
-                    {
-                        MessageBox.Show("ROI设置成功，但无法获取实际设置值", "成功", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
+                    // 在UI线程更新界面显示为实际设置的ROI值
+                    this.Invoke(new Action(UpdateROIControls));
                 }
                 else
                 {
-                    MessageBox.Show("ROI设置失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    this.Invoke(new Action(() =>
+                    {
+                        UpdateROIControls(); // 更新以显示未改变的值
+                        MessageBox.Show("ROI设置失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }));
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"应用ROI设置失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                this.Invoke(new Action(() =>
+                {
+                    UpdateROIControls(); // 失败时恢复原来的值
+                    MessageBox.Show($"应用ROI设置失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }));
             }
         }
         
@@ -692,39 +685,28 @@ namespace MultiCameraTest
             if (!_isDrawingROI || e.Button != MouseButtons.Left)
                 return;
                 
-            if (_roiRectangle.Width > 10 && _roiRectangle.Height > 10)
+            // 立即退出画框模式
+            _isDrawingROI = false;
+            _btnSetROI.Text = "设置ROI";
+            _pictureBox.Cursor = Cursors.Default;
+            
+            var capturedRoiRect = _roiRectangle;
+            
+            // 立即清除屏幕上的矩形
+            _roiRectangle = new Rectangle();
+            _pictureBox.Invalidate();
+
+            // 检查绘制的矩形是否有效
+            if (capturedRoiRect.Width > 10 && capturedRoiRect.Height > 10)
             {
-                // 将PictureBox坐标转换为图像坐标
                 if (_pictureBox.Image != null)
                 {
-                    var imageROI = ConvertPictureBoxROIToImageROI(_roiRectangle);
-                    _txtOffsetX.Text = imageROI.X.ToString();
-                    _txtOffsetY.Text = imageROI.Y.ToString();
-                    _txtWidth.Text = imageROI.Width.ToString();
-                    _txtHeight.Text = imageROI.Height.ToString();
+                    var imageROI = ConvertPictureBoxROIToImageROI(capturedRoiRect);
                     
-                    // 询问用户是否应用当前ROI设置
-                    var result = MessageBox.Show(
-                        $"检测到ROI区域: ({imageROI.X}, {imageROI.Y}, {imageROI.Width}, {imageROI.Height})\n\n是否按照当前ROI设置应用到相机？", 
-                        "确认ROI设置", 
-                        MessageBoxButtons.YesNo, 
-                        MessageBoxIcon.Question);
-                    
-                    if (result == DialogResult.Yes)
-                    {
-                        // 应用ROI设置
-                        ApplyROISettings(imageROI.X, imageROI.Y, imageROI.Width, imageROI.Height);
-                    }
-                    
-                    // 退出画框模式
-                    _isDrawingROI = false;
-                    _btnSetROI.Text = "设置ROI";
-                    _pictureBox.Cursor = Cursors.Default;
+                    // 异步应用ROI设置，避免UI卡顿
+                    Task.Run(() => ApplyROISettings(imageROI.X, imageROI.Y, imageROI.Width, imageROI.Height));
                 }
             }
-            
-            _roiRectangle = new Rectangle();
-            _pictureBox.Invalidate(); // 清除绘制
         }
         
         private void PictureBox_Paint(object sender, PaintEventArgs e)
