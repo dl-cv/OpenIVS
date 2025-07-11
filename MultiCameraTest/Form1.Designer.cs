@@ -59,7 +59,7 @@
             this._pictureBox.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this._pictureBox.Location = new System.Drawing.Point(12, 225);
             this._pictureBox.Name = "_pictureBox";
-            this._pictureBox.Size = new System.Drawing.Size(1234, 696);
+            this._pictureBox.Size = new System.Drawing.Size(1376, 845);
             this._pictureBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this._pictureBox.TabIndex = 0;
             this._pictureBox.TabStop = false;
@@ -232,9 +232,9 @@
             // 
             this._lblStatus.BorderStyle = System.Windows.Forms.BorderStyle.Fixed3D;
             this._lblStatus.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this._lblStatus.Location = new System.Drawing.Point(0, 938);
+            this._lblStatus.Location = new System.Drawing.Point(0, 1070);
             this._lblStatus.Name = "_lblStatus";
-            this._lblStatus.Size = new System.Drawing.Size(1258, 30);
+            this._lblStatus.Size = new System.Drawing.Size(1400, 30);
             this._lblStatus.TabIndex = 4;
             this._lblStatus.Text = "准备就绪";
             // 
@@ -246,14 +246,14 @@
             this._tabCameras.Location = new System.Drawing.Point(12, 50);
             this._tabCameras.Name = "_tabCameras";
             this._tabCameras.SelectedIndex = 0;
-            this._tabCameras.Size = new System.Drawing.Size(1234, 880);
+            this._tabCameras.Size = new System.Drawing.Size(1376, 1020);
             this._tabCameras.TabIndex = 7;
             // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 18F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1258, 968);
+            this.ClientSize = new System.Drawing.Size(1400, 1100);
             this.Controls.Add(this._tabCameras);
             this.Controls.Add(this._btnRemoveCamera);
             this.Controls.Add(this._btnLoadAllCameras);
@@ -263,10 +263,10 @@
             this.Controls.Add(this._pictureBox);
             this.Controls.Add(this._groupCamera);
             this.Controls.Add(this._lblStatus);
-            this.MinimumSize = new System.Drawing.Size(820, 650);
+            this.MinimumSize = new System.Drawing.Size(1200, 900);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "多相机测试";
+            this.Text = "相机参数同步软件";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
             ((System.ComponentModel.ISupportInitialize)(this._pictureBox)).EndInit();

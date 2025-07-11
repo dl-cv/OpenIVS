@@ -38,6 +38,11 @@ namespace DLCV.Camera
         public string DeviceType { get; private set; }
 
         /// <summary>
+        /// 用户ID
+        /// </summary>
+        public string UserId { get; private set; }
+
+        /// <summary>
         /// 构造函数
         /// </summary>
         /// <param name="deviceInfo">原始设备信息</param>
@@ -47,6 +52,7 @@ namespace DLCV.Camera
             ManufacturerName = deviceInfo.ManufacturerName;
             ModelName = deviceInfo.ModelName;
             SerialNumber = deviceInfo.SerialNumber;
+            UserId = deviceInfo.UserDefinedName;
             
             switch (deviceInfo.TLayerType)
             {
@@ -74,7 +80,16 @@ namespace DLCV.Camera
         /// <returns>设备显示名称</returns>
         public override string ToString()
         {
-            return $"{ManufacturerName} {ModelName} ({SerialNumber})";
+            return $"{UserId} ({SerialNumber})";
+        }
+
+        /// <summary>
+        /// 获取用户ID
+        /// </summary>
+        /// <returns>用户ID</returns>
+        public string GetUserId()
+        {
+            return UserId;
         }
     }
 
@@ -1320,13 +1335,13 @@ namespace DLCV.Camera
                     return false;
                 }
 
-                // 海康相机ROI参数可能需要满足特定的对齐要求（通常是4或8的倍数）
+                // 海康相机ROI参数可能需要满足特定的对齐要求（8的倍数）
                 // 调整宽度到4的倍数
-                int adjustedWidth = (width / 4) * 4;
-                int adjustedHeight = (height / 4) * 4;
-                int adjustedOffsetX = (offsetX / 4) * 4;
-                int adjustedOffsetY = (offsetY / 4) * 4;
-                
+                int adjustedWidth = (width / 8) * 8;
+                int adjustedHeight = (height / 8) * 8;
+                int adjustedOffsetX = (offsetX / 8) * 8;
+                int adjustedOffsetY = (offsetY / 8) * 8;
+
                 if (adjustedWidth != width || adjustedHeight != height || 
                     adjustedOffsetX != offsetX || adjustedOffsetY != offsetY)
                 {
