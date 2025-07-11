@@ -17,35 +17,35 @@ namespace CameraManagerTest
     {
         private List<DeviceInfoWrapper> _deviceList;
         private List<CameraTabView> _cameraTabs = new List<CameraTabView>();
-        
+
         // 线程安全保护
         private readonly object _lockObject = new object();
-        
+
         // 设备枚举限制 - 避免同时多个线程枚举设备
         private static readonly SemaphoreSlim _deviceEnumerationSemaphore = new SemaphoreSlim(1, 1);
-        
+
         // 相机连接限制 - 避免同时连接过多相机导致资源冲突
         private static readonly SemaphoreSlim _connectionSemaphore = new SemaphoreSlim(3, 3);
-        
+
         // 相机管理器字典，用于跟踪已连接的相机
         private readonly Dictionary<string, CameraManager> _connectedCameras = new Dictionary<string, CameraManager>();
 
         public Form1()
         {
             InitializeComponent();
-            
+
             // 设置窗体最小大小，确保UI有足够空间
             this.MinimumSize = new Size(1550, 1050);
             this.Size = new Size(1600, 1100);
             this.StartPosition = FormStartPosition.CenterScreen;
-            
+
             // 确保所有控件已正确初始化
             if (_comboDevices == null || _tabCameras == null)
             {
                 MessageBox.Show("控件初始化失败，程序可能无法正常工作", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
-            
+
             // 绑定窗体事件
             this.FormClosing += Form1_FormClosing;
             this.Load += Form1_Load;
@@ -70,14 +70,14 @@ namespace CameraManagerTest
             {
                 // 停止所有相机并释放资源
                 List<CameraManager> managersToDispose = new List<CameraManager>();
-                
+
                 lock (_lockObject)
                 {
                     // 收集所有相机管理器
                     managersToDispose.AddRange(_connectedCameras.Values);
                     _connectedCameras.Clear();
                 }
-                
+
                 // 在锁外释放资源
                 foreach (var manager in managersToDispose)
                 {
@@ -89,7 +89,7 @@ namespace CameraManagerTest
                     }
                     catch { }
                 }
-                
+
                 // 释放所有相机标签页
                 foreach (var tab in _cameraTabs)
                 {
@@ -99,7 +99,7 @@ namespace CameraManagerTest
                     }
                     catch { }
                 }
-                
+
                 // 释放SDK资源
                 CameraUtils.ReleaseSDK();
             }
@@ -143,7 +143,7 @@ namespace CameraManagerTest
                 _btnLoadAllCameras.Enabled = false;
             }
         }
-        
+
         /// <summary>
         /// 异步刷新设备列表（线程安全版本）
         /// </summary>
@@ -160,7 +160,7 @@ namespace CameraManagerTest
                         using (var tempManager = new CameraManager())
                         {
                             var devices = tempManager.RefreshDeviceList();
-                            
+
                             // 在UI线程更新控件
                             this.BeginInvoke(new Action(() =>
                             {
@@ -176,7 +176,7 @@ namespace CameraManagerTest
                     {
                         this.BeginInvoke(new Action(() =>
                         {
-                            MessageBox.Show($"获取设备列表失败: {ex.Message}", "错误", 
+                            MessageBox.Show($"获取设备列表失败: {ex.Message}", "错误",
                                           MessageBoxButtons.OK, MessageBoxIcon.Error);
                             _btnAddCamera.Enabled = false;
                             _btnLoadAllCameras.Enabled = false;
@@ -189,14 +189,14 @@ namespace CameraManagerTest
                 _deviceEnumerationSemaphore.Release();
             }
         }
-        
+
         /// <summary>
         /// 更新设备下拉框（必须在UI线程调用）
         /// </summary>
         private void UpdateDeviceComboBox()
         {
             _comboDevices.Items.Clear();
-            
+
             if (_deviceList == null || _deviceList.Count == 0)
             {
                 _comboDevices.Items.Add("未检测到设备");
@@ -231,7 +231,7 @@ namespace CameraManagerTest
 
             var deviceInfo = _deviceList[selectedIndex];
             var cameraId = deviceInfo.SerialNumber;
-            
+
             // 检查相机是否已连接
             lock (_lockObject)
             {
@@ -241,18 +241,18 @@ namespace CameraManagerTest
                     return;
                 }
             }
-            
+
             // 禁用按钮防止重复点击
             _btnAddCamera.Enabled = false;
             _btnLoadAllCameras.Enabled = false;
-            
+
             try
             {
                 UpdateStatus($"正在连接相机 {deviceInfo}...");
-                
+
                 // 异步连接相机
                 bool success = await ConnectCameraAsync(deviceInfo);
-                
+
                 if (success)
                 {
                     UpdateStatus($"相机 {deviceInfo} 连接成功");
@@ -278,7 +278,7 @@ namespace CameraManagerTest
         {
             if (deviceInfo == null)
                 return false;
-            
+
             var cameraId = deviceInfo.SerialNumber;
 
             // 限制并发连接数量
@@ -287,7 +287,7 @@ namespace CameraManagerTest
             {
                 CameraTabView cameraTabView = null;
                 CameraManager cameraManager = null;
-                
+
                 try
                 {
                     // 在UI线程创建标签页
@@ -295,7 +295,7 @@ namespace CameraManagerTest
                     {
                         cameraTabView = new CameraTabView(cameraId, deviceInfo.ToString(), this);
                     });
-                    
+
                     // 限制设备枚举，避免冲突
                     await _deviceEnumerationSemaphore.WaitAsync();
                     try
@@ -303,12 +303,12 @@ namespace CameraManagerTest
                         // 创建并连接相机管理器
                         cameraManager = new CameraManager();
                         bool connected = cameraManager.ConnectDevice(deviceInfo);
-                        
+
                         if (!connected)
                         {
                             throw new Exception("CameraManager.ConnectDevice(deviceInfo) returned false.");
                         }
-                        
+
                         // 锁定资源，更新状态
                         lock (_lockObject)
                         {
@@ -319,19 +319,19 @@ namespace CameraManagerTest
                                 cameraManager.Dispose();
                                 throw new Exception("Camera was connected by another thread in the meantime.");
                             }
-                            
+
                             _connectedCameras[cameraId] = cameraManager;
                         }
-                        
+
                         // 设置相机管理器到标签页
                         cameraTabView.SetCameraManager(cameraManager);
-                        
+
                         // 订阅图像更新事件
                         cameraManager.ImageUpdated += (sender, e) =>
                         {
                             cameraTabView.OnImageUpdated(e.Image);
                         };
-                        
+
                         // 在UI线程添加标签页
                         await this.InvokeAsync(() =>
                         {
@@ -347,9 +347,9 @@ namespace CameraManagerTest
                             _tabCameras.SelectedTab = tabPage;
                             _btnRemoveCamera.Enabled = true;
                         });
-                        
+
                         // 开始采集
-                        cameraManager.StartGrabbing();
+                        //cameraManager.StartGrabbing();
 
                         return true;
                     }
@@ -362,7 +362,7 @@ namespace CameraManagerTest
                 {
                     string errorMsg = $"连接相机 {deviceInfo} (ID: {cameraId}) 失败: {ex.Message}";
                     System.Diagnostics.Debug.WriteLine(errorMsg);
-                    
+
                     // 清理资源
                     if (cameraManager != null)
                     {
@@ -377,7 +377,7 @@ namespace CameraManagerTest
                         }
                         catch { }
                     }
-                    
+
                     if (cameraTabView != null)
                     {
                         await this.InvokeAsync(() =>
@@ -385,7 +385,7 @@ namespace CameraManagerTest
                             cameraTabView.Dispose();
                         });
                     }
-                    
+
                     // 直接抛出异常，不要包装新的异常
                     throw;
                 }
@@ -417,37 +417,37 @@ namespace CameraManagerTest
         {
             if (_tabCameras.SelectedTab == null || _cameraTabs.Count == 0)
                 return;
-            
+
             try
             {
                 // 找到当前选中的标签页
                 var tabPage = _tabCameras.SelectedTab;
                 CameraTabView cameraTabView = null;
                 string cameraId = null;
-                
+
                 lock (_lockObject)
                 {
                     // Find the UserControl within the TabPage's controls
                     cameraTabView = tabPage.Controls.OfType<CameraTabView>().FirstOrDefault();
                     if (cameraTabView == null)
                         return;
-                    
+
                     cameraId = cameraTabView.CameraId;
                 }
-                
+
                 string deviceName = cameraTabView.DeviceName;
-                
+
                 // 禁用按钮防止重复操作
                 _btnRemoveCamera.Enabled = false;
                 UpdateStatus($"正在断开相机 {deviceName}...");
-                
+
                 // 异步释放资源
                 await Task.Run(() =>
                 {
                     try
                     {
                         CameraManager cameraManager = null;
-                        
+
                         // 获取并移除相机管理器
                         lock (_lockObject)
                         {
@@ -456,7 +456,7 @@ namespace CameraManagerTest
                                 _connectedCameras.Remove(cameraId);
                             }
                         }
-                        
+
                         // 在锁外释放资源，避免阻塞
                         if (cameraManager != null)
                         {
@@ -477,7 +477,7 @@ namespace CameraManagerTest
                         System.Diagnostics.Debug.WriteLine($"移除相机失败: {ex.Message}");
                     }
                 });
-                
+
                 // 在UI线程更新界面
                 lock (_lockObject)
                 {
@@ -485,7 +485,7 @@ namespace CameraManagerTest
                 }
                 _tabCameras.TabPages.Remove(tabPage);
                 cameraTabView.Dispose();
-                
+
                 // 更新按钮状态
                 if (_cameraTabs.Count == 0)
                 {
@@ -495,7 +495,7 @@ namespace CameraManagerTest
                 {
                     _btnRemoveCamera.Enabled = true;
                 }
-                
+
                 UpdateStatus($"已移除相机: {deviceName}");
             }
             catch (Exception ex)
@@ -517,7 +517,7 @@ namespace CameraManagerTest
             System.Diagnostics.Debug.WriteLine("\n--- [诊断] 开始加载所有相机... ---");
             var deviceIds = _deviceList.Select(d => d.SerialNumber).ToList();
             System.Diagnostics.Debug.WriteLine($"[诊断] 发现 {_deviceList.Count} 个设备: [{string.Join(", ", deviceIds)}]");
-            
+
             var duplicateIds = deviceIds.GroupBy(id => id)
                                         .Where(g => g.Count() > 1)
                                         .Select(g => g.Key).ToList();
@@ -531,23 +531,23 @@ namespace CameraManagerTest
             _btnAddCamera.Enabled = false;
             _btnLoadAllCameras.Enabled = false;
             _btnRemoveCamera.Enabled = false;
-            
+
             UpdateStatus("开始加载所有相机...");
-            
+
             int successCount = 0;
             int failCount = 0;
             var failedDevices = new List<string>();
-            
+
             // 保存当前可用设备列表快照
             List<DeviceInfoWrapper> deviceSnapshot;
             lock (_lockObject)
             {
                 deviceSnapshot = new List<DeviceInfoWrapper>(_deviceList);
             }
-            
+
             // 使用并发任务加载所有相机，但受限于_connectionSemaphore
             var tasks = new List<Task<(DeviceInfoWrapper deviceInfo, bool success, string error)>>();
-            
+
             foreach (var deviceInfo in deviceSnapshot)
             {
                 var cameraId = deviceInfo.SerialNumber;
@@ -563,17 +563,17 @@ namespace CameraManagerTest
                         continue;
                     }
                 }
-                
+
                 System.Diagnostics.Debug.WriteLine($"[诊断] --> 为 {deviceInfo} 创建连接任务");
                 // 创建异步连接任务
                 var task = ConnectSingleCameraAsync(deviceInfo);
-                
+
                 tasks.Add(task);
             }
-            
+
             // 等待所有任务完成
             var results = await Task.WhenAll(tasks);
-            
+
             System.Diagnostics.Debug.WriteLine("[诊断] --- 所有连接任务完成，正在处理结果... ---");
             // 统计结果
             foreach (var (deviceInfo, success, error) in results)
@@ -593,19 +593,19 @@ namespace CameraManagerTest
                     System.Diagnostics.Debug.WriteLine($"[诊断] --> 结果: 失败 - {deviceInfo}. 原因: {errorMsg}");
                 }
             }
-            
+
             // 显示结果
             string resultMessage = $"全部加载完成!\n成功: {successCount} 个\n失败: {failCount} 个";
             if (failedDevices.Count > 0)
             {
                 resultMessage += "\n\n失败的设备:\n" + string.Join("\n", failedDevices);
             }
-            
-            MessageBox.Show(resultMessage, "加载结果", MessageBoxButtons.OK, 
+
+            MessageBox.Show(resultMessage, "加载结果", MessageBoxButtons.OK,
                           failCount == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-            
+
             UpdateStatus($"全部加载完成: 成功 {successCount} 个，失败 {failCount} 个");
-            
+
             // 重新启用按钮
             _btnAddCamera.Enabled = true;
             _btnLoadAllCameras.Enabled = true;
@@ -777,7 +777,7 @@ namespace CameraManagerTest
                             // 更新UI显示为实际设置的ROI值（16倍数对齐后的值）
                             var (actualX, actualY, actualWidth, actualHeight) = tab.CameraManager.GetROI();
                             if (actualWidth > 0 && actualHeight > 0 &&
-                                tab._txtOffsetX != null && tab._txtOffsetY != null && 
+                                tab._txtOffsetX != null && tab._txtOffsetY != null &&
                                 tab._txtWidth != null && tab._txtHeight != null)
                             {
                                 tab._txtOffsetX.Text = actualX.ToString();
@@ -821,7 +821,7 @@ namespace CameraManagerTest
         public static Task InvokeAsync(this Control control, Action action)
         {
             var tcs = new TaskCompletionSource<bool>();
-            
+
             if (control.InvokeRequired)
             {
                 control.BeginInvoke(new Action(() =>
@@ -849,7 +849,7 @@ namespace CameraManagerTest
                     tcs.SetException(ex);
                 }
             }
-            
+
             return tcs.Task;
         }
     }
