@@ -285,113 +285,110 @@ namespace CameraManagerTest
             await _connectionSemaphore.WaitAsync();
             try
             {
-                return await Task.Run(async () =>
+                CameraTabView cameraTabView = null;
+                CameraManager cameraManager = null;
+                
+                try
                 {
-                    CameraTabView cameraTabView = null;
-                    CameraManager cameraManager = null;
+                    // 在UI线程创建标签页
+                    await this.InvokeAsync(() =>
+                    {
+                        cameraTabView = new CameraTabView(cameraId, deviceInfo.ToString(), this);
+                    });
                     
+                    // 限制设备枚举，避免冲突
+                    await _deviceEnumerationSemaphore.WaitAsync();
                     try
                     {
-                        // 在UI线程创建标签页
-                        await this.InvokeAsync(() =>
-                        {
-                            cameraTabView = new CameraTabView(cameraId, deviceInfo.ToString(), this);
-                        });
+                        // 创建并连接相机管理器
+                        cameraManager = new CameraManager();
+                        bool connected = cameraManager.ConnectDevice(deviceInfo);
                         
-                        // 限制设备枚举，避免冲突
-                        await _deviceEnumerationSemaphore.WaitAsync();
-                        try
+                        if (!connected)
                         {
-                            // 创建并连接相机管理器
-                            cameraManager = new CameraManager();
-                            bool connected = cameraManager.ConnectDevice(deviceInfo);
-                            
-                            if (!connected)
-                            {
-                                throw new Exception("CameraManager.ConnectDevice(deviceInfo) returned false.");
-                            }
-                            
-                            // 锁定资源，更新状态
-                            lock (_lockObject)
-                            {
-                                // 再次检查是否已连接（避免竞态条件）
-                                if (_connectedCameras.ContainsKey(cameraId))
-                                {
-                                    cameraManager.DisconnectDevice();
-                                    cameraManager.Dispose();
-                                    throw new Exception("Camera was connected by another thread in the meantime.");
-                                }
-                                
-                                _connectedCameras[cameraId] = cameraManager;
-                            }
-                            
-                            // 设置相机管理器到标签页
-                            cameraTabView.SetCameraManager(cameraManager);
-                            
-                            // 订阅图像更新事件
-                            cameraManager.ImageUpdated += (sender, e) =>
-                            {
-                                cameraTabView.OnImageUpdated(e.Image);
-                            };
-                            
-                            // 在UI线程添加标签页
-                            await this.InvokeAsync(() =>
-                            {
-                                var tabPage = new TabPage(deviceInfo.ToString());
-                                cameraTabView.Dock = DockStyle.Fill;
-                                tabPage.Controls.Add(cameraTabView);
-
-                                lock (_lockObject)
-                                {
-                                    _cameraTabs.Add(cameraTabView);
-                                }
-                                _tabCameras.TabPages.Add(tabPage);
-                                _tabCameras.SelectedTab = tabPage;
-                                _btnRemoveCamera.Enabled = true;
-                            });
-                            
-                            // 开始采集
-                            cameraManager.StartGrabbing();
-                            
-                            return true;
+                            throw new Exception("CameraManager.ConnectDevice(deviceInfo) returned false.");
                         }
-                        finally
-                        {
-                            _deviceEnumerationSemaphore.Release();
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        string errorMsg = $"连接相机 {deviceInfo} (ID: {cameraId}) 失败: {ex.Message}";
-                        System.Diagnostics.Debug.WriteLine(errorMsg);
                         
-                        // 清理资源
-                        if (cameraManager != null)
+                        // 锁定资源，更新状态
+                        lock (_lockObject)
                         {
-                            try
+                            // 再次检查是否已连接（避免竞态条件）
+                            if (_connectedCameras.ContainsKey(cameraId))
                             {
-                                lock (_lockObject)
-                                {
-                                    _connectedCameras.Remove(cameraId);
-                                }
                                 cameraManager.DisconnectDevice();
                                 cameraManager.Dispose();
+                                throw new Exception("Camera was connected by another thread in the meantime.");
                             }
-                            catch { }
+                            
+                            _connectedCameras[cameraId] = cameraManager;
                         }
                         
-                        if (cameraTabView != null)
+                        // 设置相机管理器到标签页
+                        cameraTabView.SetCameraManager(cameraManager);
+                        
+                        // 订阅图像更新事件
+                        cameraManager.ImageUpdated += (sender, e) =>
                         {
-                            await this.InvokeAsync(() =>
-                            {
-                                cameraTabView.Dispose();
-                            });
-                        }
+                            cameraTabView.OnImageUpdated(e.Image);
+                        };
                         
-                        // 重新抛出异常，以便上层调用者可以捕获并处理
-                        throw new Exception(errorMsg, ex);
+                        // 在UI线程添加标签页
+                        await this.InvokeAsync(() =>
+                        {
+                            var tabPage = new TabPage(deviceInfo.ToString());
+                            cameraTabView.Dock = DockStyle.Fill;
+                            tabPage.Controls.Add(cameraTabView);
+
+                            lock (_lockObject)
+                            {
+                                _cameraTabs.Add(cameraTabView);
+                            }
+                            _tabCameras.TabPages.Add(tabPage);
+                            _tabCameras.SelectedTab = tabPage;
+                            _btnRemoveCamera.Enabled = true;
+                        });
+                        
+                        // 开始采集
+                        cameraManager.StartGrabbing();
+
+                        return true;
                     }
-                });
+                    finally
+                    {
+                        _deviceEnumerationSemaphore.Release();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    string errorMsg = $"连接相机 {deviceInfo} (ID: {cameraId}) 失败: {ex.Message}";
+                    System.Diagnostics.Debug.WriteLine(errorMsg);
+                    
+                    // 清理资源
+                    if (cameraManager != null)
+                    {
+                        try
+                        {
+                            lock (_lockObject)
+                            {
+                                _connectedCameras.Remove(cameraId);
+                            }
+                            cameraManager.DisconnectDevice();
+                            cameraManager.Dispose();
+                        }
+                        catch { }
+                    }
+                    
+                    if (cameraTabView != null)
+                    {
+                        await this.InvokeAsync(() =>
+                        {
+                            cameraTabView.Dispose();
+                        });
+                    }
+                    
+                    // 直接抛出异常，不要包装新的异常
+                    throw;
+                }
             }
             finally
             {
