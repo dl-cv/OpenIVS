@@ -38,6 +38,11 @@ namespace DLCV.Camera
         public string DeviceType { get; private set; }
 
         /// <summary>
+        /// 用户ID
+        /// </summary>
+        public string UserId { get; private set; }
+
+        /// <summary>
         /// 构造函数
         /// </summary>
         /// <param name="deviceInfo">原始设备信息</param>
@@ -47,6 +52,7 @@ namespace DLCV.Camera
             ManufacturerName = deviceInfo.ManufacturerName;
             ModelName = deviceInfo.ModelName;
             SerialNumber = deviceInfo.SerialNumber;
+            UserId = deviceInfo.UserDefinedName;
             
             switch (deviceInfo.TLayerType)
             {
@@ -74,7 +80,16 @@ namespace DLCV.Camera
         /// <returns>设备显示名称</returns>
         public override string ToString()
         {
-            return $"{ManufacturerName} {ModelName} ({SerialNumber})";
+            return $"{UserId} ({SerialNumber})";
+        }
+
+        /// <summary>
+        /// 获取用户ID
+        /// </summary>
+        /// <returns>用户ID</returns>
+        public string GetUserId()
+        {
+            return UserId;
         }
     }
 
