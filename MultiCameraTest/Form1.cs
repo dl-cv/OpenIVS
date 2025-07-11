@@ -396,6 +396,23 @@ namespace CameraManagerTest
             }
         }
 
+        /// <summary>
+        /// 连接单个相机的辅助方法，用于批量加载
+        /// </summary>
+        private async Task<(DeviceInfoWrapper deviceInfo, bool success, string error)> ConnectSingleCameraAsync(DeviceInfoWrapper deviceInfo)
+        {
+            try
+            {
+                UpdateStatus($"正在连接相机 {deviceInfo}...");
+                bool success = await ConnectCameraAsync(deviceInfo);
+                return (deviceInfo, success, null);
+            }
+            catch (Exception ex)
+            {
+                return (deviceInfo, false, ex.Message);
+            }
+        }
+
         private async void BtnRemoveCamera_Click(object sender, EventArgs e)
         {
             if (_tabCameras.SelectedTab == null || _cameraTabs.Count == 0)
@@ -495,7 +512,21 @@ namespace CameraManagerTest
                 MessageBox.Show("未检测到可用的相机设备", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+
+            // --- 开始诊断日志 ---
+            System.Diagnostics.Debug.WriteLine("\n--- [诊断] 开始加载所有相机... ---");
+            var deviceIds = _deviceList.Select(d => d.SerialNumber).ToList();
+            System.Diagnostics.Debug.WriteLine($"[诊断] 发现 {_deviceList.Count} 个设备: [{string.Join(", ", deviceIds)}]");
             
+            var duplicateIds = deviceIds.GroupBy(id => id)
+                                        .Where(g => g.Count() > 1)
+                                        .Select(g => g.Key).ToList();
+            if (duplicateIds.Any())
+            {
+                System.Diagnostics.Debug.WriteLine($"[诊断] !!! 警告: 检测到重复的设备序列号: [{string.Join(", ", duplicateIds)}] !!!");
+            }
+            // --- 结束诊断日志 ---
+
             // 禁用相关按钮
             _btnAddCamera.Enabled = false;
             _btnLoadAllCameras.Enabled = false;
@@ -520,31 +551,22 @@ namespace CameraManagerTest
             foreach (var deviceInfo in deviceSnapshot)
             {
                 var cameraId = deviceInfo.SerialNumber;
-                
+                System.Diagnostics.Debug.WriteLine($"[诊断] 正在处理设备: {deviceInfo} (S/N: {cameraId})");
+
                 // 检查相机是否已连接
                 lock (_lockObject)
                 {
                     if (_connectedCameras.ContainsKey(cameraId))
                     {
                         UpdateStatus($"相机 {deviceInfo} 已存在，跳过");
+                        System.Diagnostics.Debug.WriteLine($"[诊断] --> 跳过 (已连接): {deviceInfo}");
                         continue;
                     }
                 }
                 
+                System.Diagnostics.Debug.WriteLine($"[诊断] --> 为 {deviceInfo} 创建连接任务");
                 // 创建异步连接任务
-                var task = Task.Run(async () =>
-                {
-                    try
-                    {
-                        UpdateStatus($"正在连接相机 {deviceInfo}...");
-                        bool success = await ConnectCameraAsync(deviceInfo);
-                        return (deviceInfo, success, null);
-                    }
-                    catch (Exception ex)
-                    {
-                        return (deviceInfo, false, ex.Message);
-                    }
-                });
+                var task = ConnectSingleCameraAsync(deviceInfo);
                 
                 tasks.Add(task);
             }
@@ -552,6 +574,7 @@ namespace CameraManagerTest
             // 等待所有任务完成
             var results = await Task.WhenAll(tasks);
             
+            System.Diagnostics.Debug.WriteLine("[诊断] --- 所有连接任务完成，正在处理结果... ---");
             // 统计结果
             foreach (var (deviceInfo, success, error) in results)
             {
@@ -559,6 +582,7 @@ namespace CameraManagerTest
                 {
                     successCount++;
                     UpdateStatus($"相机 {deviceInfo} 连接成功 ({successCount}/{deviceSnapshot.Count})");
+                    System.Diagnostics.Debug.WriteLine($"[诊断] --> 结果: 成功 - {deviceInfo}");
                 }
                 else
                 {
@@ -566,6 +590,7 @@ namespace CameraManagerTest
                     string errorMsg = string.IsNullOrEmpty(error) ? "未知错误" : error;
                     failedDevices.Add($"相机 {deviceInfo}: {errorMsg}");
                     UpdateStatus($"相机 {deviceInfo} 连接失败 ({failCount} 个失败)");
+                    System.Diagnostics.Debug.WriteLine($"[诊断] --> 结果: 失败 - {deviceInfo}. 原因: {errorMsg}");
                 }
             }
             
