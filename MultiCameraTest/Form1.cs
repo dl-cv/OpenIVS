@@ -807,6 +807,100 @@ namespace CameraManagerTest
             }
         }
 
+        /// <summary>
+        /// 同步当前用户集选择到其他相机
+        /// </summary>
+        /// <param name="sourceTab">源相机标签页</param>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        public void SyncCurrentUserSetToOtherCameras(CameraTabView sourceTab, int userSetIndex)
+        {
+            try
+            {
+                int successCount = 0;
+                int failCount = 0;
+
+                foreach (var tab in _cameraTabs)
+                {
+                    if (tab == sourceTab || tab.CameraManager?.ActiveDevice == null)
+                        continue;
+
+                    try
+                    {
+                        // 设置用户集选择器
+                        bool success = tab.CameraManager.SetUserSetSelector(userSetIndex);
+                        if (success)
+                        {
+                            successCount++;
+                            // 更新UI显示
+                            if (tab._comboUserSet != null)
+                                tab._comboUserSet.SelectedIndex = userSetIndex - 1; // 转换为0-2的索引
+                        }
+                        else
+                        {
+                            failCount++;
+                        }
+                    }
+                    catch
+                    {
+                        failCount++;
+                    }
+                }
+
+                string message = $"当前用户集同步完成: 成功{successCount}个，失败{failCount}个";
+                UpdateStatus(message);
+                MessageBox.Show(message, "同步结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"同步当前用户集失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 同步默认用户集设置到其他相机
+        /// </summary>
+        /// <param name="sourceTab">源相机标签页</param>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        public void SyncDefaultUserSetToOtherCameras(CameraTabView sourceTab, int userSetIndex)
+        {
+            try
+            {
+                int successCount = 0;
+                int failCount = 0;
+
+                foreach (var tab in _cameraTabs)
+                {
+                    if (tab == sourceTab || tab.CameraManager?.ActiveDevice == null)
+                        continue;
+
+                    try
+                    {
+                        bool success = tab.CameraManager.SetUserSetDefault(userSetIndex);
+                        if (success)
+                        {
+                            successCount++;
+                        }
+                        else
+                        {
+                            failCount++;
+                        }
+                    }
+                    catch
+                    {
+                        failCount++;
+                    }
+                }
+
+                string message = $"默认用户集同步完成: 成功{successCount}个，失败{failCount}个";
+                UpdateStatus(message);
+                MessageBox.Show(message, "同步结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"同步默认用户集失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         #endregion
     }
 

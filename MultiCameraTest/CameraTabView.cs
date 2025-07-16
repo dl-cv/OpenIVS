@@ -49,6 +49,7 @@ namespace MultiCameraTest
             _groupExposure.Enabled = false;
             _groupWhiteBalance.Enabled = false;
             _groupROI.Enabled = false;
+            _groupUserSet.Enabled = false;
 
             BindEvents();
         }
@@ -65,9 +66,13 @@ namespace MultiCameraTest
             _groupExposure.Enabled = true;
             _groupWhiteBalance.Enabled = true;
             _groupROI.Enabled = true;
+            _groupUserSet.Enabled = true;
 
             // 初始化参数显示
             InitializeParameterDisplay();
+            
+            // 初始化用户集显示
+            InitializeUserSetDisplay();
         }
 
         /// <summary>
@@ -145,8 +150,17 @@ namespace MultiCameraTest
             
             // ROI事件
             _btnSetROI.Click += BtnSetROI_Click;
+            _btnApplyROI.Click += BtnApplyROI_Click;
             _btnSyncROI.Click += BtnSyncROI_Click;
             _btnRestoreROI.Click += BtnRestoreROI_Click;
+            
+            // 用户集事件
+            _comboUserSet.SelectedIndexChanged += ComboUserSet_SelectedIndexChanged;
+            _btnLoadUserSet.Click += BtnLoadUserSet_Click;
+            _btnSaveUserSet.Click += BtnSaveUserSet_Click;
+            _btnSetDefault.Click += BtnSetDefault_Click;
+            _btnSyncCurrentUserSet.Click += BtnSyncCurrentUserSet_Click;
+            _btnSyncDefaultUserSet.Click += BtnSyncDefaultUserSet_Click;
             
             // PictureBox鼠标事件（用于ROI绘制）
             _pictureBox.MouseDown += PictureBox_MouseDown;
@@ -541,6 +555,115 @@ namespace MultiCameraTest
                 MessageBox.Show($"设置ROI失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+
+        private void BtnApplyROI_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // 读取文本框中的ROI数值
+                if (!int.TryParse(_txtOffsetX.Text, out int offsetX) || offsetX < 0)
+                {
+                    MessageBox.Show("请输入有效的X偏移值（大于等于0）", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    _txtOffsetX.Focus();
+                    return;
+                }
+
+                if (!int.TryParse(_txtOffsetY.Text, out int offsetY) || offsetY < 0)
+                {
+                    MessageBox.Show("请输入有效的Y偏移值（大于等于0）", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    _txtOffsetY.Focus();
+                    return;
+                }
+
+                if (!int.TryParse(_txtWidth.Text, out int width) || width <= 0)
+                {
+                    MessageBox.Show("请输入有效的宽度值（大于0）", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    _txtWidth.Focus();
+                    return;
+                }
+
+                if (!int.TryParse(_txtHeight.Text, out int height) || height <= 0)
+                {
+                    MessageBox.Show("请输入有效的高度值（大于0）", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    _txtHeight.Focus();
+                    return;
+                }
+
+                // 获取相机最大分辨率进行验证
+                var (maxWidth, maxHeight) = CameraManager.GetMaxResolution();
+                if (maxWidth > 0 && maxHeight > 0)
+                {
+                    if (offsetX + width > maxWidth)
+                    {
+                        MessageBox.Show($"ROI超出范围：X偏移+宽度({offsetX + width}) 超过相机最大宽度({maxWidth})", 
+                                      "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+
+                    if (offsetY + height > maxHeight)
+                    {
+                        MessageBox.Show($"ROI超出范围：Y偏移+高度({offsetY + height}) 超过相机最大高度({maxHeight})", 
+                                      "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                }
+
+                // 停止采集
+                bool wasGrabbing = CameraManager.ActiveDevice.IsGrabbing;
+                if (wasGrabbing)
+                    CameraManager.StopGrabbing();
+
+                // 应用ROI设置
+                bool success = CameraManager.SetROI(offsetX, offsetY, width, height);
+
+                // 恢复采集
+                if (wasGrabbing)
+                    CameraManager.StartGrabbing();
+
+                if (success)
+                {
+                    // 更新UI显示为实际设置的ROI值（可能会因为对齐要求被调整）
+                    UpdateROIControls();
+                    
+                    // 获取实际设置的ROI值用于消息显示
+                    var (actualX, actualY, actualWidth, actualHeight) = CameraManager.GetROI();
+                    if (actualWidth > 0 && actualHeight > 0)
+                    {
+                        if (actualX != offsetX || actualY != offsetY || actualWidth != width || actualHeight != height)
+                        {
+                            MessageBox.Show($"ROI设置成功！\n" +
+                                          $"输入值: ({offsetX}, {offsetY}, {width}, {height})\n" +
+                                          $"实际值: ({actualX}, {actualY}, {actualWidth}, {actualHeight})\n" +
+                                          $"注意：实际值可能因对齐要求被调整", 
+                                          "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        else
+                        {
+                            MessageBox.Show($"ROI设置成功！\n值: ({actualX}, {actualY}, {actualWidth}, {actualHeight})", 
+                                          "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    }
+                    else
+                    {
+                        MessageBox.Show("ROI设置成功！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("ROI设置失败，请检查输入的数值是否合理", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"应用ROI失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
         
         private void BtnSyncROI_Click(object sender, EventArgs e)
         {
@@ -813,6 +936,259 @@ namespace MultiCameraTest
                 Console.WriteLine($"UpdateROIControls异常: {ex.Message}");
             }
         }
+
+        private void InitializeUserSetDisplay()
+        {
+            try
+            {
+                if (CameraManager?.ActiveDevice == null)
+                {
+                    Console.WriteLine("InitializeUserSetDisplay: 相机未连接");
+                    return;
+                }
+
+                // 获取当前用户集设置
+                int currentUserSet = CameraManager.GetCurrentUserSet();
+                if (currentUserSet >= 1 && currentUserSet <= 3)
+                {
+                    _comboUserSet.SelectedIndex = currentUserSet - 1; // 转换为0-2的索引
+                    Console.WriteLine($"当前用户集: {currentUserSet}");
+                }
+                else
+                {
+                    // 如果获取失败，默认选择用户集1
+                    _comboUserSet.SelectedIndex = 0;
+                    Console.WriteLine("获取当前用户集失败，默认选择用户集1");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"InitializeUserSetDisplay异常: {ex.Message}");
+                // 异常时默认选择用户集1
+                _comboUserSet.SelectedIndex = 0;
+            }
+        }
+
+        #region 用户集事件处理
+
+        private void ComboUserSet_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                    return;
+
+                int selectedIndex = _comboUserSet.SelectedIndex + 1; // 转换为1-3的索引
+                Console.WriteLine($"用户集选择改变为: 用户集{selectedIndex}");
+                
+                // 设置用户集选择器
+                bool success = CameraManager.SetUserSetSelector(selectedIndex);
+                if (success)
+                {
+                    UpdateStatus($"当前选择用户集{selectedIndex}");
+                }
+                else
+                {
+                    UpdateStatus($"切换到用户集{selectedIndex}失败");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"选择用户集失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnLoadUserSet_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                int selectedIndex = _comboUserSet.SelectedIndex + 1; // 转换为1-3的索引
+                if (selectedIndex < 1 || selectedIndex > 3)
+                {
+                    MessageBox.Show("请选择有效的用户集", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                bool success = CameraManager.LoadUserSet(selectedIndex);
+                if (success)
+                {
+                    MessageBox.Show($"用户集{selectedIndex}加载成功", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    
+                    // 重新初始化参数显示
+                    InitializeParameterDisplay();
+                    UpdateStatus($"已加载用户集{selectedIndex}");
+                }
+                else
+                {
+                    MessageBox.Show($"用户集{selectedIndex}加载失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    UpdateStatus($"加载用户集{selectedIndex}失败");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"加载用户集失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnSaveUserSet_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                int selectedIndex = _comboUserSet.SelectedIndex + 1; // 转换为1-3的索引
+                if (selectedIndex < 1 || selectedIndex > 3)
+                {
+                    MessageBox.Show("请选择有效的用户集", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var result = MessageBox.Show($"确定要将当前参数保存到用户集{selectedIndex}吗？\n这将覆盖该用户集中已保存的参数。", 
+                                           "确认保存", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                
+                if (result == DialogResult.Yes)
+                {
+                    bool success = CameraManager.SaveToUserSet(selectedIndex);
+                    if (success)
+                    {
+                        MessageBox.Show($"参数已保存到用户集{selectedIndex}", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        UpdateStatus($"已保存到用户集{selectedIndex}");
+                    }
+                    else
+                    {
+                        MessageBox.Show($"保存到用户集{selectedIndex}失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        UpdateStatus($"保存到用户集{selectedIndex}失败");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"保存用户集失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnSetDefault_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                int selectedIndex = _comboUserSet.SelectedIndex + 1; // 转换为1-3的索引
+                if (selectedIndex < 1 || selectedIndex > 3)
+                {
+                    MessageBox.Show("请选择有效的用户集", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var result = MessageBox.Show($"确定要将用户集{selectedIndex}设为默认用户集吗？\n相机重启后将自动加载此用户集的参数。", 
+                                           "确认设置", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                
+                if (result == DialogResult.Yes)
+                {
+                    bool success = CameraManager.SetUserSetDefault(selectedIndex);
+                    if (success)
+                    {
+                        MessageBox.Show($"用户集{selectedIndex}已设为默认", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        UpdateStatus($"用户集{selectedIndex}已设为默认");
+                    }
+                    else
+                    {
+                        MessageBox.Show($"设置默认用户集失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        UpdateStatus("设置默认用户集失败");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"设置默认用户集失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnSyncCurrentUserSet_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                int selectedIndex = _comboUserSet.SelectedIndex + 1; // 转换为1-3的索引
+                if (selectedIndex < 1 || selectedIndex > 3)
+                {
+                    MessageBox.Show("请选择有效的用户集", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var result = MessageBox.Show($"确定要将当前选择的用户集{selectedIndex}同步到其他所有相机吗？", 
+                                           "确认同步", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                
+                if (result == DialogResult.Yes)
+                {
+                    // 调用Form1的同步方法
+                    _mainForm.SyncCurrentUserSetToOtherCameras(this, selectedIndex);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"同步当前用户集失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnSyncDefaultUserSet_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                int selectedIndex = _comboUserSet.SelectedIndex + 1; // 转换为1-3的索引
+                if (selectedIndex < 1 || selectedIndex > 3)
+                {
+                    MessageBox.Show("请选择有效的用户集", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var result = MessageBox.Show($"确定要将用户集{selectedIndex}设为所有相机的默认用户集吗？\n这将影响所有相机重启后的默认参数。", 
+                                           "确认同步", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                
+                if (result == DialogResult.Yes)
+                {
+                    // 调用Form1的同步方法
+                    _mainForm.SyncDefaultUserSetToOtherCameras(this, selectedIndex);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"同步默认用户集失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void UpdateStatus(string message)
+        {
+            // 这里可以更新状态显示，如果有状态栏的话
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {message}");
+        }
+
+        #endregion
         
         #endregion
 

@@ -253,6 +253,40 @@ namespace DLCV.Camera
         /// </summary>
         /// <returns>是否保存成功</returns>
         bool SaveToUserSet1();
+
+        /// <summary>
+        /// 设置用户集选择器
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否设置成功</returns>
+        bool SetUserSetSelector(int userSetIndex);
+
+        /// <summary>
+        /// 设置默认用户集
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否设置成功</returns>
+        bool SetUserSetDefault(int userSetIndex);
+
+        /// <summary>
+        /// 加载指定用户集
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否加载成功</returns>
+        bool LoadUserSet(int userSetIndex);
+
+        /// <summary>
+        /// 保存参数到指定用户集
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否保存成功</returns>
+        bool SaveToUserSet(int userSetIndex);
+
+        /// <summary>
+        /// 获取当前选中的用户集索引
+        /// </summary>
+        /// <returns>用户集索引，失败返回-1</returns>
+        int GetCurrentUserSet();
     }
 
     #endregion
@@ -1616,6 +1650,303 @@ namespace DLCV.Camera
         }
 
         /// <summary>
+        /// 设置用户集选择器
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetUserSetSelector(int userSetIndex)
+        {
+            if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("SetUserSetSelector: 设备未打开");
+                return false;
+            }
+
+            if (userSetIndex < 1 || userSetIndex > 3)
+            {
+                Console.WriteLine($"SetUserSetSelector: 用户集索引无效 {userSetIndex}，必须在1-3之间");
+                return false;
+            }
+
+            try
+            {
+                string userSetName = $"UserSet{userSetIndex}";
+                Console.WriteLine($"设置用户集选择器为 {userSetName}...");
+                
+                int result = _device.Parameters.SetEnumValueByString("UserSetSelector", userSetName);
+                Console.WriteLine($"SetEnumValueByString UserSetSelector={userSetName} 结果: 0x{result:X8}");
+                
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine($"用户集选择器设置为 {userSetName} 成功");
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine($"用户集选择器设置为 {userSetName} 失败");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"SetUserSetSelector异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 设置默认用户集
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetUserSetDefault(int userSetIndex)
+        {
+            if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("SetUserSetDefault: 设备未打开");
+                return false;
+            }
+
+            if (userSetIndex < 1 || userSetIndex > 3)
+            {
+                Console.WriteLine($"SetUserSetDefault: 用户集索引无效 {userSetIndex}，必须在1-3之间");
+                return false;
+            }
+
+            try
+            {
+                string userSetName = $"UserSet{userSetIndex}";
+                Console.WriteLine($"设置默认用户集为 {userSetName}...");
+                
+                int result = _device.Parameters.SetEnumValueByString("UserSetDefault", userSetName);
+                Console.WriteLine($"SetEnumValueByString UserSetDefault={userSetName} 结果: 0x{result:X8}");
+                
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine($"默认用户集设置为 {userSetName} 成功");
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine($"默认用户集设置为 {userSetName} 失败");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"SetUserSetDefault异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 加载指定用户集
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否加载成功</returns>
+        public bool LoadUserSet(int userSetIndex)
+        {
+            if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("LoadUserSet: 设备未打开");
+                return false;
+            }
+
+            if (userSetIndex < 1 || userSetIndex > 3)
+            {
+                Console.WriteLine($"LoadUserSet: 用户集索引无效 {userSetIndex}，必须在1-3之间");
+                return false;
+            }
+
+            try
+            {
+                string userSetName = $"UserSet{userSetIndex}";
+                Console.WriteLine($"加载用户集 {userSetName}...");
+                
+                // 检查是否正在采集，如果是则停止采集
+                bool wasGrabbing = IsGrabbing;
+                if (wasGrabbing)
+                {
+                    Console.WriteLine("停止采集以加载用户集...");
+                    StopGrabbing();
+                    Thread.Sleep(100); // 等待停止完成
+                }
+                
+                // 首先选择用户集
+                int result = _device.Parameters.SetEnumValueByString("UserSetSelector", userSetName);
+                Console.WriteLine($"SetEnumValueByString UserSetSelector={userSetName} 结果: 0x{result:X8}");
+                if (result != MvError.MV_OK)
+                {
+                    Console.WriteLine($"选择用户集 {userSetName} 失败");
+                    // 恢复采集
+                    if (wasGrabbing)
+                    {
+                        StartGrabbing();
+                    }
+                    return false;
+                }
+
+                // 加载用户集
+                result = _device.Parameters.SetCommandValue("UserSetLoad");
+                Console.WriteLine($"SetCommandValue UserSetLoad 结果: 0x{result:X8}");
+                
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine($"用户集 {userSetName} 加载成功");
+                    
+                    // 恢复采集
+                    if (wasGrabbing)
+                    {
+                        Console.WriteLine("恢复采集...");
+                        StartGrabbing();
+                    }
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine($"用户集 {userSetName} 加载失败，错误代码: 0x{result:X8}");
+                    // 恢复采集
+                    if (wasGrabbing)
+                    {
+                        StartGrabbing();
+                    }
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"LoadUserSet异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 保存参数到指定用户集
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否保存成功</returns>
+        public bool SaveToUserSet(int userSetIndex)
+        {
+            if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("SaveToUserSet: 设备未打开");
+                return false;
+            }
+
+            if (userSetIndex < 1 || userSetIndex > 3)
+            {
+                Console.WriteLine($"SaveToUserSet: 用户集索引无效 {userSetIndex}，必须在1-3之间");
+                return false;
+            }
+
+            try
+            {
+                string userSetName = $"UserSet{userSetIndex}";
+                Console.WriteLine($"保存参数到用户集 {userSetName}...");
+                
+                // 检查是否正在采集，如果是则停止采集
+                bool wasGrabbing = IsGrabbing;
+                if (wasGrabbing)
+                {
+                    Console.WriteLine("停止采集以保存用户集...");
+                    StopGrabbing();
+                    Thread.Sleep(100); // 等待停止完成
+                }
+                
+                // 首先选择用户集
+                int result = _device.Parameters.SetEnumValueByString("UserSetSelector", userSetName);
+                Console.WriteLine($"SetEnumValueByString UserSetSelector={userSetName} 结果: 0x{result:X8}");
+                if (result != MvError.MV_OK)
+                {
+                    Console.WriteLine($"选择用户集 {userSetName} 失败");
+                    // 恢复采集
+                    if (wasGrabbing)
+                    {
+                        StartGrabbing();
+                    }
+                    return false;
+                }
+
+                // 保存参数
+                result = _device.Parameters.SetCommandValue("UserSetSave");
+                Console.WriteLine($"SetCommandValue UserSetSave 结果: 0x{result:X8}");
+                
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine($"参数保存到用户集 {userSetName} 成功");
+                    // 恢复采集
+                    if (wasGrabbing)
+                    {
+                        Console.WriteLine("恢复采集...");
+                        StartGrabbing();
+                    }
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine($"参数保存到用户集 {userSetName} 失败，错误代码: 0x{result:X8}");
+                    // 恢复采集
+                    if (wasGrabbing)
+                    {
+                        StartGrabbing();
+                    }
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"SaveToUserSet异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取当前选中的用户集索引
+        /// </summary>
+        /// <returns>用户集索引，失败返回-1</returns>
+        public int GetCurrentUserSet()
+        {
+            if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("GetCurrentUserSet: 设备未打开");
+                return -1;
+            }
+
+            try
+            {
+                Console.WriteLine("获取当前用户集...");
+                
+                IEnumValue enumValue;
+                int result = _device.Parameters.GetEnumValue("UserSetSelector", out enumValue);
+                Console.WriteLine($"GetEnumValue UserSetSelector 结果: 0x{result:X8}");
+                
+                if (result == MvError.MV_OK)
+                {
+                    string currentUserSet = enumValue.CurEnumEntry.Symbolic;
+                    Console.WriteLine($"当前用户集: {currentUserSet}");
+                    
+                    // 解析用户集名称获取索引
+                    if (currentUserSet == "UserSet1") return 1;
+                    if (currentUserSet == "UserSet2") return 2;
+                    if (currentUserSet == "UserSet3") return 3;
+                    
+                    Console.WriteLine($"未知的用户集名称: {currentUserSet}");
+                    return -1;
+                }
+                else
+                {
+                    Console.WriteLine("获取当前用户集失败");
+                    return -1;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"GetCurrentUserSet异常: {ex.Message}");
+                return -1;
+            }
+        }
+
+        /// <summary>
         /// 释放资源
         /// </summary>
         public void Dispose()
@@ -2043,6 +2374,123 @@ namespace DLCV.Camera
         {
             ImageCaptured?.Invoke(this, e);
         }
+
+        #region 用户集管理方法
+
+        /// <summary>
+        /// 设置用户集选择器
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetUserSetSelector(int userSetIndex)
+        {
+            if (_activeDevice == null)
+            {
+                Console.WriteLine("SetUserSetSelector: 无活动设备");
+                return false;
+            }
+            
+            return _activeDevice.SetUserSetSelector(userSetIndex);
+        }
+
+        /// <summary>
+        /// 设置默认用户集
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetUserSetDefault(int userSetIndex)
+        {
+            if (_activeDevice == null)
+            {
+                Console.WriteLine("SetUserSetDefault: 无活动设备");
+                return false;
+            }
+            
+            return _activeDevice.SetUserSetDefault(userSetIndex);
+        }
+
+        /// <summary>
+        /// 加载指定用户集
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否加载成功</returns>
+        public bool LoadUserSet(int userSetIndex)
+        {
+            if (_activeDevice == null)
+            {
+                Console.WriteLine("LoadUserSet: 无活动设备");
+                return false;
+            }
+            
+            // 检查是否正在采集，如果是则需要停止
+            bool wasGrabbing = _activeDevice.IsGrabbing;
+            if (wasGrabbing)
+            {
+                Console.WriteLine("CameraManager: 停止采集以加载用户集...");
+                StopGrabbing();
+            }
+            
+            bool result = _activeDevice.LoadUserSet(userSetIndex);
+            
+            // 恢复采集状态
+            if (wasGrabbing && result)
+            {
+                Console.WriteLine("CameraManager: 恢复采集...");
+                StartGrabbing();
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// 保存参数到指定用户集
+        /// </summary>
+        /// <param name="userSetIndex">用户集索引(1-3)</param>
+        /// <returns>是否保存成功</returns>
+        public bool SaveToUserSet(int userSetIndex)
+        {
+            if (_activeDevice == null)
+            {
+                Console.WriteLine("SaveToUserSet: 无活动设备");
+                return false;
+            }
+            
+            // 检查是否正在采集，如果是则需要停止
+            bool wasGrabbing = _activeDevice.IsGrabbing;
+            if (wasGrabbing)
+            {
+                Console.WriteLine("CameraManager: 停止采集以保存用户集...");
+                StopGrabbing();
+            }
+            
+            bool result = _activeDevice.SaveToUserSet(userSetIndex);
+            
+            // 恢复采集状态
+            if (wasGrabbing)
+            {
+                Console.WriteLine("CameraManager: 恢复采集...");
+                StartGrabbing();
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// 获取当前选中的用户集索引
+        /// </summary>
+        /// <returns>用户集索引，失败返回-1</returns>
+        public int GetCurrentUserSet()
+        {
+            if (_activeDevice == null)
+            {
+                Console.WriteLine("GetCurrentUserSet: 无活动设备");
+                return -1;
+            }
+            
+            return _activeDevice.GetCurrentUserSet();
+        }
+
+        #endregion
 
         /// <summary>
         /// 释放资源

@@ -66,9 +66,18 @@ namespace MultiCameraTest
             this._lblHeight = new System.Windows.Forms.Label();
             this._txtHeight = new System.Windows.Forms.TextBox();
             this._btnSetROI = new System.Windows.Forms.Button();
+            this._btnApplyROI = new System.Windows.Forms.Button();
             this._btnSyncROI = new System.Windows.Forms.Button();
             this._btnRestoreROI = new System.Windows.Forms.Button();
             this._lblROITip = new System.Windows.Forms.Label();
+            this._groupUserSet = new System.Windows.Forms.GroupBox();
+            this._lblUserSet = new System.Windows.Forms.Label();
+            this._comboUserSet = new System.Windows.Forms.ComboBox();
+            this._btnLoadUserSet = new System.Windows.Forms.Button();
+            this._btnSaveUserSet = new System.Windows.Forms.Button();
+            this._btnSetDefault = new System.Windows.Forms.Button();
+            this._btnSyncCurrentUserSet = new System.Windows.Forms.Button();
+            this._btnSyncDefaultUserSet = new System.Windows.Forms.Button();
             this._pictureBox = new System.Windows.Forms.PictureBox();
             this.mainLayout.SuspendLayout();
             this.controlsPanel.SuspendLayout();
@@ -76,6 +85,7 @@ namespace MultiCameraTest
             this._groupExposure.SuspendLayout();
             this._groupWhiteBalance.SuspendLayout();
             this._groupROI.SuspendLayout();
+            this._groupUserSet.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this._pictureBox)).BeginInit();
             this.SuspendLayout();
             // 
@@ -97,15 +107,17 @@ namespace MultiCameraTest
             // 
             // controlsPanel
             // 
-            this.controlsPanel.ColumnCount = 4;
-            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.controlsPanel.ColumnCount = 5;
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
             this.controlsPanel.Controls.Add(this._groupCamera, 0, 0);
             this.controlsPanel.Controls.Add(this._groupExposure, 1, 0);
             this.controlsPanel.Controls.Add(this._groupWhiteBalance, 2, 0);
             this.controlsPanel.Controls.Add(this._groupROI, 3, 0);
+            this.controlsPanel.Controls.Add(this._groupUserSet, 4, 0);
             this.controlsPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.controlsPanel.Location = new System.Drawing.Point(5, 5);
             this.controlsPanel.Margin = new System.Windows.Forms.Padding(5);
@@ -396,6 +408,7 @@ namespace MultiCameraTest
             this._groupROI.Controls.Add(this._lblHeight);
             this._groupROI.Controls.Add(this._txtHeight);
             this._groupROI.Controls.Add(this._btnSetROI);
+            this._groupROI.Controls.Add(this._btnApplyROI);
             this._groupROI.Controls.Add(this._btnSyncROI);
             this._groupROI.Controls.Add(this._btnRestoreROI);
             this._groupROI.Controls.Add(this._lblROITip);
@@ -477,24 +490,33 @@ namespace MultiCameraTest
             this._btnSetROI.Name = "_btnSetROI";
             this._btnSetROI.Size = new System.Drawing.Size(70, 23);
             this._btnSetROI.TabIndex = 8;
-            this._btnSetROI.Text = "设置ROI";
+            this._btnSetROI.Text = "画框ROI";
             this._btnSetROI.UseVisualStyleBackColor = true;
+            // 
+            // _btnApplyROI
+            // 
+            this._btnApplyROI.Location = new System.Drawing.Point(84, 73);
+            this._btnApplyROI.Name = "_btnApplyROI";
+            this._btnApplyROI.Size = new System.Drawing.Size(70, 23);
+            this._btnApplyROI.TabIndex = 9;
+            this._btnApplyROI.Text = "应用ROI";
+            this._btnApplyROI.UseVisualStyleBackColor = true;
             // 
             // _btnSyncROI
             // 
-            this._btnSyncROI.Location = new System.Drawing.Point(84, 73);
+            this._btnSyncROI.Location = new System.Drawing.Point(8, 100);
             this._btnSyncROI.Name = "_btnSyncROI";
             this._btnSyncROI.Size = new System.Drawing.Size(70, 23);
-            this._btnSyncROI.TabIndex = 9;
+            this._btnSyncROI.TabIndex = 10;
             this._btnSyncROI.Text = "同步ROI";
             this._btnSyncROI.UseVisualStyleBackColor = true;
             // 
             // _btnRestoreROI
             // 
-            this._btnRestoreROI.Location = new System.Drawing.Point(160, 73);
+            this._btnRestoreROI.Location = new System.Drawing.Point(84, 100);
             this._btnRestoreROI.Name = "_btnRestoreROI";
             this._btnRestoreROI.Size = new System.Drawing.Size(70, 23);
-            this._btnRestoreROI.TabIndex = 10;
+            this._btnRestoreROI.TabIndex = 11;
             this._btnRestoreROI.Text = "还原ROI";
             this._btnRestoreROI.UseVisualStyleBackColor = true;
             // 
@@ -503,11 +525,96 @@ namespace MultiCameraTest
             this._lblROITip.AutoSize = true;
             this._lblROITip.Font = new System.Drawing.Font("宋体", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this._lblROITip.ForeColor = System.Drawing.Color.Gray;
-            this._lblROITip.Location = new System.Drawing.Point(6, 106);
+            this._lblROITip.Location = new System.Drawing.Point(6, 128);
             this._lblROITip.Name = "_lblROITip";
             this._lblROITip.Size = new System.Drawing.Size(165, 11);
-            this._lblROITip.TabIndex = 11;
-            this._lblROITip.Text = "提示: 点击设置ROI可画框选择区域";
+            this._lblROITip.TabIndex = 12;
+            this._lblROITip.Text = "提示: 画框ROI或手动输入数值后应用";
+            // 
+            // _groupUserSet
+            // 
+            this._groupUserSet.Controls.Add(this._lblUserSet);
+            this._groupUserSet.Controls.Add(this._comboUserSet);
+            this._groupUserSet.Controls.Add(this._btnLoadUserSet);
+            this._groupUserSet.Controls.Add(this._btnSaveUserSet);
+            this._groupUserSet.Controls.Add(this._btnSetDefault);
+            this._groupUserSet.Controls.Add(this._btnSyncCurrentUserSet);
+            this._groupUserSet.Controls.Add(this._btnSyncDefaultUserSet);
+            this._groupUserSet.Dock = System.Windows.Forms.DockStyle.Fill;
+            this._groupUserSet.Location = new System.Drawing.Point(800, 5);
+            this._groupUserSet.Margin = new System.Windows.Forms.Padding(5);
+            this._groupUserSet.Name = "_groupUserSet";
+            this._groupUserSet.Size = new System.Drawing.Size(185, 145);
+            this._groupUserSet.TabIndex = 4;
+            this._groupUserSet.TabStop = false;
+            this._groupUserSet.Text = "用户集";
+            // 
+            // _lblUserSet
+            // 
+            this._lblUserSet.AutoSize = true;
+            this._lblUserSet.Location = new System.Drawing.Point(6, 18);
+            this._lblUserSet.Name = "_lblUserSet";
+            this._lblUserSet.Size = new System.Drawing.Size(59, 12);
+            this._lblUserSet.TabIndex = 0;
+            this._lblUserSet.Text = "用户集:";
+            // 
+            // _comboUserSet
+            // 
+            this._comboUserSet.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this._comboUserSet.FormattingEnabled = true;
+            this._comboUserSet.Items.AddRange(new object[] {
+            "用户集1",
+            "用户集2",
+            "用户集3"});
+            this._comboUserSet.Location = new System.Drawing.Point(71, 15);
+            this._comboUserSet.Name = "_comboUserSet";
+            this._comboUserSet.Size = new System.Drawing.Size(100, 20);
+            this._comboUserSet.TabIndex = 1;
+            // 
+            // _btnLoadUserSet
+            // 
+            this._btnLoadUserSet.Location = new System.Drawing.Point(8, 45);
+            this._btnLoadUserSet.Name = "_btnLoadUserSet";
+            this._btnLoadUserSet.Size = new System.Drawing.Size(70, 23);
+            this._btnLoadUserSet.TabIndex = 2;
+            this._btnLoadUserSet.Text = "加载";
+            this._btnLoadUserSet.UseVisualStyleBackColor = true;
+            // 
+            // _btnSaveUserSet
+            // 
+            this._btnSaveUserSet.Location = new System.Drawing.Point(88, 45);
+            this._btnSaveUserSet.Name = "_btnSaveUserSet";
+            this._btnSaveUserSet.Size = new System.Drawing.Size(70, 23);
+            this._btnSaveUserSet.TabIndex = 3;
+            this._btnSaveUserSet.Text = "保存";
+            this._btnSaveUserSet.UseVisualStyleBackColor = true;
+            // 
+            // _btnSetDefault
+            // 
+            this._btnSetDefault.Location = new System.Drawing.Point(8, 75);
+            this._btnSetDefault.Name = "_btnSetDefault";
+            this._btnSetDefault.Size = new System.Drawing.Size(70, 23);
+            this._btnSetDefault.TabIndex = 4;
+            this._btnSetDefault.Text = "设为默认";
+            this._btnSetDefault.UseVisualStyleBackColor = true;
+            // 
+            // _btnSyncCurrentUserSet
+            // 
+            this._btnSyncCurrentUserSet.Location = new System.Drawing.Point(88, 75);
+            this._btnSyncCurrentUserSet.Name = "_btnSyncCurrentUserSet";
+            this._btnSyncCurrentUserSet.Size = new System.Drawing.Size(70, 23);
+            this._btnSyncCurrentUserSet.TabIndex = 5;
+            this._btnSyncCurrentUserSet.Text = "同步选择";
+            this._btnSyncCurrentUserSet.UseVisualStyleBackColor = true;
+            // 
+            // _btnSyncDefaultUserSet
+            // 
+            this._btnSyncDefaultUserSet.Location = new System.Drawing.Point(8, 105);
+            this._btnSyncDefaultUserSet.Name = "_btnSyncDefaultUserSet";
+            this._btnSyncDefaultUserSet.Size = new System.Drawing.Size(150, 23);
+            this._btnSyncDefaultUserSet.TabIndex = 6;
+            this._btnSyncDefaultUserSet.Text = "同步默认";
+            this._btnSyncDefaultUserSet.UseVisualStyleBackColor = true;
             // 
             // _pictureBox
             // 
@@ -537,6 +644,8 @@ namespace MultiCameraTest
             this._groupWhiteBalance.PerformLayout();
             this._groupROI.ResumeLayout(false);
             this._groupROI.PerformLayout();
+            this._groupUserSet.ResumeLayout(false);
+            this._groupUserSet.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this._pictureBox)).EndInit();
             this.ResumeLayout(false);
 
@@ -582,9 +691,18 @@ namespace MultiCameraTest
         private System.Windows.Forms.Label _lblHeight;
         internal System.Windows.Forms.TextBox _txtHeight;
         private System.Windows.Forms.Button _btnSetROI;
+        private System.Windows.Forms.Button _btnApplyROI;
         private System.Windows.Forms.Button _btnSyncROI;
         private System.Windows.Forms.Button _btnRestoreROI;
         private System.Windows.Forms.Label _lblROITip;
+        private System.Windows.Forms.GroupBox _groupUserSet;
+        private System.Windows.Forms.Label _lblUserSet;
+        internal System.Windows.Forms.ComboBox _comboUserSet;
+        private System.Windows.Forms.Button _btnLoadUserSet;
+        private System.Windows.Forms.Button _btnSaveUserSet;
+        private System.Windows.Forms.Button _btnSetDefault;
+        private System.Windows.Forms.Button _btnSyncCurrentUserSet;
+        private System.Windows.Forms.Button _btnSyncDefaultUserSet;
         private System.Windows.Forms.PictureBox _pictureBox;
     }
 } 
