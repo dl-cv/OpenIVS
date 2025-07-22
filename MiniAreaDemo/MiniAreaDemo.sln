@@ -1,11 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.13.35931.197 d17.13
+VisualStudioVersion = 17.13.35931.197
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniAreaDemo", "MiniAreaDemo.csproj", "{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCsharpApi", "..\..\PrintMatch\DlcvCsharpApi\DlcvCsharpApi.csproj", "{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCsharpApi", "..\DlcvCsharpApi\DlcvCsharpApi.csproj", "{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

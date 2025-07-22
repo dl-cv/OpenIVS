@@ -88,11 +88,11 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-     <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
-       <Project>{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}</Project>
-       <Name>DlcvCsharpApi</Name>
-     </ProjectReference>
-   </ItemGroup>
+    <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
+      <Project>{73d82dbe-59d3-46f9-a8b3-87e13eb220ec}</Project>
+      <Name>DlcvCsharpApi</Name>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
