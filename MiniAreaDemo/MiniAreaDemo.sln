@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35931.197
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniAreaDemo", "MiniAreaDemo.csproj", "{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCsharpApi", "..\DlcvCsharpApi\DlcvCsharpApi.csproj", "{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}.Debug|x64.ActiveCfg = Debug|x64
+		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}.Debug|x64.Build.0 = Debug|x64
+		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}.Release|x64.ActiveCfg = Release|x64
+		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}.Release|x64.Build.0 = Release|x64
+		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Debug|x64.ActiveCfg = Debug|x64
+		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Debug|x64.Build.0 = Debug|x64
+		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Release|x64.ActiveCfg = Release|x64
+		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {46F53EB6-FA4D-4B28-9AAF-D82BACEF1664}
+	EndGlobalSection
+EndGlobal
