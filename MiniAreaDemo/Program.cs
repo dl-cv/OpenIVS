@@ -395,50 +395,106 @@ namespace MiniAreaDemo
             try
             {
                 // 输入文件路径
-                string imagePath = @"C:\Users\Administrator\Desktop\20250718150607902_origin.png";
-                string modelPath = @"C:\Users\Administrator\Desktop\贴子轮廓检测-语义分割_20250722_112221.dvt";
+                string imageDir = @"C:\Users\Administrator\Desktop\标签识别\4-后处理测试";
+                string modelPath = @"C:\Users\Administrator\Desktop\标签识别\002.dvt";
 
                 Console.WriteLine("开始处理...");
+                Console.WriteLine($"处理目录: {imageDir}");
+                Console.WriteLine($"模型路径: {modelPath}");
+
+                // 检查目录是否存在
+                if (!Directory.Exists(imageDir))
+                {
+                    Console.WriteLine($"目录不存在: {imageDir}");
+                    return;
+                }
+
+                // 获取所有图像文件
+                string[] imageExtensions = { "*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff", "*.tif" };
+                List<string> imageFiles = new List<string>();
+                
+                foreach (string extension in imageExtensions)
+                {
+                    imageFiles.AddRange(Directory.GetFiles(imageDir, extension, SearchOption.TopDirectoryOnly));
+                }
+
+                Console.WriteLine($"找到 {imageFiles.Count} 个图像文件");
+
+                if (imageFiles.Count == 0)
+                {
+                    Console.WriteLine("未找到图像文件");
+                    return;
+                }
 
                 // 创建处理器实例
                 ILabelProcessor processor = new LabelProcessor();
-
-                // 处理图像
-                var results = processor.ProcessLabels(imagePath, modelPath);
-
-                Console.WriteLine($"处理完成，共检测到 {results.Count} 个标签纸");
 
                 // 创建输出目录
                 string outputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "processed_images");
                 Directory.CreateDirectory(outputDir);
 
-                // 处理结果
-                for (int i = 0; i < results.Count; i++)
+                int totalProcessed = 0;
+                int totalLabels = 0;
+
+                // 处理每个图像文件
+                for (int fileIndex = 0; fileIndex < imageFiles.Count; fileIndex++)
                 {
-                    var result = results[i];
-                    Console.WriteLine($"\n=== 标签纸 {i} ===");
-                    Console.WriteLine($"角度: {result.Angle * 180 / Math.PI:F2}度");
+                    string imagePath = imageFiles[fileIndex];
+                    string fileName = Path.GetFileNameWithoutExtension(imagePath);
                     
-                    // 打印四边形顶点
-                    Console.WriteLine("四边形顶点:");
-                    for (int j = 0; j < result.QuadPoints.Length; j++)
+                    Console.WriteLine($"\n{new string('=', 50)}");
+                    Console.WriteLine($"处理图像 {fileIndex + 1}/{imageFiles.Count}: {fileName}");
+                    Console.WriteLine($"图像路径: {imagePath}");
+
+                    try
                     {
-                        Console.WriteLine($"  点{j}: ({result.QuadPoints[j].X:F1}, {result.QuadPoints[j].Y:F1})");
+                        // 处理图像
+                        var results = processor.ProcessLabels(imagePath, modelPath);
+
+                        Console.WriteLine($"检测到 {results.Count} 个标签纸");
+
+                        // 处理结果
+                        for (int i = 0; i < results.Count; i++)
+                        {
+                            var result = results[i];
+                            Console.WriteLine($"\n--- 标签纸 {i} ---");
+                            Console.WriteLine($"角度: {result.Angle * 180 / Math.PI:F2}度");
+                            
+                            // 打印四边形顶点
+                            Console.WriteLine("四边形顶点:");
+                            for (int j = 0; j < result.QuadPoints.Length; j++)
+                            {
+                                Console.WriteLine($"  点{j}: ({result.QuadPoints[j].X:F1}, {result.QuadPoints[j].Y:F1})");
+                            }
+                            
+                            // 保存处理后的图像
+                            string outputPath = Path.Combine(outputDir, $"{fileName}_label_{i}.png");
+                            Cv2.ImWrite(outputPath, result.ProcessedImage);
+                            Console.WriteLine($"已保存处理后的图像: {outputPath}");
+                            Console.WriteLine($"图像尺寸: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
+                        }
+
+                        // 清理资源
+                        foreach (var result in results)
+                        {
+                            result.ProcessedImage?.Dispose();
+                            result.MaskInfo?.Mask?.Dispose();
+                        }
+
+                        totalProcessed++;
+                        totalLabels += results.Count;
                     }
-                    
-                    // 保存处理后的图像
-                    string outputPath = Path.Combine(outputDir, $"processed_label_{i}.png");
-                    Cv2.ImWrite(outputPath, result.ProcessedImage);
-                    Console.WriteLine($"已保存处理后的图像: {outputPath}");
-                    Console.WriteLine($"图像尺寸: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"处理图像 {fileName} 时发生错误: {ex.Message}");
+                    }
                 }
 
-                // 清理资源
-                foreach (var result in results)
-                {
-                    result.ProcessedImage?.Dispose();
-                    result.MaskInfo?.Mask?.Dispose();
-                }
+                Console.WriteLine($"\n{new string('=', 50)}");
+                Console.WriteLine($"处理完成!");
+                Console.WriteLine($"成功处理图像: {totalProcessed}/{imageFiles.Count}");
+                Console.WriteLine($"总共检测到标签纸: {totalLabels} 个");
+                Console.WriteLine($"输出目录: {outputDir}");
             }
             catch (Exception ex)
             {
@@ -446,7 +502,7 @@ namespace MiniAreaDemo
                 Console.WriteLine($"堆栈: {ex.StackTrace}");
             }
 
-            Console.WriteLine("按任意键退出...");
+            Console.WriteLine("\n按任意键退出...");
             Console.ReadKey();
         }
     }
