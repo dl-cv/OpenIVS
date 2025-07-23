@@ -239,7 +239,7 @@ namespace DlcvDemo
             }
 
             JObject data = new JObject();
-            data["threshold"] = float.Parse(textBox_threshold.Text);
+            data["threshold"] = (float)numericUpDown_threshold.Value;
             data["with_mask"] = true;
 
             Stopwatch stopwatch = new Stopwatch();
