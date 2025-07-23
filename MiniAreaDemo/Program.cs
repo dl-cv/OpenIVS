@@ -81,23 +81,17 @@ namespace MiniAreaDemo
         }
     }
 
-    // Update the `ILabelProcessor` interface to inherit from `IDisposable`  
+    /// <summary>
+    /// 标签纸处理接口
+    /// </summary>
     public interface ILabelProcessor : IDisposable
     {
-        /// <summary>  
-        /// 处理图像中的标签纸  
-        /// </summary>  
-        /// <param name="imagePath">输入图像路径</param>  
-        /// <param name="modelPath">模型路径</param>  
-        /// <returns>处理结果列表</returns>  
-        DisposableProcessingResults ProcessLabels(string imagePath, string modelPath);
-
-        /// <summary>  
-        /// 处理图像中的标签纸（使用Mat对象）  
-        /// </summary>  
-        /// <param name="image">输入图像</param>  
-        /// <param name="modelPath">模型路径</param>  
-        /// <returns>处理结果列表</returns>  
+        /// <summary>
+        /// 处理图像中的标签纸（使用Mat对象）
+        /// </summary>
+        /// <param name="image">输入图像</param>
+        /// <param name="modelPath">模型路径</param>
+        /// <returns>处理结果列表</returns>
         DisposableProcessingResults ProcessLabels(Mat image, string modelPath);
     }
 
@@ -157,36 +151,6 @@ namespace MiniAreaDemo
             _currentModelPath = modelPath;
             
             return _model;
-        }
-
-        public DisposableProcessingResults ProcessLabels(string imagePath, string modelPath)
-        {
-            // 检查文件是否存在
-            if (!File.Exists(imagePath))
-            {
-                throw new FileNotFoundException($"图片文件不存在: {imagePath}");
-            }
-
-            if (!File.Exists(modelPath))
-            {
-                throw new FileNotFoundException($"模型文件不存在: {modelPath}");
-            }
-
-            // 加载图片
-            Mat originalImage = Cv2.ImRead(imagePath);
-            if (originalImage.Empty())
-            {
-                throw new InvalidOperationException("无法加载图片");
-            }
-
-            try
-            {
-                return ProcessLabels(originalImage, modelPath);
-            }
-            finally
-            {
-                originalImage.Dispose();
-            }
         }
 
         public DisposableProcessingResults ProcessLabels(Mat originalImage, string modelPath)
@@ -533,37 +497,49 @@ namespace MiniAreaDemo
 
                         try
                         {
-                            // 处理图像
-                            using (var results = processor.ProcessLabels(imagePath, modelPath))
+                            // 使用cv.read读取图像
+                            using (Mat originalImage = Cv2.ImRead(imagePath))
                             {
-                                Console.WriteLine($"检测到 {results.Count} 个标签纸");
-
-                                // 处理结果
-                                for (int i = 0; i < results.Count; i++)
+                                if (originalImage.Empty())
                                 {
-                                    var result = results[i];
-                                    Console.WriteLine($"\n--- 标签纸 {i} ---");
-                                    Console.WriteLine($"角度: {result.Angle * 180 / Math.PI:F2}度");
-                                    
-                                    // 打印四边形顶点
-                                    Console.WriteLine("四边形顶点:");
-                                    for (int j = 0; j < result.QuadPoints.Length; j++)
-                                    {
-                                        Console.WriteLine($"  点{j}: ({result.QuadPoints[j].X:F1}, {result.QuadPoints[j].Y:F1})");
-                                    }
-                                    
-                                    // 保存处理后的图像
-                                    string outputPath = Path.Combine(outputDir, $"{fileName}_label_{i}.png");
-                                    Cv2.ImWrite(outputPath, result.ProcessedImage);
-                                    Console.WriteLine($"已保存处理后的图像: {outputPath}");
-                                    Console.WriteLine($"图像尺寸: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
+                                    Console.WriteLine($"无法加载图像: {imagePath}");
+                                    continue;
                                 }
 
-                                totalProcessed++;
-                                totalLabels += results.Count;
-                                
-                                Console.WriteLine($"处理完成，释放资源...");
-                            } // results会自动释放
+                                Console.WriteLine($"图像尺寸: {originalImage.Width}x{originalImage.Height}");
+
+                                // 处理图像
+                                using (var results = processor.ProcessLabels(originalImage, modelPath))
+                                {
+                                    Console.WriteLine($"检测到 {results.Count} 个标签纸");
+
+                                    // 处理结果
+                                    for (int i = 0; i < results.Count; i++)
+                                    {
+                                        var result = results[i];
+                                        Console.WriteLine($"\n--- 标签纸 {i} ---");
+                                        Console.WriteLine($"角度: {result.Angle * 180 / Math.PI:F2}度");
+                                        
+                                        // 打印四边形顶点
+                                        Console.WriteLine("四边形顶点:");
+                                        for (int j = 0; j < result.QuadPoints.Length; j++)
+                                        {
+                                            Console.WriteLine($"  点{j}: ({result.QuadPoints[j].X:F1}, {result.QuadPoints[j].Y:F1})");
+                                        }
+                                        
+                                        // 保存处理后的图像
+                                        string outputPath = Path.Combine(outputDir, $"{fileName}_label_{i}.png");
+                                        Cv2.ImWrite(outputPath, result.ProcessedImage);
+                                        Console.WriteLine($"已保存处理后的图像: {outputPath}");
+                                        Console.WriteLine($"图像尺寸: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
+                                    }
+
+                                    totalProcessed++;
+                                    totalLabels += results.Count;
+                                    
+                                    Console.WriteLine($"处理完成，释放资源...");
+                                } // results会自动释放
+                            } // originalImage会自动释放
                         }
                         catch (Exception ex)
                         {
