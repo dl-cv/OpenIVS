@@ -2,16 +2,12 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Diagnostics;
 using OpenCvSharp;
 using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 
 namespace MiniAreaDemo
 {
-    /// <summary>
-    /// 标签纸透视变换程序
-    /// 
     /// 主要功能：
     /// 1. 使用语义分割模型检测标签纸轮廓
     /// 2. 高级透视变换，专门处理透视变形
@@ -20,7 +16,6 @@ namespace MiniAreaDemo
     /// - 使用平均尺寸计算目标尺寸，更好地保持比例
     /// - 自动调整输出方向（横向/纵向）
     /// - 专门针对透视变形优化
-    /// </summary>
     public class MaskInfo
     {
         public Mat Mask { get; set; }
@@ -30,9 +25,7 @@ namespace MiniAreaDemo
         public int BboxH { get; set; }
     }
     
-    /// <summary>
     /// 处理结果类，包含mask信息和透视变换后的图像
-    /// </summary>
     public class ProcessingResult : IDisposable
     {
         public MaskInfo MaskInfo { get; set; }
@@ -52,26 +45,14 @@ namespace MiniAreaDemo
         {
             if (!_disposed && disposing)
             {
-                if (ProcessedImage != null)
-                {
-                    Console.WriteLine($"    释放ProcessingResult.ProcessedImage: {ProcessedImage.Width}x{ProcessedImage.Height}");
-                    ProcessedImage.Dispose();
-                    ProcessedImage = null;
-                }
-                if (MaskInfo?.Mask != null)
-                {
-                    Console.WriteLine($"    释放ProcessingResult.Mask: {MaskInfo.Mask.Width}x{MaskInfo.Mask.Height}");
-                    MaskInfo.Mask.Dispose();
-                    MaskInfo.Mask = null;
-                }
+                ProcessedImage?.Dispose();
+                MaskInfo?.Mask?.Dispose();
                 _disposed = true;
             }
         }
     }
 
-    /// <summary>
     /// 可释放的处理结果列表
-    /// </summary>
     public class DisposableProcessingResults : List<ProcessingResult>, IDisposable
     {
         private bool _disposed = false;
@@ -86,26 +67,16 @@ namespace MiniAreaDemo
         {
             if (!_disposed && disposing)
             {
-                Console.WriteLine($"释放 {Count} 个处理结果...");
                 foreach (var result in this)
                 {
                     if (result != null)
                     {
-                        if (result.ProcessedImage != null)
-                        {
-                            Console.WriteLine($"  释放ProcessedImage: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
-                            result.ProcessedImage.Dispose();
-                        }
-                        if (result.MaskInfo?.Mask != null)
-                        {
-                            Console.WriteLine($"  释放Mask: {result.MaskInfo.Mask.Width}x{result.MaskInfo.Mask.Height}");
-                            result.MaskInfo.Mask.Dispose();
-                        }
+                        result.ProcessedImage?.Dispose();
+                        result.MaskInfo?.Mask?.Dispose();
                     }
                 }
                 Clear();
                 _disposed = true;
-                Console.WriteLine("处理结果释放完成");
             }
         }
     }
@@ -504,24 +475,13 @@ namespace MiniAreaDemo
     // 示例使用类
     internal class Program
     {
-        /// <summary>
-        /// 获取当前进程的内存使用情况（MB）
-        /// </summary>
-        static long GetCurrentMemoryUsage()
-        {
-            using (var process = Process.GetCurrentProcess())
-            {
-                return process.WorkingSet64 / 1024 / 1024;
-            }
-        }
-
         static void Main(string[] args)
         {
             try
             {
                 // 输入文件路径
-                string imageDir = @"C:\Users\Administrator\Desktop\标签识别\4-后处理测试";
-                string modelPath = @"C:\Users\Administrator\Desktop\标签识别\004.dvt";
+                string imageDir = @"C:\Users\Administrator\Desktop\标签识别\5-测试图";
+                string modelPath = @"C:\Users\Administrator\Desktop\标签识别\005.dvt";
 
                 Console.WriteLine("开始处理...");
                 Console.WriteLine($"处理目录: {imageDir}");
@@ -560,10 +520,6 @@ namespace MiniAreaDemo
 
                     int totalProcessed = 0;
                     int totalLabels = 0;
-
-                    // 记录初始内存使用
-                    long initialMemory = GetCurrentMemoryUsage();
-                    Console.WriteLine($"初始内存使用: {initialMemory} MB");
 
                     // 处理每个图像文件
                     for (int fileIndex = 0; fileIndex < imageFiles.Count; fileIndex++)
@@ -608,18 +564,6 @@ namespace MiniAreaDemo
                                 
                                 Console.WriteLine($"处理完成，释放资源...");
                             } // results会自动释放
-
-                            // 每处理3个图像强制垃圾回收一次
-                            if (fileIndex % 3 == 0)
-                            {
-                                Console.WriteLine("执行垃圾回收...");
-                                GC.Collect();
-                                GC.WaitForPendingFinalizers();
-                                GC.Collect();
-                                
-                                long currentMemory = GetCurrentMemoryUsage();
-                                Console.WriteLine($"当前内存使用: {currentMemory} MB");
-                            }
                         }
                         catch (Exception ex)
                         {
@@ -627,20 +571,11 @@ namespace MiniAreaDemo
                         }
                     }
 
-                    // 最终垃圾回收
-                    Console.WriteLine("执行最终垃圾回收...");
-                    GC.Collect();
-                    GC.WaitForPendingFinalizers();
-                    GC.Collect();
-
-                    long finalMemory = GetCurrentMemoryUsage();
                     Console.WriteLine($"\n{new string('=', 50)}");
                     Console.WriteLine($"处理完成!");
                     Console.WriteLine($"成功处理图像: {totalProcessed}/{imageFiles.Count}");
                     Console.WriteLine($"总共检测到标签纸: {totalLabels} 个");
                     Console.WriteLine($"输出目录: {outputDir}");
-                    Console.WriteLine($"最终内存使用: {finalMemory} MB");
-                    Console.WriteLine($"内存变化: {finalMemory - initialMemory} MB");
                 } // processor会自动释放，包括模型资源
             }
             catch (Exception ex)
