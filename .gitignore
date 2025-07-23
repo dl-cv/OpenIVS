@@ -413,3 +413,4 @@ FodyWeavers.xsd
 *.sln.iml
 .remember/memory/self.md
 .remember/memory/project.md
+MiniAreaDemo/ExternalCallExample.cs
