@@ -338,6 +338,8 @@ namespace DlcvDemo
 
                                     richTextBox1.Text = s;
                                     MessageBox.Show("检测到推理结果不一致，测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                                    baselineJsonResult = null;
                                 });
                             }
                         }
@@ -492,7 +494,6 @@ namespace DlcvDemo
                 }
 
                 // 清理资源
-                baselineJsonResult = null;
                 shouldStopPressureTest = false; // 重置测试停止标志
 
                 // 根据模式重置按钮文本
