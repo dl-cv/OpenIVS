@@ -46,13 +46,14 @@
             this.imagePanel1 = new DLCV.ImageViewer();
             this.richTextBox1 = new System.Windows.Forms.RichTextBox();
             this.label4 = new System.Windows.Forms.Label();
-            this.textBox_threshold = new System.Windows.Forms.TextBox();
+            this.numericUpDown_threshold = new System.Windows.Forms.NumericUpDown();
             this.button_check_dog = new System.Windows.Forms.Button();
             this.button_load_sliding_window_model = new System.Windows.Forms.Button();
             this.button_free_all_model = new System.Windows.Forms.Button();
             this.button_load_ocr_model = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_threshold)).BeginInit();
             this.SuspendLayout();
             // 
             // button_load_model
@@ -200,7 +201,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(627, 105);
+            this.label3.Location = new System.Drawing.Point(640, 105);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(99, 24);
             this.label3.TabIndex = 15;
@@ -208,7 +209,7 @@
             // 
             // numericUpDown_batch_size
             // 
-            this.numericUpDown_batch_size.Location = new System.Drawing.Point(732, 103);
+            this.numericUpDown_batch_size.Location = new System.Drawing.Point(745, 103);
             this.numericUpDown_batch_size.Maximum = new decimal(new int[] {
             1024,
             0,
@@ -263,13 +264,28 @@
             this.label4.TabIndex = 18;
             this.label4.Text = "threshold";
             // 
-            // textBox_threshold
+            // numericUpDown_threshold
             // 
-            this.textBox_threshold.Location = new System.Drawing.Point(555, 103);
-            this.textBox_threshold.Name = "textBox_threshold";
-            this.textBox_threshold.Size = new System.Drawing.Size(66, 31);
-            this.textBox_threshold.TabIndex = 19;
-            this.textBox_threshold.Text = "0.5";
+            this.numericUpDown_threshold.DecimalPlaces = 2;
+            this.numericUpDown_threshold.Increment = new decimal(new int[] {
+            5,
+            0,
+            0,
+            131072});
+            this.numericUpDown_threshold.Location = new System.Drawing.Point(555, 103);
+            this.numericUpDown_threshold.Maximum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+            this.numericUpDown_threshold.Name = "numericUpDown_threshold";
+            this.numericUpDown_threshold.Size = new System.Drawing.Size(79, 31);
+            this.numericUpDown_threshold.TabIndex = 19;
+            this.numericUpDown_threshold.Value = new decimal(new int[] {
+            5,
+            0,
+            0,
+            65536});
             // 
             // button_check_dog
             // 
@@ -328,7 +344,7 @@
             this.Controls.Add(this.button_free_all_model);
             this.Controls.Add(this.button_load_sliding_window_model);
             this.Controls.Add(this.button_check_dog);
-            this.Controls.Add(this.textBox_threshold);
+            this.Controls.Add(this.numericUpDown_threshold);
             this.Controls.Add(this.label4);
             this.Controls.Add(this.imagePanel1);
             this.Controls.Add(this.numericUpDown_batch_size);
@@ -357,6 +373,7 @@
             this.Load += new System.EventHandler(this.Form1_Load);
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_threshold)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -380,7 +397,7 @@
         private DLCV.ImageViewer imagePanel1;
         private System.Windows.Forms.RichTextBox richTextBox1;
         private System.Windows.Forms.Label label4;
-        private System.Windows.Forms.TextBox textBox_threshold;
+        private System.Windows.Forms.NumericUpDown numericUpDown_threshold;
         private System.Windows.Forms.Button button_check_dog;
         private System.Windows.Forms.Button button_load_sliding_window_model;
         private System.Windows.Forms.Button button_free_all_model;
