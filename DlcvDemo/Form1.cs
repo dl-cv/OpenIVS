@@ -18,7 +18,7 @@ namespace DlcvDemo
     {
         // 设备映射表：设备名称 -> 设备ID
         private Dictionary<string, int> deviceNameToIdMap = new Dictionary<string, int>();
-        
+
         /// <summary>
         /// 获取当前选中的设备ID
         /// </summary>
@@ -29,16 +29,16 @@ namespace DlcvDemo
             {
                 return -1; // 默认使用CPU
             }
-            
+
             string selectedDeviceName = comboBox1.SelectedItem.ToString();
             if (deviceNameToIdMap.ContainsKey(selectedDeviceName))
             {
                 return deviceNameToIdMap[selectedDeviceName];
             }
-            
+
             return -1; // 默认使用CPU
         }
-        
+
         public Form1()
         {
             InitializeComponent();
@@ -239,7 +239,7 @@ namespace DlcvDemo
             }
 
             JObject data = new JObject();
-            data["threshold"] = float.Parse(textBox_threshold.Text);
+            data["threshold"] = (float)numericUpDown_threshold.Value;
             data["with_mask"] = true;
 
             Stopwatch stopwatch = new Stopwatch();
@@ -281,7 +281,11 @@ namespace DlcvDemo
                 }
 
                 // 调用InferInternal进行推理
-                var resultTuple = model.InferInternal(image_list, null);
+
+                JObject infer_config = new JObject();
+                infer_config["with_mask"] = false;
+
+                var resultTuple = model.InferInternal(image_list, infer_config);
                 IntPtr currentResultPtr = resultTuple.Item2;
 
                 try
@@ -289,11 +293,16 @@ namespace DlcvDemo
                     // 根据模式决定是否进行一致性检查
                     if (isConsistencyTestMode)
                     {
+                        String thread_id = Thread.CurrentThread.ManagedThreadId.ToString("00");
                         // 一致性测试模式：比较推理结果
                         // 第一次推理时获取基准结果
                         if (baselineJsonResult == null)
                         {
+                            Debug.WriteLine($"线程{thread_id}基准结果为空，写入基准结果……");
                             baselineJsonResult = resultTuple.Item1;
+                            string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
+                            Debug.WriteLine($"线程{thread_id}写入基准结果完成。");
+                            Debug.WriteLine($"线程{thread_id}基准结果：" + baselineJson);
                             return; // 第一次推理，获取基准后直接返回
                         }
                         else
@@ -310,6 +319,10 @@ namespace DlcvDemo
 
                             if (baselineJson != currentJson)
                             {
+                                Debug.WriteLine($"线程{thread_id}基准结果与当前结果不一致");
+                                Debug.WriteLine($"线程{thread_id}基准结果：" + baselineJson);
+                                Debug.WriteLine($"线程{thread_id}当前结果：" + currentJson);
+
                                 // 立即设置停止标志，防止其他线程继续执行
                                 shouldStopPressureTest = true;
 
@@ -329,6 +342,8 @@ namespace DlcvDemo
 
                                     richTextBox1.Text = s;
                                     MessageBox.Show("检测到推理结果不一致，测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                                    baselineJsonResult = null;
                                 });
                             }
                         }
@@ -483,7 +498,6 @@ namespace DlcvDemo
                 }
 
                 // 清理资源
-                baselineJsonResult = null;
                 shouldStopPressureTest = false; // 重置测试停止标志
 
                 // 根据模式重置按钮文本
