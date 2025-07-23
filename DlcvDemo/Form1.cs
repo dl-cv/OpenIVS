@@ -281,7 +281,11 @@ namespace DlcvDemo
                 }
 
                 // 调用InferInternal进行推理
-                var resultTuple = model.InferInternal(image_list, null);
+
+                JObject infer_config = new JObject();
+                infer_config["with_mask"] = false;
+
+                var resultTuple = model.InferInternal(image_list, infer_config);
                 IntPtr currentResultPtr = resultTuple.Item2;
 
                 try
