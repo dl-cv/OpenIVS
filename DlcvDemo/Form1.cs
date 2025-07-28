@@ -245,18 +245,18 @@ namespace DlcvDemo
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
 
-            CSharpResult result = model.InferBatch(image_list, data);
+            dynamic result = model.InferOneOutJson(image_rgb, data);
 
             stopwatch.Stop();
             double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
             Console.WriteLine($"推理时间: {delay_ms:F2}ms");
 
-            imagePanel1.UpdateImageAndResult(image, result);
+            imagePanel1.UpdateImageAndResultJson(image, result);
 
             StringBuilder sb = new StringBuilder();
             sb.AppendLine($"推理时间: {delay_ms:F2}ms\n");
             sb.AppendLine($"推理结果: ");
-            sb.AppendLine(result.SampleResults[0].ToString());
+            sb.AppendLine(result.ToString());
             richTextBox1.Text = sb.ToString();
         }
 
@@ -275,18 +275,17 @@ namespace DlcvDemo
                 }
 
                 var image_list = (List<Mat>)parameter;
-                if (image_list == null)
+                if (image_list == null || image_list.Count == 0)
                 {
                     return;
                 }
 
-                // 调用InferInternal进行推理
-
+                // 调用InferOneOutJson进行推理，使用第一张图片
                 JObject infer_config = new JObject();
                 infer_config["with_mask"] = false;
 
-                var resultTuple = model.InferInternal(image_list, infer_config);
-                IntPtr currentResultPtr = resultTuple.Item2;
+                dynamic result = model.InferOneOutJson(image_list[0], infer_config);
+                IntPtr currentResultPtr = IntPtr.Zero; // InferOneOutJson 不返回指针
 
                 try
                 {
@@ -299,7 +298,7 @@ namespace DlcvDemo
                         if (baselineJsonResult == null)
                         {
                             Debug.WriteLine($"线程{thread_id}基准结果为空，写入基准结果……");
-                            baselineJsonResult = resultTuple.Item1;
+                            baselineJsonResult = result;
                             string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
                             Debug.WriteLine($"线程{thread_id}写入基准结果完成。");
                             Debug.WriteLine($"线程{thread_id}基准结果：" + baselineJson);
@@ -315,7 +314,7 @@ namespace DlcvDemo
 
                             // 直接比较JSON字符串
                             string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
-                            string currentJson = JsonConvert.SerializeObject(resultTuple.Item1, Formatting.None);
+                            string currentJson = JsonConvert.SerializeObject(result, Formatting.None);
 
                             if (baselineJson != currentJson)
                             {
@@ -337,7 +336,7 @@ namespace DlcvDemo
                                     sb.AppendLine("=== 基准结果 ===");
                                     sb.AppendLine(JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented));
                                     sb.AppendLine("\n=== 当前结果 ===");
-                                    sb.AppendLine(JsonConvert.SerializeObject(resultTuple.Item1, Formatting.Indented));
+                                    sb.AppendLine(JsonConvert.SerializeObject(result, Formatting.Indented));
                                     string s = sb.ToString();
 
                                     richTextBox1.Text = s;

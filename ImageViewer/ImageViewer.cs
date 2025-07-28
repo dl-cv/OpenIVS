@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -100,6 +100,16 @@ namespace DLCV
             {
                 UpdateImage(image);
                 UpdateResults(currentResults);
+                Update();
+            }
+        }
+
+        public void UpdateImageAndResultJson(dynamic image, dynamic jsonResults)
+        {
+            lock (_Lock)
+            {
+                UpdateImage(image);
+                UpdateResults(jsonResults);
                 Update();
             }
         }
@@ -209,7 +219,7 @@ namespace DLCV
             _imagePosition = new PointF(newX, newY);
         }
 
-        public CSharpResult? currentResults;
+        public dynamic currentResults;
         // 外部可以调用的，更新图像内容
         public void UpdateImage(Image image)
         {
@@ -244,20 +254,204 @@ namespace DLCV
             float fontSize = Math.Max(8, 24 / _scale);
             string _statusText = "OK";
 
-            // 遍历结构体的嵌套结构
-            if (currentResults.Value.SampleResults.Count == 0)
+            // 检测数据类型并分别处理
+            if (currentResults is CSharpResult)
+            {
+                DrawCSharpResults(e, borderWidth, fontSize, ref _statusText);
+            }
+            else if (currentResults is Newtonsoft.Json.Linq.JArray)
+            {
+                DrawJsonResults(e, borderWidth, fontSize, ref _statusText);
+            }
+        }
+
+        private void DrawCSharpResults(PaintEventArgs e, float borderWidth, float fontSize, ref string _statusText)
+        {
+            var csharpResults = (CSharpResult)currentResults;
+            
+            // 处理 CSharpResult 格式的结果
+            if (csharpResults.SampleResults == null || csharpResults.SampleResults.Count == 0)
+            {
+                _statusText = "No Result";
+                return;
+            }
+
+            foreach (var sampleResult in csharpResults.SampleResults)
+            {
+                if (sampleResult.Results == null) continue;
+                
+                foreach (var objResult in sampleResult.Results)
+                {
+                    string categoryName = objResult.CategoryName ?? "";
+                    float score = objResult.Score;
+                    var bbox = objResult.Bbox;
+
+                    if (bbox == null || bbox.Count < 4)
+                    {
+                        // 这个是分类结果，没有bbox
+                        _statusText = categoryName;
+                        
+                        // 根据分类结果设置状态
+                        string classificationResultLower = categoryName.ToLower();
+                        if (!classificationResultLower.Contains("ok"))
+                        {
+                            _statusText = "NG";
+                        }
+                        else
+                        {
+                            _statusText = "OK";
+                        }
+                        break;
+                    }
+
+                    // 颜色处理（根据结果内容设置颜色）
+                    Color color = Color.Red; // 默认红色
+                    
+                    // 判断categoryName内容（忽略大小写）
+                    string categoryNameLower = categoryName.ToLower();
+                    if (categoryNameLower.Contains("ok"))
+                    {
+                        color = Color.Green;
+                    }
+                    else if (categoryNameLower.Contains("ng"))
+                    {
+                        color = Color.Red;
+                    }
+                    // 其他情况保持默认红色
+
+                    // 判断是否显示NG状态
+                    if (!categoryNameLower.Contains("ok"))
+                        _statusText = "NG";
+
+                    // 处理旋转框检测
+                    if (objResult.WithAngle)
+                    {
+                        // 旋转框检测：[cx, cy, w, h]
+                        float cx = (float)bbox[0];
+                        float cy = (float)bbox[1];
+                        float w = (float)bbox[2];
+                        float h = (float)bbox[3];
+                        float angle = objResult.Angle;
+
+                        // 计算旋转框的四个角点
+                        PointF[] points = new PointF[4];
+                        float cos = (float)Math.Cos(angle);
+                        float sin = (float)Math.Sin(angle);
+
+                        // 计算相对于中心点的偏移
+                        float[] offsets = new float[] {
+                            -w/2, -h/2,  // 左上
+                            w/2, -h/2,   // 右上
+                            w/2, h/2,    // 右下
+                            -w/2, h/2    // 左下
+                        };
+
+                        // 计算旋转后的四个角点
+                        for (int i = 0; i < 4; i++)
+                        {
+                            float x = offsets[i * 2];
+                            float y = offsets[i * 2 + 1];
+                            points[i] = new PointF(
+                                cx + x * cos - y * sin,
+                                cy + x * sin + y * cos
+                            );
+                        }
+
+                        // 绘制旋转框
+                        using (Pen pen = new Pen(color, borderWidth))
+                        {
+                            // 绘制四条边
+                            for (int i = 0; i < 4; i++)
+                            {
+                                e.Graphics.DrawLine(pen, points[i], points[(i + 1) % 4]);
+                            }
+                        }
+
+                        // 绘制标签文本
+                        string label = $"{categoryName} {score:F2}";
+                        using (Font font = new Font("Microsoft YaHei", fontSize))
+                        {
+                            SizeF textSize = e.Graphics.MeasureString(label, font);
+                            // 将文本位置放在旋转框上方
+                            float textX = cx - textSize.Width / 2;
+                            float textY = cy - h / 2 - textSize.Height - 2;
+
+                            // 绘制半透明黑色背景
+                            using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                            {
+                                e.Graphics.FillRectangle(backgroundBrush, textX, textY, textSize.Width, textSize.Height);
+                            }
+
+                            // 绘制文字
+                            using (SolidBrush textBrush = new SolidBrush(color))
+                            {
+                                e.Graphics.DrawString(label, font, textBrush, textX, textY);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // 普通检测框：[x, y, w, h]
+                        float x = (float)bbox[0];
+                        float y = (float)bbox[1];
+                        float w = (float)bbox[2];
+                        float h = (float)bbox[3];
+
+                        // 处理Mask
+                        if (objResult.WithMask && objResult.Mask != null)
+                        {
+                            using (var maskBitmap = CreateTransparentMaskDirect(objResult.Mask))
+                            {
+                                e.Graphics.DrawImage(maskBitmap, x, y, w, h);
+                            }
+                        }
+
+                        // 绘制边界框
+                        using (Pen pen = new Pen(color, borderWidth))
+                        {
+                            e.Graphics.DrawRectangle(pen, x, y, w, h);
+                        }
+
+                        // 绘制标签文本
+                        string label = $"{categoryName} {score:F2}";
+                        using (Font font = new Font("Microsoft YaHei", fontSize))
+                        {
+                            SizeF textSize = e.Graphics.MeasureString(label, font);
+                            float textY = y - textSize.Height - 2;
+
+                            // 绘制半透明黑色背景
+                            using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                            {
+                                e.Graphics.FillRectangle(backgroundBrush, x, textY, textSize.Width, textSize.Height);
+                            }
+
+                            // 绘制文字
+                            using (SolidBrush textBrush = new SolidBrush(color))
+                            {
+                                e.Graphics.DrawString(label, font, textBrush, x, textY);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private void DrawJsonResults(PaintEventArgs e, float borderWidth, float fontSize, ref string _statusText)
+        {
+            var jsonResults = (Newtonsoft.Json.Linq.JArray)currentResults;
+            
+            // 处理 JArray 格式的结果
+            if (jsonResults.Count == 0)
             {
                 _statusText = "No Result";
             }
 
-            var sampleResult = currentResults.Value.SampleResults[0];
-
-            foreach (var objResult in sampleResult.Results)
+            foreach (var objResult in jsonResults)
             {
                 // 获取对象属性
-                string categoryName = objResult.CategoryName;
-                float score = objResult.Score;
-                var bbox = objResult.Bbox;
+                string categoryName = objResult["category_name"]?.ToString() ?? "";
+                float score = objResult["score"]?.Value<float>() ?? 0.0f;
+                var bbox = objResult["bbox"]?.ToObject<List<double>>() ?? new List<double>();
 
                 if (bbox.Count < 4)
                 {
@@ -297,14 +491,15 @@ namespace DLCV
                     _statusText = "NG";
 
                 // 处理旋转框检测
-                if (objResult.WithAngle)
+                bool withAngle = objResult["with_angle"]?.Value<bool>() ?? false;
+                if (withAngle)
                 {
                     // 旋转框检测：[cx, cy, w, h]
                     float cx = (float)bbox[0];
                     float cy = (float)bbox[1];
                     float w = (float)bbox[2];
                     float h = (float)bbox[3];
-                    float angle = objResult.Angle;
+                    float angle = objResult["angle"]?.Value<float>() ?? 0.0f;
 
                     // 计算旋转框的四个角点
                     PointF[] points = new PointF[4];
@@ -371,11 +566,51 @@ namespace DLCV
                     float h = (float)bbox[3];
 
                     // 处理Mask
-                    if (objResult.WithMask && objResult.Mask != null)
+                    bool withMask = objResult["with_mask"]?.Value<bool>() ?? false;
+                    var mask = objResult["mask"];
+                    if (withMask && mask != null)
                     {
-                        using (var maskBitmap = CreateTransparentMaskDirect(objResult.Mask))
+                        // 检查是否是多边形格式的 mask
+                        if (mask is Newtonsoft.Json.Linq.JArray polygonArray && polygonArray.Count > 0)
                         {
-                            e.Graphics.DrawImage(maskBitmap, x, y, w, h);
+                            // 绘制多边形
+                            var points = new List<PointF>();
+                            foreach (var point in polygonArray)
+                            {
+                                float px = point["x"]?.Value<float>() ?? 0;
+                                float py = point["y"]?.Value<float>() ?? 0;
+                                points.Add(new PointF(px, py));
+                            }
+                            if (points.Count > 2)
+                            {
+                                using (SolidBrush maskBrush = new SolidBrush(Color.FromArgb(128, 0, 255, 0)))
+                                {
+                                    e.Graphics.FillPolygon(maskBrush, points.ToArray());
+                                }
+                            }
+                        }
+                        else if (mask is Newtonsoft.Json.Linq.JObject maskObj)
+                        {
+                            // 处理原来的 mask 格式
+                            int mask_width = maskObj["width"]?.Value<int>() ?? 0;
+                            int mask_height = maskObj["height"]?.Value<int>() ?? 0;
+                            long maskPtrValue = maskObj["mask_ptr"]?.Value<long>() ?? 0;
+                            
+                            if (maskPtrValue != 0 && mask_width > 0 && mask_height > 0)
+                            {
+                                IntPtr mask_ptr = new IntPtr(maskPtrValue);
+                                Mat mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
+                                
+                                if (mask_img.Cols != (int)w || mask_img.Rows != (int)h)
+                                 {
+                                     mask_img = mask_img.Resize(new OpenCvSharp.Size((int)w, (int)h));
+                                 }
+                                
+                                using (var maskBitmap = CreateTransparentMaskDirect(mask_img))
+                                {
+                                    e.Graphics.DrawImage(maskBitmap, x, y, w, h);
+                                }
+                            }
                         }
                     }
 
