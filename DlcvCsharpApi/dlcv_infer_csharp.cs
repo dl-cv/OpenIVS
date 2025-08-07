@@ -1280,7 +1280,7 @@ namespace dlcv_infer_csharp
                             ["area"] = detection.Area,
                             ["bbox"] = new JArray(detection.Bbox),
                             ["with_bbox"] = detection.WithBbox,
-                            ["with_mask"] = detection.WithMask,
+                            ["with_mask"] = false, // OCR模型不返回mask信息
                             ["with_angle"] = detection.WithAngle
                         };
 
