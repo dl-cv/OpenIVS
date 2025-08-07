@@ -56,5 +56,65 @@ namespace DlcvDemo.Properties
                 this["LastImagePath"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LastDetModelPath
+        {
+            get
+            {
+                return ((string)(this["LastDetModelPath"]));
+            }
+            set
+            {
+                this["LastDetModelPath"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LastOcrModelPath
+        {
+            get
+            {
+                return ((string)(this["LastOcrModelPath"]));
+            }
+            set
+            {
+                this["LastOcrModelPath"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public int LastOcrDeviceId
+        {
+            get
+            {
+                return ((int)(this["LastOcrDeviceId"]));
+            }
+            set
+            {
+                this["LastOcrDeviceId"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("1")]
+        public float LastOcrHorizontalScale
+        {
+            get
+            {
+                return ((float)(this["LastOcrHorizontalScale"]));
+            }
+            set
+            {
+                this["LastOcrHorizontalScale"] = value;
+            }
+        }
     }
 }

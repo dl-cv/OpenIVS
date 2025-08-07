@@ -20,6 +20,7 @@ namespace DlcvDemo
         public OcrModelConfigForm(int defaultDeviceId) : this()
         {
             numDevice.Value = defaultDeviceId;
+            DeviceId = defaultDeviceId;
         }
 
         private void InitializeForm()
@@ -34,6 +35,63 @@ namespace DlcvDemo
             toolTip.SetToolTip(txtOcrModel, "选择用于文本识别的OCR模型文件");
             toolTip.SetToolTip(numDevice, "选择用于推理的GPU设备ID（0表示第一个GPU）");
             toolTip.SetToolTip(numHorizontalScale, "水平缩放比例，默认1.0。当OCR文字比较密集时，建议设置为1.5");
+            
+            // 读取保存的设置
+            LoadSavedSettings();
+        }
+
+        private void LoadSavedSettings()
+        {
+            try
+            {
+                // 读取上次保存的模型路径
+                if (!string.IsNullOrEmpty(Properties.Settings.Default.LastDetModelPath))
+                {
+                    txtDetModel.Text = Properties.Settings.Default.LastDetModelPath;
+                    DetModelPath = Properties.Settings.Default.LastDetModelPath;
+                }
+
+                if (!string.IsNullOrEmpty(Properties.Settings.Default.LastOcrModelPath))
+                {
+                    txtOcrModel.Text = Properties.Settings.Default.LastOcrModelPath;
+                    OcrModelPath = Properties.Settings.Default.LastOcrModelPath;
+                }
+
+                // 读取设备ID
+                numDevice.Value = Properties.Settings.Default.LastOcrDeviceId;
+                DeviceId = Properties.Settings.Default.LastOcrDeviceId;
+
+                // 读取水平缩放比例
+                numHorizontalScale.Value = (decimal)Properties.Settings.Default.LastOcrHorizontalScale;
+                HorizontalScale = Properties.Settings.Default.LastOcrHorizontalScale;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"加载OCR设置失败: {ex.Message}");
+            }
+        }
+
+        private void SaveCurrentSettings()
+        {
+            try
+            {
+                // 保存模型路径
+                Properties.Settings.Default.LastDetModelPath = DetModelPath;
+                Properties.Settings.Default.LastOcrModelPath = OcrModelPath;
+
+                // 保存设备ID
+                Properties.Settings.Default.LastOcrDeviceId = DeviceId;
+
+                // 保存水平缩放比例
+                Properties.Settings.Default.LastOcrHorizontalScale = HorizontalScale;
+
+                // 保存设置到文件
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"保存OCR设置失败: {ex.Message}");
+            }
         }
 
         private void btnBrowseDet_Click(object sender, EventArgs e)
@@ -131,6 +189,9 @@ namespace DlcvDemo
             OcrModelPath = txtOcrModel.Text;
             DeviceId = (int)numDevice.Value;
             HorizontalScale = (float)numHorizontalScale.Value;
+
+            // 保存设置
+            SaveCurrentSettings();
 
             // 关闭对话框
             this.DialogResult = DialogResult.OK;
