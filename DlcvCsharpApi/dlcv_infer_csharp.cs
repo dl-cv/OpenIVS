@@ -1222,8 +1222,13 @@ namespace dlcv_infer_csharp
             // 遍历检测结果
             if (detResult.SampleResults != null && detResult.SampleResults.Count > 0)
             {
+                int detectionCount = detResult.SampleResults[0].Results.Count;
+                
+                int processedCount = 0;
+                
                 foreach (var detection in detResult.SampleResults[0].Results)
                 {
+                    processedCount++;
                     try
                     {
                         Mat roiMat = null;
@@ -1244,9 +1249,10 @@ namespace dlcv_infer_csharp
                             double y = Math.Max(0, detection.Bbox[1]);
                             double w = Math.Min(detection.Bbox[2], image.Width - x);
                             double h = Math.Min(detection.Bbox[3], image.Height - y);
-
                             if (w <= 0 || h <= 0)
+                            {
                                 continue;
+                            }
 
                             globalX = (int)x;
                             globalY = (int)y;
@@ -1256,7 +1262,9 @@ namespace dlcv_infer_csharp
                         }
 
                         if (roiMat == null || roiMat.Empty())
+                        {
                             continue;
+                        }
 
                         // 如果水平缩放比例不是1.0，则进行水平缩放
                         if (Math.Abs(_horizontalScale - 1.0f) > 0.001f)
@@ -1268,9 +1276,6 @@ namespace dlcv_infer_csharp
                             roiMat.Dispose();
                             roiMat = scaledRoi;
                         }
-
-                        // 使用识别模型进行推理
-                        var recognizeResult = _ocrModel.Infer(roiMat, params_json);
 
                         // 构建结果对象
                         var resultObj = new JObject
@@ -1289,16 +1294,27 @@ namespace dlcv_infer_csharp
                             resultObj["angle"] = detection.Angle;
                         }
 
-                        // 如果识别模型有结果，使用识别结果的类别名称
-                        if (recognizeResult.SampleResults.Count > 0 && 
-                            recognizeResult.SampleResults[0].Results.Count > 0)
+                        // 尝试使用识别模型进行推理
+                        try
                         {
-                            var topResult = recognizeResult.SampleResults[0].Results[0];
-                            resultObj["category_name"] = topResult.CategoryName;
+                            var recognizeResult = _ocrModel.Infer(roiMat, params_json);
+
+                            // 如果识别模型有结果，使用识别结果的类别名称
+                            if (recognizeResult.SampleResults.Count > 0 && 
+                                recognizeResult.SampleResults[0].Results.Count > 0)
+                            {
+                                var topResult = recognizeResult.SampleResults[0].Results[0];
+                                resultObj["category_name"] = topResult.CategoryName;
+                            }
+                            else
+                            {
+                                resultObj["category_name"] = "";
+                            }
                         }
-                        else
+                        catch (Exception ocrEx)
                         {
-                            resultObj["category_name"] = detection.CategoryName;
+                            // OCR识别失败，保留检测结果但将类别名称设为空
+                            resultObj["category_name"] = "";
                         }
 
                         // 添加全局坐标信息（用于后续处理）
@@ -1753,9 +1769,12 @@ namespace dlcv_infer_csharp
                 // 遍历第一个模型的检测结果
                 foreach (var sampleResult in result.SampleResults)
                 {
+                    int detectionCount = sampleResult.Results.Count;
+                    int processedCount = 0;                    
                     for (int i = 0; i < sampleResult.Results.Count; i++)
                     {
                         var detection = sampleResult.Results[i];
+                        processedCount++;
 
                         // 获取边界框坐标 (x, y, w, h)
                         double x = detection.Bbox[0];
@@ -1768,9 +1787,10 @@ namespace dlcv_infer_csharp
                         y = Math.Max(0, y);
                         w = Math.Min(w, image.Width - x);
                         h = Math.Min(h, image.Height - y);
-
                         if (w <= 0 || h <= 0)
+                        {
                             continue;
+                        }
 
                         // 提取ROI区域
                         Rect roi = new Rect((int)x, (int)y, (int)w, (int)h);
