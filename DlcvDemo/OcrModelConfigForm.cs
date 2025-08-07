@@ -98,7 +98,7 @@ namespace DlcvDemo
         {
             using (OpenFileDialog openFileDialog = new OpenFileDialog())
             {
-                openFileDialog.Filter = "深度视觉模型文件 (*.dvt;*.dvp)|*.dvt;*.dvp|所有文件 (*.*)|*.*";
+                openFileDialog.Filter = "深度视觉模型文件 (*.dvt;*.dvp;*.dvo)|*.dvt;*.dvp;*.dvo|所有文件 (*.*)|*.*";
                 openFileDialog.Title = "选择检测模型文件";
                 openFileDialog.RestoreDirectory = true;
                 
