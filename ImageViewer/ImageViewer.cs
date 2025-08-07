@@ -375,7 +375,8 @@ namespace DLCV
                     {
                         using (var maskBitmap = CreateTransparentMaskDirect(objResult.Mask))
                         {
-                            e.Graphics.DrawImage(maskBitmap, x, y, w, h);
+                            if (maskBitmap != null)
+                                e.Graphics.DrawImage(maskBitmap, x, y, w, h);
                         }
                     }
 
@@ -426,6 +427,9 @@ namespace DLCV
         {
             int width = mask.Width;
             int height = mask.Height;
+
+            if (width <= 0 || height <= 0) 
+                return null;
 
             // 创建目标Bitmap
             Bitmap result = new Bitmap(width, height, PixelFormat.Format32bppArgb);
