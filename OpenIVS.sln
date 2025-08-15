@@ -57,6 +57,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvDvpHttpApi", "DlcvDvpHt
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvDvpHttpApiTest", "DlcvDvpHttpApiTest\DlcvDvpHttpApiTest.csproj", "{BB2F0FB1-E0F7-4E6B-B624-4847FFF7F4B5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvModuleApi", "DlcvModuleApi\DlcvModuleApi.csproj", "{B5D0C2B7-2C9E-4C9B-8C5E-0C8A0832C7B2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvModuleApiTest", "DlcvModuleApiTest\DlcvModuleApiTest.csproj", "{F4C2A8D6-0E4B-4F49-8B20-8B184B7B7823}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -127,6 +131,14 @@ Global
 		{BB2F0FB1-E0F7-4E6B-B624-4847FFF7F4B5}.Debug|x64.Build.0 = Debug|x64
 		{BB2F0FB1-E0F7-4E6B-B624-4847FFF7F4B5}.Release|x64.ActiveCfg = Release|Any CPU
 		{BB2F0FB1-E0F7-4E6B-B624-4847FFF7F4B5}.Release|x64.Build.0 = Release|Any CPU
+		{B5D0C2B7-2C9E-4C9B-8C5E-0C8A0832C7B2}.Debug|x64.ActiveCfg = Debug|x64
+		{B5D0C2B7-2C9E-4C9B-8C5E-0C8A0832C7B2}.Debug|x64.Build.0 = Debug|x64
+		{B5D0C2B7-2C9E-4C9B-8C5E-0C8A0832C7B2}.Release|x64.ActiveCfg = Release|x64
+		{B5D0C2B7-2C9E-4C9B-8C5E-0C8A0832C7B2}.Release|x64.Build.0 = Release|x64
+		{F4C2A8D6-0E4B-4F49-8B20-8B184B7B7823}.Debug|x64.ActiveCfg = Debug|x64
+		{F4C2A8D6-0E4B-4F49-8B20-8B184B7B7823}.Debug|x64.Build.0 = Debug|x64
+		{F4C2A8D6-0E4B-4F49-8B20-8B184B7B7823}.Release|x64.ActiveCfg = Release|x64
+		{F4C2A8D6-0E4B-4F49-8B20-8B184B7B7823}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
