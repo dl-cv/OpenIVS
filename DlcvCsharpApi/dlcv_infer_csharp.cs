@@ -419,6 +419,10 @@ namespace dlcv_infer_csharp
                 {
                     writer.WriteLine(req.ToString(Formatting.None));
                     string line = reader.ReadLine();
+                    if (line == null)
+                    {
+                        throw new Exception("RPC通信失败：未收到任何响应（line为null）");
+                    }
                     if (string.IsNullOrEmpty(line)) return null;
                     return JObject.Parse(line);
                 }

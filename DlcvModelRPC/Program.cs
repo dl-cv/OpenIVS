@@ -35,6 +35,7 @@ namespace DlcvModelRPC
 
         private static void Main(string[] args)
         {
+            Console.WriteLine("DlcvModelRPC");
             try { Console.Title = "DlcvModelRPC"; } catch { }
             s_cts = new CancellationTokenSource();
             // Ctrl+C / Ctrl+Break（在无控制台时可能无效，做兼容处理）
