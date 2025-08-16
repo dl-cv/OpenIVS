@@ -29,12 +29,23 @@ namespace DlcvModelRPC
 
         private static CancellationTokenSource s_cts;
         private static readonly ConcurrentDictionary<string, MemoryMappedFile> s_maskMmfs = new ConcurrentDictionary<string, MemoryMappedFile>();
+        private static readonly ManualResetEventSlim s_shutdownEvent = new ManualResetEventSlim(false);
+        private static volatile bool s_isShuttingDown = false;
+        private static ConsoleCtrlDelegate s_ctrlHandlerDelegate;
 
         private static void Main(string[] args)
         {
-            Console.Title = "DlcvModelRPC";
+            try { Console.Title = "DlcvModelRPC"; } catch { }
             s_cts = new CancellationTokenSource();
-            Console.CancelKeyPress += (s, e) => { e.Cancel = true; s_cts.Cancel(); };
+            // Ctrl+C / Ctrl+Break（在无控制台时可能无效，做兼容处理）
+            try { Console.CancelKeyPress += (s, e) => { e.Cancel = true; RequestShutdown(); }; } catch { }
+
+            // 进程退出 & 未处理异常
+            AppDomain.CurrentDomain.ProcessExit += (s, e) => RequestShutdown();
+            AppDomain.CurrentDomain.UnhandledException += (s, e) => RequestShutdown();
+
+            // 控制台窗口关闭 / 注销 / 关机
+            TryRegisterConsoleCloseHandler();
 
             // 启动命名管道服务器(多实例)
             Task.Run(() => RunPipeListenerAsync(s_cts.Token));
@@ -46,10 +57,8 @@ namespace DlcvModelRPC
             }
 
             // 清理
-            foreach (var kv in s_loadedModels)
-            {
-                try { kv.Value.Dispose(); } catch { }
-            }
+            CleanupResources();
+            s_shutdownEvent.Set();
         }
 
         private static async Task RunPipeListenerAsync(CancellationToken token)
@@ -117,6 +126,65 @@ namespace DlcvModelRPC
                 catch { }
             }
         }
+
+        private static void RequestShutdown()
+        {
+            if (s_isShuttingDown) return;
+            s_isShuttingDown = true;
+            try { s_cts?.Cancel(); } catch { }
+        }
+
+        private static void CleanupResources()
+        {
+            // 释放模型
+            foreach (var kv in s_loadedModels)
+            {
+                try { kv.Value.FreeModel(); } catch { }
+                try { kv.Value.Dispose(); } catch { }
+            }
+
+            // 释放临时mask的MMF
+            foreach (var kv in s_maskMmfs)
+            {
+                try { kv.Value.Dispose(); } catch { }
+            }
+            s_maskMmfs.Clear();
+        }
+
+        // 处理控制台窗口被关闭、注销、关机等事件
+        private static void TryRegisterConsoleCloseHandler()
+        {
+            try
+            {
+                s_ctrlHandlerDelegate = ConsoleCtrlHandler; // 持有引用，避免GC
+                SetConsoleCtrlHandler(s_ctrlHandlerDelegate, true);
+            }
+            catch { }
+        }
+
+        private static bool ConsoleCtrlHandler(CtrlTypes ctrlType)
+        {
+            // 尽量进行一次有序关闭，避免forrtl 200窗口关闭中止
+            RequestShutdown();
+
+            // 等待主循环设置退出标记（最多等待数秒）
+            try { s_shutdownEvent.Wait(TimeSpan.FromSeconds(3)); } catch { }
+            return true; // 表示我们处理了该事件
+        }
+
+        private delegate bool ConsoleCtrlDelegate(CtrlTypes ctrlType);
+
+        private enum CtrlTypes
+        {
+            CTRL_C_EVENT = 0,
+            CTRL_BREAK_EVENT = 1,
+            CTRL_CLOSE_EVENT = 2,
+            CTRL_LOGOFF_EVENT = 5,
+            CTRL_SHUTDOWN_EVENT = 6
+        }
+
+        [DllImport("Kernel32")]
+        private static extern bool SetConsoleCtrlHandler(ConsoleCtrlDelegate handler, bool add);
 
         private static Task HandleLoadModelAsync(JObject req, StreamWriter writer)
         {

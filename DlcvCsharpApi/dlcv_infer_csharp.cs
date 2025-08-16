@@ -292,9 +292,10 @@ namespace dlcv_infer_csharp
                 var processStartInfo = new ProcessStartInfo
                 {
                     FileName = backendExePath,
-                    UseShellExecute = true,
-                    CreateNoWindow = false,
-                    WindowStyle = ProcessWindowStyle.Normal
+                    WorkingDirectory = Path.GetDirectoryName(backendExePath),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
                 };
 
                 Process.Start(processStartInfo);
@@ -306,7 +307,7 @@ namespace dlcv_infer_csharp
             }
         }
 
-        // ===== RPC 本地服务支持（DVO） =====
+        // ===== RPC 本地服务支持 =====
         private void InitializeRpcMode(string modelPath, int device_id)
         {
             // 确保服务可用
@@ -380,9 +381,10 @@ namespace dlcv_infer_csharp
                 var psi = new ProcessStartInfo
                 {
                     FileName = exePath,
-                    UseShellExecute = true,
-                    CreateNoWindow = false,
-                    WindowStyle = ProcessWindowStyle.Minimized
+                    WorkingDirectory = Path.GetDirectoryName(exePath),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
                 };
                 Process.Start(psi);
                 Console.WriteLine($"已启动 DlcvModelRPC 服务: {exePath}");
