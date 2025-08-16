@@ -152,7 +152,7 @@ namespace dlcv_infer_csharp
 
             string extension = Path.GetExtension(modelPath).ToLower();
             _isDvpMode = extension == ".dvp";
-            _isRpcMode = rpc_mode; // .dvo 走本地RPC服务
+            _isRpcMode = rpc_mode;
 
             if (_isDvpMode)
             {
@@ -161,7 +161,7 @@ namespace dlcv_infer_csharp
             }
             else if (_isRpcMode)
             {
-                // DVO/DVT（可扩展）模式：使用本地RPC（命名管道+共享内存）
+                // DVO/DVT RPC模式：使用本地RPC（命名管道+共享内存）
                 InitializeRpcMode(modelPath, device_id);
             }
             else
@@ -282,20 +282,27 @@ namespace dlcv_infer_csharp
         {
             try
             {
+                string backendExePath = @"C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe";
+
+                if (!File.Exists(backendExePath))
+                {
+                    throw new FileNotFoundException($"找不到后端服务程序: {backendExePath}");
+                }
+
                 var processStartInfo = new ProcessStartInfo
                 {
-                    FileName = @"C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe",
+                    FileName = backendExePath,
                     UseShellExecute = true,
                     CreateNoWindow = false,
                     WindowStyle = ProcessWindowStyle.Normal
                 };
 
                 Process.Start(processStartInfo);
-                Console.WriteLine("已启动后端推理服务");
+                Console.WriteLine($"已启动后端推理服务: {backendExePath}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"启动后端服务失败: {ex.Message}");
+                throw new Exception($"启动后端服务失败: {ex.Message}", ex);
             }
         }
 
@@ -361,7 +368,14 @@ namespace dlcv_infer_csharp
                 {
                     // 兼容开发目录结构（Debug/Release 子目录）
                     var candidate = Directory.GetFiles(baseDir, "DlcvModelRPC.exe", SearchOption.AllDirectories).FirstOrDefault();
-                    if (!string.IsNullOrEmpty(candidate)) exePath = candidate;
+                    if (!string.IsNullOrEmpty(candidate))
+                    {
+                        exePath = candidate;
+                    }
+                    else
+                    {
+                        throw new FileNotFoundException($"找不到 DlcvModelRPC.exe 文件。搜索路径: {baseDir}");
+                    }
                 }
                 var psi = new ProcessStartInfo
                 {
@@ -371,10 +385,11 @@ namespace dlcv_infer_csharp
                     WindowStyle = ProcessWindowStyle.Minimized
                 };
                 Process.Start(psi);
+                Console.WriteLine($"已启动 DlcvModelRPC 服务: {exePath}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"启动 DlcvModelRPC 失败: {ex.Message}");
+                throw new Exception($"启动 DlcvModelRPC 失败: {ex.Message}", ex);
             }
         }
 
@@ -545,7 +560,7 @@ namespace dlcv_infer_csharp
 
             // 移除指定字段
             var fieldsToRemove = new[] { "character", "dict", "classes" };
-            
+
             foreach (var field in fieldsToRemove)
             {
                 if (filteredInfo.ContainsKey(field))
@@ -1396,7 +1411,7 @@ namespace dlcv_infer_csharp
             }
 
             var modelInfo = new JObject();
-            
+
             try
             {
                 modelInfo["det_model"] = GetDetModelInfo();
@@ -1445,21 +1460,21 @@ namespace dlcv_infer_csharp
             try
             {
                 var allResults = new List<JObject>();
-            
+
                 foreach (var image in images)
-            {
-                if (image == null || image.Empty())
                 {
-                    // 空图像添加空结果
+                    if (image == null || image.Empty())
+                    {
+                        // 空图像添加空结果
                         var emptyResult = new JObject
                         {
                             ["results"] = new JArray()
                         };
                         allResults.Add(emptyResult);
-                    continue;
-                }
+                        continue;
+                    }
 
-                // 对单张图像进行OCR推理
+                    // 对单张图像进行OCR推理
                     var singleResult = OcrInferInternal(image, params_json);
                     allResults.Add(singleResult);
                 }
@@ -1496,7 +1511,7 @@ namespace dlcv_infer_csharp
         {
             // 使用检测模型进行推理
             var detResult = _detModel.Infer(image, params_json);
-            
+
             var resultsArray = new JArray();
 
             // 遍历检测结果
@@ -1570,7 +1585,7 @@ namespace dlcv_infer_csharp
                         }
 
                         // 如果识别模型有结果，使用识别结果的类别名称
-                        if (recognizeResult.SampleResults.Count > 0 && 
+                        if (recognizeResult.SampleResults.Count > 0 &&
                             recognizeResult.SampleResults[0].Results.Count > 0)
                         {
                             var topResult = recognizeResult.SampleResults[0].Results[0];
@@ -1587,21 +1602,21 @@ namespace dlcv_infer_csharp
                             ["global_x"] = globalX,
                             ["global_y"] = globalY
                         };
-                        
+
                         if (detection.WithAngle)
                         {
-                            metadata["global_bbox"] = new JArray 
-                            { 
-                                detection.Bbox[0], detection.Bbox[1], 
-                                detection.Bbox[2], detection.Bbox[3], 
-                                detection.Angle 
+                            metadata["global_bbox"] = new JArray
+                            {
+                                detection.Bbox[0], detection.Bbox[1],
+                                detection.Bbox[2], detection.Bbox[3],
+                                detection.Angle
                             };
                         }
-                        
+
                         resultObj["metadata"] = metadata;
 
                         resultsArray.Add(resultObj);
-                        
+
                         roiMat?.Dispose();
                     }
                     catch (Exception ex)
