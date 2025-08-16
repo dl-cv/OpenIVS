@@ -51,7 +51,7 @@
             this.button_load_sliding_window_model = new System.Windows.Forms.Button();
             this.button_free_all_model = new System.Windows.Forms.Button();
             this.button_load_ocr_model = new System.Windows.Forms.Button();
-            this.checkBox_force_dvp = new System.Windows.Forms.CheckBox();
+            this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_threshold)).BeginInit();
@@ -336,22 +336,22 @@
             this.button_load_ocr_model.UseVisualStyleBackColor = true;
             this.button_load_ocr_model.Click += new System.EventHandler(this.button_load_ocr_model_Click);
             // 
-            // checkBox_force_dvp
+            // checkBox_rpc_mode
             // 
-            this.checkBox_force_dvp.AutoSize = true;
-            this.checkBox_force_dvp.Location = new System.Drawing.Point(493, 171);
-            this.checkBox_force_dvp.Name = "checkBox_force_dvp";
-            this.checkBox_force_dvp.Size = new System.Drawing.Size(191, 35);
-            this.checkBox_force_dvp.TabIndex = 24;
-            this.checkBox_force_dvp.Text = "强制DVP模式";
-            this.checkBox_force_dvp.UseVisualStyleBackColor = true;
+            this.checkBox_rpc_mode.AutoSize = true;
+            this.checkBox_rpc_mode.Location = new System.Drawing.Point(493, 171);
+            this.checkBox_rpc_mode.Name = "checkBox_rpc_mode";
+            this.checkBox_rpc_mode.Size = new System.Drawing.Size(191, 35);
+            this.checkBox_rpc_mode.TabIndex = 24;
+            this.checkBox_rpc_mode.Text = "RPC模式";
+            this.checkBox_rpc_mode.UseVisualStyleBackColor = true;
             // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(14F, 31F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1238, 844);
-            this.Controls.Add(this.checkBox_force_dvp);
+            this.Controls.Add(this.checkBox_rpc_mode);
             this.Controls.Add(this.button_load_ocr_model);
             this.Controls.Add(this.button_free_all_model);
             this.Controls.Add(this.button_load_sliding_window_model);
@@ -414,7 +414,7 @@
         private System.Windows.Forms.Button button_load_sliding_window_model;
         private System.Windows.Forms.Button button_free_all_model;
         private System.Windows.Forms.Button button_load_ocr_model;
-        private System.Windows.Forms.CheckBox checkBox_force_dvp;
+        private System.Windows.Forms.CheckBox checkBox_rpc_mode;
     }
 }
 
