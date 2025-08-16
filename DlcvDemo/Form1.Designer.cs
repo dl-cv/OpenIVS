@@ -51,6 +51,7 @@
             this.button_load_sliding_window_model = new System.Windows.Forms.Button();
             this.button_free_all_model = new System.Windows.Forms.Button();
             this.button_load_ocr_model = new System.Windows.Forms.Button();
+            this.checkBox_force_dvp = new System.Windows.Forms.CheckBox();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_threshold)).BeginInit();
@@ -162,7 +163,7 @@
             0,
             0});
             this.numericUpDown_num_thread.Name = "numericUpDown_num_thread";
-            this.numericUpDown_num_thread.Size = new System.Drawing.Size(63, 31);
+            this.numericUpDown_num_thread.Size = new System.Drawing.Size(83, 39);
             this.numericUpDown_num_thread.TabIndex = 11;
             this.numericUpDown_num_thread.Value = new decimal(new int[] {
             1,
@@ -177,7 +178,7 @@
             this.comboBox1.FormattingEnabled = true;
             this.comboBox1.Location = new System.Drawing.Point(249, 34);
             this.comboBox1.Name = "comboBox1";
-            this.comboBox1.Size = new System.Drawing.Size(760, 32);
+            this.comboBox1.Size = new System.Drawing.Size(760, 39);
             this.comboBox1.TabIndex = 12;
             // 
             // label1
@@ -185,7 +186,7 @@
             this.label1.AutoSize = true;
             this.label1.Location = new System.Drawing.Point(161, 37);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(82, 24);
+            this.label1.Size = new System.Drawing.Size(110, 31);
             this.label1.TabIndex = 13;
             this.label1.Text = "选择显卡";
             // 
@@ -194,7 +195,7 @@
             this.label2.AutoSize = true;
             this.label2.Location = new System.Drawing.Point(318, 172);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(64, 24);
+            this.label2.Size = new System.Drawing.Size(86, 31);
             this.label2.TabIndex = 14;
             this.label2.Text = "线程数";
             // 
@@ -203,7 +204,7 @@
             this.label3.AutoSize = true;
             this.label3.Location = new System.Drawing.Point(640, 105);
             this.label3.Name = "label3";
-            this.label3.Size = new System.Drawing.Size(99, 24);
+            this.label3.Size = new System.Drawing.Size(132, 31);
             this.label3.TabIndex = 15;
             this.label3.Text = "batch_size";
             // 
@@ -221,7 +222,7 @@
             0,
             0});
             this.numericUpDown_batch_size.Name = "numericUpDown_batch_size";
-            this.numericUpDown_batch_size.Size = new System.Drawing.Size(63, 31);
+            this.numericUpDown_batch_size.Size = new System.Drawing.Size(63, 39);
             this.numericUpDown_batch_size.TabIndex = 16;
             this.numericUpDown_batch_size.Value = new decimal(new int[] {
             1,
@@ -260,7 +261,7 @@
             this.label4.AutoSize = true;
             this.label4.Location = new System.Drawing.Point(457, 105);
             this.label4.Name = "label4";
-            this.label4.Size = new System.Drawing.Size(92, 24);
+            this.label4.Size = new System.Drawing.Size(123, 31);
             this.label4.TabIndex = 18;
             this.label4.Text = "threshold";
             // 
@@ -279,7 +280,7 @@
             0,
             0});
             this.numericUpDown_threshold.Name = "numericUpDown_threshold";
-            this.numericUpDown_threshold.Size = new System.Drawing.Size(79, 31);
+            this.numericUpDown_threshold.Size = new System.Drawing.Size(79, 39);
             this.numericUpDown_threshold.TabIndex = 19;
             this.numericUpDown_threshold.Value = new decimal(new int[] {
             5,
@@ -335,11 +336,22 @@
             this.button_load_ocr_model.UseVisualStyleBackColor = true;
             this.button_load_ocr_model.Click += new System.EventHandler(this.button_load_ocr_model_Click);
             // 
+            // checkBox_force_dvp
+            // 
+            this.checkBox_force_dvp.AutoSize = true;
+            this.checkBox_force_dvp.Location = new System.Drawing.Point(493, 171);
+            this.checkBox_force_dvp.Name = "checkBox_force_dvp";
+            this.checkBox_force_dvp.Size = new System.Drawing.Size(191, 35);
+            this.checkBox_force_dvp.TabIndex = 24;
+            this.checkBox_force_dvp.Text = "强制DVP模式";
+            this.checkBox_force_dvp.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(14F, 31F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1238, 844);
+            this.Controls.Add(this.checkBox_force_dvp);
             this.Controls.Add(this.button_load_ocr_model);
             this.Controls.Add(this.button_free_all_model);
             this.Controls.Add(this.button_load_sliding_window_model);
@@ -402,6 +414,7 @@
         private System.Windows.Forms.Button button_load_sliding_window_model;
         private System.Windows.Forms.Button button_free_all_model;
         private System.Windows.Forms.Button button_load_ocr_model;
+        private System.Windows.Forms.CheckBox checkBox_force_dvp;
     }
 }
 

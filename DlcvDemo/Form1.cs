@@ -141,7 +141,13 @@ namespace DlcvDemo
                         model = null;
                         GC.Collect();
                     }
-                    model = new Model(selectedFilePath, device_id);
+                    bool forceDvp = false;
+                    try
+                    {
+                        forceDvp = this.checkBox_force_dvp != null && this.checkBox_force_dvp.Checked;
+                    }
+                    catch { }
+                    model = new Model(selectedFilePath, device_id, forceDvp);
                     button_getmodelinfo_Click(sender, e);
                 }
                 catch (Exception ex)
