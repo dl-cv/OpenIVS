@@ -136,7 +136,7 @@ namespace dlcv_infer_csharp
 
         }
 
-        public Model(string modelPath, int device_id)
+        public Model(string modelPath, int device_id, bool dvp_mode = false)
         {
             _modelPath = modelPath;
 
@@ -147,7 +147,7 @@ namespace dlcv_infer_csharp
             }
 
             string extension = Path.GetExtension(modelPath).ToLower();
-            _isDvpMode = extension == ".dvp";
+            _isDvpMode = extension == ".dvp" || dvp_mode;
 
             if (_isDvpMode)
             {
