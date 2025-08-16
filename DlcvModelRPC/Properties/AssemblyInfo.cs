@@ -1,11 +1,11 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-[assembly: AssemblyTitle("DlcvModelRPC")]
+[assembly: AssemblyTitle("AI Model RPC")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("DLCV")]
-[assembly: AssemblyProduct("DlcvModelRPC")]
+[assembly: AssemblyProduct("AI Model RPC")]
 [assembly: AssemblyCopyright("Copyright © DLCV 2025")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]

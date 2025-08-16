@@ -35,8 +35,8 @@ namespace DlcvModelRPC
 
         private static void Main(string[] args)
         {
-            Console.WriteLine("DlcvModelRPC");
-            try { Console.Title = "DlcvModelRPC"; } catch { }
+            Console.WriteLine("AI Model RPC");
+            try { Console.Title = "AI Model RPC"; } catch { }
             s_cts = new CancellationTokenSource();
             // Ctrl+C / Ctrl+Break（在无控制台时可能无效，做兼容处理）
             try { Console.CancelKeyPress += (s, e) => { e.Cancel = true; RequestShutdown(); }; } catch { }
