@@ -209,10 +209,16 @@ namespace DlcvModuleApi.Pipeline.Modules
                     if (categoryFilter.Contains(cname) && cname != "全选") continue;
                     var bboxToken = each["bbox"] as JArray;
                     if (bboxToken == null || bboxToken.Count != 4) continue;
-                    double x1 = bboxToken[0].Value<double>();
-                    double y1 = bboxToken[1].Value<double>();
-                    double x2 = bboxToken[2].Value<double>();
-                    double y2 = bboxToken[3].Value<double>();
+                    // 约定：det模型输出为 [x, y, w, h]（xywh）
+                    double x = bboxToken[0].Value<double>();
+                    double y = bboxToken[1].Value<double>();
+                    double w = bboxToken[2].Value<double>();
+                    double h = bboxToken[3].Value<double>();
+                    // 内部合并与裁剪使用 xyxy，输出保留 xywh
+                    double x1 = x;
+                    double y1 = y;
+                    double x2 = x + Math.Max(1.0, w);
+                    double y2 = y + Math.Max(1.0, h);
 
                     int pad = 0;
                     if (modelConfig != null)
@@ -222,14 +228,18 @@ namespace DlcvModuleApi.Pipeline.Modules
 
                     int gx = imgDict[imgKey].global_x;
                     int gy = imgDict[imgKey].global_y;
-                    var gb = new JArray((int)(x1 + gx), (int)(y1 + gy), (int)(x2 + gx), (int)(y2 + gy));
+                    // 元数据：同时写入 xywh（最终输出）与 xyxy（合并/裁剪）
+                    var gb_xyxy = new JArray((int)(x1 + gx), (int)(y1 + gy), (int)(x2 + gx), (int)(y2 + gy));
+                    var gb_xywh = new JArray((int)(x + gx), (int)(y + gy), (int)Math.Max(1.0, w), (int)Math.Max(1.0, h));
                     var meta = new JObject
                     {
                         ["combine_flag"] = false,
                         ["slice_index"] = new JArray(new JArray(imgDict[imgKey].slice_positions[0].Item1, imgDict[imgKey].slice_positions[0].Item2)),
                         ["global_x"] = gx,
                         ["global_y"] = gy,
-                        ["global_bbox"] = gb
+                        ["global_bbox"] = gb_xywh,
+                        ["global_bbox_xyxy"] = gb_xyxy,
+                        ["bbox_mode"] = "xywh"
                     };
 
                     var pred = new Prediction
@@ -237,6 +247,7 @@ namespace DlcvModuleApi.Pipeline.Modules
                         category_id = each["category_id"]?.Value<int>() ?? 0,
                         category_name = cname,
                         score = (float)(each["score"]?.Value<double>() ?? 0.0),
+                        // 保持内部bbox为xyxy，便于面积/IoS计算
                         bbox = new List<double> { x1, y1, x2, y2 },
                         area = each["area"]?.Value<int>(),
                         with_mask = each["with_mask"]?.Value<bool>() ?? false,

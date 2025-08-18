@@ -26,7 +26,7 @@ namespace DlcvModuleApi.Pipeline.Modules
                 }
                 else
                 {
-                    CombineAxisAligned(rd, thr);
+                    CombineAxisAligned(rd, thr, inputs.current_round);
                 }
             }
             return Task.FromResult(inputs);
@@ -54,12 +54,44 @@ namespace DlcvModuleApi.Pipeline.Modules
             yield return down;
         }
 
-        private static void CombineAxisAligned(Dictionary<Tuple<int, int>, ResultEntry> rd, double thr)
+        private static List<double> GetXyxyFromMeta(JObject meta)
         {
-            // 1) 建立切片索引到结果键的映射（支持 [i,j] 和 [[i,j]] 两种格式）
+            if (meta == null) return null;
+            var xyxyTok = meta["global_bbox_xyxy"] as JArray;
+            var tok = (JArray)(xyxyTok ?? meta["global_bbox"] as JArray);
+            if (tok == null || tok.Count < 4) return null;
+            var mode = meta["bbox_mode"]?.Value<string>() ?? "xyxy";
+            if (xyxyTok != null || mode == "xyxy")
+            {
+                double ax1 = tok[0].Value<double>(), ay1 = tok[1].Value<double>(), ax2 = tok[2].Value<double>(), ay2 = tok[3].Value<double>();
+                double nx1 = Math.Min(ax1, ax2);
+                double ny1 = Math.Min(ay1, ay2);
+                double nx2 = Math.Max(ax1, ax2);
+                double ny2 = Math.Max(ay1, ay2);
+                return new List<double> { nx1, ny1, nx2, ny2 };
+            }
+            else
+            {
+                // xywh -> xyxy
+                double x = tok[0].Value<double>();
+                double y = tok[1].Value<double>();
+                double w = tok[2].Value<double>();
+                double h = tok[3].Value<double>();
+                double x1 = x;
+                double y1 = y;
+                double x2 = x + Math.Max(1.0, w);
+                double y2 = y + Math.Max(1.0, h);
+                return new List<double> { x1, y1, x2, y2 };
+            }
+        }
+
+        private static void CombineAxisAligned(Dictionary<Tuple<int, int>, ResultEntry> rd, double thr, int targetRound)
+        {
+            // 1) 建立切片索引到结果键的映射（支持 [i,j] 和 [[i,j]] 两种格式），仅处理当前轮次
             var sliceToKey = new Dictionary<string, Tuple<int, int>>();
             foreach (var kv in rd)
             {
+                if (kv.Value.current_round != targetRound) continue;
                 if (kv.Value.predictions.Count == 0) continue;
                 var firstPred = kv.Value.predictions.First().Value;
                 var si = firstPred.metadata?["slice_index"] as JArray;
@@ -84,7 +116,7 @@ namespace DlcvModuleApi.Pipeline.Modules
                 sliceToKey[key] = kv.Key;
             }
 
-            // 2) 收集所有预测节点，准备做连通分量合并（邻接比较、同类且 IOS>thr 即连边）
+            // 2) 收集所有预测节点，准备做连通分量合并（两两比较、同类且 IOS>thr 即连边），仅当前轮次
             var nodeResultKeys = new List<Tuple<int, int>>();
             var nodePredKeys = new List<int>();
             var nodeSliceKeys = new List<Tuple<int, int>>();
@@ -95,6 +127,7 @@ namespace DlcvModuleApi.Pipeline.Modules
 
             foreach (var kv in rd)
             {
+                if (kv.Value.current_round != targetRound) continue;
                 var preds = kv.Value.predictions;
                 foreach (var p in preds)
                 {
@@ -118,14 +151,8 @@ namespace DlcvModuleApi.Pipeline.Modules
                     }
                     else continue;
                     var baseKey = new Tuple<int, int>(sliceI, sliceJ);
-                    var gb = pred.metadata?["global_bbox"] as JArray;
-                    if (gb == null || gb.Count < 4) continue;
-                    double ax1 = gb[0].Value<double>(), ay1 = gb[1].Value<double>(), ax2 = gb[2].Value<double>(), ay2 = gb[3].Value<double>();
-                    double nx1 = Math.Min(ax1, ax2);
-                    double ny1 = Math.Min(ay1, ay2);
-                    double nx2 = Math.Max(ax1, ax2);
-                    double ny2 = Math.Max(ay1, ay2);
-                    var bbox = new List<double> { nx1, ny1, nx2, ny2 };
+                    var bbox = GetXyxyFromMeta(pred.metadata);
+                    if (bbox == null) continue;
                     
                     int ni = nodeResultKeys.Count;
                     nodeResultKeys.Add(kv.Key);
@@ -152,42 +179,21 @@ namespace DlcvModuleApi.Pipeline.Modules
                 if (ra != rb) parent[rb] = ra;
             };
 
-            // 4) 仅与相邻切片（右、下）比较，构造连通关系
+            // 4) 对所有同类框进行两两比较（跨切片），构造连通关系
             for (int i = 0; i < n; i++)
             {
-                var baseKey = nodeSliceKeys[i];
-                foreach (var nb in GetNeighbors(baseKey))
+                for (int j = i + 1; j < n; j++)
                 {
-                    string nk = $"{nb.Item1},{nb.Item2}";
-                    if (!sliceToKey.ContainsKey(nk)) continue;
-                    var nbKey = sliceToKey[nk];
-                    var nbPreds = rd[nbKey].predictions;
-                    foreach (var q in nbPreds)
+                    if (nodeLabels[i] != nodeLabels[j]) continue;
+                    var ios = IOS(nodeBboxes[i], nodeBboxes[j]);
+                    if (ios > thr)
                     {
-                        var np = q.Value;
-                        if (np.category_id != nodeLabels[i]) continue;
-                        var ngb = np.metadata?["global_bbox"] as JArray;
-                        if (ngb == null || ngb.Count < 4) continue;
-                        double bx1 = ngb[0].Value<double>(), by1 = ngb[1].Value<double>(), bx2 = ngb[2].Value<double>(), by2 = ngb[3].Value<double>();
-                        double mx1 = Math.Min(bx1, bx2);
-                        double my1 = Math.Min(by1, by2);
-                        double mx2 = Math.Max(bx1, bx2);
-                        double my2 = Math.Max(by1, by2);
-                        var nbbox = new List<double> { mx1, my1, mx2, my2 };
-                        var ios = IOS(nodeBboxes[i], nbbox);
-                        if (ios > thr)
-                        {
-                            int j;
-                            if (nodeIndexMap.TryGetValue($"{nbKey.Item1},{nbKey.Item2}:{q.Key}", out j))
-                            {
-                                unite(i, j);
-                            }
-                        }
+                        unite(i, j);
                     }
                 }
             }
 
-            // 5) 每个连通分量仅保留最高分，其余标记 combine_flag=true
+            // 5) 每个连通分量仅保留最高分，其余标记 combine_flag=true（确保全局只输出一个）
             var bestInGroup = new Dictionary<int, int>();
             for (int i = 0; i < n; i++)
             {

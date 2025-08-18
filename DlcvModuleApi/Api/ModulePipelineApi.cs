@@ -155,12 +155,27 @@ namespace DlcvModuleApi.Api
                     {
                         var pred = p.Value;
                         if (pred.metadata?["combine_flag"]?.Value<bool>() == true) continue;
+                        // 输出bbox优先xywh（与det模型输出保持一致）；若不可用则退回xyxy
+                        JToken outBbox = null;
+                        var prefer = pred.metadata?["bbox_mode"]?.Value<string>() ?? "xywh";
+                        if (prefer == "xywh")
+                        {
+                            outBbox = pred.metadata?["global_bbox"];
+                        }
+                        if (outBbox == null)
+                        {
+                            outBbox = pred.metadata?["global_bbox_xyxy"];
+                        }
+                        if (outBbox == null)
+                        {
+                            outBbox = new JArray(pred.bbox ?? new List<double> { 0, 0, 0, 0 });
+                        }
                         var item = new JObject
                         {
                             ["category_id"] = pred.category_id,
                             ["category_name"] = pred.category_name,
                             ["score"] = pred.score,
-                            ["bbox"] = pred.metadata?["global_bbox"] ?? new JArray(pred.bbox ?? new List<double> { 0, 0, 0, 0 })
+                            ["bbox"] = outBbox
                         };
                         if (pred.with_mask && pred.mask != null && !pred.mask.Empty())
                         {
