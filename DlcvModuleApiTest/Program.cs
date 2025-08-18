@@ -30,7 +30,8 @@ namespace DlcvModuleApiTest
                     ["iou_threshold"] = 0.2,
                     ["top_k"] = 1,
                     ["epsilon"] = 1.0,
-                    ["category_filter_list"] = new JArray()
+                    ["category_filter_list"] = new JArray(),
+                    ["combine_ios_threshold"] = 0.2
                 },
                 new JObject { ["module_type"] = "detection_result", ["task_type"] = "detection_result" },
                 new JObject { ["module_type"] = "combine_results", ["combine_ios_threshold"] = 0.2 }

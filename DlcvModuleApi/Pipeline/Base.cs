@@ -51,6 +51,7 @@ namespace DlcvModuleApi.Pipeline
             if (resultProcessor is Modules.DetectionResultModule || resultProcessor is Modules.RotatedDetectionResultModule)
             {
                 var combineThreshold = opResult.model_config.combine_ios_threshold;
+
                 var combineModule = new Modules.CombineResultsModule(new ModuleConfig { combine_ios_threshold = combineThreshold });
                 processed = await combineModule.Process(processed, update);
             }

@@ -56,58 +56,159 @@ namespace DlcvModuleApi.Pipeline.Modules
 
         private static void CombineAxisAligned(Dictionary<Tuple<int, int>, ResultEntry> rd, double thr)
         {
+            // 1) 建立切片索引到结果键的映射（支持 [i,j] 和 [[i,j]] 两种格式）
             var sliceToKey = new Dictionary<string, Tuple<int, int>>();
             foreach (var kv in rd)
             {
                 if (kv.Value.predictions.Count == 0) continue;
-                var si = kv.Value.predictions.First().Value.metadata?["slice_index"] as JArray;
+                var firstPred = kv.Value.predictions.First().Value;
+                var si = firstPred.metadata?["slice_index"] as JArray;
                 if (si == null || si.Count == 0) continue;
-                var idx = si;
-                string key = $"{idx[0].Value<int>()},{idx[1].Value<int>()}";
+                var idx = si; // 按用户要求保留该写法
+                // 支持两种格式：[i,j] 或 [[i,j]]
+                int sliceI, sliceJ;
+                if (idx.Count >= 2 && idx[0].Type != JTokenType.Array)
+                {
+                    // 格式：[i,j]
+                    sliceI = idx[0].Value<int>();
+                    sliceJ = idx[1].Value<int>();
+                }
+                else if (idx.Count >= 1 && idx[0] is JArray idxPair && idxPair.Count >= 2)
+                {
+                    // 格式：[[i,j]]
+                    sliceI = idxPair[0].Value<int>();
+                    sliceJ = idxPair[1].Value<int>();
+                }
+                else continue;
+                string key = $"{sliceI},{sliceJ}";
                 sliceToKey[key] = kv.Key;
             }
 
-            foreach (var kv in rd.ToList())
+            // 2) 收集所有预测节点，准备做连通分量合并（邻接比较、同类且 IOS>thr 即连边）
+            var nodeResultKeys = new List<Tuple<int, int>>();
+            var nodePredKeys = new List<int>();
+            var nodeSliceKeys = new List<Tuple<int, int>>();
+            var nodeLabels = new List<int>();
+            var nodeScores = new List<float>();
+            var nodeBboxes = new List<List<double>>();
+            var nodeIndexMap = new Dictionary<string, int>(); // (rdKey.Item1,rdKey.Item2,predKey) -> idx
+
+            foreach (var kv in rd)
             {
                 var preds = kv.Value.predictions;
-                foreach (var p in preds.ToList())
+                foreach (var p in preds)
                 {
                     var pred = p.Value;
-                    if (pred.metadata?["combine_flag"]?.Value<bool>() == true) continue;
                     var si = pred.metadata?["slice_index"] as JArray;
                     if (si == null || si.Count == 0) continue;
-                    var idx = si;
-                    var baseKey = new Tuple<int, int>(idx[0].Value<int>(), idx[1].Value<int>());
-                    var label = pred.category_id;
-                    var gb = pred.metadata?["global_bbox"] as JArray;
-                    var bbox = new List<double> { gb[0].Value<double>(), gb[1].Value<double>(), gb[2].Value<double>(), gb[3].Value<double>() };
-
-                    foreach (var nb in GetNeighbors(baseKey))
+                    var idx = si; // 保留写法
+                    // 支持两种格式：[i,j] 或 [[i,j]]
+                    int sliceI, sliceJ;
+                    if (idx.Count >= 2 && idx[0].Type != JTokenType.Array)
                     {
-                        string nk = $"{nb.Item1},{nb.Item2}";
-                        if (!sliceToKey.ContainsKey(nk)) continue;
-                        var nbKey = sliceToKey[nk];
-                        var nbPreds = rd[nbKey].predictions;
-                        foreach (var q in nbPreds.ToList())
+                        // 格式：[i,j]
+                        sliceI = idx[0].Value<int>();
+                        sliceJ = idx[1].Value<int>();
+                    }
+                    else if (idx.Count >= 1 && idx[0] is JArray idxPair && idxPair.Count >= 2)
+                    {
+                        // 格式：[[i,j]]
+                        sliceI = idxPair[0].Value<int>();
+                        sliceJ = idxPair[1].Value<int>();
+                    }
+                    else continue;
+                    var baseKey = new Tuple<int, int>(sliceI, sliceJ);
+                    var gb = pred.metadata?["global_bbox"] as JArray;
+                    if (gb == null || gb.Count < 4) continue;
+                    double ax1 = gb[0].Value<double>(), ay1 = gb[1].Value<double>(), ax2 = gb[2].Value<double>(), ay2 = gb[3].Value<double>();
+                    double nx1 = Math.Min(ax1, ax2);
+                    double ny1 = Math.Min(ay1, ay2);
+                    double nx2 = Math.Max(ax1, ax2);
+                    double ny2 = Math.Max(ay1, ay2);
+                    var bbox = new List<double> { nx1, ny1, nx2, ny2 };
+                    
+                    int ni = nodeResultKeys.Count;
+                    nodeResultKeys.Add(kv.Key);
+                    nodePredKeys.Add(p.Key);
+                    nodeSliceKeys.Add(baseKey);
+                    nodeLabels.Add(pred.category_id);
+                    nodeScores.Add(pred.score);
+                    nodeBboxes.Add(bbox);
+                    nodeIndexMap[$"{kv.Key.Item1},{kv.Key.Item2}:{p.Key}"] = ni;
+                }
+            }
+
+            int n = nodeResultKeys.Count;
+            if (n == 0) return;
+
+            // 3) 并查集
+            var parent = new int[n];
+            for (int i = 0; i < n; i++) parent[i] = i;
+            Func<int, int> find = null;
+            find = i => parent[i] == i ? i : (parent[i] = find(parent[i]));
+            Action<int, int> unite = (a, b) =>
+            {
+                int ra = find(a), rb = find(b);
+                if (ra != rb) parent[rb] = ra;
+            };
+
+            // 4) 仅与相邻切片（右、下）比较，构造连通关系
+            for (int i = 0; i < n; i++)
+            {
+                var baseKey = nodeSliceKeys[i];
+                foreach (var nb in GetNeighbors(baseKey))
+                {
+                    string nk = $"{nb.Item1},{nb.Item2}";
+                    if (!sliceToKey.ContainsKey(nk)) continue;
+                    var nbKey = sliceToKey[nk];
+                    var nbPreds = rd[nbKey].predictions;
+                    foreach (var q in nbPreds)
+                    {
+                        var np = q.Value;
+                        if (np.category_id != nodeLabels[i]) continue;
+                        var ngb = np.metadata?["global_bbox"] as JArray;
+                        if (ngb == null || ngb.Count < 4) continue;
+                        double bx1 = ngb[0].Value<double>(), by1 = ngb[1].Value<double>(), bx2 = ngb[2].Value<double>(), by2 = ngb[3].Value<double>();
+                        double mx1 = Math.Min(bx1, bx2);
+                        double my1 = Math.Min(by1, by2);
+                        double mx2 = Math.Max(bx1, bx2);
+                        double my2 = Math.Max(by1, by2);
+                        var nbbox = new List<double> { mx1, my1, mx2, my2 };
+                        var ios = IOS(nodeBboxes[i], nbbox);
+                        if (ios > thr)
                         {
-                            var np = q.Value;
-                            if (np.category_id != label) continue;
-                            var ngb = np.metadata?["global_bbox"] as JArray;
-                            var nbbox = new List<double> { ngb[0].Value<double>(), ngb[1].Value<double>(), ngb[2].Value<double>(), ngb[3].Value<double>() };
-                            var ios = IOS(bbox, nbbox);
-                            if (ios > thr)
+                            int j;
+                            if (nodeIndexMap.TryGetValue($"{nbKey.Item1},{nbKey.Item2}:{q.Key}", out j))
                             {
-                                if (np.score > pred.score)
-                                {
-                                    pred.metadata["combine_flag"] = true;
-                                }
-                                else
-                                {
-                                    np.metadata["combine_flag"] = true;
-                                }
+                                unite(i, j);
                             }
                         }
                     }
+                }
+            }
+
+            // 5) 每个连通分量仅保留最高分，其余标记 combine_flag=true
+            var bestInGroup = new Dictionary<int, int>();
+            for (int i = 0; i < n; i++)
+            {
+                int r = find(i);
+                if (!bestInGroup.ContainsKey(r) || nodeScores[i] > nodeScores[bestInGroup[r]])
+                {
+                    bestInGroup[r] = i;
+                }
+            }
+
+            for (int i = 0; i < n; i++)
+            {
+                int r = find(i);
+                bool keep = bestInGroup[r] == i;
+                var rk = nodeResultKeys[i];
+                var pk = nodePredKeys[i];
+                var pred = rd[rk].predictions[pk];
+                if (!keep)
+                {
+                    if (pred.metadata == null) pred.metadata = new JObject();
+                    pred.metadata["combine_flag"] = true;
                 }
             }
         }
