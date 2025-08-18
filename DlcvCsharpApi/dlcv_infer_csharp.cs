@@ -11,6 +11,8 @@ using Newtonsoft.Json.Schema;
 using System.Net.Http;
 using System.IO;
 using System.Diagnostics;
+using System.IO.Pipes;
+using System.IO.MemoryMappedFiles;
 
 namespace dlcv_infer_csharp
 {
@@ -126,17 +128,19 @@ namespace dlcv_infer_csharp
 
         // DVP mode fields
         private bool _isDvpMode = false;
+        private bool _isRpcMode = false;
         private string _modelPath;
         private string _serverUrl = "http://127.0.0.1:9890";
         private HttpClient _httpClient;
         private bool _disposed = false;
+        private readonly string _rpcPipeName = "DlcvModelRpcPipe";
 
         public Model()
         {
 
         }
 
-        public Model(string modelPath, int device_id)
+        public Model(string modelPath, int device_id, bool rpc_mode = false)
         {
             _modelPath = modelPath;
 
@@ -148,11 +152,17 @@ namespace dlcv_infer_csharp
 
             string extension = Path.GetExtension(modelPath).ToLower();
             _isDvpMode = extension == ".dvp";
+            _isRpcMode = rpc_mode;
 
             if (_isDvpMode)
             {
                 // DVP 模式：使用 HTTP API
                 InitializeDvpMode(modelPath, device_id);
+            }
+            else if (_isRpcMode)
+            {
+                // DVO/DVT RPC模式：使用本地RPC（命名管道+共享内存）
+                InitializeRpcMode(modelPath, device_id);
             }
             else
             {
@@ -272,20 +282,150 @@ namespace dlcv_infer_csharp
         {
             try
             {
+                string backendExePath = @"C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe";
+
+                if (!File.Exists(backendExePath))
+                {
+                    throw new FileNotFoundException($"找不到后端服务程序: {backendExePath}");
+                }
+
                 var processStartInfo = new ProcessStartInfo
                 {
-                    FileName = @"C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe",
-                    UseShellExecute = true,
-                    CreateNoWindow = false,
-                    WindowStyle = ProcessWindowStyle.Normal
+                    FileName = backendExePath,
+                    WorkingDirectory = Path.GetDirectoryName(backendExePath),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
                 };
 
                 Process.Start(processStartInfo);
-                Console.WriteLine("已启动后端推理服务");
+                Console.WriteLine($"已启动后端推理服务: {backendExePath}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"启动后端服务失败: {ex.Message}");
+                throw new Exception($"启动后端服务失败: {ex.Message}", ex);
+            }
+        }
+
+        // ===== RPC 本地服务支持 =====
+        private void InitializeRpcMode(string modelPath, int device_id)
+        {
+            // 确保服务可用
+            if (!CheckRpcService())
+            {
+                StartRpcService();
+                WaitForRpcService();
+            }
+
+            // 加载模型
+            var req = new JObject
+            {
+                ["action"] = "load_model",
+                ["model_path"] = modelPath,
+                ["device_id"] = device_id
+            };
+            var resp = SendRpc(req);
+            if (resp == null || !(resp["ok"]?.Value<bool>() ?? false))
+            {
+                string err = resp != null ? resp["error"]?.ToString() : "rpc_no_response";
+                throw new Exception($"RPC 加载模型失败: {err}");
+            }
+            modelIndex = 1; // 标记为已加载
+        }
+
+        private bool CheckRpcService()
+        {
+            try
+            {
+                using (var client = new NamedPipeClientStream(".", _rpcPipeName, PipeDirection.InOut, PipeOptions.None))
+                {
+                    client.Connect(200);
+                    using (var writer = new StreamWriter(client, new UTF8Encoding(false), 8192, true) { AutoFlush = true })
+                    using (var reader = new StreamReader(client, Encoding.UTF8, false, 8192, true))
+                    {
+                        var ping = new JObject { ["action"] = "ping" };
+                        writer.WriteLine(ping.ToString(Formatting.None));
+                        var line = reader.ReadLine();
+                        if (string.IsNullOrEmpty(line)) return false;
+                        var resp = JObject.Parse(line);
+                        return resp["pong"]?.Value<bool>() ?? false;
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void StartRpcService()
+        {
+            try
+            {
+                // 优先在当前目录寻找 AIModelRPC.exe
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string exePath = Path.Combine(baseDir, "AIModelRPC.exe");
+                if (!File.Exists(exePath))
+                {
+                    // 兼容开发目录结构（Debug/Release 子目录）
+                    var candidate = Directory.GetFiles(baseDir, "AIModelRPC.exe", SearchOption.AllDirectories).FirstOrDefault();
+                    if (!string.IsNullOrEmpty(candidate))
+                    {
+                        exePath = candidate;
+                    }
+                    else
+                    {
+                        throw new FileNotFoundException($"找不到 AIModelRPC.exe 文件。搜索路径: {baseDir}");
+                    }
+                }
+                var psi = new ProcessStartInfo
+                {
+                    FileName = exePath,
+                    WorkingDirectory = Path.GetDirectoryName(exePath),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                Process.Start(psi);
+                Console.WriteLine($"已启动 AIModelRPC 服务: {exePath}");
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"启动 AIModelRPC 失败: {ex.Message}", ex);
+            }
+        }
+
+        private void WaitForRpcService()
+        {
+            const int maxWaitMs = 15000;
+            const int stepMs = 200;
+            int waited = 0;
+            while (waited < maxWaitMs)
+            {
+                if (CheckRpcService()) return;
+                System.Threading.Thread.Sleep(stepMs);
+                waited += stepMs;
+            }
+            throw new Exception("等待RPC服务启动超时");
+        }
+
+        private JObject SendRpc(JObject req, int timeoutMs = 300000)
+        {
+            using (var client = new NamedPipeClientStream(".", _rpcPipeName, PipeDirection.InOut, PipeOptions.None))
+            {
+                client.Connect(timeoutMs);
+                using (var writer = new StreamWriter(client, new UTF8Encoding(false), 8192, true) { AutoFlush = true })
+                using (var reader = new StreamReader(client, Encoding.UTF8, false, 8192, true))
+                {
+                    writer.WriteLine(req.ToString(Formatting.None));
+                    string line = reader.ReadLine();
+                    if (line == null)
+                    {
+                        throw new Exception("RPC通信失败：未收到任何响应（line为null）");
+                    }
+                    if (string.IsNullOrEmpty(line)) return null;
+                    return JObject.Parse(line);
+                }
             }
         }
 
@@ -373,6 +513,24 @@ namespace dlcv_infer_csharp
                     Console.WriteLine($"DVP 释放模型失败: {ex.Message}");
                 }
             }
+            else if (_isRpcMode)
+            {
+                if (_disposed || modelIndex == -1) return;
+                try
+                {
+                    var req = new JObject
+                    {
+                        ["action"] = "free_model",
+                        ["model_path"] = _modelPath
+                    };
+                    SendRpc(req);
+                    modelIndex = -1;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"RPC 释放模型失败: {ex.Message}");
+                }
+            }
             else
             {
                 // DVT 模式：使用原来的释放逻辑
@@ -408,7 +566,7 @@ namespace dlcv_infer_csharp
 
             // 移除指定字段
             var fieldsToRemove = new[] { "character", "dict", "classes" };
-            
+
             foreach (var field in fieldsToRemove)
             {
                 if (filteredInfo.ContainsKey(field))
@@ -426,6 +584,21 @@ namespace dlcv_infer_csharp
             if (_isDvpMode)
             {
                 modelInfo = GetModelInfoDvp();
+            }
+            else if (_isRpcMode)
+            {
+                var req = new JObject
+                {
+                    ["action"] = "get_model_info",
+                    ["model_path"] = _modelPath
+                };
+                var resp = SendRpc(req);
+                if (resp == null || !(resp["ok"]?.Value<bool>() ?? false))
+                {
+                    string err = resp != null ? resp["error"]?.ToString() : "rpc_no_response";
+                    throw new Exception($"获取模型信息失败: {err}");
+                }
+                modelInfo = (JObject)resp["model_info"];
             }
             else
             {
@@ -499,10 +672,111 @@ namespace dlcv_infer_csharp
             {
                 return InferInternalDvp(images, params_json);
             }
+            else if (_isRpcMode)
+            {
+                return InferInternalRpc(images, params_json);
+            }
             else
             {
                 return InferInternalDvt(images, params_json);
             }
+        }
+
+        private Tuple<JObject, IntPtr> InferInternalRpc(List<Mat> images, JObject params_json)
+        {
+            // 仅支持单张图像；多张时逐张合并
+            var allResults = new JArray();
+            foreach (var image in images)
+            {
+                if (image == null || image.Empty())
+                {
+                    allResults.Add(new JObject { ["results"] = new JArray() });
+                    continue;
+                }
+
+                Mat mat = image;
+                if (!mat.IsContinuous()) mat = image.Clone();
+
+                int width = mat.Width, height = mat.Height, channels = mat.Channels();
+                string token = Guid.NewGuid().ToString("N");
+                string mmfName = "DlcvModelMmf_" + token;
+
+                int bytes = width * height * channels;
+                using (var mmf = MemoryMappedFile.CreateNew(mmfName, bytes))
+                using (var accessor = mmf.CreateViewAccessor(0, bytes, MemoryMappedFileAccess.Write))
+                {
+                    // 将Mat数据写入MMF
+                    byte[] buffer = new byte[bytes];
+                    System.Runtime.InteropServices.Marshal.Copy(mat.Data, buffer, 0, bytes);
+                    accessor.WriteArray(0, buffer, 0, bytes);
+
+                    var req = new JObject
+                    {
+                        ["action"] = "infer",
+                        ["model_path"] = _modelPath,
+                        ["mmf_token"] = token,
+                        ["width"] = width,
+                        ["height"] = height,
+                        ["channels"] = channels,
+                    };
+                    if (params_json != null)
+                    {
+                        req["params_json"] = params_json;
+                    }
+
+                    var resp = SendRpc(req);
+                    if (resp == null || !(resp["ok"]?.Value<bool>() ?? false))
+                    {
+                        string err = resp != null ? resp["error"]?.ToString() : "rpc_no_response";
+                        throw new Exception($"RPC 推理失败: {err}");
+                    }
+                    var resultObj = (JObject)resp["result"];
+
+                    // 如果包含mask的mmf引用，在本地转回Mat以保持一致
+                    var firstSample = resultObj["sample_results"][0]["results"] as JArray;
+                    if (firstSample != null)
+                    {
+                        foreach (JObject o in firstSample)
+                        {
+                            if ((o["with_mask"]?.Value<bool>() ?? false) && o["mask"] is JObject mj)
+                            {
+                                string mtoken = mj.Value<string>("mmf_token");
+                                int mw = mj.Value<int>("width");
+                                int mh = mj.Value<int>("height");
+                                if (!string.IsNullOrEmpty(mtoken) && mw > 0 && mh > 0)
+                                {
+                                    string mmfName2 = "DlcvModelMask_" + mtoken;
+                                    try
+                                    {
+                                        using (var mmf2 = MemoryMappedFile.OpenExisting(mmfName2, MemoryMappedFileRights.Read))
+                                        using (var acc2 = mmf2.CreateViewAccessor(0, mw * mh, MemoryMappedFileAccess.Read))
+                                        {
+                                            byte[] mBuf = new byte[mw * mh];
+                                            acc2.ReadArray(0, mBuf, 0, mBuf.Length);
+                                            using (var view = Mat.FromPixelData(mh, mw, MatType.CV_8UC1, mBuf))
+                                            {
+                                                // 为了统一，mask不在json里返回，后续 ParseToStructResult 会按DVP/DVT分支处理
+                                                // 这里先替换成占位，客户端最终不使用此字段
+                                            }
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+                        }
+                    }
+
+                    allResults.Add(new JObject { ["results"] = firstSample ?? new JArray() });
+                }
+                if (!ReferenceEquals(mat, image)) mat.Dispose();
+            }
+
+            var merged = new JObject { ["sample_results"] = new JArray() };
+            foreach (JObject sr in allResults)
+            {
+                ((JArray)merged["sample_results"]).Add(new JObject { ["results"] = sr["results"] });
+            }
+            return new Tuple<JObject, IntPtr>(merged, IntPtr.Zero);
         }
 
         private Tuple<JObject, IntPtr> InferInternalDvp(List<Mat> images, JObject params_json)
@@ -711,18 +985,45 @@ namespace dlcv_infer_csharp
                         }
                         else if (!_isDvpMode && result["mask"] != null)
                         {
-                            // DVT 模式：从指针数据生成 mask
-                            var mask = result["mask"];
-                            long maskPtrValue = mask["mask_ptr"]?.Value<long>() ?? 0;
-                            if (maskPtrValue != 0)
+                            // DVT / RPC 模式：优先支持RPC的MMF传输，其次兼容指针
+                            var mask = result["mask"] as JObject;
+                            if (mask != null && mask.ContainsKey("mmf_token"))
                             {
-                                IntPtr mask_ptr = new IntPtr(maskPtrValue);
-                                int mask_width = mask["width"]?.Value<int>() ?? 0;
-                                int mask_height = mask["height"]?.Value<int>() ?? 0;
-                                if (mask_width > 0 && mask_height > 0)
+                                string mtoken = mask.Value<string>("mmf_token");
+                                int mask_width = mask.Value<int>("width");
+                                int mask_height = mask.Value<int>("height");
+                                if (!string.IsNullOrEmpty(mtoken) && mask_width > 0 && mask_height > 0)
                                 {
-                                    mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-                                    mask_img = mask_img.Clone();
+                                    string mmfName2 = "DlcvModelMask_" + mtoken;
+                                    try
+                                    {
+                                        using (var mmf2 = MemoryMappedFile.OpenExisting(mmfName2, MemoryMappedFileRights.Read))
+                                        using (var acc2 = mmf2.CreateViewAccessor(0, mask_width * mask_height, MemoryMappedFileAccess.Read))
+                                        {
+                                            byte[] mBuf = new byte[mask_width * mask_height];
+                                            acc2.ReadArray(0, mBuf, 0, mBuf.Length);
+                                            using (var view = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mBuf))
+                                            {
+                                                mask_img = view.Clone();
+                                            }
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+                            else if (mask != null)
+                            {
+                                long maskPtrValue = mask["mask_ptr"]?.Value<long>() ?? 0;
+                                if (maskPtrValue != 0)
+                                {
+                                    IntPtr mask_ptr = new IntPtr(maskPtrValue);
+                                    int mask_width = mask["width"]?.Value<int>() ?? 0;
+                                    int mask_height = mask["height"]?.Value<int>() ?? 0;
+                                    if (mask_width > 0 && mask_height > 0)
+                                    {
+                                        mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
+                                        mask_img = mask_img.Clone();
+                                    }
                                 }
                             }
                         }
@@ -1116,7 +1417,7 @@ namespace dlcv_infer_csharp
             }
 
             var modelInfo = new JObject();
-            
+
             try
             {
                 modelInfo["det_model"] = GetDetModelInfo();
@@ -1165,21 +1466,21 @@ namespace dlcv_infer_csharp
             try
             {
                 var allResults = new List<JObject>();
-            
+
                 foreach (var image in images)
-            {
-                if (image == null || image.Empty())
                 {
-                    // 空图像添加空结果
+                    if (image == null || image.Empty())
+                    {
+                        // 空图像添加空结果
                         var emptyResult = new JObject
                         {
                             ["results"] = new JArray()
                         };
                         allResults.Add(emptyResult);
-                    continue;
-                }
+                        continue;
+                    }
 
-                // 对单张图像进行OCR推理
+                    // 对单张图像进行OCR推理
                     var singleResult = OcrInferInternal(image, params_json);
                     allResults.Add(singleResult);
                 }
@@ -1216,7 +1517,7 @@ namespace dlcv_infer_csharp
         {
             // 使用检测模型进行推理
             var detResult = _detModel.Infer(image, params_json);
-            
+
             var resultsArray = new JArray();
 
             // 遍历检测结果
@@ -1290,7 +1591,7 @@ namespace dlcv_infer_csharp
                         }
 
                         // 如果识别模型有结果，使用识别结果的类别名称
-                        if (recognizeResult.SampleResults.Count > 0 && 
+                        if (recognizeResult.SampleResults.Count > 0 &&
                             recognizeResult.SampleResults[0].Results.Count > 0)
                         {
                             var topResult = recognizeResult.SampleResults[0].Results[0];
@@ -1307,21 +1608,21 @@ namespace dlcv_infer_csharp
                             ["global_x"] = globalX,
                             ["global_y"] = globalY
                         };
-                        
+
                         if (detection.WithAngle)
                         {
-                            metadata["global_bbox"] = new JArray 
-                            { 
-                                detection.Bbox[0], detection.Bbox[1], 
-                                detection.Bbox[2], detection.Bbox[3], 
-                                detection.Angle 
+                            metadata["global_bbox"] = new JArray
+                            {
+                                detection.Bbox[0], detection.Bbox[1],
+                                detection.Bbox[2], detection.Bbox[3],
+                                detection.Angle
                             };
                         }
-                        
+
                         resultObj["metadata"] = metadata;
 
                         resultsArray.Add(resultObj);
-                        
+
                         roiMat?.Dispose();
                     }
                     catch (Exception ex)
