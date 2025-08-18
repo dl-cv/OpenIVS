@@ -362,20 +362,20 @@ namespace dlcv_infer_csharp
         {
             try
             {
-                // 优先在当前目录寻找 DlcvModelRPC.exe
+                // 优先在当前目录寻找 AIModelRPC.exe
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                string exePath = Path.Combine(baseDir, "DlcvModelRPC.exe");
+                string exePath = Path.Combine(baseDir, "AIModelRPC.exe");
                 if (!File.Exists(exePath))
                 {
                     // 兼容开发目录结构（Debug/Release 子目录）
-                    var candidate = Directory.GetFiles(baseDir, "DlcvModelRPC.exe", SearchOption.AllDirectories).FirstOrDefault();
+                    var candidate = Directory.GetFiles(baseDir, "AIModelRPC.exe", SearchOption.AllDirectories).FirstOrDefault();
                     if (!string.IsNullOrEmpty(candidate))
                     {
                         exePath = candidate;
                     }
                     else
                     {
-                        throw new FileNotFoundException($"找不到 DlcvModelRPC.exe 文件。搜索路径: {baseDir}");
+                        throw new FileNotFoundException($"找不到 AIModelRPC.exe 文件。搜索路径: {baseDir}");
                     }
                 }
                 var psi = new ProcessStartInfo
@@ -387,11 +387,11 @@ namespace dlcv_infer_csharp
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
                 Process.Start(psi);
-                Console.WriteLine($"已启动 DlcvModelRPC 服务: {exePath}");
+                Console.WriteLine($"已启动 AIModelRPC 服务: {exePath}");
             }
             catch (Exception ex)
             {
-                throw new Exception($"启动 DlcvModelRPC 失败: {ex.Message}", ex);
+                throw new Exception($"启动 AIModelRPC 失败: {ex.Message}", ex);
             }
         }
 

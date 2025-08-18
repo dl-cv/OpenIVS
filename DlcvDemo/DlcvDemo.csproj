@@ -258,7 +258,7 @@
   <!-- 自动复制 DlcvModelRPC.exe -->
   <Target Name="CopyDlcvModelRPC" AfterTargets="Build">
     <ItemGroup>
-      <DlcvModelRPCFiles Include="$(SolutionDir)DlcvModelRPC\bin\$(PlatformName)\$(ConfigurationName)\DlcvModelRPC.exe" />
+      <DlcvModelRPCFiles Include="$(SolutionDir)DlcvModelRPC\bin\$(PlatformName)\$(ConfigurationName)\AIModelRPC.exe" />
     </ItemGroup>
     <Copy SourceFiles="@(DlcvModelRPCFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
     <Message Text="DlcvModelRPC.exe 已自动复制到 $(OutputPath)" Importance="high" />
