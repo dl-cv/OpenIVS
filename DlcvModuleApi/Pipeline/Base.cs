@@ -153,12 +153,14 @@ namespace DlcvModuleApi.Pipeline
                             if (prediction.metadata?["combine_flag"]?.Value<bool>() == true) continue;
 
                             var newKey = new Tuple<int, int>(currentRound + 1, keyCounter++);
-                            var globalBboxToken = prediction.metadata?["global_bbox"];
+                            var globalBboxToken = prediction.metadata?["global_bbox"] as JArray;
+                            var globalBboxXyxyToken = prediction.metadata?["global_bbox_xyxy"] as JArray;
+                            string bboxMode = prediction.metadata?["bbox_mode"]?.Value<string>() ?? "xyxy";
                             bool isRotated = prediction.metadata?["is_rotated"]?.Value<bool>() ?? false;
 
                             OpenCvSharp.Mat crop;
                             int gx = 0, gy = 0;
-                            if (isRotated && globalBboxToken != null && globalBboxToken.Type == JTokenType.Array && ((JArray)globalBboxToken).Count >= 5)
+                            if (isRotated && globalBboxToken != null && globalBboxToken.Count >= 5)
                             {
                                 // [cx, cy, w, h, angle (radian)]
                                 double cx = globalBboxToken[0].Value<double>();
@@ -175,21 +177,45 @@ namespace DlcvModuleApi.Pipeline
                                 gx = (int)(cx - w / 2.0);
                                 gy = (int)(cy - h / 2.0);
                             }
-                            else if (globalBboxToken != null && globalBboxToken.Type == JTokenType.Array && ((JArray)globalBboxToken).Count >= 4)
+                            else
                             {
-                                int x1 = (int)globalBboxToken[0].Value<double>();
-                                int y1 = (int)globalBboxToken[1].Value<double>();
-                                int x2 = (int)globalBboxToken[2].Value<double>();
-                                int y2 = (int)globalBboxToken[3].Value<double>();
+                                // 非旋转：优先用全局xyxy；否则根据 bbox_mode 把 xywh 转为 xyxy
+                                int x1, y1, x2, y2;
+                                if (globalBboxXyxyToken != null && globalBboxXyxyToken.Count >= 4)
+                                {
+                                    x1 = (int)globalBboxXyxyToken[0].Value<double>();
+                                    y1 = (int)globalBboxXyxyToken[1].Value<double>();
+                                    x2 = (int)globalBboxXyxyToken[2].Value<double>();
+                                    y2 = (int)globalBboxXyxyToken[3].Value<double>();
+                                }
+                                else if (globalBboxToken != null && globalBboxToken.Count >= 4)
+                                {
+                                    if (bboxMode == "xywh")
+                                    {
+                                        int x = (int)globalBboxToken[0].Value<double>();
+                                        int y = (int)globalBboxToken[1].Value<double>();
+                                        int w = (int)Math.Max(1.0, globalBboxToken[2].Value<double>());
+                                        int h = (int)Math.Max(1.0, globalBboxToken[3].Value<double>());
+                                        x1 = x; y1 = y; x2 = x + w; y2 = y + h;
+                                    }
+                                    else
+                                    {
+                                        x1 = (int)globalBboxToken[0].Value<double>();
+                                        y1 = (int)globalBboxToken[1].Value<double>();
+                                        x2 = (int)globalBboxToken[2].Value<double>();
+                                        y2 = (int)globalBboxToken[3].Value<double>();
+                                    }
+                                }
+                                else
+                                {
+                                    continue;
+                                }
+
                                 x2 = Math.Max(x1 + 1, x2);
                                 y2 = Math.Max(y1 + 1, y2);
                                 var rect = new OpenCvSharp.Rect(x1, y1, Math.Max(1, x2 - x1), Math.Max(1, y2 - y1));
                                 crop = new OpenCvSharp.Mat(oriImg, rect).Clone();
                                 gx = x1; gy = y1;
-                            }
-                            else
-                            {
-                                continue;
                             }
 
                             imgDict[newKey] = new ImgDictEntry
