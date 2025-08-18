@@ -29,6 +29,7 @@ namespace DlcvModelRPC
 
         private static CancellationTokenSource s_cts;
         private static readonly ConcurrentDictionary<string, MemoryMappedFile> s_maskMmfs = new ConcurrentDictionary<string, MemoryMappedFile>();
+        private static readonly ConcurrentDictionary<string, ReaderWriterLockSlim> s_modelLocks = new ConcurrentDictionary<string, ReaderWriterLockSlim>(StringComparer.OrdinalIgnoreCase);
         private static readonly ManualResetEventSlim s_shutdownEvent = new ManualResetEventSlim(false);
         private static volatile bool s_isShuttingDown = false;
         private static ConsoleCtrlDelegate s_ctrlHandlerDelegate;
@@ -187,6 +188,11 @@ namespace DlcvModelRPC
         [DllImport("Kernel32")]
         private static extern bool SetConsoleCtrlHandler(ConsoleCtrlDelegate handler, bool add);
 
+        private static ReaderWriterLockSlim GetModelLock(string modelPath)
+        {
+            return s_modelLocks.GetOrAdd(modelPath, _ => new ReaderWriterLockSlim());
+        }
+
         private static Task HandleLoadModelAsync(JObject req, StreamWriter writer)
         {
             string modelPath = req.Value<string>("model_path");
@@ -196,7 +202,16 @@ namespace DlcvModelRPC
                 return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = false, error = "missing model_path" }));
             }
 
-            var model = s_loadedModels.GetOrAdd(modelPath, p => new Model(p, deviceId));
+            var rwLock = GetModelLock(modelPath);
+            rwLock.EnterWriteLock();
+            try
+            {
+                _ = s_loadedModels.GetOrAdd(modelPath, p => new Model(p, deviceId));
+            }
+            finally
+            {
+                if (rwLock.IsWriteLockHeld) rwLock.ExitWriteLock();
+            }
             return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = true }));
         }
 
@@ -208,13 +223,22 @@ namespace DlcvModelRPC
                 return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = false, error = "missing model_path" }));
             }
 
-            if (!s_loadedModels.TryGetValue(modelPath, out var model))
+            var rwLock = GetModelLock(modelPath);
+            rwLock.EnterReadLock();
+            try
             {
-                return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = false, error = "model_not_loaded" }));
-            }
+                if (!s_loadedModels.TryGetValue(modelPath, out var model))
+                {
+                    return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = false, error = "model_not_loaded" }));
+                }
 
-            var info = model.GetModelInfo();
-            return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = true, model_info = info }));
+                var info = model.GetModelInfo();
+                return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = true, model_info = info }));
+            }
+            finally
+            {
+                if (rwLock.IsReadLockHeld) rwLock.ExitReadLock();
+            }
         }
 
         private static Task HandleFreeModelAsync(JObject req, StreamWriter writer)
@@ -225,9 +249,18 @@ namespace DlcvModelRPC
                 return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = false, error = "missing model_path" }));
             }
 
-            if (s_loadedModels.TryRemove(modelPath, out var model))
+            var rwLock = GetModelLock(modelPath);
+            rwLock.EnterWriteLock();
+            try
             {
-                try { model.FreeModel(); model.Dispose(); } catch { }
+                if (s_loadedModels.TryRemove(modelPath, out var model))
+                {
+                    try { model.FreeModel(); model.Dispose(); } catch { }
+                }
+            }
+            finally
+            {
+                if (rwLock.IsWriteLockHeld) rwLock.ExitWriteLock();
             }
 
             return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = true }));
@@ -247,102 +280,113 @@ namespace DlcvModelRPC
                 return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = false, error = "bad_args" }));
             }
 
-            if (!s_loadedModels.TryGetValue(modelPath, out var model))
-            {
-                return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = false, error = "model_not_loaded" }));
-            }
-
             string mmfName = MmfNamePrefix + mmfToken;
             try
             {
+                // 先读取输入图像数据（无需持有模型锁）
+                Mat mat;
                 using (var mmf = MemoryMappedFile.OpenExisting(mmfName, MemoryMappedFileRights.ReadWrite))
                 using (var accessor = mmf.CreateViewAccessor(0, width * height * channels, MemoryMappedFileAccess.Read))
                 {
                     byte[] buffer = new byte[width * height * channels];
                     accessor.ReadArray(0, buffer, 0, buffer.Length);
 
-                    // 构建Mat (假设输入为BGR 8UC3 或灰度)，用 FromPixelData 生成临时视图再 Clone
-                    Mat mat;
                     var matType = channels == 1 ? MatType.CV_8UC1 : MatType.CV_8UC3;
                     using (var matView = Mat.FromPixelData(height, width, matType, buffer))
                     {
                         mat = matView.Clone();
                     }
+                }
 
-                    // 执行推理
-                    var result = model.Infer(mat, paramsJson);
-                    mat.Dispose();
-
-                    // 返回JSON结果（mat结果若有，将由客户端另建MMF读取；这里先只返回JSON）
-                    var sampleResultsArray = new JArray();
-                    foreach (var sr in result.SampleResults)
+                // 使用模型读锁，避免与释放并发冲突，允许同模型多并发推理
+                var rwLock = GetModelLock(modelPath);
+                Utils.CSharpResult result;
+                rwLock.EnterReadLock();
+                try
+                {
+                    if (!s_loadedModels.TryGetValue(modelPath, out var model))
                     {
-                        var resultsArray = new JArray();
-                        foreach (var r in sr.Results)
-                        {
-                            var jobj = new JObject
-                            {
-                                ["category_id"] = r.CategoryId,
-                                ["category_name"] = r.CategoryName,
-                                ["score"] = r.Score,
-                                ["area"] = r.Area,
-                                ["bbox"] = JArray.FromObject(r.Bbox),
-                                ["with_bbox"] = r.WithBbox,
-                                ["with_angle"] = r.WithAngle,
-                                ["angle"] = r.Angle,
-                                ["with_mask"] = r.WithMask
-                            };
-
-                            if (r.WithMask && r.Mask != null && !r.Mask.Empty())
-                            {
-                                var mask = r.Mask;
-                                Mat maskCont = mask.IsContinuous() ? mask : mask.Clone();
-                                try
-                                {
-                                    int mw = maskCont.Width;
-                                    int mh = maskCont.Height;
-                                    int mbytes = mw * mh;
-                                    byte[] mBuf = new byte[mbytes];
-                                    Marshal.Copy(maskCont.Data, mBuf, 0, mbytes);
-                                    string mtoken = Guid.NewGuid().ToString("N");
-                                    string mmfName2 = MmfMaskPrefix + mtoken;
-                                    var mmf2 = MemoryMappedFile.CreateNew(mmfName2, mbytes);
-                                    s_maskMmfs[mtoken] = mmf2;
-                                    using (var acc2 = mmf2.CreateViewAccessor(0, mbytes, MemoryMappedFileAccess.Write))
-                                    {
-                                        acc2.WriteArray(0, mBuf, 0, mbytes);
-                                    }
-                                    _ = Task.Run(async () =>
-                                    {
-                                        try { await Task.Delay(30000); } catch { }
-                                        if (s_maskMmfs.TryRemove(mtoken, out var mmfHold))
-                                        {
-                                            try { mmfHold.Dispose(); } catch { }
-                                        }
-                                    });
-
-                                    jobj["mask"] = new JObject
-                                    {
-                                        ["mmf_token"] = mtoken,
-                                        ["width"] = mw,
-                                        ["height"] = mh
-                                    };
-                                }
-                                finally
-                                {
-                                    if (!ReferenceEquals(maskCont, mask)) maskCont.Dispose();
-                                }
-                            }
-
-                            resultsArray.Add(jobj);
-                        }
-                        sampleResultsArray.Add(new JObject { ["results"] = resultsArray });
+                        mat.Dispose();
+                        return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = false, error = "model_not_loaded" }));
                     }
 
-                    var json = new JObject { ["sample_results"] = sampleResultsArray };
-
-                    return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = true, result = json }));
+                    result = model.Infer(mat, paramsJson);
                 }
+                finally
+                {
+                    if (rwLock.IsReadLockHeld) rwLock.ExitReadLock();
+                    mat.Dispose();
+                }
+
+                // 返回JSON结果（mat结果若有，将由客户端另建MMF读取；这里先只返回JSON）
+                var sampleResultsArray = new JArray();
+                foreach (var sr in result.SampleResults)
+                {
+                    var resultsArray = new JArray();
+                    foreach (var r in sr.Results)
+                    {
+                        var jobj = new JObject
+                        {
+                            ["category_id"] = r.CategoryId,
+                            ["category_name"] = r.CategoryName,
+                            ["score"] = r.Score,
+                            ["area"] = r.Area,
+                            ["bbox"] = JArray.FromObject(r.Bbox),
+                            ["with_bbox"] = r.WithBbox,
+                            ["with_angle"] = r.WithAngle,
+                            ["angle"] = r.Angle,
+                            ["with_mask"] = r.WithMask
+                        };
+
+                        if (r.WithMask && r.Mask != null && !r.Mask.Empty())
+                        {
+                            var mask = r.Mask;
+                            Mat maskCont = mask.IsContinuous() ? mask : mask.Clone();
+                            try
+                            {
+                                int mw = maskCont.Width;
+                                int mh = maskCont.Height;
+                                int mbytes = mw * mh;
+                                byte[] mBuf = new byte[mbytes];
+                                Marshal.Copy(maskCont.Data, mBuf, 0, mbytes);
+                                string mtoken = Guid.NewGuid().ToString("N");
+                                string mmfName2 = MmfMaskPrefix + mtoken;
+                                var mmf2 = MemoryMappedFile.CreateNew(mmfName2, mbytes);
+                                s_maskMmfs[mtoken] = mmf2;
+                                using (var acc2 = mmf2.CreateViewAccessor(0, mbytes, MemoryMappedFileAccess.Write))
+                                {
+                                    acc2.WriteArray(0, mBuf, 0, mbytes);
+                                }
+                                _ = Task.Run(async () =>
+                                {
+                                    try { await Task.Delay(30000); } catch { }
+                                    if (s_maskMmfs.TryRemove(mtoken, out var mmfHold))
+                                    {
+                                        try { mmfHold.Dispose(); } catch { }
+                                    }
+                                });
+
+                                jobj["mask"] = new JObject
+                                {
+                                    ["mmf_token"] = mtoken,
+                                    ["width"] = mw,
+                                    ["height"] = mh
+                                };
+                            }
+                            finally
+                            {
+                                if (!ReferenceEquals(maskCont, mask)) maskCont.Dispose();
+                            }
+                        }
+
+                        resultsArray.Add(jobj);
+                    }
+                    sampleResultsArray.Add(new JObject { ["results"] = resultsArray });
+                }
+
+                var json = new JObject { ["sample_results"] = sampleResultsArray };
+
+                return writer.WriteLineAsync(JsonConvert.SerializeObject(new { ok = true, result = json }));
             }
             catch (Exception ex)
             {
