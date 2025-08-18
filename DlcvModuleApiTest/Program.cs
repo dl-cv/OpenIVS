@@ -16,15 +16,15 @@ namespace DlcvModuleApiTest
                 {
                     ["module_type"] = "sliding_window",
                     ["task_type"] = "sliding_window",
-                    ["small_img_width"] = 640,
-                    ["small_img_height"] = 640,
+                    ["small_img_width"] = 400,
+                    ["small_img_height"] = 400,
                     ["horizontal_overlap"] = 64,
                     ["vertical_overlap"] = 64
                 },
                 new JObject
                 {
                     ["module_type"] = "model_inference",
-                    ["model_path"] = @"C:\\path\\to\\your\\model.dvt",
+                    ["model_path"] = @"C:\Users\Administrator\Desktop\三代目测试目录\实例分割\实例分割.dvt",
                     ["task_type"] = "det",
                     ["threshold"] = 0.5,
                     ["iou_threshold"] = 0.2,
@@ -36,7 +36,7 @@ namespace DlcvModuleApiTest
                 new JObject { ["module_type"] = "combine_results", ["combine_ios_threshold"] = 0.2 }
             };
 
-            string testImg = @"C:\\Users\\Administrator\\Desktop\\test.jpg"; // 替换为你的测试图片
+            string testImg = @"C:\Users\Administrator\Desktop\三代目测试目录\实例分割\实例分割.png"; // 替换为你的测试图片
             try
             {
                 var result = DlcvModulePipelineApi.PredictWithModulesList(testImg, modules_list, return_vis: false, module_index: null, data: null);

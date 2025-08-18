@@ -30,7 +30,7 @@ namespace DlcvModuleApi.Utils
     public class ImgDictEntry
     {
         public string origin_path;
-        public Tuple<int, int>? parent_key;
+        public Tuple<int, int> parent_key;
         public int global_x;
         public int global_y;
         public Tuple<int, int>[] slice_positions;

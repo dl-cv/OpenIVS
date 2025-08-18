@@ -26,7 +26,7 @@ namespace DlcvModuleApi.Pipeline.Modules
             int ho = Config.horizontal_overlap;
             int vo = Config.vertical_overlap;
 
-            Cv2.CvtColor(ori, ori, ColorConversionCodes.BGR2BGR); // no-op ensure valid
+            // 保持原图不做无意义的颜色转换（原先的 BGR2BGR 常量无效，删除该无操作转换）
 
             int imgH = ori.Rows;
             int imgW = ori.Cols;

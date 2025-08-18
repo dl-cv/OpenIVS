@@ -157,7 +157,7 @@ namespace DlcvModuleApi.Pipeline
 
                             OpenCvSharp.Mat crop;
                             int gx = 0, gy = 0;
-                            if (isRotated && globalBboxToken != null && globalBboxToken.Type == JTokenType.Array && globalBboxToken.Count() >= 5)
+                            if (isRotated && globalBboxToken != null && globalBboxToken.Type == JTokenType.Array && ((JArray)globalBboxToken).Count >= 5)
                             {
                                 // [cx, cy, w, h, angle (radian)]
                                 double cx = globalBboxToken[0].Value<double>();
@@ -174,7 +174,7 @@ namespace DlcvModuleApi.Pipeline
                                 gx = (int)(cx - w / 2.0);
                                 gy = (int)(cy - h / 2.0);
                             }
-                            else if (globalBboxToken != null && globalBboxToken.Type == JTokenType.Array && globalBboxToken.Count() >= 4)
+                            else if (globalBboxToken != null && globalBboxToken.Type == JTokenType.Array && ((JArray)globalBboxToken).Count >= 4)
                             {
                                 int x1 = (int)globalBboxToken[0].Value<double>();
                                 int y1 = (int)globalBboxToken[1].Value<double>();

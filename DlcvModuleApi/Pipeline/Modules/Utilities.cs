@@ -62,7 +62,7 @@ namespace DlcvModuleApi.Pipeline.Modules
                 if (kv.Value.predictions.Count == 0) continue;
                 var si = kv.Value.predictions.First().Value.metadata?["slice_index"] as JArray;
                 if (si == null || si.Count == 0) continue;
-                var idx = si[0];
+                var idx = si;
                 string key = $"{idx[0].Value<int>()},{idx[1].Value<int>()}";
                 sliceToKey[key] = kv.Key;
             }
@@ -76,7 +76,7 @@ namespace DlcvModuleApi.Pipeline.Modules
                     if (pred.metadata?["combine_flag"]?.Value<bool>() == true) continue;
                     var si = pred.metadata?["slice_index"] as JArray;
                     if (si == null || si.Count == 0) continue;
-                    var idx = si[0];
+                    var idx = si;
                     var baseKey = new Tuple<int, int>(idx[0].Value<int>(), idx[1].Value<int>());
                     var label = pred.category_id;
                     var gb = pred.metadata?["global_bbox"] as JArray;

@@ -8,14 +8,6 @@ using Newtonsoft.Json.Linq;
 
 namespace MiniAreaDemo
 {
-    /// 主要功能：
-    /// 1. 使用语义分割模型检测标签纸轮廓
-    /// 2. 高级透视变换，专门处理透视变形
-    /// 
-    /// 透视变换方法：
-    /// - 使用平均尺寸计算目标尺寸，更好地保持比例
-    /// - 自动调整输出方向（横向/纵向）
-    /// - 专门针对透视变形优化
     public class MaskInfo
     {
         public Mat Mask { get; set; }
@@ -24,202 +16,121 @@ namespace MiniAreaDemo
         public int BboxW { get; set; }
         public int BboxH { get; set; }
     }
-    
-    /// 处理结果类，包含mask信息和透视变换后的图像
-    public class ProcessingResult : IDisposable
+    internal class Program
     {
-        public MaskInfo MaskInfo { get; set; }
-        public Mat ProcessedImage { get; set; }
-        public Point2f[] QuadPoints { get; set; }
-        public double Angle { get; set; }
-
-        private bool _disposed = false;
-
-        public void Dispose()
+        static void Main(string[] args)
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (!_disposed && disposing)
-            {
-                ProcessedImage?.Dispose();
-                MaskInfo?.Mask?.Dispose();
-                _disposed = true;
-            }
-        }
-    }
-
-    /// 可释放的处理结果列表
-    public class DisposableProcessingResults : List<ProcessingResult>, IDisposable
-    {
-        private bool _disposed = false;
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (!_disposed && disposing)
-            {
-                foreach (var result in this)
-                {
-                    if (result != null)
-                    {
-                        result.ProcessedImage?.Dispose();
-                        result.MaskInfo?.Mask?.Dispose();
-                    }
-                }
-                Clear();
-                _disposed = true;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 标签纸处理接口
-    /// </summary>
-    public interface ILabelProcessor : IDisposable
-    {
-        /// <summary>
-        /// 处理图像中的标签纸（使用Mat对象）
-        /// </summary>
-        /// <param name="image">输入图像</param>
-        /// <param name="modelPath">模型路径</param>
-        /// <returns>处理结果列表</returns>
-        DisposableProcessingResults ProcessLabels(Mat image, string modelPath);
-    }
-
-    /// <summary>
-    /// 标签纸处理器实现
-    /// </summary>
-    public class LabelProcessor : ILabelProcessor, IDisposable
-    {
-        private Model _model = null;
-        private string _currentModelPath = null;
-        private bool _disposed = false;
-
-        public LabelProcessor()
-        {
-        }
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (!_disposed && disposing)
-            {
-                _model?.Dispose();
-                _model = null;
-                _currentModelPath = null;
-                _disposed = true;
-            }
-        }
-
-        /// <summary>
-        /// 加载模型，如果已加载相同路径的模型则复用
-        /// </summary>
-        private Model GetOrLoadModel(string modelPath)
-        {
-            // 如果模型路径相同且模型已加载，直接返回
-            if (_model != null && _currentModelPath == modelPath)
-            {
-                Console.WriteLine("复用已加载的模型");
-                return _model;
-            }
-
-            // 如果模型路径不同，先释放旧模型
-            if (_model != null)
-            {
-                Console.WriteLine("释放旧模型，加载新模型");
-                _model.Dispose();
-                _model = null;
-            }
-
-            // 加载新模型
-            Console.WriteLine($"加载模型: {modelPath}");
-            _model = new Model(modelPath, 0);
-            _currentModelPath = modelPath;
-            
-            return _model;
-        }
-
-        public DisposableProcessingResults ProcessLabels(Mat originalImage, string modelPath)
-        {
-            DisposableProcessingResults results = new DisposableProcessingResults();
-
             try
             {
+                // 创建输出目录
+                string outputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test_output");
+                Directory.CreateDirectory(outputDir);
+
+                // 输入文件路径
+                string imagePath = @"C:\Users\Administrator\Desktop\20250718150607902_origin.png";
+                string modelPath = @"Z:\3-保密-客户数据\C250705-西安恒盈晟-贴纸外轮廓提取\3-训练数据-语义分割\2-模型\贴子轮廓检测-语义分割_20250722_112221.dvt";
+
+                Console.WriteLine("开始处理...");
+                
+                // 检查文件是否存在
+                if (!File.Exists(imagePath))
+                {
+                    Console.WriteLine($"图片文件不存在: {imagePath}");
+                    return;
+                }
+
+                if (!File.Exists(modelPath))
+                {
+                    Console.WriteLine($"模型文件不存在: {modelPath}");
+                    return;
+                }
+
+                // 加载图片
+                Mat originalImage = Cv2.ImRead(imagePath);
+                if (originalImage.Empty())
+                {
+                    Console.WriteLine("无法加载图片");
+                    return;
+                }
+
+                Console.WriteLine($"图片加载成功: {originalImage.Width}x{originalImage.Height}");
+
                 // 使用模型进行推理并获取mask和bbox信息
                 var maskInfos = InferAndGetMasks(originalImage, modelPath);
                 if (maskInfos.Count == 0)
                 {
-                    return results;
+                    Console.WriteLine("未找到有效的mask");
+                    return;
                 }
 
                 // 处理所有mask
                 for (int i = 0; i < maskInfos.Count; i++)
                 {
                     var maskInfo = maskInfos[i];
-                    
+                    Console.WriteLine($"\n=== 处理第{i}个Mask ===");
+                    Console.WriteLine($"Mask信息: {maskInfo.Mask.Width}x{maskInfo.Mask.Height}, Bbox: [{maskInfo.BboxX},{maskInfo.BboxY},{maskInfo.BboxW},{maskInfo.BboxH}]");
+
                     // 将mask坐标转换到原图坐标系并获取最小外接四边形
                     Point2f[] quadPoints = GetMinAreaQuadInOriginalImage(maskInfo);
 
                     if (quadPoints.Length != 4)
                     {
-                        // 立即释放无效的mask
-                        maskInfo.Mask?.Dispose();
+                        Console.WriteLine("无法获取有效的四边形，跳过此mask。");
                         continue;
                     }
 
                     // 计算角度
                     double angleInRadians = GetAngleFromQuad(quadPoints);
+                    Console.WriteLine($"原图坐标系最小外接四边形: 角度{angleInRadians:F4}弧度");
 
-                    // 对原图进行透视变换
-                    Mat processedImage = AdvancedPerspectiveTransform(originalImage, quadPoints);
+                    // 对原图进行旋转+裁剪一步到位
+                    Mat rotatedMat = RotateAndCropInOneStep(originalImage, quadPoints);
 
-                    // 创建处理结果
-                    var result = new ProcessingResult
-                    {
-                        MaskInfo = maskInfo,
-                        ProcessedImage = processedImage,
-                        QuadPoints = quadPoints,
-                        Angle = angleInRadians
-                    };
+                    // 打印前100个字符信息
+                    PrintMatData(rotatedMat);
 
-                    results.Add(result);
+                    // 保存处理后的mat
+                    string outputPath = Path.Combine(outputDir, $"rotated_mask_{i}.png");
+                    Cv2.ImWrite(outputPath, rotatedMat);
+                    Console.WriteLine($"已保存旋转后的mask: {outputPath}");
+                    
+                    rotatedMat.Dispose();
                 }
 
-                return results;
+                // 清理资源
+                originalImage.Dispose();
+                foreach (var info in maskInfos) info.Mask.Dispose();
+
+                Console.WriteLine("处理完成！");
             }
             catch (Exception ex)
             {
-                // 清理已创建的资源
-                results.Dispose();
-                throw;
+                Console.WriteLine($"发生错误: {ex.Message}");
+                Console.WriteLine($"堆栈: {ex.StackTrace}");
             }
+
+            Console.WriteLine("按任意键退出...");
+            Console.ReadKey();
         }
 
-        List<MaskInfo> InferAndGetMasks(Mat originalImage, string modelPath)
+        static List<MaskInfo> InferAndGetMasks(Mat originalImage, string modelPath)
         {
             List<MaskInfo> maskInfos = new List<MaskInfo>();
+            Model model = null;
             
             try
             {
-                // 使用全局模型实例
-                Model model = GetOrLoadModel(modelPath);
+                Console.WriteLine("正在加载模型...");
+                
+                // 创建模型实例，使用设备ID 0
+                model = new Model(modelPath, 0);
+                
+                Console.WriteLine("模型加载成功，开始推理...");
                 
                 // 进行推理
                 var result = model.Infer(originalImage);
+                
+                Console.WriteLine($"推理完成，检测到 {result.SampleResults[0].Results.Count} 个对象");
                 
                 // 从推理结果中提取mask和bbox信息
                 foreach (var objectResult in result.SampleResults[0].Results)
@@ -244,11 +155,14 @@ namespace MiniAreaDemo
                             {
                                 Cv2.CvtColor(mask, mask, ColorConversionCodes.BGR2GRAY);
                             }
+                            
+                            Console.WriteLine($"提取到mask并resize: {mask.Width}x{mask.Height}, bbox: [{bboxX},{bboxY},{bboxW},{bboxH}]");
                         }
                         else
                         {
                             // 如果没有mask，根据bbox尺寸创建全白mask
                             mask = new Mat(bboxH, bboxW, MatType.CV_8UC1, Scalar.All(255));
+                            Console.WriteLine($"根据bbox创建mask: {mask.Width}x{mask.Height}, bbox: [{bboxX},{bboxY},{bboxW},{bboxH}]");
                         }
                         
                         maskInfos.Add(new MaskInfo
@@ -261,62 +175,55 @@ namespace MiniAreaDemo
                         });
                     }
                 }
+                
+                Console.WriteLine($"总共提取了 {maskInfos.Count} 个mask");
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"模型推理失败: {ex.Message}", ex);
+                Console.WriteLine($"模型推理失败: {ex.Message}");
+                Console.WriteLine($"堆栈: {ex.StackTrace}");
+            }
+            finally
+            {
+                // 释放模型资源
+                model?.Dispose();
             }
             
             return maskInfos;
         }
 
-        // 高级透视变换函数，专门处理透视变形
-        static Mat AdvancedPerspectiveTransform(Mat src, Point2f[] quadPoints)
+        static Mat RotateAndCropInOneStep(Mat src, Point2f[] quadPoints)
         {
-            // 使用改进的四边形排序算法
-            var sortedPoints = SortQuadPointsImproved(quadPoints);
+            var sortedPoints = SortQuadPoints(quadPoints);
             Point2f tl = sortedPoints[0];
             Point2f tr = sortedPoints[1];
             Point2f br = sortedPoints[2];
             Point2f bl = sortedPoints[3];
 
-            // 计算四边形的实际尺寸（考虑透视变形）
-            float topWidth = (float)Point2f.Distance(tl, tr);
-            float bottomWidth = (float)Point2f.Distance(bl, br);
-            float leftHeight = (float)Point2f.Distance(tl, bl);
-            float rightHeight = (float)Point2f.Distance(tr, br);
-
-            // 使用平均尺寸作为目标尺寸，这样可以更好地保持比例
-            float targetWidth = (topWidth + bottomWidth) / 2.0f;
-            float targetHeight = (leftHeight + rightHeight) / 2.0f;
-
-            // 如果标签纸本身是横向的，确保输出也是横向
-            if (targetWidth < targetHeight)
-            {
-                (targetWidth, targetHeight) = (targetHeight, targetWidth);
-                // 重新排序点以匹配新的方向
-                sortedPoints = new Point2f[] { bl, tl, tr, br };
-                tl = sortedPoints[0];
-                tr = sortedPoints[1];
-                br = sortedPoints[2];
-                bl = sortedPoints[3];
-            }
+            float width = (Point2f.Distance(tl, tr) + Point2f.Distance(bl, br)) / 2.0f;
+            float height = (Point2f.Distance(tl, bl) + Point2f.Distance(tr, br)) / 2.0f;
 
             Point2f[] srcQuad = sortedPoints;
+
+            // Ensure the output is landscape by making width the longer side
+            if (width < height)
+            {
+                (width, height) = (height, width);
+                // Rotate source points by 90 degrees to match new orientation
+                srcQuad = new Point2f[] { bl, tl, tr, br };
+            }
+
             Point2f[] dstPoints = new Point2f[]
             {
                 new Point2f(0, 0),
-                new Point2f(targetWidth - 1, 0),
-                new Point2f(targetWidth - 1, targetHeight - 1),
-                new Point2f(0, targetHeight - 1)
+                new Point2f(width - 1, 0),
+                new Point2f(width - 1, height - 1),
+                new Point2f(0, height - 1)
             };
 
-            // 计算透视变换矩阵
             Mat transformMatrix = Cv2.GetPerspectiveTransform(srcQuad, dstPoints);
-            
-            // 应用透视变换
             Mat rotatedMat = new Mat();
-            Cv2.WarpPerspective(src, rotatedMat, transformMatrix, new Size((int)targetWidth, (int)targetHeight));
+            Cv2.WarpPerspective(src, rotatedMat, transformMatrix, new Size((int)width, (int)height));
 
             transformMatrix.Dispose();
             return rotatedMat;
@@ -324,47 +231,27 @@ namespace MiniAreaDemo
 
         static double GetAngleFromQuad(Point2f[] quadPoints)
         {
-            var sortedPoints = SortQuadPointsImproved(quadPoints);
+            var sortedPoints = SortQuadPoints(quadPoints);
             Point2f tl = sortedPoints[0];
             Point2f tr = sortedPoints[1];
-            // 计算上边缘的角度
+            // Angle of the top edge
             double angle = Math.Atan2(tr.Y - tl.Y, tr.X - tl.X);
             return angle;
         }
 
-        static Point2f[] SortQuadPointsImproved(Point2f[] points)
+        static Point2f[] SortQuadPoints(Point2f[] points)
         {
             if (points.Length != 4) return points;
 
-            // 计算质心
-            Point2f center = new Point2f(
-                points.Average(p => p.X),
-                points.Average(p => p.Y)
-            );
+            // Sort by sum of coords to find top-left and bottom-right
+            var sortedBySum = points.OrderBy(p => p.X + p.Y).ToArray();
+            Point2f tl = sortedBySum[0];
+            Point2f br = sortedBySum[3];
 
-            // 根据相对于质心的角度排序
-            var sortedPoints = points.OrderBy(p => Math.Atan2(p.Y - center.Y, p.X - center.X)).ToArray();
-
-            // 重新排列为左上、右上、右下、左下的顺序
-            // 找到最靠近左上角的点
-            Point2f tl = sortedPoints[0];
-            Point2f tr = sortedPoints[1];
-            Point2f br = sortedPoints[2];
-            Point2f bl = sortedPoints[3];
-
-            // 验证排序是否正确，如果不正确则调整
-            // 左上角应该是最小的X+Y值
-            var pointsList = sortedPoints.ToList();
-            tl = pointsList.OrderBy(p => p.X + p.Y).First();
-            br = pointsList.OrderBy(p => p.X + p.Y).Last();
-            
-            // 剩余两个点中，右上角是Y-X最小的，左下角是Y-X最大的
-            var remaining = pointsList.Where(p => p != tl && p != br).ToArray();
-            if (remaining.Length == 2)
-            {
-                tr = remaining.OrderBy(p => p.Y - p.X).First();
-                bl = remaining.OrderBy(p => p.Y - p.X).Last();
-            }
+            // Sort by difference of coords to find top-right and bottom-left
+            var sortedByDiff = points.OrderBy(p => p.Y - p.X).ToArray();
+            Point2f tr = sortedByDiff[0];
+            Point2f bl = sortedByDiff[3];
 
             return new Point2f[] { tl, tr, br, bl };
         }
@@ -378,6 +265,7 @@ namespace MiniAreaDemo
 
             if (contours.Length == 0)
             {
+                Console.WriteLine("未找到轮廓");
                 return new Point2f[0];
             }
 
@@ -407,161 +295,45 @@ namespace MiniAreaDemo
             // 计算凸包
             Point[] hull = Cv2.ConvexHull(originalContour);
 
-            // 使用更精确的四边形逼近
-            double epsilon = Cv2.ArcLength(hull, true) * 0.02;
-            Point[] quad = Cv2.ApproxPolyDP(hull, epsilon, true);
+            // 使用 ApproxPolyDP 逼近四边形
+            Point[] quad = Cv2.ApproxPolyDP(hull, Cv2.ArcLength(hull, true) * 0.02, true);
 
-            // 如果逼近结果不是四边形，尝试调整epsilon值
+            // 如果逼近结果不是四边形，则使用最小外接矩形的顶点
             if (quad.Length != 4)
             {
-                // 尝试不同的epsilon值
-                for (double eps = 0.01; eps <= 0.1; eps += 0.01)
-                {
-                    quad = Cv2.ApproxPolyDP(hull, Cv2.ArcLength(hull, true) * eps, true);
-                    if (quad.Length == 4)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            // 如果仍然无法得到四边形，则使用最小外接矩形的顶点
-            if (quad.Length != 4)
-            {
+                Console.WriteLine("无法逼近四边形，将使用最小外接矩形。");
                 RotatedRect minRect = Cv2.MinAreaRect(originalContour);
                 return minRect.Points();
             }
 
             return quad.Select(p => new Point2f(p.X, p.Y)).ToArray();
         }
-    }
 
-    // 示例使用类
-    internal class Program
-    {
-        static void Main(string[] args)
+        static void PrintMatData(Mat mat)
         {
-            try
+            Console.WriteLine("旋转后mat的前100个数据:");
+            
+            // 将mat转换为字节数组
+            int totalElements = Math.Min(100, (int)mat.Total());
+            byte[] data = new byte[totalElements];
+            
+            // 使用Indexer访问数据
+            int index = 0;
+            for (int y = 0; y < mat.Height && index < totalElements; y++)
             {
-                // 输入文件路径
-                string imageDir = @"C:\Users\Administrator\Desktop\标签识别\5-测试图";
-                string modelPath = @"C:\Users\Administrator\Desktop\标签识别\005.dvt";
-
-                Console.WriteLine("开始处理...");
-                Console.WriteLine($"处理目录: {imageDir}");
-                Console.WriteLine($"模型路径: {modelPath}");
-
-                // 检查目录是否存在
-                if (!Directory.Exists(imageDir))
+                for (int x = 0; x < mat.Width && index < totalElements; x++)
                 {
-                    Console.WriteLine($"目录不存在: {imageDir}");
-                    return;
+                    data[index++] = mat.Get<byte>(y, x);
                 }
-
-                // 获取所有图像文件
-                string[] imageExtensions = { "*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff", "*.tif" };
-                List<string> imageFiles = new List<string>();
-                
-                foreach (string extension in imageExtensions)
-                {
-                    imageFiles.AddRange(Directory.GetFiles(imageDir, extension, SearchOption.TopDirectoryOnly));
-                }
-
-                Console.WriteLine($"找到 {imageFiles.Count} 个图像文件");
-
-                if (imageFiles.Count == 0)
-                {
-                    Console.WriteLine("未找到图像文件");
-                    return;
-                }
-
-                // 创建处理器实例
-                using (ILabelProcessor processor = new LabelProcessor())
-                {
-                    // 创建输出目录
-                    string outputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "processed_images");
-                    Directory.CreateDirectory(outputDir);
-
-                    int totalProcessed = 0;
-                    int totalLabels = 0;
-
-                    // 处理每个图像文件
-                    for (int fileIndex = 0; fileIndex < imageFiles.Count; fileIndex++)
-                    {
-                        string imagePath = imageFiles[fileIndex];
-                        string fileName = Path.GetFileNameWithoutExtension(imagePath);
-                        
-                        Console.WriteLine($"\n{new string('=', 50)}");
-                        Console.WriteLine($"处理图像 {fileIndex + 1}/{imageFiles.Count}: {fileName}");
-                        Console.WriteLine($"图像路径: {imagePath}");
-
-                        try
-                        {
-                            // 使用cv.read读取图像
-                            using (Mat originalImage = Cv2.ImRead(imagePath))
-                            {
-                                if (originalImage.Empty())
-                                {
-                                    Console.WriteLine($"无法加载图像: {imagePath}");
-                                    continue;
-                                }
-
-                                Console.WriteLine($"图像尺寸: {originalImage.Width}x{originalImage.Height}");
-
-                                // 处理图像
-                                using (var results = processor.ProcessLabels(originalImage, modelPath))
-                                {
-                                    Console.WriteLine($"检测到 {results.Count} 个标签纸");
-
-                                    // 处理结果
-                                    for (int i = 0; i < results.Count; i++)
-                                    {
-                                        var result = results[i];
-                                        Console.WriteLine($"\n--- 标签纸 {i} ---");
-                                        Console.WriteLine($"角度: {result.Angle * 180 / Math.PI:F2}度");
-                                        
-                                        // 打印四边形顶点
-                                        Console.WriteLine("四边形顶点:");
-                                        for (int j = 0; j < result.QuadPoints.Length; j++)
-                                        {
-                                            Console.WriteLine($"  点{j}: ({result.QuadPoints[j].X:F1}, {result.QuadPoints[j].Y:F1})");
-                                        }
-                                        
-                                        // 保存处理后的图像
-                                        string outputPath = Path.Combine(outputDir, $"{fileName}_label_{i}.png");
-                                        Cv2.ImWrite(outputPath, result.ProcessedImage);
-                                        Console.WriteLine($"已保存处理后的图像: {outputPath}");
-                                        Console.WriteLine($"图像尺寸: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
-                                    }
-
-                                    totalProcessed++;
-                                    totalLabels += results.Count;
-                                    
-                                    Console.WriteLine($"处理完成，释放资源...");
-                                } // results会自动释放
-                            } // originalImage会自动释放
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"处理图像 {fileName} 时发生错误: {ex.Message}");
-                        }
-                    }
-
-                    Console.WriteLine($"\n{new string('=', 50)}");
-                    Console.WriteLine($"处理完成!");
-                    Console.WriteLine($"成功处理图像: {totalProcessed}/{imageFiles.Count}");
-                    Console.WriteLine($"总共检测到标签纸: {totalLabels} 个");
-                    Console.WriteLine($"输出目录: {outputDir}");
-                } // processor会自动释放，包括模型资源
             }
-            catch (Exception ex)
+            
+            // 打印前100个值
+            for (int i = 0; i < Math.Min(100, data.Length); i++)
             {
-                Console.WriteLine($"发生错误: {ex.Message}");
-                Console.WriteLine($"堆栈: {ex.StackTrace}");
+                if (i > 0 && i % 10 == 0) Console.WriteLine();
+                Console.Write($"{data[i]:D3} ");
             }
-
-            Console.WriteLine("\n按任意键退出...");
-            Console.ReadKey();
+            Console.WriteLine();
         }
     }
 }
