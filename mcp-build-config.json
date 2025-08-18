@@ -1,0 +1,9 @@
+{
+  "mcp-build-server": {
+    "command": "python",
+    "args": ["C:/Users/Administrator/Desktop/OpenIVS/mcp-build-server.py"],
+    "env": {
+      "PYTHONPATH": "C:/Users/Administrator/Desktop/OpenIVS"
+    }
+  }
+}
