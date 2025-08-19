@@ -133,14 +133,18 @@ namespace DlcvModuleApi.Pipeline.Modules
                     var bbox = new List<double> { 0, 0, smallW, smallH };
                     int gx = imgDict[imgKey].global_x;
                     int gy = imgDict[imgKey].global_y;
-                    var gb = new JArray(0 + gx, 0 + gy, smallW + gx, smallH + gy);
+                    // 同时写入两种全局坐标：xywh（首选，用于最终输出）与 xyxy（备选，供可视化/合并）
+                    var gb_xyxy = new JArray(0 + gx, 0 + gy, smallW + gx, smallH + gy);
+                    var gb_xywh = new JArray(0 + gx, 0 + gy, smallW, smallH);
                     var meta = new JObject
                     {
                         ["combine_flag"] = false,
                         ["slice_index"] = new JArray(new JArray(imgDict[imgKey].slice_positions[0].Item1, imgDict[imgKey].slice_positions[0].Item2)),
                         ["global_x"] = gx,
                         ["global_y"] = gy,
-                        ["global_bbox"] = gb
+                        ["global_bbox"] = gb_xywh,
+                        ["global_bbox_xyxy"] = gb_xyxy,
+                        ["bbox_mode"] = "xywh"
                     };
                     var pred = new Prediction
                     {
