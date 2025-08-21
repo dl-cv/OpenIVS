@@ -420,33 +420,29 @@ namespace DLCV
             if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
                 throw new ArgumentException("模型文件路径无效或文件不存在", nameof(modelPath));
 
-            // 创建请求
-            var request = new
-            {
-                model_path = modelPath
-            };
-
             try
             {
                 var client = GetHttpClient();
                 
-                // 根据后端代码，get_model_info是GET请求，需要使用查询参数
-                string url = $"{_serverUrl}/get_model_info?model_path={Uri.EscapeDataString(modelPath)}";
-                var response = client.GetAsync(url).GetAwaiter().GetResult();
+                // 创建请求，与 dlcv_infer_csharp 保持一致
+                var request = new
+                {
+                    model_path = modelPath
+                };
+
+                string jsonContent = JsonConvert.SerializeObject(request);
+                var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+
+                var response = client.PostAsync($"{_serverUrl}/get_model_info", content).GetAwaiter().GetResult();
+                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    HandleErrorResponse(response.StatusCode);
+                    throw new DlcvApiException($"获取模型信息失败: {response.StatusCode} - {responseString}");
                 }
 
-                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 var jsonResult = JObject.Parse(responseString);
-
-                if (jsonResult["code"]?.ToString() != "00000")
-                {
-                    throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
-                }
-
+                Console.WriteLine($"Model info: {jsonResult}");
                 return jsonResult;
             }
             catch (Exception ex)
@@ -454,7 +450,7 @@ namespace DLCV
                 if (ex is DlcvApiException)
                     throw;
 
-                throw new DlcvApiException("获取模型信息请求处理失败", ex);
+                throw new DlcvApiException($"获取模型信息失败: {ex.Message}", ex);
             }
         }
 
