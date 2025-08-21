@@ -300,12 +300,16 @@ namespace DLCV
             {
                 var client = GetHttpClient();
                 
-                // 使用URL查询参数，与Python调用保持一致
-                string url = $"{_serverUrl}/load_model?model_path={Uri.EscapeDataString(modelPath)}";
-                
-                // 使用空内容发送POST请求
-                var content = new StringContent("", System.Text.Encoding.UTF8, "application/json");
-                var response = client.PostAsync(url, content).GetAwaiter().GetResult();
+                // 使用JSON请求体提交模型路径，与 dlcv_infer_csharp 保持一致
+                var request = new
+                {
+                    model_path = modelPath
+                };
+                var content = new StringContent(
+                    JsonConvert.SerializeObject(request),
+                    System.Text.Encoding.UTF8,
+                    "application/json");
+                var response = client.PostAsync($"{_serverUrl}/load_model", content).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -319,6 +323,9 @@ namespace DLCV
                 {
                     throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
                 }
+
+                // 加载成功后调用 /version 接口以确保后端状态就绪
+                CallVersionApi();
 
                 return jsonResult;
             }
@@ -413,33 +420,29 @@ namespace DLCV
             if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
                 throw new ArgumentException("模型文件路径无效或文件不存在", nameof(modelPath));
 
-            // 创建请求
-            var request = new
-            {
-                model_path = modelPath
-            };
-
             try
             {
                 var client = GetHttpClient();
                 
-                // 根据后端代码，get_model_info是GET请求，需要使用查询参数
-                string url = $"{_serverUrl}/get_model_info?model_path={Uri.EscapeDataString(modelPath)}";
-                var response = client.GetAsync(url).GetAwaiter().GetResult();
+                // 创建请求，与 dlcv_infer_csharp 保持一致
+                var request = new
+                {
+                    model_path = modelPath
+                };
+
+                string jsonContent = JsonConvert.SerializeObject(request);
+                var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+
+                var response = client.PostAsync($"{_serverUrl}/get_model_info", content).GetAwaiter().GetResult();
+                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    HandleErrorResponse(response.StatusCode);
+                    throw new DlcvApiException($"获取模型信息失败: {response.StatusCode} - {responseString}");
                 }
 
-                var responseString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 var jsonResult = JObject.Parse(responseString);
-
-                if (jsonResult["code"]?.ToString() != "00000")
-                {
-                    throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
-                }
-
+                Console.WriteLine($"Model info: {jsonResult}");
                 return jsonResult;
             }
             catch (Exception ex)
@@ -447,7 +450,7 @@ namespace DLCV
                 if (ex is DlcvApiException)
                     throw;
 
-                throw new DlcvApiException("获取模型信息请求处理失败", ex);
+                throw new DlcvApiException($"获取模型信息失败: {ex.Message}", ex);
             }
         }
 
@@ -686,6 +689,23 @@ namespace DLCV
                     throw new DlcvApiException("服务器内部错误");
                 default:
                     throw new DlcvApiException($"HTTP请求失败: {(int)statusCode}");
+            }
+        }
+
+        /// <summary>
+        /// 调用后端 /version 接口，忽略返回，仅用于触发状态初始化
+        /// </summary>
+        private void CallVersionApi()
+        {
+            try
+            {
+                var client = GetHttpClient();
+                var response = client.GetAsync($"{_serverUrl}/version").GetAwaiter().GetResult();
+                // 忽略非成功状态，不阻断主流程
+            }
+            catch
+            {
+                // 忽略异常，不影响主流程
             }
         }
 
