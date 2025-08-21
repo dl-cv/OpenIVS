@@ -300,12 +300,16 @@ namespace DLCV
             {
                 var client = GetHttpClient();
                 
-                // 使用URL查询参数，与Python调用保持一致
-                string url = $"{_serverUrl}/load_model?model_path={Uri.EscapeDataString(modelPath)}";
-                
-                // 使用空内容发送POST请求
-                var content = new StringContent("", System.Text.Encoding.UTF8, "application/json");
-                var response = client.PostAsync(url, content).GetAwaiter().GetResult();
+                // 使用JSON请求体提交模型路径，与 dlcv_infer_csharp 保持一致
+                var request = new
+                {
+                    model_path = modelPath
+                };
+                var content = new StringContent(
+                    JsonConvert.SerializeObject(request),
+                    System.Text.Encoding.UTF8,
+                    "application/json");
+                var response = client.PostAsync($"{_serverUrl}/load_model", content).GetAwaiter().GetResult();
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -319,6 +323,9 @@ namespace DLCV
                 {
                     throw new DlcvApiException($"API错误: {jsonResult["message"]?.ToString()}");
                 }
+
+                // 加载成功后调用 /version 接口以确保后端状态就绪
+                CallVersionApi();
 
                 return jsonResult;
             }
@@ -686,6 +693,23 @@ namespace DLCV
                     throw new DlcvApiException("服务器内部错误");
                 default:
                     throw new DlcvApiException($"HTTP请求失败: {(int)statusCode}");
+            }
+        }
+
+        /// <summary>
+        /// 调用后端 /version 接口，忽略返回，仅用于触发状态初始化
+        /// </summary>
+        private void CallVersionApi()
+        {
+            try
+            {
+                var client = GetHttpClient();
+                var response = client.GetAsync($"{_serverUrl}/version").GetAwaiter().GetResult();
+                // 忽略非成功状态，不阻断主流程
+            }
+            catch
+            {
+                // 忽略异常，不影响主流程
             }
         }
 
