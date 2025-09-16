@@ -23,10 +23,19 @@ OpenIVS 是一个基于 .NET 平台的工业视觉软件框架，提供了相机
 
 * **海康相机MVS**
   - 版本：MVS_STD_4.4.0_240913.exe
-  - 下载地址：[MVS_STD_4.4.0_240913.zip](https://www.hikrobotics.com/cn2/source/support/software/MVS_STD_4.4.0_240913.zip)
+  - 下载地址：[https://www.hikrobotics.com/cn/machinevision/service/download/](https://www.hikrobotics.com/cn/machinevision/service/download/)
   - 用于相机连接和图像采集
 
 ![MVS](README/image.png)
+
+
+常见问题：
+
+如果没有安装MVS，则会出现找不到 MvCameraControl 的问题。
+
+如果安装的不是 MVS，而是 机器视觉工业相机SDK ，则需要自行修改引用的 DLL 路径。
+
+我们依赖的 MVS 的 DLL 路径是：C:\Program Files (x86)\MVS\Development\DotNet\win64\MvCameraControl.Net.dll
 
 * **Halcon**（可选）
   - 版本：halcon-20.11.1.0-windows.exe
