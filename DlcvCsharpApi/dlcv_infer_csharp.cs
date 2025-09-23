@@ -57,6 +57,10 @@ namespace dlcv_infer_csharp
         public delegate IntPtr GetDeviceInfo();
         public GetDeviceInfo dlcv_get_device_info;
 
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate IntPtr KeepMaxClock();
+        public KeepMaxClock dlcv_keep_max_clock;
+
         private void LoadDll()
         {
             JArray feature_list = new JArray();
@@ -100,6 +104,7 @@ namespace dlcv_infer_csharp
             dlcv_free_result = GetDelegate<FreeResultDelegate>(hModule, "dlcv_free_result");
             dlcv_free_all_models = GetDelegate<FreeAllModelsDelegate>(hModule, "dlcv_free_all_models");
             dlcv_get_device_info = GetDelegate<GetDeviceInfo>(hModule, "dlcv_get_device_info");
+            dlcv_keep_max_clock = GetDelegate<KeepMaxClock>(hModule, "dlcv_keep_max_clock");
         }
 
         private T GetDelegate<T>(IntPtr hModule, string procedureName) where T : Delegate
