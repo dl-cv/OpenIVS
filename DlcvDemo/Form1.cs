@@ -50,6 +50,7 @@ namespace DlcvDemo
             Thread thread = new Thread(GetDeviceInfo);
             thread.IsBackground = true;
             thread.Start();
+            dlcv_infer_csharp.DllLoader.Instance.dlcv_keep_max_clock();
         }
 
         private void GetDeviceInfo()
