@@ -199,6 +199,32 @@ namespace DLCV.Camera
         float GetExposureTime();
 
         /// <summary>
+        /// 使能/关闭帧率控制(AcquisitionFrameRateEnable)
+        /// </summary>
+        /// <param name="enable">是否使能</param>
+        /// <returns>是否设置成功</returns>
+        bool SetFrameRateEnable(bool enable);
+
+        /// <summary>
+        /// 获取是否使能帧率控制
+        /// </summary>
+        /// <returns>是否已使能；失败时返回false</returns>
+        bool GetFrameRateEnable();
+
+        /// <summary>
+        /// 设置采集帧率(AcquisitionFrameRate)
+        /// </summary>
+        /// <param name="frameRate">帧率(FPS)</param>
+        /// <returns>是否设置成功</returns>
+        bool SetFrameRate(float frameRate);
+
+        /// <summary>
+        /// 获取采集帧率
+        /// </summary>
+        /// <returns>帧率(FPS)，失败返回0</returns>
+        float GetFrameRate();
+
+        /// <summary>
         /// 执行一键白平衡
         /// </summary>
         /// <returns>是否成功</returns>
@@ -1103,6 +1129,150 @@ namespace DLCV.Camera
             catch (Exception ex)
             {
                 Console.WriteLine($"GetExposureTime异常: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 使能/关闭帧率控制(AcquisitionFrameRateEnable)
+        /// </summary>
+        /// <param name="enable">是否使能</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetFrameRateEnable(bool enable)
+        {
+            if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("SetFrameRateEnable: 设备未打开");
+                return false;
+            }
+
+            try
+            {
+                int result = _device.Parameters.SetBoolValue("AcquisitionFrameRateEnable", enable);
+                Console.WriteLine($"SetBoolValue AcquisitionFrameRateEnable={enable} 结果: 0x{result:X8}");
+                return result == MvError.MV_OK;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"SetFrameRateEnable异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取是否使能帧率控制
+        /// </summary>
+        /// <returns>是否使能；失败返回false</returns>
+        public bool GetFrameRateEnable()
+        {
+            if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("GetFrameRateEnable: 设备未打开");
+                return false;
+            }
+
+            try
+            {
+                bool enabled;
+                int result = _device.Parameters.GetBoolValue("AcquisitionFrameRateEnable", out enabled);
+                Console.WriteLine($"GetBoolValue AcquisitionFrameRateEnable 结果: 0x{result:X8}");
+                return result == MvError.MV_OK ? enabled : false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"GetFrameRateEnable异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 设置采集帧率(AcquisitionFrameRate)
+        /// </summary>
+        /// <param name="frameRate">帧率(FPS)</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetFrameRate(float frameRate)
+        {
+            if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("SetFrameRate: 设备未打开");
+                return false;
+            }
+
+            try
+            {
+                Console.WriteLine($"尝试设置帧率: {frameRate} FPS");
+
+                if (frameRate <= 0)
+                {
+                    Console.WriteLine("帧率必须大于0");
+                    return false;
+                }
+
+                // 尝试读取范围并夹取
+                try
+                {
+                    IFloatValue frInfo;
+                    int getRange = _device.Parameters.GetFloatValue("AcquisitionFrameRate", out frInfo);
+                    if (getRange == MvError.MV_OK)
+                    {
+                        float min = frInfo.Min;
+                        float max = frInfo.Max;
+                        if (frameRate < min) frameRate = min;
+                        if (frameRate > max) frameRate = max;
+                        Console.WriteLine($"帧率范围: [{min}, {max}]，调整后: {frameRate}");
+                    }
+                }
+                catch { }
+
+                int result = _device.Parameters.SetFloatValue("AcquisitionFrameRate", frameRate);
+                Console.WriteLine($"SetFloatValue AcquisitionFrameRate={frameRate} 结果: 0x{result:X8}");
+                return result == MvError.MV_OK;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"SetFrameRate异常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取采集帧率
+        /// </summary>
+        /// <returns>帧率(FPS)，失败返回0</returns>
+        public float GetFrameRate()
+        {
+            if (!IsOpen || _device == null)
+            {
+                Console.WriteLine("GetFrameRate: 设备未打开");
+                return 0;
+            }
+
+            try
+            {
+                // 优先读取ResultingFrameRate，如果不可用则读AcquisitionFrameRate
+                IFloatValue value;
+                int result = _device.Parameters.GetFloatValue("ResultingFrameRate", out value);
+                Console.WriteLine($"GetFloatValue ResultingFrameRate 结果: 0x{result:X8}");
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine($"当前ResultingFrameRate: {value.CurValue} FPS");
+                    return value.CurValue;
+                }
+
+                result = _device.Parameters.GetFloatValue("AcquisitionFrameRate", out value);
+                Console.WriteLine($"GetFloatValue AcquisitionFrameRate 结果: 0x{result:X8}");
+                if (result == MvError.MV_OK)
+                {
+                    Console.WriteLine($"当前AcquisitionFrameRate: {value.CurValue} FPS");
+                    return value.CurValue;
+                }
+
+                Console.WriteLine("获取帧率失败");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"GetFrameRate异常: {ex.Message}");
                 return 0;
             }
         }
@@ -2252,6 +2422,56 @@ namespace DLCV.Camera
         public float GetExposureTime()
         {
             return _activeDevice?.GetExposureTime() ?? 0;
+        }
+
+        /// <summary>
+        /// 使能/关闭帧率控制
+        /// </summary>
+        /// <param name="enable">是否使能</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetFrameRateEnable(bool enable)
+        {
+            if (_activeDevice == null)
+                return false;
+
+            bool result = _activeDevice.SetFrameRateEnable(enable);
+            if (result)
+                _activeDevice.SaveToUserSet1();
+            return result;
+        }
+
+        /// <summary>
+        /// 获取是否使能帧率控制
+        /// </summary>
+        /// <returns>是否使能；失败返回false</returns>
+        public bool GetFrameRateEnable()
+        {
+            return _activeDevice?.GetFrameRateEnable() ?? false;
+        }
+
+        /// <summary>
+        /// 设置帧率(FPS)
+        /// </summary>
+        /// <param name="frameRate">帧率</param>
+        /// <returns>是否设置成功</returns>
+        public bool SetFrameRate(float frameRate)
+        {
+            if (_activeDevice == null)
+                return false;
+
+            bool result = _activeDevice.SetFrameRate(frameRate);
+            if (result)
+                _activeDevice.SaveToUserSet1();
+            return result;
+        }
+
+        /// <summary>
+        /// 获取帧率(FPS)
+        /// </summary>
+        /// <returns>帧率</returns>
+        public float GetFrameRate()
+        {
+            return _activeDevice?.GetFrameRate() ?? 0;
         }
 
         /// <summary>
