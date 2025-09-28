@@ -902,6 +902,122 @@ namespace CameraManagerTest
         }
 
         #endregion
+
+        #region 帧率同步
+
+        /// <summary>
+        /// 同步帧率到其他相机
+        /// </summary>
+        /// <param name="sourceTab">源相机标签页</param>
+        /// <param name="fps">帧率(FPS)</param>
+        public void SyncFrameRateToOtherCameras(CameraTabView sourceTab, float fps)
+        {
+            try
+            {
+                int successCount = 0;
+                int failCount = 0;
+
+                foreach (var tab in _cameraTabs)
+                {
+                    if (tab == sourceTab || tab.CameraManager?.ActiveDevice == null)
+                        continue;
+
+                    try
+                    {
+                        // 确保帧率控制已启用
+                        bool enabled = tab.CameraManager.GetFrameRateEnable();
+                        if (!enabled)
+                        {
+                            if (!tab.CameraManager.SetFrameRateEnable(true))
+                            {
+                                failCount++;
+                                continue;
+                            }
+                        }
+
+                        bool success = tab.CameraManager.SetFrameRate(fps);
+                        if (success)
+                        {
+                            successCount++;
+                            // 更新UI
+                            if (tab._txtFrameRate != null)
+                            {
+                                float actual = tab.CameraManager.GetFrameRate();
+                                if (actual > 0)
+                                    tab._txtFrameRate.Text = actual.ToString("F2");
+                            }
+                        }
+                        else
+                        {
+                            failCount++;
+                        }
+                    }
+                    catch
+                    {
+                        failCount++;
+                    }
+                }
+
+                string message = $"帧率同步完成: 成功{successCount}个，失败{failCount}个";
+                UpdateStatus(message);
+                MessageBox.Show(message, "同步结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"同步帧率失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 同步帧率开关到其他相机
+        /// </summary>
+        /// <param name="sourceTab">源相机标签页</param>
+        /// <param name="enable">是否启用帧率控制</param>
+        public void SyncFrameRateEnableToOtherCameras(CameraTabView sourceTab, bool enable)
+        {
+            try
+            {
+                int successCount = 0;
+                int failCount = 0;
+
+                foreach (var tab in _cameraTabs)
+                {
+                    if (tab == sourceTab || tab.CameraManager?.ActiveDevice == null)
+                        continue;
+
+                    try
+                    {
+                        bool success = tab.CameraManager.SetFrameRateEnable(enable);
+                        if (success)
+                        {
+                            successCount++;
+                            if (tab._chkFrameRateEnable != null)
+                            {
+                                tab._chkFrameRateEnable.Checked = enable;
+                            }
+                        }
+                        else
+                        {
+                            failCount++;
+                        }
+                    }
+                    catch
+                    {
+                        failCount++;
+                    }
+                }
+
+                string message = $"帧率开关同步完成: 成功{successCount}个，失败{failCount}个";
+                UpdateStatus(message);
+                MessageBox.Show(message, "同步结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"同步帧率开关失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        #endregion
     }
 
     /// <summary>

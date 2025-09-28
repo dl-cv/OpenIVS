@@ -59,7 +59,7 @@
             this._pictureBox.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this._pictureBox.Location = new System.Drawing.Point(12, 225);
             this._pictureBox.Name = "_pictureBox";
-            this._pictureBox.Size = new System.Drawing.Size(1376, 845);
+            this._pictureBox.Size = new System.Drawing.Size(1522, 845);
             this._pictureBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this._pictureBox.TabIndex = 0;
             this._pictureBox.TabStop = false;
@@ -83,37 +83,6 @@
             this._btnConnect.UseVisualStyleBackColor = true;
             this._btnConnect.Visible = false;
             this._btnConnect.Click += new System.EventHandler(this.BtnConnect_Click);
-            // 
-            // _btnAddCamera
-            // 
-            this._btnAddCamera.Location = new System.Drawing.Point(370, 12);
-            this._btnAddCamera.Name = "_btnAddCamera";
-            this._btnAddCamera.Size = new System.Drawing.Size(100, 34);
-            this._btnAddCamera.TabIndex = 5;
-            this._btnAddCamera.Text = "添加相机";
-            this._btnAddCamera.UseVisualStyleBackColor = true;
-            this._btnAddCamera.Click += new System.EventHandler(this.BtnAddCamera_Click);
-            // 
-            // _btnRemoveCamera
-            // 
-            this._btnRemoveCamera.Location = new System.Drawing.Point(582, 12);
-            this._btnRemoveCamera.Name = "_btnRemoveCamera";
-            this._btnRemoveCamera.Size = new System.Drawing.Size(100, 34);
-            this._btnRemoveCamera.TabIndex = 6;
-            this._btnRemoveCamera.Text = "移除相机";
-            this._btnRemoveCamera.UseVisualStyleBackColor = true;
-            this._btnRemoveCamera.Enabled = false;
-            this._btnRemoveCamera.Click += new System.EventHandler(this.BtnRemoveCamera_Click);
-            // 
-            // _btnLoadAllCameras
-            // 
-            this._btnLoadAllCameras.Location = new System.Drawing.Point(476, 12);
-            this._btnLoadAllCameras.Name = "_btnLoadAllCameras";
-            this._btnLoadAllCameras.Size = new System.Drawing.Size(100, 34);
-            this._btnLoadAllCameras.TabIndex = 7;
-            this._btnLoadAllCameras.Text = "全部加载";
-            this._btnLoadAllCameras.UseVisualStyleBackColor = true;
-            this._btnLoadAllCameras.Click += new System.EventHandler(this.BtnLoadAllCameras_Click);
             // 
             // _btnStartGrab
             // 
@@ -194,7 +163,7 @@
             this._groupCamera.Enabled = false;
             this._groupCamera.Location = new System.Drawing.Point(12, 50);
             this._groupCamera.Name = "_groupCamera";
-            this._groupCamera.Size = new System.Drawing.Size(448, 165);
+            this._groupCamera.Size = new System.Drawing.Size(594, 165);
             this._groupCamera.TabIndex = 3;
             this._groupCamera.TabStop = false;
             this._groupCamera.Text = "相机控制";
@@ -234,7 +203,7 @@
             this._lblStatus.Dock = System.Windows.Forms.DockStyle.Bottom;
             this._lblStatus.Location = new System.Drawing.Point(0, 1070);
             this._lblStatus.Name = "_lblStatus";
-            this._lblStatus.Size = new System.Drawing.Size(1400, 30);
+            this._lblStatus.Size = new System.Drawing.Size(1546, 30);
             this._lblStatus.TabIndex = 4;
             this._lblStatus.Text = "准备就绪";
             // 
@@ -246,14 +215,45 @@
             this._tabCameras.Location = new System.Drawing.Point(12, 50);
             this._tabCameras.Name = "_tabCameras";
             this._tabCameras.SelectedIndex = 0;
-            this._tabCameras.Size = new System.Drawing.Size(1376, 1020);
+            this._tabCameras.Size = new System.Drawing.Size(1522, 1020);
             this._tabCameras.TabIndex = 7;
+            // 
+            // _btnAddCamera
+            // 
+            this._btnAddCamera.Location = new System.Drawing.Point(370, 12);
+            this._btnAddCamera.Name = "_btnAddCamera";
+            this._btnAddCamera.Size = new System.Drawing.Size(100, 34);
+            this._btnAddCamera.TabIndex = 5;
+            this._btnAddCamera.Text = "添加相机";
+            this._btnAddCamera.UseVisualStyleBackColor = true;
+            this._btnAddCamera.Click += new System.EventHandler(this.BtnAddCamera_Click);
+            // 
+            // _btnRemoveCamera
+            // 
+            this._btnRemoveCamera.Enabled = false;
+            this._btnRemoveCamera.Location = new System.Drawing.Point(582, 12);
+            this._btnRemoveCamera.Name = "_btnRemoveCamera";
+            this._btnRemoveCamera.Size = new System.Drawing.Size(100, 34);
+            this._btnRemoveCamera.TabIndex = 6;
+            this._btnRemoveCamera.Text = "移除相机";
+            this._btnRemoveCamera.UseVisualStyleBackColor = true;
+            this._btnRemoveCamera.Click += new System.EventHandler(this.BtnRemoveCamera_Click);
+            // 
+            // _btnLoadAllCameras
+            // 
+            this._btnLoadAllCameras.Location = new System.Drawing.Point(476, 12);
+            this._btnLoadAllCameras.Name = "_btnLoadAllCameras";
+            this._btnLoadAllCameras.Size = new System.Drawing.Size(100, 34);
+            this._btnLoadAllCameras.TabIndex = 7;
+            this._btnLoadAllCameras.Text = "全部加载";
+            this._btnLoadAllCameras.UseVisualStyleBackColor = true;
+            this._btnLoadAllCameras.Click += new System.EventHandler(this.BtnLoadAllCameras_Click);
             // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 18F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1400, 1100);
+            this.ClientSize = new System.Drawing.Size(1546, 1100);
             this.Controls.Add(this._tabCameras);
             this.Controls.Add(this._btnRemoveCamera);
             this.Controls.Add(this._btnLoadAllCameras);

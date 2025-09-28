@@ -167,6 +167,12 @@ namespace MultiCameraTest
             _pictureBox.MouseMove += PictureBox_MouseMove;
             _pictureBox.MouseUp += PictureBox_MouseUp;
             _pictureBox.Paint += PictureBox_Paint;
+
+            // 帧率事件
+            _btnSetFrameRate.Click += BtnSetFrameRate_Click;
+            _btnSyncFrameRate.Click += BtnSyncFrameRate_Click;
+            _btnSyncFrameRateEnable.Click += BtnSyncFrameRateEnable_Click;
+            _chkFrameRateEnable.CheckedChanged += ChkFrameRateEnable_CheckedChanged;
         }
 
         private void InitializeParameterDisplay()
@@ -217,11 +223,154 @@ namespace MultiCameraTest
                 Console.WriteLine("正在获取ROI参数...");
                 UpdateROIControls();
                 
+                // 初始化帧率显示
+                Console.WriteLine("正在获取帧率参数...");
+                try
+                {
+                    bool fpsEnable = CameraManager.GetFrameRateEnable();
+                    _chkFrameRateEnable.CheckedChanged -= ChkFrameRateEnable_CheckedChanged;
+                    _chkFrameRateEnable.Checked = fpsEnable;
+                    _chkFrameRateEnable.CheckedChanged += ChkFrameRateEnable_CheckedChanged;
+
+                    float fps = CameraManager.GetFrameRate();
+                    if (fps > 0)
+                    {
+                        _txtFrameRate.Text = fps.ToString("F2");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"初始化帧率显示异常: {ex.Message}");
+                }
+                
                 Console.WriteLine("参数显示初始化完成");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"InitializeParameterDisplay异常: {ex.Message}");
+            }
+        }
+
+        private void ChkFrameRateEnable_CheckedChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                    return;
+
+                bool enable = _chkFrameRateEnable.Checked;
+                bool result = CameraManager.SetFrameRateEnable(enable);
+                if (!result)
+                {
+                    // 回退勾选状态
+                    _chkFrameRateEnable.CheckedChanged -= ChkFrameRateEnable_CheckedChanged;
+                    _chkFrameRateEnable.Checked = !enable;
+                    _chkFrameRateEnable.CheckedChanged += ChkFrameRateEnable_CheckedChanged;
+                    MessageBox.Show("设置帧率控制开关失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"设置帧率控制开关失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnSetFrameRate_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                if (!float.TryParse(_txtFrameRate.Text, out float fps) || fps <= 0)
+                {
+                    MessageBox.Show("请输入有效的帧率(FPS)", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                bool enabled = _chkFrameRateEnable.Checked;
+                if (!enabled)
+                {
+                    var ask = MessageBox.Show("未启用帧率控制，是否启用并继续设置?", "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (ask == DialogResult.Yes)
+                    {
+                        if (!CameraManager.SetFrameRateEnable(true))
+                        {
+                            MessageBox.Show("启用帧率控制失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+                        _chkFrameRateEnable.CheckedChanged -= ChkFrameRateEnable_CheckedChanged;
+                        _chkFrameRateEnable.Checked = true;
+                        _chkFrameRateEnable.CheckedChanged += ChkFrameRateEnable_CheckedChanged;
+                    }
+                    else
+                    {
+                        return;
+                    }
+                }
+
+                bool success = CameraManager.SetFrameRate(fps);
+                if (success)
+                {
+                    float actual = CameraManager.GetFrameRate();
+                    _txtFrameRate.Text = actual > 0 ? actual.ToString("F2") : fps.ToString("F2");
+                    MessageBox.Show($"帧率设置成功: {actual:F2} FPS", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show("帧率设置失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"设置帧率失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnSyncFrameRate_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                float fps = CameraManager.GetFrameRate();
+                if (fps <= 0)
+                {
+                    MessageBox.Show("获取当前帧率失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                _mainForm.SyncFrameRateToOtherCameras(this, fps);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"同步帧率失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnSyncFrameRateEnable_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (CameraManager == null || CameraManager.ActiveDevice == null)
+                {
+                    MessageBox.Show("相机未连接", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                bool enable = _chkFrameRateEnable.Checked;
+                _mainForm.SyncFrameRateEnableToOtherCameras(this, enable);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"同步帧率开关失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
         

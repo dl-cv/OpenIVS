@@ -57,6 +57,13 @@ namespace MultiCameraTest
             this._txtBlueRatio = new System.Windows.Forms.TextBox();
             this._lblRatioRange = new System.Windows.Forms.Label();
             this._groupROI = new System.Windows.Forms.GroupBox();
+            this._groupFrameRate = new System.Windows.Forms.GroupBox();
+            this._chkFrameRateEnable = new System.Windows.Forms.CheckBox();
+            this._lblFrameRate = new System.Windows.Forms.Label();
+            this._txtFrameRate = new System.Windows.Forms.TextBox();
+            this._btnSetFrameRate = new System.Windows.Forms.Button();
+            this._btnSyncFrameRate = new System.Windows.Forms.Button();
+            this._btnSyncFrameRateEnable = new System.Windows.Forms.Button();
             this._lblOffsetX = new System.Windows.Forms.Label();
             this._txtOffsetX = new System.Windows.Forms.TextBox();
             this._lblOffsetY = new System.Windows.Forms.Label();
@@ -85,6 +92,7 @@ namespace MultiCameraTest
             this._groupExposure.SuspendLayout();
             this._groupWhiteBalance.SuspendLayout();
             this._groupROI.SuspendLayout();
+            this._groupFrameRate.SuspendLayout();
             this._groupUserSet.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this._pictureBox)).BeginInit();
             this.SuspendLayout();
@@ -107,17 +115,19 @@ namespace MultiCameraTest
             // 
             // controlsPanel
             // 
-            this.controlsPanel.ColumnCount = 5;
-            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
-            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
-            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
-            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
-            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+            this.controlsPanel.ColumnCount = 6;
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 16.66667F));
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 16.66667F));
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 16.66667F));
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 16.66667F));
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 16.66667F));
+            this.controlsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 16.66667F));
             this.controlsPanel.Controls.Add(this._groupCamera, 0, 0);
             this.controlsPanel.Controls.Add(this._groupExposure, 1, 0);
             this.controlsPanel.Controls.Add(this._groupWhiteBalance, 2, 0);
             this.controlsPanel.Controls.Add(this._groupROI, 3, 0);
-            this.controlsPanel.Controls.Add(this._groupUserSet, 4, 0);
+            this.controlsPanel.Controls.Add(this._groupFrameRate, 4, 0);
+            this.controlsPanel.Controls.Add(this._groupUserSet, 5, 0);
             this.controlsPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.controlsPanel.Location = new System.Drawing.Point(5, 5);
             this.controlsPanel.Margin = new System.Windows.Forms.Padding(5);
@@ -420,6 +430,78 @@ namespace MultiCameraTest
             this._groupROI.TabStop = false;
             this._groupROI.Text = "ROI设置";
             // 
+            // _groupFrameRate
+            // 
+            this._groupFrameRate.Dock = System.Windows.Forms.DockStyle.Fill;
+            this._groupFrameRate.Name = "_groupFrameRate";
+            this._groupFrameRate.Size = new System.Drawing.Size(158, 149);
+            this._groupFrameRate.TabIndex = 4;
+            this._groupFrameRate.TabStop = false;
+            this._groupFrameRate.Text = "帧率设置";
+            // 
+            // _chkFrameRateEnable
+            // 
+            this._chkFrameRateEnable.AutoSize = true;
+            this._chkFrameRateEnable.Location = new System.Drawing.Point(8, 20);
+            this._chkFrameRateEnable.Name = "_chkFrameRateEnable";
+            this._chkFrameRateEnable.Size = new System.Drawing.Size(108, 16);
+            this._chkFrameRateEnable.TabIndex = 0;
+            this._chkFrameRateEnable.Text = "启用帧率控制";
+            this._chkFrameRateEnable.UseVisualStyleBackColor = true;
+            // 
+            // _lblFrameRate
+            // 
+            this._lblFrameRate.AutoSize = true;
+            this._lblFrameRate.Location = new System.Drawing.Point(6, 48);
+            this._lblFrameRate.Name = "_lblFrameRate";
+            this._lblFrameRate.Size = new System.Drawing.Size(71, 12);
+            this._lblFrameRate.TabIndex = 1;
+            this._lblFrameRate.Text = "帧率(FPS):";
+            // 
+            // _txtFrameRate
+            // 
+            this._txtFrameRate.Location = new System.Drawing.Point(78, 45);
+            this._txtFrameRate.Name = "_txtFrameRate";
+            this._txtFrameRate.Size = new System.Drawing.Size(50, 21);
+            this._txtFrameRate.TabIndex = 2;
+            this._txtFrameRate.Text = "30";
+            // 
+            // _btnSetFrameRate
+            // 
+            this._btnSetFrameRate.Location = new System.Drawing.Point(134, 44);
+            this._btnSetFrameRate.Name = "_btnSetFrameRate";
+            this._btnSetFrameRate.Size = new System.Drawing.Size(40, 23);
+            this._btnSetFrameRate.TabIndex = 3;
+            this._btnSetFrameRate.Text = "设置";
+            this._btnSetFrameRate.UseVisualStyleBackColor = true;
+            // 
+            // _btnSyncFrameRate
+            // 
+            this._btnSyncFrameRate.Location = new System.Drawing.Point(8, 75);
+            this._btnSyncFrameRate.Name = "_btnSyncFrameRate";
+            this._btnSyncFrameRate.Size = new System.Drawing.Size(75, 23);
+            this._btnSyncFrameRate.TabIndex = 4;
+            this._btnSyncFrameRate.Text = "同步帧率";
+            this._btnSyncFrameRate.UseVisualStyleBackColor = true;
+            // 
+            // _btnSyncFrameRateEnable
+            // 
+            this._btnSyncFrameRateEnable.Location = new System.Drawing.Point(89, 75);
+            this._btnSyncFrameRateEnable.Name = "_btnSyncFrameRateEnable";
+            this._btnSyncFrameRateEnable.Size = new System.Drawing.Size(85, 23);
+            this._btnSyncFrameRateEnable.TabIndex = 5;
+            this._btnSyncFrameRateEnable.Text = "同步启用";
+            this._btnSyncFrameRateEnable.UseVisualStyleBackColor = true;
+            // 
+            // add controls to _groupFrameRate
+            // 
+            this._groupFrameRate.Controls.Add(this._chkFrameRateEnable);
+            this._groupFrameRate.Controls.Add(this._lblFrameRate);
+            this._groupFrameRate.Controls.Add(this._txtFrameRate);
+            this._groupFrameRate.Controls.Add(this._btnSetFrameRate);
+            this._groupFrameRate.Controls.Add(this._btnSyncFrameRate);
+            this._groupFrameRate.Controls.Add(this._btnSyncFrameRateEnable);
+            // 
             // _lblOffsetX
             // 
             this._lblOffsetX.AutoSize = true;
@@ -644,6 +726,8 @@ namespace MultiCameraTest
             this._groupWhiteBalance.PerformLayout();
             this._groupROI.ResumeLayout(false);
             this._groupROI.PerformLayout();
+            this._groupFrameRate.ResumeLayout(false);
+            this._groupFrameRate.PerformLayout();
             this._groupUserSet.ResumeLayout(false);
             this._groupUserSet.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this._pictureBox)).EndInit();
@@ -695,6 +779,13 @@ namespace MultiCameraTest
         private System.Windows.Forms.Button _btnSyncROI;
         private System.Windows.Forms.Button _btnRestoreROI;
         private System.Windows.Forms.Label _lblROITip;
+        private System.Windows.Forms.GroupBox _groupFrameRate;
+        internal System.Windows.Forms.CheckBox _chkFrameRateEnable;
+        private System.Windows.Forms.Label _lblFrameRate;
+        internal System.Windows.Forms.TextBox _txtFrameRate;
+        private System.Windows.Forms.Button _btnSetFrameRate;
+        private System.Windows.Forms.Button _btnSyncFrameRate;
+        private System.Windows.Forms.Button _btnSyncFrameRateEnable;
         private System.Windows.Forms.GroupBox _groupUserSet;
         private System.Windows.Forms.Label _lblUserSet;
         internal System.Windows.Forms.ComboBox _comboUserSet;
