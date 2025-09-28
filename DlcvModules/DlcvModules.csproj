@@ -44,5 +44,11 @@
     <Compile Include="Modules.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
+      <Project>{73d82dbe-59d3-46f9-a8b3-87e13eb220ec}</Project>
+      <Name>DlcvCsharpApi</Name>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
