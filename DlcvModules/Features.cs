@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Linq;
+using Newtonsoft.Json.Linq;
+using OpenCvSharp;
 
 namespace DlcvModules
 {
@@ -23,34 +23,34 @@ namespace DlcvModules
         {
         }
 
-        public override Tuple<List<object>, List<Dictionary<string, object>>> Process(List<object> imageList = null, List<Dictionary<string, object>> resultList = null)
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
-            var imagesIn = imageList ?? new List<object>();
-            var resultsIn = resultList ?? new List<Dictionary<string, object>>();
+            var imagesIn = imageList ?? new List<ModuleImage>();
+            var resultsIn = resultList ?? new JArray();
 
             // 构建 transform/index 映射，便于按条目裁剪
-            var transformKeyToImage = new Dictionary<string, Tuple<ModuleImage, Bitmap, int>>();
+            var transformKeyToImage = new Dictionary<string, Tuple<ModuleImage, Mat, int>>();
             for (int i = 0; i < imagesIn.Count; i++)
             {
                 var (wrap, bmp) = UnwrapImage(imagesIn[i]);
-                if (bmp == null) continue;
+                if (bmp == null || bmp.Empty()) continue;
                 string key = SerializeTransform(wrap != null ? wrap.TransformState : null, i, wrap != null ? wrap.OriginalIndex : i);
                 transformKeyToImage[key] = Tuple.Create(wrap, bmp, i);
             }
 
-            var imagesOut = new List<object>();
-            var resultsOut = new List<Dictionary<string, object>>();
+            var imagesOut = new List<ModuleImage>();
+            var resultsOut = new JArray();
             int outIndex = 0;
 
-            foreach (var entry in resultsIn)
+            foreach (var entryToken in resultsIn)
             {
-                if (entry == null) continue;
-                int idx = GetInt(entry, "index", -1);
-                int originIndex = GetInt(entry, "origin_index", idx);
-                var stateDict = GetDict(entry, "transform");
-                var state = stateDict != null ? TransformationState.FromDict(stateDict) : null;
+                if (!(entryToken is JObject entry)) continue;
+                int idx = entry["index"]?.Value<int?>() ?? -1;
+                int originIndex = entry["origin_index"]?.Value<int?>() ?? idx;
+                var stateDict = entry["transform"] as JObject;
+                var state = stateDict != null ? TransformationState.FromDict(stateDict.ToObject<Dictionary<string, object>>()) : null;
                 string key = SerializeTransform(state, idx, originIndex);
-                if (!transformKeyToImage.TryGetValue(key, out Tuple<ModuleImage, Bitmap, int> tup))
+                if (!transformKeyToImage.TryGetValue(key, out Tuple<ModuleImage, Mat, int> tup))
                 {
                     // 回退到 index 匹配
                     key = SerializeTransform(null, idx, originIndex);
@@ -58,30 +58,30 @@ namespace DlcvModules
                 }
                 if (tup == null) continue;
 
-                var sampleResults = GetList(entry, "sample_results");
+                var sampleResults = entry["sample_results"] as JArray;
                 if (sampleResults == null || sampleResults.Count == 0) continue;
 
                 foreach (var sr in sampleResults)
                 {
                     if (sr == null) continue;
                     // 每个 sr 应为一个对象结果，可能含 bbox、with_angle/angle、with_bbox
-                    var bbox = GetDoubleList(sr, "bbox");
-                    bool withAngle = GetBool(sr, "with_angle", false);
-                    double angle = GetDouble(sr, "angle", -100.0);
-                    bool withBbox = GetBool(sr, "with_bbox", bbox != null && bbox.Count > 0);
+                    var bbox = sr["bbox"] as JArray;
+                    bool withAngle = sr["with_angle"]?.Value<bool>() ?? false;
+                    double angle = sr["angle"]?.Value<double?>() ?? -100.0;
+                    bool withBbox = sr["with_bbox"]?.Value<bool?>() ?? (bbox != null && bbox.Count > 0);
                     if (!withBbox || bbox == null || bbox.Count < 4) continue;
 
-                    Bitmap cropped = null;
+                    Mat cropped = null;
                     double[] childA2x3 = null;
                     int cw, ch;
 
                     if (withAngle && angle != -100.0)
                     {
                         // 旋转框: bbox=[cx,cy,w,h]，angle为弧度
-                        double cx = bbox[0];
-                        double cy = bbox[1];
-                        double w = bbox[2];
-                        double h = bbox[3];
+                        double cx = bbox[0].Value<double>();
+                        double cy = bbox[1].Value<double>();
+                        double w = bbox[2].Value<double>();
+                        double h = bbox[3].Value<double>();
                         cw = Math.Max(1, (int)Math.Round(w));
                         ch = Math.Max(1, (int)Math.Round(h));
                         cropped = CropRotated(tup.Item2, (float)cx, (float)cy, (float)w, (float)h, (float)(angle * 180.0 / Math.PI));
@@ -96,17 +96,15 @@ namespace DlcvModules
                     else
                     {
                         // 轴对齐框: bbox=[x,y,w,h]
-                        int x = ClampToInt(bbox[0]);
-                        int y = ClampToInt(bbox[1]);
-                        int w = Math.Max(1, ClampToInt(bbox[2]));
-                        int h = Math.Max(1, ClampToInt(bbox[3]));
-                        var rect = new Rectangle(x, y, Math.Min(w, Math.Max(1, tup.Item2.Width - x)), Math.Min(h, Math.Max(1, tup.Item2.Height - y)));
-                        if (rect.Width <= 0 || rect.Height <= 0) continue;
-                        cropped = new Bitmap(rect.Width, rect.Height);
-                        using (var g = Graphics.FromImage(cropped))
-                        {
-                            g.DrawImage(tup.Item2, new Rectangle(0, 0, rect.Width, rect.Height), rect, GraphicsUnit.Pixel);
-                        }
+                        int x = ClampToInt(bbox[0].Value<double>());
+                        int y = ClampToInt(bbox[1].Value<double>());
+                        int w = Math.Max(1, ClampToInt(bbox[2].Value<double>()));
+                        int h = Math.Max(1, ClampToInt(bbox[3].Value<double>()));
+                        int rw = Math.Min(w, Math.Max(1, tup.Item2.Width - x));
+                        int rh = Math.Min(h, Math.Max(1, tup.Item2.Height - y));
+                        if (rw <= 0 || rh <= 0) continue;
+                        var rect = new OpenCvSharp.Rect(x, y, rw, rh);
+                        cropped = new Mat(tup.Item2, rect).Clone();
                         cw = rect.Width;
                         ch = rect.Height;
                         // 平移到左上角
@@ -121,28 +119,26 @@ namespace DlcvModules
                     var childWrap = new ModuleImage(cropped, parentWrap != null ? parentWrap.OriginalImage : tup.Item2, childState, parentWrap != null ? parentWrap.OriginalIndex : originIndex);
                     imagesOut.Add(childWrap);
 
-                    var outEntry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                    outEntry["type"] = "local";
-                    outEntry["index"] = outIndex;
-                    outEntry["origin_index"] = parentWrap != null ? parentWrap.OriginalIndex : originIndex;
-                    outEntry["transform"] = childState.ToDict();
-                    outEntry["sample_results"] = new List<Dictionary<string, object>>();
+                    var outEntry = new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = outIndex,
+                        ["origin_index"] = parentWrap != null ? parentWrap.OriginalIndex : originIndex,
+                        ["transform"] = JObject.FromObject(childState.ToDict()),
+                        ["sample_results"] = new JArray()
+                    };
                     resultsOut.Add(outEntry);
                     outIndex += 1;
                 }
             }
 
-            return Tuple.Create(imagesOut, resultsOut);
+            return new ModuleIO(imagesOut, resultsOut);
         }
 
-        private static Tuple<ModuleImage, Bitmap> UnwrapImage(object obj)
+        private static Tuple<ModuleImage, Mat> UnwrapImage(ModuleImage obj)
         {
-            if (obj is ModuleImage mi)
-            {
-                if (mi.ImageObject is Bitmap bmp1) return Tuple.Create(mi, bmp1);
-                return Tuple.Create(mi, mi.ImageObject as Bitmap);
-            }
-            return Tuple.Create<ModuleImage, Bitmap>(null, obj as Bitmap);
+            if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
+            return Tuple.Create(obj, obj.ImageObject);
         }
 
         private static int GetInt(Dictionary<string, object> d, string k, int dv)
@@ -185,12 +181,6 @@ namespace DlcvModules
             return null;
         }
 
-        private static Dictionary<string, object> GetDict(Dictionary<string, object> d, string k)
-        {
-            if (d == null || k == null || !d.TryGetValue(k, out object v) || v == null) return null;
-            return v as Dictionary<string, object>;
-        }
-
         private static string SerializeTransform(TransformationState st, int index, int originIndex)
         {
             if (st == null || st.AffineMatrix2x3 == null)
@@ -201,6 +191,8 @@ namespace DlcvModules
             return $"idx:{index}|org:{originIndex}|T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
         }
 
+        
+
         private static int ClampToInt(double v)
         {
             if (double.IsNaN(v) || double.IsInfinity(v)) return 0;
@@ -209,23 +201,15 @@ namespace DlcvModules
             return (int)Math.Round(v);
         }
 
-        private static Bitmap CropRotated(Bitmap src, float cx, float cy, float w, float h, float angleDeg)
+        private static Mat CropRotated(Mat src, float cx, float cy, float w, float h, float angleDeg)
         {
             int iw = Math.Max(1, (int)Math.Round(w));
             int ih = Math.Max(1, (int)Math.Round(h));
-            var dst = new Bitmap(iw, ih);
-            using (var g = Graphics.FromImage(dst))
-            {
-                g.SmoothingMode = SmoothingMode.HighQuality;
-                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-
-                // 让 (cx,cy) 旋转后落在新图中心 (w/2,h/2)
-                g.TranslateTransform(w / 2.0f, h / 2.0f);
-                g.RotateTransform(angleDeg);
-                g.TranslateTransform(-cx, -cy);
-                g.DrawImage(src, new Rectangle(0, 0, src.Width, src.Height));
-            }
+            var rotMat = Cv2.GetRotationMatrix2D(new Point2f(cx, cy), angleDeg, 1.0);
+            rotMat.Set<double>(0, 2, rotMat.Get<double>(0, 2) + (w / 2.0) - cx);
+            rotMat.Set<double>(1, 2, rotMat.Get<double>(1, 2) + (h / 2.0) - cy);
+            var dst = new Mat();
+            Cv2.WarpAffine(src, dst, rotMat, new Size(iw, ih));
             return dst;
         }
     }
@@ -247,20 +231,20 @@ namespace DlcvModules
         {
         }
 
-        public override Tuple<List<object>, List<Dictionary<string, object>>> Process(List<object> imageList = null, List<Dictionary<string, object>> resultList = null)
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
-            var allImages = new List<object>();
-            var allResults = new List<Dictionary<string, object>>();
+            var allImages = new List<ModuleImage>();
+            var allResults = new JArray();
 
             if (imageList != null) allImages.AddRange(imageList);
-            if (resultList != null) allResults.AddRange(resultList);
+            if (resultList != null) foreach (var r in resultList) allResults.Add(r);
             if (ExtraInputsIn != null)
             {
                 foreach (var ch in ExtraInputsIn)
                 {
                     if (ch == null) continue;
                     if (ch.ImageList != null) allImages.AddRange(ch.ImageList);
-                    if (ch.ResultList != null) allResults.AddRange(ch.ResultList);
+                    if (ch.ResultList != null) foreach (var r in ch.ResultList) allResults.Add(r);
                 }
             }
 
@@ -275,18 +259,19 @@ namespace DlcvModules
             }
 
             // 将结果按 key 汇总
-            var keyToResults = new Dictionary<string, List<Dictionary<string, object>>>();
-            foreach (var r in allResults)
+            var keyToResults = new Dictionary<string, List<JObject>>();
+            foreach (var t in allResults)
             {
+                var r = t as JObject;
                 if (r == null) continue;
-                int idx = GetInt(r, "index", -1);
-                int originIndex = GetInt(r, "origin_index", idx);
-                var stDict = GetDict(r, "transform");
-                var st = stDict != null ? TransformationState.FromDict(stDict) : null;
+                int idx = r["index"]?.Value<int?>() ?? -1;
+                int originIndex = r["origin_index"]?.Value<int?>() ?? idx;
+                var stDict = r["transform"] as JObject;
+                var st = stDict != null ? TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()) : null;
                 string key = SerializeTransform(st, idx, originIndex);
-                if (!keyToResults.TryGetValue(key, out List<Dictionary<string, object>> list))
+                if (!keyToResults.TryGetValue(key, out List<JObject> list))
                 {
-                    list = new List<Dictionary<string, object>>();
+                    list = new List<JObject>();
                     keyToResults[key] = list;
                 }
                 list.Add(r);
@@ -295,27 +280,23 @@ namespace DlcvModules
             // 去重选项
             bool dedup = Properties != null && Properties.TryGetValue("deduplicate", out object dv) && Convert.ToBoolean(dv);
 
-            var mergedImages = new List<object>(allImages);
-            var mergedResults = new List<Dictionary<string, object>>();
+            var mergedImages = new List<ModuleImage>(allImages);
+            var mergedResults = new JArray();
 
             int newIndex = 0;
             foreach (var kv in keyToImage)
             {
                 var wrap = kv.Value.Item1;
                 var st = wrap != null ? wrap.TransformState : null;
-                var samples = new List<Dictionary<string, object>>();
+                var samples = new List<JObject>();
 
-                if (keyToResults.TryGetValue(kv.Key, out List<Dictionary<string, object>> rs))
+                if (keyToResults.TryGetValue(kv.Key, out List<JObject> rs))
                 {
                     foreach (var r in rs)
                     {
-                        List<Dictionary<string, object>> srs = null;
-                        if (r != null && r.TryGetValue("sample_results", out object sv) && sv is List<Dictionary<string, object>> svl)
-                        {
-                            srs = svl;
-                        }
+                        var srs = r["sample_results"] as JArray;
                         if (srs == null) continue;
-                        foreach (var o in srs) samples.Add(o);
+                        foreach (var o in srs) if (o is JObject oj) samples.Add(oj);
                     }
                 }
 
@@ -324,42 +305,41 @@ namespace DlcvModules
                     samples = Deduplicate(samples);
                 }
 
-                var outEntry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                outEntry["type"] = "local";
-                outEntry["index"] = newIndex;
-                outEntry["origin_index"] = wrap != null ? wrap.OriginalIndex : 0;
-                outEntry["transform"] = st != null ? (object)st.ToDict() : null;
-                outEntry["sample_results"] = samples;
+                var outEntry = new JObject
+                {
+                    ["type"] = "local",
+                    ["index"] = newIndex,
+                    ["origin_index"] = wrap != null ? wrap.OriginalIndex : 0,
+                    ["transform"] = st != null ? JObject.FromObject(st.ToDict()) : null,
+                    ["sample_results"] = new JArray(samples)
+                };
                 mergedResults.Add(outEntry);
                 newIndex += 1;
             }
 
-            return Tuple.Create(mergedImages, mergedResults);
+            return new ModuleIO(mergedImages, mergedResults);
         }
 
-        private static Tuple<ModuleImage, Bitmap> ImageGeneration_Unwrap(object obj)
+        private static Tuple<ModuleImage, Mat> ImageGeneration_Unwrap(ModuleImage obj)
         {
-            if (obj is ModuleImage mi)
-            {
-                if (mi.ImageObject is Bitmap bmp1) return Tuple.Create(mi, bmp1);
-                return Tuple.Create(mi, mi.ImageObject as Bitmap);
-            }
-            return Tuple.Create<ModuleImage, Bitmap>(null, obj as Bitmap);
+            if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
+            return Tuple.Create(obj, obj.ImageObject);
         }
 
-        private static List<Dictionary<string, object>> Deduplicate(List<Dictionary<string, object>> samples)
+        private static List<JObject> Deduplicate(List<JObject> samples)
         {
             var set = new HashSet<string>(StringComparer.Ordinal);
-            var outList = new List<Dictionary<string, object>>();
+            var outList = new List<JObject>();
             foreach (var s in samples)
             {
-                string cat = s != null && s.TryGetValue("category_name", out object cn) && cn != null ? cn.ToString() : "";
-                IEnumerable<object> bbox = null;
-                if (s != null && s.TryGetValue("bbox", out object bv) && bv is IEnumerable<object> bl)
+                string cat = s?["category_name"]?.ToString() ?? "";
+                var bboxToken = s?["bbox"];
+                string bstr = "";
+                if (bboxToken is JArray bl)
                 {
-                    bbox = bl;
+                    var nums = bl.Select(x => SafeToDouble(((JValue)x).Value)).ToList();
+                    bstr = string.Join(",", nums.Select(v => v.ToString("F3")));
                 }
-                string bstr = bbox != null ? string.Join(",", bbox.Select(x => SafeToDouble(x).ToString("F3"))) : "";
                 string key = cat + "|" + bstr;
                 if (set.Add(key)) outList.Add(s);
             }
@@ -409,21 +389,21 @@ namespace DlcvModules
         {
         }
 
-        public override Tuple<List<object>, List<Dictionary<string, object>>> Process(List<object> imageList = null, List<Dictionary<string, object>> resultList = null)
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
-            var inImages = imageList ?? new List<object>();
-            var inResults = resultList ?? new List<Dictionary<string, object>>();
+            var inImages = imageList ?? new List<ModuleImage>();
+            var inResults = resultList ?? new JArray();
 
             var categories = ReadCategories();
             var keepSet = new HashSet<string>(categories, StringComparer.OrdinalIgnoreCase);
 
-            var mainImages = new List<object>();
-            var mainResults = new List<Dictionary<string, object>>();
-            var altImages = new List<object>();
-            var altResults = new List<Dictionary<string, object>>();
+            var mainImages = new List<ModuleImage>();
+            var mainResults = new JArray();
+            var altImages = new List<ModuleImage>();
+            var altResults = new JArray();
 
             // 构建 image 键映射
-            var keyToImageObj = new Dictionary<string, object>();
+            var keyToImageObj = new Dictionary<string, ModuleImage>();
             for (int i = 0; i < inImages.Count; i++)
             {
                 var (wrap, bmp) = ImageGeneration_Unwrap(inImages[i]);
@@ -432,55 +412,57 @@ namespace DlcvModules
                 keyToImageObj[key] = inImages[i];
             }
 
-            foreach (var r in inResults)
+            foreach (var t in inResults)
             {
+                var r = t as JObject;
                 if (r == null) continue;
-                int idx = GetInt(r, "index", -1);
-                int originIndex = GetInt(r, "origin_index", idx);
-                var stDict = GetDict(r, "transform");
-                var st = stDict != null ? TransformationState.FromDict(stDict) : null;
+                int idx = r["index"]?.Value<int?>() ?? -1;
+                int originIndex = r["origin_index"]?.Value<int?>() ?? idx;
+                var stDict = r["transform"] as JObject;
+                var st = stDict != null ? TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()) : null;
                 string key = SerializeTransform(st, idx, originIndex);
 
                 // 复制结果，并按 categories 过滤 sample_results
-                List<Dictionary<string, object>> srs = null;
-                if (r != null && r.TryGetValue("sample_results", out object sv) && sv is List<Dictionary<string, object>> svl)
+                var srsArray = r["sample_results"] as JArray;
+                var sKeep = new List<JObject>();
+                var sAlt = new List<JObject>();
+                if (srsArray != null)
                 {
-                    srs = svl;
-                }
-                var sKeep = new List<Dictionary<string, object>>();
-                var sAlt = new List<Dictionary<string, object>>();
-                if (srs != null)
-                {
-                    foreach (var s in srs)
+                    foreach (var sToken in srsArray)
                     {
-                        string cat = s != null && s.TryGetValue("category_name", out object cn) && cn != null ? cn.ToString() : "";
+                        if (!(sToken is JObject s)) continue;
+                        string cat = s["category_name"]?.ToString() ?? "";
                         if (keepSet.Count == 0 || keepSet.Contains(cat)) sKeep.Add(s);
                         else sAlt.Add(s);
                     }
                 }
 
-                if (keyToImageObj.TryGetValue(key, out object imgObj))
+                if (keyToImageObj.TryGetValue(key, out ModuleImage imgObj))
                 {
-                    if (sKeep.Count > 0 || srs == null)
+                    if (sKeep.Count > 0 || srsArray == null)
                     {
                         mainImages.Add(imgObj);
-                        var e = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                        e["type"] = "local";
-                        e["index"] = mainResults.Count;
-                        e["origin_index"] = originIndex;
-                        e["transform"] = st != null ? (object)st.ToDict() : null;
-                        e["sample_results"] = sKeep;
+                        var e = new JObject
+                        {
+                            ["type"] = "local",
+                            ["index"] = mainResults.Count,
+                            ["origin_index"] = originIndex,
+                            ["transform"] = st != null ? JObject.FromObject(st.ToDict()) : null,
+                            ["sample_results"] = new JArray(sKeep)
+                        };
                         mainResults.Add(e);
                     }
                     if (sAlt.Count > 0)
                     {
                         altImages.Add(imgObj);
-                        var e2 = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                        e2["type"] = "local";
-                        e2["index"] = altResults.Count;
-                        e2["origin_index"] = originIndex;
-                        e2["transform"] = st != null ? (object)st.ToDict() : null;
-                        e2["sample_results"] = sAlt;
+                        var e2 = new JObject
+                        {
+                            ["type"] = "local",
+                            ["index"] = altResults.Count,
+                            ["origin_index"] = originIndex,
+                            ["transform"] = st != null ? JObject.FromObject(st.ToDict()) : null,
+                            ["sample_results"] = new JArray(sAlt)
+                        };
                         altResults.Add(e2);
                     }
                 }
@@ -488,7 +470,7 @@ namespace DlcvModules
 
             // 通过 extra output 暴露第二路
             this.ExtraOutputs.Add(new ModuleChannel(altImages, altResults));
-            return Tuple.Create(mainImages, mainResults);
+            return new ModuleIO(mainImages, mainResults);
         }
 
         private List<string> ReadCategories()
@@ -506,14 +488,10 @@ namespace DlcvModules
             return cats;
         }
 
-        private static Tuple<ModuleImage, Bitmap> ImageGeneration_Unwrap(object obj)
+        private static Tuple<ModuleImage, Mat> ImageGeneration_Unwrap(ModuleImage obj)
         {
-            if (obj is ModuleImage mi)
-            {
-                if (mi.ImageObject is Bitmap bmp1) return Tuple.Create(mi, bmp1);
-                return Tuple.Create(mi, mi.ImageObject as Bitmap);
-            }
-            return Tuple.Create<ModuleImage, Bitmap>(null, obj as Bitmap);
+            if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
+            return Tuple.Create(obj, obj.ImageObject);
         }
 
         private static int GetInt(Dictionary<string, object> d, string k, int dv)

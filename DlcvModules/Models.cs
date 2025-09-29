@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using dlcv_infer_csharp;
@@ -8,7 +7,7 @@ using dlcv_infer_csharp;
 namespace DlcvModules
 {
 	/// <summary>
-	/// 模型模块最小骨架：统一从输入 images 取 Bitmap/ModuleImage，转为 Mat 调用 DlcvCsharpApi.Model。
+	/// 模型模块最小骨架：统一从输入 images 取 ModuleImage(Mat) 调用 DlcvCsharpApi.Model。
 	/// 为兼容 .NET 4.7.2，仅用到必要 API。
 	/// </summary>
 	public abstract class BaseModelModule : BaseModule
@@ -52,26 +51,15 @@ namespace DlcvModules
 			return dv;
 		}
 
-		protected static Tuple<ModuleImage, Bitmap> Unwrap(object obj)
+		protected static Tuple<ModuleImage, Mat> Unwrap(object obj)
 		{
 			if (obj is ModuleImage mi)
 			{
-				if (mi.ImageObject is Bitmap bmp1) return Tuple.Create(mi, bmp1);
-				return Tuple.Create(mi, mi.ImageObject as Bitmap);
+				return Tuple.Create(mi, mi.ImageObject);
 			}
-			return Tuple.Create<ModuleImage, Bitmap>(null, obj as Bitmap);
+			return Tuple.Create<ModuleImage, Mat>(null, obj as Mat);
 		}
 
-		protected static Mat ToMat(Bitmap bmp)
-		{
-			if (bmp == null) return null;
-			// 使用 OpenCvSharp 将 Bitmap 转 Mat：先保存到内存流避免 GDI 共享句柄复杂性
-			System.IO.MemoryStream ms = new System.IO.MemoryStream();
-			bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-			var bytes = ms.ToArray();
-			ms.Dispose();
-			return Cv2.ImDecode(bytes, ImreadModes.Color);
-		}
 	}
 
 	/// <summary>
@@ -89,58 +77,59 @@ namespace DlcvModules
 		{
 		}
 
-		public override Tuple<List<object>, List<Dictionary<string, object>>> Process(List<object> imageList = null, List<Dictionary<string, object>> resultList = null)
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
 		{
-			var images = imageList ?? new List<object>();
-			var outImages = new List<object>();
-			var outResults = new List<Dictionary<string, object>>();
+			var images = imageList ?? new List<ModuleImage>();
+			var outImages = new List<ModuleImage>();
+			var outResults = new JArray();
 			EnsureModel();
 
 			int outIndex = 0;
 			for (int i = 0; i < images.Count; i++)
 			{
 				var tup = Unwrap(images[i]);
-				var wrap = tup.Item1; var bmp = tup.Item2;
-				if (bmp == null) continue;
-				var mat = ToMat(bmp);
+				var wrap = tup.Item1; var mat = tup.Item2;
 				if (mat == null || mat.Empty()) continue;
 
 				var res = _model.Infer(mat, null); // 结构化结果
-				mat.Dispose();
 
 				// 输出：沿用输入图像对象；结果转为统一 local entry
 				outImages.Add(images[i]);
-				var entry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-				entry["type"] = "local";
-				entry["index"] = outIndex;
-				entry["origin_index"] = wrap != null ? wrap.OriginalIndex : i;
-				entry["transform"] = wrap != null && wrap.TransformState != null ? (object)wrap.TransformState.ToDict() : null;
-				entry["sample_results"] = ConvertToLocalSamples(res);
+				var entry = new JObject
+				{
+					["type"] = "local",
+					["index"] = outIndex,
+					["origin_index"] = wrap != null ? wrap.OriginalIndex : i,
+					["transform"] = wrap != null && wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null,
+					["sample_results"] = ConvertToLocalSamples(res)
+				};
 				outResults.Add(entry);
 				outIndex += 1;
 			}
 
-			return Tuple.Create(outImages, outResults);
+			return new ModuleIO(outImages, outResults);
 		}
 
-		private static List<Dictionary<string, object>> ConvertToLocalSamples(Utils.CSharpResult res)
+		private static JArray ConvertToLocalSamples(Utils.CSharpResult res)
 		{
-			var list = new List<Dictionary<string, object>>();
+			var list = new JArray();
 			if (res.SampleResults == null || res.SampleResults.Count == 0) return list;
 			var sr = res.SampleResults[0];
 			if (sr.Results == null) return list;
 			foreach (var obj in sr.Results)
 			{
-				var o = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-				o["category_id"] = obj.CategoryId;
-				o["category_name"] = obj.CategoryName;
-				o["score"] = obj.Score;
-				o["area"] = obj.Area;
-				o["bbox"] = obj.Bbox != null ? (object)new List<double>(obj.Bbox) : null;
-				o["with_bbox"] = obj.WithBbox;
-				o["with_mask"] = obj.WithMask;
-				o["with_angle"] = obj.WithAngle;
-				o["angle"] = obj.Angle;
+				var o = new JObject
+				{
+					["category_id"] = obj.CategoryId,
+					["category_name"] = obj.CategoryName,
+					["score"] = obj.Score,
+					["area"] = obj.Area,
+					["bbox"] = obj.Bbox != null ? JArray.FromObject(obj.Bbox) : null,
+					["with_bbox"] = obj.WithBbox,
+					["with_mask"] = obj.WithMask,
+					["with_angle"] = obj.WithAngle,
+					["angle"] = obj.Angle
+				};
 				list.Add(o);
 			}
 			return list;

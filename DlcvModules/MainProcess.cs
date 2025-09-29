@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
 
 namespace DlcvModules
 {
@@ -18,11 +19,11 @@ namespace DlcvModules
 			_context = context ?? new ExecutionContext();
 		}
 
-		public Dictionary<int, Dictionary<string, List<object>>> Run()
+        public Dictionary<int, Dictionary<string, object>> Run()
 		{
-			var lastImages = new List<object>();
-			var lastResults = new List<Dictionary<string, object>>();
-			var outputs = new Dictionary<int, Dictionary<string, List<object>>>();
+            var lastImages = new List<ModuleImage>();
+            var lastResults = new JArray();
+            var outputs = new Dictionary<int, Dictionary<string, object>>();
 
 			for (int i = 0; i < _nodes.Count; i++)
 			{
@@ -35,14 +36,14 @@ namespace DlcvModules
 				var moduleType = ModuleRegistry.Get(type);
 				if (moduleType == null) continue;
 				var module = (BaseModule)Activator.CreateInstance(moduleType, nodeId, title, props, _context);
-				var tuple = module.Process(lastImages, lastResults);
-				lastImages = tuple.Item1;
-				lastResults = tuple.Item2;
+                var io = module.Process(lastImages, lastResults);
+                lastImages = io.ImageList;
+                lastResults = io.ResultList;
 
-				outputs[nodeId] = new Dictionary<string, List<object>>
+                outputs[nodeId] = new Dictionary<string, object>
 				{
-					{ "image_list", new List<object>(lastImages) },
-					{ "result_list", new List<object>(lastResults.ConvertAll(x => (object)x)) }
+                    { "image_list", new List<ModuleImage>(lastImages) },
+                    { "result_list", new JArray(lastResults) }
 				};
 			}
 

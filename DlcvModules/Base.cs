@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
+using OpenCvSharp;
 
 namespace DlcvModules
 {
@@ -216,12 +218,12 @@ namespace DlcvModules
     /// </summary>
     public class ModuleImage
     {
-        public object ImageObject { get; private set; }
-        public object OriginalImage { get; private set; }
+        public Mat ImageObject { get; private set; }
+        public Mat OriginalImage { get; private set; }
         public TransformationState TransformState { get; private set; }
         public int OriginalIndex { get; private set; }
 
-        public ModuleImage(object imageObject, object originalImage, TransformationState transformState, int originalIndex = 0)
+        public ModuleImage(Mat imageObject, Mat originalImage, TransformationState transformState, int originalIndex = 0)
         {
             ImageObject = imageObject;
             OriginalImage = originalImage ?? imageObject;
@@ -229,7 +231,7 @@ namespace DlcvModules
             OriginalIndex = originalIndex;
         }
 
-        public object GetImage()
+        public Mat GetImage()
         {
             return ImageObject;
         }
@@ -244,17 +246,32 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块 I/O：统一强类型图像序列与 JArray 结果序列
+    /// </summary>
+    public class ModuleIO
+    {
+        public List<ModuleImage> ImageList { get; private set; }
+        public JArray ResultList { get; private set; }
+
+        public ModuleIO(List<ModuleImage> images = null, JArray results = null)
+        {
+            ImageList = images ?? new List<ModuleImage>();
+            ResultList = results ?? new JArray();
+        }
+    }
+
+    /// <summary>
     /// 模块输入/输出对（便于承载额外通道）
     /// </summary>
     public class ModuleChannel
     {
-        public List<object> ImageList { get; private set; }
-        public List<Dictionary<string, object>> ResultList { get; private set; }
+        public List<ModuleImage> ImageList { get; private set; }
+        public JArray ResultList { get; private set; }
 
-        public ModuleChannel(List<object> images, List<Dictionary<string, object>> results)
+        public ModuleChannel(List<ModuleImage> images, JArray results)
         {
-            ImageList = images ?? new List<object>();
-            ResultList = results ?? new List<Dictionary<string, object>>();
+            ImageList = images ?? new List<ModuleImage>();
+            ResultList = results ?? new JArray();
         }
     }
 
@@ -280,15 +297,10 @@ namespace DlcvModules
             Context = context ?? new ExecutionContext();
         }
 
-        protected static List<T> EnsureList<T>(List<T> value)
-        {
-            return value ?? new List<T>();
-        }
-
-        public virtual Tuple<List<object>, List<Dictionary<string, object>>> Process(List<object> imageList = null, List<Dictionary<string, object>> resultList = null)
+        public virtual ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
             // 缺省透传
-            return Tuple.Create(EnsureList(imageList), EnsureList(resultList));
+            return new ModuleIO(imageList ?? new List<ModuleImage>(), resultList ?? new JArray());
         }
     }
 
@@ -302,12 +314,12 @@ namespace DlcvModules
         {
         }
 
-        public virtual Tuple<List<object>, List<Dictionary<string, object>>> Generate()
+        public virtual ModuleIO Generate()
         {
-            return Tuple.Create(new List<object>(), new List<Dictionary<string, object>>());
+            return new ModuleIO(new List<ModuleImage>(), new JArray());
         }
 
-        public override Tuple<List<object>, List<Dictionary<string, object>>> Process(List<object> imageList = null, List<Dictionary<string, object>> resultList = null)
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
             return Generate();
         }

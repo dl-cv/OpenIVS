@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.IO;
+using Newtonsoft.Json.Linq;
+using OpenCvSharp;
 
 namespace DlcvModules
 {
@@ -22,10 +23,10 @@ namespace DlcvModules
 		public SaveImage(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
 			: base(nodeId, title, properties, context) { }
 
-		public override Tuple<List<object>, List<Dictionary<string, object>>> Process(List<object> imageList = null, List<Dictionary<string, object>> resultList = null)
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
 		{
-			var images = imageList ?? new List<object>();
-			var results = resultList ?? new List<Dictionary<string, object>>();
+			var images = imageList ?? new List<ModuleImage>();
+			var results = resultList ?? new JArray();
 
 			string saveDir = ReadString("save_path", null);
 			string suffix = ReadString("suffix", "_out");
@@ -37,24 +38,32 @@ namespace DlcvModules
 
 			for (int i = 0; i < images.Count; i++)
 			{
-				var (wrap, bmp) = Unwrap(images[i]);
-				if (bmp == null) continue;
+				var (wrap, matRgb) = Unwrap(images[i]);
+                if (matRgb == null || matRgb.Empty()) continue;
 				string baseName = null;
-				if (i < results.Count && results[i] != null && results[i].TryGetValue("filename", out object fn) && fn is string s && !string.IsNullOrWhiteSpace(s))
+				if (i < results.Count && results[i] != null && ((JObject)results[i])["filename"] != null && !string.IsNullOrWhiteSpace(((JObject)results[i])["filename"].ToString()))
 				{
-					baseName = Path.GetFileNameWithoutExtension(s);
+					baseName = Path.GetFileNameWithoutExtension(((JObject)results[i])["filename"].ToString());
 				}
 				if (string.IsNullOrWhiteSpace(baseName)) baseName = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
 				string fileName = baseName + suffix + "." + (string.IsNullOrWhiteSpace(fmt) ? "png" : fmt);
 				if (!string.IsNullOrWhiteSpace(saveDir))
 				{
 					string full = Path.Combine(saveDir, fileName);
-					try { bmp.Save(full); } catch { }
+                    try
+                    {
+                        // 输出前从RGB转BGR
+                        using (var matBgr = new Mat())
+                        {
+                            Cv2.CvtColor(matRgb, matBgr, ColorConversionCodes.RGB2BGR);
+                            Cv2.ImWrite(full, matBgr);
+                        }
+                    } catch { }
 				}
 			}
 
 			// 透传
-			return Tuple.Create(images, results);
+			return new ModuleIO(images, results);
 		}
 
 		private string ReadString(string key, string dv)
@@ -67,14 +76,10 @@ namespace DlcvModules
 			return dv;
 		}
 
-		private static Tuple<ModuleImage, Bitmap> Unwrap(object obj)
+        private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj)
 		{
-			if (obj is ModuleImage mi)
-			{
-				if (mi.ImageObject is Bitmap bmp1) return Tuple.Create(mi, bmp1);
-				return Tuple.Create(mi, mi.ImageObject as Bitmap);
-			}
-			return Tuple.Create<ModuleImage, Bitmap>(null, obj as Bitmap);
+			if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
+			return Tuple.Create(obj, obj.ImageObject);
 		}
 	}
 

@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.IO;
+using Newtonsoft.Json.Linq;
+using OpenCvSharp;
 
 namespace DlcvModules
 {
@@ -23,10 +24,10 @@ namespace DlcvModules
         {
         }
 
-        public override Tuple<List<object>, List<Dictionary<string, object>>> Generate()
+        public override ModuleIO Generate()
         {
-            var images = new List<object>();
-            var results = new List<Dictionary<string, object>>();
+            var images = new List<ModuleImage>();
+            var results = new JArray();
 
             var files = ResolveFileList();
             int index = 0;
@@ -35,24 +36,26 @@ namespace DlcvModules
                 try
                 {
                     if (!File.Exists(file)) continue;
-                    using (var img = Image.FromFile(file))
+                    var bgr = Cv2.ImRead(file, ImreadModes.Color);
+                    if (bgr.Empty()) { bgr.Dispose(); continue; }
+                    var rgb = new Mat();
+                    Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+                    bgr.Dispose();
+
+                    var state = new TransformationState(rgb.Width, rgb.Height);
+                    var wrap = new ModuleImage(rgb, rgb, state, index);
+                    images.Add(wrap);
+
+                    var entry = new JObject
                     {
-                        // 克隆到内存，避免 using 释放后引用失效
-                        var bitmap = new Bitmap(img);
-
-                        var state = new TransformationState(bitmap.Width, bitmap.Height);
-                        var wrap = new ModuleImage(bitmap, bitmap, state, index);
-                        images.Add(wrap);
-
-                        var entry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                        entry["type"] = "local";
-                        entry["index"] = index;
-                        entry["origin_index"] = index;
-                        entry["transform"] = state.ToDict();
-                        entry["sample_results"] = new List<Dictionary<string, object>>();
-                        entry["filename"] = file;
-                        results.Add(entry);
-                    }
+                        ["type"] = "local",
+                        ["index"] = index,
+                        ["origin_index"] = index,
+                        ["transform"] = JObject.FromObject(state.ToDict()),
+                        ["sample_results"] = new JArray(),
+                        ["filename"] = file
+                    };
+                    results.Add(entry);
                     index += 1;
                 }
                 catch
@@ -61,7 +64,7 @@ namespace DlcvModules
                 }
             }
 
-            return Tuple.Create(images, results);
+            return new ModuleIO(images, results);
         }
 
         private List<string> ResolveFileList()
@@ -105,35 +108,41 @@ namespace DlcvModules
         {
         }
 
-        public override Tuple<List<object>, List<Dictionary<string, object>>> Generate()
+        public override ModuleIO Generate()
         {
-            var images = new List<object>();
-            var results = new List<Dictionary<string, object>>();
+            var images = new List<ModuleImage>();
+            var results = new JArray();
 
             string path = ResolvePath();
             if (string.IsNullOrWhiteSpace(path))
             {
-                return Tuple.Create(images, results);
+                return new ModuleIO(images, results);
             }
 
             try
             {
                 if (File.Exists(path))
                 {
-                    using (var img = Image.FromFile(path))
+                    var bgr = Cv2.ImRead(path, ImreadModes.Color);
+                    if (!bgr.Empty())
                     {
-                        var bitmap = new Bitmap(img);
-                        var state = new TransformationState(bitmap.Width, bitmap.Height);
-                        var wrap = new ModuleImage(bitmap, bitmap, state, 0);
+                        var rgb = new Mat();
+                        Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+                        bgr.Dispose();
+
+                        var state = new TransformationState(rgb.Width, rgb.Height);
+                        var wrap = new ModuleImage(rgb, rgb, state, 0);
                         images.Add(wrap);
 
-                        var entry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                        entry["type"] = "local";
-                        entry["index"] = 0;
-                        entry["origin_index"] = 0;
-                        entry["transform"] = state.ToDict();
-                        entry["sample_results"] = new List<Dictionary<string, object>>();
-                        entry["filename"] = path;
+                        var entry = new JObject
+                        {
+                            ["type"] = "local",
+                            ["index"] = 0,
+                            ["origin_index"] = 0,
+                            ["transform"] = JObject.FromObject(state.ToDict()),
+                            ["sample_results"] = new JArray(),
+                            ["filename"] = path
+                        };
                         results.Add(entry);
                     }
                 }
@@ -142,7 +151,7 @@ namespace DlcvModules
             {
             }
 
-            return Tuple.Create(images, results);
+            return new ModuleIO(images, results);
         }
 
         private string ResolvePath()

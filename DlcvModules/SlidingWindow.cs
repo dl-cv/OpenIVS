@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
+using Newtonsoft.Json.Linq;
+using OpenCvSharp;
 
 namespace DlcvModules
 {
@@ -25,70 +26,66 @@ namespace DlcvModules
 		{
 		}
 
-		public override Tuple<List<object>, List<Dictionary<string, object>>> Process(List<object> imageList = null, List<Dictionary<string, object>> resultList = null)
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
 		{
-			var images = imageList ?? new List<object>();
-			var results = resultList ?? new List<Dictionary<string, object>>();
+			var images = imageList ?? new List<ModuleImage>();
+            var results = resultList ?? new JArray();
 
 			int winW = ReadInt("small_img_width", 832);
 			int winH = ReadInt("small_img_height", 704);
 			int hov = ReadInt("horizontal_overlap", 16);
 			int vov = ReadInt("vertical_overlap", 16);
 
-			var outImages = new List<object>();
-			var outResults = new List<Dictionary<string, object>>();
+            var outImages = new List<ModuleImage>();
+            var outResults = new JArray();
 			int outIndex = 0;
 
 			for (int i = 0; i < images.Count; i++)
 			{
-				var tuple = Unwrap(images[i]);
-				var wrap = tuple.Item1;
-				var bmp = tuple.Item2;
-				if (bmp == null) continue;
+                var tuple = Unwrap(images[i]);
+                var wrap = tuple.Item1;
+                var mat = tuple.Item2;
+                if (mat == null || mat.Empty()) continue;
 
 				int stepX = Math.Max(1, winW - hov);
 				int stepY = Math.Max(1, winH - vov);
 
-				for (int y = 0; y < bmp.Height; y += stepY)
+                for (int y = 0; y < mat.Height; y += stepY)
 				{
-					for (int x = 0; x < bmp.Width; x += stepX)
+                    for (int x = 0; x < mat.Width; x += stepX)
 					{
-						int w = Math.Min(winW, Math.Max(1, bmp.Width - x));
-						int h = Math.Min(winH, Math.Max(1, bmp.Height - y));
+                        int w = Math.Min(winW, Math.Max(1, mat.Width - x));
+                        int h = Math.Min(winH, Math.Max(1, mat.Height - y));
 						if (w <= 0 || h <= 0) continue;
+                        var rect = new Rect(x, y, w, h);
+                        var cropped = new Mat(mat, rect).Clone();
 
-						var rect = new Rectangle(x, y, w, h);
-						var cropped = new Bitmap(rect.Width, rect.Height);
-						using (var g = Graphics.FromImage(cropped))
-						{
-							g.DrawImage(bmp, new Rectangle(0, 0, rect.Width, rect.Height), rect, System.Drawing.GraphicsUnit.Pixel);
-						}
-
-						var parentState = wrap != null ? wrap.TransformState : new TransformationState(bmp.Width, bmp.Height);
+                        var parentState = wrap != null ? wrap.TransformState : new TransformationState(mat.Width, mat.Height);
 						var childA2x3 = new double[] { 1, 0, -x, 0, 1, -y };
 						var childState = parentState.DeriveChild(childA2x3, w, h);
-						var childWrap = new ModuleImage(cropped, wrap != null ? wrap.OriginalImage : bmp, childState, wrap != null ? wrap.OriginalIndex : i);
+                        var childWrap = new ModuleImage(cropped, wrap != null ? wrap.OriginalImage : mat, childState, wrap != null ? wrap.OriginalIndex : i);
 						outImages.Add(childWrap);
 
-						var entry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-						entry["type"] = "local";
-						entry["index"] = outIndex;
-						entry["origin_index"] = wrap != null ? wrap.OriginalIndex : i;
-						entry["transform"] = childState.ToDict();
-						entry["sample_results"] = new List<Dictionary<string, object>>();
-						// 简单标注网格信息
-						entry["sliding_meta"] = new Dictionary<string, object>
-						{
-							{ "x", x }, { "y", y }, { "w", w }, { "h", h },
-							{ "win_w", winW }, { "win_h", winH }, { "step_x", stepX }, { "step_y", stepY }
-						};
-						outResults.Add(entry);
+                        var entry = new JObject
+                        {
+                            ["type"] = "local",
+                            ["index"] = outIndex,
+                            ["origin_index"] = wrap != null ? wrap.OriginalIndex : i,
+                            ["transform"] = JObject.FromObject(childState.ToDict()),
+                            ["sample_results"] = new JArray(),
+                            ["sliding_meta"] = new JObject
+                            {
+                                ["x"] = x, ["y"] = y, ["w"] = w, ["h"] = h,
+                                ["win_w"] = winW, ["win_h"] = winH, ["step_x"] = stepX, ["step_y"] = stepY
+                            }
+                        };
+                        outResults.Add(entry);
 						outIndex += 1;
 					}
 				}
 			}
 
-			return Tuple.Create(outImages, outResults);
+			return new ModuleIO(outImages, outResults);
 		}
 
 		private int ReadInt(string key, int dv)
@@ -100,14 +97,10 @@ namespace DlcvModules
 			return dv;
 		}
 
-		private static Tuple<ModuleImage, Bitmap> Unwrap(object obj)
+        private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj)
 		{
-			if (obj is ModuleImage mi)
-			{
-				if (mi.ImageObject is Bitmap bmp1) return Tuple.Create(mi, bmp1);
-				return Tuple.Create(mi, mi.ImageObject as Bitmap);
-			}
-			return Tuple.Create<ModuleImage, Bitmap>(null, obj as Bitmap);
+			if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
+            return Tuple.Create(obj, obj.ImageObject);
 		}
 	}
 }

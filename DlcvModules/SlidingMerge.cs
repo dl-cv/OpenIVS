@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
+using Newtonsoft.Json.Linq;
+using OpenCvSharp;
 
 namespace DlcvModules
 {
@@ -21,17 +22,17 @@ namespace DlcvModules
 		{
 		}
 
-		public override Tuple<List<object>, List<Dictionary<string, object>>> Process(List<object> imageList = null, List<Dictionary<string, object>> resultList = null)
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
 		{
-			var inImages = imageList ?? new List<object>();
-			var inResults = resultList ?? new List<Dictionary<string, object>>();
+			var inImages = imageList ?? new List<ModuleImage>();
+			var inResults = resultList ?? new JArray();
 
 			// 将输入中含 transform==null 的视为“原图”，建立 origin_index->image 映射
-			var originIndexToImage = new Dictionary<int, object>();
+			var originIndexToImage = new Dictionary<int, ModuleImage>();
 			for (int i = 0; i < inImages.Count; i++)
 			{
-				var (wrap, bmp) = Unwrap(inImages[i]);
-				if (bmp == null) continue;
+				var (wrap, mat) = Unwrap(inImages[i]);
+                if (mat == null || mat.Empty()) continue;
 				int originIndex = wrap != null ? wrap.OriginalIndex : i;
 				var st = wrap != null ? wrap.TransformState : null;
 				if (st == null || st.AffineMatrix2x3 == null)
@@ -42,22 +43,26 @@ namespace DlcvModules
 			}
 
 			// 收集每个 origin_index 的所有局部结果，并合并（这里提供简单合并：直接拼接）
-			var originIndexToSamples = new Dictionary<int, List<Dictionary<string, object>>>();
-			foreach (var entry in inResults)
+			var originIndexToSamples = new Dictionary<int, List<JObject>>();
+			foreach (var token in inResults)
 			{
+				var entry = token as JObject;
 				if (entry == null) continue;
-				int originIndex = ReadInt(entry, "origin_index", ReadInt(entry, "index", 0));
-				if (!originIndexToSamples.TryGetValue(originIndex, out List<Dictionary<string, object>> list))
+				int originIndex = entry["origin_index"]?.Value<int?>() ?? (entry["index"]?.Value<int?>() ?? 0);
+                if (!originIndexToSamples.TryGetValue(originIndex, out List<JObject> list))
 				{
-					list = new List<Dictionary<string, object>>();
+                    list = new List<JObject>();
 					originIndexToSamples[originIndex] = list;
 				}
-				var srs = ReadSampleResults(entry);
-				if (srs != null) list.AddRange(srs);
+				var srs = entry["sample_results"] as JArray;
+                if (srs != null)
+                {
+					foreach (var o in srs) if (o is JObject oj) list.Add(oj);
+                }
 			}
 
-			var outImages = new List<object>();
-			var outResults = new List<Dictionary<string, object>>();
+			var outImages = new List<ModuleImage>();
+			var outResults = new JArray();
 			int outIdx = 0;
 
 			foreach (var kv in originIndexToImage)
@@ -65,46 +70,32 @@ namespace DlcvModules
 				int originIndex = kv.Key;
 				outImages.Add(kv.Value);
 
-				var samples = new List<Dictionary<string, object>>();
-				if (originIndexToSamples.TryGetValue(originIndex, out List<Dictionary<string, object>> s))
+                var samples = new List<JObject>();
+                if (originIndexToSamples.TryGetValue(originIndex, out List<JObject> s))
 				{
 					// 简单合并：直接拼接；后续可替换为 IoU 去重与几何合并
 					samples.AddRange(s);
 				}
 
-				var mergedEntry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-				mergedEntry["type"] = "local";
-				mergedEntry["index"] = outIdx;
-				mergedEntry["origin_index"] = originIndex;
-				mergedEntry["transform"] = null; // 已回到原图坐标
-				mergedEntry["sample_results"] = samples;
+				var mergedEntry = new JObject
+                {
+                    ["type"] = "local",
+                    ["index"] = outIdx,
+                    ["origin_index"] = originIndex,
+                    ["transform"] = null,
+                    ["sample_results"] = new JArray(samples)
+                };
 				outResults.Add(mergedEntry);
 				outIdx += 1;
 			}
 
-			return Tuple.Create(outImages, outResults);
+			return new ModuleIO(outImages, outResults);
 		}
 
-		private static Tuple<ModuleImage, Bitmap> Unwrap(object obj)
+        private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj)
 		{
-			if (obj is ModuleImage mi)
-			{
-				if (mi.ImageObject is Bitmap bmp1) return Tuple.Create(mi, bmp1);
-				return Tuple.Create(mi, mi.ImageObject as Bitmap);
-			}
-			return Tuple.Create<ModuleImage, Bitmap>(null, obj as Bitmap);
-		}
-
-		private static int ReadInt(Dictionary<string, object> d, string k, int dv)
-		{
-			if (d == null || k == null || !d.TryGetValue(k, out object v) || v == null) return dv;
-			try { return Convert.ToInt32(v); } catch { return dv; }
-		}
-
-		private static List<Dictionary<string, object>> ReadSampleResults(Dictionary<string, object> d)
-		{
-			if (d == null || !d.TryGetValue("sample_results", out object v) || v == null) return null;
-			return v as List<Dictionary<string, object>>;
+			if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
+			return Tuple.Create(obj, obj.ImageObject);
 		}
 	}
 }
