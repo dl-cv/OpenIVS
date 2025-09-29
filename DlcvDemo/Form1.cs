@@ -11,6 +11,9 @@ using static dlcv_infer_csharp.Utils;
 using DLCV;
 using System.Text;
 using Newtonsoft.Json;
+using DlcvModules;
+using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace DlcvDemo
 {
@@ -703,6 +706,143 @@ namespace DlcvDemo
             model = null;
             Utils.FreeAllModels();
             richTextBox1.Text = "所有模型已释放";
+        }
+
+        /// <summary>
+        /// 加载流程JSON（视为模型），运行GraphExecutor，并将可视化结果显示到imagePanel1
+        /// </summary>
+        private void button_load_flow_model_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                OpenFileDialog openFileDialog = new OpenFileDialog();
+                openFileDialog.RestoreDirectory = true;
+                openFileDialog.Filter = "流程JSON (*.json)|*.json|所有文件 (*.*)|*.*";
+                openFileDialog.Title = "选择流程配置JSON";
+
+                if (openFileDialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                string jsonPath = openFileDialog.FileName;
+                string jsonText = File.ReadAllText(jsonPath, Encoding.UTF8);
+
+                // 解析为 JObject 根对象，并读取 nodes 数组
+                var root = JObject.Parse(jsonText);
+                var rawArr = root["nodes"] as JArray;
+                if (rawArr == null)
+                {
+                    throw new InvalidOperationException("流程 JSON 缺少 nodes 字段（根应为 JObject）");
+                }
+                var nodes = new List<Dictionary<string, object>>();
+                foreach (var token in rawArr)
+                {
+                    if (!(token is JObject jo)) continue;
+                    nodes.Add(JObjectToDictionary(jo));
+                }
+
+                // 强制注册所有模块类型（触发静态构造函数）
+                ForceRegisterModules();
+
+                // 构造执行上下文
+                var context = new DlcvModules.ExecutionContext();
+                if (!string.IsNullOrEmpty(image_path))
+                {
+                    context.Set("frontend_image_path", image_path);
+                }
+
+                var executor = new GraphExecutor(nodes, context);
+                var outputs = executor.Run();
+
+                if (outputs != null && outputs.Count > 0)
+                {
+                    // 取最大nodeId对应的输出
+                    var last = outputs.OrderBy(kv => kv.Key).Last();
+                    var imageListObj = last.Value.ContainsKey("image_list") ? last.Value["image_list"] as List<ModuleImage> : null;
+                    if (imageListObj != null && imageListObj.Count > 0)
+                    {
+                        var mat = imageListObj[0].GetImage();
+                        if (mat != null && !mat.Empty())
+                        {
+                            imagePanel1.ClearResults();
+                            imagePanel1.UpdateImage(mat);
+                        }
+                    }
+
+                    var resultListObj = last.Value.ContainsKey("result_list") ? last.Value["result_list"] as JArray : null;
+                    if (resultListObj != null)
+                    {
+                        richTextBox1.Text = resultListObj.ToString();
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("流程执行未产生输出。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("加载或执行流程失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private static Dictionary<string, object> JObjectToDictionary(JObject obj)
+        {
+            var dict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in obj.Properties())
+            {
+                dict[property.Name] = JTokenToPlain(property.Value);
+            }
+            return dict;
+        }
+
+        private static object JTokenToPlain(JToken token)
+        {
+            switch (token.Type)
+            {
+                case JTokenType.Object:
+                    return JObjectToDictionary((JObject)token);
+                case JTokenType.Array:
+                    var list = new List<object>();
+                    foreach (var item in (JArray)token)
+                    {
+                        list.Add(JTokenToPlain(item));
+                    }
+                    return list;
+                case JTokenType.Integer:
+                    return token.Value<long>() <= int.MaxValue && token.Value<long>() >= int.MinValue ? (object)token.Value<int>() : token.Value<long>();
+                case JTokenType.Float:
+                    return token.Value<double>();
+                case JTokenType.Boolean:
+                    return token.Value<bool>();
+                case JTokenType.Null:
+                    return null;
+                case JTokenType.String:
+                    return token.Value<string>();
+                default:
+                    return token.ToString();
+            }
+        }
+
+        private static void ForceRegisterModules()
+        {
+            // 使用运行时强制执行静态构造函数，注册模块类型
+            TryRunCctor(typeof(DlcvModules.InputImage));
+            TryRunCctor(typeof(DlcvModules.InputFrontendImage));
+            TryRunCctor(typeof(DlcvModules.DetModel));
+            TryRunCctor(typeof(DlcvModules.RotatedBBoxModel));
+            TryRunCctor(typeof(DlcvModules.InstanceSegModel));
+            TryRunCctor(typeof(DlcvModules.SemanticSegModel));
+            TryRunCctor(typeof(DlcvModules.ClsModel));
+            TryRunCctor(typeof(DlcvModules.OCRModel));
+            TryRunCctor(typeof(DlcvModules.VisualizeOnOriginal));
+            TryRunCctor(typeof(DlcvModules.VisualizeOnLocal));
+        }
+
+        private static void TryRunCctor(Type t)
+        {
+            try { RuntimeHelpers.RunClassConstructor(t.TypeHandle); } catch { }
         }
     }
 }

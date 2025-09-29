@@ -52,6 +52,7 @@
             this.button_free_all_model = new System.Windows.Forms.Button();
             this.button_load_ocr_model = new System.Windows.Forms.Button();
             this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
+            this.button_load_flow_model = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_threshold)).BeginInit();
@@ -346,11 +347,25 @@
             this.checkBox_rpc_mode.Text = "RPC模式";
             this.checkBox_rpc_mode.UseVisualStyleBackColor = true;
             // 
+            // button_load_flow_model
+            // 
+            this.button_load_flow_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.button_load_flow_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.button_load_flow_model.Location = new System.Drawing.Point(787, 93);
+            this.button_load_flow_model.Margin = new System.Windows.Forms.Padding(4);
+            this.button_load_flow_model.Name = "button_load_flow_model";
+            this.button_load_flow_model.Size = new System.Drawing.Size(140, 60);
+            this.button_load_flow_model.TabIndex = 25;
+            this.button_load_flow_model.Text = "加载流程";
+            this.button_load_flow_model.UseVisualStyleBackColor = true;
+            this.button_load_flow_model.Click += new System.EventHandler(this.button_load_flow_model_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(14F, 31F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1238, 844);
+            this.Controls.Add(this.button_load_flow_model);
             this.Controls.Add(this.checkBox_rpc_mode);
             this.Controls.Add(this.button_load_ocr_model);
             this.Controls.Add(this.button_free_all_model);
@@ -415,6 +430,7 @@
         private System.Windows.Forms.Button button_free_all_model;
         private System.Windows.Forms.Button button_load_ocr_model;
         private System.Windows.Forms.CheckBox checkBox_rpc_mode;
+        private System.Windows.Forms.Button button_load_flow_model;
     }
 }
 
