@@ -751,6 +751,20 @@ namespace DlcvDemo
                 {
                     context.Set("frontend_image_path", image_path);
                 }
+                // 传递设备与模式参数给流程中的模型节点
+                try
+                {
+                    int deviceId = GetSelectedDeviceId();
+                    context.Set("device_id", deviceId);
+                }
+                catch { }
+                try
+                {
+                    bool rpc_mode = false;
+                    try { rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked; } catch { }
+                    context.Set("rpc_mode", rpc_mode);
+                }
+                catch { }
 
                 var executor = new GraphExecutor(nodes, context);
                 var outputs = executor.Run();

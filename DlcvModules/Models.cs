@@ -28,7 +28,38 @@ namespace DlcvModules
 		{
 			if (_model == null)
 			{
-				_model = new Model(_modelPath, _deviceId);
+				// 从上下文/属性读取设备与模式
+				int deviceId = _deviceId;
+				try
+				{
+					if (Context != null)
+					{
+						deviceId = Context.Get<int>("device_id", deviceId);
+					}
+				}
+				catch { }
+
+				bool rpcMode = false;
+				try
+				{
+					if (Properties != null && Properties.TryGetValue("rpc_mode", out object rv) && rv != null)
+					{
+						bool.TryParse(rv.ToString(), out rpcMode);
+					}
+					if (!rpcMode && Context != null)
+					{
+						rpcMode = Context.Get<bool>("rpc_mode", false);
+					}
+				}
+				catch { }
+
+				// 允许从上下文兜底获取模型路径
+				if (string.IsNullOrWhiteSpace(_modelPath) && Context != null)
+				{
+					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
+				}
+
+				_model = new Model(_modelPath, deviceId, rpcMode);
 			}
 		}
 
