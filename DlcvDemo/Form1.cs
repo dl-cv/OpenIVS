@@ -114,13 +114,15 @@ namespace DlcvDemo
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
+        // 已加载的流程节点（持久化），用于更换图片后自动重跑流程
+        private List<Dictionary<string, object>> loadedFlowNodes = null;
 
         private void button_loadmodel_Click(object sender, EventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "深度视觉模型文件 (*.dvt;*.dvp;*.dvo)|*.dvt;*.dvp;*.dvo";
+            openFileDialog.Filter = "深度视觉模型/流程 (*.dvt;*.dvp;*.dvo;*.json)|*.dvt;*.dvp;*.dvo;*.json|所有文件 (*.*)|*.*";
             openFileDialog.Title = "选择模型";
             try
             {
@@ -137,33 +139,57 @@ namespace DlcvDemo
                 string selectedFilePath = openFileDialog.FileName;
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
                 Properties.Settings.Default.Save();
-                int device_id = GetSelectedDeviceId();
-                try
+                string ext = Path.GetExtension(selectedFilePath)?.ToLowerInvariant();
+                if (ext == ".json")
                 {
-                    if (model != null)
-                    {
-                        model = null;
-                        GC.Collect();
-                    }
-                    bool rpc_mode = false;
                     try
                     {
-                        rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked;
+                        if (model != null)
+                        {
+                            model = null;
+                            GC.Collect();
+                        }
+                        var nodes = LoadFlowNodesFromJson(selectedFilePath);
+                        loadedFlowNodes = nodes;
+                        RunLoadedFlow();
                     }
-                    catch { }
-                    model = new Model(selectedFilePath, device_id, rpc_mode);
-                    button_getmodelinfo_Click(sender, e);
+                    catch (Exception ex)
+                    {
+                        ReportError("加载或执行流程失败", ex);
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    richTextBox1.Text = ex.Message;
+                    int device_id = GetSelectedDeviceId();
+                    try
+                    {
+                        if (model != null)
+                        {
+                            model = null;
+                            GC.Collect();
+                        }
+                        bool rpc_mode = false;
+                        try
+                        {
+                            rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked;
+                        }
+                        catch { }
+                        model = new Model(selectedFilePath, device_id, rpc_mode);
+                        // 切换到模型模式时清空持久化流程
+                        loadedFlowNodes = null;
+                        button_getmodelinfo_Click(sender, e);
+                    }
+                    catch (Exception ex)
+                    {
+                        richTextBox1.Text = ex.Message;
+                    }
                 }
             }
         }
 
         private void button_getmodelinfo_Click(object sender, EventArgs e)
         {
-            if (model == null)
+            if (model == null && loadedFlowNodes == null)
             {
                 MessageBox.Show("请先加载模型文件！");
                 return;
@@ -214,60 +240,83 @@ namespace DlcvDemo
                 image_path = openFileDialog.FileName;
                 Properties.Settings.Default.LastImagePath = image_path;
                 Properties.Settings.Default.Save();
-                button_infer_Click(sender, e);
+                if (loadedFlowNodes != null)
+                {
+                    // 已加载流程：更换图片后自动重跑流程
+                    RunLoadedFlow();
+                }
+                else
+                {
+                    // 普通模型流程
+                    button_infer_Click(sender, e);
+                }
             }
         }
 
         private void button_infer_Click(object sender, EventArgs e)
         {
-            if (model == null)
+            // 若已加载流程，则直接按流程执行
+            if (loadedFlowNodes != null)
             {
-                MessageBox.Show("请先加载模型文件！");
-                return;
-            }
-            if (image_path == null)
-            {
-                MessageBox.Show("请先选择图片文件！");
+                RunLoadedFlow();
                 return;
             }
 
-            Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
-            Mat image_rgb = new Mat();
-            Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
-
-            batch_size = (int)numericUpDown_batch_size.Value;
-            var image_list = new List<Mat>();
-            for (int i = 0; i < batch_size; i++)
+            try
             {
-                image_list.Add(image_rgb);
-            }
+                if (model == null)
+                {
+                    MessageBox.Show("请先加载模型文件！");
+                    return;
+                }
+                if (image_path == null)
+                {
+                    MessageBox.Show("请先选择图片文件！");
+                    return;
+                }
 
-            if (image.Empty())
+                Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+                Mat image_rgb = new Mat();
+                Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
+
+                batch_size = (int)numericUpDown_batch_size.Value;
+                var image_list = new List<Mat>();
+                for (int i = 0; i < batch_size; i++)
+                {
+                    image_list.Add(image_rgb);
+                }
+
+                if (image.Empty())
+                {
+                    Console.WriteLine("图像解码失败！");
+                    return;
+                }
+
+                JObject data = new JObject();
+                data["threshold"] = (float)numericUpDown_threshold.Value;
+                data["with_mask"] = true;
+
+                Stopwatch stopwatch = new Stopwatch();
+                stopwatch.Start();
+
+                CSharpResult result = model.InferBatch(image_list, data);
+
+                stopwatch.Stop();
+                double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                Console.WriteLine($"推理时间: {delay_ms:F2}ms");
+
+                imagePanel1.UpdateImageAndResult(image, result);
+
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine($"推理时间: {delay_ms:F2}ms\n");
+                sb.AppendLine($"推理结果: ");
+                sb.AppendLine(result.SampleResults[0].ToString());
+                richTextBox1.Text = sb.ToString();
+            }
+            catch (Exception ex)
             {
-                Console.WriteLine("图像解码失败！");
-                return;
+                ReportError("推理失败", ex);
             }
-
-            JObject data = new JObject();
-            data["threshold"] = (float)numericUpDown_threshold.Value;
-            data["with_mask"] = true;
-
-            Stopwatch stopwatch = new Stopwatch();
-            stopwatch.Start();
-
-            CSharpResult result = model.InferBatch(image_list, data);
-
-            stopwatch.Stop();
-            double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
-            Console.WriteLine($"推理时间: {delay_ms:F2}ms");
-
-            imagePanel1.UpdateImageAndResult(image, result);
-
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"推理时间: {delay_ms:F2}ms\n");
-            sb.AppendLine($"推理结果: ");
-            sb.AppendLine(result.SampleResults[0].ToString());
-            richTextBox1.Text = sb.ToString();
         }
 
         /// <summary>
@@ -558,6 +607,7 @@ namespace DlcvDemo
 
             model = null;
             GC.Collect();
+            loadedFlowNodes = null; // 清空持久化流程
             richTextBox1.Text = "模型已释放";
         }
 
@@ -570,9 +620,10 @@ namespace DlcvDemo
         {
             StopPressureTest();
             // 释放模型
-            if (model != null && model is IDisposable disposable)
+            var disposable = model as IDisposable;
+            if (disposable != null)
             {
-                model.Dispose();
+                disposable.Dispose();
                 model = null;
             }
             Utils.FreeAllModels();
@@ -661,7 +712,8 @@ namespace DlcvDemo
                         // 释放旧模型
                         if (model != null)
                         {
-                            if (model is IDisposable disposable)
+                            var disposable = model as IDisposable;
+                            if (disposable != null)
                             {
                                 disposable.Dispose();
                             }
@@ -682,9 +734,13 @@ namespace DlcvDemo
                     catch (Exception ex)
                     {
                         richTextBox1.Text = $"加载OCR模型失败：{ex.Message}";
-                        if (model != null && model is IDisposable disposable)
+                        if (model != null)
                         {
-                            model.Dispose();
+                            var disposable = model as IDisposable;
+                            if (disposable != null)
+                            {
+                                disposable.Dispose();
+                            }
                             model = null;
                         }
                         MessageBox.Show($"加载OCR模型失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -699,12 +755,14 @@ namespace DlcvDemo
             StopPressureTest();
 
             // 释放模型
-            if (model != null && model is IDisposable disposable)
+            var disposable = model as IDisposable;
+            if (disposable != null)
             {
-                model.Dispose();
+                disposable.Dispose();
             }
             model = null;
             Utils.FreeAllModels();
+            loadedFlowNodes = null;
             richTextBox1.Text = "所有模型已释放";
         }
 
@@ -741,63 +799,13 @@ namespace DlcvDemo
                     if (!(token is JObject jo)) continue;
                     nodes.Add(JObjectToDictionary(jo));
                 }
-
-                // 强制注册所有模块类型（触发静态构造函数）
-                ForceRegisterModules();
-
-                // 构造执行上下文
-                var context = new DlcvModules.ExecutionContext();
-                if (!string.IsNullOrEmpty(image_path))
-                {
-                    context.Set("frontend_image_path", image_path);
-                }
-                // 传递设备与模式参数给流程中的模型节点
-                try
-                {
-                    int deviceId = GetSelectedDeviceId();
-                    context.Set("device_id", deviceId);
-                }
-                catch { }
-                try
-                {
-                    bool rpc_mode = false;
-                    try { rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked; } catch { }
-                    context.Set("rpc_mode", rpc_mode);
-                }
-                catch { }
-
-                var executor = new GraphExecutor(nodes, context);
-                var outputs = executor.Run();
-
-                if (outputs != null && outputs.Count > 0)
-                {
-                    // 取最大nodeId对应的输出
-                    var last = outputs.OrderBy(kv => kv.Key).Last();
-                    var imageListObj = last.Value.ContainsKey("image_list") ? last.Value["image_list"] as List<ModuleImage> : null;
-                    if (imageListObj != null && imageListObj.Count > 0)
-                    {
-                        var mat = imageListObj[0].GetImage();
-                        if (mat != null && !mat.Empty())
-                        {
-                            imagePanel1.ClearResults();
-                            imagePanel1.UpdateImage(mat);
-                        }
-                    }
-
-                    var resultListObj = last.Value.ContainsKey("result_list") ? last.Value["result_list"] as JArray : null;
-                    if (resultListObj != null)
-                    {
-                        richTextBox1.Text = resultListObj.ToString();
-                    }
-                }
-                else
-                {
-                    MessageBox.Show("流程执行未产生输出。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
+                // 持久化流程，并立即执行一次
+                loadedFlowNodes = nodes;
+                RunLoadedFlow();
             }
             catch (Exception ex)
             {
-                MessageBox.Show("加载或执行流程失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ReportError("加载或执行流程失败", ex);
             }
         }
 
@@ -857,6 +865,208 @@ namespace DlcvDemo
         private static void TryRunCctor(Type t)
         {
             try { RuntimeHelpers.RunClassConstructor(t.TypeHandle); } catch { }
+        }
+
+        /// <summary>
+        /// 从流程 JSON 文件加载 nodes 列表（根对象需包含 nodes 数组）
+        /// </summary>
+        private List<Dictionary<string, object>> LoadFlowNodesFromJson(string jsonPath)
+        {
+            string jsonText = File.ReadAllText(jsonPath, Encoding.UTF8);
+            var root = JObject.Parse(jsonText);
+            var rawArr = root["nodes"] as JArray;
+            if (rawArr == null)
+            {
+                throw new InvalidOperationException("流程 JSON 缺少 nodes 字段（根应为 JObject）");
+            }
+            var nodes = new List<Dictionary<string, object>>();
+            foreach (var token in rawArr)
+            {
+                if (!(token is JObject jo)) continue;
+                nodes.Add(JObjectToDictionary(jo));
+            }
+            return nodes;
+        }
+
+        /// <summary>
+        /// 将流程输出的 result_list(JArray) 转换为 Utils.CSharpResult，便于 ImageViewer 绘制
+        /// </summary>
+        private dlcv_infer_csharp.Utils.CSharpResult ConvertFlowResultsToCSharp(JArray resultList)
+        {
+            var objects = new List<dlcv_infer_csharp.Utils.CSharpObjectResult>();
+            if (resultList != null)
+            {
+                foreach (var entryToken in resultList)
+                {
+                    var entry = entryToken as JObject;
+                    var samples = entry?["sample_results"] as JArray;
+                    if (samples == null) continue;
+                    foreach (var sToken in samples)
+                    {
+                        var so = sToken as JObject;
+                        if (so == null) continue;
+                        int categoryId = so.Value<int?>("category_id") ?? 0;
+                        string categoryName = so.Value<string>("category_name") ?? string.Empty;
+                        float score = so.Value<float?>("score") ?? 0f;
+                        float area = so.Value<float?>("area") ?? 0f;
+                        var bboxArr = so["bbox"] as JArray;
+                        var bbox = bboxArr != null ? bboxArr.ToObject<List<double>>() : new List<double>();
+                        bool withBbox = so.Value<bool?>("with_bbox") ?? (bbox != null && bbox.Count > 0);
+                        bool withMask = so.Value<bool?>("with_mask") ?? false;
+                        bool withAngle = so.Value<bool?>("with_angle") ?? false;
+                        float angle = so.Value<float?>("angle") ?? -100f;
+                        // 目前流程结果未携带可直接绘制的 mask 图像，这里置空
+                        OpenCvSharp.Mat mask = new OpenCvSharp.Mat();
+                        var obj = new dlcv_infer_csharp.Utils.CSharpObjectResult(
+                            categoryId, categoryName, score, area, bbox,
+                            withMask, mask, withBbox, withAngle, angle);
+                        objects.Add(obj);
+                    }
+                }
+            }
+            var sample = new dlcv_infer_csharp.Utils.CSharpSampleResult(objects);
+            return new dlcv_infer_csharp.Utils.CSharpResult(new List<dlcv_infer_csharp.Utils.CSharpSampleResult> { sample });
+        }
+
+        /// <summary>
+        /// 使用当前图片路径与设备设置，执行已加载的流程
+        /// </summary>
+        private void RunLoadedFlow()
+        {
+            if (loadedFlowNodes == null)
+            {
+                MessageBox.Show("请先加载流程 JSON！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            try
+            {
+                // 强制注册所有模块类型
+                ForceRegisterModules();
+
+                // 构造执行上下文
+                var context = new DlcvModules.ExecutionContext();
+                if (!string.IsNullOrEmpty(image_path))
+                {
+                    context.Set("frontend_image_path", image_path);
+                }
+                try
+                {
+                    int deviceId = GetSelectedDeviceId();
+                    context.Set("device_id", deviceId);
+                }
+                catch { }
+                try
+                {
+                    bool rpc_mode = false;
+                    try { rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked; } catch { }
+                    context.Set("rpc_mode", rpc_mode);
+                }
+                catch { }
+
+                var executor = new GraphExecutor(loadedFlowNodes, context);
+                var outputs = executor.Run();
+
+                if (outputs != null && outputs.Count > 0)
+                {
+                    // 根据 nodes 的 order/id 确定最后节点
+                    int lastNodeId = -1;
+                    string lastNodeType = null;
+                    int bestOrder = int.MinValue;
+                    foreach (var node in loadedFlowNodes)
+                    {
+                        int order = 0; int id = 0;
+                        if (node != null)
+                        {
+                            try { if (node.ContainsKey("order") && node["order"] != null) order = Convert.ToInt32(node["order"]); } catch { }
+                            try { if (node.ContainsKey("id") && node["id"] != null) id = Convert.ToInt32(node["id"]); } catch { }
+                        }
+                        int key = (order << 20) + id;
+                        if (key >= bestOrder)
+                        {
+                            bestOrder = key;
+                            lastNodeId = id;
+                            try { lastNodeType = node.ContainsKey("type") && node["type"] != null ? node["type"].ToString() : null; } catch { lastNodeType = null; }
+                        }
+                    }
+
+                    KeyValuePair<int, Dictionary<string, object>> last;
+                    if (lastNodeId != -1 && outputs.ContainsKey(lastNodeId))
+                    {
+                        last = new KeyValuePair<int, Dictionary<string, object>>(lastNodeId, outputs[lastNodeId]);
+                    }
+                    else
+                    {
+                        last = outputs.OrderBy(kv => kv.Key).Last();
+                    }
+
+                    var imageListObj = last.Value.ContainsKey("image_list") ? last.Value["image_list"] as List<ModuleImage> : null;
+                    var resultListObj = last.Value.ContainsKey("result_list") ? last.Value["result_list"] as JArray : null;
+
+                    dlcv_infer_csharp.Utils.CSharpResult? csharpResultNullable = null;
+                    try
+                    {
+                        if (resultListObj != null)
+                        {
+                            csharpResultNullable = ConvertFlowResultsToCSharp(resultListObj);
+                        }
+                    }
+                    catch { }
+
+                    if (imageListObj != null && imageListObj.Count > 0)
+                    {
+                        var mat = imageListObj[0].GetImage();
+                        if (mat != null && !mat.Empty())
+                        {
+                            bool isVisualizedInFlow = false;
+                            try
+                            {
+                                if (!string.IsNullOrEmpty(lastNodeType))
+                                {
+                                    string t = lastNodeType.ToLowerInvariant();
+                                    isVisualizedInFlow = t.StartsWith("output/visualize");
+                                }
+                            }
+                            catch { }
+
+                            if (isVisualizedInFlow || csharpResultNullable == null)
+                            {
+                                imagePanel1.ClearResults();
+                                imagePanel1.UpdateImage(mat);
+                            }
+                            else
+                            {
+                                imagePanel1.UpdateImageAndResult(mat, csharpResultNullable.Value);
+                            }
+                        }
+                    }
+
+                    if (resultListObj != null)
+                    {
+                        richTextBox1.Text = resultListObj.ToString();
+                    }
+                }
+                else
+                {
+                    richTextBox1.Text = "流程执行未产生输出。";
+                }
+            }
+            catch (Exception ex)
+            {
+                ReportError("流程执行失败", ex);
+            }
+        }
+
+        /// <summary>
+        /// 统一错误输出：写入 richTextBox1 并弹窗提示
+        /// </summary>
+        private void ReportError(string title, Exception ex)
+        {
+            try
+            {
+                richTextBox1.Text = title + "\n" + ex.ToString();
+            }
+            catch { }
+            MessageBox.Show(title + ": " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 }
