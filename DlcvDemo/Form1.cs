@@ -1075,14 +1075,33 @@ namespace DlcvDemo
                             }
                             catch { }
 
+                            // 可视化前进行一次 BGR -> RGB 转换（仅用于显示）
+                            OpenCvSharp.Mat displayMat = mat;
+                            try
+                            {
+                                if (displayMat.Channels() == 3)
+                                {
+                                    var converted = new OpenCvSharp.Mat();
+                                    OpenCvSharp.Cv2.CvtColor(displayMat, converted, OpenCvSharp.ColorConversionCodes.BGR2RGB);
+                                    displayMat = converted;
+                                }
+                            }
+                            catch { }
+
                             if (isVisualizedInFlow || csharpResultNullable == null)
                             {
                                 imagePanel1.ClearResults();
-                                imagePanel1.UpdateImage(mat);
+                                imagePanel1.UpdateImage(displayMat);
                             }
                             else
                             {
-                                imagePanel1.UpdateImageAndResult(mat, csharpResultNullable.Value);
+                                imagePanel1.UpdateImageAndResult(displayMat, csharpResultNullable.Value);
+                            }
+
+                            // 释放仅用于显示的临时Mat
+                            if (!object.ReferenceEquals(displayMat, mat))
+                            {
+                                displayMat.Dispose();
                             }
                         }
                     }
