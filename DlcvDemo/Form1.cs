@@ -915,8 +915,55 @@ namespace DlcvDemo
                         bool withMask = so.Value<bool?>("with_mask") ?? false;
                         bool withAngle = so.Value<bool?>("with_angle") ?? false;
                         float angle = so.Value<float?>("angle") ?? -100f;
-                        // 目前流程结果未携带可直接绘制的 mask 图像，这里置空
+                        // 从多边形点集还原真实mask（与bbox同尺寸，绝对坐标转相对坐标）
                         OpenCvSharp.Mat mask = new OpenCvSharp.Mat();
+                        if (withMask && bbox != null && bbox.Count >= 4)
+                        {
+                            var maskToken = so["mask"] ?? so["polygon"]; // 兼容字段名
+                            var pointsArray = maskToken as JArray;
+                            int w = (int)(bbox.Count > 2 ? bbox[2] : 0);
+                            int h = (int)(bbox.Count > 3 ? bbox[3] : 0);
+                            if (pointsArray != null && w > 0 && h > 0)
+                            {
+                                try
+                                {
+                                    mask = OpenCvSharp.Mat.Zeros(h, w, OpenCvSharp.MatType.CV_8UC1);
+                                    var points = new List<OpenCvSharp.Point>();
+                                    double x0 = bbox[0];
+                                    double y0 = bbox[1];
+                                    foreach (var pToken in pointsArray)
+                                    {
+                                        int px, py;
+                                        if (pToken is JObject pj)
+                                        {
+                                            px = pj.Value<int>("x");
+                                            py = pj.Value<int>("y");
+                                        }
+                                        else if (pToken is JArray pa && pa.Count >= 2)
+                                        {
+                                            px = pa[0].Value<int>();
+                                            py = pa[1].Value<int>();
+                                        }
+                                        else
+                                        {
+                                            continue;
+                                        }
+                                        int rx = (int)Math.Round(px - x0);
+                                        int ry = (int)Math.Round(py - y0);
+                                        // clamp到mask范围
+                                        rx = Math.Max(0, Math.Min(w - 1, rx));
+                                        ry = Math.Max(0, Math.Min(h - 1, ry));
+                                        points.Add(new OpenCvSharp.Point(rx, ry));
+                                    }
+                                    if (points.Count > 2)
+                                    {
+                                        var pts = new OpenCvSharp.Point[][] { points.ToArray() };
+                                        OpenCvSharp.Cv2.FillPoly(mask, pts, OpenCvSharp.Scalar.White);
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
                         var obj = new dlcv_infer_csharp.Utils.CSharpObjectResult(
                             categoryId, categoryName, score, area, bbox,
                             withMask, mask, withBbox, withAngle, angle);
