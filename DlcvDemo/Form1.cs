@@ -852,12 +852,18 @@ namespace DlcvDemo
             // 使用运行时强制执行静态构造函数，注册模块类型
             TryRunCctor(typeof(DlcvModules.InputImage));
             TryRunCctor(typeof(DlcvModules.InputFrontendImage));
+            // Features
+            TryRunCctor(typeof(DlcvModules.ImageGeneration));
+            TryRunCctor(typeof(DlcvModules.ResultFilter));
+            TryRunCctor(typeof(DlcvModules.MergeResults));
             TryRunCctor(typeof(DlcvModules.DetModel));
             TryRunCctor(typeof(DlcvModules.RotatedBBoxModel));
             TryRunCctor(typeof(DlcvModules.InstanceSegModel));
             TryRunCctor(typeof(DlcvModules.SemanticSegModel));
             TryRunCctor(typeof(DlcvModules.ClsModel));
             TryRunCctor(typeof(DlcvModules.OCRModel));
+            // Outputs
+            TryRunCctor(typeof(DlcvModules.SaveImage));
             TryRunCctor(typeof(DlcvModules.VisualizeOnOriginal));
             TryRunCctor(typeof(DlcvModules.VisualizeOnLocal));
         }
