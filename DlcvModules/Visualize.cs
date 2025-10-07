@@ -128,6 +128,25 @@ namespace DlcvModules
                     int rh = Math.Max(1, maxY - minY);
                     var rect = new OpenCvSharp.Rect(Math.Max(0, minX), Math.Max(0, minY), rw, rh);
                     Cv2.Rectangle(target, rect, new Scalar(255, 150, 0), 2);
+
+                    // 绘制文本标签（若存在 category_name），对齐 Python 可视化的直观效果
+                    try
+                    {
+                        string label = so["category_name"]?.ToString();
+                        if (!string.IsNullOrEmpty(label))
+                        {
+                            int baseLine = 0;
+                            var textSize = Cv2.GetTextSize(label, HersheyFonts.HersheySimplex, 0.5, 1, out baseLine);
+                            int tx = Math.Max(0, rect.X);
+                            int ty = Math.Max(0, rect.Y - 4);
+                            // 背景框
+                            var bgRect = new OpenCvSharp.Rect(tx, Math.Max(0, ty - textSize.Height - 4), Math.Min(target.Width - tx, textSize.Width + 6), textSize.Height + 4);
+                            Cv2.Rectangle(target, bgRect, new Scalar(0, 0, 0), -1);
+                            // 文字
+                            Cv2.PutText(target, label, new OpenCvSharp.Point(tx + 3, ty - 2), HersheyFonts.HersheySimplex, 0.5, new Scalar(255, 255, 255), 1, LineTypes.AntiAlias);
+                        }
+                    }
+                    catch { }
                 }
 			}
 
