@@ -94,6 +94,12 @@ namespace DlcvModules
 		}
 		public Preview(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
 			: base(nodeId, title, properties, context) { }
+
+		public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+		{
+			// 预览节点仅透传，不做额外绘制。前端直接显示该 image_list
+			return new ModuleIO(imageList ?? new List<ModuleImage>(), resultList ?? new JArray());
+		}
 	}
 }
 

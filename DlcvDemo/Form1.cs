@@ -1076,7 +1076,8 @@ namespace DlcvDemo
                                 if (!string.IsNullOrEmpty(lastNodeType))
                                 {
                                     string t = lastNodeType.ToLowerInvariant();
-                                    isVisualizedInFlow = t.StartsWith("output/visualize");
+                                    // 前端已完成绘制的两类：output/visualize + 其后的 output/preview
+                                    isVisualizedInFlow = t.StartsWith("output/visualize") || t.StartsWith("output/preview");
                                 }
                             }
                             catch { }
