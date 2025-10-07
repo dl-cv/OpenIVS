@@ -248,17 +248,18 @@ namespace DlcvModules
                 }
             }
 
-            // 建立 image 键
+            // 建立 image 键（仅依据 transform 矩阵；若无矩阵则使用 origin_index）
             var keyToImage = new Dictionary<string, Tuple<ModuleImage, int>>();
             for (int i = 0; i < allImages.Count; i++)
             {
                 var (wrap, bmp) = ImageGeneration_Unwrap(allImages[i]);
                 if (bmp == null) continue;
-                string key = SerializeTransform(wrap != null ? wrap.TransformState : null, i, wrap != null ? wrap.OriginalIndex : i);
+                int org = wrap != null ? wrap.OriginalIndex : i;
+                string key = SerializeTransformOnly(wrap != null ? wrap.TransformState : null, org);
                 keyToImage[key] = Tuple.Create(wrap, i);
             }
 
-            // 将结果按 key 汇总
+            // 将结果按 key 汇总（与上方相同关键字规则）
             var keyToResults = new Dictionary<string, List<JObject>>();
             foreach (var t in allResults)
             {
@@ -267,8 +268,20 @@ namespace DlcvModules
                 int idx = r["index"]?.Value<int?>() ?? -1;
                 int originIndex = r["origin_index"]?.Value<int?>() ?? idx;
                 var stDict = r["transform"] as JObject;
-                var st = stDict != null ? TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()) : null;
-                string key = SerializeTransform(st, idx, originIndex);
+                TransformationState st = null;
+                try
+                {
+                    if (stDict != null)
+                    {
+                        // 兼容 JArray 字段的 FromDict 解析
+                        st = TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>());
+                    }
+                }
+                catch
+                {
+                    st = null;
+                }
+                string key = SerializeTransformOnly(st, originIndex);
                 if (!keyToResults.TryGetValue(key, out List<JObject> list))
                 {
                     list = new List<JObject>();
@@ -363,14 +376,14 @@ namespace DlcvModules
             return v as Dictionary<string, object>;
         }
 
-        private static string SerializeTransform(TransformationState st, int index, int originIndex)
+        private static string SerializeTransformOnly(TransformationState st, int originIndex)
         {
             if (st == null || st.AffineMatrix2x3 == null)
             {
-                return $"idx:{index}|org:{originIndex}|T:null";
+                return $"org:{originIndex}|T:null";
             }
             var a = st.AffineMatrix2x3;
-            return $"idx:{index}|org:{originIndex}|T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
+            return $"T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
         }
     }
 

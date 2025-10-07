@@ -112,23 +112,48 @@ namespace DlcvModules
             int ow = SafeGetInt(data, "original_width", 0);
             int oh = SafeGetInt(data, "original_height", 0);
             int[] crop = null;
-            if (data.TryGetValue("crop_box", out object cropObj) && cropObj is Array cropArr && cropArr.Length >= 4)
+            if (data.TryGetValue("crop_box", out object cropObj))
             {
-                crop = new int[] { Convert.ToInt32(((Array)cropArr).GetValue(0)), Convert.ToInt32(((Array)cropArr).GetValue(1)), Convert.ToInt32(((Array)cropArr).GetValue(2)), Convert.ToInt32(((Array)cropArr).GetValue(3)) };
+                if (cropObj is Array cropArr && cropArr.Length >= 4)
+                {
+                    crop = new int[] { Convert.ToInt32(((Array)cropArr).GetValue(0)), Convert.ToInt32(((Array)cropArr).GetValue(1)), Convert.ToInt32(((Array)cropArr).GetValue(2)), Convert.ToInt32(((Array)cropArr).GetValue(3)) };
+                }
+                else if (cropObj is JArray jCrop && jCrop.Count >= 4)
+                {
+                    crop = new int[] { jCrop[0].Value<int>(), jCrop[1].Value<int>(), jCrop[2].Value<int>(), jCrop[3].Value<int>() };
+                }
             }
             double[] a23 = null;
-            if (data.TryGetValue("affine_2x3", out object a23Obj) && a23Obj is Array a23Arr && a23Arr.Length >= 6)
+            if (data.TryGetValue("affine_2x3", out object a23Obj))
             {
-                a23 = new double[]
+                if (a23Obj is Array a23Arr && a23Arr.Length >= 6)
                 {
-                    Convert.ToDouble(a23Arr.GetValue(0)), Convert.ToDouble(a23Arr.GetValue(1)), Convert.ToDouble(a23Arr.GetValue(2)),
-                    Convert.ToDouble(a23Arr.GetValue(3)), Convert.ToDouble(a23Arr.GetValue(4)), Convert.ToDouble(a23Arr.GetValue(5))
-                };
+                    a23 = new double[]
+                    {
+                        Convert.ToDouble(a23Arr.GetValue(0)), Convert.ToDouble(a23Arr.GetValue(1)), Convert.ToDouble(a23Arr.GetValue(2)),
+                        Convert.ToDouble(a23Arr.GetValue(3)), Convert.ToDouble(a23Arr.GetValue(4)), Convert.ToDouble(a23Arr.GetValue(5))
+                    };
+                }
+                else if (a23Obj is JArray jA23 && jA23.Count >= 6)
+                {
+                    a23 = new double[]
+                    {
+                        jA23[0].Value<double>(), jA23[1].Value<double>(), jA23[2].Value<double>(),
+                        jA23[3].Value<double>(), jA23[4].Value<double>(), jA23[5].Value<double>()
+                    };
+                }
             }
             int[] osize = null;
-            if (data.TryGetValue("output_size", out object osObj) && osObj is Array osArr && osArr.Length >= 2)
+            if (data.TryGetValue("output_size", out object osObj))
             {
-                osize = new int[] { Convert.ToInt32(osArr.GetValue(0)), Convert.ToInt32(osArr.GetValue(1)) };
+                if (osObj is Array osArr && osArr.Length >= 2)
+                {
+                    osize = new int[] { Convert.ToInt32(osArr.GetValue(0)), Convert.ToInt32(osArr.GetValue(1)) };
+                }
+                else if (osObj is JArray jOs && jOs.Count >= 2)
+                {
+                    osize = new int[] { jOs[0].Value<int>(), jOs[1].Value<int>() };
+                }
             }
             return new TransformationState(ow, oh, crop, a23, osize);
         }
