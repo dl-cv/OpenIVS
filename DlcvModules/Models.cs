@@ -291,6 +291,54 @@ namespace DlcvModules
 		}
 		public ClsModel(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
 			: base(nodeId, title, properties, context) { }
+
+		public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+		{
+			var baseIo = base.Process(imageList, resultList);
+			var imagesOut = baseIo != null ? (baseIo.ImageList ?? new List<ModuleImage>()) : new List<ModuleImage>();
+			var resultsOut = baseIo != null ? (baseIo.ResultList ?? new JArray()) : new JArray();
+
+			int n = Math.Min(resultsOut.Count, imagesOut.Count);
+			for (int i = 0; i < n; i++)
+			{
+				var entry = resultsOut[i] as JObject;
+				if (entry == null) continue;
+				var samples = entry["sample_results"] as JArray;
+				if (samples == null) continue;
+
+				var imgMat = imagesOut[i] != null ? imagesOut[i].ImageObject : null;
+				int iw = imgMat != null ? Math.Max(1, imgMat.Width) : 1;
+				int ih = imgMat != null ? Math.Max(1, imgMat.Height) : 1;
+
+				foreach (var s in samples)
+				{
+					var so = s as JObject;
+					if (so == null) continue;
+					var bboxArr = so["bbox"] as JArray;
+					bool withBbox = so.Value<bool?>("with_bbox") ?? false;
+					bool validDims = false;
+					if (bboxArr != null && bboxArr.Count >= 4)
+					{
+						try
+						{
+							double bw = bboxArr[2].Value<double>();
+							double bh = bboxArr[3].Value<double>();
+							validDims = (bw > 0.0 && bh > 0.0);
+						}
+						catch { validDims = false; }
+					}
+					if (!withBbox || !validDims)
+					{
+						so["bbox"] = new JArray(0, 0, iw, ih);
+						so["with_bbox"] = true;
+						so["with_angle"] = false;
+						so["angle"] = -100.0;
+					}
+				}
+			}
+
+			return new ModuleIO(imagesOut, resultsOut);
+		}
 	}
 
 	public class OCRModel : DetModel

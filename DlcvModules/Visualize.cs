@@ -31,16 +31,34 @@ namespace DlcvModules
 			// 读取样式配置
             var vis = ReadVisConfig(this.Properties);
 
-			// 1) 构建 origin_index -> 可写 Mat 映射（克隆或黑底）
-            var originToBitmap = new Dictionary<int, Mat>();
+			// 1) 构建 origin_index -> 可写 Mat 映射（优先选择最大尺寸原图，避免被裁剪图抢占）
+			var originToBitmap = new Dictionary<int, Mat>();
 			var originToState = new Dictionary<int, TransformationState>();
 			for (int i = 0; i < images.Count; i++)
 			{
 				var (wrap, bmp) = Unwrap(images[i]);
-                if (bmp == null || bmp.Empty()) continue;
+				if (bmp == null || bmp.Empty()) continue;
 				int originIndex = wrap != null ? wrap.OriginalIndex : i;
 				Mat originMat = wrap != null && wrap.OriginalImage != null ? wrap.OriginalImage : bmp;
-				if (!originToBitmap.ContainsKey(originIndex) && originMat != null && !originMat.Empty())
+				if (originMat == null || originMat.Empty()) continue;
+
+				int candArea = originMat.Rows * originMat.Cols;
+				bool shouldReplace = false;
+				if (!originToBitmap.ContainsKey(originIndex))
+				{
+					shouldReplace = true;
+				}
+				else
+				{
+					var cur = originToBitmap[originIndex];
+					int curArea = (cur != null && !cur.Empty()) ? (cur.Rows * cur.Cols) : 0;
+					if (candArea > curArea)
+					{
+						shouldReplace = true;
+					}
+				}
+
+				if (shouldReplace)
 				{
 					Mat canvas;
 					if (vis.BlackBackground)

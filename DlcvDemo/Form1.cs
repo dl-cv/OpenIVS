@@ -866,6 +866,7 @@ namespace DlcvDemo
             TryRunCctor(typeof(DlcvModules.SaveImage));
             TryRunCctor(typeof(DlcvModules.VisualizeOnOriginal));
             TryRunCctor(typeof(DlcvModules.VisualizeOnLocal));
+            TryRunCctor(typeof(DlcvModules.Preview));
         }
 
         private static void TryRunCctor(Type t)
