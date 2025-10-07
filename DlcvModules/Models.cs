@@ -115,6 +115,15 @@ namespace DlcvModules
 			var outResults = new JArray();
 			EnsureModel();
 
+			// 透传推理参数
+			var p = new JObject();
+			TryAddParam(p, "threshold");
+			TryAddParam(p, "iou_threshold");
+			TryAddParam(p, "top_k");
+			TryAddParam(p, "return_polygon");
+			TryAddParam(p, "epsilon");
+			TryAddParam(p, "batch_size");
+
 			int outIndex = 0;
 			for (int i = 0; i < images.Count; i++)
 			{
@@ -122,7 +131,15 @@ namespace DlcvModules
 				var wrap = tup.Item1; var mat = tup.Item2;
 				if (mat == null || mat.Empty()) continue;
 
-				var res = _model.Infer(mat, null); // 结构化结果
+				Utils.CSharpResult res;
+				if (p.Count > 0)
+				{
+					res = _model.Infer(mat, p);
+				}
+				else
+				{
+					res = _model.Infer(mat, null);
+				}
 
 				// 输出：沿用输入图像对象；结果转为统一 local entry
 				outImages.Add(images[i]);
@@ -191,6 +208,45 @@ namespace DlcvModules
 				list.Add(o);
 			}
 			return list;
+		}
+
+		private void TryAddParam(JObject p, string key)
+		{
+			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+			{
+				try
+				{
+					// 按照原样塞入，保持与后端期望的类型兼容
+					if (v is bool)
+					{
+						p[key] = (bool)v;
+					}
+					else if (v is int)
+					{
+						p[key] = (int)v;
+					}
+					else if (v is float)
+					{
+						p[key] = (float)v;
+					}
+					else if (v is double)
+					{
+						p[key] = (double)v;
+					}
+					else if (v is string)
+					{
+						// 尝试数字/布尔解析，失败则作为字符串
+						if (double.TryParse((string)v, out double dv)) p[key] = dv;
+						else if (bool.TryParse((string)v, out bool bv)) p[key] = bv;
+						else p[key] = (string)v;
+					}
+					else
+					{
+						p[key] = v.ToString();
+					}
+				}
+				catch { }
+			}
 		}
 	}
 

@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
+using Point = OpenCvSharp.Point;
 
 namespace DlcvModules
 {
@@ -27,7 +28,10 @@ namespace DlcvModules
 			var images = imageList ?? new List<ModuleImage>();
 			var results = resultList ?? new JArray();
 
-			// 1) 构建 origin_index -> 原图 Mat 映射（使用 OriginalImage）
+			// 读取样式配置
+            var vis = ReadVisConfig(this.Properties);
+
+			// 1) 构建 origin_index -> 可写 Mat 映射（克隆或黑底）
             var originToBitmap = new Dictionary<int, Mat>();
 			var originToState = new Dictionary<int, TransformationState>();
 			for (int i = 0; i < images.Count; i++)
@@ -38,12 +42,21 @@ namespace DlcvModules
 				Mat originMat = wrap != null && wrap.OriginalImage != null ? wrap.OriginalImage : bmp;
 				if (!originToBitmap.ContainsKey(originIndex) && originMat != null && !originMat.Empty())
 				{
-					originToBitmap[originIndex] = originMat;
+					Mat canvas;
+					if (vis.BlackBackground)
+					{
+						canvas = new Mat(originMat.Rows, originMat.Cols, originMat.Type(), new Scalar(0, 0, 0));
+					}
+					else
+					{
+						canvas = originMat.Clone();
+					}
+					originToBitmap[originIndex] = canvas;
 					originToState[originIndex] = new TransformationState(originMat.Width, originMat.Height);
 				}
 			}
 
-			// 2) 在原图上绘制，将局部坐标通过 transform 反投影到原图坐标
+			// 2) 在原图副本上绘制，将局部坐标通过 transform 反投影到原图坐标
 			foreach (var token in results)
 			{
 				var entry = token as JObject;
@@ -115,42 +128,84 @@ namespace DlcvModules
                     }
                     else
                     {
-                        // 若无变换，认为坐标已是原图系
                         ptsGlobal.AddRange(ptsLocal);
                     }
 
-                    // 取轴对齐外接矩形并绘制
-                    int minX = (int)Math.Floor(ptsGlobal.Min(p => p.X));
-                    int minY = (int)Math.Floor(ptsGlobal.Min(p => p.Y));
-                    int maxX = (int)Math.Ceiling(ptsGlobal.Max(p => p.X));
-                    int maxY = (int)Math.Ceiling(ptsGlobal.Max(p => p.Y));
-                    int rw = Math.Max(1, maxX - minX);
-                    int rh = Math.Max(1, maxY - minY);
-                    var rect = new OpenCvSharp.Rect(Math.Max(0, minX), Math.Max(0, minY), rw, rh);
-                    Cv2.Rectangle(target, rect, new Scalar(255, 150, 0), 2);
-
-                    // 绘制文本标签（若存在 category_name），对齐 Python 可视化的直观效果
-                    try
+                    // 绘制 mask/contours
+                    if (vis.DisplayMask || vis.DisplayContours)
                     {
-                        string label = so["category_name"]?.ToString();
-                        if (!string.IsNullOrEmpty(label))
+                        var poly = ReadPolygonPoints(so);
+                        if (poly != null && poly.Count >= 3)
                         {
-                            int baseLine = 0;
-                            var textSize = Cv2.GetTextSize(label, HersheyFonts.HersheySimplex, 0.5, 1, out baseLine);
-                            int tx = Math.Max(0, rect.X);
-                            int ty = Math.Max(0, rect.Y - 4);
-                            // 背景框
-                            var bgRect = new OpenCvSharp.Rect(tx, Math.Max(0, ty - textSize.Height - 4), Math.Min(target.Width - tx, textSize.Width + 6), textSize.Height + 4);
-                            Cv2.Rectangle(target, bgRect, new Scalar(0, 0, 0), -1);
-                            // 文字
-                            Cv2.PutText(target, label, new OpenCvSharp.Point(tx + 3, ty - 2), HersheyFonts.HersheySimplex, 0.5, new Scalar(255, 255, 255), 1, LineTypes.AntiAlias);
+                            var polyGlobal = new List<Point>();
+                            foreach (var p in poly)
+                            {
+                                double x = p.X, y = p.Y;
+                                if (inv2x3 != null)
+                                {
+                                    double gx = inv2x3[0] * x + inv2x3[1] * y + inv2x3[2];
+                                    double gy = inv2x3[3] * x + inv2x3[4] * y + inv2x3[5];
+                                    polyGlobal.Add(new Point((int)Math.Round(gx), (int)Math.Round(gy)));
+                                }
+                                else
+                                {
+                                    polyGlobal.Add(new Point((int)Math.Round(x), (int)Math.Round(y)));
+                                }
+                            }
+                            if (vis.DisplayMask)
+                            {
+                                var overlay = target.Clone();
+                                Cv2.FillPoly(overlay, new Point[][] { polyGlobal.ToArray() }, vis.MaskFillColor);
+                                Cv2.AddWeighted(overlay, 0.35, target, 0.65, 0, target);
+                                overlay.Dispose();
+                            }
+                            if (vis.DisplayContours)
+                            {
+                                Cv2.Polylines(target, new Point[][] { polyGlobal.ToArray() }, true, vis.BboxColor, vis.BboxLineWidth, LineTypes.AntiAlias);
+                            }
                         }
                     }
-                    catch { }
+
+                    // 绘制 bbox（旋转用 rot 颜色）
+                    if (vis.DisplayBbox)
+                    {
+                        var pts = ptsGlobal.Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray();
+                        var color = (withAngle && angle != -100.0) ? vis.BboxColorRot : vis.BboxColor;
+                        Cv2.Polylines(target, new Point[][] { pts }, true, color, vis.BboxLineWidth, LineTypes.AntiAlias);
+                    }
+
+                    // 文本与分数
+                    if (vis.DisplayText)
+                    {
+                        string label = so["category_name"]?.ToString();
+                        if (vis.DisplayScore)
+                        {
+                            try
+                            {
+                                float sc = so["score"]?.Value<float?>() ?? float.NaN;
+                                if (!float.IsNaN(sc)) label = string.IsNullOrEmpty(label) ? $"{sc:F2}" : $"{label} {sc:F2}";
+                            }
+                            catch { }
+                        }
+                        if (!string.IsNullOrEmpty(label))
+                        {
+                            int minX = (int)Math.Floor(ptsGlobal.Min(p => p.X));
+                            int minY = (int)Math.Floor(ptsGlobal.Min(p => p.Y));
+                            int maxX = (int)Math.Ceiling(ptsGlobal.Max(p => p.X));
+                            int maxY = (int)Math.Ceiling(ptsGlobal.Max(p => p.Y));
+                            int tx = vis.TextOutOfBbox ? minX : minX + 3;
+                            int ty = vis.TextOutOfBbox ? Math.Max(0, minY - 4) : Math.Max(0, minY + (int)Math.Round(12 * vis.FontScale));
+                            if (vis.DisplayTextShadow)
+                            {
+                                Cv2.PutText(target, label, new Point(tx + 1, ty + 1), HersheyFonts.HersheySimplex, vis.FontScale, new Scalar(0, 0, 0), vis.FontThickness + 1, LineTypes.AntiAlias);
+                            }
+                            Cv2.PutText(target, label, new Point(tx, ty), HersheyFonts.HersheySimplex, vis.FontScale, vis.FontColor, vis.FontThickness, LineTypes.AntiAlias);
+                        }
+                    }
                 }
 			}
 
-            // 3) 输出原图序列作为可视化结果
+            // 3) 输出绘制后的原图序列
             var outImages = new List<ModuleImage>();
             foreach (var kv in originToBitmap)
             {
@@ -179,6 +234,113 @@ namespace DlcvModules
             h = Clamp(arr[3].Value<double>());
 			return true;
 		}
+
+        private static List<Point2d> ReadPolygonPoints(JObject s)
+        {
+            var maskToken = s?["mask"] ?? s?["polygon"];
+            var pts = new List<Point2d>();
+            var arr = maskToken as JArray;
+            if (arr == null) return null;
+            foreach (var p in arr)
+            {
+                if (p is JObject pj)
+                {
+                    double x = pj.Value<double>("x");
+                    double y = pj.Value<double>("y");
+                    pts.Add(new Point2d(x, y));
+                }
+                else if (p is JArray pa && pa.Count >= 2)
+                {
+                    double x = pa[0].Value<double>();
+                    double y = pa[1].Value<double>();
+                    pts.Add(new Point2d(x, y));
+                }
+            }
+            return pts;
+        }
+
+        private class VisConfig
+        {
+            public bool BlackBackground;
+            public bool DisplayMask;
+            public bool DisplayContours;
+            public bool DisplayBbox;
+            public bool DisplayText;
+            public bool DisplayScore;
+            public bool TextOutOfBbox;
+            public bool DisplayTextShadow;
+            public int BboxLineWidth;
+            public double FontScale;
+            public int FontThickness;
+            public Scalar BboxColor;
+            public Scalar BboxColorRot;
+            public Scalar FontColor;
+            public Scalar MaskFillColor;
+        }
+
+        private static VisConfig ReadVisConfig(Dictionary<string, object> props)
+        {
+            var v = new VisConfig
+            {
+                BlackBackground = ReadBool(props, "black_background", false),
+                DisplayMask = ReadBool(props, "display_mask", true),
+                DisplayContours = ReadBool(props, "display_contours", true),
+                DisplayBbox = ReadBool(props, "display_bbox", true),
+                DisplayText = ReadBool(props, "display_text", true),
+                DisplayScore = ReadBool(props, "display_score", true),
+                TextOutOfBbox = ReadBool(props, "text_out_of_bbox", true),
+                DisplayTextShadow = ReadBool(props, "display_text_shadow", true),
+                BboxLineWidth = ReadInt(props, "bbox_line_width", 2),
+                FontScale = Math.Max(0.3, ReadInt(props, "font_size", 13) / 26.0),
+                FontThickness = 1,
+                BboxColor = ReadColor(props, "bbox_color", new Scalar(0, 0, 255)),
+                BboxColorRot = ReadColor(props, "bbox_color_rot", new Scalar(0, 255, 0)),
+                FontColor = ReadColor(props, "font_color", new Scalar(255, 255, 255)),
+                MaskFillColor = new Scalar(0, 255, 0)
+            };
+            return v;
+        }
+
+        private static bool ReadBool(Dictionary<string, object> d, string k, bool dv)
+        {
+            if (d != null && d.TryGetValue(k, out object v) && v != null)
+            {
+                try { return Convert.ToBoolean(v); } catch { return dv; }
+            }
+            return dv;
+        }
+
+        private static int ReadInt(Dictionary<string, object> d, string k, int dv)
+        {
+            if (d != null && d.TryGetValue(k, out object v) && v != null)
+            {
+                try { return Convert.ToInt32(v); } catch { return dv; }
+            }
+            return dv;
+        }
+
+        private static Scalar ReadColor(Dictionary<string, object> d, string k, Scalar dv)
+        {
+            try
+            {
+                if (d == null || !d.TryGetValue(k, out object v) || v == null) return dv;
+                if (v is IEnumerable<object> objs)
+                {
+                    var list = new List<int>();
+                    foreach (var o in objs)
+                    {
+                        try { list.Add(Convert.ToInt32(o)); } catch { }
+                    }
+                    if (list.Count >= 3)
+                    {
+                        // JSON 配置为 [R,G,B]，OpenCv Scalar 为 (B,G,R)
+                        return new Scalar(list[2], list[1], list[0]);
+                    }
+                }
+            }
+            catch { }
+            return dv;
+        }
 
 		private static int Clamp(double v)
 		{

@@ -529,6 +529,259 @@ namespace DlcvModules
             return $"idx:{index}|org:{originIndex}|T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
         }
     }
+
+    /// <summary>
+    /// 高级结果过滤：支持按 bbox/rbox 的 w/h、bbox 面积、mask 面积过滤。
+    /// 通过主通道输出通过项；通过 ExtraOutputs[0] 输出未通过项；同时保持图像对齐。
+    /// properties:
+    /// - enable_bbox_wh(bool), enable_rbox_wh(bool), enable_bbox_area(bool), enable_mask_area(bool)
+    /// - bbox_w_min/max, bbox_h_min/max
+    /// - rbox_w_min/max, rbox_h_min/max
+    /// - bbox_area_min/max, mask_area_min/max
+    /// </summary>
+    public class ResultFilterAdvanced : BaseModule
+    {
+        static ResultFilterAdvanced()
+        {
+            ModuleRegistry.Register("features/result_filter_advanced", typeof(ResultFilterAdvanced));
+        }
+
+        public ResultFilterAdvanced(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var inImages = imageList ?? new List<ModuleImage>();
+            var inResults = resultList ?? new JArray();
+
+            var mainImages = new List<ModuleImage>();
+            var mainResults = new JArray();
+            var altImages = new List<ModuleImage>();
+            var altResults = new JArray();
+
+            // 读取配置
+            bool enableBBoxWh = ReadBool("enable_bbox_wh", false);
+            bool enableRBoxWh = ReadBool("enable_rbox_wh", false);
+            bool enableBBoxArea = ReadBool("enable_bbox_area", false);
+            bool enableMaskArea = ReadBool("enable_mask_area", false);
+
+            double? bboxWMin = ReadNullableDouble("bbox_w_min");
+            double? bboxWMax = ReadNullableDouble("bbox_w_max");
+            double? bboxHMin = ReadNullableDouble("bbox_h_min");
+            double? bboxHMax = ReadNullableDouble("bbox_h_max");
+
+            double? rboxWMin = ReadNullableDouble("rbox_w_min");
+            double? rboxWMax = ReadNullableDouble("rbox_w_max");
+            double? rboxHMin = ReadNullableDouble("rbox_h_min");
+            double? rboxHMax = ReadNullableDouble("rbox_h_max");
+
+            double? bboxAreaMin = ReadNullableDouble("bbox_area_min");
+            double? bboxAreaMax = ReadNullableDouble("bbox_area_max");
+            double? maskAreaMin = ReadNullableDouble("mask_area_min");
+            double? maskAreaMax = ReadNullableDouble("mask_area_max");
+
+            // 构建 image 键映射：仅 transform；空则退回 origin_index
+            var keyToImageObj = new Dictionary<string, ModuleImage>();
+            for (int i = 0; i < inImages.Count; i++)
+            {
+                var tup = RFAdv_Unwrap(inImages[i]);
+                var wrap = tup.Item1; var bmp = tup.Item2;
+                if (bmp == null) continue;
+                int org = wrap != null ? wrap.OriginalIndex : i;
+                string key = SerializeTransformOnly(wrap != null ? wrap.TransformState : null, org);
+                keyToImageObj[key] = inImages[i];
+            }
+
+            foreach (var t in inResults)
+            {
+                var r = t as JObject;
+                if (r == null) continue;
+                int idx = r["index"]?.Value<int?>() ?? -1;
+                int originIndex = r["origin_index"]?.Value<int?>() ?? idx;
+                var stDict = r["transform"] as JObject;
+                TransformationState st = null;
+                try { if (stDict != null) st = TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()); } catch { st = null; }
+                string key = SerializeTransformOnly(st, originIndex);
+
+                var srsArray = r["sample_results"] as JArray;
+                var passList = new List<JObject>();
+                var failList = new List<JObject>();
+
+                if (srsArray != null)
+                {
+                    foreach (var sToken in srsArray)
+                    {
+                        if (!(sToken is JObject s)) continue;
+
+                        bool withAngle = s.Value<bool?>("with_angle") ?? false;
+                        var bbox = s["bbox"] as JArray;
+                        double w = 0.0, h = 0.0;
+                        bool hasWH = false;
+                        if (bbox != null && bbox.Count >= 4)
+                        {
+                            try
+                            {
+                                if (withAngle)
+                                {
+                                    // 旋转框：bbox=[cx,cy,w,h]
+                                    w = Math.Abs(bbox[2].Value<double>());
+                                    h = Math.Abs(bbox[3].Value<double>());
+                                }
+                                else
+                                {
+                                    // 轴对齐：bbox=[x,y,w,h]
+                                    w = Math.Abs(bbox[2].Value<double>());
+                                    h = Math.Abs(bbox[3].Value<double>());
+                                }
+                                hasWH = true;
+                            }
+                            catch { hasWH = false; }
+                        }
+
+                        // 面积
+                        double bboxArea = hasWH ? (w * h) : 0.0;
+                        double maskArea = ReadMaskPolygonArea(s);
+
+                        bool pass = true;
+                        if (enableBBoxWh && hasWH)
+                        {
+                            pass = pass && InRange(w, bboxWMin, bboxWMax) && InRange(h, bboxHMin, bboxHMax);
+                        }
+                        if (enableRBoxWh && hasWH && withAngle)
+                        {
+                            pass = pass && InRange(w, rboxWMin, rboxWMax) && InRange(h, rboxHMin, rboxHMax);
+                        }
+                        if (enableBBoxArea && hasWH)
+                        {
+                            pass = pass && InRange(bboxArea, bboxAreaMin, bboxAreaMax);
+                        }
+                        if (enableMaskArea && maskArea > 0)
+                        {
+                            pass = pass && InRange(maskArea, maskAreaMin, maskAreaMax);
+                        }
+
+                        if (pass) passList.Add(s);
+                        else failList.Add(s);
+                    }
+                }
+
+                if (keyToImageObj.TryGetValue(key, out ModuleImage imgObj))
+                {
+                    if (passList.Count > 0 || srsArray == null)
+                    {
+                        mainImages.Add(imgObj);
+                        var e = new JObject
+                        {
+                            ["type"] = "local",
+                            ["index"] = mainResults.Count,
+                            ["origin_index"] = originIndex,
+                            ["transform"] = st != null ? JObject.FromObject(st.ToDict()) : null,
+                            ["sample_results"] = new JArray(passList)
+                        };
+                        mainResults.Add(e);
+                    }
+                    if (failList.Count > 0)
+                    {
+                        altImages.Add(imgObj);
+                        var e2 = new JObject
+                        {
+                            ["type"] = "local",
+                            ["index"] = altResults.Count,
+                            ["origin_index"] = originIndex,
+                            ["transform"] = st != null ? JObject.FromObject(st.ToDict()) : null,
+                            ["sample_results"] = new JArray(failList)
+                        };
+                        altResults.Add(e2);
+                    }
+                }
+            }
+
+            // 通过 extra output 暴露第二路（未通过项）
+            this.ExtraOutputs.Add(new ModuleChannel(altImages, altResults));
+            return new ModuleIO(mainImages, mainResults);
+        }
+
+        private static bool InRange(double v, double? minV, double? maxV)
+        {
+            if (minV.HasValue && v < minV.Value) return false;
+            if (maxV.HasValue && v > maxV.Value) return false;
+            return true;
+        }
+
+        private static double ReadMaskPolygonArea(JObject s)
+        {
+            try
+            {
+                var maskToken = s["mask"] ?? s["polygon"];
+                var pts = new List<System.Drawing.PointF>();
+                if (maskToken is JArray arr)
+                {
+                    foreach (var p in arr)
+                    {
+                        if (p is JObject pj)
+                        {
+                            float x = pj.Value<float>("x");
+                            float y = pj.Value<float>("y");
+                            pts.Add(new System.Drawing.PointF(x, y));
+                        }
+                        else if (p is JArray pa && pa.Count >= 2)
+                        {
+                            float x = pa[0].Value<float>();
+                            float y = pa[1].Value<float>();
+                            pts.Add(new System.Drawing.PointF(x, y));
+                        }
+                    }
+                }
+                if (pts.Count < 3) return 0.0;
+                // Shoelace formula
+                double area = 0.0;
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    int j = (i + 1) % pts.Count;
+                    area += pts[i].X * pts[j].Y - pts[j].X * pts[i].Y;
+                }
+                return Math.Abs(area) * 0.5;
+            }
+            catch { return 0.0; }
+        }
+
+        private bool ReadBool(string key, bool dv)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+            {
+                try { return Convert.ToBoolean(v); } catch { return dv; }
+            }
+            return dv;
+        }
+
+        private double? ReadNullableDouble(string key)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+            {
+                double x;
+                if (double.TryParse(v.ToString(), out x)) return x;
+            }
+            return null;
+        }
+
+        private static string SerializeTransformOnly(TransformationState st, int originIndex)
+        {
+            if (st == null || st.AffineMatrix2x3 == null)
+            {
+                return $"org:{originIndex}|T:null";
+            }
+            var a = st.AffineMatrix2x3;
+            return $"T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
+        }
+
+        private static Tuple<ModuleImage, Mat> RFAdv_Unwrap(ModuleImage obj)
+        {
+            if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
+            return Tuple.Create(obj, obj.ImageObject);
+        }
+    }
 }
 
 
