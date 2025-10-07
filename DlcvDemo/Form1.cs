@@ -906,6 +906,21 @@ namespace DlcvDemo
                 foreach (var entryToken in resultList)
                 {
                     var entry = entryToken as JObject;
+                    // 读取 original->current 的仿射矩阵，并计算其逆（current->original）
+                    double[] invA23 = null;
+                    try
+                    {
+                        var tdict = entry?["transform"] as JObject;
+                        var a23 = tdict != null ? (tdict["affine_2x3"] as JArray) : null;
+                        if (a23 != null && a23.Count >= 6)
+                        {
+                            invA23 = Inverse2x3(new double[] {
+                                a23[0].Value<double>(), a23[1].Value<double>(), a23[2].Value<double>(),
+                                a23[3].Value<double>(), a23[4].Value<double>(), a23[5].Value<double>()
+                            });
+                        }
+                    }
+                    catch { invA23 = null; }
                     var samples = entry?["sample_results"] as JArray;
                     if (samples == null) continue;
                     foreach (var sToken in samples)
@@ -922,6 +937,46 @@ namespace DlcvDemo
                         bool withMask = so.Value<bool?>("with_mask") ?? false;
                         bool withAngle = so.Value<bool?>("with_angle") ?? false;
                         float angle = so.Value<float?>("angle") ?? -100f;
+
+                        // 将局部坐标映射回原图坐标
+                        if (invA23 != null && bbox != null && bbox.Count >= 4)
+                        {
+                            if (withAngle && angle != -100f)
+                            {
+                                // 旋转框（[cx,cy,w,h], angle in rad）
+                                double cx = bbox[0], cy = bbox[1];
+                                double w = Math.Abs(bbox[2]), h = Math.Abs(bbox[3]);
+                                var cpt = ApplyAffine(invA23, cx, cy);
+                                // 线性部分
+                                double ia = invA23[0], ib = invA23[1], ic = invA23[3], id = invA23[4];
+                                double exx = Math.Cos(angle), exy = Math.Sin(angle);
+                                double eyx = -Math.Sin(angle), eyy = Math.Cos(angle);
+                                double gx_ex = ia * exx + ib * exy;
+                                double gy_ex = ic * exx + id * exy;
+                                double gx_ey = ia * eyx + ib * eyy;
+                                double gy_ey = ic * eyx + id * eyy;
+                                double sx = Math.Sqrt(gx_ex * gx_ex + gy_ex * gy_ex);
+                                double sy = Math.Sqrt(gx_ey * gx_ey + gy_ey * gy_ey);
+                                double newAngle = Math.Atan2(gy_ex, gx_ex);
+                                bbox = new List<double> { cpt.X, cpt.Y, w * sx, h * sy };
+                                withAngle = true; angle = (float)newAngle; withBbox = true;
+                            }
+                            else
+                            {
+                                // 轴对齐框，四角点投回原图后再取 AABB
+                                double x = bbox[0], y = bbox[1], w = bbox[2], h = bbox[3];
+                                var p1 = ApplyAffine(invA23, x, y);
+                                var p2 = ApplyAffine(invA23, x + w, y);
+                                var p3 = ApplyAffine(invA23, x + w, y + h);
+                                var p4 = ApplyAffine(invA23, x, y + h);
+                                double minX = Math.Min(Math.Min(p1.X, p2.X), Math.Min(p3.X, p4.X));
+                                double minY = Math.Min(Math.Min(p1.Y, p2.Y), Math.Min(p3.Y, p4.Y));
+                                double maxX = Math.Max(Math.Max(p1.X, p2.X), Math.Max(p3.X, p4.X));
+                                double maxY = Math.Max(Math.Max(p1.Y, p2.Y), Math.Max(p3.Y, p4.Y));
+                                bbox = new List<double> { minX, minY, Math.Max(1.0, maxX - minX), Math.Max(1.0, maxY - minY) };
+                                withAngle = false; angle = -100f; withBbox = true;
+                            }
+                        }
                         // 从多边形点集还原真实mask（与bbox同尺寸，绝对坐标转相对坐标）
                         OpenCvSharp.Mat mask = new OpenCvSharp.Mat();
                         if (withMask && bbox != null && bbox.Count >= 4)
@@ -980,6 +1035,31 @@ namespace DlcvDemo
             }
             var sample = new dlcv_infer_csharp.Utils.CSharpSampleResult(objects);
             return new dlcv_infer_csharp.Utils.CSharpResult(new List<dlcv_infer_csharp.Utils.CSharpSampleResult> { sample });
+        }
+
+        private static System.Drawing.PointF ApplyAffine(double[] a2x3, double x, double y)
+        {
+            if (a2x3 == null || a2x3.Length != 6) return new System.Drawing.PointF((float)x, (float)y);
+            double nx = a2x3[0] * x + a2x3[1] * y + a2x3[2];
+            double ny = a2x3[3] * x + a2x3[4] * y + a2x3[5];
+            return new System.Drawing.PointF((float)nx, (float)ny);
+        }
+
+        private static double[] Inverse2x3(double[] a2x3)
+        {
+            if (a2x3 == null || a2x3.Length != 6) return null;
+            double a = a2x3[0], b = a2x3[1], tx = a2x3[2];
+            double c = a2x3[3], d = a2x3[4], ty = a2x3[5];
+            double det = a * d - b * c;
+            if (Math.Abs(det) < 1e-12) return null;
+            double invDet = 1.0 / det;
+            double ia = d * invDet;
+            double ib = -b * invDet;
+            double ic = -c * invDet;
+            double id = a * invDet;
+            double itx = -(ia * tx + ib * ty);
+            double ity = -(ic * tx + id * ty);
+            return new double[] { ia, ib, itx, ic, id, ity };
         }
 
         /// <summary>
@@ -1068,7 +1148,17 @@ namespace DlcvDemo
 
                     if (imageListObj != null && imageListObj.Count > 0)
                     {
-                        var mat = imageListObj[0].GetImage();
+                        // 选择面积最大的 OriginalImage 作为底图
+                        ModuleImage best = null; long bestArea = -1;
+                        foreach (var w in imageListObj)
+                        {
+                            if (w == null) continue;
+                            var baseMat = w.OriginalImage ?? w.GetImage();
+                            if (baseMat == null || baseMat.Empty()) continue;
+                            long ar = (long)baseMat.Width * (long)baseMat.Height;
+                            if (ar > bestArea) { bestArea = ar; best = w; }
+                        }
+                        var mat = best != null ? (best.OriginalImage ?? best.GetImage()) : imageListObj[0].GetImage();
                         if (mat != null && !mat.Empty())
                         {
                             bool isVisualizedInFlow = false;
@@ -1103,6 +1193,7 @@ namespace DlcvDemo
                             }
                             else
                             {
+                                // 结果已在 ConvertFlowResultsToCSharp 中映射到原图坐标
                                 imagePanel1.UpdateImageAndResult(displayMat, csharpResultNullable.Value);
                             }
 
