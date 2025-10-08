@@ -277,11 +277,13 @@ namespace DlcvModules
     {
         public List<ModuleImage> ImageList { get; private set; }
         public JArray ResultList { get; private set; }
+        public List<SimpleTemplate> TemplateList { get; private set; }
 
-        public ModuleIO(List<ModuleImage> images = null, JArray results = null)
+        public ModuleIO(List<ModuleImage> images = null, JArray results = null, List<SimpleTemplate> templates = null)
         {
             ImageList = images ?? new List<ModuleImage>();
             ResultList = results ?? new JArray();
+            TemplateList = templates ?? new List<SimpleTemplate>();
         }
     }
 
@@ -292,11 +294,13 @@ namespace DlcvModules
     {
         public List<ModuleImage> ImageList { get; private set; }
         public JArray ResultList { get; private set; }
+        public List<SimpleTemplate> TemplateList { get; private set; }
 
-        public ModuleChannel(List<ModuleImage> images, JArray results)
+        public ModuleChannel(List<ModuleImage> images, JArray results, List<SimpleTemplate> templates = null)
         {
             ImageList = images ?? new List<ModuleImage>();
             ResultList = results ?? new JArray();
+            TemplateList = templates ?? new List<SimpleTemplate>();
         }
     }
 
@@ -314,6 +318,13 @@ namespace DlcvModules
         public List<ModuleChannel> ExtraInputsIn { get; private set; } = new List<ModuleChannel>();
         public List<ModuleChannel> ExtraOutputs { get; private set; } = new List<ModuleChannel>();
 
+        // 主对模板输入
+        public List<SimpleTemplate> MainTemplateList { get; set; } = new List<SimpleTemplate>();
+        // 标量输入/输出（按索引与名称）
+        public Dictionary<int, object> ScalarInputsByIndex { get; set; } = new Dictionary<int, object>();
+        public Dictionary<string, object> ScalarInputsByName { get; set; } = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, object> ScalarOutputsByName { get; set; } = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
         public BaseModule(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
         {
             NodeId = nodeId;
@@ -325,7 +336,7 @@ namespace DlcvModules
         public virtual ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
             // 缺省透传
-            return new ModuleIO(imageList ?? new List<ModuleImage>(), resultList ?? new JArray());
+            return new ModuleIO(imageList ?? new List<ModuleImage>(), resultList ?? new JArray(), new List<SimpleTemplate>());
         }
     }
 

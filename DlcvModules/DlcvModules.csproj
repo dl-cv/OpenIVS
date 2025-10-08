@@ -93,6 +93,7 @@
     <Compile Include="SlidingWindow.cs" />
     <Compile Include="SlidingMerge.cs" />
     <Compile Include="Outputs.cs" />
+    <Compile Include="Templates.cs" />
     <Compile Include="Visualize.cs" />
     <Compile Include="MainProcess.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
