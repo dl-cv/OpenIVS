@@ -861,3 +861,160 @@ namespace DlcvModules
 }
 
 
+namespace DlcvModules
+{
+	/// <summary>
+	/// 编排模块：印刷品模版匹配（复用现有模板模块，集中流程与条件）。
+	/// type: features/printed_template_match
+	/// properties:
+	/// - save_dir(string)
+	/// - product_serial(string)
+	/// 可透传：position_tolerance_x(double), position_tolerance_y(double), min_confidence_threshold(double)
+	/// 输出：Scalar ok(bool), detail(string)；TemplateList 按条件返回。
+	/// </summary>
+	public class PrintedTemplateMatch : BaseModule
+	{
+		static PrintedTemplateMatch()
+		{
+			ModuleRegistry.Register("features/printed_template_match", typeof(PrintedTemplateMatch));
+		}
+
+		public PrintedTemplateMatch(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+			: base(nodeId, title, properties, context) { }
+
+		public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+		{
+			var images = imageList ?? new List<ModuleImage>();
+			var results = resultList ?? new JArray();
+
+			string saveDir = ReadString("save_dir", null);
+			if (string.IsNullOrWhiteSpace(saveDir))
+			{
+				try { saveDir = Directory.GetCurrentDirectory(); } catch { saveDir = "."; }
+			}
+			else
+			{
+				try { Directory.CreateDirectory(saveDir); } catch { }
+			}
+			string productSerial = ReadString("product_serial", null);
+			productSerial = productSerial ?? string.Empty;
+
+			// 1) 从 results 构建模板
+			var builder = new TemplateFromResults(NodeId * 10 + 1, context: this.Context);
+			var built = builder.Process(images, results);
+			SimpleTemplate tpl = null;
+			if (built != null && built.TemplateList != null && built.TemplateList.Count > 0)
+			{
+				tpl = built.TemplateList[0];
+			}
+			if (tpl == null)
+			{
+				try { this.ScalarOutputsByName["ok"] = false; this.ScalarOutputsByName["detail"] = string.Empty; } catch { }
+				return new ModuleIO(images, results, new List<SimpleTemplate>());
+			}
+
+			// 分支 A：无产品序列号 -> 不保存，返回模板，ok=false
+			if (string.IsNullOrWhiteSpace(productSerial))
+			{
+				try { this.ScalarOutputsByName["ok"] = false; this.ScalarOutputsByName["detail"] = string.Empty; } catch { }
+				return new ModuleIO(images, results, new List<SimpleTemplate> { tpl });
+			}
+
+			// 计算模板文件路径
+			string fname = SimpleTemplateUtils.MakeSafeFileName(productSerial);
+			string jsonPath = Path.Combine(saveDir, fname + ".json");
+
+			// 分支 B：无现存模板 -> 保存模板与 PNG（PNG 使用首图 OriginalImage）
+			if (!File.Exists(jsonPath))
+			{
+				// 提取首图 OriginalImage 作为 saver 的 ImageObject
+				List<ModuleImage> imagesForSave = images;
+				try
+				{
+					var img0 = images != null && images.Count > 0 ? images[0] : null;
+					if (img0 != null && img0.OriginalImage != null && !img0.OriginalImage.Empty())
+					{
+						var ori = img0.OriginalImage;
+						var ts = img0.TransformState ?? new TransformationState(ori.Width, ori.Height);
+						imagesForSave = new List<ModuleImage> { new ModuleImage(ori, ori, ts, img0.OriginalIndex) };
+					}
+				}
+				catch { imagesForSave = images; }
+
+				var saver = new TemplateSave(NodeId * 10 + 2, context: this.Context, properties: new Dictionary<string, object>
+				{
+					["save_dir"] = saveDir,
+					["file_name"] = fname
+				});
+				saver.MainTemplateList = new List<SimpleTemplate> { tpl };
+				try { saver.Process(imagesForSave, results); } catch { }
+
+				try { this.ScalarOutputsByName["ok"] = true; this.ScalarOutputsByName["detail"] = string.Empty; } catch { }
+				return new ModuleIO(images, results, new List<SimpleTemplate> { tpl });
+			}
+
+			// 分支 C：存在模板文件 -> 加载并匹配；返回 ok/detail，模板为空
+			var loader = new TemplateLoad(NodeId * 10 + 3, context: this.Context, properties: new Dictionary<string, object>
+			{
+				["path"] = jsonPath
+			});
+			List<SimpleTemplate> goldenList = null;
+			try
+			{
+				var lo = loader.Process(images, results);
+				goldenList = lo != null ? lo.TemplateList : null;
+			}
+			catch { goldenList = null; }
+
+			if (goldenList == null || goldenList.Count == 0)
+			{
+				// 回退到保存分支
+				var saver2 = new TemplateSave(NodeId * 10 + 4, context: this.Context, properties: new Dictionary<string, object>
+				{
+					["save_dir"] = saveDir,
+					["file_name"] = fname
+				});
+				saver2.MainTemplateList = new List<SimpleTemplate> { tpl };
+				try { saver2.Process(images, results); } catch { }
+				try { this.ScalarOutputsByName["ok"] = true; this.ScalarOutputsByName["detail"] = string.Empty; } catch { }
+				return new ModuleIO(images, results, new List<SimpleTemplate> { tpl });
+			}
+
+			var matcher = new TemplateMatch(NodeId * 10 + 5, context: this.Context, properties: new Dictionary<string, object>
+			{
+				["position_tolerance_x"] = ReadDoubleOr("position_tolerance_x", 20.0),
+				["position_tolerance_y"] = ReadDoubleOr("position_tolerance_y", 20.0),
+				["min_confidence_threshold"] = ReadDoubleOr("min_confidence_threshold", 0.5)
+			});
+			matcher.MainTemplateList = new List<SimpleTemplate> { tpl };
+			matcher.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), new JArray(), goldenList));
+			try { matcher.Process(images, results); } catch { }
+
+			object okObj = false; object detailObj = string.Empty;
+			try { if (matcher.ScalarOutputsByName != null && matcher.ScalarOutputsByName.ContainsKey("ok")) okObj = matcher.ScalarOutputsByName["ok"]; } catch { }
+			try { if (matcher.ScalarOutputsByName != null && matcher.ScalarOutputsByName.ContainsKey("detail")) detailObj = matcher.ScalarOutputsByName["detail"]; } catch { }
+			try { this.ScalarOutputsByName["ok"] = okObj; this.ScalarOutputsByName["detail"] = detailObj; } catch { }
+			return new ModuleIO(images, results, new List<SimpleTemplate>());
+		}
+
+		private string ReadString(string key, string dv)
+		{
+			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+			{
+				var s = v.ToString();
+				return string.IsNullOrWhiteSpace(s) ? dv : s;
+			}
+			return dv;
+		}
+
+		private double ReadDoubleOr(string key, double dv)
+		{
+			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+			{
+				double x; if (double.TryParse(v.ToString(), out x)) return x;
+			}
+			return dv;
+		}
+	}
+}
+
