@@ -371,39 +371,320 @@ namespace DlcvModules
 		public TemplateMatch(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
 			: base(nodeId, title, properties, context) { }
 
-		public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
-		{
-			var images = imageList ?? new List<ModuleImage>();
-			var results = resultList != null ? new JArray(resultList) : new JArray();
-
-			// 主通道：待匹配模板；额外输入第 0 对：黄金模板
-			SimpleTemplate toCheck = null;
-			if (this.MainTemplateList != null && this.MainTemplateList.Count > 0) toCheck = this.MainTemplateList[0];
-			SimpleTemplate golden = null;
-			if (ExtraInputsIn != null && ExtraInputsIn.Count > 0 && ExtraInputsIn[0] != null)
+			public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
 			{
-				var lst = ExtraInputsIn[0].TemplateList;
-				if (lst != null && lst.Count > 0) golden = lst[0];
+				var images = imageList ?? new List<ModuleImage>();
+				var results = resultList != null ? new JArray(resultList) : new JArray();
+				
+				// 主通道：待匹配模板；额外输入第 0 对：黄金模板
+				SimpleTemplate toCheck = null;
+				if (this.MainTemplateList != null && this.MainTemplateList.Count > 0) toCheck = this.MainTemplateList[0];
+				SimpleTemplate golden = null;
+				if (ExtraInputsIn != null && ExtraInputsIn.Count > 0 && ExtraInputsIn[0] != null)
+				{
+					var lst = ExtraInputsIn[0].TemplateList;
+					if (lst != null && lst.Count > 0) golden = lst[0];
+				}
+				
+				if (toCheck == null || golden == null)
+				{
+					return new ModuleIO(images, results);
+				}
+				
+				// 读取容差与阈值，默认对齐 PrintMatch.MatchingConfiguration.CreateBalanced()
+				double posTolX = ReadDoubleOr("position_tolerance_x", 20.0);
+				double posTolY = ReadDoubleOr("position_tolerance_y", 20.0);
+				double minConf = ReadDoubleOr("min_confidence_threshold", 0.5);
+				
+				// 使用与 PrintMatch 一致的匹配逻辑与输出结构
+				var pmDetail = MatchAsPrintMatch(golden, toCheck.OcrItems ?? new List<SimpleOcrItem>(), posTolX, posTolY, minConf);
+				bool ok = pmDetail?["template_match_info"] != null && pmDetail["template_match_info"]["is_match"] != null && pmDetail["template_match_info"]["is_match"].Value<bool>();
+				try
+				{
+					this.ScalarOutputsByName["ok"] = ok;
+					this.ScalarOutputsByName["detail"] = pmDetail != null ? pmDetail.ToString(Formatting.None) : "{}";
+				}
+				catch { }
+				return new ModuleIO(new List<ModuleImage>(), new JArray(), new List<SimpleTemplate>());
 			}
 
-			if (toCheck == null || golden == null)
+			private static string NormalizeTextPM(string text)
 			{
-				return new ModuleIO(images, results);
+				if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+				string s = text.Replace("\t", "").Replace("\r", "").Replace("\n", "");
+				// 去空白
+				s = s.Replace(" ", "");
+				// PrintMatch 对易混字符与符号的归一
+				s = s
+					.Replace('l', 'I')
+					.Replace('O', '0')
+					.Replace('o', '0')
+					.Replace('1', 'I')
+					.Replace('S', '5')
+					.Replace('Z', '2')
+					.Replace('G', '6')
+					.Replace('B', '8')
+					.Replace("°C", "℃")
+					.Replace("°", "")
+					.Replace('。', '.')
+					.Replace('！', '!')
+					.Replace('，', ',')
+					.Replace('(', '（')
+					.Replace(')', '）')
+					.Replace(':', '：')
+					.Replace('[', '【')
+					.Replace(']', '】')
+					.Replace('“', '"')
+					.Replace('”', '"')
+					.Replace('\'', '"')
+					.Replace("—", "-")
+					.Replace("--", "-");
+				return s.ToUpperInvariant();
 			}
 
-			// 读取位置容差（实例属性）并传递给静态匹配函数
-			double posTolX = ReadDoubleOr("position_tolerance_x", 20.0);
-			double posTolY = ReadDoubleOr("position_tolerance_y", 20.0);
-			var detail = MatchTemplate(golden, toCheck.OcrItems ?? new List<SimpleOcrItem>(), posTolX, posTolY);
-			// 输出标量：ok 与 detail_json
-			try
+			private static double CalculatePositionError(SimpleOcrItem a, SimpleOcrItem b)
 			{
-				this.ScalarOutputsByName["ok"] = detail.IsMatch;
-				this.ScalarOutputsByName["detail"] = JsonConvert.SerializeObject(detail);
+				int ax = a.X + a.Width / 2;
+				int ay = a.Y + a.Height / 2;
+				int bx = b.X + b.Width / 2;
+				int by = b.Y + b.Height / 2;
+				int dx = ax - bx;
+				int dy = ay - by;
+				return Math.Sqrt(dx * dx + dy * dy);
 			}
-			catch { }
-			return new ModuleIO(new List<ModuleImage>(), new JArray(), new List<SimpleTemplate>());
-		}
+
+			private static double PositionErrorThreshold(double xTol, double yTol)
+			{
+				return Math.Sqrt(xTol * xTol + yTol * yTol);
+			}
+
+			private static bool HasOverlap(SimpleOcrItem t, SimpleOcrItem d)
+			{
+				int ax2 = t.X + t.Width, ay2 = t.Y + t.Height;
+				int bx2 = d.X + d.Width, by2 = d.Y + d.Height;
+				return !(ax2 < d.X || bx2 < t.X || ay2 < d.Y || by2 < t.Y);
+			}
+
+			private static JObject MatchAsPrintMatch(SimpleTemplate golden, List<SimpleOcrItem> det, double posTolXVal, double posTolYVal, double minConf)
+			{
+				if (golden == null) return new JObject();
+				var templateItems = (golden.OcrItems ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
+				var detectionItemsAll = (det ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
+				// 置信度过滤（与 PrintMatch 一致）
+				var validDetections = detectionItemsAll.Where(r => r.Confidence >= (float)minConf && r.Width > 0 && r.Height > 0).ToList();
+				
+				// 按规范化文本分组
+				var allTexts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+				var tplGroups = new Dictionary<string, List<SimpleOcrItem>>(StringComparer.OrdinalIgnoreCase);
+				var detGroups = new Dictionary<string, List<SimpleOcrItem>>(StringComparer.OrdinalIgnoreCase);
+				for (int i = 0; i < templateItems.Count; i++)
+				{
+					string key = NormalizeTextPM(templateItems[i].Text);
+					allTexts.Add(key);
+					if (!tplGroups.ContainsKey(key)) tplGroups[key] = new List<SimpleOcrItem>();
+					tplGroups[key].Add(templateItems[i]);
+				}
+				for (int i = 0; i < validDetections.Count; i++)
+				{
+					string key = NormalizeTextPM(validDetections[i].Text);
+					allTexts.Add(key);
+					if (!detGroups.ContainsKey(key)) detGroups[key] = new List<SimpleOcrItem>();
+					detGroups[key].Add(validDetections[i]);
+				}
+				
+				var overDetectionsGlobal = new List<SimpleOcrItem>();
+				var missedTemplatesGlobal = new List<SimpleOcrItem>();
+				var deviationPairs = new List<Tuple<SimpleOcrItem, SimpleOcrItem>>(); // (tpl, det)
+				var correctPairs = new List<Tuple<SimpleOcrItem, SimpleOcrItem>>();
+				var misjudgmentPairs = new List<Tuple<SimpleOcrItem, SimpleOcrItem>>(); // (tpl, det)
+				
+				double errTh = PositionErrorThreshold(posTolXVal, posTolYVal);
+				
+				foreach (var text in allTexts)
+				{
+					var groupTpl = tplGroups.ContainsKey(text) ? new List<SimpleOcrItem>(tplGroups[text]) : new List<SimpleOcrItem>();
+					var groupDet = detGroups.ContainsKey(text) ? new List<SimpleOcrItem>(detGroups[text]) : new List<SimpleOcrItem>();
+					var usedDet = new HashSet<SimpleOcrItem>();
+					var matchedTpl = new HashSet<SimpleOcrItem>();
+					// 第一轮：精确位置（欧氏距离）
+					for (int ti = 0; ti < groupTpl.Count; ti++)
+					{
+						var t = groupTpl[ti];
+						bool matched = false;
+						for (int di = 0; di < groupDet.Count; di++)
+						{
+							var d = groupDet[di]; if (usedDet.Contains(d)) continue;
+							double pe = CalculatePositionError(t, d);
+							if (pe <= errTh)
+							{
+								correctPairs.Add(Tuple.Create(t, d));
+								usedDet.Add(d);
+								matchedTpl.Add(t);
+								matched = true; break;
+							}
+						}
+						// 未匹配留给第二轮
+					}
+					// 第二轮：重叠偏差
+					var tplRemain = groupTpl.Where(x => !matchedTpl.Contains(x)).ToList();
+					var detRemain = groupDet.Where(x => !usedDet.Contains(x)).ToList();
+					for (int ti = 0; ti < tplRemain.Count; ti++)
+					{
+						var t = tplRemain[ti];
+						for (int di = 0; di < detRemain.Count; di++)
+						{
+							var d = detRemain[di]; if (usedDet.Contains(d)) continue;
+							if (HasOverlap(t, d))
+							{
+								deviationPairs.Add(Tuple.Create(t, d));
+								usedDet.Add(d);
+								matchedTpl.Add(t);
+								break;
+							}
+						}
+					}
+					// 本组剩余
+					for (int di = 0; di < groupDet.Count; di++)
+					{
+						var d = groupDet[di]; if (!usedDet.Contains(d)) overDetectionsGlobal.Add(d);
+					}
+					for (int ti = 0; ti < groupTpl.Count; ti++)
+					{
+						var t = groupTpl[ti]; if (!matchedTpl.Contains(t)) missedTemplatesGlobal.Add(t);
+					}
+				}
+				
+				// 组间误判配对：过检与漏检重叠 → 误判
+				var usedOver = new HashSet<SimpleOcrItem>();
+				var usedMiss = new HashSet<SimpleOcrItem>();
+				for (int oi = 0; oi < overDetectionsGlobal.Count; oi++)
+				{
+					var d = overDetectionsGlobal[oi]; if (usedOver.Contains(d)) continue;
+					for (int mi = 0; mi < missedTemplatesGlobal.Count; mi++)
+					{
+						var t = missedTemplatesGlobal[mi]; if (usedMiss.Contains(t)) continue;
+						if (HasOverlap(t, d))
+						{
+							misjudgmentPairs.Add(Tuple.Create(t, d));
+							usedOver.Add(d);
+							usedMiss.Add(t);
+							break;
+						}
+					}
+				}
+				// 移除已并入误判的过检与漏检
+				overDetectionsGlobal = overDetectionsGlobal.Where(d => !usedOver.Contains(d)).ToList();
+				missedTemplatesGlobal = missedTemplatesGlobal.Where(t => !usedMiss.Contains(t)).ToList();
+				
+				// 统计
+				int correctCount = correctPairs.Count;
+				int deviationCount = deviationPairs.Count;
+				int overCount = overDetectionsGlobal.Count;
+				int missCount = missedTemplatesGlobal.Count;
+				int misjudgeCount = misjudgmentPairs.Count;
+				int totalTpl = Math.Max(0, templateItems.Count);
+				double score = 0.0;
+				if (totalTpl > 0)
+				{
+					var correctRatio = (double)correctCount / totalTpl;
+					var deviationPenalty = Math.Min(deviationCount * 0.1, 0.3);
+					var overPenalty = Math.Min(overCount * 0.15, 0.4);
+					var missPenalty = Math.Min(missCount * 0.2, 0.5);
+					var misPenalty = Math.Min(misjudgeCount * 0.5, 0.8);
+					score = Math.Max(0.0, correctRatio - deviationPenalty - overPenalty - missPenalty - misPenalty);
+				}
+				bool isMatch = (missCount == 0 && overCount == 0 && misjudgeCount == 0);
+				
+				// 构造输出 JSON（与 PrintMatch 字段一致）
+				var root = new JObject();
+				// ocr_results
+				var ocrArray = new JArray();
+				for (int i = 0; i < validDetections.Count; i++)
+				{
+					var d = validDetections[i];
+					string status = "OverDetection";
+					if (correctPairs.Any(p => ReferenceEquals(p.Item2, d))) status = "Correct";
+					else if (deviationPairs.Any(p => ReferenceEquals(p.Item2, d))) status = "PositionDeviation";
+					else if (misjudgmentPairs.Any(p => ReferenceEquals(p.Item2, d))) status = "Misjudgment";
+					var o = new JObject
+					{
+						["text"] = d.Text ?? string.Empty,
+						["x"] = d.X,
+						["y"] = d.Y,
+						["width"] = d.Width,
+						["height"] = d.Height,
+						["confidence"] = (double)d.Confidence,
+						["match_status"] = status
+					};
+					ocrArray.Add(o);
+				}
+				root["ocr_results"] = ocrArray;
+				// missing_template_items
+				var missingArr = new JArray();
+				for (int i = 0; i < missedTemplatesGlobal.Count; i++)
+				{
+					var t = missedTemplatesGlobal[i];
+					missingArr.Add(new JObject
+					{
+						["text"] = t.Text ?? string.Empty,
+						["x"] = t.X,
+						["y"] = t.Y,
+						["width"] = t.Width,
+						["height"] = t.Height,
+						["status"] = "missing"
+					});
+				}
+				root["missing_template_items"] = missingArr;
+				// deviation_template_items（用于绘制模板虚线框）
+				var devTplArr = new JArray();
+				for (int i = 0; i < deviationPairs.Count; i++)
+				{
+					var t = deviationPairs[i].Item1;
+					devTplArr.Add(new JObject
+					{
+						["text"] = t.Text ?? string.Empty,
+						["x"] = t.X,
+						["y"] = t.Y,
+						["width"] = t.Width,
+						["height"] = t.Height
+					});
+				}
+				root["deviation_template_items"] = devTplArr;
+				// misjudgment_pairs
+				var misPairsArr = new JArray();
+				for (int i = 0; i < misjudgmentPairs.Count; i++)
+				{
+					var pair = misjudgmentPairs[i];
+					var t = pair.Item1; var d = pair.Item2;
+					misPairsArr.Add(new JObject
+					{
+						["d_text"] = d.Text ?? string.Empty,
+						["d_x"] = d.X,
+						["d_y"] = d.Y,
+						["d_w"] = d.Width,
+						["d_h"] = d.Height,
+						["t_text"] = t.Text ?? string.Empty,
+						["t_x"] = t.X,
+						["t_y"] = t.Y,
+						["t_w"] = t.Width,
+						["t_h"] = t.Height
+					});
+				}
+				root["misjudgment_pairs"] = misPairsArr;
+				// template_match_info
+				root["template_match_info"] = new JObject
+				{
+					["template_name"] = golden.TemplateName ?? string.Empty,
+					["is_match"] = isMatch,
+					["match_score"] = score,
+					["perfect_matches"] = correctCount,
+					["position_deviations"] = deviationCount,
+					["over_detections"] = overCount,
+					["missing_components"] = missCount,
+					["misjudgments"] = misjudgeCount
+				};
+				return root;
+			}
 
 		private static List<SimpleOcrItem> ExtractOcrFromLocal(JArray results)
 		{
