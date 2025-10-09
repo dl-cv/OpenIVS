@@ -836,13 +836,6 @@ namespace DlcvModules
 			return detail;
 		}
 
-		private static bool HasOverlap(SimpleOcrItem a, SimpleOcrItem b)
-		{
-			int ax2 = a.X + a.Width, ay2 = a.Y + a.Height;
-			int bx2 = b.X + b.Width, by2 = b.Y + b.Height;
-			return !(ax2 < b.X || bx2 < a.X || ay2 < b.Y || by2 < a.Y);
-		}
-
 		private static int ClampToInt(double v)
 		{
 			if (double.IsNaN(v) || double.IsInfinity(v)) return 0;
