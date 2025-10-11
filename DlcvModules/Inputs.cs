@@ -113,6 +113,34 @@ namespace DlcvModules
             var images = new List<ModuleImage>();
             var results = new JArray();
 
+            // 优先从 ExecutionContext 注入前端图像 Mat（RGB）
+            try
+            {
+                Mat matFromContext = null;
+                try { matFromContext = Context != null ? Context.Get<Mat>("frontend_image_mat", null) : null; } catch { matFromContext = null; }
+                if (matFromContext != null && !matFromContext.Empty())
+                {
+                    var rgb = matFromContext;
+                    var state = new TransformationState(rgb.Width, rgb.Height);
+                    var wrap = new ModuleImage(rgb, rgb, state, 0);
+                    images.Add(wrap);
+
+                    var entry = new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = 0,
+                        ["origin_index"] = 0,
+                        ["transform"] = JObject.FromObject(state.ToDict()),
+                        ["sample_results"] = new JArray(),
+                        ["filename"] = "frontend_mat"
+                    };
+                    results.Add(entry);
+                    return new ModuleIO(images, results);
+                }
+            }
+            catch { }
+
+            // 回退到从路径读取
             string path = ResolvePath();
             if (string.IsNullOrWhiteSpace(path))
             {

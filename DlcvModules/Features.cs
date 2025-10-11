@@ -483,6 +483,22 @@ namespace DlcvModules
 
             // 通过 extra output 暴露第二路
             this.ExtraOutputs.Add(new ModuleChannel(altImages, altResults));
+
+            // 衍生布尔标量：是否存在保留类别（用于 D 面 OK/NG 判定）
+            try
+            {
+                bool hasPositive = false;
+                foreach (var t in mainResults)
+                {
+                    var e = t as JObject; if (e == null) continue;
+                    var srs = e["sample_results"] as JArray;
+                    if (srs != null && srs.Count > 0) { hasPositive = true; break; }
+                }
+                // 输出到 ScalarOutputsByName，供执行器写入标量出口
+                this.ScalarOutputsByName["has_positive"] = hasPositive;
+            }
+            catch { }
+
             return new ModuleIO(mainImages, mainResults);
         }
 
