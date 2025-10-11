@@ -1,5 +1,11 @@
 # OpenIVS 文档
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=dl-cv/OpenIVS&type=Date&theme=dark" />
+  <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=dl-cv/OpenIVS&type=Date" />
+  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=dl-cv/OpenIVS&type=Date" />
+</picture>
+
 ## 简介
 
 OpenIVS 的全称是 Open Source Industrial Vision System，即开源工业视觉系统。它是一个开源的工业视觉软件框架，帮助你快速完成工业视觉检测项目。
