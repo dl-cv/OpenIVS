@@ -139,6 +139,10 @@ namespace dlcv_infer_csharp
         private HttpClient _httpClient;
         private bool _disposed = false;
         private readonly string _rpcPipeName = "DlcvModelRpcPipe";
+        private static readonly string[] _rpcExecutableFixedPaths = new string[]
+        {
+            @"C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe"
+        };
 
         public Model()
         {
@@ -367,22 +371,27 @@ namespace dlcv_infer_csharp
         {
             try
             {
-                // 优先在当前目录寻找 AIModelRPC.exe
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                string exePath = Path.Combine(baseDir, "AIModelRPC.exe");
-                if (!File.Exists(exePath))
+                var candidates = new List<string>
                 {
-                    // 兼容开发目录结构（Debug/Release 子目录）
-                    var candidate = Directory.GetFiles(baseDir, "AIModelRPC.exe", SearchOption.AllDirectories).FirstOrDefault();
-                    if (!string.IsNullOrEmpty(candidate))
-                    {
-                        exePath = candidate;
-                    }
-                    else
-                    {
-                        throw new FileNotFoundException($"找不到 AIModelRPC.exe 文件。搜索路径: {baseDir}");
-                    }
+                    Path.Combine(baseDir, "AIModelRPC.exe")
+                };
+
+                // 仅按固定列表顺序追加
+                candidates.AddRange(_rpcExecutableFixedPaths);
+
+                var orderedUnique = candidates
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Select(p => p.Trim())
+                    .Distinct()
+                    .ToList();
+
+                string exePath = orderedUnique.FirstOrDefault(File.Exists);
+                if (string.IsNullOrEmpty(exePath))
+                {
+                    throw new FileNotFoundException("找不到 AIModelRPC.exe 文件。尝试路径: " + string.Join(" | ", orderedUnique));
                 }
+
                 var psi = new ProcessStartInfo
                 {
                     FileName = exePath,
