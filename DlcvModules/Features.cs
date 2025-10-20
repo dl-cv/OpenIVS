@@ -215,6 +215,90 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 固定坐标裁剪：按 x,y,w,h 在每张图上裁剪，透传 results。
+    /// 与 Python features/coordinate_crop 对齐：
+    /// - 坐标与尺寸按图像范围 clamp，最小 1x1
+    /// - 子图 transform 为平移矩阵 [-x, -y]
+    /// </summary>
+    public class CoordinateCrop : BaseModule
+    {
+        static CoordinateCrop()
+        {
+            ModuleRegistry.Register("features/coordinate_crop", typeof(CoordinateCrop));
+        }
+
+        public CoordinateCrop(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var imagesIn = imageList ?? new List<ModuleImage>();
+            var resultsIn = resultList ?? new JArray();
+
+            int propX = ReadInt(Properties, "x", 0);
+            int propY = ReadInt(Properties, "y", 0);
+            int propW = Math.Max(1, ReadInt(Properties, "w", 100));
+            int propH = Math.Max(1, ReadInt(Properties, "h", 100));
+
+            var imagesOut = new List<ModuleImage>();
+
+            for (int i = 0; i < imagesIn.Count; i++)
+            {
+                var tup = Unwrap(imagesIn[i]);
+                var wrap = tup.Item1;
+                var bmp = tup.Item2;
+                if (bmp == null || bmp.Empty()) continue;
+
+                int W = bmp.Width;
+                int H = bmp.Height;
+
+                int x0 = Math.Max(0, Math.Min(Math.Max(0, W - 1), propX));
+                int y0 = Math.Max(0, Math.Min(Math.Max(0, H - 1), propY));
+                int w0 = Math.Max(1, propW);
+                int h0 = Math.Max(1, propH);
+
+                int x1 = Math.Min(W, x0 + w0);
+                int y1 = Math.Min(H, y0 + h0);
+                if (x1 <= x0) x1 = Math.Min(W, x0 + 1);
+                if (y1 <= y0) y1 = Math.Min(H, y0 + 1);
+
+                int cw = Math.Max(1, x1 - x0);
+                int ch = Math.Max(1, y1 - y0);
+
+                var rect = new OpenCvSharp.Rect(x0, y0, cw, ch);
+                var cropped = new Mat(bmp, rect).Clone();
+
+                var parentWrap = wrap;
+                var parentState = parentWrap != null ? parentWrap.TransformState : new TransformationState(bmp.Width, bmp.Height);
+                var childA2x3 = new double[] { 1, 0, -x0, 0, 1, -y0 };
+                var childState = parentState.DeriveChild(childA2x3, cw, ch);
+
+                var childWrap = new ModuleImage(cropped,
+                    parentWrap != null ? parentWrap.OriginalImage : bmp,
+                    childState,
+                    parentWrap != null ? parentWrap.OriginalIndex : i);
+                imagesOut.Add(childWrap);
+            }
+
+            return new ModuleIO(imagesOut, resultsIn);
+        }
+
+        private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj)
+        {
+            if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
+            return Tuple.Create(obj, obj.ImageObject);
+        }
+
+        private static int ReadInt(Dictionary<string, object> d, string k, int dv)
+        {
+            if (d == null || k == null || !d.TryGetValue(k, out object v) || v == null) return dv;
+            try { return Convert.ToInt32(v); } catch { return dv; }
+        }
+    }
+
+    /// <summary>
     /// 合并多路图像与结果：将主输入和 ExtraInputsIn 的对汇总；按 transform/index/origin_index 对齐结果
     /// 可选去重：当 bbox+category_name 一致时去重
     /// 输出：每张图一个 local 条目
