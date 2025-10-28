@@ -260,16 +260,23 @@ namespace MiniAreaDemo
 
         public DisposableProcessingResults ProcessLabels(Mat originalImage, string modelPath)
         {
-            DisposableProcessingResults results = null;
+            DisposableProcessingResults singleResult = null;
             try
             {
-                var maskInfos = InferAndGetMasks(originalImage, modelPath);
-                results = PostProcessMasks(originalImage, maskInfos);
-                return results;
+                var batchResults = ProcessLabelsBatch(new List<Mat> { originalImage }, modelPath);
+                if (batchResults != null && batchResults.Count > 0)
+                {
+                    singleResult = batchResults[0];
+                }
+                else
+                {
+                    singleResult = new DisposableProcessingResults();
+                }
+                return singleResult;
             }
             catch
             {
-                results?.Dispose();
+                singleResult?.Dispose();
                 throw;
             }
         }
@@ -300,16 +307,6 @@ namespace MiniAreaDemo
                 }
                 throw;
             }
-        }
-
-        List<MaskInfo> InferAndGetMasks(Mat originalImage, string modelPath)
-        {
-            var batch = InferAndGetMasksBatch(new List<Mat> { originalImage }, modelPath);
-            if (batch != null && batch.Count > 0)
-            {
-                return batch[0];
-            }
-            return new List<MaskInfo>();
         }
 
         /// <summary>
