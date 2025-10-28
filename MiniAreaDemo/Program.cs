@@ -93,6 +93,14 @@ namespace MiniAreaDemo
         /// <param name="modelPath">模型路径</param>
         /// <returns>处理结果列表</returns>
         DisposableProcessingResults ProcessLabels(Mat image, string modelPath);
+
+        /// <summary>
+        /// 批量处理图像中的标签纸（使用Mat对象列表）
+        /// </summary>
+        /// <param name="images">输入图像列表</param>
+        /// <param name="modelPath">模型路径</param>
+        /// <returns>与输入一一对应的处理结果列表</returns>
+        List<DisposableProcessingResults> ProcessLabelsBatch(List<Mat> images, string modelPath);
     }
 
     /// <summary>
@@ -153,121 +161,200 @@ namespace MiniAreaDemo
             return _model;
         }
 
-        public DisposableProcessingResults ProcessLabels(Mat originalImage, string modelPath)
+        /// <summary>
+        /// 通用后处理：从 MaskInfo 列表生成 ProcessingResult 列表
+        /// </summary>
+        private DisposableProcessingResults PostProcessMasks(Mat originalImage, List<MaskInfo> maskInfos)
         {
             DisposableProcessingResults results = new DisposableProcessingResults();
 
-            try
+            if (maskInfos == null || maskInfos.Count == 0)
             {
-                // 使用模型进行推理并获取mask和bbox信息
-                var maskInfos = InferAndGetMasks(originalImage, modelPath);
-                if (maskInfos.Count == 0)
-                {
-                    return results;
-                }
-
-                // 处理所有mask
-                for (int i = 0; i < maskInfos.Count; i++)
-                {
-                    var maskInfo = maskInfos[i];
-                    
-                    // 将mask坐标转换到原图坐标系并获取最小外接四边形
-                    Point2f[] quadPoints = GetMinAreaQuadInOriginalImage(maskInfo);
-
-                    if (quadPoints.Length != 4)
-                    {
-                        // 立即释放无效的mask
-                        maskInfo.Mask?.Dispose();
-                        continue;
-                    }
-
-                    // 计算角度
-                    double angleInRadians = GetAngleFromQuad(quadPoints);
-
-                    // 对原图进行透视变换
-                    Mat processedImage = AdvancedPerspectiveTransform(originalImage, quadPoints);
-
-                    // 创建处理结果
-                    var result = new ProcessingResult
-                    {
-                        MaskInfo = maskInfo,
-                        ProcessedImage = processedImage,
-                        QuadPoints = quadPoints,
-                        Angle = angleInRadians
-                    };
-
-                    results.Add(result);
-                }
-
                 return results;
             }
-            catch (Exception ex)
+
+            for (int i = 0; i < maskInfos.Count; i++)
             {
-                // 清理已创建的资源
-                results.Dispose();
+                var maskInfo = maskInfos[i];
+
+                // 将mask坐标转换到原图坐标系并获取最小外接四边形
+                Point2f[] quadPoints = GetMinAreaQuadInOriginalImage(maskInfo);
+
+                if (quadPoints.Length != 4)
+                {
+                    // 立即释放无效的mask
+                    maskInfo.Mask?.Dispose();
+                    continue;
+                }
+
+                // 计算角度
+                double angleInRadians = GetAngleFromQuad(quadPoints);
+
+                // 对原图进行透视变换
+                Mat processedImage = AdvancedPerspectiveTransform(originalImage, quadPoints);
+
+                // 创建处理结果
+                var result = new ProcessingResult
+                {
+                    MaskInfo = maskInfo,
+                    ProcessedImage = processedImage,
+                    QuadPoints = quadPoints,
+                    Angle = angleInRadians
+                };
+
+                results.Add(result);
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// 从单个检测对象构建 MaskInfo
+        /// </summary>
+        private MaskInfo CreateMaskInfoFromObject(Utils.CSharpObjectResult objectResult)
+        {
+            if (objectResult.WithBbox && objectResult.Bbox != null && objectResult.Bbox.Count >= 4)
+            {
+                int bboxX = (int)objectResult.Bbox[0];
+                int bboxY = (int)objectResult.Bbox[1];
+                int bboxW = (int)objectResult.Bbox[2];
+                int bboxH = (int)objectResult.Bbox[3];
+
+                if (bboxW <= 0 || bboxH <= 0)
+                {
+                    return null;
+                }
+
+                Mat mask;
+
+                if (objectResult.WithMask && objectResult.Mask != null && !objectResult.Mask.Empty())
+                {
+                    // 如果有mask，使用原始mask并resize到bbox尺寸
+                    mask = objectResult.Mask.Clone();
+                    Cv2.Resize(mask, mask, new Size(bboxW, bboxH));
+
+                    // 确保mask是单通道8位图像
+                    if (mask.Channels() != 1)
+                    {
+                        Cv2.CvtColor(mask, mask, ColorConversionCodes.BGR2GRAY);
+                    }
+                }
+                else
+                {
+                    // 如果没有mask，根据bbox尺寸创建全白mask
+                    mask = new Mat(bboxH, bboxW, MatType.CV_8UC1, Scalar.All(255));
+                }
+
+                return new MaskInfo
+                {
+                    Mask = mask,
+                    BboxX = bboxX,
+                    BboxY = bboxY,
+                    BboxW = bboxW,
+                    BboxH = bboxH
+                };
+            }
+
+            return null;
+        }
+
+        public DisposableProcessingResults ProcessLabels(Mat originalImage, string modelPath)
+        {
+            DisposableProcessingResults results = null;
+            try
+            {
+                var maskInfos = InferAndGetMasks(originalImage, modelPath);
+                results = PostProcessMasks(originalImage, maskInfos);
+                return results;
+            }
+            catch
+            {
+                results?.Dispose();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// 批量处理：对每张图片执行推理与后处理
+        /// </summary>
+        public List<DisposableProcessingResults> ProcessLabelsBatch(List<Mat> originalImages, string modelPath)
+        {
+            var batchResults = new List<DisposableProcessingResults>();
+            try
+            {
+                var batchMaskInfos = InferAndGetMasksBatch(originalImages, modelPath);
+                int count = Math.Min(originalImages != null ? originalImages.Count : 0, batchMaskInfos.Count);
+                for (int i = 0; i < count; i++)
+                {
+                    var oneImageResults = PostProcessMasks(originalImages[i], batchMaskInfos[i]);
+                    batchResults.Add(oneImageResults);
+                }
+                return batchResults;
+            }
+            catch
+            {
+                // 发生异常时释放已创建的结果资源
+                foreach (var r in batchResults)
+                {
+                    r?.Dispose();
+                }
                 throw;
             }
         }
 
         List<MaskInfo> InferAndGetMasks(Mat originalImage, string modelPath)
         {
-            List<MaskInfo> maskInfos = new List<MaskInfo>();
-            
+            var batch = InferAndGetMasksBatch(new List<Mat> { originalImage }, modelPath);
+            if (batch != null && batch.Count > 0)
+            {
+                return batch[0];
+            }
+            return new List<MaskInfo>();
+        }
+
+        /// <summary>
+        /// 批量推理并为每张图片生成 MaskInfo 列表
+        /// </summary>
+        List<List<MaskInfo>> InferAndGetMasksBatch(List<Mat> originalImages, string modelPath)
+        {
+            var batchMaskInfos = new List<List<MaskInfo>>();
             try
             {
                 // 使用全局模型实例
                 Model model = GetOrLoadModel(modelPath);
-                
-                // 进行推理
-                var result = model.Infer(originalImage);
-                
-                // 从推理结果中提取mask和bbox信息
-                foreach (var objectResult in result.SampleResults[0].Results)
+
+                // 进行批量推理
+                var batchResult = model.InferBatch(originalImages);
+
+                // 与输入列表一一对应地提取结果
+                for (int i = 0; i < batchResult.SampleResults.Count; i++)
                 {
-                    if (objectResult.WithBbox && objectResult.Bbox.Count >= 4)
+                    var oneImageMaskInfos = new List<MaskInfo>();
+                    foreach (var objectResult in batchResult.SampleResults[i].Results)
                     {
-                        int bboxX = (int)objectResult.Bbox[0];
-                        int bboxY = (int)objectResult.Bbox[1];
-                        int bboxW = (int)objectResult.Bbox[2];
-                        int bboxH = (int)objectResult.Bbox[3];
-                        
-                        Mat mask;
-                        
-                        if (objectResult.WithMask && !objectResult.Mask.Empty())
+                        var mi = CreateMaskInfoFromObject(objectResult);
+                        if (mi != null)
                         {
-                            // 如果有mask，使用原始mask并resize到bbox尺寸
-                            mask = objectResult.Mask.Clone();
-                            Cv2.Resize(mask, mask, new Size(bboxW, bboxH));
-                            
-                            // 确保mask是单通道8位图像
-                            if (mask.Channels() != 1)
-                            {
-                                Cv2.CvtColor(mask, mask, ColorConversionCodes.BGR2GRAY);
-                            }
+                            oneImageMaskInfos.Add(mi);
                         }
-                        else
-                        {
-                            // 如果没有mask，根据bbox尺寸创建全白mask
-                            mask = new Mat(bboxH, bboxW, MatType.CV_8UC1, Scalar.All(255));
-                        }
-                        
-                        maskInfos.Add(new MaskInfo
-                        {
-                            Mask = mask,
-                            BboxX = bboxX,
-                            BboxY = bboxY,
-                            BboxW = bboxW,
-                            BboxH = bboxH
-                        });
                     }
+                    batchMaskInfos.Add(oneImageMaskInfos);
                 }
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"模型推理失败: {ex.Message}", ex);
+                // 释放已创建的mask资源后再抛出
+                foreach (var list in batchMaskInfos)
+                {
+                    foreach (var mi in list)
+                    {
+                        mi.Mask?.Dispose();
+                    }
+                }
+                throw new InvalidOperationException($"模型批量推理失败: {ex.Message}", ex);
             }
-            
-            return maskInfos;
+
+            return batchMaskInfos;
         }
 
         // 高级透视变换函数，专门处理透视变形
