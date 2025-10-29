@@ -566,76 +566,118 @@ namespace MiniAreaDemo
                     string outputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "processed_images");
                     Directory.CreateDirectory(outputDir);
 
-                    int totalProcessed = 0;
-                    int totalLabels = 0;
-
-                    // 处理每个图像文件
+                    // 批量加载所有图像
+                    Console.WriteLine("\n批量加载图像...");
+                    List<Mat> images = new List<Mat>();
+                    List<string> loadedFileNames = new List<string>();
+                    
                     for (int fileIndex = 0; fileIndex < imageFiles.Count; fileIndex++)
                     {
                         string imagePath = imageFiles[fileIndex];
                         string fileName = Path.GetFileNameWithoutExtension(imagePath);
                         
-                        Console.WriteLine($"\n{new string('=', 50)}");
-                        Console.WriteLine($"处理图像 {fileIndex + 1}/{imageFiles.Count}: {fileName}");
-                        Console.WriteLine($"图像路径: {imagePath}");
-
                         try
                         {
-                            // 使用cv.read读取图像
-                            using (Mat originalImage = Cv2.ImRead(imagePath))
+                            Mat image = Cv2.ImRead(imagePath);
+                            if (image.Empty())
                             {
-                                if (originalImage.Empty())
-                                {
-                                    Console.WriteLine($"无法加载图像: {imagePath}");
-                                    continue;
-                                }
-
-                                Console.WriteLine($"图像尺寸: {originalImage.Width}x{originalImage.Height}");
-
-                                // 处理图像
-                                using (var results = processor.ProcessLabels(originalImage, modelPath))
-                                {
-                                    Console.WriteLine($"检测到 {results.Count} 个标签纸");
-
-                                    // 处理结果
-                                    for (int i = 0; i < results.Count; i++)
-                                    {
-                                        var result = results[i];
-                                        Console.WriteLine($"\n--- 标签纸 {i} ---");
-                                        Console.WriteLine($"角度: {result.Angle * 180 / Math.PI:F2}度");
-                                        
-                                        // 打印四边形顶点
-                                        Console.WriteLine("四边形顶点:");
-                                        for (int j = 0; j < result.QuadPoints.Length; j++)
-                                        {
-                                            Console.WriteLine($"  点{j}: ({result.QuadPoints[j].X:F1}, {result.QuadPoints[j].Y:F1})");
-                                        }
-                                        
-                                        // 保存处理后的图像
-                                        string outputPath = Path.Combine(outputDir, $"{fileName}_label_{i}.png");
-                                        Cv2.ImWrite(outputPath, result.ProcessedImage);
-                                        Console.WriteLine($"已保存处理后的图像: {outputPath}");
-                                        Console.WriteLine($"图像尺寸: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
-                                    }
-
-                                    totalProcessed++;
-                                    totalLabels += results.Count;
-                                    
-                                    Console.WriteLine($"处理完成，释放资源...");
-                                } // results会自动释放
-                            } // originalImage会自动释放
+                                Console.WriteLine($"无法加载图像: {imagePath}");
+                                continue;
+                            }
+                            
+                            images.Add(image);
+                            loadedFileNames.Add(fileName);
+                            Console.WriteLine($"已加载图像 {images.Count}/{imageFiles.Count}: {fileName} ({image.Width}x{image.Height})");
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"处理图像 {fileName} 时发生错误: {ex.Message}");
+                            Console.WriteLine($"加载图像失败 {fileName}: {ex.Message}");
                         }
                     }
 
-                    Console.WriteLine($"\n{new string('=', 50)}");
-                    Console.WriteLine($"处理完成!");
-                    Console.WriteLine($"成功处理图像: {totalProcessed}/{imageFiles.Count}");
-                    Console.WriteLine($"总共检测到标签纸: {totalLabels} 个");
-                    Console.WriteLine($"输出目录: {outputDir}");
+                    Console.WriteLine($"\n总共加载 {images.Count} 张图像");
+                    
+                    if (images.Count == 0)
+                    {
+                        Console.WriteLine("没有成功加载任何图像");
+                        return;
+                    }
+
+                    // 使用批量推理接口
+                    Console.WriteLine("\n开始批量推理...");
+                    int totalLabels = 0;
+                    List<DisposableProcessingResults> batchResults = null;
+                    
+                    try
+                    {
+                        batchResults = processor.ProcessLabelsBatch(images, modelPath);
+                        Console.WriteLine($"批量推理完成，处理 {batchResults.Count} 张图像");
+                        
+                        // 处理每张图像的结果
+                        for (int imgIndex = 0; imgIndex < batchResults.Count; imgIndex++)
+                        {
+                            var results = batchResults[imgIndex];
+                            string fileName = loadedFileNames[imgIndex];
+                            
+                            Console.WriteLine($"\n{new string('=', 50)}");
+                            Console.WriteLine($"图像 {imgIndex + 1}/{batchResults.Count}: {fileName}");
+                            Console.WriteLine($"检测到 {results.Count} 个标签纸");
+
+                            // 处理结果
+                            for (int i = 0; i < results.Count; i++)
+                            {
+                                var result = results[i];
+                                Console.WriteLine($"\n--- 标签纸 {i} ---");
+                                Console.WriteLine($"角度: {result.Angle * 180 / Math.PI:F2}度");
+                                
+                                // 打印四边形顶点
+                                Console.WriteLine("四边形顶点:");
+                                for (int j = 0; j < result.QuadPoints.Length; j++)
+                                {
+                                    Console.WriteLine($"  点{j}: ({result.QuadPoints[j].X:F1}, {result.QuadPoints[j].Y:F1})");
+                                }
+                                
+                                // 保存处理后的图像
+                                string outputPath = Path.Combine(outputDir, $"{fileName}_label_{i}.png");
+                                Cv2.ImWrite(outputPath, result.ProcessedImage);
+                                Console.WriteLine($"已保存处理后的图像: {outputPath}");
+                                Console.WriteLine($"图像尺寸: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
+                            }
+                            
+                            totalLabels += results.Count;
+                        }
+                        
+                        Console.WriteLine($"\n{new string('=', 50)}");
+                        Console.WriteLine($"处理完成!");
+                        Console.WriteLine($"成功处理图像: {images.Count}/{imageFiles.Count}");
+                        Console.WriteLine($"总共检测到标签纸: {totalLabels} 个");
+                        Console.WriteLine($"输出目录: {outputDir}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"批量推理失败: {ex.Message}");
+                        throw;
+                    }
+                    finally
+                    {
+                        // 释放批量推理结果
+                        if (batchResults != null)
+                        {
+                            Console.WriteLine("\n释放批量推理结果资源...");
+                            foreach (var results in batchResults)
+                            {
+                                results?.Dispose();
+                            }
+                        }
+                        
+                        // 释放所有加载的图像
+                        Console.WriteLine("释放图像资源...");
+                        foreach (var image in images)
+                        {
+                            image?.Dispose();
+                        }
+                        images.Clear();
+                    }
                 } // processor会自动释放，包括模型资源
             }
             catch (Exception ex)
