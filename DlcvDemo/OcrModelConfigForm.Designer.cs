@@ -133,6 +133,11 @@ namespace DlcvDemo
             0,
             0,
             0});
+            this.numDevice.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            -2147483648});
             this.numDevice.Name = "numDevice";
             this.numDevice.Size = new System.Drawing.Size(80, 31);
             this.numDevice.TabIndex = 7;
