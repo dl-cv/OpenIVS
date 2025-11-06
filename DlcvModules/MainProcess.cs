@@ -202,51 +202,80 @@ namespace DlcvModules
 			return outputs;
 		}
 
-			public void LoadModels()
-			{
-				var ordered = new List<Dictionary<string, object>>(_nodes);
-				ordered.Sort((a, b) =>
-				{
-					int ao = a != null && a.TryGetValue("order", out object aov) ? SafeToInt(aov, int.MaxValue - 1) : int.MaxValue - 1;
-					int bo = b != null && b.TryGetValue("order", out object bov) ? SafeToInt(bov, int.MaxValue - 1) : int.MaxValue - 1;
-					if (ao != bo) return ao.CompareTo(bo);
-					int aid = a != null && a.TryGetValue("id", out object aidv) ? SafeToInt(aidv, 0) : 0;
-					int bid = b != null && b.TryGetValue("id", out object bidv) ? SafeToInt(bidv, 0) : 0;
-					return aid.CompareTo(bid);
-				});
+		public JObject LoadModels()
+		{
+			var report = new JObject();
+			var items = new JArray();
+			int failCount = 0;
 
-				for (int i = 0; i < ordered.Count; i++)
+			var ordered = new List<Dictionary<string, object>>(_nodes);
+			ordered.Sort((a, b) =>
+			{
+				int ao = a != null && a.TryGetValue("order", out object aov) ? SafeToInt(aov, int.MaxValue - 1) : int.MaxValue - 1;
+				int bo = b != null && b.TryGetValue("order", out object bov) ? SafeToInt(bov, int.MaxValue - 1) : int.MaxValue - 1;
+				if (ao != bo) return ao.CompareTo(bo);
+				int aid = a != null && a.TryGetValue("id", out object aidv) ? SafeToInt(aidv, 0) : 0;
+				int bid = b != null && b.TryGetValue("id", out object bidv) ? SafeToInt(bidv, 0) : 0;
+				return aid.CompareTo(bid);
+			});
+
+			for (int i = 0; i < ordered.Count; i++)
+			{
+				var node = ordered[i];
+				string type = node != null && node.TryGetValue("type", out object tv) ? (tv != null ? tv.ToString() : null) : null;
+				int nodeId = node != null && node.TryGetValue("id", out object iv) ? SafeToInt(iv, i) : i;
+				string title = node != null && node.TryGetValue("title", out object tl) ? (tl != null ? tl.ToString() : null) : null;
+				Dictionary<string, object> props = null;
+				if (node != null && node.TryGetValue("properties", out object pv) && pv != null)
 				{
-					var node = ordered[i];
-					string type = node != null && node.TryGetValue("type", out object tv) ? (tv != null ? tv.ToString() : null) : null;
-					int nodeId = node != null && node.TryGetValue("id", out object iv) ? SafeToInt(iv, i) : i;
-					string title = node != null && node.TryGetValue("title", out object tl) ? (tl != null ? tl.ToString() : null) : null;
-					Dictionary<string, object> props = null;
-					if (node != null && node.TryGetValue("properties", out object pv) && pv != null)
+					props = pv as Dictionary<string, object>;
+					if (props == null)
 					{
-						props = pv as Dictionary<string, object>;
-						if (props == null)
+						var jo = pv as JObject;
+						if (jo != null)
 						{
-							var jo = pv as JObject;
-							if (jo != null)
-							{
-								try { props = jo.ToObject<Dictionary<string, object>>(); } catch { props = null; }
-							}
+							try { props = jo.ToObject<Dictionary<string, object>>(); } catch { props = null; }
 						}
 					}
-					if (props == null) props = new Dictionary<string, object>();
+				}
+				if (props == null) props = new Dictionary<string, object>();
 
-					var moduleType = ModuleRegistry.Get(type);
-					if (moduleType == null) continue;
-					var module = (BaseModule)Activator.CreateInstance(moduleType, nodeId, title, props, _context);
+				var moduleType = ModuleRegistry.Get(type);
+				if (moduleType == null) continue;
+				var module = (BaseModule)Activator.CreateInstance(moduleType, nodeId, title, props, _context);
 
-					var modelModule = module as BaseModelModule;
-					if (modelModule != null)
+				var modelModule = module as BaseModelModule;
+				if (modelModule != null)
+				{
+					string modelPath = null;
+					try { if (props != null && props.ContainsKey("model_path") && props["model_path"] != null) modelPath = props["model_path"].ToString(); } catch { }
+					var item = new JObject();
+					item["node_id"] = nodeId;
+					item["type"] = type ?? string.Empty;
+					item["title"] = title ?? string.Empty;
+					item["model_path"] = modelPath ?? string.Empty;
+					try
 					{
-						try { modelModule.LoadModel(); } catch { }
+						modelModule.LoadModel();
+						item["status_code"] = 0;
+						item["status_message"] = "ok";
 					}
+					catch (Exception ex)
+					{
+						failCount++;
+						item["status_code"] = 1;
+						item["status_message"] = ex.Message ?? string.Empty;
+						try { item["exception"] = ex.ToString(); } catch { }
+					}
+					items.Add(item);
 				}
 			}
+
+			report["code"] = failCount == 0 ? 0 : 1;
+			report["message"] = failCount == 0 ? "all models loaded" : ("models loaded with " + failCount + " error(s)");
+			report["models"] = items;
+			return report;
+		}
 
 		private static int SafeToInt(object v, int dv)
 		{
