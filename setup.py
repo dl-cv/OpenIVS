@@ -4,7 +4,7 @@ import shutil
 
 from setuptools import setup
 
-version = '2025.8.18.0'
+version = '2025.11.4.1a0'
 
 package_name = "dlcvpro_infer_csharp"  # 包名
 packages: list = [package_name]  # 需要打包的包

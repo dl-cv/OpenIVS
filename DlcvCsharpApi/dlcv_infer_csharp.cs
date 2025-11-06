@@ -139,6 +139,10 @@ namespace dlcv_infer_csharp
         private HttpClient _httpClient;
         private bool _disposed = false;
         private readonly string _rpcPipeName = "DlcvModelRpcPipe";
+        private static readonly string[] _rpcExecutableFixedPaths = new string[]
+        {
+            @"C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe"
+        };
 
         public Model()
         {
@@ -367,22 +371,27 @@ namespace dlcv_infer_csharp
         {
             try
             {
-                // 优先在当前目录寻找 AIModelRPC.exe
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                string exePath = Path.Combine(baseDir, "AIModelRPC.exe");
-                if (!File.Exists(exePath))
+                var candidates = new List<string>
                 {
-                    // 兼容开发目录结构（Debug/Release 子目录）
-                    var candidate = Directory.GetFiles(baseDir, "AIModelRPC.exe", SearchOption.AllDirectories).FirstOrDefault();
-                    if (!string.IsNullOrEmpty(candidate))
-                    {
-                        exePath = candidate;
-                    }
-                    else
-                    {
-                        throw new FileNotFoundException($"找不到 AIModelRPC.exe 文件。搜索路径: {baseDir}");
-                    }
+                    Path.Combine(baseDir, "AIModelRPC.exe")
+                };
+
+                // 仅按固定列表顺序追加
+                candidates.AddRange(_rpcExecutableFixedPaths);
+
+                var orderedUnique = candidates
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Select(p => p.Trim())
+                    .Distinct()
+                    .ToList();
+
+                string exePath = orderedUnique.FirstOrDefault(File.Exists);
+                if (string.IsNullOrEmpty(exePath))
+                {
+                    throw new FileNotFoundException("找不到 AIModelRPC.exe 文件。尝试路径: " + string.Join(" | ", orderedUnique));
                 }
+
                 var psi = new ProcessStartInfo
                 {
                     FileName = exePath,
@@ -2123,61 +2132,84 @@ namespace dlcv_infer_csharp
         // 新增方法：获取 GPU 信息
         public static JObject GetGpuInfo()
         {
-            var devices = new List<Dictionary<string, object>>();
-
-            int result = nvmlInit();
-            if (result != 0)
+            try
             {
-                return JObject.FromObject(new
-                {
-                    code = 1,
-                    message = "Failed to initialize NVML."
-                });
-            }
+                var devices = new List<Dictionary<string, object>>();
 
-            int deviceCount = 0;
-            result = nvmlDeviceGetCount(ref deviceCount);
-            if (result != 0)
-            {
-                nvmlShutdown();
-                return JObject.FromObject(new
-                {
-                    code = 2,
-                    message = "Failed to get device count."
-                });
-            }
-
-            for (uint i = 0; i < deviceCount; i++)
-            {
-                IntPtr device;
-                result = nvmlDeviceGetHandleByIndex(i, out device);
+                int result = nvmlInit();
                 if (result != 0)
                 {
-                    continue; // Skip this device if we fail to get its handle
+                    return JObject.FromObject(new
+                    {
+                        code = 1,
+                        message = "Failed to initialize NVML."
+                    });
                 }
 
-                uint length = 64; // Allocate enough space for the name
-                char[] name = new char[length];
-                result = nvmlDeviceGetName(device, name, ref length);
-                if (result == 0)
+                int deviceCount = 0;
+                result = nvmlDeviceGetCount(ref deviceCount);
+                if (result != 0)
                 {
-                    string gpuName = new string(name, 0, (int)length);
-                    devices.Add(new Dictionary<string, object>
+                    nvmlShutdown();
+                    return JObject.FromObject(new
+                    {
+                        code = 2,
+                        message = "Failed to get device count."
+                    });
+                }
+
+                for (uint i = 0; i < deviceCount; i++)
                 {
-                    { "device_id", i },
-                    { "device_name", gpuName }
+                    IntPtr device;
+                    result = nvmlDeviceGetHandleByIndex(i, out device);
+                    if (result != 0)
+                    {
+                        continue; // Skip this device if we fail to get its handle
+                    }
+
+                    uint length = 64; // Allocate enough space for the name
+                    char[] name = new char[length];
+                    result = nvmlDeviceGetName(device, name, ref length);
+                    if (result == 0)
+                    {
+                        string gpuName = new string(name, 0, (int)length);
+                        devices.Add(new Dictionary<string, object>
+                    {
+                        { "device_id", i },
+                        { "device_name", gpuName }
+                    });
+                    }
+                }
+
+                nvmlShutdown();
+
+                return JObject.FromObject(new
+                {
+                    code = 0,
+                    message = "Success",
+                    devices
                 });
-                }
             }
-
-            nvmlShutdown();
-
-            return JObject.FromObject(new
+            catch (DllNotFoundException)
             {
-                code = 0,
-                message = "Success",
-                devices
-            });
+                // nvml.dll 未安装
+                return JObject.FromObject(new
+                {
+                    code = -1,
+                    message = "NVML library (nvml.dll) not found. NVIDIA driver may not be installed.",
+                    devices = new List<Dictionary<string, object>>()
+                });
+            }
+            catch (Exception ex)
+            {
+                // 其他异常
+                return JObject.FromObject(new
+                {
+                    code = -2,
+                    message = $"Error getting GPU info: {ex.Message}",
+                    devices = new List<Dictionary<string, object>>()
+                });
+            }
         }
 
         // NVML API 的 P/Invoke 声明

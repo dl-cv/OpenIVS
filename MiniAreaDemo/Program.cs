@@ -93,6 +93,14 @@ namespace MiniAreaDemo
         /// <param name="modelPath">模型路径</param>
         /// <returns>处理结果列表</returns>
         DisposableProcessingResults ProcessLabels(Mat image, string modelPath);
+
+        /// <summary>
+        /// 批量处理图像中的标签纸（使用Mat对象列表）
+        /// </summary>
+        /// <param name="images">输入图像列表</param>
+        /// <param name="modelPath">模型路径</param>
+        /// <returns>与输入一一对应的处理结果列表</returns>
+        List<DisposableProcessingResults> ProcessLabelsBatch(List<Mat> images, string modelPath);
     }
 
     /// <summary>
@@ -153,121 +161,197 @@ namespace MiniAreaDemo
             return _model;
         }
 
-        public DisposableProcessingResults ProcessLabels(Mat originalImage, string modelPath)
+        /// <summary>
+        /// 通用后处理：从 MaskInfo 列表生成 ProcessingResult 列表
+        /// </summary>
+        private DisposableProcessingResults PostProcessMasks(Mat originalImage, List<MaskInfo> maskInfos)
         {
             DisposableProcessingResults results = new DisposableProcessingResults();
 
-            try
+            if (maskInfos == null || maskInfos.Count == 0)
             {
-                // 使用模型进行推理并获取mask和bbox信息
-                var maskInfos = InferAndGetMasks(originalImage, modelPath);
-                if (maskInfos.Count == 0)
-                {
-                    return results;
-                }
-
-                // 处理所有mask
-                for (int i = 0; i < maskInfos.Count; i++)
-                {
-                    var maskInfo = maskInfos[i];
-                    
-                    // 将mask坐标转换到原图坐标系并获取最小外接四边形
-                    Point2f[] quadPoints = GetMinAreaQuadInOriginalImage(maskInfo);
-
-                    if (quadPoints.Length != 4)
-                    {
-                        // 立即释放无效的mask
-                        maskInfo.Mask?.Dispose();
-                        continue;
-                    }
-
-                    // 计算角度
-                    double angleInRadians = GetAngleFromQuad(quadPoints);
-
-                    // 对原图进行透视变换
-                    Mat processedImage = AdvancedPerspectiveTransform(originalImage, quadPoints);
-
-                    // 创建处理结果
-                    var result = new ProcessingResult
-                    {
-                        MaskInfo = maskInfo,
-                        ProcessedImage = processedImage,
-                        QuadPoints = quadPoints,
-                        Angle = angleInRadians
-                    };
-
-                    results.Add(result);
-                }
-
                 return results;
             }
-            catch (Exception ex)
+
+            for (int i = 0; i < maskInfos.Count; i++)
             {
-                // 清理已创建的资源
-                results.Dispose();
+                var maskInfo = maskInfos[i];
+
+                // 将mask坐标转换到原图坐标系并获取最小外接四边形
+                Point2f[] quadPoints = GetMinAreaQuadInOriginalImage(maskInfo);
+
+                if (quadPoints.Length != 4)
+                {
+                    // 立即释放无效的mask
+                    maskInfo.Mask?.Dispose();
+                    continue;
+                }
+
+                // 计算角度
+                double angleInRadians = GetAngleFromQuad(quadPoints);
+
+                // 对原图进行透视变换
+                Mat processedImage = AdvancedPerspectiveTransform(originalImage, quadPoints);
+
+                // 创建处理结果
+                var result = new ProcessingResult
+                {
+                    MaskInfo = maskInfo,
+                    ProcessedImage = processedImage,
+                    QuadPoints = quadPoints,
+                    Angle = angleInRadians
+                };
+
+                results.Add(result);
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// 从单个检测对象构建 MaskInfo
+        /// </summary>
+        private MaskInfo CreateMaskInfoFromObject(Utils.CSharpObjectResult objectResult)
+        {
+            if (objectResult.WithBbox && objectResult.Bbox != null && objectResult.Bbox.Count >= 4)
+            {
+                int bboxX = (int)objectResult.Bbox[0];
+                int bboxY = (int)objectResult.Bbox[1];
+                int bboxW = (int)objectResult.Bbox[2];
+                int bboxH = (int)objectResult.Bbox[3];
+
+                if (bboxW <= 0 || bboxH <= 0)
+                {
+                    return null;
+                }
+
+                Mat mask;
+
+                if (objectResult.WithMask && objectResult.Mask != null && !objectResult.Mask.Empty())
+                {
+                    // 如果有mask，使用原始mask并resize到bbox尺寸
+                    mask = objectResult.Mask.Clone();
+                    Cv2.Resize(mask, mask, new Size(bboxW, bboxH));
+
+                    // 确保mask是单通道8位图像
+                    if (mask.Channels() != 1)
+                    {
+                        Cv2.CvtColor(mask, mask, ColorConversionCodes.BGR2GRAY);
+                    }
+                }
+                else
+                {
+                    // 如果没有mask，根据bbox尺寸创建全白mask
+                    mask = new Mat(bboxH, bboxW, MatType.CV_8UC1, Scalar.All(255));
+                }
+
+                return new MaskInfo
+                {
+                    Mask = mask,
+                    BboxX = bboxX,
+                    BboxY = bboxY,
+                    BboxW = bboxW,
+                    BboxH = bboxH
+                };
+            }
+
+            return null;
+        }
+
+        public DisposableProcessingResults ProcessLabels(Mat originalImage, string modelPath)
+        {
+            DisposableProcessingResults singleResult = null;
+            try
+            {
+                var batchResults = ProcessLabelsBatch(new List<Mat> { originalImage }, modelPath);
+                if (batchResults != null && batchResults.Count > 0)
+                {
+                    singleResult = batchResults[0];
+                }
+                else
+                {
+                    singleResult = new DisposableProcessingResults();
+                }
+                return singleResult;
+            }
+            catch
+            {
+                singleResult?.Dispose();
                 throw;
             }
         }
 
-        List<MaskInfo> InferAndGetMasks(Mat originalImage, string modelPath)
+        /// <summary>
+        /// 批量处理：对每张图片执行推理与后处理
+        /// </summary>
+        public List<DisposableProcessingResults> ProcessLabelsBatch(List<Mat> originalImages, string modelPath)
         {
-            List<MaskInfo> maskInfos = new List<MaskInfo>();
-            
+            var batchResults = new List<DisposableProcessingResults>();
+            try
+            {
+                var batchMaskInfos = InferAndGetMasksBatch(originalImages, modelPath);
+                int count = Math.Min(originalImages != null ? originalImages.Count : 0, batchMaskInfos.Count);
+                for (int i = 0; i < count; i++)
+                {
+                    var oneImageResults = PostProcessMasks(originalImages[i], batchMaskInfos[i]);
+                    batchResults.Add(oneImageResults);
+                }
+                return batchResults;
+            }
+            catch
+            {
+                // 发生异常时释放已创建的结果资源
+                foreach (var r in batchResults)
+                {
+                    r?.Dispose();
+                }
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// 批量推理并为每张图片生成 MaskInfo 列表
+        /// </summary>
+        List<List<MaskInfo>> InferAndGetMasksBatch(List<Mat> originalImages, string modelPath)
+        {
+            var batchMaskInfos = new List<List<MaskInfo>>();
             try
             {
                 // 使用全局模型实例
                 Model model = GetOrLoadModel(modelPath);
-                
-                // 进行推理
-                var result = model.Infer(originalImage);
-                
-                // 从推理结果中提取mask和bbox信息
-                foreach (var objectResult in result.SampleResults[0].Results)
+
+                // 进行批量推理
+                var batchResult = model.InferBatch(originalImages);
+
+                // 与输入列表一一对应地提取结果
+                for (int i = 0; i < batchResult.SampleResults.Count; i++)
                 {
-                    if (objectResult.WithBbox && objectResult.Bbox.Count >= 4)
+                    var oneImageMaskInfos = new List<MaskInfo>();
+                    foreach (var objectResult in batchResult.SampleResults[i].Results)
                     {
-                        int bboxX = (int)objectResult.Bbox[0];
-                        int bboxY = (int)objectResult.Bbox[1];
-                        int bboxW = (int)objectResult.Bbox[2];
-                        int bboxH = (int)objectResult.Bbox[3];
-                        
-                        Mat mask;
-                        
-                        if (objectResult.WithMask && !objectResult.Mask.Empty())
+                        var mi = CreateMaskInfoFromObject(objectResult);
+                        if (mi != null)
                         {
-                            // 如果有mask，使用原始mask并resize到bbox尺寸
-                            mask = objectResult.Mask.Clone();
-                            Cv2.Resize(mask, mask, new Size(bboxW, bboxH));
-                            
-                            // 确保mask是单通道8位图像
-                            if (mask.Channels() != 1)
-                            {
-                                Cv2.CvtColor(mask, mask, ColorConversionCodes.BGR2GRAY);
-                            }
+                            oneImageMaskInfos.Add(mi);
                         }
-                        else
-                        {
-                            // 如果没有mask，根据bbox尺寸创建全白mask
-                            mask = new Mat(bboxH, bboxW, MatType.CV_8UC1, Scalar.All(255));
-                        }
-                        
-                        maskInfos.Add(new MaskInfo
-                        {
-                            Mask = mask,
-                            BboxX = bboxX,
-                            BboxY = bboxY,
-                            BboxW = bboxW,
-                            BboxH = bboxH
-                        });
                     }
+                    batchMaskInfos.Add(oneImageMaskInfos);
                 }
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"模型推理失败: {ex.Message}", ex);
+                // 释放已创建的mask资源后再抛出
+                foreach (var list in batchMaskInfos)
+                {
+                    foreach (var mi in list)
+                    {
+                        mi.Mask?.Dispose();
+                    }
+                }
+                throw new InvalidOperationException($"模型批量推理失败: {ex.Message}", ex);
             }
-            
-            return maskInfos;
+
+            return batchMaskInfos;
         }
 
         // 高级透视变换函数，专门处理透视变形
@@ -482,76 +566,118 @@ namespace MiniAreaDemo
                     string outputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "processed_images");
                     Directory.CreateDirectory(outputDir);
 
-                    int totalProcessed = 0;
-                    int totalLabels = 0;
-
-                    // 处理每个图像文件
+                    // 批量加载所有图像
+                    Console.WriteLine("\n批量加载图像...");
+                    List<Mat> images = new List<Mat>();
+                    List<string> loadedFileNames = new List<string>();
+                    
                     for (int fileIndex = 0; fileIndex < imageFiles.Count; fileIndex++)
                     {
                         string imagePath = imageFiles[fileIndex];
                         string fileName = Path.GetFileNameWithoutExtension(imagePath);
                         
-                        Console.WriteLine($"\n{new string('=', 50)}");
-                        Console.WriteLine($"处理图像 {fileIndex + 1}/{imageFiles.Count}: {fileName}");
-                        Console.WriteLine($"图像路径: {imagePath}");
-
                         try
                         {
-                            // 使用cv.read读取图像
-                            using (Mat originalImage = Cv2.ImRead(imagePath))
+                            Mat image = Cv2.ImRead(imagePath);
+                            if (image.Empty())
                             {
-                                if (originalImage.Empty())
-                                {
-                                    Console.WriteLine($"无法加载图像: {imagePath}");
-                                    continue;
-                                }
-
-                                Console.WriteLine($"图像尺寸: {originalImage.Width}x{originalImage.Height}");
-
-                                // 处理图像
-                                using (var results = processor.ProcessLabels(originalImage, modelPath))
-                                {
-                                    Console.WriteLine($"检测到 {results.Count} 个标签纸");
-
-                                    // 处理结果
-                                    for (int i = 0; i < results.Count; i++)
-                                    {
-                                        var result = results[i];
-                                        Console.WriteLine($"\n--- 标签纸 {i} ---");
-                                        Console.WriteLine($"角度: {result.Angle * 180 / Math.PI:F2}度");
-                                        
-                                        // 打印四边形顶点
-                                        Console.WriteLine("四边形顶点:");
-                                        for (int j = 0; j < result.QuadPoints.Length; j++)
-                                        {
-                                            Console.WriteLine($"  点{j}: ({result.QuadPoints[j].X:F1}, {result.QuadPoints[j].Y:F1})");
-                                        }
-                                        
-                                        // 保存处理后的图像
-                                        string outputPath = Path.Combine(outputDir, $"{fileName}_label_{i}.png");
-                                        Cv2.ImWrite(outputPath, result.ProcessedImage);
-                                        Console.WriteLine($"已保存处理后的图像: {outputPath}");
-                                        Console.WriteLine($"图像尺寸: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
-                                    }
-
-                                    totalProcessed++;
-                                    totalLabels += results.Count;
-                                    
-                                    Console.WriteLine($"处理完成，释放资源...");
-                                } // results会自动释放
-                            } // originalImage会自动释放
+                                Console.WriteLine($"无法加载图像: {imagePath}");
+                                continue;
+                            }
+                            
+                            images.Add(image);
+                            loadedFileNames.Add(fileName);
+                            Console.WriteLine($"已加载图像 {images.Count}/{imageFiles.Count}: {fileName} ({image.Width}x{image.Height})");
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"处理图像 {fileName} 时发生错误: {ex.Message}");
+                            Console.WriteLine($"加载图像失败 {fileName}: {ex.Message}");
                         }
                     }
 
-                    Console.WriteLine($"\n{new string('=', 50)}");
-                    Console.WriteLine($"处理完成!");
-                    Console.WriteLine($"成功处理图像: {totalProcessed}/{imageFiles.Count}");
-                    Console.WriteLine($"总共检测到标签纸: {totalLabels} 个");
-                    Console.WriteLine($"输出目录: {outputDir}");
+                    Console.WriteLine($"\n总共加载 {images.Count} 张图像");
+                    
+                    if (images.Count == 0)
+                    {
+                        Console.WriteLine("没有成功加载任何图像");
+                        return;
+                    }
+
+                    // 使用批量推理接口
+                    Console.WriteLine("\n开始批量推理...");
+                    int totalLabels = 0;
+                    List<DisposableProcessingResults> batchResults = null;
+                    
+                    try
+                    {
+                        batchResults = processor.ProcessLabelsBatch(images, modelPath);
+                        Console.WriteLine($"批量推理完成，处理 {batchResults.Count} 张图像");
+                        
+                        // 处理每张图像的结果
+                        for (int imgIndex = 0; imgIndex < batchResults.Count; imgIndex++)
+                        {
+                            var results = batchResults[imgIndex];
+                            string fileName = loadedFileNames[imgIndex];
+                            
+                            Console.WriteLine($"\n{new string('=', 50)}");
+                            Console.WriteLine($"图像 {imgIndex + 1}/{batchResults.Count}: {fileName}");
+                            Console.WriteLine($"检测到 {results.Count} 个标签纸");
+
+                            // 处理结果
+                            for (int i = 0; i < results.Count; i++)
+                            {
+                                var result = results[i];
+                                Console.WriteLine($"\n--- 标签纸 {i} ---");
+                                Console.WriteLine($"角度: {result.Angle * 180 / Math.PI:F2}度");
+                                
+                                // 打印四边形顶点
+                                Console.WriteLine("四边形顶点:");
+                                for (int j = 0; j < result.QuadPoints.Length; j++)
+                                {
+                                    Console.WriteLine($"  点{j}: ({result.QuadPoints[j].X:F1}, {result.QuadPoints[j].Y:F1})");
+                                }
+                                
+                                // 保存处理后的图像
+                                string outputPath = Path.Combine(outputDir, $"{fileName}_label_{i}.png");
+                                Cv2.ImWrite(outputPath, result.ProcessedImage);
+                                Console.WriteLine($"已保存处理后的图像: {outputPath}");
+                                Console.WriteLine($"图像尺寸: {result.ProcessedImage.Width}x{result.ProcessedImage.Height}");
+                            }
+                            
+                            totalLabels += results.Count;
+                        }
+                        
+                        Console.WriteLine($"\n{new string('=', 50)}");
+                        Console.WriteLine($"处理完成!");
+                        Console.WriteLine($"成功处理图像: {images.Count}/{imageFiles.Count}");
+                        Console.WriteLine($"总共检测到标签纸: {totalLabels} 个");
+                        Console.WriteLine($"输出目录: {outputDir}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"批量推理失败: {ex.Message}");
+                        throw;
+                    }
+                    finally
+                    {
+                        // 释放批量推理结果
+                        if (batchResults != null)
+                        {
+                            Console.WriteLine("\n释放批量推理结果资源...");
+                            foreach (var results in batchResults)
+                            {
+                                results?.Dispose();
+                            }
+                        }
+                        
+                        // 释放所有加载的图像
+                        Console.WriteLine("释放图像资源...");
+                        foreach (var image in images)
+                        {
+                            image?.Dispose();
+                        }
+                        images.Clear();
+                    }
                 } // processor会自动释放，包括模型资源
             }
             catch (Exception ex)
