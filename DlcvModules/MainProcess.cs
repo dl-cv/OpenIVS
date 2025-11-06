@@ -62,7 +62,20 @@ namespace DlcvModules
 				string type = node != null && node.TryGetValue("type", out object tv) ? (tv != null ? tv.ToString() : null) : null;
 				int nodeId = node != null && node.TryGetValue("id", out object iv) ? SafeToInt(iv, i) : i;
 				string title = node != null && node.TryGetValue("title", out object tl) ? (tl != null ? tl.ToString() : null) : null;
-				var props = node != null && node.TryGetValue("properties", out object pv) ? pv as Dictionary<string, object> : new Dictionary<string, object>();
+				Dictionary<string, object> props = null;
+				if (node != null && node.TryGetValue("properties", out object pv) && pv != null)
+				{
+					props = pv as Dictionary<string, object>;
+					if (props == null)
+					{
+						var jo = pv as JObject;
+						if (jo != null)
+						{
+							try { props = jo.ToObject<Dictionary<string, object>>(); } catch { props = null; }
+						}
+					}
+				}
+				if (props == null) props = new Dictionary<string, object>();
 
 				var moduleType = ModuleRegistry.Get(type);
 				if (moduleType == null) continue;
@@ -88,20 +101,21 @@ namespace DlcvModules
 				var scalarInputsByName = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 				try
 				{
-					if (node != null && node.TryGetValue("inputs", out object inv) && inv is List<object> inMetaList)
+					if (node != null && node.TryGetValue("inputs", out object inv))
 					{
+						var inMetaList = AsListOfDict(inv);
 						for (int ii = 0; ii < inMetaList.Count; ii++)
 						{
-							var inp = inMetaList[ii] as Dictionary<string, object>;
+							var inp = inMetaList[ii];
 							if (inp == null) continue;
 							int linkId = inp.TryGetValue("link", out object lv) ? SafeToInt(lv, -1) : -1;
 							string dtype = inp.TryGetValue("type", out object tv2) && tv2 != null ? tv2.ToString() : null;
 							if (linkId < 0 || !linkToSource.TryGetValue(linkId, out Tuple<int, int> src2)) continue;
-                            string kind = ClassifyPort(dtype);
+							string kind = ClassifyPort(dtype);
 							if (kind == "scalar")
 							{
 								int srcNodeId2 = src2.Item1; int srcOutIdx2 = src2.Item2;
-                                if (_outputs.TryGetValue(srcNodeId2, out Dictionary<string, object> dummy)) { }
+								if (_outputs.TryGetValue(srcNodeId2, out Dictionary<string, object> dummy)) { }
 								if (outputs.TryGetValue(srcNodeId2, out Dictionary<string, object> srcOutMap))
 								{
 									if (srcOutMap.TryGetValue("scalars", out object scon) && scon is Dictionary<int, object> smap)
@@ -117,8 +131,8 @@ namespace DlcvModules
 							}
 						}
 					}
-				}
-				catch { }
+				}//增加报错处理
+				catch (Exception ex) { Console.WriteLine($"Error in CollectInputPairs: {ex.Message}"); }
 				module.ScalarInputsByIndex = scalarInputsByIdx;
 				module.ScalarInputsByName = scalarInputsByName;
 
@@ -145,13 +159,13 @@ namespace DlcvModules
 				var scalarsByIdx = new Dictionary<int, object>();
 				try
 				{
-					var outPorts = node != null && node.TryGetValue("outputs", out object ov2) ? ov2 as List<object> : null;
+					var outPorts = node != null && node.TryGetValue("outputs", out object ov2) ? AsListOfDict(ov2) : null;
 					var scalarMap = module.ScalarOutputsByName ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 					if (outPorts != null)
 					{
 						for (int oi = 0; oi < outPorts.Count; oi++)
 						{
-							var meta = outPorts[oi] as Dictionary<string, object>;
+							var meta = outPorts[oi];
 							if (meta == null) continue;
 							string otype = meta.TryGetValue("type", out object tv3) && tv3 != null ? tv3.ToString().ToLower() : null;
 							if (otype == "bool" || otype == "boolean" || otype == "int" || otype == "integer" || otype == "str" || otype == "string")
@@ -188,9 +202,88 @@ namespace DlcvModules
 			return outputs;
 		}
 
+			public void LoadModels()
+			{
+				var ordered = new List<Dictionary<string, object>>(_nodes);
+				ordered.Sort((a, b) =>
+				{
+					int ao = a != null && a.TryGetValue("order", out object aov) ? SafeToInt(aov, int.MaxValue - 1) : int.MaxValue - 1;
+					int bo = b != null && b.TryGetValue("order", out object bov) ? SafeToInt(bov, int.MaxValue - 1) : int.MaxValue - 1;
+					if (ao != bo) return ao.CompareTo(bo);
+					int aid = a != null && a.TryGetValue("id", out object aidv) ? SafeToInt(aidv, 0) : 0;
+					int bid = b != null && b.TryGetValue("id", out object bidv) ? SafeToInt(bidv, 0) : 0;
+					return aid.CompareTo(bid);
+				});
+
+				for (int i = 0; i < ordered.Count; i++)
+				{
+					var node = ordered[i];
+					string type = node != null && node.TryGetValue("type", out object tv) ? (tv != null ? tv.ToString() : null) : null;
+					int nodeId = node != null && node.TryGetValue("id", out object iv) ? SafeToInt(iv, i) : i;
+					string title = node != null && node.TryGetValue("title", out object tl) ? (tl != null ? tl.ToString() : null) : null;
+					Dictionary<string, object> props = null;
+					if (node != null && node.TryGetValue("properties", out object pv) && pv != null)
+					{
+						props = pv as Dictionary<string, object>;
+						if (props == null)
+						{
+							var jo = pv as JObject;
+							if (jo != null)
+							{
+								try { props = jo.ToObject<Dictionary<string, object>>(); } catch { props = null; }
+							}
+						}
+					}
+					if (props == null) props = new Dictionary<string, object>();
+
+					var moduleType = ModuleRegistry.Get(type);
+					if (moduleType == null) continue;
+					var module = (BaseModule)Activator.CreateInstance(moduleType, nodeId, title, props, _context);
+
+					var modelModule = module as BaseModelModule;
+					if (modelModule != null)
+					{
+						try { modelModule.LoadModel(); } catch { }
+					}
+				}
+			}
+
 		private static int SafeToInt(object v, int dv)
 		{
 			try { return Convert.ToInt32(v); } catch { return dv; }
+		}
+
+		private static List<Dictionary<string, object>> AsListOfDict(object obj)
+		{
+			var list = new List<Dictionary<string, object>>();
+			if (obj == null) return list;
+			if (obj is List<object> lo)
+			{
+				for (int i = 0; i < lo.Count; i++)
+				{
+					var d = lo[i] as Dictionary<string, object>;
+					if (d != null) { list.Add(d); continue; }
+					var jo = lo[i] as JObject;
+					if (jo != null)
+					{
+						try { list.Add(jo.ToObject<Dictionary<string, object>>()); } catch { }
+					}
+				}
+				return list;
+			}
+			var ja = obj as JArray;
+			if (ja != null)
+			{
+				for (int i = 0; i < ja.Count; i++)
+				{
+					var jo = ja[i] as JObject;
+					if (jo != null)
+					{
+						try { list.Add(jo.ToObject<Dictionary<string, object>>()); } catch { }
+					}
+				}
+			}
+			return list;
 		}
 
 		private class NodeExecOutput
@@ -199,80 +292,96 @@ namespace DlcvModules
 			public List<ModuleChannel> Extra;
 		}
 
-		private Dictionary<int, Tuple<int, int>> BuildLinkSourceMap(List<Dictionary<string, object>> nodes)
-		{
-			var map = new Dictionary<int, Tuple<int, int>>(); // linkId -> (srcNodeId, srcOutIdx)
-			foreach (var n in nodes)
-			{
-				if (n == null) continue;
-				int nid = n.TryGetValue("id", out object iv) ? SafeToInt(iv, -1) : -1;
-				if (nid < 0) continue;
-				if (!n.TryGetValue("outputs", out object ov) || !(ov is List<object> outList)) continue;
-				for (int oi = 0; oi < outList.Count; oi++)
-				{
-					var o = outList[oi] as Dictionary<string, object>;
-					if (o == null) continue;
-					if (!o.TryGetValue("links", out object lv) || lv == null) continue;
-					if (lv is List<object> lobj)
-					{
-						foreach (var lidObj in lobj)
-						{
-							int lid = SafeToInt(lidObj, -1);
-							if (lid >= 0 && !map.ContainsKey(lid)) map[lid] = Tuple.Create(nid, oi);
-						}
-					}
-				}
-			}
-			return map;
-		}
+        private Dictionary<int, Tuple<int, int>> BuildLinkSourceMap(List<Dictionary<string, object>> nodes)
+        {
+            var map = new Dictionary<int, Tuple<int, int>>(); // linkId -> (srcNodeId, srcOutIdx)
+            foreach (var n in nodes)
+            {
+                if (n == null) continue;
+                int nid = n.TryGetValue("id", out object iv) ? SafeToInt(iv, -1) : -1;
+                if (nid < 0) continue;
+                if (!n.TryGetValue("outputs", out object ov)) continue;
+                var outPorts = AsListOfDict(ov);
+                if (outPorts == null || outPorts.Count == 0) continue;
+                for (int oi = 0; oi < outPorts.Count; oi++)
+                {
+                    var o = outPorts[oi];
+                    if (o == null) continue;
+                    if (!o.TryGetValue("links", out object lv) || lv == null) continue;
+                    if (lv is List<object> lobj)
+                    {
+                        foreach (var lidObj in lobj)
+                        {
+                            int lid = SafeToInt(lidObj, -1);
+                            if (lid >= 0 && !map.ContainsKey(lid)) map[lid] = Tuple.Create(nid, oi);
+                        }
+                    }
+                    else
+                    {
+                        var jarr = lv as JArray;
+                        if (jarr != null)
+                        {
+                            for (int jj = 0; jj < jarr.Count; jj++)
+                            {
+                                int lid = SafeToInt(jarr[jj], -1);
+                                if (lid >= 0 && !map.ContainsKey(lid)) map[lid] = Tuple.Create(nid, oi);
+                            }
+                        }
+                    }
+                }
+            }
+            return map;
+        }
 
-		private Dictionary<int, ModuleChannel> CollectInputPairs(Dictionary<string, object> node, Dictionary<int, Tuple<int, int>> linkToSource)
-		{
-			var pairs = new Dictionary<int, ModuleChannel>();
-			if (node == null) return pairs;
-			if (!node.TryGetValue("inputs", out object iv) || !(iv is List<object> inList))
-			{
-				return pairs;
-			}
-			for (int ii = 0; ii < inList.Count; ii++)
-			{
-				var inp = inList[ii] as Dictionary<string, object>;
-				if (inp == null) continue;
-				int linkId = inp.TryGetValue("link", out object lv) ? SafeToInt(lv, -1) : -1;
-				string dtype = inp.TryGetValue("type", out object tv) && tv != null ? tv.ToString() : null;
-				if (linkId < 0 || !linkToSource.TryGetValue(linkId, out Tuple<int, int> src)) continue;
-				int pairIdx = ii / 2;
-				var ch = pairs.ContainsKey(pairIdx) ? pairs[pairIdx] : new ModuleChannel(new List<ModuleImage>(), new JArray());
-				var srcNodeId = src.Item1; var srcOutIdx = src.Item2;
-				if (!_nodeExecMap.TryGetValue(srcNodeId, out NodeExecOutput srcOut))
-				{
-					// 源尚未执行：忽略（拓扑排序一般保证源在前）
-					continue;
-				}
-				ModuleChannel picked = null;
-				int srcPairIdx = srcOutIdx / 2;
-				if (srcPairIdx == 0)
-				{
-					picked = srcOut.Main;
-				}
-				else
-				{
-					int ei = srcPairIdx - 1;
-					if (srcOut.Extra != null && ei >= 0 && ei < srcOut.Extra.Count)
-					{
-						picked = srcOut.Extra[ei];
-					}
-				}
+        private Dictionary<int, ModuleChannel> CollectInputPairs(Dictionary<string, object> node, Dictionary<int, Tuple<int, int>> linkToSource)
+        {
+            var pairs = new Dictionary<int, ModuleChannel>();
+            if (node == null) return pairs;
+            if (!node.TryGetValue("inputs", out object iv))
+            {
+                return pairs;
+            }
+            var inMetaList = AsListOfDict(iv);
+            if (inMetaList == null || inMetaList.Count == 0) return pairs;
+            for (int ii = 0; ii < inMetaList.Count; ii++)
+            {
+                var inp = inMetaList[ii];
+                if (inp == null) continue;
+                int linkId = inp.TryGetValue("link", out object lv) ? SafeToInt(lv, -1) : -1;
+                string dtype = inp.TryGetValue("type", out object tv) && tv != null ? tv.ToString() : null;
+                if (linkId < 0 || !linkToSource.TryGetValue(linkId, out Tuple<int, int> src)) continue;
+                int pairIdx = ii / 2;
+                var ch = pairs.ContainsKey(pairIdx) ? pairs[pairIdx] : new ModuleChannel(new List<ModuleImage>(), new JArray());
+                var srcNodeId = src.Item1; var srcOutIdx = src.Item2;
+                if (!_nodeExecMap.TryGetValue(srcNodeId, out NodeExecOutput srcOut))
+                {
+                    // 源尚未执行：忽略（拓扑排序一般保证源在前）
+                    continue;
+                }
+                ModuleChannel picked = null;
+                int srcPairIdx = srcOutIdx / 2;
+                if (srcPairIdx == 0)
+                {
+                    picked = srcOut.Main;
+                }
+                else
+                {
+                    int ei = srcPairIdx - 1;
+                    if (srcOut.Extra != null && ei >= 0 && ei < srcOut.Extra.Count)
+                    {
+                        picked = srcOut.Extra[ei];
+                    }
+                }
                 if (picked == null) continue;
                 if (string.Equals(dtype, "image_chan", StringComparison.OrdinalIgnoreCase))
-				{
-					// 覆盖为来自源的整个列表
+                {
+                    // 覆盖为来自源的整个列表
                     ch = new ModuleChannel(new List<ModuleImage>(picked.ImageList ?? new List<ModuleImage>()), ch.ResultList ?? new JArray(), ch.TemplateList ?? new List<SimpleTemplate>());
-				}
-				else if (string.Equals(dtype, "result_chan", StringComparison.OrdinalIgnoreCase))
-				{
-					var r = new JArray();
-					if (picked.ResultList != null) foreach (var t in picked.ResultList) r.Add(t);
+                }
+                else if (string.Equals(dtype, "result_chan", StringComparison.OrdinalIgnoreCase))
+                {
+                    var r = new JArray();
+                    if (picked.ResultList != null) foreach (var t in picked.ResultList) r.Add(t);
                     ch = new ModuleChannel(ch.ImageList ?? new List<ModuleImage>(), r, ch.TemplateList ?? new List<SimpleTemplate>());
                 }
                 else if (string.Equals(dtype, "template_chan", StringComparison.OrdinalIgnoreCase)
@@ -280,11 +389,11 @@ namespace DlcvModules
                 {
                     var tlist = new List<SimpleTemplate>(picked.TemplateList ?? new List<SimpleTemplate>());
                     ch = new ModuleChannel(ch.ImageList ?? new List<ModuleImage>(), ch.ResultList ?? new JArray(), tlist);
-				}
-				pairs[pairIdx] = ch;
-			}
-			return pairs;
-		}
+                }
+                pairs[pairIdx] = ch;
+            }
+            return pairs;
+        }
 
 		private static string ClassifyPort(string dtype)
 		{

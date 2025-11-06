@@ -24,7 +24,7 @@ namespace DlcvModules
 			// 简化：初始化在首次推理时完成
 		}
 
-		protected void EnsureModel()
+		public void LoadModel()
 		{
 			if (_model == null)
 			{
@@ -53,13 +53,12 @@ namespace DlcvModules
 				}
 				catch { }
 
-				// 允许从上下文兜底获取模型路径
 				if (string.IsNullOrWhiteSpace(_modelPath) && Context != null)
 				{
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				_model = new Model(_modelPath, deviceId, rpcMode);
+				_model = new Model(_modelPath, deviceId, true);
 			}
 		}
 
@@ -113,7 +112,7 @@ namespace DlcvModules
 			var images = imageList ?? new List<ModuleImage>();
 			var outImages = new List<ModuleImage>();
 			var outResults = new JArray();
-			EnsureModel();
+			LoadModel();
 
 			// 透传推理参数
 			var p = new JObject();
@@ -131,15 +130,20 @@ namespace DlcvModules
 				var wrap = tup.Item1; var mat = tup.Item2;
 				if (mat == null || mat.Empty()) continue;
 
-				Utils.CSharpResult res;
+				// mat 转为 RGB 格式
+				Mat rgbMat = new Mat();
+				Cv2.CvtColor(mat, rgbMat, ColorConversionCodes.BGR2RGB);
+
+				CSharpResult res;
 				if (p.Count > 0)
 				{
-					res = _model.Infer(mat, p);
+					res = _model.Infer(rgbMat, p);
 				}
 				else
 				{
-					res = _model.Infer(mat, null);
+					res = _model.Infer(rgbMat, null);
 				}
+				rgbMat.Dispose();
 
 				// 输出：沿用输入图像对象；结果转为统一 local entry
 				outImages.Add(images[i]);
@@ -158,7 +162,7 @@ namespace DlcvModules
 			return new ModuleIO(outImages, outResults);
 		}
 
-		private static JArray ConvertToLocalSamples(Utils.CSharpResult res)
+		private static JArray ConvertToLocalSamples(CSharpResult res)
 		{
 			var list = new JArray();
 			if (res.SampleResults == null || res.SampleResults.Count == 0) return list;

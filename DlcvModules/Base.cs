@@ -318,7 +318,7 @@ namespace DlcvModules
         public List<ModuleChannel> ExtraInputsIn { get; private set; } = new List<ModuleChannel>();
         public List<ModuleChannel> ExtraOutputs { get; private set; } = new List<ModuleChannel>();
 
-        // 主对模板输入
+        // 主对模版输入
         public List<SimpleTemplate> MainTemplateList { get; set; } = new List<SimpleTemplate>();
         // 标量输入/输出（按索引与名称）
         public Dictionary<int, object> ScalarInputsByIndex { get; set; } = new Dictionary<int, object>();

@@ -36,7 +36,7 @@ namespace DlcvModules
 				try { Directory.CreateDirectory(saveDir); } catch { }
 			}
 
-			for (int i = 0; i < images.Count; i++)
+            for (int i = 0; i < images.Count; i++)
 			{
 				var (wrap, matRgb) = Unwrap(images[i]);
                 if (matRgb == null || matRgb.Empty()) continue;
@@ -47,19 +47,36 @@ namespace DlcvModules
 				}
 				if (string.IsNullOrWhiteSpace(baseName)) baseName = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
 				string fileName = baseName + suffix + "." + (string.IsNullOrWhiteSpace(fmt) ? "png" : fmt);
-				if (!string.IsNullOrWhiteSpace(saveDir))
-				{
-					string full = Path.Combine(saveDir, fileName);
+                if (!string.IsNullOrWhiteSpace(saveDir))
+                {
+                    string full = Path.Combine(saveDir, fileName);
                     try
                     {
-                        // 输出前从RGB转BGR
-                        using (var matBgr = new Mat())
+                        // 统一按BGR写盘：
+                        // 4通道 -> BGRA2BGR；1通道 -> GRAY2BGR；3通道视为BGR直写
+                        int ch = matRgb.Channels();
+                        if (ch == 4)
                         {
-                            Cv2.CvtColor(matRgb, matBgr, ColorConversionCodes.RGB2BGR);
-                            Cv2.ImWrite(full, matBgr);
+                            using (var matBgr = new Mat())
+                            {
+                                Cv2.CvtColor(matRgb, matBgr, ColorConversionCodes.BGRA2BGR);
+                                Cv2.ImWrite(full, matBgr);
+                            }
+                        }
+                        else if (ch == 1)
+                        {
+                            using (var matBgr = new Mat())
+                            {
+                                Cv2.CvtColor(matRgb, matBgr, ColorConversionCodes.GRAY2BGR);
+                                Cv2.ImWrite(full, matBgr);
+                            }
+                        }
+                        else
+                        {
+                            Cv2.ImWrite(full, matRgb);
                         }
                     } catch { }
-				}
+                }
 			}
 
 			// 透传

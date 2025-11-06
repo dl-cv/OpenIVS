@@ -9,28 +9,42 @@ using OpenCvSharp;
 namespace DlcvModules
 {
 	/// <summary>
-	/// 轻量模板与匹配数据模型（OpenIVS 内部实现，避免引用 PrintMatch 工程）。
+	/// 轻量模版与匹配数据模型（OpenIVS 内部实现，避免引用 PrintMatch 工程）。
 	/// </summary>
+	[JsonObject]
 	public class SimpleOcrItem
 	{
-		public string Text { get; set; }
-		public float Confidence { get; set; }
-		public int X { get; set; }
-		public int Y { get; set; }
-		public int Width { get; set; }
-		public int Height { get; set; }
+		[JsonProperty("text")] public string Text { get; set; }
+		[JsonProperty("confidence")] public float Confidence { get; set; }
+		[JsonProperty("x")] public int X { get; set; }
+		[JsonProperty("y")] public int Y { get; set; }
+		[JsonProperty("width")] public int Width { get; set; }
+		[JsonProperty("height")] public int Height { get; set; }
+		[JsonProperty("recognition_time")] public DateTime RecognitionTime { get; set; } = DateTime.Now;
+		[JsonProperty("match_status")] public int MatchStatus { get; set; } = 0;
 	}
 
 	public class SimpleTemplate
 	{
-		public string TemplateId { get; set; }
-		public string TemplateName { get; set; }
-		public string ProductId { get; set; }
-		public string ProductName { get; set; }
-		public List<SimpleOcrItem> OcrItems { get; set; } = new List<SimpleOcrItem>();
-		public DateTime CreatedTime { get; set; } = DateTime.Now;
-		public bool IsEnabled { get; set; } = true;
-		public string ImageFileName { get; set; } // 与模板同名 PNG 的文件名（相对）
+		[JsonProperty("template_id")] public string TemplateId { get; set; }
+		[JsonProperty("template_name")] public string TemplateName { get; set; }
+		[JsonProperty("product_id")] public string ProductId { get; set; }
+		[JsonProperty("product_name")] public string ProductName { get; set; }
+		[JsonProperty("OCRResults")] public List<SimpleOcrItem> OCRResults { get; set; } = new List<SimpleOcrItem>();
+		[JsonProperty("camera_position")] public int CameraPosition { get; set; } = 0;
+		[JsonProperty("expected_x")] public int ExpectedX { get; set; } = 0;
+		[JsonProperty("expected_y")] public int ExpectedY { get; set; } = 0;
+		[JsonProperty("expected_width")] public int ExpectedWidth { get; set; } = 0;
+		[JsonProperty("expected_height")] public int ExpectedHeight { get; set; } = 0;
+		[JsonProperty("expected_text")] public string ExpectedText { get; set; } = string.Empty;
+		[JsonProperty("position_tolerance")] public int PositionTolerance { get; set; } = 10;
+		[JsonProperty("size_tolerance")] public int SizeTolerance { get; set; } = 5;
+		[JsonProperty("min_confidence")] public double MinConfidence { get; set; } = 0.8;
+		[JsonProperty("strict_text_match")] public bool StrictTextMatch { get; set; } = true;
+		[JsonProperty("created_time")] public DateTime CreatedTime { get; set; } = DateTime.Now;
+		[JsonProperty("updated_time")] public DateTime UpdatedTime { get; set; } = DateTime.Now;
+		[JsonProperty("is_enabled")] public bool IsEnabled { get; set; } = true;
+		[JsonProperty("image_path")] public string ImagePath { get; set; }
 	}
 
 	public class SimpleTemplateMatchDetail
@@ -67,13 +81,12 @@ namespace DlcvModules
 			string s = name.Trim();
 			foreach (char c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');
 			s = s.Replace(' ', '_');
-			if (s.Length > 50) s = s.Substring(0, 50);
 			return string.IsNullOrWhiteSpace(s) ? "Unknown" : s;
 		}
 	}
 
 	/// <summary>
-	/// 1) 转化模板：从 local OCR 结果构建 SimpleTemplate
+	/// 1) 转化模版：从 local OCR 结果构建 SimpleTemplate
 	/// type: features/template_from_results
 	/// properties: template_name(string), product_id(string), product_name(string)
 	/// 输出：result_list 仅包含一个 { "type":"template", "template": {...} }
@@ -91,16 +104,50 @@ namespace DlcvModules
 		public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
 		{
 			var results = resultList ?? new JArray();
-			string tname = ReadString("template_name", "Template");
-			string pid = ReadString("product_id", "");
-			string pname = ReadString("product_name", "");
+			string productName = ReadString("product_name", "");
+			string productId = ReadString("product_id", null);
+			string templateName = ReadString("template_name", productName);
 
 			var tpl = new SimpleTemplate
 			{
-				TemplateName = tname,
-				ProductId = pid,
-				ProductName = pname
+				ProductName = productName,
+				ProductId = productId,
+				TemplateName = templateName
 			};
+
+			// 优先从上下文读取条码，覆盖 product_id（旧版要求以条码作为 product_id）
+			try
+			{
+				string barcode = this.Context != null ? this.Context.Get<string>("barcode_text", null) : null;
+				if (!string.IsNullOrWhiteSpace(barcode))
+				{
+					tpl.ProductId = barcode;
+				}
+				else if (string.IsNullOrWhiteSpace(tpl.ProductId))
+				{
+					tpl.ProductId = string.Empty;
+				}
+			}
+			catch { }
+
+			// 写入相机位置（A/B/C/D -> 0/1/2/3），默认 0
+			try
+			{
+				string face = this.Context != null ? this.Context.Get<string>("face", null) : null;
+				if (!string.IsNullOrWhiteSpace(face))
+				{
+					char c = char.ToUpperInvariant(face[0]);
+					switch (c)
+					{
+						case 'A': tpl.CameraPosition = 0; break;
+						case 'B': tpl.CameraPosition = 1; break;
+						case 'C': tpl.CameraPosition = 2; break;
+						case 'D': tpl.CameraPosition = 3; break;
+						default: tpl.CameraPosition = 0; break;
+					}
+				}
+			}
+			catch { }
 
 			// 收集所有 local entries 的 OCR，转换为原图坐标并去重
 			var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -172,19 +219,26 @@ namespace DlcvModules
 					int iw = Math.Max(1, ClampToInt(maxx - minx));
 					int ih = Math.Max(1, ClampToInt(maxy - miny));
 
-					string text = so["category_name"]?.ToString() ?? string.Empty;
+					string text =
+						(so["category_name"] != null ? so["category_name"].ToString() : null) ??
+						(so["text"] != null ? so["text"].ToString() : null) ??
+						(so["recognized_text"] != null ? so["recognized_text"].ToString() : null) ??
+						(so["name"] != null ? so["name"].ToString() : null) ??
+						string.Empty;
+					text = text != null ? text.Trim() : string.Empty;
 					float conf = SafeToFloat(so["score"]);
 					string key = SimpleTemplateUtils.NormalizeText(text) + "|" + ix + "," + iy + "," + iw + "," + ih;
-					if (seen.Add(key))
-					{
-						tpl.OcrItems.Add(new SimpleOcrItem { Text = text, Confidence = conf, X = ix, Y = iy, Width = iw, Height = ih });
-					}
+						if (seen.Add(key))
+						{
+							tpl.OCRResults.Add(new SimpleOcrItem { Text = text, Confidence = conf, X = ix, Y = iy, Width = iw, Height = ih, RecognitionTime = DateTime.Now, MatchStatus = 0 });
+						}
 				}
 			}
 
 			if (string.IsNullOrWhiteSpace(tpl.TemplateId))
 			{
-				string baseName = string.IsNullOrWhiteSpace(tpl.ProductName) ? tpl.TemplateName : tpl.ProductName;
+				string baseName = !string.IsNullOrWhiteSpace(tpl.TemplateName) ? tpl.TemplateName : 
+								  !string.IsNullOrWhiteSpace(tpl.ProductName) ? tpl.ProductName : "Template";
 				tpl.TemplateId = SimpleTemplateUtils.MakeSafeFileName(baseName);
 			}
 
@@ -217,9 +271,9 @@ namespace DlcvModules
 	}
 
 	/// <summary>
-	/// 2) 存储模板：将 SimpleTemplate 写入 JSON 文件；如有首张图像则保存 PNG 同名文件。
+	/// 2) 存储模版：将 SimpleTemplate 写入 JSON 文件；如有首张图像则保存 PNG 同名文件。
 	/// type: features/template_save
-	/// properties: save_dir(string), file_name(string 可选，默认 TemplateId)
+	/// properties: file_name(string 可选，默认 TemplateId)
 	/// 输入：result_list 中需包含 {type: "template"}
 	/// 输出：透传 + 在 result_list 末尾附加 {type:"template_saved", path: full_json_path}
 	/// </summary>
@@ -237,10 +291,23 @@ namespace DlcvModules
 		{
 			var images = imageList ?? new List<ModuleImage>();
 			var results = resultList != null ? new JArray(resultList) : new JArray();
-			string dir = ReadString("save_dir", null);
-			if (!string.IsNullOrWhiteSpace(dir)) { try { Directory.CreateDirectory(dir); } catch { } }
+			string dir = this.Context != null ? this.Context.Get<string>("templates_dir", null) : null;
+			string effDir = dir;
+			try
+			{
+				if (string.IsNullOrWhiteSpace(effDir))
+				{
+					effDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "模版");
+				}
+				else if (!Path.IsPathRooted(effDir))
+				{
+					effDir = Path.GetFullPath(effDir);
+				}
+			}
+			catch { }
+			try { if (!string.IsNullOrWhiteSpace(effDir)) Directory.CreateDirectory(effDir); } catch { }
 
-			// 从模板主通道读取
+			// 从模版主通道读取
 			SimpleTemplate tpl = null;
 			if (this.MainTemplateList != null && this.MainTemplateList.Count > 0)
 			{
@@ -253,29 +320,33 @@ namespace DlcvModules
 			string fileName = ReadString("file_name", null);
 			if (string.IsNullOrWhiteSpace(fileName)) fileName = tpl?.TemplateId ?? "Template";
 			fileName = SimpleTemplateUtils.MakeSafeFileName(fileName);
-			string jsonPath = string.IsNullOrWhiteSpace(dir) ? fileName + ".json" : Path.Combine(dir, fileName + ".json");
+			string jsonPath = Path.Combine(effDir ?? string.Empty, fileName + ".json");
 
-			// 如有首张原图，另存 PNG（RGB->BGR 输出）
+			// 如有首张原图，另存 PNG
 			if (images.Count > 0 && images[0] != null && images[0].ImageObject != null && !images[0].ImageObject.Empty())
 			{
-				string pngPath = string.IsNullOrWhiteSpace(dir) ? fileName + ".png" : Path.Combine(dir, fileName + ".png");
+				string pngPath = Path.Combine(effDir ?? string.Empty, fileName + ".png");
 				try
 				{
-					using (var bgr = new Mat())
-					{
-						Cv2.CvtColor(images[0].ImageObject, bgr, ColorConversionCodes.RGB2BGR);
-						Cv2.ImWrite(pngPath, bgr);
-					}
-					tpl.ImageFileName = Path.GetFileName(pngPath);
+					Cv2.ImWrite(pngPath, images[0].ImageObject);
+					tpl.ImagePath = Path.GetFileName(pngPath);
 				}
 				catch { }
 			}
 
+			// 落盘前过滤：临时替换 OCR 列表，写入后恢复，避免影响内存与后续判定
+			var original = tpl.OCRResults;
 			try
 			{
-				File.WriteAllText(jsonPath, JsonConvert.SerializeObject(tpl, Formatting.Indented));
+				if (original != null)
+				{
+					var filtered = original.Where(x => x == null || ((x.Text ?? string.Empty).IndexOf("NG", StringComparison.OrdinalIgnoreCase) < 0)).ToList();
+					tpl.OCRResults = filtered;
+				}
 			}
 			catch { }
+			File.WriteAllText(jsonPath, JsonConvert.SerializeObject(tpl, Formatting.Indented));
+			try { tpl.OCRResults = original; } catch { }
 
 			// 无输出：返回空主通道
 			return new ModuleIO(new List<ModuleImage>(), new JArray(), new List<SimpleTemplate>());
@@ -306,12 +377,12 @@ namespace DlcvModules
 	}
 
 	/// <summary>
-	/// 3) 读取模板：从路径加载 SimpleTemplate
+	/// 3) 读取模版：从路径加载 SimpleTemplate
 	/// type: features/template_load
 	/// properties: path(string)
 	/// 输出：result_list 追加 {type:"template", template:{...}}
 	/// </summary>
-	public class TemplateLoad : BaseModule
+		public class TemplateLoad : BaseModule
 	{
 		static TemplateLoad()
 		{
@@ -353,11 +424,11 @@ namespace DlcvModules
 	}
 
 	/// <summary>
-	/// 4) 模板匹配：输入需要匹配的模板 与 正确模板，输出 bool 与匹配详情。
+	/// 4) 模版匹配：输入需要匹配的模版 与 正确模版，输出 bool 与匹配详情。
 	/// type: features/template_match
 	/// 输入：
 	/// - 主对 result_list：待匹配图像的 local OCR 结果
-	/// - 额外输入对0（ExtraInputsIn[0]）的 result_list：包含 {type:"template"} 的正确模板
+	/// - 额外输入对0（ExtraInputsIn[0]）的 result_list：包含 {type:"template"} 的正确模版
 	/// 输出：
 	/// - result_list 末尾追加 {type:"template_match", ok:bool, score:double, detail:{...}}
 	/// </summary>
@@ -376,7 +447,7 @@ namespace DlcvModules
 				var images = imageList ?? new List<ModuleImage>();
 				var results = resultList != null ? new JArray(resultList) : new JArray();
 				
-				// 主通道：待匹配模板；额外输入第 0 对：黄金模板
+				// 主通道：待匹配模版；额外输入第 0 对：黄金模版
 				SimpleTemplate toCheck = null;
 				if (this.MainTemplateList != null && this.MainTemplateList.Count > 0) toCheck = this.MainTemplateList[0];
 				SimpleTemplate golden = null;
@@ -391,13 +462,14 @@ namespace DlcvModules
 					return new ModuleIO(images, results);
 				}
 				
-				// 读取容差与阈值，默认对齐 PrintMatch.MatchingConfiguration.CreateBalanced()
+				// 读取容差与阈值
 				double posTolX = ReadDoubleOr("position_tolerance_x", 20.0);
 				double posTolY = ReadDoubleOr("position_tolerance_y", 20.0);
 				double minConf = ReadDoubleOr("min_confidence_threshold", 0.5);
+				bool checkPosition = ReadBoolOr("check_position", true);
 				
 				// 使用与 PrintMatch 一致的匹配逻辑与输出结构
-				var pmDetail = MatchAsPrintMatch(golden, toCheck.OcrItems ?? new List<SimpleOcrItem>(), posTolX, posTolY, minConf);
+				var pmDetail = MatchAsPrintMatch(golden, toCheck.OCRResults ?? new List<SimpleOcrItem>(), posTolX, posTolY, minConf, checkPosition);
 				bool ok = pmDetail?["template_match_info"] != null && pmDetail["template_match_info"]["is_match"] != null && pmDetail["template_match_info"]["is_match"].Value<bool>();
 				try
 				{
@@ -465,13 +537,19 @@ namespace DlcvModules
 				return !(ax2 < d.X || bx2 < t.X || ay2 < d.Y || by2 < t.Y);
 			}
 
-			private static JObject MatchAsPrintMatch(SimpleTemplate golden, List<SimpleOcrItem> det, double posTolXVal, double posTolYVal, double minConf)
+		private static JObject MatchAsPrintMatch(SimpleTemplate golden, List<SimpleOcrItem> det, double posTolXVal, double posTolYVal, double minConf, bool checkPosition)
+		{
+			if (golden == null) return new JObject();
+			var templateItems = (golden.OCRResults ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
+			var detectionItemsAll = (det ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
+			// 置信度过滤（与 PrintMatch 一致）
+			var validDetections = detectionItemsAll.Where(r => r.Confidence >= (float)minConf && r.Width > 0 && r.Height > 0).ToList();
+			
+			// 不检查位置时：只按文本内容和数量匹配
+			if (!checkPosition)
 			{
-				if (golden == null) return new JObject();
-				var templateItems = (golden.OcrItems ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
-				var detectionItemsAll = (det ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
-				// 置信度过滤（与 PrintMatch 一致）
-				var validDetections = detectionItemsAll.Where(r => r.Confidence >= (float)minConf && r.Width > 0 && r.Height > 0).ToList();
+				return MatchByTextAndCountOnly(golden, validDetections, templateItems);
+			}
 				
 				// 按规范化文本分组
 				var allTexts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -510,7 +588,6 @@ namespace DlcvModules
 					for (int ti = 0; ti < groupTpl.Count; ti++)
 					{
 						var t = groupTpl[ti];
-						bool matched = false;
 						for (int di = 0; di < groupDet.Count; di++)
 						{
 							var d = groupDet[di]; if (usedDet.Contains(d)) continue;
@@ -520,7 +597,7 @@ namespace DlcvModules
 								correctPairs.Add(Tuple.Create(t, d));
 								usedDet.Add(d);
 								matchedTpl.Add(t);
-								matched = true; break;
+								break;
 							}
 						}
 						// 未匹配留给第二轮
@@ -635,7 +712,7 @@ namespace DlcvModules
 					});
 				}
 				root["missing_template_items"] = missingArr;
-				// deviation_template_items（用于绘制模板虚线框）
+				// deviation_template_items（用于绘制模版虚线框）
 				var devTplArr = new JArray();
 				for (int i = 0; i < deviationPairs.Count; i++)
 				{
@@ -672,17 +749,18 @@ namespace DlcvModules
 				}
 				root["misjudgment_pairs"] = misPairsArr;
 				// template_match_info
-				root["template_match_info"] = new JObject
-				{
-					["template_name"] = golden.TemplateName ?? string.Empty,
-					["is_match"] = isMatch,
-					["match_score"] = score,
-					["perfect_matches"] = correctCount,
-					["position_deviations"] = deviationCount,
-					["over_detections"] = overCount,
-					["missing_components"] = missCount,
-					["misjudgments"] = misjudgeCount
-				};
+			root["template_match_info"] = new JObject
+			{
+				["template_name"] = golden.TemplateName ?? string.Empty,
+				["product_name"] = golden.ProductName ?? string.Empty,
+				["is_match"] = isMatch,
+				["match_score"] = score,
+				["perfect_matches"] = correctCount,
+				["position_deviations"] = deviationCount,
+				["over_detections"] = overCount,
+				["missing_components"] = missCount,
+				["misjudgments"] = misjudgeCount
+			};
 				return root;
 			}
 
@@ -731,9 +809,9 @@ namespace DlcvModules
 		{
 			var detail = new SimpleTemplateMatchDetail();
 			var normalizedToTpl = new Dictionary<string, List<SimpleOcrItem>>(StringComparer.OrdinalIgnoreCase);
-			for (int i = 0; i < golden.OcrItems.Count; i++)
+			for (int i = 0; i < golden.OCRResults.Count; i++)
 			{
-				var t = golden.OcrItems[i];
+				var t = golden.OCRResults[i];
 				string key = SimpleTemplateUtils.NormalizeText(t.Text);
 				if (!normalizedToTpl.ContainsKey(key)) normalizedToTpl[key] = new List<SimpleOcrItem>();
 				normalizedToTpl[key].Add(t);
@@ -803,7 +881,7 @@ namespace DlcvModules
 
 			// 误判配对
 			var detUnused = det.Where(x => !usedDet.Contains(x)).ToList();
-			var tplUnused = golden.OcrItems.Where(x => !usedTpl.Contains(x)).ToList();
+			var tplUnused = golden.OCRResults.Where(x => !usedTpl.Contains(x)).ToList();
 			for (int i = 0; i < detUnused.Count; i++)
 			{
 				var d = detUnused[i];
@@ -823,14 +901,14 @@ namespace DlcvModules
 				if (!paired) { over += 1; detail.OverDetectionItems.Add(new JObject { ["d_text"] = d.Text }); }
 			}
 
-			// 剩余未配对模板为漏检
-			foreach (var t in golden.OcrItems)
+			// 剩余未配对模版为漏检
+			foreach (var t in golden.OCRResults)
 			{
 				if (!usedTpl.Contains(t)) { miss += 1; detail.MissedTemplateItems.Add(new JObject { ["t_text"] = t.Text }); }
 			}
 
 			// 评分与结论：无漏检/过检/误判为通过；分数粗略按正确率减罚分
-			int total = Math.Max(1, golden.OcrItems.Count);
+			int total = Math.Max(1, golden.OCRResults.Count);
 			detail.Score = Math.Max(0.0, (double)correct / total - Math.Min(over * 0.15, 0.4) - Math.Min(miss * 0.2, 0.5) - Math.Min(misjudge * 0.5, 0.8));
 			detail.IsMatch = (miss == 0 && over == 0 && misjudge == 0);
 			return detail;
@@ -857,6 +935,137 @@ namespace DlcvModules
 			}
 			return dv;
 		}
+
+		private bool ReadBoolOr(string key, bool dv)
+		{
+			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+			{
+				bool b; if (bool.TryParse(v.ToString(), out b)) return b;
+			}
+			return dv;
+		}
+
+		private static JObject MatchByTextAndCountOnly(SimpleTemplate golden, List<SimpleOcrItem> validDetections, List<SimpleOcrItem> templateItems)
+		{
+			var tplTextCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+			var detTextCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+			
+			foreach (var t in templateItems)
+			{
+				string key = NormalizeTextPM(t.Text);
+				if (!tplTextCount.ContainsKey(key)) tplTextCount[key] = 0;
+				tplTextCount[key]++;
+			}
+			
+			foreach (var d in validDetections)
+			{
+				string key = NormalizeTextPM(d.Text);
+				if (!detTextCount.ContainsKey(key)) detTextCount[key] = 0;
+				detTextCount[key]++;
+			}
+			
+			var allTexts = new HashSet<string>(tplTextCount.Keys, StringComparer.OrdinalIgnoreCase);
+			foreach (var k in detTextCount.Keys) allTexts.Add(k);
+			
+			int totalMatch = 0;
+			int overCount = 0;
+			int missCount = 0;
+			var correctList = new List<SimpleOcrItem>();
+			var overList = new List<SimpleOcrItem>();
+			var missList = new List<SimpleOcrItem>();
+			
+			foreach (var text in allTexts)
+			{
+				int tplCount = tplTextCount.ContainsKey(text) ? tplTextCount[text] : 0;
+				int detCount = detTextCount.ContainsKey(text) ? detTextCount[text] : 0;
+				int matched = Math.Min(tplCount, detCount);
+				totalMatch += matched;
+				
+				if (detCount > tplCount)
+				{
+					overCount += (detCount - tplCount);
+					var items = validDetections.Where(d => string.Equals(NormalizeTextPM(d.Text), text, StringComparison.OrdinalIgnoreCase)).ToList();
+					for (int i = matched; i < items.Count; i++) overList.Add(items[i]);
+				}
+				else if (tplCount > detCount)
+				{
+					missCount += (tplCount - detCount);
+					var items = templateItems.Where(t => string.Equals(NormalizeTextPM(t.Text), text, StringComparison.OrdinalIgnoreCase)).ToList();
+					for (int i = matched; i < items.Count; i++) missList.Add(items[i]);
+				}
+				
+				var matchedDet = validDetections.Where(d => string.Equals(NormalizeTextPM(d.Text), text, StringComparison.OrdinalIgnoreCase)).Take(matched).ToList();
+				correctList.AddRange(matchedDet);
+			}
+			
+			bool isMatch = (missCount == 0 && overCount == 0);
+			int totalTpl = Math.Max(1, templateItems.Count);
+			double score = (double)totalMatch / totalTpl;
+			
+			var root = new JObject();
+			var ocrArray = new JArray();
+			foreach (var d in validDetections)
+			{
+				string status = "OverDetection";
+				if (correctList.Any(c => ReferenceEquals(c, d))) status = "Correct";
+				var o = new JObject
+				{
+					["text"] = d.Text ?? string.Empty,
+					["x"] = d.X,
+					["y"] = d.Y,
+					["width"] = d.Width,
+					["height"] = d.Height,
+					["confidence"] = (double)d.Confidence,
+					["match_status"] = status
+				};
+				ocrArray.Add(o);
+			}
+			root["ocr_results"] = ocrArray;
+			
+			var missingArr = new JArray();
+			foreach (var t in missList)
+			{
+				missingArr.Add(new JObject
+				{
+					["text"] = t.Text ?? string.Empty,
+					["x"] = t.X,
+					["y"] = t.Y,
+					["width"] = t.Width,
+					["height"] = t.Height,
+					["status"] = "missing"
+				});
+			}
+			root["missing_template_items"] = missingArr;
+			root["deviation_template_items"] = new JArray();
+			// 构造误判配对：按个数成对输出（用于“错：模型：x，模版：y”）
+			var misPairsArr = new JArray();
+			int pairCount = Math.Min(missList.Count, overList.Count);
+			for (int i = 0; i < pairCount; i++)
+			{
+				var pair = new JObject
+				{
+					["t_text"] = missList[i].Text ?? string.Empty,
+					["d_text"] = overList[i].Text ?? string.Empty
+				};
+				misPairsArr.Add(pair);
+			}
+			root["misjudgment_pairs"] = misPairsArr;
+			
+			root["template_match_info"] = new JObject
+			{
+				["template_name"] = golden.TemplateName ?? string.Empty,
+				["product_name"] = golden.ProductName ?? string.Empty,
+				["is_match"] = isMatch,
+				["match_score"] = score,
+				["perfect_matches"] = totalMatch,
+				["position_deviations"] = 0,
+				["over_detections"] = overCount,
+				["missing_components"] = missCount,
+				["misjudgments"] = 0
+			};
+			
+			return root;
+		}
 	}
 }
 
@@ -864,12 +1073,11 @@ namespace DlcvModules
 namespace DlcvModules
 {
 	/// <summary>
-	/// 编排模块：印刷品模版匹配（复用现有模板模块，集中流程与条件）。
+	/// 编排模块：印刷品模版匹配（复用现有模版模块，集中流程与条件）。
 	/// type: features/printed_template_match
 	/// properties:
-	/// - save_dir(string)
-	/// - product_serial(string)
-	/// 可透传：position_tolerance_x(double), position_tolerance_y(double), min_confidence_threshold(double)
+	/// - product_type(string): 产品型号
+	/// 可透传：position_tolerance_x(double), position_tolerance_y(double), min_confidence_threshold(double), check_position(bool)
 	/// 输出：Scalar ok(bool), detail(string)；TemplateList 按条件返回。
 	/// </summary>
 	public class PrintedTemplateMatch : BaseModule
@@ -887,20 +1095,25 @@ namespace DlcvModules
 			var images = imageList ?? new List<ModuleImage>();
 			var results = resultList ?? new JArray();
 
-			string saveDir = ReadString("save_dir", null);
-			if (string.IsNullOrWhiteSpace(saveDir))
-			{
-				try { saveDir = Directory.GetCurrentDirectory(); } catch { saveDir = "."; }
-			}
-			else
-			{
-				try { Directory.CreateDirectory(saveDir); } catch { }
-			}
-			string productSerial = ReadString("product_serial", null);
-			productSerial = productSerial ?? string.Empty;
+			string saveDir = this.Context != null ? this.Context.Get<string>("templates_dir", null) : null;
+			if (!string.IsNullOrWhiteSpace(saveDir)) { try { Directory.CreateDirectory(saveDir); } catch { } }
+			string productType = ReadString("product_type", null);
+			productType = productType ?? string.Empty;
 
-			// 1) 从 results 构建模板
-			var builder = new TemplateFromResults(NodeId * 10 + 1, context: this.Context);
+			string face = this.Context != null ? this.Context.Get<string>("face", null) : null;
+			string templateName = productType;
+			if (!string.IsNullOrWhiteSpace(face))
+			{
+				templateName = productType + "_" + face;
+			}
+
+			// 1) 从 results 构建模版
+			var builder = new TemplateFromResults(NodeId * 10 + 1, context: this.Context, properties: new Dictionary<string, object>
+			{
+				["product_name"] = productType,
+				["product_id"] = productType,
+				["template_name"] = templateName
+			});
 			var built = builder.Process(images, results);
 			SimpleTemplate tpl = null;
 			if (built != null && built.TemplateList != null && built.TemplateList.Count > 0)
@@ -913,21 +1126,103 @@ namespace DlcvModules
 				return new ModuleIO(images, results, new List<SimpleTemplate>());
 			}
 
-			// 分支 A：无产品序列号 -> 不保存，返回模板，ok=false
-			if (string.IsNullOrWhiteSpace(productSerial))
+			// 条件分支：
+			// 1) 有条码但无型号 -> 直接NG（error_reason: 条码NG）
+			// 2) 无条码/条码为NG -> 无条码直接通过
+			try
+			{
+				string barcode = this.Context != null ? this.Context.Get<string>("barcode_text", null) : null;
+				bool isNoBarcode = string.IsNullOrWhiteSpace(barcode) || string.Equals(barcode, "NG", StringComparison.OrdinalIgnoreCase);
+				bool isUnknownProduct = string.IsNullOrWhiteSpace(productType) || string.Equals(productType, "Unknown", StringComparison.OrdinalIgnoreCase);
+				bool hasBarcode = !isNoBarcode;
+
+				if (hasBarcode && isUnknownProduct)
+				{
+					var rootNg = new JObject();
+					rootNg["ocr_results"] = new JArray();
+					rootNg["missing_template_items"] = new JArray();
+					rootNg["deviation_template_items"] = new JArray();
+					rootNg["misjudgment_pairs"] = new JArray();
+					rootNg["template_match_info"] = new JObject
+					{
+						["template_name"] = string.Empty,
+						["product_name"] = string.Empty,
+						["is_match"] = false,
+						["match_score"] = 0.0,
+						["perfect_matches"] = 0,
+						["position_deviations"] = 0,
+						["over_detections"] = 0,
+						["missing_components"] = 0,
+						["misjudgments"] = 0,
+						["error_reason"] = "条码NG"
+					};
+					try { this.ScalarOutputsByName["ok"] = false; this.ScalarOutputsByName["detail"] = rootNg.ToString(Formatting.None); } catch { }
+					return new ModuleIO(images, results, new List<SimpleTemplate>());
+				}
+
+				if (isNoBarcode)
+				{
+					var ocrArray = new JArray();
+					int correctCount = 0;
+					int overCount = 0;
+					var list = tpl.OCRResults ?? new List<SimpleOcrItem>();
+					for (int i = 0; i < list.Count; i++)
+					{
+						var it = list[i]; if (it == null) continue;
+						string txt = it.Text ?? string.Empty;
+						bool isNgText = txt.IndexOf("NG", StringComparison.OrdinalIgnoreCase) >= 0;
+						var o = new JObject
+						{
+							["text"] = txt,
+							["x"] = it.X,
+							["y"] = it.Y,
+							["width"] = it.Width,
+							["height"] = it.Height,
+							["confidence"] = (double)it.Confidence,
+							["match_status"] = isNgText ? "OverDetection" : "Correct"
+						};
+						if (isNgText) overCount++; else correctCount++;
+						ocrArray.Add(o);
+					}
+
+					var root = new JObject();
+					root["ocr_results"] = ocrArray;
+					root["missing_template_items"] = new JArray();
+					root["deviation_template_items"] = new JArray();
+					root["misjudgment_pairs"] = new JArray();
+					root["template_match_info"] = new JObject
+					{
+						["template_name"] = string.Empty,
+						["product_name"] = string.Empty,
+						["is_match"] = true,
+						["match_score"] = 1.0,
+						["perfect_matches"] = correctCount,
+						["position_deviations"] = 0,
+						["over_detections"] = overCount,
+						["missing_components"] = 0,
+						["misjudgments"] = 0
+					};
+
+					try { this.ScalarOutputsByName["ok"] = true; this.ScalarOutputsByName["detail"] = root.ToString(Formatting.None); } catch { }
+					return new ModuleIO(images, results, new List<SimpleTemplate>());
+				}
+			}
+			catch { }
+
+			// 分支 A：无产品型号 -> 不保存，返回模版，ok=false
+			if (string.IsNullOrWhiteSpace(productType))
 			{
 				try { this.ScalarOutputsByName["ok"] = false; this.ScalarOutputsByName["detail"] = string.Empty; } catch { }
 				return new ModuleIO(images, results, new List<SimpleTemplate> { tpl });
 			}
 
-			// 计算模板文件路径
-			string fname = SimpleTemplateUtils.MakeSafeFileName(productSerial);
-			string jsonPath = Path.Combine(saveDir, fname + ".json");
+			// 计算模版文件路径（固定使用执行上下文中的 templates_dir）
+			string fname = SimpleTemplateUtils.MakeSafeFileName(templateName);
+			string jsonPath = string.IsNullOrWhiteSpace(saveDir) ? (fname + ".json") : Path.Combine(saveDir, fname + ".json");
 
-			// 分支 B：无现存模板 -> 保存模板与 PNG（PNG 使用首图 OriginalImage）
+			// 分支 B：无现存模版 -> 保存模版与 PNG（PNG 使用首图 OriginalImage），随后与自身匹配
 			if (!File.Exists(jsonPath))
 			{
-				// 提取首图 OriginalImage 作为 saver 的 ImageObject
 				List<ModuleImage> imagesForSave = images;
 				try
 				{
@@ -943,48 +1238,65 @@ namespace DlcvModules
 
 				var saver = new TemplateSave(NodeId * 10 + 2, context: this.Context, properties: new Dictionary<string, object>
 				{
-					["save_dir"] = saveDir,
 					["file_name"] = fname
 				});
 				saver.MainTemplateList = new List<SimpleTemplate> { tpl };
 				try { saver.Process(imagesForSave, results); } catch { }
 
-				try { this.ScalarOutputsByName["ok"] = true; this.ScalarOutputsByName["detail"] = string.Empty; } catch { }
-				return new ModuleIO(images, results, new List<SimpleTemplate> { tpl });
+				// 自匹配：golden 使用磁盘上已保存（已过滤）的模版文件
+				var goldenListSelf = new List<SimpleTemplate>();
+				var loaderSelf = new TemplateLoad(NodeId * 10 + 3, context: this.Context, properties: new Dictionary<string, object>
+				{
+					["path"] = jsonPath
+				});
+				// 保存完成后校验文件存在
+				if (!File.Exists(jsonPath))
+				{
+					throw new Exception("template save failed: file not found");
+				}
+				var loSelf = loaderSelf.Process(images, results);
+				if (loSelf == null || loSelf.TemplateList == null || loSelf.TemplateList.Count == 0)
+				{
+					throw new Exception("template load failed");
+				}
+				goldenListSelf = loSelf.TemplateList;
+				bool checkPosSelf = false; try { if (Properties != null && Properties.ContainsKey("check_position") && Properties["check_position"] != null) { bool.TryParse(Properties["check_position"].ToString(), out checkPosSelf); } } catch { }
+				var matcherSelf = new TemplateMatch(NodeId * 10 + 5, context: this.Context, properties: new Dictionary<string, object>
+				{
+					["position_tolerance_x"] = ReadDoubleOr("position_tolerance_x", 20.0),
+					["position_tolerance_y"] = ReadDoubleOr("position_tolerance_y", 20.0),
+					["min_confidence_threshold"] = ReadDoubleOr("min_confidence_threshold", 0.5),
+					["check_position"] = checkPosSelf
+				});
+				matcherSelf.MainTemplateList = new List<SimpleTemplate> { tpl };
+				matcherSelf.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), new JArray(), goldenListSelf));
+				try { matcherSelf.Process(images, results); } catch { }
+				object okObjSelf = true; object detailObjSelf = string.Empty; // 自匹配必为 OK
+				try { if (matcherSelf.ScalarOutputsByName != null && matcherSelf.ScalarOutputsByName.ContainsKey("ok")) okObjSelf = matcherSelf.ScalarOutputsByName["ok"]; } catch { }
+				try { if (matcherSelf.ScalarOutputsByName != null && matcherSelf.ScalarOutputsByName.ContainsKey("detail")) detailObjSelf = matcherSelf.ScalarOutputsByName["detail"]; } catch { }
+				try { this.ScalarOutputsByName["ok"] = okObjSelf; this.ScalarOutputsByName["detail"] = detailObjSelf; } catch { }
+				return new ModuleIO(images, results, new List<SimpleTemplate>());
 			}
 
-			// 分支 C：存在模板文件 -> 加载并匹配；返回 ok/detail，模板为空
+			// 分支 C：存在模版文件 -> 加载并匹配；返回 ok/detail，模版为空
 			var loader = new TemplateLoad(NodeId * 10 + 3, context: this.Context, properties: new Dictionary<string, object>
 			{
 				["path"] = jsonPath
 			});
-			List<SimpleTemplate> goldenList = null;
-			try
+			var lo = loader.Process(images, results);
+			if (lo == null || lo.TemplateList == null || lo.TemplateList.Count == 0)
 			{
-				var lo = loader.Process(images, results);
-				goldenList = lo != null ? lo.TemplateList : null;
+				throw new Exception("template load failed");
 			}
-			catch { goldenList = null; }
+			List<SimpleTemplate> goldenList = lo.TemplateList;
 
-			if (goldenList == null || goldenList.Count == 0)
-			{
-				// 回退到保存分支
-				var saver2 = new TemplateSave(NodeId * 10 + 4, context: this.Context, properties: new Dictionary<string, object>
-				{
-					["save_dir"] = saveDir,
-					["file_name"] = fname
-				});
-				saver2.MainTemplateList = new List<SimpleTemplate> { tpl };
-				try { saver2.Process(images, results); } catch { }
-				try { this.ScalarOutputsByName["ok"] = true; this.ScalarOutputsByName["detail"] = string.Empty; } catch { }
-				return new ModuleIO(images, results, new List<SimpleTemplate> { tpl });
-			}
-
+			bool checkPos = false; try { if (Properties != null && Properties.ContainsKey("check_position") && Properties["check_position"] != null) { bool.TryParse(Properties["check_position"].ToString(), out checkPos); } } catch { }
 			var matcher = new TemplateMatch(NodeId * 10 + 5, context: this.Context, properties: new Dictionary<string, object>
 			{
 				["position_tolerance_x"] = ReadDoubleOr("position_tolerance_x", 20.0),
 				["position_tolerance_y"] = ReadDoubleOr("position_tolerance_y", 20.0),
-				["min_confidence_threshold"] = ReadDoubleOr("min_confidence_threshold", 0.5)
+				["min_confidence_threshold"] = ReadDoubleOr("min_confidence_threshold", 0.5),
+				["check_position"] = checkPos
 			});
 			matcher.MainTemplateList = new List<SimpleTemplate> { tpl };
 			matcher.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), new JArray(), goldenList));
