@@ -85,6 +85,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="FlowGraphModel.cs" />
     <Compile Include="Modules.cs" />
     <Compile Include="Base.cs" />
     <Compile Include="Inputs.cs" />
