@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -134,7 +134,7 @@ namespace DlcvModules
 				Mat rgbMat = new Mat();
 				Cv2.CvtColor(mat, rgbMat, ColorConversionCodes.BGR2RGB);
 
-				CSharpResult res;
+				Utils.CSharpResult res;
 				if (p.Count > 0)
 				{
 					res = _model.Infer(rgbMat, p);
@@ -162,7 +162,7 @@ namespace DlcvModules
 			return new ModuleIO(outImages, outResults);
 		}
 
-		private static JArray ConvertToLocalSamples(CSharpResult res)
+		private static JArray ConvertToLocalSamples(Utils.CSharpResult res)
 		{
 			var list = new JArray();
 			if (res.SampleResults == null || res.SampleResults.Count == 0) return list;
