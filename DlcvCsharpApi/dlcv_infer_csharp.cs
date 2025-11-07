@@ -58,6 +58,10 @@ namespace dlcv_infer_csharp
         public GetDeviceInfo dlcv_get_device_info;
 
         [UnmanagedFunctionPointer(calling_method)]
+        public delegate IntPtr GetGpuInfo();
+        public GetGpuInfo dlcv_get_gpu_info;
+
+        [UnmanagedFunctionPointer(calling_method)]
         public delegate IntPtr KeepMaxClock();
         public KeepMaxClock dlcv_keep_max_clock;
 
@@ -103,7 +107,25 @@ namespace dlcv_infer_csharp
             dlcv_free_model_result = GetDelegate<FreeModelResultDelegate>(hModule, "dlcv_free_model_result");
             dlcv_free_result = GetDelegate<FreeResultDelegate>(hModule, "dlcv_free_result");
             dlcv_free_all_models = GetDelegate<FreeAllModelsDelegate>(hModule, "dlcv_free_all_models");
-            dlcv_get_device_info = GetDelegate<GetDeviceInfo>(hModule, "dlcv_get_device_info");
+            IntPtr gpuInfoPtr = GetProcAddress(hModule, "dlcv_get_gpu_info");
+            if (gpuInfoPtr != IntPtr.Zero)
+            {
+                dlcv_get_gpu_info = (GetGpuInfo)Marshal.GetDelegateForFunctionPointer(gpuInfoPtr, typeof(GetGpuInfo));
+            }
+            else
+            {
+                dlcv_get_gpu_info = null;
+            }
+
+            IntPtr devInfoPtr = GetProcAddress(hModule, "dlcv_get_device_info");
+            if (devInfoPtr != IntPtr.Zero)
+            {
+                dlcv_get_device_info = (GetDeviceInfo)Marshal.GetDelegateForFunctionPointer(devInfoPtr, typeof(GetDeviceInfo));
+            }
+            else
+            {
+                dlcv_get_device_info = null;
+            }
             dlcv_keep_max_clock = GetDelegate<KeepMaxClock>(hModule, "dlcv_keep_max_clock");
         }
 
@@ -2105,10 +2127,24 @@ namespace dlcv_infer_csharp
 
         public static JObject GetDeviceInfo()
         {
-            IntPtr resultPtr = DllLoader.Instance.dlcv_get_device_info();
+            var loader = DllLoader.Instance;
+            IntPtr resultPtr = IntPtr.Zero;
+            if (loader.dlcv_get_gpu_info != null)
+            {
+                resultPtr = loader.dlcv_get_gpu_info();
+            }
+            else if (loader.dlcv_get_device_info != null)
+            {
+                resultPtr = loader.dlcv_get_device_info();
+            }
+            else
+            {
+                return JObject.FromObject(new { code = -1, message = "dlcv_get_gpu_info 与 dlcv_get_device_info 均不可用" });
+            }
+
             var resultJson = Marshal.PtrToStringAnsi(resultPtr);
             var resultObject = JObject.Parse(resultJson);
-            DllLoader.Instance.dlcv_free_result(resultPtr);
+            loader.dlcv_free_result(resultPtr);
             return resultObject;
         }
 
