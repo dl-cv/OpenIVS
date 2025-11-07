@@ -350,7 +350,6 @@
             // 
             // button_load_flow_model
             // 
-            this.button_load_flow_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_load_flow_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.button_load_flow_model.Location = new System.Drawing.Point(165, 87);
             this.button_load_flow_model.Margin = new System.Windows.Forms.Padding(4);
