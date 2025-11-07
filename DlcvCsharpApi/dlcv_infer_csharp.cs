@@ -144,12 +144,17 @@ namespace dlcv_infer_csharp
             @"C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe"
         };
 
+        // 模型缓存（按模型路径+设备+模式区分）
+        private static readonly Dictionary<string, int> _modelCache = new Dictionary<string, int>();
+        private static readonly HashSet<string> _loadingModels = new HashSet<string>();
+        private static readonly object _cacheLock = new object();
+
         public Model()
         {
 
         }
 
-        public Model(string modelPath, int device_id, bool rpc_mode = false)
+        public Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false)
         {
             _modelPath = modelPath;
 
@@ -163,20 +168,65 @@ namespace dlcv_infer_csharp
             _isDvpMode = extension == ".dvp";
             _isRpcMode = rpc_mode;
 
-            if (_isDvpMode)
+            if (enableCache)
             {
-                // DVP 模式：使用 HTTP API
-                InitializeDvpMode(modelPath, device_id);
+                while (true)
+                {
+                    lock (_cacheLock)
+                    {
+                        int cachedIndex;
+                        if (_modelCache.TryGetValue(modelPath, out cachedIndex))
+                        {
+                            modelIndex = cachedIndex;
+                            return;
+                        }
+                        if (!_loadingModels.Contains(modelPath))
+                        {
+                            _loadingModels.Add(modelPath);
+                            break;
+                        }
+                    }
+                    System.Threading.Thread.Sleep(10);
+                }
             }
-            else if (_isRpcMode)
+
+            try
             {
-                // DVO/DVT RPC模式：使用本地RPC（命名管道+共享内存）
-                InitializeRpcMode(modelPath, device_id);
+                if (_isDvpMode)
+                {
+                    // DVP 模式：使用 HTTP API
+                    InitializeDvpMode(modelPath, device_id);
+                }
+                else if (_isRpcMode)
+                {
+                    // DVO/DVT RPC模式：使用本地RPC（命名管道+共享内存）
+                    InitializeRpcMode(modelPath, device_id);
+                }
+                else
+                {
+                    // DVT 模式：使用原来的 DLL 接口
+                    InitializeDvtMode(modelPath, device_id);
+                }
+
+                if (enableCache)
+                {
+                    lock (_cacheLock)
+                    {
+                        _modelCache[modelPath] = modelIndex;
+                        _loadingModels.Remove(modelPath);
+                    }
+                }
             }
-            else
+            catch
             {
-                // DVT 模式：使用原来的 DLL 接口
-                InitializeDvtMode(modelPath, device_id);
+                if (enableCache)
+                {
+                    lock (_cacheLock)
+                    {
+                        _loadingModels.Remove(modelPath);
+                    }
+                }
+                throw;
             }
         }
 
@@ -1294,6 +1344,18 @@ namespace dlcv_infer_csharp
         /// 获取当前模型是否为DVP模式
         /// </summary>
         public bool IsDvpMode => _isDvpMode;
+
+        /// <summary>
+        /// 清空模型缓存
+        /// </summary>
+        public static void ClearModelCache()
+        {
+            lock (_cacheLock)
+            {
+                _modelCache.Clear();
+                _loadingModels.Clear();
+            }
+        }
     }
 
     public class SlidingWindowModel : Model
@@ -1394,18 +1456,18 @@ namespace dlcv_infer_csharp
         /// <param name="detModelPath">检测模型路径</param>
         /// <param name="ocrModelPath">OCR识别模型路径</param>
         /// <param name="deviceId">设备ID，默认为0</param>
-        public void Load(string detModelPath, string ocrModelPath, int deviceId = 0)
+        public void Load(string detModelPath, string ocrModelPath, int deviceId = 0, bool enableCache = false)
         {
             try
             {
                 // 加载检测模型
                 Console.WriteLine($"正在加载检测模型: {detModelPath}");
-                _detModel = new Model(detModelPath, deviceId);
+                _detModel = new Model(detModelPath, deviceId, false, enableCache);
                 Console.WriteLine("检测模型加载成功");
 
                 // 加载OCR模型
                 Console.WriteLine($"正在加载OCR模型: {ocrModelPath}");
-                _ocrModel = new Model(ocrModelPath, deviceId);
+                _ocrModel = new Model(ocrModelPath, deviceId, false, enableCache);
                 Console.WriteLine("OCR模型加载成功");
             }
             catch (Exception ex)
