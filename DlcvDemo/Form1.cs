@@ -182,10 +182,47 @@ namespace DlcvDemo
                 new_result["ocr_model"] = (JObject)result["ocr_model"]["model_info"];
                 richTextBox1.Text = new_result.ToString();
             }
+            else if (result.ContainsKey("nodes") && result.ContainsKey("links"))
+            {
+                // FlowGraph 格式：提取节点和链接的摘要信息
+                JObject summary = new JObject();
+                summary["type"] = "FlowGraph";
+                summary["version"] = result.ContainsKey("version") ? result["version"] : "unknown";
+                summary["node_count"] = result["nodes"] != null ? ((JArray)result["nodes"]).Count : 0;
+                summary["link_count"] = result["links"] != null ? ((JArray)result["links"]).Count : 0;
+                
+                // 提取每个节点的基本信息
+                JArray nodes_info = new JArray();
+                if (result["nodes"] != null)
+                {
+                    foreach (JObject node in (JArray)result["nodes"])
+                    {
+                        JObject node_summary = new JObject();
+                        node_summary["id"] = node.ContainsKey("id") ? node["id"] : -1;
+                        node_summary["type"] = node.ContainsKey("type") ? node["type"] : "unknown";
+                        if (node.ContainsKey("properties") && node["properties"] is JObject props)
+                        {
+                            if (props.ContainsKey("model_path"))
+                            {
+                                node_summary["model_path"] = props["model_path"];
+                            }
+                        }
+                        nodes_info.Add(node_summary);
+                    }
+                }
+                summary["nodes"] = nodes_info;
+                
+                richTextBox1.Text = summary.ToString();
+            }
             else if (result.ContainsKey("code"))
             {
                 richTextBox1.Text = result.ToString();
                 return;
+            }
+            else
+            {
+                // 未知格式，直接显示原始 JSON
+                richTextBox1.Text = result.ToString();
             }
         }
 
