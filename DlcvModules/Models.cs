@@ -58,7 +58,7 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				_model = new Model(_modelPath, deviceId, rpcMode);
+				_model = new Model(_modelPath, deviceId, rpcMode, true);
 			}
 		}
 
