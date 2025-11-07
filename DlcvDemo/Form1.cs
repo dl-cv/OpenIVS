@@ -774,12 +774,28 @@ namespace DlcvDemo
                 openFileDialog.Filter = "流程JSON (*.json)|*.json|所有文件 (*.*)|*.*";
                 openFileDialog.Title = "选择流程配置JSON";
 
+                try
+                {
+                    openFileDialog.InitialDirectory = Path.GetDirectoryName(Properties.Settings.Default.LastFlowPath);
+                    openFileDialog.FileName = Path.GetFileName(Properties.Settings.Default.LastFlowPath);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+
                 if (openFileDialog.ShowDialog() != DialogResult.OK)
                 {
                     return;
                 }
 
-				string jsonPath = openFileDialog.FileName;
+                string jsonPath = openFileDialog.FileName;
+                try
+                {
+                    Properties.Settings.Default.LastFlowPath = jsonPath;
+                    Properties.Settings.Default.Save();
+                }
+                catch (Exception) { }
 				try
 				{
 					// 切换到流程模型模式
