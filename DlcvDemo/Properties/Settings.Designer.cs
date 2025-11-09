@@ -56,5 +56,20 @@ namespace DlcvDemo.Properties
                 this["LastImagePath"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LastFlowPath
+        {
+            get
+            {
+                return ((string)(this["LastFlowPath"]));
+            }
+            set
+            {
+                this["LastFlowPath"] = value;
+            }
+        }
     }
 }

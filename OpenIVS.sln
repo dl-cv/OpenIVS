@@ -61,6 +61,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvDvpHttpApiTest", "DlcvD
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniAreaDemo", "MiniAreaDemo\MiniAreaDemo.csproj", "{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvModules", "DlcvModules\DlcvModules.csproj", "{7CBA0B95-77F1-403B-93AA-29D29A29C190}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -139,6 +141,10 @@ Global
 		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}.Debug|x64.Build.0 = Debug|x64
 		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}.Release|x64.ActiveCfg = Release|x64
 		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}.Release|x64.Build.0 = Release|x64
+		{7CBA0B95-77F1-403B-93AA-29D29A29C190}.Debug|x64.ActiveCfg = Debug|x64
+		{7CBA0B95-77F1-403B-93AA-29D29A29C190}.Debug|x64.Build.0 = Debug|x64
+		{7CBA0B95-77F1-403B-93AA-29D29A29C190}.Release|x64.ActiveCfg = Release|Any CPU
+		{7CBA0B95-77F1-403B-93AA-29D29A29C190}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -164,6 +170,7 @@ Global
 		{DB7C8281-BDB3-46D9-98F0-40559943CA39} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 		{BB2F0FB1-E0F7-4E6B-B624-4847FFF7F4B5} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
+		{7CBA0B95-77F1-403B-93AA-29D29A29C190} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {ECC568E3-465E-4300-ADD1-27469BDF798F}

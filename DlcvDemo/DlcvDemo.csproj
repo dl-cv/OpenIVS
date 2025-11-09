@@ -240,6 +240,10 @@
       <Project>{73d82dbe-59d3-46f9-a8b3-87e13eb220ec}</Project>
       <Name>DlcvCsharpApi</Name>
     </ProjectReference>
+    <ProjectReference Include="..\DlcvModules\DlcvModules.csproj">
+      <Project>{7CBA0B95-77F1-403B-93AA-29D29A29C190}</Project>
+      <Name>DlcvModules</Name>
+    </ProjectReference>
     <ProjectReference Include="..\ImageViewer\ImageViewer.csproj">
       <Project>{e11ddcc6-84d1-4caf-9534-2266651e7787}</Project>
       <Name>ImageViewer</Name>

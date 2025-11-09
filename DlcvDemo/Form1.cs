@@ -11,6 +11,9 @@ using static dlcv_infer_csharp.Utils;
 using DLCV;
 using System.Text;
 using Newtonsoft.Json;
+using DlcvModules;
+using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace DlcvDemo
 {
@@ -50,7 +53,6 @@ namespace DlcvDemo
             Thread thread = new Thread(GetDeviceInfo);
             thread.IsBackground = true;
             thread.Start();
-            dlcv_infer_csharp.DllLoader.Instance.dlcv_keep_max_clock();
         }
 
         private void GetDeviceInfo()
@@ -101,6 +103,8 @@ namespace DlcvDemo
 
             var info = Utils.GetDeviceInfo();
             Console.WriteLine(info.ToString());
+
+            DllLoader.Instance.dlcv_keep_max_clock();
         }
 
         private dynamic model;
@@ -111,13 +115,13 @@ namespace DlcvDemo
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
-
+        
         private void button_loadmodel_Click(object sender, EventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "深度视觉模型文件 (*.dvt;*.dvp;*.dvo)|*.dvt;*.dvp;*.dvo";
+            openFileDialog.Filter = "深度视觉模型 (*.dvt;*.dvp;*.dvo)|*.dvt;*.dvp;*.dvo|所有文件 (*.*)|*.*";
             openFileDialog.Title = "选择模型";
             try
             {
@@ -149,6 +153,7 @@ namespace DlcvDemo
                     }
                     catch { }
                     model = new Model(selectedFilePath, device_id, rpc_mode);
+                    
                     button_getmodelinfo_Click(sender, e);
                 }
                 catch (Exception ex)
@@ -178,10 +183,47 @@ namespace DlcvDemo
                 new_result["ocr_model"] = (JObject)result["ocr_model"]["model_info"];
                 richTextBox1.Text = new_result.ToString();
             }
+            else if (result.ContainsKey("nodes") && result.ContainsKey("links"))
+            {
+                // FlowGraph 格式：提取节点和链接的摘要信息
+                JObject summary = new JObject();
+                summary["type"] = "FlowGraph";
+                summary["version"] = result.ContainsKey("version") ? result["version"] : "unknown";
+                summary["node_count"] = result["nodes"] != null ? ((JArray)result["nodes"]).Count : 0;
+                summary["link_count"] = result["links"] != null ? ((JArray)result["links"]).Count : 0;
+                
+                // 提取每个节点的基本信息
+                JArray nodes_info = new JArray();
+                if (result["nodes"] != null)
+                {
+                    foreach (JObject node in (JArray)result["nodes"])
+                    {
+                        JObject node_summary = new JObject();
+                        node_summary["id"] = node.ContainsKey("id") ? node["id"] : -1;
+                        node_summary["type"] = node.ContainsKey("type") ? node["type"] : "unknown";
+                        if (node.ContainsKey("properties") && node["properties"] is JObject props)
+                        {
+                            if (props.ContainsKey("model_path"))
+                            {
+                                node_summary["model_path"] = props["model_path"];
+                            }
+                        }
+                        nodes_info.Add(node_summary);
+                    }
+                }
+                summary["nodes"] = nodes_info;
+                
+                richTextBox1.Text = summary.ToString();
+            }
             else if (result.ContainsKey("code"))
             {
                 richTextBox1.Text = result.ToString();
                 return;
+            }
+            else
+            {
+                // 未知格式，直接显示原始 JSON
+                richTextBox1.Text = result.ToString();
             }
         }
 
@@ -217,54 +259,63 @@ namespace DlcvDemo
 
         private void button_infer_Click(object sender, EventArgs e)
         {
-            if (model == null)
+            
+
+            try
             {
-                MessageBox.Show("请先加载模型文件！");
-                return;
+                if (model == null)
+                {
+                    MessageBox.Show("请先加载模型文件！");
+                    return;
+                }
+                if (image_path == null)
+                {
+                    MessageBox.Show("请先选择图片文件！");
+                    return;
+                }
+
+                Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+                Mat image_rgb = new Mat();
+                Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
+
+                batch_size = (int)numericUpDown_batch_size.Value;
+                var image_list = new List<Mat>();
+                for (int i = 0; i < batch_size; i++)
+                {
+                    image_list.Add(image_rgb);
+                }
+
+                if (image.Empty())
+                {
+                    Console.WriteLine("图像解码失败！");
+                    return;
+                }
+
+                JObject data = new JObject();
+                data["threshold"] = (float)numericUpDown_threshold.Value;
+                data["with_mask"] = true;
+
+                Stopwatch stopwatch = new Stopwatch();
+                stopwatch.Start();
+
+                CSharpResult result = model.InferBatch(image_list, data);
+
+                stopwatch.Stop();
+                double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                Console.WriteLine($"推理时间: {delay_ms:F2}ms");
+
+                imagePanel1.UpdateImageAndResult(image, result);
+
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine($"推理时间: {delay_ms:F2}ms\n");
+                sb.AppendLine($"推理结果: ");
+                sb.AppendLine(result.SampleResults[0].ToString());
+                richTextBox1.Text = sb.ToString();
             }
-            if (image_path == null)
+            catch (Exception ex)
             {
-                MessageBox.Show("请先选择图片文件！");
-                return;
+                ReportError("推理失败", ex);
             }
-
-            Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
-            Mat image_rgb = new Mat();
-            Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
-
-            batch_size = (int)numericUpDown_batch_size.Value;
-            var image_list = new List<Mat>();
-            for (int i = 0; i < batch_size; i++)
-            {
-                image_list.Add(image_rgb);
-            }
-
-            if (image.Empty())
-            {
-                Console.WriteLine("图像解码失败！");
-                return;
-            }
-
-            JObject data = new JObject();
-            data["threshold"] = (float)numericUpDown_threshold.Value;
-            data["with_mask"] = true;
-
-            Stopwatch stopwatch = new Stopwatch();
-            stopwatch.Start();
-
-            CSharpResult result = model.InferBatch(image_list, data);
-
-            stopwatch.Stop();
-            double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
-            Console.WriteLine($"推理时间: {delay_ms:F2}ms");
-
-            imagePanel1.UpdateImageAndResult(image, result);
-
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"推理时间: {delay_ms:F2}ms\n");
-            sb.AppendLine($"推理结果: ");
-            sb.AppendLine(result.SampleResults[0].ToString());
-            richTextBox1.Text = sb.ToString();
         }
 
         /// <summary>
@@ -567,9 +618,10 @@ namespace DlcvDemo
         {
             StopPressureTest();
             // 释放模型
-            if (model != null && model is IDisposable disposable)
+            var disposable = model as IDisposable;
+            if (disposable != null)
             {
-                model.Dispose();
+                disposable.Dispose();
                 model = null;
             }
             Utils.FreeAllModels();
@@ -658,7 +710,8 @@ namespace DlcvDemo
                         // 释放旧模型
                         if (model != null)
                         {
-                            if (model is IDisposable disposable)
+                            var disposable = model as IDisposable;
+                            if (disposable != null)
                             {
                                 disposable.Dispose();
                             }
@@ -679,9 +732,13 @@ namespace DlcvDemo
                     catch (Exception ex)
                     {
                         richTextBox1.Text = $"加载OCR模型失败：{ex.Message}";
-                        if (model != null && model is IDisposable disposable)
+                        if (model != null)
                         {
-                            model.Dispose();
+                            var disposable = model as IDisposable;
+                            if (disposable != null)
+                            {
+                                disposable.Dispose();
+                            }
                             model = null;
                         }
                         MessageBox.Show($"加载OCR模型失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -696,13 +753,99 @@ namespace DlcvDemo
             StopPressureTest();
 
             // 释放模型
-            if (model != null && model is IDisposable disposable)
+            var disposable = model as IDisposable;
+            if (disposable != null)
             {
-                model.Dispose();
+                disposable.Dispose();
             }
             model = null;
             Utils.FreeAllModels();
             richTextBox1.Text = "所有模型已释放";
         }
-    }
+
+        /// <summary>
+        /// 加载流程JSON（视为模型），运行GraphExecutor，并将可视化结果显示到imagePanel1
+        /// </summary>
+        private void button_load_flow_model_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                OpenFileDialog openFileDialog = new OpenFileDialog();
+                openFileDialog.RestoreDirectory = true;
+                openFileDialog.Filter = "流程JSON (*.json)|*.json|所有文件 (*.*)|*.*";
+                openFileDialog.Title = "选择流程配置JSON";
+
+                try
+                {
+                    openFileDialog.InitialDirectory = Path.GetDirectoryName(Properties.Settings.Default.LastFlowPath);
+                    openFileDialog.FileName = Path.GetFileName(Properties.Settings.Default.LastFlowPath);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+
+                if (openFileDialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                string jsonPath = openFileDialog.FileName;
+                try
+                {
+                    Properties.Settings.Default.LastFlowPath = jsonPath;
+                    Properties.Settings.Default.Save();
+                }
+                catch (Exception) { }
+				try
+				{
+					// 切换到流程模型模式
+					model = null;
+					GC.Collect();
+					var flowModel = new DlcvModules.FlowGraphModel();
+					int deviceId = 0;
+					try { deviceId = GetSelectedDeviceId(); } catch { deviceId = 0; }
+					var loadReport = flowModel.Load(jsonPath, deviceId);
+					model = flowModel;
+					// 如果加载有错误，优先显示加载报告JSON；否则显示流程配置信息
+					try
+					{
+						int code = loadReport != null && loadReport["code"] != null ? (int)loadReport["code"] : 1;
+						if (code != 0)
+						{
+							richTextBox1.Text = loadReport.ToString();
+						}
+						else
+						{
+							button_getmodelinfo_Click(sender, e);
+						}
+					}
+					catch { button_getmodelinfo_Click(sender, e); }
+				}
+				catch (Exception ex)
+				{
+					ReportError("加载或执行流程失败", ex);
+				}
+
+			}
+			catch (Exception ex)
+			{
+				ReportError("加载或执行流程失败", ex);
+			}
+
+		}
+
+		/// <summary>
+		/// 统一错误输出：写入 richTextBox1 并弹窗提示
+		/// </summary>
+		private void ReportError(string title, Exception ex)
+		{
+			try
+			{
+				richTextBox1.Text = title + "\n" + ex.ToString();
+			}
+			catch { }
+			MessageBox.Show(title + ": " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+		}
+	}
 }
