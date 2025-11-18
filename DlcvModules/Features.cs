@@ -883,4 +883,401 @@ namespace DlcvModules
             return dv;
         }
     }
+
+    /// <summary>
+    /// features/image_rotate_by_cls：根据分类结果对图像做整图旋转（仅输出图像）。
+    /// 使用场景：上游分类结果给出方向类别（例如 “90/180/270/0” 的自定义名称）。
+    /// 规则：
+    /// - 逐对匹配优先级：transform 完全匹配 > index 匹配 > origin_index 匹配；均无则视为 0°。
+    /// - 每张图最多匹配一个结果，且仅进行一种变换。
+    /// - 若判定应旋转 0°，原图也会输出。
+    /// - 最终仅输出图像（不透传 results）。
+    ///
+    /// properties:
+    /// - rotate90_labels: List&lt;string&gt; 对应逆时针旋转 90 度的分类标签集合
+    /// - rotate180_labels: List&lt;string&gt; 对应逆时针旋转 180 度的分类标签集合
+    /// - rotate270_labels: List&lt;string&gt; 对应逆时针旋转 270 度的分类标签集合
+    /// </summary>
+    public class ImageRotateByClassification : BaseModule
+    {
+        static ImageRotateByClassification()
+        {
+            ModuleRegistry.Register("features/image_rotate_by_cls", typeof(ImageRotateByClassification));
+        }
+
+        public ImageRotateByClassification(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var images = imageList ?? new List<ModuleImage>();
+            var results = resultList ?? new JArray();
+
+            if (images.Count == 0)
+            {
+                return new ModuleIO(new List<ModuleImage>(), new JArray());
+            }
+
+            // 读取并标准化标签集合
+            var set90 = ToLabelSet(ReadProperty("rotate90_labels"));
+            var set180 = ToLabelSet(ReadProperty("rotate180_labels"));
+            var set270 = ToLabelSet(ReadProperty("rotate270_labels"));
+
+            // 聚合分类结果映射
+            Dictionary<string, string> tmap;
+            Dictionary<int, string> imap;
+            Dictionary<int, string> omap;
+            BuildLabelMaps(results, out tmap, out imap, out omap);
+
+            var outImages = new List<ModuleImage>();
+
+            for (int i = 0; i < images.Count; i++)
+            {
+                var wrap = images[i];
+                if (wrap == null || wrap.GetImage() == null || wrap.GetImage().Empty())
+                {
+                    continue;
+                }
+
+                var baseImg = wrap.GetImage();
+                int w = baseImg.Width;
+                int h = baseImg.Height;
+
+                string sig = SerializeTransformKey(wrap.TransformState);
+                string label = null;
+
+                if (sig != null && tmap != null && tmap.ContainsKey(sig))
+                {
+                    label = tmap[sig];
+                }
+                else if (imap != null && imap.ContainsKey(i))
+                {
+                    label = imap[i];
+                }
+                else if (omap != null && omap.ContainsKey(wrap.OriginalIndex))
+                {
+                    label = omap[wrap.OriginalIndex];
+                }
+
+                int angleCcw = 0;
+                if (!string.IsNullOrEmpty(label))
+                {
+                    string key = label.Trim();
+                    if (set90.Contains(key))
+                    {
+                        angleCcw = 90;
+                    }
+                    else if (set180.Contains(key))
+                    {
+                        angleCcw = 180;
+                    }
+                    else if (set270.Contains(key))
+                    {
+                        angleCcw = 270;
+                    }
+                }
+
+                if (angleCcw % 360 == 0)
+                {
+                    outImages.Add(wrap);
+                    continue;
+                }
+
+                double[] A;
+                int newW, newH;
+                GetRotationAffineCcwDeg(angleCcw, w, h, out A, out newW, out newH);
+
+                Mat rotated = null;
+                try
+                {
+                    var matA = new Mat(2, 3, MatType.CV_64FC1);
+                    matA.Set(0, 0, A[0]);
+                    matA.Set(0, 1, A[1]);
+                    matA.Set(0, 2, A[2]);
+                    matA.Set(1, 0, A[3]);
+                    matA.Set(1, 1, A[4]);
+                    matA.Set(1, 2, A[5]);
+                    rotated = new Mat();
+                    Cv2.WarpAffine(baseImg, rotated, matA, new Size(newW, newH));
+                }
+                catch
+                {
+                    rotated = new Mat();
+                    int a = ((angleCcw % 360) + 360) % 360;
+                    if (a == 90)
+                    {
+                        Cv2.Rotate(baseImg, rotated, RotateFlags.Rotate90Counterclockwise);
+                    }
+                    else if (a == 180)
+                    {
+                        Cv2.Rotate(baseImg, rotated, RotateFlags.Rotate180);
+                    }
+                    else
+                    {
+                        Cv2.Rotate(baseImg, rotated, RotateFlags.Rotate90Clockwise);
+                    }
+                }
+
+                if (rotated == null || rotated.Empty())
+                {
+                    outImages.Add(wrap);
+                    continue;
+                }
+
+                var parentState = wrap.TransformState ?? new TransformationState(w, h);
+                var childState = parentState.DeriveChild(A, newW, newH);
+                var child = new ModuleImage(rotated, wrap.OriginalImage ?? baseImg, childState, wrap.OriginalIndex);
+                outImages.Add(child);
+            }
+
+            return new ModuleIO(outImages, new JArray());
+        }
+
+        private object ReadProperty(string key)
+        {
+            if (Properties == null || string.IsNullOrEmpty(key))
+            {
+                return null;
+            }
+            if (!Properties.TryGetValue(key, out object v) || v == null)
+            {
+                return null;
+            }
+            return v;
+        }
+
+        private static HashSet<string> ToLabelSet(object v)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (v == null)
+            {
+                return set;
+            }
+
+            try
+            {
+                var enumerable = v as System.Collections.IEnumerable;
+                if (!(v is string) && enumerable != null)
+                {
+                    foreach (var item in enumerable)
+                    {
+                        if (item == null) continue;
+                        string s = item.ToString();
+                        if (string.IsNullOrWhiteSpace(s)) continue;
+                        set.Add(s.Trim());
+                    }
+                    return set;
+                }
+
+                string str = v as string;
+                if (!string.IsNullOrEmpty(str))
+                {
+                    string s = str.Trim();
+                    if (s.Length == 0) return set;
+                    string[] seps = new string[] { "，", ",", ";", "；", "|", "/" };
+                    foreach (var sep in seps)
+                    {
+                        s = s.Replace(sep, " ");
+                    }
+                    var parts = s.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var p in parts)
+                    {
+                        string ps = p.Trim();
+                        if (ps.Length > 0) set.Add(ps);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return set;
+        }
+
+        private static string SerializeTransformKey(TransformationState st)
+        {
+            if (st == null || st.AffineMatrix2x3 == null || st.AffineMatrix2x3.Length < 6)
+            {
+                return null;
+            }
+            var a = st.AffineMatrix2x3;
+            return string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "T:{0:F4},{1:F4},{2:F2},{3:F4},{4:F4},{5:F2}",
+                a[0], a[1], a[2], a[3], a[4], a[5]);
+        }
+
+        private static void BuildLabelMaps(JArray clsResults, out Dictionary<string, string> tmap, out Dictionary<int, string> imap, out Dictionary<int, string> omap)
+        {
+            tmap = new Dictionary<string, string>(StringComparer.Ordinal);
+            imap = new Dictionary<int, string>();
+            omap = new Dictionary<int, string>();
+
+            if (clsResults == null) return;
+
+            foreach (var token in clsResults)
+            {
+                var entry = token as JObject;
+                if (entry == null) continue;
+                var type = entry.Value<string>("type") ?? "";
+                if (!string.Equals(type, "local", StringComparison.OrdinalIgnoreCase)) continue;
+
+                string label = ClsTop1Label(entry);
+                if (label == null) continue;
+
+                // transform -> label（仅使用 affine_2x3；若无则不建键）
+                string tSig = null;
+                var stDict = entry["transform"] as JObject;
+                if (stDict != null)
+                {
+                    try
+                    {
+                        var dict = stDict.ToObject<Dictionary<string, object>>();
+                        var st = TransformationState.FromDict(dict);
+                        tSig = SerializeTransformKey(st);
+                    }
+                    catch
+                    {
+                        tSig = null;
+                    }
+                }
+                if (tSig != null && !tmap.ContainsKey(tSig))
+                {
+                    tmap[tSig] = label;
+                }
+
+                // index -> label
+                int idx = entry["index"] != null ? (entry["index"].Value<int?>() ?? -1) : -1;
+                if (idx >= 0 && !imap.ContainsKey(idx))
+                {
+                    imap[idx] = label;
+                }
+
+                // origin_index -> label
+                int oidx;
+                var originToken = entry["origin_index"];
+                if (originToken != null)
+                {
+                    oidx = originToken.Value<int?>() ?? -1;
+                }
+                else
+                {
+                    oidx = idx;
+                }
+                if (oidx >= 0 && !omap.ContainsKey(oidx))
+                {
+                    omap[oidx] = label;
+                }
+            }
+        }
+
+        private static string ClsTop1Label(JObject entry)
+        {
+            try
+            {
+                if (entry == null) return null;
+                var type = entry.Value<string>("type") ?? "";
+                if (!string.Equals(type, "local", StringComparison.OrdinalIgnoreCase)) return null;
+
+                var srsToken = entry["sample_results"] as JArray;
+                if (srsToken == null || srsToken.Count == 0) return null;
+
+                var dets = new List<JObject>();
+
+                foreach (var t in srsToken)
+                {
+                    var obj = t as JObject;
+                    if (obj == null) continue;
+
+                    bool hasCategory = obj["category_name"] != null || obj["results"] != null || obj["bbox"] != null;
+                    if (!hasCategory) continue;
+
+                    var innerResults = obj["results"] as JArray;
+                    if (innerResults != null)
+                    {
+                        foreach (var r in innerResults)
+                        {
+                            var ro = r as JObject;
+                            if (ro != null) dets.Add(ro);
+                        }
+                    }
+                    else
+                    {
+                        dets.Add(obj);
+                    }
+                }
+
+                if (dets.Count == 0) return null;
+
+                JObject best = null;
+                double bestScore = double.MinValue;
+                foreach (var d in dets)
+                {
+                    double sc = 0.0;
+                    var sv = d["score"];
+                    if (sv != null)
+                    {
+                        double tmp;
+                        if (double.TryParse(sv.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out tmp))
+                        {
+                            sc = tmp;
+                        }
+                    }
+                    if (best == null || sc > bestScore)
+                    {
+                        best = d;
+                        bestScore = sc;
+                    }
+                }
+
+                if (best == null) return null;
+                var cnToken = best["category_name"];
+                if (cnToken == null) return null;
+                var cn = cnToken.ToString();
+                if (string.IsNullOrEmpty(cn)) return null;
+                return cn;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void GetRotationAffineCcwDeg(int angle, int width, int height, out double[] A, out int newWidth, out int newHeight)
+        {
+            int w = width;
+            int h = height;
+            int a = ((angle % 360) + 360) % 360;
+
+            if (a == 0)
+            {
+                A = new double[] { 1.0, 0.0, 0.0, 0.0, 1.0, 0.0 };
+                newWidth = w;
+                newHeight = h;
+                return;
+            }
+            if (a == 90)
+            {
+                // 逆时针 90：x' = y; y' = w-1 - x
+                A = new double[] { 0.0, 1.0, 0.0, -1.0, 0.0, w - 1.0 };
+                newWidth = h;
+                newHeight = w;
+                return;
+            }
+            if (a == 180)
+            {
+                // 180：x' = w-1 - x; y' = h-1 - y
+                A = new double[] { -1.0, 0.0, w - 1.0, 0.0, -1.0, h - 1.0 };
+                newWidth = w;
+                newHeight = h;
+                return;
+            }
+            // 270：逆时针 270 等同于顺时针 90，x' = h-1 - y; y' = x
+            A = new double[] { 0.0, -1.0, h - 1.0, 1.0, 0.0, 0.0 };
+            newWidth = h;
+            newHeight = w;
+        }
+    }
 }
