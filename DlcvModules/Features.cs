@@ -215,6 +215,197 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 镜像翻转：支持水平（左右）与竖直（上下）翻转；仅处理图像并只输出图像。
+    /// 输入：image；输出：image；不透传 results。
+    /// properties:
+    /// - direction: str 翻转方向，仅支持中文："水平"（左右）或 "竖直"（上下），默认 "水平"
+    /// </summary>
+    public class ImageFlip : BaseModule
+    {
+        static ImageFlip()
+        {
+            ModuleRegistry.Register("features/image_flip", typeof(ImageFlip));
+        }
+
+        public ImageFlip(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var images = imageList ?? new List<ModuleImage>();
+            if (images.Count == 0) return new ModuleIO(new List<ModuleImage>(), new JArray());
+
+            string dirStr = "水平";
+            if (Properties != null && Properties.TryGetValue("direction", out object v) && v != null)
+            {
+                dirStr = v.ToString();
+            }
+            string direction = "horizontal";
+            if (dirStr.Contains("竖直") || dirStr.Contains("vertical")) direction = "vertical";
+
+            var outImages = new List<ModuleImage>();
+
+            for (int i = 0; i < images.Count; i++)
+            {
+                var wrap = images[i];
+                if (wrap == null || wrap.ImageObject == null || wrap.ImageObject.Empty()) continue;
+
+                var baseImg = wrap.ImageObject;
+                int w = baseImg.Width;
+                int h = baseImg.Height;
+
+                double[] A;
+                if (direction == "vertical")
+                {
+                    // 上下翻转：y' = h-1 - y
+                    A = new double[] { 1.0, 0.0, 0.0, 0.0, -1.0, h - 1.0 };
+                }
+                else
+                {
+                    // 水平翻转：x' = w-1 - x
+                    A = new double[] { -1.0, 0.0, w - 1.0, 0.0, 1.0, 0.0 };
+                }
+
+                Mat flipped = new Mat();
+                try
+                {
+                    var matA = new Mat(2, 3, MatType.CV_64FC1);
+                    matA.Set(0, 0, A[0]); matA.Set(0, 1, A[1]); matA.Set(0, 2, A[2]);
+                    matA.Set(1, 0, A[3]); matA.Set(1, 1, A[4]); matA.Set(1, 2, A[5]);
+                    Cv2.WarpAffine(baseImg, flipped, matA, new Size(w, h));
+                }
+                catch
+                {
+                    FlipMode mode = direction == "vertical" ? FlipMode.X : FlipMode.Y; // OpenCV FlipMode.X is vertical (around x-axis)? No.
+                    // FlipMode.X means flip around X-axis -> Vertical flip.
+                    // FlipMode.Y means flip around Y-axis -> Horizontal flip.
+                    Cv2.Flip(baseImg, flipped, mode);
+                }
+
+                var parentState = wrap.TransformState ?? new TransformationState(w, h);
+                var childState = parentState.DeriveChild(A, w, h);
+                var child = new ModuleImage(flipped, wrap.OriginalImage ?? baseImg, childState, wrap.OriginalIndex);
+                outImages.Add(child);
+            }
+
+            // 不透传 results
+            return new ModuleIO(outImages, new JArray());
+        }
+    }
+
+    /// <summary>
+    /// 根据 2D mask 生成最小外接矩旋转框（le90），替换原 bbox；image 透传。
+    /// </summary>
+    public class MaskToRBox : BaseModule
+    {
+        static MaskToRBox()
+        {
+            ModuleRegistry.Register("features/mask_to_rbox", typeof(MaskToRBox));
+        }
+
+        public MaskToRBox(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var images = imageList ?? new List<ModuleImage>();
+            var results = resultList ?? new JArray();
+            var outResults = new JArray();
+
+            foreach (var entryToken in results)
+            {
+                if (!(entryToken is JObject entry) || entry["type"]?.ToString() != "local")
+                {
+                    outResults.Add(entryToken);
+                    continue;
+                }
+
+                var dets = entry["sample_results"] as JArray;
+                if (dets == null)
+                {
+                    outResults.Add(entryToken);
+                    continue;
+                }
+
+                var newDets = new JArray();
+                foreach (var dToken in dets)
+                {
+                    if (!(dToken is JObject d)) continue;
+
+                    // 检查 mask
+                    var maskToken = d["mask"];
+                    if (maskToken == null)
+                    {
+                        // 无 mask，跳过（Python逻辑是移除，这里也移除）
+                        continue;
+                    }
+
+                    // 检查 bbox
+                    var bbox = d["bbox"] as JArray;
+                    if (bbox == null || bbox.Count < 4) continue;
+
+                    // 解析 mask 点集
+                    var pts = new List<Point2f>();
+                    if (maskToken is JArray arr)
+                    {
+                        foreach (var p in arr)
+                        {
+                            if (p is JObject pj)
+                            {
+                                pts.Add(new Point2f(pj.Value<float>("x"), pj.Value<float>("y")));
+                            }
+                        }
+                    }
+
+                    if (pts.Count == 0) continue;
+
+                    // 最小外接矩
+                    RotatedRect rr = Cv2.MinAreaRect(pts);
+                    float rw = rr.Size.Width;
+                    float rh = rr.Size.Height;
+                    float angDeg = rr.Angle;
+
+                    // 转换为 le90：长边在前
+                    if (rw < rh)
+                    {
+                        float tmp = rw; rw = rh; rh = tmp;
+                        angDeg += 90.0f;
+                    }
+
+                    // 角度转弧度并归一到 [-PI/2, PI/2)
+                    double angRad = angDeg * Math.PI / 180.0;
+                    angRad = NormalizeAngleLe90Rad(angRad);
+
+                    var d2 = (JObject)d.DeepClone();
+                    d2["bbox"] = new JArray(rr.Center.X, rr.Center.Y, rw, rh, angRad);
+                    d2["with_angle"] = true;
+                    d2["angle"] = angRad;
+                    d2.Remove("mask"); // 移除 mask 以减小体积
+
+                    newDets.Add(d2);
+                }
+
+                var entry2 = (JObject)entry.DeepClone();
+                entry2["sample_results"] = newDets;
+                outResults.Add(entry2);
+            }
+
+            return new ModuleIO(images, outResults);
+        }
+
+        private static double NormalizeAngleLe90Rad(double aRad)
+        {
+            double x = aRad;
+            x = (x + Math.PI / 2.0) % Math.PI - Math.PI / 2.0;
+            return x;
+        }
+    }
+
+    /// <summary>
     /// 合并多路图像与结果：将主输入和 ExtraInputsIn 的对汇总；按 transform/index/origin_index 对齐结果
     /// 可选去重：当 bbox+category_name 一致时去重
     /// 输出：每张图一个 local 条目
