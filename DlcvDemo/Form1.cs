@@ -121,7 +121,7 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "深度视觉模型 (*.dvt;*.dvp;*.dvo)|*.dvt;*.dvp;*.dvo|所有文件 (*.*)|*.*";
+            openFileDialog.Filter = "深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst)|*.dvt;*.dvp;*.dvo;*.dvst|所有文件 (*.*)|*.*";
             openFileDialog.Title = "选择模型";
             try
             {
@@ -152,7 +152,24 @@ namespace DlcvDemo
                         rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked;
                     }
                     catch { }
-                    model = new Model(selectedFilePath, device_id, rpc_mode);
+
+                    if (selectedFilePath.EndsWith(".dvst", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var dvstModel = new DlcvModules.DvstModel();
+                        var report = dvstModel.Load(selectedFilePath, device_id);
+                        model = dvstModel;
+                        
+                        int code = report != null && report["code"] != null ? (int)report["code"] : 1;
+                        if (code != 0)
+                        {
+                             string msg = report != null ? report.ToString() : "Unknown error";
+                             throw new Exception("DVST模型加载失败:\n" + msg);
+                        }
+                    }
+                    else
+                    {
+                        model = new Model(selectedFilePath, device_id, rpc_mode);
+                    }
                     
                     button_getmodelinfo_Click(sender, e);
                 }
