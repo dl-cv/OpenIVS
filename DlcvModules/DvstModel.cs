@@ -43,6 +43,8 @@ namespace DlcvModules
 
             JObject pipelineJson = null;
             var extractedFiles = new Dictionary<string, string>(); // filename -> fullPath
+            // 映射：原始文件名 -> 临时文件路径（Guid命名）
+            var fileNameToTempPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             try
             {
@@ -91,7 +93,13 @@ namespace DlcvModules
                         else
                         {
                             // 其他文件（.dvt）写入临时目录
-                            string targetPath = Path.Combine(_tempDir, fileName);
+                            // 关键修改：为了避免中文文件名导致的底层库打开失败，我们将临时文件重命名为纯英文（Guid）
+                            // 保留原始扩展名以便识别
+                            string ext = Path.GetExtension(fileName);
+                            if (string.IsNullOrEmpty(ext)) ext = ".tmp";
+                            string safeName = Guid.NewGuid().ToString("N") + ext;
+                            string targetPath = Path.Combine(_tempDir, safeName);
+                            
                             using (FileStream outFs = new FileStream(targetPath, FileMode.Create, FileAccess.Write))
                             {
                                 byte[] buffer = new byte[8192];
@@ -105,6 +113,7 @@ namespace DlcvModules
                                 }
                             }
                             extractedFiles[fileName] = targetPath;
+                            fileNameToTempPath[fileName] = targetPath;
                         }
                     }
                 }
@@ -123,10 +132,25 @@ namespace DlcvModules
                         if (props.ContainsKey("model_path"))
                         {
                             string originalPath = props["model_path"].ToString();
-                            // 如果提取的文件列表中有这个文件名，则替换为临时绝对路径
-                            if (extractedFiles.ContainsKey(originalPath))
+                            
+                            // 尝试匹配策略：
+                            // 1. 原始路径是否就是文件名且在映射中？
+                            if (fileNameToTempPath.ContainsKey(originalPath))
                             {
-                                props["model_path"] = extractedFiles[originalPath];
+                                props["model_path"] = fileNameToTempPath[originalPath];
+                            }
+                            else
+                            {
+                                // 2. 尝试提取原始路径的文件名部分进行匹配
+                                try 
+                                {
+                                    string justName = Path.GetFileName(originalPath);
+                                    if (!string.IsNullOrEmpty(justName) && fileNameToTempPath.ContainsKey(justName))
+                                    {
+                                        props["model_path"] = fileNameToTempPath[justName];
+                                    }
+                                }
+                                catch {}
                             }
                         }
                     }
