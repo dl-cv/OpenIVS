@@ -292,7 +292,10 @@ namespace DlcvModules
                 ctx.Set("frontend_image_path", "");
                 ctx.Set("device_id", _deviceId);
 
-                var outputs = _executor.Run();
+                // 错误修复：不能使用 Load 时创建的 _executor（它绑定了旧的 context）
+                // 必须使用包含当前图像数据的 ctx 创建新的 GraphExecutor
+                var exec = new GraphExecutor(_nodes, ctx);
+                var outputs = exec.Run();
 
                 if (converted != null) converted.Dispose();
 
