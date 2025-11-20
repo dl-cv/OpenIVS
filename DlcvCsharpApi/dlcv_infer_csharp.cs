@@ -13,6 +13,7 @@ using System.IO;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.IO.MemoryMappedFiles;
+using DlcvModules;
 
 namespace dlcv_infer_csharp
 {
@@ -155,6 +156,8 @@ namespace dlcv_infer_csharp
 
         // DVP mode fields
         private bool _isDvpMode = false;
+        private bool _isDvsMode = false;
+        private DlcvModules.DvsModel _dvsModel;
         private bool _isRpcMode = false;
         private string _modelPath;
         private string _serverUrl = "http://127.0.0.1:9890";
@@ -188,6 +191,7 @@ namespace dlcv_infer_csharp
 
             string extension = Path.GetExtension(modelPath).ToLower();
             _isDvpMode = extension == ".dvp";
+            _isDvsMode = extension == ".dvst" || extension == ".dvso" || extension == ".dvsp";
             _isRpcMode = rpc_mode;
 
             if (enableCache)
@@ -218,6 +222,10 @@ namespace dlcv_infer_csharp
                 {
                     // DVP 模式：使用 HTTP API
                     InitializeDvpMode(modelPath, device_id);
+                }
+                else if (_isDvsMode)
+                {
+                    InitializeDvsMode(modelPath, device_id);
                 }
                 else if (_isRpcMode)
                 {
@@ -308,6 +316,28 @@ namespace dlcv_infer_csharp
             catch (Exception ex)
             {
                 throw new Exception($"加载模型失败: {ex.Message}", ex);
+            }
+        }
+
+        private void InitializeDvsMode(string modelPath, int device_id)
+        {
+            _dvsModel = new DlcvModules.DvsModel();
+            try
+            {
+                var report = _dvsModel.Load(modelPath, device_id);
+                int code = report != null && report["code"] != null ? (int)report["code"] : 1;
+                if (code != 0)
+                {
+                    string msg = report != null ? report.ToString() : "Unknown error";
+                    throw new Exception("DVS模型加载失败:\n" + msg);
+                }
+                modelIndex = 1; // 标记为已加载
+            }
+            catch (Exception ex)
+            {
+                _dvsModel.Dispose();
+                _dvsModel = null;
+                throw new Exception($"加载 DVS 模型失败: {ex.Message}", ex);
             }
         }
 
@@ -599,6 +629,13 @@ namespace dlcv_infer_csharp
                     Console.WriteLine($"DVP 释放模型失败: {ex.Message}");
                 }
             }
+            else if (_isDvsMode)
+            {
+                if (_disposed || modelIndex == -1) return;
+                _dvsModel?.Dispose();
+                _dvsModel = null;
+                modelIndex = -1;
+            }
             else if (_isRpcMode)
             {
                 if (_disposed || modelIndex == -1) return;
@@ -670,6 +707,10 @@ namespace dlcv_infer_csharp
             if (_isDvpMode)
             {
                 modelInfo = GetModelInfoDvp();
+            }
+            else if (_isDvsMode)
+            {
+                modelInfo = _dvsModel.GetModelInfo();
             }
             else if (_isRpcMode)
             {
@@ -757,6 +798,10 @@ namespace dlcv_infer_csharp
             if (_isDvpMode)
             {
                 return InferInternalDvp(images, params_json);
+            }
+            else if (_isDvsMode)
+            {
+                return _dvsModel.InferInternal(images, params_json);
             }
             else if (_isRpcMode)
             {
@@ -1199,6 +1244,11 @@ namespace dlcv_infer_csharp
 
         public Utils.CSharpResult Infer(Mat image, JObject params_json = null)
         {
+            if (_isDvsMode)
+            {
+                return _dvsModel.InferBatch(new List<Mat> { image }, params_json);
+            }
+
             // 将单张图像放入列表中处理
             var resultTuple = InferInternal(new List<Mat> { image }, params_json);
             try
@@ -1217,6 +1267,11 @@ namespace dlcv_infer_csharp
 
         public Utils.CSharpResult InferBatch(List<Mat> image_list, JObject params_json = null)
         {
+            if (_isDvsMode)
+            {
+                return _dvsModel.InferBatch(image_list, params_json);
+            }
+
             var resultTuple = InferInternal(image_list, params_json);
             try
             {
@@ -1252,6 +1307,12 @@ namespace dlcv_infer_csharp
         /// </returns>
         public dynamic InferOneOutJson(Mat image, JObject params_json = null)
         {
+            if (_isDvsMode)
+            {
+                var res = _dvsModel.InferInternal(new List<Mat> { image }, params_json);
+                return res.Item1["result_list"] as JArray ?? new JArray();
+            }
+
             var resultTuple = InferInternal(new List<Mat> { image }, params_json);
             try
             {
