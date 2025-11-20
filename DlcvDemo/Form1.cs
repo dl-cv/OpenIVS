@@ -155,7 +155,7 @@ namespace DlcvDemo
 
                     if (selectedFilePath.EndsWith(".dvst", StringComparison.OrdinalIgnoreCase))
                     {
-                        var dvstModel = new DlcvModules.DvstModel();
+                        var dvstModel = new DvsModel();
                         var report = dvstModel.Load(selectedFilePath, device_id);
                         model = dvstModel;
                         
