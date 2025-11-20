@@ -67,7 +67,7 @@
   <ItemGroup>
     <Compile Include="dlcv_infer_csharp.cs" />
     <Compile Include="Base.cs" />
-    <Compile Include="DvstModel.cs" />
+    <Compile Include="DvsModel.cs" />
     <Compile Include="Features.cs" />
     <Compile Include="FlowGraphModel.cs" />
     <Compile Include="Inputs.cs" />
