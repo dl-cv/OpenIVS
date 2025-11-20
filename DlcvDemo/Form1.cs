@@ -121,7 +121,7 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "深度视觉模型 (*.dvt;*.dvp;*.dvo)|*.dvt;*.dvp;*.dvo|所有文件 (*.*)|*.*";
+            openFileDialog.Filter = "深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
             openFileDialog.Title = "选择模型";
             try
             {
@@ -152,6 +152,7 @@ namespace DlcvDemo
                         rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked;
                     }
                     catch { }
+
                     model = new Model(selectedFilePath, device_id, rpc_mode);
                     
                     button_getmodelinfo_Click(sender, e);
