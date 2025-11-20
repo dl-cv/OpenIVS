@@ -155,15 +155,15 @@ namespace DlcvDemo
 
                     if (selectedFilePath.EndsWith(".dvst", StringComparison.OrdinalIgnoreCase))
                     {
-                        var dvstModel = new DvsModel();
-                        var report = dvstModel.Load(selectedFilePath, device_id);
-                        model = dvstModel;
+                        var dvsModel = new DlcvModules.DvsModel();
+                        var report = dvsModel.Load(selectedFilePath, device_id);
+                        model = dvsModel;
                         
                         int code = report != null && report["code"] != null ? (int)report["code"] : 1;
                         if (code != 0)
                         {
                              string msg = report != null ? report.ToString() : "Unknown error";
-                             throw new Exception("DVST模型加载失败:\n" + msg);
+                             throw new Exception("DVS模型加载失败:\n" + msg);
                         }
                     }
                     else
