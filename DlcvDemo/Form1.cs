@@ -121,7 +121,7 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst)|*.dvt;*.dvp;*.dvo;*.dvst|所有文件 (*.*)|*.*";
+            openFileDialog.Filter = "深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
             openFileDialog.Title = "选择模型";
             try
             {
@@ -153,23 +153,7 @@ namespace DlcvDemo
                     }
                     catch { }
 
-                    if (selectedFilePath.EndsWith(".dvst", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var dvsModel = new DlcvModules.DvsModel();
-                        var report = dvsModel.Load(selectedFilePath, device_id);
-                        model = dvsModel;
-                        
-                        int code = report != null && report["code"] != null ? (int)report["code"] : 1;
-                        if (code != 0)
-                        {
-                             string msg = report != null ? report.ToString() : "Unknown error";
-                             throw new Exception("DVS模型加载失败:\n" + msg);
-                        }
-                    }
-                    else
-                    {
-                        model = new Model(selectedFilePath, device_id, rpc_mode);
-                    }
+                    model = new Model(selectedFilePath, device_id, rpc_mode);
                     
                     button_getmodelinfo_Click(sender, e);
                 }
