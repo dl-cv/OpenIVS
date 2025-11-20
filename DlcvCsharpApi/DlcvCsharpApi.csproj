@@ -65,7 +65,12 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="dlcv_infer_csharp.cs" />
+    <Compile Include="DllLoader.cs" />
+    <Compile Include="Model.cs" />
+    <Compile Include="SlidingWindowModel.cs" />
+    <Compile Include="OcrWithDetModel.cs" />
+    <Compile Include="DataTypes.cs" />
+    <Compile Include="Utils.cs" />
     <Compile Include="Base.cs" />
     <Compile Include="DvsModel.cs" />
     <Compile Include="Features.cs" />
