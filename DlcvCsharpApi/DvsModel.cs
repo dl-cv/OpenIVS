@@ -11,17 +11,17 @@ using dlcv_infer_csharp;
 namespace DlcvModules
 {
     /// <summary>
-    /// 支持加载 .dvst 格式（包含 pipeline.json + 多个 .dvt 模型）
+    /// 支持加载 .dvst/dvso/dvsp 格式（包含 pipeline.json + 多个 .dvt/.dvs/.dvp 模型）
     /// 解包 -> 临时存储 -> 加载 -> 清理
     /// </summary>
-    public class DvstModel : IDisposable
+    public class DvsModel : IDisposable
     {
         private List<Dictionary<string, object>> _nodes;
         private JObject _root;
         private bool _loaded = false;
         private bool _disposed = false;
         private int _deviceId = 0;
-        private string _dvstPath;
+        private string _dvsPath;
         private GraphExecutor _executor;
 
         // 临时文件夹路径，用于清理
@@ -29,16 +29,16 @@ namespace DlcvModules
 
         public bool IsLoaded { get { return _loaded; } }
 
-        public JObject Load(string dvstPath, int deviceId = 0)
+        public JObject Load(string dvsPath, int deviceId = 0)
         {
-            if (string.IsNullOrWhiteSpace(dvstPath)) throw new ArgumentException("文件路径为空", nameof(dvstPath));
-            if (!File.Exists(dvstPath)) throw new FileNotFoundException("文件不存在", dvstPath);
+            if (string.IsNullOrWhiteSpace(dvsPath)) throw new ArgumentException("文件路径为空", nameof(dvsPath));
+            if (!File.Exists(dvsPath)) throw new FileNotFoundException("文件不存在", dvsPath);
 
-            _dvstPath = dvstPath;
+            _dvsPath = dvsPath;
             _deviceId = deviceId;
 
-            // 1. 准备临时目录
-            _tempDir = Path.Combine(Path.GetTempPath(), "DlcvDvst_" + Guid.NewGuid().ToString("N"));
+                // 1. 准备临时目录
+            _tempDir = Path.Combine(Path.GetTempPath(), "DlcvDvs_" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_tempDir);
 
             JObject pipelineJson = null;
@@ -48,7 +48,7 @@ namespace DlcvModules
 
             try
             {
-                using (FileStream fs = new FileStream(dvstPath, FileMode.Open, FileAccess.Read))
+                using (FileStream fs = new FileStream(dvsPath, FileMode.Open, FileAccess.Read))
                 {
                     // 2. 校验头部 "DV\n"
                     byte[] magic = new byte[3];
@@ -236,7 +236,7 @@ namespace DlcvModules
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[DvstModel] Warning: Failed to cleanup temp dir {_tempDir}: {ex.Message}");
+                    Console.WriteLine($"[DvsModel] Warning: Failed to cleanup temp dir {_tempDir}: {ex.Message}");
                 }
                 _tempDir = null;
             }
@@ -342,7 +342,7 @@ namespace DlcvModules
             }
         }
 
-        ~DvstModel()
+        ~DvsModel()
         {
             Dispose(false);
         }
