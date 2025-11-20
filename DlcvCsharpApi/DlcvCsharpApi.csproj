@@ -73,7 +73,6 @@
     <Compile Include="Inputs.cs" />
     <Compile Include="MainProcess.cs" />
     <Compile Include="Models.cs" />
-    <Compile Include="Modules.cs" />
     <Compile Include="Outputs.cs" />
     <Compile Include="SlidingMerge.cs" />
     <Compile Include="SlidingWindow.cs" />
