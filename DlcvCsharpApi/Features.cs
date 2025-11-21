@@ -1471,4 +1471,200 @@ namespace DlcvModules
             newHeight = w;
         }
     }
+
+    /// <summary>
+    /// 特征/文本替换：根据映射表替换识别结果（category_name）中的字符或子串。
+    /// 注册名：features/text_replacement
+    /// properties:
+    /// - mapping: Dict[string, string] 或 JSON 字符串，按 key->value 执行 str.Replace
+    ///
+    /// 行为：
+    /// - 仅处理 type == "local" 的结果；图像透传不变；未配置或无效映射时直接透传。
+    /// - 对每个 sample_result 的 category_name（字符串）进行多轮替换；若修改则写回。
+    /// </summary>
+    public class TextReplacement : BaseModule
+    {
+        static TextReplacement()
+        {
+            ModuleRegistry.Register("features/text_replacement", typeof(TextReplacement));
+        }
+
+        public TextReplacement(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var images = imageList ?? new List<ModuleImage>();
+            var results = resultList ?? new JArray();
+
+            var mapping = ReadMapping(Properties);
+            if (mapping == null || mapping.Count == 0)
+            {
+                // 无有效映射，直接透传
+                return new ModuleIO(images, results);
+            }
+
+            var outResults = new JArray();
+
+            foreach (var token in results)
+            {
+                var entry = token as JObject;
+                if (entry == null)
+                {
+                    outResults.Add(token);
+                    continue;
+                }
+
+                var typeStr = entry.Value<string>("type") ?? string.Empty;
+                if (!string.Equals(typeStr, "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                var dets = entry["sample_results"] as JArray;
+                if (dets == null)
+                {
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                var newDets = new JArray();
+                foreach (var dToken in dets)
+                {
+                    var d = dToken as JObject;
+                    if (d == null)
+                    {
+                        newDets.Add(dToken);
+                        continue;
+                    }
+
+                    var catToken = d["category_name"];
+                    if (catToken != null && catToken.Type == JTokenType.String)
+                    {
+                        string cat = catToken.ToString();
+                        string newCat = ApplyMapping(cat, mapping);
+                        if (!string.Equals(cat, newCat, StringComparison.Ordinal))
+                        {
+                            var d2 = (JObject)d.DeepClone();
+                            d2["category_name"] = newCat;
+                            newDets.Add(d2);
+                        }
+                        else
+                        {
+                            newDets.Add(d);
+                        }
+                    }
+                    else
+                    {
+                        newDets.Add(d);
+                    }
+                }
+
+                var entryNew = (JObject)entry.DeepClone();
+                entryNew["sample_results"] = newDets;
+                outResults.Add(entryNew);
+            }
+
+            return new ModuleIO(images, outResults);
+        }
+
+        private static string ApplyMapping(string input, Dictionary<string, string> mapping)
+        {
+            if (string.IsNullOrEmpty(input) || mapping == null || mapping.Count == 0) return input;
+            string s = input;
+            foreach (var kv in mapping)
+            {
+                if (!string.IsNullOrEmpty(kv.Key) && kv.Value != null && s.IndexOf(kv.Key, StringComparison.Ordinal) >= 0)
+                {
+                    s = s.Replace(kv.Key, kv.Value);
+                }
+            }
+            return s;
+        }
+
+        private static Dictionary<string, string> ReadMapping(Dictionary<string, object> props)
+        {
+            var dict = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (props == null) return dict;
+
+            if (!props.TryGetValue("mapping", out object v) || v == null) return dict;
+
+            try
+            {
+                // 1) JObject
+                var jobj = v as JObject;
+                if (jobj != null)
+                {
+                    foreach (var p in jobj)
+                    {
+                        var key = p.Key;
+                        if (string.IsNullOrEmpty(key)) continue;
+                        var val = p.Value != null ? p.Value.ToString() : "";
+                        dict[key] = val ?? "";
+                    }
+                    return dict;
+                }
+
+                // 2) Dictionary<string, object>
+                var dso = v as Dictionary<string, object>;
+                if (dso != null)
+                {
+                    foreach (var kv in dso)
+                    {
+                        if (string.IsNullOrEmpty(kv.Key)) continue;
+                        dict[kv.Key] = kv.Value != null ? kv.Value.ToString() : "";
+                    }
+                    return dict;
+                }
+
+                // 3) JSON 字符串
+                var str = v as string;
+                if (str == null && v is JValue jv && jv.Type == JTokenType.String)
+                {
+                    str = jv.ToString();
+                }
+                if (!string.IsNullOrEmpty(str))
+                {
+                    try
+                    {
+                        var parsed = JObject.Parse(str);
+                        foreach (var p in parsed)
+                        {
+                            var key = p.Key;
+                            if (string.IsNullOrEmpty(key)) continue;
+                            var val = p.Value != null ? p.Value.ToString() : "";
+                            dict[key] = val ?? "";
+                        }
+                        return dict;
+                    }
+                    catch
+                    {
+                        // 非 JSON 字符串则忽略
+                    }
+                }
+
+                // 4) 其它 IDictionary 兼容
+                var idict = v as System.Collections.IDictionary;
+                if (idict != null)
+                {
+                    foreach (var keyObj in idict.Keys)
+                    {
+                        var key = keyObj != null ? keyObj.ToString() : null;
+                        if (string.IsNullOrEmpty(key)) continue;
+                        var valObj = idict[keyObj];
+                        dict[key] = valObj != null ? valObj.ToString() : "";
+                    }
+                }
+            }
+            catch
+            {
+                // 任何解析异常，按空映射处理
+            }
+
+            return dict;
+        }
+    }
 }
