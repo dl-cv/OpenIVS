@@ -1238,7 +1238,7 @@ namespace dlcv_infer_csharp
             var bbox = item["bbox"]?.ToObject<List<double>>() ?? new List<double>();
 
             // DVP Conversion [x1,y1,x2,y2] -> [x,y,w,h]
-            if (isDvpMode && bbox.Count == 4)
+            if ((isDvpMode || _isDvsMode)&& bbox.Count == 4)
             {
                 double x1 = bbox[0];
                 double y1 = bbox[1];
