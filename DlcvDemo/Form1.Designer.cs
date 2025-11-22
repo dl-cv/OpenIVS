@@ -53,6 +53,7 @@
             this.button_load_ocr_model = new System.Windows.Forms.Button();
             this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
             this.button_load_flow_model = new System.Windows.Forms.Button();
+            this.button_infer_json = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_threshold)).BeginInit();
@@ -360,11 +361,23 @@
             this.button_load_flow_model.UseVisualStyleBackColor = true;
             this.button_load_flow_model.Click += new System.EventHandler(this.button_load_flow_model_Click);
             // 
+            // button_infer_json
+            // 
+            this.button_infer_json.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.button_infer_json.Location = new System.Drawing.Point(676, 161);
+            this.button_infer_json.Name = "button_infer_json";
+            this.button_infer_json.Size = new System.Drawing.Size(140, 60);
+            this.button_infer_json.TabIndex = 26;
+            this.button_infer_json.Text = "推理JSON";
+            this.button_infer_json.UseVisualStyleBackColor = true;
+            this.button_infer_json.Click += new System.EventHandler(this.button_infer_json_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1274, 844);
+            this.Controls.Add(this.button_infer_json);
             this.Controls.Add(this.button_load_flow_model);
             this.Controls.Add(this.checkBox_rpc_mode);
             this.Controls.Add(this.button_load_ocr_model);
@@ -431,6 +444,7 @@
         private System.Windows.Forms.Button button_load_ocr_model;
         private System.Windows.Forms.CheckBox checkBox_rpc_mode;
         private System.Windows.Forms.Button button_load_flow_model;
+        private System.Windows.Forms.Button button_infer_json;
     }
 }
 

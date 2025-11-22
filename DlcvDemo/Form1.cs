@@ -164,6 +164,43 @@ namespace DlcvDemo
             }
         }
 
+		private void button_infer_json_Click(object sender, EventArgs e)
+		{
+			try
+			{
+				if (model == null)
+				{
+					MessageBox.Show("请先加载模型文件！");
+					return;
+				}
+				if (image_path == null)
+				{
+					MessageBox.Show("请先选择图片文件！");
+					return;
+				}
+
+				Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+				if (image.Empty())
+				{
+					Console.WriteLine("图像解码失败！");
+					return;
+				}
+				Mat image_rgb = new Mat();
+				Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
+
+				JObject data = new JObject();
+				data["threshold"] = (float)numericUpDown_threshold.Value;
+				data["with_mask"] = true;
+
+				var json = model.InferOneOutJson(image_rgb, data);
+				richTextBox1.Text = JsonConvert.SerializeObject(json, Formatting.Indented);
+			}
+			catch (Exception ex)
+			{
+				ReportError("推理JSON失败", ex);
+			}
+		}
+
         private void button_getmodelinfo_Click(object sender, EventArgs e)
         {
             if (model == null)
