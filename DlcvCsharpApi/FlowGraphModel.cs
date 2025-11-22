@@ -145,34 +145,55 @@ namespace DlcvModules
 
                 try { if (converted != null) { converted.Dispose(); } } catch { }
 
-                // 选取最后节点（按 order/id）
-                int lastNodeId = -1;
-                int bestOrderKey = int.MinValue;
-                for (int ni = 0; ni < _nodes.Count; ni++)
-                {
-                    var node = _nodes[ni];
-                    if (node == null) continue;
-                    int order = 0; int id = 0;
-                    if (node.ContainsKey("order") && node["order"] != null) { try { order = Convert.ToInt32(node["order"]); } catch { order = 0; } }
-                    if (node.ContainsKey("id") && node["id"] != null) { try { id = Convert.ToInt32(node["id"]); } catch { id = 0; } }
-                    int key = (order << 20) + id;
-                    if (key >= bestOrderKey) { bestOrderKey = key; lastNodeId = id; }
-                }
-
-                Dictionary<string, object> lastMap = null;
-                if (lastNodeId != -1 && outputs.ContainsKey(lastNodeId))
-                {
-                    lastMap = outputs[lastNodeId];
-                }
-                else
-                {
-                    foreach (var kv in outputs) lastMap = kv.Value; // 取最后一个
-                }
-
+                // 优先尝试获取 output/return_json 的结果
                 JArray resultList = null;
-                if (lastMap != null && lastMap.ContainsKey("result_list"))
+                var feJson = ctx.Get<Dictionary<string, object>>("frontend_json");
+                if (feJson != null && feJson.ContainsKey("last"))
                 {
-                    resultList = lastMap["result_list"] as JArray;
+                    var lastPayload = feJson["last"] as Dictionary<string, object>;
+                    if (lastPayload != null && lastPayload.ContainsKey("by_image"))
+                    {
+                        var byImg = lastPayload["by_image"] as List<Dictionary<string, object>>;
+                        if (byImg != null && byImg.Count > 0)
+                        {
+                             var resObj = byImg[0]["results"];
+                             if (resObj is JArray ja) resultList = ja;
+                             else if (resObj is List<Dictionary<string, object>> ldo) resultList = JArray.FromObject(ldo);
+                             else if (resObj is List<object> lo) resultList = JArray.FromObject(lo);
+                        }
+                    }
+                }
+
+                if (resultList == null)
+                {
+                    // 回退：选取最后节点（按 order/id）
+                    int lastNodeId = -1;
+                    int bestOrderKey = int.MinValue;
+                    for (int ni = 0; ni < _nodes.Count; ni++)
+                    {
+                        var node = _nodes[ni];
+                        if (node == null) continue;
+                        int order = 0; int id = 0;
+                        if (node.ContainsKey("order") && node["order"] != null) { try { order = Convert.ToInt32(node["order"]); } catch { order = 0; } }
+                        if (node.ContainsKey("id") && node["id"] != null) { try { id = Convert.ToInt32(node["id"]); } catch { id = 0; } }
+                        int key = (order << 20) + id;
+                        if (key >= bestOrderKey) { bestOrderKey = key; lastNodeId = id; }
+                    }
+
+                    Dictionary<string, object> lastMap = null;
+                    if (lastNodeId != -1 && outputs.ContainsKey(lastNodeId))
+                    {
+                        lastMap = outputs[lastNodeId];
+                    }
+                    else
+                    {
+                        foreach (var kv in outputs) lastMap = kv.Value; // 取最后一个
+                    }
+
+                    if (lastMap != null && lastMap.ContainsKey("result_list"))
+                    {
+                        resultList = lastMap["result_list"] as JArray;
+                    }
                 }
 
                 var entry = new JObject();
