@@ -1158,112 +1158,247 @@ namespace dlcv_infer_csharp
         /// <param name="image">输入图像</param>
         /// <param name="params_json">可选的推理参数，用于配置推理过程</param>
         /// <returns>
-        /// 返回JSON格式的检测结果数组，每个元素包含：
-        /// - category_id: 类别ID
-        /// - category_name: 类别名称
-        /// - score: 检测置信度
-        /// - area: 检测框面积
-        /// - bbox: 检测框坐标 [x,y,w,h] 或 [cx,cy,w,h]
-        /// - with_mask: 是否包含mask
-        /// - mask: 如果with_mask为true，则包含mask信息
-        ///   - 对于实例分割/语义分割：返回mask的多边形点集
-        ///   - 每个点包含x,y坐标，坐标是相对于原图的绝对坐标
-        /// - angle: 如果是旋转框检测，则包含旋转角度（弧度）
+        /// 返回JSON格式的检测结果数组，格式如下：
+        /// [
+        ///   {
+        ///     "angle": -100.0,
+        ///     "area": 100.0,
+        ///     "bbox": [x, y, w, h],
+        ///     "category_id": 0,
+        ///     "category_name": "name",
+        ///     "mask": { "height": -1, "mask_ptr": 0, "width": -1 } 或 [{"x":1,"y":1}, ...],
+        ///     "score": 0.99,
+        ///     "with_angle": false,
+        ///     "with_bbox": true,
+        ///     "with_mask": false
+        ///   }
+        /// ]
         /// </returns>
         public dynamic InferOneOutJson(Mat image, JObject params_json = null)
         {
+            JArray rawResults = null;
+
             if (_isDvsMode)
             {
                 var res = _dvsModel.InferInternal(new List<Mat> { image }, params_json);
-                return res.Item1["result_list"] as JArray ?? new JArray();
+                rawResults = res.Item1["result_list"] as JArray ?? new JArray();
+                
+                // DVS 模式下不需要释放非托管资源，直接处理
+                var finalResults = new JArray();
+                foreach (var item in rawResults)
+                {
+                    if (item is JObject obj)
+                    {
+                        finalResults.Add(StandardizeJsonOutput(obj, false));
+                    }
+                }
+                return finalResults;
             }
 
             var resultTuple = InferInternal(new List<Mat> { image }, params_json);
             try
             {
-                var results = resultTuple.Item1["sample_results"][0]["results"] as JArray;
-
-                if (_isDvpMode)
+                if (resultTuple.Item1["sample_results"] is JArray sampleResults && sampleResults.Count > 0)
                 {
-                    // DVP 模式：需要将bbox从[x1,y1,x2,y2]转换为[x,y,w,h]，并处理polygon数据
-                    foreach (JObject result in results)
-                    {
-                        // 转换bbox格式
-                        var bbox = result["bbox"]?.ToObject<List<double>>();
-                        if (bbox != null && bbox.Count == 4)
-                        {
-                            double x1 = bbox[0];
-                            double y1 = bbox[1];
-                            double x2 = bbox[2];
-                            double y2 = bbox[3];
-                            result["bbox"] = new JArray { x1, y1, x2 - x1, y2 - y1 };
-                        }
-
-                        // polygon数据已经在返回结果中，直接保留
-                        if (result.ContainsKey("polygon"))
-                        {
-                            result["mask"] = result["polygon"];
-                        }
-                    }
-                    return results;
+                    rawResults = sampleResults[0]["results"] as JArray;
                 }
-                else
+                
+                if (rawResults == null) rawResults = new JArray();
+
+                var finalResults = new JArray();
+                foreach (var item in rawResults)
                 {
-                    // DVT 模式：需要将mask转换为多边形点集
-                    foreach (var result in results)
+                    if (item is JObject obj)
                     {
-                        var bbox = result["bbox"].ToObject<List<double>>();
-                        var withMask = result["with_mask"]?.Value<bool>() ?? false;
-
-                        var mask = result["mask"];
-                        int mask_width = mask?["width"]?.Value<int>() ?? 0;
-                        int mask_height = mask?["height"]?.Value<int>() ?? 0;
-                        int width = bbox != null && bbox.Count > 2 ? (int)bbox[2] : 0;
-                        int height = bbox != null && bbox.Count > 3 ? (int)bbox[3] : 0;
-
-                        Mat mask_img = new Mat();
-                        if (withMask && mask != null && mask_width > 0 && mask_height > 0)
-                        {
-                            long maskPtrValue = mask["mask_ptr"]?.Value<long>() ?? 0;
-                            if (maskPtrValue != 0)
-                            {
-                                IntPtr mask_ptr = new IntPtr(maskPtrValue);
-                                mask_img = Mat.FromPixelData(mask_height, mask_width, MatType.CV_8UC1, mask_ptr);
-
-                                if (mask_img.Cols != width || mask_img.Rows != height)
-                                {
-                                    mask_img = mask_img.Resize(new Size(width, height));
-                                }
-
-                                Point[][] points = mask_img.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-                                JArray pointsJson = new JArray();
-                                if (points.Length > 0 && points[0].Length > 0)
-                                {
-                                    foreach (var point in points[0])
-                                    {
-                                        JObject point_obj = new JObject
-                                        {
-                                            ["x"] = (int)(point.X + (bbox != null && bbox.Count > 0 ? bbox[0] : 0)),
-                                            ["y"] = (int)(point.Y + (bbox != null && bbox.Count > 1 ? bbox[1] : 0))
-                                        };
-                                        pointsJson.Add(point_obj);
-                                    }
-                                }
-                                result["mask"] = pointsJson;
-                            }
-                        }
+                        finalResults.Add(StandardizeJsonOutput(obj, _isDvpMode));
                     }
-                    return results;
                 }
+                return finalResults;
             }
             finally
             {
-                // 处理完后释放结果，DVP模式下指针为空，不需要释放
+                // 处理完后释放结果
                 if (resultTuple.Item2 != IntPtr.Zero)
                 {
                     DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
                 }
             }
+        }
+
+        private JObject StandardizeJsonOutput(JObject item, bool isDvpMode)
+        {
+            var result = new JObject();
+
+            // 1. Copy/Set basic fields
+            result["category_id"] = item["category_id"] ?? 0;
+            result["category_name"] = item["category_name"] ?? "";
+            result["score"] = item["score"] ?? 0.0;
+
+            // 2. Handle BBox
+            var bbox = item["bbox"]?.ToObject<List<double>>() ?? new List<double>();
+
+            // DVP Conversion [x1,y1,x2,y2] -> [x,y,w,h]
+            if ((isDvpMode || _isDvsMode)&& bbox.Count == 4)
+            {
+                double x1 = bbox[0];
+                double y1 = bbox[1];
+                double x2 = bbox[2];
+                double y2 = bbox[3];
+                bbox = new List<double> { x1, y1, x2 - x1, y2 - y1 };
+            }
+
+            result["bbox"] = JArray.FromObject(bbox);
+            result["with_bbox"] = bbox.Count > 0;
+
+            // 3. Handle Area
+            if (item.ContainsKey("area"))
+            {
+                result["area"] = item["area"];
+            }
+            else
+            {
+                result["area"] = (bbox.Count >= 4) ? (bbox[2] * bbox[3]) : 0.0;
+            }
+
+            // 4. Handle Angle
+            bool withAngle = false;
+            double angle = -100.0;
+
+            if (item.ContainsKey("angle"))
+            {
+                angle = item["angle"].Value<double>();
+                withAngle = (angle > -99.0);
+            }
+            
+            // If bbox implies rotation (5 elements: [cx, cy, w, h, a])
+            if (bbox.Count == 5)
+            {
+                angle = bbox[4];
+                withAngle = true;
+            }
+
+            result["angle"] = angle;
+            result["with_angle"] = withAngle;
+
+            // 5. Handle Mask
+            bool withMask = false;
+            JToken maskOutput = null;
+
+            if (isDvpMode && item.ContainsKey("polygon"))
+            {
+                // DVP Polygon: [[x,y],...]
+                var poly = item["polygon"] as JArray;
+                if (poly != null && poly.Count > 0)
+                {
+                    var points = new JArray();
+                    foreach (var pt in poly)
+                    {
+                        if (pt is JArray p && p.Count >= 2)
+                        {
+                            points.Add(new JObject { ["x"] = p[0], ["y"] = p[1] });
+                        }
+                    }
+                    if (points.Count > 0)
+                    {
+                        maskOutput = points;
+                        withMask = true;
+                    }
+                }
+            }
+            else if (item.ContainsKey("poly")) // DVS ReturnJson format
+            {
+                // poly: [[[x,y],...]] (List of contours)
+                var polyOuter = item["poly"] as JArray;
+                if (polyOuter != null && polyOuter.Count > 0)
+                {
+                    var points = new JArray();
+                    // Take first contour
+                    if (polyOuter[0] is JArray contour)
+                    {
+                        foreach (var pt in contour) // pt is [x,y] (List<float>)
+                        {
+                            if (pt is JArray p && p.Count >= 2)
+                            {
+                                points.Add(new JObject { ["x"] = (int)p[0].Value<float>(), ["y"] = (int)p[1].Value<float>() });
+                            }
+                        }
+                    }
+                    if (points.Count > 0)
+                    {
+                        maskOutput = points;
+                        withMask = true;
+                    }
+                }
+            }
+            else if (item.ContainsKey("mask")) // DVT / RPC
+            {
+                var m = item["mask"];
+                // Check if it is already points (JArray)
+                if (m is JArray ma)
+                {
+                    if (ma.Count > 0 && ma[0] is JObject mo && mo.ContainsKey("x"))
+                    {
+                        maskOutput = ma;
+                        withMask = true;
+                    }
+                }
+                else if (m is JObject maskObj)
+                {
+                    // DVT Mask Object with ptr
+                    long ptrVal = maskObj["mask_ptr"]?.Value<long>() ?? 0;
+                    if (ptrVal != 0)
+                    {
+                        int mw = maskObj["width"]?.Value<int>() ?? 0;
+                        int mh = maskObj["height"]?.Value<int>() ?? 0;
+                        if (mw > 0 && mh > 0)
+                        {
+                            // Convert ptr to points using OpenCV
+                            using (var maskImg = Mat.FromPixelData(mh, mw, MatType.CV_8UC1, new IntPtr(ptrVal)))
+                            {
+                                int bw = (bbox.Count > 2) ? (int)bbox[2] : 0;
+                                int bh = (bbox.Count > 3) ? (int)bbox[3] : 0;
+                                double bx = (bbox.Count > 0) ? bbox[0] : 0;
+                                double by = (bbox.Count > 1) ? bbox[1] : 0;
+
+                                Mat procImg = maskImg;
+                                bool needDispose = false;
+                                if (bw > 0 && bh > 0 && (maskImg.Cols != bw || maskImg.Rows != bh))
+                                {
+                                    procImg = maskImg.Resize(new Size(bw, bh));
+                                    needDispose = true;
+                                }
+
+                                var contours = procImg.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+                                if (contours.Length > 0)
+                                {
+                                    var points = new JArray();
+                                    foreach (var pt in contours[0])
+                                    {
+                                        points.Add(new JObject { ["x"] = (int)(pt.X + bx), ["y"] = (int)(pt.Y + by) });
+                                    }
+                                    maskOutput = points;
+                                    withMask = true;
+                                }
+
+                                if (needDispose) procImg.Dispose();
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (withMask)
+            {
+                result["mask"] = maskOutput;
+                result["with_mask"] = true;
+            }
+            else
+            {
+                result["mask"] = new JObject { ["height"] = -1, ["mask_ptr"] = 0, ["width"] = -1 };
+                result["with_mask"] = false;
+            }
+
+            return result;
         }
 
         public void Dispose()
