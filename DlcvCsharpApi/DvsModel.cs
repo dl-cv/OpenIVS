@@ -483,78 +483,88 @@ namespace DlcvModules
 
             Mat mask = new Mat();
             bool withMask = false;
-            var polyToken = entry["poly"]; 
-            
-            if (polyToken is JArray polyOuter && polyOuter.Count > 0 && withBbox) 
-            {
-                // 对于 mask 绘制，需要相对于 bbox 的左上角
-                // 如果是旋转框，通常 mask 是在旋转矩形内或者全局 mask
-                // 根据 output/return_json 逻辑，poly 是全局多边形
-                // 而 CSharpObjectResult 的 mask 是局部 mask (从 bbox 裁剪出来的)
-                // 所以我们需要计算 bbox 的 AABB，计算偏移，并绘制
-                
-                // 简单起见，我们这里计算 mask 的尺寸为 bbox 的 w,h (如果是旋转框，取 w,h)
-                // 并根据 bbox 的中心点/左上角进行平移
-                
-                // 重新计算用于 mask 的左上角和尺寸
-                double x0, y0;
-                int w, h;
-                
-                if (withAngle) 
-                {
-                     // 旋转框：bbox=[cx,cy,w,h]
-                     // 无法简单绘制局部 mask，除非旋转 poly
-                     // 暂不支持旋转框的 mask 还原到局部 mask (OpenCV 需要旋转)
-                     // 或者我们假设 mask 画在 bounding rect 上
-                     w = (int)Math.Max(1, bbox[2]);
-                     h = (int)Math.Max(1, bbox[3]);
-                     x0 = bbox[0] - w / 2.0;
-                     y0 = bbox[1] - h / 2.0;
-                }
-                else
-                {
-                     // 水平框：bbox=[x,y,w,h]
-                     x0 = bbox[0];
-                     y0 = bbox[1];
-                     w = (int)Math.Max(1, bbox[2]);
-                     h = (int)Math.Max(1, bbox[3]);
-                }
 
+            // 优先从 mask_rle 还原掩膜（与 FlowGraphModel 行为保持一致）
+            var maskInfo = entry["mask_rle"];
+            if (maskInfo != null)
+            {
                 try
                 {
-                    mask = Mat.Zeros(h, w, MatType.CV_8UC1);
-                    bool anyPolyDrawn = false;
-
-                    foreach (var contourToken in polyOuter)
+                    mask = MaskRleUtils.MaskInfoToMat(maskInfo);
+                    if (mask != null && !mask.Empty()) withMask = true;
+                }
+                catch
+                {
+                    mask = new Mat();
+                    withMask = false;
+                }
+            }
+            else
+            {
+                // 兼容路径：从 poly 生成局部 mask（沿用原有逻辑）
+                var polyToken = entry["poly"]; 
+            
+                if (polyToken is JArray polyOuter && polyOuter.Count > 0 && withBbox) 
+                {
+                    double x0, y0;
+                    int w, h;
+                    
+                    if (withAngle) 
                     {
-                        var ptsArr = contourToken as JArray;
-                        if (ptsArr == null || ptsArr.Count < 3) continue;
-                        
-                        var points = new List<Point>();
-                        foreach (var pToken in ptsArr)
+                         // 旋转框：bbox=[cx,cy,w,h]
+                         w = (int)Math.Max(1, bbox[2]);
+                         h = (int)Math.Max(1, bbox[3]);
+                         x0 = bbox[0] - w / 2.0;
+                         y0 = bbox[1] - h / 2.0;
+                    }
+                    else
+                    {
+                         // 水平框：bbox=[x,y,w,h]
+                         x0 = bbox[0];
+                         y0 = bbox[1];
+                         w = (int)Math.Max(1, bbox[2]);
+                         h = (int)Math.Max(1, bbox[3]);
+                    }
+
+                    try
+                    {
+                        mask = Mat.Zeros(h, w, MatType.CV_8UC1);
+                        bool anyPolyDrawn = false;
+
+                        foreach (var contourToken in polyOuter)
                         {
-                            var pa = pToken as JArray;
-                            if (pa != null && pa.Count >= 2)
+                            var ptsArr = contourToken as JArray;
+                            if (ptsArr == null || ptsArr.Count < 3) continue;
+                            
+                            var points = new List<Point>();
+                            foreach (var pToken in ptsArr)
                             {
-                                double px = pa[0].Value<double>();
-                                double py = pa[1].Value<double>();
-                                int rx = (int)Math.Round(px - x0);
-                                int ry = (int)Math.Round(py - y0);
-                                // 暂时不限制，让OpenCV处理
-                                points.Add(new Point(rx, ry));
+                                var pa = pToken as JArray;
+                                if (pa != null && pa.Count >= 2)
+                                {
+                                    double px = pa[0].Value<double>();
+                                    double py = pa[1].Value<double>();
+                                    int rx = (int)Math.Round(px - x0);
+                                    int ry = (int)Math.Round(py - y0);
+                                    points.Add(new Point(rx, ry));
+                                }
+                            }
+                            if (points.Count > 2)
+                            {
+                                var pts = new Point[][] { points.ToArray() };
+                                Cv2.FillPoly(mask, pts, Scalar.White);
+                                anyPolyDrawn = true;
                             }
                         }
-                        if (points.Count > 2)
-                        {
-                            var pts = new Point[][] { points.ToArray() };
-                            Cv2.FillPoly(mask, pts, Scalar.White);
-                            anyPolyDrawn = true;
-                        }
+                        
+                        if (anyPolyDrawn) withMask = true;
                     }
-                    
-                    if (anyPolyDrawn) withMask = true;
+                    catch
+                    {
+                        mask = new Mat();
+                        withMask = false;
+                    }
                 }
-                catch { }
             }
 
             var obj = new Utils.CSharpObjectResult(

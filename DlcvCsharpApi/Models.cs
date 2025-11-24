@@ -182,32 +182,17 @@ namespace DlcvModules
 					["with_angle"] = obj.WithAngle,
 					["angle"] = obj.Angle
 				};
-				// 将mask以多边形点集的形式保留（绝对坐标），以便后续还原真实mask
+				// 将 mask 以 RLE 的形式存储到 JSON（mask_rle），避免直接写入原始像素或多边形点集
 				if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
 				{
 					try
 					{
-						var mask = obj.Mask;
-						var bbox = obj.Bbox;
-						double x0 = bbox != null && bbox.Count > 0 ? bbox[0] : 0.0;
-						double y0 = bbox != null && bbox.Count > 1 ? bbox[1] : 0.0;
-						Point[][] contours = mask.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-						if (contours.Length > 0 && contours[0].Length > 0)
-						{
-							var pointsJson = new JArray();
-							foreach (var p in contours[0])
-							{
-								var pObj = new JObject
-								{
-									["x"] = (int)(p.X + x0),
-									["y"] = (int)(p.Y + y0)
-								};
-								pointsJson.Add(pObj);
-							}
-							o["mask"] = pointsJson;
-						}
+						var maskInfo = MaskRleUtils.MatToMaskInfo(obj.Mask);
+						o["mask_rle"] = maskInfo;
 					}
-					catch { }
+					catch
+					{
+					}
 				}
 				list.Add(o);
 			}

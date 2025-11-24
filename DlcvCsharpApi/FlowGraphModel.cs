@@ -338,7 +338,6 @@ namespace DlcvModules
 
                     foreach (var so in itemsToProcess)
                     {
-
                         int categoryId = so.Value<int?>("category_id") ?? 0;
                         string categoryName = so.Value<string>("category_name") ?? string.Empty;
                         float score = so.Value<float?>("score") ?? 0f;
@@ -350,6 +349,41 @@ namespace DlcvModules
                         bool withAngle = so.Value<bool?>("with_angle") ?? false;
                         float angle = so.Value<float?>("angle") ?? -100f;
 
+                        // 若缺少 with_angle，但 bbox 为 [cx,cy,w,h,angle] 形式，则自动恢复角度信息
+                        if (!withAngle && bbox != null && bbox.Count >= 5)
+                        {
+                            try
+                            {
+                                angle = (float)bbox[4];
+                                withAngle = true;
+                                // 缩减为 [cx,cy,w,h]，与 CSharpObjectResult 约定一致
+                                bbox = new List<double> { bbox[0], bbox[1], bbox[2], bbox[3] };
+                            }
+                            catch
+                            {
+                                withAngle = false;
+                                angle = -100f;
+                            }
+                        }
+
+                        // 若缺少 with_mask，但存在 mask_rle 或 poly/mask 字段，则自动认为有掩膜
+                        if (!withMask)
+                        {
+                            if (so["mask_rle"] != null)
+                            {
+                                withMask = true;
+                            }
+                            else
+                            {
+                                var polyToken = so["poly"] ?? so["mask"] ?? so["polygon"];
+                                if (polyToken is JArray ja && ja.Count > 0)
+                                {
+                                    withMask = true;
+                                }
+                            }
+                        }
+
+                        // 坐标从当前局部坐标系还原到原图坐标系（按 transform.affine_2x3 的逆）
                         if (invA23 != null && bbox != null && bbox.Count >= 4)
                         {
                             if (withAngle && angle != -100f)
@@ -396,50 +430,63 @@ namespace DlcvModules
                         }
 
                         Mat mask = new Mat();
-                        if (withMask && bbox != null && bbox.Count >= 4)
+                        if (withMask)
                         {
-                            var maskToken = so["mask"] ?? so["polygon"];
-                            var pointsArray = maskToken as JArray;
-                            int w = (int)(bbox.Count > 2 ? bbox[2] : 0);
-                            int h = (int)(bbox.Count > 3 ? bbox[3] : 0);
-                            if (pointsArray != null && w > 0 && h > 0)
+                            try
                             {
-                                try
+                                // 优先从 mask_rle 还原掩膜 Mat
+                                var maskInfo = so["mask_rle"];
+                                if (maskInfo != null)
                                 {
-                                    mask = Mat.Zeros(h, w, MatType.CV_8UC1);
-                                    var points = new List<Point>();
-                                    double x0 = bbox[0];
-                                    double y0 = bbox[1];
-                                    for (int pi = 0; pi < pointsArray.Count; pi++)
+                                    mask = MaskRleUtils.MaskInfoToMat(maskInfo);
+                                }
+                                else if (bbox != null && bbox.Count >= 4)
+                                {
+                                    // 兼容旧格式：从多边形/点集生成局部掩膜，再与 bbox 对齐
+                                    var maskToken = so["mask"] ?? so["polygon"];
+                                    var pointsArray = maskToken as JArray;
+                                    int w = (int)(bbox.Count > 2 ? bbox[2] : 0);
+                                    int h = (int)(bbox.Count > 3 ? bbox[3] : 0);
+                                    if (pointsArray != null && w > 0 && h > 0)
                                     {
-                                        var pToken = pointsArray[pi];
-                                        int px; int py;
-                                        var pj = pToken as JObject;
-                                        if (pj != null)
+                                        mask = Mat.Zeros(h, w, MatType.CV_8UC1);
+                                        var points = new List<Point>();
+                                        double x0 = bbox[0];
+                                        double y0 = bbox[1];
+                                        for (int pi = 0; pi < pointsArray.Count; pi++)
                                         {
-                                            px = pj.Value<int>("x");
-                                            py = pj.Value<int>("y");
+                                            var pToken = pointsArray[pi];
+                                            int px; int py;
+                                            var pj = pToken as JObject;
+                                            if (pj != null)
+                                            {
+                                                px = pj.Value<int>("x");
+                                                py = pj.Value<int>("y");
+                                            }
+                                            else
+                                            {
+                                                var pa = pToken as JArray;
+                                                if (pa == null || pa.Count < 2) continue;
+                                                px = pa[0].Value<int>();
+                                                py = pa[1].Value<int>();
+                                            }
+                                            int rx = (int)Math.Round(px - x0);
+                                            int ry = (int)Math.Round(py - y0);
+                                            rx = Math.Max(0, Math.Min(w - 1, rx));
+                                            ry = Math.Max(0, Math.Min(h - 1, ry));
+                                            points.Add(new Point(rx, ry));
                                         }
-                                        else
+                                        if (points.Count > 2)
                                         {
-                                            var pa = pToken as JArray;
-                                            if (pa == null || pa.Count < 2) continue;
-                                            px = pa[0].Value<int>();
-                                            py = pa[1].Value<int>();
+                                            var pts = new Point[][] { points.ToArray() };
+                                            Cv2.FillPoly(mask, pts, Scalar.White);
                                         }
-                                        int rx = (int)Math.Round(px - x0);
-                                        int ry = (int)Math.Round(py - y0);
-                                        rx = Math.Max(0, Math.Min(w - 1, rx));
-                                        ry = Math.Max(0, Math.Min(h - 1, ry));
-                                        points.Add(new Point(rx, ry));
-                                    }
-                                    if (points.Count > 2)
-                                    {
-                                        var pts = new Point[][] { points.ToArray() };
-                                        Cv2.FillPoly(mask, pts, Scalar.White);
                                     }
                                 }
-                                catch { }
+                            }
+                            catch
+                            {
+                                mask = new Mat();
                             }
                         }
 
