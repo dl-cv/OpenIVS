@@ -320,12 +320,24 @@ namespace DlcvModules
                     }
                     catch { invA23 = null; }
 
+                    // 兼容逻辑：既支持带 sample_results 的标准格式，也支持直接返回结果的格式(如 return_json)
+                    var itemsToProcess = new List<JObject>();
                     var samples = entry != null ? (entry["sample_results"] as JArray) : null;
-                    if (samples == null) continue;
-                    for (int si = 0; si < samples.Count; si++)
+
+                    if (samples != null)
                     {
-                        var so = samples[si] as JObject;
-                        if (so == null) continue;
+                        foreach (var s in samples)
+                        {
+                            if (s is JObject jo) itemsToProcess.Add(jo);
+                        }
+                    }
+                    else if (entry != null && (entry.ContainsKey("bbox") || entry.ContainsKey("category_id")))
+                    {
+                        itemsToProcess.Add(entry);
+                    }
+
+                    foreach (var so in itemsToProcess)
+                    {
 
                         int categoryId = so.Value<int?>("category_id") ?? 0;
                         string categoryName = so.Value<string>("category_name") ?? string.Empty;
@@ -372,6 +384,15 @@ namespace DlcvModules
                                 bbox = new List<double> { minX, minY, Math.Max(1.0, maxX - minX), Math.Max(1.0, maxY - minY) };
                                 withAngle = false; angle = -100f; withBbox = true;
                             }
+                        }
+                        else if (bbox != null && bbox.Count == 4 && !withAngle)
+                        {
+                            // 无 transform (如 ReturnJson 输出)，此时 bbox 为 XYXY 格式，需转为 XYWH
+                            double x1 = bbox[0];
+                            double y1 = bbox[1];
+                            double x2 = bbox[2];
+                            double y2 = bbox[3];
+                            bbox = new List<double> { x1, y1, Math.Max(0, x2 - x1), Math.Max(0, y2 - y1) };
                         }
 
                         Mat mask = new Mat();

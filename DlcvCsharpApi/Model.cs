@@ -959,6 +959,37 @@ namespace dlcv_infer_csharp
                         bbox = new List<double> { x1, y1, x2 - x1, y2 - y1 };
                     }
 
+                    // 补充逻辑：如果是DVP模式且bbox无效，尝试从polygon计算bbox
+                    if (_isDvpMode && (bbox == null || bbox.Count < 4) && result.ContainsKey("polygon"))
+                    {
+                        var poly = result["polygon"] as JArray;
+                        if (poly != null && poly.Count > 0)
+                        {
+                            double minX = double.MaxValue, minY = double.MaxValue;
+                            double maxX = double.MinValue, maxY = double.MinValue;
+                            bool hasPoints = false;
+
+                            foreach (var pointArray in poly)
+                            {
+                                if (pointArray is JArray point && point.Count >= 2)
+                                {
+                                    double px = point[0].Value<double>();
+                                    double py = point[1].Value<double>();
+                                    if (px < minX) minX = px;
+                                    if (px > maxX) maxX = px;
+                                    if (py < minY) minY = py;
+                                    if (py > maxY) maxY = py;
+                                    hasPoints = true;
+                                }
+                            }
+
+                            if (hasPoints)
+                            {
+                                bbox = new List<double> { minX, minY, maxX - minX, maxY - minY };
+                            }
+                        }
+                    }
+
                     bool withBbox = false;
                     if (result.ContainsKey("with_bbox"))
                     {
@@ -1021,6 +1052,22 @@ namespace dlcv_infer_csharp
                                         mask_img = mask_img.Clone();
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    // 补充逻辑：如果bbox无效但有mask，尝试从mask计算bbox
+                    if ((bbox == null || bbox.Count < 4) && !mask_img.Empty())
+                    {
+                        // 寻找非零像素
+                        using (Mat points = new Mat())
+                        {
+                            Cv2.FindNonZero(mask_img, points);
+                            if (points.Rows > 0 || points.Cols > 0)
+                            {
+                                Rect rect = Cv2.BoundingRect(points);
+                                bbox = new List<double> { rect.X, rect.Y, rect.Width, rect.Height };
+                                withBbox = true;
                             }
                         }
                     }

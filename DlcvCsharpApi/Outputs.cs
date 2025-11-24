@@ -228,12 +228,23 @@ namespace DlcvModules
                         }
                         else if (bboxLocal != null && bboxLocal.Count == 4)
                         {
-                            var poly = BBoxPolyInOriginal(bboxLocal, T_c2o);
-                            if (poly != null)
+                            // bboxLocal 是 [x, y, w, h]，需要转为 [x1, y1, x2, y2] 供 BBoxPolyInOriginal 使用
+                            try
                             {
-                                item["bbox"] = AABBFromPoly(poly);
-                                item["metadata"] = new Dictionary<string, object> { { "is_rotated", false } };
+                                float bx = bboxLocal[0].Value<float>();
+                                float by = bboxLocal[1].Value<float>();
+                                float bw = bboxLocal[2].Value<float>();
+                                float bh = bboxLocal[3].Value<float>();
+                                var bboxXYXY = new JArray(bx, by, bx + bw, by + bh);
+                                
+                                var poly = BBoxPolyInOriginal(bboxXYXY, T_c2o);
+                                if (poly != null)
+                                {
+                                    item["bbox"] = AABBFromPoly(poly);
+                                    item["metadata"] = new Dictionary<string, object> { { "is_rotated", false } };
+                                }
                             }
+                            catch { }
                         }
 
                         // 还原 mask -> poly
