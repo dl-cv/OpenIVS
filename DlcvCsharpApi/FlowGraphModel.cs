@@ -146,7 +146,7 @@ namespace DlcvModules
                 try { if (converted != null) { converted.Dispose(); } } catch { }
 
                 // 获取 output/return_json 的结果
-                JArray resultList = null;
+                JArray resultList = new JArray();
                 var feJson = ctx.Get<Dictionary<string, object>>("frontend_json");
                 if (feJson != null && feJson.ContainsKey("last"))
                 {
@@ -169,19 +169,12 @@ namespace DlcvModules
                                     else if (resultsObj is List<object> lo) resultsArr = JArray.FromObject(lo);
                                     else resultsArr = new JArray();
                                     // 合并
-                                    if (resultList is JArray exist && exist.Count > 0)
-                                    {
-                                        foreach (var r in resultsArr) exist.Add(r);
-                                    }
-                                    else
-                                    {
-                                        resultList = resultsArr;
-                                    }
+                                    foreach (var r in resultsArr) resultList.Add(r);
                                 }
                             }
-                            merged.Add(resultList);
                         }
                     }
+                    merged.Add(resultList);
                 }
             }
 
@@ -261,6 +254,9 @@ namespace DlcvModules
             var samples = new List<Utils.CSharpSampleResult>();
             if (resultList == null || resultList.Count == 0)
             {
+                var sample_result = new Utils.CSharpSampleResult();
+                sample_result.Results = new List<Utils.CSharpObjectResult>();
+                samples.Add(sample_result);
                 return new Utils.CSharpResult(samples);
             }
 
