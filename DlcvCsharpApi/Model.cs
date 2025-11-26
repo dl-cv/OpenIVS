@@ -1193,7 +1193,7 @@ namespace dlcv_infer_csharp
                         }
                     }
                 }
-                DlcvModules.GlobalDebug.Log($"推理完成。输入图像尺寸: {dims}，本次推理的所有 category_name: {string.Join(", ", names)}");
+                DlcvModules.GlobalDebug.Log($"推理完成。输入图像尺寸: {dims}，推理结果: {string.Join(", ", names)}");
             }
             return result;
         }
