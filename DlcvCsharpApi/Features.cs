@@ -112,6 +112,12 @@ namespace DlcvModules
                     }
 
                     if (cropped == null) continue;
+                    
+                    if (GlobalDebug.PrintDebug)
+                    {
+                        GlobalDebug.Log($"[ImageGeneration] 输入图像尺寸: {tup.Item2.Width}x{tup.Item2.Height}, 裁剪后的图像尺寸: {cropped.Width}x{cropped.Height}");
+                    }
+
                     // 派生状态
                     var parentWrap = tup.Item1;
                     var parentState = parentWrap != null ? parentWrap.TransformState : new TransformationState(tup.Item2.Width, tup.Item2.Height);
@@ -369,6 +375,11 @@ namespace DlcvModules
                     float rh = rr.Size.Height;
                     float angDeg = rr.Angle;
 
+                    if (GlobalDebug.PrintDebug)
+                    {
+                        GlobalDebug.Log($"[MaskToRBox] bbox大小: {rw:F2}x{rh:F2}, 最小外接矩坐标: ({rr.Center.X:F2},{rr.Center.Y:F2}), 宽高: {rw:F2}x{rh:F2}, 角度: {angDeg:F2}");
+                    }
+
                     // 转换为 le90：长边在前
                     if (rw < rh)
                     {
@@ -598,6 +609,22 @@ namespace DlcvModules
             var inImages = imageList ?? new List<ModuleImage>();
             var inResults = resultList ?? new JArray();
 
+            if (GlobalDebug.PrintDebug)
+            {
+                var cats = new List<string>();
+                foreach (var t in inResults)
+                {
+                    if (t is JObject r && r["sample_results"] is JArray srs)
+                    {
+                        foreach (var s in srs)
+                        {
+                            if (s is JObject so) cats.Add(so["category_name"]?.ToString() ?? "");
+                        }
+                    }
+                }
+                GlobalDebug.Log($"[ResultFilter] 筛选前 category_name 列表: {string.Join(", ", cats)}");
+            }
+
             var categories = ReadCategories();
             var keepSet = new HashSet<string>(categories, StringComparer.OrdinalIgnoreCase);
 
@@ -689,6 +716,22 @@ namespace DlcvModules
                 this.ScalarOutputsByName["has_positive"] = hasPositive;
             }
             catch { }
+
+            if (GlobalDebug.PrintDebug)
+            {
+                var cats = new List<string>();
+                foreach (var t in mainResults)
+                {
+                    if (t is JObject r && r["sample_results"] is JArray srs)
+                    {
+                        foreach (var s in srs)
+                        {
+                            if (s is JObject so) cats.Add(so["category_name"]?.ToString() ?? "");
+                        }
+                    }
+                }
+                GlobalDebug.Log($"[ResultFilter] 筛选后 category_name 列表: {string.Join(", ", cats)}");
+            }
 
             return new ModuleIO(mainImages, mainResults);
         }
@@ -1168,6 +1211,11 @@ namespace DlcvModules
                     {
                         angleCcw = 270;
                     }
+                }
+
+                if (GlobalDebug.PrintDebug)
+                {
+                    GlobalDebug.Log($"[ImageRotateByClassification] 每张图的识别结果: {label ?? "null"}, 旋转角度: {angleCcw}");
                 }
 
                 if (angleCcw % 360 == 0)

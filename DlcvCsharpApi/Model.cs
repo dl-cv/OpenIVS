@@ -1156,25 +1156,46 @@ namespace dlcv_infer_csharp
 
         public Utils.CSharpResult Infer(Mat image, JObject params_json = null)
         {
+            Utils.CSharpResult result = default(Utils.CSharpResult);
             if (_isDvsMode)
             {
-                return _dvsModel.InferBatch(new List<Mat> { image }, params_json);
+                result = _dvsModel.InferBatch(new List<Mat> { image }, params_json);
             }
-
-            // 将单张图像放入列表中处理
-            var resultTuple = InferInternal(new List<Mat> { image }, params_json);
-            try
+            else
             {
-                return ParseToStructResult(resultTuple.Item1);
-            }
-            finally
-            {
-                // 处理完后释放结果，DVP模式下指针为空，不需要释放
-                if (resultTuple.Item2 != IntPtr.Zero)
+                // 将单张图像放入列表中处理
+                var resultTuple = InferInternal(new List<Mat> { image }, params_json);
+                try
                 {
-                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                    result = ParseToStructResult(resultTuple.Item1);
+                }
+                finally
+                {
+                    // 处理完后释放结果，DVP模式下指针为空，不需要释放
+                    if (resultTuple.Item2 != IntPtr.Zero)
+                    {
+                        DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                    }
                 }
             }
+
+            if (DlcvModules.GlobalDebug.PrintDebug && result.SampleResults != null)
+            {
+                string dims = (image == null || image.Empty()) ? "Empty" : $"{image.Width}x{image.Height}";
+                var names = new List<string>();
+                if (result.SampleResults != null)
+                {
+                    foreach (var sr in result.SampleResults)
+                    {
+                        if (sr.Results != null)
+                        {
+                            foreach (var obj in sr.Results) names.Add(obj.CategoryName);
+                        }
+                    }
+                }
+                DlcvModules.GlobalDebug.Log($"推理完成。输入图像尺寸: {dims}，本次推理的所有 category_name: {string.Join(", ", names)}");
+            }
+            return result;
         }
 
         public Utils.CSharpResult InferBatch(List<Mat> image_list, JObject params_json = null)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -60,6 +60,22 @@ namespace DlcvModules
             if (string.IsNullOrWhiteSpace(moduleType)) return null;
             _registry.TryGetValue(moduleType, out Type t);
             return t;
+        }
+    }
+
+    public static class GlobalDebug
+    {
+#if DEBUG
+        public static bool PrintDebug { get; set; } = true;
+#else
+        public static bool PrintDebug { get; set; } = false;
+#endif
+        public static void Log(string message)
+        {
+            if (PrintDebug)
+            {
+                Console.WriteLine($"[DEBUG] {message}");
+            }
         }
     }
 
