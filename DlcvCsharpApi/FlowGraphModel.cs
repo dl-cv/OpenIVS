@@ -23,6 +23,9 @@ namespace DlcvModules
 
         public bool IsLoaded { get { return _loaded; } }
 
+        /// <summary>
+        /// 从流程 JSON 文件加载流程图。
+        /// </summary>
         public JObject Load(string flowJsonPath, int deviceId = 0)
         {
             if (string.IsNullOrWhiteSpace(flowJsonPath)) throw new ArgumentException("流程 JSON 路径为空", nameof(flowJsonPath));
@@ -30,13 +33,26 @@ namespace DlcvModules
 
             string text = File.ReadAllText(flowJsonPath);
             var root = JObject.Parse(text);
+            _flowJsonPath = flowJsonPath;
+            return LoadFromRoot(root, deviceId);
+        }
+
+        /// <summary>
+        /// 给继承类复用的核心加载逻辑：从已经解析好的 root（包含 nodes 数组）初始化并加载模型。
+        /// </summary>
+        /// <param name="root">包含 nodes 的流程配置根 JSON 对象</param>
+        /// <param name="deviceId">设备 ID</param>
+        /// <returns>模型加载报告</returns>
+        protected JObject LoadFromRoot(JObject root, int deviceId)
+        {
+            if (root == null) throw new ArgumentNullException("root");
+
             var nodesToken = root["nodes"] as JArray;
             if (nodesToken == null) throw new InvalidOperationException("流程 JSON 缺少 nodes 数组");
 
             _nodes = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(nodesToken.ToString());
             _root = root;
             _deviceId = deviceId;
-            _flowJsonPath = flowJsonPath;
 
             var ctx = new ExecutionContext();
             ctx.Set("device_id", deviceId);
