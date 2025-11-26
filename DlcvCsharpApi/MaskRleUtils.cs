@@ -117,5 +117,32 @@ namespace DlcvModules
 
 		[DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
 		private static extern IntPtr memset(IntPtr dest, int c, UIntPtr count);
+
+		/// <summary>
+		/// 计算 RLE Mask 的非零面积（累加 runs 中奇数索引的长度）
+		/// </summary>
+		public static double CalculateMaskArea(JToken maskInfo)
+		{
+			if (maskInfo == null) return 0.0;
+			try
+			{
+				var obj = maskInfo as JObject;
+				if (obj == null) return 0.0;
+				var runs = obj["runs"] as JArray;
+				if (runs == null) return 0.0;
+
+				long area = 0;
+				// runs: [0-len, 1-len, 0-len, 1-len, ...]
+				for (int i = 1; i < runs.Count; i += 2)
+				{
+					area += runs[i].Value<long>();
+				}
+				return (double)area;
+			}
+			catch
+			{
+				return 0.0;
+			}
+		}
 	}
 }

@@ -897,7 +897,7 @@ namespace DlcvModules
 
                         // 面积
                         double bboxArea = hasWH ? (w * h) : 0.0;
-                        double maskArea = ReadMaskPolygonArea(s);
+                        double maskArea = MaskRleUtils.CalculateMaskArea(s["mask_rle"]);
 
                         bool pass = true;
                         if (enableBBoxWh && hasWH)
@@ -963,43 +963,6 @@ namespace DlcvModules
             if (minV.HasValue && v < minV.Value) return false;
             if (maxV.HasValue && v > maxV.Value) return false;
             return true;
-        }
-
-        private static double ReadMaskPolygonArea(JObject s)
-        {
-            try
-            {
-                var maskToken = s["mask"] ?? s["polygon"];
-                var pts = new List<System.Drawing.PointF>();
-                if (maskToken is JArray arr)
-                {
-                    foreach (var p in arr)
-                    {
-                        if (p is JObject pj)
-                        {
-                            float x = pj.Value<float>("x");
-                            float y = pj.Value<float>("y");
-                            pts.Add(new System.Drawing.PointF(x, y));
-                        }
-                        else if (p is JArray pa && pa.Count >= 2)
-                        {
-                            float x = pa[0].Value<float>();
-                            float y = pa[1].Value<float>();
-                            pts.Add(new System.Drawing.PointF(x, y));
-                        }
-                    }
-                }
-                if (pts.Count < 3) return 0.0;
-                // Shoelace formula
-                double area = 0.0;
-                for (int i = 0; i < pts.Count; i++)
-                {
-                    int j = (i + 1) % pts.Count;
-                    area += pts[i].X * pts[j].Y - pts[j].X * pts[i].Y;
-                }
-                return Math.Abs(area) * 0.5;
-            }
-            catch { return 0.0; }
         }
 
         private bool ReadBool(string key, bool dv)
