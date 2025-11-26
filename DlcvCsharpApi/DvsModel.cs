@@ -180,35 +180,6 @@ namespace DlcvModules
             }
         }
 
-        /// <summary>
-        /// DVS 批量推理：与其它模式保持一致，一张输入图像对应一个 SampleResult。
-        /// 这里复用基类的单张推理逻辑，避免再次实现 JSON 解析代码。
-        /// </summary>
-        public new Utils.CSharpResult InferBatch(List<Mat> imageList, JObject paramsJson = null)
-        {
-            if (imageList == null || imageList.Count == 0)
-                throw new ArgumentException("输入图像列表为空", nameof(imageList));
-
-            if (!IsLoaded) throw new InvalidOperationException("模型未加载");
-
-            var samples = new List<Utils.CSharpSampleResult>();
-            for (int i = 0; i < imageList.Count; i++)
-            {
-                var single = base.Infer(imageList[i], paramsJson);
-                if (single.SampleResults != null && single.SampleResults.Count > 0)
-                {
-                    // 按照其它模式的约定：一张图像使用第一个 SampleResult
-                    samples.Add(single.SampleResults[0]);
-                }
-                else
-                {
-                    samples.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
-                }
-            }
-
-            return new Utils.CSharpResult(samples);
-        }
-
         public new void Dispose()
         {
             Dispose(true);

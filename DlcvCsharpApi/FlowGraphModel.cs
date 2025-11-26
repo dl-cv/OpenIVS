@@ -221,19 +221,27 @@ namespace DlcvModules
 
         public Utils.CSharpResult InferBatch(List<Mat> imageList, JObject paramsJson = null)
         {
-            if (imageList == null || imageList.Count == 0) throw new ArgumentException("输入图像列表为空", nameof(imageList));
-            var allObjects = new List<Utils.CSharpObjectResult>();
+            if (imageList == null || imageList.Count == 0)
+                throw new ArgumentException("输入图像列表为空", nameof(imageList));
+
+            if (!IsLoaded) throw new InvalidOperationException("模型未加载");
+
+            var samples = new List<Utils.CSharpSampleResult>();
             for (int i = 0; i < imageList.Count; i++)
             {
-                var r = Infer(imageList[i], paramsJson);
-                if (r.SampleResults != null && r.SampleResults.Count > 0)
+                var single = Infer(imageList[i], paramsJson);
+                if (single.SampleResults != null && single.SampleResults.Count > 0)
                 {
-                    var objs = r.SampleResults[0].Results ?? new List<Utils.CSharpObjectResult>();
-                    for (int k = 0; k < objs.Count; k++) allObjects.Add(objs[k]);
+                    // 按照其它模式的约定：一张图像使用第一个 SampleResult
+                    samples.Add(single.SampleResults[0]);
+                }
+                else
+                {
+                    samples.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
                 }
             }
-            var sample = new Utils.CSharpSampleResult(allObjects);
-            return new Utils.CSharpResult(new List<Utils.CSharpSampleResult> { sample });
+
+            return new Utils.CSharpResult(samples);
         }
 
         public double Benchmark(Mat image, int warmup = 1, int runs = 10)
