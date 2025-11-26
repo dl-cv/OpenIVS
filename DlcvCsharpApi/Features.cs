@@ -342,11 +342,11 @@ namespace DlcvModules
                 {
                     if (!(dToken is JObject d)) continue;
 
-                    // 检查 mask
-                    var maskToken = d["mask"];
-                    if (maskToken == null)
+                    // 检查 mask_rle
+                    var maskRleToken = d["mask_rle"];
+                    if (maskRleToken == null)
                     {
-                        // 无 mask，跳过（Python逻辑是移除，这里也移除）
+                        // 无 mask_rle，跳过
                         continue;
                     }
 
@@ -354,23 +354,27 @@ namespace DlcvModules
                     var bbox = d["bbox"] as JArray;
                     if (bbox == null || bbox.Count < 4) continue;
 
-                    // 解析 mask 点集
-                    var pts = new List<Point2f>();
-                    if (maskToken is JArray arr)
+                    float bx = bbox[0].Value<float>();
+                    float by = bbox[1].Value<float>();
+
+                    // 直接通过 mask 计算最小外接矩
+                    RotatedRect rr;
+                    try
                     {
-                        foreach (var p in arr)
+                        using (var maskMat = MaskRleUtils.MaskInfoToMat(maskRleToken))
+                        using (var points = new Mat())
                         {
-                            if (p is JObject pj)
-                            {
-                                pts.Add(new Point2f(pj.Value<float>("x"), pj.Value<float>("y")));
-                            }
+                            if (maskMat == null || maskMat.Empty()) continue;
+                            Cv2.FindNonZero(maskMat, points);
+                            if (points.Empty()) continue;
+                            rr = Cv2.MinAreaRect(points);
                         }
                     }
+                    catch { continue; }
 
-                    if (pts.Count == 0) continue;
+                    // 加上偏移（mask 坐标是相对于 bbox 左上角的）
+                    rr.Center += new Point2f(bx, by);
 
-                    // 最小外接矩
-                    RotatedRect rr = Cv2.MinAreaRect(pts);
                     float rw = rr.Size.Width;
                     float rh = rr.Size.Height;
                     float angDeg = rr.Angle;
@@ -395,7 +399,8 @@ namespace DlcvModules
                     d2["bbox"] = new JArray(rr.Center.X, rr.Center.Y, rw, rh, angRad);
                     d2["with_angle"] = true;
                     d2["angle"] = angRad;
-                    d2.Remove("mask"); // 移除 mask 以减小体积
+                    d2.Remove("mask_rle"); // 移除 mask_rle 以减小体积
+                    d2.Remove("mask");
 
                     newDets.Add(d2);
                 }
