@@ -112,6 +112,12 @@ namespace DlcvModules
                     }
 
                     if (cropped == null) continue;
+                    
+                    if (GlobalDebug.PrintDebug)
+                    {
+                        GlobalDebug.Log($"[ImageGeneration] 输入图像尺寸: {tup.Item2.Width}x{tup.Item2.Height}, 裁剪后的图像尺寸: {cropped.Width}x{cropped.Height}");
+                    }
+
                     // 派生状态
                     var parentWrap = tup.Item1;
                     var parentState = parentWrap != null ? parentWrap.TransformState : new TransformationState(tup.Item2.Width, tup.Item2.Height);
@@ -336,11 +342,11 @@ namespace DlcvModules
                 {
                     if (!(dToken is JObject d)) continue;
 
-                    // 检查 mask
-                    var maskToken = d["mask"];
-                    if (maskToken == null)
+                    // 检查 mask_rle
+                    var maskRleToken = d["mask_rle"];
+                    if (maskRleToken == null)
                     {
-                        // 无 mask，跳过（Python逻辑是移除，这里也移除）
+                        // 无 mask_rle，跳过
                         continue;
                     }
 
@@ -348,26 +354,35 @@ namespace DlcvModules
                     var bbox = d["bbox"] as JArray;
                     if (bbox == null || bbox.Count < 4) continue;
 
-                    // 解析 mask 点集
-                    var pts = new List<Point2f>();
-                    if (maskToken is JArray arr)
+                    float bx = bbox[0].Value<float>();
+                    float by = bbox[1].Value<float>();
+
+                    // 直接通过 mask 计算最小外接矩
+                    RotatedRect rr;
+                    try
                     {
-                        foreach (var p in arr)
+                        using (var maskMat = MaskRleUtils.MaskInfoToMat(maskRleToken))
+                        using (var points = new Mat())
                         {
-                            if (p is JObject pj)
-                            {
-                                pts.Add(new Point2f(pj.Value<float>("x"), pj.Value<float>("y")));
-                            }
+                            if (maskMat == null || maskMat.Empty()) continue;
+                            Cv2.FindNonZero(maskMat, points);
+                            if (points.Empty()) continue;
+                            rr = Cv2.MinAreaRect(points);
                         }
                     }
+                    catch { continue; }
 
-                    if (pts.Count == 0) continue;
+                    // 加上偏移（mask 坐标是相对于 bbox 左上角的）
+                    rr.Center += new Point2f(bx, by);
 
-                    // 最小外接矩
-                    RotatedRect rr = Cv2.MinAreaRect(pts);
                     float rw = rr.Size.Width;
                     float rh = rr.Size.Height;
                     float angDeg = rr.Angle;
+
+                    if (GlobalDebug.PrintDebug)
+                    {
+                        GlobalDebug.Log($"[MaskToRBox] bbox大小: {rw:F2}x{rh:F2}, 最小外接矩坐标: ({rr.Center.X:F2},{rr.Center.Y:F2}), 宽高: {rw:F2}x{rh:F2}, 角度: {angDeg:F2}");
+                    }
 
                     // 转换为 le90：长边在前
                     if (rw < rh)
@@ -384,7 +399,8 @@ namespace DlcvModules
                     d2["bbox"] = new JArray(rr.Center.X, rr.Center.Y, rw, rh, angRad);
                     d2["with_angle"] = true;
                     d2["angle"] = angRad;
-                    d2.Remove("mask"); // 移除 mask 以减小体积
+                    d2.Remove("mask_rle"); // 移除 mask_rle 以减小体积
+                    d2.Remove("mask");
 
                     newDets.Add(d2);
                 }
@@ -598,6 +614,22 @@ namespace DlcvModules
             var inImages = imageList ?? new List<ModuleImage>();
             var inResults = resultList ?? new JArray();
 
+            if (GlobalDebug.PrintDebug)
+            {
+                var cats = new List<string>();
+                foreach (var t in inResults)
+                {
+                    if (t is JObject r && r["sample_results"] is JArray srs)
+                    {
+                        foreach (var s in srs)
+                        {
+                            if (s is JObject so) cats.Add(so["category_name"]?.ToString() ?? "");
+                        }
+                    }
+                }
+                GlobalDebug.Log($"[ResultFilter] 筛选前 category_name 列表: {string.Join(", ", cats)}");
+            }
+
             var categories = ReadCategories();
             var keepSet = new HashSet<string>(categories, StringComparer.OrdinalIgnoreCase);
 
@@ -689,6 +721,22 @@ namespace DlcvModules
                 this.ScalarOutputsByName["has_positive"] = hasPositive;
             }
             catch { }
+
+            if (GlobalDebug.PrintDebug)
+            {
+                var cats = new List<string>();
+                foreach (var t in mainResults)
+                {
+                    if (t is JObject r && r["sample_results"] is JArray srs)
+                    {
+                        foreach (var s in srs)
+                        {
+                            if (s is JObject so) cats.Add(so["category_name"]?.ToString() ?? "");
+                        }
+                    }
+                }
+                GlobalDebug.Log($"[ResultFilter] 筛选后 category_name 列表: {string.Join(", ", cats)}");
+            }
 
             return new ModuleIO(mainImages, mainResults);
         }
@@ -849,7 +897,7 @@ namespace DlcvModules
 
                         // 面积
                         double bboxArea = hasWH ? (w * h) : 0.0;
-                        double maskArea = ReadMaskPolygonArea(s);
+                        double maskArea = MaskRleUtils.CalculateMaskArea(s["mask_rle"]);
 
                         bool pass = true;
                         if (enableBBoxWh && hasWH)
@@ -915,43 +963,6 @@ namespace DlcvModules
             if (minV.HasValue && v < minV.Value) return false;
             if (maxV.HasValue && v > maxV.Value) return false;
             return true;
-        }
-
-        private static double ReadMaskPolygonArea(JObject s)
-        {
-            try
-            {
-                var maskToken = s["mask"] ?? s["polygon"];
-                var pts = new List<System.Drawing.PointF>();
-                if (maskToken is JArray arr)
-                {
-                    foreach (var p in arr)
-                    {
-                        if (p is JObject pj)
-                        {
-                            float x = pj.Value<float>("x");
-                            float y = pj.Value<float>("y");
-                            pts.Add(new System.Drawing.PointF(x, y));
-                        }
-                        else if (p is JArray pa && pa.Count >= 2)
-                        {
-                            float x = pa[0].Value<float>();
-                            float y = pa[1].Value<float>();
-                            pts.Add(new System.Drawing.PointF(x, y));
-                        }
-                    }
-                }
-                if (pts.Count < 3) return 0.0;
-                // Shoelace formula
-                double area = 0.0;
-                for (int i = 0; i < pts.Count; i++)
-                {
-                    int j = (i + 1) % pts.Count;
-                    area += pts[i].X * pts[j].Y - pts[j].X * pts[i].Y;
-                }
-                return Math.Abs(area) * 0.5;
-            }
-            catch { return 0.0; }
         }
 
         private bool ReadBool(string key, bool dv)
@@ -1168,6 +1179,11 @@ namespace DlcvModules
                     {
                         angleCcw = 270;
                     }
+                }
+
+                if (GlobalDebug.PrintDebug)
+                {
+                    GlobalDebug.Log($"[ImageRotateByClassification] 每张图的识别结果: {label ?? "null"}, 旋转角度: {angleCcw}");
                 }
 
                 if (angleCcw % 360 == 0)

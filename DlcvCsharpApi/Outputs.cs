@@ -216,7 +216,7 @@ namespace DlcvModules
                         bool isRot = false;
                         if (bboxLocal != null && bboxLocal.Count == 5) isRot = true;
 
-                        // 还原 bbox
+                        // 还原 bbox 到原图坐标系
                         if (isRot)
                         {
                             var rboxG = RBoxLocalToGlobal(bboxLocal, T_c2o);
@@ -228,35 +228,89 @@ namespace DlcvModules
                         }
                         else if (bboxLocal != null && bboxLocal.Count == 4)
                         {
-                            var poly = BBoxPolyInOriginal(bboxLocal, T_c2o);
-                            if (poly != null)
+                            // bboxLocal 是 [x, y, w, h]，需要转为 [x1, y1, x2, y2] 供 BBoxPolyInOriginal 使用
+                            try
                             {
-                                item["bbox"] = AABBFromPoly(poly);
-                                item["metadata"] = new Dictionary<string, object> { { "is_rotated", false } };
-                            }
-                        }
-
-                        // 还原 mask -> poly
-                        var maskToken = d["mask"]; // JArray of {x,y}
-                        if (maskToken is JArray maskArr && maskArr.Count > 0)
-                        {
-                            // C# DetModel 已经将 mask 转为 contours 点集（局部坐标）
-                            // 直接变换这些点
-                            var ptsLocal = new List<Point2f>();
-                            foreach (var p in maskArr)
-                            {
-                                if (p is JObject pj)
+                                float bx = bboxLocal[0].Value<float>();
+                                float by = bboxLocal[1].Value<float>();
+                                float bw = bboxLocal[2].Value<float>();
+                                float bh = bboxLocal[3].Value<float>();
+                                var bboxXYXY = new JArray(bx, by, bx + bw, by + bh);
+                                
+                                var poly = BBoxPolyInOriginal(bboxXYXY, T_c2o);
+                                if (poly != null)
                                 {
-                                    ptsLocal.Add(new Point2f(pj.Value<float>("x"), pj.Value<float>("y")));
+                                    item["bbox"] = AABBFromPoly(poly);
+                                    item["metadata"] = new Dictionary<string, object> { { "is_rotated", false } };
                                 }
                             }
-                            var ptsGlobal = TransformPoints(T_c2o, ptsLocal.ToArray());
-                            var polyList = new List<List<float>>();
-                            foreach (var p in ptsGlobal)
+                            catch { }
+                        }
+
+                        // 透传 mask_rle，并在需要时从 RLE 生成 poly（原图坐标系）
+                        var maskInfo = d["mask_rle"];
+                        if (maskInfo != null)
+                        {
+                            item["mask_rle"] = maskInfo;
+
+                            try
                             {
-                                polyList.Add(new List<float> { p.X, p.Y });
+                                using (var localMask = MaskRleUtils.MaskInfoToMat(maskInfo))
+                                {
+                                    if (localMask != null && !localMask.Empty())
+                                    {
+                                        int mw = localMask.Cols;
+                                        int mh = localMask.Rows;
+
+                                        // 将 RLE mask 视作在当前裁剪坐标系下的局部掩膜：
+                                        // 若提供 bboxLocal，则以其左上角为偏移；否则默认从 (0,0) 开始。
+                                        double x0 = 0.0;
+                                        double y0 = 0.0;
+                                        if (bboxLocal != null && bboxLocal.Count >= 4)
+                                        {
+                                            try
+                                            {
+                                                x0 = bboxLocal[0].Value<double>();
+                                                y0 = bboxLocal[1].Value<double>();
+                                            }
+                                            catch { x0 = 0.0; y0 = 0.0; }
+                                        }
+
+                                        var nz = new Mat();
+                                        Cv2.FindNonZero(localMask, nz);
+                                        if (!nz.Empty())
+                                        {
+                                            if (!nz.IsContinuous()) nz = nz.Clone();
+                                            int nPts = nz.Rows;
+                                            var raw = new int[nPts * 2]; // CV_32SC2: x,y 交错
+                                            System.Runtime.InteropServices.Marshal.Copy(nz.Data, raw, 0, raw.Length);
+                                            var ptsLocal = new List<Point2f>();
+                                            for (int pi = 0; pi < nPts; pi++)
+                                            {
+                                                int baseIndex = pi * 2;
+                                                int lx = raw[baseIndex];
+                                                int ly = raw[baseIndex + 1];
+                                                double cx = x0 + lx;
+                                                double cy = y0 + ly;
+                                                ptsLocal.Add(new Point2f((float)cx, (float)cy));
+                                            }
+                                            var ptsGlobal = TransformPoints(T_c2o, ptsLocal.ToArray());
+                                            var polyList = new List<List<float>>();
+                                            foreach (var p in ptsGlobal)
+                                            {
+                                                polyList.Add(new List<float> { p.X, p.Y });
+                                            }
+                                            if (polyList.Count > 0)
+                                            {
+                                                item["poly"] = new List<object> { polyList }; // [[[x,y],...]]
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            item["poly"] = new List<object> { polyList }; // 格式：[[[x,y],...]]
+                            catch
+                            {
+                            }
                         }
 
                         outResults.Add(item);

@@ -77,10 +77,12 @@
     <Compile Include="FlowGraphModel.cs" />
     <Compile Include="Inputs.cs" />
     <Compile Include="MainProcess.cs" />
+    <Compile Include="MaskRleUtils.cs" />
     <Compile Include="Models.cs" />
     <Compile Include="Outputs.cs" />
     <Compile Include="SlidingMerge.cs" />
     <Compile Include="SlidingWindow.cs" />
+    <Compile Include="StrokeToPoints.cs" />
     <Compile Include="Templates.cs" />
     <Compile Include="Visualize.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

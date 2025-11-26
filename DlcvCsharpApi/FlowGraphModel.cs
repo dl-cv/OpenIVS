@@ -23,6 +23,9 @@ namespace DlcvModules
 
         public bool IsLoaded { get { return _loaded; } }
 
+        /// <summary>
+        /// 从流程 JSON 文件加载流程图。
+        /// </summary>
         public JObject Load(string flowJsonPath, int deviceId = 0)
         {
             if (string.IsNullOrWhiteSpace(flowJsonPath)) throw new ArgumentException("流程 JSON 路径为空", nameof(flowJsonPath));
@@ -30,13 +33,26 @@ namespace DlcvModules
 
             string text = File.ReadAllText(flowJsonPath);
             var root = JObject.Parse(text);
+            _flowJsonPath = flowJsonPath;
+            return LoadFromRoot(root, deviceId);
+        }
+
+        /// <summary>
+        /// 给继承类复用的核心加载逻辑：从已经解析好的 root（包含 nodes 数组）初始化并加载模型。
+        /// </summary>
+        /// <param name="root">包含 nodes 的流程配置根 JSON 对象</param>
+        /// <param name="deviceId">设备 ID</param>
+        /// <returns>模型加载报告</returns>
+        protected JObject LoadFromRoot(JObject root, int deviceId)
+        {
+            if (root == null) throw new ArgumentNullException("root");
+
             var nodesToken = root["nodes"] as JArray;
             if (nodesToken == null) throw new InvalidOperationException("流程 JSON 缺少 nodes 数组");
 
             _nodes = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(nodesToken.ToString());
             _root = root;
             _deviceId = deviceId;
-            _flowJsonPath = flowJsonPath;
 
             var ctx = new ExecutionContext();
             ctx.Set("device_id", deviceId);
@@ -205,19 +221,81 @@ namespace DlcvModules
 
         public Utils.CSharpResult InferBatch(List<Mat> imageList, JObject paramsJson = null)
         {
-            if (imageList == null || imageList.Count == 0) throw new ArgumentException("输入图像列表为空", nameof(imageList));
-            var allObjects = new List<Utils.CSharpObjectResult>();
+            if (imageList == null || imageList.Count == 0)
+                throw new ArgumentException("输入图像列表为空", nameof(imageList));
+
+            if (!IsLoaded) throw new InvalidOperationException("模型未加载");
+
+            var samples = new List<Utils.CSharpSampleResult>();
             for (int i = 0; i < imageList.Count; i++)
             {
-                var r = Infer(imageList[i], paramsJson);
-                if (r.SampleResults != null && r.SampleResults.Count > 0)
+                var single = Infer(imageList[i], paramsJson);
+                if (single.SampleResults != null && single.SampleResults.Count > 0)
                 {
-                    var objs = r.SampleResults[0].Results ?? new List<Utils.CSharpObjectResult>();
-                    for (int k = 0; k < objs.Count; k++) allObjects.Add(objs[k]);
+                    // 按照其它模式的约定：一张图像使用第一个 SampleResult
+                    samples.Add(single.SampleResults[0]);
+                }
+                else
+                {
+                    samples.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
                 }
             }
-            var sample = new Utils.CSharpSampleResult(allObjects);
-            return new Utils.CSharpResult(new List<Utils.CSharpSampleResult> { sample });
+
+            return new Utils.CSharpResult(samples);
+        }
+
+        /// <summary>
+        /// 对单张图片进行推理，返回 JSON 格式的结果
+        /// </summary>
+        /// <param name="image">输入图像（RGB 格式）</param>
+        /// <param name="paramsJson">可选的推理参数</param>
+        /// <returns>
+        /// 返回 JSON 格式的检测结果数组，约定为：
+        /// [
+        ///   { ... 单个检测结果 ... },
+        ///   ...
+        /// ]
+        /// </returns>
+        public dynamic InferOneOutJson(Mat image, JObject paramsJson = null)
+        {
+            if (image == null || image.Empty())
+                throw new ArgumentException("输入图像为空", nameof(image));
+
+            // 复用 InferInternal 的流程图执行逻辑，保持与 Infer/InferBatch 一致
+            var resultTuple = InferInternal(new List<Mat> { image }, paramsJson);
+            try
+            {
+                // FlowGraphModel.InferInternal 在单张图片情况下，
+                // result_list 字段直接为该图片的结果数组 JArray。
+                // 为了兼容未来可能的格式调整，这里做一次安全解析。
+                JArray resultArray = null;
+                var resultToken = resultTuple.Item1["result_list"];
+
+                if (resultToken is JArray ja)
+                {
+                    resultArray = ja;
+                }
+                else if (resultToken is JObject jo)
+                {
+                    // 兼容形如 { "result_list": [ ... ] } 的容器格式
+                    resultArray = jo["result_list"] as JArray ?? new JArray();
+                }
+                else
+                {
+                    resultArray = new JArray();
+                }
+
+                return resultArray;
+            }
+            finally
+            {
+                // 当前 FlowGraphModel.InferInternal 返回的指针恒为 IntPtr.Zero，
+                // 这里保留释放逻辑以兼容未来可能的扩展实现。
+                if (resultTuple.Item2 != IntPtr.Zero)
+                {
+                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                }
+            }
         }
 
         public double Benchmark(Mat image, int warmup = 1, int runs = 10)
@@ -363,9 +441,21 @@ namespace DlcvModules
 
             Mat mask = new Mat();
             bool withMask = false;
+
+            var maskInfo = entry["mask_rle"];
+            if (maskInfo != null)
+            {
+                try
+                {
+                    mask = MaskRleUtils.MaskInfoToMat(maskInfo);
+                    if (mask != null && !mask.Empty()) withMask = true;
+                }
+                catch { mask = new Mat(); withMask = false; }
+            }
+
             var polyToken = entry["poly"];
 
-            if (polyToken is JArray polyOuter && polyOuter.Count > 0 && withBbox)
+            if (!withMask && polyToken is JArray polyOuter && polyOuter.Count > 0 && withBbox)
             {
                 // 对于 mask 绘制，需要相对于 bbox 的左上角
                 // 如果是旋转框，通常 mask 是在旋转矩形内或者全局 mask
@@ -476,6 +566,8 @@ namespace DlcvModules
                 var bbox = bboxArr != null ? bboxArr.ToObject<List<double>>() : new List<double>();
                 bool withBbox = so.Value<bool?>("with_bbox") ?? (bbox != null && bbox.Count > 0);
                 bool withMask = so.Value<bool?>("with_mask") ?? false;
+                var maskInfo = so["mask_rle"];
+                if (!withMask && maskInfo != null) withMask = true;
                 bool withAngle = so.Value<bool?>("with_angle") ?? false;
                 float angle = so.Value<float?>("angle") ?? -100f;
 
@@ -516,50 +608,57 @@ namespace DlcvModules
                 }
 
                 Mat mask = new Mat();
-                if (withMask && bbox != null && bbox.Count >= 4)
+                if (withMask)
                 {
-                    var maskToken = so["mask"] ?? so["polygon"];
-                    var pointsArray = maskToken as JArray;
-                    int w = (int)(bbox.Count > 2 ? bbox[2] : 0);
-                    int h = (int)(bbox.Count > 3 ? bbox[3] : 0);
-                    if (pointsArray != null && w > 0 && h > 0)
+                    if (maskInfo != null)
                     {
-                        try
+                        try { mask = MaskRleUtils.MaskInfoToMat(maskInfo); } catch { }
+                    }
+                    else if (bbox != null && bbox.Count >= 4)
+                    {
+                        var maskToken = so["mask"] ?? so["polygon"];
+                        var pointsArray = maskToken as JArray;
+                        int w = (int)(bbox.Count > 2 ? bbox[2] : 0);
+                        int h = (int)(bbox.Count > 3 ? bbox[3] : 0);
+                        if (pointsArray != null && w > 0 && h > 0)
                         {
-                            mask = Mat.Zeros(h, w, MatType.CV_8UC1);
-                            var points = new List<Point>();
-                            double x0 = bbox[0];
-                            double y0 = bbox[1];
-                            for (int pi = 0; pi < pointsArray.Count; pi++)
+                            try
                             {
-                                var pToken = pointsArray[pi];
-                                int px; int py;
-                                var pj = pToken as JObject;
-                                if (pj != null)
+                                mask = Mat.Zeros(h, w, MatType.CV_8UC1);
+                                var points = new List<Point>();
+                                double x0 = bbox[0];
+                                double y0 = bbox[1];
+                                for (int pi = 0; pi < pointsArray.Count; pi++)
                                 {
-                                    px = pj.Value<int>("x");
-                                    py = pj.Value<int>("y");
+                                    var pToken = pointsArray[pi];
+                                    int px; int py;
+                                    var pj = pToken as JObject;
+                                    if (pj != null)
+                                    {
+                                        px = pj.Value<int>("x");
+                                        py = pj.Value<int>("y");
+                                    }
+                                    else
+                                    {
+                                        var pa = pToken as JArray;
+                                        if (pa == null || pa.Count < 2) continue;
+                                        px = pa[0].Value<int>();
+                                        py = pa[1].Value<int>();
+                                    }
+                                    int rx = (int)Math.Round(px - x0);
+                                    int ry = (int)Math.Round(py - y0);
+                                    rx = Math.Max(0, Math.Min(w - 1, rx));
+                                    ry = Math.Max(0, Math.Min(h - 1, ry));
+                                    points.Add(new Point(rx, ry));
                                 }
-                                else
+                                if (points.Count > 2)
                                 {
-                                    var pa = pToken as JArray;
-                                    if (pa == null || pa.Count < 2) continue;
-                                    px = pa[0].Value<int>();
-                                    py = pa[1].Value<int>();
+                                    var pts = new Point[][] { points.ToArray() };
+                                    Cv2.FillPoly(mask, pts, Scalar.White);
                                 }
-                                int rx = (int)Math.Round(px - x0);
-                                int ry = (int)Math.Round(py - y0);
-                                rx = Math.Max(0, Math.Min(w - 1, rx));
-                                ry = Math.Max(0, Math.Min(h - 1, ry));
-                                points.Add(new Point(rx, ry));
                             }
-                            if (points.Count > 2)
-                            {
-                                var pts = new Point[][] { points.ToArray() };
-                                Cv2.FillPoly(mask, pts, Scalar.White);
-                            }
+                            catch { }
                         }
-                        catch { }
                     }
                 }
 
