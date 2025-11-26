@@ -244,6 +244,60 @@ namespace DlcvModules
             return new Utils.CSharpResult(samples);
         }
 
+        /// <summary>
+        /// 对单张图片进行推理，返回 JSON 格式的结果
+        /// </summary>
+        /// <param name="image">输入图像（RGB 格式）</param>
+        /// <param name="paramsJson">可选的推理参数</param>
+        /// <returns>
+        /// 返回 JSON 格式的检测结果数组，约定为：
+        /// [
+        ///   { ... 单个检测结果 ... },
+        ///   ...
+        /// ]
+        /// </returns>
+        public dynamic InferOneOutJson(Mat image, JObject paramsJson = null)
+        {
+            if (image == null || image.Empty())
+                throw new ArgumentException("输入图像为空", nameof(image));
+
+            // 复用 InferInternal 的流程图执行逻辑，保持与 Infer/InferBatch 一致
+            var resultTuple = InferInternal(new List<Mat> { image }, paramsJson);
+            try
+            {
+                // FlowGraphModel.InferInternal 在单张图片情况下，
+                // result_list 字段直接为该图片的结果数组 JArray。
+                // 为了兼容未来可能的格式调整，这里做一次安全解析。
+                JArray resultArray = null;
+                var resultToken = resultTuple.Item1["result_list"];
+
+                if (resultToken is JArray ja)
+                {
+                    resultArray = ja;
+                }
+                else if (resultToken is JObject jo)
+                {
+                    // 兼容形如 { "result_list": [ ... ] } 的容器格式
+                    resultArray = jo["result_list"] as JArray ?? new JArray();
+                }
+                else
+                {
+                    resultArray = new JArray();
+                }
+
+                return resultArray;
+            }
+            finally
+            {
+                // 当前 FlowGraphModel.InferInternal 返回的指针恒为 IntPtr.Zero，
+                // 这里保留释放逻辑以兼容未来可能的扩展实现。
+                if (resultTuple.Item2 != IntPtr.Zero)
+                {
+                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                }
+            }
+        }
+
         public double Benchmark(Mat image, int warmup = 1, int runs = 10)
         {
             if (image == null || image.Empty()) throw new ArgumentException("输入图像为空", nameof(image));
