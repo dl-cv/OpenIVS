@@ -11,8 +11,7 @@ namespace DlcvModules
 	/// 将 local 结果中的按类别(N/P)聚合的 mask（点集多边形）转换为等间距点集（局部坐标），并以点为中心生成固定大小的矩形框（XYWH）。
 	/// 注册名：features/stroke_to_points
 	/// properties:
-	/// - count_N(int, default 1)
-	/// - count_P(int, default 1)
+	/// - counts_dict(dict, category_name -> count)
 	/// - point_width(int, default 10)
 	/// - point_height(int, default 10)
 	/// 输入：image_list
@@ -347,11 +346,7 @@ namespace DlcvModules
 				{
 					foreach (var p in jobj)
 					{
-						int c;
-						if (TryConvertToInt(p.Value, out c))
-						{
-							dict[p.Key] = c;
-						}
+						if (TryConvertToInt(p.Value, out int c)) dict[p.Key] = c;
 					}
 				}
 				else
@@ -361,11 +356,7 @@ namespace DlcvModules
 					{
 						foreach (var kv in dso)
 						{
-							int c;
-							if (TryConvertToInt(kv.Value, out c))
-							{
-								dict[kv.Key] = c;
-							}
+							if (TryConvertToInt(kv.Value, out int c)) dict[kv.Key] = c;
 						}
 					}
 					else
@@ -377,25 +368,14 @@ namespace DlcvModules
 							{
 								string key = keyObj != null ? keyObj.ToString() : null;
 								if (string.IsNullOrEmpty(key)) continue;
-								int c;
-								if (TryConvertToInt(idict[keyObj], out c))
-								{
-									dict[key] = c;
-								}
+								if (TryConvertToInt(idict[keyObj], out int c)) dict[key] = c;
 							}
 						}
 					}
 				}
 			}
 
-			if (!dict.ContainsKey("N"))
-			{
-				dict["N"] = ReadInt("count_N", 1);
-			}
-			if (!dict.ContainsKey("P"))
-			{
-				dict["P"] = ReadInt("count_P", 1);
-			}
+			if (dict.Count == 0) { dict["N"] = ReadInt("count_N", 1); dict["P"] = ReadInt("count_P", 1); }
 			return dict;
 		}
 
