@@ -152,9 +152,11 @@ namespace DlcvModules
                     // 绘制 mask/contours
                     if (vis.DisplayMask || vis.DisplayContours)
                     {
-                        var poly = ReadPolygonPoints(so);
-                        if (poly != null && poly.Count >= 3)
+                        var contours = ReadMaskContours(so, lx, ly);
+                        foreach (var poly in contours)
                         {
+                            if (poly == null || poly.Count < 3) continue;
+
                             var polyGlobal = new List<Point>();
                             foreach (var p in poly)
                             {
@@ -170,16 +172,19 @@ namespace DlcvModules
                                     polyGlobal.Add(new Point((int)Math.Round(x), (int)Math.Round(y)));
                                 }
                             }
+
+                            var ptsArr = new Point[][] { polyGlobal.ToArray() };
                             if (vis.DisplayMask)
                             {
-                                var overlay = target.Clone();
-                                Cv2.FillPoly(overlay, new Point[][] { polyGlobal.ToArray() }, vis.MaskFillColor);
-                                Cv2.AddWeighted(overlay, 0.35, target, 0.65, 0, target);
-                                overlay.Dispose();
+                                using (var overlay = target.Clone())
+                                {
+                                    Cv2.FillPoly(overlay, ptsArr, vis.MaskFillColor);
+                                    Cv2.AddWeighted(overlay, 0.35, target, 0.65, 0, target);
+                                }
                             }
                             if (vis.DisplayContours)
                             {
-                                Cv2.Polylines(target, new Point[][] { polyGlobal.ToArray() }, true, vis.BboxColor, vis.BboxLineWidth, LineTypes.AntiAlias);
+                                Cv2.Polylines(target, ptsArr, true, vis.BboxColor, vis.BboxLineWidth, LineTypes.AntiAlias);
                             }
                         }
                     }
@@ -253,28 +258,40 @@ namespace DlcvModules
 			return true;
 		}
 
-        private static List<Point2d> ReadPolygonPoints(JObject s)
+        private static List<List<Point2d>> ReadMaskContours(JObject s, double bx, double by)
         {
-            var maskToken = s?["mask"] ?? s?["polygon"];
-            var pts = new List<Point2d>();
-            var arr = maskToken as JArray;
-            if (arr == null) return null;
-            foreach (var p in arr)
+            var result = new List<List<Point2d>>();
+
+            var maskRle = s["mask_rle"];
+            if (maskRle != null)
             {
-                if (p is JObject pj)
+                try
                 {
-                    double x = pj.Value<double>("x");
-                    double y = pj.Value<double>("y");
-                    pts.Add(new Point2d(x, y));
+                    using (var maskMat = MaskRleUtils.MaskInfoToMat(maskRle))
+                    {
+                        if (maskMat != null && !maskMat.Empty())
+                        {
+                            OpenCvSharp.Point[][] contours;
+                            HierarchyIndex[] hierarchy;
+                            Cv2.FindContours(maskMat, out contours, out hierarchy, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+                            if (contours != null)
+                            {
+                                foreach (var c in contours)
+                                {
+                                    var list = new List<Point2d>();
+                                    foreach (var p in c)
+                                    {
+                                        list.Add(new Point2d(p.X + bx, p.Y + by));
+                                    }
+                                    result.Add(list);
+                                }
+                            }
+                        }
+                    }
                 }
-                else if (p is JArray pa && pa.Count >= 2)
-                {
-                    double x = pa[0].Value<double>();
-                    double y = pa[1].Value<double>();
-                    pts.Add(new Point2d(x, y));
-                }
+                catch { }
             }
-            return pts;
+            return result;
         }
 
         private class VisConfig
