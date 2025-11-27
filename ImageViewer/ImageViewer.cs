@@ -64,11 +64,26 @@ namespace DLCV
         // 新增参数控制是否显示状态文本
         public bool ShowStatusText { get; set; } = false;
 
+        // 控制是否显示可视化结果（框、Mask、文字等）
+        public bool ShowVisualization { get; set; } = true;
+
         public ImageViewer()
         {
             this.DoubleBuffered = true; // Enable double buffering
             this.SetStyle(ControlStyles.ResizeRedraw, true); // Redraw on resize
+            this.SetStyle(ControlStyles.Selectable, true); // Allow control to accept focus
+            this.TabStop = true;
+        }
 
+        // 处理键盘事件
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if (e.KeyCode == Keys.V)
+            {
+                ShowVisualization = !ShowVisualization;
+                Invalidate(); // 重绘
+            }
         }
 
         private readonly object _Lock = new object();
@@ -132,6 +147,7 @@ namespace DLCV
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            this.Focus(); // 获取焦点以便接收键盘事件
             base.OnMouseDown(e);
             if (e.Button == MouseButtons.Left)
             {
@@ -238,7 +254,7 @@ namespace DLCV
 
         public void DrawResults(PaintEventArgs e)
         {
-            if (currentResults == null) return;
+            if (currentResults == null || !ShowVisualization) return;
 
             float borderWidth = Math.Max(1, 2 / _scale); // 更细的边框
             float fontSize = Math.Max(8, 24 / _scale);
