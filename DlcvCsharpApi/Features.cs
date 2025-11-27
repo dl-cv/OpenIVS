@@ -7,6 +7,7 @@ using OpenCvSharp;
 namespace DlcvModules
 {
     /// <summary>
+    /// 模块名称：生成裁剪
     /// 根据检测结果对图像裁剪，支持轴对齐与旋转框
     /// 输入：image_list (ModuleImage/Bitmap)，result_list（local entries，含 sample_results）
     /// 输出：裁剪得到的新 image_list 与对应的 local result_list（含 transform/index/origin_index）
@@ -221,6 +222,7 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块名称：镜像翻转
     /// 镜像翻转：支持水平（左右）与竖直（上下）翻转；仅处理图像并只输出图像。
     /// 输入：image；输出：image；不透传 results。
     /// properties:
@@ -302,12 +304,14 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块名称：掩码转最小外接矩
     /// 根据 2D mask 生成最小外接矩旋转框（le90），替换原 bbox；image 透传。
     /// </summary>
     public class MaskToRBox : BaseModule
     {
         static MaskToRBox()
         {
+            ModuleRegistry.Register("post_process/mask_to_rbox", typeof(MaskToRBox));
             ModuleRegistry.Register("features/mask_to_rbox", typeof(MaskToRBox));
         }
 
@@ -422,6 +426,7 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块名称：结果合并
     /// 合并多路图像与结果：将主输入和 ExtraInputsIn 的对汇总；按 transform/index/origin_index 对齐结果
     /// 可选去重：当 bbox+category_name 一致时去重
     /// 输出：每张图一个 local 条目
@@ -430,6 +435,7 @@ namespace DlcvModules
     {
         static MergeResults()
         {
+            ModuleRegistry.Register("post_process/merge_results", typeof(MergeResults));
             ModuleRegistry.Register("features/merge_results", typeof(MergeResults));
         }
 
@@ -595,12 +601,14 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块名称：结果筛选
     /// 结果过滤：按 categories 将结果与图像分流为两路；第二路通过 ExtraOutputs[0] 暴露
     /// </summary>
     public class ResultFilter : BaseModule
     {
         static ResultFilter()
         {
+            ModuleRegistry.Register("post_process/result_filter", typeof(ResultFilter));
             ModuleRegistry.Register("features/result_filter", typeof(ResultFilter));
         }
 
@@ -786,6 +794,7 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块名称：结果过滤（高级）
     /// 高级结果过滤：支持按 bbox/rbox 的 w/h、bbox 面积、mask 面积过滤。
     /// 通过主通道输出通过项；通过 ExtraOutputs[0] 输出未通过项；同时保持图像对齐。
     /// properties:
@@ -798,6 +807,7 @@ namespace DlcvModules
     {
         static ResultFilterAdvanced()
         {
+            ModuleRegistry.Register("post_process/result_filter_advanced", typeof(ResultFilterAdvanced));
             ModuleRegistry.Register("features/result_filter_advanced", typeof(ResultFilterAdvanced));
         }
 
@@ -1002,6 +1012,7 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块名称：固定裁剪
     /// 固定坐标裁剪：按 x,y,w,h 从每张输入图像裁剪，结果透传。
     /// 注册名：features/coordinate_crop
     /// properties:
@@ -1012,6 +1023,7 @@ namespace DlcvModules
     {
         static CoordinateCrop()
         {
+            ModuleRegistry.Register("pre_process/coordinate_crop", typeof(CoordinateCrop));
             ModuleRegistry.Register("features/coordinate_crop", typeof(CoordinateCrop));
         }
 
@@ -1087,6 +1099,7 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块名称：分类矫正
     /// features/image_rotate_by_cls：根据分类结果对图像做整图旋转（仅输出图像）。
     /// 使用场景：上游分类结果给出方向类别（例如 “90/180/270/0” 的自定义名称）。
     /// 规则：
@@ -1489,6 +1502,7 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块名称：文本替换
     /// 特征/文本替换：根据映射表替换识别结果（category_name）中的字符或子串。
     /// 注册名：features/text_replacement
     /// properties:
@@ -1502,6 +1516,7 @@ namespace DlcvModules
     {
         static TextReplacement()
         {
+            ModuleRegistry.Register("post_process/text_replacement", typeof(TextReplacement));
             ModuleRegistry.Register("features/text_replacement", typeof(TextReplacement));
         }
 
