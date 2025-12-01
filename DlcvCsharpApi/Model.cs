@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
@@ -779,6 +779,10 @@ namespace dlcv_infer_csharp
         {
             try
             {
+                if (_httpClient is null)
+                {
+                    _httpClient = new HttpClient();
+                }
                 // DVP 模式只支持单张图片，如果有多张图片需要分别处理
                 var allResults = new List<JObject>();
 
