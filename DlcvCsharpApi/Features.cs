@@ -2164,9 +2164,6 @@ namespace DlcvModules
                     rotatedImg = baseImg;
                 }
 
-                Cv2.ImShow("test", rotatedImg);
-                Cv2.WaitKey();
-
                 var parentState = wrap.TransformState ?? new TransformationState(w, h);
                 var childState = parentState.DeriveChild(A, w, h);
                 var newWrap = new ModuleImage(rotatedImg, wrap.OriginalImage ?? baseImg, childState, wrap.OriginalIndex);
