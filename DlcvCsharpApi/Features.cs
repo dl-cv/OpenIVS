@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
@@ -1100,13 +1100,14 @@ namespace DlcvModules
 
     /// <summary>
     /// 模块名称：分类矫正
-    /// features/image_rotate_by_cls：根据分类结果对图像做整图旋转（仅输出图像）。
-    /// 使用场景：上游分类结果给出方向类别（例如 “90/180/270/0” 的自定义名称）。
+    /// features/image_rotate_by_cls：根据分类结果对图像做整图旋转，并同步更新旋转框/检测结果的几何与 transform。
+    /// 使用场景：上游分类结果给出方向类别（例如 “90/180/270/0” 的自定义名称），且已经存在对应图像的检测/旋转框结果。
     /// 规则：
-    /// - 逐对匹配优先级：transform 完全匹配 > index 匹配 > origin_index 匹配；均无则视为 0°。
-    /// - 每张图最多匹配一个结果，且仅进行一种变换。
-    /// - 若判定应旋转 0°，原图也会输出。
-    /// - 最终仅输出图像（不透传 results）。
+    /// - 主对：image/result_list 为检测或旋转框结果；
+    /// - 额外输入对0（ExtraInputsIn[0]）：result_list 作为分类结果，只用于决定旋转角度，不会在输出中透传；
+    /// - 逐对匹配优先级：transform 完全匹配 > index 匹配 > origin_index 匹配；均无则视为 0°；
+    /// - 每张图最多匹配一个结果，且仅进行一种变换；
+    /// - 若判定应旋转 0°，图像本身不旋转，但仍会统一更新 transform 与检测框坐标格式。
     ///
     /// properties:
     /// - rotate90_labels: List&lt;string&gt; 对应逆时针旋转 90 度的分类标签集合
@@ -1128,11 +1129,12 @@ namespace DlcvModules
         public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
             var images = imageList ?? new List<ModuleImage>();
-            var results = resultList ?? new JArray();
+            var resultsDet = resultList ?? new JArray();
 
             if (images.Count == 0)
             {
-                return new ModuleIO(new List<ModuleImage>(), new JArray());
+                // 没有图像时，直接透传检测结果
+                return new ModuleIO(new List<ModuleImage>(), new JArray(resultsDet));
             }
 
             // 读取并标准化标签集合
@@ -1140,13 +1142,22 @@ namespace DlcvModules
             var set180 = ToLabelSet(ReadProperty("rotate180_labels"));
             var set270 = ToLabelSet(ReadProperty("rotate270_labels"));
 
-            // 聚合分类结果映射
+            // 从额外输入对0中读取分类结果
+            JArray clsResults = new JArray();
+            if (ExtraInputsIn != null && ExtraInputsIn.Count > 0 && ExtraInputsIn[0] != null && ExtraInputsIn[0].ResultList != null)
+            {
+                clsResults = ExtraInputsIn[0].ResultList;
+            }
+
+            // 聚合分类结果映射（仅基于分类结果，不透传分类本身）
             Dictionary<string, string> tmap;
             Dictionary<int, string> imap;
             Dictionary<int, string> omap;
-            BuildLabelMaps(results, out tmap, out imap, out omap);
+            BuildLabelMaps(clsResults, out tmap, out imap, out omap);
 
             var outImages = new List<ModuleImage>();
+            // 记录每张图像在本模块输出时的 TransformationState（包括 0° 情况），用于后续更新检测结果
+            var imgNewStates = new Dictionary<int, TransformationState>();
 
             for (int i = 0; i < images.Count; i++)
             {
@@ -1163,6 +1174,7 @@ namespace DlcvModules
                 string sig = SerializeTransformKey(wrap.TransformState);
                 string label = null;
 
+                // 逐对匹配：transform > index > origin_index
                 if (sig != null && tmap != null && tmap.ContainsKey(sig))
                 {
                     label = tmap[sig];
@@ -1201,7 +1213,10 @@ namespace DlcvModules
 
                 if (angleCcw % 360 == 0)
                 {
+                    // 角度为 0：图像不做旋转，但仍记录当前 TransformationState，
+                    // 以便后续对检测结果做统一的 transform 与坐标格式更新
                     outImages.Add(wrap);
+                    imgNewStates[i] = wrap.TransformState != null ? wrap.TransformState.Clone() : new TransformationState(w, h);
                     continue;
                 }
 
@@ -1243,6 +1258,7 @@ namespace DlcvModules
                 if (rotated == null || rotated.Empty())
                 {
                     outImages.Add(wrap);
+                    imgNewStates[i] = wrap.TransformState != null ? wrap.TransformState.Clone() : new TransformationState(w, h);
                     continue;
                 }
 
@@ -1250,9 +1266,204 @@ namespace DlcvModules
                 var childState = parentState.DeriveChild(A, newW, newH);
                 var child = new ModuleImage(rotated, wrap.OriginalImage ?? baseImg, childState, wrap.OriginalIndex);
                 outImages.Add(child);
+                imgNewStates[i] = childState;
             }
 
-            return new ModuleIO(outImages, new JArray());
+            // 若没有任何有效图像，直接透传检测结果
+            if (imgNewStates.Count == 0)
+            {
+                return new ModuleIO(outImages, new JArray(resultsDet));
+            }
+
+            // 根据旋转后的 TransformationState 更新检测/旋转框结果
+            var outResults = new JArray();
+            foreach (var token in resultsDet)
+            {
+                var res = token as JObject;
+                if (res == null)
+                {
+                    outResults.Add(token);
+                    continue;
+                }
+
+                var typeStr = res.Value<string>("type") ?? string.Empty;
+                if (!string.Equals(typeStr, "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    outResults.Add(res);
+                    continue;
+                }
+
+                int idx = res["index"] != null ? (res["index"].Value<int?>() ?? -1) : -1;
+                if (!imgNewStates.ContainsKey(idx))
+                {
+                    // 该 result 不对应本模块中被旋转的图像，原样透传
+                    outResults.Add(res);
+                    continue;
+                }
+
+                var oldTransform = res["transform"] as JObject;
+                var childState = imgNewStates[idx];
+                var T_o2n = ForwardMatrixFromState(childState);
+
+                var newRes = (JObject)res.DeepClone();
+                // 将 transform 更新为旋转后图像的 state
+                newRes["transform"] = childState != null ? JObject.FromObject(childState.ToDict()) : null;
+
+                var oldDets = res["sample_results"] as JArray;
+                var newDets = new JArray();
+
+                if (oldDets != null)
+                {
+                    foreach (var dToken in oldDets)
+                    {
+                        var d = dToken as JObject;
+                        if (d == null)
+                        {
+                            newDets.Add(dToken);
+                            continue;
+                        }
+
+                        var dNew = (JObject)d.DeepClone();
+                        var bboxToken = d["bbox"];
+                        Point2f[] ptsCrop = null;
+
+                        // 支持 rbox 与 xyxy
+                        var bboxArr = bboxToken as JArray;
+                        if (bboxArr != null)
+                        {
+                            if (bboxArr.Count == 5)
+                            {
+                                // 旋转框：[cx, cy, w, h, angle(rad)]
+                                try
+                                {
+                                    double cx = bboxArr[0].Value<double>();
+                                    double cy = bboxArr[1].Value<double>();
+                                    double rw = bboxArr[2].Value<double>();
+                                    double rh = bboxArr[3].Value<double>();
+                                    double ra = bboxArr[4].Value<double>();
+                                    float angDeg = (float)(ra * 180.0 / Math.PI);
+                                    var rect = new RotatedRect(
+                                        new Point2f((float)cx, (float)cy),
+                                        new Size2f((float)rw, (float)rh),
+                                        angDeg);
+                                    ptsCrop = rect.Points();
+                                }
+                                catch (Exception ex)
+                                {
+                                    if (GlobalDebug.PrintDebug)
+                                    {
+                                        GlobalDebug.Log("[ImageRotateByClassification] 解析 rbox bbox 失败: " + ex.Message);
+                                    }
+                                    ptsCrop = null;
+                                }
+                            }
+                            else if (bboxArr.Count == 4)
+                            {
+                                // 普通框：[x1, y1, x2, y2]
+                                try
+                                {
+                                    double x1 = bboxArr[0].Value<double>();
+                                    double y1 = bboxArr[1].Value<double>();
+                                    double x2 = bboxArr[2].Value<double>();
+                                    double y2 = bboxArr[3].Value<double>();
+                                    ptsCrop = new[]
+                                    {
+                                        new Point2f((float)x1, (float)y1),
+                                        new Point2f((float)x2, (float)y1),
+                                        new Point2f((float)x2, (float)y2),
+                                        new Point2f((float)x1, (float)y2)
+                                    };
+                                }
+                                catch (Exception ex)
+                                {
+                                    if (GlobalDebug.PrintDebug)
+                                    {
+                                        GlobalDebug.Log("[ImageRotateByClassification] 解析 xyxy bbox 失败: " + ex.Message);
+                                    }
+                                    ptsCrop = null;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var bboxObj = bboxToken as JObject;
+                            if (bboxObj != null && bboxObj["cx"] != null)
+                            {
+                                // dict 形式的旋转框：{cx, cy, w, h, angle/theta}
+                                try
+                                {
+                                    double cx = bboxObj.Value<double?>("cx") ?? 0.0;
+                                    double cy = bboxObj.Value<double?>("cy") ?? 0.0;
+                                    double rw = bboxObj.Value<double?>("w") ?? 0.0;
+                                    double rh = bboxObj.Value<double?>("h") ?? 0.0;
+                                    double ra = bboxObj["angle"] != null
+                                        ? bboxObj.Value<double?>("angle") ?? 0.0
+                                        : (bboxObj.Value<double?>("theta") ?? 0.0);
+                                    float angDeg = (float)(ra * 180.0 / Math.PI);
+                                    var rect = new RotatedRect(
+                                        new Point2f((float)cx, (float)cy),
+                                        new Size2f((float)rw, (float)rh),
+                                        angDeg);
+                                    ptsCrop = rect.Points();
+                                }
+                                catch (Exception ex)
+                                {
+                                    if (GlobalDebug.PrintDebug)
+                                    {
+                                        GlobalDebug.Log("[ImageRotateByClassification] 解析 dict rbox bbox 失败: " + ex.Message);
+                                    }
+                                    ptsCrop = null;
+                                }
+                            }
+                        }
+
+                        if (ptsCrop != null && oldTransform != null)
+                        {
+                            try
+                            {
+                                // 1. 先从当前图坐标映射回原图坐标
+                                var ptsOrig = MapPointsToOriginal(oldTransform, ptsCrop);
+
+                                // 2. 再从原图映射到矫正后的新图坐标
+                                var ptsNew = TransformPoints3x3(T_o2n, ptsOrig);
+
+                                // 3. 使用最小外接矩形重新拟合旋转框
+                                var rr = Cv2.MinAreaRect(ptsNew);
+                                double nangRad = rr.Angle * Math.PI / 180.0;
+
+                                dNew["bbox"] = new JArray(
+                                    (double)rr.Center.X,
+                                    (double)rr.Center.Y,
+                                    (double)rr.Size.Width,
+                                    (double)rr.Size.Height,
+                                    nangRad
+                                );
+
+                                // 几何已经变化，mask 不再可靠，移除
+                                if (dNew["mask_array"] != null)
+                                {
+                                    dNew.Remove("mask_array");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                if (GlobalDebug.PrintDebug)
+                                {
+                                    GlobalDebug.Log("[ImageRotateByClassification] 更新检测 bbox 失败，保留原值: " + ex.Message);
+                                }
+                            }
+                        }
+
+                        newDets.Add(dNew);
+                    }
+                }
+
+                newRes["sample_results"] = newDets;
+                outResults.Add(newRes);
+            }
+
+            // 输出：矫正后的图像与更新后的检测/旋转框结果；分类结果仅作为输入参与计算，不会出现在输出中
+            return new ModuleIO(outImages, outResults);
         }
 
         private object ReadProperty(string key)
@@ -1499,6 +1710,119 @@ namespace DlcvModules
             newWidth = h;
             newHeight = w;
         }
+
+        /// <summary>
+        /// 将当前 TransformationState 转换为原图 -> 当前图像的 3x3 仿射矩阵。
+        /// 在 C# 版本中，AffineMatrix2x3 直接表示原图 -> 当前图，因此这里只需升维到 3x3。
+        /// </summary>
+        private static double[] ForwardMatrixFromState(TransformationState st)
+        {
+            if (st == null || st.AffineMatrix2x3 == null || st.AffineMatrix2x3.Length != 6)
+            {
+                // 单位矩阵
+                return new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+            }
+            return TransformationState.To3x3(st.AffineMatrix2x3);
+        }
+
+        /// <summary>
+        /// 将当前图像坐标系下的点映射回原图坐标（使用 transform 中的 crop_box + affine）。
+        /// 等价于 Python 中 RBoxAngleCorrection._map_points_to_original。
+        /// </summary>
+        private static Point2f[] MapPointsToOriginal(JObject transformObj, Point2f[] pts)
+        {
+            if (transformObj == null || pts == null || pts.Length == 0)
+            {
+                return pts;
+            }
+
+            try
+            {
+                // 读取 crop_box
+                int x0 = 0, y0 = 0;
+                var crop = transformObj["crop_box"] as JArray;
+                if (crop != null && crop.Count >= 2)
+                {
+                    x0 = crop[0].Value<int>();
+                    y0 = crop[1].Value<int>();
+                }
+
+                // 读取 2x3 仿射矩阵（支持 affine_2x3 或 affine_matrix 两种形式）
+                double[] a2x3 = null;
+                var flat = transformObj["affine_2x3"] as JArray;
+                if (flat != null && flat.Count >= 6)
+                {
+                    a2x3 = new double[6];
+                    for (int i = 0; i < 6; i++)
+                    {
+                        a2x3[i] = flat[i].Value<double>();
+                    }
+                }
+                else
+                {
+                    var mat = transformObj["affine_matrix"] as JArray;
+                    if (mat != null && mat.Count >= 2)
+                    {
+                        var row0 = mat[0] as JArray;
+                        var row1 = mat[1] as JArray;
+                        if (row0 != null && row0.Count >= 3 && row1 != null && row1.Count >= 3)
+                        {
+                            a2x3 = new double[]
+                            {
+                                row0[0].Value<double>(), row0[1].Value<double>(), row0[2].Value<double>(),
+                                row1[0].Value<double>(), row1[1].Value<double>(), row1[2].Value<double>()
+                            };
+                        }
+                    }
+                }
+
+                if (a2x3 == null || a2x3.Length != 6)
+                {
+                    return pts;
+                }
+
+                // 计算逆矩阵：当前图 -> ROI
+                double[] inv = TransformationState.Inverse2x3(a2x3);
+                var outPts = new Point2f[pts.Length];
+                for (int i = 0; i < pts.Length; i++)
+                {
+                    double x = pts[i].X;
+                    double y = pts[i].Y;
+                    double rx = inv[0] * x + inv[1] * y + inv[2];
+                    double ry = inv[3] * x + inv[4] * y + inv[5];
+                    outPts[i] = new Point2f((float)(rx + x0), (float)(ry + y0));
+                }
+                return outPts;
+            }
+            catch
+            {
+                return pts;
+            }
+        }
+
+        /// <summary>
+        /// 使用 3x3 仿射矩阵变换点集：P_new = T * P_orig。
+        /// </summary>
+        private static Point2f[] TransformPoints3x3(double[] T, Point2f[] pts)
+        {
+            if (T == null || T.Length != 9 || pts == null || pts.Length == 0)
+            {
+                return pts;
+            }
+
+            var outPts = new Point2f[pts.Length];
+            for (int i = 0; i < pts.Length; i++)
+            {
+                double x = pts[i].X;
+                double y = pts[i].Y;
+                double nx = T[0] * x + T[1] * y + T[2];
+                double ny = T[3] * x + T[4] * y + T[5];
+                double w = T[6] * x + T[7] * y + T[8];
+                if (Math.Abs(w) < 1e-8) w = 1.0;
+                outPts[i] = new Point2f((float)(nx / w), (float)(ny / w));
+            }
+            return outPts;
+        }
     }
 
     /// <summary>
@@ -1696,6 +2020,466 @@ namespace DlcvModules
             }
 
             return dict;
+        }
+    }
+
+    /// <summary>
+    /// 模块名称：旋转框矫正
+    /// 根据旋转框结果矫正图像，以图像中心为旋转中心，使基准框角度变为 0 度，并更新所有检测结果的坐标。
+    /// 注册名：post_process/rbox_correction, features/rbox_correction
+    /// 处理逻辑：
+    /// 1. 取 results 中每张图关联的第一个含 transform 的 local 结果作为基准；
+    /// 2. 从 transform 的仿射矩阵中解析旋转角度 angle；
+    /// 3. 以图像中心为轴，旋转图像 angle 度；
+    /// 4. 更新所有检测结果的 bbox 以匹配新图像坐标系；若存在 mask_array，则在几何变化后移除。
+    /// properties:
+    /// - fill_value: int 旋转图像填充值，默认 0
+    /// </summary>
+    public class RBoxCorrection : BaseModule
+    {
+        static RBoxCorrection()
+        {
+            ModuleRegistry.Register("post_process/rbox_correction", typeof(RBoxCorrection));
+            ModuleRegistry.Register("features/rbox_correction", typeof(RBoxCorrection));
+        }
+
+        public RBoxCorrection(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var images = imageList ?? new List<ModuleImage>();
+            var results = resultList ?? new JArray();
+
+            int fillVal = 0;
+            if (Properties != null && Properties.TryGetValue("fill_value", out object fv) && fv != null)
+            {
+                try { fillVal = Convert.ToInt32(fv); }
+                catch { fillVal = 0; }
+            }
+
+            // 1. 预处理图像，保持索引一致
+            var wrappers = new List<ModuleImage>();
+            for (int idx = 0; idx < images.Count; idx++)
+            {
+                var im = images[idx];
+                if (im == null || im.GetImage() == null || im.GetImage().Empty())
+                {
+                    wrappers.Add(null);
+                }
+                else
+                {
+                    wrappers.Add(im);
+                }
+            }
+
+            // 2. 建立 Image Index -> List[Result Entry] 映射（仅 type==local）
+            var imgIdxToLocalResults = new Dictionary<int, List<JObject>>();
+            foreach (var token in results)
+            {
+                var res = token as JObject;
+                if (res == null) continue;
+                var typeStr = res.Value<string>("type") ?? string.Empty;
+                if (!string.Equals(typeStr, "local", StringComparison.OrdinalIgnoreCase)) continue;
+                int idx = res["index"] != null ? (res["index"].Value<int?>() ?? -1) : -1;
+                if (idx >= 0 && idx < wrappers.Count)
+                {
+                    if (!imgIdxToLocalResults.TryGetValue(idx, out List<JObject> lst))
+                    {
+                        lst = new List<JObject>();
+                        imgIdxToLocalResults[idx] = lst;
+                    }
+                    lst.Add(res);
+                }
+            }
+
+            // 3. 计算每张图的旋转矩阵
+            // Map: index -> (A_rot_2x3, child_state_of_new_image, angle_rad)
+            var imgTransforms = new Dictionary<int, Tuple<double[], TransformationState, double>>();
+            var outImages = new List<ModuleImage>();
+
+            for (int i = 0; i < wrappers.Count; i++)
+            {
+                var wrap = wrappers[i];
+                if (wrap == null)
+                {
+                    outImages.Add(null);
+                    continue;
+                }
+
+                double refAngleRad = 0.0;
+                bool foundRef = false;
+
+                if (imgIdxToLocalResults.TryGetValue(i, out List<JObject> resEntries))
+                {
+                    foreach (var entry in resEntries)
+                    {
+                        var tObj = entry["transform"] as JObject;
+                        if (tObj == null) continue;
+                        double? ang = GetAngleFromTransform(tObj);
+                        if (ang.HasValue)
+                        {
+                            refAngleRad = ang.Value;
+                            foundRef = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!foundRef)
+                {
+                    // 没有可用的基准 transform，则不做矫正
+                    outImages.Add(wrap);
+                    continue;
+                }
+
+                double rotDeg = -refAngleRad * 180.0 / Math.PI;
+
+                var baseImg = wrap.GetImage();
+                int h = baseImg.Height;
+                int w = baseImg.Width;
+                var center = new Point2f(w / 2.0f, h / 2.0f);
+
+                // 使用 OpenCV 获取旋转矩阵，再提取 2x3 double[]
+                var rotMat = Cv2.GetRotationMatrix2D(center, rotDeg, 1.0);
+                double[] A = new double[6];
+                A[0] = rotMat.Get<double>(0, 0);
+                A[1] = rotMat.Get<double>(0, 1);
+                A[2] = rotMat.Get<double>(0, 2);
+                A[3] = rotMat.Get<double>(1, 0);
+                A[4] = rotMat.Get<double>(1, 1);
+                A[5] = rotMat.Get<double>(1, 2);
+
+                Mat rotatedImg;
+                try
+                {
+                    rotatedImg = new Mat();
+                    // 使用常量边界填充值
+                    Cv2.WarpAffine(baseImg, rotatedImg, rotMat, new Size(w, h), borderMode: BorderTypes.Constant, borderValue: new Scalar(fillVal, fillVal, fillVal));
+                }
+                catch
+                {
+                    rotatedImg = baseImg;
+                }
+
+                Cv2.ImShow("test", rotatedImg);
+                Cv2.WaitKey();
+
+                var parentState = wrap.TransformState ?? new TransformationState(w, h);
+                var childState = parentState.DeriveChild(A, w, h);
+                var newWrap = new ModuleImage(rotatedImg, wrap.OriginalImage ?? baseImg, childState, wrap.OriginalIndex);
+                outImages.Add(newWrap);
+
+                imgTransforms[i] = Tuple.Create(A, childState, refAngleRad);
+            }
+
+            // 4. 更新结果
+            var outResults = new JArray();
+            foreach (var token in results)
+            {
+                var res = token as JObject;
+                if (res == null)
+                {
+                    outResults.Add(token);
+                    continue;
+                }
+
+                var typeStr = res.Value<string>("type") ?? string.Empty;
+                if (!string.Equals(typeStr, "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    outResults.Add(res);
+                    continue;
+                }
+
+                int idx = res["index"] != null ? (res["index"].Value<int?>() ?? -1) : -1;
+                if (!imgTransforms.TryGetValue(idx, out Tuple<double[], TransformationState, double> tup))
+                {
+                    outResults.Add(res);
+                    continue;
+                }
+
+                var Arot = tup.Item1;
+                var newState = tup.Item2;
+
+                var newRes = (JObject)res.DeepClone();
+                // 更新 transform 为新图像的 state
+                newRes["transform"] = newState != null ? JObject.FromObject(newState.ToDict()) : null;
+
+                var oldDets = res["sample_results"] as JArray;
+                var newDets = new JArray();
+
+                if (oldDets != null)
+                {
+                    foreach (var dToken in oldDets)
+                    {
+                        var d = dToken as JObject;
+                        if (d == null)
+                        {
+                            newDets.Add(dToken);
+                            continue;
+                        }
+
+                        var dNew = (JObject)d.DeepClone();
+                        var bboxToken = d["bbox"];
+                        Point2f[] ptsCrop = null;
+
+                        var bboxArr = bboxToken as JArray;
+                        if (bboxArr != null)
+                        {
+                            if (bboxArr.Count == 5)
+                            {
+                                // 旋转框 [cx, cy, w, h, angle(rad)]
+                                try
+                                {
+                                    double cx = bboxArr[0].Value<double>();
+                                    double cy = bboxArr[1].Value<double>();
+                                    double rw = bboxArr[2].Value<double>();
+                                    double rh = bboxArr[3].Value<double>();
+                                    double ra = bboxArr[4].Value<double>();
+                                    float angDeg = (float)(ra * 180.0 / Math.PI);
+                                    var rect = new RotatedRect(
+                                        new Point2f((float)cx, (float)cy),
+                                        new Size2f((float)rw, (float)rh),
+                                        angDeg);
+                                    ptsCrop = rect.Points();
+                                }
+                                catch
+                                {
+                                    ptsCrop = null;
+                                }
+                            }
+                            else if (bboxArr.Count == 4)
+                            {
+                                // 轴对齐框 [x1, y1, x2, y2]
+                                try
+                                {
+                                    double x1 = bboxArr[0].Value<double>();
+                                    double y1 = bboxArr[1].Value<double>();
+                                    double x2 = bboxArr[2].Value<double>();
+                                    double y2 = bboxArr[3].Value<double>();
+                                    ptsCrop = new[]
+                                    {
+                                        new Point2f((float)x1, (float)y1),
+                                        new Point2f((float)x2, (float)y1),
+                                        new Point2f((float)x2, (float)y2),
+                                        new Point2f((float)x1, (float)y2)
+                                    };
+                                }
+                                catch
+                                {
+                                    ptsCrop = null;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var bboxObj = bboxToken as JObject;
+                            if (bboxObj != null && bboxObj["cx"] != null)
+                            {
+                                // dict 形式旋转框 {cx, cy, w, h, angle/theta}
+                                try
+                                {
+                                    double cx = bboxObj.Value<double?>("cx") ?? 0.0;
+                                    double cy = bboxObj.Value<double?>("cy") ?? 0.0;
+                                    double rw = bboxObj.Value<double?>("w") ?? 0.0;
+                                    double rh = bboxObj.Value<double?>("h") ?? 0.0;
+                                    double ra = bboxObj["angle"] != null
+                                        ? bboxObj.Value<double?>("angle") ?? 0.0
+                                        : (bboxObj.Value<double?>("theta") ?? 0.0);
+                                    float angDeg = (float)(ra * 180.0 / Math.PI);
+                                    var rect = new RotatedRect(
+                                        new Point2f((float)cx, (float)cy),
+                                        new Size2f((float)rw, (float)rh),
+                                        angDeg);
+                                    ptsCrop = rect.Points();
+                                }
+                                catch
+                                {
+                                    ptsCrop = null;
+                                }
+                            }
+                        }
+
+                        if (ptsCrop != null)
+                        {
+                            var tOrigin = res["transform"] as JObject;
+                            if (tOrigin != null)
+                            {
+                                try
+                                {
+                                    // 1. 当前图 -> 原图
+                                    var ptsOrig = MapPointsToOriginal(tOrigin, ptsCrop);
+                                    // 2. 原图 -> 旋转后
+                                    var ptsNew = TransformPoints2x3(Arot, ptsOrig);
+
+                                    var rr = Cv2.MinAreaRect(ptsNew);
+                                    double nangRad = rr.Angle * Math.PI / 180.0;
+
+                                    dNew["bbox"] = new JArray(
+                                        (double)rr.Center.X,
+                                        (double)rr.Center.Y,
+                                        (double)rr.Size.Width,
+                                        (double)rr.Size.Height,
+                                        nangRad
+                                    );
+
+                                    if (dNew["mask_array"] != null)
+                                    {
+                                        dNew.Remove("mask_array");
+                                    }
+                                }
+                                catch
+                                {
+                                    // 几何更新失败时保留原 bbox
+                                }
+                            }
+                        }
+
+                        newDets.Add(dNew);
+                    }
+                }
+
+                newRes["sample_results"] = newDets;
+                outResults.Add(newRes);
+            }
+
+            // 过滤掉 null 图像占位
+            var finalImages = new List<ModuleImage>();
+            foreach (var im in outImages)
+            {
+                if (im != null) finalImages.Add(im);
+            }
+
+            return new ModuleIO(finalImages, outResults);
+        }
+
+        /// <summary>
+        /// 从 transform 仿射矩阵中解析旋转角度（弧度）。
+        /// 支持 affine_matrix（2x3）或 affine_2x3（长度 6 的一维数组）。
+        /// </summary>
+        private static double? GetAngleFromTransform(JObject transformObj)
+        {
+            if (transformObj == null) return null;
+            try
+            {
+                double a, b;
+                var mat = transformObj["affine_matrix"] as JArray;
+                if (mat != null && mat.Count >= 2)
+                {
+                    var row0 = mat[0] as JArray;
+                    if (row0 == null || row0.Count < 2) return null;
+                    a = row0[0].Value<double>();
+                    b = row0[1].Value<double>();
+                }
+                else
+                {
+                    var flat = transformObj["affine_2x3"] as JArray;
+                    if (flat == null || flat.Count < 2) return null;
+                    a = flat[0].Value<double>();
+                    b = flat[1].Value<double>();
+                }
+                return Math.Atan2(b, a);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 将当前图像坐标系下的点映射回原图坐标（使用 transform 中的 crop_box + affine）。
+        /// 与 ImageRotateByClassification.MapPointsToOriginal 行为保持一致。
+        /// </summary>
+        private static Point2f[] MapPointsToOriginal(JObject transformObj, Point2f[] pts)
+        {
+            if (transformObj == null || pts == null || pts.Length == 0)
+            {
+                return pts;
+            }
+
+            try
+            {
+                int x0 = 0, y0 = 0;
+                var crop = transformObj["crop_box"] as JArray;
+                if (crop != null && crop.Count >= 2)
+                {
+                    x0 = crop[0].Value<int>();
+                    y0 = crop[1].Value<int>();
+                }
+
+                double[] a2x3 = null;
+                var flat = transformObj["affine_2x3"] as JArray;
+                if (flat != null && flat.Count >= 6)
+                {
+                    a2x3 = new double[6];
+                    for (int i = 0; i < 6; i++)
+                    {
+                        a2x3[i] = flat[i].Value<double>();
+                    }
+                }
+                else
+                {
+                    var mat = transformObj["affine_matrix"] as JArray;
+                    if (mat != null && mat.Count >= 2)
+                    {
+                        var row0 = mat[0] as JArray;
+                        var row1 = mat[1] as JArray;
+                        if (row0 != null && row0.Count >= 3 && row1 != null && row1.Count >= 3)
+                        {
+                            a2x3 = new double[]
+                            {
+                                row0[0].Value<double>(), row0[1].Value<double>(), row0[2].Value<double>(),
+                                row1[0].Value<double>(), row1[1].Value<double>(), row1[2].Value<double>()
+                            };
+                        }
+                    }
+                }
+
+                if (a2x3 == null || a2x3.Length != 6)
+                {
+                    return pts;
+                }
+
+                double[] inv = TransformationState.Inverse2x3(a2x3);
+                var outPts = new Point2f[pts.Length];
+                for (int i = 0; i < pts.Length; i++)
+                {
+                    double x = pts[i].X;
+                    double y = pts[i].Y;
+                    double rx = inv[0] * x + inv[1] * y + inv[2];
+                    double ry = inv[3] * x + inv[4] * y + inv[5];
+                    outPts[i] = new Point2f((float)(rx + x0), (float)(ry + y0));
+                }
+                return outPts;
+            }
+            catch
+            {
+                return pts;
+            }
+        }
+
+        /// <summary>
+        /// 使用 2x3 仿射矩阵变换点集：P_new = A * P_orig。
+        /// </summary>
+        private static Point2f[] TransformPoints2x3(double[] A, Point2f[] pts)
+        {
+            if (A == null || A.Length != 6 || pts == null || pts.Length == 0)
+            {
+                return pts;
+            }
+
+            var outPts = new Point2f[pts.Length];
+            for (int i = 0; i < pts.Length; i++)
+            {
+                double x = pts[i].X;
+                double y = pts[i].Y;
+                double nx = A[0] * x + A[1] * y + A[2];
+                double ny = A[3] * x + A[4] * y + A[5];
+                outPts[i] = new Point2f((float)nx, (float)ny);
+            }
+            return outPts;
         }
     }
 }
