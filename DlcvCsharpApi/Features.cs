@@ -1150,10 +1150,13 @@ namespace DlcvModules
             }
 
             // 聚合分类结果映射（仅基于分类结果，不透传分类本身）
+            // 修正：同时也从 results_det 中尝试获取分类标签，以支持用户将分类结果连接到主 results 端口的情况
+            var allClsSources = clsResults.Concat(resultsDet);
+
             Dictionary<string, string> tmap;
             Dictionary<int, string> imap;
             Dictionary<int, string> omap;
-            BuildLabelMaps(clsResults, out tmap, out imap, out omap);
+            BuildLabelMaps(allClsSources, out tmap, out imap, out omap);
 
             var outImages = new List<ModuleImage>();
             // 记录每张图像在本模块输出时的 TransformationState（包括 0° 情况），用于后续更新检测结果
@@ -1540,7 +1543,7 @@ namespace DlcvModules
                 a[0], a[1], a[2], a[3], a[4], a[5]);
         }
 
-        private static void BuildLabelMaps(JArray clsResults, out Dictionary<string, string> tmap, out Dictionary<int, string> imap, out Dictionary<int, string> omap)
+        private static void BuildLabelMaps(IEnumerable<JToken> clsResults, out Dictionary<string, string> tmap, out Dictionary<int, string> imap, out Dictionary<int, string> omap)
         {
             tmap = new Dictionary<string, string>(StringComparer.Ordinal);
             imap = new Dictionary<int, string>();
