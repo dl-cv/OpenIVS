@@ -9,10 +9,9 @@ namespace DlcvModules
 	/// features/sliding_window：按给定窗口与步长对输入图像生成子图。
 	/// 仅提供最小可编译与接口一致实现，后续可替换为高性能版本。
 	/// properties:
-	/// - small_img_width(int, default 832)
-	/// - small_img_height(int, default 704)
-	/// - horizontal_overlap(int, default 16)
-	/// - vertical_overlap(int, default 16)
+	/// - window_size([w,h], required, example [320,600])
+	/// - overlap([ow,oh], required, example [32,32])
+	/// - min_size(int, optional, default 1)  // 约束窗口/裁剪最小尺寸
 	/// </summary>
 	public class SlidingWindow : BaseModule
 	{
@@ -31,10 +30,17 @@ namespace DlcvModules
 			var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
 
-			int winW = ReadInt("small_img_width", 832);
-			int winH = ReadInt("small_img_height", 704);
-			int hov = ReadInt("horizontal_overlap", 16);
-			int vov = ReadInt("vertical_overlap", 16);
+			var win = ReadInt2("window_size", 832, 704);
+			var ov = ReadInt2("overlap", 16, 16);
+			int minSize = ReadInt("min_size", 1);
+
+			int winW = Math.Max(minSize, win.Item1);
+			int winH = Math.Max(minSize, win.Item2);
+			int hov = Math.Max(0, ov.Item1);
+			int vov = Math.Max(0, ov.Item2);
+			// overlap 不能 >= window，否则步长会变成 0（这里统一裁到 window-1）
+			if (winW > 0) hov = Math.Min(hov, winW - 1);
+			if (winH > 0) vov = Math.Min(vov, winH - 1);
 
             var outImages = new List<ModuleImage>();
             var outResults = new JArray();
@@ -56,7 +62,7 @@ namespace DlcvModules
 					{
                         int w = Math.Min(winW, Math.Max(1, mat.Width - x));
                         int h = Math.Min(winH, Math.Max(1, mat.Height - y));
-						if (w <= 0 || h <= 0) continue;
+						if (w < minSize || h < minSize) continue;
                         var rect = new Rect(x, y, w, h);
                         var cropped = new Mat(mat, rect).Clone();
 
@@ -95,6 +101,45 @@ namespace DlcvModules
 				try { return Convert.ToInt32(v); } catch { return dv; }
 			}
 			return dv;
+		}
+
+		private Tuple<int, int> ReadInt2(string key, int dv1, int dv2)
+		{
+			if (Properties == null || !Properties.TryGetValue(key, out object v) || v == null)
+				return Tuple.Create(dv1, dv2);
+
+			try
+			{
+				// 常见：JArray / object[] / List<object> / int[]
+				if (v is JArray ja && ja.Count >= 2)
+					return Tuple.Create(Convert.ToInt32(ja[0]), Convert.ToInt32(ja[1]));
+
+				if (v is object[] oa && oa.Length >= 2)
+					return Tuple.Create(Convert.ToInt32(oa[0]), Convert.ToInt32(oa[1]));
+
+				if (v is List<object> lo && lo.Count >= 2)
+					return Tuple.Create(Convert.ToInt32(lo[0]), Convert.ToInt32(lo[1]));
+
+				if (v is int[] ia && ia.Length >= 2)
+					return Tuple.Create(ia[0], ia[1]);
+
+				if (v is long[] la && la.Length >= 2)
+					return Tuple.Create(Convert.ToInt32(la[0]), Convert.ToInt32(la[1]));
+
+				// 兜底：比如字符串 "320,600"
+				if (v is string s)
+				{
+					var parts = s.Split(new[] { ',', ' ', ';', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+					if (parts.Length >= 2)
+						return Tuple.Create(Convert.ToInt32(parts[0]), Convert.ToInt32(parts[1]));
+				}
+			}
+			catch
+			{
+				// 只对新配置做适配：解析失败就回退默认值（不做旧字段兼容）
+			}
+
+			return Tuple.Create(dv1, dv2);
 		}
 
         private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj)
