@@ -128,12 +128,20 @@ namespace DlcvModules
             if (images == null || images.Count == 0) throw new ArgumentException("输入图像列表为空", nameof(images));
 
             var merged = new JArray();
+            // 允许没有 output/return_json 的流程：回退到 last_node_id 的 result_list
+            int lastNodeId = -1;
+            try
+            {
+                lastNodeId = _root != null ? (_root["last_node_id"]?.Value<int?>() ?? -1) : -1;
+            }
+            catch { lastNodeId = -1; }
             for (int i = 0; i < images.Count; i++)
             {
                 var img = images[i];
                 if (img == null || img.Empty())
                 {
-                    merged.Add(new JObject());
+                    // 单图/批量都统一用空数组表示“无结果”
+                    merged.Add(new JArray());
                     continue;
                 }
 
@@ -161,8 +169,10 @@ namespace DlcvModules
 
                 try { if (converted != null) { converted.Dispose(); } } catch { }
 
-                // 获取 output/return_json 的结果
+                // 获取 output/return_json 的结果；若流程未包含 return_json，则回退读取 last_node_id 的 result_list
                 JArray resultList = new JArray();
+                bool gotAny = false;
+
                 var feJson = ctx.Get<Dictionary<string, object>>("frontend_json");
                 if (feJson != null && feJson.ContainsKey("last"))
                 {
@@ -174,7 +184,8 @@ namespace DlcvModules
                         {
                             foreach (var item in byImg)
                             {
-                                int idx = Convert.ToInt32(item["origin_index"]);
+                                if (item == null) continue;
+                                int idx = Convert.ToInt32(item.ContainsKey("origin_index") ? item["origin_index"] : -1);
                                 if (idx != i) continue;
                                 if (item.ContainsKey("results"))
                                 {
@@ -184,18 +195,40 @@ namespace DlcvModules
                                     else if (resultsObj is List<Dictionary<string, object>> ldo) resultsArr = JArray.FromObject(ldo);
                                     else if (resultsObj is List<object> lo) resultsArr = JArray.FromObject(lo);
                                     else resultsArr = new JArray();
-                                    // 合并
                                     foreach (var r in resultsArr) resultList.Add(r);
+                                    gotAny = true;
                                 }
                             }
                         }
                     }
-                    merged.Add(resultList);
                 }
+
+                if (!gotAny && lastNodeId >= 0 && outputs != null && outputs.TryGetValue(lastNodeId, out Dictionary<string, object> lastOut))
+                {
+                    if (lastOut != null && lastOut.TryGetValue("result_list", out object rlObj) && rlObj != null)
+                    {
+                        try
+                        {
+                            if (rlObj is JArray jrl) resultList = jrl;
+                            else if (rlObj is JObject jro) resultList = jro["result_list"] as JArray ?? new JArray();
+                            else resultList = JArray.FromObject(rlObj);
+                            gotAny = true;
+                        }
+                        catch
+                        {
+                            // 回退失败则保持空数组
+                            resultList = new JArray();
+                        }
+                    }
+                }
+
+                // 无论是否取到结果，都要写入 merged，避免 merged[0] 越界
+                merged.Add(resultList ?? new JArray());
             }
 
             var root = new JObject();
-            root["result_list"] = images.Count == 1 ? merged[0] : merged;
+            // 单图：直接返回该图的结果数组；批量：返回数组的数组
+            root["result_list"] = images.Count == 1 ? (merged.Count > 0 ? merged[0] : new JArray()) : merged;
             return new Tuple<JObject, IntPtr>(root, IntPtr.Zero);
         }
 
