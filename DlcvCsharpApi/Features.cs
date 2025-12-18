@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
@@ -28,6 +28,45 @@ namespace DlcvModules
         {
             var imagesIn = imageList ?? new List<ModuleImage>();
             var resultsIn = resultList ?? new JArray();
+
+            // 与 Python 侧一致的裁剪参数
+            double cropExpand = 0.0;
+            int? cropW = null;
+            int? cropH = null;
+            int minSize = 1;
+            if (Properties != null)
+            {
+                cropExpand = GetDouble(Properties, "crop_expand", 0.0);
+                minSize = Math.Max(1, GetInt(Properties, "min_size", 1));
+
+                try
+                {
+                    if (Properties.TryGetValue("crop_shape", out object cs) && cs != null)
+                    {
+                        var arr = cs as System.Collections.IEnumerable;
+                        if (!(cs is string) && arr != null)
+                        {
+                            var list = new List<int>();
+                            foreach (var o in arr)
+                            {
+                                if (o == null) continue;
+                                try { list.Add(Convert.ToInt32(Convert.ToDouble(o))); } catch { }
+                                if (list.Count >= 2) break;
+                            }
+                            if (list.Count >= 2)
+                            {
+                                cropW = list[0];
+                                cropH = list[1];
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    cropW = null;
+                    cropH = null;
+                }
+            }
 
             // 构建 transform/index 映射，便于按条目裁剪
             var transformKeyToImage = new Dictionary<string, Tuple<ModuleImage, Mat, int>>();
@@ -79,37 +118,96 @@ namespace DlcvModules
                     if (withAngle && angle != -100.0)
                     {
                         // 旋转框: bbox=[cx,cy,w,h]，angle为弧度
+                        // 与 Python 一致：支持 crop_expand / crop_shape / min_size，输出尺寸使用 int(...) 截断
                         double cx = bbox[0].Value<double>();
                         double cy = bbox[1].Value<double>();
-                        double w = bbox[2].Value<double>();
-                        double h = bbox[3].Value<double>();
-                        cw = Math.Max(1, (int)Math.Round(w));
-                        ch = Math.Max(1, (int)Math.Round(h));
-                        cropped = CropRotated(tup.Item2, (float)cx, (float)cy, (float)w, (float)h, (float)(angle * 180.0 / Math.PI));
+                        double w = Math.Abs(bbox[2].Value<double>());
+                        double h = Math.Abs(bbox[3].Value<double>());
 
-                        // current->child 2x3: 先平移到(-cx,-cy)，再旋转(-angle)，再平移到(w/2,h/2)
-                        // R(-a) = [c s; -s c]
-                        double c = Math.Cos(-angle), s = Math.Sin(-angle);
-                        double tx = (w / 2.0) + (-c * cx - s * cy);
-                        double ty = (h / 2.0) + (s * cx - c * cy);
-                        childA2x3 = new double[] { c, s, tx, -s, c, ty };
+                        double w2 = cropW.HasValue && cropH.HasValue ? (double)cropW.Value : Math.Max((double)minSize, w + 2.0 * cropExpand);
+                        double h2 = cropW.HasValue && cropH.HasValue ? (double)cropH.Value : Math.Max((double)minSize, h + 2.0 * cropExpand);
+
+                        int iw = Math.Max(minSize, (int)w2);
+                        int ih = Math.Max(minSize, (int)h2);
+
+                        var rotMat = Cv2.GetRotationMatrix2D(new Point2f((float)cx, (float)cy), (float)(angle * 180.0 / Math.PI), 1.0);
+                        rotMat.Set<double>(0, 2, rotMat.Get<double>(0, 2) + (w2 / 2.0) - cx);
+                        rotMat.Set<double>(1, 2, rotMat.Get<double>(1, 2) + (h2 / 2.0) - cy);
+
+                        var dst = new Mat();
+                        Cv2.WarpAffine(tup.Item2, dst, rotMat, new Size(iw, ih));
+                        cropped = dst;
+
+                        cw = iw;
+                        ch = ih;
+                        childA2x3 = new double[]
+                        {
+                            rotMat.Get<double>(0, 0), rotMat.Get<double>(0, 1), rotMat.Get<double>(0, 2),
+                            rotMat.Get<double>(1, 0), rotMat.Get<double>(1, 1), rotMat.Get<double>(1, 2),
+                        };
                     }
                     else
                     {
-                        // 轴对齐框: bbox=[x,y,w,h]
-                        int x = ClampToInt(bbox[0].Value<double>());
-                        int y = ClampToInt(bbox[1].Value<double>());
-                        int w = Math.Max(1, ClampToInt(bbox[2].Value<double>()));
-                        int h = Math.Max(1, ClampToInt(bbox[3].Value<double>()));
-                        int rw = Math.Min(w, Math.Max(1, tup.Item2.Width - x));
-                        int rh = Math.Min(h, Math.Max(1, tup.Item2.Height - y));
+                        // 轴对齐框: 输入 bbox 为 xywh，但按要求先转换成 Python 语义的 xyxy，再按 Python 的方式裁剪
+                        // Python 规则：xyxy 的 x2/y2 为 end-exclusive；裁剪用 [y1:y2, x1:x2]
+                        int W = tup.Item2.Width;
+                        int H = tup.Item2.Height;
+
+                        double x = bbox[0].Value<double>();
+                        double y = bbox[1].Value<double>();
+                        double bw = Math.Abs(bbox[2].Value<double>());
+                        double bh = Math.Abs(bbox[3].Value<double>());
+
+                        double x1 = x;
+                        double y1 = y;
+                        double x2 = x + bw;
+                        double y2 = y + bh;
+
+                        int nx1, ny1, nx2, ny2;
+                        if (cropW.HasValue && cropH.HasValue)
+                        {
+                            // 固定尺寸：以中心点裁剪（与 Python 一致，左上 int(...) 相当于 floor）
+                            double cx = (x1 + x2) / 2.0;
+                            double cy = (y1 + y2) / 2.0;
+                            double tx1 = Math.Max(0.0, Math.Min((double)W, cx - cropW.Value / 2.0));
+                            double ty1 = Math.Max(0.0, Math.Min((double)H, cy - cropH.Value / 2.0));
+                            nx1 = (int)Math.Floor(tx1);
+                            ny1 = (int)Math.Floor(ty1);
+                            nx2 = (int)Math.Max(nx1 + 1, Math.Min(W, nx1 + cropW.Value));
+                            ny2 = (int)Math.Max(ny1 + 1, Math.Min(H, ny1 + cropH.Value));
+                        }
+                        else
+                        {
+                            // 外扩：左上 int(...)（floor），右下 round 后再 clamp（与 Python 一致）
+                            double tx1 = Math.Max(0.0, Math.Min((double)W, x1 - cropExpand));
+                            double ty1 = Math.Max(0.0, Math.Min((double)H, y1 - cropExpand));
+                            nx1 = (int)Math.Floor(tx1);
+                            ny1 = (int)Math.Floor(ty1);
+
+                            int rx2 = (int)Math.Round(x2 + cropExpand, MidpointRounding.ToEven);
+                            int ry2 = (int)Math.Round(y2 + cropExpand, MidpointRounding.ToEven);
+                            nx2 = Math.Min(W, Math.Max(0, rx2));
+                            ny2 = Math.Min(H, Math.Max(0, ry2));
+                            nx2 = Math.Max(nx1 + minSize, nx2);
+                            ny2 = Math.Max(ny1 + minSize, ny2);
+                        }
+
+                        // 最终 clamp，保持 end-exclusive 语义：nx2/ny2 允许等于 W/H
+                        nx1 = Math.Max(0, Math.Min(W, nx1));
+                        ny1 = Math.Max(0, Math.Min(H, ny1));
+                        nx2 = Math.Max(nx1 + 1, Math.Min(W, nx2));
+                        ny2 = Math.Max(ny1 + 1, Math.Min(H, ny2));
+
+                        int rw = nx2 - nx1;
+                        int rh = ny2 - ny1;
                         if (rw <= 0 || rh <= 0) continue;
-                        var rect = new OpenCvSharp.Rect(x, y, rw, rh);
+
+                        var rect = new OpenCvSharp.Rect(nx1, ny1, rw, rh);
                         cropped = new Mat(tup.Item2, rect).Clone();
                         cw = rect.Width;
                         ch = rect.Height;
-                        // 平移到左上角
-                        childA2x3 = new double[] { 1, 0, -x, 0, 1, -y };
+                        // 平移到左上角（与 Python 的 translation_mat 一致）
+                        childA2x3 = new double[] { 1, 0, -nx1, 0, 1, -ny1 };
                     }
 
                     if (cropped == null) continue;
