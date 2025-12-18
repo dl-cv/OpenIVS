@@ -7,11 +7,13 @@ namespace DlcvModules
 {
 	/// <summary>
 	/// features/sliding_window：按给定窗口与步长对输入图像生成子图。
-	/// 仅提供最小可编译与接口一致实现，后续可替换为高性能版本。
+	/// 逻辑已对齐 Python 版 (backend.multi_tasks.NewModules.sliding_window.py)：
+	/// - 采用回退策略（Backtracking）：当窗口超出边界时，起始坐标回退，保证切出的图大小为 window_size（除非原图更小）。
+	/// - 包含完整的 grid_x, grid_y 等元数据。
 	/// properties:
-	/// - window_size([w,h], required, example [320,600])
-	/// - overlap([ow,oh], required, example [32,32])
-	/// - min_size(int, optional, default 1)  // 约束窗口/裁剪最小尺寸
+	/// - window_size([w,h], required, default [640, 640])
+	/// - overlap([ow,oh], required, default [0, 0])
+	/// - min_size(int, optional, default 1)
 	/// </summary>
 	public class SlidingWindow : BaseModule
 	{
@@ -30,17 +32,16 @@ namespace DlcvModules
 			var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
 
-			var win = ReadInt2("window_size", 832, 704);
-			var ov = ReadInt2("overlap", 16, 16);
+			// 默认值尽量对齐 Python，但也保留一定的兼容性（如果需要严格一致，应在 JSON 配置中指定）
+			// Python defaults: window=[640,640], overlap=[0,0]
+			var win = ReadInt2("window_size", 640, 640);
+			var ov = ReadInt2("overlap", 0, 0);
 			int minSize = ReadInt("min_size", 1);
 
 			int winW = Math.Max(minSize, win.Item1);
 			int winH = Math.Max(minSize, win.Item2);
-			int hov = Math.Max(0, ov.Item1);
-			int vov = Math.Max(0, ov.Item2);
-			// overlap 不能 >= window，否则步长会变成 0（这里统一裁到 window-1）
-			if (winW > 0) hov = Math.Min(hov, winW - 1);
-			if (winH > 0) vov = Math.Min(vov, winH - 1);
+			int ovX = Math.Max(0, ov.Item1);
+			int ovY = Math.Max(0, ov.Item2);
 
             var outImages = new List<ModuleImage>();
             var outResults = new JArray();
@@ -53,23 +54,73 @@ namespace DlcvModules
                 var mat = tuple.Item2;
                 if (mat == null || mat.Empty()) continue;
 
-				int stepX = Math.Max(1, winW - hov);
-				int stepY = Math.Max(1, winH - vov);
+                int H = mat.Height;
+                int W = mat.Width;
 
-                for (int y = 0; y < mat.Height; y += stepY)
+                // 限制窗口不超过原图
+                int smallW = Math.Min(winW, W);
+                int smallH = Math.Min(winH, H);
+
+                // 计算行列数 (逻辑对齐 Python)
+                int rowNum, colNum;
+
+                if (smallH >= H)
+                {
+                    rowNum = 1;
+                }
+                else
+                {
+                    int effH = Math.Max(1, smallH - ovY);
+                    rowNum = H / effH;
+                    if (H % effH > 0) rowNum++;
+                }
+
+                if (smallW >= W)
+                {
+                    colNum = 1;
+                }
+                else
+                {
+                    int effW = Math.Max(1, smallW - ovX);
+                    colNum = W / effW;
+                    if (W % effW > 0) colNum++;
+                }
+
+                // 遍历格点
+                for (int r = 0; r < rowNum; r++)
 				{
-                    for (int x = 0; x < mat.Width; x += stepX)
+                    for (int c = 0; c < colNum; c++)
 					{
-                        int w = Math.Min(winW, Math.Max(1, mat.Width - x));
-                        int h = Math.Min(winH, Math.Max(1, mat.Height - y));
-						if (w < minSize || h < minSize) continue;
-                        var rect = new Rect(x, y, w, h);
+                        int startX = c * (smallW - ovX);
+                        int startY = r * (smallH - ovY);
+
+                        // 右/下边界回退 (Backtracking)
+                        if (startX + smallW > W) startX = W - smallW;
+                        if (startY + smallH > H) startY = H - smallH;
+
+                        // 边界保护
+                        if (startX < 0) startX = 0;
+                        if (startY < 0) startY = 0;
+
+                        int endX = startX + smallW;
+                        int endY = startY + smallH;
+
+                        if ((endX - startX) < minSize || (endY - startY) < minSize) continue;
+
+                        var rect = new Rect(startX, startY, endX - startX, endY - startY);
                         var cropped = new Mat(mat, rect).Clone();
 
-                        var parentState = wrap != null ? wrap.TransformState : new TransformationState(mat.Width, mat.Height);
-						var childA2x3 = new double[] { 1, 0, -x, 0, 1, -y };
-						var childState = parentState.DeriveChild(childA2x3, w, h);
-                        var childWrap = new ModuleImage(cropped, wrap != null ? wrap.OriginalImage : mat, childState, wrap != null ? wrap.OriginalIndex : i);
+                        var parentState = wrap != null ? wrap.TransformState : new TransformationState(W, H);
+						// 2x3 matrix: [1, 0, -dx, 0, 1, -dy]
+						var childA2x3 = new double[] { 1, 0, -startX, 0, 1, -startY };
+						var childState = parentState.DeriveChild(childA2x3, endX - startX, endY - startY);
+						
+                        var childWrap = new ModuleImage(
+                            cropped, 
+                            wrap != null ? wrap.OriginalImage : mat, 
+                            childState, 
+                            wrap != null ? wrap.OriginalIndex : i
+                        );
 						outImages.Add(childWrap);
 
                         var entry = new JObject
@@ -81,8 +132,15 @@ namespace DlcvModules
                             ["sample_results"] = new JArray(),
                             ["sliding_meta"] = new JObject
                             {
-                                ["x"] = x, ["y"] = y, ["w"] = w, ["h"] = h,
-                                ["win_w"] = winW, ["win_h"] = winH, ["step_x"] = stepX, ["step_y"] = stepY
+                                ["grid_x"] = c,
+                                ["grid_y"] = r,
+                                ["grid_size"] = new JArray { colNum, rowNum },
+                                ["win_size"] = new JArray { endX - startX, endY - startY },
+                                ["slice_index"] = new JArray { r, c },
+                                ["x"] = startX, 
+                                ["y"] = startY, 
+                                ["w"] = endX - startX, 
+                                ["h"] = endY - startY
                             }
                         };
                         outResults.Add(entry);
@@ -149,7 +207,3 @@ namespace DlcvModules
 		}
 	}
 }
-
-
-
-
