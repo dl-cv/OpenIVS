@@ -14,6 +14,8 @@ namespace DlcvModules
 	{
 		static SlidingMergeResults()
 		{
+			// Python: @register_module("pre_process/sliding_merge", alias=["features/sliding_merge"])
+			ModuleRegistry.Register("pre_process/sliding_merge", typeof(SlidingMergeResults));
 			ModuleRegistry.Register("features/sliding_merge", typeof(SlidingMergeResults));
 		}
 

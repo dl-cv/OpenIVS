@@ -19,6 +19,8 @@ namespace DlcvModules
 	{
 		static SlidingWindow()
 		{
+			// Python: @register_module("pre_process/sliding_window", alias=["features/sliding_window"])
+			ModuleRegistry.Register("pre_process/sliding_window", typeof(SlidingWindow));
 			ModuleRegistry.Register("features/sliding_window", typeof(SlidingWindow));
 		}
 
