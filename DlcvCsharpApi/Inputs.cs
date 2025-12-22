@@ -341,7 +341,10 @@ namespace DlcvModules
             outImages.Add(usedWrap);
 
             int categoryId = 0; string categoryName = "测试对象"; double score = 0.95;
-            double x1 = 100.0, y1 = 100.0, x2 = 300.0, y2 = 300.0; double angle = 0.0;
+            // 兼容属性输入为 XYXY（bbox_x1~bbox_y2）或 XYWH（bbox_x/bbox_y/bbox_w/bbox_h）
+            double x1 = 100.0, y1 = 100.0, x2 = 300.0, y2 = 300.0;
+            double bx = double.NaN, by = double.NaN, bwProp = double.NaN, bhProp = double.NaN;
+            double angle = 0.0;
             try { if (Properties != null && Properties.TryGetValue("category_id", out object v) && v != null) categoryId = Convert.ToInt32(v); } catch { }
             try { if (Properties != null && Properties.TryGetValue("category_name", out object v) && v != null) categoryName = v.ToString(); } catch { }
             try { if (Properties != null && Properties.TryGetValue("score", out object v) && v != null) score = Convert.ToDouble(v); } catch { }
@@ -349,21 +352,34 @@ namespace DlcvModules
             try { if (Properties != null && Properties.TryGetValue("bbox_y1", out object v) && v != null) y1 = Convert.ToDouble(v); } catch { }
             try { if (Properties != null && Properties.TryGetValue("bbox_x2", out object v) && v != null) x2 = Convert.ToDouble(v); } catch { }
             try { if (Properties != null && Properties.TryGetValue("bbox_y2", out object v) && v != null) y2 = Convert.ToDouble(v); } catch { }
+            try { if (Properties != null && Properties.TryGetValue("bbox_x", out object v) && v != null) bx = Convert.ToDouble(v); } catch { }
+            try { if (Properties != null && Properties.TryGetValue("bbox_y", out object v) && v != null) by = Convert.ToDouble(v); } catch { }
+            try { if (Properties != null && Properties.TryGetValue("bbox_w", out object v) && v != null) bwProp = Convert.ToDouble(v); } catch { }
+            try { if (Properties != null && Properties.TryGetValue("bbox_h", out object v) && v != null) bhProp = Convert.ToDouble(v); } catch { }
             try { if (Properties != null && Properties.TryGetValue("bbox_angle", out object v) && v != null) angle = Convert.ToDouble(v); } catch { }
 
-            // 智能缩放：若原坐标在 640 范围内，则按比例缩放到实际图像尺寸
-            if (x2 <= 640.0 && y2 <= 640.0 && w > 0 && h > 0)
+            // 与 Python 版本对齐：不做“按 640x640 缩放”的假设。
+            // 若用户提供了 bbox_x/bbox_y/bbox_w/bbox_h，则优先按 XYWH 解释；否则按 XYXY 解释。
+            if (!double.IsNaN(bx) && !double.IsNaN(by) && !double.IsNaN(bwProp) && !double.IsNaN(bhProp))
             {
-                double sx = w / 640.0;
-                double sy = h / 640.0;
-                x1 *= sx; y1 *= sy; x2 *= sx; y2 *= sy;
+                x1 = bx;
+                y1 = by;
+                x2 = bx + Math.Abs(bwProp);
+                y2 = by + Math.Abs(bhProp);
+            }
+            else
+            {
+                // 顺序修正（XYXY）
+                if (x2 < x1) { var t = x1; x1 = x2; x2 = t; }
+                if (y2 < y1) { var t = y1; y1 = y2; y2 = t; }
             }
 
             // 约束至图像范围并转为 (x, y, w, h)
             x1 = Math.Max(0.0, Math.Min(x1, w));
             y1 = Math.Max(0.0, Math.Min(y1, h));
-            x2 = Math.Max(x1, Math.Min(x2, w));
-            y2 = Math.Max(y1, Math.Min(y2, h));
+            x2 = Math.Max(0.0, Math.Min(x2, w));
+            y2 = Math.Max(0.0, Math.Min(y2, h));
+            // 保证至少 1 像素（下游通常要求 w>0,h>0）
             double bw = Math.Max(1.0, x2 - x1);
             double bh = Math.Max(1.0, y2 - y1);
 

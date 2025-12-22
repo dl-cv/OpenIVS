@@ -74,6 +74,7 @@
     <Compile Include="Base.cs" />
     <Compile Include="DvsModel.cs" />
     <Compile Include="Features.cs" />
+    <Compile Include="ResultFilterRegion.cs" />
     <Compile Include="FlowGraphModel.cs" />
     <Compile Include="Inputs.cs" />
     <Compile Include="MainProcess.cs" />

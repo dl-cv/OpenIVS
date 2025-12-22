@@ -1460,13 +1460,15 @@ namespace DlcvModules
                             }
                             else if (bboxArr.Count == 4)
                             {
-                                // 普通框：[x1, y1, x2, y2]
+                                // 普通框（统一按 C# 侧 XYWH）：[x, y, w, h]
                                 try
                                 {
                                     double x1 = bboxArr[0].Value<double>();
                                     double y1 = bboxArr[1].Value<double>();
-                                    double x2 = bboxArr[2].Value<double>();
-                                    double y2 = bboxArr[3].Value<double>();
+                                    double bw = bboxArr[2].Value<double>();
+                                    double bh = bboxArr[3].Value<double>();
+                                    double x2 = x1 + bw;
+                                    double y2 = y1 + bh;
                                     ptsCrop = new[]
                                     {
                                         new Point2f((float)x1, (float)y1),
@@ -1479,7 +1481,7 @@ namespace DlcvModules
                                 {
                                     if (GlobalDebug.PrintDebug)
                                     {
-                                        GlobalDebug.Log("[ImageRotateByClassification] 解析 xyxy bbox 失败: " + ex.Message);
+                                        GlobalDebug.Log("[ImageRotateByClassification] 解析 xywh bbox 失败: " + ex.Message);
                                     }
                                     ptsCrop = null;
                                 }
@@ -2350,13 +2352,15 @@ namespace DlcvModules
                             }
                             else if (bboxArr.Count == 4)
                             {
-                                // 轴对齐框 [x1, y1, x2, y2]
+                                // 轴对齐框（统一按 C# 侧 XYWH）[x, y, w, h]
                                 try
                                 {
                                     double x1 = bboxArr[0].Value<double>();
                                     double y1 = bboxArr[1].Value<double>();
-                                    double x2 = bboxArr[2].Value<double>();
-                                    double y2 = bboxArr[3].Value<double>();
+                                    double bw = bboxArr[2].Value<double>();
+                                    double bh = bboxArr[3].Value<double>();
+                                    double x2 = x1 + bw;
+                                    double y2 = y1 + bh;
                                     ptsCrop = new[]
                                     {
                                         new Point2f((float)x1, (float)y1),
