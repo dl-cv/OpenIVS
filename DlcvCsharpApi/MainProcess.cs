@@ -76,6 +76,9 @@ namespace DlcvModules
 					}
 				}
 				if (props == null) props = new Dictionary<string, object>();
+				
+				// 统一 bbox 属性：允许前端/旧配置用 XYXY 输入，C# 侧统一补齐为 XYWH（不删除原字段）
+				try { NormalizeBboxProperties(props); } catch { }
 
 				var moduleType = ModuleRegistry.Get(type);
 				if (moduleType == null) continue;
@@ -432,6 +435,40 @@ namespace DlcvModules
 				return "scalar";
 			// 其余类型均视作非标量通道
 			return "channel";
+		}
+
+		/// <summary>
+		/// 将常见的 bbox_xyxy 属性形式补齐为 bbox_xywh，便于模块侧统一按 XYWH 读取。
+		/// 当前仅处理：
+		/// - bbox_x1/bbox_y1/bbox_x2/bbox_y2  -> bbox_x/bbox_y/bbox_w/bbox_h
+		/// </summary>
+		private static void NormalizeBboxProperties(Dictionary<string, object> props)
+		{
+			if (props == null) return;
+
+			bool hasX1 = props.TryGetValue("bbox_x1", out object vx1) && vx1 != null;
+			bool hasY1 = props.TryGetValue("bbox_y1", out object vy1) && vy1 != null;
+			bool hasX2 = props.TryGetValue("bbox_x2", out object vx2) && vx2 != null;
+			bool hasY2 = props.TryGetValue("bbox_y2", out object vy2) && vy2 != null;
+			if (!(hasX1 && hasY1 && hasX2 && hasY2)) return;
+
+			double x1, y1, x2, y2;
+			try { x1 = Convert.ToDouble(vx1); } catch { return; }
+			try { y1 = Convert.ToDouble(vy1); } catch { return; }
+			try { x2 = Convert.ToDouble(vx2); } catch { return; }
+			try { y2 = Convert.ToDouble(vy2); } catch { return; }
+
+			// 顺序修正
+			double bx = Math.Min(x1, x2);
+			double by = Math.Min(y1, y2);
+			double bw = Math.Abs(x2 - x1);
+			double bh = Math.Abs(y2 - y1);
+
+			// 仅在未显式提供 bbox_w/bbox_h 时覆盖，避免用户明确给了 XYWH 还被改写
+			if (!props.ContainsKey("bbox_x")) props["bbox_x"] = bx;
+			if (!props.ContainsKey("bbox_y")) props["bbox_y"] = by;
+			if (!props.ContainsKey("bbox_w")) props["bbox_w"] = bw;
+			if (!props.ContainsKey("bbox_h")) props["bbox_h"] = bh;
 		}
 	}
 }
