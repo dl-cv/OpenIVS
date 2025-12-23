@@ -139,7 +139,10 @@ namespace DlcvModules
             var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
 
-            // 1. 建立 transform/index/origin_index -> dets 映射
+            // 1. 建立 index/origin_index/transform -> dets 映射
+            // 说明：
+            // - transform 在“整图单位变换”等场景下很容易相同，若优先按 transform 匹配会导致跨图串结果/重复结果。
+            // - 因此这里优先使用 index（其次 origin_index），transform 仅作为兜底兼容旧流程。
             var transToDets = new Dictionary<string, List<JObject>>();
             var indexToDets = new Dictionary<int, List<JObject>>();
             var originToDets = new Dictionary<int, List<JObject>>();
@@ -154,30 +157,33 @@ namespace DlcvModules
                 var detList = new List<JObject>();
                 foreach (var d in dets) if (d is JObject dojb) detList.Add(dojb);
 
-                var stDict = entry["transform"] as JObject;
-                var st = stDict != null ? TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()) : null;
-                string tSig = SerializeTransformKey(st);
+                // 先记录 index/origin_index（优先匹配）
+                int idx = entry["index"]?.Value<int?>() ?? -1;
+                if (idx >= 0)
+                {
+                    if (!indexToDets.ContainsKey(idx)) indexToDets[idx] = new List<JObject>();
+                    indexToDets[idx].AddRange(detList);
+                }
+                int oidx = entry["origin_index"]?.Value<int?>() ?? -1;
+                if (oidx >= 0)
+                {
+                    if (!originToDets.ContainsKey(oidx)) originToDets[oidx] = new List<JObject>();
+                    originToDets[oidx].AddRange(detList);
+                }
 
-                if (tSig != null)
+                // transform 作为兜底兼容（仍记录，但不作为首选）
+                try
                 {
-                    if (!transToDets.ContainsKey(tSig)) transToDets[tSig] = new List<JObject>();
-                    transToDets[tSig].AddRange(detList);
-                }
-                else
-                {
-                    int idx = entry["index"]?.Value<int?>() ?? -1;
-                    if (idx >= 0)
+                    var stDict = entry["transform"] as JObject;
+                    var st = stDict != null ? TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()) : null;
+                    string tSig = SerializeTransformKey(st);
+                    if (tSig != null)
                     {
-                        if (!indexToDets.ContainsKey(idx)) indexToDets[idx] = new List<JObject>();
-                        indexToDets[idx].AddRange(detList);
-                    }
-                    int oidx = entry["origin_index"]?.Value<int?>() ?? -1;
-                    if (oidx >= 0)
-                    {
-                        if (!originToDets.ContainsKey(oidx)) originToDets[oidx] = new List<JObject>();
-                        originToDets[oidx].AddRange(detList);
+                        if (!transToDets.ContainsKey(tSig)) transToDets[tSig] = new List<JObject>();
+                        transToDets[tSig].AddRange(detList);
                     }
                 }
+                catch { }
             }
 
             // 2. 遍历图像，还原坐标
@@ -195,9 +201,10 @@ namespace DlcvModules
                 string sig = SerializeTransformKey(wrap.TransformState);
                 List<JObject> dets = null;
 
-                if (sig != null && transToDets.ContainsKey(sig)) dets = transToDets[sig];
-                else if (indexToDets.ContainsKey(i)) dets = indexToDets[i];
+                // 优先按 index（与 imageList 顺序强绑定），其次 origin_index，最后 transform 兜底
+                if (indexToDets.ContainsKey(i)) dets = indexToDets[i];
                 else if (originToDets.ContainsKey(wrap.OriginalIndex)) dets = originToDets[wrap.OriginalIndex];
+                else if (sig != null && transToDets.ContainsKey(sig)) dets = transToDets[sig];
 
                 var outResults = new List<Dictionary<string, object>>();
                 if (dets != null)

@@ -525,9 +525,15 @@ namespace DlcvModules
 
     /// <summary>
     /// 模块名称：结果合并
-    /// 合并多路图像与结果：将主输入和 ExtraInputsIn 的对汇总；按 transform/index/origin_index 对齐结果
-    /// 可选去重：当 bbox+category_name 一致时去重
-    /// 输出：每张图一个 local 条目
+    /// 合并多路图像与结果（简化逻辑，避免重复/串结果）：
+    /// - 图像：按输入顺序拼接输出（主输入在前，其后按 ExtraInputsIn 顺序追加）
+    /// - 结果：按输入顺序拼接输出；对 local 条目做 index/origin_index 的 offset 修正，
+    ///         保证结果严格绑定到对应图像，且顺序与图像顺序一致
+    ///
+    /// 说明：
+    /// - 不再按 transform 聚合/重建“每图一个 local 条目”。transform 在“整图单位变换”等场景下极易相同，
+    ///   会导致跨图串结果/重复结果（典型现象：两个1、两个2）。
+    /// - 不做去重（保持逻辑简单、可预期）。
     /// </summary>
     public class MergeResults : BaseModule
     {
@@ -544,157 +550,94 @@ namespace DlcvModules
 
         public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
-            var allImages = new List<ModuleImage>();
-            var allResults = new JArray();
-
-            if (imageList != null) allImages.AddRange(imageList);
-            if (resultList != null) foreach (var r in resultList) allResults.Add(r);
+            // 组装输入组：主输入在前，ExtraInputsIn 顺序在后
+            var groups = new List<Tuple<List<ModuleImage>, JArray>>();
+            groups.Add(Tuple.Create(imageList ?? new List<ModuleImage>(), resultList ?? new JArray()));
             if (ExtraInputsIn != null)
             {
                 foreach (var ch in ExtraInputsIn)
                 {
                     if (ch == null) continue;
-                    if (ch.ImageList != null) allImages.AddRange(ch.ImageList);
-                    if (ch.ResultList != null) foreach (var r in ch.ResultList) allResults.Add(r);
+                    groups.Add(Tuple.Create(ch.ImageList ?? new List<ModuleImage>(), ch.ResultList ?? new JArray()));
                 }
             }
 
-            // 建立 image 键（仅依据 transform 矩阵；若无矩阵则使用 origin_index）
-            var keyToImage = new Dictionary<string, Tuple<ModuleImage, int>>();
-            for (int i = 0; i < allImages.Count; i++)
-            {
-                var (wrap, bmp) = ImageGeneration_Unwrap(allImages[i]);
-                if (bmp == null) continue;
-                int org = wrap != null ? wrap.OriginalIndex : i;
-                string key = SerializeTransformOnly(wrap != null ? wrap.TransformState : null, org);
-                keyToImage[key] = Tuple.Create(wrap, i);
-            }
-
-            // 将结果按 key 汇总（与上方相同关键字规则）
-            var keyToResults = new Dictionary<string, List<JObject>>();
-            foreach (var t in allResults)
-            {
-                var r = t as JObject;
-                if (r == null) continue;
-                int idx = r["index"]?.Value<int?>() ?? -1;
-                int originIndex = r["origin_index"]?.Value<int?>() ?? idx;
-                var stDict = r["transform"] as JObject;
-                TransformationState st = null;
-                try
-                {
-                    if (stDict != null)
-                    {
-                        // 兼容 JArray 字段的 FromDict 解析
-                        st = TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>());
-                    }
-                }
-                catch
-                {
-                    st = null;
-                }
-                string key = SerializeTransformOnly(st, originIndex);
-                if (!keyToResults.TryGetValue(key, out List<JObject> list))
-                {
-                    list = new List<JObject>();
-                    keyToResults[key] = list;
-                }
-                list.Add(r);
-            }
-
-            // 去重选项
-            bool dedup = Properties != null && Properties.TryGetValue("deduplicate", out object dv) && Convert.ToBoolean(dv);
-
-            var mergedImages = new List<ModuleImage>(allImages);
+            var mergedImages = new List<ModuleImage>();
             var mergedResults = new JArray();
 
-            int newIndex = 0;
-            foreach (var kv in keyToImage)
+            foreach (var g in groups)
             {
-                var wrap = kv.Value.Item1;
-                var st = wrap != null ? wrap.TransformState : null;
-                var samples = new List<JObject>();
+                var imgs = g.Item1 ?? new List<ModuleImage>();
+                var res = g.Item2 ?? new JArray();
 
-                if (keyToResults.TryGetValue(kv.Key, out List<JObject> rs))
+                // 1) 追加图像，并建立“本组 local 索引 -> 全局索引”的映射
+                //    注意：执行器可能传入空/含 null 的 imageList（但 resultList 仍有数据）。
+                //    若用简单 offset+idx，会把结果绑定到不存在/被跳过的图像索引上，从而在下游（ReturnJson）表现为“结果丢失”。
+                int baseIndex = mergedImages.Count;
+                var localToGlobal = new Dictionary<int, int>();
+                int added = 0;
+
+                for (int i = 0; i < imgs.Count; i++)
                 {
-                    foreach (var r in rs)
+                    var im = imgs[i];
+                    if (im == null) continue;
+
+                    int globalIdx = baseIndex + added;
+                    localToGlobal[i] = globalIdx;
+                    added++;
+
+                    // 关键：一定要重包，确保 OriginalIndex 与全局顺序一致（Base.cs 中 OriginalIndex 为 private set，无法原地修改）
+                    // 若这里退回透传，将导致多个图像的 OriginalIndex 仍为 0，进而在下游/前端按 origin_index 聚合时只保留一个。
+                    var newWrap = new ModuleImage(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
+                    mergedImages.Add(newWrap);
+                }
+
+                // 2) 追加结果：尽量把 local 结果绑定到本组输出的图像索引上（不依赖 transform）
+                foreach (var t in res)
+                {
+                    if (!(t is JObject r))
                     {
-                        var srs = r["sample_results"] as JArray;
-                        if (srs == null) continue;
-                        foreach (var o in srs) if (o is JObject oj) samples.Add(oj);
+                        // 非对象结构直接跳过（避免异常）
+                        continue;
                     }
-                }
 
-                if (dedup && samples.Count > 1)
-                {
-                    samples = Deduplicate(samples);
-                }
+                    if (!string.Equals(r["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase))
+                    {
+                        mergedResults.Add(r);
+                        continue;
+                    }
 
-                var outEntry = new JObject
-                {
-                    ["type"] = "local",
-                    ["index"] = newIndex,
-                    ["origin_index"] = wrap != null ? wrap.OriginalIndex : 0,
-                    ["transform"] = st != null ? JObject.FromObject(st.ToDict()) : null,
-                    ["sample_results"] = new JArray(samples)
-                };
-                mergedResults.Add(outEntry);
-                newIndex += 1;
+                    var r2 = (JObject)r.DeepClone();
+                    int idx = r2["index"]?.Value<int?>() ?? -1;
+                    int oidx = r2["origin_index"]?.Value<int?>() ?? idx;
+
+                    // 若本组只有 1 张图：强制把所有 local 结果都绑定到这张图（典型的 build_results 场景）
+                    if (added == 1)
+                    {
+                        r2["index"] = baseIndex;
+                        r2["origin_index"] = baseIndex;
+                    }
+                    else
+                    {
+                        // 否则按 idx/oidx 尝试映射到全局索引
+                        if (idx >= 0 && localToGlobal.TryGetValue(idx, out int gidx))
+                            r2["index"] = gidx;
+
+                        if (oidx >= 0 && localToGlobal.TryGetValue(oidx, out int goidx))
+                            r2["origin_index"] = goidx;
+
+                        // 兜底：若 origin_index 仍缺失，则用 index 补齐
+                        if ((r2["origin_index"] == null || r2["origin_index"].Type == JTokenType.Null) && r2["index"] != null)
+                        {
+                            try { r2["origin_index"] = r2["index"].Value<int>(); } catch { }
+                        }
+                    }
+
+                    mergedResults.Add(r2);
+                }
             }
 
             return new ModuleIO(mergedImages, mergedResults);
-        }
-
-        private static Tuple<ModuleImage, Mat> ImageGeneration_Unwrap(ModuleImage obj)
-        {
-            if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
-            return Tuple.Create(obj, obj.ImageObject);
-        }
-
-        private static List<JObject> Deduplicate(List<JObject> samples)
-        {
-            var set = new HashSet<string>(StringComparer.Ordinal);
-            var outList = new List<JObject>();
-            foreach (var s in samples)
-            {
-                string cat = s?["category_name"]?.ToString() ?? "";
-                var bboxToken = s?["bbox"];
-                string bstr = "";
-                if (bboxToken is JArray bl)
-                {
-                    var nums = bl.Select(x => SafeToDouble(((JValue)x).Value)).ToList();
-                    bstr = string.Join(",", nums.Select(v => v.ToString("F3")));
-                }
-                string key = cat + "|" + bstr;
-                if (set.Add(key)) outList.Add(s);
-            }
-            return outList;
-        }
-
-        private static double SafeToDouble(object x)
-        {
-            try { return Convert.ToDouble(x); } catch { return 0.0; }
-        }
-
-        private static int GetInt(Dictionary<string, object> d, string k, int dv)
-        {
-            if (d == null || k == null || !d.TryGetValue(k, out object v) || v == null) return dv;
-            try { return Convert.ToInt32(v); } catch { return dv; }
-        }
-
-        private static Dictionary<string, object> GetDict(Dictionary<string, object> d, string k)
-        {
-            if (d == null || k == null || !d.TryGetValue(k, out object v) || v == null) return null;
-            return v as Dictionary<string, object>;
-        }
-
-        private static string SerializeTransformOnly(TransformationState st, int originIndex)
-        {
-            if (st == null || st.AffineMatrix2x3 == null)
-            {
-                return $"org:{originIndex}|T:null";
-            }
-            var a = st.AffineMatrix2x3;
-            return $"T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
         }
     }
 
