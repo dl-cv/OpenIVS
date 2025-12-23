@@ -174,8 +174,6 @@ namespace DlcvModules
                         {
                             foreach (var item in byImg)
                             {
-                                int idx = Convert.ToInt32(item["origin_index"]);
-                                if (idx != i) continue;
                                 if (item.ContainsKey("results"))
                                 {
                                     var resultsObj = item["results"];
@@ -190,8 +188,10 @@ namespace DlcvModules
                             }
                         }
                     }
-                    merged.Add(resultList);
                 }
+                // 注意：一次流程执行（针对单张输入图 i）内部可能生成多张输出图（例如 merge_results）。
+                // 这里将 by_image 中所有结果合并返回给该输入图，避免按 origin_index==i 过滤导致丢结果。
+                merged.Add(resultList);
             }
 
             var root = new JObject();
