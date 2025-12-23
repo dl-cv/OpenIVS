@@ -48,13 +48,52 @@ namespace DlcvModules
 				string et = entry["type"]?.ToString();
 				if (!string.Equals(et, "local", StringComparison.OrdinalIgnoreCase)) continue;
 
-				// 尺寸来源：transform.output_size 作为局部坐标系尺寸
+				// 尺寸来源（与 Python 保持一致）：优先使用 transform.output_size 作为局部坐标系尺寸。
+				// 说明：
+				// - original_width/original_height 表示“原图尺寸”，在裁剪/缩放场景下可能很大；
+				//   若误用原图尺寸去构建整图 mask，会造成内存暴涨，进而在 try/catch 下静默丢失大量结果。
+				// - output_size 表示“当前图（局部坐标系）尺寸”，是笔画转点应使用的坐标系。
 				var stObj = entry["transform"] as JObject;
 				if (stObj == null) continue;
-				// output_size 结构为 { "original_width": 360, "original_height": 800 }
-				if (stObj == null) continue;
-				int W = ClampToInt(stObj["original_width"] != null ? stObj["original_width"].Value<double>() : 0);
-				int H = ClampToInt(stObj["original_height"] != null ? stObj["original_height"].Value<double>() : 0);
+				int W = 0;
+				int H = 0;
+				try
+				{
+					var os = stObj["output_size"] as JArray;
+					if (os != null && os.Count >= 2)
+					{
+						W = ClampToInt(os[0].Value<double>());
+						H = ClampToInt(os[1].Value<double>());
+					}
+				}
+				catch { W = 0; H = 0; }
+
+				// 回退 1：用对应输入图像尺寸（更接近“当前图”）
+				if (W <= 0 || H <= 0)
+				{
+					try
+					{
+						int idxImg = entry["index"]?.Value<int?>() ?? 0;
+						if (idxImg >= 0 && idxImg < images.Count && images[idxImg] != null && images[idxImg].ImageObject != null && !images[idxImg].ImageObject.Empty())
+						{
+							W = images[idxImg].ImageObject.Width;
+							H = images[idxImg].ImageObject.Height;
+						}
+						else if (images.Count > 0 && images[0] != null && images[0].ImageObject != null && !images[0].ImageObject.Empty())
+						{
+							W = images[0].ImageObject.Width;
+							H = images[0].ImageObject.Height;
+						}
+					}
+					catch { }
+				}
+
+				// 回退 2：最后才使用 original_width/original_height
+				if (W <= 0 || H <= 0)
+				{
+					W = ClampToInt(stObj["original_width"] != null ? stObj["original_width"].Value<double>() : 0);
+					H = ClampToInt(stObj["original_height"] != null ? stObj["original_height"].Value<double>() : 0);
+				}
 				if (W <= 0 || H <= 0) continue;
 
 				var maskByCat = new Dictionary<string, Mat>(StringComparer.OrdinalIgnoreCase);
