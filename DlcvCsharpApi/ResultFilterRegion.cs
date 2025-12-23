@@ -41,48 +41,21 @@ namespace DlcvModules
             int w = Math.Max(1, ReadInt("w", 100));
             int h = Math.Max(1, ReadInt("h", 100));
 
-            // 为每张图像准备 ROI（原图/当前图）缓存
-            var roiCache = new Dictionary<int, Tuple<int[], int[]>>(); // wrapId -> (roi_o, roi_c)
-            Tuple<int[], int[]> GetRois(ModuleImage wrap)
+            // ROI 规则（与 Python 最新一致）：
+            // - ROI 的数值永远取输入的 x/y/w/h，不做 original<->current 的几何变换
+            // - 仅根据本次选择的坐标系，对 ROI 做边界裁剪（clamp）
+            // key: (wrapId, useOriginal) -> roi_xyxy
+            var roiCache = new Dictionary<string, int[]>(StringComparer.Ordinal);
+            int[] GetRoi(ModuleImage wrap, bool useOriginal, int Wc, int Hc, int W0, int H0)
             {
-                int key = wrap != null ? RuntimeHelpers.GetHashCode(wrap) : 0;
+                int wrapId = wrap != null ? RuntimeHelpers.GetHashCode(wrap) : 0;
+                string key = $"{wrapId}:{(useOriginal ? 1 : 0)}:{Wc}:{Hc}:{W0}:{H0}";
                 if (roiCache.TryGetValue(key, out var cached)) return cached;
-
-                var baseImg = wrap != null ? wrap.GetImage() : null;
-                int Wc = baseImg != null && !baseImg.Empty() ? baseImg.Width : 1;
-                int Hc = baseImg != null && !baseImg.Empty() ? baseImg.Height : 1;
-
-                int W0 = 0, H0 = 0;
-                try
-                {
-                    if (wrap != null && wrap.TransformState != null)
-                    {
-                        W0 = wrap.TransformState.OriginalWidth;
-                        H0 = wrap.TransformState.OriginalHeight;
-                    }
-                }
-                catch { }
-                if (W0 <= 0 || H0 <= 0)
-                {
-                    try
-                    {
-                        var ori = wrap != null ? wrap.OriginalImage : null;
-                        if (ori != null && !ori.Empty())
-                        {
-                            W0 = ori.Width;
-                            H0 = ori.Height;
-                        }
-                    }
-                    catch { }
-                }
-                if (W0 <= 0) W0 = Wc;
-                if (H0 <= 0) H0 = Hc;
-
-                var roiO = ClampXYXY(x, y, x + w, y + h, W0, H0);
-                var roiC = ComputeRoiInCurrent(wrap != null ? wrap.TransformState : null, roiO, Wc, Hc);
-                var tup = Tuple.Create(roiO, roiC);
-                roiCache[key] = tup;
-                return tup;
+                int[] rr = useOriginal
+                    ? ClampXYXY(x, y, x + w, y + h, W0, H0)
+                    : ClampXYXY(x, y, x + w, y + h, Wc, Hc);
+                roiCache[key] = rr;
+                return rr;
             }
 
             // wrap 索引：transform(仅矩阵)+origin_index 优先，其次 origin_index
@@ -126,6 +99,138 @@ namespace DlcvModules
 
             bool hasAnyInside = false;
 
+            // -----------------------------
+            // 坐标系处理策略（全局一次判定）：
+            // 1) 若输入“待筛选结果”中存在原图坐标结果，则本次按原图坐标处理，并把所有输出 det bbox 统一转成原图坐标（entry.transform = null）
+            // 2) 若输入全部为局部坐标结果，则本次按局部/当前图坐标处理，不做转化
+            //
+            // 注意：C# 的 det["bbox"] 约定通常为 xywh（旋转框则 bbox=[cx,cy,w,h] + angle），
+            // 本模块内部统一转为 AABB xyxy 做计算；若需要回写为原图坐标，输出仍按 xywh（AABB）回写。
+            // -----------------------------
+            bool forceOriginal = false;
+            foreach (var token in results)
+            {
+                if (!(token is JObject entry) || !string.Equals(entry["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                // entry 级别：transform==null 通常表示结果已处于原图坐标
+                if (entry["transform"] == null || entry["transform"].Type == JTokenType.Null)
+                {
+                    forceOriginal = true;
+                    break;
+                }
+
+                var dets = entry["sample_results"] as JArray;
+                if (dets == null || dets.Count == 0) continue;
+
+                var wrap = PickWrapForEntry(entry);
+                if (wrap == null) continue;
+
+                var baseImg = wrap.GetImage();
+                int Wc = baseImg != null && !baseImg.Empty() ? baseImg.Width : 1;
+                int Hc = baseImg != null && !baseImg.Empty() ? baseImg.Height : 1;
+                int W0 = wrap.TransformState != null ? wrap.TransformState.OriginalWidth : Wc;
+                int H0 = wrap.TransformState != null ? wrap.TransformState.OriginalHeight : Hc;
+                if (W0 <= 0) W0 = Wc;
+                if (H0 <= 0) H0 = Hc;
+
+                foreach (var dTok in dets)
+                {
+                    if (!(dTok is JObject d)) continue;
+                    if (!TryExtractBboxAabbCurrent(d, out double bx1, out double by1, out double bx2, out double by2)) continue;
+
+                    var bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
+
+                    // metadata.global_bbox 作为“原图坐标存在”的强证据（与 bboxCur 明显不同/或超出当前图范围）
+                    int[] bboxMetaOri = null;
+                    try
+                    {
+                        var meta = d["metadata"] as JObject;
+                        var gb = meta != null ? (meta["global_bbox"] as JArray) : null;
+                        if (gb != null && (gb.Count == 4 || gb.Count == 5))
+                        {
+                            bboxMetaOri = ParseGlobalBboxToAabb(gb);
+                            if (bboxMetaOri != null)
+                            {
+                                bboxMetaOri = ClampXYXY(bboxMetaOri[0], bboxMetaOri[1], bboxMetaOri[2], bboxMetaOri[3], W0, H0);
+                            }
+                        }
+                    }
+                    catch { bboxMetaOri = null; }
+
+                    if (bboxMetaOri != null)
+                    {
+                        try
+                        {
+                            // 1) bbox 明显不同
+                            if (Math.Abs(bboxMetaOri[0] - bboxCur[0]) > 1 || Math.Abs(bboxMetaOri[1] - bboxCur[1]) > 1 ||
+                                Math.Abs(bboxMetaOri[2] - bboxCur[2]) > 1 || Math.Abs(bboxMetaOri[3] - bboxCur[3]) > 1)
+                            {
+                                forceOriginal = true;
+                                break;
+                            }
+                            // 2) meta bbox 明显超出当前图尺寸
+                            if (bboxMetaOri[2] > Wc + 1 || bboxMetaOri[3] > Hc + 1)
+                            {
+                                forceOriginal = true;
+                                break;
+                            }
+                        }
+                        catch
+                        {
+                            forceOriginal = true;
+                            break;
+                        }
+                    }
+
+                    // bbox 数值范围超出当前图：也认为存在原图坐标结果
+                    try
+                    {
+                        if (bx2 > Wc + 1 || by2 > Hc + 1)
+                        {
+                            forceOriginal = true;
+                            break;
+                        }
+                    }
+                    catch { }
+                }
+
+                if (forceOriginal) break;
+            }
+
+            JObject ConvertDetToOriginal(JObject det, int[] bboxOriXYXY)
+            {
+                if (det == null || bboxOriXYXY == null || bboxOriXYXY.Length < 4) return det;
+                var d2 = det.DeepClone() as JObject;
+                if (d2 == null) return det;
+
+                int ox1 = bboxOriXYXY[0];
+                int oy1 = bboxOriXYXY[1];
+                int ox2 = bboxOriXYXY[2];
+                int oy2 = bboxOriXYXY[3];
+                int ow = Math.Max(1, ox2 - ox1);
+                int oh = Math.Max(1, oy2 - oy1);
+
+                // C# bbox 约定：默认 xywh（轴对齐）；旋转框也允许但这里输出 AABB xywh，与 Python 一致（过滤模块允许损失旋转语义）
+                d2["bbox"] = new JArray { ox1, oy1, ow, oh };
+
+                // 同步 metadata.global_bbox（也按 xywh 存储，便于后续模块识别）
+                try
+                {
+                    var meta = d2["metadata"] as JObject;
+                    if (meta == null)
+                    {
+                        meta = new JObject();
+                        d2["metadata"] = meta;
+                    }
+                    meta["global_bbox"] = new JArray { ox1, oy1, ow, oh };
+                }
+                catch { }
+                return d2;
+            }
+
             foreach (var token in results)
             {
                 var entry = token as JObject;
@@ -166,9 +271,10 @@ namespace DlcvModules
                 if (W0 <= 0) W0 = Wc;
                 if (H0 <= 0) H0 = Hc;
 
-                var rois = GetRois(wrap);
-                var roiO = rois.Item1;
-                var roiC = rois.Item2;
+                bool useOriginal = forceOriginal;
+                var roiUse = GetRoi(wrap, useOriginal, Wc, Hc, W0, H0);
+                int spaceW = useOriginal ? W0 : Wc;
+                int spaceH = useOriginal ? H0 : Hc;
 
                 foreach (var dTok in dets)
                 {
@@ -187,57 +293,35 @@ namespace DlcvModules
                     }
 
                     var bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
-                    int[] bboxOri = null;
-                    try
-                    {
-                        bboxOri = MapAabbToOriginalAndClamp(wrap.TransformState, bboxCur, W0, H0);
-                    }
-                    catch { bboxOri = null; }
-
-                    // metadata.global_bbox（容错：可能为原图坐标）
-                    int[] bboxMetaOri = null;
-                    try
-                    {
-                        var meta = d["metadata"] as JObject;
-                        var gb = meta != null ? (meta["global_bbox"] as JArray) : null;
-                        if (gb != null && (gb.Count == 4 || gb.Count == 5))
-                        {
-                            bboxMetaOri = ParseGlobalBboxToAabb(gb);
-                            if (bboxMetaOri != null) bboxMetaOri = ClampXYXY(bboxMetaOri[0], bboxMetaOri[1], bboxMetaOri[2], bboxMetaOri[3], W0, H0);
-                        }
-                    }
-                    catch { bboxMetaOri = null; }
-
-                    // 选择空间（尽量与 Python 逻辑一致）
-                    bool useOriginal = false;
                     int[] bboxUse = bboxCur;
-                    try
+                    int[] bboxOri = null;
+                    if (useOriginal)
                     {
-                        // 若 metadata 的 bbox 明显超出当前图尺寸，优先认为它是原图坐标
-                        if (bboxMetaOri != null && (bboxMetaOri[2] > Wc + 1 || bboxMetaOri[3] > Hc + 1))
+                        // 原图模式：优先使用 metadata.global_bbox（若存在），否则从 bboxCur 反算到原图坐标
+                        int[] bboxMetaOri = null;
+                        try
                         {
-                            useOriginal = true;
-                            bboxUse = bboxMetaOri;
+                            var meta = d["metadata"] as JObject;
+                            var gb = meta != null ? (meta["global_bbox"] as JArray) : null;
+                            if (gb != null && (gb.Count == 4 || gb.Count == 5))
+                            {
+                                bboxMetaOri = ParseGlobalBboxToAabb(gb);
+                                if (bboxMetaOri != null) bboxMetaOri = ClampXYXY(bboxMetaOri[0], bboxMetaOri[1], bboxMetaOri[2], bboxMetaOri[3], W0, H0);
+                            }
+                        }
+                        catch { bboxMetaOri = null; }
+
+                        if (bboxMetaOri != null)
+                        {
+                            bboxOri = bboxMetaOri;
                         }
                         else
                         {
-                            // 若 bbox 数值范围明显超出当前图，且可得到原图 bbox，则认为是原图坐标
-                            if ((bx2 > Wc + 1 || by2 > Hc + 1) && bboxOri != null)
-                            {
-                                useOriginal = true;
-                                bboxUse = bboxOri;
-                            }
+                            try { bboxOri = MapAabbToOriginalAndClamp(wrap.TransformState, bboxCur, W0, H0); } catch { bboxOri = null; }
                         }
-                    }
-                    catch
-                    {
-                        useOriginal = false;
-                        bboxUse = bboxCur;
-                    }
 
-                    var roiUse = useOriginal ? roiO : roiC;
-                    int spaceW = useOriginal ? W0 : Wc;
-                    int spaceH = useOriginal ? H0 : Hc;
+                        bboxUse = bboxOri ?? bboxCur;
+                    }
 
                     // 判定：mask 优先，其次 bbox
                     bool isIn = false;
@@ -286,12 +370,12 @@ namespace DlcvModules
 
                     if (isIn)
                     {
-                        inArr.Add(d);
+                        inArr.Add(useOriginal ? ConvertDetToOriginal(d, bboxUse) : d);
                         hasAnyInside = true;
                     }
                     else
                     {
-                        outArr.Add(d);
+                        outArr.Add(useOriginal ? ConvertDetToOriginal(d, bboxUse) : d);
                     }
                 }
             }
@@ -311,7 +395,11 @@ namespace DlcvModules
                 if (insideByWrap.TryGetValue(wrapId, out var inArr) && inArr != null && inArr.Count > 0)
                 {
                     outImagesIn.Add(wrap);
-                    var st = wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null;
+                    JObject st = null;
+                    if (!forceOriginal)
+                    {
+                        st = wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null;
+                    }
                     outResultsIn.Add(new JObject
                     {
                         ["type"] = "local",
@@ -325,7 +413,11 @@ namespace DlcvModules
                 if (outsideByWrap.TryGetValue(wrapId, out var outArr) && outArr != null && outArr.Count > 0)
                 {
                     outImagesOut.Add(wrap);
-                    var st = wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null;
+                    JObject st = null;
+                    if (!forceOriginal)
+                    {
+                        st = wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null;
+                    }
                     outResultsOut.Add(new JObject
                     {
                         ["type"] = "local",
@@ -406,55 +498,6 @@ namespace DlcvModules
             int iw = Math.Min(a[2], b[2]) - Math.Max(a[0], b[0]);
             int ih = Math.Min(a[3], b[3]) - Math.Max(a[1], b[1]);
             return iw > 0 && ih > 0;
-        }
-
-        private static int[] ComputeRoiInCurrent(TransformationState st, int[] roiO, int Wc, int Hc)
-        {
-            if (roiO == null || roiO.Length < 4) return ClampXYXY(0, 0, 1, 1, Wc, Hc);
-            if (st == null || st.AffineMatrix2x3 == null || st.AffineMatrix2x3.Length != 6)
-            {
-                // 回退：视为同坐标
-                return ClampXYXY(roiO[0], roiO[1], roiO[2], roiO[3], Wc, Hc);
-            }
-
-            try
-            {
-                var a = st.AffineMatrix2x3;
-                double[] xs = new double[4];
-                double[] ys = new double[4];
-
-                var pts = new[]
-                {
-                    new Point2d(roiO[0], roiO[1]),
-                    new Point2d(roiO[2], roiO[1]),
-                    new Point2d(roiO[2], roiO[3]),
-                    new Point2d(roiO[0], roiO[3]),
-                };
-
-                for (int i = 0; i < 4; i++)
-                {
-                    double x = pts[i].X;
-                    double y = pts[i].Y;
-                    double nx = a[0] * x + a[1] * y + a[2];
-                    double ny = a[3] * x + a[4] * y + a[5];
-                    xs[i] = nx;
-                    ys[i] = ny;
-                }
-
-                double minX = xs[0], maxX = xs[0], minY = ys[0], maxY = ys[0];
-                for (int i = 1; i < 4; i++)
-                {
-                    if (xs[i] < minX) minX = xs[i];
-                    if (xs[i] > maxX) maxX = xs[i];
-                    if (ys[i] < minY) minY = ys[i];
-                    if (ys[i] > maxY) maxY = ys[i];
-                }
-                return ClampXYXY(minX, minY, maxX, maxY, Wc, Hc);
-            }
-            catch
-            {
-                return ClampXYXY(roiO[0], roiO[1], roiO[2], roiO[3], Wc, Hc);
-            }
         }
 
         private static bool TryExtractBboxAabbCurrent(JObject det, out double x1, out double y1, out double x2, out double y2)
