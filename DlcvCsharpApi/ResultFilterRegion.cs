@@ -7,7 +7,7 @@ using OpenCvSharp;
 namespace DlcvModules
 {
     /// <summary>
-    /// 模块名称：结果过滤（区域）
+    /// 模块名称：结果过滤（区域）- 本地
     /// 按指定矩形区域将结果与图像拆分为两路输出（区域内 / 区域外）。
     ///
     /// 规则（对齐 Python: post_process/result_filter_region）：
@@ -31,6 +31,21 @@ namespace DlcvModules
         }
 
         public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            return ProcessInternal(imageList, resultList, forceOriginalOverride: null, convertOutputToOriginalOverride: null);
+        }
+
+        /// <summary>
+        /// 核心逻辑（可复用）：支持“强制按原图坐标判定”(forceOriginalOverride) 与 “是否把输出转换为原图坐标”(convertOutputToOriginalOverride)。
+        /// - Local：override 均为 null -> 保持自动判定（与旧行为兼容）
+        /// - Global：forceOriginalOverride=true 且 convertOutputToOriginalOverride=false -> 仅用原图坐标判定，但不改输出结果坐标系/transform
+        /// </summary>
+        protected ModuleIO ProcessInternal(
+            List<ModuleImage> imageList,
+            JArray resultList,
+            bool? forceOriginalOverride,
+            bool? convertOutputToOriginalOverride
+        )
         {
             var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
@@ -58,50 +73,63 @@ namespace DlcvModules
                 return rr;
             }
 
-            // wrap 索引：transform(仅矩阵)+origin_index 优先，其次 origin_index
-            var keyToWrap = new Dictionary<string, ModuleImage>(StringComparer.OrdinalIgnoreCase);
+            // wrap 索引：transform 签名优先（对齐 Python：仅看 transform 本身，不依赖 origin/index），其次 index，再其次 origin_index
+            var sigToWrap = new Dictionary<string, ModuleImage>(StringComparer.Ordinal);
             var originToWrap = new Dictionary<int, ModuleImage>();
+            var indexToWrap = new Dictionary<int, ModuleImage>();
+            var wrapIdToIndex = new Dictionary<int, int>();
             for (int i = 0; i < images.Count; i++)
             {
                 var wrap = images[i];
                 if (wrap == null) continue;
                 originToWrap[wrap.OriginalIndex] = wrap;
-                string k = SerializeTransformOnly(wrap.TransformState, wrap.OriginalIndex);
-                keyToWrap[k] = wrap;
+                indexToWrap[i] = wrap;
+                wrapIdToIndex[RuntimeHelpers.GetHashCode(wrap)] = i;
+                string sig = SerializeTransformSig(wrap.TransformState);
+                if (!string.IsNullOrEmpty(sig))
+                {
+                    sigToWrap[sig] = wrap;
+                }
             }
 
             ModuleImage PickWrapForEntry(JObject entry)
             {
                 if (entry == null) return null;
                 int originIndex = entry["origin_index"]?.Value<int?>() ?? -1;
+                int idx = entry["index"]?.Value<int?>() ?? -1;
                 try
                 {
                     var stObj = entry["transform"] as JObject;
                     if (stObj != null)
                     {
-                        var st = TransformationState.FromDict(stObj.ToObject<Dictionary<string, object>>());
-                        if (st != null && originIndex >= 0)
-                        {
-                            string k = SerializeTransformOnly(st, originIndex);
-                            if (keyToWrap.TryGetValue(k, out var w0)) return w0;
-                        }
+                        string sig = SerializeTransformSig(stObj);
+                        if (!string.IsNullOrEmpty(sig) && sigToWrap.TryGetValue(sig, out var w0)) return w0;
                     }
                 }
                 catch { }
+                // Python 对齐：transform > index > origin_index
+                if (idx >= 0 && indexToWrap.TryGetValue(idx, out var wIdx)) return wIdx;
                 if (originIndex >= 0 && originToWrap.TryGetValue(originIndex, out var w1)) return w1;
                 return null;
             }
 
-            // 聚合：每张图像的 inside/outside det 列表
-            var insideByWrap = new Dictionary<int, JArray>();
-            var outsideByWrap = new Dictionary<int, JArray>();
+            // Python 对齐：不聚合为“每图一个 entry”，而是保留 entry 结构，仅拆分 sample_results。
+            // 同时记录 entry 绑定的输入图像下标 oldIdx，便于分支输出时重排 index，避免二路错位。
+            var insideEntries = new List<Tuple<JObject, int>>();
+            var outsideEntries = new List<Tuple<JObject, int>>();
             var others = new List<JToken>(); // 非 local / 无法定位的条目：透传到两路，避免丢失
+            // 记录每张图输入侧的 transform 形态（用于在不转换输出坐标系时，尽量保持 transform 与上游一致）
+            // wrapId -> null(表示输入为原图坐标) / JObject(表示输入为局部坐标 transform)
+            var inputTransformByWrapId = new Dictionary<int, JToken>();
+            var inFlags = new bool[Math.Max(0, images.Count)];
+            var outFlags = new bool[Math.Max(0, images.Count)];
 
             bool hasAnyInside = false;
 
             // -----------------------------
             // 坐标系处理策略（全局一次判定）：
-            // 1) 若输入“待筛选结果”中存在原图坐标结果，则本次按原图坐标处理，并把所有输出 det bbox 统一转成原图坐标（entry.transform = null）
+            // 1) 若输入“待筛选结果”中存在原图坐标结果，则本次按原图坐标处理；
+            //    注意：是否将输出也转换为原图坐标，由 convertOutputToOriginal 决定（默认与 forceOriginal 一致）。
             // 2) 若输入全部为局部坐标结果，则本次按局部/当前图坐标处理，不做转化
             //
             // 注意：C# 的 det["bbox"] 约定通常为 xywh（旋转框则 bbox=[cx,cy,w,h] + angle），
@@ -200,6 +228,15 @@ namespace DlcvModules
                 if (forceOriginal) break;
             }
 
+            // override：与 Python 侧一致，只有在 override 显式给定时才覆盖自动判定
+            if (forceOriginalOverride.HasValue)
+            {
+                forceOriginal = forceOriginalOverride.Value;
+            }
+            bool convertOutputToOriginal = convertOutputToOriginalOverride.HasValue
+                ? convertOutputToOriginalOverride.Value
+                : forceOriginal;
+
             JObject ConvertDetToOriginal(JObject det, int[] bboxOriXYXY)
             {
                 if (det == null || bboxOriXYXY == null || bboxOriXYXY.Length < 4) return det;
@@ -216,7 +253,7 @@ namespace DlcvModules
                 // C# bbox 约定：默认 xywh（轴对齐）；旋转框也允许但这里输出 AABB xywh，与 Python 一致（过滤模块允许损失旋转语义）
                 d2["bbox"] = new JArray { ox1, oy1, ow, oh };
 
-                // 同步 metadata.global_bbox（也按 xywh 存储，便于后续模块识别）
+                // 同步 metadata.global_bbox（对齐 Python：优先写 xyxy；同时兼容 xywh 解析）
                 try
                 {
                     var meta = d2["metadata"] as JObject;
@@ -225,7 +262,7 @@ namespace DlcvModules
                         meta = new JObject();
                         d2["metadata"] = meta;
                     }
-                    meta["global_bbox"] = new JArray { ox1, oy1, ow, oh };
+                    meta["global_bbox"] = new JArray { ox1, oy1, ox2, oy2 };
                 }
                 catch { }
                 return d2;
@@ -260,8 +297,25 @@ namespace DlcvModules
                 }
 
                 int wrapId = RuntimeHelpers.GetHashCode(wrap);
-                if (!insideByWrap.TryGetValue(wrapId, out var inArr)) { inArr = new JArray(); insideByWrap[wrapId] = inArr; }
-                if (!outsideByWrap.TryGetValue(wrapId, out var outArr)) { outArr = new JArray(); outsideByWrap[wrapId] = outArr; }
+                int oldIdx = -1;
+                if (!wrapIdToIndex.TryGetValue(wrapId, out oldIdx)) oldIdx = -1;
+                // 记录输入 transform（首次出现为准；若某 wrap 同时出现 null 与非 null，这本身就是数据不一致，优先保留 null）
+                if (!inputTransformByWrapId.TryGetValue(wrapId, out var existingTransform))
+                {
+                    var tTok = entry["transform"];
+                    inputTransformByWrapId[wrapId] = tTok != null ? tTok.DeepClone() : null;
+                }
+                else
+                {
+                    // 若已记录为 null，则不再覆盖；否则若当前 entry 为 null，则降级为 null（更保守，避免输出 transform 伪造）
+                    var tTok = entry["transform"];
+                    bool existingIsNull = existingTransform == null || existingTransform.Type == JTokenType.Null;
+                    bool currentIsNull = (tTok == null) || (tTok.Type == JTokenType.Null);
+                    if (!existingIsNull && currentIsNull)
+                    {
+                        inputTransformByWrapId[wrapId] = null;
+                    }
+                }
 
                 var baseImg = wrap.GetImage();
                 int Wc = baseImg != null && !baseImg.Empty() ? baseImg.Width : 1;
@@ -271,11 +325,14 @@ namespace DlcvModules
                 if (W0 <= 0) W0 = Wc;
                 if (H0 <= 0) H0 = Hc;
 
+                // useOriginal：仅用于“判定”使用的坐标系
                 bool useOriginal = forceOriginal;
                 var roiUse = GetRoi(wrap, useOriginal, Wc, Hc, W0, H0);
                 int spaceW = useOriginal ? W0 : Wc;
                 int spaceH = useOriginal ? H0 : Hc;
 
+                var inArr = new JArray();
+                var outArr = new JArray();
                 foreach (var dTok in dets)
                 {
                     if (!(dTok is JObject d))
@@ -370,63 +427,98 @@ namespace DlcvModules
 
                     if (isIn)
                     {
-                        inArr.Add(useOriginal ? ConvertDetToOriginal(d, bboxUse) : d);
+                        // 关键修复（对齐 Python 最新）：
+                        // - 判定可以按原图坐标（useOriginal=true）
+                        // - 但只有在 convertOutputToOriginal=true 时才允许改写输出 det/bbox/transform
+                        inArr.Add((convertOutputToOriginal && useOriginal) ? ConvertDetToOriginal(d, bboxUse) : d);
                         hasAnyInside = true;
                     }
                     else
                     {
-                        outArr.Add(useOriginal ? ConvertDetToOriginal(d, bboxUse) : d);
+                        outArr.Add((convertOutputToOriginal && useOriginal) ? ConvertDetToOriginal(d, bboxUse) : d);
+                    }
+                }
+
+                if (inArr.Count > 0)
+                {
+                    var e2 = entry.DeepClone() as JObject;
+                    if (e2 != null)
+                    {
+                        e2["sample_results"] = inArr;
+                        if (convertOutputToOriginal && useOriginal)
+                        {
+                            e2["transform"] = null;
+                            // 与 Python 一致：输出为原图坐标时，把 origin_index 绑定到该图（更稳定）
+                            e2["origin_index"] = wrap.OriginalIndex;
+                        }
+                        insideEntries.Add(Tuple.Create(e2, oldIdx));
+                        if (oldIdx >= 0 && oldIdx < inFlags.Length) inFlags[oldIdx] = true;
+                    }
+                }
+                if (outArr.Count > 0)
+                {
+                    var e3 = entry.DeepClone() as JObject;
+                    if (e3 != null)
+                    {
+                        e3["sample_results"] = outArr;
+                        if (convertOutputToOriginal && useOriginal)
+                        {
+                            e3["transform"] = null;
+                            e3["origin_index"] = wrap.OriginalIndex;
+                        }
+                        outsideEntries.Add(Tuple.Create(e3, oldIdx));
+                        if (oldIdx >= 0 && oldIdx < outFlags.Length) outFlags[oldIdx] = true;
                     }
                 }
             }
 
-            // 构建输出：保持 image_list 与 result_list 对齐（index 与 image 下标一致）
+            // 构建输出 image_list（子集）
             var outImagesIn = new List<ModuleImage>();
-            var outResultsIn = new JArray();
             var outImagesOut = new List<ModuleImage>();
-            var outResultsOut = new JArray();
-
             for (int i = 0; i < images.Count; i++)
             {
                 var wrap = images[i];
                 if (wrap == null) continue;
-                int wrapId = RuntimeHelpers.GetHashCode(wrap);
+                if (i >= 0 && i < inFlags.Length && inFlags[i]) outImagesIn.Add(wrap);
+                if (i >= 0 && i < outFlags.Length && outFlags[i]) outImagesOut.Add(wrap);
+            }
 
-                if (insideByWrap.TryGetValue(wrapId, out var inArr) && inArr != null && inArr.Count > 0)
-                {
-                    outImagesIn.Add(wrap);
-                    JObject st = null;
-                    if (!forceOriginal)
-                    {
-                        st = wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null;
-                    }
-                    outResultsIn.Add(new JObject
-                    {
-                        ["type"] = "local",
-                        ["index"] = outImagesIn.Count - 1,
-                        ["origin_index"] = wrap.OriginalIndex,
-                        ["transform"] = st,
-                        ["sample_results"] = inArr
-                    });
-                }
+            // 分支内重排 index（避免二路错位）
+            var inReindex = new Dictionary<int, int>();
+            var outReindex = new Dictionary<int, int>();
+            int ptr = 0;
+            for (int i = 0; i < inFlags.Length; i++) if (inFlags[i]) inReindex[i] = ptr++;
+            ptr = 0;
+            for (int i = 0; i < outFlags.Length; i++) if (outFlags[i]) outReindex[i] = ptr++;
 
-                if (outsideByWrap.TryGetValue(wrapId, out var outArr) && outArr != null && outArr.Count > 0)
+            var outResultsIn = new JArray();
+            foreach (var tup in insideEntries)
+            {
+                var e = tup.Item1;
+                int oldIdx = tup.Item2;
+                if (e == null) continue;
+                if (oldIdx >= 0 && inReindex.TryGetValue(oldIdx, out int newIdx))
                 {
-                    outImagesOut.Add(wrap);
-                    JObject st = null;
-                    if (!forceOriginal)
-                    {
-                        st = wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null;
-                    }
-                    outResultsOut.Add(new JObject
-                    {
-                        ["type"] = "local",
-                        ["index"] = outImagesOut.Count - 1,
-                        ["origin_index"] = wrap.OriginalIndex,
-                        ["transform"] = st,
-                        ["sample_results"] = outArr
-                    });
+                    e["index"] = newIdx;
                 }
+                else
+                {
+                    // 若无法定位 oldIdx，则尽量保持原 index（不强行改）
+                }
+                outResultsIn.Add(e);
+            }
+
+            var outResultsOut = new JArray();
+            foreach (var tup in outsideEntries)
+            {
+                var e = tup.Item1;
+                int oldIdx = tup.Item2;
+                if (e == null) continue;
+                if (oldIdx >= 0 && outReindex.TryGetValue(oldIdx, out int newIdx))
+                {
+                    e["index"] = newIdx;
+                }
+                outResultsOut.Add(e);
             }
 
             // 透传非 local 条目到两路（避免丢失）
@@ -465,14 +557,95 @@ namespace DlcvModules
             return dv;
         }
 
-        private static string SerializeTransformOnly(TransformationState st, int originIndex)
+        // 对齐 Python: _serialize_transform(transform_dict) 的“稳定签名”
+        // - 不依赖 index/origin_index，仅依赖 transform 本身
+        // - 只取关键字段（crop_box / output_size / original_size / affine）并做浮点 round(6)
+        private static string SerializeTransformSig(TransformationState st)
         {
             if (st == null || st.AffineMatrix2x3 == null || st.AffineMatrix2x3.Length < 6)
             {
-                return $"org:{originIndex}|T:null";
+                return null;
             }
-            var a = st.AffineMatrix2x3;
-            return $"org:{originIndex}|T:{a[0]:F6},{a[1]:F6},{a[2]:F3},{a[3]:F6},{a[4]:F6},{a[5]:F3}";
+            int cbx = 0, cby = 0, cbw = 0, cbh = 0;
+            if (st.CropBox != null && st.CropBox.Length >= 4)
+            {
+                cbx = st.CropBox[0]; cby = st.CropBox[1]; cbw = st.CropBox[2]; cbh = st.CropBox[3];
+            }
+            int ow = st.OriginalWidth;
+            int oh = st.OriginalHeight;
+            int outW = 0, outH = 0;
+            if (st.OutputSize != null && st.OutputSize.Length >= 2)
+            {
+                outW = st.OutputSize[0]; outH = st.OutputSize[1];
+            }
+            double[] a = st.AffineMatrix2x3;
+            return $"cb:{cbx},{cby},{cbw},{cbh}|os:{outW},{outH}|ori:{ow},{oh}|A:{Round6(a[0])},{Round6(a[1])},{Round6(a[2])},{Round6(a[3])},{Round6(a[4])},{Round6(a[5])}";
+        }
+
+        private static string SerializeTransformSig(JObject stObj)
+        {
+            if (stObj == null) return null;
+            try
+            {
+                int cbx = 0, cby = 0, cbw = 0, cbh = 0;
+                var cb = stObj["crop_box"] as JArray;
+                if (cb != null && cb.Count >= 4)
+                {
+                    cbx = cb[0].Value<int>(); cby = cb[1].Value<int>(); cbw = cb[2].Value<int>(); cbh = cb[3].Value<int>();
+                }
+
+                int outW = 0, outH = 0;
+                var os = stObj["output_size"] as JArray;
+                if (os != null && os.Count >= 2)
+                {
+                    outW = os[0].Value<int>(); outH = os[1].Value<int>();
+                }
+
+                int ow = 0, oh = 0;
+                // 兼容 original_size: [W,H] 与 original_width/original_height
+                var ori = stObj["original_size"] as JArray;
+                if (ori != null && ori.Count >= 2)
+                {
+                    ow = ori[0].Value<int>(); oh = ori[1].Value<int>();
+                }
+                else
+                {
+                    ow = stObj["original_width"]?.Value<int?>() ?? 0;
+                    oh = stObj["original_height"]?.Value<int?>() ?? 0;
+                }
+
+                // affine：兼容 affine_2x3(flat) 与 affine_matrix(2x3 rows)
+                double[] a = null;
+                var a23 = stObj["affine_2x3"] as JArray;
+                if (a23 != null && a23.Count >= 6)
+                {
+                    a = new double[6];
+                    for (int i = 0; i < 6; i++) a[i] = SafeToDouble(a23[i]);
+                }
+                else
+                {
+                    var amat = stObj["affine_matrix"] as JArray;
+                    if (amat != null && amat.Count >= 2 && amat[0] is JArray r0 && amat[1] is JArray r1 && r0.Count >= 3 && r1.Count >= 3)
+                    {
+                        a = new double[6];
+                        a[0] = SafeToDouble(r0[0]); a[1] = SafeToDouble(r0[1]); a[2] = SafeToDouble(r0[2]);
+                        a[3] = SafeToDouble(r1[0]); a[4] = SafeToDouble(r1[1]); a[5] = SafeToDouble(r1[2]);
+                    }
+                }
+
+                if (a == null || a.Length < 6) return null;
+                return $"cb:{cbx},{cby},{cbw},{cbh}|os:{outW},{outH}|ori:{ow},{oh}|A:{Round6(a[0])},{Round6(a[1])},{Round6(a[2])},{Round6(a[3])},{Round6(a[4])},{Round6(a[5])}";
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string Round6(double v)
+        {
+            try { return Math.Round(v, 6).ToString("0.######", System.Globalization.CultureInfo.InvariantCulture); }
+            catch { return "0"; }
         }
 
         private static int[] ClampXYXY(double x1, double y1, double x2, double y2, int W, int H)
@@ -568,6 +741,21 @@ namespace DlcvModules
             if (st == null || st.AffineMatrix2x3 == null || st.AffineMatrix2x3.Length != 6) return ClampXYXY(bboxCur[0], bboxCur[1], bboxCur[2], bboxCur[3], W0, H0);
 
             var inv = TransformationState.Inverse2x3(st.AffineMatrix2x3);
+
+            // 对齐 Python: 若存在 crop_box，则 current -> ROI 后需要加回 (x0,y0) 映射到原图坐标
+            int x0 = 0, y0 = 0;
+            bool hasCropOffset = false;
+            try
+            {
+                if (st.CropBox != null && st.CropBox.Length >= 4)
+                {
+                    x0 = st.CropBox[0];
+                    y0 = st.CropBox[1];
+                    // 仅当 crop_box 显著非零时启用（避免对“已融合 crop 的 affine”重复加偏移）
+                    hasCropOffset = (x0 != 0 || y0 != 0);
+                }
+            }
+            catch { hasCropOffset = false; x0 = 0; y0 = 0; }
             var pts = new[]
             {
                 new Point2d(bboxCur[0], bboxCur[1]),
@@ -582,6 +770,11 @@ namespace DlcvModules
                 double x = pts[i].X, y = pts[i].Y;
                 double ox = inv[0] * x + inv[1] * y + inv[2];
                 double oy = inv[3] * x + inv[4] * y + inv[5];
+                if (hasCropOffset)
+                {
+                    ox += x0;
+                    oy += y0;
+                }
                 if (ox < minX) minX = ox;
                 if (ox > maxX) maxX = ox;
                 if (oy < minY) minY = oy;
@@ -597,12 +790,21 @@ namespace DlcvModules
             {
                 if (gb.Count == 4)
                 {
-                    // 容错：当作 xywh（与 C# 常规 bbox 一致）
-                    double x = SafeToDouble(gb[0]);
-                    double y = SafeToDouble(gb[1]);
-                    double w = Math.Abs(SafeToDouble(gb[2]));
-                    double h = Math.Abs(SafeToDouble(gb[3]));
-                    return new[] { (int)Math.Floor(x), (int)Math.Floor(y), (int)Math.Ceiling(x + w), (int)Math.Ceiling(y + h) };
+                    // 双兼容：既支持 xyxy（Python 新版写法），也支持 xywh（C# 旧写法）
+                    double a0 = SafeToDouble(gb[0]);
+                    double a1 = SafeToDouble(gb[1]);
+                    double a2 = SafeToDouble(gb[2]);
+                    double a3 = SafeToDouble(gb[3]);
+
+                    // 若第三/四个值更像右下角（大于左上角），优先按 xyxy 解读
+                    if (a2 > a0 && a3 > a1)
+                    {
+                        return new[] { (int)Math.Floor(a0), (int)Math.Floor(a1), (int)Math.Ceiling(a2), (int)Math.Ceiling(a3) };
+                    }
+                    // 否则按 xywh 解读
+                    double w = Math.Abs(a2);
+                    double h = Math.Abs(a3);
+                    return new[] { (int)Math.Floor(a0), (int)Math.Floor(a1), (int)Math.Ceiling(a0 + w), (int)Math.Ceiling(a1 + h) };
                 }
                 if (gb.Count == 5)
                 {
@@ -776,6 +978,33 @@ namespace DlcvModules
                 }
             }
             return mat;
+        }
+
+        // 说明：MapAabbToOriginalAndClamp 已对 crop_box 做了偏移补偿（对齐 Python 的 crop_box+affine 语义）。
+    }
+
+    /// <summary>
+    /// 模块名称：结果过滤（区域-全局）
+    /// 对齐 Python: post_process/result_filter_region_global / features/result_filter_region_global
+    /// 语义：使用原图坐标做 ROI 相交判定，但不修改输出结果的坐标系/transform（避免图像与结果错配）。
+    /// </summary>
+    public class ResultFilterRegionGlobal : ResultFilterRegion
+    {
+        static ResultFilterRegionGlobal()
+        {
+            ModuleRegistry.Register("post_process/result_filter_region_global", typeof(ResultFilterRegionGlobal));
+            ModuleRegistry.Register("features/result_filter_region_global", typeof(ResultFilterRegionGlobal));
+        }
+
+        public ResultFilterRegionGlobal(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            // 强制按原图坐标判定，但不把输出结果“原图化”
+            return ProcessInternal(imageList, resultList, forceOriginalOverride: true, convertOutputToOriginalOverride: false);
         }
     }
 }
