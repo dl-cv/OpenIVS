@@ -1,3 +1,5 @@
+python "%~dp0sync_assembly_version.py"
+
 "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" DlcvDemo\DlcvDemo.csproj /p:Configuration=Release /p:Platform=x64
 
 rm -rf dlcvpro_infer_csharp
