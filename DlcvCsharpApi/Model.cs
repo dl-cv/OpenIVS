@@ -1079,7 +1079,7 @@ namespace dlcv_infer_csharp
                     bool withAngle = false;
                     float angle = -100;
 
-                    // 优先从 JSON 字段读取
+                    // JSON 字段读取
                     if (result.ContainsKey("with_angle") && (result["with_angle"]?.Value<bool>() ?? false))
                     {
                         withAngle = true;
