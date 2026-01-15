@@ -1077,11 +1077,23 @@ namespace dlcv_infer_csharp
                     }
 
                     bool withAngle = false;
-                    withAngle = result.ContainsKey("with_angle") && (result["with_angle"]?.Value<bool>() ?? false);
                     float angle = -100;
-                    if (withAngle && result.ContainsKey("angle"))
+
+                    // 优先从 JSON 字段读取
+                    if (result.ContainsKey("with_angle") && (result["with_angle"]?.Value<bool>() ?? false))
                     {
-                        angle = result["angle"]?.Value<float>() ?? -100f;
+                        withAngle = true;
+                        if (result.ContainsKey("angle"))
+                        {
+                            angle = result["angle"]?.Value<float>() ?? -100f;
+                        }
+                    }
+
+                    // DVP
+                    if (!withAngle && bbox != null && bbox.Count == 5)
+                    {
+                        withAngle = true;
+                        angle = (float)bbox[4];
                     }
 
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
