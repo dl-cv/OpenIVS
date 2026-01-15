@@ -315,7 +315,8 @@ namespace DLCV
                         _statusText = "NG";
 
                     // 处理旋转框检测
-                    if (objResult.WithAngle)
+                    bool isRotated = objResult.WithAngle || (bbox != null && bbox.Count >= 5);
+                    if (isRotated)
                     {
                         // 旋转框检测：[cx, cy, w, h]
                         float cx = (float)bbox[0];
@@ -324,6 +325,12 @@ namespace DLCV
                         float h = (float)bbox[3];
                         float angle = objResult.Angle;
 
+                        // DVP [cx, cy, w, h, angle]  DVT [cx, cy, w, h]
+                        if(angle == -100f && bbox.Count >= 5)
+                        {
+                            angle = (float)bbox[4];
+                        }
+
                         // 计算旋转框的四个角点
                         PointF[] points = new PointF[4];
                         float cos = (float)Math.Cos(angle);
@@ -331,11 +338,11 @@ namespace DLCV
 
                         // 计算相对于中心点的偏移
                         float[] offsets = new float[] {
-                        -w/2, -h/2,  // 左上
-                        w/2, -h/2,   // 右上
-                        w/2, h/2,    // 右下
-                        -w/2, h/2    // 左下
-                    };
+                            -w/2, -h/2,  // 左上
+                            w/2, -h/2,   // 右上
+                            w/2, h/2,    // 右下
+                            -w/2, h/2    // 左下
+                        };
 
                         // 计算旋转后的四个角点
                         for (int i = 0; i < 4; i++)
