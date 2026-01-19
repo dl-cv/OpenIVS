@@ -1,0 +1,333 @@
+﻿<UserControl x:Class="DlcvTest.StandardSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:DlcvTest"
+             xmlns:controls="clr-namespace:DlcvTest.Controls"
+             mc:Ignorable="d" 
+             d:DesignHeight="800" d:DesignWidth="1000" Background="White">
+    
+    <!-- 添加 ScrollViewer 以支持滚动 -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="30,20">
+            <StackPanel Grid.IsSharedSizeScope="True">
+                <TextBlock Text="标准化配置" FontSize="16" Foreground="#333" Margin="0,0,0,20"/>
+
+                <!-- ==================== 新增部分：顶部通用设置 ==================== -->
+                
+                <!-- 1. 线程数 -->
+                <Grid Margin="0,0,0,15">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                        <TextBlock Text="线程数" VerticalAlignment="Center" FontSize="15" Foreground="#555"/>
+                        <Border Margin="5,0,0,0" Width="16" Height="16" CornerRadius="8" BorderBrush="#999" BorderThickness="1" VerticalAlignment="Center" ToolTip="设置处理线程的数量">
+                            <TextBlock Text="?" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="#999"/>
+                        </Border>
+                    </StackPanel>
+                    <Border Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="30" Width="120" Background="White">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
+                            <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
+                            <TextBox Text="2" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
+                            <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
+                            <Button Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- 2. 按类别保存 -->
+                <Grid Margin="0,0,0,15">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                        <TextBlock Text="按类别保存" VerticalAlignment="Center" FontSize="15" Foreground="#555"/>
+                        <Border Margin="5,0,0,0" Width="16" Height="16" CornerRadius="8" BorderBrush="#999" BorderThickness="1" VerticalAlignment="Center" ToolTip="将结果按类别分别保存到不同文件夹">
+                            <TextBlock Text="?" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="#999"/>
+                        </Border>
+                    </StackPanel>
+                    <controls:AnimatedCheckBox Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                </Grid>
+
+                <!-- 3. 预测完成后打开文件夹 -->
+                <Grid Margin="0,0,0,15">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="预测完成后打开文件夹" VerticalAlignment="Center" FontSize="15" Foreground="#555" HorizontalAlignment="Left" TextAlignment="Left"/>
+                    <controls:AnimatedCheckBox Grid.Column="1" x:Name="chkOpenOutputFolderAfterBatch" IsChecked="True"
+                                              HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"
+                                              Checked="ChkOpenOutputFolderAfterBatch_Checked"
+                                              Unchecked="ChkOpenOutputFolderAfterBatch_Unchecked"/>
+                </Grid>
+
+                <!-- 4. 输出目录 -->
+                <Grid Margin="0,0,0,20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="输出目录" VerticalAlignment="Center" FontSize="15" Foreground="#555" HorizontalAlignment="Left" TextAlignment="Left"/>
+                    <Grid Grid.Column="1" Margin="16,0,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        
+                        <!-- 输入框部分 -->
+                        <Border Grid.Column="0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4,0,0,4" Height="30" Background="White" Margin="0,0,-1,0" Panel.ZIndex="1">
+                            <Grid>
+                                <TextBox x:Name="txtOutputDir" BorderThickness="0" VerticalContentAlignment="Center" Padding="5,0,25,0" Foreground="#333" LostFocus="TxtOutputDir_LostFocus"/>
+                                <!-- 清除按钮 (x) -->
+                                <Button HorizontalAlignment="Right" Margin="0,0,5,0" Width="20" Height="20" Background="Transparent" BorderThickness="0" Cursor="Hand" Click="BtnClearOutputDir_Click">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="Transparent">
+                                                <Grid>
+                                                    <Ellipse Fill="#CCC" Width="14" Height="14"/>
+                                                    <Path Data="M4,4 L10,10 M10,4 L4,10" Stroke="White" StrokeThickness="1.5" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </Grid>
+                        </Border>
+                        
+                        <!-- 文件夹按钮 -->
+                        <Button Grid.Column="1" Width="40" Height="30" BorderBrush="#E0E0E0" BorderThickness="1" Background="#F5F6F8" Cursor="Hand" Click="BtnBrowseOutputDir_Click">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="0,4,4,0">
+                                        <!-- 简单的文件夹图标 -->
+                                        <Path Data="M2,4 L6,4 L8,6 L18,6 L18,14 L2,14 Z" Stroke="#666" StrokeThickness="1" Fill="Transparent" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </Grid>
+                </Grid>
+
+                <!-- 5. 运行评估流程 -->
+                <Grid Margin="0,0,0,20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                        <TextBlock Text="运行评估流程" VerticalAlignment="Center" FontSize="15" Foreground="#555"/>
+                        <Border Margin="5,0,0,0" Width="16" Height="16" CornerRadius="8" BorderBrush="#999" BorderThickness="1" VerticalAlignment="Center" ToolTip="是否运行评估流程">
+                            <TextBlock Text="?" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="#999"/>
+                        </Border>
+                    </StackPanel>
+                    <controls:AnimatedCheckBox Grid.Column="1" IsChecked="True" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                </Grid>
+
+                <!-- 6. 保存数据路径 -->
+                <Grid Margin="0,0,0,15">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="保存数据路径" VerticalAlignment="Center" FontSize="15" Foreground="#555" HorizontalAlignment="Left" TextAlignment="Left"/>
+                    <controls:AnimatedCheckBox Grid.Column="1" x:Name="chkAutoLoadDataPath" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"
+                              Checked="ChkAutoLoadDataPath_Checked"
+                              Unchecked="ChkAutoLoadDataPath_Unchecked"/>
+                </Grid>
+
+                <!-- 7. 保存加载模型 -->
+                <Grid Margin="0,0,0,20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="保存加载模型" VerticalAlignment="Center" FontSize="15" Foreground="#555" HorizontalAlignment="Left" TextAlignment="Left"/>
+                    <controls:AnimatedCheckBox Grid.Column="1" x:Name="chkAutoLoadModel" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"
+                              Checked="ChkAutoLoadModel_Checked"
+                              Unchecked="ChkAutoLoadModel_Unchecked"/>
+                </Grid>
+
+                <!-- 分割线 -->
+                <Rectangle Height="1" Fill="#E0E0E0" Margin="0,10,0,20"/>
+
+                <!-- ==================== 第一部分：保存原图 ==================== -->
+                <DockPanel Margin="0,0,0,20" LastChildFill="False">
+                    <TextBlock Text="保存原图" VerticalAlignment="Center" FontSize="16" Foreground="#333"/>
+                    <controls:AnimatedToggleSwitchWithText x:Name="chkSaveOriginal" DockPanel.Dock="Right" VerticalAlignment="Center"
+                                                           Checked="ChkSaveOriginal_Checked"
+                                                           Unchecked="ChkSaveOriginal_Unchecked"/>
+                </DockPanel>
+
+                <!-- 分割线 -->
+                <Rectangle Height="1" Fill="#E0E0E0" Margin="0,10,0,20"/>
+
+                <!-- ==================== 第二部分：保存可视化图片 ==================== -->
+                <DockPanel Margin="0,0,0,20" LastChildFill="False">
+                    <TextBlock Text="保存可视化图片" VerticalAlignment="Center" FontSize="16" Foreground="#333"/>
+                    <controls:AnimatedToggleSwitchWithText x:Name="chkSaveVisualization" DockPanel.Dock="Right" VerticalAlignment="Center"
+                                                           Checked="ChkSaveVisualization_Checked"
+                                                           Unchecked="ChkSaveVisualization_Unchecked"/>
+                </DockPanel>
+
+                <StackPanel x:Name="pnlVisualizationOptions">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ElementName=chkSaveVisualization, Path=IsChecked}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                </StackPanel>
+
+                <!-- 分割线 -->
+                <Rectangle Height="1" Fill="#E0E0E0" Margin="0,10,0,20"/>
+
+                <!-- ==================== 第三部分：目标检测裁图 ==================== -->
+                <DockPanel Margin="0,0,0,20" LastChildFill="False">
+                    <TextBlock Text="目标检测裁图" VerticalAlignment="Center" FontSize="16" Foreground="#333"/>
+                    <controls:AnimatedToggleSwitchWithText x:Name="chkTargetCrop" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                </DockPanel>
+
+                <StackPanel x:Name="pnlTargetCropOptions">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ElementName=chkTargetCrop, Path=IsChecked}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <!-- 1. 裁图外扩 (数字输入框) -->
+                    <Grid Margin="0,0,0,15">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="目标检测裁图外扩" VerticalAlignment="Center" FontSize="15" Foreground="#555" HorizontalAlignment="Left" TextAlignment="Left"/>
+                        <Border Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="30" Width="120" Background="White">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
+                                <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
+                                <TextBox Text="5" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
+                                <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
+                                <Button Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <!-- 2. 保存标注文件 -->
+                    <Grid Margin="0,0,0,15">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="保存标注文件" VerticalAlignment="Center" FontSize="15" Foreground="#555" HorizontalAlignment="Left"/>
+                        <controls:AnimatedCheckBox Grid.Column="1" IsChecked="True" HorizontalAlignment="Left" Margin="16,0,0,0" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <!-- 3. 仅保存有标注的裁图 (带问号) -->
+                    <Grid Margin="0,0,0,15">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                            <TextBlock Text="仅保存有标注的裁图" VerticalAlignment="Center" FontSize="15" Foreground="#555"/>
+                            <Border Margin="5,0,0,0" Width="16" Height="16" CornerRadius="8" BorderBrush="#999" BorderThickness="1" VerticalAlignment="Center" ToolTip="仅保存包含标注信息的裁图">
+                                <TextBlock Text="?" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="#999"/>
+                            </Border>
+                        </StackPanel>
+                        <controls:AnimatedCheckBox Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <!-- 4. 固定裁图尺寸 (复杂行) -->
+                    <Grid Margin="0,0,0,15">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="固定裁图尺寸" VerticalAlignment="Center" FontSize="15" Foreground="#555" HorizontalAlignment="Left"/>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left" Margin="16,0,0,0" VerticalAlignment="Center">
+                            <controls:AnimatedCheckBox x:Name="chkFixedSize" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                            
+                            <!-- 宽度输入 -->
+                            <StackPanel Orientation="Horizontal" IsEnabled="{Binding ElementName=chkFixedSize, Path=IsChecked}">
+                                <TextBlock Text="宽度" VerticalAlignment="Center" Foreground="#666" Margin="0,0,5,0"/>
+                                <Border BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="30" Width="120" Background="White">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
+                                        <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
+                                        <TextBox Text="224" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
+                                        <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
+                                        <Button Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2"/>
+                                    </Grid>
+                                </Border>
+                                
+                                <!-- 高度输入 -->
+                                <TextBlock Text="高度" VerticalAlignment="Center" Foreground="#666" Margin="10,0,5,0"/>
+                                <Border BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="30" Width="120" Background="White">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
+                                        <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
+                                        <TextBox Text="224" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
+                                        <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
+                                        <Button Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2"/>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- 5. 最小外接矩裁图 -->
+                    <Grid Margin="0,0,0,15">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                            <TextBlock Text="最小外接矩裁图" VerticalAlignment="Center" FontSize="15" Foreground="#555"/>
+                            <Border Margin="5,0,0,0" Width="16" Height="16" CornerRadius="8" BorderBrush="#999" BorderThickness="1" VerticalAlignment="Center" ToolTip="使用最小外接矩形进行裁图">
+                                <TextBlock Text="?" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="#999"/>
+                            </Border>
+                        </StackPanel>
+                        <controls:AnimatedCheckBox Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" VerticalAlignment="Center"/>
+                    </Grid>
+
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</UserControl>
+

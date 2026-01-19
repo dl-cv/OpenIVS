@@ -1,0 +1,85 @@
+﻿<UserControl x:Class="DlcvTest.Controls.ColorPickerControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             mc:Ignorable="d" 
+             d:DesignHeight="200" d:DesignWidth="400">
+    <UserControl.Resources>
+        <!-- 色相渐变画刷（用于色相滑块） -->
+        <LinearGradientBrush x:Key="HueGradient" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#FFFF0000" Offset="0.0"/>   <!-- �?-->
+            <GradientStop Color="#FFFF7F00" Offset="0.17"/>  <!-- �?-->
+            <GradientStop Color="#FFFFFF00" Offset="0.33"/>  <!-- �?-->
+            <GradientStop Color="#FF00FF00" Offset="0.5"/>   <!-- �?-->
+            <GradientStop Color="#FF00FFFF" Offset="0.67"/>  <!-- �?-->
+            <GradientStop Color="#FF0000FF" Offset="0.83"/>  <!-- �?-->
+            <GradientStop Color="#FF7F00FF" Offset="0.92"/>  <!-- �?-->
+            <GradientStop Color="#FFFF0000" Offset="1.0"/>   <!-- �?-->
+        </LinearGradientBrush>
+    </UserControl.Resources>
+    
+    <Border Background="White" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,8,0,0">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            
+            <!-- 主颜色选择区域 -->
+            <Border x:Name="colorArea" Grid.Column="0" Width="200" Height="200" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                <Grid>
+                    <Canvas x:Name="colorAreaCanvas" MouseDown="ColorArea_MouseDown" MouseMove="ColorArea_MouseMove" MouseUp="ColorArea_MouseUp" Background="Transparent">
+                        <!-- 渐变背景由代码动态生�?-->
+                        <Rectangle x:Name="colorAreaRect" Width="200" Height="200" Fill="Red"/>
+                    </Canvas>
+                    <!-- 颜色指示�?-->
+                    <Canvas x:Name="indicatorCanvas">
+                        <Ellipse x:Name="colorIndicator" Width="12" Height="12" Stroke="White" StrokeThickness="2" 
+                                 Fill="Transparent" IsHitTestVisible="False"/>
+                    </Canvas>
+                </Grid>
+            </Border>
+            
+            <!-- 色相滑块 -->
+            <Border Grid.Column="2" Width="20" Height="200" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                <Grid>
+                    <Grid x:Name="hueSliderGrid" MouseDown="HueSlider_MouseDown" MouseMove="HueSlider_MouseMove" MouseUp="HueSlider_MouseUp">
+                        <Rectangle Fill="{StaticResource HueGradient}"/>
+                    </Grid>
+                    <!-- 色相指示器 -->
+                    <Border x:Name="hueIndicator" Width="24" Height="8" BorderBrush="White" BorderThickness="2" 
+                            HorizontalAlignment="Center" VerticalAlignment="Top" 
+                            Margin="-2,-4,-2,0" IsHitTestVisible="False" CornerRadius="2"/>
+                </Grid>
+            </Border>
+            
+            <!-- 右侧控制区域 -->
+            <StackPanel Grid.Column="3" Margin="16,0,0,0" VerticalAlignment="Top">
+                <!-- 十六进制颜色输入 -->
+                <TextBlock Text="颜色值" FontSize="12" Foreground="#666" Margin="0,0,0,8"/>
+                <Border Width="120" Height="32" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4">
+                    <TextBox x:Name="txtHexColor" FontSize="13" 
+                             BorderThickness="0" Padding="8,0" Background="Transparent"
+                             TextChanged="TxtHexColor_TextChanged" LostFocus="TxtHexColor_LostFocus"/>
+                </Border>
+                
+                <!-- 按钮区域 -->
+                <StackPanel Orientation="Horizontal" Margin="0,16,0,0" HorizontalAlignment="Right">
+                    <Button x:Name="btnClear" Content="Clear" Width="60" Height="32" 
+                            Background="White" BorderBrush="#E0E0E0" BorderThickness="1" 
+                            Foreground="#666" FontSize="12" Margin="0,0,8,0" 
+                            Click="BtnClear_Click" Cursor="Hand"/>
+                    <Button x:Name="btnOK" Content="OK" Width="60" Height="32" 
+                            Background="White" BorderBrush="#E0E0E0" BorderThickness="1" 
+                            Foreground="#666" FontSize="12" 
+                            Click="BtnOK_Click" Cursor="Hand"/>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>
+
+

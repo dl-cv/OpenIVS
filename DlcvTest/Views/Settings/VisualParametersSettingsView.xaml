@@ -1,0 +1,403 @@
+﻿<UserControl x:Class="DlcvTest.VisualParametersSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:controls="clr-namespace:DlcvTest.Controls"
+             mc:Ignorable="d" 
+             d:DesignHeight="800" d:DesignWidth="1200" Background="White">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        
+        <DropShadowEffect x:Key="CardShadow" BlurRadius="24" ShadowDepth="8" Opacity="0.08" Color="Black"/>
+        
+        <!-- 细微的棋盘格背景 -->
+        <DrawingBrush x:Key="CheckerboardBrush" TileMode="Tile" Viewport="0,0,16,16" ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="White">
+                        <GeometryDrawing.Geometry>
+                            <RectangleGeometry Rect="0,0,16,16"/>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="#F8F8F8">
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup>
+                                <RectangleGeometry Rect="0,0,8,8"/>
+                                <RectangleGeometry Rect="8,8,8,8"/>
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
+
+        <!-- 统一的标签样式（左对齐） -->
+        <Style x:Key="FormLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Foreground" Value="#555"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="TextAlignment" Value="Left"/>
+            <Setter Property="Margin" Value="0"/>
+        </Style>
+
+        <!-- 统一的行容器样式 -->
+        <Style x:Key="FormRowStyle" TargetType="Grid">
+            <Setter Property="Height" Value="40"/>
+        </Style>
+
+    </UserControl.Resources>
+    
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/> <!-- 标题 -->
+            <RowDefinition Height="*"/>    <!-- 内容 -->
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="520"/> <!-- 设置面板宽度 -->
+            <ColumnDefinition Width="520"/> <!-- 预览区域 -->
+        </Grid.ColumnDefinitions>
+
+        <!-- 标题 - 横跨两列 -->
+        <Border Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Padding="24,24,24,16" Background="White" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="False">
+                <TextBlock Text="可视化参数" FontSize="18" FontWeight="Bold" Foreground="#333" VerticalAlignment="Center"/>
+                <Button DockPanel.Dock="Right" Content="恢复默认" Background="White" BorderBrush="#E0E0E0" BorderThickness="1" Padding="12,6" FontSize="12" Foreground="#666" Cursor="Hand">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#F9F9F9"/>
+                                    <Setter Property="Foreground" Value="#333"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </DockPanel>
+        </Border>
+
+        <!-- 第二和第三区 -->
+        <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="520"/> <!-- 设置面板 -->
+                <ColumnDefinition Width="520"/> <!-- 预览区域 -->
+            </Grid.ColumnDefinitions>
+            
+            <!-- 左侧：设置面板 -->
+            <Grid Grid.Column="0" Background="White">
+                <!-- 分割线 - 设置面板右侧 -->
+                <Border HorizontalAlignment="Right" Width="1" Background="#E0E0E0"/>
+                
+                <!-- 内容 - 带现代化细滚动条的 ScrollViewer -->
+                <ScrollViewer Style="{StaticResource ModernScrollViewerStyle}"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Margin="0,0,1,0">
+                    <StackPanel Grid.IsSharedSizeScope="True" Margin="24,0">
+                    
+                    <!-- 画布设置分组 -->
+                    <ToggleButton x:Name="btnCanvasSettings" IsChecked="True" Content="画布设置" Style="{StaticResource GroupToggleButtonStyle}" Margin="0,8,0,0" Click="BtnCanvasSettings_Click"/>
+                    
+                    <StackPanel Visibility="{Binding IsChecked, ElementName=btnCanvasSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        
+                        <!-- 统一栅格布局：Label列宽度共享，文字右对齐 -->
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="显示原图控件" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox x:Name="chkShowOriginalPane" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Checked="ChkShowOriginalPane_Changed" Unchecked="ChkShowOriginalPane_Changed"/>
+                        </Grid>
+
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="显示bbox边框" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox x:Name="chkShowBBoxPane" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Checked="CheckBox_SettingChanged" Unchecked="CheckBox_SettingChanged"/>
+                        </Grid>
+
+                        <!-- 所有选项独立，无依赖关系，文字右对齐 -->
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="显示分数" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox x:Name="chkShowScorePane" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Checked="CheckBox_SettingChanged" Unchecked="CheckBox_SettingChanged"/>
+                        </Grid>
+                        
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="显示中心点" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox x:Name="chkShowCenterPoint" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Checked="CheckBox_SettingChanged" Unchecked="CheckBox_SettingChanged"/>
+                        </Grid>
+
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="显示文字(C)" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox x:Name="chkShowTextPane" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Checked="CheckBox_SettingChanged" Unchecked="CheckBox_SettingChanged"/>
+                        </Grid>
+
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="显示文字阴影" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox x:Name="chkShowTextShadowPane" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Checked="CheckBox_SettingChanged" Unchecked="CheckBox_SettingChanged"/>
+                        </Grid>
+
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="标签写在框外" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox x:Name="chkShowTextOutOfBboxPane" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Checked="CheckBox_SettingChanged" Unchecked="CheckBox_SettingChanged"/>
+                        </Grid>
+
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="显示过滤检测" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" IsChecked="True"/>
+                        </Grid>
+
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="显示旋转框箭头" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" IsChecked="True"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- 画笔设置分组 -->
+                    <ToggleButton x:Name="btnBrushSettings" IsChecked="False" Content="画笔设置" Style="{StaticResource GroupToggleButtonStyle}" Margin="0,16,0,0" Click="BtnBrushSettings_Click"/>
+                    
+                    <StackPanel Visibility="{Binding IsChecked, ElementName=btnBrushSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        
+                        <!-- bbox框线宽度 -->
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="bbox框线宽度" Style="{StaticResource FormLabelStyle}"/>
+                            <Border Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="32" Width="140">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="32"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="32"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="btnDecreaseBorderThickness" Grid.Column="0" Content="-" Style="{StaticResource StepperButtonStyle}" Click="BtnBorderThicknessStepper_Click" Tag="-0.5"/>
+                                    <Border Grid.Column="1" BorderBrush="#E0E0E0" BorderThickness="1,0,1,0">
+                                        <TextBox x:Name="txtBorderThickness" Text="{Binding Path=BBoxBorderThickness, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent" FontSize="13" Foreground="#333" LostFocus="TxtBorderThickness_LostFocus"/>
+                                    </Border>
+                                    <Button x:Name="btnIncreaseBorderThickness" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}" Click="BtnBorderThicknessStepper_Click" Tag="0.5"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <!-- bbox框线颜色 -->
+                        <StackPanel>
+                            <Grid Style="{StaticResource FormRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="bbox框线颜色" Style="{StaticResource FormLabelStyle}"/>
+                                <Button x:Name="btnBBoxColor" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Width="32" Height="32" 
+                                        Background="#74A574" BorderBrush="#E0E0E0" BorderThickness="1" 
+                                        Cursor="Hand" Click="BtnBBoxColor_Click" Padding="0">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{TemplateBinding Background}" 
+                                                    BorderBrush="{TemplateBinding BorderBrush}" 
+                                                    BorderThickness="{TemplateBinding BorderThickness}" 
+                                                    CornerRadius="4">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </Grid>
+                            <!-- 颜色选择器展开区域 -->
+                            <Grid x:Name="bBoxColorPickerContainer" Height="0" ClipToBounds="True">
+                                <controls:ColorPickerControl x:Name="bBoxColorPicker" 
+                                                         ColorChanged="BBoxColorPicker_ColorChanged"
+                                                         ColorConfirmed="BBoxColorPicker_ColorConfirmed"
+                                                         ColorCleared="BBoxColorPicker_ColorCleared"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- 填充bbox -->
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="填充bbox" Style="{StaticResource FormLabelStyle}"/>
+                            <controls:AnimatedCheckBox x:Name="chkFillBBox" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Checked="CheckBox_SettingChanged" Unchecked="CheckBox_SettingChanged"/>
+                        </Grid>
+
+                        <!-- 填充透明度 -->
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="填充透明度(%)" Style="{StaticResource FormLabelStyle}"/>
+                            <Border Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="32" Width="140">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="32"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="32"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="btnDecreaseFillOpacity" Grid.Column="0" Content="-" Style="{StaticResource StepperButtonStyle}" Click="BtnFillOpacityStepper_Click" Tag="-5.0"/>
+                                    <Border Grid.Column="1" BorderBrush="#E0E0E0" BorderThickness="1,0,1,0">
+                                        <TextBox x:Name="txtFillOpacity" Text="{Binding Path=BBoxFillOpacity, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent" FontSize="13" Foreground="#333" LostFocus="TxtFillOpacity_LostFocus"/>
+                                    </Border>
+                                    <Button x:Name="btnIncreaseFillOpacity" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}" Click="BtnFillOpacityStepper_Click" Tag="5.0"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <!-- 字体大小 -->
+                        <Grid Style="{StaticResource FormRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="字体大小" Style="{StaticResource FormLabelStyle}"/>
+                            <Border Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="32" Width="140">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="32"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="32"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="btnDecreaseFontSize" Grid.Column="0" Content="-" Style="{StaticResource StepperButtonStyle}" Click="BtnFontSizeStepper_Click" Tag="-1.0"/>
+                                    <Border Grid.Column="1" BorderBrush="#E0E0E0" BorderThickness="1,0,1,0">
+                                        <TextBox x:Name="txtFontSize" Text="{Binding Path=FontSize, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent" FontSize="13" Foreground="#333" LostFocus="TxtFontSize_LostFocus"/>
+                                    </Border>
+                                    <Button x:Name="btnIncreaseFontSize" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}" Click="BtnFontSizeStepper_Click" Tag="1.0"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <!-- 字体颜色 -->
+                        <StackPanel>
+                            <Grid Style="{StaticResource FormRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="字体颜色" Style="{StaticResource FormLabelStyle}"/>
+                                <Button x:Name="btnFontColor" Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" Width="32" Height="32" 
+                                        Background="#B0B0B0" BorderBrush="#E0E0E0" BorderThickness="1" 
+                                        Cursor="Hand" Click="BtnFontColor_Click" Padding="0">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{TemplateBinding Background}" 
+                                                    BorderBrush="{TemplateBinding BorderBrush}" 
+                                                    BorderThickness="{TemplateBinding BorderThickness}" 
+                                                    CornerRadius="4">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </Grid>
+                            <!-- 颜色选择器展开区域 -->
+                            <Grid x:Name="fontColorPickerContainer" Height="0" ClipToBounds="True">
+                                <controls:ColorPickerControl x:Name="fontColorPicker" 
+                                                         ColorChanged="FontColorPicker_ColorChanged"
+                                                         ColorConfirmed="FontColorPicker_ColorConfirmed"
+                                                         ColorCleared="FontColorPicker_ColorCleared"/>
+                            </Grid>
+                        </StackPanel>
+
+                    </StackPanel>
+                    
+                    <!-- 底部留白 -->
+                    <Border Height="40"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
+                <!-- 右侧：预览区�?-->
+                <Grid x:Name="previewContainer" Grid.Column="1" Background="{StaticResource CheckerboardBrush}" ClipToBounds="True">
+                    <!-- 图片内容 - 居中显示 -->
+                    <Image x:Name="previewImage" 
+                           Stretch="Uniform" 
+                           HorizontalAlignment="Center" 
+                           VerticalAlignment="Center"
+                           Loaded="PreviewImage_Loaded"
+                           SizeChanged="PreviewImage_SizeChanged"/>
+                    
+                    <!-- 可视化元素层 -->
+                    <Canvas x:Name="visualizationCanvas" 
+                            HorizontalAlignment="Stretch" 
+                            VerticalAlignment="Stretch">
+                        <!-- bbox 矩形�?-->
+                        <Border x:Name="bboxBorder" 
+                                BorderThickness="2"
+                                CornerRadius="0"
+                                Visibility="Collapsed">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="BorderBrush" Value="Red"/>
+                                    <Setter Property="Background" Value="Transparent"/>
+                                </Style>
+                            </Border.Style>
+                        </Border>
+                        
+                        <!-- 标签文字（包含分数） -->
+                        <Border x:Name="labelBorder" 
+                                Background="White" 
+                                CornerRadius="4"
+                                Padding="4,2"
+                                Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="labelText" 
+                                           Text="小猫" 
+                                           FontSize="12" 
+                                           Foreground="Black"
+                                           FontWeight="Bold"
+                                           Margin="0,0,4,0"/>
+                                <TextBlock x:Name="scoreText" 
+                                           Text="100.0" 
+                                           FontSize="12" 
+                                           Foreground="Black"
+                                           FontWeight="Bold"
+                                           Visibility="Collapsed"/>
+                            </StackPanel>
+                        </Border>
+                    </Canvas>
+                </Grid>
+            </Grid>
+    </Grid>
+</UserControl>
+
+
