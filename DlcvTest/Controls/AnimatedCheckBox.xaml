@@ -1,0 +1,36 @@
+﻿<UserControl x:Class="DlcvTest.Controls.AnimatedCheckBox"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             mc:Ignorable="d" 
+             d:DesignHeight="18" d:DesignWidth="18">
+    <Grid Width="22" Height="22" Background="Transparent" MouseLeftButtonDown="Grid_MouseLeftButtonDown" Cursor="Hand">
+        <!-- 背景和边框 -->
+        <Border x:Name="BorderBg" 
+                Width="22" Height="22" 
+                BorderThickness="1.5" 
+                CornerRadius="5"
+                Background="Transparent">
+            <Border.BorderBrush>
+                <SolidColorBrush x:Name="BorderColor" Color="#C0C0C0"/>
+            </Border.BorderBrush>
+        </Border>
+        
+        <!-- 对号图标 - 使用一条完整的 Path，固定在框内居中 -->
+        <Viewbox Width="14" Height="14" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Path x:Name="CheckMark" 
+                  Stroke="White" 
+                  StrokeThickness="2.0"
+                  StrokeStartLineCap="Round"
+                  StrokeEndLineCap="Round"
+                  StrokeLineJoin="Round"
+                  Data="M2,6 L6,10 L14,2">
+                <Path.RenderTransform>
+                    <ScaleTransform x:Name="CheckScale" ScaleX="0" ScaleY="0" CenterX="8" CenterY="6"/>
+                </Path.RenderTransform>
+            </Path>
+        </Viewbox>
+    </Grid>
+</UserControl>
+

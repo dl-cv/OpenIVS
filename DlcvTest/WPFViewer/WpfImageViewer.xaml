@@ -1,0 +1,55 @@
+﻿<UserControl x:Class="DlcvTest.WPFViewer.WpfImageViewer"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:DlcvTest.WPFViewer"
+             mc:Ignorable="d"
+             Focusable="True"
+             SnapsToDevicePixels="True"
+             UseLayoutRounding="True"
+             d:DesignHeight="300" d:DesignWidth="300">
+    <Grid x:Name="Root" ClipToBounds="True" Background="Transparent">
+        <!-- ContentLayer：内容层应用缩放/平移（避免影响视口计算） -->
+        <Canvas x:Name="ContentLayer" HorizontalAlignment="Left" VerticalAlignment="Top" RenderTransformOrigin="0,0">
+            <Canvas.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="ScaleTf" ScaleX="1" ScaleY="1"/>
+                    <TranslateTransform x:Name="TransTf" X="0" Y="0"/>
+                </TransformGroup>
+            </Canvas.RenderTransform>
+
+            <!-- 内容尺寸 = 图像像素尺寸；由代码计算基础缩放并应用到 ContentLayer -->
+            <Image x:Name="Img"
+                   Canvas.Left="0" Canvas.Top="0"
+                   Stretch="Fill"
+                   RenderOptions.BitmapScalingMode="NearestNeighbor"
+                   SnapsToDevicePixels="True"
+                   IsHitTestVisible="False"/>
+
+            <local:OverlayRenderer x:Name="Overlay"
+                                   Canvas.Left="0" Canvas.Top="0"
+                                   IsHitTestVisible="False"
+                                   RenderOptions.EdgeMode="Aliased"
+                                   SnapsToDevicePixels="True"/>
+        </Canvas>
+
+        <!-- HUD：不随缩放平移（固定屏幕位置） -->
+        <Border x:Name="HudBorder"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Margin="10"
+                Background="#00000000"
+                CornerRadius="4"
+                Padding="4"
+                Visibility="Collapsed">
+            <TextBlock x:Name="HudText"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       Foreground="LimeGreen"
+                       Text=""/>
+        </Border>
+    </Grid>
+</UserControl>
+
+
