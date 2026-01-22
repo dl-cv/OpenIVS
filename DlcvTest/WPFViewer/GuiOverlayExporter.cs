@@ -75,7 +75,7 @@ namespace DlcvTest.WPFViewer
 
             var vr = visualizeResult ?? new WpfVisualize.VisualizeResult { StatusText = string.Empty, StatusIsOk = true };
 
-            // 使用独立的视觉树，避免受�?UI 缩放/平移影响
+            // 使用独立的视觉树，避免受到 UI 缩放/平移影响
             var root = new Grid
             {
                 Width = width,
@@ -89,7 +89,7 @@ namespace DlcvTest.WPFViewer
             bool hardEdge = mode == ExportRenderMode.HardEdge;
             if (hardEdge)
             {
-                // 导出期望“硬边”：关闭矢量抗锯齿，避免�?字边缘出现彩边与模糊
+                // 导出期望"硬边"：关闭矢量抗锯齿，避免在字边缘出现彩边与模糊
                 RenderOptions.SetEdgeMode(root, EdgeMode.Aliased);
                 TextOptions.SetTextFormattingMode(root, TextFormattingMode.Display);
                 TextOptions.SetTextRenderingMode(root, TextRenderingMode.Aliased);
@@ -97,7 +97,7 @@ namespace DlcvTest.WPFViewer
             }
             else
             {
-                // 顺滑：允许抗锯齿（离屏通常是灰�?AA�?                RenderOptions.SetEdgeMode(root, EdgeMode.Unspecified);
+                // 顺滑：允许抗锯齿（离屏通常是灰度 AA）                RenderOptions.SetEdgeMode(root, EdgeMode.Unspecified);
                 TextOptions.SetTextFormattingMode(root, TextFormattingMode.Display);
                 TextOptions.SetTextRenderingMode(root, TextRenderingMode.Grayscale);
                 TextOptions.SetTextHintingMode(root, TextHintingMode.Auto);
@@ -114,7 +114,7 @@ namespace DlcvTest.WPFViewer
             };
             if (hardEdge)
             {
-                // 保险起见：避免任何插值缩放（即使未来改动导致出现缩放�?                RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.NearestNeighbor);
+                // 保险起见：避免任何插值缩放（即使未来改动导致出现缩放）                RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.NearestNeighbor);
                 RenderOptions.SetEdgeMode(img, EdgeMode.Aliased);
             }
             else
@@ -127,7 +127,7 @@ namespace DlcvTest.WPFViewer
             double exportFontSize = screenFontSize;
             if (hardEdge)
             {
-                // 硬边导出：强制整数像素线�?字号，减少灰度过渡像�?                exportLineWidth = Math.Max(1.0, Math.Round(screenLineWidth, 0, MidpointRounding.AwayFromZero));
+                // 硬边导出：强制整数像素线宽/字号，减少灰度过渡像素                exportLineWidth = Math.Max(1.0, Math.Round(screenLineWidth, 0, MidpointRounding.AwayFromZero));
                 exportFontSize = Math.Max(6.0, Math.Round(screenFontSize, 0, MidpointRounding.AwayFromZero));
             }
 
@@ -137,10 +137,10 @@ namespace DlcvTest.WPFViewer
                 Height = height,
                 SnapsToDevicePixels = true,
                 VisualizeResult = vr,
-                ViewScale = 1.0, // 导出不抵消缩放：直接按像素绘�?                ScreenLineWidth = exportLineWidth,
+                ViewScale = 1.0, // 导出不抵消缩放：直接按像素绘制                ScreenLineWidth = exportLineWidth,
                 ScreenFontSize = exportFontSize,
                 TextOutOfBbox = opt.TextOutOfBbox,
-                // 硬边导出建议关闭阴影：阴影会显著加重“厚/糊”观�?                ShowTextShadow = hardEdge ? false : opt.DisplayTextShadow,
+                // 硬边导出建议关闭阴影：阴影会显著加重"厚/糊"观感                ShowTextShadow = hardEdge ? false : opt.DisplayTextShadow,
                 ShowStatusText = false,
                 DrawHudInThisLayer = false,
                 IsHitTestVisible = false
@@ -177,7 +177,8 @@ namespace DlcvTest.WPFViewer
         }
 
         /// <summary>
-        /// 左右拼接两张图片（不缩放）�?        /// </summary>
+        /// 左右拼接两张图片（不缩放）。
+        /// </summary>
         public static BitmapSource ConcatenateHorizontal(BitmapSource left, BitmapSource right)
         {
             if (left == null && right == null) return null;

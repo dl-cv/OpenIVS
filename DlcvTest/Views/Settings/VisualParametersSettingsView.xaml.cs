@@ -1,13 +1,11 @@
-﻿using System;
+using System;
 using System.ComponentModel;
-using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Shapes;
 using DlcvTest.Properties;
 
 namespace DlcvTest
@@ -339,7 +337,7 @@ namespace DlcvTest
                 scoreText.FontSize = Settings.Default.FontSize;
 
                 labelBorder.Visibility = Visibility.Visible;
-                
+
                 // 分数显示在文字后面，只有显示文字时才显示分数
                 if (Settings.Default.ShowScorePane)
                 {
@@ -349,7 +347,7 @@ namespace DlcvTest
                 {
                     scoreText.Visibility = Visibility.Collapsed;
                 }
-                
+
                 // 应用文字阴影效果（文字背景是阴影色）
                 if (Settings.Default.ShowTextShadowPane)
                 {
@@ -375,13 +373,15 @@ namespace DlcvTest
                         scoreText.Foreground = Brushes.Black; // 默认黑色文字
                     }
                 }
-                
+
+                double labelHeight = labelBorder.ActualHeight;
+
                 // 根据"标签写在框外"设置调整位置
                 if (Settings.Default.ShowTextOutOfBboxPane)
                 {
                     // 框外：显示在 bbox 上方
                     Canvas.SetLeft(labelBorder, imageLeft + bboxX);
-                    Canvas.SetTop(labelBorder, imageTop + bboxY - labelBorder.ActualHeight - 5);
+                    Canvas.SetTop(labelBorder, imageTop + bboxY - labelHeight - 5);
                 }
                 else
                 {
@@ -392,63 +392,41 @@ namespace DlcvTest
             }
             else
             {
-                // 不显示文字时，也不显示分�?                labelBorder.Visibility = Visibility.Collapsed;
+                // 不显示文字时，也不显示分数
+                labelBorder.Visibility = Visibility.Collapsed;
                 scoreText.Visibility = Visibility.Collapsed;
             }
 
             // 绘制中心点十字
-            if (Settings.Default.ShowCenterPoint)
+            if (centerCrossPath != null)
             {
-                // 计算中心点坐标（相对于图片）
-                double centerX = bboxX + bboxWidth / 2;
-                double centerY = bboxY + bboxHeight / 2;
-
-                // 十字线长度为bbox较小边的30%
-                double crossSize = Math.Min(bboxWidth, bboxHeight) * 0.3;
-
-                // 清除之前的十字线
-                var existingCrossLines = visualizationCanvas.Children.OfType<System.Windows.Shapes.Line>()
-                    .Where(line => line.Tag != null && line.Tag.ToString() == "CenterCross").ToList();
-                foreach (var line in existingCrossLines)
+                if (Settings.Default.ShowCenterPoint)
                 {
-                    visualizationCanvas.Children.Remove(line);
+                    // 计算中心点坐标（相对于图片）
+                    double centerX = bboxX + bboxWidth / 2;
+                    double centerY = bboxY + bboxHeight / 2;
+
+                    // 十字线长度为bbox较小边的30%
+                    double crossSize = Math.Min(bboxWidth, bboxHeight) * 0.3;
+                    double halfSize = crossSize / 2;
+
+                    double canvasCenterX = imageLeft + centerX;
+                    double canvasCenterY = imageTop + centerY;
+
+                    var geometryGroup = new GeometryGroup();
+                    geometryGroup.Children.Add(new LineGeometry(
+                        new Point(canvasCenterX - halfSize, canvasCenterY),
+                        new Point(canvasCenterX + halfSize, canvasCenterY)));
+                    geometryGroup.Children.Add(new LineGeometry(
+                        new Point(canvasCenterX, canvasCenterY - halfSize),
+                        new Point(canvasCenterX, canvasCenterY + halfSize)));
+
+                    centerCrossPath.Data = geometryGroup;
+                    centerCrossPath.Visibility = Visibility.Visible;
                 }
-
-                // 创建水平线
-                var horizontalLine = new System.Windows.Shapes.Line
+                else
                 {
-                    X1 = imageLeft + centerX - crossSize / 2,
-                    Y1 = imageTop + centerY,
-                    X2 = imageLeft + centerX + crossSize / 2,
-                    Y2 = imageTop + centerY,
-                    Stroke = Brushes.Red,
-                    StrokeThickness = 2,
-                    Tag = "CenterCross"
-                };
-
-                // 创建垂直线
-                var verticalLine = new System.Windows.Shapes.Line
-                {
-                    X1 = imageLeft + centerX,
-                    Y1 = imageTop + centerY - crossSize / 2,
-                    X2 = imageLeft + centerX,
-                    Y2 = imageTop + centerY + crossSize / 2,
-                    Stroke = Brushes.Red,
-                    StrokeThickness = 2,
-                    Tag = "CenterCross"
-                };
-
-                // 添加到画�?                visualizationCanvas.Children.Add(horizontalLine);
-                visualizationCanvas.Children.Add(verticalLine);
-            }
-            else
-            {
-                // 不显示十字时，清除现有的十字线
-                var existingCrossLines = visualizationCanvas.Children.OfType<System.Windows.Shapes.Line>()
-                    .Where(line => line.Tag != null && line.Tag.ToString() == "CenterCross").ToList();
-                foreach (var line in existingCrossLines)
-                {
-                    visualizationCanvas.Children.Remove(line);
+                    centerCrossPath.Visibility = Visibility.Collapsed;
                 }
             }
         }

@@ -6,7 +6,7 @@
              mc:Ignorable="d" 
              d:DesignHeight="18" d:DesignWidth="18">
     <Grid Width="22" Height="22" Background="Transparent" MouseLeftButtonDown="Grid_MouseLeftButtonDown" Cursor="Hand">
-        <!-- 背景和边�?-->
+        <!-- 背景和边框 -->
         <Border x:Name="BorderBg" 
                 Width="22" Height="22" 
                 BorderThickness="1.5" 

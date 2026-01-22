@@ -68,16 +68,16 @@ namespace DlcvTest.Controls
             saturationBrush.GradientStops.Add(new GradientStop(hueColor, 0));
             saturationBrush.GradientStops.Add(new GradientStop(Colors.Gray, 1));
             
-            // 使用组合画刷：先应用饱和度，再应用亮�?
+            // 使用组合画刷：先应用饱和度，再应用亮度
             // 由于WPF不支持直接组合，我们使用更简单的方法：创建一个包含多个渐变停止点的LinearGradientBrush
-            // 但实际上，我们需要一个二维渐变，这在WPF中比较复�?
+            // 但实际上，我们需要一个二维渐变，这在WPF中比较复杂
             // 所以使用一个简化的方法：创建多个水平渐变条
             DrawingGroup drawingGroup = new DrawingGroup();
             
             // 创建20行渐变（每行10像素高），减少计算量
             for (int y = 0; y < 20; y++)
             {
-                double val = 1.0 - (y / 20.0); // 垂直方向：亮�?1-0
+                double val = 1.0 - (y / 20.0); // 垂直方向：亮度 1-0
                 
                 // 水平方向：饱和度渐变
                 LinearGradientBrush rowBrush = new LinearGradientBrush
@@ -188,13 +188,13 @@ namespace DlcvTest.Controls
         
         private void UpdateUI()
         {
-            // 更新颜色指示器位�?
+            // 更新颜色指示器位置
             double x = _saturation * 199.0;
             double y = (1.0 - _value) * 199.0;
             Canvas.SetLeft(colorIndicator, x);
             Canvas.SetTop(colorIndicator, y);
             
-            // 更新色相指示器位�?
+            // 更新色相指示器位置
             double hueY = (_hue / 360.0) * 199.0;
             Canvas.SetTop(hueIndicator, hueY);
             
@@ -237,7 +237,7 @@ namespace DlcvTest.Controls
             
             if (_hue < 0) _hue += 360;
             
-            // 计算饱和�?
+            // 计算饱和度
             _saturation = max == 0 ? 0 : delta / max;
             
             // 计算亮度
@@ -288,7 +288,7 @@ namespace DlcvTest.Controls
         
         private void TxtHexColor_TextChanged(object sender, TextChangedEventArgs e)
         {
-            // 实时更新颜色（但不触发事件，避免循环�?
+            // 实时更新颜色（但不触发事件，避免循环）
         }
         
         private void TxtHexColor_LostFocus(object sender, RoutedEventArgs e)
@@ -307,7 +307,7 @@ namespace DlcvTest.Controls
             }
             catch
             {
-                // 无效颜色，恢复原�?
+                // 无效颜色，恢复原值
                 UpdateUI();
             }
         }

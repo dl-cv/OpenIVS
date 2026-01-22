@@ -18,6 +18,11 @@ namespace DlcvTest
         // 字段声明
         private dynamic model = null;
         private string _currentImagePath = null;
+
+        /// <summary>
+        /// 初始化标志位，防止 Loaded 事件中设置 checkbox 值时触发保存
+        /// </summary>
+        private bool _isInitializing = true;
         private static readonly HashSet<string> ImageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff"
@@ -167,7 +172,7 @@ namespace DlcvTest
         }
 
         /// <summary>
-        /// 批量预测：单张图片完成事件参数（预留外部存储/导出挂钩）�?
+        /// 批量预测：单张图片完成事件参数（预留外部存储/导出挂钩）。
         /// </summary>
         public sealed class BatchItemCompletedEventArgs : EventArgs
         {
@@ -199,7 +204,7 @@ namespace DlcvTest
         }
 
         /// <summary>
-        /// 批量预测：整批完成事件参数（预留外部存储/导出挂钩）�?
+        /// 批量预测：整批完成事件参数（预留外部存储/导出挂钩）。
         /// </summary>
         public sealed class BatchCompletedEventArgs : EventArgs
         {
@@ -262,7 +267,7 @@ namespace DlcvTest
         private bool _isUpdatingModelCombo = false;
         private string _loadedModelPath = null;
 
-        // 图片处理请求控制：保证“最新请求优先”，避免旧任务回写覆盖新�?
+        // 图片处理请求控制：保证"最新请求优先"，避免旧任务回写覆盖新图
         private int _imageProcessRequestId = 0;
         private int _imageProcessActiveRequestId = 0;
         private readonly object _imageProcessSync = new object();
@@ -271,10 +276,10 @@ namespace DlcvTest
         // 高风险入口（设置页面高频触发刷新）需要去抖，避免堆积大量后台任务
         private System.Windows.Threading.DispatcherTimer _refreshDebounceTimer = null;
 
-        // WPF 叠加显示：两�?Viewer 共享同一套缩�?平移状�?
+        // WPF 叠加显示：两个 Viewer 共享同一套缩放/平移状态
         private ImageViewState _wpfSharedViewState = null;
 
-        // 业务逻辑已拆分到多个 partial 文件�?
+        // 业务逻辑已拆分到多个 partial 文件。
     }
 
     public sealed class ProgressToWidthConverter : IMultiValueConverter

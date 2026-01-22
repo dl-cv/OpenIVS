@@ -17,7 +17,7 @@
             <ColumnDefinition Width="520"/>
         </Grid.ColumnDefinitions>
 
-        <!-- 左侧侧边�?-->
+        <!-- 左侧侧边栏 -->
         <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Background="White" BorderBrush="#E0E0E0" BorderThickness="0,0,1,0">
             <StackPanel Margin="0,20,0,0">
                 <TextBlock Text="设置(Setting)" FontSize="18" FontWeight="Bold" Margin="20,0,0,20" Foreground="#333"/>
@@ -31,11 +31,11 @@
             </StackPanel>
         </Border>
 
-        <!-- 中间和右侧内容区 - VisualParametersSettingsView 将占据两�?-->
+        <!-- 中间和右侧内容区 - VisualParametersSettingsView 将占据两列 -->
         <ContentControl x:Name="MainContent" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Margin="0"/>
 
-        <!-- 右下角：开始预测按�?-->
-        <Border Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Background="White" Padding="0,12,24,24">
+        <!-- 右下角：开始预测按钮 -->
+        <Border x:Name="btnStartBatchPredictPanel" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Background="White" Padding="0,12,24,24">
             <Grid>
                 <Button x:Name="btnStartBatchPredict" Content="开始预测" Height="40" HorizontalAlignment="Right"
                         Style="{StaticResource PurpleButtonStyle}" Click="btnStartBatchPredict_Click"/>

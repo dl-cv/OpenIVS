@@ -8,14 +8,14 @@
     <UserControl.Resources>
         <!-- 色相渐变画刷（用于色相滑块） -->
         <LinearGradientBrush x:Key="HueGradient" StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#FFFF0000" Offset="0.0"/>   <!-- �?-->
-            <GradientStop Color="#FFFF7F00" Offset="0.17"/>  <!-- �?-->
-            <GradientStop Color="#FFFFFF00" Offset="0.33"/>  <!-- �?-->
-            <GradientStop Color="#FF00FF00" Offset="0.5"/>   <!-- �?-->
-            <GradientStop Color="#FF00FFFF" Offset="0.67"/>  <!-- �?-->
-            <GradientStop Color="#FF0000FF" Offset="0.83"/>  <!-- �?-->
-            <GradientStop Color="#FF7F00FF" Offset="0.92"/>  <!-- �?-->
-            <GradientStop Color="#FFFF0000" Offset="1.0"/>   <!-- �?-->
+            <GradientStop Color="#FFFF0000" Offset="0.0"/>   <!-- 红 -->
+            <GradientStop Color="#FFFF7F00" Offset="0.17"/>  <!-- 橙 -->
+            <GradientStop Color="#FFFFFF00" Offset="0.33"/>  <!-- 黄 -->
+            <GradientStop Color="#FF00FF00" Offset="0.5"/>   <!-- 绿 -->
+            <GradientStop Color="#FF00FFFF" Offset="0.67"/>  <!-- 青 -->
+            <GradientStop Color="#FF0000FF" Offset="0.83"/>  <!-- 蓝 -->
+            <GradientStop Color="#FF7F00FF" Offset="0.92"/>  <!-- 紫 -->
+            <GradientStop Color="#FFFF0000" Offset="1.0"/>   <!-- 红 -->
         </LinearGradientBrush>
     </UserControl.Resources>
     
@@ -32,10 +32,10 @@
             <Border x:Name="colorArea" Grid.Column="0" Width="200" Height="200" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
                 <Grid>
                     <Canvas x:Name="colorAreaCanvas" MouseDown="ColorArea_MouseDown" MouseMove="ColorArea_MouseMove" MouseUp="ColorArea_MouseUp" Background="Transparent">
-                        <!-- 渐变背景由代码动态生�?-->
+                        <!-- 渐变背景由代码动态生成 -->
                         <Rectangle x:Name="colorAreaRect" Width="200" Height="200" Fill="Red"/>
                     </Canvas>
-                    <!-- 颜色指示�?-->
+                    <!-- 颜色指示器 -->
                     <Canvas x:Name="indicatorCanvas">
                         <Ellipse x:Name="colorIndicator" Width="12" Height="12" Stroke="White" StrokeThickness="2" 
                                  Fill="Transparent" IsHitTestVisible="False"/>

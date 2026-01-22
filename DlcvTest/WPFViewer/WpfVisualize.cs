@@ -12,7 +12,9 @@ using OpenCvSharp;
 namespace DlcvTest.WPFViewer
 {
     /// <summary>
-    /// 将推理结果转换为可绘制的叠加元素（WPF 侧使用）�?    /// 目标：替代“画�?Mat 再显示”的方式，提升交互缩放时文字可读性与性能�?    /// </summary>
+    /// 将推理结果转换为可绘制的叠加元素（WPF 侧使用）。
+    /// 目标：替代"画到 Mat 再显示"的方式，提升交互缩放时文字可读性与性能。
+    /// </summary>
     public static class WpfVisualize
     {
         public sealed class Options
@@ -126,7 +128,7 @@ namespace DlcvTest.WPFViewer
                 }
             }
 
-            // 分类任务（无 bbox）：用叠加文字显示“类�?+ 分数”，不做 OK/NG 判定
+            // 分类任务（无 bbox）：用叠加文字显示"类别 + 分数"，不做 OK/NG 判定
             if (!hasAnyBbox)
             {
                 // 取分数最高的一项
@@ -154,7 +156,7 @@ namespace DlcvTest.WPFViewer
                         IsOk = true,
                         IsRotated = false,
                         Polygon = null,
-                        // 用一个最�?bboxRect 作为锚点，把文字固定在左上角附近
+                        // 用一个最小 bboxRect 作为锚点，把文字固定在左上角附近
                         BboxRect = new System.Windows.Rect(0, 0, 1, 1),
                         MaskBitmap = null,
                         MaskContours = null,
@@ -182,7 +184,7 @@ namespace DlcvTest.WPFViewer
                 return r;
             }
 
-            // 检�?分割结果
+            // 检测/分割结果
             bool any = false;
             foreach (var det in passed)
             {
@@ -281,13 +283,16 @@ namespace DlcvTest.WPFViewer
                     item.LabelText = label;
                 }
 
-                // Mask / Contours（支持旋转：�?mask 轮廓�?bbox + angle 变换到图像坐标）
+                // Mask / Contours（支持旋转：将 mask 轮廓按 bbox + angle 变换到图像坐标）
                 if (det.WithMask && det.Mask != null && !det.Mask.Empty() && (opt.DisplayMask || opt.DisplayContours))
                 {
                     var localContours = ReadMaskContours(det.Mask, 0, 0);
                     if (localContours != null && localContours.Count > 0)
                     {
                         List<System.Windows.Point[]> worldContours;
+                        double maskW = det.Mask.Width;
+                        double maskH = det.Mask.Height;
+
                         if (withAngle && !double.IsNaN(angle) && !double.IsInfinity(angle))
                         {
                             double cx = b0;
@@ -298,9 +303,13 @@ namespace DlcvTest.WPFViewer
                         }
                         else
                         {
+                            // 非旋转框：将 mask 轮廓缩放并偏移到 bbox 位置
+                            // 处理 mask 尺寸与 bbox 尺寸不一致的情况（如语义分割 DVT 模型）
                             double x = b0;
                             double y = b1;
-                            worldContours = OffsetContours(localContours, x, y);
+                            double w = Math.Max(1.0, b2);
+                            double h = Math.Max(1.0, b3);
+                            worldContours = ScaleAndOffsetContours(localContours, x, y, w, h, maskW, maskH);
                         }
 
                         if (opt.DisplayMask)
@@ -347,7 +356,8 @@ namespace DlcvTest.WPFViewer
         }
 
         /// <summary>
-        /// �?labelme 标注文件中的 shapes 转为可叠加绘制元素（主要用于左侧“标注视图”）�?        /// </summary>
+        /// 将 labelme 标注文件中的 shapes 转为可叠加绘制元素（主要用于左侧"标注视图"）。
+        /// </summary>
         public static VisualizeResult BuildFromLabelmeShapes(JArray shapes, Options opt, Color strokeColor)
         {
             var r = new VisualizeResult
@@ -398,7 +408,7 @@ namespace DlcvTest.WPFViewer
                 }
                 else
                 {
-                    // 默认�?polygon 处理（兼�?shape_type 为空的情况）
+                    // 默认按 polygon 处理（兼容 shape_type 为空的情况）
                     if (points.Count < 3) continue;
 
                     var tmp = new System.Windows.Point[points.Count];
@@ -445,7 +455,7 @@ namespace DlcvTest.WPFViewer
 
                     LabelText = opt.DisplayText ? label : null,
 
-                    // 避免�?bbox fill 用在 polygon 上导致“填充外接矩形”的误解
+                    // 避免将 bbox fill 用在 polygon 上导致"填充外接矩形"的误解
                     FillEnabled = false,
                     FillAlpha = 0
                 };
@@ -550,6 +560,47 @@ namespace DlcvTest.WPFViewer
                 for (int i = 0; i < c.Length; i++)
                 {
                     pts[i] = new System.Windows.Point(c[i].X + ox, c[i].Y + oy);
+                }
+                result.Add(pts);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 将轮廓从 mask 坐标系变换到图像坐标系：先按比例缩放，再偏移到 bbox 位置。
+        /// 用于处理 mask 尺寸与 bbox 尺寸不一致的情况（如语义分割模型返回固定大小的 mask）。
+        /// </summary>
+        /// <param name="contours">mask 坐标系中的轮廓</param>
+        /// <param name="bboxX">bbox 左上角 X</param>
+        /// <param name="bboxY">bbox 左上角 Y</param>
+        /// <param name="bboxW">bbox 宽度</param>
+        /// <param name="bboxH">bbox 高度</param>
+        /// <param name="maskW">mask 宽度</param>
+        /// <param name="maskH">mask 高度</param>
+        /// <returns>图像坐标系中的轮廓</returns>
+        private static List<System.Windows.Point[]> ScaleAndOffsetContours(
+            List<System.Windows.Point[]> contours,
+            double bboxX, double bboxY,
+            double bboxW, double bboxH,
+            double maskW, double maskH)
+        {
+            var result = new List<System.Windows.Point[]>();
+            if (contours == null) return result;
+
+            // 计算缩放比例：bbox 尺寸 / mask 尺寸
+            double scaleX = (maskW > 0) ? (bboxW / maskW) : 1.0;
+            double scaleY = (maskH > 0) ? (bboxH / maskH) : 1.0;
+
+            foreach (var c in contours)
+            {
+                if (c == null || c.Length == 0) continue;
+                var pts = new System.Windows.Point[c.Length];
+                for (int i = 0; i < c.Length; i++)
+                {
+                    // 先缩放，再偏移
+                    double newX = c[i].X * scaleX + bboxX;
+                    double newY = c[i].Y * scaleY + bboxY;
+                    pts[i] = new System.Windows.Point(newX, newY);
                 }
                 result.Add(pts);
             }

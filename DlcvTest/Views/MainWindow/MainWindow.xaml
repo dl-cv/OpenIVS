@@ -270,7 +270,7 @@
             </Setter>
         </Style>
 
-        <!-- 4. 步进器按钮样�?-->
+        <!-- 4. 步进器按钮样式 -->
         <Style x:Key="StepperButtonStyle" TargetType="Button">
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -294,7 +294,7 @@
             </Setter>
         </Style>
 
-        <!-- 5. 透明棋盘格背�?(DrawingBrush) -->
+        <!-- 5. 透明棋盘格背景(DrawingBrush) -->
         <DrawingBrush x:Key="CheckerboardBrush" TileMode="Tile" Viewport="0,0,20,20" ViewportUnits="Absolute">
             <DrawingBrush.Drawing>
                 <DrawingGroup>
@@ -583,15 +583,16 @@
     <Border Background="White" CornerRadius="8" BorderBrush="#E0E0E0" BorderThickness="1">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="40"/> <!-- 顶部菜单�?-->
-                <RowDefinition Height="60"/> <!-- 数据路径�?-->
+                <RowDefinition Height="40"/> <!-- 顶部菜单栏 -->
+                <RowDefinition Height="60"/> <!-- 数据路径栏 -->
                 <RowDefinition Height="*"/>  <!-- 主内容区 -->
             </Grid.RowDefinitions>
 
-            <!-- 遮罩�?- 设置窗口打开时显�?-->
-            <Border x:Name="overlayMask" Grid.RowSpan="3" Background="#80000000" Visibility="Collapsed" Panel.ZIndex="1000"/>
+            <!-- 遮罩层 - 设置窗口打开时显示 -->
+            <Border x:Name="overlayMask" Grid.RowSpan="3" Background="#80000000" Visibility="Collapsed" Panel.ZIndex="1000"
+                    MouseLeftButtonDown="OverlayMask_MouseLeftButtonDown"/>
 
-            <!-- Row 0: 顶部菜单�?-->
+            <!-- Row 0: 顶部菜单栏 -->
             <Grid Grid.Row="0">
                 <Border Background="White" CornerRadius="8,8,0,0" BorderBrush="#EEE" BorderThickness="0,0,0,1"/>
                 <DockPanel LastChildFill="False" Margin="15,0,0,0">
@@ -603,12 +604,12 @@
                         <TextBlock Text="AI 测试平台" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" Foreground="#333"/>
                     </StackPanel>
 
-                    <!-- 菜单�?-->
+                    <!-- 菜单栏 -->
                     <Button Content="文件" Style="{StaticResource MenuButtonStyle}"/>
-                    <Button Content="可视化参数" Style="{StaticResource MenuButtonStyle}"/>
+                    <Button Content="可视化参数" Style="{StaticResource MenuButtonStyle}" Click="btnVisualParams_Click"/>
                     <Button Content="设置(Setting)" Style="{StaticResource MenuButtonStyle}" Click="btnSettings_Click"/>
                     
-                    <!-- 右上角窗口控制按�?-->
+                    <!-- 右上角窗口控制按钮 -->
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="0,0,5,0">
                         <Button Style="{StaticResource WindowMinimizeButtonStyle}" Click="btnMinimize_Click" ToolTip="最小化"/>
                         <Button Style="{StaticResource WindowMaximizeButtonStyle}" Click="btnMaximize_Click" ToolTip="最大化"/>
@@ -617,7 +618,7 @@
                 </DockPanel>
             </Grid>
 
-        <!-- Row 1: 数据路径�?-->
+        <!-- Row 1: 数据路径栏 -->
         <Grid Grid.Row="1" Background="White" Margin="15,0" TextElement.FontSize="14">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
@@ -626,13 +627,13 @@
             </Grid.ColumnDefinitions>
             <TextBlock Text="数据路径：" VerticalAlignment="Center" Foreground="#666" FontSize="16" Margin="0,0,10,0"/>
             
-            <!-- 路径输入�?-->
+            <!-- 路径输入框 -->
             <Border Grid.Column="1" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="36" VerticalAlignment="Center">
                 <TextBox x:Name="txtDataPath" Text="C:/Users/xu/Desktop/20250514测试/2-实例分割1/1-训练集" 
                          BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Padding="10,0" Foreground="#333" IsReadOnly="True"/>
             </Border>
 
-            <!-- 选择文件夹按�?-->
+            <!-- 选择文件夹按钮 -->
             <Button Grid.Column="2" Content="选择文件夹" Click="btnSelectFolder_Click" Style="{StaticResource PurpleButtonStyle}" Margin="10,0,0,0" Height="36" VerticalAlignment="Center" FontSize="16"/>
         </Grid>
 
@@ -640,10 +641,10 @@
         <Grid Grid.Row="2" Margin="15,0,15,15" TextElement.FontSize="14">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="260" MinWidth="200"/> <!-- 左侧列表 -->
-                <ColumnDefinition Width="6"/>                  <!-- 分隔�?�?�? -->
+                <ColumnDefinition Width="6"/>                  <!-- 分隔条1 -->
                 <ColumnDefinition Width="*" MinWidth="400"/>   <!-- 中间预览 -->
-                <ColumnDefinition Width="6"/>                  <!-- 分隔�?�?�? -->
-                <ColumnDefinition Width="320" MinWidth="240"/> <!-- 右侧属�?-->
+                <ColumnDefinition Width="6"/>                  <!-- 分隔条2 -->
+                <ColumnDefinition Width="320" MinWidth="240"/> <!-- 右侧属性栏 -->
             </Grid.ColumnDefinitions>
 
             <!-- Column 0: 左侧文件列表 -->
@@ -654,7 +655,7 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <!-- 搜索�?-->
+                <!-- 搜索框 -->
                 <Border Grid.Row="0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="32" Margin="0,0,0,10">
                     <Grid>
                         <TextBox x:Name="txtFolderSearch" BorderThickness="0" Background="Transparent" 
@@ -682,7 +683,7 @@
                 <Border Grid.Row="2" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Background="White">
                     <TreeView x:Name="tvFolders" BorderThickness="0" Background="Transparent" SelectedItemChanged="tvFolders_SelectedItemChanged">
                         <TreeView.Resources>
-                            <!-- 左侧树形列表：仅显示滑块，隐藏轨�?-->
+                            <!-- 左侧树形列表：仅显示滑块，隐藏轨道 -->
                             <Style TargetType="{x:Type ScrollBar}">
                                 <Setter Property="Width" Value="6"/>
                                 <Setter Property="MinWidth" Value="6"/>
@@ -738,7 +739,7 @@
                 </Border>
             </Grid>
 
-            <!-- Column 1: 分隔�?�?�? -->
+            <!-- Column 1: 分隔条1 -->
             <GridSplitter Grid.Column="1"
                           Width="6"
                           Background="Transparent"
@@ -749,12 +750,12 @@
                           ShowsPreview="False"
                           Cursor="SizeWE"/>
 
-            <!-- Column 2: 中间预览�?-->
+            <!-- Column 2: 中间预览区 -->
             <Border Grid.Column="2" Background="{StaticResource CheckerboardBrush}" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="1"/> <!-- 分割�?-->
+                        <ColumnDefinition Width="1"/> <!-- 分割线 -->
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
@@ -773,7 +774,7 @@
                         </Grid>
                     </Border>
                     
-                    <!-- 分割�?-->
+                    <!-- 分割线 -->
                     <Rectangle Grid.Column="1" x:Name="dividerLine" Fill="#999" Panel.ZIndex="10"/>
 
                     <!-- 预览 2 - 使用Border限制边界，防止超出分割线 -->
@@ -793,7 +794,7 @@
                 </Grid>
             </Border>
 
-            <!-- Column 3: 分隔�?�?�? -->
+            <!-- Column 3: 分隔条2 -->
             <GridSplitter Grid.Column="3"
                           Width="6"
                           Background="Transparent"
@@ -812,7 +813,7 @@
                     <RowDefinition Height="Auto"/> <!-- Bottom Button -->
                 </Grid.RowDefinitions>
 
-                <!-- 1. Tabs (灰色背景�? -->
+                <!-- 1. Tabs (灰色背景) -->
                 <Border Grid.Row="0" Height="35" Background="{StaticResource LightGrayBg}" CornerRadius="4" Padding="2" Margin="0,0,0,15">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -856,7 +857,7 @@
                                                   SelectionChanged="cmbModelName_SelectionChanged">
                                             <ComboBox.ItemContainerStyle>
                                                 <Style TargetType="ComboBoxItem">
-                                                    <!-- 显示完整路径，便于用户确�?-->
+                                                    <!-- 显示完整路径，便于用户确认 -->
                                                     <Setter Property="ToolTip" Value="{Binding ModelPath}"/>
                                                     <Style.Triggers>
                                                         <!-- 占位项仅用于未加载时显示，不出现在下拉列表中 -->
@@ -878,7 +879,7 @@
                         <!-- 预测参数 -->
                         <ToggleButton x:Name="btnPredictParamsGroup" IsChecked="True" Content="预测参数" Style="{StaticResource GroupToggleButtonStyle}" Margin="0,15,0,5"/>
                         <StackPanel Grid.IsSharedSizeScope="True" Margin="10,5,0,0" Visibility="{Binding IsChecked, ElementName=btnPredictParamsGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <!-- 置信�?-->
+                                <!-- 置信度 -->
                                 <Grid Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
@@ -892,7 +893,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0" Click="Stepper0_1Button_Click"/>
+                                            <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0" Click="Stepper0_1Button_Click"/>
                                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
                                             <TextBox x:Name="ConfidenceVal" Text="0.50" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333" LostFocus="ParameterTextBox_LostFocus" TextChanged="ParameterTextBox_TextChanged"/>
                                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
@@ -915,7 +916,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0" Click="Stepper0_1Button_Click"/>
+                                            <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0" Click="Stepper0_1Button_Click"/>
                                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
                                             <TextBox x:Name="IOUVal" Text="0.20" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333" LostFocus="ParameterTextBox_LostFocus" TextChanged="ParameterTextBox_TextChanged"/>
                                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
@@ -924,7 +925,7 @@
                                     </Border>
                                 </Grid>
 
-                                <!-- 自动标注复杂�?-->
+                                <!-- 自动标注复杂度 -->
                                 <Grid Margin="0,0,0,12" Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>

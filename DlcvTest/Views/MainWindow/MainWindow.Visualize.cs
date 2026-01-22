@@ -14,13 +14,13 @@ namespace DlcvTest
 {
     public partial class MainWindow
     {
-        // Mat �?Bitmap（用于保存文件）
+        // Mat 转 Bitmap（用于保存文件）
         private Bitmap MatToBitmap(Mat mat)
         {
             return OpenCvSharp.Extensions.BitmapConverter.ToBitmap(mat);
         }
 
-        // 统一的文本绘制辅助方�?
+        // 统一的文本绘制辅助方法
         private void DrawUnifiedTextOnMat(Graphics g, Font font, string text, float bboxX, float bboxY, float bboxWidth, float bboxHeight, System.Drawing.Color textColor)
         {
             SizeF textSize = g.MeasureString(text, font);
@@ -49,7 +49,7 @@ namespace DlcvTest
             }
             else
             {
-                // 正常：背景是半透明黑色，绿色文�?
+                // 正常：背景是半透明黑色，绿色文字
                 backgroundBrush = new SolidBrush(System.Drawing.Color.FromArgb(160, 0, 0, 0));
                 textBrush = new SolidBrush(textColor);
             }
@@ -71,8 +71,8 @@ namespace DlcvTest
 
             if (mat == null || mat.Empty() || detections == null || detections.Count == 0) return;
 
-            // 优化：使�?lockbits 方式直接操作像素数据，减少转换开销
-            // 但由于需�?GDI+ 绘制文本，仍需�?Mat->Bitmap 转换
+            // 优化：使用 lockbits 方式直接操作像素数据，减少转换开销
+            // 但由于需要 GDI+ 绘制文本，仍需要 Mat->Bitmap 转换
             // 优化点：复用 Font 对象，减少对象创建开销
             Bitmap bitmap = null;
             try
@@ -81,14 +81,14 @@ namespace DlcvTest
 
                 using (Graphics g = Graphics.FromImage(bitmap))
                 {
-                    // 绘制启用抗锯�?
+                    // 绘制启用抗锯齿
                     g.SmoothingMode = SmoothingMode.AntiAlias;
-                    // 文本抗锯�?
+                    // 文本抗锯齿
                     g.TextRenderingHint = TextRenderingHint.AntiAlias;
-                    // 高质量插�?
+                    // 高质量插值
                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
-                    // 复用 Font 对象，避免在循环中重复创�?
+                    // 复用 Font 对象，避免在循环中重复创建
                     float fontSize = (float)Settings.Default.FontSize;
                     using (System.Drawing.Font font = new System.Drawing.Font("Microsoft YaHei", fontSize, System.Drawing.FontStyle.Bold))
                     {
@@ -135,7 +135,7 @@ namespace DlcvTest
                                     float w = (float)bbox[2];
                                     float h = (float)bbox[3];
 
-                                    // 绘制bbox填充（在文本之前�?
+                                    // 绘制bbox填充（在文本之前）
                                     DrawBBoxFillOnMat(g, x, y, w, h);
 
                                     SizeF textSize = g.MeasureString(text, font);
@@ -145,14 +145,14 @@ namespace DlcvTest
                                     float textY;
                                     if (Settings.Default.ShowTextOutOfBboxPane)
                                     {
-                                        // 文本显示在bbox外（上方�?
+                                        // 文本显示在bbox外（上方）
                                         textX = x;
                                         textY = y - textSize.Height - 2;
                                         if (textY < 0) textY = y + 2;
                                     }
                                     else
                                     {
-                                        // 文本显示在bbox�?
+                                        // 文本显示在bbox内
                                         textX = x + 3;
                                         textY = y + (int)Math.Round(12 * (fontSize / 12.0f));
                                     }
@@ -166,7 +166,7 @@ namespace DlcvTest
                                     // 绘制半透明黑色背景
                                     g.FillRectangle(backgroundBrush, textX, textY, textSize.Width, textSize.Height);
 
-                                    // 绘制文字（使用设置的字体颜色�?
+                                    // 绘制文字（使用设置的字体颜色）
                                     g.DrawString(text, font, textBrush, textX, textY);
                                 }
                             }
@@ -174,26 +174,26 @@ namespace DlcvTest
                     }
                 }
 
-                // 优化：直接使�?ToMat 并复制，避免额外�?using �?
+                // 优化：直接使用 ToMat 并复制，避免额外的 using 块
                 var matFromBitmap = OpenCvSharp.Extensions.BitmapConverter.ToMat(bitmap);
                 matFromBitmap.CopyTo(mat);
                 matFromBitmap.Dispose();
             }
             finally
             {
-                // 确保 Bitmap 被释�?
+                // 确保 Bitmap 被释放
                 bitmap?.Dispose();
             }
         }
 
-        // 更新图片布局（根�?显示原图控件"设置�?
+        // 更新图片布局（根据"显示原图控件"设置）
         public void UpdateImageLayout()
         {
             try
             {
                 bool showOriginalPane = Settings.Default.ShowOriginalPane;
 
-                // 检�?UI 元素是否存在
+                // 检查 UI 元素是否存在
                 if (border1 == null || border2 == null || dividerLine == null)
                 {
                     System.Diagnostics.Debug.WriteLine("UpdateImageLayout: UI 元素未初始化");
@@ -211,7 +211,7 @@ namespace DlcvTest
                 }
                 else
                 {
-                    // 隐藏左侧和分割线，右侧占�?
+                    // 隐藏左侧和分割线，右侧占满
                     border1.Visibility = Visibility.Collapsed;
                     dividerLine.Visibility = Visibility.Collapsed;
                     border2.Visibility = Visibility.Visible;
@@ -219,12 +219,15 @@ namespace DlcvTest
                     border2.SetValue(Grid.ColumnSpanProperty, 3);
                 }
 
+                if (wpfViewer1?.Source != null) wpfViewer1.FitToView();
+                if (wpfViewer2?.Source != null) wpfViewer2.FitToView();
+
                 // 注意：ShowContours 设置用于控制可视化中的轮廓显示，不控制UI布局
-                // 如果需要控�?borderEdges 的显示，可以在这里添加逻辑
+                // 如果需要控制 borderEdges 的显示，可以在这里添加逻辑
             }
             catch (Exception ex)
             {
-                // 捕获异常，防止布局更新时崩�?
+                // 捕获异常，防止布局更新时崩溃
                 System.Diagnostics.Debug.WriteLine($"UpdateImageLayout 失败: {ex.Message}");
             }
         }
@@ -330,11 +333,11 @@ namespace DlcvTest
                     borderColor = System.Drawing.Color.Red;
                 }
 
-                // 根据BBoxFillOpacity计算alpha值（0-100映射�?-255�?
+                // 根据BBoxFillOpacity计算alpha值（0-100映射到0-255）
                 double opacity = Math.Max(0.0, Math.Min(100.0, Settings.Default.BBoxFillOpacity));
                 byte alpha = (byte)(opacity / 100.0 * 255);
 
-                // 使用框线颜色的RGB，但使用计算出的alpha�?
+                // 使用框线颜色的RGB，但使用计算出的alpha值
                 var fillColor = System.Drawing.Color.FromArgb(alpha, borderColor.R, borderColor.G, borderColor.B);
 
                 using (var fillBrush = new SolidBrush(fillColor))
@@ -344,7 +347,7 @@ namespace DlcvTest
             }
             catch
             {
-                // 填充绘制失败，静默处�?
+                // 填充绘制失败，静默处理
             }
         }
     }

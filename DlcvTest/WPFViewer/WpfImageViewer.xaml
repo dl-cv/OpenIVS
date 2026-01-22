@@ -10,34 +10,31 @@
              UseLayoutRounding="True"
              d:DesignHeight="300" d:DesignWidth="300">
     <Grid x:Name="Root" ClipToBounds="True" Background="Transparent">
-        <!-- TransformLayer：用户缩�?平移（与原来 imgPreview �?RenderTransform 同逻辑�?-->
-        <Grid x:Name="TransformLayer" RenderTransformOrigin="0,0">
-            <Grid.RenderTransform>
+        <!-- ContentLayer：内容层应用缩放/平移（避免影响视口计算） -->
+        <Canvas x:Name="ContentLayer" HorizontalAlignment="Left" VerticalAlignment="Top" RenderTransformOrigin="0,0">
+            <Canvas.RenderTransform>
                 <TransformGroup>
                     <ScaleTransform x:Name="ScaleTf" ScaleX="1" ScaleY="1"/>
                     <TranslateTransform x:Name="TransTf" X="0" Y="0"/>
                 </TransformGroup>
-            </Grid.RenderTransform>
+            </Canvas.RenderTransform>
 
-            <!-- FitBox：负�?Stretch=Uniform 自动铺满（等价于原来 Image �?Stretch=Uniform�?-->
-            <Viewbox x:Name="FitBox" Stretch="Uniform" StretchDirection="Both">
-                <!-- 内容尺寸 = 图像像素尺寸；Viewbox 会把它等比缩放到可视区域 -->
-                <Grid x:Name="ContentLayer" HorizontalAlignment="Left" VerticalAlignment="Top">
-                    <Image x:Name="Img"
-                           Stretch="Fill"
-                           RenderOptions.BitmapScalingMode="NearestNeighbor"
-                           SnapsToDevicePixels="True"
-                           IsHitTestVisible="False"/>
+            <!-- 内容尺寸 = 图像像素尺寸；由代码计算基础缩放并应用到 ContentLayer -->
+            <Image x:Name="Img"
+                   Canvas.Left="0" Canvas.Top="0"
+                   Stretch="Fill"
+                   RenderOptions.BitmapScalingMode="NearestNeighbor"
+                   SnapsToDevicePixels="True"
+                   IsHitTestVisible="False"/>
 
-                    <local:OverlayRenderer x:Name="Overlay"
-                                           IsHitTestVisible="False"
-                                           RenderOptions.EdgeMode="Aliased"
-                                           SnapsToDevicePixels="True"/>
-                </Grid>
-            </Viewbox>
-        </Grid>
+            <local:OverlayRenderer x:Name="Overlay"
+                                   Canvas.Left="0" Canvas.Top="0"
+                                   IsHitTestVisible="False"
+                                   RenderOptions.EdgeMode="Aliased"
+                                   SnapsToDevicePixels="True"/>
+        </Canvas>
 
-        <!-- HUD：不随缩放平移（固定屏幕位置�?-->
+        <!-- HUD：不随缩放平移（固定屏幕位置） -->
         <Border x:Name="HudBorder"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Top"

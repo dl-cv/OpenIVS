@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -51,6 +52,63 @@ namespace DlcvTest
             return cleaned;
         }
 
+        /// <summary>
+        /// 计算文件相对于基准目录的相对路径，并组合到输出目录，同时确保目标目录存在。
+        /// </summary>
+        /// <param name="basePath">输入根目录（用于计算相对路径）</param>
+        /// <param name="filePath">源文件完整路径</param>
+        /// <param name="outputDir">输出目录</param>
+        /// <param name="newExtension">可选的新扩展名（如 ".png"）</param>
+        /// <returns>完整的输出文件路径</returns>
+        private static string GetRelativeOutputPath(string basePath, string filePath, string outputDir, string newExtension = null)
+        {
+            // 计算相对路径（兼容 .NET Framework 4.7.2，手动实现）
+            string relativePath;
+            try
+            {
+                var baseUri = new Uri(EnsureTrailingSlash(Path.GetFullPath(basePath)));
+                var fileUri = new Uri(Path.GetFullPath(filePath));
+                var relativeUri = baseUri.MakeRelativeUri(fileUri);
+                relativePath = Uri.UnescapeDataString(relativeUri.ToString()).Replace('/', Path.DirectorySeparatorChar);
+            }
+            catch
+            {
+                // 如果计算相对路径失败，回退到只使用文件名
+                relativePath = Path.GetFileName(filePath);
+            }
+
+            // 组合输出路径
+            string outputPath = Path.Combine(outputDir, relativePath);
+
+            // 更改扩展名（如果需要）
+            if (!string.IsNullOrEmpty(newExtension))
+            {
+                outputPath = Path.ChangeExtension(outputPath, newExtension);
+            }
+
+            // 确保目录存在
+            string dir = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            return outputPath;
+        }
+
+        /// <summary>
+        /// 确保路径以目录分隔符结尾（用于 Uri 相对路径计算）
+        /// </summary>
+        private static string EnsureTrailingSlash(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return path;
+            if (!path.EndsWith(Path.DirectorySeparatorChar.ToString()) && !path.EndsWith(Path.AltDirectorySeparatorChar.ToString()))
+            {
+                return path + Path.DirectorySeparatorChar;
+            }
+            return path;
+        }
+
         private static string CreateUniqueDirectoryPath(string outputRoot, string baseName)
         {
             string basePath = Path.Combine(outputRoot, baseName);
@@ -85,7 +143,7 @@ namespace DlcvTest
             try
             {
                 var extensions = new[] { ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff" };
-                var files = Directory.GetFiles(folderPath)
+                var files = Directory.GetFiles(folderPath, "*", SearchOption.AllDirectories)
                     .Where(f => extensions.Contains(Path.GetExtension(f).ToLower()))
                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
                     .ToArray();
@@ -140,10 +198,9 @@ namespace DlcvTest
                 // 是否请求mask：显示mask 或 显示边缘 都需要 mask 数据
                 bool withMask = showMask || showContours;
 
-                // 构造推理参数
+                // 构造推理参数（与 DlcvDemo 保持一致，不传递 iou_threshold）
                 var inferenceParams = new JObject();
                 inferenceParams["threshold"] = (float)threshold;
-                inferenceParams["iou_threshold"] = (float)iouThreshold;
                 inferenceParams["with_mask"] = withMask;
                 EnsureDvpParamsMirror(inferenceParams);
 
@@ -219,6 +276,11 @@ namespace DlcvTest
                     return;
                 }
 
+                bool enableProfile = IsBatchProfileEnabled();
+                BatchProfileLogger profileLogger = enableProfile
+                    ? new BatchProfileLogger(Path.Combine(outDir, "batch_profile.csv"))
+                    : null;
+
                 // 批量导出选项：尽量复用，减少循环内创建
                 BuildWpfOptions(threshold, out var exportOptions, out double screenLineWidth, out double screenFontSize);
                 WpfVisualize.Options labelOptions = null;
@@ -269,6 +331,20 @@ namespace DlcvTest
                                 exported += 1;
                             }
 
+                            if (item.Profile != null)
+                            {
+                                item.Profile.RenderMs = renderResult?.RenderMs ?? 0.0;
+                                item.Profile.SaveMs = renderResult?.SaveMs ?? 0.0;
+                                item.Profile.Exported = renderResult?.Exported ?? false;
+                                item.Profile.OutputPath = renderResult?.OutputPath;
+                                item.Profile.Error = renderResult?.Error ?? item.Profile.Error;
+                                item.Profile.Status = renderResult == null
+                                    ? "render_fail"
+                                    : (renderResult.Exported ? "ok" : "export_fail");
+                                item.Profile.MarkDone();
+                                profileLogger?.Log(item.Profile);
+                            }
+
                             RaiseBatchItemCompleted(new BatchItemCompletedEventArgs(
                                 item.ImagePath,
                                 success: true,
@@ -287,6 +363,7 @@ namespace DlcvTest
                             {
                                 try
                                 {
+                                    BatchProfileItem profile = enableProfile ? BatchProfileItem.Start(imagePath) : null;
                                     if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
                                     {
                                         skipped += 1;
@@ -298,12 +375,21 @@ namespace DlcvTest
                                             inferenceParams: SafeCloneJObject(inferenceParams),
                                             exportedImagePath: null,
                                             result: null));
+                                        if (profile != null)
+                                        {
+                                            profile.Status = "missing";
+                                            profile.MarkDone();
+                                            profileLogger?.Log(profile);
+                                        }
                                         UpdateBatchProgress(processed + skipped + failed, files.Length);
                                         continue;
                                     }
 
+                                    var readSw = Stopwatch.StartNew();
                                     using (Mat original = Cv2.ImRead(imagePath))
                                     {
+                                        readSw.Stop();
+                                        if (profile != null) profile.ReadMs = readSw.Elapsed.TotalMilliseconds;
                                         if (original == null || original.Empty())
                                         {
                                             skipped += 1;
@@ -315,6 +401,12 @@ namespace DlcvTest
                                                 inferenceParams: SafeCloneJObject(inferenceParams),
                                                 exportedImagePath: null,
                                                 result: null));
+                                            if (profile != null)
+                                            {
+                                                profile.Status = "read_empty";
+                                                profile.MarkDone();
+                                                profileLogger?.Log(profile);
+                                            }
                                             UpdateBatchProgress(processed + skipped + failed, files.Length);
                                             continue;
                                         }
@@ -323,8 +415,11 @@ namespace DlcvTest
                                         {
                                             try
                                             {
-                                                string originalOutPath = Path.Combine(originalDir, Path.GetFileName(imagePath));
+                                                var copySw = Stopwatch.StartNew();
+                                                string originalOutPath = GetRelativeOutputPath(folderPath, imagePath, originalDir);
                                                 File.Copy(imagePath, originalOutPath, true);
+                                                copySw.Stop();
+                                                if (profile != null) profile.CopyMs = copySw.Elapsed.TotalMilliseconds;
                                             }
                                             catch
                                             {
@@ -355,6 +450,7 @@ namespace DlcvTest
                                             result = model.Infer(rgb, inferenceParams);
                                             sw.Stop();
                                             inferMs = sw.Elapsed.TotalMilliseconds;
+                                            if (profile != null) profile.InferMs = inferMs;
                                             LogInferEnd("batch", imagePath, result, inferMs);
                                             RunDvpHttpDiagnostic(rgb, inferenceParams, imagePath, "batch");
                                         }
@@ -363,6 +459,7 @@ namespace DlcvTest
                                         WpfVisualize.VisualizeResult labelOverlay = null;
                                         if (saveVisualization)
                                         {
+                                            var jsonSw = Stopwatch.StartNew();
                                             try
                                             {
                                                 string jsonPath = Path.ChangeExtension(imagePath, ".json");
@@ -393,10 +490,15 @@ namespace DlcvTest
                                                     labelOverlay = null;
                                                 }
                                             }
+                                            jsonSw.Stop();
+                                            if (profile != null) profile.JsonMs = jsonSw.Elapsed.TotalMilliseconds;
                                         }
 
                                         // GUI叠加导出：批量不预览，仅导出渲染结果（渲染线程执行）
+                                        var baseSw = Stopwatch.StartNew();
                                         var baseImage = MatBitmapSource.ToBitmapSource(original);
+                                        baseSw.Stop();
+                                        if (profile != null) profile.BaseImageMs = baseSw.Elapsed.TotalMilliseconds;
                                         var renderTask = renderWorker.Enqueue(new BatchRenderJob
                                         {
                                             BaseImage = baseImage,
@@ -408,7 +510,8 @@ namespace DlcvTest
                                             LabelOptions = labelOptions,
                                             SaveVisualization = saveVisualization,
                                             OutputDir = resultDir,
-                                            ImagePath = imagePath
+                                            ImagePath = imagePath,
+                                            BaseFolderPath = folderPath
                                         });
 
                                         pending.Enqueue(new PendingRender(
@@ -416,7 +519,8 @@ namespace DlcvTest
                                             renderTask,
                                             SafeCloneJObject(inferenceParams),
                                             inferMs,
-                                            result));
+                                            result,
+                                            profile));
 
                                         if (pending.Count >= maxInFlight)
                                         {
@@ -438,6 +542,14 @@ namespace DlcvTest
                                         inferenceParams: SafeCloneJObject(inferenceParams),
                                         exportedImagePath: null,
                                         result: null));
+                                    if (enableProfile)
+                                    {
+                                        var profile = BatchProfileItem.Start(imagePath);
+                                        profile.Status = "exception";
+                                        profile.Error = ex.Message;
+                                        profile.MarkDone();
+                                        profileLogger?.Log(profile);
+                                    }
                                     UpdateBatchProgress(processed + skipped + failed, files.Length);
                                 }
                             }
@@ -497,6 +609,147 @@ namespace DlcvTest
             }
         }
 
+        /// <summary>
+        /// 代码开关：是否导出批量预测的 CSV 性能日志（batch_profile.csv）。
+        /// 设置为 false 可禁用 CSV 导出。
+        /// </summary>
+        private const bool EnableBatchProfileCsv = false;
+
+        private static bool IsBatchProfileEnabled()
+        {
+            // 代码开关优先：如果代码中禁用，则直接返回 false
+            if (!EnableBatchProfileCsv) return false;
+
+            try
+            {
+                var v = Environment.GetEnvironmentVariable("DLCV_BATCH_PROFILE");
+                if (string.IsNullOrWhiteSpace(v)) return true;
+                v = v.Trim();
+                return !string.Equals(v, "0", StringComparison.OrdinalIgnoreCase) &&
+                       !string.Equals(v, "false", StringComparison.OrdinalIgnoreCase) &&
+                       !string.Equals(v, "no", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private sealed class BatchProfileItem
+        {
+            public string ImagePath { get; }
+            public string Status { get; set; }
+            public double ReadMs { get; set; }
+            public double CopyMs { get; set; }
+            public double InferMs { get; set; }
+            public double JsonMs { get; set; }
+            public double BaseImageMs { get; set; }
+            public double RenderMs { get; set; }
+            public double SaveMs { get; set; }
+            public double TotalMs { get; private set; }
+            public double QueueWaitMs { get; private set; }
+            public bool Exported { get; set; }
+            public string OutputPath { get; set; }
+            public string Error { get; set; }
+            private long _totalStartTicks;
+
+            private BatchProfileItem(string imagePath)
+            {
+                ImagePath = imagePath ?? string.Empty;
+                _totalStartTicks = Stopwatch.GetTimestamp();
+            }
+
+            public static BatchProfileItem Start(string imagePath)
+            {
+                return new BatchProfileItem(imagePath);
+            }
+
+            public void MarkDone()
+            {
+                long end = Stopwatch.GetTimestamp();
+                TotalMs = (end - _totalStartTicks) * 1000.0 / Stopwatch.Frequency;
+                double accounted = ReadMs + CopyMs + InferMs + JsonMs + BaseImageMs + RenderMs + SaveMs;
+                QueueWaitMs = Math.Max(0.0, TotalMs - accounted);
+                if (string.IsNullOrWhiteSpace(Status)) Status = "ok";
+            }
+        }
+
+        private sealed class BatchProfileLogger
+        {
+            private readonly string _path;
+            private readonly object _lock = new object();
+
+            public BatchProfileLogger(string path)
+            {
+                _path = path;
+                try
+                {
+                    var dir = Path.GetDirectoryName(_path);
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+                }
+                catch { }
+
+                if (!File.Exists(_path))
+                {
+                    var header = string.Join(",",
+                        "ImagePath",
+                        "Status",
+                        "ReadMs",
+                        "CopyMs",
+                        "InferMs",
+                        "JsonMs",
+                        "BaseImageMs",
+                        "RenderMs",
+                        "SaveMs",
+                        "TotalMs",
+                        "QueueWaitMs",
+                        "Exported",
+                        "OutputPath",
+                        "Error");
+                    File.WriteAllText(_path, header + Environment.NewLine, Encoding.UTF8);
+                }
+            }
+
+            public void Log(BatchProfileItem item)
+            {
+                if (item == null) return;
+                string line = string.Join(",",
+                    Escape(item.ImagePath),
+                    Escape(item.Status),
+                    FormatNum(item.ReadMs),
+                    FormatNum(item.CopyMs),
+                    FormatNum(item.InferMs),
+                    FormatNum(item.JsonMs),
+                    FormatNum(item.BaseImageMs),
+                    FormatNum(item.RenderMs),
+                    FormatNum(item.SaveMs),
+                    FormatNum(item.TotalMs),
+                    FormatNum(item.QueueWaitMs),
+                    item.Exported ? "1" : "0",
+                    Escape(item.OutputPath),
+                    Escape(item.Error));
+
+                lock (_lock)
+                {
+                    File.AppendAllText(_path, line + Environment.NewLine, Encoding.UTF8);
+                }
+            }
+
+            private static string FormatNum(double value)
+            {
+                return value.ToString("F3", CultureInfo.InvariantCulture);
+            }
+
+            private static string Escape(string value)
+            {
+                if (string.IsNullOrEmpty(value)) return "\"\"";
+                return "\"" + value.Replace("\"", "\"\"") + "\"";
+            }
+        }
+
         private sealed class PendingRender
         {
             public string ImagePath { get; }
@@ -504,14 +757,16 @@ namespace DlcvTest
             public JObject InferenceParams { get; }
             public double InferMs { get; }
             public Utils.CSharpResult Result { get; }
+            public BatchProfileItem Profile { get; }
 
-            public PendingRender(string imagePath, Task<BatchRenderResult> renderTask, JObject inferenceParams, double inferMs, Utils.CSharpResult result)
+            public PendingRender(string imagePath, Task<BatchRenderResult> renderTask, JObject inferenceParams, double inferMs, Utils.CSharpResult result, BatchProfileItem profile)
             {
                 ImagePath = imagePath;
                 RenderTask = renderTask;
                 InferenceParams = inferenceParams;
                 InferMs = inferMs;
                 Result = result;
+                Profile = profile;
             }
         }
 
@@ -527,6 +782,10 @@ namespace DlcvTest
             public bool SaveVisualization { get; set; }
             public string OutputDir { get; set; }
             public string ImagePath { get; set; }
+            /// <summary>
+            /// 输入根目录路径，用于计算相对路径以保留目录结构
+            /// </summary>
+            public string BaseFolderPath { get; set; }
             public TaskCompletionSource<BatchRenderResult> Completion { get; set; }
         }
 
@@ -534,11 +793,17 @@ namespace DlcvTest
         {
             public string OutputPath { get; }
             public bool Exported { get; }
+            public double RenderMs { get; }
+            public double SaveMs { get; }
+            public string Error { get; }
 
-            public BatchRenderResult(string outputPath, bool exported)
+            public BatchRenderResult(string outputPath, bool exported, double renderMs, double saveMs, string error = null)
             {
                 OutputPath = outputPath;
                 Exported = exported;
+                RenderMs = renderMs;
+                SaveMs = saveMs;
+                Error = error;
             }
         }
 
@@ -587,7 +852,7 @@ namespace DlcvTest
                     }
                     catch
                     {
-                        result = new BatchRenderResult(null, false);
+                        result = new BatchRenderResult(null, false, 0.0, 0.0, "render_exception");
                     }
 
                     try { job.Completion.TrySetResult(result); } catch { }
@@ -596,50 +861,55 @@ namespace DlcvTest
 
             private static BatchRenderResult Execute(BatchRenderJob job)
             {
-                if (job == null || job.BaseImage == null) return new BatchRenderResult(null, false);
+            if (job == null || job.BaseImage == null) return new BatchRenderResult(null, false, 0.0, 0.0, "invalid_job");
 
                 BitmapSource exportBitmap = null;
                 BitmapSource labelBitmap = null;
+            double renderMs = 0.0;
+            double saveMs = 0.0;
 
+            var renderSw = Stopwatch.StartNew();
+            try
+            {
+                exportBitmap = GuiOverlayExporter.Render(
+                    job.BaseImage,
+                    job.Result,
+                    job.ExportOptions,
+                    job.ScreenLineWidth,
+                    job.ScreenFontSize,
+                    GuiOverlayExporter.ExportRenderMode.HardEdge);
+            }
+            catch
+            {
+                exportBitmap = null;
+            }
+
+            if (job.SaveVisualization)
+            {
                 try
                 {
-                    exportBitmap = GuiOverlayExporter.Render(
-                        job.BaseImage,
-                        job.Result,
-                        job.ExportOptions,
-                        job.ScreenLineWidth,
-                        job.ScreenFontSize,
-                        GuiOverlayExporter.ExportRenderMode.HardEdge);
-                }
-                catch
-                {
-                    exportBitmap = null;
-                }
-
-                if (job.SaveVisualization)
-                {
-                    try
+                    if (job.LabelOverlay != null && job.LabelOverlay.Items != null && job.LabelOverlay.Items.Count > 0)
                     {
-                        if (job.LabelOverlay != null && job.LabelOverlay.Items != null && job.LabelOverlay.Items.Count > 0)
-                        {
-                            labelBitmap = GuiOverlayExporter.RenderWithVisualizeResult(
-                                job.BaseImage,
-                                job.LabelOverlay,
-                                job.LabelOptions,
-                                job.ScreenLineWidth,
-                                job.ScreenFontSize,
-                                GuiOverlayExporter.ExportRenderMode.HardEdge);
-                        }
-                        else
-                        {
-                            labelBitmap = job.BaseImage;
-                        }
+                        labelBitmap = GuiOverlayExporter.RenderWithVisualizeResult(
+                            job.BaseImage,
+                            job.LabelOverlay,
+                            job.LabelOptions,
+                            job.ScreenLineWidth,
+                            job.ScreenFontSize,
+                            GuiOverlayExporter.ExportRenderMode.HardEdge);
                     }
-                    catch
+                    else
                     {
                         labelBitmap = job.BaseImage;
                     }
                 }
+                catch
+                {
+                    labelBitmap = job.BaseImage;
+                }
+            }
+            renderSw.Stop();
+            renderMs = renderSw.Elapsed.TotalMilliseconds;
 
                 string outPath = null;
                 bool exported = false;
@@ -647,9 +917,10 @@ namespace DlcvTest
                 {
                     try
                     {
-                        string fname = Path.GetFileNameWithoutExtension(job.ImagePath) + ".png";
-                        outPath = Path.Combine(job.OutputDir, fname);
+                        // 使用相对路径保留目录结构
+                        outPath = GetRelativeOutputPath(job.BaseFolderPath, job.ImagePath, job.OutputDir, ".png");
 
+                    var saveSw = Stopwatch.StartNew();
                         if (job.SaveVisualization)
                         {
                             if (labelBitmap == null) labelBitmap = job.BaseImage;
@@ -660,6 +931,8 @@ namespace DlcvTest
                         {
                             GuiOverlayExporter.SavePng(exportBitmap, outPath);
                         }
+                    saveSw.Stop();
+                    saveMs = saveSw.Elapsed.TotalMilliseconds;
 
                         exported = true;
                     }
@@ -670,7 +943,8 @@ namespace DlcvTest
                     }
                 }
 
-                return new BatchRenderResult(outPath, exported);
+            string error = exported ? null : "export_failed";
+            return new BatchRenderResult(outPath, exported, renderMs, saveMs, error);
             }
 
             public void Dispose()
@@ -1013,27 +1287,13 @@ namespace DlcvTest
                             if (!IsImageProcessRequestCurrent(requestId, imagePath, token)) return;
 
                             // 使用 Model.Infer 进行推理（返回 CSharpResult，与 DLCVDEMO 一致）
-                            // 构造推理参数
+                            // 构造推理参数（与 DlcvDemo 保持一致，不传递 iou_threshold）
                             JObject inferenceParams = new JObject();
                             inferenceParams["threshold"] = (float)threshold;
-                            // iou_threshold 会影响 NMS/去重行为；为安全起见做默认与范围限制
-                            double iouFinal = iouThreshold;
-                            if (double.IsNaN(iouFinal) || double.IsInfinity(iouFinal))
-                            {
-                                iouFinal = 0.2;
-                                System.Diagnostics.Debug.WriteLine($"[推理前] iou_threshold 不是 NaN/Infinity，回退默认值 {iouFinal:F3}");
-                            }
-                            double iouClamped = Clamp01(iouFinal);
-                            if (Math.Abs(iouClamped - iouFinal) > 1e-12)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"[推理前] iou_threshold 越界，已 clamp 到 [0,1]：raw={iouFinal:F6}, clamped={iouClamped:F6}");
-                            }
-                            iouFinal = iouClamped;
-                            inferenceParams["iou_threshold"] = (float)iouFinal;
                             inferenceParams["with_mask"] = true;
                             EnsureDvpParamsMirror(inferenceParams);
 
-                            System.Diagnostics.Debug.WriteLine($"[模型推理] 开始推理，参数: threshold={(float)threshold}, iou_threshold={(float)iouFinal}, with_mask=true");
+                            System.Diagnostics.Debug.WriteLine($"[模型推理] 开始推理，参数: threshold={(float)threshold}, with_mask=true");
 
                             // 执行推理
                             Utils.CSharpResult result;

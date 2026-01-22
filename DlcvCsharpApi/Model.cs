@@ -912,8 +912,16 @@ namespace dlcv_infer_csharp
                 // 检查是否返回错误
                 if (resultObject["code"] != null && resultObject["code"].Value<int>() != 0)
                 {
+                    // 打印详细错误信息便于排查
+                    Console.WriteLine("=== DVT 推理失败 ===");
+                    Console.WriteLine("请求参数: " + jsonStr);
+                    Console.WriteLine("返回结果: " + resultJson);
+                    Console.WriteLine("错误码: " + resultObject["code"]);
+                    Console.WriteLine("错误信息: " + resultObject["message"]);
+                    
                     DllLoader.Instance.dlcv_free_model_result(resultPtr);
-                    throw new Exception("Inference failed: " + resultObject["message"]);
+                    throw new Exception("Inference failed: " + resultObject["message"] + 
+                        "\n请求参数: " + jsonStr);
                 }
 
                 // 不在这里释放结果，而是返回结果对象和指针

@@ -10,7 +10,7 @@ namespace DlcvTest
 
         public bool StartBatchPredictRequested { get; private set; }
 
-        public SettingsWindow()
+        public SettingsWindow(bool openVisualParams = false)
         {
             InitializeComponent();
             
@@ -20,6 +20,14 @@ namespace DlcvTest
 
             // 默认显示标准视图
             MainContent.Content = _standardView;
+
+            if (openVisualParams)
+            {
+                btnVisualParams.IsChecked = true;
+                _visualParamsView.RefreshSettings();
+                MainContent.Content = _visualParamsView;
+                btnStartBatchPredictPanel.Visibility = Visibility.Collapsed;
+            }
         }
 
         private void SidebarButton_Click(object sender, RoutedEventArgs e)
@@ -27,12 +35,14 @@ namespace DlcvTest
             if (sender == btnStandard)
             {
                 MainContent.Content = _standardView;
+                btnStartBatchPredictPanel.Visibility = Visibility.Visible;
             }
             else if (sender == btnVisualParams)
             {
                 // 切换到可视化参数视图时，刷新设置
                 _visualParamsView.RefreshSettings();
                 MainContent.Content = _visualParamsView;
+                btnStartBatchPredictPanel.Visibility = Visibility.Collapsed;
             }
         }
 

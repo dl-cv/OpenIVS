@@ -93,6 +93,7 @@ namespace DlcvModules
                     if (a23 != null && a23.Count >= 6)
                     {
                         var m = new double[] { a23[0].Value<double>(), a23[1].Value<double>(), a23[2].Value<double>(), a23[3].Value<double>(), a23[4].Value<double>(), a23[5].Value<double>() };
+                        // 逆变换
                         inv2x3 = TransformationState.Inverse2x3(m);
                     }
                 }

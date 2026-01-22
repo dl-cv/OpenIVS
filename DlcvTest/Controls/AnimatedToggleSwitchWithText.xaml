@@ -11,39 +11,9 @@
             <Border.Background>
                 <SolidColorBrush x:Name="TrackBrush" Color="#E9E9EA"/>
             </Border.Background>
-            
-            <!-- 文字�?-->
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                
-                                    <!-- ON 文字 -->
-                                    <TextBlock x:Name="txtYes" Grid.Column="0" 
-                                              Text="ON" 
-                                              FontSize="9" 
-                                              FontWeight="Bold"
-                                              Foreground="White"
-                                              HorizontalAlignment="Center" 
-                                              VerticalAlignment="Center"
-                                              Opacity="0"
-                                              Margin="0,0,8,0"/>
-                                    
-                                    <!-- OFF 文字 -->
-                                    <TextBlock x:Name="txtNo" Grid.Column="1" 
-                                              Text="OFF" 
-                                              FontSize="9" 
-                                              FontWeight="Bold"
-                                              Foreground="#999"
-                                              HorizontalAlignment="Center" 
-                                              VerticalAlignment="Center"
-                                              Opacity="1"
-                                              Margin="8,0,0,0"/>
-            </Grid>
         </Border>
         
-        <!-- 滑块（使�?Canvas 以便精确控制位置�?-->
+        <!-- 滑块（使用 Canvas 以便精确控制位置） -->
         <Canvas>
             <Border x:Name="Thumb" Canvas.Left="2" Canvas.Top="2" 
                     Width="28" Height="28" CornerRadius="14" Background="White">

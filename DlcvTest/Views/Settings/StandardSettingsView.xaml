@@ -35,7 +35,7 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
+                            <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
                             <TextBox Text="2" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
@@ -91,12 +91,22 @@
                                 <TextBox x:Name="txtOutputDir" BorderThickness="0" VerticalContentAlignment="Center" Padding="5,0,25,0" Foreground="#333" LostFocus="TxtOutputDir_LostFocus"/>
                                 <!-- 清除按钮 (x) -->
                                 <Button HorizontalAlignment="Right" Margin="0,0,5,0" Width="20" Height="20" Background="Transparent" BorderThickness="0" Cursor="Hand" Click="BtnClearOutputDir_Click">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Text, ElementName=txtOutputDir}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
                                             <Border Background="Transparent">
                                                 <Grid>
-                                                    <Ellipse Fill="#CCC" Width="14" Height="14"/>
-                                                    <Path Data="M4,4 L10,10 M10,4 L4,10" Stroke="White" StrokeThickness="1.5" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                                    <Ellipse Fill="White" Stroke="#333" StrokeThickness="1" Width="14" Height="14"/>
+                                                    <Path Data="M4,4 L10,10 M10,4 L4,10" Stroke="#333" StrokeThickness="1" Width="14" Height="14" Stretch="None"/>
                                                 </Grid>
                                             </Border>
                                         </ControlTemplate>
@@ -228,7 +238,7 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
+                                <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
                                 <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
                                 <TextBox Text="5" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
                                 <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
@@ -282,7 +292,7 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
+                                        <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
                                         <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
                                         <TextBox Text="224" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
                                         <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
@@ -291,7 +301,7 @@
                                 </Border>
                                 
                                 <!-- 高度输入 -->
-                                <TextBlock Text="高度" VerticalAlignment="Center" Foreground="#666" Margin="10,0,5,0"/>
+                                <TextBlock Text="高度" VerticalAlignment="Center" Foreground="#666" Margin="16,0,5,0"/>
                                 <Border BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="30" Width="120" Background="White">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
@@ -299,7 +309,7 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <Button Content="—" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
+                                        <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
                                         <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
                                         <TextBox Text="224" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
                                         <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>

@@ -8,7 +8,8 @@ namespace DlcvTest.WPFViewer
 {
     /// <summary>
     /// 叠加层渲染器：在图像坐标系中绘制 bbox/旋转框/mask/文字等。
-    /// 注意：外层会对 WorldLayer 做缩放/平移，因此这里的线宽/字号需要用 1/scale 抵消缩放，保证屏幕可读性。
+    /// 注意：如果 ViewScale 传入的是“总缩放”，这里会用 1/scale 抵消缩放以保持屏幕可读性；
+    /// 若 ViewScale 固定为 1，则线宽/字号会随图像一起缩放（Python/Qt 风格）。
     /// </summary>
     public sealed class OverlayRenderer : FrameworkElement
     {

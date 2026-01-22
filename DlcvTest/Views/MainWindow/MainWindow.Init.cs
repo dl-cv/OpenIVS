@@ -28,12 +28,12 @@ namespace DlcvTest
                 if (wpfViewer1 != null)
                 {
                     wpfViewer1.ViewState = _wpfSharedViewState;
-                    wpfViewer1.ShowStatusText = false; // 左侧默认不显�?OK/NG
+                    wpfViewer1.ShowStatusText = false; // 左侧默认不显示 OK/NG
                 }
                 if (wpfViewer2 != null)
                 {
                     wpfViewer2.ViewState = _wpfSharedViewState;
-                    wpfViewer2.ShowStatusText = false; // 不显�?OK/NG/No Result
+                    wpfViewer2.ShowStatusText = false; // 不显示 OK/NG/No Result
                 }
             }
             catch
@@ -229,50 +229,70 @@ namespace DlcvTest
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            // 如果设置了自动加载数据路径，则加载
-            string savedDataPath = null;
-            try { savedDataPath = Properties.Settings.Default.SavedDataPath; } catch { savedDataPath = null; }
-
-            if (!string.IsNullOrEmpty(savedDataPath))
+            System.Diagnostics.Debug.WriteLine($"[MainWindow_Loaded] 开始, _isInitializing 将设为 true");
+            
+            // 同步初始化部分：设置 checkbox 初始值，完成后立即解除初始化锁
+            _isInitializing = true;
+            try
             {
-                txtDataPath.Text = savedDataPath;
+                // 如果设置了自动加载数据路径，则加载
+                string savedDataPath = null;
+                try { savedDataPath = Properties.Settings.Default.SavedDataPath; } catch { savedDataPath = null; }
+
+                if (!string.IsNullOrEmpty(savedDataPath))
+                {
+                    txtDataPath.Text = savedDataPath;
+                }
+                else
+                {
+                    txtDataPath.Text = "";
+                }
+
+                if (Properties.Settings.Default.AutoLoadDataPath &&
+                    !string.IsNullOrEmpty(savedDataPath) &&
+                    Directory.Exists(savedDataPath))
+                {
+                    LoadFolderTree(savedDataPath);
+                }
+
+                // 设置 checkbox 初始值（必须在 await 之前完成）
+                try
+                {
+                    System.Diagnostics.Debug.WriteLine($"[MainWindow_Loaded] 设置 checkbox 初始值, ShowMaskPane={Settings.Default.ShowMaskPane}, ShowContours={Settings.Default.ShowContours}");
+                    
+                    if (chkShowMaskPane != null)
+                    {
+                        chkShowMaskPane.IsChecked = Settings.Default.ShowMaskPane;
+                    }
+
+                    if (chkShowEdgesPane != null)
+                    {
+                        chkShowEdgesPane.IsChecked = Settings.Default.ShowContours;
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
             }
-            else
+            finally
             {
-                txtDataPath.Text = "";
+                // 立即解除初始化锁，确保用户后续操作可以正常保存
+                _isInitializing = false;
+                System.Diagnostics.Debug.WriteLine($"[MainWindow_Loaded] finally 块执行, _isInitializing 已设为 false");
             }
 
-            if (Properties.Settings.Default.AutoLoadDataPath &&
-                !string.IsNullOrEmpty(savedDataPath) &&
-                Directory.Exists(savedDataPath))
-            {
-                LoadFolderTree(savedDataPath);
-            }
+            System.Diagnostics.Debug.WriteLine($"[MainWindow_Loaded] 同步初始化完成, _isInitializing={_isInitializing}, 开始异步加载模型");
 
-            // 如果设置了自动加载模型，则加载
+            // 异步加载模型（在 _isInitializing = false 之后进行，不影响用户操作）
             if (Properties.Settings.Default.AutoLoadModel &&
                 !string.IsNullOrEmpty(Properties.Settings.Default.SavedModelPath) &&
                 File.Exists(Properties.Settings.Default.SavedModelPath))
             {
                 await LoadSavedModel(Properties.Settings.Default.SavedModelPath);
             }
-
-            try
-            {
-                if (chkShowMaskPane != null)
-                {
-                    chkShowMaskPane.IsChecked = Settings.Default.ShowMaskPane;
-                }
-
-                if (chkShowEdgesPane != null)
-                {
-                    chkShowEdgesPane.IsChecked = Settings.Default.ShowContours;
-                }
-            }
-            catch
-            {
-                // ignore
-            }
+            
+            System.Diagnostics.Debug.WriteLine($"[MainWindow_Loaded] 完成");
         }
 
         private async Task LoadSavedModel(string modelPath)

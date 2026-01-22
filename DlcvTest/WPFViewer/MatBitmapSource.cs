@@ -7,8 +7,8 @@ using OpenCvSharp;
 namespace DlcvTest.WPFViewer
 {
     /// <summary>
-    /// Mat �?BitmapSource 的转换工具（net472/WPF）�?
-    /// 说明：为了线程安全与生命周期安全，这里使�?WritePixels 进行一次性拷贝，并对结果 Freeze()�?
+    /// Mat 转 BitmapSource 的转换工具（net472/WPF）。
+    /// 说明：为了线程安全与生命周期安全，这里使用 WritePixels 进行一次性拷贝，并对结果 Freeze()。
     /// </summary>
     public static class MatBitmapSource
     {
@@ -16,7 +16,7 @@ namespace DlcvTest.WPFViewer
         {
             if (mat == null || mat.Empty()) return null;
 
-            // 仅支持常见格式；其他格式尽量转为 8UC3�?
+            // 仅支持常见格式；其他格式尽量转为 8UC3。
             Mat src = mat;
             PixelFormat pf;
             if (mat.Type() == MatType.CV_8UC1)
@@ -33,7 +33,7 @@ namespace DlcvTest.WPFViewer
             }
             else
             {
-                // 尽量转换�?8UC3（BGR）�?
+                // 尽量转换为 8UC3（BGR）。
                 src = new Mat();
                 try
                 {

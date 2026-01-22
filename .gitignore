@@ -414,3 +414,10 @@ FodyWeavers.xsd
 .remember/memory/self.md
 .remember/memory/project.md
 MiniAreaDemo/ExternalCallExample.cs
+
+# DlcvTest specific
+DlcvTest/bin/
+DlcvTest/obj/
+DlcvTest/bin_build/
+DlcvTest/_legacy/
+DlcvTest/*.bak

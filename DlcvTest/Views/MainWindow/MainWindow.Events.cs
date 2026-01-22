@@ -13,13 +13,15 @@ namespace DlcvTest
 {
     public partial class MainWindow
     {
+        // 当前打开的设置窗口引用，用于点击遮罩层时关闭
+        private SettingsWindow _currentSettingsWindow = null;
         // 步进器按钮点击事件（用于调整置信度和IOU阈值）
         private void Stepper0_1Button_Click(object sender, RoutedEventArgs e)
         {
             var btn = sender as Button;
             if (btn == null) return;
 
-            // 找到对应的TextBox（通过按钮的父容器�?
+            // 找到对应的TextBox（通过按钮的父容器）
             var grid = btn.Parent as Grid;
             if (grid == null) return;
 
@@ -35,7 +37,7 @@ namespace DlcvTest
 
             if (textBox == null) return;
 
-            // 解析当前�?
+            // 解析当前值
             if (double.TryParse(textBox.Text, out double value))
             {
                 if (btn.Content.ToString() == "+")
@@ -153,38 +155,59 @@ namespace DlcvTest
         }
 
         // 设置工具栏按钮
-        private async void btnSettings_Click(object sender, RoutedEventArgs e)
+        private void btnSettings_Click(object sender, RoutedEventArgs e)
         {
-            bool shouldStartBatchPredict = ShowSettingsDialogAndGetStartRequest();
-            if (shouldStartBatchPredict)
-            {
-                await RunBatchInferJsonAsync();
-            }
+            ShowSettingsWindow();
         }
 
-        private bool ShowSettingsDialogAndGetStartRequest()
+        private void btnVisualParams_Click(object sender, RoutedEventArgs e)
         {
+            ShowSettingsWindow(openVisualParams: true);
+        }
+
+        /// <summary>
+        /// 显示设置窗口（非模态），支持点击遮罩层关闭
+        /// </summary>
+        private void ShowSettingsWindow(bool openVisualParams = false)
+        {
+            // 如果已有设置窗口打开，先关闭它
+            if (_currentSettingsWindow != null)
+            {
+                _currentSettingsWindow.Close();
+                _currentSettingsWindow = null;
+            }
+
             try
             {
-                // 显示遮罩�?
+                // 显示遮罩层
                 if (overlayMask != null)
                 {
                     overlayMask.Visibility = Visibility.Visible;
                 }
 
-                SettingsWindow settingsWindow = new SettingsWindow();
-                settingsWindow.Owner = this;
-                settingsWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-                settingsWindow.Closed += (s, args) =>
+                _currentSettingsWindow = new SettingsWindow(openVisualParams);
+                _currentSettingsWindow.Owner = this;
+                _currentSettingsWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                _currentSettingsWindow.Closed += async (s, args) =>
                 {
                     // 设置窗口关闭时隐藏遮罩层
                     if (overlayMask != null)
                     {
                         overlayMask.Visibility = Visibility.Collapsed;
                     }
+
+                    // 检查是否需要开始批量预测
+                    var window = s as SettingsWindow;
+                    if (window != null && window.StartBatchPredictRequested)
+                    {
+                        await RunBatchInferJsonAsync();
+                    }
+
+                    _currentSettingsWindow = null;
                 };
-                settingsWindow.ShowDialog();
-                return settingsWindow.StartBatchPredictRequested;
+                
+                // 使用 Show() 而不是 ShowDialog()，这样用户可以点击遮罩层关闭
+                _currentSettingsWindow.Show();
             }
             catch
             {
@@ -196,18 +219,25 @@ namespace DlcvTest
                     }
                 }
                 catch { }
-                return false;
+                _currentSettingsWindow = null;
+            }
+        }
+
+        /// <summary>
+        /// 遮罩层点击事件 - 关闭设置窗口
+        /// </summary>
+        private void OverlayMask_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (_currentSettingsWindow != null)
+            {
+                _currentSettingsWindow.Close();
             }
         }
 
         // 批量推理按钮
-        private async void btnInferBatchJson_Click(object sender, RoutedEventArgs e)
+        private void btnInferBatchJson_Click(object sender, RoutedEventArgs e)
         {
-            bool shouldStartBatchPredict = ShowSettingsDialogAndGetStartRequest();
-            if (shouldStartBatchPredict)
-            {
-                await RunBatchInferJsonAsync();
-            }
+            ShowSettingsWindow();
         }
 
         private void UpdateFolderImageCount(string folderPath)
@@ -290,9 +320,9 @@ namespace DlcvTest
             }
         }
 
-        // 对应搜索框回车事�?
+        // 对应搜索框回车事件
         // LIKE风格模糊搜索
-        // 这里只是去重新加载了当前的树，目前功能没有完成，看后续方�?
+        // 这里只是去重新加载了当前的树，目前功能没有完成，看后续方案
         private void txtFolderSearch_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key == Key.Enter)
@@ -374,15 +404,21 @@ namespace DlcvTest
                 return;
             }
 
-            Settings.Default.ShowContours = isChecked;
-            Settings.Default.Save();
-            // 刷新图片以应用设�?
+            // 初始化期间不保存，避免覆盖用户设置
+            if (!_isInitializing)
+            {
+                Settings.Default.ShowContours = isChecked;
+                Settings.Default.Save();
+            }
+            // 刷新图片以应用设置
             RefreshImages();
         }
 
         //显示mask
         public void chkShowMaskPane_Checked(object sender, RoutedEventArgs e)
         {
+            System.Diagnostics.Debug.WriteLine($"[chkShowMaskPane_Checked] 事件触发, _isInitializing={_isInitializing}");
+            
             bool isChecked;
             if (sender is Controls.AnimatedCheckBox animatedCheckBox)
             {
@@ -394,26 +430,38 @@ namespace DlcvTest
             }
             else
             {
+                System.Diagnostics.Debug.WriteLine($"[chkShowMaskPane_Checked] sender 类型不匹配，跳过");
                 return;
             }
 
-            Settings.Default.ShowMaskPane = isChecked;
-            Settings.Default.Save();
-            // 刷新图片以应用设�?
+            System.Diagnostics.Debug.WriteLine($"[chkShowMaskPane_Checked] isChecked={isChecked}");
+
+            // 初始化期间不保存，避免覆盖用户设置
+            if (!_isInitializing)
+            {
+                Settings.Default.ShowMaskPane = isChecked;
+                Settings.Default.Save();
+                System.Diagnostics.Debug.WriteLine($"[chkShowMaskPane_Checked] 已保存 ShowMaskPane={isChecked}");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"[chkShowMaskPane_Checked] 跳过保存，因为 _isInitializing=true");
+            }
+            // 刷新图片以应用设置
             RefreshImages();
         }
 
-        // 参数 TextBox 文本改变时触发更�?
+        // 参数 TextBox 文本改变时触发更新
         private async void ParameterTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
         {
-            // 直接触发更新，重新进行模型推�?
+            // 直接触发更新，重新进行模型推理
             if (model != null && !string.IsNullOrEmpty(_currentImagePath) && File.Exists(_currentImagePath))
             {
                 await ProcessSelectedImageAsync(_currentImagePath);
             }
         }
 
-        // 参数 TextBox 失去焦点时触发更�?
+        // 参数 TextBox 失去焦点时触发更新
         private async void ParameterTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
             if (model != null && !string.IsNullOrEmpty(_currentImagePath) && File.Exists(_currentImagePath))

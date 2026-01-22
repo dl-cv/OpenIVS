@@ -23,8 +23,10 @@ namespace DlcvTest.WPFViewer
 
         private WpfVisualize.VisualizeResult _externalOverlay;
 
-        // Viewbox(Uniform) 负责“自动铺满”，这里仅记录它对应的基础缩放，用于让文字/线宽抵消总缩放
+        // 基础铺满缩放比例（等价于原先 Viewbox(Uniform) 的自动铺满）
         private double _baseFitScale = 1.0;
+        private double _baseFitOffsetX = 0.0;
+        private double _baseFitOffsetY = 0.0;
         private double _lastOverlayViewScale = double.NaN;
 
         public WpfImageViewer()
@@ -42,17 +44,13 @@ namespace DlcvTest.WPFViewer
             PreviewMouseRightButtonUp += WpfImageViewer_PreviewMouseRightButtonUp;
             PreviewKeyDown += WpfImageViewer_PreviewKeyDown;
 
-            SizeChanged += (_, __) => UpdateBaseFitScale();
-            Loaded += (_, __) => UpdateBaseFitScale();
-
-            if (FitBox != null)
+            SizeChanged += (_, __) => FitToView();
+            Loaded += (_, __) => FitToView();
+            IsVisibleChanged += (_, __) =>
             {
-                FitBox.SizeChanged += (_, __) => UpdateBaseFitScale();
-            }
-            if (ScaleTf != null)
-            {
-                ScaleTf.Changed += (_, __) => UpdateOverlayViewScale();
-            }
+                if (IsVisible) FitToView();
+            };
+            UpdateOverlayViewScale();
         }
 
         public WpfVisualize.Options Options { get; }
@@ -61,7 +59,16 @@ namespace DlcvTest.WPFViewer
 
         public double MinScale { get; set; } = 0.05;
 
+        public double ZoomFactor { get; set; } = 1.15;
+
+        public int MinZoom { get; set; } = -4;
+
         public bool ShowVisualization { get; set; } = true;
+
+        /// <summary>
+        /// Python/Qt 风格：叠加层随图像缩放，不做“屏幕恒定线宽/字号”补偿。
+        /// </summary>
+        public bool OverlayScaleWithImage { get; set; } = false;
 
         // 不再显示推理状态文字（OK/NG/No Result）
         public bool ShowStatusText { get; set; } = false;
@@ -104,7 +111,7 @@ namespace DlcvTest.WPFViewer
             {
                 Img.Source = value;
                 UpdateContentSize();
-                UpdateBaseFitScale();
+                ResetViewToFit();
 
                 RebuildOverlay();
             }
@@ -123,7 +130,8 @@ namespace DlcvTest.WPFViewer
         }
 
         /// <summary>
-        /// 额外叠加层（例如标注 shapes）。会绘制在推理结果之下�?        /// </summary>
+        /// 额外叠加层（例如标注 shapes）。会绘制在推理结果之下。
+        /// </summary>
         public WpfVisualize.VisualizeResult ExternalOverlay
         {
             get => _externalOverlay;
@@ -161,15 +169,34 @@ namespace DlcvTest.WPFViewer
             Result = result;
         }
 
+        public void FitToView()
+        {
+            QueueUpdateBaseFitScale();
+        }
+
+        public void ResetViewToFit()
+        {
+            if (ViewState != null)
+            {
+                ViewState.SetView(1.0, 0.0, 0.0);
+                ViewState.ZoomLevel = 0;
+            }
+            FitToView();
+        }
+
         private void UpdateContentSize()
         {
             try
             {
                 if (!(Img.Source is System.Windows.Media.Imaging.BitmapSource bmp)) return;
-                ContentLayer.Width = bmp.PixelWidth;
-                ContentLayer.Height = bmp.PixelHeight;
-                Overlay.Width = bmp.PixelWidth;
-                Overlay.Height = bmp.PixelHeight;
+                double width = bmp.PixelWidth;
+                double height = bmp.PixelHeight;
+                ContentLayer.Width = width;
+                ContentLayer.Height = height;
+                Img.Width = width;
+                Img.Height = height;
+                Overlay.Width = width;
+                Overlay.Height = height;
             }
             catch
             {
@@ -184,7 +211,9 @@ namespace DlcvTest.WPFViewer
                 if (!(Img.Source is System.Windows.Media.Imaging.BitmapSource bmp))
                 {
                     _baseFitScale = 1.0;
-                    UpdateOverlayViewScale();
+                    _baseFitOffsetX = 0.0;
+                    _baseFitOffsetY = 0.0;
+                    ApplyViewState();
                     return;
                 }
 
@@ -199,12 +228,21 @@ namespace DlcvTest.WPFViewer
                 // Match Viewbox(Uniform) scaling based on actual viewport size.
                 _baseFitScale = Math.Min(viewW / bmp.PixelWidth, viewH / bmp.PixelHeight);
                 if (!(_baseFitScale > 0)) _baseFitScale = 1.0;
-                UpdateOverlayViewScale();
+
+                double scaledW = bmp.PixelWidth * _baseFitScale;
+                double scaledH = bmp.PixelHeight * _baseFitScale;
+                _baseFitOffsetX = (viewW - scaledW) * 0.5;
+                _baseFitOffsetY = (viewH - scaledH) * 0.5;
+                if (double.IsNaN(_baseFitOffsetX) || double.IsInfinity(_baseFitOffsetX)) _baseFitOffsetX = 0.0;
+                if (double.IsNaN(_baseFitOffsetY) || double.IsInfinity(_baseFitOffsetY)) _baseFitOffsetY = 0.0;
+                ApplyViewState();
             }
             catch
             {
                 _baseFitScale = 1.0;
-                UpdateOverlayViewScale();
+                _baseFitOffsetX = 0.0;
+                _baseFitOffsetY = 0.0;
+                ApplyViewState();
             }
         }
 
@@ -216,7 +254,7 @@ namespace DlcvTest.WPFViewer
             {
                 _isUpdateBaseFitScaleQueued = false;
                 UpdateBaseFitScale();
-            }), System.Windows.Threading.DispatcherPriority.Loaded);
+            }), System.Windows.Threading.DispatcherPriority.Render);
         }
 
         private bool TryGetViewportSize(out double width, out double height)
@@ -224,10 +262,16 @@ namespace DlcvTest.WPFViewer
             width = 0.0;
             height = 0.0;
 
-            if (FitBox != null)
+            if (Root != null)
             {
-                width = FitBox.ActualWidth;
-                height = FitBox.ActualHeight;
+                width = Root.ActualWidth;
+                height = Root.ActualHeight;
+            }
+
+            if (width <= 1 || height <= 1)
+            {
+                width = Root != null ? Root.RenderSize.Width : 0.0;
+                height = Root != null ? Root.RenderSize.Height : 0.0;
             }
 
             if (width <= 1 || height <= 1)
@@ -238,39 +282,18 @@ namespace DlcvTest.WPFViewer
 
             if (width <= 1 || height <= 1)
             {
-                if (Root != null)
-                {
-                    width = Root.ActualWidth;
-                    height = Root.ActualHeight;
-                }
+                width = RenderSize.Width;
+                height = RenderSize.Height;
+            }
+
+            if (double.IsNaN(width) || double.IsInfinity(width) || double.IsNaN(height) || double.IsInfinity(height))
+            {
+                width = 0.0;
+                height = 0.0;
+                return false;
             }
 
             return width > 1 && height > 1;
-        }
-
-        private double GetUserScale()
-        {
-            double scale = ViewState != null ? ViewState.Scale : 1.0;
-            if (ScaleTf != null)
-            {
-                double sx = Math.Abs(ScaleTf.ScaleX);
-                double sy = Math.Abs(ScaleTf.ScaleY);
-                if (sx > 0 && sy > 0)
-                {
-                    scale = (sx + sy) * 0.5;
-                }
-                else if (sx > 0)
-                {
-                    scale = sx;
-                }
-                else if (sy > 0)
-                {
-                    scale = sy;
-                }
-            }
-
-            if (!(scale > 0)) scale = 1.0;
-            return scale;
         }
 
         private void ViewState_PropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -298,9 +321,11 @@ namespace DlcvTest.WPFViewer
             {
                 _isApplyingViewState = true;
 
-                double s = ViewState != null ? ViewState.Scale : 1.0;
-                double ox = ViewState != null ? ViewState.OffsetX : 0.0;
-                double oy = ViewState != null ? ViewState.OffsetY : 0.0;
+                double userScale = ViewState != null ? ViewState.Scale : 1.0;
+                double s = _baseFitScale * userScale;
+                if (!(s > 0)) s = 1.0;
+                double ox = (ViewState != null ? ViewState.OffsetX : 0.0) + _baseFitOffsetX;
+                double oy = (ViewState != null ? ViewState.OffsetY : 0.0) + _baseFitOffsetY;
 
                 if (Math.Abs(ScaleTf.ScaleX - s) >= 1e-12) ScaleTf.ScaleX = s;
                 if (Math.Abs(ScaleTf.ScaleY - s) >= 1e-12) ScaleTf.ScaleY = s;
@@ -317,10 +342,25 @@ namespace DlcvTest.WPFViewer
 
         private void UpdateOverlayViewScale()
         {
-            double total = _baseFitScale * GetUserScale();
+            if (Overlay == null) return;
+
+            if (OverlayScaleWithImage)
+            {
+                const double fixedScale = 1.0;
+                if (!double.IsNaN(_lastOverlayViewScale) && Math.Abs(_lastOverlayViewScale - fixedScale) < 1e-12)
+                {
+                    return;
+                }
+
+                _lastOverlayViewScale = fixedScale;
+                Overlay.ViewScale = fixedScale;
+                return;
+            }
+
+            double total = _baseFitScale * (ViewState != null ? ViewState.Scale : 1.0);
             if (!(total > 0)) total = 1.0;
 
-            // 只有缩放变化才需要重绘 Overlay（线宽/字号按 1/scale 抵消）；平移不应强制重绘
+            // 只有缩放变化才需要重绘 Overlay（屏幕恒定线宽/字号模式下）；平移不应强制重绘
             if (!double.IsNaN(_lastOverlayViewScale) && Math.Abs(_lastOverlayViewScale - total) < 1e-12)
             {
                 return;
@@ -334,10 +374,12 @@ namespace DlcvTest.WPFViewer
         {
             if (!ShowVisualization)
             {
+                if (Overlay != null) Overlay.Visibility = Visibility.Collapsed;
                 Overlay.VisualizeResult = new WpfVisualize.VisualizeResult { StatusText = string.Empty, StatusIsOk = true };
                 UpdateHud(Overlay.VisualizeResult);
                 return;
             }
+            if (Overlay != null) Overlay.Visibility = Visibility.Visible;
 
             // 推理层（用于 HUD 状态）
             WpfVisualize.VisualizeResult vrInfer;
@@ -403,23 +445,53 @@ namespace DlcvTest.WPFViewer
         private void WpfImageViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
             if (Img.Source == null) return;
+            if (ViewState == null) return;
 
+            // 计算缩放方向和下一个 zoom level
+            int nextZoom;
+            if (e.Delta > 0)
+            {
+                nextZoom = ViewState.ZoomLevel + 1;
+            }
+            else if (e.Delta < 0)
+            {
+                nextZoom = ViewState.ZoomLevel - 1;
+            }
+            else
+            {
+                return;
+            }
+
+            // 边界检查：限制最小缩放级别
+            if (nextZoom < MinZoom)
+            {
+                ViewState.ZoomLevel = MinZoom;
+                e.Handled = true;
+                return;
+            }
+
+            // 统一的缩放计算：所有情况都使用固定缩放因子，确保每次缩放幅度一致
+            double factor = (e.Delta > 0) ? ZoomFactor : (1.0 / ZoomFactor);
             double oldScale = ViewState.Scale;
-            double newScale = oldScale;
-            if (e.Delta > 0) newScale = oldScale * 1.1;
-            else if (e.Delta < 0) newScale = oldScale / 1.1;
-            else return;
-
+            double newScale = oldScale * factor;
             newScale = Clamp(newScale, MinScale, MaxScale);
-            if (Math.Abs(newScale - oldScale) < 1e-12) return;
 
-            // 以鼠标位置为中心缩放（与 WinForms ImageViewer 同款公式）
+            if (Math.Abs(newScale - oldScale) < 1e-12)
+            {
+                e.Handled = true;
+                return;
+            }
+
+            // 鼠标锚点缩放：使用"总平移"(user + baseFit) 保持中心稳定
             Point mouse = e.GetPosition(this);
             double scaleChange = newScale / oldScale;
-            double newTx = mouse.X - scaleChange * (mouse.X - ViewState.OffsetX);
-            double newTy = mouse.Y - scaleChange * (mouse.Y - ViewState.OffsetY);
+            double oldTx = ViewState.OffsetX + _baseFitOffsetX;
+            double oldTy = ViewState.OffsetY + _baseFitOffsetY;
+            double newTx = mouse.X - scaleChange * (mouse.X - oldTx) - _baseFitOffsetX;
+            double newTy = mouse.Y - scaleChange * (mouse.Y - oldTy) - _baseFitOffsetY;
 
             ViewState.SetView(newScale, newTx, newTy);
+            ViewState.ZoomLevel = nextZoom;
             e.Handled = true;
         }
 
@@ -456,7 +528,7 @@ namespace DlcvTest.WPFViewer
         private void WpfImageViewer_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
         {
             // 右键：重置视图（基础铺满，Viewbox(Uniform) 保证）
-            ViewState.SetView(1.0, 0.0, 0.0);
+            ResetViewToFit();
             e.Handled = true;
         }
 

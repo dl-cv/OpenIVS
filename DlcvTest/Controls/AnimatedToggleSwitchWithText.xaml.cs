@@ -7,7 +7,7 @@ using System.Windows.Media.Animation;
 namespace DlcvTest.Controls
 {
     /// <summary>
-    /// �?YES/NO 文字显示的动画开关控�?
+    /// 带 YES/NO 文字显示的动画开关控件
     /// 文字和滑块都有贝塞尔曲线动画效果
     /// </summary>
     public partial class AnimatedToggleSwitchWithText : UserControl
@@ -30,7 +30,7 @@ namespace DlcvTest.Controls
         public event RoutedEventHandler Checked;
         public event RoutedEventHandler Unchecked;
 
-        private const double AnimationDuration = 0.3; // �?
+        private const double AnimationDuration = 0.3; // 秒
         private const double ThumbCheckedPosition = 30; // 选中时的位置
         private const double ThumbUncheckedPosition = 2; // 未选中时的位置
 
@@ -67,14 +67,14 @@ namespace DlcvTest.Controls
 
         private void Grid_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
-            // 切换状�?
+            // 切换状态
             IsChecked = !IsChecked;
             e.Handled = true;
         }
 
         private void UpdateVisualState(bool useTransition)
         {
-            if (Thumb == null || TrackBrush == null || txtYes == null || txtNo == null)
+            if (Thumb == null || TrackBrush == null)
                 return;
 
             double targetPosition = IsChecked ? ThumbCheckedPosition : ThumbUncheckedPosition;
@@ -85,23 +85,18 @@ namespace DlcvTest.Controls
                 // 使用动画过渡
                 AnimateThumbPosition(targetPosition);
                 AnimateTrackColor(targetColor);
-                AnimateTextVisibility();
             }
             else
             {
-                // 直接设置（无动画�?
+                // 直接设置（无动画）
                 Canvas.SetLeft(Thumb, targetPosition);
                 TrackBrush.Color = targetColor;
-                
-                // 设置文字状�?
-                txtYes.Opacity = IsChecked ? 1 : 0;
-                txtNo.Opacity = IsChecked ? 0 : 1;
             }
         }
 
         private void AnimateThumbPosition(double targetPosition)
         {
-            // 创建弹性动�?- 使用 KeySpline 实现贝塞尔曲线效�?
+            // 创建弹性动画 - 使用 KeySpline 实现贝塞尔曲线效果
             var animation = new DoubleAnimationUsingKeyFrames();
             
             // 添加关键帧，使用 SplineDoubleKeyFrame 实现自定义贝塞尔曲线
@@ -110,16 +105,16 @@ namespace DlcvTest.Controls
             {
                 KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromSeconds(AnimationDuration)),
                 Value = targetPosition,
-                KeySpline = new KeySpline(0.175, 0.885, 0.32, 1.275) // 贝塞尔曲�?
+                KeySpline = new KeySpline(0.175, 0.885, 0.32, 1.275) // 贝塞尔曲线
             });
 
-            // 应用动画�?Thumb �?Canvas.Left 属�?
+            // 应用动画到 Thumb 的 Canvas.Left 属性
             Thumb.BeginAnimation(Canvas.LeftProperty, animation);
         }
 
         private void AnimateTrackColor(Color targetColor)
         {
-            // 颜色渐变动画 - 使用弹性缓动函�?
+            // 颜色渐变动画 - 使用弹性缓动函数
             var animation = new ColorAnimation
             {
                 To = targetColor,
@@ -130,52 +125,10 @@ namespace DlcvTest.Controls
                 }
             };
 
-            // 应用动画�?TrackBrush �?Color 属�?
+            // 应用动画到 TrackBrush 的 Color 属性
             TrackBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
         }
 
-        private void AnimateTextVisibility()
-        {
-            // YES 文字动画
-            var yesAnimation = new DoubleAnimationUsingKeyFrames();
-            yesAnimation.KeyFrames.Add(new SplineDoubleKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromSeconds(AnimationDuration)),
-                Value = IsChecked ? 1 : 0,
-                KeySpline = new KeySpline(0.175, 0.885, 0.32, 1.275)
-            });
-            txtYes.BeginAnimation(UIElement.OpacityProperty, yesAnimation);
-
-            // NO 文字动画
-            var noAnimation = new DoubleAnimationUsingKeyFrames();
-            noAnimation.KeyFrames.Add(new SplineDoubleKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromSeconds(AnimationDuration)),
-                Value = IsChecked ? 0 : 1,
-                KeySpline = new KeySpline(0.175, 0.885, 0.32, 1.275)
-            });
-            txtNo.BeginAnimation(UIElement.OpacityProperty, noAnimation);
-
-            // YES 文字位置微调动画（向左滑出效果）
-            var yesMarginAnimation = new ThicknessAnimationUsingKeyFrames();
-            yesMarginAnimation.KeyFrames.Add(new SplineThicknessKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromSeconds(AnimationDuration)),
-                Value = IsChecked ? new Thickness(0, 0, 8, 0) : new Thickness(-5, 0, 8, 0),
-                KeySpline = new KeySpline(0.175, 0.885, 0.32, 1.275)
-            });
-            txtYes.BeginAnimation(FrameworkElement.MarginProperty, yesMarginAnimation);
-
-            // NO 文字位置微调动画（向右滑出效果）
-            var noMarginAnimation = new ThicknessAnimationUsingKeyFrames();
-            noMarginAnimation.KeyFrames.Add(new SplineThicknessKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromSeconds(AnimationDuration)),
-                Value = IsChecked ? new Thickness(13, 0, 0, 0) : new Thickness(8, 0, 0, 0),
-                KeySpline = new KeySpline(0.175, 0.885, 0.32, 1.275)
-            });
-            txtNo.BeginAnimation(FrameworkElement.MarginProperty, noMarginAnimation);
-        }
     }
 }
 

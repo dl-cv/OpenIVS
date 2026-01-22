@@ -6,7 +6,7 @@
         <!-- 全局颜色资源 -->
         <SolidColorBrush x:Key="PrimaryPurple" Color="#7B4DFF"/>
 
-        <!-- 紫色主按钮样�?(圆角) -->
+        <!-- 紫色主按钮样式(圆角) -->
         <Style x:Key="PurpleButtonStyle" TargetType="Button">
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="{StaticResource PrimaryPurple}"/>
@@ -35,7 +35,7 @@
             </Setter>
         </Style>
 
-        <!-- 1. �?YES/NO 文字的开关样式（紫色主题�?-->
+        <!-- 1. 带 YES/NO 文字的开关样式（紫色主题） -->
         <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -49,7 +49,7 @@
                                     <SolidColorBrush Color="#E9E9EA"/>
                                 </Border.Background>
                                 
-                                <!-- 文字�?-->
+                                <!-- 文字层 -->
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -105,7 +105,7 @@
             </Setter>
         </Style>
 
-        <!-- 2. 数字步进器按钮样�?(+/- �? -->
+        <!-- 2. 数字步进器按钮样式(+/- 符号) -->
         <Style x:Key="StepperButtonStyle" TargetType="Button">
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -211,7 +211,7 @@
             </Setter>
         </Style>
 
-        <!-- 4. 侧边栏按钮样�?-->
+        <!-- 4. 侧边栏按钮样式 -->
         <Style x:Key="SidebarButtonStyle" TargetType="RadioButton">
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -243,7 +243,7 @@
 
         <!-- 6. 现代化细滚动条样式（完整版） -->
         
-        <!-- RepeatButton 样式（隐藏的箭头按钮�?-->
+        <!-- RepeatButton 样式（隐藏的箭头按钮） -->
         <Style x:Key="ScrollBarLineButton" TargetType="{x:Type RepeatButton}">
             <Setter Property="SnapsToDevicePixels" Value="True"/>
             <Setter Property="OverridesDefaultStyle" Value="True"/>
@@ -257,7 +257,7 @@
             </Setter>
         </Style>
 
-        <!-- PageButton 样式（Track 区域点击�?-->
+        <!-- PageButton 样式（Track 区域点击） -->
         <Style x:Key="ScrollBarPageButton" TargetType="{x:Type RepeatButton}">
             <Setter Property="SnapsToDevicePixels" Value="True"/>
             <Setter Property="OverridesDefaultStyle" Value="True"/>
@@ -299,7 +299,7 @@
             </Setter>
         </Style>
 
-        <!-- 垂直滚动条模�?-->
+        <!-- 垂直滚动条模板 -->
         <ControlTemplate x:Key="ModernVerticalScrollBarTemplate" TargetType="{x:Type ScrollBar}">
             <Grid>
                 <Grid.RowDefinitions>
@@ -311,7 +311,7 @@
                 <!-- 背景轨道 -->
                 <Border Grid.Row="1" Background="#F0F0F0" CornerRadius="3.5"/>
 
-                <!-- 上箭头按钮（隐藏�?-->
+                <!-- 上箭头按钮（隐藏） -->
                 <RepeatButton Grid.Row="0"
                               Style="{StaticResource ScrollBarLineButton}"
                               Command="ScrollBar.LineUpCommand"/>
@@ -331,14 +331,14 @@
                     </Track.IncreaseRepeatButton>
                 </Track>
 
-                <!-- 下箭头按钮（隐藏�?-->
+                <!-- 下箭头按钮（隐藏） -->
                 <RepeatButton Grid.Row="2"
                               Style="{StaticResource ScrollBarLineButton}"
                               Command="ScrollBar.LineDownCommand"/>
             </Grid>
         </ControlTemplate>
 
-        <!-- 水平滚动条模�?-->
+        <!-- 水平滚动条模板 -->
         <ControlTemplate x:Key="ModernHorizontalScrollBarTemplate" TargetType="{x:Type ScrollBar}">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -350,7 +350,7 @@
                 <!-- 背景轨道 -->
                 <Border Grid.Column="1" Background="#F0F0F0" CornerRadius="3.5"/>
 
-                <!-- 左箭头按钮（隐藏�?-->
+                <!-- 左箭头按钮（隐藏） -->
                 <RepeatButton Grid.Column="0"
                               Style="{StaticResource ScrollBarLineButton}"
                               Command="ScrollBar.LineLeftCommand"/>
@@ -370,14 +370,14 @@
                     </Track.IncreaseRepeatButton>
                 </Track>
 
-                <!-- 右箭头按钮（隐藏�?-->
+                <!-- 右箭头按钮（隐藏） -->
                 <RepeatButton Grid.Column="2"
                               Style="{StaticResource ScrollBarLineButton}"
                               Command="ScrollBar.LineRightCommand"/>
             </Grid>
         </ControlTemplate>
 
-        <!-- 仅显示滑块的垂直滚动条模板（隐藏轨道�?-->
+        <!-- 仅显示滑块的垂直滚动条模板（隐藏轨道） -->
         <ControlTemplate x:Key="ThumbOnlyVerticalScrollBarTemplate" TargetType="{x:Type ScrollBar}">
             <Grid>
                 <Grid.RowDefinitions>
@@ -389,7 +389,7 @@
                 <!-- 轨道背景：透明 -->
                 <Border Grid.Row="1" Background="Transparent"/>
 
-                <!-- 上箭头按钮（隐藏�?-->
+                <!-- 上箭头按钮（隐藏） -->
                 <RepeatButton Grid.Row="0"
                               Style="{StaticResource ScrollBarLineButton}"
                               Command="ScrollBar.LineUpCommand"/>
@@ -409,14 +409,14 @@
                     </Track.IncreaseRepeatButton>
                 </Track>
 
-                <!-- 下箭头按钮（隐藏�?-->
+                <!-- 下箭头按钮（隐藏） -->
                 <RepeatButton Grid.Row="2"
                               Style="{StaticResource ScrollBarLineButton}"
                               Command="ScrollBar.LineDownCommand"/>
             </Grid>
         </ControlTemplate>
 
-        <!-- 仅显示滑块的水平滚动条模板（隐藏轨道�?-->
+        <!-- 仅显示滑块的水平滚动条模板（隐藏轨道） -->
         <ControlTemplate x:Key="ThumbOnlyHorizontalScrollBarTemplate" TargetType="{x:Type ScrollBar}">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -428,7 +428,7 @@
                 <!-- 轨道背景：透明 -->
                 <Border Grid.Column="1" Background="Transparent"/>
 
-                <!-- 左箭头按钮（隐藏�?-->
+                <!-- 左箭头按钮（隐藏） -->
                 <RepeatButton Grid.Column="0"
                               Style="{StaticResource ScrollBarLineButton}"
                               Command="ScrollBar.LineLeftCommand"/>
@@ -448,14 +448,14 @@
                     </Track.IncreaseRepeatButton>
                 </Track>
 
-                <!-- 右箭头按钮（隐藏�?-->
+                <!-- 右箭头按钮（隐藏） -->
                 <RepeatButton Grid.Column="2"
                               Style="{StaticResource ScrollBarLineButton}"
                               Command="ScrollBar.LineRightCommand"/>
             </Grid>
         </ControlTemplate>
 
-        <!-- 垂直滚动条样�?-->
+        <!-- 垂直滚动条样式 -->
         <Style x:Key="ModernVerticalScrollBar" TargetType="{x:Type ScrollBar}">
             <Setter Property="SnapsToDevicePixels" Value="True"/>
             <Setter Property="OverridesDefaultStyle" Value="True"/>
@@ -464,7 +464,7 @@
             <Setter Property="Template" Value="{StaticResource ModernVerticalScrollBarTemplate}"/>
         </Style>
 
-        <!-- 水平滚动条样�?-->
+        <!-- 水平滚动条样式 -->
         <Style x:Key="ModernHorizontalScrollBar" TargetType="{x:Type ScrollBar}">
             <Setter Property="SnapsToDevicePixels" Value="True"/>
             <Setter Property="OverridesDefaultStyle" Value="True"/>

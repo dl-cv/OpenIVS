@@ -346,7 +346,7 @@
                 </ScrollViewer>
             </Grid>
 
-                <!-- 右侧：预览区�?-->
+                <!-- 右侧：预览区域 -->
                 <Grid x:Name="previewContainer" Grid.Column="1" Background="{StaticResource CheckerboardBrush}" ClipToBounds="True">
                     <!-- 图片内容 - 居中显示 -->
                     <Image x:Name="previewImage" 
@@ -360,7 +360,7 @@
                     <Canvas x:Name="visualizationCanvas" 
                             HorizontalAlignment="Stretch" 
                             VerticalAlignment="Stretch">
-                        <!-- bbox 矩形�?-->
+                        <!-- bbox 矩形框 -->
                         <Border x:Name="bboxBorder" 
                                 BorderThickness="2"
                                 CornerRadius="0"
@@ -394,6 +394,15 @@
                                            Visibility="Collapsed"/>
                             </StackPanel>
                         </Border>
+
+                        <!-- 中心点十字 -->
+                        <Path x:Name="centerCrossPath"
+                              Stroke="Red"
+                              StrokeThickness="2"
+                              Visibility="Collapsed"
+                              SnapsToDevicePixels="True"
+                              IsHitTestVisible="False"
+                              RenderOptions.EdgeMode="Aliased"/>
                     </Canvas>
                 </Grid>
             </Grid>

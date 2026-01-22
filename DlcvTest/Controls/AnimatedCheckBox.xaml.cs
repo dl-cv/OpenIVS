@@ -8,7 +8,7 @@ namespace DlcvTest.Controls
 {
     /// <summary>
     /// 带对号滑入动画效果的 CheckBox 控件
-    /// 模仿 HTML/CSS 示例的动画效�?
+    /// 模仿 HTML/CSS 示例的动画效果
     /// </summary>
     public partial class AnimatedCheckBox : UserControl
     {
@@ -30,7 +30,7 @@ namespace DlcvTest.Controls
         public event RoutedEventHandler Checked;
         public event RoutedEventHandler Unchecked;
 
-        private const double AnimationDuration = 0.2; // �?
+        private const double AnimationDuration = 0.2; // 秒
 
         public AnimatedCheckBox()
         {
@@ -75,7 +75,7 @@ namespace DlcvTest.Controls
 
         private void Grid_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
-            // 切换状�?
+            // 切换状态
             IsChecked = !IsChecked;
             e.Handled = true;
         }
@@ -94,7 +94,7 @@ namespace DlcvTest.Controls
             }
             else
             {
-                // 直接设置（无动画�?
+                // 直接设置（无动画）
                 if (IsChecked)
                 {
                     // 选中状态：对号可见
@@ -116,7 +116,7 @@ namespace DlcvTest.Controls
 
         private void AnimateCheckMark()
         {
-            // 对号缩放动画（从中心点放�?缩小），使用更明显的回弹效果
+            // 对号缩放动画（从中心点放大/缩小），使用更明显的回弹效果
             var scaleAnimation = new DoubleAnimation
             {
                 To = IsChecked ? 1 : 0,
@@ -141,7 +141,7 @@ namespace DlcvTest.Controls
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             };
 
-            // 确保 Brush 不是冻结�?
+            // 确保 Brush 不是冻结的
             var brush = BorderBg.Background as SolidColorBrush;
             if (brush == null || brush.IsFrozen)
             {
@@ -164,7 +164,7 @@ namespace DlcvTest.Controls
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             };
 
-            // 确保 Brush 不是冻结�?
+            // 确保 Brush 不是冻结的
             if (BorderColor.IsFrozen)
             {
                 var newBrush = new SolidColorBrush(BorderColor.Color);
