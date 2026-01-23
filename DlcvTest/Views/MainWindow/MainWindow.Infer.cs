@@ -10,12 +10,17 @@ using System.Collections.Concurrent;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using dlcv_infer_csharp;
+using DlcvModules;
 using OpenCvSharp;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using DlcvTest.Properties;
 using DlcvTest.WPFViewer;
+using System.Net.WebSockets;
 
 namespace DlcvTest
 {
@@ -139,481 +144,621 @@ namespace DlcvTest
                 return;
             }
 
-            bool batchStarted = false;
+            // 获取模型路径
+            string modelPath = null;
+            try { modelPath = Settings.Default.LastModelPath; } catch { }
+            if(string.IsNullOrEmpty(modelPath))
+            {
+                MessageBox.Show("请先加载模型");
+                return;
+            }
+
+            // 读取推理参数
+            double threshold = 0.5;
+            bool saveOriginal = false;
+            bool saveVisualization = false;
+            bool openAfterBatch = false;
+            
             try
             {
-                var extensions = new[] { ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff" };
-                var files = Directory.GetFiles(folderPath, "*", SearchOption.AllDirectories)
-                    .Where(f => extensions.Contains(Path.GetExtension(f).ToLower()))
-                    .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-
-                if (files.Length == 0)
+                if(ConfidenceVal != null && double.TryParse(ConfidenceVal.Text, out double confVal))
                 {
-                    MessageBox.Show("文件夹中没有图片！");
-                    return;
+                    threshold = Clamp01(confVal);
+                    saveOriginal = Settings.Default.SaveOriginal;
+                    saveVisualization = Settings.Default.SaveVisualization;
+                    openAfterBatch = Settings.Default.OpenOutputFolderAfterBatch;
                 }
+            }
+            catch
+            { }
 
-                BeginBatchProgress(files.Length);
-                batchStarted = true;
+            // 输出目录
+            string outputRoot = null;
+            try { outputRoot = (Settings.Default.OutputDirectory ?? string.Empty).Trim(); } catch { outputRoot = string.Empty; }
+            if (string.IsNullOrWhiteSpace(outputRoot))
+            {
+                outputRoot = Path.Combine(folderPath, "导出");
+            }
 
-            // 读取推理参数（UI线程）
-            double threshold = 0.5;
-                double iouThreshold = 0.2;
-                bool showMask = true;
-                bool showContours = true;
-                bool saveOriginal = false;
-                bool saveVisualization = false;
+            try
+            {
+                if (!Directory.Exists(outputRoot)) Directory.CreateDirectory(outputRoot);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("无法创建输出目录: " + outputRoot + "\n" + ex.Message);
+                return;
+            }
+
+            // 估算文件数量用于进度显示
+            var extensions = new[] { ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff" };
+            int estimatedCount = 0;
+            try
+            {
+                estimatedCount = Directory.GetFiles(folderPath, "*", SearchOption.AllDirectories)
+                    .Count(f => extensions.Contains(Path.GetExtension(f).ToLower()));
+            }
+            catch {}
+
+            if(estimatedCount == 0)
+            {
+                MessageBox.Show("文件夹中没有图片！");
+                return;
+            }
+
+            BeginBatchProgress(estimatedCount);
+
+            try
+            {
+                await RunBatchLocalAsync(
+                    srcDir: folderPath,
+                    dstDir: outputRoot,
+                    threshold: threshold,
+                    saveImg: saveOriginal,
+                    saveVis: saveVisualization,
+                    openDstDir: openAfterBatch
+                );
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("批量推理失败：" + ex.Message);
+            }
+            finally
+            {
+                EndBatchProgress();
+            }
+        }
+
+        /// <summary>
+        /// 通过 WebSocket 调用后端的 /predict_directory 接口进行批量推理
+        /// </summary>
+        private async Task RunBatchViaWebSocketAsync(
+            string modelPath,
+            string srcDir,
+            string dstDir,
+            double threshold,
+            bool saveImg,
+            bool saveVis,
+            bool openDstDir)
+        {
+            string serverUrl = "ws://127.0.0.1:9890/predict_directory";
+
+            using (var ws = new ClientWebSocket())
+            {
+                var cts = new CancellationTokenSource(TimeSpan.FromMinutes(30));
+
                 try
                 {
-                    // 置信度
-                    if (ConfidenceVal != null && double.TryParse(ConfidenceVal.Text, out double confVal))
+                    // 1. 连接 WebSocket
+                    await ws.ConnectAsync(new Uri(serverUrl), cts.Token);
+
+                    // 2. 发送批量推理参数
+                    // 注意：后端会在 dst_dir 下创建 {模型名}_测试时间_{时间戳}/ 子目录保存结果
+                    var requestData = new JObject
                     {
-                        threshold = confVal;
-                    }
-                    // IOU
-                    if (IOUVal != null && double.TryParse(IOUVal.Text, out double iouVal))
+                        ["model_path"] = modelPath,
+                        ["src_dir"] = srcDir,
+                        ["dst_dir"] = dstDir,
+                        ["threshold"] = threshold,
+                        ["save_img"] = saveImg,
+                        ["save_vis"] = true,        
+                        ["save_json"] = true,       
+                        ["open_dst_dir"] = openDstDir,
+                        ["batch_size"] = 1,
+                        ["save_ok_img"] = true,   
+                        ["save_ng_img"] = true,   
+                        ["save_by_category"] = false,
+                        ["with_mask"] = true
+                    };
+
+                    string jsonStr = requestData.ToString(Formatting.None);
+                    System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 发送参数: {jsonStr}");
+                    var sendBuffer = Encoding.UTF8.GetBytes(jsonStr);
+                    await ws.SendAsync(
+                        new ArraySegment<byte>(sendBuffer),
+                        WebSocketMessageType.Text,
+                        true,
+                        cts.Token);
+
+                    // 3. 接收进度和结果
+                    var receiveBuffer = new byte[8192];
+                    bool completed = false;
+                    string lastErrorMessage = null;
+
+                    while (ws.State == WebSocketState.Open && !completed)
                     {
-                        iouThreshold = iouVal;
-                    }
-                    threshold = Clamp01(threshold);
-                    iouThreshold = Clamp01(iouThreshold);
-
-                    // 是否显示 mask/边缘
-                    try { showMask = Settings.Default.ShowMaskPane; } catch { showMask = true; }
-                    try { showContours = Settings.Default.ShowContours; } catch { showContours = true; }
-                    try { saveOriginal = Settings.Default.SaveOriginal; } catch { saveOriginal = false; }
-                    try { saveVisualization = Settings.Default.SaveVisualization; } catch { saveVisualization = false; }
-                }
-                catch
-                {
-                    threshold = 0.5;
-                    iouThreshold = 0.2;
-                    showMask = true;
-                    showContours = true;
-                    saveOriginal = false;
-                    saveVisualization = false;
-                }
-
-                // 是否请求mask：显示mask 或 显示边缘 都需要 mask 数据
-                bool withMask = showMask || showContours;
-
-                // 构造推理参数（与 DlcvDemo 保持一致，不传递 iou_threshold）
-                var inferenceParams = new JObject();
-                inferenceParams["threshold"] = (float)threshold;
-                inferenceParams["with_mask"] = withMask;
-                EnsureDvpParamsMirror(inferenceParams);
-
-                int processed = 0;
-                int skipped = 0;
-                int failed = 0;
-                int exported = 0;
-
-                // 输出根目录：优先使用设置中的 OutputDirectory；为空则回退到输入文件夹下的“导出”
-                string outputRoot = null;
-                try { outputRoot = (Settings.Default.OutputDirectory ?? string.Empty).Trim(); } catch { outputRoot = string.Empty; }
-                if (string.IsNullOrWhiteSpace(outputRoot))
-                {
-                    outputRoot = Path.Combine(folderPath, "导出");
-                }
-
-                try
-                {
-                    if (!Directory.Exists(outputRoot)) Directory.CreateDirectory(outputRoot);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("无法创建输出目录: " + outputRoot + "\n" + ex.Message);
-                    return;
-                }
-
-                string modelPath = null;
-                try { modelPath = Settings.Default.LastModelPath; } catch { modelPath = null; }
-                string rawModelName = null;
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(modelPath))
-                    {
-                        rawModelName = Path.GetFileNameWithoutExtension(modelPath);
-                    }
-                }
-                catch
-                {
-                    rawModelName = null;
-                }
-
-                string modelName = SanitizeFileName(rawModelName);
-                string timeText = DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss");
-                string batchFolderName = $"{modelName}_{timeText}";
-                string outDir = null;
-                try
-                {
-                    outDir = CreateUniqueDirectoryPath(outputRoot, batchFolderName);
-                    if (!Directory.Exists(outDir)) Directory.CreateDirectory(outDir);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("无法创建批量输出目录: " + outDir + "\n" + ex.Message);
-                    return;
-                }
-
-                string originalDir = null;
-                string resultDir = null;
-                try
-                {
-                    if (saveOriginal)
-                    {
-                        originalDir = Path.Combine(outDir, "原图");
-                        if (!Directory.Exists(originalDir)) Directory.CreateDirectory(originalDir);
-                    }
-
-                    resultDir = Path.Combine(outDir, saveVisualization ? "可视化和结果" : "结果");
-                    if (!Directory.Exists(resultDir)) Directory.CreateDirectory(resultDir);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("无法创建输出子目录: " + outDir + "\n" + ex.Message);
-                    return;
-                }
-
-                bool enableProfile = IsBatchProfileEnabled();
-                BatchProfileLogger profileLogger = enableProfile
-                    ? new BatchProfileLogger(Path.Combine(outDir, "batch_profile.csv"))
-                    : null;
-
-                // 批量导出选项：尽量复用，减少循环内创建
-                BuildWpfOptions(threshold, out var exportOptions, out double screenLineWidth, out double screenFontSize);
-                WpfVisualize.Options labelOptions = null;
-                if (saveVisualization)
-                {
-                    try
-                    {
-                        labelOptions = new WpfVisualize.Options
-                        {
-                            DisplayText = Settings.Default.ShowTextPane,
-                            DisplayScore = false,
-                            TextOutOfBbox = Settings.Default.ShowTextOutOfBboxPane,
-                            DisplayTextShadow = Settings.Default.ShowTextShadowPane,
-                            FontColor = SafeParseColor(Settings.Default.FontColor, System.Windows.Media.Colors.White),
-                            MaskColor = System.Windows.Media.Colors.LimeGreen,
-                            MaskAlpha = 128
-                        };
-                    }
-                    catch
-                    {
-                        labelOptions = new WpfVisualize.Options();
-                    }
-                }
-
-                // 批量推理改为异步，不阻塞界面
-                const int maxInFlight = 2;
-                using (var renderWorker = new BatchRenderWorker(maxInFlight))
-                {
-                    var pending = new Queue<PendingRender>(maxInFlight);
-                    await Task.Run(async () =>
-                {
-                        async Task DrainOneAsync()
-                        {
-                            if (pending.Count == 0) return;
-                            var item = pending.Dequeue();
-                            BatchRenderResult renderResult = null;
-                            try
-                            {
-                                renderResult = await item.RenderTask.ConfigureAwait(false);
-                            }
-                            catch
-                            {
-                                renderResult = null;
-                            }
-
-                            if (renderResult != null && renderResult.Exported)
-                            {
-                                exported += 1;
-                            }
-
-                            if (item.Profile != null)
-                            {
-                                item.Profile.RenderMs = renderResult?.RenderMs ?? 0.0;
-                                item.Profile.SaveMs = renderResult?.SaveMs ?? 0.0;
-                                item.Profile.Exported = renderResult?.Exported ?? false;
-                                item.Profile.OutputPath = renderResult?.OutputPath;
-                                item.Profile.Error = renderResult?.Error ?? item.Profile.Error;
-                                item.Profile.Status = renderResult == null
-                                    ? "render_fail"
-                                    : (renderResult.Exported ? "ok" : "export_fail");
-                                item.Profile.MarkDone();
-                                profileLogger?.Log(item.Profile);
-                            }
-
-                            RaiseBatchItemCompleted(new BatchItemCompletedEventArgs(
-                                item.ImagePath,
-                                success: true,
-                                error: null,
-                                elapsedMs: item.InferMs,
-                                inferenceParams: item.InferenceParams,
-                                exportedImagePath: renderResult?.OutputPath,
-                                result: item.Result));
-
-                            DisposeCSharpResultMasks(item.Result);
-                        }
-
                         try
                         {
-                            foreach (var imagePath in files)
+                            var result = await ws.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), cts.Token);
+
+                            if (result.MessageType == WebSocketMessageType.Close)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 服务端关闭连接, CloseStatus={ws.CloseStatus}, CloseStatusDescription={ws.CloseStatusDescription}");
+                                break;
+                            }
+
+                            if (result.MessageType == WebSocketMessageType.Text)
+                            {
+                                string message = Encoding.UTF8.GetString(receiveBuffer, 0, result.Count);
+                                System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 收到消息: {message}");
+
+                                try
+                                {
+                                    var json = JObject.Parse(message);
+
+                                    // 处理错误（先检查错误）
+                                    if (json.ContainsKey("code") && json["code"].ToString() != "00000")
+                                    {
+                                        lastErrorMessage = json["message"]?.ToString() ?? "未知错误";
+                                        System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 后端返回错误: {lastErrorMessage}");
+                                        throw new Exception(lastErrorMessage);
+                                    }
+
+                                    // 处理进度更新
+                                    if (json.ContainsKey("progress"))
+                                    {
+                                        double progress = json["progress"].Value<double>();
+                                        int current = (int)(progress * FolderImageCount);
+                                        UpdateBatchProgress(current, FolderImageCount);
+                                        System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 进度: {progress:P0}");
+
+                                        if (progress >= 1.0)
+                                        {
+                                            completed = true;
+                                            System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 完成！输出目录: {dstDir}");
+                                        }
+                                    }
+                                }
+                                catch (JsonException)
+                                {
+                                    // 忽略无法解析的消息
+                                }
+                            }
+                        }
+                        catch (WebSocketException ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] WebSocketException: {ex.Message}, ws.State={ws.State}");
+                            
+                            // 如果已经收到 progress=1.0，连接异常关闭也视为成功
+                            if (completed)
+                                break;
+
+                            // 检查是否是"连接被关闭"类型的错误
+                            if (ws.State == WebSocketState.Aborted ||
+                                ws.State == WebSocketState.Closed)
+                            {
+                                // 服务端可能已完成并关闭，但如果没有收到完成消息，报错
+                                if (!completed)
+                                {
+                                    throw new Exception($"WebSocket 连接被关闭，推理可能失败。请检查后端日志。");
+                                }
+                                break;
+                            }
+
+                            throw;
+                        }
+                    }
+
+                    // 如果没有完成且没有收到任何进度消息，报错
+                    if (!completed)
+                    {
+                        throw new Exception(lastErrorMessage ?? "批量推理未正常完成，请检查后端日志或输出目录。");
+                    }
+
+                    // 4. 尝试正常关闭（如果还没关闭的话）
+                    if (ws.State == WebSocketState.Open)
+                    {
+                        try
+                        {
+                            await ws.CloseAsync(
+                                WebSocketCloseStatus.NormalClosure,
+                                "Done",
+                                CancellationToken.None);
+                        }
+                        catch
+                        {
+                            // 忽略关闭错误
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw new Exception("批量推理超时");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 本地批量推理：使用 Model.Infer 进行推理，并保存原图/可视化图
+        /// 可视化图为并排拼接：左边是 GT（LabelMe 标注），右边是模型推理结果
+        /// </summary>
+        private async Task RunBatchLocalAsync(
+            string srcDir,
+            string dstDir,
+            double threshold,
+            bool saveImg,
+            bool saveVis,
+            bool openDstDir)
+        {
+            // 1. 创建输出子目录
+            string timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
+            string modelName = "Model";
+            try
+            {
+                var lastPath = Settings.Default.LastModelPath;
+                if (!string.IsNullOrEmpty(lastPath))
+                {
+                    modelName = SanitizeFileName(Path.GetFileNameWithoutExtension(lastPath));
+                }
+            }
+            catch { }
+
+            string outputDir = Path.Combine(dstDir, $"{modelName}_{timestamp}");
+            string imgDir = Path.Combine(outputDir, "images");
+            string visDir = Path.Combine(outputDir, "visualizations");
+
+            try
+            {
+                Directory.CreateDirectory(outputDir);
+                if (saveImg) Directory.CreateDirectory(imgDir);
+                if (saveVis) Directory.CreateDirectory(visDir);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"无法创建输出目录: {ex.Message}");
+            }
+
+            // 2. 获取图片列表
+            var extensions = new[] { ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff" };
+            var imageFiles = Directory.GetFiles(srcDir, "*", SearchOption.AllDirectories)
+                .Where(f => extensions.Contains(Path.GetExtension(f).ToLower()))
+                .ToList();
+
+            int total = imageFiles.Count;
+            if (total == 0)
+            {
+                throw new Exception("文件夹中没有图片！");
+            }
+
+            // 从设置读取可视化配置（与主界面预览保持一致）
+            var visProperties = new Dictionary<string, object>
+            {
+                // 画布设置
+                { "display_bbox", Settings.Default.ShowBBoxPane },
+                { "display_mask", Settings.Default.ShowMaskPane },
+                { "display_contours", Settings.Default.ShowContours },
+                { "display_text", Settings.Default.ShowTextPane },
+                { "display_score", Settings.Default.ShowScorePane },
+                { "display_text_shadow", Settings.Default.ShowTextShadowPane },
+                { "text_out_of_bbox", Settings.Default.ShowTextOutOfBboxPane },
+                // 画笔设置
+                { "bbox_line_width", Math.Max(1, (int)Settings.Default.BBoxBorderThickness) },
+                { "font_size", Math.Max(6, (int)Settings.Default.FontSize) },
+                { "bbox_color", ParseColorToRgbArray(Settings.Default.BBoxBorderColor) },
+                { "font_color", ParseColorToRgbArray(Settings.Default.FontColor) }
+            };
+
+            // 3. 并行推理并保存（使用 Parallel.ForEach 提升性能）
+            int processedCount = 0;
+            await Task.Run(() =>
+            {
+                // 使用并行处理，限制最大并行度为 4
+                var options = new ParallelOptions { MaxDegreeOfParallelism = 4 };
+                Parallel.ForEach(imageFiles, options, (imgPath) =>
+                {
+                    string baseName = Path.GetFileNameWithoutExtension(imgPath);
+                    string ext = Path.GetExtension(imgPath);
+
+                    try
+                    {
+                        using (var mat = Cv2.ImRead(imgPath, ImreadModes.Color))
+                        {
+                            if (mat == null || mat.Empty())
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[批量推理] 无法读取图片: {imgPath}");
+                                Interlocked.Increment(ref processedCount);
+                                Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(processedCount, total)));
+                                return;
+                            }
+
+                            // 推理
+                            var result = model.Infer(mat);
+
+                            // 保存原图
+                            if (saveImg)
+                            {
+                                string imgOutPath = Path.Combine(imgDir, baseName + ext);
+                                try { Cv2.ImWrite(imgOutPath, mat); } catch { }
+                            }
+
+                            // 可视化并保存（左边：GT 标注，右边：推理结果）
+                            if (saveVis)
                             {
                                 try
                                 {
-                                    BatchProfileItem profile = enableProfile ? BatchProfileItem.Start(imagePath) : null;
-                                    if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
+                                    // 1. 左边：原图 + LabelMe 标注绘制（GT）- 直接在 mat 上绘制以减少 Clone
+                                    string labelMePath = Path.ChangeExtension(imgPath, ".json");
+                                    using (var leftImage = saveImg ? DrawLabelMeAnnotations(mat.Clone(), labelMePath, visProperties) 
+                                                                    : DrawLabelMeAnnotationsInPlace(mat, labelMePath, visProperties))
                                     {
-                                        skipped += 1;
-                                        RaiseBatchItemCompleted(new BatchItemCompletedEventArgs(
-                                            imagePath,
-                                            success: false,
-                                            error: null,
-                                            elapsedMs: 0.0,
-                                            inferenceParams: SafeCloneJObject(inferenceParams),
-                                            exportedImagePath: null,
-                                            result: null));
-                                        if (profile != null)
+                                        // 2. 右边：原图 + 推理结果绘制（需要重新读取，因为 mat 可能被修改）
+                                        using (var matForVis = saveImg ? mat.Clone() : Cv2.ImRead(imgPath, ImreadModes.Color))
                                         {
-                                            profile.Status = "missing";
-                                            profile.MarkDone();
-                                            profileLogger?.Log(profile);
-                                        }
-                                        UpdateBatchProgress(processed + skipped + failed, files.Length);
-                                        continue;
-                                    }
-
-                                    var readSw = Stopwatch.StartNew();
-                                    using (Mat original = Cv2.ImRead(imagePath))
-                                    {
-                                        readSw.Stop();
-                                        if (profile != null) profile.ReadMs = readSw.Elapsed.TotalMilliseconds;
-                                        if (original == null || original.Empty())
-                                        {
-                                            skipped += 1;
-                                            RaiseBatchItemCompleted(new BatchItemCompletedEventArgs(
-                                                imagePath,
-                                                success: false,
-                                                error: null,
-                                                elapsedMs: 0.0,
-                                                inferenceParams: SafeCloneJObject(inferenceParams),
-                                                exportedImagePath: null,
-                                                result: null));
-                                            if (profile != null)
+                                            var visList = Utils.VisualizeResults(
+                                                new List<Mat> { matForVis }, result, visProperties);
+                                            if (visList != null && visList.Count > 0 && visList[0] != null)
                                             {
-                                                profile.Status = "read_empty";
-                                                profile.MarkDone();
-                                                profileLogger?.Log(profile);
-                                            }
-                                            UpdateBatchProgress(processed + skipped + failed, files.Length);
-                                            continue;
-                                        }
-
-                                        if (saveOriginal && !string.IsNullOrEmpty(originalDir))
-                                        {
-                                            try
-                                            {
-                                                var copySw = Stopwatch.StartNew();
-                                                string originalOutPath = GetRelativeOutputPath(folderPath, imagePath, originalDir);
-                                                File.Copy(imagePath, originalOutPath, true);
-                                                copySw.Stop();
-                                                if (profile != null) profile.CopyMs = copySw.Elapsed.TotalMilliseconds;
-                                            }
-                                            catch
-                                            {
-                                                // 保存原图失败不影响整体批处理
-                                            }
-                                        }
-
-                                        // 推理输入：RGB
-                                        Utils.CSharpResult result;
-                                        double inferMs = 0.0;
-                                        using (var rgb = new Mat())
-                                        {
-                                            try
-                                            {
-                                                int ch = original.Channels();
-                                                if (ch == 3) Cv2.CvtColor(original, rgb, ColorConversionCodes.BGR2RGB);
-                                                else if (ch == 4) Cv2.CvtColor(original, rgb, ColorConversionCodes.BGRA2RGB);
-                                                else if (ch == 1) Cv2.CvtColor(original, rgb, ColorConversionCodes.GRAY2RGB);
-                                                else original.CopyTo(rgb);
-                                            }
-                                            catch
-                                            {
-                                                original.CopyTo(rgb);
-                                            }
-
-                                            LogInferStart("batch", imagePath, inferenceParams, rgb);
-                                            var sw = Stopwatch.StartNew();
-                                            result = model.Infer(rgb, inferenceParams);
-                                            sw.Stop();
-                                            inferMs = sw.Elapsed.TotalMilliseconds;
-                                            if (profile != null) profile.InferMs = inferMs;
-                                            LogInferEnd("batch", imagePath, result, inferMs);
-                                            RunDvpHttpDiagnostic(rgb, inferenceParams, imagePath, "batch");
-                                        }
-
-                                        JArray labelShapes = null;
-                                        WpfVisualize.VisualizeResult labelOverlay = null;
-                                        if (saveVisualization)
-                                        {
-                                            var jsonSw = Stopwatch.StartNew();
-                                            try
-                                            {
-                                                string jsonPath = Path.ChangeExtension(imagePath, ".json");
-                                                if (File.Exists(jsonPath))
+                                                using (var rightImage = visList[0])
+                                                // 3. 使用 HConcat 高效拼接
+                                                using (var combined = ConcatImagesHorizontallyFast(leftImage, rightImage))
                                                 {
-                                                    string jsonContent = File.ReadAllText(jsonPath);
-                                                    var json = JsonConvert.DeserializeObject(jsonContent);
-                                                    if (json is JObject jObj && jObj["shapes"] is JArray shp)
-                                                    {
-                                                        labelShapes = shp;
-                                                    }
+                                                    // 4. 保存
+                                                    string visOutPath = Path.Combine(visDir, baseName + "_vis.png");
+                                                    Cv2.ImWrite(visOutPath, combined);
                                                 }
                                             }
-                                            catch
-                                            {
-                                                labelShapes = null;
-                                            }
-
-                                            if (labelShapes != null && labelShapes.Count > 0)
-                                            {
-                                                try
-                                                {
-                                                    var stroke = SafeParseColor(Settings.Default.BBoxBorderColor, System.Windows.Media.Colors.Red);
-                                                    labelOverlay = WpfVisualize.BuildFromLabelmeShapes(labelShapes, labelOptions, stroke);
-                                                }
-                                                catch
-                                                {
-                                                    labelOverlay = null;
-                                                }
-                                            }
-                                            jsonSw.Stop();
-                                            if (profile != null) profile.JsonMs = jsonSw.Elapsed.TotalMilliseconds;
-                                        }
-
-                                        // GUI叠加导出：批量不预览，仅导出渲染结果（渲染线程执行）
-                                        var baseSw = Stopwatch.StartNew();
-                                        var baseImage = MatBitmapSource.ToBitmapSource(original);
-                                        baseSw.Stop();
-                                        if (profile != null) profile.BaseImageMs = baseSw.Elapsed.TotalMilliseconds;
-                                        var renderTask = renderWorker.Enqueue(new BatchRenderJob
-                                        {
-                                            BaseImage = baseImage,
-                                            Result = result,
-                                            ExportOptions = exportOptions,
-                                            ScreenLineWidth = screenLineWidth,
-                                            ScreenFontSize = screenFontSize,
-                                            LabelOverlay = labelOverlay,
-                                            LabelOptions = labelOptions,
-                                            SaveVisualization = saveVisualization,
-                                            OutputDir = resultDir,
-                                            ImagePath = imagePath,
-                                            BaseFolderPath = folderPath
-                                        });
-
-                                        pending.Enqueue(new PendingRender(
-                                            imagePath,
-                                            renderTask,
-                                            SafeCloneJObject(inferenceParams),
-                                            inferMs,
-                                            result,
-                                            profile));
-
-                                        if (pending.Count >= maxInFlight)
-                                        {
-                                            await DrainOneAsync().ConfigureAwait(false);
                                         }
                                     }
-
-                                    processed += 1;
-                                    UpdateBatchProgress(processed + skipped + failed, files.Length);
                                 }
-                                catch (Exception ex)
+                                catch (Exception visEx)
                                 {
-                                    failed += 1;
-                                    RaiseBatchItemCompleted(new BatchItemCompletedEventArgs(
-                                        imagePath,
-                                        success: false,
-                                        error: ex,
-                                        elapsedMs: 0.0,
-                                        inferenceParams: SafeCloneJObject(inferenceParams),
-                                        exportedImagePath: null,
-                                        result: null));
-                                    if (enableProfile)
-                                    {
-                                        var profile = BatchProfileItem.Start(imagePath);
-                                        profile.Status = "exception";
-                                        profile.Error = ex.Message;
-                                        profile.MarkDone();
-                                        profileLogger?.Log(profile);
-                                    }
-                                    UpdateBatchProgress(processed + skipped + failed, files.Length);
+                                    System.Diagnostics.Debug.WriteLine($"[批量推理] 可视化失败: {visEx.Message}");
                                 }
                             }
-                        }
-                        finally
-                        {
-                            renderWorker.Complete();
-                            while (pending.Count > 0)
-                            {
-                                await DrainOneAsync().ConfigureAwait(false);
-                            }
-                        }
-                    });
-                }
-
-                RaiseBatchCompleted(new BatchCompletedEventArgs(
-                    total: files.Length,
-                    processed: processed,
-                    exported: exported,
-                    skipped: skipped,
-                    failed: failed,
-                    outputDir: outDir,
-                    inferenceParams: SafeCloneJObject(inferenceParams)));
-                
-                bool openAfterBatch = false;
-                try { openAfterBatch = Settings.Default.OpenOutputFolderAfterBatch; } catch { openAfterBatch = false; }
-                if (openAfterBatch)
-                {
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(outDir) && Directory.Exists(outDir))
-                        {
-                            Process.Start(new ProcessStartInfo
-                            {
-                                FileName = "explorer.exe",
-                                Arguments = $"\"{outDir}\"",
-                                UseShellExecute = true
-                            });
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // 打开文件夹失败不影响流程
+                        System.Diagnostics.Debug.WriteLine($"[批量推理] 处理图片失败 {imgPath}: {ex.Message}");
+                    }
+
+                    // 线程安全更新进度
+                    int currentCount = Interlocked.Increment(ref processedCount);
+                    Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(currentCount, total)));
+                });
+            });
+
+            // 4. 打开输出目录
+            if (openDstDir)
+            {
+                try
+                {
+                    Process.Start("explorer.exe", outputDir);
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// 读取 LabelMe JSON 标注并绘制到图像上（用于显示 GT）
+        /// 返回新的 Mat（克隆后绘制）
+        /// </summary>
+        private static Mat DrawLabelMeAnnotations(Mat image, string jsonPath, Dictionary<string, object> visProperties)
+        {
+            var result = image.Clone();
+            DrawLabelMeAnnotationsCore(result, jsonPath, visProperties);
+            return result;
+        }
+
+        /// <summary>
+        /// 读取 LabelMe JSON 标注并绘制到图像上（原地绘制版本，不做 Clone）
+        /// 返回同一个 Mat（直接修改传入的图像）
+        /// </summary>
+        private static Mat DrawLabelMeAnnotationsInPlace(Mat image, string jsonPath, Dictionary<string, object> visProperties)
+        {
+            DrawLabelMeAnnotationsCore(image, jsonPath, visProperties);
+            return image;
+        }
+
+        /// <summary>
+        /// 绘制 LabelMe 标注的核心逻辑（不包含克隆）
+        /// </summary>
+        private static void DrawLabelMeAnnotationsCore(Mat image, string jsonPath, Dictionary<string, object> visProperties)
+        {
+            if (!File.Exists(jsonPath)) return;
+
+            try
+            {
+                var json = JObject.Parse(File.ReadAllText(jsonPath, Encoding.UTF8));
+                var shapes = json["shapes"] as JArray;
+                if (shapes == null || shapes.Count == 0) return;
+
+                // 读取可视化配置
+                int lineWidth = 2;
+                double fontScale = 0.5;
+                bool displayText = true;
+                bool textOutOfBbox = true;
+                bool displayTextShadow = true;
+                if (visProperties != null)
+                {
+                    if (visProperties.TryGetValue("bbox_line_width", out var lw)) lineWidth = Convert.ToInt32(lw);
+                    if (visProperties.TryGetValue("font_size", out var fs)) fontScale = Math.Max(0.3, Convert.ToInt32(fs) / 26.0);
+                    if (visProperties.TryGetValue("display_text", out var dt)) displayText = Convert.ToBoolean(dt);
+                    if (visProperties.TryGetValue("text_out_of_bbox", out var tob)) textOutOfBbox = Convert.ToBoolean(tob);
+                    if (visProperties.TryGetValue("display_text_shadow", out var dts)) displayTextShadow = Convert.ToBoolean(dts);
+                }
+
+                var bboxColor = new Scalar(0, 255, 0); // 绿色表示 GT
+                var fontColor = new Scalar(255, 255, 255);
+
+                foreach (var shape in shapes)
+                {
+                    if (!(shape is JObject shapeObj)) continue;
+
+                    string label = shapeObj["label"]?.ToString() ?? "";
+                    string shapeType = shapeObj["shape_type"]?.ToString() ?? "polygon";
+                    var points = shapeObj["points"] as JArray;
+                    if (points == null || points.Count == 0) continue;
+
+                    // 解析点坐标
+                    var pts = new List<OpenCvSharp.Point>();
+                    foreach (var pt in points)
+                    {
+                        if (pt is JArray ptArr && ptArr.Count >= 2)
+                        {
+                            int x = (int)Math.Round(ptArr[0].Value<double>());
+                            int y = (int)Math.Round(ptArr[1].Value<double>());
+                            pts.Add(new OpenCvSharp.Point(x, y));
+                        }
+                    }
+
+                    if (pts.Count == 0) continue;
+
+                    // 根据 shape_type 绘制
+                    if (shapeType == "rectangle" && pts.Count >= 2)
+                    {
+                        var rect = new OpenCvSharp.Rect(pts[0], new OpenCvSharp.Size(pts[1].X - pts[0].X, pts[1].Y - pts[0].Y));
+                        Cv2.Rectangle(image, rect, bboxColor, lineWidth);
+                    }
+                    else if (shapeType == "polygon" || shapeType == "linestrip")
+                    {
+                        bool isClosed = (shapeType == "polygon");
+                        Cv2.Polylines(image, new[] { pts.ToArray() }, isClosed, bboxColor, lineWidth, LineTypes.AntiAlias);
+                    }
+                    else if (shapeType == "circle" && pts.Count >= 2)
+                    {
+                        int radius = (int)Math.Sqrt(Math.Pow(pts[1].X - pts[0].X, 2) + Math.Pow(pts[1].Y - pts[0].Y, 2));
+                        Cv2.Circle(image, pts[0], radius, bboxColor, lineWidth);
+                    }
+                    else if (shapeType == "point" && pts.Count >= 1)
+                    {
+                        Cv2.Circle(image, pts[0], 3, bboxColor, -1);
+                    }
+                    else
+                    {
+                        // 默认当作多边形处理
+                        Cv2.Polylines(image, new[] { pts.ToArray() }, true, bboxColor, lineWidth, LineTypes.AntiAlias);
+                    }
+
+                    // 绘制标签文字（使用 GDI+ 支持中文）
+                    if (displayText && !string.IsNullOrEmpty(label) && pts.Count > 0)
+                    {
+                        int minX = pts.Min(p => p.X);
+                        int minY = pts.Min(p => p.Y);
+                        
+                        // 计算字体大小（与 VisualizeOnOriginal 一致）
+                        float fontSize = (float)(fontScale * 26);
+                        int textHeight = (int)Math.Ceiling(fontSize * 1.2);
+                        
+                        // 根据设置决定文字位置（与 WPF OverlayRenderer 一致）
+                        int textX = minX;
+                        int textY;
+                        if (textOutOfBbox)
+                        {
+                            // 标签写在框外（上方）
+                            textY = minY - textHeight - 2;
+                            if (textY < 0) textY = minY + 2; // 超出边界则放框内
+                        }
+                        else
+                        {
+                            // 标签写在框内（左上角）
+                            textY = minY + 2;
+                        }
+                        
+                        // 使用 GDI+ 绘制文字（支持中文）
+                        DrawLabelTextGdiPlus(image, label, textX, textY, fontSize, displayTextShadow);
                     }
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show("批量处理失败: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine($"[DrawLabelMeAnnotations] 解析标注失败: {ex.Message}");
             }
-            finally
+        }
+
+        /// <summary>
+        /// 水平拼接两张图像（左右并排）- 保留用于兼容
+        /// </summary>
+        private static Mat ConcatImagesHorizontally(Mat left, Mat right)
+        {
+            return ConcatImagesHorizontallyFast(left, right);
+        }
+
+        /// <summary>
+        /// 水平拼接两张图像（优化版：使用 Cv2.HConcat 减少内存复制）
+        /// </summary>
+        private static Mat ConcatImagesHorizontallyFast(Mat left, Mat right)
+        {
+            if (left == null || left.Empty()) return right?.Clone() ?? new Mat();
+            if (right == null || right.Empty()) return left.Clone();
+
+            // 如果高度相同，直接使用 HConcat（最快，只需 1 次复制）
+            if (left.Height == right.Height && left.Type() == right.Type())
             {
-                if (batchStarted)
-                {
-                    EndBatchProgress();
-                }
+                var result = new Mat();
+                Cv2.HConcat(new Mat[] { left, right }, result);
+                return result;
             }
+
+            // 高度不同时，先 resize 再拼接
+            int targetHeight = Math.Max(left.Height, right.Height);
+            
+            // 准备左图（保持宽高比 resize）
+            Mat leftResized;
+            if (left.Height != targetHeight)
+            {
+                double scale = (double)targetHeight / left.Height;
+                int newWidth = (int)(left.Width * scale);
+                leftResized = new Mat();
+                Cv2.Resize(left, leftResized, new OpenCvSharp.Size(newWidth, targetHeight));
+            }
+            else
+            {
+                leftResized = left;
+            }
+
+            // 准备右图（保持宽高比 resize）
+            Mat rightResized;
+            if (right.Height != targetHeight)
+            {
+                double scale = (double)targetHeight / right.Height;
+                int newWidth = (int)(right.Width * scale);
+                rightResized = new Mat();
+                Cv2.Resize(right, rightResized, new OpenCvSharp.Size(newWidth, targetHeight));
+            }
+            else
+            {
+                rightResized = right;
+            }
+
+            // 使用 HConcat 拼接
+            var combined = new Mat();
+            Cv2.HConcat(new Mat[] { leftResized, rightResized }, combined);
+
+            // 释放临时创建的 resize Mat
+            if (leftResized != left) leftResized.Dispose();
+            if (rightResized != right) rightResized.Dispose();
+
+            return combined;
         }
 
         /// <summary>
         /// 代码开关：是否导出批量预测的 CSV 性能日志（batch_profile.csv）。
         /// 设置为 false 可禁用 CSV 导出。
         /// </summary>
+#region CSV开关
         private const bool EnableBatchProfileCsv = false;
+#endregion
 
         private static bool IsBatchProfileEnabled()
         {
@@ -1457,6 +1602,79 @@ namespace DlcvTest
                     // 保持静默：刷新失败不应打断用户交互
                 }
             };
+        }
+
+        /// <summary>
+        /// 使用 GDI+ 在 Mat 上绘制标注文字（支持中文），用于 GT 标注图绘制。
+        /// 绿色文字，与推理结果的橙色区分。
+        /// </summary>
+        private static void DrawLabelTextGdiPlus(Mat mat, string text, int x, int y, float fontSize, bool withShadow)
+        {
+            if (mat == null || mat.Empty() || string.IsNullOrEmpty(text)) return;
+            if (mat.Channels() != 3) return;
+
+            try
+            {
+                int width = mat.Cols;
+                int height = mat.Rows;
+                int stride = (int)mat.Step();
+
+                using (var bmp = new Bitmap(width, height, stride,
+                    System.Drawing.Imaging.PixelFormat.Format24bppRgb, mat.Data))
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.TextRenderingHint = TextRenderingHint.AntiAlias;
+                    using (var font = new Font("Microsoft YaHei", fontSize, System.Drawing.FontStyle.Bold, GraphicsUnit.Pixel))
+                    {
+                        // 测量文字大小
+                        var textSize = g.MeasureString(text, font);
+                        
+                        // 绘制半透明黑色背景
+                        using (var bgBrush = new SolidBrush(System.Drawing.Color.FromArgb(160, 0, 0, 0)))
+                        {
+                            g.FillRectangle(bgBrush, x, y, textSize.Width, textSize.Height);
+                        }
+                        
+                        // 绘制文字阴影
+                        if (withShadow)
+                        {
+                            using (var shadowBrush = new SolidBrush(System.Drawing.Color.Black))
+                            {
+                                g.DrawString(text, font, shadowBrush, x + 1, y + 1);
+                            }
+                        }
+                        
+                        // 绘制文字（绿色，表示GT标注）
+                        using (var brush = new SolidBrush(System.Drawing.Color.LimeGreen))
+                        {
+                            g.DrawString(text, font, brush, x, y);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// 将颜色字符串（如 "#FFFF0000" 或 "#FF0000"）解析为 [R, G, B] 对象数组。
+        /// 用于传递给 OpenCV 可视化模块（VisualizeOnOriginal）。
+        /// 注意：必须返回 object[] 而非 int[]，因为 VisualizeOnOriginal.ReadColor 
+        /// 检查的是 IEnumerable&lt;object&gt;，而 int[] 实现的是 IEnumerable&lt;int&gt;。
+        /// </summary>
+        private static object[] ParseColorToRgbArray(string colorText)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(colorText))
+                    return new object[] { 255, 0, 0 }; // 默认红色
+
+                var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(colorText);
+                return new object[] { (int)color.R, (int)color.G, (int)color.B };
+            }
+            catch
+            {
+                return new object[] { 255, 0, 0 }; // 解析失败默认红色
+            }
         }
     }
 }

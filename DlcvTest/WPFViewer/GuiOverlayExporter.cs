@@ -188,7 +188,7 @@ namespace DlcvTest.WPFViewer
             int width = left.PixelWidth + right.PixelWidth;
             int height = Math.Max(left.PixelHeight, right.PixelHeight);
             if (width <= 0 || height <= 0) return null;
-
+             
             var dv = new DrawingVisual();
             using (var dc = dv.RenderOpen())
             {

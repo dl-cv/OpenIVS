@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -206,7 +207,7 @@ namespace DlcvModules
                             try
                             {
                                 float sc = so["score"]?.Value<float?>() ?? float.NaN;
-                                if (!float.IsNaN(sc)) label = string.IsNullOrEmpty(label) ? $"{sc:F2}" : $"{label} {sc:F2}";
+                                if (!float.IsNaN(sc)) label = string.IsNullOrEmpty(label) ? $"{sc * 100:F1}" : $"{label}: {sc * 100:F1}";
                             }
                             catch { }
                         }
@@ -216,13 +217,29 @@ namespace DlcvModules
                             int minY = (int)Math.Floor(ptsGlobal.Min(p => p.Y));
                             int maxX = (int)Math.Ceiling(ptsGlobal.Max(p => p.X));
                             int maxY = (int)Math.Ceiling(ptsGlobal.Max(p => p.Y));
-                            int tx = vis.TextOutOfBbox ? minX : minX + 3;
-                            int ty = vis.TextOutOfBbox ? Math.Max(0, minY - 4) : Math.Max(0, minY + (int)Math.Round(12 * vis.FontScale));
-                            if (vis.DisplayTextShadow)
+                            
+                            // 使用 GDI+ 绘制文本（支持中文），与 WPF 预览保持一致
+                            float fontSize = (float)(vis.FontScale * 26); // 转换为像素大小
+                            var fontColor = System.Drawing.Color.FromArgb(
+                                (int)vis.FontColor.Val2, (int)vis.FontColor.Val1, (int)vis.FontColor.Val0);
+                            
+                            // 计算文字位置（与 WPF OverlayRenderer 一致）
+                            int tx = minX;
+                            int ty;
+                            int textHeight = (int)Math.Ceiling(fontSize * 1.2); // 估算文字高度
+                            if (vis.TextOutOfBbox)
                             {
-                                Cv2.PutText(target, label, new Point(tx + 1, ty + 1), HersheyFonts.HersheySimplex, vis.FontScale, new Scalar(0, 0, 0), vis.FontThickness + 1, LineTypes.AntiAlias);
+                                // 框外：文字在bbox上方，留2像素间距
+                                ty = minY - textHeight - 2;
+                                if (ty < 0) ty = minY + 2; // 超出图像上边界则放框内
                             }
-                            Cv2.PutText(target, label, new Point(tx, ty), HersheyFonts.HersheySimplex, vis.FontScale, vis.FontColor, vis.FontThickness, LineTypes.AntiAlias);
+                            else
+                            {
+                                // 框内：文字在bbox左上角内部，留2像素间距
+                                ty = minY + 2;
+                            }
+                            
+                            DrawTextGdiPlus(target, label, tx, ty, fontSize, fontColor, vis.DisplayTextShadow);
                         }
                     }
                 }
@@ -384,6 +401,59 @@ namespace DlcvModules
 			if (v < int.MinValue) return int.MinValue;
 			return (int)Math.Round(v);
 		}
+
+        /// <summary>
+        /// 使用 GDI+ 在 Mat 上绘制文本（支持中文），与 WPF OverlayRenderer 风格一致
+        /// </summary>
+        private static void DrawTextGdiPlus(Mat mat, string text, int x, int y,
+            float fontSize, System.Drawing.Color fontColor, bool withShadow)
+        {
+            if (mat == null || mat.Empty() || string.IsNullOrEmpty(text)) return;
+            if (mat.Channels() != 3) return; // 仅支持 BGR 图像
+
+            try
+            {
+                int width = mat.Cols;
+                int height = mat.Rows;
+                int stride = (int)mat.Step();
+
+                // 直接使用 Mat 的内存创建 Bitmap（共享内存，零拷贝）
+                using (var bmp = new Bitmap(width, height, stride,
+                    System.Drawing.Imaging.PixelFormat.Format24bppRgb, mat.Data))
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.TextRenderingHint = TextRenderingHint.AntiAlias;
+                    using (var font = new Font("Microsoft YaHei", fontSize, FontStyle.Bold, GraphicsUnit.Pixel))
+                    {
+                        // 测量文字大小
+                        var textSize = g.MeasureString(text, font);
+                        
+                        // 绘制半透明黑色背景（与 WPF OverlayRenderer 一致）
+                        using (var bgBrush = new SolidBrush(System.Drawing.Color.FromArgb(160, 0, 0, 0)))
+                        {
+                            g.FillRectangle(bgBrush, x, y, textSize.Width, textSize.Height);
+                        }
+                        
+                        // 绘制文字阴影（如果启用）
+                        if (withShadow)
+                        {
+                            using (var shadowBrush = new SolidBrush(System.Drawing.Color.Black))
+                            {
+                                g.DrawString(text, font, shadowBrush, x + 1, y + 1);
+                            }
+                        }
+                        
+                        // 绘制文字
+                        using (var brush = new SolidBrush(fontColor))
+                        {
+                            g.DrawString(text, font, brush, x, y);
+                        }
+                    }
+                }
+                // Bitmap 直接共享 Mat 的内存，绘制后数据已写入 Mat
+            }
+            catch { }
+        }
 	}
 
 	/// <summary>
@@ -471,7 +541,6 @@ namespace DlcvModules
 		}
 	}
 }
-
 
 
 
