@@ -629,7 +629,7 @@
             
             <!-- 路径输入框 -->
             <Border Grid.Column="1" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="36" VerticalAlignment="Center">
-                <TextBox x:Name="txtDataPath" Text="C:/Users/xu/Desktop/20250514测试/2-实例分割1/1-训练集" 
+                <TextBox x:Name="txtDataPath" Text="请打开数据文件夹……" 
                          BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Padding="10,0" Foreground="#333" IsReadOnly="True"/>
             </Border>
 
