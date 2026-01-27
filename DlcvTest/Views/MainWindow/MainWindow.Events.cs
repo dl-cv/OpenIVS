@@ -54,6 +54,43 @@ namespace DlcvTest
             }
         }
 
+        // 整数步进器按钮点击事件（用于调整 top_k）
+        private void StepperIntButton_Click(object sender, RoutedEventArgs e)
+        {
+            var btn = sender as Button;
+            if (btn == null) return;
+
+            // 找到对应的TextBox（通过按钮的父容器）
+            var grid = btn.Parent as Grid;
+            if (grid == null) return;
+
+            TextBox textBox = null;
+            foreach (var child in grid.Children)
+            {
+                if (child is TextBox tb)
+                {
+                    textBox = tb;
+                    break;
+                }
+            }
+
+            if (textBox == null) return;
+
+            // 解析当前值
+            if (int.TryParse(textBox.Text, out int value))
+            {
+                if (btn.Content.ToString() == "+")
+                {
+                    value += 1;
+                }
+                else if (btn.Content.ToString() == "—" || btn.Content.ToString() == "-")
+                {
+                    value = Math.Max(1, value - 1);
+                }
+                textBox.Text = value.ToString();
+            }
+        }
+
         // 窗口控制按钮左键拖拽事件
         private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {

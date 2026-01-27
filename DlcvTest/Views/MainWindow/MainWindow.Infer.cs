@@ -20,7 +20,6 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using DlcvTest.Properties;
 using DlcvTest.WPFViewer;
-using System.Net.WebSockets;
 
 namespace DlcvTest
 {
@@ -230,165 +229,6 @@ namespace DlcvTest
         }
 
         /// <summary>
-        /// 通过 WebSocket 调用后端的 /predict_directory 接口进行批量推理
-        /// </summary>
-        private async Task RunBatchViaWebSocketAsync(
-            string modelPath,
-            string srcDir,
-            string dstDir,
-            double threshold,
-            bool saveImg,
-            bool saveVis,
-            bool openDstDir)
-        {
-            string serverUrl = "ws://127.0.0.1:9890/predict_directory";
-
-            using (var ws = new ClientWebSocket())
-            {
-                var cts = new CancellationTokenSource(TimeSpan.FromMinutes(30));
-
-                try
-                {
-                    // 1. 连接 WebSocket
-                    await ws.ConnectAsync(new Uri(serverUrl), cts.Token);
-
-                    // 2. 发送批量推理参数
-                    // 注意：后端会在 dst_dir 下创建 {模型名}_测试时间_{时间戳}/ 子目录保存结果
-                    var requestData = new JObject
-                    {
-                        ["model_path"] = modelPath,
-                        ["src_dir"] = srcDir,
-                        ["dst_dir"] = dstDir,
-                        ["threshold"] = threshold,
-                        ["save_img"] = saveImg,
-                        ["save_vis"] = true,        
-                        ["save_json"] = true,       
-                        ["open_dst_dir"] = openDstDir,
-                        ["batch_size"] = 1,
-                        ["save_ok_img"] = true,   
-                        ["save_ng_img"] = true,   
-                        ["save_by_category"] = false,
-                        ["with_mask"] = true
-                    };
-
-                    string jsonStr = requestData.ToString(Formatting.None);
-                    System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 发送参数: {jsonStr}");
-                    var sendBuffer = Encoding.UTF8.GetBytes(jsonStr);
-                    await ws.SendAsync(
-                        new ArraySegment<byte>(sendBuffer),
-                        WebSocketMessageType.Text,
-                        true,
-                        cts.Token);
-
-                    // 3. 接收进度和结果
-                    var receiveBuffer = new byte[8192];
-                    bool completed = false;
-                    string lastErrorMessage = null;
-
-                    while (ws.State == WebSocketState.Open && !completed)
-                    {
-                        try
-                        {
-                            var result = await ws.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), cts.Token);
-
-                            if (result.MessageType == WebSocketMessageType.Close)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 服务端关闭连接, CloseStatus={ws.CloseStatus}, CloseStatusDescription={ws.CloseStatusDescription}");
-                                break;
-                            }
-
-                            if (result.MessageType == WebSocketMessageType.Text)
-                            {
-                                string message = Encoding.UTF8.GetString(receiveBuffer, 0, result.Count);
-                                System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 收到消息: {message}");
-
-                                try
-                                {
-                                    var json = JObject.Parse(message);
-
-                                    // 处理错误（先检查错误）
-                                    if (json.ContainsKey("code") && json["code"].ToString() != "00000")
-                                    {
-                                        lastErrorMessage = json["message"]?.ToString() ?? "未知错误";
-                                        System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 后端返回错误: {lastErrorMessage}");
-                                        throw new Exception(lastErrorMessage);
-                                    }
-
-                                    // 处理进度更新
-                                    if (json.ContainsKey("progress"))
-                                    {
-                                        double progress = json["progress"].Value<double>();
-                                        int current = (int)(progress * FolderImageCount);
-                                        UpdateBatchProgress(current, FolderImageCount);
-                                        System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 进度: {progress:P0}");
-
-                                        if (progress >= 1.0)
-                                        {
-                                            completed = true;
-                                            System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] 完成！输出目录: {dstDir}");
-                                        }
-                                    }
-                                }
-                                catch (JsonException)
-                                {
-                                    // 忽略无法解析的消息
-                                }
-                            }
-                        }
-                        catch (WebSocketException ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"[WebSocket批量推理] WebSocketException: {ex.Message}, ws.State={ws.State}");
-                            
-                            // 如果已经收到 progress=1.0，连接异常关闭也视为成功
-                            if (completed)
-                                break;
-
-                            // 检查是否是"连接被关闭"类型的错误
-                            if (ws.State == WebSocketState.Aborted ||
-                                ws.State == WebSocketState.Closed)
-                            {
-                                // 服务端可能已完成并关闭，但如果没有收到完成消息，报错
-                                if (!completed)
-                                {
-                                    throw new Exception($"WebSocket 连接被关闭，推理可能失败。请检查后端日志。");
-                                }
-                                break;
-                            }
-
-                            throw;
-                        }
-                    }
-
-                    // 如果没有完成且没有收到任何进度消息，报错
-                    if (!completed)
-                    {
-                        throw new Exception(lastErrorMessage ?? "批量推理未正常完成，请检查后端日志或输出目录。");
-                    }
-
-                    // 4. 尝试正常关闭（如果还没关闭的话）
-                    if (ws.State == WebSocketState.Open)
-                    {
-                        try
-                        {
-                            await ws.CloseAsync(
-                                WebSocketCloseStatus.NormalClosure,
-                                "Done",
-                                CancellationToken.None);
-                        }
-                        catch
-                        {
-                            // 忽略关闭错误
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    throw new Exception("批量推理超时");
-                }
-            }
-        }
-
-        /// <summary>
         /// 本地批量推理：使用 Model.Infer 进行推理，并保存原图/可视化图
         /// 可视化图为并排拼接：左边是 GT（LabelMe 标注），右边是模型推理结果
         /// </summary>
@@ -462,8 +302,9 @@ namespace DlcvTest
             int processedCount = 0;
             await Task.Run(() =>
             {
-                // 使用并行处理，限制最大并行度为 4
-                var options = new ParallelOptions { MaxDegreeOfParallelism = 4 };
+                // 使用并行处理，从设置中读取最大并行度（默认 4，范围 1-16）
+                int threadCount = Math.Max(1, Math.Min(16, Settings.Default.ThreadCount));
+                var options = new ParallelOptions { MaxDegreeOfParallelism = threadCount };
                 Parallel.ForEach(imageFiles, options, (imgPath) =>
                 {
                     string baseName = Path.GetFileNameWithoutExtension(imgPath);
@@ -481,13 +322,46 @@ namespace DlcvTest
                                 return;
                             }
 
-                            // 推理
-                            var result = model.Infer(mat);
+                            // 推理（显式声明类型，避免 dynamic 推断导致 lambda 表达式错误）
+                            Utils.CSharpResult result = model.Infer(mat);
 
                             // 保存原图
                             if (saveImg)
                             {
-                                string imgOutPath = Path.Combine(imgDir, baseName + ext);
+                                string targetDir = imgDir;
+                                
+                                // 按类别保存：根据 top1 类别创建子文件夹
+                                if (Settings.Default.SaveByCategory)
+                                {
+                                    string categoryName = "Unknown";
+                                    try
+                                    {
+                                        if (result.SampleResults != null && result.SampleResults.Count > 0)
+                                        {
+                                            var firstSample = result.SampleResults[0];
+                                            if (firstSample.Results != null && firstSample.Results.Count > 0)
+                                            {
+                                                // 手动找到置信度最高的结果（避免 lambda 表达式与 dynamic 冲突）
+                                                var topResult = firstSample.Results[0];
+                                                for (int ri = 1; ri < firstSample.Results.Count; ri++)
+                                                {
+                                                    if (firstSample.Results[ri].Score > topResult.Score)
+                                                        topResult = firstSample.Results[ri];
+                                                }
+                                                if (!string.IsNullOrWhiteSpace(topResult.CategoryName))
+                                                {
+                                                    categoryName = SanitizeFileName(topResult.CategoryName);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch { }
+                                    
+                                    targetDir = Path.Combine(imgDir, categoryName);
+                                    try { Directory.CreateDirectory(targetDir); } catch { }
+                                }
+                                
+                                string imgOutPath = Path.Combine(targetDir, baseName + ext);
                                 try { Cv2.ImWrite(imgOutPath, mat); } catch { }
                             }
 
@@ -496,6 +370,38 @@ namespace DlcvTest
                             {
                                 try
                                 {
+                                    // 按类别保存：根据 top1 类别创建子文件夹
+                                    string targetVisDir = visDir;
+                                    if (Settings.Default.SaveByCategory)
+                                    {
+                                        string categoryName = "Unknown";
+                                        try
+                                        {
+                                            if (result.SampleResults != null && result.SampleResults.Count > 0)
+                                            {
+                                                var firstSample = result.SampleResults[0];
+                                                if (firstSample.Results != null && firstSample.Results.Count > 0)
+                                                {
+                                                    // 手动找到置信度最高的结果（避免 lambda 表达式与 dynamic 冲突）
+                                                    var topResult = firstSample.Results[0];
+                                                    for (int ri = 1; ri < firstSample.Results.Count; ri++)
+                                                    {
+                                                        if (firstSample.Results[ri].Score > topResult.Score)
+                                                            topResult = firstSample.Results[ri];
+                                                    }
+                                                    if (!string.IsNullOrWhiteSpace(topResult.CategoryName))
+                                                    {
+                                                        categoryName = SanitizeFileName(topResult.CategoryName);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        catch { }
+                                        
+                                        targetVisDir = Path.Combine(visDir, categoryName);
+                                        try { Directory.CreateDirectory(targetVisDir); } catch { }
+                                    }
+
                                     // 1. 左边：原图 + LabelMe 标注绘制（GT）- 直接在 mat 上绘制以减少 Clone
                                     string labelMePath = Path.ChangeExtension(imgPath, ".json");
                                     using (var leftImage = saveImg ? DrawLabelMeAnnotations(mat.Clone(), labelMePath, visProperties) 
@@ -513,7 +419,7 @@ namespace DlcvTest
                                                 using (var combined = ConcatImagesHorizontallyFast(leftImage, rightImage))
                                                 {
                                                     // 4. 保存
-                                                    string visOutPath = Path.Combine(visDir, baseName + "_vis.png");
+                                                    string visOutPath = Path.Combine(targetVisDir, baseName + "_vis.png");
                                                     Cv2.ImWrite(visOutPath, combined);
                                                 }
                                             }
@@ -1436,6 +1342,16 @@ namespace DlcvTest
                             JObject inferenceParams = new JObject();
                             inferenceParams["threshold"] = (float)threshold;
                             inferenceParams["with_mask"] = true;
+
+                            // 获取 top_k 参数（用于分类结果显示）
+                            int topK = 1;
+                            Dispatcher.Invoke(() =>
+                            {
+                                if (TopKVal != null && int.TryParse(TopKVal.Text, out int val) && val > 0)
+                                    topK = val;
+                            });
+                            inferenceParams["top_k"] = topK;
+
                             EnsureDvpParamsMirror(inferenceParams);
 
                             System.Diagnostics.Debug.WriteLine($"[模型推理] 开始推理，参数: threshold={(float)threshold}, with_mask=true");
@@ -1514,6 +1430,9 @@ namespace DlcvTest
                                         if (hasResults) wpfViewer2.UpdateResults(result);
                                         else wpfViewer2.ClearResults();
                                     }
+
+                                    // 更新预测结果显示（分类模型显示 top_k 个类别）
+                                    UpdatePredictResultDisplay(result, topK);
                                 }, System.Windows.Threading.DispatcherPriority.Send);
                             }
                         } // if (model != null) 块结束
@@ -1653,6 +1572,42 @@ namespace DlcvTest
                 }
             }
             catch { }
+        }
+
+        /// <summary>
+        /// 更新预测结果显示区域（分类模型显示 top_k 个类别及置信度）
+        /// </summary>
+        /// <param name="result">推理结果</param>
+        /// <param name="topK">要显示的类别数量</param>
+        private void UpdatePredictResultDisplay(Utils.CSharpResult result, int topK)
+        {
+            try
+            {
+                // 检查是否有结果
+                if (result.SampleResults == null || result.SampleResults.Count == 0 ||
+                    result.SampleResults[0].Results == null || result.SampleResults[0].Results.Count == 0)
+                {
+                    // 无结果时显示"暂无结果"
+                    if (txtPredictResultEmpty != null) txtPredictResultEmpty.Visibility = Visibility.Visible;
+                    if (PredictResultList != null) PredictResultList.ItemsSource = null;
+                    return;
+                }
+
+                // 获取按置信度排序的前 topK 个结果
+                var sortedResults = result.SampleResults[0].Results
+                    .OrderByDescending(r => r.Score)
+                    .Take(Math.Max(1, topK))
+                    .Select(r => $"{r.CategoryName}：{r.Score:P2}")
+                    .ToList();
+
+                // 更新显示
+                if (txtPredictResultEmpty != null) txtPredictResultEmpty.Visibility = Visibility.Collapsed;
+                if (PredictResultList != null) PredictResultList.ItemsSource = sortedResults;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[UpdatePredictResultDisplay] 更新预测结果显示失败: {ex.Message}");
+            }
         }
 
         /// <summary>

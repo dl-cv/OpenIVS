@@ -592,6 +592,31 @@
             <Border x:Name="overlayMask" Grid.RowSpan="3" Background="#80000000" Visibility="Collapsed" Panel.ZIndex="1000"
                     MouseLeftButtonDown="OverlayMask_MouseLeftButtonDown"/>
 
+            <!-- 模型加载遮罩层 -->
+            <Border x:Name="modelLoadingOverlay" Grid.RowSpan="3" Background="#99000000" 
+                    Visibility="Collapsed" Panel.ZIndex="1001">
+                <Border.Resources>
+                    <!-- 模型加载旋转动画 -->
+                    <Storyboard x:Key="SpinnerStoryboard" RepeatBehavior="Forever">
+                        <DoubleAnimation Storyboard.TargetName="spinnerRotate"
+                                         Storyboard.TargetProperty="Angle"
+                                         From="0" To="360" Duration="0:0:1"/>
+                    </Storyboard>
+                </Border.Resources>
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <!-- 旋转圈圈动画 -->
+                    <Ellipse Width="48" Height="48" StrokeThickness="4" 
+                             Stroke="#7B4DFF" StrokeDashArray="3 2" RenderTransformOrigin="0.5,0.5">
+                        <Ellipse.RenderTransform>
+                            <RotateTransform x:Name="spinnerRotate"/>
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+                    <!-- 提示文字 -->
+                    <TextBlock Text="正在加载模型..." Foreground="White" FontSize="16" 
+                               Margin="0,16,0,0" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
             <!-- Row 0: 顶部菜单栏 -->
             <Grid Grid.Row="0">
                 <Border Background="White" CornerRadius="8,8,0,0" BorderBrush="#EEE" BorderThickness="0,0,0,1"/>
@@ -629,7 +654,7 @@
             
             <!-- 路径输入框 -->
             <Border Grid.Column="1" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="36" VerticalAlignment="Center">
-                <TextBox x:Name="txtDataPath" Text="C:/Users/xu/Desktop/20250514测试/2-实例分割1/1-训练集" 
+                <TextBox x:Name="txtDataPath" Text="请打开数据文件夹……" 
                          BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Padding="10,0" Foreground="#333" IsReadOnly="True"/>
             </Border>
 
@@ -880,7 +905,7 @@
                         <ToggleButton x:Name="btnPredictParamsGroup" IsChecked="True" Content="预测参数" Style="{StaticResource GroupToggleButtonStyle}" Margin="0,15,0,5"/>
                         <StackPanel Grid.IsSharedSizeScope="True" Margin="10,5,0,0" Visibility="{Binding IsChecked, ElementName=btnPredictParamsGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <!-- 置信度 -->
-                                <Grid Margin="0,0,0,12">
+                                <Grid x:Name="gridConfidence" Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
@@ -902,8 +927,31 @@
                                     </Border>
                                 </Grid>
 
+                                <!-- top_k (仅图像分类显示) -->
+                                <Grid x:Name="gridTopK" Margin="0,0,0,12" Visibility="Collapsed">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="top_k" VerticalAlignment="Center" Foreground="#666" HorizontalAlignment="Left"/>
+                                    <Border Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="32" Width="120" Background="White">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0" Click="StepperIntButton_Click"/>
+                                            <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
+                                            <TextBox x:Name="TopKVal" Text="1" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
+                                            <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
+                                            <Button Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2" Click="StepperIntButton_Click"/>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+
                                 <!-- iou threshold -->
-                                <Grid Margin="0,0,0,12" Visibility="Collapsed">
+                                <Grid x:Name="gridIOU" Margin="0,0,0,12" Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
@@ -938,7 +986,7 @@
                                 </Grid>
 
                                 <!-- 类别屏蔽 -->
-                                <Grid Margin="0,0,0,12">
+                                <Grid x:Name="gridCategoryFilter" Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
@@ -956,7 +1004,7 @@
                                 </Grid>
 
                                 <!-- 显示mask -->
-                                <Grid Margin="0,0,0,12">
+                                <Grid x:Name="gridShowMask" Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
@@ -966,7 +1014,7 @@
                                 </Grid>
 
                                 <!-- 显示边缘 -->
-                                <Grid Margin="0,0,0,12">
+                                <Grid x:Name="gridShowEdges" Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
@@ -978,7 +1026,16 @@
 
                         <!-- 预测结果 -->
                         <ToggleButton x:Name="btnPredictResultGroup" IsChecked="True" Content="预测结果" Style="{StaticResource GroupToggleButtonStyle}" Margin="0,15,0,5"/>
-                        <TextBlock Text="暂无结果" Foreground="#999" Margin="10,5" Visibility="{Binding IsChecked, ElementName=btnPredictResultGroup, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <StackPanel Visibility="{Binding IsChecked, ElementName=btnPredictResultGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock x:Name="txtPredictResultEmpty" Text="暂无结果" Foreground="#999" Margin="10,5"/>
+                            <ItemsControl x:Name="PredictResultList" Margin="10,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" Foreground="#666" Margin="0,2"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
 
                     </StackPanel>
                 </ScrollViewer>

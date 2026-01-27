@@ -34,6 +34,10 @@ namespace DlcvTest
                 {
                     chkOpenOutputFolderAfterBatch.IsChecked = Settings.Default.OpenOutputFolderAfterBatch;
                 }
+                if (chkSaveByCategory != null)
+                {
+                    chkSaveByCategory.IsChecked = Settings.Default.SaveByCategory;
+                }
 
                 // 加载输出目录
                 try
@@ -46,6 +50,12 @@ namespace DlcvTest
                 catch
                 {
                     // ignore
+                }
+
+                // 加载线程数
+                if (txtThreadCount != null)
+                {
+                    txtThreadCount.Text = Settings.Default.ThreadCount.ToString();
                 }
             }
             finally
@@ -124,6 +134,20 @@ namespace DlcvTest
             Settings.Default.Save();
         }
 
+        private void ChkSaveByCategory_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveByCategory = true;
+            Settings.Default.Save();
+        }
+
+        private void ChkSaveByCategory_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveByCategory = false;
+            Settings.Default.Save();
+        }
+
         private void BtnBrowseOutputDir_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -196,6 +220,76 @@ namespace DlcvTest
                 // ignore
             }
         }
+
+        #region 步进器通用辅助方法
+
+        /// <summary>
+        /// 步进器通用方法：对 TextBox 中的整数值进行增减操作
+        /// </summary>
+        /// <param name="textBox">目标 TextBox</param>
+        /// <param name="step">步长（正数增加，负数减少）</param>
+        /// <param name="min">最小值</param>
+        /// <param name="max">最大值</param>
+        /// <returns>调整后的值</returns>
+        private int StepIntValue(TextBox textBox, int step, int min, int max)
+        {
+            if (textBox == null) return min;
+
+            int current = min;
+            if (int.TryParse(textBox.Text, out int parsed))
+            {
+                current = parsed;
+            }
+
+            int newValue = Math.Max(min, Math.Min(max, current + step));
+            textBox.Text = newValue.ToString();
+            return newValue;
+        }
+
+        /// <summary>
+        /// 验证并限制 TextBox 中的整数值在指定范围内
+        /// </summary>
+        private int ClampIntValue(TextBox textBox, int min, int max)
+        {
+            if (textBox == null) return min;
+
+            int current = min;
+            if (int.TryParse(textBox.Text, out int parsed))
+            {
+                current = Math.Max(min, Math.Min(max, parsed));
+            }
+
+            textBox.Text = current.ToString();
+            return current;
+        }
+
+        #endregion
+
+        #region 线程数步进器事件
+
+        private void BtnThreadIncrease_Click(object sender, RoutedEventArgs e)
+        {
+            int newValue = StepIntValue(txtThreadCount, 1, 1, 16);
+            Settings.Default.ThreadCount = newValue;
+            Settings.Default.Save();
+        }
+
+        private void BtnThreadDecrease_Click(object sender, RoutedEventArgs e)
+        {
+            int newValue = StepIntValue(txtThreadCount, -1, 1, 16);
+            Settings.Default.ThreadCount = newValue;
+            Settings.Default.Save();
+        }
+
+        private void TxtThreadCount_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            int newValue = ClampIntValue(txtThreadCount, 1, 16);
+            Settings.Default.ThreadCount = newValue;
+            Settings.Default.Save();
+        }
+
+        #endregion
     }
 }
 

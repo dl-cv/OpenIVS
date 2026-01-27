@@ -1060,6 +1060,22 @@ namespace dlcv_infer_csharp
                         }
                     }
 
+                    // DVT 模式：将 mask resize 到 bbox 尺寸
+                    // DVP 的 mask 已经是 bbox 尺寸，不需要 resize
+                    if (!_isDvpMode && !mask_img.Empty() && bbox != null && bbox.Count >= 4)
+                    {
+                        int bboxW = (int)bbox[2];
+                        int bboxH = (int)bbox[3];
+                        if (bboxW > 0 && bboxH > 0 && (mask_img.Width != bboxW || mask_img.Height != bboxH))
+                        {
+                            using (var original = mask_img)
+                            {
+                                mask_img = new Mat();
+                                Cv2.Resize(original, mask_img, new Size(bboxW, bboxH), 0, 0, InterpolationFlags.Nearest);
+                            }
+                        }
+                    }
+
                     // 补充逻辑：如果bbox无效但有mask，尝试从mask计算bbox
                     if ((bbox == null || bbox.Count < 4) && !mask_img.Empty())
                     {
