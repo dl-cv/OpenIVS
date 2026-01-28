@@ -658,149 +658,6 @@ namespace DlcvTest
             return combined;
         }
 
-        /// <summary>
-        /// 代码开关：是否导出批量预测的 CSV 性能日志（batch_profile.csv）。
-        /// 设置为 false 可禁用 CSV 导出。
-        /// </summary>
-#region CSV开关
-        private const bool EnableBatchProfileCsv = false;
-#endregion
-
-        private static bool IsBatchProfileEnabled()
-        {
-            // 代码开关优先：如果代码中禁用，则直接返回 false
-            if (!EnableBatchProfileCsv) return false;
-
-            try
-            {
-                var v = Environment.GetEnvironmentVariable("DLCV_BATCH_PROFILE");
-                if (string.IsNullOrWhiteSpace(v)) return true;
-                v = v.Trim();
-                return !string.Equals(v, "0", StringComparison.OrdinalIgnoreCase) &&
-                       !string.Equals(v, "false", StringComparison.OrdinalIgnoreCase) &&
-                       !string.Equals(v, "no", StringComparison.OrdinalIgnoreCase);
-            }
-            catch
-            {
-                return true;
-            }
-        }
-
-        private sealed class BatchProfileItem
-        {
-            public string ImagePath { get; }
-            public string Status { get; set; }
-            public double ReadMs { get; set; }
-            public double CopyMs { get; set; }
-            public double InferMs { get; set; }
-            public double JsonMs { get; set; }
-            public double BaseImageMs { get; set; }
-            public double RenderMs { get; set; }
-            public double SaveMs { get; set; }
-            public double TotalMs { get; private set; }
-            public double QueueWaitMs { get; private set; }
-            public bool Exported { get; set; }
-            public string OutputPath { get; set; }
-            public string Error { get; set; }
-            private long _totalStartTicks;
-
-            private BatchProfileItem(string imagePath)
-            {
-                ImagePath = imagePath ?? string.Empty;
-                _totalStartTicks = Stopwatch.GetTimestamp();
-            }
-
-            public static BatchProfileItem Start(string imagePath)
-            {
-                return new BatchProfileItem(imagePath);
-            }
-
-            public void MarkDone()
-            {
-                long end = Stopwatch.GetTimestamp();
-                TotalMs = (end - _totalStartTicks) * 1000.0 / Stopwatch.Frequency;
-                double accounted = ReadMs + CopyMs + InferMs + JsonMs + BaseImageMs + RenderMs + SaveMs;
-                QueueWaitMs = Math.Max(0.0, TotalMs - accounted);
-                if (string.IsNullOrWhiteSpace(Status)) Status = "ok";
-            }
-        }
-
-        private sealed class BatchProfileLogger
-        {
-            private readonly string _path;
-            private readonly object _lock = new object();
-
-            public BatchProfileLogger(string path)
-            {
-                _path = path;
-                try
-                {
-                    var dir = Path.GetDirectoryName(_path);
-                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                    {
-                        Directory.CreateDirectory(dir);
-                    }
-                }
-                catch { }
-
-                if (!File.Exists(_path))
-                {
-                    var header = string.Join(",",
-                        "ImagePath",
-                        "Status",
-                        "ReadMs",
-                        "CopyMs",
-                        "InferMs",
-                        "JsonMs",
-                        "BaseImageMs",
-                        "RenderMs",
-                        "SaveMs",
-                        "TotalMs",
-                        "QueueWaitMs",
-                        "Exported",
-                        "OutputPath",
-                        "Error");
-                    File.WriteAllText(_path, header + Environment.NewLine, Encoding.UTF8);
-                }
-            }
-
-            public void Log(BatchProfileItem item)
-            {
-                if (item == null) return;
-                string line = string.Join(",",
-                    Escape(item.ImagePath),
-                    Escape(item.Status),
-                    FormatNum(item.ReadMs),
-                    FormatNum(item.CopyMs),
-                    FormatNum(item.InferMs),
-                    FormatNum(item.JsonMs),
-                    FormatNum(item.BaseImageMs),
-                    FormatNum(item.RenderMs),
-                    FormatNum(item.SaveMs),
-                    FormatNum(item.TotalMs),
-                    FormatNum(item.QueueWaitMs),
-                    item.Exported ? "1" : "0",
-                    Escape(item.OutputPath),
-                    Escape(item.Error));
-
-                lock (_lock)
-                {
-                    File.AppendAllText(_path, line + Environment.NewLine, Encoding.UTF8);
-                }
-            }
-
-            private static string FormatNum(double value)
-            {
-                return value.ToString("F3", CultureInfo.InvariantCulture);
-            }
-
-            private static string Escape(string value)
-            {
-                if (string.IsNullOrEmpty(value)) return "\"\"";
-                return "\"" + value.Replace("\"", "\"\"") + "\"";
-            }
-        }
-
         private sealed class PendingRender
         {
             public string ImagePath { get; }
@@ -808,16 +665,14 @@ namespace DlcvTest
             public JObject InferenceParams { get; }
             public double InferMs { get; }
             public Utils.CSharpResult Result { get; }
-            public BatchProfileItem Profile { get; }
 
-            public PendingRender(string imagePath, Task<BatchRenderResult> renderTask, JObject inferenceParams, double inferMs, Utils.CSharpResult result, BatchProfileItem profile)
+            public PendingRender(string imagePath, Task<BatchRenderResult> renderTask, JObject inferenceParams, double inferMs, Utils.CSharpResult result)
             {
                 ImagePath = imagePath;
                 RenderTask = renderTask;
                 InferenceParams = inferenceParams;
                 InferMs = inferMs;
                 Result = result;
-                Profile = profile;
             }
         }
 
