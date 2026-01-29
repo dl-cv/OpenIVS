@@ -3,6 +3,8 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Media.Animation;
+using Newtonsoft.Json.Linq;
 using dlcv_infer_csharp;
 using DlcvTest.Properties;
 using DlcvTest.WPFViewer;
@@ -152,24 +154,27 @@ namespace DlcvTest
 
         private async Task<bool> LoadModelAsync(string modelPath, bool showSuccessPopup)
         {
-            string fullPath = NormalizeModelPath(modelPath);
-            if (string.IsNullOrWhiteSpace(fullPath))
-            {
-                MessageBox.Show("模型路径为空，无法加载。");
-                return false;
-            }
-            if (!File.Exists(fullPath))
-            {
-                MessageBox.Show("模型文件不存在: " + fullPath);
-                return false;
-            }
-
-            int deviceId = 0;
-            try { deviceId = GetSelectedDeviceId(); }
-            catch { deviceId = 0; }
+            // 显示加载遮罩层
+            ShowModelLoadingOverlay();
 
             try
             {
+                string fullPath = NormalizeModelPath(modelPath);
+                if (string.IsNullOrWhiteSpace(fullPath))
+                {
+                    MessageBox.Show("模型路径为空，无法加载。");
+                    return false;
+                }
+                if (!File.Exists(fullPath))
+                {
+                    MessageBox.Show("模型文件不存在: " + fullPath);
+                    return false;
+                }
+
+                int deviceId = 0;
+                try { deviceId = GetSelectedDeviceId(); }
+                catch { deviceId = 0; }
+
                 await Task.Run(() =>
                 {
                     // 1. 释放旧模型
@@ -184,7 +189,38 @@ namespace DlcvTest
                     model = new Model(fullPath, deviceId, false, false);
                 });
 
-                // 3) 成功后更新设置 + MRU（最多3个）
+                // 3) 获取模型类型并更新预测参数 UI
+                string taskType = "";
+                try
+                {
+                    // 显式转换为 JObject，避免 dynamic 类型导致的方法调用问题
+                    JObject modelInfo = model.GetModelInfo() as JObject;
+                    if (modelInfo != null)
+                    {
+                        // 尝试两种数据结构: { "model_info": { "task_type": ... } } 或 { "task_type": ... }
+                        if (modelInfo["model_info"]?["task_type"] != null)
+                        {
+                            taskType = modelInfo["model_info"]["task_type"].ToString();
+                        }
+                        else if (modelInfo["task_type"] != null)
+                        {
+                            taskType = modelInfo["task_type"].ToString();
+                        }
+                    }
+                    System.Diagnostics.Debug.WriteLine($"[LoadModelAsync] 模型类型: {taskType}");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[LoadModelAsync] 获取模型类型失败: {ex.Message}");
+                }
+
+                // 更新预测参数 UI 显示（必须在 UI 线程上执行）
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    UpdatePredictParamsVisibility(taskType);
+                });
+
+                // 4) 成功后更新设置 + MRU（最多3个）
                 try
                 {
                     Properties.Settings.Default.LastModelPath = fullPath;
@@ -224,6 +260,11 @@ namespace DlcvTest
                 // 失败时恢复到当前已加载模型（或占位）
                 RefreshModelComboItems(_loadedModelPath);
                 return false;
+            }
+            finally
+            {
+                // 隐藏加载遮罩层
+                HideModelLoadingOverlay();
             }
         }
 
@@ -303,6 +344,64 @@ namespace DlcvTest
         private int GetSelectedDeviceId()
         {
             return 0;
+        }
+
+        /// <summary>
+        /// 根据模型类型更新预测参数 UI 显示
+        /// </summary>
+        private void UpdatePredictParamsVisibility(string taskType)
+        {
+            bool isClassification = taskType == "分类";
+            System.Diagnostics.Debug.WriteLine($"[UpdatePredictParamsVisibility] taskType='{taskType}', isClassification={isClassification}");
+            
+            // top_k 仅在图像分类时显示
+            if (gridTopK != null)
+            {
+                gridTopK.Visibility = isClassification ? Visibility.Visible : Visibility.Collapsed;
+                System.Diagnostics.Debug.WriteLine($"[UpdatePredictParamsVisibility] gridTopK.Visibility={gridTopK.Visibility}");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"[UpdatePredictParamsVisibility] gridTopK is null!");
+            }
+            
+            // 以下参数在图像分类时隐藏
+            if (gridShowMask != null)
+                gridShowMask.Visibility = isClassification ? Visibility.Collapsed : Visibility.Visible;
+            if (gridShowEdges != null)
+                gridShowEdges.Visibility = isClassification ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        /// <summary>
+        /// 显示模型加载遮罩层
+        /// </summary>
+        private void ShowModelLoadingOverlay()
+        {
+            if (modelLoadingOverlay != null)
+            {
+                modelLoadingOverlay.Visibility = Visibility.Visible;
+                var sb = modelLoadingOverlay.FindResource("SpinnerStoryboard") as Storyboard;
+                if (sb != null)
+                {
+                    sb.Begin();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 隐藏模型加载遮罩层
+        /// </summary>
+        private void HideModelLoadingOverlay()
+        {
+            if (modelLoadingOverlay != null)
+            {
+                modelLoadingOverlay.Visibility = Visibility.Collapsed;
+                var sb = modelLoadingOverlay.FindResource("SpinnerStoryboard") as Storyboard;
+                if (sb != null)
+                {
+                    sb.Stop();
+                }
+            }
         }
     }
 }

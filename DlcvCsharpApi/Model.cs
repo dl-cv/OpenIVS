@@ -268,10 +268,10 @@ namespace dlcv_infer_csharp
                 var processStartInfo = new ProcessStartInfo
                 {
                     FileName = backendExePath,
+                    Arguments = "--keep_alive",
                     WorkingDirectory = Path.GetDirectoryName(backendExePath),
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden
+                    UseShellExecute = true,
+                    CreateNoWindow = false
                 };
 
                 Process.Start(processStartInfo);
@@ -845,6 +845,11 @@ namespace dlcv_infer_csharp
                 // DVP 模式返回空指针，不需要释放
                 return new Tuple<JObject, IntPtr>(mergedResult, IntPtr.Zero);
             }
+            catch (AggregateException ae)
+            {
+                var innerException = ae.Flatten().InnerException ?? ae;
+                throw new Exception($"DVP 推理失败: {innerException.Message}", innerException);
+            }
             catch (Exception ex)
             {
                 throw new Exception($"DVP 推理失败: {ex.Message}", ex);
@@ -1056,6 +1061,22 @@ namespace dlcv_infer_csharp
                                         mask_img = mask_img.Clone();
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    // DVT 模式：将 mask resize 到 bbox 尺寸
+                    // DVP 的 mask 已经是 bbox 尺寸，不需要 resize
+                    if (!_isDvpMode && !mask_img.Empty() && bbox != null && bbox.Count >= 4)
+                    {
+                        int bboxW = (int)bbox[2];
+                        int bboxH = (int)bbox[3];
+                        if (bboxW > 0 && bboxH > 0 && (mask_img.Width != bboxW || mask_img.Height != bboxH))
+                        {
+                            using (var original = mask_img)
+                            {
+                                mask_img = new Mat();
+                                Cv2.Resize(original, mask_img, new Size(bboxW, bboxH), 0, 0, InterpolationFlags.Nearest);
                             }
                         }
                     }

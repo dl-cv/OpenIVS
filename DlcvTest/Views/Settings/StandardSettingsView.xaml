@@ -35,11 +35,11 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0"/>
+                            <Button x:Name="btnThreadDecrease" Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0" Click="BtnThreadDecrease_Click"/>
                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
-                            <TextBox Text="2" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
+                            <TextBox x:Name="txtThreadCount" Text="4" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333" LostFocus="TxtThreadCount_LostFocus"/>
                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
-                            <Button Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2"/>
+                            <Button x:Name="btnThreadIncrease" Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2" Click="BtnThreadIncrease_Click"/>
                         </Grid>
                     </Border>
                 </Grid>
@@ -56,7 +56,9 @@
                             <TextBlock Text="?" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="#999"/>
                         </Border>
                     </StackPanel>
-                    <controls:AnimatedCheckBox Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                    <controls:AnimatedCheckBox Grid.Column="1" x:Name="chkSaveByCategory" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"
+                                              Checked="ChkSaveByCategory_Checked"
+                                              Unchecked="ChkSaveByCategory_Unchecked"/>
                 </Grid>
 
                 <!-- 3. 预测完成后打开文件夹 -->

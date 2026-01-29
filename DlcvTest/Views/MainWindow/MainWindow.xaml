@@ -207,6 +207,65 @@
             </Style.Triggers>
         </Style>
 
+        <!-- 批量预测取消按钮样式（圆形灰色背景，hover变红变大） -->
+        <Style x:Key="BatchCancelButtonStyle" TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Background" Value="#999"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value>
+                    <ScaleTransform ScaleX="1" ScaleY="1"/>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="14"
+                                SnapsToDevicePixels="True">
+                            <Border.Effect>
+                                <DropShadowEffect ShadowDepth="1" BlurRadius="3" Opacity="0.3" Color="Black"/>
+                            </Border.Effect>
+                            <Canvas Width="10" Height="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Line X1="0" Y1="0" X2="10" Y2="10" 
+                                      Stroke="White" StrokeThickness="2" 
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                <Line X1="10" Y1="0" X2="0" Y2="10" 
+                                      Stroke="White" StrokeThickness="2"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                            </Canvas>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#d1282a"/>
+                                <Setter TargetName="border" Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect ShadowDepth="1" BlurRadius="5" Opacity="0.5" Color="#d1282a"/>
+                                    </Setter.Value>
+                                </Setter>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value>
+                                        <ScaleTransform ScaleX="1.15" ScaleY="1.15"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#b02020"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value>
+                                        <ScaleTransform ScaleX="1.1" ScaleY="1.1"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 1. 顶部菜单按钮样式 (无背景，鼠标悬停变色) -->
         <Style x:Key="MenuButtonStyle" TargetType="Button">
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -592,6 +651,31 @@
             <Border x:Name="overlayMask" Grid.RowSpan="3" Background="#80000000" Visibility="Collapsed" Panel.ZIndex="1000"
                     MouseLeftButtonDown="OverlayMask_MouseLeftButtonDown"/>
 
+            <!-- 模型加载遮罩层 -->
+            <Border x:Name="modelLoadingOverlay" Grid.RowSpan="3" Background="#99000000" 
+                    Visibility="Collapsed" Panel.ZIndex="1001">
+                <Border.Resources>
+                    <!-- 模型加载旋转动画 -->
+                    <Storyboard x:Key="SpinnerStoryboard" RepeatBehavior="Forever">
+                        <DoubleAnimation Storyboard.TargetName="spinnerRotate"
+                                         Storyboard.TargetProperty="Angle"
+                                         From="0" To="360" Duration="0:0:1"/>
+                    </Storyboard>
+                </Border.Resources>
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <!-- 旋转圈圈动画 -->
+                    <Ellipse Width="48" Height="48" StrokeThickness="4" 
+                             Stroke="#7B4DFF" StrokeDashArray="3 2" RenderTransformOrigin="0.5,0.5">
+                        <Ellipse.RenderTransform>
+                            <RotateTransform x:Name="spinnerRotate"/>
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+                    <!-- 提示文字 -->
+                    <TextBlock Text="正在加载模型..." Foreground="White" FontSize="16" 
+                               Margin="0,16,0,0" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
             <!-- Row 0: 顶部菜单栏 -->
             <Grid Grid.Row="0">
                 <Border Background="White" CornerRadius="8,8,0,0" BorderBrush="#EEE" BorderThickness="0,0,0,1"/>
@@ -880,7 +964,7 @@
                         <ToggleButton x:Name="btnPredictParamsGroup" IsChecked="True" Content="预测参数" Style="{StaticResource GroupToggleButtonStyle}" Margin="0,15,0,5"/>
                         <StackPanel Grid.IsSharedSizeScope="True" Margin="10,5,0,0" Visibility="{Binding IsChecked, ElementName=btnPredictParamsGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <!-- 置信度 -->
-                                <Grid Margin="0,0,0,12">
+                                <Grid x:Name="gridConfidence" Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
@@ -902,13 +986,13 @@
                                     </Border>
                                 </Grid>
 
-                                <!-- iou threshold -->
-                                <Grid Margin="0,0,0,12" Visibility="Collapsed">
+                                <!-- top_k (仅图像分类显示) -->
+                                <Grid x:Name="gridTopK" Margin="0,0,0,12" Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="iou threshold" VerticalAlignment="Center" Foreground="#666" HorizontalAlignment="Left"/>
+                                    <TextBlock Grid.Column="0" Text="top_k" VerticalAlignment="Center" Foreground="#666" HorizontalAlignment="Left"/>
                                     <Border Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="32" Width="120" Background="White">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -916,11 +1000,11 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0" Click="Stepper0_1Button_Click"/>
+                                            <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0" Click="StepperIntButton_Click"/>
                                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
-                                            <TextBox x:Name="IOUVal" Text="0.20" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333" LostFocus="ParameterTextBox_LostFocus" TextChanged="ParameterTextBox_TextChanged"/>
+                                            <TextBox x:Name="TopKVal" Text="1" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333"/>
                                             <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
-                                            <Button Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2" Click="Stepper0_1Button_Click"/>
+                                            <Button Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2" Click="StepperIntButton_Click"/>
                                         </Grid>
                                     </Border>
                                 </Grid>
@@ -938,7 +1022,7 @@
                                 </Grid>
 
                                 <!-- 类别屏蔽 -->
-                                <Grid Margin="0,0,0,12">
+                                <Grid x:Name="gridCategoryFilter" Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
@@ -956,7 +1040,7 @@
                                 </Grid>
 
                                 <!-- 显示mask -->
-                                <Grid Margin="0,0,0,12">
+                                <Grid x:Name="gridShowMask" Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
@@ -966,7 +1050,7 @@
                                 </Grid>
 
                                 <!-- 显示边缘 -->
-                                <Grid Margin="0,0,0,12">
+                                <Grid x:Name="gridShowEdges" Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
                                         <ColumnDefinition Width="*"/>
@@ -978,7 +1062,16 @@
 
                         <!-- 预测结果 -->
                         <ToggleButton x:Name="btnPredictResultGroup" IsChecked="True" Content="预测结果" Style="{StaticResource GroupToggleButtonStyle}" Margin="0,15,0,5"/>
-                        <TextBlock Text="暂无结果" Foreground="#999" Margin="10,5" Visibility="{Binding IsChecked, ElementName=btnPredictResultGroup, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <StackPanel Visibility="{Binding IsChecked, ElementName=btnPredictResultGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock x:Name="txtPredictResultEmpty" Text="暂无结果" Foreground="#999" Margin="10,5"/>
+                            <ItemsControl x:Name="PredictResultList" Margin="10,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" Foreground="#666" Margin="0,2"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
 
                     </StackPanel>
                 </ScrollViewer>
@@ -990,14 +1083,29 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     
-                    <!-- 批量预测按钮 -->
-                    <Button x:Name="btnInferBatchJson"
-                            Grid.Row="0"
-                            Height="40"
-                            Click="btnInferBatchJson_Click"
-                            Margin="0,0,0,8"
-                            Content="{Binding BatchProgressText, RelativeSource={RelativeSource AncestorType=Window}}"
-                            Style="{StaticResource BatchProgressButtonStyle}"/>
+                    <!-- 批量预测按钮区域：进度按钮 + 取消按钮 -->
+                    <Grid Grid.Row="0" Height="40" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        
+                        <!-- 进度按钮 -->
+                        <Button x:Name="btnInferBatchJson"
+                                Grid.Column="0"
+                                Click="btnInferBatchJson_Click"
+                                Content="{Binding BatchProgressText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Style="{StaticResource BatchProgressButtonStyle}"/>
+                        
+                        <!-- 取消按钮（批量运行时显示） -->
+                        <Button x:Name="btnCancelBatch"
+                                Grid.Column="1"
+                                Width="28" Height="28"
+                                Margin="8,0,0,0"
+                                Click="btnCancelBatch_Click"
+                                Style="{StaticResource BatchCancelButtonStyle}"
+                                Visibility="{Binding IsBatchRunning, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                    </Grid>
                     
                 </Grid>
             </Grid>
