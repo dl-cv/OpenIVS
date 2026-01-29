@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
+using DlcvModules;
 
 namespace dlcv_infer_csharp
 {
@@ -27,6 +29,76 @@ namespace dlcv_infer_csharp
             };
             string unicodeJson = JsonConvert.SerializeObject(json, Formatting.Indented, settings);
             return unicodeJson;
+        }
+
+        public static JArray ConvertToVisualizeFormat(CSharpResult result)
+        {
+            var array = new JArray();
+            if(result.SampleResults == null)return array;
+
+            for(int i = 0; i < result.SampleResults.Count; i++)
+            {
+                var sample = result.SampleResults[i];
+                var sampleResults = new JArray();
+
+                if(sample.Results != null)
+                {
+                    foreach(var obj in sample.Results)
+                    {
+                        var item = new JObject
+                        {
+                            ["category_id"] = obj.CategoryId,
+                            ["category_name"] = obj.CategoryName,
+                            ["score"] = obj.Score,
+                            ["bbox"] = obj.Bbox != null ? JArray.FromObject(obj.Bbox) : null,
+                            ["with_angle"] = obj.WithAngle,
+                            ["angle"] = obj.Angle,
+                            ["with_mask"] = obj.WithMask
+                        };
+                        // 将 mask 以 RLE 的形式存储到 JSON（mask_rle）
+                        if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
+                        {
+                            item["mask_rle"] = MaskRleUtils.MatToMaskInfo(obj.Mask);
+                        }
+                        sampleResults.Add(item);
+                    }
+                }
+
+                var entry = new JObject
+                {
+                    ["index"] = i,
+                    ["sample_results"] = sampleResults
+                };
+                array.Add(entry);
+
+            }
+            
+            return array;
+        }
+
+        /// <summary>
+        /// 将推理结果绘制到原图上
+        /// </summary>
+        /// <param name="images">输入图像列表</param>
+        /// <param name="result">推理结果</param>
+        /// <param name="properties">可视化配置（可选）</param>
+        /// <returns>绘制后的图像列表</returns>
+        public static List<Mat> VisualizeResults(
+            List<Mat> images,
+            CSharpResult result,
+            Dictionary<string, object> properties = null)
+        {
+            var jArray = ConvertToVisualizeFormat(result);
+            var moduleImages = new List<ModuleImage>();
+            for (int i = 0; i < images.Count; i++)
+            {
+                var img = images[i];
+                var state = new TransformationState(img.Width, img.Height);
+                moduleImages.Add(new ModuleImage(img, img, state, i));
+            }
+            var visualizer = new VisualizeOnOriginal(0, null, properties);
+            var output = visualizer.Process(moduleImages, jArray);
+            return output.ImageList.Select(m => m.ImageObject).ToList();
         }
 
         public static void FreeAllModels()
