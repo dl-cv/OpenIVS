@@ -63,8 +63,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniAreaDemo", "MiniAreaDem
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvTest", "DlcvTest\DlcvTest.csproj", "{4361228C-0A82-C883-86B5-1D7ECCAA46F1}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OpenCv", "..\OpenCv\OpenCv.vcxproj", "{01E0FA35-CE6E-4F32-9296-02A5C8B50B5B}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -147,10 +145,6 @@ Global
 		{4361228C-0A82-C883-86B5-1D7ECCAA46F1}.Debug|x64.Build.0 = Debug|x64
 		{4361228C-0A82-C883-86B5-1D7ECCAA46F1}.Release|x64.ActiveCfg = Release|x64
 		{4361228C-0A82-C883-86B5-1D7ECCAA46F1}.Release|x64.Build.0 = Release|x64
-		{01E0FA35-CE6E-4F32-9296-02A5C8B50B5B}.Debug|x64.ActiveCfg = Debug|x64
-		{01E0FA35-CE6E-4F32-9296-02A5C8B50B5B}.Debug|x64.Build.0 = Debug|x64
-		{01E0FA35-CE6E-4F32-9296-02A5C8B50B5B}.Release|x64.ActiveCfg = Release|x64
-		{01E0FA35-CE6E-4F32-9296-02A5C8B50B5B}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
