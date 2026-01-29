@@ -366,8 +366,6 @@ namespace DlcvTest
             }
             
             // 以下参数在图像分类时隐藏
-            if (gridIOU != null)
-                gridIOU.Visibility = isClassification ? Visibility.Collapsed : Visibility.Visible;
             if (gridShowMask != null)
                 gridShowMask.Visibility = isClassification ? Visibility.Collapsed : Visibility.Visible;
             if (gridShowEdges != null)

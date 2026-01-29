@@ -1009,29 +1009,6 @@
                                     </Border>
                                 </Grid>
 
-                                <!-- iou threshold -->
-                                <Grid x:Name="gridIOU" Margin="0,0,0,12" Visibility="Collapsed">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" SharedSizeGroup="ParamLabelColumn"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="iou threshold" VerticalAlignment="Center" Foreground="#666" HorizontalAlignment="Left"/>
-                                    <Border Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="32" Width="120" Background="White">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <Button Content="-" Style="{StaticResource StepperButtonStyle}" Grid.Column="0" Click="Stepper0_1Button_Click"/>
-                                            <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="0" HorizontalAlignment="Right"/>
-                                            <TextBox x:Name="IOUVal" Text="0.20" Grid.Column="1" BorderThickness="0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" Foreground="#333" LostFocus="ParameterTextBox_LostFocus" TextChanged="ParameterTextBox_TextChanged"/>
-                                            <Rectangle Width="1" Fill="#E0E0E0" Grid.Column="2" HorizontalAlignment="Left"/>
-                                            <Button Content="+" Style="{StaticResource StepperButtonStyle}" Grid.Column="2" Click="Stepper0_1Button_Click"/>
-                                        </Grid>
-                                    </Border>
-                                </Grid>
-
                                 <!-- 自动标注复杂度 -->
                                 <Grid Margin="0,0,0,12" Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>

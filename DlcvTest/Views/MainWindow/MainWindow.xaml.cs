@@ -115,13 +115,24 @@ namespace DlcvTest
 
         private void EndBatchProgress()
         {
-            RunOnUiThread(() =>
+            // 使用 Invoke 同步执行，确保在所有 BeginInvoke 的进度更新之后执行
+            if (Dispatcher.CheckAccess())
             {
                 IsBatchRunning = false;
                 BatchProgressValue = 0.0;
                 BatchProgressText = "批量预测";
                 AnimateBatchProgressVisual(0.0);
-            });
+            }
+            else
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    IsBatchRunning = false;
+                    BatchProgressValue = 0.0;
+                    BatchProgressText = "批量预测";
+                    AnimateBatchProgressVisual(0.0);
+                });
+            }
         }
 
         /// <summary>

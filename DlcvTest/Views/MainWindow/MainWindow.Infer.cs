@@ -1179,7 +1179,6 @@ namespace DlcvTest
 
                             // 在UI线程上读取参数值并更新模型参数
                             double threshold = 0.5;
-                            double iouThreshold = 0.2;
                             double epsilon = 1000.0;
                             bool useWpfViewer = true;
 
@@ -1187,10 +1186,9 @@ namespace DlcvTest
                             {
                                 if (!IsImageProcessRequestCurrent(requestId, imagePath, token)) return;
                                 string confText = ConfidenceVal.Text;
-                                string iouText = IOUVal.Text;
                                 string epsText = AutoLabelComplexityVal.Text;
 
-                                Console.WriteLine($"[推理前] 从UI读取参数文本: ConfidenceVal.Text='{confText}', IOUVal.Text='{iouText}', AutoLabelComplexityVal.Text='{epsText}'");
+                                Console.WriteLine($"[推理前] 从UI读取参数文本: ConfidenceVal.Text='{confText}', AutoLabelComplexityVal.Text='{epsText}'");
 
                                 if (double.TryParse(confText, out double confVal))
                                 {
@@ -1200,16 +1198,6 @@ namespace DlcvTest
                                 else
                                 {
                                     Console.WriteLine($"[推理前] 解析 ConfidenceVal 失败，使用默认值 {threshold}");
-                                }
-
-                                if (double.TryParse(iouText, out double iouVal))
-                                {
-                                    iouThreshold = iouVal;
-                                    Console.WriteLine($"[推理前] 成功解析 IOUVal: {iouThreshold}");
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"[推理前] 解析 IOUVal 失败，使用默认值 {iouThreshold}");
                                 }
 
                                 if (double.TryParse(epsText, out double epsVal))
