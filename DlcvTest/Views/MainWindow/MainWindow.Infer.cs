@@ -205,6 +205,8 @@ namespace DlcvTest
                 return;
             }
 
+            // 重置停止标志
+            batchStopFlag = false;
             BeginBatchProgress(estimatedCount);
 
             try
@@ -220,10 +222,14 @@ namespace DlcvTest
             }
             catch (Exception ex)
             {
-                MessageBox.Show("批量推理失败：" + ex.Message);
+                if (!batchStopFlag)
+                {
+                    MessageBox.Show("批量推理失败：" + ex.Message);
+                }
             }
             finally
             {
+                batchStopFlag = false;
                 EndBatchProgress();
             }
         }
@@ -305,8 +311,15 @@ namespace DlcvTest
                 // 使用并行处理，从设置中读取最大并行度（默认 4，范围 1-16）
                 int threadCount = Math.Max(1, Math.Min(16, Settings.Default.ThreadCount));
                 var options = new ParallelOptions { MaxDegreeOfParallelism = threadCount };
-                Parallel.ForEach(imageFiles, options, (imgPath) =>
+                Parallel.ForEach(imageFiles, options, (imgPath, loopState) =>
                 {
+                    // 检查停止标志
+                    if (batchStopFlag)
+                    {
+                        loopState.Stop();
+                        return;
+                    }
+
                     string baseName = Path.GetFileNameWithoutExtension(imgPath);
                     string ext = Path.GetExtension(imgPath);
 
@@ -318,7 +331,8 @@ namespace DlcvTest
                             {
                                 System.Diagnostics.Debug.WriteLine($"[批量推理] 无法读取图片: {imgPath}");
                                 Interlocked.Increment(ref processedCount);
-                                Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(processedCount, total)));
+                                if (!batchStopFlag)
+                                    Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(processedCount, total)));
                                 return;
                             }
 
@@ -328,7 +342,7 @@ namespace DlcvTest
                             // 保存原图
                             if (saveImg)
                             {
-                                string targetDir = imgDir;
+                                string imgOutPath;
                                 
                                 // 按类别保存：根据 top1 类别创建子文件夹
                                 if (Settings.Default.SaveByCategory)
@@ -357,11 +371,16 @@ namespace DlcvTest
                                     }
                                     catch { }
                                     
-                                    targetDir = Path.Combine(imgDir, categoryName);
+                                    string targetDir = Path.Combine(imgDir, categoryName);
                                     try { Directory.CreateDirectory(targetDir); } catch { }
+                                    imgOutPath = Path.Combine(targetDir, baseName + ext);
+                                }
+                                else
+                                {
+                                    // 普通保存：保留原文件夹结构
+                                    imgOutPath = GetRelativeOutputPath(srcDir, imgPath, imgDir, null);
                                 }
                                 
-                                string imgOutPath = Path.Combine(targetDir, baseName + ext);
                                 try { Cv2.ImWrite(imgOutPath, mat); } catch { }
                             }
 
@@ -370,10 +389,11 @@ namespace DlcvTest
                             {
                                 try
                                 {
-                                    // 按类别保存：根据 top1 类别创建子文件夹
-                                    string targetVisDir = visDir;
+                                    // 计算输出路径
+                                    string visOutPath;
                                     if (Settings.Default.SaveByCategory)
                                     {
+                                        // 按类别保存：根据 top1 类别创建子文件夹
                                         string categoryName = "Unknown";
                                         try
                                         {
@@ -398,8 +418,17 @@ namespace DlcvTest
                                         }
                                         catch { }
                                         
-                                        targetVisDir = Path.Combine(visDir, categoryName);
+                                        string targetVisDir = Path.Combine(visDir, categoryName);
                                         try { Directory.CreateDirectory(targetVisDir); } catch { }
+                                        visOutPath = Path.Combine(targetVisDir, baseName + "_vis.png");
+                                    }
+                                    else
+                                    {
+                                        // 普通保存：保留原文件夹结构，文件名添加 _vis 后缀
+                                        string relativePath = GetRelativeOutputPath(srcDir, imgPath, visDir, ".png");
+                                        string dir = Path.GetDirectoryName(relativePath);
+                                        string name = Path.GetFileNameWithoutExtension(relativePath);
+                                        visOutPath = Path.Combine(dir, name + "_vis.png");
                                     }
 
                                     // 1. 左边：原图 + LabelMe 标注绘制（GT）- 直接在 mat 上绘制以减少 Clone
@@ -419,7 +448,6 @@ namespace DlcvTest
                                                 using (var combined = ConcatImagesHorizontallyFast(leftImage, rightImage))
                                                 {
                                                     // 4. 保存
-                                                    string visOutPath = Path.Combine(targetVisDir, baseName + "_vis.png");
                                                     Cv2.ImWrite(visOutPath, combined);
                                                 }
                                             }
@@ -438,9 +466,12 @@ namespace DlcvTest
                         System.Diagnostics.Debug.WriteLine($"[批量推理] 处理图片失败 {imgPath}: {ex.Message}");
                     }
 
-                    // 线程安全更新进度
-                    int currentCount = Interlocked.Increment(ref processedCount);
-                    Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(currentCount, total)));
+                    // 线程安全更新进度（停止时不更新）
+                    if (!batchStopFlag)
+                    {
+                        int currentCount = Interlocked.Increment(ref processedCount);
+                        Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(currentCount, total)));
+                    }
                 });
             });
 

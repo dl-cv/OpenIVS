@@ -207,6 +207,65 @@
             </Style.Triggers>
         </Style>
 
+        <!-- 批量预测取消按钮样式（圆形灰色背景，hover变红变大） -->
+        <Style x:Key="BatchCancelButtonStyle" TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Background" Value="#999"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value>
+                    <ScaleTransform ScaleX="1" ScaleY="1"/>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="14"
+                                SnapsToDevicePixels="True">
+                            <Border.Effect>
+                                <DropShadowEffect ShadowDepth="1" BlurRadius="3" Opacity="0.3" Color="Black"/>
+                            </Border.Effect>
+                            <Canvas Width="10" Height="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Line X1="0" Y1="0" X2="10" Y2="10" 
+                                      Stroke="White" StrokeThickness="2" 
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                <Line X1="10" Y1="0" X2="0" Y2="10" 
+                                      Stroke="White" StrokeThickness="2"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                            </Canvas>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#d1282a"/>
+                                <Setter TargetName="border" Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect ShadowDepth="1" BlurRadius="5" Opacity="0.5" Color="#d1282a"/>
+                                    </Setter.Value>
+                                </Setter>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value>
+                                        <ScaleTransform ScaleX="1.15" ScaleY="1.15"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#b02020"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value>
+                                        <ScaleTransform ScaleX="1.1" ScaleY="1.1"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 1. 顶部菜单按钮样式 (无背景，鼠标悬停变色) -->
         <Style x:Key="MenuButtonStyle" TargetType="Button">
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -1047,14 +1106,29 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     
-                    <!-- 批量预测按钮 -->
-                    <Button x:Name="btnInferBatchJson"
-                            Grid.Row="0"
-                            Height="40"
-                            Click="btnInferBatchJson_Click"
-                            Margin="0,0,0,8"
-                            Content="{Binding BatchProgressText, RelativeSource={RelativeSource AncestorType=Window}}"
-                            Style="{StaticResource BatchProgressButtonStyle}"/>
+                    <!-- 批量预测按钮区域：进度按钮 + 取消按钮 -->
+                    <Grid Grid.Row="0" Height="40" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        
+                        <!-- 进度按钮 -->
+                        <Button x:Name="btnInferBatchJson"
+                                Grid.Column="0"
+                                Click="btnInferBatchJson_Click"
+                                Content="{Binding BatchProgressText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Style="{StaticResource BatchProgressButtonStyle}"/>
+                        
+                        <!-- 取消按钮（批量运行时显示） -->
+                        <Button x:Name="btnCancelBatch"
+                                Grid.Column="1"
+                                Width="28" Height="28"
+                                Margin="8,0,0,0"
+                                Click="btnCancelBatch_Click"
+                                Style="{StaticResource BatchCancelButtonStyle}"
+                                Visibility="{Binding IsBatchRunning, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                    </Grid>
                     
                 </Grid>
             </Grid>

@@ -29,6 +29,11 @@ namespace DlcvTest
         };
         private static readonly object _diagLogLock = new object();
 
+        /// <summary>
+        /// 批量预测停止标志（volatile 确保多线程可见性）
+        /// </summary>
+        private volatile bool batchStopFlag = false;
+
         private int _folderImageCount = 0;
         public int FolderImageCount
         {
@@ -117,6 +122,18 @@ namespace DlcvTest
                 BatchProgressText = "批量预测";
                 AnimateBatchProgressVisual(0.0);
             });
+        }
+
+        /// <summary>
+        /// 取消批量预测按钮点击事件
+        /// </summary>
+        private void btnCancelBatch_Click(object sender, RoutedEventArgs e)
+        {
+            if (IsBatchRunning && !batchStopFlag)
+            {
+                batchStopFlag = true;
+                BatchProgressText = "正在取消...";
+            }
         }
 
         private void SetBatchProgressCore(int current, int total, bool isRunning)

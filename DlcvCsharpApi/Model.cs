@@ -268,10 +268,10 @@ namespace dlcv_infer_csharp
                 var processStartInfo = new ProcessStartInfo
                 {
                     FileName = backendExePath,
+                    Arguments = "--keep_alive",
                     WorkingDirectory = Path.GetDirectoryName(backendExePath),
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden
+                    UseShellExecute = true,
+                    CreateNoWindow = false
                 };
 
                 Process.Start(processStartInfo);
@@ -844,6 +844,11 @@ namespace dlcv_infer_csharp
 
                 // DVP 模式返回空指针，不需要释放
                 return new Tuple<JObject, IntPtr>(mergedResult, IntPtr.Zero);
+            }
+            catch (AggregateException ae)
+            {
+                var innerException = ae.Flatten().InnerException ?? ae;
+                throw new Exception($"DVP 推理失败: {innerException.Message}", innerException);
             }
             catch (Exception ex)
             {
