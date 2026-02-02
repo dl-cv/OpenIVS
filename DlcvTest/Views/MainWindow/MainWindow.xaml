@@ -393,8 +393,8 @@
         </Style>
 
         <!-- TreeView 选中/悬停颜色 -->
-        <SolidColorBrush x:Key="TreeViewItemSelectedBrush" Color="#8036C26A"/>
-        <SolidColorBrush x:Key="TreeViewItemHoverBrush" Color="#3336C26A"/>
+        <SolidColorBrush x:Key="TreeViewItemSelectedBrush" Color="#3336C26A"/>
+        <SolidColorBrush x:Key="TreeViewItemHoverBrush" Color="#33CCCCCC"/>
 
         <!-- TreeViewItem 样式美化（整行圆角高亮） -->
         <ControlTemplate x:Key="TreeViewExpanderToggleTemplate" TargetType="ToggleButton">
@@ -817,6 +817,7 @@
                         <TreeView.ItemContainerStyle>
                             <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
                                 <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                                <EventSetter Event="PreviewMouseLeftButtonDown" Handler="TreeViewItem_PreviewMouseLeftButtonDown"/>
                             </Style>
                         </TreeView.ItemContainerStyle>
                     </TreeView>
@@ -1028,15 +1029,97 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="类别屏蔽" VerticalAlignment="Center" Foreground="#666" HorizontalAlignment="Left"/>
-                                    <Border Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Height="32" Width="120" Background="White">
-                                        <ComboBox Style="{StaticResource IOSComboBoxStyle}" 
-                                                  IsEditable="False" IsReadOnly="True" 
-                                                  VerticalContentAlignment="Center" 
-                                                  BorderThickness="0" Background="Transparent" 
-                                                  Padding="10,0">
-                                            <ComboBoxItem FocusVisualStyle="{x:Null}" Content="Select" IsSelected="True"/>
-                                        </ComboBox>
-                                    </Border>
+                                    <!-- 多选下拉框：显示已选类别标签 + 下拉列表 -->
+                                    <Grid Grid.Column="1" HorizontalAlignment="Left" Margin="16,0,0,0">
+                                        <ToggleButton x:Name="btnCategoryFilterDropdown" 
+                                                      Width="140" Height="32" 
+                                                      Background="White" 
+                                                      BorderBrush="#E0E0E0" 
+                                                      BorderThickness="1"
+                                                      Padding="8,0,24,0"
+                                                      HorizontalContentAlignment="Left">
+                                            <ToggleButton.Template>
+                                                <ControlTemplate TargetType="ToggleButton">
+                                                    <Border Background="{TemplateBinding Background}" 
+                                                            BorderBrush="{TemplateBinding BorderBrush}" 
+                                                            BorderThickness="{TemplateBinding BorderThickness}" 
+                                                            CornerRadius="4">
+                                                        <Grid>
+                                                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,24,0"/>
+                                                            <Path x:Name="Arrow" 
+                                                                  HorizontalAlignment="Right" 
+                                                                  VerticalAlignment="Center" 
+                                                                  Margin="0,0,8,0"
+                                                                  Data="M0,0 L4,4 L8,0" 
+                                                                  Stroke="#666" 
+                                                                  StrokeThickness="1.5"/>
+                                                        </Grid>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsChecked" Value="True">
+                                                            <Setter TargetName="Arrow" Property="RenderTransform">
+                                                                <Setter.Value>
+                                                                    <RotateTransform Angle="180" CenterX="4" CenterY="2"/>
+                                                                </Setter.Value>
+                                                            </Setter>
+                                                        </Trigger>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter Property="BorderBrush" Value="#7C3AED"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </ToggleButton.Template>
+                                            <TextBlock x:Name="txtCategoryFilterDisplay" 
+                                                       Text="无" 
+                                                       Foreground="#666" 
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center"/>
+                                        </ToggleButton>
+                                        <Popup x:Name="popupCategoryFilter" 
+                                               PlacementTarget="{Binding ElementName=btnCategoryFilterDropdown}" 
+                                               Placement="Bottom"
+                                               IsOpen="{Binding IsChecked, ElementName=btnCategoryFilterDropdown, Mode=TwoWay}"
+                                               StaysOpen="False"
+                                               AllowsTransparency="True"
+                                               PopupAnimation="Slide">
+                                            <Border Background="White" 
+                                                    BorderBrush="#E0E0E0" 
+                                                    BorderThickness="1" 
+                                                    CornerRadius="8" 
+                                                    Margin="0,4,0,0"
+                                                    MinWidth="140"
+                                                    MaxHeight="200">
+                                                <Border.Effect>
+                                                    <DropShadowEffect ShadowDepth="2" BlurRadius="10" Opacity="0.15" Color="Black"/>
+                                                </Border.Effect>
+                                                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="4">
+                                                    <StackPanel>
+                                                        <!-- 全选/取消全选 -->
+                                                        <CheckBox x:Name="chkCategoryFilterSelectAll" 
+                                                                  Content="全选" 
+                                                                  Margin="8,6,8,4" 
+                                                                  Foreground="#333"
+                                                                  Checked="CategoryFilterSelectAll_Changed"
+                                                                  Unchecked="CategoryFilterSelectAll_Changed"/>
+                                                        <Separator Margin="8,2,8,2" Background="#E0E0E0"/>
+                                                        <!-- 类别列表 -->
+                                                        <ItemsControl x:Name="lstCategoryFilter">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <CheckBox Content="{Binding Name}" 
+                                                                              IsChecked="{Binding IsSelected, Mode=TwoWay}" 
+                                                                              Margin="8,4,8,4" 
+                                                                              Foreground="#333"
+                                                                              Checked="CategoryFilterItem_Changed"
+                                                                              Unchecked="CategoryFilterItem_Changed"/>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </ScrollViewer>
+                                            </Border>
+                                        </Popup>
+                                    </Grid>
                                 </Grid>
 
                                 <!-- 显示mask -->

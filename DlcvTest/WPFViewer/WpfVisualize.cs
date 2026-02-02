@@ -38,6 +38,9 @@ namespace DlcvTest.WPFViewer
             public Color FontColor { get; set; } = Colors.White;
             public Color MaskColor { get; set; } = Colors.LimeGreen;
             public byte MaskAlpha { get; set; } = 128;
+
+            /// <summary>被屏蔽的类别名称集合（这些类别不显示）</summary>
+            public HashSet<string> HiddenCategories { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
 
         public sealed class VisualItem
@@ -97,12 +100,18 @@ namespace DlcvTest.WPFViewer
                 return r;
             }
 
-            // 先筛选过阈值的结果
+            // 先筛选过阈值的结果，并排除被屏蔽的类别
             var passed = new List<Utils.CSharpObjectResult>();
             foreach (var det in sample.Results)
             {
                 if (det.Score >= opt.ConfidenceThreshold)
                 {
+                    // 跳过被屏蔽的类别
+                    string catName = det.CategoryName ?? string.Empty;
+                    if (opt.HiddenCategories != null && opt.HiddenCategories.Count > 0 && opt.HiddenCategories.Contains(catName))
+                    {
+                        continue;
+                    }
                     passed.Add(det);
                 }
             }
