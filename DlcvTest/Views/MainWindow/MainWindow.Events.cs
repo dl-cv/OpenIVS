@@ -1,12 +1,15 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using Microsoft.Win32;
 using DlcvTest.Properties;
+using DlcvTest.WPFViewer;
 using Ookii.Dialogs.Wpf;
 
 namespace DlcvTest
@@ -88,6 +91,9 @@ namespace DlcvTest
                     value = Math.Max(1, value - 1);
                 }
                 textBox.Text = value.ToString();
+
+                // 刷新图片以应用新的 top_k 设置
+                RefreshImages();
             }
         }
 
@@ -183,6 +189,7 @@ namespace DlcvTest
             {
                 string selectedPath = dialog.SelectedPath;
                 txtDataPath.Text = selectedPath;
+                searchOriginalRootPath = selectedPath; // 保存原始目录路径用于搜索恢复
                 LoadFolderTree(selectedPath);
 
                 // 保存路径到设置中
@@ -341,6 +348,126 @@ namespace DlcvTest
             return node;
         }
 
+        /// <summary>
+        /// 递归过滤单个节点，返回过滤后的新节点（不修改原节点）
+        /// 同时匹配文件名和文件夹名
+        /// </summary>
+        private FileNode FilterNode(FileNode node, string keyword)
+        {
+            if (node == null) return null;
+
+            bool nameMatches = node.Name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (!node.IsDirectory)
+            {
+                // 文件：检查名称是否包含搜索词（忽略大小写）
+                if (nameMatches)
+                {
+                    return new FileNode
+                    {
+                        Name = node.Name,
+                        FullPath = node.FullPath,
+                        IsDirectory = false
+                    };
+                }
+                return null;
+            }
+
+            // 目录：如果目录名称匹配，保留整个目录及其所有子内容
+            if (nameMatches)
+            {
+                return CloneNode(node);
+            }
+
+            // 目录名称不匹配时，递归过滤子节点
+            var filteredChildren = new System.Collections.ObjectModel.ObservableCollection<FileNode>();
+            foreach (var child in node.Children)
+            {
+                var filteredChild = FilterNode(child, keyword);
+                if (filteredChild != null)
+                {
+                    filteredChildren.Add(filteredChild);
+                }
+            }
+
+            // 只有包含匹配子节点的目录才保留
+            if (filteredChildren.Count > 0)
+            {
+                return new FileNode
+                {
+                    Name = node.Name,
+                    FullPath = node.FullPath,
+                    IsDirectory = true,
+                    IsExpanded = true, // 自动展开包含匹配项的目录
+                    Children = filteredChildren
+                };
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 深拷贝一个FileNode节点及其所有子节点
+        /// </summary>
+        private FileNode CloneNode(FileNode node)
+        {
+            if (node == null) return null;
+
+            var clonedNode = new FileNode
+            {
+                Name = node.Name,
+                FullPath = node.FullPath,
+                IsDirectory = node.IsDirectory,
+                IsExpanded = true // 匹配的目录自动展开
+            };
+
+            foreach (var child in node.Children)
+            {
+                clonedNode.Children.Add(CloneNode(child));
+            }
+
+            return clonedNode;
+        }
+
+        /// <summary>
+        /// 根据关键词过滤TreeView，只显示匹配的文件和包含匹配文件的目录
+        /// </summary>
+        private void FilterTreeByKeyword(string keyword)
+        {
+            if (string.IsNullOrEmpty(searchOriginalRootPath) || !Directory.Exists(searchOriginalRootPath))
+                return;
+
+            // 重新构建完整的树
+            var fullRootNode = CreateFileNode(searchOriginalRootPath);
+
+            // 过滤树
+            var filteredNode = FilterNode(fullRootNode, keyword);
+
+            if (filteredNode != null)
+            {
+                var nodes = new System.Collections.ObjectModel.ObservableCollection<FileNode>();
+                filteredNode.IsExpanded = true;
+                nodes.Add(filteredNode);
+                tvFolders.ItemsSource = nodes;
+            }
+            else
+            {
+                // 没有匹配项时显示空树
+                tvFolders.ItemsSource = new System.Collections.ObjectModel.ObservableCollection<FileNode>();
+            }
+        }
+
+        /// <summary>
+        /// 恢复完整的树形结构
+        /// </summary>
+        private void RestoreFullTree()
+        {
+            if (string.IsNullOrEmpty(searchOriginalRootPath) || !Directory.Exists(searchOriginalRootPath))
+                return;
+
+            LoadFolderTree(searchOriginalRootPath);
+        }
+
         private async void tvFolders_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
         {
             if (e.NewValue is FileNode selectedNode)
@@ -357,70 +484,102 @@ namespace DlcvTest
             }
         }
 
-        // 对应搜索框回车事件
-        // LIKE风格模糊搜索
-        // 这里只是去重新加载了当前的树，目前功能没有完成，看后续方案
+        private void TreeViewItem_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is TreeViewItem item && item.DataContext is FileNode node && node.IsDirectory)
+            {
+                // 检查点击的元素是否直接属于当前 TreeViewItem（而不是子项）
+                DependencyObject source = e.OriginalSource as DependencyObject;
+                TreeViewItem clickedItem = FindVisualParent<TreeViewItem>(source);
+                
+                if (clickedItem == item)
+                {
+                    item.IsExpanded = !item.IsExpanded;
+                    e.Handled = true;
+                }
+            }
+        }
+
+        private static T FindVisualParent<T>(DependencyObject obj) where T : DependencyObject
+        {
+            while (obj != null && !(obj is T))
+            {
+                obj = VisualTreeHelper.GetParent(obj);
+            }
+            return obj as T;
+        }
+
+        // 对应搜索框回车事件和ESC事件
+        // Enter键：执行过滤搜索或加载新目录
+        // ESC键：清空搜索框并恢复完整树形结构
         private void txtFolderSearch_KeyDown(object sender, KeyEventArgs e)
         {
+            // ESC键：清空搜索框并恢复完整树形结构
+            if (e.Key == Key.Escape)
+            {
+                txtFolderSearch.Text = "";
+                RestoreFullTree();
+                e.Handled = true;
+                return;
+            }
+
             if (e.Key == Key.Enter)
             {
                 string input = txtFolderSearch.Text.Trim();
-                if (string.IsNullOrEmpty(input)) return;
 
+                // 搜索框为空时恢复完整树形结构
+                if (string.IsNullOrEmpty(input))
+                {
+                    RestoreFullTree();
+                    return;
+                }
+
+                // 如果输入的是完整目录路径，则加载该目录
                 if (Directory.Exists(input))
                 {
+                    searchOriginalRootPath = input;
                     LoadFolderTree(input);
                     txtDataPath.Text = input;
+                    txtFolderSearch.Text = ""; // 加载新目录后清空搜索框
                     try
                     {
                         Properties.Settings.Default.SavedDataPath = input;
                         Properties.Settings.Default.Save();
                     }
                     catch { }
+                    return;
                 }
-                else if (File.Exists(input))
+
+                // 如果输入的是完整文件路径，则加载该文件所在目录
+                if (File.Exists(input))
                 {
                     string dir = Path.GetDirectoryName(input);
+                    searchOriginalRootPath = dir;
                     LoadFolderTree(dir);
                     txtDataPath.Text = dir;
+                    txtFolderSearch.Text = ""; // 加载新目录后清空搜索框
                     try
                     {
                         Properties.Settings.Default.SavedDataPath = dir;
                         Properties.Settings.Default.Save();
                     }
                     catch { }
+                    return;
                 }
-                else
-                {
-                    // 搜索当前目录中的文件（LIKE 匹配：文件名包含输入）
-                    string currentDir = txtDataPath.Text;
-                    if (string.IsNullOrEmpty(currentDir) || !Directory.Exists(currentDir))
-                    {
-                        //MessageBox.Show("请先选择有效的图片文件夹！");
-                        return;
-                    }
-                    var extensions = new[] { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff" };
-                    var matchingFiles = Directory.GetFiles(currentDir, "*", SearchOption.AllDirectories)
-                        .Where(f => extensions.Contains(Path.GetExtension(f).ToLower()) && Path.GetFileName(f).IndexOf(input, StringComparison.OrdinalIgnoreCase) >= 0)
-                        .ToList();
 
-                    if (matchingFiles.Any())
-                    {
-                        // 这里只是去重新加载了当前的树，目前功能没有完成，看后续方案
-                        LoadFolderTree(currentDir);
-                        txtDataPath.Text = currentDir;
-                        try
-                        {
-                            Properties.Settings.Default.SavedDataPath = currentDir;
-                            Properties.Settings.Default.Save();
-                        }
-                        catch { }
-                    }
-                    else
-                    {
-                        //MessageBox.Show("未找到匹配的文件或文件夹！");
-                    }
+                // 否则执行关键词搜索过滤
+                // 确保有有效的原始目录
+                if (string.IsNullOrEmpty(searchOriginalRootPath))
+                {
+                    searchOriginalRootPath = txtDataPath.Text;
                 }
+
+                if (string.IsNullOrEmpty(searchOriginalRootPath) || !Directory.Exists(searchOriginalRootPath))
+                {
+                    return;
+                }
+
+                FilterTreeByKeyword(input);
             }
         }
 
@@ -504,6 +663,164 @@ namespace DlcvTest
             if (model != null && !string.IsNullOrEmpty(_currentImagePath) && File.Exists(_currentImagePath))
             {
                 await ProcessSelectedImageAsync(_currentImagePath);
+            }
+        }
+
+        /// <summary>
+        /// 防止全选操作时递归触发事件
+        /// </summary>
+        private bool isUpdatingCategoryFilter = false;
+
+        /// <summary>
+        /// 类别屏蔽：全选/取消全选复选框变化事件
+        /// </summary>
+        private void CategoryFilterSelectAll_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing || isUpdatingCategoryFilter) return;
+            if (!(sender is System.Windows.Controls.CheckBox chk)) return;
+
+            isUpdatingCategoryFilter = true;
+            try
+            {
+                bool selectAll = chk.IsChecked ?? false;
+                foreach (var item in availableCategories)
+                {
+                    item.IsSelected = selectAll;
+                }
+
+                UpdateHiddenCategoriesFromUI();
+                UpdateCategoryFilterDisplay();
+                RefreshImages();
+            }
+            finally
+            {
+                isUpdatingCategoryFilter = false;
+            }
+        }
+
+        /// <summary>
+        /// 类别屏蔽：单个类别复选框变化事件
+        /// </summary>
+        private void CategoryFilterItem_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing || isUpdatingCategoryFilter) return;
+
+            UpdateHiddenCategoriesFromUI();
+            UpdateCategoryFilterDisplay();
+            UpdateSelectAllCheckState();
+            RefreshImages();
+        }
+
+        /// <summary>
+        /// 从 UI 更新 hiddenCategories 集合
+        /// 注意：IsSelected=true 表示该类别被选中要屏蔽
+        /// </summary>
+        private void UpdateHiddenCategoriesFromUI()
+        {
+            hiddenCategories.Clear();
+            foreach (var item in availableCategories)
+            {
+                if (item.IsSelected)
+                {
+                    hiddenCategories.Add(item.Name);
+                }
+            }
+
+            // 同步到 WpfViewer 的 Options
+            if (wpfViewer2 != null && wpfViewer2.Options != null)
+            {
+                wpfViewer2.Options.HiddenCategories = hiddenCategories;
+            }
+        }
+
+        /// <summary>
+        /// 更新类别屏蔽显示文本
+        /// </summary>
+        private void UpdateCategoryFilterDisplay()
+        {
+            if (txtCategoryFilterDisplay == null) return;
+
+            int selectedCount = 0;
+            foreach (var item in availableCategories)
+            {
+                if (item.IsSelected) selectedCount++;
+            }
+
+            if (selectedCount == 0)
+            {
+                txtCategoryFilterDisplay.Text = "无";
+            }
+            else if (selectedCount == 1)
+            {
+                foreach (var item in availableCategories)
+                {
+                    if (item.IsSelected)
+                    {
+                        txtCategoryFilterDisplay.Text = item.Name;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                txtCategoryFilterDisplay.Text = $"{selectedCount}个类别";
+            }
+        }
+
+        /// <summary>
+        /// 更新全选复选框状态：只有全部选中时才显示勾，否则不显示
+        /// </summary>
+        private void UpdateSelectAllCheckState()
+        {
+            if (chkCategoryFilterSelectAll == null) return;
+            if (availableCategories.Count == 0)
+            {
+                chkCategoryFilterSelectAll.IsChecked = false;
+                return;
+            }
+
+            int selectedCount = 0;
+            foreach (var item in availableCategories)
+            {
+                if (item.IsSelected) selectedCount++;
+            }
+
+            // 只有全部选中才显示勾，否则不显示
+            chkCategoryFilterSelectAll.IsChecked = (selectedCount == availableCategories.Count);
+        }
+
+        /// <summary>
+        /// 设置可用的类别列表（从推理结果中提取）
+        /// </summary>
+        public void SetAvailableCategories(IEnumerable<string> categories)
+        {
+            availableCategories.Clear();
+            hiddenCategories.Clear();
+
+            if (categories != null)
+            {
+                foreach (var cat in categories)
+                {
+                    if (!string.IsNullOrWhiteSpace(cat))
+                    {
+                        availableCategories.Add(new CategoryFilterItem { Name = cat, IsSelected = false });
+                    }
+                }
+            }
+
+            // 绑定到 ItemsControl
+            if (lstCategoryFilter != null)
+            {
+                lstCategoryFilter.ItemsSource = availableCategories;
+            }
+
+            UpdateCategoryFilterDisplay();
+            UpdateSelectAllCheckState();
+
+            // 同步到 WpfViewer 的 Options
+            if (wpfViewer2 != null && wpfViewer2.Options != null)
+            {
+                wpfViewer2.Options.HiddenCategories = hiddenCategories;
             }
         }
 

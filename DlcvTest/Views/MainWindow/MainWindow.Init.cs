@@ -214,6 +214,9 @@ namespace DlcvTest
                     System.Diagnostics.Debug.WriteLine($"[LoadModelAsync] 获取模型类型失败: {ex.Message}");
                 }
 
+                // 保存模型类型到字段
+                _currentTaskType = taskType;
+
                 // 更新预测参数 UI 显示（必须在 UI 线程上执行）
                 await Dispatcher.InvokeAsync(() =>
                 {
@@ -293,6 +296,7 @@ namespace DlcvTest
                     !string.IsNullOrEmpty(savedDataPath) &&
                     Directory.Exists(savedDataPath))
                 {
+                    searchOriginalRootPath = savedDataPath; // 保存原始目录路径用于搜索恢复
                     LoadFolderTree(savedDataPath);
                 }
 
@@ -370,6 +374,10 @@ namespace DlcvTest
                 gridShowMask.Visibility = isClassification ? Visibility.Collapsed : Visibility.Visible;
             if (gridShowEdges != null)
                 gridShowEdges.Visibility = isClassification ? Visibility.Collapsed : Visibility.Visible;
+            
+            // 类别屏蔽在图像分类时隐藏
+            if (gridCategoryFilter != null)
+                gridCategoryFilter.Visibility = isClassification ? Visibility.Collapsed : Visibility.Visible;
         }
 
         /// <summary>

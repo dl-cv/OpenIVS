@@ -267,6 +267,9 @@ namespace DlcvTest
             options.MaskColor = System.Windows.Media.Colors.LimeGreen;
             options.MaskAlpha = 128;
 
+            // 设置被屏蔽的类别
+            options.HiddenCategories = hiddenCategories;
+
             double lineWidth = 2.0;
             try { lineWidth = Settings.Default.BBoxBorderThickness; } catch { lineWidth = 2.0; }
             screenLineWidth = Math.Max(1.0, Math.Min(20.0, lineWidth));
@@ -296,6 +299,7 @@ namespace DlcvTest
             viewer.Options.FontColor = options.FontColor;
             viewer.Options.MaskColor = options.MaskColor;
             viewer.Options.MaskAlpha = options.MaskAlpha;
+            viewer.Options.HiddenCategories = options.HiddenCategories;
 
             viewer.ScreenLineWidth = screenLineWidth;
             viewer.ScreenFontSize = screenFontSize;

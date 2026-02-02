@@ -18,6 +18,49 @@ namespace DlcvTest
         // 字段声明
         private dynamic model = null;
         private string _currentImagePath = null;
+        private string _currentTaskType = "";
+
+        /// <summary>
+        /// 搜索功能：保存原始目录路径，用于恢复完整树形结构
+        /// </summary>
+        private string searchOriginalRootPath = null;
+
+        /// <summary>
+        /// 被屏蔽的类别名称集合（这些类别不在可视化和统计中显示）
+        /// </summary>
+        private HashSet<string> hiddenCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// 类别屏蔽下拉列表的数据源
+        /// </summary>
+        private ObservableCollection<CategoryFilterItem> availableCategories = new ObservableCollection<CategoryFilterItem>();
+
+        /// <summary>
+        /// 类别屏蔽列表项
+        /// </summary>
+        public class CategoryFilterItem : INotifyPropertyChanged
+        {
+            private string name;
+            private bool isSelected;
+
+            public string Name
+            {
+                get => name;
+                set { name = value; OnPropertyChanged(nameof(Name)); }
+            }
+
+            public bool IsSelected
+            {
+                get => isSelected;
+                set { isSelected = value; OnPropertyChanged(nameof(IsSelected)); }
+            }
+
+            public event PropertyChangedEventHandler PropertyChanged;
+            protected void OnPropertyChanged(string propertyName)
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            }
+        }
 
         /// <summary>
         /// 初始化标志位，防止 Loaded 事件中设置 checkbox 值时触发保存
@@ -103,21 +146,41 @@ namespace DlcvTest
             }
         }
 
-        private void BeginBatchProgress(int total)
+        // 批量进度的“会话标记”：用于防止批量结束后，排队在 Dispatcher 里的旧进度回调把状态改回“运行中”。
+        // runId 单调递增，activeRunId 表示当前有效会话；End 时会将 activeRunId 清空。
+        private int _batchProgressRunIdCounter = 0;
+        private int _batchProgressActiveRunId = 0;
+
+        private int BeginBatchProgress(int total)
         {
-            SetBatchProgressCore(0, total, isRunning: true);
+            int runId = Interlocked.Increment(ref _batchProgressRunIdCounter);
+            Volatile.Write(ref _batchProgressActiveRunId, runId);
+            SetBatchProgressCore(runId, 0, total, isRunning: true);
+            return runId;
         }
 
-        private void UpdateBatchProgress(int current, int total)
+        private void UpdateBatchProgress(int runId, int current, int total)
         {
-            SetBatchProgressCore(current, total, isRunning: true);
+            SetBatchProgressCore(runId, current, total, isRunning: true);
         }
 
-        private void EndBatchProgress()
+        private void EndBatchProgress(int runId)
         {
-            // 使用 Invoke 同步执行，确保在所有 BeginInvoke 的进度更新之后执行
+            // 先让该会话失效：确保后续排队的旧 Update 不会覆盖 End 的复位。
+            if (runId <= 0) return;
+
+            int prev = Interlocked.CompareExchange(ref _batchProgressActiveRunId, 0, runId);
+            if (prev != runId)
+            {
+                // 当前激活的已不是本次会话（可能新批量已启动）；不要错误地复位 UI。
+                return;
+            }
+
+            // 使用 BeginInvoke 异步执行，避免与大量排队的进度更新回调产生死锁
             if (Dispatcher.CheckAccess())
             {
+                // 若在复位前已出现新的会话，则不复位（防止覆盖新批量）
+                if (Volatile.Read(ref _batchProgressActiveRunId) != 0) return;
                 IsBatchRunning = false;
                 BatchProgressValue = 0.0;
                 BatchProgressText = "批量预测";
@@ -125,13 +188,14 @@ namespace DlcvTest
             }
             else
             {
-                Dispatcher.Invoke(() =>
+                Dispatcher.BeginInvoke(new Action(() =>
                 {
+                    if (Volatile.Read(ref _batchProgressActiveRunId) != 0) return;
                     IsBatchRunning = false;
                     BatchProgressValue = 0.0;
                     BatchProgressText = "批量预测";
                     AnimateBatchProgressVisual(0.0);
-                });
+                }));
             }
         }
 
@@ -147,7 +211,7 @@ namespace DlcvTest
             }
         }
 
-        private void SetBatchProgressCore(int current, int total, bool isRunning)
+        private void SetBatchProgressCore(int runId, int current, int total, bool isRunning)
         {
             if (total <= 0) total = 1;
             double percent = current * 100.0 / total;
@@ -157,6 +221,8 @@ namespace DlcvTest
 
             RunOnUiThread(() =>
             {
+                // 仅允许“当前活跃会话”更新 UI，避免批量结束后旧回调覆盖 End。
+                if (runId != Volatile.Read(ref _batchProgressActiveRunId)) return;
                 IsBatchRunning = isRunning;
                 BatchProgressValue = percent;
                 BatchProgressText = text;

@@ -207,7 +207,7 @@ namespace DlcvTest
 
             // 重置停止标志
             batchStopFlag = false;
-            BeginBatchProgress(estimatedCount);
+            int batchRunId = BeginBatchProgress(estimatedCount);
 
             try
             {
@@ -217,7 +217,8 @@ namespace DlcvTest
                     threshold: threshold,
                     saveImg: saveOriginal,
                     saveVis: saveVisualization,
-                    openDstDir: openAfterBatch
+                    openDstDir: openAfterBatch,
+                    progressRunId: batchRunId
                 );
             }
             catch (Exception ex)
@@ -230,7 +231,7 @@ namespace DlcvTest
             finally
             {
                 batchStopFlag = false;
-                EndBatchProgress();
+                EndBatchProgress(batchRunId);
             }
         }
 
@@ -244,7 +245,8 @@ namespace DlcvTest
             double threshold,
             bool saveImg,
             bool saveVis,
-            bool openDstDir)
+            bool openDstDir,
+            int progressRunId)
         {
             // 1. 创建输出子目录
             string timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
@@ -306,6 +308,8 @@ namespace DlcvTest
 
             // 3. 并行推理并保存（使用 Parallel.ForEach 提升性能）
             int processedCount = 0;
+            long lastProgressUpdateTicks = 0; // 用于节流进度更新
+            const long ProgressUpdateIntervalTicks = 500000; // 50ms 节流间隔（1 tick = 100ns）
             await Task.Run(() =>
             {
                 // 使用并行处理，从设置中读取最大并行度（默认 4，范围 1-16）
@@ -330,9 +334,9 @@ namespace DlcvTest
                             if (mat == null || mat.Empty())
                             {
                                 System.Diagnostics.Debug.WriteLine($"[批量推理] 无法读取图片: {imgPath}");
-                                Interlocked.Increment(ref processedCount);
+                                int currentCount = Interlocked.Increment(ref processedCount);
                                 if (!batchStopFlag)
-                                    Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(processedCount, total)));
+                                    Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(progressRunId, currentCount, total)));
                                 return;
                             }
 
@@ -431,11 +435,17 @@ namespace DlcvTest
                                         visOutPath = Path.Combine(dir, name + "_vis.png");
                                     }
 
-                                    // 1. 左边：原图 + LabelMe 标注绘制（GT）- 直接在 mat 上绘制以减少 Clone
+                                    // 1. 左边：原图 + LabelMe 标注绘制（GT）
+                                    // 注意：当 saveImg=false 时，DrawLabelMeAnnotationsInPlace 返回 mat 本身，
+                                    // 不能放入 using 块，否则会导致双重 Dispose（外层 using(mat) 也会释放）
                                     string labelMePath = Path.ChangeExtension(imgPath, ".json");
-                                    using (var leftImage = saveImg ? DrawLabelMeAnnotations(mat.Clone(), labelMePath, visProperties) 
-                                                                    : DrawLabelMeAnnotationsInPlace(mat, labelMePath, visProperties))
+                                    Mat leftImage = null;
+                                    bool shouldDisposeLeftImage = saveImg; // 只有克隆时才需要手动释放
+                                    try
                                     {
+                                        leftImage = saveImg ? DrawLabelMeAnnotations(mat.Clone(), labelMePath, visProperties) 
+                                                            : DrawLabelMeAnnotationsInPlace(mat, labelMePath, visProperties);
+                                        
                                         // 2. 右边：原图 + 推理结果绘制（需要重新读取，因为 mat 可能被修改）
                                         using (var matForVis = saveImg ? mat.Clone() : Cv2.ImRead(imgPath, ImreadModes.Color))
                                         {
@@ -453,6 +463,15 @@ namespace DlcvTest
                                             }
                                         }
                                     }
+                                    finally
+                                    {
+                                        // 只有 saveImg=true 时才释放 leftImage（因为是克隆的新 Mat）
+                                        // saveImg=false 时 leftImage 就是 mat 本身，由外层 using 块负责释放
+                                        if (shouldDisposeLeftImage && leftImage != null)
+                                        {
+                                            leftImage.Dispose();
+                                        }
+                                    }
                                 }
                                 catch (Exception visEx)
                                 {
@@ -466,11 +485,21 @@ namespace DlcvTest
                         System.Diagnostics.Debug.WriteLine($"[批量推理] 处理图片失败 {imgPath}: {ex.Message}");
                     }
 
-                    // 线程安全更新进度（停止时不更新）
+                    // 线程安全更新进度（停止时不更新，添加节流减少 Dispatcher 队列压力）
                     if (!batchStopFlag)
                     {
                         int currentCount = Interlocked.Increment(ref processedCount);
-                        Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(currentCount, total)));
+                        
+                        // 节流：每 50ms 最多更新一次进度，或者是最后一张图片时强制更新
+                        long nowTicks = DateTime.UtcNow.Ticks;
+                        long lastTicks = Interlocked.Read(ref lastProgressUpdateTicks);
+                        bool isLastImage = (currentCount >= total);
+                        bool shouldUpdate = isLastImage || (nowTicks - lastTicks >= ProgressUpdateIntervalTicks);
+                        
+                        if (shouldUpdate && Interlocked.CompareExchange(ref lastProgressUpdateTicks, nowTicks, lastTicks) == lastTicks)
+                        {
+                            Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(progressRunId, currentCount, total)));
+                        }
                     }
                 });
             });
@@ -1307,6 +1336,9 @@ namespace DlcvTest
 
                                     // 更新预测结果显示（分类模型显示 top_k 个类别）
                                     UpdatePredictResultDisplay(result, topK);
+
+                                    // 从结果中提取类别列表并更新类别屏蔽 UI
+                                    UpdateAvailableCategoriesFromResult(result);
                                 }, System.Windows.Threading.DispatcherPriority.Send);
                             }
                         } // if (model != null) 块结束
@@ -1449,10 +1481,12 @@ namespace DlcvTest
         }
 
         /// <summary>
-        /// 更新预测结果显示区域（分类模型显示 top_k 个类别及置信度）
+        /// 更新预测结果显示区域
+        /// 分类模型：显示 top_k 个类别及置信度
+        /// 目标检测/分割模型：显示各类别的检测数量
         /// </summary>
         /// <param name="result">推理结果</param>
-        /// <param name="topK">要显示的类别数量</param>
+        /// <param name="topK">要显示的类别数量（仅分类模型使用）</param>
         private void UpdatePredictResultDisplay(Utils.CSharpResult result, int topK)
         {
             try
@@ -1467,20 +1501,110 @@ namespace DlcvTest
                     return;
                 }
 
-                // 获取按置信度排序的前 topK 个结果
-                var sortedResults = result.SampleResults[0].Results
-                    .OrderByDescending(r => r.Score)
-                    .Take(Math.Max(1, topK))
-                    .Select(r => $"{r.CategoryName}：{r.Score:P2}")
-                    .ToList();
+                // 获取被屏蔽的类别集合
+                var hiddenSet = hiddenCategories ?? new HashSet<string>();
+
+                bool isClassification = _currentTaskType == "分类";
+                List<string> displayResults;
+
+                if (isClassification)
+                {
+                    // 分类模型：显示 top_k 类别及置信度（排除被屏蔽的类别）
+                    displayResults = result.SampleResults[0].Results
+                        .Where(r => !hiddenSet.Contains(r.CategoryName ?? string.Empty))
+                        .OrderByDescending(r => r.Score)
+                        .Take(Math.Max(1, topK))
+                        .Select(r => $"{r.CategoryName}：{r.Score:P2}")
+                        .ToList();
+                }
+                else
+                {
+                    // 目标检测/分割模型：统计各类别数量（排除被屏蔽的类别）
+                    displayResults = result.SampleResults[0].Results
+                        .Where(r => !hiddenSet.Contains(r.CategoryName ?? string.Empty))
+                        .GroupBy(r => r.CategoryName)
+                        .Select(g => $"{g.Key}：{g.Count()}")
+                        .ToList();
+                }
 
                 // 更新显示
-                if (txtPredictResultEmpty != null) txtPredictResultEmpty.Visibility = Visibility.Collapsed;
-                if (PredictResultList != null) PredictResultList.ItemsSource = sortedResults;
+                if (txtPredictResultEmpty != null) txtPredictResultEmpty.Visibility = displayResults.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+                if (PredictResultList != null) PredictResultList.ItemsSource = displayResults.Count > 0 ? displayResults : null;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[UpdatePredictResultDisplay] 更新预测结果显示失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 从推理结果中提取类别列表并更新类别屏蔽 UI
+        /// 只在有新类别出现时更新，避免重复刷新
+        /// </summary>
+        private void UpdateAvailableCategoriesFromResult(Utils.CSharpResult result)
+        {
+            try
+            {
+                if (result.SampleResults == null || result.SampleResults.Count == 0 ||
+                    result.SampleResults[0].Results == null || result.SampleResults[0].Results.Count == 0)
+                {
+                    return;
+                }
+
+                // 提取所有唯一类别名称
+                var newCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var r in result.SampleResults[0].Results)
+                {
+                    if (!string.IsNullOrWhiteSpace(r.CategoryName))
+                    {
+                        newCategories.Add(r.CategoryName);
+                    }
+                }
+
+                if (newCategories.Count == 0) return;
+
+                // 检查是否有新类别（避免每次推理都重新设置导致选择状态丢失）
+                var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var item in availableCategories)
+                {
+                    existingNames.Add(item.Name);
+                }
+
+                bool hasNewCategory = false;
+                foreach (var cat in newCategories)
+                {
+                    if (!existingNames.Contains(cat))
+                    {
+                        hasNewCategory = true;
+                        break;
+                    }
+                }
+
+                // 只有在有新类别时才更新列表
+                if (hasNewCategory || availableCategories.Count == 0)
+                {
+                    // 保留现有的选中状态
+                    var currentHidden = new HashSet<string>(hiddenCategories, StringComparer.OrdinalIgnoreCase);
+                    
+                    SetAvailableCategories(newCategories);
+
+                    // 恢复之前的选中状态
+                    foreach (var item in availableCategories)
+                    {
+                        if (currentHidden.Contains(item.Name))
+                        {
+                            item.IsSelected = true;
+                        }
+                    }
+
+                    UpdateHiddenCategoriesFromUI();
+                    UpdateCategoryFilterDisplay();
+                    UpdateSelectAllCheckState();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[UpdateAvailableCategoriesFromResult] 更新类别列表失败: {ex.Message}");
             }
         }
 
