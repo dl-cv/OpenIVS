@@ -11,9 +11,6 @@ using static dlcv_infer_csharp.Utils;
 using DLCV;
 using System.Text;
 using Newtonsoft.Json;
-using DlcvModules;
-using System.Linq;
-using System.Runtime.CompilerServices;
 
 namespace DlcvDemo
 {
@@ -211,52 +208,7 @@ namespace DlcvDemo
             JObject result = model.GetModelInfo();
             if (result.ContainsKey("model_info"))
             {
-                result = (JObject)result["model_info"];
-                richTextBox1.Text = result.ToString();
-            }
-            else if (result.ContainsKey("det_model"))
-            {
-                JObject new_result = new JObject();
-                new_result["det_model"] = (JObject)result["det_model"]["model_info"];
-                new_result["ocr_model"] = (JObject)result["ocr_model"]["model_info"];
-                richTextBox1.Text = new_result.ToString();
-            }
-            else if (result.ContainsKey("nodes") && result.ContainsKey("links"))
-            {
-                // FlowGraph 格式：提取节点和链接的摘要信息
-                JObject summary = new JObject();
-                summary["type"] = "FlowGraph";
-                summary["version"] = result.ContainsKey("version") ? result["version"] : "unknown";
-                summary["node_count"] = result["nodes"] != null ? ((JArray)result["nodes"]).Count : 0;
-                summary["link_count"] = result["links"] != null ? ((JArray)result["links"]).Count : 0;
-                
-                // 提取每个节点的基本信息
-                JArray nodes_info = new JArray();
-                if (result["nodes"] != null)
-                {
-                    foreach (JObject node in (JArray)result["nodes"])
-                    {
-                        JObject node_summary = new JObject();
-                        node_summary["id"] = node.ContainsKey("id") ? node["id"] : -1;
-                        node_summary["type"] = node.ContainsKey("type") ? node["type"] : "unknown";
-                        if (node.ContainsKey("properties") && node["properties"] is JObject props)
-                        {
-                            if (props.ContainsKey("model_path"))
-                            {
-                                node_summary["model_path"] = props["model_path"];
-                            }
-                        }
-                        nodes_info.Add(node_summary);
-                    }
-                }
-                summary["nodes"] = nodes_info;
-                
-                richTextBox1.Text = summary.ToString();
-            }
-            else if (result.ContainsKey("code"))
-            {
-                richTextBox1.Text = result.ToString();
-                return;
+                richTextBox1.Text = result["model_info"].ToString();
             }
             else
             {
@@ -313,6 +265,10 @@ namespace DlcvDemo
                 }
 
                 Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+                if (image.Empty())
+                {
+                    throw new Exception("图像解码失败！");
+                }
                 Mat image_rgb = new Mat();
                 Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
 
@@ -321,12 +277,6 @@ namespace DlcvDemo
                 for (int i = 0; i < batch_size; i++)
                 {
                     image_list.Add(image_rgb);
-                }
-
-                if (image.Empty())
-                {
-                    Console.WriteLine("图像解码失败！");
-                    return;
                 }
 
                 JObject data = new JObject();
@@ -667,122 +617,26 @@ namespace DlcvDemo
 
         private void button1_Click(object sender, EventArgs e)
         {
-            JArray sntl_info = sntl_admin_csharp.SNTLUtils.GetDeviceList();
-            JArray sntl_features = sntl_admin_csharp.SNTLUtils.GetFeatureList();
-            richTextBox1.Text = "加密狗ID：\n" + sntl_info.ToString() + "\n\n" +
-                "加密狗特性：\n" + sntl_features.ToString();
-        }
-
-        private void button_load_sliding_window_model_Click(object sender, EventArgs e)
-        {
-            OpenFileDialog openFileDialog = new OpenFileDialog();
-            openFileDialog.RestoreDirectory = true;
-
-            openFileDialog.Filter = "深度视觉加速模型文件 (*.dvt)|*.dvt";
-            openFileDialog.Title = "选择模型";
+            JArray sntl_info;
+            JArray sntl_features;
             try
             {
-                openFileDialog.InitialDirectory = Path.GetDirectoryName(Properties.Settings.Default.LastModelPath);
-                openFileDialog.FileName = Path.GetFileName(Properties.Settings.Default.LastModelPath);
+                sntl_info = sntl_admin_csharp.SNTLUtils.GetDeviceList();
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine(ex.Message);
+                sntl_info = new JArray();
             }
-
-            if (openFileDialog.ShowDialog() == DialogResult.OK)
+            try
             {
-                string selectedFilePath = openFileDialog.FileName;
-                Properties.Settings.Default.LastModelPath = selectedFilePath;
-                Properties.Settings.Default.Save();
-                int device_id = GetSelectedDeviceId();
-
-                // 显示参数配置窗口
-                using (var configForm = new SlidingWindowConfigForm())
-                {
-                    if (configForm.ShowDialog() == DialogResult.OK)
-                    {
-                        try
-                        {
-                            if (model != null)
-                            {
-                                model = null;
-                                GC.Collect();
-                            }
-                            model = new SlidingWindowModel(
-                                selectedFilePath,
-                                device_id,
-                                configForm.SmallImgWidth,
-                                configForm.SmallImgHeight,
-                                configForm.HorizontalOverlap,
-                                configForm.VerticalOverlap,
-                                configForm.Threshold,
-                                configForm.IouThreshold,
-                                configForm.CombineIosThreshold
-                            );
-                            button_getmodelinfo_Click(sender, e);
-                        }
-                        catch (Exception ex)
-                        {
-                            richTextBox1.Text = ex.Message;
-                        }
-                    }
-                }
+                sntl_features = sntl_admin_csharp.SNTLUtils.GetFeatureList();
             }
-        }
-
-        private void button_load_ocr_model_Click(object sender, EventArgs e)
-        {
-            // 使用新的OCR模型配置窗口
-            using (var ocrConfigForm = new OcrModelConfigForm(GetSelectedDeviceId()))
+            catch
             {
-                if (ocrConfigForm.ShowDialog(this) == DialogResult.OK)
-                {
-                    string detModelPath = ocrConfigForm.DetModelPath;
-                    string ocrModelPath = ocrConfigForm.OcrModelPath;
-                    int deviceId = ocrConfigForm.DeviceId;
-                    float horizontalScale = ocrConfigForm.HorizontalScale;
-
-                    try
-                    {
-                        // 释放旧模型
-                        if (model != null)
-                        {
-                            var disposable = model as IDisposable;
-                            if (disposable != null)
-                            {
-                                disposable.Dispose();
-                            }
-                            model = null;
-                        }
-
-                        // 创建新的OCR模型
-                        model = new OcrWithDetModel();
-                        model.Load(detModelPath, ocrModelPath, deviceId);
-                        model.SetHorizontalScale(horizontalScale);
-
-                        richTextBox1.Text = "OCR模型加载成功！\n" +
-                                          $"检测模型: {Path.GetFileName(detModelPath)}\n" +
-                                          $"OCR模型: {Path.GetFileName(ocrModelPath)}\n" +
-                                          $"设备ID: {deviceId}\n" +
-                                          $"水平缩放比例: {horizontalScale}";
-                    }
-                    catch (Exception ex)
-                    {
-                        richTextBox1.Text = $"加载OCR模型失败：{ex.Message}";
-                        if (model != null)
-                        {
-                            var disposable = model as IDisposable;
-                            if (disposable != null)
-                            {
-                                disposable.Dispose();
-                            }
-                            model = null;
-                        }
-                        MessageBox.Show($"加载OCR模型失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                }
+                sntl_features = new JArray();
             }
+            richTextBox1.Text = "加密狗ID：\n" + sntl_info.ToString() + "\n\n" +
+                "加密狗特性：\n" + sntl_features.ToString();
         }
 
         private void button_free_all_model_Click(object sender, EventArgs e)
@@ -800,78 +654,6 @@ namespace DlcvDemo
             Utils.FreeAllModels();
             richTextBox1.Text = "所有模型已释放";
         }
-
-        /// <summary>
-        /// 加载流程JSON（视为模型），运行GraphExecutor，并将可视化结果显示到imagePanel1
-        /// </summary>
-        private void button_load_flow_model_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                OpenFileDialog openFileDialog = new OpenFileDialog();
-                openFileDialog.RestoreDirectory = true;
-                openFileDialog.Filter = "流程JSON (*.json)|*.json|所有文件 (*.*)|*.*";
-                openFileDialog.Title = "选择流程配置JSON";
-
-                try
-                {
-                    openFileDialog.InitialDirectory = Path.GetDirectoryName(Properties.Settings.Default.LastFlowPath);
-                    openFileDialog.FileName = Path.GetFileName(Properties.Settings.Default.LastFlowPath);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine(ex.Message);
-                }
-
-                if (openFileDialog.ShowDialog() != DialogResult.OK)
-                {
-                    return;
-                }
-
-                string jsonPath = openFileDialog.FileName;
-                try
-                {
-                    Properties.Settings.Default.LastFlowPath = jsonPath;
-                    Properties.Settings.Default.Save();
-                }
-                catch (Exception) { }
-				try
-				{
-					// 切换到流程模型模式
-					model = null;
-					GC.Collect();
-					var flowModel = new DlcvModules.FlowGraphModel();
-					int deviceId = 0;
-					try { deviceId = GetSelectedDeviceId(); } catch { deviceId = 0; }
-					var loadReport = flowModel.Load(jsonPath, deviceId);
-					model = flowModel;
-					// 如果加载有错误，优先显示加载报告JSON；否则显示流程配置信息
-					try
-					{
-						int code = loadReport != null && loadReport["code"] != null ? (int)loadReport["code"] : 1;
-						if (code != 0)
-						{
-							richTextBox1.Text = loadReport.ToString();
-						}
-						else
-						{
-							button_getmodelinfo_Click(sender, e);
-						}
-					}
-					catch { button_getmodelinfo_Click(sender, e); }
-				}
-				catch (Exception ex)
-				{
-					ReportError("加载或执行流程失败", ex);
-				}
-
-			}
-			catch (Exception ex)
-			{
-				ReportError("加载或执行流程失败", ex);
-			}
-
-		}
 
 		/// <summary>
 		/// 统一错误输出：写入 richTextBox1 并弹窗提示

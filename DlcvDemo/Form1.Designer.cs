@@ -48,11 +48,8 @@
             this.label4 = new System.Windows.Forms.Label();
             this.numericUpDown_threshold = new System.Windows.Forms.NumericUpDown();
             this.button_check_dog = new System.Windows.Forms.Button();
-            this.button_load_sliding_window_model = new System.Windows.Forms.Button();
             this.button_free_all_model = new System.Windows.Forms.Button();
-            this.button_load_ocr_model = new System.Windows.Forms.Button();
             this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
-            this.button_load_flow_model = new System.Windows.Forms.Button();
             this.button_infer_json = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
@@ -97,7 +94,7 @@
             // 
             // button_infer
             // 
-            this.button_infer.Location = new System.Drawing.Point(311, 87);
+            this.button_infer.Location = new System.Drawing.Point(12, 86);
             this.button_infer.Name = "button_infer";
             this.button_infer.Size = new System.Drawing.Size(140, 60);
             this.button_infer.TabIndex = 4;
@@ -180,7 +177,7 @@
             this.comboBox1.FormattingEnabled = true;
             this.comboBox1.Location = new System.Drawing.Point(249, 34);
             this.comboBox1.Name = "comboBox1";
-            this.comboBox1.Size = new System.Drawing.Size(796, 32);
+            this.comboBox1.Size = new System.Drawing.Size(743, 32);
             this.comboBox1.TabIndex = 12;
             // 
             // label1
@@ -204,7 +201,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(640, 105);
+            this.label3.Location = new System.Drawing.Point(318, 104);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(99, 24);
             this.label3.TabIndex = 15;
@@ -212,7 +209,7 @@
             // 
             // numericUpDown_batch_size
             // 
-            this.numericUpDown_batch_size.Location = new System.Drawing.Point(745, 103);
+            this.numericUpDown_batch_size.Location = new System.Drawing.Point(423, 102);
             this.numericUpDown_batch_size.Maximum = new decimal(new int[] {
             1024,
             0,
@@ -244,8 +241,10 @@
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
             this.imagePanel1.ShowStatusText = false;
+            this.imagePanel1.ShowVisualization = true;
             this.imagePanel1.Size = new System.Drawing.Size(818, 604);
             this.imagePanel1.TabIndex = 17;
+            this.imagePanel1.TabStop = true;
             // 
             // richTextBox1
             // 
@@ -261,7 +260,7 @@
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(457, 105);
+            this.label4.Location = new System.Drawing.Point(492, 104);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(92, 24);
             this.label4.TabIndex = 18;
@@ -275,12 +274,17 @@
             0,
             0,
             131072});
-            this.numericUpDown_threshold.Location = new System.Drawing.Point(555, 103);
+            this.numericUpDown_threshold.Location = new System.Drawing.Point(590, 102);
             this.numericUpDown_threshold.Maximum = new decimal(new int[] {
             1,
             0,
             0,
             0});
+            this.numericUpDown_threshold.Minimum = new decimal(new int[] {
+            5,
+            0,
+            0,
+            65536});
             this.numericUpDown_threshold.Name = "numericUpDown_threshold";
             this.numericUpDown_threshold.Size = new System.Drawing.Size(79, 31);
             this.numericUpDown_threshold.TabIndex = 19;
@@ -301,19 +305,6 @@
             this.button_check_dog.UseVisualStyleBackColor = true;
             this.button_check_dog.Click += new System.EventHandler(this.button1_Click);
             // 
-            // button_load_sliding_window_model
-            // 
-            this.button_load_sliding_window_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_load_sliding_window_model.Location = new System.Drawing.Point(824, 93);
-            this.button_load_sliding_window_model.Margin = new System.Windows.Forms.Padding(4);
-            this.button_load_sliding_window_model.Name = "button_load_sliding_window_model";
-            this.button_load_sliding_window_model.Size = new System.Drawing.Size(140, 60);
-            this.button_load_sliding_window_model.TabIndex = 21;
-            this.button_load_sliding_window_model.Text = "加载\r\n滑窗裁图模型";
-            this.button_load_sliding_window_model.UseVisualStyleBackColor = true;
-            this.button_load_sliding_window_model.Visible = false;
-            this.button_load_sliding_window_model.Click += new System.EventHandler(this.button_load_sliding_window_model_Click);
-            // 
             // button_free_all_model
             // 
             this.button_free_all_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
@@ -327,44 +318,20 @@
             this.button_free_all_model.UseVisualStyleBackColor = true;
             this.button_free_all_model.Click += new System.EventHandler(this.button_free_all_model_Click);
             // 
-            // button_load_ocr_model
-            // 
-            this.button_load_ocr_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_load_ocr_model.Location = new System.Drawing.Point(12, 87);
-            this.button_load_ocr_model.Margin = new System.Windows.Forms.Padding(4);
-            this.button_load_ocr_model.Name = "button_load_ocr_model";
-            this.button_load_ocr_model.Size = new System.Drawing.Size(140, 60);
-            this.button_load_ocr_model.TabIndex = 23;
-            this.button_load_ocr_model.Text = "加载OCR模型";
-            this.button_load_ocr_model.UseVisualStyleBackColor = true;
-            this.button_load_ocr_model.Click += new System.EventHandler(this.button_load_ocr_model_Click);
-            // 
             // checkBox_rpc_mode
             // 
+            this.checkBox_rpc_mode.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.checkBox_rpc_mode.AutoSize = true;
-            this.checkBox_rpc_mode.Location = new System.Drawing.Point(493, 171);
+            this.checkBox_rpc_mode.Location = new System.Drawing.Point(998, 37);
             this.checkBox_rpc_mode.Name = "checkBox_rpc_mode";
             this.checkBox_rpc_mode.Size = new System.Drawing.Size(107, 28);
             this.checkBox_rpc_mode.TabIndex = 24;
             this.checkBox_rpc_mode.Text = "RPC模式";
             this.checkBox_rpc_mode.UseVisualStyleBackColor = true;
             // 
-            // button_load_flow_model
-            // 
-            this.button_load_flow_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_load_flow_model.Location = new System.Drawing.Point(165, 87);
-            this.button_load_flow_model.Margin = new System.Windows.Forms.Padding(4);
-            this.button_load_flow_model.Name = "button_load_flow_model";
-            this.button_load_flow_model.Size = new System.Drawing.Size(140, 60);
-            this.button_load_flow_model.TabIndex = 25;
-            this.button_load_flow_model.Text = "加载流程";
-            this.button_load_flow_model.UseVisualStyleBackColor = true;
-            this.button_load_flow_model.Click += new System.EventHandler(this.button_load_flow_model_Click);
-            // 
             // button_infer_json
             // 
-            this.button_infer_json.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_infer_json.Location = new System.Drawing.Point(676, 161);
+            this.button_infer_json.Location = new System.Drawing.Point(165, 86);
             this.button_infer_json.Name = "button_infer_json";
             this.button_infer_json.Size = new System.Drawing.Size(140, 60);
             this.button_infer_json.TabIndex = 26;
@@ -378,11 +345,8 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1274, 844);
             this.Controls.Add(this.button_infer_json);
-            this.Controls.Add(this.button_load_flow_model);
             this.Controls.Add(this.checkBox_rpc_mode);
-            this.Controls.Add(this.button_load_ocr_model);
             this.Controls.Add(this.button_free_all_model);
-            this.Controls.Add(this.button_load_sliding_window_model);
             this.Controls.Add(this.button_check_dog);
             this.Controls.Add(this.numericUpDown_threshold);
             this.Controls.Add(this.label4);
@@ -439,11 +403,8 @@
         private System.Windows.Forms.Label label4;
         private System.Windows.Forms.NumericUpDown numericUpDown_threshold;
         private System.Windows.Forms.Button button_check_dog;
-        private System.Windows.Forms.Button button_load_sliding_window_model;
         private System.Windows.Forms.Button button_free_all_model;
-        private System.Windows.Forms.Button button_load_ocr_model;
         private System.Windows.Forms.CheckBox checkBox_rpc_mode;
-        private System.Windows.Forms.Button button_load_flow_model;
         private System.Windows.Forms.Button button_infer_json;
     }
 }
