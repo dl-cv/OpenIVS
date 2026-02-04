@@ -109,40 +109,14 @@
 
 ##### 4.1.1 控件清单与默认值（文本必须一致）
 
-- **按钮**
-  - `加载模型`（`button_load_model`）
-  - `打开图片推理`（`button_open_image`）
-  - `单次推理`（`button_infer`）
-  - `多线程测试`（`button_thread_test`，点击后在运行时切换为 `停止`）
-  - `一致性测试`（`button_consistency_test`，点击后在运行时切换为 `停止`）
-  - `释放模型`（`button_free_model`）
-  - `释放所有模型`（`button_free_all_model`）
-  - `检查加密狗`（`button_check_dog`）
-  - `文档`（`button_github`）
-  - `获取模型信息`（`button_get_model_info`）
-  - `加载\r\n滑窗裁图模型`（`button_load_sliding_window_model`）：
-    - **默认不可见**：`Visible=false`（即最终产品界面默认看不到该按钮；视为隐藏/保留功能）
-
-- **下拉框**
-  - `comboBox1`：设备选择列表
-
-- **Label**
-  - `选择显卡`
-  - `线程数`
-  - `batch_size`
-  - `threshold`
-
-- **数值输入**
-  - `numericUpDown_num_thread`：线程数，**最小=1，最大=32，默认=1**
-  - `numericUpDown_batch_size`：batch_size，**最小=1，最大=1024，默认=1**
-  - `numericUpDown_threshold`：threshold
-    - **小数位=2**
-    - **步进=0.05**
-    - **最大=1.00**
-    - **默认=0.05**
-
-- **复选框**
-  - `checkBox_rpc_mode`：文本 `RPC模式`，默认不勾选
+- **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`文档`、`获取模型信息`。
+- **下拉框**：设备选择。
+- **Label**：`选择显卡`、`线程数`、`batch_size`、`threshold`。
+- **数值输入**：
+  - 线程数（1-32，默认1）。
+  - Batch Size（1-1024，默认1）。
+  - Threshold（0.05-1.00，步进0.05，默认0.05）。
+- **复选框**：`RPC模式`（默认不勾选）。
 
 - **文本输出**
   - `richTextBox1`：用于显示错误、模型信息、推理结果文本、测试统计信息（不要求富文本格式）
@@ -171,32 +145,15 @@
 
 #### 5.2 绘制规则（框/文字/Mask）
 
-- **绘制对象**：仅可视化 `currentResults.SampleResults[0]`（batch_size>1 时只绘制第一张图的结果）
-- **插值方式**：图像缩放采用 NearestNeighbor（最近邻）
-- **平移边界**：拖拽平移时需限制图片位置，保证图片在可视区域内至少露出约 100px（避免完全拖出视野）
-- **坐标系**：推理结果中的 bbox 坐标以**原图像像素坐标**为准；绘制时使用控件当前的平移/缩放变换。
-- **颜色规则**（忽略大小写）：
-  - `category_name` 包含 `ok` → 绿色
-  - `category_name` 包含 `ng` → 红色
-  - 其他情况 → 红色
-- **标签文本**：`"{category_name} {score:F2}"`
-- **标签背景**：半透明黑色（ARGB=160,0,0,0）
-- **边框线宽**：`max(1, 2/scale)`
-- **字体大小**：`max(8, 24/scale)`，字体 `Microsoft YaHei`
-
-- **普通框（WithAngle=false）**：
-  - bbox 解释为 `[x, y, w, h]`
-  - 绘制矩形框
-  - 若 `WithMask=true` 且 `Mask` 非空：在 bbox 区域叠加 mask
-    - mask 的颜色：半透明绿色（ARGB=128,0,255,0）
-    - mask 像素规则：mask>0 为有效区域，否则透明
-  - 标签绘制在框上方（y - textHeight - 2）
-
-- **旋转框（WithAngle=true）**：
-  - bbox 解释为 `[cx, cy, w, h]`
-  - angle 为弧度
-  - 计算四点并绘制四条边
-  - 标签绘制在旋转框上方（以中心点对齐）
+- **输入**：仅可视化 `SampleResults[0]`（Batch中第一张图的结果）。
+- **坐标**：基于**原图像素坐标**。
+- **可视化输出**：
+  - **边界框**：
+    - 普通框：绘制矩形 `[x, y, w, h]`。
+    - 旋转框：根据 `[cx, cy, w, h, angle]` 绘制四边形。
+  - **Mask**：若存在，在框内叠加半透明蒙版（仅有效区域）。
+  - **标签**：在框上方显示 `{category_name} {score:F2}`。
+  - **颜色**：根据类别（OK/NG）区分颜色（如绿/红）。
 
 ### 6. 主流程与状态（必须一致）
 
@@ -288,28 +245,17 @@
 
 #### 7.6 单次推理（按钮：`单次推理`）
 
-- 前置条件：
-  - 未加载模型：弹窗 `请先加载模型文件！`
-  - 未选择图片：弹窗 `请先选择图片文件！`
-- 处理流程：
-  - 用 OpenCV 读取图片（BGR）
-  - 按源码顺序：先尝试转为 RGB（BGR→RGB）；若源图为空导致 OpenCV 抛错，则进入“推理失败”的异常处理
-  - （若执行到空图判断）当检测到 `image.Empty()==true` 时，仅输出控制台 `图像解码失败！` 并直接返回（不弹窗、不更新 UI）
-  - batch_size 从 `numericUpDown_batch_size` 读取
-  - 构造 `image_list`：重复同一张 RGB Mat `batch_size` 次
-  - 推理参数 JSON：
-    - `threshold = numericUpDown_threshold`
-    - `with_mask = true`
-  - 计时并调用：`model.InferBatch(image_list, params)`
-  - 将 **原始 BGR 图** 与推理结果传给 `imagePanel1.UpdateImageAndResult(image, result)`
-  - 在 `richTextBox1` 输出（格式必须一致）：
-
-    - `推理时间: {ms:F2}ms`
-    - 空行
-    - `推理结果: `
-    - `{result.SampleResults[0].ToString()}`
-
-- 异常处理：`ReportError("推理失败", ex)`
+- **功能**：对当前图片执行推理并展示结果。
+- **前置条件**：
+  - 已加载模型。
+  - 已选择图片。
+- **输入**：
+  - 图片：当前选择的图片（读取为RGB）。
+  - 参数：UI设置的 Batch Size, Threshold，强制 `with_mask=true`。
+- **输出**：
+  - **图像**：在界面显示原图及可视化结果。
+  - **文本**：输出推理耗时及结果详情。
+- **异常处理**：若图片无效或推理失败，弹窗提示错误。
 
 #### 7.7 推理 JSON（按钮：`推理JSON`）
 
