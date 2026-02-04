@@ -72,7 +72,7 @@
             // 
             this.button_get_model_info.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_get_model_info.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_get_model_info.Location = new System.Drawing.Point(971, 161);
+            this.button_get_model_info.Location = new System.Drawing.Point(1119, 161);
             this.button_get_model_info.Margin = new System.Windows.Forms.Padding(4);
             this.button_get_model_info.Name = "button_get_model_info";
             this.button_get_model_info.Size = new System.Drawing.Size(140, 60);
@@ -126,7 +126,7 @@
             // 
             this.button_free_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_free_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_free_model.Location = new System.Drawing.Point(1119, 93);
+            this.button_free_model.Location = new System.Drawing.Point(971, 93);
             this.button_free_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_free_model.Name = "button_free_model";
             this.button_free_model.Size = new System.Drawing.Size(140, 60);
@@ -139,7 +139,7 @@
             // 
             this.button_github.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_github.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_github.Location = new System.Drawing.Point(823, 161);
+            this.button_github.Location = new System.Drawing.Point(971, 161);
             this.button_github.Margin = new System.Windows.Forms.Padding(4);
             this.button_github.Name = "button_github";
             this.button_github.Size = new System.Drawing.Size(140, 60);
@@ -221,7 +221,7 @@
             0,
             0});
             this.numericUpDown_batch_size.Name = "numericUpDown_batch_size";
-            this.numericUpDown_batch_size.Size = new System.Drawing.Size(63, 31);
+            this.numericUpDown_batch_size.Size = new System.Drawing.Size(77, 31);
             this.numericUpDown_batch_size.TabIndex = 16;
             this.numericUpDown_batch_size.Value = new decimal(new int[] {
             1,
@@ -260,7 +260,7 @@
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(492, 104);
+            this.label4.Location = new System.Drawing.Point(506, 104);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(92, 24);
             this.label4.TabIndex = 18;
@@ -274,7 +274,7 @@
             0,
             0,
             131072});
-            this.numericUpDown_threshold.Location = new System.Drawing.Point(590, 102);
+            this.numericUpDown_threshold.Location = new System.Drawing.Point(604, 102);
             this.numericUpDown_threshold.Maximum = new decimal(new int[] {
             1,
             0,
@@ -297,7 +297,7 @@
             // button_check_dog
             // 
             this.button_check_dog.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.button_check_dog.Location = new System.Drawing.Point(971, 93);
+            this.button_check_dog.Location = new System.Drawing.Point(824, 161);
             this.button_check_dog.Name = "button_check_dog";
             this.button_check_dog.Size = new System.Drawing.Size(140, 60);
             this.button_check_dog.TabIndex = 20;
@@ -309,7 +309,7 @@
             // 
             this.button_free_all_model.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_free_all_model.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_free_all_model.Location = new System.Drawing.Point(1119, 161);
+            this.button_free_all_model.Location = new System.Drawing.Point(1119, 93);
             this.button_free_all_model.Margin = new System.Windows.Forms.Padding(4);
             this.button_free_all_model.Name = "button_free_all_model";
             this.button_free_all_model.Size = new System.Drawing.Size(140, 60);
