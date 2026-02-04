@@ -41,8 +41,7 @@
 - **OpenCvSharp 运行时（必须）**
   - `OpenCvSharpExtern.dll` + OpenCV 相关运行时 DLL（由 `OpenCvSharp4.runtime.win` 提供）
 - **GPU 枚举（可选）**
-  - `nvml.dll`（NVIDIA 驱动自带）：用于枚举 GPU 名称
-  - 缺失时：设备下拉仍显示 `CPU`，并在 `richTextBox1` 显示 `GPU信息获取失败：...`
+  - `nvml.dll`（NVIDIA 驱动自带）：用于枚举 GPU 名称；失败/缺失时的 UI 表现见 **6.2**
 - **加密狗检查（可选）**
   - `sntl_adminapi_windows_x64.dll`：用于读取加密狗信息
   - 缺失时：`检查加密狗` 输出为空数组（`[]`），不应崩溃
@@ -109,7 +108,7 @@
 
 ##### 4.1.1 控件清单与默认值（文本必须一致）
 
-- **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`文档`、`获取模型信息`。
+- **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`推理JSON`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`文档`、`获取模型信息`。
 - **下拉框**：设备选择。
 - **Label**：`选择显卡`、`线程数`、`batch_size`、`threshold`。
 - **数值输入**：
@@ -254,7 +253,7 @@
   - 参数：UI设置的 Batch Size, Threshold，强制 `with_mask=true`。
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
-  - **文本**：输出推理耗时及结果详情。
+  - **文本**：输出推理耗时及结果详情；且 `richTextBox1` 文本中必须包含字段名 `推理时间:` 与 `推理结果:`。
 - **异常处理**：若图片无效或推理失败，弹窗提示错误。
 
 #### 7.7 推理 JSON（按钮：`推理JSON`）
@@ -268,7 +267,7 @@
     - `threshold = numericUpDown_threshold`
     - `with_mask = true`
   - 调用：`model.InferOneOutJson(image_rgb, params)`
-  - 输出到 `richTextBox1`：`JsonConvert.SerializeObject(json, Formatting.Indented)`
+- 输出到 `richTextBox1`：`JsonConvert.SerializeObject(json, Formatting.Indented)`（输出内容根节点必须为 JSON 数组 `[]`，即使为空）
 - **说明**：该功能只输出 JSON 文本，不更新 `imagePanel1` 的图像与可视化结果
 - 异常处理：`ReportError("推理JSON失败", ex)`
 
@@ -328,12 +327,7 @@
   - 按钮文字切为 `停止`
   - 定时器输出统计时，若 `baselineJsonResult!=null`，则在统计文本后追加：
     - `\n\n基准结果:\n{baselineJsonIndented}`
-- **启动失败处理**：
-  - 弹窗：`启动一致性测试失败: {ex.Message}`（标题 `错误`，Error）
-- **运行中异常处理**：
-  - 任一 worker 推理回调发生异常时必须立即停止测试，并：
-    - 弹窗：`一致性测试过程中发生错误: {ex.Message}`（标题 `错误`，Error）
-    - `richTextBox1.Text = "推理错误: {ex.Message}"`
+- **启动失败/运行中异常处理**：同 7.8（仅将提示文案中的“压力测试”替换为“一致性测试”）
 - 一致性检查规则（在 worker 线程中执行）：
   - 推理调用使用 `model.InferInternal(image_list, {with_mask:false})`
   - 第一次推理且 `baselineJsonResult==null`：
@@ -414,7 +408,7 @@
   - `FileName = Path.GetFileName(Last*Path)`
   - 异常一律忽略（不提示）
 
-### 10. 验收用例（实现完成后逐条通过）
+### 10. 验收清单
 
 - **设备列表**
   - 启动后，设备下拉框首项必须为 `CPU`，其 device_id=-1
