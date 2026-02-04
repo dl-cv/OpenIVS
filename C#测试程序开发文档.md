@@ -8,8 +8,6 @@
 - **项目/模块**：`DlcvDemo`（WinForms Demo）
 - **DLCV SDK**：本 Demo 依赖的推理能力提供方（包含 `dlcv_infer_csharp`、`DlcvModules` 等）
 - **模型文件**：深度视觉模型，扩展名包含 `.dvt/.dvo/.dvp/.dvst/.dvso/.dvsp`
-- **流程模型**：流程图推理配置，扩展名 `.json`
-- **OCR模型**：由 “检测模型 + 识别模型” 组合构成的端到端 OCR 推理
 
 ### 2. 运行环境与依赖（必须满足）
 
@@ -19,7 +17,7 @@
 - **图像处理**：OpenCvSharp4
 - **JSON**：Newtonsoft.Json
 - **本仓库内项目依赖**（`DlcvDemo` 必须引用）：
-  - `DlcvCsharpApi`（提供 `dlcv_infer_csharp.Model`、`OcrWithDetModel`、`FlowGraphModel`、`SlidingWindowModel`、`Utils` 等）
+  - `DlcvCsharpApi`（提供 `dlcv_infer_csharp.Model`、`Utils` 等）
   - `ImageViewer`（提供控件 `DLCV.ImageViewer`）
   - `PressureTestRunner`（提供 `DLCV.PressureTestRunner`）
   - `DlcvModelRPC`（生成 `AIModelRPC.exe`，用于 RPC 模式；`DlcvDemo` 编译后需自动复制到输出目录）
@@ -76,8 +74,6 @@
 - **必须具备的功能**：
   - GPU/CPU 设备列表显示与选择
   - 加载模型（多后缀），可选 RPC 模式
-  - 加载 OCR 模型（检测+识别，含参数对话框）
-  - 加载流程（JSON）
   - 打开图片并立即推理
   - 单次推理（对已选择图片重复推理）
   - 推理 JSON（输出 JSON 数组到文本框）
@@ -93,7 +89,7 @@
   - 不提供相机/视频流推理
   - 不提供批量文件夹推理（除内部压力测试使用 batch_size 重复同一张图）
   - 不提供结果导出/保存到文件
-  - 不提供可配置的推理参数面板（除阈值、batch_size、线程数、OCR水平缩放、滑窗参数）
+  - 不提供可配置的推理参数面板（除阈值、batch_size、线程数）
   - 不提供 GPU 列表“刷新”按钮
   - 不提供流程编辑器/可视化编辑（仅加载 JSON）
 
@@ -115,11 +111,8 @@
 
 - **按钮**
   - `加载模型`（`button_load_model`）
-  - `加载OCR模型`（`button_load_ocr_model`）
-  - `加载流程`（`button_load_flow_model`）
   - `打开图片推理`（`button_open_image`）
   - `单次推理`（`button_infer`）
-  - `推理JSON`（`button_infer_json`）
   - `多线程测试`（`button_thread_test`，点击后在运行时切换为 `停止`）
   - `一致性测试`（`button_consistency_test`，点击后在运行时切换为 `停止`）
   - `释放模型`（`button_free_model`）
@@ -160,48 +153,6 @@
     - `ShowStatusText=false`
     - `MaxScale=100`
     - `MinScale=0.5`（实际运行会根据图片动态计算 MinScale）
-
-#### 4.2 OCR 模型配置对话框 `OcrModelConfigForm`
-
-- **窗体标题**：`OCR模型配置`
-- **窗口属性**：固定对话框、不可最大化/最小化、居中于父窗体
-- **按钮**：
-  - `确定`（AcceptButton，点后执行校验）
-  - `取消`（CancelButton）
-  - 两个 `浏览...` 按钮用于选择模型文件
-- **分组框标题**：
-  - `模型文件选择`
-  - `推理设置`
-- **字段与校验**
-  - 检测模型：只读文本框 + 浏览按钮
-  - OCR模型：只读文本框 + 浏览按钮
-  - 设备ID：数值输入（允许 -1~10）
-  - 水平缩放比例：数值输入
-    - 1位小数
-    - 步进 0.1
-    - 最小 0.5
-    - 最大 3.0
-    - 默认 1.0
-  - 点击“确定”时必须校验：
-    - 未选择检测模型：弹窗 `请选择检测模型文件！`（标题 `提示`，Warning）
-    - 未选择OCR模型：弹窗 `请选择OCR模型文件！`（标题 `提示`，Warning）
-    - 检测模型文件不存在：弹窗 `检测模型文件不存在！`（标题 `错误`，Error）
-    - OCR模型文件不存在：弹窗 `OCR模型文件不存在！`（标题 `错误`，Error）
-
-#### 4.3 滑窗参数对话框 `SlidingWindowConfigForm`（隐藏功能依赖）
-
-- **窗体标题**：`滑窗裁图模型参数配置`
-- **窗口属性**：固定对话框、不可最大化/最小化、居中于父窗体
-- **输入字段（文本框）**：
-  - 小图像宽度（默认 `832`）
-  - 小图像高度（默认 `704`）
-  - 水平重叠（默认 `16`）
-  - 垂直重叠（默认 `16`）
-  - 阈值（默认 `0.5`）
-  - IOU阈值（默认 `0.2`）
-  - 合并IOS阈值（默认 `0.2`）
-- **确定按钮校验**：
-  - 任意字段解析失败：弹窗 `请输入有效的数值！\n{异常信息}`（标题 `错误`，Error），并阻止对话框关闭（保持 DialogResult=None）
 
 ### 5. 图像显示与可视化（必须一致）
 
@@ -253,7 +204,7 @@
 
 - **设备映射表**：设备名称 → device_id（CPU=-1，GPU从0递增）
 - **当前模型**：`dynamic model`
-  - 可能类型：`dlcv_infer_csharp.Model` / `dlcv_infer_csharp.OcrWithDetModel` / `DlcvModules.FlowGraphModel` / `dlcv_infer_csharp.SlidingWindowModel`
+  - 可能类型：`dlcv_infer_csharp.Model`
 - **当前图片路径**：`string image_path`
 - **batch_size**：与 UI 的 `numericUpDown_batch_size` 保持一致
 - **压力测试**：`PressureTestRunner pressureTestRunner` + `Timer updateTimer`
@@ -277,7 +228,6 @@
 - **设备选择生效规则（必须一致）**：
   - 主窗体下拉框的 device_id **只在加载时读取**（`加载模型` / `加载流程` /（隐藏）`加载滑窗裁图模型`）
   - 加载完成后再切换下拉框，不会影响当前已加载模型的运行设备
-  - OCR 模型的 device_id 以 `OCR模型配置` 对话框中的数值为准，与主窗体下拉框互不联动
 
 #### 6.3 窗口关闭行为（FormClosing，必须一致）
 
@@ -317,83 +267,11 @@
 - **副作用**：
   - 保存 `LastModelPath=所选路径`
 
-#### 7.1.1（隐藏）加载滑窗裁图模型（按钮：`加载滑窗裁图模型`，默认不可见）
-
-> 说明：该按钮在默认 UI 中 `Visible=false`，属于隐藏/保留功能；但若将其显示出来或以其他方式触发，其行为必须如下。
-
-- **文件选择对话框**：
-  - 标题：`选择模型`
-  - 过滤器：`深度视觉加速模型文件 (*.dvt)|*.dvt`
-  - 初始目录/默认文件名：尝试使用 `LastModelPath`
-- **参数配置**：
-  - 选择模型文件后必须弹出 `SlidingWindowConfigForm`
-  - 只有当对话框返回 `DialogResult.OK` 时才继续加载
-- **加载逻辑**：
-  - 若存在旧 `model`：置空并触发 GC
-  - 读取当前设备ID（由下拉框映射；CPU=-1）
-  - 创建 `SlidingWindowModel`，参数依次为：
-    - `modelPath, deviceId, SmallImgWidth, SmallImgHeight, HorizontalOverlap, VerticalOverlap, Threshold, IouThreshold, CombineIosThreshold`
-  - 加载完成后自动执行一次“获取模型信息”（同 7.4）
-- **异常**：
-  - 捕获异常后：`richTextBox1.Text = ex.Message`（不弹窗）
-- **副作用**：
-  - 保存 `LastModelPath=所选路径`
-
-#### 7.2 加载 OCR 模型（按钮：`加载OCR模型`）
-
-- 弹出 `OcrModelConfigForm`（默认 deviceId=当前选择设备ID）
-- 用户点击“确定”且校验通过后：
-  - 释放旧模型（若可 Dispose 则 Dispose）
-  - 创建 `OcrWithDetModel` 并执行：
-    - `Load(detModelPath, ocrModelPath, deviceId)`
-    - `SetHorizontalScale(horizontalScale)`
-  - 在 `richTextBox1` 输出（格式必须一致）：
-
-    - `OCR模型加载成功！`
-    - `检测模型: {detModelFileName}`
-    - `OCR模型: {ocrModelFileName}`
-    - `设备ID: {deviceId}`
-    - `水平缩放比例: {horizontalScale}`
-
-- 失败处理：
-  - `richTextBox1.Text = $"加载OCR模型失败：{ex.Message}"`
-  - 若 model 已创建：Dispose 并置空
-  - 弹窗：`加载OCR模型失败：{ex.Message}`（标题 `错误`，Error）
-
-#### 7.3 加载流程（按钮：`加载流程`）
-
-- 文件对话框：
-  - 标题：`选择流程配置JSON`
-  - 过滤器：`流程JSON (*.json)|*.json|所有文件 (*.*)|*.*`
-  - 初始目录/默认文件名：尝试使用 `LastFlowPath`
-- 加载逻辑：
-  - 释放旧模型（置空 + GC）
-  - 创建 `FlowGraphModel`
-  - deviceId：优先取当前选择（异常则使用 0）
-  - 调用 `Load(jsonPath, deviceId)`，得到 `loadReport`
-  - 设置 `model=flowModel`
-  - 若 `loadReport.code != 0`：`richTextBox1.Text = loadReport.ToString()`
-  - 否则：调用一次“获取模型信息”
-- 异常处理：调用统一 `ReportError("加载或执行流程失败", ex)`（见 8.1）
-- 副作用：保存 `LastFlowPath=所选路径`
-
 #### 7.4 获取模型信息（按钮：`获取模型信息`）
 
 - 前置条件：已加载模型，否则弹窗 `请先加载模型文件！`
 - 调用 `model.GetModelInfo()` 返回 JSON（可能格式多样），显示规则如下：
   - 若包含 `model_info`：显示 `model_info` 对象（`richTextBox1.Text = result["model_info"].ToString()`）
-  - 否则若包含 `det_model`（OCR）：显示摘要对象：
-    - `det_model = result.det_model.model_info`
-    - `ocr_model = result.ocr_model.model_info`
-  - 否则若包含 `nodes` 且包含 `links`（流程）：
-    - 输出 summary JSON：
-      - `type="FlowGraph"`
-      - `version`：有则取，否则 `"unknown"`
-      - `node_count`：nodes 数量
-      - `link_count`：links 数量
-      - `nodes`：每个节点输出 `{id,type,model_path?}`
-  - 否则若包含 `code`：直接显示原 JSON
-  - 其他情况：直接显示原 JSON
 
 #### 7.5 打开图片推理（按钮：`打开图片推理`）
 
@@ -577,15 +455,11 @@
 
 - `LastModelPath`
 - `LastImagePath`
-- `LastFlowPath`
 
 保存时机：
 
 - 加载模型成功选择文件后：写 `LastModelPath`
-- OCR 检测模型选择后：写 `LastModelPath`（OCR识别模型选择不写）
 - 打开图片选择后：写 `LastImagePath`
-- 加载流程选择后：写 `LastFlowPath`
-- （隐藏）滑窗裁图模型选择后：写 `LastModelPath`
 
 读取时机：
 
