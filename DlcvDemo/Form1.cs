@@ -649,7 +649,7 @@ namespace DlcvDemo
 
         private void button_github_Click(object sender, EventArgs e)
         {
-            Process.Start("https://docs.dlcv.com.cn/deploy/csharp_sdk");
+            Process.Start("https://docs.dlcv.com.cn/deploy/sdk/csharp_sdk");
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
