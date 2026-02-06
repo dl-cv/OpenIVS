@@ -53,7 +53,7 @@ OpenIVS 是一个基于 .NET 平台的工业视觉软件框架，提供了相机
   - 需要安装**高性能SDK套件**才能加载模型进行推理
   - 您需要使用深度视觉AI平台训练模型
   - 该SDK提供了模型推理所需的各项功能
-  - 参考文档：[https://docs.dlcv.com.cn/deploy/csharp_sdk](https://docs.dlcv.com.cn/deploy/csharp_sdk)
+  - 参考文档：[https://docs.dlcv.com.cn/deploy/sdk/csharp_sdk](https://docs.dlcv.com.cn/deploy/sdk/csharp_sdk)
 
 ![](README/image-1.png)
 
