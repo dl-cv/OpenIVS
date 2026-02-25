@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
@@ -17,7 +17,13 @@ namespace dlcv_infer_csharp
 {
     public class Model : IDisposable
     {
-        protected int modelIndex = -1;
+        public int modelIndex = -1;
+        /// <summary>
+        /// 是否拥有当前实例所绑定“底层模型资源”的释放权。
+        /// - true（默认）：Dispose/FreeModel 时会释放底层模型
+        /// - false：Dispose/FreeModel 时不会释放底层模型（用于“共享/借用模型”的场景）
+        /// </summary>
+        public bool OwnModelIndex { get; set; } = true;
 
         // DVP mode fields
         private bool _isDvpMode = false;
@@ -467,75 +473,78 @@ namespace dlcv_infer_csharp
 
         public void FreeModel()
         {
+            // 仅借用/共享模式，不释放底层模型，只标记无效
+            if (!OwnModelIndex)
+            {
+                Console.WriteLine("[FreeModel] 共享/借用, 不释放，仅置为-1");
+                modelIndex = -1;
+                return;
+            }
+
             if (_isDvpMode)
             {
-                // DVP 模式：调用HTTP API释放模型
                 if (_disposed || modelIndex == -1)
+                {
+                    Console.WriteLine("[FreeModel][DVP] 已Disposed或modelIndex为-1，无需释放");
                     return;
-
+                }
                 try
                 {
-                    var request = new
-                    {
-                        model_index = modelIndex
-                    };
-
-                    string jsonContent = JsonConvert.SerializeObject(request);
-                    var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
+                    var request = new { model_index = modelIndex };
+                    var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
                     var response = _httpClient.PostAsync($"{_serverUrl}/free_model", content).Result;
-                    var responseJson = response.Content.ReadAsStringAsync().Result;
-
-                    Console.WriteLine($"DVP Model free result: {responseJson}");
+                    Console.WriteLine($"[FreeModel][DVP] HTTP释放，状态: {response.StatusCode}");
                     modelIndex = -1;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"DVP 释放模型失败: {ex.Message}");
+                    Console.WriteLine($"[FreeModel][DVP] 释放失败: {ex.Message}");
                 }
             }
             else if (_isDvsMode)
             {
-                if (_disposed || modelIndex == -1) return;
+                if (_disposed || modelIndex == -1)
+                {
+                    Console.WriteLine("[FreeModel][DVS] 已Disposed或modelIndex为-1，无需释放");
+                    return;
+                }
                 _dvsModel?.Dispose();
                 _dvsModel = null;
                 modelIndex = -1;
+                Console.WriteLine("[FreeModel][DVS] FlowGraph已释放");
             }
             else if (_isRpcMode)
             {
-                if (_disposed || modelIndex == -1) return;
+                if (_disposed || modelIndex == -1)
+                {
+                    Console.WriteLine("[FreeModel][RPC] 已Disposed或modelIndex为-1，无需释放");
+                    return;
+                }
                 try
                 {
-                    var req = new JObject
-                    {
-                        ["action"] = "free_model",
-                        ["model_path"] = _modelPath
-                    };
+                    var req = new JObject { ["action"] = "free_model", ["model_path"] = _modelPath };
                     SendRpc(req);
                     modelIndex = -1;
+                    Console.WriteLine("[FreeModel][RPC] RPC模型已释放");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"RPC 释放模型失败: {ex.Message}");
+                    Console.WriteLine($"[FreeModel][RPC] 释放失败: {ex.Message}");
                 }
             }
             else
             {
-                // DVT 模式：使用原来的释放逻辑
-                if (modelIndex != -1)
+                if (modelIndex == -1)
                 {
-                    var config = new JObject
-                    {
-                        ["model_index"] = modelIndex
-                    };
-                    string jsonStr = config.ToString();
-                    IntPtr resultPtr = DllLoader.Instance.dlcv_free_model(jsonStr);
-                    var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-                    var resultObject = JObject.Parse(resultJson);
-                    Console.WriteLine("DVT Model free result: " + resultObject.ToString());
-                    DllLoader.Instance.dlcv_free_result(resultPtr);
-                    modelIndex = -1;
+                    Console.WriteLine("[FreeModel][DVT] modelIndex为-1，无需释放");
+                    return;
                 }
+                var config = new JObject { ["model_index"] = modelIndex };
+                IntPtr resultPtr = DllLoader.Instance.dlcv_free_model(config.ToString());
+                string resultText = Marshal.PtrToStringAnsi(resultPtr);
+                DllLoader.Instance.dlcv_free_result(resultPtr);
+                Console.WriteLine($"[FreeModel][DVT] DVT模型释放结果: {resultText}");
+                modelIndex = -1;
             }
         }
 
