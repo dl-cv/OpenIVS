@@ -21,7 +21,7 @@
 
 ## 构建（Visual Studio 解决方案）
 
-- 打开解决方案：`dlcv_infer_cpp_c.sln`
+- 打开解决方案：`OpenIVS.sln`
 - 选择配置：`Release|x64`（或 `Debug|x64`）
 - 生成项目：`dlcv_infer_cpp_qt_demo`
 
@@ -31,7 +31,7 @@
 
 - `Qt6_DIR=C:\Qt\6.10.2\msvc2022_64\lib\cmake`
 
-构建前会调用 `rcc.exe` 生成 `qrc_resources.cpp`；构建后会尝试执行 `windeployqt.exe` 将 Qt 运行时部署到 exe 同目录（若提示找不到 `windeployqt.exe`，请先修正 Qt 路径或手动对 `dlcv_infer_cpp_qt_demo.exe` 执行一次 `windeployqt`）。
+构建前会调用 `rcc.exe` 生成 `qrc_resources.cpp`；构建后会尝试执行 `windeployqt.exe` 将 Qt 运行时部署到 exe 同目录（若提示找不到 `windeployqt.exe`，请先修正 `Qt6_DIR` 或手动对 `dlcv_infer_cpp_qt_demo.exe` 执行一次 `windeployqt`）。
 
 ### 工程默认路径（来自 `*.vcxproj`，便于排错）
 
