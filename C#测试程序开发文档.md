@@ -16,11 +16,11 @@
 - **UI 技术**：Windows Forms
 - **图像处理**：OpenCvSharp4
 - **JSON**：Newtonsoft.Json
-- **本仓库内项目依赖**（`DlcvDemo` 必须引用）：
-  - `DlcvCsharpApi`（提供 `dlcv_infer_csharp.Model`、`Utils` 等）
-  - `ImageViewer`（提供控件 `DLCV.ImageViewer`）
-  - `PressureTestRunner`（提供 `DLCV.PressureTestRunner`）
-  - `DlcvModelRPC`（生成 `AIModelRPC.exe`，用于 RPC 模式；`DlcvDemo` 编译后需自动复制到输出目录）
+- **本仓库内项目依赖（依赖链与 `*.csproj` 对齐）**：
+  - `DlcvDemo` 引用：`DlcvCsharpApi`、`ImageViewer`、`PressureTestRunner`
+  - `ImageViewer` 引用：`DlcvCsharpApi`
+  - `PressureTestRunner`：无额外项目引用（纯 .NET 代码）
+  - `DlcvModelRPC`：独立控制台项目（输出名 `AIModelRPC.exe`），不被 `DlcvDemo` 直接引用
 
 #### 2.1 解决方案与编译配置（必须满足）
 
@@ -30,7 +30,9 @@
 - **输出**：
   - `DlcvDemo`：WinExe（无控制台窗口）
   - `DlcvModelRPC`：生成 `AIModelRPC.exe`（RPC 模式依赖）
-  - 构建 `DlcvDemo` 后，必须将 `AIModelRPC.exe` 复制到 `DlcvDemo` 输出目录（与主 EXE 同目录）
+  - 说明：当前源码中 **没有**为 `DlcvDemo` 配置“自动复制 `AIModelRPC.exe`”的构建步骤；若要启用 RPC 模式，请确保 `AIModelRPC.exe` 位于以下任一路径（见 `DlcvCsharpApi/Model.cs` 的查找顺序）：
+    - `DlcvDemo` 的输出目录（与主 EXE 同目录）
+    - SDK 固定路径：`C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`
 
 #### 2.2 运行时外部依赖（必须满足/按功能启用）
 
@@ -56,16 +58,19 @@
 - **创建解决方案与项目**
   - 创建 WinForms 项目 `DlcvDemo`（.NET Framework 4.7.2，平台 x64）
   - 创建/加入类库项目：`DlcvCsharpApi`、`ImageViewer`、`PressureTestRunner`
-  - 创建控制台项目：`DlcvModelRPC`（输出名 `AIModelRPC.exe`，平台 x64）
+  - 创建控制台项目：`DlcvModelRPC`（输出名 `AIModelRPC.exe`，平台 x64），用于在本机目录提供 RPC 服务进程
 - **NuGet 依赖（版本需与现有一致或兼容）**
   - `Newtonsoft.Json (13.0.3)`
   - `OpenCvSharp4 (4.10.0.20241108)` + `OpenCvSharp4.runtime.win` + `OpenCvSharp4.Extensions`
+  - `OpenCvSharp4.Windows (4.10.0.20241108)`
+  - `System.Drawing.Common (8.0.0)`
+  - `System.Buffers (4.5.1)`、`System.Memory (4.5.5)`、`System.Numerics.Vectors (4.5.0)`、`System.Runtime.CompilerServices.Unsafe (6.0.0)`
 - **项目引用**
-  - `DlcvDemo` 引用：`DlcvCsharpApi`、`ImageViewer`、`PressureTestRunner`、`DlcvModelRPC`（仅用于构建依赖与复制 EXE）
+  - `DlcvDemo` 引用：`DlcvCsharpApi`、`ImageViewer`、`PressureTestRunner`
   - `ImageViewer` 引用：`DlcvCsharpApi`
   - `DlcvModelRPC` 引用：`DlcvCsharpApi`
 - **编译设置**
-  - `ImageViewer` 必须启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加）
+  - `DlcvDemo` 与 `ImageViewer` 建议启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加相关的 `unsafe` 代码）
   - 建议将 `DlcvDemo` 也统一按 x64 配置编译运行（与解决方案一致）
 
 ### 3. 功能边界（必须严格一致）
