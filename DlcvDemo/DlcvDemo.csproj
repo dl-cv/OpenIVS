@@ -141,10 +141,6 @@
     <Compile Include="Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
-    <Compile Include="ImageViewer.cs">
-      <SubType>Component</SubType>
-    </Compile>
-    <Compile Include="PressureTestRunner.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Form1.resx">
@@ -225,6 +221,14 @@
     <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
       <Project>{73d82dbe-59d3-46f9-a8b3-87e13eb220ec}</Project>
       <Name>DlcvCsharpApi</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\ImageViewer\ImageViewer.csproj">
+      <Project>{e11ddcc6-84d1-4caf-9534-2266651e7787}</Project>
+      <Name>ImageViewer</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\PressureTestRunner\PressureTestRunner.csproj">
+      <Project>{980f03f3-3648-4160-bf60-9668c7701785}</Project>
+      <Name>PressureTestRunner</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
