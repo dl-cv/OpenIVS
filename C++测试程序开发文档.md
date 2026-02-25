@@ -33,6 +33,17 @@
 
 构建前会调用 `rcc.exe` 生成 `qrc_resources.cpp`；构建后会尝试执行 `windeployqt.exe` 将 Qt 运行时部署到 exe 同目录（若提示找不到 `windeployqt.exe`，请先修正 Qt 路径或手动对 `dlcv_infer_cpp_qt_demo.exe` 执行一次 `windeployqt`）。
 
+### 工程默认路径（来自 `*.vcxproj`，便于排错）
+
+- **OpenCV Include**：`C:\OpenCV\build\include`
+- **OpenCV Lib（x64, vc16）**：`C:\OpenCV\build\x64\vc16\lib`
+- **DLCV SDK Include**：`C:\dlcv\Lib\site-packages\dlcvpro_infer\include`
+- **链接库**：
+  - Debug：`dlcv_infer_cpp_dll.lib;opencv_world4100d.lib;Qt6Widgetsd.lib;Qt6Guid.lib;Qt6Cored.lib`
+  - Release：`dlcv_infer_cpp_dll.lib;opencv_world4100.lib;Qt6Widgets.lib;Qt6Gui.lib;Qt6Core.lib`
+
+> 注：工程文件同时包含 `Win32` 配置，但本文档按实际使用建议以 `x64` 为准。
+
 ## 运行
 
 - 直接运行 `Release\dlcv_infer_cpp_qt_demo.exe`（或对应配置目录下的 exe）。
