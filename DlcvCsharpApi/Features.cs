@@ -2527,4 +2527,209 @@ namespace DlcvModules
             return outPts;
         }
     }
+
+    /// <summary>
+    /// 模块名称：结果标签合并
+    /// 对齐 Python: post_process/result_label_merge
+    /// - 输入两路 (image, results)，要求是同一组图像
+    /// - 输出 image 透传第 2 路；results 以第 2 路为基准
+    /// - 将第 2 路 local 条目中的 category_name 改为：
+    ///   first_label + fixed_text + second_label
+    /// </summary>
+    public class ResultLabelMerge : BaseModule
+    {
+        static ResultLabelMerge()
+        {
+            ModuleRegistry.Register("post_process/result_label_merge", typeof(ResultLabelMerge));
+            ModuleRegistry.Register("features/result_label_merge", typeof(ResultLabelMerge));
+        }
+
+        public ResultLabelMerge(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var imagesA = imageList ?? new List<ModuleImage>();
+            var resultsA = resultList ?? new JArray();
+
+            // Python 侧第二路来自 extra_inputs_in[1]；C# 执行器中的扩展路仅包含“额外输入”，
+            // 因此这里取 ExtraInputsIn[0] 作为第二路。
+            var pair1 = (ExtraInputsIn != null && ExtraInputsIn.Count > 0) ? ExtraInputsIn[0] : null;
+            var imagesB = pair1 != null ? (pair1.ImageList ?? new List<ModuleImage>()) : new List<ModuleImage>();
+            var resultsB = pair1 != null ? (pair1.ResultList ?? new JArray()) : new JArray();
+
+            if (imagesB.Count == 0)
+            {
+                throw new InvalidOperationException("结果标签合并需要第2路输入（image_2/results_2）。");
+            }
+
+            if (imagesA.Count != imagesB.Count)
+            {
+                throw new InvalidOperationException(
+                    string.Format("两路输入图像数量不一致: {0} vs {1}", imagesA.Count, imagesB.Count)
+                );
+            }
+
+            for (int i = 0; i < imagesA.Count; i++)
+            {
+                if (!ImageSignature(imagesA[i]).Equals(ImageSignature(imagesB[i])))
+                {
+                    throw new InvalidOperationException(string.Format("两路输入不是同一组图像，index={0}", i));
+                }
+            }
+
+            string fixedText = GetPropertyString("fixed_text", string.Empty);
+            bool useTop1 = GetPropertyBool("use_first_score_top1", true);
+
+            // 第一路标签映射：entry.index -> top1 category_name
+            var labelMap = new Dictionary<int, string>();
+            foreach (var token in resultsA)
+            {
+                var entry = token as JObject;
+                if (entry == null) continue;
+                if (!string.Equals(entry.Value<string>("type"), "local", StringComparison.OrdinalIgnoreCase)) continue;
+
+                int idx = SafeInt(entry["index"], -1);
+                if (idx < 0) continue;
+
+                var dets = entry["sample_results"] as JArray;
+                if (dets == null) continue;
+
+                string firstLabel = PickFirstLabel(dets, useTop1);
+                if (!string.IsNullOrWhiteSpace(firstLabel))
+                {
+                    labelMap[idx] = firstLabel;
+                }
+            }
+
+            var outResults = new JArray();
+            foreach (var token in resultsB)
+            {
+                var entry = token as JObject;
+                if (entry == null || !string.Equals(entry.Value<string>("type"), "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    outResults.Add(token);
+                    continue;
+                }
+
+                int idx = SafeInt(entry["index"], -1);
+                string prefix = labelMap.ContainsKey(idx) ? (labelMap[idx] ?? string.Empty) : string.Empty;
+                var dets = entry["sample_results"] as JArray;
+                if (dets == null || string.IsNullOrEmpty(prefix))
+                {
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                var newDets = new JArray();
+                foreach (var dToken in dets)
+                {
+                    var d = dToken as JObject;
+                    if (d == null)
+                    {
+                        newDets.Add(dToken);
+                        continue;
+                    }
+
+                    var cat = d["category_name"]?.ToString();
+                    if (cat == null)
+                    {
+                        newDets.Add(d);
+                        continue;
+                    }
+
+                    var d2 = (JObject)d.DeepClone();
+                    d2["category_name"] = prefix + fixedText + cat;
+                    newDets.Add(d2);
+                }
+
+                var e2 = (JObject)entry.DeepClone();
+                e2["sample_results"] = newDets;
+                outResults.Add(e2);
+            }
+
+            return new ModuleIO(imagesB, outResults);
+        }
+
+        private string GetPropertyString(string key, string defaultValue)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+            {
+                return v.ToString();
+            }
+            return defaultValue;
+        }
+
+        private bool GetPropertyBool(string key, bool defaultValue)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+            {
+                if (v is bool b) return b;
+                if (bool.TryParse(v.ToString(), out bool pb)) return pb;
+            }
+            return defaultValue;
+        }
+
+        private static int SafeInt(JToken token, int defaultValue)
+        {
+            if (token == null || token.Type == JTokenType.Null) return defaultValue;
+            try { return token.Value<int>(); } catch { return defaultValue; }
+        }
+
+        private static double SafeScore(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null) return 0.0;
+            try { return token.Value<double>(); } catch { return 0.0; }
+        }
+
+        private static string PickFirstLabel(JArray dets, bool useTop1)
+        {
+            if (dets == null || dets.Count == 0) return null;
+            var candidates = new List<JObject>();
+            foreach (var dToken in dets)
+            {
+                var d = dToken as JObject;
+                if (d == null) continue;
+                if (d["category_name"] == null || d["category_name"].Type != JTokenType.String) continue;
+                candidates.Add(d);
+            }
+            if (candidates.Count == 0) return null;
+
+            if (!useTop1)
+            {
+                return candidates[0].Value<string>("category_name");
+            }
+
+            JObject top = candidates[0];
+            double topScore = SafeScore(top["score"]);
+            for (int i = 1; i < candidates.Count; i++)
+            {
+                var cur = candidates[i];
+                double curScore = SafeScore(cur["score"]);
+                if (curScore > topScore)
+                {
+                    top = cur;
+                    topScore = curScore;
+                }
+            }
+            return top.Value<string>("category_name");
+        }
+
+        private static string ImageSignature(ModuleImage im)
+        {
+            if (im == null) return "null";
+            string ts = string.Empty;
+            try
+            {
+                ts = im.TransformState != null ? JObject.FromObject(im.TransformState.ToDict()).ToString(Newtonsoft.Json.Formatting.None) : string.Empty;
+            }
+            catch
+            {
+                ts = string.Empty;
+            }
+            return string.Format("module|{0}|{1}", im.OriginalIndex, ts);
+        }
+    }
 }
