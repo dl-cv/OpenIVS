@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.13.35825.156
@@ -62,6 +62,10 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniAreaDemo", "MiniAreaDemo\MiniAreaDemo.csproj", "{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvTest", "DlcvTest\DlcvTest.csproj", "{4361228C-0A82-C883-86B5-1D7ECCAA46F1}"
+EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "dlcv_infer_cpp_dll", "dlcv_infer_cpp_dll\dlcv_infer_cpp_dll.vcxproj", "{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}"
+EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "dlcv_infer_cpp_qt_demo", "dlcv_infer_cpp_qt_demo\dlcv_infer_cpp_qt_demo.vcxproj", "{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -145,6 +149,14 @@ Global
 		{4361228C-0A82-C883-86B5-1D7ECCAA46F1}.Debug|x64.Build.0 = Debug|x64
 		{4361228C-0A82-C883-86B5-1D7ECCAA46F1}.Release|x64.ActiveCfg = Release|x64
 		{4361228C-0A82-C883-86B5-1D7ECCAA46F1}.Release|x64.Build.0 = Release|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Debug|x64.ActiveCfg = Debug|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Debug|x64.Build.0 = Debug|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Release|x64.ActiveCfg = Release|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Release|x64.Build.0 = Release|x64
+		{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}.Debug|x64.ActiveCfg = Debug|x64
+		{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}.Debug|x64.Build.0 = Debug|x64
+		{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}.Release|x64.ActiveCfg = Release|x64
+		{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -170,6 +182,8 @@ Global
 		{DB7C8281-BDB3-46D9-98F0-40559943CA39} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 		{BB2F0FB1-E0F7-4E6B-B624-4847FFF7F4B5} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
+		{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {ECC568E3-465E-4300-ADD1-27469BDF798F}
