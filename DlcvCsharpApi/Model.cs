@@ -17,6 +17,16 @@ namespace dlcv_infer_csharp
 {
     public class Model : IDisposable
     {
+        public static bool EnableConsoleLog { get; set; } = true;
+
+        private static void Log(string message)
+        {
+            if (EnableConsoleLog)
+            {
+                Console.WriteLine(message);
+            }
+        }
+
         public int modelIndex = -1;
         /// <summary>
         /// 是否拥有当前实例所绑定“底层模型资源”的释放权。
@@ -143,7 +153,7 @@ namespace dlcv_infer_csharp
                 StartBackendService();
 
                 // 循环等待后端服务启动完成
-                Console.WriteLine("正在等待后端服务启动...");
+                Log("正在等待后端服务启动...");
                 WaitForBackendService();
             }
 
@@ -171,7 +181,7 @@ namespace dlcv_infer_csharp
                 if (resultObject.ContainsKey("code") &&
                     resultObject["code"].Value<string>() == "00000")
                 {
-                    Console.WriteLine($"Model load result: {resultObject}");
+                    Log($"Model load result: {resultObject}");
                     modelIndex = 1; // DVP模式设置默认值表示模型已加载
 
                     // 模型加载成功后，调用 /version 接口
@@ -228,7 +238,7 @@ namespace dlcv_infer_csharp
             var resultJson = Marshal.PtrToStringAnsi(resultPtr);
             var resultObject = JObject.Parse(resultJson);
 
-            Console.WriteLine("Model load result: " + resultObject.ToString());
+            Log("Model load result: " + resultObject.ToString());
             if (resultObject.ContainsKey("model_index"))
             {
                 modelIndex = resultObject["model_index"].Value<int>();
@@ -281,7 +291,7 @@ namespace dlcv_infer_csharp
                 };
 
                 Process.Start(processStartInfo);
-                Console.WriteLine($"已启动后端推理服务: {backendExePath}");
+                Log($"已启动后端推理服务: {backendExePath}");
             }
             catch (Exception ex)
             {
@@ -374,7 +384,7 @@ namespace dlcv_infer_csharp
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
                 Process.Start(psi);
-                Console.WriteLine($"已启动 AIModelRPC 服务: {exePath}");
+                Log($"已启动 AIModelRPC 服务: {exePath}");
             }
             catch (Exception ex)
             {
@@ -428,16 +438,16 @@ namespace dlcv_infer_csharp
 
                 if (response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine($"后端版本信息: {responseJson}");
+                    Log($"后端版本信息: {responseJson}");
                 }
                 else
                 {
-                    Console.WriteLine($"获取版本信息失败: {response.StatusCode} - {responseJson}");
+                    Log($"获取版本信息失败: {response.StatusCode} - {responseJson}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"调用版本接口失败: {ex.Message}");
+                Log($"调用版本接口失败: {ex.Message}");
             }
         }
 
@@ -454,11 +464,11 @@ namespace dlcv_infer_csharp
             {
                 if (CheckBackendService())
                 {
-                    Console.WriteLine("后端服务已启动，继续加载模型...");
+                    Log("后端服务已启动，继续加载模型...");
                     return;
                 }
 
-                Console.WriteLine($"等待后端服务启动中... ({waitedTime + checkInterval}/{maxWaitTime}秒)");
+                Log($"等待后端服务启动中... ({waitedTime + checkInterval}/{maxWaitTime}秒)");
                 System.Threading.Thread.Sleep((int)(checkInterval * 1000));
                 waitedTime += checkInterval;
             }
@@ -476,7 +486,7 @@ namespace dlcv_infer_csharp
             // 仅借用/共享模式，不释放底层模型，只标记无效
             if (!OwnModelIndex)
             {
-                Console.WriteLine("[FreeModel] 共享/借用, 不释放，仅置为-1");
+                Log("[FreeModel] 共享/借用, 不释放，仅置为-1");
                 modelIndex = -1;
                 return;
             }
@@ -485,7 +495,7 @@ namespace dlcv_infer_csharp
             {
                 if (_disposed || modelIndex == -1)
                 {
-                    Console.WriteLine("[FreeModel][DVP] 已Disposed或modelIndex为-1，无需释放");
+                    Log("[FreeModel][DVP] 已Disposed或modelIndex为-1，无需释放");
                     return;
                 }
                 try
@@ -493,31 +503,31 @@ namespace dlcv_infer_csharp
                     var request = new { model_index = modelIndex };
                     var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
                     var response = _httpClient.PostAsync($"{_serverUrl}/free_model", content).Result;
-                    Console.WriteLine($"[FreeModel][DVP] HTTP释放，状态: {response.StatusCode}");
+                    Log($"[FreeModel][DVP] HTTP释放，状态: {response.StatusCode}");
                     modelIndex = -1;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[FreeModel][DVP] 释放失败: {ex.Message}");
+                    Log($"[FreeModel][DVP] 释放失败: {ex.Message}");
                 }
             }
             else if (_isDvsMode)
             {
                 if (_disposed || modelIndex == -1)
                 {
-                    Console.WriteLine("[FreeModel][DVS] 已Disposed或modelIndex为-1，无需释放");
+                    Log("[FreeModel][DVS] 已Disposed或modelIndex为-1，无需释放");
                     return;
                 }
                 _dvsModel?.Dispose();
                 _dvsModel = null;
                 modelIndex = -1;
-                Console.WriteLine("[FreeModel][DVS] FlowGraph已释放");
+                Log("[FreeModel][DVS] FlowGraph已释放");
             }
             else if (_isRpcMode)
             {
                 if (_disposed || modelIndex == -1)
                 {
-                    Console.WriteLine("[FreeModel][RPC] 已Disposed或modelIndex为-1，无需释放");
+                    Log("[FreeModel][RPC] 已Disposed或modelIndex为-1，无需释放");
                     return;
                 }
                 try
@@ -525,25 +535,25 @@ namespace dlcv_infer_csharp
                     var req = new JObject { ["action"] = "free_model", ["model_path"] = _modelPath };
                     SendRpc(req);
                     modelIndex = -1;
-                    Console.WriteLine("[FreeModel][RPC] RPC模型已释放");
+                    Log("[FreeModel][RPC] RPC模型已释放");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[FreeModel][RPC] 释放失败: {ex.Message}");
+                    Log($"[FreeModel][RPC] 释放失败: {ex.Message}");
                 }
             }
             else
             {
                 if (modelIndex == -1)
                 {
-                    Console.WriteLine("[FreeModel][DVT] modelIndex为-1，无需释放");
+                    Log("[FreeModel][DVT] modelIndex为-1，无需释放");
                     return;
                 }
                 var config = new JObject { ["model_index"] = modelIndex };
                 IntPtr resultPtr = DllLoader.Instance.dlcv_free_model(config.ToString());
                 string resultText = Marshal.PtrToStringAnsi(resultPtr);
                 DllLoader.Instance.dlcv_free_result(resultPtr);
-                Console.WriteLine($"[FreeModel][DVT] DVT模型释放结果: {resultText}");
+                Log($"[FreeModel][DVT] DVT模型释放结果: {resultText}");
                 modelIndex = -1;
             }
         }
@@ -640,7 +650,7 @@ namespace dlcv_infer_csharp
                 }
 
                 var resultObject = JObject.Parse(responseJson);
-                Console.WriteLine($"Model info: {resultObject}");
+                Log($"Model info: {resultObject}");
                 return resultObject;
             }
             catch (Exception ex)
@@ -661,7 +671,7 @@ namespace dlcv_infer_csharp
             var resultJson = Marshal.PtrToStringAnsi(resultPtr);
             var resultObject = JObject.Parse(resultJson);
 
-            Console.WriteLine("Model info: " + resultObject.ToString());
+            Log("Model info: " + resultObject.ToString());
             DllLoader.Instance.dlcv_free_result(resultPtr);
             return resultObject;
         }
@@ -1195,7 +1205,7 @@ namespace dlcv_infer_csharp
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"创建mask失败: {ex.Message}");
+                Log($"创建mask失败: {ex.Message}");
                 return new Mat();
             }
         }
