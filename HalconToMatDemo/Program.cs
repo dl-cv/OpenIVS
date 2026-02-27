@@ -1,18 +1,22 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using HalconDotNet;
 using OpenCvSharp;
 using dlcv_infer_csharp;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
+#if HALCON_DOTNET
+using HalconDotNet;
+#endif
+
 namespace HalconToMatDemo
 {
-    class Program
+    internal static class Program
     {
+#if HALCON_DOTNET
         [DllImport("kernel32.dll")]
         public extern static long CopyMemory(IntPtr dest, IntPtr source, int size);
 
@@ -175,5 +179,17 @@ namespace HalconToMatDemo
                 Console.WriteLine("---");
             }
         }
+#else
+        // 该 Demo 依赖商业库 HalconDotNet。为保证开源仓库在未安装 Halcon 的机器上也能编译，
+        // 默认不启用 HALCON_DOTNET 编译常量，仅给出运行时提示。
+        private static void Main(string[] args)
+        {
+            Console.OutputEncoding = Encoding.UTF8;
+            Console.WriteLine("HalconToMatDemo 未启用（缺少 HALCON_DOTNET）。");
+            Console.WriteLine("如需运行该 Demo：");
+            Console.WriteLine("- 安装 Halcon，并确保工程引用到 HalconDotNet.dll（或 halcondotnet）。");
+            Console.WriteLine("- 在 HalconToMatDemo 项目里定义编译常量：HALCON_DOTNET");
+        }
+#endif
     }
 }

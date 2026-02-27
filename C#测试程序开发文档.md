@@ -212,6 +212,9 @@
     - `深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*`
   - 初始目录/默认文件名：
     - 尝试从 `LastModelPath` 提取（异常忽略）
+- **路径与编码约定（避免中文路径踩坑）**：
+  - UI 侧拿到的文件路径为 .NET `string`（UTF-16），**保持原样传入**：`new Model(path, deviceId, rpc_mode)`
+  - 不要对路径做额外的“转 UTF-8 / 转字节再拼回字符串”等处理；当前实现会在序列化/传输层处理编码细节（例如 JSON `EscapeNonAscii`、RPC 通道 UTF-8），以保证中文路径可用。
 - **加载逻辑**：
   - 若存在旧 `model`：置空并触发 GC
   - 读取当前设备ID（由下拉框映射；CPU=-1）

@@ -84,6 +84,13 @@
 
 ### 模型/图片/推理
 
+- **路径与编码（非常关键，Windows）**
+  - `dlcv_infer_cpp_dll` 的 `dlcv_infer::Model(...)`：
+    - `Model(const std::string& modelPath, ...)` 约定：`modelPath` 传入 **GBK(936)/本地 ANSI** 字符串，DLL 内部会再将其转换为 UTF-8 与底层推理 DLL 交互。
+    - `Model(const std::wstring& modelPath, ...)`（推荐）：可直接传 Windows 原生 UTF-16 路径，内部会处理到 GBK/UTF-8 的转换，避免调用侧手写转码造成路径乱码。
+  - Qt 侧正确写法：使用 `QString::toLocal8Bit().toStdString()` 获取路径字符串；不要使用 `toUtf8()` 或自行把路径转 UTF-8 再传入，否则遇到中文路径时可能导致加载失败。
+  - 典型现象：日志出现 `load model failed: {"code":1,"message":"[ModelInternal::decode_file] Failed to open file"}`，但文件实际存在（多为编码不匹配导致路径打不开）。
+
 - **加载模型**：
   - 文件对话框标题：`选择模型`
   - 过滤器：`AI模型 (*.dvt *.dvo *.dvr *.dvst);;所有文件 (*.*)`

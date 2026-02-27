@@ -1,4 +1,4 @@
-﻿#include "dlcv_infer.h"
+#include "dlcv_infer.h"
 #include "dlcv_sntl_admin.h"
 #include "flow/FlowGraphModel.h"
 #include "flow/utils/MaskRleUtils.h"
@@ -695,6 +695,9 @@ namespace dlcv_infer {
 
         DllLoader::Instance().GetFreeResultFunc()(resultPtr);
     }
+
+    Model::Model(const std::wstring& modelPath, int device_id)
+        : Model(convertWstringToGbk(modelPath), device_id) {}
 
     Model::~Model() {
         try { FreeModel(); } catch (...) {}

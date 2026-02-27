@@ -198,19 +198,19 @@ SpeedResult RunSpeed(dlcv_infer::Model& model, const cv::Mat& rgb, int batch, bo
     }
 }
 
-double RunLoadFreeLeak(const std::string& modelPathUtf8) {
+double RunLoadFreeLeak(const std::wstring& modelPathW) {
     const double baseline = CaptureMemory().privateMb;
     for (int i = 0; i < kLeakLoopCount; ++i) {
-        std::unique_ptr<dlcv_infer::Model> m(new dlcv_infer::Model(modelPathUtf8, kGpuDeviceId));
+        std::unique_ptr<dlcv_infer::Model> m(new dlcv_infer::Model(modelPathW, kGpuDeviceId));
         m.reset();
     }
     return CaptureMemory().privateMb - baseline;
 }
 
-double RunInferLeak3s(const std::string& modelPathUtf8, const std::wstring& imagePath) {
+double RunInferLeak3s(const std::wstring& modelPathW, const std::wstring& imagePath) {
     const double before = CaptureMemory().privateMb;
     try {
-        std::unique_ptr<dlcv_infer::Model> model(new dlcv_infer::Model(modelPathUtf8, kGpuDeviceId));
+        std::unique_ptr<dlcv_infer::Model> model(new dlcv_infer::Model(modelPathW, kGpuDeviceId));
         cv::Mat bgr = LoadImageByDecode(imagePath);
         if (bgr.empty()) return 0.0;
         cv::Mat rgb;
@@ -241,9 +241,8 @@ CaseRow RunCase(const std::wstring& modelPath, const std::wstring& imagePath) {
     const auto memBefore = CaptureMemory();
     const auto t0 = Clock::now();
     std::unique_ptr<dlcv_infer::Model> model;
-    const std::string modelPathUtf8 = WideToUtf8(modelPath);
     try {
-        model.reset(new dlcv_infer::Model(modelPathUtf8, kGpuDeviceId));
+        model.reset(new dlcv_infer::Model(modelPath, kGpuDeviceId));
     } catch (const std::exception& e) {
         row.categories = Safe(e.what());
         return row;
@@ -371,15 +370,14 @@ int main() {
         std::cout << "跳过：未找到可用实例分割模型\n";
     } else {
         std::cout << "模型: " << WideToUtf8(BaseName(leakModelPath)) << "\n";
-        const std::string leakModelPathUtf8 = WideToUtf8(leakModelPath);
         try {
-            const double inc = RunLoadFreeLeak(leakModelPathUtf8);
+            const double inc = RunLoadFreeLeak(leakModelPath);
             std::cout << "加载/释放循环" << kLeakLoopCount << "次内存增量: " << ToFixed(inc, 2) << "MB\n";
         } catch (...) {
             std::cout << "加载/释放循环" << kLeakLoopCount << "次内存增量: 错误\n";
         }
         try {
-            const double inc = RunInferLeak3s(leakModelPathUtf8, leakImagePath);
+            const double inc = RunInferLeak3s(leakModelPath, leakImagePath);
             std::cout << "推理" << kSpeedWindowSeconds << "秒内存增量: " << ToFixed(inc, 2) << "MB\n";
         } catch (...) {
             std::cout << "推理" << kSpeedWindowSeconds << "秒内存增量: 错误\n";
