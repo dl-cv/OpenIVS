@@ -1,4 +1,3 @@
-﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.13.35825.156
@@ -63,6 +62,14 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniAreaDemo", "MiniAreaDem
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvTest", "DlcvTest\DlcvTest.csproj", "{4361228C-0A82-C883-86B5-1D7ECCAA46F1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCSharpTest", "Test\DlcvCSharpTest\DlcvCSharpTest.csproj", "{8F72814C-C5A7-4D81-9961-2C94E760DB4A}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dlcv_infer_cpp_dll", "dlcv_infer_cpp_dll\dlcv_infer_cpp_dll.vcxproj", "{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dlcv_infer_cpp_qt_demo", "dlcv_infer_cpp_qt_demo\dlcv_infer_cpp_qt_demo.vcxproj", "{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dlcv_infer_cpp_test", "Test\dlcv_infer_cpp_test\dlcv_infer_cpp_test.vcxproj", "{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -121,6 +128,7 @@ Global
 		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Debug|x64.ActiveCfg = Debug|x64
 		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Debug|x64.Build.0 = Debug|x64
 		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Release|x64.ActiveCfg = Release|x64
+		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Release|x64.Build.0 = Release|x64
 		{2143B798-C3C9-4532-9AD2-EB0C209E7FDA}.Debug|x64.ActiveCfg = Debug|x64
 		{2143B798-C3C9-4532-9AD2-EB0C209E7FDA}.Debug|x64.Build.0 = Debug|x64
 		{2143B798-C3C9-4532-9AD2-EB0C209E7FDA}.Release|x64.ActiveCfg = Release|x64
@@ -145,6 +153,22 @@ Global
 		{4361228C-0A82-C883-86B5-1D7ECCAA46F1}.Debug|x64.Build.0 = Debug|x64
 		{4361228C-0A82-C883-86B5-1D7ECCAA46F1}.Release|x64.ActiveCfg = Release|x64
 		{4361228C-0A82-C883-86B5-1D7ECCAA46F1}.Release|x64.Build.0 = Release|x64
+		{8F72814C-C5A7-4D81-9961-2C94E760DB4A}.Debug|x64.ActiveCfg = Debug|x64
+		{8F72814C-C5A7-4D81-9961-2C94E760DB4A}.Debug|x64.Build.0 = Debug|x64
+		{8F72814C-C5A7-4D81-9961-2C94E760DB4A}.Release|x64.ActiveCfg = Release|x64
+		{8F72814C-C5A7-4D81-9961-2C94E760DB4A}.Release|x64.Build.0 = Release|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Debug|x64.ActiveCfg = Debug|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Debug|x64.Build.0 = Debug|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Release|x64.ActiveCfg = Release|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Release|x64.Build.0 = Release|x64
+		{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}.Debug|x64.ActiveCfg = Debug|x64
+		{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}.Debug|x64.Build.0 = Debug|x64
+		{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}.Release|x64.ActiveCfg = Release|x64
+		{B95A1D3B-E16A-4B80-A3BC-1FB4E3D53017}.Release|x64.Build.0 = Release|x64
+		{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1}.Debug|x64.ActiveCfg = Debug|x64
+		{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1}.Debug|x64.Build.0 = Debug|x64
+		{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1}.Release|x64.ActiveCfg = Release|x64
+		{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -170,6 +194,9 @@ Global
 		{DB7C8281-BDB3-46D9-98F0-40559943CA39} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 		{BB2F0FB1-E0F7-4E6B-B624-4847FFF7F4B5} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 		{8A7D124C-54E6-47B2-B1EF-4A6A62395AC9} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
+		{8F72814C-C5A7-4D81-9961-2C94E760DB4A} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
+		{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {ECC568E3-465E-4300-ADD1-27469BDF798F}

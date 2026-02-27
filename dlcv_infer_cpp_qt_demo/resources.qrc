@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/">
+    <file>dlcv_demo_icon.svg</file>
+  </qresource>
+</RCC>

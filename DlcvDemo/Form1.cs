@@ -112,13 +112,31 @@ namespace DlcvDemo
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
+
+        private void DisposeCurrentModel()
+        {
+            try
+            {
+                var disposable = model as IDisposable;
+                disposable?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                // 不要因为释放失败影响后续加载
+                Console.WriteLine("Dispose model failed: " + ex.Message);
+            }
+            finally
+            {
+                model = null;
+            }
+        }
         
         private void button_loadmodel_Click(object sender, EventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
+            openFileDialog.Filter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
             openFileDialog.Title = "选择模型";
             try
             {
@@ -140,8 +158,7 @@ namespace DlcvDemo
                 {
                     if (model != null)
                     {
-                        model = null;
-                        GC.Collect();
+                        DisposeCurrentModel();
                     }
                     bool rpc_mode = false;
                     try
@@ -151,7 +168,7 @@ namespace DlcvDemo
                     catch { }
 
                     model = new Model(selectedFilePath, device_id, rpc_mode);
-                    
+
                     button_getmodelinfo_Click(sender, e);
                 }
                 catch (Exception ex)
@@ -591,9 +608,7 @@ namespace DlcvDemo
         {
             // 如果存在正在运行的压力测试，先停止它
             StopPressureTest();
-
-            model = null;
-            GC.Collect();
+            DisposeCurrentModel();
             richTextBox1.Text = "模型已释放";
         }
 

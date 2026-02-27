@@ -230,21 +230,8 @@
       <Project>{980f03f3-3648-4160-bf60-9668c7701785}</Project>
       <Name>PressureTestRunner</Name>
     </ProjectReference>
-    <ProjectReference Include="..\DlcvModelRPC\DlcvModelRPC.csproj">
-      <Project>{1E3D9C3B-7E8D-4E5F-B62A-1D8E9E6B3D2A}</Project>
-      <Name>DlcvModelRPC</Name>
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <!-- 自动复制 DlcvModelRPC.exe -->
-  <Target Name="CopyDlcvModelRPC" AfterTargets="Build">
-    <ItemGroup>
-      <DlcvModelRPCFiles Include="$(SolutionDir)DlcvModelRPC\bin\$(PlatformName)\$(ConfigurationName)\AIModelRPC.exe" />
-    </ItemGroup>
-    <Copy SourceFiles="@(DlcvModelRPCFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-    <Message Text="DlcvModelRPC.exe 已自动复制到 $(OutputPath)" Importance="high" />
-  </Target>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>这台计算机上缺少此项目引用的 NuGet 程序包。使用"NuGet 程序包还原"可下载这些程序包。有关更多信息，请参见 http://go.microsoft.com/fwlink/?LinkID=322105。缺少的文件是 {0}。</ErrorText>
