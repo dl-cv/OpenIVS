@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -438,6 +438,40 @@ namespace DLCV
                     e.Graphics.DrawString(_statusText, font, brush, 10, 10);
                 }
                 e.Graphics.Transform = originalTransform;
+            }
+        }
+
+        public Bitmap CreateVisualizationBitmap()
+        {
+            lock (_Lock)
+            {
+                if (_image == null)
+                {
+                    throw new InvalidOperationException("当前没有可导出的图像。");
+                }
+
+                Bitmap output = new Bitmap(_image.Width, _image.Height, PixelFormat.Format24bppRgb);
+                using (Graphics graphics = Graphics.FromImage(output))
+                {
+                    graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                    graphics.DrawImage(_image, 0, 0, _image.Width, _image.Height);
+
+                    float originalScale = _scale;
+                    try
+                    {
+                        _scale = 1.0f;
+                        using (PaintEventArgs paintArgs = new PaintEventArgs(graphics, new Rectangle(0, 0, output.Width, output.Height)))
+                        {
+                            DrawResults(paintArgs);
+                        }
+                    }
+                    finally
+                    {
+                        _scale = originalScale;
+                    }
+                }
+
+                return output;
             }
         }
 
