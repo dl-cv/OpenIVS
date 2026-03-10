@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using Newtonsoft.Json.Linq;
 using sntl_admin_csharp;
 using System.Linq;
@@ -69,13 +71,22 @@ namespace dlcv_infer_csharp
                 }
                 else if (feature_list.Any(item => item.ToString() == "2"))
                 {
-                    DllName = DllName2;
-                    DllPath = DllPath2;
+                    if (DllExists(DllName2, DllPath2))
+                    {
+                        DllName = DllName2;
+                        DllPath = DllPath2;
+                    }
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // 如果获取特征列表失败，则使用默认的 DLL 路径
+            }
+
+            if (!DllExists(DllName, DllPath))
+            {
+                MessageBox(IntPtr.Zero, "需要先安装 dlcv_infer", "提示", 0x00000030u);
+                throw new Exception("需要先安装 dlcv_infer");
             }
 
             IntPtr hModule = LoadLibrary(DllName);
@@ -119,6 +130,23 @@ namespace dlcv_infer_csharp
             dlcv_keep_max_clock = GetDelegate<KeepMaxClock>(hModule, "dlcv_keep_max_clock");
         }
 
+        private static bool DllExists(string dllName, string dllPath)
+        {
+            return !string.IsNullOrEmpty(SearchDllPath(dllName)) || File.Exists(dllPath);
+        }
+
+        private static string SearchDllPath(string dllName)
+        {
+            var buffer = new StringBuilder(32767);
+            uint result = SearchPath(null, dllName, null, (uint)buffer.Capacity, buffer, IntPtr.Zero);
+            if (result == 0 || result >= (uint)buffer.Capacity)
+            {
+                return null;
+            }
+
+            return buffer.ToString();
+        }
+
         private T GetDelegate<T>(IntPtr hModule, string procedureName) where T : Delegate
         {
             IntPtr pAddressOfFunctionToCall = GetProcAddress(hModule, procedureName);
@@ -130,6 +158,12 @@ namespace dlcv_infer_csharp
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
+
+        [DllImport("kernel32.dll", EntryPoint = "SearchPathW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint SearchPath(string lpPath, string lpFileName, string lpExtension, uint nBufferLength, StringBuilder lpBuffer, IntPtr lpFilePart);
+
+        [DllImport("user32.dll", EntryPoint = "MessageBoxW", CharSet = CharSet.Unicode)]
+        private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
 
         private static readonly Lazy<DllLoader> _instance = new Lazy<DllLoader>(() => new DllLoader());
 

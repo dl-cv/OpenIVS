@@ -15,6 +15,14 @@ namespace {
 
 using Json = dlcv_infer::json;
 
+bool DllExists(const std::string& dllName, const std::string& dllPath) {
+    if (SearchPathA(nullptr, dllName.c_str(), nullptr, 0, nullptr, nullptr) != 0) {
+        return true;
+    }
+
+    return GetFileAttributesA(dllPath.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
 struct DvsUnpackResult {
     Json pipelineRoot = Json::object();
     std::string tempDir;
@@ -596,16 +604,26 @@ namespace dlcv_infer {
                 [](const json& item) { return item.get<std::string>() == "1"; }) != feature_list.end())
             {
                 // 使用默认DLL
-            } else if (std::find_if(feature_list.begin(), feature_list.end(),
+            }
+            else if (std::find_if(feature_list.begin(), feature_list.end(),
                 [](const json& item) { return item.get<std::string>() == "2"; }) != feature_list.end())
             {
-                dllName = dllName2;
-                dllPath = dllPath2;
+                if (DllExists(dllName2, dllPath2))
+                {
+                    dllName = dllName2;
+                    dllPath = dllPath2;
+                }
             }
         }
         catch (...)
         {
             // 如果获取功能列表失败，则使用默认的DLL路径
+        }
+
+        if (!DllExists(dllName, dllPath))
+        {
+            MessageBoxA(nullptr, "需要先安装 dlcv_infer", "提示", MB_OK | MB_ICONWARNING);
+            throw std::runtime_error("need install dlcv_infer first");
         }
 
         // 加载DLL
