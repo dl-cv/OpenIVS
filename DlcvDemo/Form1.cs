@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
@@ -682,5 +682,57 @@ namespace DlcvDemo
 			catch { }
 			MessageBox.Show(title + ": " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
 		}
-	}
+
+        private void button_save_img_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(image_path))
+                {
+                    MessageBox.Show("请先选择图片文件！");
+                    return;
+                }
+
+                if (imagePanel1.image == null)
+                {
+                    MessageBox.Show("当前没有可保存的图像！");
+                    return;
+                }
+
+                SaveFileDialog saveFileDialog = new SaveFileDialog();
+                saveFileDialog.Filter = "JPEG 图像 (*.jpg)|*.jpg";
+                saveFileDialog.Title = "保存可视化图像";
+                saveFileDialog.DefaultExt = "jpg";
+                saveFileDialog.AddExtension = true;
+                saveFileDialog.OverwritePrompt = true;
+                saveFileDialog.RestoreDirectory = true;
+
+                try
+                {
+                    saveFileDialog.InitialDirectory = Path.GetDirectoryName(image_path);
+                    saveFileDialog.FileName = Path.GetFileNameWithoutExtension(image_path) + "_vis.jpg";
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+
+                if (saveFileDialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                using (var bitmap = imagePanel1.CreateVisualizationBitmap())
+                {
+                    bitmap.Save(saveFileDialog.FileName, System.Drawing.Imaging.ImageFormat.Jpeg);
+                }
+
+                richTextBox1.Text = "图像已保存：\n" + saveFileDialog.FileName;
+            }
+            catch (Exception ex)
+            {
+                ReportError("保存图像失败", ex);
+            }
+        }
+    }
 }

@@ -51,6 +51,7 @@
             this.button_free_all_model = new System.Windows.Forms.Button();
             this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
             this.button_infer_json = new System.Windows.Forms.Button();
+            this.button_save_img = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_threshold)).BeginInit();
@@ -339,11 +340,22 @@
             this.button_infer_json.UseVisualStyleBackColor = true;
             this.button_infer_json.Click += new System.EventHandler(this.button_infer_json_Click);
             // 
+            // button_save_img
+            // 
+            this.button_save_img.Location = new System.Drawing.Point(824, 93);
+            this.button_save_img.Name = "button_save_img";
+            this.button_save_img.Size = new System.Drawing.Size(140, 60);
+            this.button_save_img.TabIndex = 27;
+            this.button_save_img.Text = "保存图像";
+            this.button_save_img.UseVisualStyleBackColor = true;
+            this.button_save_img.Click += new System.EventHandler(this.button_save_img_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1274, 844);
+            this.Controls.Add(this.button_save_img);
             this.Controls.Add(this.button_infer_json);
             this.Controls.Add(this.checkBox_rpc_mode);
             this.Controls.Add(this.button_free_all_model);
@@ -406,6 +418,7 @@
         private System.Windows.Forms.Button button_free_all_model;
         private System.Windows.Forms.CheckBox checkBox_rpc_mode;
         private System.Windows.Forms.Button button_infer_json;
+        private System.Windows.Forms.Button button_save_img;
     }
 }
 
