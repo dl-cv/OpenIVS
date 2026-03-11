@@ -77,14 +77,38 @@
 
   <PropertyGroup Label="UserMacros" />
 
+  <PropertyGroup>
+    <!-- 依赖目录自动解析：支持环境变量、仓库相对目录、历史默认目录 -->
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_INCLUDE_DIR)'!=''">$(OpenCV_INCLUDE_DIR)</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\opencv2\core.hpp')">$(OpenCV_DIR)</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\include\opencv2\core.hpp')">$(OpenCV_DIR)\include</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\..\..\include\opencv2\core.hpp')">$([System.IO.Path]::GetFullPath('$(OpenCV_DIR)\..\..\include'))</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(SolutionDir)third_party\opencv\build\include\opencv2\core.hpp')">$(SolutionDir)third_party\opencv\build\include</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\opencv\build\include\opencv2\core.hpp')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\opencv\build\include'))</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('C:\OpenCV\build\include\opencv2\core.hpp')">C:\OpenCV\build\include</OpenCvIncludeDir>
+
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_LIB_DIR)'!=''">$(OpenCV_LIB_DIR)</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\opencv_world4100.lib')">$(OpenCV_DIR)</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\lib\opencv_world4100.lib')">$(OpenCV_DIR)\lib</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\x64\vc16\lib\opencv_world4100.lib')">$(OpenCV_DIR)\x64\vc16\lib</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and Exists('$(SolutionDir)third_party\opencv\build\x64\vc16\lib\opencv_world4100.lib')">$(SolutionDir)third_party\opencv\build\x64\vc16\lib</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and Exists('$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib\opencv_world4100.lib')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib'))</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and Exists('C:\OpenCV\build\x64\vc16\lib\opencv_world4100.lib')">C:\OpenCV\build\x64\vc16\lib</OpenCvLibDir>
+
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DLCVPRO_INFER_INCLUDE)'!=''">$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(SolutionDir)third_party\dlcvpro_infer\include')">$(SolutionDir)third_party\dlcvpro_infer\include</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\dlcvpro_infer\include')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\dlcvpro_infer\include'))</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('C:\dlcv\Lib\site-packages\dlcvpro_infer\include')">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(ProjectDir);C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(IncludePath)</IncludePath>
-    <LibraryPath>C:\OpenCV\build\x64\vc16\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir);$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
+    <LibraryPath>$(OpenCvLibDir);$(LibraryPath)</LibraryPath>
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>$(ProjectDir);C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(IncludePath)</IncludePath>
-    <LibraryPath>C:\OpenCV\build\x64\vc16\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir);$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
+    <LibraryPath>$(OpenCvLibDir);$(LibraryPath)</LibraryPath>
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
   </PropertyGroup>
 
@@ -176,6 +200,15 @@
     <ClInclude Include="flow\utils\MaskRleUtils.h" />
     <ClInclude Include="flow\modules\ModelModules.h" />
   </ItemGroup>
+
+  <Target Name="ValidatePortableDeps" BeforeTargets="ClCompile" Condition="'$(Platform)'=='x64'">
+    <Error Condition="!Exists('$(OpenCvIncludeDir)\opencv2\core.hpp')"
+           Text="未找到 OpenCV 头文件。请确保以下任一路径可用：1) 设置 OpenCV_DIR；2) 仓库 third_party\opencv\build；3) C:\OpenCV\build。" />
+    <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100d.lib') and '$(Configuration)'=='Debug'"
+           Text="未找到 OpenCV Debug 库 opencv_world4100d.lib。请检查 OpenCV 库目录是否正确。" />
+    <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100.lib') and '$(Configuration)'!='Debug'"
+           Text="未找到 OpenCV Release 库 opencv_world4100.lib。请检查 OpenCV 库目录是否正确。" />
+  </Target>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
