@@ -342,6 +342,7 @@
             // 
             // button_save_img
             // 
+            this.button_save_img.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_save_img.Location = new System.Drawing.Point(824, 93);
             this.button_save_img.Name = "button_save_img";
             this.button_save_img.Size = new System.Drawing.Size(140, 60);

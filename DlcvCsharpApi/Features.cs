@@ -2732,4 +2732,340 @@ namespace DlcvModules
             return string.Format("module|{0}|{1}", im.OriginalIndex, ts);
         }
     }
+
+    /// <summary>
+    /// 模块名称：BBox 重叠去重
+    /// 对齐 Python: post_process/bbox_iou_dedup
+    /// - 仅处理 type == "local" 的条目
+    /// - 从 sample_results 提取 bbox=[x1,y1,x2,y2]，按分组与面积从大到小去重
+    /// - metric 支持 iou / ios；per_category 控制是否按类别分别去重
+    /// </summary>
+    public class BBoxIoUDedup : BaseModule
+    {
+        private sealed class Candidate
+        {
+            public int EntryIndex;
+            public int DetIndex;
+            public double[] BBox;
+            public double Area;
+        }
+
+        static BBoxIoUDedup()
+        {
+            ModuleRegistry.Register("post_process/bbox_iou_dedup", typeof(BBoxIoUDedup));
+            ModuleRegistry.Register("features/bbox_iou_dedup", typeof(BBoxIoUDedup));
+        }
+
+        public BBoxIoUDedup(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var images = imageList ?? new List<ModuleImage>();
+            var results = resultList ?? new JArray();
+
+            string metric = NormalizeMetric(GetPropertyString("metric", "iou"));
+            double threshold = Clamp01(GetPropertyDouble("iou_threshold", 0.5));
+            bool perCategory = GetPropertyBool("per_category", true);
+
+            var keepFlags = new Dictionary<int, List<bool>>();
+            var grouped = new Dictionary<string, List<Candidate>>(StringComparer.Ordinal);
+
+            for (int entryIdx = 0; entryIdx < results.Count; entryIdx++)
+            {
+                var entry = results[entryIdx] as JObject;
+                if (entry == null) continue;
+                if (!string.Equals(entry.Value<string>("type"), "local", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var dets = entry["sample_results"] as JArray;
+                if (dets == null) continue;
+
+                var flags = new List<bool>(dets.Count);
+                for (int i = 0; i < dets.Count; i++) flags.Add(true);
+                keepFlags[entryIdx] = flags;
+
+                int idx = SafeInt(entry["index"], -1);
+                int originIdx = SafeInt(entry["origin_index"], idx);
+                string transformSig = SerializeTokenCompact(entry["transform"]);
+                string entryGroupKey = string.Format("{0}|{1}|{2}", idx, originIdx, transformSig);
+
+                for (int detIdx = 0; detIdx < dets.Count; detIdx++)
+                {
+                    var det = dets[detIdx] as JObject;
+                    if (det == null) continue;
+
+                    if (!TryExtractBboxXyxy(det, out double[] bbox)) continue;
+
+                    double area = BBoxArea(bbox);
+                    if (area <= 0.0) continue;
+
+                    string groupKey;
+                    if (perCategory)
+                    {
+                        string catId = SerializeTokenCompact(det["category_id"]);
+                        string catName = SerializeTokenCompact(det["category_name"]);
+                        groupKey = string.Format("{0}|{1}|{2}", entryGroupKey, catId, catName);
+                    }
+                    else
+                    {
+                        groupKey = entryGroupKey + "|__all__";
+                    }
+
+                    if (!grouped.TryGetValue(groupKey, out List<Candidate> list))
+                    {
+                        list = new List<Candidate>();
+                        grouped[groupKey] = list;
+                    }
+                    list.Add(new Candidate
+                    {
+                        EntryIndex = entryIdx,
+                        DetIndex = detIdx,
+                        BBox = bbox,
+                        Area = area
+                    });
+                }
+            }
+
+            int removedCount = 0;
+            foreach (var kv in grouped)
+            {
+                var items = kv.Value;
+                items.Sort((a, b) =>
+                {
+                    int cmpArea = b.Area.CompareTo(a.Area);
+                    if (cmpArea != 0) return cmpArea;
+                    int cmpEntry = a.EntryIndex.CompareTo(b.EntryIndex);
+                    if (cmpEntry != 0) return cmpEntry;
+                    return a.DetIndex.CompareTo(b.DetIndex);
+                });
+
+                var keptBoxes = new List<double[]>();
+                foreach (var item in items)
+                {
+                    bool shouldDrop = false;
+                    for (int i = 0; i < keptBoxes.Count; i++)
+                    {
+                        if (IsOverlapExceeded(item.BBox, keptBoxes[i], threshold, metric))
+                        {
+                            shouldDrop = true;
+                            break;
+                        }
+                    }
+
+                    if (shouldDrop)
+                    {
+                        if (keepFlags.TryGetValue(item.EntryIndex, out List<bool> flags) &&
+                            item.DetIndex >= 0 &&
+                            item.DetIndex < flags.Count)
+                        {
+                            flags[item.DetIndex] = false;
+                        }
+                        removedCount++;
+                        continue;
+                    }
+
+                    keptBoxes.Add(item.BBox);
+                }
+            }
+
+            int keptCount = 0;
+            var outResults = new JArray();
+            for (int entryIdx = 0; entryIdx < results.Count; entryIdx++)
+            {
+                var entry = results[entryIdx] as JObject;
+                if (entry == null || !string.Equals(entry.Value<string>("type"), "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    outResults.Add(results[entryIdx]);
+                    continue;
+                }
+
+                var dets = entry["sample_results"] as JArray;
+                if (dets == null)
+                {
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                if (!keepFlags.TryGetValue(entryIdx, out List<bool> flags) || flags == null)
+                {
+                    keptCount += dets.Count;
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                var newDets = new JArray();
+                for (int detIdx = 0; detIdx < dets.Count; detIdx++)
+                {
+                    if (detIdx < flags.Count && flags[detIdx])
+                    {
+                        newDets.Add(dets[detIdx]);
+                    }
+                }
+                keptCount += newDets.Count;
+
+                if (newDets.Count == dets.Count)
+                {
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                var newEntry = (JObject)entry.DeepClone();
+                newEntry["sample_results"] = newDets;
+                outResults.Add(newEntry);
+            }
+
+            ScalarOutputsByName["kept_count"] = keptCount;
+            ScalarOutputsByName["removed_count"] = removedCount;
+
+            return new ModuleIO(images, outResults);
+        }
+
+        private string GetPropertyString(string key, string defaultValue)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+            {
+                string s = v.ToString();
+                if (!string.IsNullOrWhiteSpace(s)) return s;
+            }
+            return defaultValue;
+        }
+
+        private double GetPropertyDouble(string key, double defaultValue)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+            {
+                try { return Convert.ToDouble(v); } catch { }
+            }
+            return defaultValue;
+        }
+
+        private bool GetPropertyBool(string key, bool defaultValue)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+            {
+                if (v is bool b) return b;
+                if (bool.TryParse(v.ToString(), out bool pb)) return pb;
+                if (int.TryParse(v.ToString(), out int pi)) return pi != 0;
+            }
+            return defaultValue;
+        }
+
+        private static int SafeInt(JToken token, int defaultValue)
+        {
+            if (token == null || token.Type == JTokenType.Null) return defaultValue;
+            try { return token.Value<int>(); } catch { return defaultValue; }
+        }
+
+        private static string SerializeTokenCompact(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null) return "null";
+            try { return token.ToString(Newtonsoft.Json.Formatting.None); } catch { return token.ToString(); }
+        }
+
+        private static bool TryExtractBboxXyxy(JObject det, out double[] bbox)
+        {
+            bbox = null;
+            var arr = det["bbox"] as JArray;
+            if (arr == null || arr.Count != 4) return false;
+
+            double x1;
+            double y1;
+            double x2;
+            double y2;
+            try
+            {
+                x1 = arr[0].Value<double>();
+                y1 = arr[1].Value<double>();
+                x2 = arr[2].Value<double>();
+                y2 = arr[3].Value<double>();
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (x2 < x1)
+            {
+                double t = x1;
+                x1 = x2;
+                x2 = t;
+            }
+            if (y2 < y1)
+            {
+                double t = y1;
+                y1 = y2;
+                y2 = t;
+            }
+            if (x2 <= x1 || y2 <= y1) return false;
+
+            bbox = new[] { x1, y1, x2, y2 };
+            return true;
+        }
+
+        private static double BBoxArea(double[] bbox)
+        {
+            if (bbox == null || bbox.Length < 4) return 0.0;
+            return Math.Max(0.0, bbox[2] - bbox[0]) * Math.Max(0.0, bbox[3] - bbox[1]);
+        }
+
+        private static string NormalizeMetric(string metricRaw)
+        {
+            string m = (metricRaw ?? "iou").Trim().ToLowerInvariant();
+            if (m == "ios") return "ios";
+            return "iou";
+        }
+
+        private static double Clamp01(double v)
+        {
+            if (double.IsNaN(v) || double.IsInfinity(v)) return 0.0;
+            if (v < 0.0) return 0.0;
+            if (v > 1.0) return 1.0;
+            return v;
+        }
+
+        private static bool IsOverlapExceeded(double[] bbox, double[] keptBbox, double threshold, string metric)
+        {
+            if (string.Equals(metric, "ios", StringComparison.OrdinalIgnoreCase))
+            {
+                return ComputeIoS(bbox, keptBbox) > threshold;
+            }
+            return ComputeIoU(bbox, keptBbox) > threshold;
+        }
+
+        private static double ComputeIoU(double[] a, double[] b)
+        {
+            double inter = IntersectionArea(a, b);
+            if (inter <= 0.0) return 0.0;
+            double areaA = BBoxArea(a);
+            double areaB = BBoxArea(b);
+            double union = areaA + areaB - inter;
+            if (union <= 0.0) return 0.0;
+            return inter / union;
+        }
+
+        private static double ComputeIoS(double[] a, double[] b)
+        {
+            double inter = IntersectionArea(a, b);
+            if (inter <= 0.0) return 0.0;
+            double areaA = BBoxArea(a);
+            double areaB = BBoxArea(b);
+            double smaller = Math.Min(areaA, areaB);
+            if (smaller <= 0.0) return 0.0;
+            return inter / smaller;
+        }
+
+        private static double IntersectionArea(double[] a, double[] b)
+        {
+            if (a == null || b == null || a.Length < 4 || b.Length < 4) return 0.0;
+            double x1 = Math.Max(a[0], b[0]);
+            double y1 = Math.Max(a[1], b[1]);
+            double x2 = Math.Min(a[2], b[2]);
+            double y2 = Math.Min(a[3], b[3]);
+            double w = Math.Max(0.0, x2 - x1);
+            double h = Math.Max(0.0, y2 - y1);
+            return w * h;
+        }
+    }
 }

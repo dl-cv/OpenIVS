@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -199,6 +199,40 @@ namespace DlcvModules
 			return list;
 		}
 
+		private static double ReadScoreForSort(JToken token)
+		{
+			var obj = token as JObject;
+			if (obj == null) return 0.0;
+			try
+			{
+				return obj.Value<double?>("score") ?? 0.0;
+			}
+			catch
+			{
+				double score;
+				return double.TryParse(obj["score"] != null ? obj["score"].ToString() : null, out score) ? score : 0.0;
+			}
+		}
+
+		protected static void KeepTopKByScore(JArray samples, int topK)
+		{
+			if (samples == null || topK <= 0 || samples.Count <= topK) return;
+
+			var ordered = new List<JToken>();
+			foreach (var sample in samples)
+			{
+				ordered.Add(sample);
+			}
+
+			ordered.Sort((a, b) => ReadScoreForSort(b).CompareTo(ReadScoreForSort(a)));
+
+			samples.Clear();
+			for (int i = 0; i < topK && i < ordered.Count; i++)
+			{
+				samples.Add(ordered[i]);
+			}
+		}
+
 		private void TryAddParam(JObject p, string key)
 		{
 			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
@@ -286,6 +320,7 @@ namespace DlcvModules
 			var baseIo = base.Process(imageList, resultList);
 			var imagesOut = baseIo != null ? (baseIo.ImageList ?? new List<ModuleImage>()) : new List<ModuleImage>();
 			var resultsOut = baseIo != null ? (baseIo.ResultList ?? new JArray()) : new JArray();
+			int topK = Math.Max(0, ReadInt("top_k", 1));
 
 			int n = Math.Min(resultsOut.Count, imagesOut.Count);
 			for (int i = 0; i < n; i++)
@@ -294,6 +329,7 @@ namespace DlcvModules
 				if (entry == null) continue;
 				var samples = entry["sample_results"] as JArray;
 				if (samples == null) continue;
+				KeepTopKByScore(samples, topK);
 
 				var imgMat = imagesOut[i] != null ? imagesOut[i].ImageObject : null;
 				int iw = imgMat != null ? Math.Max(1, imgMat.Width) : 1;
