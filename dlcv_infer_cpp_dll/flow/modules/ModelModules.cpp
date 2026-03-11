@@ -1,4 +1,4 @@
-﻿#include "flow/modules/ModelModules.h"
+#include "flow/modules/ModelModules.h"
 
 #include <algorithm>
 #include <cmath>
@@ -103,6 +103,37 @@ static Json ConvertToLocalSamples(const dlcv_infer::Result& res) {
     return list;
 }
 
+static double ReadScoreForSort(const Json& token) {
+    try {
+        if (token.is_object() && token.contains("score")) {
+            const Json& score = token.at("score");
+            if (score.is_number()) return score.get<double>();
+            if (score.is_string()) return std::stod(score.get<std::string>());
+        }
+    } catch (...) {}
+    return 0.0;
+}
+
+static void KeepTopKByScore(Json& samples, int topK) {
+    if (!samples.is_array() || topK <= 0 || static_cast<int>(samples.size()) <= topK) return;
+
+    std::vector<Json> ordered;
+    ordered.reserve(samples.size());
+    for (const auto& sample : samples) {
+        ordered.push_back(sample);
+    }
+
+    std::stable_sort(ordered.begin(), ordered.end(), [](const Json& a, const Json& b) {
+        return ReadScoreForSort(a) > ReadScoreForSort(b);
+    });
+
+    Json trimmed = Json::array();
+    for (int i = 0; i < topK && i < static_cast<int>(ordered.size()); i++) {
+        trimmed.push_back(ordered[static_cast<size_t>(i)]);
+    }
+    samples = std::move(trimmed);
+}
+
 ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, const Json& /*resultList*/) {
     const std::vector<ModuleImage>& images = imageList;
     std::vector<ModuleImage> outImages;
@@ -182,6 +213,15 @@ static void EnsureBboxForAllSamples(std::vector<ModuleImage>& imagesOut, Json& r
 
 ModuleIO ClsModelModule::Process(const std::vector<ModuleImage>& imageList, const Json& resultList) {
     ModuleIO baseIo = DetModelModule::Process(imageList, resultList);
+    const int topK = std::max(0, ReadInt("top_k", 1));
+    if (topK > 0 && baseIo.ResultList.is_array()) {
+        for (auto& token : baseIo.ResultList) {
+            if (!token.is_object()) continue;
+            Json& entry = token;
+            if (!entry.contains("sample_results") || !entry["sample_results"].is_array()) continue;
+            KeepTopKByScore(entry["sample_results"], topK);
+        }
+    }
     EnsureBboxForAllSamples(baseIo.ImageList, baseIo.ResultList);
     return baseIo;
 }
