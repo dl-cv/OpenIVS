@@ -27,9 +27,6 @@
     <ClCompile Include="ImageViewerWidget.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)qrc_resources.cpp">
-      <Filter>生成文件</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="MainWindow.h">
@@ -40,11 +37,8 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="resources.qrc">
+    <ResourceCompile Include="app_icon.rc">
       <Filter>资源文件</Filter>
-    </None>
-    <None Include="dlcv_demo_icon.svg">
-      <Filter>资源文件</Filter>
-    </None>
+    </ResourceCompile>
   </ItemGroup>
 </Project>

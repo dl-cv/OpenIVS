@@ -1,4 +1,4 @@
-﻿#include "MainWindow.h"
+#include "MainWindow.h"
 
 #include <cmath>
 #include <chrono>
@@ -17,7 +17,6 @@
 #include <QGridLayout>
 #include <QGuiApplication>
 #include <QHBoxLayout>
-#include <QIcon>
 #include <QLabel>
 #include <QCoreApplication>
 #include <QMainWindow>
@@ -65,7 +64,6 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 
 void MainWindow::setupUi() {
     setWindowTitle("C++测试程序");
-    setWindowIcon(QIcon(":/dlcv_demo_icon.svg"));
     setMinimumSize(860, 500);
 
     QWidget* centralWidget = new QWidget(this);

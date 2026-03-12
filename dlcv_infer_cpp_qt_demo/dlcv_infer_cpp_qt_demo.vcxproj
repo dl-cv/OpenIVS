@@ -83,19 +83,22 @@
     <QtBinDir Condition="'$(QtBinDir)'==''">$(QtInstallDir)\bin</QtBinDir>
     <QtIncludeDir Condition="'$(QtIncludeDir)'==''">$(QtInstallDir)\include</QtIncludeDir>
     <QtLibDir Condition="'$(QtLibDir)'==''">$(QtInstallDir)\lib</QtLibDir>
+    <QtPluginsDir Condition="'$(QtPluginsDir)'==''">$(QtInstallDir)\plugins</QtPluginsDir>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp_dll;$(SolutionDir)dlcv_infer_cpp_dll;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
     <LibraryPath>C:\OpenCV\build\x64\vc16\lib;$(QtLibDir);$(LibraryPath)</LibraryPath>
-    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <OutDir>$(SolutionDir)$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <QtDllSuffix>d</QtDllSuffix>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp_dll;$(SolutionDir)dlcv_infer_cpp_dll;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
     <LibraryPath>C:\OpenCV\build\x64\vc16\lib;$(QtLibDir);$(LibraryPath)</LibraryPath>
-    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <OutDir>$(SolutionDir)$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <QtDllSuffix></QtDllSuffix>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
@@ -148,21 +151,26 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
-    <PreBuildEvent>
-      <Command>(if not exist "$(ProjectDir)$(IntDir)" mkdir "$(ProjectDir)$(IntDir)") &amp; "$(QtBinDir)\rcc.exe" -name resources "$(ProjectDir)resources.qrc" -o "$(ProjectDir)$(IntDir)qrc_resources.cpp"</Command>
-    </PreBuildEvent>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)$(Configuration)\;$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100d.lib;Qt6Widgetsd.lib;Qt6Guid.lib;Qt6Cored.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>if not exist "$(QtBinDir)\windeployqt.exe" (
-  echo [WARN] windeployqt not found: $(QtBinDir)\windeployqt.exe
+      <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
+if not exist "$(TargetDir)styles" mkdir "$(TargetDir)styles"
+if exist "$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll" (
+  copy /Y "$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll" "$(TargetDir)"
 ) else (
-  "$(QtBinDir)\windeployqt.exe" --debug --no-translations --no-opengl-sw --no-system-d3d-compiler --force "$(TargetPath)"
-)</Command>
+  if exist "$(SolutionDir)$(Configuration)\dlcv_infer_cpp_dll.dll" copy /Y "$(SolutionDir)$(Configuration)\dlcv_infer_cpp_dll.dll" "$(TargetDir)"
+)
+if exist "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" "$(TargetDir)platforms\"
+if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" "$(TargetDir)styles\"
+if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" "$(TargetDir)styles\"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -177,23 +185,28 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
-    <PreBuildEvent>
-      <Command>(if not exist "$(ProjectDir)$(IntDir)" mkdir "$(ProjectDir)$(IntDir)") &amp; "$(QtBinDir)\rcc.exe" -name resources "$(ProjectDir)resources.qrc" -o "$(ProjectDir)$(IntDir)qrc_resources.cpp"</Command>
-    </PreBuildEvent>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)$(Configuration)\;$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100.lib;Qt6Widgets.lib;Qt6Gui.lib;Qt6Core.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>if not exist "$(QtBinDir)\windeployqt.exe" (
-  echo [WARN] windeployqt not found: $(QtBinDir)\windeployqt.exe
+      <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
+if not exist "$(TargetDir)styles" mkdir "$(TargetDir)styles"
+if exist "$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll" (
+  copy /Y "$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll" "$(TargetDir)"
 ) else (
-  "$(QtBinDir)\windeployqt.exe" --release --no-translations --no-opengl-sw --no-system-d3d-compiler --force "$(TargetPath)"
-)</Command>
+  if exist "$(SolutionDir)$(Configuration)\dlcv_infer_cpp_dll.dll" copy /Y "$(SolutionDir)$(Configuration)\dlcv_infer_cpp_dll.dll" "$(TargetDir)"
+)
+if exist "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" "$(TargetDir)platforms\"
+if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" "$(TargetDir)styles\"
+if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" "$(TargetDir)styles\"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
 
@@ -206,15 +219,10 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="ImageViewerWidget.cpp" />
-    <ClCompile Include="$(ProjectDir)$(IntDir)qrc_resources.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-    </ClCompile>
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="resources.qrc" />
-    <None Include="dlcv_demo_icon.svg" />
+    <ResourceCompile Include="app_icon.rc" />
   </ItemGroup>
 
   <ItemGroup>
