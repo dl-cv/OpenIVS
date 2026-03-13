@@ -2560,6 +2560,11 @@ namespace DlcvModules
             var imagesB = pair1 != null ? (pair1.ImageList ?? new List<ModuleImage>()) : new List<ModuleImage>();
             var resultsB = pair1 != null ? (pair1.ResultList ?? new JArray()) : new JArray();
 
+            if (imagesA.Count == 0 && resultsA.Count == 0 && imagesB.Count == 0 && resultsB.Count == 0)
+            {
+                return new ModuleIO(new List<ModuleImage>(), new JArray());
+            }
+
             if (imagesB.Count == 0)
             {
                 throw new InvalidOperationException("结果标签合并需要第2路输入（image_2/results_2）。");
