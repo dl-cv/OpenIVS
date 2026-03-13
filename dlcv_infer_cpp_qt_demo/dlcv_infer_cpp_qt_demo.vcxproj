@@ -84,6 +84,8 @@
     <QtIncludeDir Condition="'$(QtIncludeDir)'==''">$(QtInstallDir)\include</QtIncludeDir>
     <QtLibDir Condition="'$(QtLibDir)'==''">$(QtInstallDir)\lib</QtLibDir>
     <QtPluginsDir Condition="'$(QtPluginsDir)'==''">$(QtInstallDir)\plugins</QtPluginsDir>
+    <DlcvInferCppDllOutDir>$(SolutionDir)$(Configuration)\</DlcvInferCppDllOutDir>
+    <DlcvInferCppDllPath>$(DlcvInferCppDllOutDir)dlcv_infer_cpp_dll.dll</DlcvInferCppDllPath>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -154,17 +156,14 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)$(Configuration)\;$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100d.lib;Qt6Widgetsd.lib;Qt6Guid.lib;Qt6Cored.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
 if not exist "$(TargetDir)styles" mkdir "$(TargetDir)styles"
-if exist "$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll" (
-  copy /Y "$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll" "$(TargetDir)"
-) else (
-  if exist "$(SolutionDir)$(Configuration)\dlcv_infer_cpp_dll.dll" copy /Y "$(SolutionDir)$(Configuration)\dlcv_infer_cpp_dll.dll" "$(TargetDir)"
-)
+if not exist "$(DlcvInferCppDllPath)" exit /b 1
+copy /Y "$(DlcvInferCppDllPath)" "$(TargetDir)"
 if exist "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" "$(TargetDir)"
 if exist "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" "$(TargetDir)"
 if exist "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" "$(TargetDir)"
@@ -190,17 +189,14 @@ if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDi
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)$(Configuration)\;$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100.lib;Qt6Widgets.lib;Qt6Gui.lib;Qt6Core.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
 if not exist "$(TargetDir)styles" mkdir "$(TargetDir)styles"
-if exist "$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll" (
-  copy /Y "$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll" "$(TargetDir)"
-) else (
-  if exist "$(SolutionDir)$(Configuration)\dlcv_infer_cpp_dll.dll" copy /Y "$(SolutionDir)$(Configuration)\dlcv_infer_cpp_dll.dll" "$(TargetDir)"
-)
+if not exist "$(DlcvInferCppDllPath)" exit /b 1
+copy /Y "$(DlcvInferCppDllPath)" "$(TargetDir)"
 if exist "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" "$(TargetDir)"
 if exist "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" "$(TargetDir)"
 if exist "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" "$(TargetDir)"
