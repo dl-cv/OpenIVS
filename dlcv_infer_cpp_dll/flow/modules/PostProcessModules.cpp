@@ -851,15 +851,20 @@ private:
         const Json& bb = det.at("bbox");
         if (!bb.is_array() || bb.size() != 4) return false;
 
-        double x1 = 0.0, y1 = 0.0, x2 = 0.0, y2 = 0.0;
+        double x = 0.0, y = 0.0, w = 0.0, h = 0.0;
         try {
-            x1 = bb.at(0).get<double>();
-            y1 = bb.at(1).get<double>();
-            x2 = bb.at(2).get<double>();
-            y2 = bb.at(3).get<double>();
+            x = bb.at(0).get<double>();
+            y = bb.at(1).get<double>();
+            w = bb.at(2).get<double>();
+            h = bb.at(3).get<double>();
         } catch (...) {
             return false;
         }
+
+        double x1 = x;
+        double y1 = y;
+        double x2 = x + w;
+        double y2 = y + h;
 
         if (x2 < x1) std::swap(x1, x2);
         if (y2 < y1) std::swap(y1, y2);
