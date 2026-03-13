@@ -2560,6 +2560,11 @@ namespace DlcvModules
             var imagesB = pair1 != null ? (pair1.ImageList ?? new List<ModuleImage>()) : new List<ModuleImage>();
             var resultsB = pair1 != null ? (pair1.ResultList ?? new JArray()) : new JArray();
 
+            if (imagesA.Count == 0 && resultsA.Count == 0 && imagesB.Count == 0 && resultsB.Count == 0)
+            {
+                return new ModuleIO(new List<ModuleImage>(), new JArray());
+            }
+
             if (imagesB.Count == 0)
             {
                 throw new InvalidOperationException("结果标签合并需要第2路输入（image_2/results_2）。");
@@ -2737,7 +2742,7 @@ namespace DlcvModules
     /// 模块名称：BBox 重叠去重
     /// 对齐 Python: post_process/bbox_iou_dedup
     /// - 仅处理 type == "local" 的条目
-    /// - 从 sample_results 提取 bbox=[x1,y1,x2,y2]，按分组与面积从大到小去重
+    /// - 从 sample_results 提取 bbox=[x,y,w,h]，内部转换为 xyxy 后按分组与面积从大到小去重
     /// - metric 支持 iou / ios；per_category 控制是否按类别分别去重
     /// </summary>
     public class BBoxIoUDedup : BaseModule
@@ -2970,21 +2975,26 @@ namespace DlcvModules
             var arr = det["bbox"] as JArray;
             if (arr == null || arr.Count != 4) return false;
 
-            double x1;
-            double y1;
-            double x2;
-            double y2;
+            double x;
+            double y;
+            double w;
+            double h;
             try
             {
-                x1 = arr[0].Value<double>();
-                y1 = arr[1].Value<double>();
-                x2 = arr[2].Value<double>();
-                y2 = arr[3].Value<double>();
+                x = arr[0].Value<double>();
+                y = arr[1].Value<double>();
+                w = arr[2].Value<double>();
+                h = arr[3].Value<double>();
             }
             catch
             {
                 return false;
             }
+
+            double x1 = x;
+            double y1 = y;
+            double x2 = x + w;
+            double y2 = y + h;
 
             if (x2 < x1)
             {

@@ -1,4 +1,4 @@
-﻿#include "flow/BaseModule.h"
+#include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
 
 #include <algorithm>
@@ -680,13 +680,19 @@ public:
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
         const std::vector<ModuleImage>& imagesA = imageList;
         const Json resultsA = resultList.is_array() ? resultList : Json::array();
+        const std::vector<ModuleImage> emptyImages;
+        const std::vector<ModuleImage>& imagesB = ExtraInputsIn.empty() ? emptyImages : ExtraInputsIn[0].ImageList;
+        const Json resultsB = (!ExtraInputsIn.empty() && ExtraInputsIn[0].ResultList.is_array())
+            ? ExtraInputsIn[0].ResultList
+            : Json::array();
+
+        if (imagesA.empty() && resultsA.empty() && imagesB.empty() && resultsB.empty()) {
+            return ModuleIO(std::vector<ModuleImage>(), Json::array(), Json::array());
+        }
 
         if (ExtraInputsIn.empty()) {
             throw std::runtime_error("结果标签合并需要第2路输入（image_2/results_2）");
         }
-
-        const std::vector<ModuleImage>& imagesB = ExtraInputsIn[0].ImageList;
-        const Json resultsB = ExtraInputsIn[0].ResultList.is_array() ? ExtraInputsIn[0].ResultList : Json::array();
 
         if (imagesA.size() != imagesB.size()) {
             throw std::runtime_error(

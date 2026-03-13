@@ -2,7 +2,9 @@
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/MaskRleUtils.h"
 
+#include <array>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -62,6 +64,38 @@ static std::string ReplaceAll(std::string s, const std::string& from, const std:
         pos += to.size();
     }
     return s;
+}
+
+static std::string SerializeTokenCompact(const Json& token) {
+    try {
+        if (token.is_null()) return "null";
+        return token.dump();
+    } catch (...) {
+        return "null";
+    }
+}
+
+static int SafeIntFromJson(const Json& token, int defaultValue) {
+    try {
+        if (token.is_number_integer()) return token.get<int>();
+        if (token.is_number()) return static_cast<int>(std::llround(token.get<double>()));
+        if (token.is_string()) return std::stoi(token.get<std::string>());
+    } catch (...) {}
+    return defaultValue;
+}
+
+static bool TryReadDouble(const Json& token, double& outVal) {
+    try {
+        if (token.is_number()) {
+            outVal = token.get<double>();
+            return true;
+        }
+        if (token.is_string()) {
+            outVal = std::stod(token.get<std::string>());
+            return true;
+        }
+    } catch (...) {}
+    return false;
 }
 
 /// post_process/merge_results, features/merge_results
@@ -661,63 +695,58 @@ public:
 class BBoxIoUDedupModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
-
+private:
     struct Candidate {
-        int entryIdx = -1;
-        int detIdx = -1;
-        std::array<double, 4> bbox = {0.0, 0.0, 0.0, 0.0};
-        double area = 0.0;
+        int EntryIndex = -1;
+        int DetIndex = -1;
+        std::array<double, 4> BBox = {0.0, 0.0, 0.0, 0.0};
+        double Area = 0.0;
     };
+
+public:
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
         const std::vector<ModuleImage>& images = imageList;
         const Json results = resultList.is_array() ? resultList : Json::array();
 
-        const std::string metric = NormalizeMetric(ReadString("metric", "iou"));
+        std::string metric = NormalizeMetric(ReadString("metric", "iou"));
         const double threshold = Clamp01(ReadDouble("iou_threshold", 0.5));
         const bool perCategory = ReadBool("per_category", true);
 
-        std::unordered_map<int, std::vector<char>> keepFlags;
+        std::unordered_map<int, std::vector<bool>> keepFlags;
         std::unordered_map<std::string, std::vector<Candidate>> grouped;
 
-        for (int entryIdx = 0; entryIdx < static_cast<int>(results.size()); ++entryIdx) {
+        for (int entryIdx = 0; entryIdx < static_cast<int>(results.size()); entryIdx++) {
             const Json& entry = results.at(static_cast<size_t>(entryIdx));
-            if (!entry.is_object() || entry.value("type", "") != "local") continue;
+            if (!entry.is_object()) continue;
+            if (entry.value("type", "") != "local") continue;
+            if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) continue;
 
-            Json dets = Json::array();
-            try {
-                if (entry.contains("sample_results")) {
-                    dets = entry.at("sample_results");
-                    if (dets.is_null()) dets = Json::array();
-                }
-            } catch (...) {
-                dets = Json::array();
-            }
-            if (!dets.is_array()) continue;
+            const Json& dets = entry.at("sample_results");
+            keepFlags[entryIdx] = std::vector<bool>(dets.size(), true);
 
-            keepFlags[entryIdx] = std::vector<char>(dets.size(), 1);
+            const int idx = entry.contains("index") ? SafeIntFromJson(entry.at("index"), -1) : -1;
+            const int originIdx = entry.contains("origin_index") ? SafeIntFromJson(entry.at("origin_index"), idx) : idx;
+            const std::string transformSig = entry.contains("transform") ? SerializeTokenCompact(entry.at("transform")) : "null";
+            const std::string entryGroupKey = std::to_string(idx) + "|" + std::to_string(originIdx) + "|" + transformSig;
 
-            const int idx = SafeInt(entry, "index", -1);
-            const int originIdx = SafeInt(entry, "origin_index", idx);
-            const std::string transformSig = SerializeJsonCompact(entry, "transform");
-            const std::string entryGroupKey =
-                std::to_string(idx) + "|" + std::to_string(originIdx) + "|" + transformSig;
-
-            for (int detIdx = 0; detIdx < static_cast<int>(dets.size()); ++detIdx) {
+            for (int detIdx = 0; detIdx < static_cast<int>(dets.size()); detIdx++) {
                 const Json& det = dets.at(static_cast<size_t>(detIdx));
                 if (!det.is_object()) continue;
 
-                std::array<double, 4> bbox{};
+                std::array<double, 4> bbox = {0.0, 0.0, 0.0, 0.0};
                 if (!TryExtractBboxXyxy(det, bbox)) continue;
 
                 const double area = BBoxArea(bbox);
                 if (area <= 0.0) continue;
 
-                std::string groupKey = entryGroupKey + "|__all__";
+                std::string groupKey;
                 if (perCategory) {
-                    const std::string catId = SerializeJsonCompact(det, "category_id");
-                    const std::string catName = SerializeJsonCompact(det, "category_name");
+                    const std::string catId = det.contains("category_id") ? SerializeTokenCompact(det.at("category_id")) : "null";
+                    const std::string catName = det.contains("category_name") ? SerializeTokenCompact(det.at("category_name")) : "null";
                     groupKey = entryGroupKey + "|" + catId + "|" + catName;
+                } else {
+                    groupKey = entryGroupKey + "|__all__";
                 }
 
                 grouped[groupKey].push_back(Candidate{entryIdx, detIdx, bbox, area});
@@ -726,71 +755,65 @@ public:
 
         int removedCount = 0;
         for (auto& kv : grouped) {
-            auto& items = kv.second;
+            std::vector<Candidate>& items = kv.second;
             std::sort(items.begin(), items.end(), [](const Candidate& a, const Candidate& b) {
-                if (a.area != b.area) return a.area > b.area;
-                if (a.entryIdx != b.entryIdx) return a.entryIdx < b.entryIdx;
-                return a.detIdx < b.detIdx;
+                if (a.Area != b.Area) return a.Area > b.Area;
+                if (a.EntryIndex != b.EntryIndex) return a.EntryIndex < b.EntryIndex;
+                return a.DetIndex < b.DetIndex;
             });
 
             std::vector<std::array<double, 4>> keptBoxes;
             for (const auto& item : items) {
                 bool shouldDrop = false;
-                for (const auto& kb : keptBoxes) {
-                    if (IsOverlapExceeded(item.bbox, kb, threshold, metric)) {
+                for (const auto& kept : keptBoxes) {
+                    if (IsOverlapExceeded(item.BBox, kept, threshold, metric)) {
                         shouldDrop = true;
                         break;
                     }
                 }
 
                 if (shouldDrop) {
-                    auto it = keepFlags.find(item.entryIdx);
-                    if (it != keepFlags.end() &&
-                        item.detIdx >= 0 &&
-                        item.detIdx < static_cast<int>(it->second.size())) {
-                        it->second[static_cast<size_t>(item.detIdx)] = 0;
+                    auto it = keepFlags.find(item.EntryIndex);
+                    if (it != keepFlags.end()) {
+                        std::vector<bool>& flags = it->second;
+                        if (item.DetIndex >= 0 && item.DetIndex < static_cast<int>(flags.size())) {
+                            flags[static_cast<size_t>(item.DetIndex)] = false;
+                        }
                     }
                     removedCount++;
                     continue;
                 }
-                keptBoxes.push_back(item.bbox);
+
+                keptBoxes.push_back(item.BBox);
             }
         }
 
         int keptCount = 0;
         Json outResults = Json::array();
-        for (int entryIdx = 0; entryIdx < static_cast<int>(results.size()); ++entryIdx) {
+        for (int entryIdx = 0; entryIdx < static_cast<int>(results.size()); entryIdx++) {
             const Json& token = results.at(static_cast<size_t>(entryIdx));
             if (!token.is_object() || token.value("type", "") != "local") {
                 outResults.push_back(token);
                 continue;
             }
 
-            Json dets = Json::array();
-            try {
-                if (token.contains("sample_results")) {
-                    dets = token.at("sample_results");
-                    if (dets.is_null()) dets = Json::array();
-                }
-            } catch (...) {
-                dets = Json::array();
-            }
-            if (!dets.is_array()) {
+            if (!token.contains("sample_results") || !token.at("sample_results").is_array()) {
                 outResults.push_back(token);
                 continue;
             }
 
-            auto itFlags = keepFlags.find(entryIdx);
-            if (itFlags == keepFlags.end()) {
+            const Json& dets = token.at("sample_results");
+            auto it = keepFlags.find(entryIdx);
+            if (it == keepFlags.end()) {
                 keptCount += static_cast<int>(dets.size());
                 outResults.push_back(token);
                 continue;
             }
 
+            const std::vector<bool>& flags = it->second;
             Json newDets = Json::array();
-            const auto& flags = itFlags->second;
-            for (int detIdx = 0; detIdx < static_cast<int>(dets.size()); ++detIdx) {
-                if (detIdx < static_cast<int>(flags.size()) && flags[static_cast<size_t>(detIdx)] != 0) {
+            for (int detIdx = 0; detIdx < static_cast<int>(dets.size()); detIdx++) {
+                if (detIdx < static_cast<int>(flags.size()) && flags[static_cast<size_t>(detIdx)]) {
                     newDets.push_back(dets.at(static_cast<size_t>(detIdx)));
                 }
             }
@@ -812,30 +835,41 @@ public:
     }
 
 private:
-    static int SafeInt(const Json& obj, const char* key, int dv) {
-        try {
-            if (obj.is_object() && obj.contains(key) && !obj.at(key).is_null()) {
-                const Json& v = obj.at(key);
-                if (v.is_number_integer()) return v.get<int>();
-                if (v.is_number()) return static_cast<int>(std::llround(v.get<double>()));
-                if (v.is_string()) return std::stoi(v.get<std::string>());
-            }
-        } catch (...) {}
-        return dv;
+    static bool TryExtractBboxXyxy(const Json& det, std::array<double, 4>& bbox) {
+        if (!det.is_object() || !det.contains("bbox") || !det.at("bbox").is_array()) return false;
+        const Json& arr = det.at("bbox");
+        if (arr.size() != 4) return false;
+
+        double x = 0.0, y = 0.0, w = 0.0, h = 0.0;
+        if (!TryReadDouble(arr.at(0), x) || !TryReadDouble(arr.at(1), y) ||
+            !TryReadDouble(arr.at(2), w) || !TryReadDouble(arr.at(3), h)) {
+            return false;
+        }
+
+        double x1 = x;
+        double y1 = y;
+        double x2 = x + w;
+        double y2 = y + h;
+        if (x2 < x1) std::swap(x1, x2);
+        if (y2 < y1) std::swap(y1, y2);
+        if (x2 <= x1 || y2 <= y1) return false;
+
+        bbox = {x1, y1, x2, y2};
+        return true;
     }
 
-    static std::string SerializeJsonCompact(const Json& obj, const char* key) {
-        try {
-            if (obj.is_object() && obj.contains(key) && !obj.at(key).is_null()) {
-                return obj.at(key).dump();
-            }
-        } catch (...) {}
-        return "null";
+    static double BBoxArea(const std::array<double, 4>& bbox) {
+        return std::max(0.0, bbox[2] - bbox[0]) * std::max(0.0, bbox[3] - bbox[1]);
     }
 
-    static std::string NormalizeMetric(std::string metric) {
-        std::transform(metric.begin(), metric.end(), metric.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (metric == "ios") return "ios";
+    static std::string NormalizeMetric(std::string metricRaw) {
+        auto trim = [](std::string& s) {
+            while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+            while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+        };
+        trim(metricRaw);
+        std::transform(metricRaw.begin(), metricRaw.end(), metricRaw.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+        if (metricRaw == "ios") return "ios";
         return "iou";
     }
 
@@ -846,33 +880,32 @@ private:
         return v;
     }
 
-    static bool TryExtractBboxXyxy(const Json& det, std::array<double, 4>& outBbox) {
-        if (!det.is_object() || !det.contains("bbox")) return false;
-        const Json& bb = det.at("bbox");
-        if (!bb.is_array() || bb.size() != 4) return false;
-
-        double x1 = 0.0, y1 = 0.0, x2 = 0.0, y2 = 0.0;
-        try {
-            x1 = bb.at(0).get<double>();
-            y1 = bb.at(1).get<double>();
-            x2 = bb.at(2).get<double>();
-            y2 = bb.at(3).get<double>();
-        } catch (...) {
-            return false;
-        }
-
-        if (x2 < x1) std::swap(x1, x2);
-        if (y2 < y1) std::swap(y1, y2);
-        if (x2 <= x1 || y2 <= y1) return false;
-
-        outBbox = {x1, y1, x2, y2};
-        return true;
+    static bool IsOverlapExceeded(const std::array<double, 4>& a,
+                                  const std::array<double, 4>& b,
+                                  double threshold,
+                                  const std::string& metric) {
+        if (metric == "ios") return ComputeIoS(a, b) > threshold;
+        return ComputeIoU(a, b) > threshold;
     }
 
-    static double BBoxArea(const std::array<double, 4>& b) {
-        const double w = std::max(0.0, b[2] - b[0]);
-        const double h = std::max(0.0, b[3] - b[1]);
-        return w * h;
+    static double ComputeIoU(const std::array<double, 4>& a, const std::array<double, 4>& b) {
+        const double inter = IntersectionArea(a, b);
+        if (inter <= 0.0) return 0.0;
+        const double areaA = BBoxArea(a);
+        const double areaB = BBoxArea(b);
+        const double uni = areaA + areaB - inter;
+        if (uni <= 0.0) return 0.0;
+        return inter / uni;
+    }
+
+    static double ComputeIoS(const std::array<double, 4>& a, const std::array<double, 4>& b) {
+        const double inter = IntersectionArea(a, b);
+        if (inter <= 0.0) return 0.0;
+        const double areaA = BBoxArea(a);
+        const double areaB = BBoxArea(b);
+        const double smaller = std::min(areaA, areaB);
+        if (smaller <= 0.0) return 0.0;
+        return inter / smaller;
     }
 
     static double IntersectionArea(const std::array<double, 4>& a, const std::array<double, 4>& b) {
@@ -884,35 +917,8 @@ private:
         const double h = std::max(0.0, y2 - y1);
         return w * h;
     }
-
-    static double IoU(const std::array<double, 4>& a, const std::array<double, 4>& b) {
-        const double inter = IntersectionArea(a, b);
-        if (inter <= 0.0) return 0.0;
-        const double areaA = BBoxArea(a);
-        const double areaB = BBoxArea(b);
-        const double uni = areaA + areaB - inter;
-        if (uni <= 0.0) return 0.0;
-        return inter / uni;
-    }
-
-    static double IoS(const std::array<double, 4>& a, const std::array<double, 4>& b) {
-        const double inter = IntersectionArea(a, b);
-        if (inter <= 0.0) return 0.0;
-        const double areaA = BBoxArea(a);
-        const double areaB = BBoxArea(b);
-        const double smaller = std::min(areaA, areaB);
-        if (smaller <= 0.0) return 0.0;
-        return inter / smaller;
-    }
-
-    static bool IsOverlapExceeded(const std::array<double, 4>& a,
-                                  const std::array<double, 4>& b,
-                                  double threshold,
-                                  const std::string& metric) {
-        if (metric == "ios") return IoS(a, b) > threshold;
-        return IoU(a, b) > threshold;
-    }
 };
+
 
 // 注册
 DLCV_FLOW_REGISTER_MODULE("post_process/merge_results", MergeResultsModule)
