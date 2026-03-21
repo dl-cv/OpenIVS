@@ -38,14 +38,12 @@ namespace dlcv_infer {
         class FlowGraphModel;
     }
 
-#ifdef DLCV_INFER_CPP_DLL_EXPORTS
-    std::wstring convertStringToWstring(const std::string& inputString);
-    std::string convertWstringToString(const std::wstring& inputWstring);
-    std::string convertWstringToUtf8(const std::wstring& inputWstring);
-    std::wstring convertUtf8ToWstring(const std::string& inputUtf8);
-    std::string convertWstringToGbk(const std::wstring& inputWstring);
-    std::wstring convertGbkToWstring(const std::string& inputGbk);
-#endif
+    DLCV_INFER_CPP_DLL_API std::wstring convertStringToWstring(const std::string& inputString);
+    DLCV_INFER_CPP_DLL_API std::string convertWstringToString(const std::wstring& inputWstring);
+    DLCV_INFER_CPP_DLL_API std::string convertWstringToUtf8(const std::wstring& inputWstring);
+    DLCV_INFER_CPP_DLL_API std::wstring convertUtf8ToWstring(const std::string& inputUtf8);
+    DLCV_INFER_CPP_DLL_API std::string convertWstringToGbk(const std::wstring& inputWstring);
+    DLCV_INFER_CPP_DLL_API std::wstring convertGbkToWstring(const std::string& inputGbk);
 
     DLCV_INFER_CPP_DLL_API std::string convertUtf8ToGbk(const std::string& inputUtf8);
     DLCV_INFER_CPP_DLL_API std::string convertGbkToUtf8(const std::string& inputGbk);
