@@ -13,6 +13,7 @@
 #include "dlcv_infer.h"
 
 int main() {
+    std::wcout << L"开始推理" << std::endl;
 
     const std::wstring model_path = LR"(Z:\A251113-微组半导体-IC封装检测\99-模型打包\微组-文字分类_120_50.dvst)";
     const std::wstring img_path = LR"(Z:\A251113-微组半导体-IC封装检测\99-模型打包\Fail1_965_574.tif)";
@@ -32,10 +33,21 @@ int main() {
         const dlcv_infer::Result result = model.Infer(img_rgb);
         for (const auto& sample_result : result.sampleResults) {
             for (const auto& object_result : sample_result.results) {
-                std::wcout << L"类别名称: " << dlcv_infer::convertUtf8ToWstring(object_result.categoryName)
-                           << L"，置信度: " << object_result.score
-                           << L"，检测框: " << object_result.bbox[0] << L", " << object_result.bbox[1] << L", "
-                           << object_result.bbox[2] << L", " << object_result.bbox[3] << std::endl;
+                //std::wcout << L"类别名称: "
+                //           << dlcv_infer::convertUtf8ToWstring(object_result.categoryName) << std::endl;
+                std::wcout << L"置信度: " << object_result.score << std::endl;
+
+                if (object_result.bbox.size() >= 4) {
+                    std::wcout << L"检测框: "
+                               << object_result.bbox[0] << L", "
+                               << object_result.bbox[1] << L", "
+                               << object_result.bbox[2] << L", "
+                               << object_result.bbox[3] << std::endl;
+                } else {
+                    std::wcout << L"检测框: 数据不完整" << std::endl;
+                }
+
+                std::wcout << std::endl;
             }
         }
     } catch (const std::exception& ex) {
