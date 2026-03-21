@@ -1,4 +1,4 @@
-#ifndef NOMINMAX
+﻿#ifndef NOMINMAX
 #define NOMINMAX
 #endif
 
@@ -20,8 +20,8 @@ int main() {
     InitGbkConsole();
     std::cout << "开始推理" << std::endl;
 
-    const std::string model_path = R"(Z:\A251113-微组半导体-IC封装检测\99-模型打包\微组-文字分类_120_50.dvst)";
-    const std::string img_path = R"(Z:\A251113-微组半导体-IC封装检测\99-模型打包\Fail1_965_574.tif)";
+    const std::string model_path = R"(C:\Users\Administrator\Desktop\20260321测试\文字分类_120_50.dvst)";
+    const std::string img_path = R"(C:\Users\Administrator\Desktop\20260321测试\Fail1_965_574.tif)";
 
     try {
         dlcv_infer::Model model(model_path, 0);
