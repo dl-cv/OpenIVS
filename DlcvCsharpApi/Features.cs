@@ -285,6 +285,11 @@ namespace DlcvModules
 
                     var outDet = (JObject)srObj.DeepClone();
                     if (outDet["mask_array"] != null) outDet.Remove("mask_array");
+                    if (outDet["mask_rle"] != null) outDet.Remove("mask_rle");
+                    if (outDet["mask"] != null) outDet.Remove("mask");
+                    if (outDet["polygon"] != null) outDet.Remove("polygon");
+                    if (outDet["poly"] != null) outDet.Remove("poly");
+                    outDet["with_mask"] = false;
                     if (rebuiltWithBbox)
                     {
                         outDet["bbox"] = new JArray(rbx0, rbx1, rbx2, rbx3);
