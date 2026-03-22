@@ -199,6 +199,12 @@ namespace dlcv_infer {
         // 以避免调用侧手动做字符串编码转换导致路径乱码。
         Model(const std::wstring& modelPath, int device_id);
 
+        Model(const Model&) = delete;
+        Model& operator=(const Model&) = delete;
+
+        Model(Model&& other) noexcept;
+        Model& operator=(Model&& other) noexcept;
+
         virtual ~Model();
 
         void FreeModel();

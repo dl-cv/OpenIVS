@@ -227,8 +227,7 @@ void WriteUtf8Text(const std::string& path, const std::string& content) {
     if (!ofs) throw std::runtime_error("failed to write file: " + path);
 }
 
-DvsUnpackResult UnpackDvsArchiveToTemp(const std::string& archivePathGbk) {
-    const std::wstring archivePathW = dlcv_infer::convertGbkToWstring(archivePathGbk);
+DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
     FILE* fp = nullptr;
     if (_wfopen_s(&fp, archivePathW.c_str(), L"rb") != 0 || fp == nullptr) {
         throw std::runtime_error("failed to open dvst file");
@@ -294,6 +293,17 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::string& archivePathGbk) {
 
     std::fclose(fp);
     return out;
+}
+
+std::wstring DecodeModelPathString(const std::string& modelPath) {
+    try {
+        const std::wstring utf8Path = dlcv_infer::convertUtf8ToWstring(modelPath);
+        if (dlcv_infer::convertWstringToUtf8(utf8Path) == modelPath) {
+            return utf8Path;
+        }
+    } catch (...) {
+    }
+    return dlcv_infer::convertGbkToWstring(modelPath);
 }
 
 double ReadJsonNumber(const Json& v, double dv = 0.0) {
@@ -666,13 +676,14 @@ namespace dlcv_infer {
 
     Model::Model(const std::string& modelPath, int device_id)
         : _deviceId(device_id) {
-        const std::string modelPathUtf8 = convertGbkToUtf8(modelPath);
+        const std::wstring modelPathW = DecodeModelPathString(modelPath);
+        const std::string modelPathUtf8 = convertWstringToUtf8(modelPathW);
 
         if (IsFlowArchivePath(modelPathUtf8)) {
             _isFlowGraphMode = true;
             _flowModel = new flow::FlowGraphModel();
             try {
-                DvsUnpackResult unpack = UnpackDvsArchiveToTemp(modelPath);
+                DvsUnpackResult unpack = UnpackDvsArchiveToTemp(modelPathW);
                 TempDirGuard tempGuard(unpack.tempDir);
 
                 const std::string pipelinePath = JoinPath(unpack.tempDir, "pipeline.json");
@@ -715,7 +726,41 @@ namespace dlcv_infer {
     }
 
     Model::Model(const std::wstring& modelPath, int device_id)
-        : Model(convertWstringToGbk(modelPath), device_id) {}
+        : Model(convertWstringToUtf8(modelPath), device_id) {}
+
+    Model::Model(Model&& other) noexcept
+        : modelIndex(other.modelIndex),
+        OwnModelIndex(other.OwnModelIndex),
+        _isFlowGraphMode(other._isFlowGraphMode),
+        _deviceId(other._deviceId),
+        _flowModel(other._flowModel) {
+        other.modelIndex = -1;
+        other.OwnModelIndex = true;
+        other._isFlowGraphMode = false;
+        other._deviceId = 0;
+        other._flowModel = nullptr;
+    }
+
+    Model& Model::operator=(Model&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        try { FreeModel(); } catch (...) {}
+
+        modelIndex = other.modelIndex;
+        OwnModelIndex = other.OwnModelIndex;
+        _isFlowGraphMode = other._isFlowGraphMode;
+        _deviceId = other._deviceId;
+        _flowModel = other._flowModel;
+
+        other.modelIndex = -1;
+        other.OwnModelIndex = true;
+        other._isFlowGraphMode = false;
+        other._deviceId = 0;
+        other._flowModel = nullptr;
+        return *this;
+    }
 
     Model::~Model() {
         try { FreeModel(); } catch (...) {}
