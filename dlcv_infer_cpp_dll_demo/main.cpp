@@ -19,6 +19,7 @@ void InitGbkConsole() {
 int main() {
     InitGbkConsole();
     std::cout << "开始推理" << std::endl;
+    dlcv_infer::Utils::KeepMaxClock();
 
     const std::string model_path = R"(C:\Users\Administrator\Desktop\测试模型\气球检测_20250407_223101_120_50.dvt)";
     const std::string img_path = R"(C:\Users\Administrator\Desktop\测试模型\balloon.jpg)";
@@ -28,8 +29,7 @@ int main() {
 
         cv::Mat img = cv::imread(img_path, cv::IMREAD_COLOR);
         if (img.empty()) {
-            std::cerr << "读取图片失败: " << img_path << std::endl;
-            return 1;
+            throw std::runtime_error("读取图片失败: " + img_path);
         }
 
         cv::Mat img_rgb;
@@ -65,8 +65,8 @@ int main() {
         }
     } catch (const std::exception& ex) {
         std::cerr << "推理失败: " << ex.what() << std::endl;
-        return 1;
     }
 
+    dlcv_infer::Utils::FreeAllModels();
     return 0;
 }

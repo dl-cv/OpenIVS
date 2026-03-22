@@ -1,4 +1,4 @@
-#include "MainWindow.h"
+﻿#include "MainWindow.h"
 
 #include <cmath>
 #include <chrono>
@@ -242,6 +242,7 @@ void MainWindow::initializeDevicesAsync() {
 
         std::vector<GpuDeviceItem> gpuDevices;
         QString warning;
+        dlcv_infer::Utils::KeepMaxClock();
         try
         {
             const json gpuInfo = dlcv_infer::Utils::GetGpuInfo();
