@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <string>
 
@@ -7,4 +7,4 @@
 extern dlcv_infer::Model global_model;
 
 void LoadGlobalModel(const std::string& model_path, int device_id);
-void InferWithGlobalModel(const std::string& img_path);
+void InferTest(const std::string& img_path);

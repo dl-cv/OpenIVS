@@ -1,4 +1,4 @@
-#ifndef NOMINMAX
+﻿#ifndef NOMINMAX
 #define NOMINMAX
 #endif
 
@@ -24,7 +24,7 @@ int main() {
 
     try {
         LoadGlobalModel(model_path, 0);
-        InferWithGlobalModel(img_path);
+        InferTest(img_path);
     } catch (const std::exception& ex) {
         if (std::string(ex.what()) == img_path) {
             std::cerr << "读取图片失败: " << img_path << std::endl;
