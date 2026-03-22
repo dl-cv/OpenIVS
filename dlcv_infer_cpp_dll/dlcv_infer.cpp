@@ -657,6 +657,7 @@ namespace dlcv_infer {
         dlcv_free_result = (FreeResultFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_result");
         dlcv_free_all_models = (FreeAllModelsFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_all_models");
         dlcv_get_device_info = (GetDeviceInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_device_info");
+        dlcv_keep_max_clock = (KeepMaxClockFuncType)GetProcAddress((HMODULE)hModule, "dlcv_keep_max_clock");
 #else
         // Linux下的DLL加载实现
         // ...
@@ -1162,6 +1163,13 @@ namespace dlcv_infer {
         json resultObject = json::parse(resultJson);
         DllLoader::Instance().GetFreeResultFunc()(resultPtr);
         return resultObject;
+    }
+
+    void Utils::KeepMaxClock() {
+        auto func = DllLoader::Instance().GetKeepMaxClockFunc();
+        if (func != nullptr) {
+            func();
+        }
     }
 
     // OCR推理方法

@@ -77,6 +77,7 @@ namespace dlcv_infer {
     typedef void (*FreeResultFuncType)(void* result_ptr);
     typedef void (*FreeAllModelsFuncType)();
     typedef void* (*GetDeviceInfoFuncType)();
+    typedef void* (*KeepMaxClockFuncType)();
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS
     // DLL 加载器（内部使用）
@@ -98,6 +99,7 @@ namespace dlcv_infer {
         FreeResultFuncType dlcv_free_result = nullptr;
         FreeAllModelsFuncType dlcv_free_all_models = nullptr;
         GetDeviceInfoFuncType dlcv_get_device_info = nullptr;
+        KeepMaxClockFuncType dlcv_keep_max_clock = nullptr;
 
         // 加载 DLL
         void LoadDll();
@@ -134,6 +136,9 @@ namespace dlcv_infer {
         }
         GetDeviceInfoFuncType GetDeviceInfoFunc() const {
             return dlcv_get_device_info;
+        }
+        KeepMaxClockFuncType GetKeepMaxClockFunc() const {
+            return dlcv_keep_max_clock;
         }
     };
 #endif
@@ -260,6 +265,7 @@ namespace dlcv_infer {
 
         // 获取 GPU 信息
         static json GetGpuInfo();
+        static void KeepMaxClock();
 
         // NVML API 封装
         static int nvmlInit();
