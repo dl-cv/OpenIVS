@@ -20,8 +20,8 @@ int main() {
     InitGbkConsole();
     std::cout << "开始推理" << std::endl;
 
-    const std::string model_path = R"(C:\Users\Administrator\Desktop\20260321测试\文字分类_120_50.dvst)";
-    const std::string img_path = R"(C:\Users\Administrator\Desktop\20260321测试\Fail1_965_574.tif)";
+    const std::string model_path = R"(C:\Users\Administrator\Desktop\测试模型\气球检测_20250407_223101_120_50.dvt)";
+    const std::string img_path = R"(C:\Users\Administrator\Desktop\测试模型\balloon.jpg)";
 
     try {
         dlcv_infer::Model model(model_path, 0);
@@ -35,7 +35,9 @@ int main() {
         cv::Mat img_rgb;
         cv::cvtColor(img, img_rgb, cv::COLOR_BGR2RGB);
 
-        const dlcv_infer::Result result = model.Infer(img_rgb);
+        dlcv_infer::json infer_params;
+        infer_params["with_mask"] = true;
+        const dlcv_infer::Result result = model.Infer(img_rgb, infer_params);
         for (const auto& sample_result : result.sampleResults) {
             for (const auto& object_result : sample_result.results) {
                 std::cout << "类别名称: " << object_result.categoryName << std::endl;
@@ -49,6 +51,13 @@ int main() {
                               << object_result.bbox[3] << std::endl;
                 } else {
                     std::cout << "检测框: 数据不完整" << std::endl;
+                }
+                if (object_result.withMask && !object_result.mask.empty()) {
+                    std::cout << "Mask尺寸: "
+                              << object_result.mask.cols << " x "
+                              << object_result.mask.rows << std::endl;
+                } else {
+                    std::cout << "Mask尺寸: 无" << std::endl;
                 }
 
                 std::cout << std::endl;
