@@ -265,6 +265,10 @@ public:
                 cv::Mat cropped;
                 std::vector<double> childA2x3;
                 int cw = 0, ch = 0;
+                double rbx0 = 0.0, rbx1 = 0.0, rbx2 = 0.0, rbx3 = 0.0;
+                double rebuiltAngle = -100.0;
+                bool rebuiltWithAngle = false;
+                bool rebuiltWithBbox = false;
 
                 if (withAngle && angle > -99.0) {
                     // rotated crop: bbox=[cx,cy,w,h], angle(rad)
@@ -289,6 +293,45 @@ public:
                         rotMat.at<double>(0,0), rotMat.at<double>(0,1), rotMat.at<double>(0,2),
                         rotMat.at<double>(1,0), rotMat.at<double>(1,1), rotMat.at<double>(1,2)
                     };
+
+                    // 重建旋转框：把原始旋转框四点映射到裁剪坐标后重新拟合
+                    try {
+                        const double hw = std::max(0.5, w / 2.0);
+                        const double hh = std::max(0.5, h / 2.0);
+                        const double c = std::cos(angle);
+                        const double s = std::sin(angle);
+                        const double offs[4][2] = {
+                            { -hw, -hh },
+                            {  hw, -hh },
+                            {  hw,  hh },
+                            { -hw,  hh }
+                        };
+                        std::vector<cv::Point2f> ptsNew;
+                        ptsNew.reserve(4);
+                        for (int pi = 0; pi < 4; pi++) {
+                            const double dx = offs[pi][0];
+                            const double dy = offs[pi][1];
+                            const double ox = cx + c * dx - s * dy;
+                            const double oy = cy + s * dx + c * dy;
+                            ptsNew.push_back(Apply2x3(childA2x3, cv::Point2f(static_cast<float>(ox), static_cast<float>(oy))));
+                        }
+
+                        const cv::RotatedRect rr = cv::minAreaRect(ptsNew);
+                        rbx0 = rr.center.x;
+                        rbx1 = rr.center.y;
+                        rbx2 = std::max(1.0, std::abs(static_cast<double>(rr.size.width)));
+                        rbx3 = std::max(1.0, std::abs(static_cast<double>(rr.size.height)));
+                        rebuiltAngle = static_cast<double>(rr.angle) * kPi / 180.0;
+                    } catch (...) {
+                        // 兜底：避免旋转框拟合失败时丢失结果
+                        rbx0 = w2 / 2.0;
+                        rbx1 = h2 / 2.0;
+                        rbx2 = std::max(1.0, w);
+                        rbx3 = std::max(1.0, h);
+                        rebuiltAngle = angle;
+                    }
+                    rebuiltWithBbox = true;
+                    rebuiltWithAngle = true;
                 } else {
                     // axis-aligned crop: bbox=[x,y,w,h]
                     const double x = bbox.at(0).get<double>();
@@ -323,6 +366,15 @@ public:
                     const cv::Rect rect(nx1, ny1, cw, ch);
                     cropped = src(rect).clone();
                     childA2x3 = { 1,0,-static_cast<double>(nx1), 0,1,-static_cast<double>(ny1) };
+
+                    // 普通框保持 xywh 语义，写回裁剪图局部坐标
+                    rbx0 = x - nx1;
+                    rbx1 = y - ny1;
+                    rbx2 = bw;
+                    rbx3 = bh;
+                    rebuiltAngle = -100.0;
+                    rebuiltWithBbox = true;
+                    rebuiltWithAngle = false;
                 }
 
                 if (cropped.empty()) continue;
@@ -337,12 +389,33 @@ public:
                                       parentWrap.OriginalIndex);
                 imagesOut.push_back(childWrap);
 
+                Json outDet = sr;
+                outDet.erase("mask_array");
+                outDet.erase("mask_rle");
+                outDet.erase("mask");
+                outDet.erase("polygon");
+                outDet.erase("poly");
+                outDet["with_mask"] = false;
+                if (rebuiltWithBbox) {
+                    if (rebuiltWithAngle) {
+                        outDet["bbox"] = Json::array({ rbx0, rbx1, rbx2, rbx3, rebuiltAngle });
+                    } else {
+                        outDet["bbox"] = Json::array({ rbx0, rbx1, rbx2, rbx3 });
+                    }
+                }
+                outDet["with_bbox"] = rebuiltWithBbox;
+                outDet["with_angle"] = rebuiltWithAngle;
+                outDet["angle"] = rebuiltWithAngle ? rebuiltAngle : -100.0;
+
                 Json outEntry = Json::object();
                 outEntry["type"] = "local";
+                outEntry["originating_module"] = "features/image_generation";
                 outEntry["index"] = outIndex;
                 outEntry["origin_index"] = parentWrap.OriginalIndex;
                 outEntry["transform"] = childState.ToJson();
-                outEntry["sample_results"] = Json::array();
+                Json outSampleResults = Json::array();
+                outSampleResults.push_back(outDet);
+                outEntry["sample_results"] = outSampleResults;
                 resultsOut.push_back(outEntry);
                 outIndex += 1;
             }
