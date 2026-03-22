@@ -103,17 +103,21 @@ namespace DlcvModules
 
                 foreach (var sr in sampleResults)
                 {
-                    if (sr == null) continue;
+                    if (!(sr is JObject srObj)) continue;
                     // 每个 sr 应为一个对象结果，可能含 bbox、with_angle/angle、with_bbox
-                    var bbox = sr["bbox"] as JArray;
-                    bool withAngle = sr["with_angle"]?.Value<bool>() ?? false;
-                    double angle = sr["angle"]?.Value<double?>() ?? -100.0;
-                    bool withBbox = sr["with_bbox"]?.Value<bool?>() ?? (bbox != null && bbox.Count > 0);
+                    var bbox = srObj["bbox"] as JArray;
+                    bool withAngle = srObj["with_angle"]?.Value<bool>() ?? false;
+                    double angle = srObj["angle"]?.Value<double?>() ?? -100.0;
+                    bool withBbox = srObj["with_bbox"]?.Value<bool?>() ?? (bbox != null && bbox.Count > 0);
                     if (!withBbox || bbox == null || bbox.Count < 4) continue;
 
                     Mat cropped = null;
                     double[] childA2x3 = null;
                     int cw, ch;
+                    double rbx0 = 0.0, rbx1 = 0.0, rbx2 = 0.0, rbx3 = 0.0;
+                    double rebuiltAngle = -100.0;
+                    bool rebuiltWithAngle = false;
+                    bool rebuiltWithBbox = false;
 
                     if (withAngle && angle != -100.0)
                     {
@@ -145,6 +149,52 @@ namespace DlcvModules
                             rotMat.Get<double>(0, 0), rotMat.Get<double>(0, 1), rotMat.Get<double>(0, 2),
                             rotMat.Get<double>(1, 0), rotMat.Get<double>(1, 1), rotMat.Get<double>(1, 2),
                         };
+
+                        // 旋转框重建：将原框4点映射到裁剪图坐标系后重拟合最小外接旋转框
+                        try
+                        {
+                            var ptsNew = new Point2f[4];
+                            double hw = Math.Max(0.5, w / 2.0);
+                            double hh = Math.Max(0.5, h / 2.0);
+                            double c = Math.Cos(angle);
+                            double s = Math.Sin(angle);
+                            double[,] offs = new double[,]
+                            {
+                                { -hw, -hh },
+                                { hw, -hh },
+                                { hw, hh },
+                                { -hw, hh }
+                            };
+                            for (int pi = 0; pi < 4; pi++)
+                            {
+                                double dx = offs[pi, 0];
+                                double dy = offs[pi, 1];
+                                double ox = cx + c * dx - s * dy;
+                                double oy = cy + s * dx + c * dy;
+                                double nx = rotMat.Get<double>(0, 0) * ox + rotMat.Get<double>(0, 1) * oy + rotMat.Get<double>(0, 2);
+                                double ny = rotMat.Get<double>(1, 0) * ox + rotMat.Get<double>(1, 1) * oy + rotMat.Get<double>(1, 2);
+                                ptsNew[pi] = new Point2f((float)nx, (float)ny);
+                            }
+
+                            var rr = Cv2.MinAreaRect(ptsNew);
+                            rbx0 = rr.Center.X;
+                            rbx1 = rr.Center.Y;
+                            rbx2 = Math.Max(1.0, Math.Abs(rr.Size.Width));
+                            rbx3 = Math.Max(1.0, Math.Abs(rr.Size.Height));
+                            rebuiltAngle = rr.Angle * Math.PI / 180.0;
+                        }
+                        catch
+                        {
+                            // 与 Python 一致的兜底：退回裁剪中心 + 原宽高
+                            rbx0 = w2 / 2.0;
+                            rbx1 = h2 / 2.0;
+                            rbx2 = Math.Max(1.0, w);
+                            rbx3 = Math.Max(1.0, h);
+                            rebuiltAngle = angle;
+                        }
+
+                        rebuiltWithBbox = true;
+                        rebuiltWithAngle = true;
                     }
                     else
                     {
@@ -208,6 +258,15 @@ namespace DlcvModules
                         ch = rect.Height;
                         // 平移到左上角（与 Python 的 translation_mat 一致）
                         childA2x3 = new double[] { 1, 0, -nx1, 0, 1, -ny1 };
+
+                        // 普通框重建：保持 C# xywh 语义，回写裁剪图局部坐标
+                        rbx0 = x - nx1;
+                        rbx1 = y - ny1;
+                        rbx2 = bw;
+                        rbx3 = bh;
+                        rebuiltAngle = -100.0;
+                        rebuiltWithBbox = true;
+                        rebuiltWithAngle = false;
                     }
 
                     if (cropped == null) continue;
@@ -224,13 +283,29 @@ namespace DlcvModules
                     var childWrap = new ModuleImage(cropped, parentWrap != null ? parentWrap.OriginalImage : tup.Item2, childState, parentWrap != null ? parentWrap.OriginalIndex : originIndex);
                     imagesOut.Add(childWrap);
 
+                    var outDet = (JObject)srObj.DeepClone();
+                    if (outDet["mask_array"] != null) outDet.Remove("mask_array");
+                    if (outDet["mask_rle"] != null) outDet.Remove("mask_rle");
+                    if (outDet["mask"] != null) outDet.Remove("mask");
+                    if (outDet["polygon"] != null) outDet.Remove("polygon");
+                    if (outDet["poly"] != null) outDet.Remove("poly");
+                    outDet["with_mask"] = false;
+                    if (rebuiltWithBbox)
+                    {
+                        outDet["bbox"] = new JArray(rbx0, rbx1, rbx2, rbx3);
+                    }
+                    outDet["with_bbox"] = rebuiltWithBbox;
+                    outDet["with_angle"] = rebuiltWithAngle;
+                    outDet["angle"] = rebuiltWithAngle ? rebuiltAngle : -100.0;
+
                     var outEntry = new JObject
                     {
                         ["type"] = "local",
+                        ["originating_module"] = "features/image_generation",
                         ["index"] = outIndex,
                         ["origin_index"] = parentWrap != null ? parentWrap.OriginalIndex : originIndex,
                         ["transform"] = JObject.FromObject(childState.ToDict()),
-                        ["sample_results"] = new JArray()
+                        ["sample_results"] = new JArray(outDet)
                     };
                     resultsOut.Add(outEntry);
                     outIndex += 1;
