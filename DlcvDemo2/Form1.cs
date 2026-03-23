@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
@@ -32,6 +33,8 @@ namespace DlcvDemo2
         private Model model1;
         private Model model2;
         private string imagePath;
+        private bool isInferenceRunning;
+        private bool isSpeedTesting;
 
         private sealed class Model1Detection
         {
@@ -72,6 +75,36 @@ namespace DlcvDemo2
             public List<string> Logs { get; } = new List<string>();
         }
 
+        private sealed class SlidingWindowConfig
+        {
+            public int WindowWidth { get; set; }
+            public int WindowHeight { get; set; }
+            public int OverlapX { get; set; }
+            public int OverlapY { get; set; }
+        }
+
+        private sealed class InferenceProgressInfo
+        {
+            public int Percent { get; set; }
+            public string Stage { get; set; }
+        }
+
+        private sealed class InferenceExecutionResult : IDisposable
+        {
+            public Mat ImageBgr { get; set; }
+            public PipelineRunResult RunResult { get; set; }
+            public double ElapsedMs { get; set; }
+
+            public void Dispose()
+            {
+                if (ImageBgr != null)
+                {
+                    ImageBgr.Dispose();
+                    ImageBgr = null;
+                }
+            }
+        }
+
         public Form1()
         {
             InitializeComponent();
@@ -81,10 +114,19 @@ namespace DlcvDemo2
         {
             RestoreUiSettings();
             TopMost = false;
+            SetInferenceProgress(0, "空闲");
+            UpdateBusyControlState();
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
+            if (isInferenceRunning || isSpeedTesting)
+            {
+                MessageBox.Show("当前正在执行推理或测速，请等待完成后再关闭。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                e.Cancel = true;
+                return;
+            }
+
             SaveUiSettings();
             ReleaseModels();
             Utils.FreeAllModels();
@@ -92,25 +134,59 @@ namespace DlcvDemo2
 
         private void btnBrowseModel1_Click(object sender, EventArgs e)
         {
+            if (!TryEnsureIdle("当前正在执行推理或测速，暂不能切换模型1。"))
+            {
+                return;
+            }
+
             var selected = BrowseFile("选择模型1", ModelFileFilter, txtModel1Path.Text);
             if (!string.IsNullOrWhiteSpace(selected))
             {
                 txtModel1Path.Text = selected;
                 SaveUiSettings();
+
+                try
+                {
+                    if (LoadModel1())
+                    {
+                        richTextBox1.Text = $"模型1加载成功:\n{txtModel1Path.Text.Trim()}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    richTextBox1.Text = $"模型1加载失败:\n{ex.Message}";
+                }
             }
         }
 
         private void btnBrowseModel2_Click(object sender, EventArgs e)
         {
+            if (!TryEnsureIdle("当前正在执行推理或测速，暂不能切换模型2。"))
+            {
+                return;
+            }
+
             var selected = BrowseFile("选择模型2", ModelFileFilter, txtModel2Path.Text);
             if (!string.IsNullOrWhiteSpace(selected))
             {
                 txtModel2Path.Text = selected;
                 SaveUiSettings();
+
+                try
+                {
+                    if (LoadModel2())
+                    {
+                        richTextBox1.Text = $"模型2加载成功:\n{txtModel2Path.Text.Trim()}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    richTextBox1.Text = $"模型2加载失败:\n{ex.Message}";
+                }
             }
         }
 
-        private void btnBrowseImage_Click(object sender, EventArgs e)
+        private async void btnBrowseImage_Click(object sender, EventArgs e)
         {
             var selected = BrowseFile(
                 "选择图片文件",
@@ -121,77 +197,30 @@ namespace DlcvDemo2
                 txtImagePath.Text = selected;
                 imagePath = selected;
                 SaveUiSettings();
+                await StartInferenceAsync(triggeredByImageSelection: true);
             }
         }
 
-        private void btnLoadModel1_Click(object sender, EventArgs e)
+        private async void btnInfer_Click(object sender, EventArgs e)
         {
-            try
-            {
-                if (LoadModel1())
-                {
-                    richTextBox1.Text = $"模型1加载成功:\n{txtModel1Path.Text.Trim()}";
-                }
-            }
-            catch (Exception ex)
-            {
-                richTextBox1.Text = $"模型1加载失败:\n{ex.Message}";
-            }
-        }
-
-        private void btnLoadModel2_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                if (LoadModel2())
-                {
-                    richTextBox1.Text = $"模型2加载成功:\n{txtModel2Path.Text.Trim()}";
-                }
-            }
-            catch (Exception ex)
-            {
-                richTextBox1.Text = $"模型2加载失败:\n{ex.Message}";
-            }
-        }
-
-        private void btnInfer_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                SaveUiSettings();
-                if (!EnsureReadyForPipeline(showMessage: true))
-                {
-                    return;
-                }
-
-                Mat imageBgr;
-                Mat imageRgb;
-                string error;
-                if (!TryLoadImageForInfer(imagePath, out imageBgr, out imageRgb, out error))
-                {
-                    richTextBox1.Text = error;
-                    return;
-                }
-
-                using (imageBgr)
-                using (imageRgb)
-                {
-                    var sw = Stopwatch.StartNew();
-                    PipelineRunResult runResult = RunFixedPipeline(imageRgb);
-                    sw.Stop();
-
-                    imagePanel1.UpdateImageAndResult(imageBgr, runResult.DisplayResult);
-                    richTextBox1.Text = BuildInferenceText(runResult, sw.Elapsed.TotalMilliseconds);
-                }
-            }
-            catch (Exception ex)
-            {
-                richTextBox1.Text = $"执行推理失败:\n{ex}";
-            }
+            await StartInferenceAsync(triggeredByImageSelection: false);
         }
 
         private void btnSpeedTest_Click(object sender, EventArgs e)
         {
+            if (isInferenceRunning)
+            {
+                richTextBox1.Text = "当前正在执行推理，请稍后再测速。";
+                return;
+            }
+            if (isSpeedTesting)
+            {
+                richTextBox1.Text = "当前正在执行测速，请稍后再试。";
+                return;
+            }
+
+            isSpeedTesting = true;
+            UpdateBusyControlState();
             try
             {
                 SaveUiSettings();
@@ -207,6 +236,7 @@ namespace DlcvDemo2
                     return;
                 }
 
+                SlidingWindowConfig config = CaptureSlidingWindowConfig();
                 Mat imageBgr;
                 Mat imageRgb;
                 string error;
@@ -225,7 +255,7 @@ namespace DlcvDemo2
                     for (int i = 0; i < rounds; i++)
                     {
                         var sw = Stopwatch.StartNew();
-                        lastResult = RunFixedPipeline(imageRgb);
+                        lastResult = RunFixedPipeline(imageRgb, config);
                         sw.Stop();
                         costs.Add(sw.Elapsed.TotalMilliseconds);
                     }
@@ -237,12 +267,118 @@ namespace DlcvDemo2
             {
                 richTextBox1.Text = $"测速失败:\n{ex}";
             }
+            finally
+            {
+                isSpeedTesting = false;
+                UpdateBusyControlState();
+            }
         }
 
         private void btnReleaseModels_Click(object sender, EventArgs e)
         {
+            if (!TryEnsureIdle("当前正在执行推理或测速，暂不能释放模型。"))
+            {
+                return;
+            }
+
             ReleaseModels();
             richTextBox1.Text = "模型已释放";
+        }
+
+        private async Task StartInferenceAsync(bool triggeredByImageSelection)
+        {
+            if (isInferenceRunning)
+            {
+                richTextBox1.Text = triggeredByImageSelection
+                    ? "当前正在执行推理，已忽略本次自动推理请求。"
+                    : "当前正在执行推理，请稍后再试。";
+                return;
+            }
+            if (isSpeedTesting)
+            {
+                richTextBox1.Text = triggeredByImageSelection
+                    ? "当前正在执行测速，已忽略本次自动推理请求。"
+                    : "当前正在执行测速，请稍后再试。";
+                return;
+            }
+
+            try
+            {
+                SaveUiSettings();
+                if (!EnsureReadyForPipeline(showMessage: true))
+                {
+                    return;
+                }
+
+                string inferImagePath = imagePath;
+                SlidingWindowConfig config = CaptureSlidingWindowConfig();
+
+                isInferenceRunning = true;
+                UpdateBusyControlState();
+                SetInferenceProgress(0, "准备推理");
+
+                var progress = new Progress<InferenceProgressInfo>(UpdateInferenceProgress);
+                using (InferenceExecutionResult result = await Task.Run(() => RunInferenceCore(inferImagePath, config, progress)))
+                {
+                    imagePanel1.UpdateImageAndResult(result.ImageBgr, result.RunResult.DisplayResult);
+                    richTextBox1.Text = BuildInferenceText(result.RunResult, result.ElapsedMs);
+                }
+
+                SetInferenceProgress(100, "完成");
+            }
+            catch (Exception ex)
+            {
+                richTextBox1.Text = $"执行推理失败:\n{ex}";
+                SetInferenceProgress(0, "空闲");
+            }
+            finally
+            {
+                isInferenceRunning = false;
+                UpdateBusyControlState();
+            }
+        }
+
+        private InferenceExecutionResult RunInferenceCore(string inferImagePath, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress)
+        {
+            Mat imageBgr = null;
+            Mat imageRgb = null;
+            try
+            {
+                ReportInferenceProgress(progress, 2, "读取图片");
+
+                string error;
+                if (!TryLoadImageForInfer(inferImagePath, out imageBgr, out imageRgb, out error))
+                {
+                    throw new InvalidOperationException(error);
+                }
+
+                var sw = Stopwatch.StartNew();
+                PipelineRunResult runResult = RunFixedPipeline(imageRgb, config, progress);
+                sw.Stop();
+
+                return new InferenceExecutionResult
+                {
+                    ImageBgr = imageBgr,
+                    RunResult = runResult,
+                    ElapsedMs = sw.Elapsed.TotalMilliseconds
+                };
+            }
+            catch
+            {
+                if (imageBgr != null)
+                {
+                    imageBgr.Dispose();
+                    imageBgr = null;
+                }
+                throw;
+            }
+            finally
+            {
+                if (imageRgb != null)
+                {
+                    imageRgb.Dispose();
+                }
+            }
         }
 
         private bool LoadModel1()
@@ -275,19 +411,27 @@ namespace DlcvDemo2
             return true;
         }
 
-        private PipelineRunResult RunFixedPipeline(Mat fullImageRgb)
+        private PipelineRunResult RunFixedPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null)
         {
             var runResult = new PipelineRunResult();
 
-            List<Rect> windows = BuildSlidingWindows(fullImageRgb);
+            ReportInferenceProgress(progress, 8, "生成滑窗");
+            List<Rect> windows = BuildSlidingWindows(fullImageRgb, config);
             runResult.SlidingWindowCount = windows.Count;
 
-            List<Model1Detection> model1Detections = InferModel1OnWindows(fullImageRgb, windows);
+            ReportInferenceProgress(progress, 12, $"模型1滑窗推理 0/{windows.Count}");
+            List<Model1Detection> model1Detections = InferModel1OnWindows(fullImageRgb, windows, progress);
+            ReportInferenceProgress(progress, 62, "合并模型1结果");
             List<Model1Detection> mergedModel1 = MergeModel1Results(model1Detections);
             runResult.MergedModel1Count = mergedModel1.Count;
 
+            int roiTotal = mergedModel1.Count;
+            int roiCompleted = 0;
             foreach (var target in mergedModel1)
             {
+                int startPercent = 70 + (int)Math.Round(25.0 * roiCompleted / Math.Max(1, roiTotal));
+                ReportInferenceProgress(progress, startPercent, $"模型2推理 {roiCompleted}/{roiTotal}");
+
                 ParsedCategoryAngle parsed = ParseCategoryAndAngle(target.ObjectResult.CategoryName);
                 using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, parsed))
                 {
@@ -308,18 +452,24 @@ namespace DlcvDemo2
                         runResult.FinalObjects.Add(target.ObjectResult);
                     }
                 }
+
+                roiCompleted++;
+                int finishPercent = 70 + (int)Math.Round(25.0 * roiCompleted / Math.Max(1, roiTotal));
+                ReportInferenceProgress(progress, finishPercent, $"模型2推理 {roiCompleted}/{roiTotal}");
             }
 
+            ReportInferenceProgress(progress, 95, "整理结果");
             runResult.DisplayResult = BuildDisplayResult(runResult.FinalObjects);
+            ReportInferenceProgress(progress, 100, "推理完成");
             return runResult;
         }
 
-        private List<Rect> BuildSlidingWindows(Mat image)
+        private static List<Rect> BuildSlidingWindows(Mat image, SlidingWindowConfig config)
         {
-            int configuredW = (int)numWindowWidth.Value;
-            int configuredH = (int)numWindowHeight.Value;
-            int overlapX = (int)numOverlapX.Value;
-            int overlapY = (int)numOverlapY.Value;
+            int configuredW = config != null ? config.WindowWidth : image.Width;
+            int configuredH = config != null ? config.WindowHeight : image.Height;
+            int overlapX = config != null ? config.OverlapX : 0;
+            int overlapY = config != null ? config.OverlapY : 0;
 
             int windowW = Math.Min(Math.Max(1, configuredW), Math.Max(1, image.Width));
             int windowH = Math.Min(Math.Max(1, configuredH), Math.Max(1, image.Height));
@@ -338,7 +488,7 @@ namespace DlcvDemo2
             return windows;
         }
 
-        private List<Model1Detection> InferModel1OnWindows(Mat fullImageRgb, List<Rect> windows)
+        private List<Model1Detection> InferModel1OnWindows(Mat fullImageRgb, List<Rect> windows, IProgress<InferenceProgressInfo> progress)
         {
             var output = new List<Model1Detection>();
             int order = 0;
@@ -347,8 +497,17 @@ namespace DlcvDemo2
                 ["with_mask"] = false
             };
 
-            foreach (var window in windows)
+            int totalWindows = windows != null ? windows.Count : 0;
+            if (totalWindows == 0)
             {
+                ReportInferenceProgress(progress, 60, "模型1滑窗推理 0/0");
+                return output;
+            }
+
+            int lastPercent = -1;
+            for (int i = 0; i < totalWindows; i++)
+            {
+                Rect window = windows[i];
                 using (var tile = new Mat(fullImageRgb, window).Clone())
                 {
                     CSharpResult tileResult = model1.Infer(tile, inferParams);
@@ -373,6 +532,13 @@ namespace DlcvDemo2
                             Order = order++
                         });
                     }
+                }
+
+                int percent = 15 + (int)Math.Round(45.0 * (i + 1) / totalWindows);
+                if (percent != lastPercent)
+                {
+                    ReportInferenceProgress(progress, percent, $"模型1滑窗推理 {i + 1}/{totalWindows}");
+                    lastPercent = percent;
                 }
             }
 
@@ -1247,6 +1413,97 @@ namespace DlcvDemo2
             return string.Format(
                 "rect=({0:F1}, {1:F1}, {2:F1}, {3:F1})",
                 obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3]);
+        }
+
+        private SlidingWindowConfig CaptureSlidingWindowConfig()
+        {
+            return new SlidingWindowConfig
+            {
+                WindowWidth = (int)numWindowWidth.Value,
+                WindowHeight = (int)numWindowHeight.Value,
+                OverlapX = (int)numOverlapX.Value,
+                OverlapY = (int)numOverlapY.Value
+            };
+        }
+
+        private bool TryEnsureIdle(string busyMessage)
+        {
+            if (isInferenceRunning || isSpeedTesting)
+            {
+                richTextBox1.Text = busyMessage;
+                return false;
+            }
+            return true;
+        }
+
+        private void UpdateBusyControlState()
+        {
+            bool isBusy = isInferenceRunning || isSpeedTesting;
+            btnBrowseModel1.Enabled = !isBusy;
+            btnBrowseModel2.Enabled = !isBusy;
+            btnBrowseImage.Enabled = !isBusy;
+            btnInfer.Enabled = !isBusy;
+            btnSpeedTest.Enabled = !isBusy;
+            btnReleaseModels.Enabled = !isBusy;
+
+            txtModel1Path.Enabled = !isBusy;
+            txtModel2Path.Enabled = !isBusy;
+            txtImagePath.Enabled = !isBusy;
+            numWindowWidth.Enabled = !isBusy;
+            numWindowHeight.Enabled = !isBusy;
+            numOverlapX.Enabled = !isBusy;
+            numOverlapY.Enabled = !isBusy;
+            numSpeedRounds.Enabled = !isBusy;
+        }
+
+        private void UpdateInferenceProgress(InferenceProgressInfo info)
+        {
+            if (info == null)
+            {
+                return;
+            }
+
+            int percent = ClampProgressPercent(info.Percent);
+            progressBarInference.Value = percent;
+            lblInferenceProgress.Text = string.IsNullOrWhiteSpace(info.Stage)
+                ? $"{percent}%"
+                : $"{percent}% {info.Stage}";
+        }
+
+        private void SetInferenceProgress(int percent, string stage)
+        {
+            UpdateInferenceProgress(new InferenceProgressInfo
+            {
+                Percent = percent,
+                Stage = stage ?? string.Empty
+            });
+        }
+
+        private static void ReportInferenceProgress(IProgress<InferenceProgressInfo> progress, int percent, string stage)
+        {
+            if (progress == null)
+            {
+                return;
+            }
+
+            progress.Report(new InferenceProgressInfo
+            {
+                Percent = ClampProgressPercent(percent),
+                Stage = stage ?? string.Empty
+            });
+        }
+
+        private static int ClampProgressPercent(int percent)
+        {
+            if (percent < 0)
+            {
+                return 0;
+            }
+            if (percent > 100)
+            {
+                return 100;
+            }
+            return percent;
         }
 
         private bool EnsureReadyForPipeline(bool showMessage)
