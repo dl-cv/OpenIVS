@@ -101,19 +101,10 @@ namespace DLCV
                 if (_image != null)
                 {
                     e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-                    e.Graphics.PageUnit = GraphicsUnit.Pixel;
 
                     e.Graphics.TranslateTransform(_imagePosition.X, _imagePosition.Y);
                     e.Graphics.ScaleTransform(_scale, _scale);
-                    e.Graphics.DrawImage(
-                        _image,
-                        new Rectangle(0, 0, _image.Width, _image.Height),
-                        0,
-                        0,
-                        _image.Width,
-                        _image.Height,
-                        GraphicsUnit.Pixel
-                    );
+                    e.Graphics.DrawImage(_image, 0, 0, _image.Width, _image.Height);
                 }
             }
 

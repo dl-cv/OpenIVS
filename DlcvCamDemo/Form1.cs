@@ -613,9 +613,8 @@ namespace DlcvCamDemo
                 {
                     try
                     {
-                        using (FileStream fs = new FileStream(openFileDialog.FileName, FileMode.Open, FileAccess.Read))
+                        using (Bitmap bitmap = LoadImageForViewer(openFileDialog.FileName))
                         {
-                            Bitmap bitmap = new Bitmap(fs);
                             OnImageUpdated(bitmap, openFileDialog.FileName);
                         }
 
@@ -634,6 +633,31 @@ namespace DlcvCamDemo
                                        MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
+            }
+        }
+
+        private Bitmap LoadImageForViewer(string filePath)
+        {
+            string ext = Path.GetExtension(filePath)?.ToLowerInvariant();
+            if (ext == ".bmp")
+            {
+                using (Mat mat = Cv2.ImRead(filePath, ImreadModes.Color))
+                {
+                    if (mat.Empty())
+                    {
+                        throw new ArgumentException("BMP 图像解码失败");
+                    }
+
+                    Bitmap normalizedBmp = BitmapConverter.ToBitmap(mat);
+                    normalizedBmp.SetResolution(96.0f, 96.0f);
+                    return normalizedBmp;
+                }
+            }
+
+            using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+            using (Bitmap original = new Bitmap(fs))
+            {
+                return new Bitmap(original);
             }
         }
 
