@@ -139,17 +139,9 @@ namespace DlcvCamDemo
             }
             catch (Exception ex)
             {
-                if (imagePanel1.InvokeRequired)
-                {
-                    imagePanel1.Invoke(new Action(() =>
-                        MessageBox.Show(ex.Message, "处理错误",
-                            MessageBoxButtons.OK, MessageBoxIcon.Error)));
-                }
-                else
-                {
+                UpdateUI(() =>
                     MessageBox.Show(ex.Message, "处理错误",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+                        MessageBoxButtons.OK, MessageBoxIcon.Error));
             }
         }
 
@@ -166,29 +158,33 @@ namespace DlcvCamDemo
                     : TimeSpan.Zero;
 
                 _frameCounter++;
-                UpdateFpsCounter(currentTime, interval);
                 _lastUpdateTime = currentTime;
+                UpdateUI(() =>
+                {
+                    UpdateFpsCounter(currentTime, interval);
 
-                if (result is CSharpResult typedResult)
-                {
-                    imagePanel1.UpdateImageAndResult(bitmap, typedResult);
-                }
-                else
-                {
-                    imagePanel1.UpdateImage(bitmap);
-                    imagePanel1.ClearResults();
-                    imagePanel1.Update();
-                }
-                
-                if (checkBox1.Checked)
-                {
-                    bnSaveImg.PerformClick();
-                }
+                    if (result is CSharpResult typedResult)
+                    {
+                        imagePanel1.UpdateImageAndResult(bitmap, typedResult);
+                    }
+                    else
+                    {
+                        imagePanel1.UpdateImage(bitmap);
+                        imagePanel1.ClearResults();
+                        imagePanel1.Update();
+                    }
+
+                    if (checkBox1.Checked)
+                    {
+                        bnSaveImg.PerformClick();
+                    }
+                });
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "UI更新错误",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdateUI(() =>
+                    MessageBox.Show(ex.Message, "UI更新错误",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error));
             }
         }
 
@@ -219,9 +215,32 @@ namespace DlcvCamDemo
         /// </summary>
         private void UpdateUI(Action action)
         {
+            if (action == null || IsDisposed || Disposing)
+            {
+                return;
+            }
+
             if (this.InvokeRequired)
             {
-                this.Invoke(new MethodInvoker(action));
+                if (!IsHandleCreated)
+                {
+                    return;
+                }
+
+                try
+                {
+                    BeginInvoke(new MethodInvoker(() =>
+                    {
+                        if (!IsDisposed && !Disposing)
+                        {
+                            action();
+                        }
+                    }));
+                }
+                catch (InvalidOperationException)
+                {
+                    // 窗体关闭过程中句柄可能已经失效，直接忽略这次更新。
+                }
             }
             else
             {

@@ -26,40 +26,39 @@ namespace DLCV
 
         public Image image
         {
-            get => _image;
+            get
+            {
+                lock (_Lock)
+                {
+                    return _image;
+                }
+            }
             set
             {
-                _image = value;
-                if (_image != null)
+                Image clonedImage = value == null ? null : (Image)value.Clone();
+                if (clonedImage is Bitmap bitmap)
                 {
-                    _image = _image.Clone() as Bitmap;
-                    if (_image is Bitmap bitmap)
-                    {
-                        NormalizeBitmapDpi(bitmap);
-                    }
-                    // 计算缩放比例以填充整个面板
-                    float panelAspect = (float)this.Width / this.Height;
-                    float imageAspect = (float)_image.Width / _image.Height;
+                    NormalizeBitmapDpi(bitmap);
+                }
 
-                    if (panelAspect > imageAspect)
+                lock (_Lock)
+                {
+                    Image oldImage = _image;
+                    _image = clonedImage;
+
+                    if (_image != null)
                     {
-                        // 面板更宽，按高度填充
-                        _scale = (float)this.Height / _image.Height;
+                        FitImageToPanelUnsafe();
+                        CalculateMinScaleUnsafe();
                     }
                     else
                     {
-                        // 面板更高，按宽度填充
-                        _scale = (float)this.Width / _image.Width;
+                        _scale = 1.0f;
+                        _imagePosition = new PointF(0, 0);
                     }
 
-                    // 计算图像初始位置以居中
-                    _imagePosition.X = (this.Width - _image.Width * _scale) / 2;
-                    _imagePosition.Y = (this.Height - _image.Height * _scale) / 2;
-
-                    // 计算MinScale
-                    CalculateMinScale();
+                    oldImage?.Dispose();
                 }
-                //Invalidate();
             }
         }
 
@@ -100,6 +99,39 @@ namespace DLCV
 
         private readonly object _Lock = new object();
 
+        private void FitImageToPanelUnsafe()
+        {
+            if (_image == null)
+            {
+                return;
+            }
+
+            if (Width <= 0 || Height <= 0)
+            {
+                _scale = 1.0f;
+                _imagePosition = new PointF(0, 0);
+                return;
+            }
+
+            float panelAspect = (float)Width / Height;
+            float imageAspect = (float)_image.Width / _image.Height;
+
+            if (panelAspect > imageAspect)
+            {
+                // 面板更宽，按高度填充
+                _scale = (float)Height / _image.Height;
+            }
+            else
+            {
+                // 面板更高，按宽度填充
+                _scale = (float)Width / _image.Width;
+            }
+
+            // 计算图像初始位置以居中
+            _imagePosition.X = (Width - _image.Width * _scale) / 2;
+            _imagePosition.Y = (Height - _image.Height * _scale) / 2;
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             lock (_Lock)
@@ -113,11 +145,11 @@ namespace DLCV
                     e.Graphics.ScaleTransform(_scale, _scale);
                     e.Graphics.DrawImage(_image, 0, 0, _image.Width, _image.Height);
                 }
-            }
 
-            if (currentResults != null)
-            {
-                DrawResults(e);
+                if (currentResults != null)
+                {
+                    DrawResults(e);
+                }
             }
         }
 
@@ -134,53 +166,72 @@ namespace DLCV
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
-            if (_image == null) return;
-
-            float oldScale = _scale;
-
-            if (e.Delta > 0 && _scale < MaxScale)
+            bool shouldInvalidate = false;
+            lock (_Lock)
             {
-                _scale *= 1.1f;
+                if (_image == null) return;
+
+                float oldScale = _scale;
+
+                if (e.Delta > 0 && _scale < MaxScale)
+                {
+                    _scale *= 1.1f;
+                }
+                else if (e.Delta < 0 && _scale > MinScale)
+                {
+                    _scale /= 1.1f;
+                }
+
+                // Calculate the new image position to zoom around the mouse pointer
+                float scaleChange = _scale / oldScale;
+                _imagePosition.X = e.X - scaleChange * (e.X - _imagePosition.X);
+                _imagePosition.Y = e.Y - scaleChange * (e.Y - _imagePosition.Y);
+
+                AdjustImagePositionUnsafe();
+                shouldInvalidate = true;
             }
-            else if (e.Delta < 0 && _scale > MinScale)
+
+            if (shouldInvalidate)
             {
-                _scale /= 1.1f;
+                Invalidate();
             }
-
-            // Calculate the new image position to zoom around the mouse pointer
-            float scaleChange = _scale / oldScale;
-            _imagePosition.X = e.X - scaleChange * (e.X - _imagePosition.X);
-            _imagePosition.Y = e.Y - scaleChange * (e.Y - _imagePosition.Y);
-
-            AdjustImagePosition();
-            //UpdateLabels();
-            Invalidate();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             this.Focus(); // 获取焦点以便接收键盘事件
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left)
+            lock (_Lock)
             {
-                _isDragging = true;
-                _lastMousePosition = e.Location;
+                if (e.Button == MouseButtons.Left)
+                {
+                    _isDragging = true;
+                    _lastMousePosition = e.Location;
+                }
             }
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            if (_isDragging)
+            bool shouldInvalidate = false;
+            lock (_Lock)
             {
-                float dx = e.X - _lastMousePosition.X;
-                float dy = e.Y - _lastMousePosition.Y;
-                _imagePosition.X += dx;
-                _imagePosition.Y += dy;
-                _lastMousePosition = e.Location;
+                if (_isDragging)
+                {
+                    float dx = e.X - _lastMousePosition.X;
+                    float dy = e.Y - _lastMousePosition.Y;
+                    _imagePosition.X += dx;
+                    _imagePosition.Y += dy;
+                    _lastMousePosition = e.Location;
 
-                AdjustImagePosition();
-                //UpdateLabels();
+                    AdjustImagePositionUnsafe();
+                    shouldInvalidate = true;
+                }
+            }
+
+            if (shouldInvalidate)
+            {
                 Invalidate();
             }
         }
@@ -188,13 +239,24 @@ namespace DLCV
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            if (e.Button == MouseButtons.Left)
+            lock (_Lock)
             {
-                _isDragging = false;
+                if (e.Button == MouseButtons.Left)
+                {
+                    _isDragging = false;
+                }
             }
         }
 
         private void AdjustImagePosition()
+        {
+            lock (_Lock)
+            {
+                AdjustImagePositionUnsafe();
+            }
+        }
+
+        private void AdjustImagePositionUnsafe()
         {
             if (_image == null) return;
 
@@ -242,26 +304,33 @@ namespace DLCV
         public void UpdateImage(Image image)
         {
             this.image = image;
-            CalculateMinScale(); // 新图像加载时计算MinScale
         }
 
         // 支持 opencv 的 Mat 类型
         public void UpdateImage(Mat image)
         {
-            Bitmap bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(image);
-            UpdateImage(bitmap);
+            using (Bitmap bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(image))
+            {
+                UpdateImage(bitmap);
+            }
         }
 
         public void UpdateResults(dynamic result)
         {
-            currentResults = result;
+            lock (_Lock)
+            {
+                currentResults = result;
+            }
         }
 
 
 
         public void ClearResults()
         {
-            currentResults = null;
+            lock (_Lock)
+            {
+                currentResults = null;
+            }
         }
 
         public void DrawResults(PaintEventArgs e)
@@ -562,7 +631,20 @@ namespace DLCV
         // 新增的计算MinScale的方法
         private void CalculateMinScale()
         {
+            lock (_Lock)
+            {
+                CalculateMinScaleUnsafe();
+            }
+        }
+
+        private void CalculateMinScaleUnsafe()
+        {
             if (_image == null) return;
+
+            if (Width <= 0 || Height <= 0)
+            {
+                return;
+            }
 
             // 计算面板的最短边长度
             float panelMinDimension = Math.Min(this.Width, this.Height);
@@ -578,38 +660,32 @@ namespace DLCV
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            CalculateMinScale();
+            lock (_Lock)
+            {
+                CalculateMinScaleUnsafe();
+                AdjustImagePositionUnsafe();
+            }
         }
 
         // 添加右键点击事件处理
         protected override void OnMouseClick(MouseEventArgs e)
         {
             base.OnMouseClick(e);
-            if (e.Button == MouseButtons.Right && _image != null)
+            bool shouldInvalidate = false;
+            lock (_Lock)
             {
-                // 计算缩放比例以填充整个面板，与image设置时的逻辑一致
-                float panelAspect = (float)this.Width / this.Height;
-                float imageAspect = (float)_image.Width / _image.Height;
-
-                if (panelAspect > imageAspect)
+                if (e.Button == MouseButtons.Right && _image != null)
                 {
-                    // 面板更宽，按高度填充
-                    _scale = (float)this.Height / _image.Height;
+                    FitImageToPanelUnsafe();
+
+                    // 调整位置确保图像始终可见
+                    AdjustImagePositionUnsafe();
+                    shouldInvalidate = true;
                 }
-                else
-                {
-                    // 面板更高，按宽度填充
-                    _scale = (float)this.Width / _image.Width;
-                }
+            }
 
-                // 重新计算图像位置以居中
-                _imagePosition.X = (this.Width - _image.Width * _scale) / 2;
-                _imagePosition.Y = (this.Height - _image.Height * _scale) / 2;
-
-                // 调整位置确保图像始终可见
-                AdjustImagePosition();
-
-                // 重绘
+            if (shouldInvalidate)
+            {
                 Invalidate();
             }
         }
