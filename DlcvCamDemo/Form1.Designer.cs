@@ -363,6 +363,8 @@ namespace DlcvCamDemo
             this.imagePanel1.Size = new System.Drawing.Size(975, 597);
             this.imagePanel1.TabIndex = 0;
             this.imagePanel1.TabStop = true;
+            this.imagePanel1.VisualizationBaseFontSize = 12F;
+            this.imagePanel1.VisualizationMinFontSize = 6F;
             this.imagePanel1.Paint += new System.Windows.Forms.PaintEventHandler(this.imagePanel1_Paint);
             // 
             // nudThread

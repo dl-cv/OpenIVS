@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -65,6 +66,12 @@ namespace DLCV
 
         public float MaxScale { get; set; } = 100.0f;
         public float MinScale { get; set; } = 0.5f;
+
+        [DefaultValue(24f)]
+        public float VisualizationBaseFontSize { get; set; } = 24f;
+
+        [DefaultValue(8f)]
+        public float VisualizationMinFontSize { get; set; } = 8f;
 
         // 新增参数控制是否显示状态文本
         public bool ShowStatusText { get; set; } = false;
@@ -262,7 +269,7 @@ namespace DLCV
             if (currentResults == null || !ShowVisualization) return;
 
             float borderWidth = Math.Max(1, 2 / _scale); // 更细的边框
-            float fontSize = Math.Max(8, 24 / _scale);
+            float fontSize = Math.Max(VisualizationMinFontSize, VisualizationBaseFontSize / _scale);
             string _statusText = "OK";
 
             // 遍历结构体的嵌套结构
