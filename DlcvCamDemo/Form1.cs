@@ -107,8 +107,8 @@ namespace DlcvCamDemo
         /// </summary>
         private void MainForm_KeyDown(object sender, KeyEventArgs e)
         {
-            // V键切换推理状态
-            if (e.KeyCode == Keys.V && !e.Alt && !e.Control && !e.Shift)
+            // I键切换推理状态（避免与 ImageViewer 的 V 键可视化开关冲突）
+            if (e.KeyCode == Keys.I && !e.Alt && !e.Control && !e.Shift)
             {
                 checkBox2.Checked = !checkBox2.Checked;
                 e.Handled = true;
@@ -169,7 +169,16 @@ namespace DlcvCamDemo
                 UpdateFpsCounter(currentTime, interval);
                 _lastUpdateTime = currentTime;
 
-                imagePanel1.UpdateImageAndResult(bitmap, result);
+                if (result is CSharpResult typedResult)
+                {
+                    imagePanel1.UpdateImageAndResult(bitmap, typedResult);
+                }
+                else
+                {
+                    imagePanel1.UpdateImage(bitmap);
+                    imagePanel1.ClearResults();
+                    imagePanel1.Update();
+                }
                 
                 if (checkBox1.Checked)
                 {

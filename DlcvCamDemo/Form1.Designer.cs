@@ -52,7 +52,7 @@ namespace DlcvCamDemo
             this.btnStressTest = new System.Windows.Forms.Button();
             this.nudRate = new System.Windows.Forms.NumericUpDown();
             this.lblStatus = new System.Windows.Forms.Label();
-            this.imagePanel1 = new DlcvCamDemo.ImagePanel();
+            this.imagePanel1 = new DLCV.ImageViewer();
             this.nudThread = new System.Windows.Forms.NumericUpDown();
             ((System.ComponentModel.ISupportInitialize)(this.numLoopInterval)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudRate)).BeginInit();
@@ -357,8 +357,11 @@ namespace DlcvCamDemo
             this.imagePanel1.MaxScale = 20F;
             this.imagePanel1.MinScale = 0.1F;
             this.imagePanel1.Name = "imagePanel1";
+            this.imagePanel1.ShowStatusText = false;
+            this.imagePanel1.ShowVisualization = true;
             this.imagePanel1.Size = new System.Drawing.Size(975, 597);
             this.imagePanel1.TabIndex = 0;
+            this.imagePanel1.TabStop = true;
             // 
             // nudThread
             // 
@@ -428,7 +431,7 @@ namespace DlcvCamDemo
 
         #endregion
 
-        private ImagePanel imagePanel1;
+        private DLCV.ImageViewer imagePanel1;
         private System.Windows.Forms.ComboBox cbDeviceList;
         private System.Windows.Forms.Button bnStopGrab;
         private System.Windows.Forms.Button bnStartGrab;

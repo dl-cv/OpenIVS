@@ -187,9 +187,6 @@
     <Compile Include="Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
-    <Compile Include="ImagePanel.cs">
-      <SubType>Component</SubType>
-    </Compile>
     <Compile Include="logger.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -242,6 +239,10 @@
     <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
       <Project>{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}</Project>
       <Name>DlcvCsharpApi</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\ImageViewer\ImageViewer.csproj">
+      <Project>{E11DDCC6-84D1-4CAF-9534-2266651E7787}</Project>
+      <Name>ImageViewer</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
