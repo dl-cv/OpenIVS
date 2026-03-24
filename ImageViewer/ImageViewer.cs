@@ -16,6 +16,7 @@ namespace DLCV
 {
     public class ImageViewer : Panel
     {
+        private const float NormalizedDpi = 96.0f;
         private Image _image;
         private float _scale = 1.0f;
         private System.Drawing.PointF _imagePosition = new PointF(0, 0);
@@ -31,6 +32,10 @@ namespace DLCV
                 if (_image != null)
                 {
                     _image = _image.Clone() as Bitmap;
+                    if (_image is Bitmap bitmap)
+                    {
+                        NormalizeBitmapDpi(bitmap);
+                    }
                     // 计算缩放比例以填充整个面板
                     float panelAspect = (float)this.Width / this.Height;
                     float imageAspect = (float)_image.Width / _image.Height;
@@ -96,10 +101,19 @@ namespace DLCV
                 if (_image != null)
                 {
                     e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                    e.Graphics.PageUnit = GraphicsUnit.Pixel;
 
                     e.Graphics.TranslateTransform(_imagePosition.X, _imagePosition.Y);
                     e.Graphics.ScaleTransform(_scale, _scale);
-                    e.Graphics.DrawImage(_image, 0, 0);
+                    e.Graphics.DrawImage(
+                        _image,
+                        new Rectangle(0, 0, _image.Width, _image.Height),
+                        0,
+                        0,
+                        _image.Width,
+                        _image.Height,
+                        GraphicsUnit.Pixel
+                    );
                 }
             }
 
@@ -529,6 +543,17 @@ namespace DLCV
             }
 
             return result;
+        }
+
+        private static void NormalizeBitmapDpi(Bitmap bitmap)
+        {
+            if (Math.Abs(bitmap.HorizontalResolution - NormalizedDpi) < 0.01f &&
+                Math.Abs(bitmap.VerticalResolution - NormalizedDpi) < 0.01f)
+            {
+                return;
+            }
+
+            bitmap.SetResolution(NormalizedDpi, NormalizedDpi);
         }
 
         new public void Update()

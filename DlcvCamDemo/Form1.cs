@@ -913,5 +913,10 @@ namespace DlcvCamDemo
         }
 
         #endregion
+
+        private void imagePanel1_Paint(object sender, PaintEventArgs e)
+        {
+
+        }
     }
 }

@@ -351,17 +351,19 @@ namespace DlcvCamDemo
             this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.imagePanel1.BackColor = System.Drawing.SystemColors.ButtonShadow;
+            this.imagePanel1.BackColor = System.Drawing.SystemColors.Control;
+            this.imagePanel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imagePanel1.image = null;
             this.imagePanel1.Location = new System.Drawing.Point(12, 102);
-            this.imagePanel1.MaxScale = 20F;
-            this.imagePanel1.MinScale = 0.1F;
+            this.imagePanel1.MaxScale = 100F;
+            this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
             this.imagePanel1.ShowStatusText = false;
             this.imagePanel1.ShowVisualization = true;
             this.imagePanel1.Size = new System.Drawing.Size(975, 597);
             this.imagePanel1.TabIndex = 0;
             this.imagePanel1.TabStop = true;
+            this.imagePanel1.Paint += new System.Windows.Forms.PaintEventHandler(this.imagePanel1_Paint);
             // 
             // nudThread
             // 
