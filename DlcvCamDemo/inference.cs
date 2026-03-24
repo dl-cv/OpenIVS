@@ -109,8 +109,28 @@ namespace DlcvCamDemo
                     }
 
                     using (var mat = BitmapConverter.ToMat(bitmap))
+                    using (var inferMat = new Mat())
                     {
-                        return _model.Infer(mat);
+                        // 与 DlcvDemo 保持一致：统一将输入转换为 RGB 后再送入推理。
+                        int channels = mat.Channels();
+                        if (channels == 3)
+                        {
+                            Cv2.CvtColor(mat, inferMat, ColorConversionCodes.BGR2RGB);
+                        }
+                        else if (channels == 4)
+                        {
+                            Cv2.CvtColor(mat, inferMat, ColorConversionCodes.BGRA2RGB);
+                        }
+                        else if (channels == 1)
+                        {
+                            Cv2.CvtColor(mat, inferMat, ColorConversionCodes.GRAY2RGB);
+                        }
+                        else
+                        {
+                            mat.CopyTo(inferMat);
+                        }
+
+                        return _model.Infer(inferMat);
                     }
                 }
                 else if (_apiFlag)
