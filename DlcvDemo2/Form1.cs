@@ -309,7 +309,7 @@ namespace DlcvDemo2
                 }
 
                 var sw = Stopwatch.StartNew();
-                PipelineRunResult runResult = RunFixedPipeline(imageRgb, config, progress);
+                PipelineRunResult runResult = RunPipeline(imageRgb, config, progress);
                 sw.Stop();
 
                 return new InferenceExecutionResult
@@ -382,7 +382,7 @@ namespace DlcvDemo2
             return true;
         }
 
-        private PipelineRunResult RunFixedPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null)
+        private PipelineRunResult RunPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null)
         {
             var runResult = new PipelineRunResult();
 
