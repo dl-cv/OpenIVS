@@ -22,33 +22,11 @@ namespace DlcvDemo2
         private const int DefaultComponentPadding = 32;
         private static readonly Regex CategoryAngleRegex = new Regex(@"^(.*?)(0|90|180|270)$", RegexOptions.Compiled);
 
-        private const double MergeIouThreshold = 0.2;
-        private const double MergeIosThreshold = 0.2;
-
         private Model extractModel;
         private Model componentDetectModel;
         private Model icDetectModel;
         private string imagePath;
         private bool isInferenceRunning;
-
-        private sealed class ExtractDetection
-        {
-            public CSharpObjectResult ObjectResult { get; set; }
-            public Rect2d MergeAabb { get; set; }
-            public int Order { get; set; }
-        }
-
-        private enum DetectionModelRoute
-        {
-            ComponentDetect = 0,
-            IcDetect = 1
-        }
-
-        private sealed class ParsedCategoryAngle
-        {
-            public string BaseName { get; set; }
-            public int Angle { get; set; }
-        }
 
         private sealed class RoiProcessResult : IDisposable
         {
@@ -393,7 +371,7 @@ namespace DlcvDemo2
             ReportInferenceProgress(progress, 12, $"元件提取模型滑窗推理 0/{windows.Count}");
             List<ExtractDetection> extractDetections = InferExtractModelOnWindows(fullImageRgb, windows, progress);
             ReportInferenceProgress(progress, 62, "合并元件提取结果");
-            List<ExtractDetection> mergedExtract = MergeExtractResults(extractDetections);
+            List<ExtractDetection> mergedExtract = ExtractMergeUtils.MergeExtractResults(extractDetections);
             runResult.MergedExtractCount = mergedExtract.Count;
 
             int roiTotal = mergedExtract.Count;
@@ -403,9 +381,14 @@ namespace DlcvDemo2
                 int startPercent = 70 + (int)Math.Round(25.0 * roiCompleted / Math.Max(1, roiTotal));
                 ReportInferenceProgress(progress, startPercent, $"局部模型推理 {roiCompleted}/{roiTotal}");
 
-                ParsedCategoryAngle parsed = ParseCategoryAndAngle(target.ObjectResult.CategoryName);
-                DetectionModelRoute route = SelectDetectionModel(parsed.BaseName);
-                using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, parsed, config.ComponentPadding))
+                string baseName;
+                int normalizeAngle;
+                ParseCategoryAndAngle(target.ObjectResult.CategoryName, out baseName, out normalizeAngle);
+                bool useIcDetectModel =
+                    string.Equals(baseName, "IC", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(baseName, "BGA", StringComparison.OrdinalIgnoreCase);
+
+                using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, normalizeAngle, config.ComponentPadding))
                 {
                     if (!roi.IsValid)
                     {
@@ -415,12 +398,12 @@ namespace DlcvDemo2
 
                     try
                     {
-                        List<CSharpObjectResult> mapped = InferDetectionModelAndMapBack(roi, target.ObjectResult, route);
+                        List<CSharpObjectResult> mapped = InferDetectionModelAndMapBack(roi, target.ObjectResult, useIcDetectModel);
                         runResult.FinalObjects.AddRange(mapped);
                         int realResultCount = mapped.Count == 1 && ReferenceEquals(mapped[0], target.ObjectResult)
                             ? 0
                             : mapped.Count;
-                        if (route == DetectionModelRoute.IcDetect)
+                        if (useIcDetectModel)
                         {
                             runResult.IcModelResultCount += realResultCount;
                         }
@@ -431,7 +414,7 @@ namespace DlcvDemo2
                     }
                     catch (Exception ex)
                     {
-                        string routeName = route == DetectionModelRoute.IcDetect ? "IC检测模型" : "元件检测模型";
+                        string routeName = useIcDetectModel ? "IC检测模型" : "元件检测模型";
                         runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]{routeName}推理失败，保留元件提取结果兜底：{ex.Message}");
                         runResult.FinalObjects.Add(target.ObjectResult);
                     }
@@ -503,7 +486,7 @@ namespace DlcvDemo2
                     foreach (var obj in tileResult.SampleResults[0].Results)
                     {
                         CSharpObjectResult mapped = LiftExtractObjectToFull(obj, window);
-                        Rect2d aabb = GetAabbFromObject(mapped);
+                        Rect2d aabb = ExtractMergeUtils.GetAabbFromObject(mapped);
                         if (aabb.Width <= 0 || aabb.Height <= 0)
                         {
                             continue;
@@ -529,107 +512,36 @@ namespace DlcvDemo2
             return output;
         }
 
-        private List<ExtractDetection> MergeExtractResults(List<ExtractDetection> fullImageDetections)
+        private static void ParseCategoryAndAngle(string categoryName, out string baseName, out int angle)
         {
-            var mergedAll = new List<ExtractDetection>();
-            if (fullImageDetections == null || fullImageDetections.Count == 0)
+            string normalizedCategoryName = (categoryName ?? string.Empty).Trim();
+            angle = 0;
+            if (normalizedCategoryName.Length == 0)
             {
-                return mergedAll;
+                baseName = string.Empty;
+                return;
             }
 
-            foreach (var group in fullImageDetections.GroupBy(x => x.ObjectResult.CategoryName ?? string.Empty))
-            {
-                var clusters = new List<ExtractDetection>();
-                var orderedGroup = group
-                    .OrderByDescending(x => GetObjectArea(x.ObjectResult))
-                    .ThenByDescending(x => x.ObjectResult.Score)
-                    .ThenBy(x => x.Order);
-
-                foreach (var detection in orderedGroup)
-                {
-                    bool merged = false;
-                    for (int i = 0; i < clusters.Count; i++)
-                    {
-                        if (!CanMerge(clusters[i].MergeAabb, detection.MergeAabb))
-                        {
-                            continue;
-                        }
-
-                        clusters[i].MergeAabb = UnionRect(clusters[i].MergeAabb, detection.MergeAabb);
-                        if (ShouldPreferRepresentative(detection, clusters[i]))
-                        {
-                            clusters[i].ObjectResult = detection.ObjectResult;
-                            clusters[i].Order = Math.Min(clusters[i].Order, detection.Order);
-                        }
-
-                        merged = true;
-                        break;
-                    }
-
-                    if (!merged)
-                    {
-                        clusters.Add(new ExtractDetection
-                        {
-                            ObjectResult = detection.ObjectResult,
-                            MergeAabb = detection.MergeAabb,
-                            Order = detection.Order
-                        });
-                    }
-                }
-
-                foreach (var cluster in clusters)
-                {
-                    if (!cluster.ObjectResult.WithAngle || cluster.ObjectResult.Bbox == null || cluster.ObjectResult.Bbox.Count < 4)
-                    {
-                        cluster.ObjectResult = BuildAabbObject(cluster.ObjectResult, cluster.MergeAabb);
-                    }
-                }
-
-                mergedAll.AddRange(clusters);
-            }
-
-            mergedAll.Sort((a, b) => a.Order.CompareTo(b.Order));
-            return mergedAll;
-        }
-
-        private static ParsedCategoryAngle ParseCategoryAndAngle(string categoryName)
-        {
-            if (string.IsNullOrWhiteSpace(categoryName))
-            {
-                return new ParsedCategoryAngle
-                {
-                    BaseName = string.Empty,
-                    Angle = 0
-                };
-            }
-
-            Match match = CategoryAngleRegex.Match(categoryName.Trim());
+            Match match = CategoryAngleRegex.Match(normalizedCategoryName);
             if (!match.Success)
             {
-                return new ParsedCategoryAngle
-                {
-                    BaseName = categoryName.Trim(),
-                    Angle = 0
-                };
+                baseName = normalizedCategoryName;
+                return;
             }
 
-            int angle;
-            if (!int.TryParse(match.Groups[2].Value, out angle))
+            int parsedAngle;
+            if (!int.TryParse(match.Groups[2].Value, out parsedAngle))
             {
-                angle = 0;
+                parsedAngle = 0;
             }
 
-            string baseName = match.Groups[1].Value;
+            baseName = match.Groups[1].Value;
             if (string.IsNullOrWhiteSpace(baseName))
             {
-                baseName = categoryName.Trim();
+                baseName = normalizedCategoryName;
             }
 
-            return new ParsedCategoryAngle
-            {
-                BaseName = baseName,
-                Angle = NormalizeRightAngle(angle)
-            };
+            angle = NormalizeRightAngle(parsedAngle);
         }
 
         private static int NormalizeRightAngle(int angle)
@@ -646,18 +558,6 @@ namespace DlcvDemo2
             }
 
             return normalized;
-        }
-
-        private static DetectionModelRoute SelectDetectionModel(string baseName)
-        {
-            string normalized = (baseName ?? string.Empty).Trim();
-            if (string.Equals(normalized, "IC", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(normalized, "BGA", StringComparison.OrdinalIgnoreCase))
-            {
-                return DetectionModelRoute.IcDetect;
-            }
-
-            return DetectionModelRoute.ComponentDetect;
         }
 
         private static Rect2d ExpandRect(Rect2d rect, int padding, int imageWidth, int imageHeight)
@@ -680,7 +580,7 @@ namespace DlcvDemo2
             return new Rect2d(left, top, right - left, bottom - top);
         }
 
-        private RoiProcessResult CropAndRotateRoi(Mat fullImageRgb, ExtractDetection target, ParsedCategoryAngle parsedCategory, int padding)
+        private RoiProcessResult CropAndRotateRoi(Mat fullImageRgb, ExtractDetection target, int normalizeAngle, int padding)
         {
             var result = new RoiProcessResult
             {
@@ -717,7 +617,6 @@ namespace DlcvDemo2
                     return result;
                 }
 
-                int normalizeAngle = NormalizeRightAngle(parsedCategory.Angle);
                 Mat normalized = RotateRoiByRightAngle(roi, normalizeAngle);
                 if (normalized == null || normalized.Empty())
                 {
@@ -752,14 +651,14 @@ namespace DlcvDemo2
             }
         }
 
-        private List<CSharpObjectResult> InferDetectionModelAndMapBack(RoiProcessResult roiContext, CSharpObjectResult extractFallback, DetectionModelRoute route)
+        private List<CSharpObjectResult> InferDetectionModelAndMapBack(RoiProcessResult roiContext, CSharpObjectResult extractFallback, bool useIcDetectModel)
         {
             JObject inferParams = new JObject
             {
                 ["with_mask"] = false
             };
 
-            Model activeModel = route == DetectionModelRoute.IcDetect ? icDetectModel : componentDetectModel;
+            Model activeModel = useIcDetectModel ? icDetectModel : componentDetectModel;
             CSharpResult roiResult = activeModel.Infer(roiContext.NormalizedRoi, inferParams);
             if (roiResult.SampleResults == null || roiResult.SampleResults.Count == 0)
             {
@@ -778,7 +677,7 @@ namespace DlcvDemo2
                 CSharpObjectResult mapped;
                 if (TryMapObjectToFull(obj, roiContext.NormToFullAffine, out mapped))
                 {
-                    mappedObjects.Add(ResolveFinalDetectionObject(mapped, extractFallback, route));
+                    mappedObjects.Add(ResolveFinalDetectionObject(mapped, extractFallback, useIcDetectModel));
                 }
             }
 
@@ -790,9 +689,9 @@ namespace DlcvDemo2
             return mappedObjects;
         }
 
-        private static CSharpObjectResult ResolveFinalDetectionObject(CSharpObjectResult mappedObject, CSharpObjectResult extractFallback, DetectionModelRoute route)
+        private static CSharpObjectResult ResolveFinalDetectionObject(CSharpObjectResult mappedObject, CSharpObjectResult extractFallback, bool useIcDetectModel)
         {
-            if (!ShouldMapBackToExtractCategory(mappedObject.CategoryName, route))
+            if (!ShouldMapBackToExtractCategory(mappedObject.CategoryName, useIcDetectModel))
             {
                 return mappedObject;
             }
@@ -810,7 +709,7 @@ namespace DlcvDemo2
                 mappedObject.Angle);
         }
 
-        private static bool ShouldMapBackToExtractCategory(string detectionCategoryName, DetectionModelRoute route)
+        private static bool ShouldMapBackToExtractCategory(string detectionCategoryName, bool useIcDetectModel)
         {
             string normalized = (detectionCategoryName ?? string.Empty).Trim();
             if (normalized.Length == 0)
@@ -818,7 +717,7 @@ namespace DlcvDemo2
                 return false;
             }
 
-            if (route == DetectionModelRoute.IcDetect)
+            if (useIcDetectModel)
             {
                 return string.Equals(normalized, "IC", StringComparison.OrdinalIgnoreCase);
             }
@@ -903,132 +802,6 @@ namespace DlcvDemo2
                 true,
                 withAngle,
                 angle);
-        }
-
-        private static double GetObjectArea(CSharpObjectResult obj)
-        {
-            if (obj.Bbox != null && obj.Bbox.Count >= 4)
-            {
-                return Math.Abs(obj.Bbox[2] * obj.Bbox[3]);
-            }
-
-            return obj.Area > 0 ? obj.Area : 0.0;
-        }
-
-        private static Rect2d GetAabbFromObject(CSharpObjectResult obj)
-        {
-            if (obj.Bbox == null || obj.Bbox.Count < 4)
-            {
-                return new Rect2d();
-            }
-
-            double w = Math.Abs(obj.Bbox[2]);
-            double h = Math.Abs(obj.Bbox[3]);
-            if (w <= 0 || h <= 0)
-            {
-                return new Rect2d();
-            }
-
-            if (obj.WithAngle || obj.Bbox.Count == 5)
-            {
-                double cx = obj.Bbox[0];
-                double cy = obj.Bbox[1];
-                return new Rect2d(cx - w / 2.0, cy - h / 2.0, w, h);
-            }
-
-            return new Rect2d(obj.Bbox[0], obj.Bbox[1], w, h);
-        }
-
-        private static bool CanMerge(Rect2d a, Rect2d b)
-        {
-            double inter = IntersectionArea(a, b);
-            if (inter <= 0)
-            {
-                return false;
-            }
-
-            double areaA = Math.Max(0, a.Width) * Math.Max(0, a.Height);
-            double areaB = Math.Max(0, b.Width) * Math.Max(0, b.Height);
-            double union = areaA + areaB - inter;
-            if (union <= 0)
-            {
-                return false;
-            }
-
-            double iou = inter / union;
-            double ios = inter / Math.Max(1e-6, Math.Min(areaA, areaB));
-            return iou >= MergeIouThreshold || ios >= MergeIosThreshold;
-        }
-
-        private static bool ShouldPreferRepresentative(ExtractDetection candidate, ExtractDetection current)
-        {
-            double areaCandidate = GetObjectArea(candidate.ObjectResult);
-            double areaCurrent = GetObjectArea(current.ObjectResult);
-            if (areaCandidate > areaCurrent + 1e-6)
-            {
-                return true;
-            }
-
-            if (Math.Abs(areaCandidate - areaCurrent) <= 1e-6)
-            {
-                if (candidate.ObjectResult.Score > current.ObjectResult.Score + 1e-6)
-                {
-                    return true;
-                }
-
-                if (Math.Abs(candidate.ObjectResult.Score - current.ObjectResult.Score) <= 1e-6 &&
-                    candidate.Order < current.Order)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static Rect2d UnionRect(Rect2d a, Rect2d b)
-        {
-            double minX = Math.Min(a.X, b.X);
-            double minY = Math.Min(a.Y, b.Y);
-            double maxX = Math.Max(a.X + a.Width, b.X + b.Width);
-            double maxY = Math.Max(a.Y + a.Height, b.Y + b.Height);
-            return new Rect2d(minX, minY, Math.Max(0, maxX - minX), Math.Max(0, maxY - minY));
-        }
-
-        private static double IntersectionArea(Rect2d a, Rect2d b)
-        {
-            double x1 = Math.Max(a.X, b.X);
-            double y1 = Math.Max(a.Y, b.Y);
-            double x2 = Math.Min(a.X + a.Width, b.X + b.Width);
-            double y2 = Math.Min(a.Y + a.Height, b.Y + b.Height);
-            if (x2 <= x1 || y2 <= y1)
-            {
-                return 0;
-            }
-            return (x2 - x1) * (y2 - y1);
-        }
-
-        private static CSharpObjectResult BuildAabbObject(CSharpObjectResult source, Rect2d aabb)
-        {
-            var bbox = new List<double>
-            {
-                aabb.X,
-                aabb.Y,
-                Math.Max(0, aabb.Width),
-                Math.Max(0, aabb.Height)
-            };
-
-            return new CSharpObjectResult(
-                source.CategoryId,
-                source.CategoryName,
-                source.Score,
-                (float)(Math.Max(0, aabb.Width) * Math.Max(0, aabb.Height)),
-                bbox,
-                false,
-                new Mat(),
-                true,
-                false,
-                -100f);
         }
 
         private static Rect ClampRectToImage(Rect2d rect, int imageWidth, int imageHeight)
