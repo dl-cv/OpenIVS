@@ -17,17 +17,19 @@ namespace DlcvDemo2
 
         private void InitializeComponent()
         {
-            this.labelModel1 = new System.Windows.Forms.Label();
-            this.txtModel1Path = new System.Windows.Forms.TextBox();
-            this.btnBrowseModel1 = new System.Windows.Forms.Button();
-            this.labelModel2 = new System.Windows.Forms.Label();
-            this.txtModel2Path = new System.Windows.Forms.TextBox();
-            this.btnBrowseModel2 = new System.Windows.Forms.Button();
+            this.labelExtractModel = new System.Windows.Forms.Label();
+            this.txtExtractModelPath = new System.Windows.Forms.TextBox();
+            this.btnBrowseExtractModel = new System.Windows.Forms.Button();
+            this.labelComponentModel = new System.Windows.Forms.Label();
+            this.txtComponentModelPath = new System.Windows.Forms.TextBox();
+            this.btnBrowseComponentModel = new System.Windows.Forms.Button();
+            this.labelIcModel = new System.Windows.Forms.Label();
+            this.txtIcModelPath = new System.Windows.Forms.TextBox();
+            this.btnBrowseIcModel = new System.Windows.Forms.Button();
             this.labelImage = new System.Windows.Forms.Label();
             this.txtImagePath = new System.Windows.Forms.TextBox();
             this.btnBrowseImage = new System.Windows.Forms.Button();
             this.btnInfer = new System.Windows.Forms.Button();
-            this.btnSpeedTest = new System.Windows.Forms.Button();
             this.labelWindowWidth = new System.Windows.Forms.Label();
             this.numWindowWidth = new System.Windows.Forms.NumericUpDown();
             this.labelWindowHeight = new System.Windows.Forms.Label();
@@ -36,8 +38,8 @@ namespace DlcvDemo2
             this.numOverlapX = new System.Windows.Forms.NumericUpDown();
             this.labelOverlapY = new System.Windows.Forms.Label();
             this.numOverlapY = new System.Windows.Forms.NumericUpDown();
-            this.labelSpeedRounds = new System.Windows.Forms.Label();
-            this.numSpeedRounds = new System.Windows.Forms.NumericUpDown();
+            this.labelComponentPadding = new System.Windows.Forms.Label();
+            this.numComponentPadding = new System.Windows.Forms.NumericUpDown();
             this.btnReleaseModels = new System.Windows.Forms.Button();
             this.progressBarInference = new System.Windows.Forms.ProgressBar();
             this.lblInferenceProgress = new System.Windows.Forms.Label();
@@ -47,92 +49,121 @@ namespace DlcvDemo2
             ((System.ComponentModel.ISupportInitialize)(this.numWindowHeight)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numOverlapX)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numOverlapY)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numSpeedRounds)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numComponentPadding)).BeginInit();
             this.SuspendLayout();
             // 
-            // labelModel1
+            // labelExtractModel
             // 
-            this.labelModel1.AutoSize = true;
-            this.labelModel1.Location = new System.Drawing.Point(12, 17);
-            this.labelModel1.Name = "labelModel1";
-            this.labelModel1.Size = new System.Drawing.Size(84, 24);
-            this.labelModel1.TabIndex = 0;
-            this.labelModel1.Text = "模型1路径";
+            this.labelExtractModel.AutoSize = true;
+            this.labelExtractModel.Location = new System.Drawing.Point(12, 17);
+            this.labelExtractModel.Name = "labelExtractModel";
+            this.labelExtractModel.Size = new System.Drawing.Size(118, 24);
+            this.labelExtractModel.TabIndex = 0;
+            this.labelExtractModel.Text = "元件提取模型";
             // 
-            // txtModel1Path
+            // txtExtractModelPath
             // 
-            this.txtModel1Path.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.txtExtractModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtModel1Path.Location = new System.Drawing.Point(102, 13);
-            this.txtModel1Path.Name = "txtModel1Path";
-            this.txtModel1Path.Size = new System.Drawing.Size(1021, 31);
-            this.txtModel1Path.TabIndex = 1;
+            this.txtExtractModelPath.Location = new System.Drawing.Point(136, 13);
+            this.txtExtractModelPath.Name = "txtExtractModelPath";
+            this.txtExtractModelPath.Size = new System.Drawing.Size(988, 31);
+            this.txtExtractModelPath.TabIndex = 1;
             // 
-            // btnBrowseModel1
+            // btnBrowseExtractModel
             // 
-            this.btnBrowseModel1.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseModel1.Location = new System.Drawing.Point(1129, 12);
-            this.btnBrowseModel1.Name = "btnBrowseModel1";
-            this.btnBrowseModel1.Size = new System.Drawing.Size(95, 34);
-            this.btnBrowseModel1.TabIndex = 2;
-            this.btnBrowseModel1.Text = "浏览...";
-            this.btnBrowseModel1.UseVisualStyleBackColor = true;
-            this.btnBrowseModel1.Click += new System.EventHandler(this.btnBrowseModel1_Click);
+            this.btnBrowseExtractModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnBrowseExtractModel.Location = new System.Drawing.Point(1130, 12);
+            this.btnBrowseExtractModel.Name = "btnBrowseExtractModel";
+            this.btnBrowseExtractModel.Size = new System.Drawing.Size(120, 34);
+            this.btnBrowseExtractModel.TabIndex = 2;
+            this.btnBrowseExtractModel.Text = "浏览...";
+            this.btnBrowseExtractModel.UseVisualStyleBackColor = true;
+            this.btnBrowseExtractModel.Click += new System.EventHandler(this.btnBrowseExtractModel_Click);
             // 
-            // labelModel2
+            // labelComponentModel
             // 
-            this.labelModel2.AutoSize = true;
-            this.labelModel2.Location = new System.Drawing.Point(12, 55);
-            this.labelModel2.Name = "labelModel2";
-            this.labelModel2.Size = new System.Drawing.Size(84, 24);
-            this.labelModel2.TabIndex = 4;
-            this.labelModel2.Text = "模型2路径";
+            this.labelComponentModel.AutoSize = true;
+            this.labelComponentModel.Location = new System.Drawing.Point(12, 55);
+            this.labelComponentModel.Name = "labelComponentModel";
+            this.labelComponentModel.Size = new System.Drawing.Size(118, 24);
+            this.labelComponentModel.TabIndex = 3;
+            this.labelComponentModel.Text = "元件检测模型";
             // 
-            // txtModel2Path
+            // txtComponentModelPath
             // 
-            this.txtModel2Path.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.txtComponentModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtModel2Path.Location = new System.Drawing.Point(102, 51);
-            this.txtModel2Path.Name = "txtModel2Path";
-            this.txtModel2Path.Size = new System.Drawing.Size(1021, 31);
-            this.txtModel2Path.TabIndex = 5;
+            this.txtComponentModelPath.Location = new System.Drawing.Point(136, 51);
+            this.txtComponentModelPath.Name = "txtComponentModelPath";
+            this.txtComponentModelPath.Size = new System.Drawing.Size(988, 31);
+            this.txtComponentModelPath.TabIndex = 4;
             // 
-            // btnBrowseModel2
+            // btnBrowseComponentModel
             // 
-            this.btnBrowseModel2.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseModel2.Location = new System.Drawing.Point(1129, 50);
-            this.btnBrowseModel2.Name = "btnBrowseModel2";
-            this.btnBrowseModel2.Size = new System.Drawing.Size(95, 34);
-            this.btnBrowseModel2.TabIndex = 6;
-            this.btnBrowseModel2.Text = "浏览...";
-            this.btnBrowseModel2.UseVisualStyleBackColor = true;
-            this.btnBrowseModel2.Click += new System.EventHandler(this.btnBrowseModel2_Click);
+            this.btnBrowseComponentModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnBrowseComponentModel.Location = new System.Drawing.Point(1130, 50);
+            this.btnBrowseComponentModel.Name = "btnBrowseComponentModel";
+            this.btnBrowseComponentModel.Size = new System.Drawing.Size(120, 34);
+            this.btnBrowseComponentModel.TabIndex = 5;
+            this.btnBrowseComponentModel.Text = "浏览...";
+            this.btnBrowseComponentModel.UseVisualStyleBackColor = true;
+            this.btnBrowseComponentModel.Click += new System.EventHandler(this.btnBrowseComponentModel_Click);
+            // 
+            // labelIcModel
+            // 
+            this.labelIcModel.AutoSize = true;
+            this.labelIcModel.Location = new System.Drawing.Point(12, 93);
+            this.labelIcModel.Name = "labelIcModel";
+            this.labelIcModel.Size = new System.Drawing.Size(110, 24);
+            this.labelIcModel.TabIndex = 6;
+            this.labelIcModel.Text = "IC检测模型";
+            // 
+            // txtIcModelPath
+            // 
+            this.txtIcModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.txtIcModelPath.Location = new System.Drawing.Point(136, 89);
+            this.txtIcModelPath.Name = "txtIcModelPath";
+            this.txtIcModelPath.Size = new System.Drawing.Size(988, 31);
+            this.txtIcModelPath.TabIndex = 7;
+            // 
+            // btnBrowseIcModel
+            // 
+            this.btnBrowseIcModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnBrowseIcModel.Location = new System.Drawing.Point(1130, 88);
+            this.btnBrowseIcModel.Name = "btnBrowseIcModel";
+            this.btnBrowseIcModel.Size = new System.Drawing.Size(120, 34);
+            this.btnBrowseIcModel.TabIndex = 8;
+            this.btnBrowseIcModel.Text = "浏览...";
+            this.btnBrowseIcModel.UseVisualStyleBackColor = true;
+            this.btnBrowseIcModel.Click += new System.EventHandler(this.btnBrowseIcModel_Click);
             // 
             // labelImage
             // 
             this.labelImage.AutoSize = true;
-            this.labelImage.Location = new System.Drawing.Point(12, 93);
+            this.labelImage.Location = new System.Drawing.Point(12, 131);
             this.labelImage.Name = "labelImage";
-            this.labelImage.Size = new System.Drawing.Size(84, 24);
-            this.labelImage.TabIndex = 8;
+            this.labelImage.Size = new System.Drawing.Size(82, 24);
+            this.labelImage.TabIndex = 9;
             this.labelImage.Text = "图片路径";
             // 
             // txtImagePath
             // 
             this.txtImagePath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtImagePath.Location = new System.Drawing.Point(102, 89);
+            this.txtImagePath.Location = new System.Drawing.Point(136, 127);
             this.txtImagePath.Name = "txtImagePath";
-            this.txtImagePath.Size = new System.Drawing.Size(804, 31);
-            this.txtImagePath.TabIndex = 9;
+            this.txtImagePath.Size = new System.Drawing.Size(786, 31);
+            this.txtImagePath.TabIndex = 10;
             // 
             // btnBrowseImage
             // 
             this.btnBrowseImage.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseImage.Location = new System.Drawing.Point(912, 88);
+            this.btnBrowseImage.Location = new System.Drawing.Point(928, 126);
             this.btnBrowseImage.Name = "btnBrowseImage";
-            this.btnBrowseImage.Size = new System.Drawing.Size(95, 34);
-            this.btnBrowseImage.TabIndex = 10;
+            this.btnBrowseImage.Size = new System.Drawing.Size(120, 34);
+            this.btnBrowseImage.TabIndex = 11;
             this.btnBrowseImage.Text = "浏览...";
             this.btnBrowseImage.UseVisualStyleBackColor = true;
             this.btnBrowseImage.Click += new System.EventHandler(this.btnBrowseImage_Click);
@@ -140,29 +171,18 @@ namespace DlcvDemo2
             // btnInfer
             // 
             this.btnInfer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnInfer.Location = new System.Drawing.Point(1013, 88);
+            this.btnInfer.Location = new System.Drawing.Point(1054, 126);
             this.btnInfer.Name = "btnInfer";
-            this.btnInfer.Size = new System.Drawing.Size(110, 34);
-            this.btnInfer.TabIndex = 11;
+            this.btnInfer.Size = new System.Drawing.Size(196, 34);
+            this.btnInfer.TabIndex = 12;
             this.btnInfer.Text = "执行推理";
             this.btnInfer.UseVisualStyleBackColor = true;
             this.btnInfer.Click += new System.EventHandler(this.btnInfer_Click);
             // 
-            // btnSpeedTest
-            // 
-            this.btnSpeedTest.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnSpeedTest.Location = new System.Drawing.Point(1129, 88);
-            this.btnSpeedTest.Name = "btnSpeedTest";
-            this.btnSpeedTest.Size = new System.Drawing.Size(95, 34);
-            this.btnSpeedTest.TabIndex = 12;
-            this.btnSpeedTest.Text = "测速";
-            this.btnSpeedTest.UseVisualStyleBackColor = true;
-            this.btnSpeedTest.Click += new System.EventHandler(this.btnSpeedTest_Click);
-            // 
             // labelWindowWidth
             // 
             this.labelWindowWidth.AutoSize = true;
-            this.labelWindowWidth.Location = new System.Drawing.Point(12, 133);
+            this.labelWindowWidth.Location = new System.Drawing.Point(12, 171);
             this.labelWindowWidth.Name = "labelWindowWidth";
             this.labelWindowWidth.Size = new System.Drawing.Size(64, 24);
             this.labelWindowWidth.TabIndex = 13;
@@ -170,7 +190,7 @@ namespace DlcvDemo2
             // 
             // numWindowWidth
             // 
-            this.numWindowWidth.Location = new System.Drawing.Point(82, 129);
+            this.numWindowWidth.Location = new System.Drawing.Point(82, 167);
             this.numWindowWidth.Maximum = new decimal(new int[] {
             30000,
             0,
@@ -193,7 +213,7 @@ namespace DlcvDemo2
             // labelWindowHeight
             // 
             this.labelWindowHeight.AutoSize = true;
-            this.labelWindowHeight.Location = new System.Drawing.Point(183, 133);
+            this.labelWindowHeight.Location = new System.Drawing.Point(183, 171);
             this.labelWindowHeight.Name = "labelWindowHeight";
             this.labelWindowHeight.Size = new System.Drawing.Size(64, 24);
             this.labelWindowHeight.TabIndex = 15;
@@ -201,7 +221,7 @@ namespace DlcvDemo2
             // 
             // numWindowHeight
             // 
-            this.numWindowHeight.Location = new System.Drawing.Point(253, 129);
+            this.numWindowHeight.Location = new System.Drawing.Point(253, 167);
             this.numWindowHeight.Maximum = new decimal(new int[] {
             30000,
             0,
@@ -224,7 +244,7 @@ namespace DlcvDemo2
             // labelOverlapX
             // 
             this.labelOverlapX.AutoSize = true;
-            this.labelOverlapX.Location = new System.Drawing.Point(354, 133);
+            this.labelOverlapX.Location = new System.Drawing.Point(354, 171);
             this.labelOverlapX.Name = "labelOverlapX";
             this.labelOverlapX.Size = new System.Drawing.Size(82, 24);
             this.labelOverlapX.TabIndex = 17;
@@ -232,7 +252,7 @@ namespace DlcvDemo2
             // 
             // numOverlapX
             // 
-            this.numOverlapX.Location = new System.Drawing.Point(442, 129);
+            this.numOverlapX.Location = new System.Drawing.Point(442, 167);
             this.numOverlapX.Maximum = new decimal(new int[] {
             30000,
             0,
@@ -250,7 +270,7 @@ namespace DlcvDemo2
             // labelOverlapY
             // 
             this.labelOverlapY.AutoSize = true;
-            this.labelOverlapY.Location = new System.Drawing.Point(543, 133);
+            this.labelOverlapY.Location = new System.Drawing.Point(543, 171);
             this.labelOverlapY.Name = "labelOverlapY";
             this.labelOverlapY.Size = new System.Drawing.Size(82, 24);
             this.labelOverlapY.TabIndex = 19;
@@ -258,7 +278,7 @@ namespace DlcvDemo2
             // 
             // numOverlapY
             // 
-            this.numOverlapY.Location = new System.Drawing.Point(631, 129);
+            this.numOverlapY.Location = new System.Drawing.Point(631, 167);
             this.numOverlapY.Maximum = new decimal(new int[] {
             30000,
             0,
@@ -273,33 +293,28 @@ namespace DlcvDemo2
             0,
             0});
             // 
-            // labelSpeedRounds
+            // labelComponentPadding
             // 
-            this.labelSpeedRounds.AutoSize = true;
-            this.labelSpeedRounds.Location = new System.Drawing.Point(732, 133);
-            this.labelSpeedRounds.Name = "labelSpeedRounds";
-            this.labelSpeedRounds.Size = new System.Drawing.Size(82, 24);
-            this.labelSpeedRounds.TabIndex = 21;
-            this.labelSpeedRounds.Text = "测速轮数";
+            this.labelComponentPadding.AutoSize = true;
+            this.labelComponentPadding.Location = new System.Drawing.Point(732, 171);
+            this.labelComponentPadding.Name = "labelComponentPadding";
+            this.labelComponentPadding.Size = new System.Drawing.Size(82, 24);
+            this.labelComponentPadding.TabIndex = 21;
+            this.labelComponentPadding.Text = "元件外扩";
             // 
-            // numSpeedRounds
+            // numComponentPadding
             // 
-            this.numSpeedRounds.Location = new System.Drawing.Point(820, 129);
-            this.numSpeedRounds.Maximum = new decimal(new int[] {
-            10000,
+            this.numComponentPadding.Location = new System.Drawing.Point(820, 167);
+            this.numComponentPadding.Maximum = new decimal(new int[] {
+            30000,
             0,
             0,
             0});
-            this.numSpeedRounds.Minimum = new decimal(new int[] {
-            1,
-            0,
-            0,
-            0});
-            this.numSpeedRounds.Name = "numSpeedRounds";
-            this.numSpeedRounds.Size = new System.Drawing.Size(86, 31);
-            this.numSpeedRounds.TabIndex = 22;
-            this.numSpeedRounds.Value = new decimal(new int[] {
-            10,
+            this.numComponentPadding.Name = "numComponentPadding";
+            this.numComponentPadding.Size = new System.Drawing.Size(86, 31);
+            this.numComponentPadding.TabIndex = 22;
+            this.numComponentPadding.Value = new decimal(new int[] {
+            32,
             0,
             0,
             0});
@@ -307,9 +322,9 @@ namespace DlcvDemo2
             // btnReleaseModels
             // 
             this.btnReleaseModels.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnReleaseModels.Location = new System.Drawing.Point(912, 127);
+            this.btnReleaseModels.Location = new System.Drawing.Point(928, 166);
             this.btnReleaseModels.Name = "btnReleaseModels";
-            this.btnReleaseModels.Size = new System.Drawing.Size(212, 34);
+            this.btnReleaseModels.Size = new System.Drawing.Size(322, 34);
             this.btnReleaseModels.TabIndex = 23;
             this.btnReleaseModels.Text = "释放模型";
             this.btnReleaseModels.UseVisualStyleBackColor = true;
@@ -319,16 +334,16 @@ namespace DlcvDemo2
             // 
             this.progressBarInference.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.progressBarInference.Location = new System.Drawing.Point(102, 166);
+            this.progressBarInference.Location = new System.Drawing.Point(136, 206);
             this.progressBarInference.Name = "progressBarInference";
-            this.progressBarInference.Size = new System.Drawing.Size(804, 24);
+            this.progressBarInference.Size = new System.Drawing.Size(770, 24);
             this.progressBarInference.TabIndex = 24;
             // 
             // lblInferenceProgress
             // 
             this.lblInferenceProgress.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.lblInferenceProgress.AutoSize = true;
-            this.lblInferenceProgress.Location = new System.Drawing.Point(912, 167);
+            this.lblInferenceProgress.Location = new System.Drawing.Point(912, 207);
             this.lblInferenceProgress.Name = "lblInferenceProgress";
             this.lblInferenceProgress.Size = new System.Drawing.Size(70, 24);
             this.lblInferenceProgress.TabIndex = 25;
@@ -338,10 +353,10 @@ namespace DlcvDemo2
             // 
             this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
             | System.Windows.Forms.AnchorStyles.Left)));
-            this.richTextBox1.Location = new System.Drawing.Point(12, 196);
+            this.richTextBox1.Location = new System.Drawing.Point(12, 236);
             this.richTextBox1.Name = "richTextBox1";
             this.richTextBox1.ReadOnly = true;
-            this.richTextBox1.Size = new System.Drawing.Size(432, 676);
+            this.richTextBox1.Size = new System.Drawing.Size(432, 674);
             this.richTextBox1.TabIndex = 26;
             this.richTextBox1.Text = "";
             // 
@@ -352,13 +367,13 @@ namespace DlcvDemo2
             | System.Windows.Forms.AnchorStyles.Right)));
             this.imagePanel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imagePanel1.image = null;
-            this.imagePanel1.Location = new System.Drawing.Point(450, 196);
+            this.imagePanel1.Location = new System.Drawing.Point(450, 236);
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
             this.imagePanel1.ShowStatusText = false;
             this.imagePanel1.ShowVisualization = true;
-            this.imagePanel1.Size = new System.Drawing.Size(934, 676);
+            this.imagePanel1.Size = new System.Drawing.Size(934, 674);
             this.imagePanel1.TabIndex = 27;
             this.imagePanel1.TabStop = true;
             // 
@@ -366,14 +381,14 @@ namespace DlcvDemo2
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1396, 884);
+            this.ClientSize = new System.Drawing.Size(1396, 922);
             this.Controls.Add(this.imagePanel1);
             this.Controls.Add(this.richTextBox1);
             this.Controls.Add(this.lblInferenceProgress);
             this.Controls.Add(this.progressBarInference);
             this.Controls.Add(this.btnReleaseModels);
-            this.Controls.Add(this.numSpeedRounds);
-            this.Controls.Add(this.labelSpeedRounds);
+            this.Controls.Add(this.numComponentPadding);
+            this.Controls.Add(this.labelComponentPadding);
             this.Controls.Add(this.numOverlapY);
             this.Controls.Add(this.labelOverlapY);
             this.Controls.Add(this.numOverlapX);
@@ -382,17 +397,19 @@ namespace DlcvDemo2
             this.Controls.Add(this.labelWindowHeight);
             this.Controls.Add(this.numWindowWidth);
             this.Controls.Add(this.labelWindowWidth);
-            this.Controls.Add(this.btnSpeedTest);
             this.Controls.Add(this.btnInfer);
             this.Controls.Add(this.btnBrowseImage);
             this.Controls.Add(this.txtImagePath);
             this.Controls.Add(this.labelImage);
-            this.Controls.Add(this.btnBrowseModel2);
-            this.Controls.Add(this.txtModel2Path);
-            this.Controls.Add(this.labelModel2);
-            this.Controls.Add(this.btnBrowseModel1);
-            this.Controls.Add(this.txtModel1Path);
-            this.Controls.Add(this.labelModel1);
+            this.Controls.Add(this.btnBrowseIcModel);
+            this.Controls.Add(this.txtIcModelPath);
+            this.Controls.Add(this.labelIcModel);
+            this.Controls.Add(this.btnBrowseComponentModel);
+            this.Controls.Add(this.txtComponentModelPath);
+            this.Controls.Add(this.labelComponentModel);
+            this.Controls.Add(this.btnBrowseExtractModel);
+            this.Controls.Add(this.txtExtractModelPath);
+            this.Controls.Add(this.labelExtractModel);
             this.Font = new System.Drawing.Font("微软雅黑", 9F);
             this.MinimumSize = new System.Drawing.Size(1200, 900);
             this.Name = "Form1";
@@ -404,24 +421,26 @@ namespace DlcvDemo2
             ((System.ComponentModel.ISupportInitialize)(this.numWindowHeight)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numOverlapX)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numOverlapY)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numSpeedRounds)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numComponentPadding)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
         }
 
         #endregion
 
-        private System.Windows.Forms.Label labelModel1;
-        private System.Windows.Forms.TextBox txtModel1Path;
-        private System.Windows.Forms.Button btnBrowseModel1;
-        private System.Windows.Forms.Label labelModel2;
-        private System.Windows.Forms.TextBox txtModel2Path;
-        private System.Windows.Forms.Button btnBrowseModel2;
+        private System.Windows.Forms.Label labelExtractModel;
+        private System.Windows.Forms.TextBox txtExtractModelPath;
+        private System.Windows.Forms.Button btnBrowseExtractModel;
+        private System.Windows.Forms.Label labelComponentModel;
+        private System.Windows.Forms.TextBox txtComponentModelPath;
+        private System.Windows.Forms.Button btnBrowseComponentModel;
+        private System.Windows.Forms.Label labelIcModel;
+        private System.Windows.Forms.TextBox txtIcModelPath;
+        private System.Windows.Forms.Button btnBrowseIcModel;
         private System.Windows.Forms.Label labelImage;
         private System.Windows.Forms.TextBox txtImagePath;
         private System.Windows.Forms.Button btnBrowseImage;
         private System.Windows.Forms.Button btnInfer;
-        private System.Windows.Forms.Button btnSpeedTest;
         private System.Windows.Forms.Label labelWindowWidth;
         private System.Windows.Forms.NumericUpDown numWindowWidth;
         private System.Windows.Forms.Label labelWindowHeight;
@@ -430,8 +449,8 @@ namespace DlcvDemo2
         private System.Windows.Forms.NumericUpDown numOverlapX;
         private System.Windows.Forms.Label labelOverlapY;
         private System.Windows.Forms.NumericUpDown numOverlapY;
-        private System.Windows.Forms.Label labelSpeedRounds;
-        private System.Windows.Forms.NumericUpDown numSpeedRounds;
+        private System.Windows.Forms.Label labelComponentPadding;
+        private System.Windows.Forms.NumericUpDown numComponentPadding;
         private System.Windows.Forms.Button btnReleaseModels;
         private System.Windows.Forms.ProgressBar progressBarInference;
         private System.Windows.Forms.Label lblInferenceProgress;

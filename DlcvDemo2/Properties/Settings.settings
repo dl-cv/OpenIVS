@@ -2,10 +2,13 @@
 <SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="DlcvDemo2.Properties" GeneratedClassName="Settings">
   <Profiles />
   <Settings>
-    <Setting Name="LastModel1Path" Type="System.String" Scope="User">
+    <Setting Name="LastExtractModelPath" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>
-    <Setting Name="LastModel2Path" Type="System.String" Scope="User">
+    <Setting Name="LastComponentDetectModelPath" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="LastIcDetectModelPath" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>
     <Setting Name="LastImagePath" Type="System.String" Scope="User">
@@ -22,6 +25,9 @@
     </Setting>
     <Setting Name="SlidingOverlapY" Type="System.Int32" Scope="User">
       <Value Profile="(Default)">1024</Value>
+    </Setting>
+    <Setting Name="ComponentPadding" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">32</Value>
     </Setting>
   </Settings>
 </SettingsFile>

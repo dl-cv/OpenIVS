@@ -23,30 +23,45 @@ namespace DlcvDemo2.Properties
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string LastModel1Path
+        public string LastExtractModelPath
         {
             get
             {
-                return ((string)(this["LastModel1Path"]));
+                return ((string)(this["LastExtractModelPath"]));
             }
             set
             {
-                this["LastModel1Path"] = value;
+                this["LastExtractModelPath"] = value;
             }
         }
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string LastModel2Path
+        public string LastComponentDetectModelPath
         {
             get
             {
-                return ((string)(this["LastModel2Path"]));
+                return ((string)(this["LastComponentDetectModelPath"]));
             }
             set
             {
-                this["LastModel2Path"] = value;
+                this["LastComponentDetectModelPath"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LastIcDetectModelPath
+        {
+            get
+            {
+                return ((string)(this["LastIcDetectModelPath"]));
+            }
+            set
+            {
+                this["LastIcDetectModelPath"] = value;
             }
         }
 
@@ -122,6 +137,21 @@ namespace DlcvDemo2.Properties
             set
             {
                 this["SlidingOverlapY"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("32")]
+        public int ComponentPadding
+        {
+            get
+            {
+                return ((int)(this["ComponentPadding"]));
+            }
+            set
+            {
+                this["ComponentPadding"] = value;
             }
         }
     }

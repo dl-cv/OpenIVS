@@ -19,28 +19,29 @@ namespace DlcvDemo2
     public partial class Form1 : Form
     {
         private const string ModelFileFilter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
+        private const int DefaultComponentPadding = 32;
         private static readonly Regex CategoryAngleRegex = new Regex(@"^(.*?)(0|90|180|270)$", RegexOptions.Compiled);
-        private static readonly HashSet<string> ExcludedMainCategories = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "字符",
-            "引脚",
-            "焊点"
-        };
 
         private const double MergeIouThreshold = 0.2;
         private const double MergeIosThreshold = 0.2;
 
-        private Model model1;
-        private Model model2;
+        private Model extractModel;
+        private Model componentDetectModel;
+        private Model icDetectModel;
         private string imagePath;
         private bool isInferenceRunning;
-        private bool isSpeedTesting;
 
-        private sealed class Model1Detection
+        private sealed class ExtractDetection
         {
             public CSharpObjectResult ObjectResult { get; set; }
             public Rect2d MergeAabb { get; set; }
             public int Order { get; set; }
+        }
+
+        private enum DetectionModelRoute
+        {
+            ComponentDetect = 0,
+            IcDetect = 1
         }
 
         private sealed class ParsedCategoryAngle
@@ -70,7 +71,9 @@ namespace DlcvDemo2
         {
             public CSharpResult DisplayResult { get; set; }
             public int SlidingWindowCount { get; set; }
-            public int MergedModel1Count { get; set; }
+            public int MergedExtractCount { get; set; }
+            public int ComponentModelResultCount { get; set; }
+            public int IcModelResultCount { get; set; }
             public List<CSharpObjectResult> FinalObjects { get; } = new List<CSharpObjectResult>();
             public List<string> Logs { get; } = new List<string>();
         }
@@ -81,6 +84,7 @@ namespace DlcvDemo2
             public int WindowHeight { get; set; }
             public int OverlapX { get; set; }
             public int OverlapY { get; set; }
+            public int ComponentPadding { get; set; }
         }
 
         private sealed class InferenceProgressInfo
@@ -120,9 +124,9 @@ namespace DlcvDemo2
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            if (isInferenceRunning || isSpeedTesting)
+            if (isInferenceRunning)
             {
-                MessageBox.Show("当前正在执行推理或测速，请等待完成后再关闭。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("当前正在执行推理，请等待完成后再关闭。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 e.Cancel = true;
                 return;
             }
@@ -132,56 +136,83 @@ namespace DlcvDemo2
             Utils.FreeAllModels();
         }
 
-        private void btnBrowseModel1_Click(object sender, EventArgs e)
+        private void btnBrowseExtractModel_Click(object sender, EventArgs e)
         {
-            if (!TryEnsureIdle("当前正在执行推理或测速，暂不能切换模型1。"))
+            if (!TryEnsureIdle("当前正在执行推理，暂不能切换元件提取模型。"))
             {
                 return;
             }
 
-            var selected = BrowseFile("选择模型1", ModelFileFilter, txtModel1Path.Text);
+            var selected = BrowseFile("选择元件提取模型", ModelFileFilter, txtExtractModelPath.Text);
             if (!string.IsNullOrWhiteSpace(selected))
             {
-                txtModel1Path.Text = selected;
+                txtExtractModelPath.Text = selected;
                 SaveUiSettings();
 
                 try
                 {
-                    if (LoadModel1())
+                    if (LoadExtractModel())
                     {
-                        richTextBox1.Text = $"模型1加载成功:\n{txtModel1Path.Text.Trim()}";
+                        richTextBox1.Text = $"元件提取模型加载成功:\n{txtExtractModelPath.Text.Trim()}";
                     }
                 }
                 catch (Exception ex)
                 {
-                    richTextBox1.Text = $"模型1加载失败:\n{ex.Message}";
+                    richTextBox1.Text = $"元件提取模型加载失败:\n{ex.Message}";
                 }
             }
         }
 
-        private void btnBrowseModel2_Click(object sender, EventArgs e)
+        private void btnBrowseComponentModel_Click(object sender, EventArgs e)
         {
-            if (!TryEnsureIdle("当前正在执行推理或测速，暂不能切换模型2。"))
+            if (!TryEnsureIdle("当前正在执行推理，暂不能切换元件检测模型。"))
             {
                 return;
             }
 
-            var selected = BrowseFile("选择模型2", ModelFileFilter, txtModel2Path.Text);
+            var selected = BrowseFile("选择元件检测模型", ModelFileFilter, txtComponentModelPath.Text);
             if (!string.IsNullOrWhiteSpace(selected))
             {
-                txtModel2Path.Text = selected;
+                txtComponentModelPath.Text = selected;
                 SaveUiSettings();
 
                 try
                 {
-                    if (LoadModel2())
+                    if (LoadComponentDetectModel())
                     {
-                        richTextBox1.Text = $"模型2加载成功:\n{txtModel2Path.Text.Trim()}";
+                        richTextBox1.Text = $"元件检测模型加载成功:\n{txtComponentModelPath.Text.Trim()}";
                     }
                 }
                 catch (Exception ex)
                 {
-                    richTextBox1.Text = $"模型2加载失败:\n{ex.Message}";
+                    richTextBox1.Text = $"元件检测模型加载失败:\n{ex.Message}";
+                }
+            }
+        }
+
+        private void btnBrowseIcModel_Click(object sender, EventArgs e)
+        {
+            if (!TryEnsureIdle("当前正在执行推理，暂不能切换IC检测模型。"))
+            {
+                return;
+            }
+
+            var selected = BrowseFile("选择IC检测模型", ModelFileFilter, txtIcModelPath.Text);
+            if (!string.IsNullOrWhiteSpace(selected))
+            {
+                txtIcModelPath.Text = selected;
+                SaveUiSettings();
+
+                try
+                {
+                    if (LoadIcDetectModel())
+                    {
+                        richTextBox1.Text = $"IC检测模型加载成功:\n{txtIcModelPath.Text.Trim()}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    richTextBox1.Text = $"IC检测模型加载失败:\n{ex.Message}";
                 }
             }
         }
@@ -206,77 +237,9 @@ namespace DlcvDemo2
             await StartInferenceAsync(triggeredByImageSelection: false);
         }
 
-        private void btnSpeedTest_Click(object sender, EventArgs e)
-        {
-            if (isInferenceRunning)
-            {
-                richTextBox1.Text = "当前正在执行推理，请稍后再测速。";
-                return;
-            }
-            if (isSpeedTesting)
-            {
-                richTextBox1.Text = "当前正在执行测速，请稍后再试。";
-                return;
-            }
-
-            isSpeedTesting = true;
-            UpdateBusyControlState();
-            try
-            {
-                SaveUiSettings();
-                if (!EnsureReadyForPipeline(showMessage: true))
-                {
-                    return;
-                }
-
-                int rounds = (int)numSpeedRounds.Value;
-                if (rounds <= 0)
-                {
-                    MessageBox.Show("测速轮数必须大于0。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-
-                SlidingWindowConfig config = CaptureSlidingWindowConfig();
-                Mat imageBgr;
-                Mat imageRgb;
-                string error;
-                if (!TryLoadImageForInfer(imagePath, out imageBgr, out imageRgb, out error))
-                {
-                    richTextBox1.Text = error;
-                    return;
-                }
-
-                using (imageBgr)
-                using (imageRgb)
-                {
-                    var costs = new List<double>(rounds);
-                    PipelineRunResult lastResult = null;
-
-                    for (int i = 0; i < rounds; i++)
-                    {
-                        var sw = Stopwatch.StartNew();
-                        lastResult = RunFixedPipeline(imageRgb, config);
-                        sw.Stop();
-                        costs.Add(sw.Elapsed.TotalMilliseconds);
-                    }
-
-                    richTextBox1.Text = BuildSpeedTestText(costs, rounds, lastResult);
-                }
-            }
-            catch (Exception ex)
-            {
-                richTextBox1.Text = $"测速失败:\n{ex}";
-            }
-            finally
-            {
-                isSpeedTesting = false;
-                UpdateBusyControlState();
-            }
-        }
-
         private void btnReleaseModels_Click(object sender, EventArgs e)
         {
-            if (!TryEnsureIdle("当前正在执行推理或测速，暂不能释放模型。"))
+            if (!TryEnsureIdle("当前正在执行推理，暂不能释放模型。"))
             {
                 return;
             }
@@ -292,13 +255,6 @@ namespace DlcvDemo2
                 richTextBox1.Text = triggeredByImageSelection
                     ? "当前正在执行推理，已忽略本次自动推理请求。"
                     : "当前正在执行推理，请稍后再试。";
-                return;
-            }
-            if (isSpeedTesting)
-            {
-                richTextBox1.Text = triggeredByImageSelection
-                    ? "当前正在执行测速，已忽略本次自动推理请求。"
-                    : "当前正在执行测速，请稍后再试。";
                 return;
             }
 
@@ -381,32 +337,47 @@ namespace DlcvDemo2
             }
         }
 
-        private bool LoadModel1()
+        private bool LoadExtractModel()
         {
-            string path = (txtModel1Path.Text ?? string.Empty).Trim();
+            string path = (txtExtractModelPath.Text ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
-                MessageBox.Show("请先选择有效的模型1文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("请先选择有效的元件提取模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return false;
             }
 
-            DisposeModel(ref model1);
-            model1 = new Model(path, 0, false);
+            DisposeModel(ref extractModel);
+            extractModel = new Model(path, 0, false);
             SaveUiSettings();
             return true;
         }
 
-        private bool LoadModel2()
+        private bool LoadComponentDetectModel()
         {
-            string path = (txtModel2Path.Text ?? string.Empty).Trim();
+            string path = (txtComponentModelPath.Text ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
-                MessageBox.Show("请先选择有效的模型2文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("请先选择有效的元件检测模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return false;
             }
 
-            DisposeModel(ref model2);
-            model2 = new Model(path, 0, false);
+            DisposeModel(ref componentDetectModel);
+            componentDetectModel = new Model(path, 0, false);
+            SaveUiSettings();
+            return true;
+        }
+
+        private bool LoadIcDetectModel()
+        {
+            string path = (txtIcModelPath.Text ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                MessageBox.Show("请先选择有效的IC检测模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+
+            DisposeModel(ref icDetectModel);
+            icDetectModel = new Model(path, 0, false);
             SaveUiSettings();
             return true;
         }
@@ -419,21 +390,22 @@ namespace DlcvDemo2
             List<Rect> windows = BuildSlidingWindows(fullImageRgb, config);
             runResult.SlidingWindowCount = windows.Count;
 
-            ReportInferenceProgress(progress, 12, $"模型1滑窗推理 0/{windows.Count}");
-            List<Model1Detection> model1Detections = InferModel1OnWindows(fullImageRgb, windows, progress);
-            ReportInferenceProgress(progress, 62, "合并模型1结果");
-            List<Model1Detection> mergedModel1 = MergeModel1Results(model1Detections);
-            runResult.MergedModel1Count = mergedModel1.Count;
+            ReportInferenceProgress(progress, 12, $"元件提取模型滑窗推理 0/{windows.Count}");
+            List<ExtractDetection> extractDetections = InferExtractModelOnWindows(fullImageRgb, windows, progress);
+            ReportInferenceProgress(progress, 62, "合并元件提取结果");
+            List<ExtractDetection> mergedExtract = MergeExtractResults(extractDetections);
+            runResult.MergedExtractCount = mergedExtract.Count;
 
-            int roiTotal = mergedModel1.Count;
+            int roiTotal = mergedExtract.Count;
             int roiCompleted = 0;
-            foreach (var target in mergedModel1)
+            foreach (var target in mergedExtract)
             {
                 int startPercent = 70 + (int)Math.Round(25.0 * roiCompleted / Math.Max(1, roiTotal));
-                ReportInferenceProgress(progress, startPercent, $"模型2推理 {roiCompleted}/{roiTotal}");
+                ReportInferenceProgress(progress, startPercent, $"局部模型推理 {roiCompleted}/{roiTotal}");
 
                 ParsedCategoryAngle parsed = ParseCategoryAndAngle(target.ObjectResult.CategoryName);
-                using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, parsed))
+                DetectionModelRoute route = SelectDetectionModel(parsed.BaseName);
+                using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, parsed, config.ComponentPadding))
                 {
                     if (!roi.IsValid)
                     {
@@ -443,19 +415,31 @@ namespace DlcvDemo2
 
                     try
                     {
-                        List<CSharpObjectResult> mapped = InferModel2AndMapBack(roi, target.ObjectResult);
+                        List<CSharpObjectResult> mapped = InferDetectionModelAndMapBack(roi, target.ObjectResult, route);
                         runResult.FinalObjects.AddRange(mapped);
+                        int realResultCount = mapped.Count == 1 && ReferenceEquals(mapped[0], target.ObjectResult)
+                            ? 0
+                            : mapped.Count;
+                        if (route == DetectionModelRoute.IcDetect)
+                        {
+                            runResult.IcModelResultCount += realResultCount;
+                        }
+                        else
+                        {
+                            runResult.ComponentModelResultCount += realResultCount;
+                        }
                     }
                     catch (Exception ex)
                     {
-                        runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]模型2推理失败，保留模型1兜底：{ex.Message}");
+                        string routeName = route == DetectionModelRoute.IcDetect ? "IC检测模型" : "元件检测模型";
+                        runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]{routeName}推理失败，保留元件提取结果兜底：{ex.Message}");
                         runResult.FinalObjects.Add(target.ObjectResult);
                     }
                 }
 
                 roiCompleted++;
                 int finishPercent = 70 + (int)Math.Round(25.0 * roiCompleted / Math.Max(1, roiTotal));
-                ReportInferenceProgress(progress, finishPercent, $"模型2推理 {roiCompleted}/{roiTotal}");
+                ReportInferenceProgress(progress, finishPercent, $"局部模型推理 {roiCompleted}/{roiTotal}");
             }
 
             ReportInferenceProgress(progress, 95, "整理结果");
@@ -488,9 +472,9 @@ namespace DlcvDemo2
             return windows;
         }
 
-        private List<Model1Detection> InferModel1OnWindows(Mat fullImageRgb, List<Rect> windows, IProgress<InferenceProgressInfo> progress)
+        private List<ExtractDetection> InferExtractModelOnWindows(Mat fullImageRgb, List<Rect> windows, IProgress<InferenceProgressInfo> progress)
         {
-            var output = new List<Model1Detection>();
+            var output = new List<ExtractDetection>();
             int order = 0;
             JObject inferParams = new JObject
             {
@@ -500,7 +484,7 @@ namespace DlcvDemo2
             int totalWindows = windows != null ? windows.Count : 0;
             if (totalWindows == 0)
             {
-                ReportInferenceProgress(progress, 60, "模型1滑窗推理 0/0");
+                ReportInferenceProgress(progress, 60, "元件提取模型滑窗推理 0/0");
                 return output;
             }
 
@@ -510,7 +494,7 @@ namespace DlcvDemo2
                 Rect window = windows[i];
                 using (var tile = new Mat(fullImageRgb, window).Clone())
                 {
-                    CSharpResult tileResult = model1.Infer(tile, inferParams);
+                    CSharpResult tileResult = extractModel.Infer(tile, inferParams);
                     if (tileResult.SampleResults == null || tileResult.SampleResults.Count == 0)
                     {
                         continue;
@@ -518,14 +502,14 @@ namespace DlcvDemo2
 
                     foreach (var obj in tileResult.SampleResults[0].Results)
                     {
-                        CSharpObjectResult mapped = LiftModel1ObjectToFull(obj, window);
+                        CSharpObjectResult mapped = LiftExtractObjectToFull(obj, window);
                         Rect2d aabb = GetAabbFromObject(mapped);
                         if (aabb.Width <= 0 || aabb.Height <= 0)
                         {
                             continue;
                         }
 
-                        output.Add(new Model1Detection
+                        output.Add(new ExtractDetection
                         {
                             ObjectResult = mapped,
                             MergeAabb = aabb,
@@ -537,7 +521,7 @@ namespace DlcvDemo2
                 int percent = 15 + (int)Math.Round(45.0 * (i + 1) / totalWindows);
                 if (percent != lastPercent)
                 {
-                    ReportInferenceProgress(progress, percent, $"模型1滑窗推理 {i + 1}/{totalWindows}");
+                    ReportInferenceProgress(progress, percent, $"元件提取模型滑窗推理 {i + 1}/{totalWindows}");
                     lastPercent = percent;
                 }
             }
@@ -545,9 +529,9 @@ namespace DlcvDemo2
             return output;
         }
 
-        private List<Model1Detection> MergeModel1Results(List<Model1Detection> fullImageDetections)
+        private List<ExtractDetection> MergeExtractResults(List<ExtractDetection> fullImageDetections)
         {
-            var mergedAll = new List<Model1Detection>();
+            var mergedAll = new List<ExtractDetection>();
             if (fullImageDetections == null || fullImageDetections.Count == 0)
             {
                 return mergedAll;
@@ -555,7 +539,7 @@ namespace DlcvDemo2
 
             foreach (var group in fullImageDetections.GroupBy(x => x.ObjectResult.CategoryName ?? string.Empty))
             {
-                var clusters = new List<Model1Detection>();
+                var clusters = new List<ExtractDetection>();
                 var orderedGroup = group
                     .OrderByDescending(x => GetObjectArea(x.ObjectResult))
                     .ThenByDescending(x => x.ObjectResult.Score)
@@ -584,7 +568,7 @@ namespace DlcvDemo2
 
                     if (!merged)
                     {
-                        clusters.Add(new Model1Detection
+                        clusters.Add(new ExtractDetection
                         {
                             ObjectResult = detection.ObjectResult,
                             MergeAabb = detection.MergeAabb,
@@ -608,11 +592,15 @@ namespace DlcvDemo2
             return mergedAll;
         }
 
-        private ParsedCategoryAngle ParseCategoryAndAngle(string categoryName)
+        private static ParsedCategoryAngle ParseCategoryAndAngle(string categoryName)
         {
             if (string.IsNullOrWhiteSpace(categoryName))
             {
-                return new ParsedCategoryAngle { BaseName = string.Empty, Angle = 0 };
+                return new ParsedCategoryAngle
+                {
+                    BaseName = string.Empty,
+                    Angle = 0
+                };
             }
 
             Match match = CategoryAngleRegex.Match(categoryName.Trim());
@@ -620,31 +608,79 @@ namespace DlcvDemo2
             {
                 return new ParsedCategoryAngle
                 {
-                    BaseName = categoryName,
+                    BaseName = categoryName.Trim(),
                     Angle = 0
                 };
             }
 
-            int parsedAngle;
-            if (!int.TryParse(match.Groups[2].Value, out parsedAngle))
+            int angle;
+            if (!int.TryParse(match.Groups[2].Value, out angle))
             {
-                parsedAngle = 0;
+                angle = 0;
             }
 
             string baseName = match.Groups[1].Value;
             if (string.IsNullOrWhiteSpace(baseName))
             {
-                baseName = categoryName;
+                baseName = categoryName.Trim();
             }
 
             return new ParsedCategoryAngle
             {
                 BaseName = baseName,
-                Angle = parsedAngle
+                Angle = NormalizeRightAngle(angle)
             };
         }
 
-        private RoiProcessResult CropAndRotateRoi(Mat fullImageRgb, Model1Detection target, ParsedCategoryAngle parsedCategory)
+        private static int NormalizeRightAngle(int angle)
+        {
+            int normalized = angle % 360;
+            if (normalized < 0)
+            {
+                normalized += 360;
+            }
+
+            if (normalized != 0 && normalized != 90 && normalized != 180 && normalized != 270)
+            {
+                return 0;
+            }
+
+            return normalized;
+        }
+
+        private static DetectionModelRoute SelectDetectionModel(string baseName)
+        {
+            string normalized = (baseName ?? string.Empty).Trim();
+            if (string.Equals(normalized, "IC", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "BGA", StringComparison.OrdinalIgnoreCase))
+            {
+                return DetectionModelRoute.IcDetect;
+            }
+
+            return DetectionModelRoute.ComponentDetect;
+        }
+
+        private static Rect2d ExpandRect(Rect2d rect, int padding, int imageWidth, int imageHeight)
+        {
+            if (imageWidth <= 0 || imageHeight <= 0 || rect.Width <= 0 || rect.Height <= 0)
+            {
+                return new Rect2d();
+            }
+
+            double safePadding = Math.Max(0, padding);
+            double left = Math.Max(0, rect.X - safePadding);
+            double top = Math.Max(0, rect.Y - safePadding);
+            double right = Math.Min(imageWidth, rect.X + rect.Width + safePadding);
+            double bottom = Math.Min(imageHeight, rect.Y + rect.Height + safePadding);
+            if (right <= left || bottom <= top)
+            {
+                return new Rect2d();
+            }
+
+            return new Rect2d(left, top, right - left, bottom - top);
+        }
+
+        private RoiProcessResult CropAndRotateRoi(Mat fullImageRgb, ExtractDetection target, ParsedCategoryAngle parsedCategory, int padding)
         {
             var result = new RoiProcessResult
             {
@@ -657,13 +693,14 @@ namespace DlcvDemo2
 
             try
             {
-                if (TryBuildRotatedCrop(fullImageRgb, target.ObjectResult, out roi, out fullToCropAffine))
+                if (TryBuildRotatedCrop(fullImageRgb, target.ObjectResult, padding, out roi, out fullToCropAffine))
                 {
                     // 使用旋转裁剪结果
                 }
                 else
                 {
-                    Rect roiRect = ClampRectToImage(target.MergeAabb, fullImageRgb.Width, fullImageRgb.Height);
+                    Rect2d expandedRect = ExpandRect(target.MergeAabb, padding, fullImageRgb.Width, fullImageRgb.Height);
+                    Rect roiRect = ClampRectToImage(expandedRect, fullImageRgb.Width, fullImageRgb.Height);
                     if (roiRect.Width <= 1 || roiRect.Height <= 1)
                     {
                         result.InvalidReason = "ROI无效";
@@ -680,7 +717,7 @@ namespace DlcvDemo2
                     return result;
                 }
 
-                int normalizeAngle = NormalizeAngle(parsedCategory.Angle);
+                int normalizeAngle = NormalizeRightAngle(parsedCategory.Angle);
                 Mat normalized = RotateRoiByRightAngle(roi, normalizeAngle);
                 if (normalized == null || normalized.Empty())
                 {
@@ -715,23 +752,24 @@ namespace DlcvDemo2
             }
         }
 
-        private List<CSharpObjectResult> InferModel2AndMapBack(RoiProcessResult roiContext, CSharpObjectResult model1Fallback)
+        private List<CSharpObjectResult> InferDetectionModelAndMapBack(RoiProcessResult roiContext, CSharpObjectResult extractFallback, DetectionModelRoute route)
         {
             JObject inferParams = new JObject
             {
                 ["with_mask"] = false
             };
 
-            CSharpResult roiResult = model2.Infer(roiContext.NormalizedRoi, inferParams);
+            Model activeModel = route == DetectionModelRoute.IcDetect ? icDetectModel : componentDetectModel;
+            CSharpResult roiResult = activeModel.Infer(roiContext.NormalizedRoi, inferParams);
             if (roiResult.SampleResults == null || roiResult.SampleResults.Count == 0)
             {
-                return new List<CSharpObjectResult> { model1Fallback };
+                return new List<CSharpObjectResult> { extractFallback };
             }
 
             List<CSharpObjectResult> rawObjects = roiResult.SampleResults[0].Results ?? new List<CSharpObjectResult>();
             if (rawObjects.Count == 0)
             {
-                return new List<CSharpObjectResult> { model1Fallback };
+                return new List<CSharpObjectResult> { extractFallback };
             }
 
             var mappedObjects = new List<CSharpObjectResult>();
@@ -740,31 +778,52 @@ namespace DlcvDemo2
                 CSharpObjectResult mapped;
                 if (TryMapObjectToFull(obj, roiContext.NormToFullAffine, out mapped))
                 {
-                    mappedObjects.Add(mapped);
+                    mappedObjects.Add(ResolveFinalDetectionObject(mapped, extractFallback, route));
                 }
             }
 
             if (mappedObjects.Count == 0)
             {
-                return new List<CSharpObjectResult> { model1Fallback };
-            }
-
-            var candidateIndexes = new List<int>();
-            for (int i = 0; i < mappedObjects.Count; i++)
-            {
-                if (!ExcludedMainCategories.Contains(mappedObjects[i].CategoryName ?? string.Empty))
-                {
-                    candidateIndexes.Add(i);
-                }
-            }
-
-            if (candidateIndexes.Count > 0)
-            {
-                int bestIndex = SelectMainCandidateIndex(mappedObjects, candidateIndexes);
-                mappedObjects[bestIndex] = CloneWithCategoryName(mappedObjects[bestIndex], model1Fallback.CategoryName);
+                return new List<CSharpObjectResult> { extractFallback };
             }
 
             return mappedObjects;
+        }
+
+        private static CSharpObjectResult ResolveFinalDetectionObject(CSharpObjectResult mappedObject, CSharpObjectResult extractFallback, DetectionModelRoute route)
+        {
+            if (!ShouldMapBackToExtractCategory(mappedObject.CategoryName, route))
+            {
+                return mappedObject;
+            }
+
+            return new CSharpObjectResult(
+                extractFallback.CategoryId,
+                extractFallback.CategoryName,
+                mappedObject.Score,
+                mappedObject.Area,
+                mappedObject.Bbox,
+                mappedObject.WithMask,
+                mappedObject.Mask,
+                mappedObject.WithBbox,
+                mappedObject.WithAngle,
+                mappedObject.Angle);
+        }
+
+        private static bool ShouldMapBackToExtractCategory(string detectionCategoryName, DetectionModelRoute route)
+        {
+            string normalized = (detectionCategoryName ?? string.Empty).Trim();
+            if (normalized.Length == 0)
+            {
+                return false;
+            }
+
+            if (route == DetectionModelRoute.IcDetect)
+            {
+                return string.Equals(normalized, "IC", StringComparison.OrdinalIgnoreCase);
+            }
+
+            return string.Equals(normalized, "元件", StringComparison.Ordinal);
         }
 
         private CSharpResult BuildDisplayResult(List<CSharpObjectResult> finalObjects)
@@ -811,7 +870,7 @@ namespace DlcvDemo2
             return positions;
         }
 
-        private static CSharpObjectResult LiftModel1ObjectToFull(CSharpObjectResult localObject, Rect windowRect)
+        private static CSharpObjectResult LiftExtractObjectToFull(CSharpObjectResult localObject, Rect windowRect)
         {
             if (localObject.Bbox == null || localObject.Bbox.Count < 4)
             {
@@ -901,7 +960,7 @@ namespace DlcvDemo2
             return iou >= MergeIouThreshold || ios >= MergeIosThreshold;
         }
 
-        private static bool ShouldPreferRepresentative(Model1Detection candidate, Model1Detection current)
+        private static bool ShouldPreferRepresentative(ExtractDetection candidate, ExtractDetection current)
         {
             double areaCandidate = GetObjectArea(candidate.ObjectResult);
             double areaCurrent = GetObjectArea(current.ObjectResult);
@@ -987,7 +1046,7 @@ namespace DlcvDemo2
             return new Rect(left, top, right - left, bottom - top);
         }
 
-        private static bool TryBuildRotatedCrop(Mat fullImage, CSharpObjectResult obj, out Mat roi, out double[] fullToCropAffine)
+        private static bool TryBuildRotatedCrop(Mat fullImage, CSharpObjectResult obj, int padding, out Mat roi, out double[] fullToCropAffine)
         {
             roi = null;
             fullToCropAffine = null;
@@ -1005,8 +1064,8 @@ namespace DlcvDemo2
 
             double cx = obj.Bbox[0];
             double cy = obj.Bbox[1];
-            double w = Math.Abs(obj.Bbox[2]);
-            double h = Math.Abs(obj.Bbox[3]);
+            double w = Math.Abs(obj.Bbox[2]) + Math.Max(0, padding) * 2.0;
+            double h = Math.Abs(obj.Bbox[3]) + Math.Max(0, padding) * 2.0;
             if (w <= 1 || h <= 1)
             {
                 return false;
@@ -1065,25 +1124,9 @@ namespace DlcvDemo2
             return rotated;
         }
 
-        private static int NormalizeAngle(int angle)
-        {
-            int n = angle % 360;
-            if (n < 0)
-            {
-                n += 360;
-            }
-
-            if (n != 0 && n != 90 && n != 180 && n != 270)
-            {
-                return 0;
-            }
-
-            return n;
-        }
-
         private static double[] BuildRightAngleAffine(int srcW, int srcH, int angle, out int dstW, out int dstH)
         {
-            angle = NormalizeAngle(angle);
+            angle = NormalizeRightAngle(angle);
             if (angle == 90)
             {
                 dstW = srcH;
@@ -1285,59 +1328,19 @@ namespace DlcvDemo2
             return true;
         }
 
-        private static int SelectMainCandidateIndex(List<CSharpObjectResult> mappedObjects, List<int> candidateIndexes)
-        {
-            int best = candidateIndexes[0];
-            for (int i = 1; i < candidateIndexes.Count; i++)
-            {
-                int idx = candidateIndexes[i];
-                if (IsBetterMainCandidate(mappedObjects[idx], mappedObjects[best]))
-                {
-                    best = idx;
-                }
-            }
-            return best;
-        }
-
-        private static bool IsBetterMainCandidate(CSharpObjectResult lhs, CSharpObjectResult rhs)
-        {
-            double areaL = GetObjectArea(lhs);
-            double areaR = GetObjectArea(rhs);
-            if (areaL > areaR + 1e-6)
-            {
-                return true;
-            }
-            if (Math.Abs(areaL - areaR) <= 1e-6 && lhs.Score > rhs.Score + 1e-6)
-            {
-                return true;
-            }
-            return false;
-        }
-
-        private static CSharpObjectResult CloneWithCategoryName(CSharpObjectResult source, string categoryName)
-        {
-            return new CSharpObjectResult(
-                source.CategoryId,
-                categoryName,
-                source.Score,
-                source.Area,
-                source.Bbox != null ? new List<double>(source.Bbox) : new List<double>(),
-                false,
-                new Mat(),
-                source.WithBbox,
-                source.WithAngle,
-                source.Angle);
-        }
-
         private string BuildInferenceText(PipelineRunResult runResult, double elapsedMs)
         {
             var sb = new StringBuilder();
             sb.AppendLine($"图片: {imagePath}");
-            sb.AppendLine($"模型1: {txtModel1Path.Text.Trim()}");
-            sb.AppendLine($"模型2: {txtModel2Path.Text.Trim()}");
+            sb.AppendLine($"元件提取模型: {txtExtractModelPath.Text.Trim()}");
+            sb.AppendLine($"元件检测模型: {txtComponentModelPath.Text.Trim()}");
+            sb.AppendLine($"IC检测模型: {txtIcModelPath.Text.Trim()}");
             sb.AppendLine($"滑窗参数: {(int)numWindowWidth.Value} x {(int)numWindowHeight.Value}, overlap=({(int)numOverlapX.Value}, {(int)numOverlapY.Value})");
+            sb.AppendLine($"元件外扩: {(int)numComponentPadding.Value}");
             sb.AppendLine($"滑窗数量: {runResult.SlidingWindowCount}");
-            sb.AppendLine($"模型1合并后目标数: {runResult.MergedModel1Count}");
+            sb.AppendLine($"元件提取模型合并后目标数: {runResult.MergedExtractCount}");
+            sb.AppendLine($"元件检测模型结果数: {runResult.ComponentModelResultCount}");
+            sb.AppendLine($"IC检测模型结果数: {runResult.IcModelResultCount}");
             sb.AppendLine($"最终结果数: {runResult.FinalObjects.Count}");
             sb.AppendLine($"推理耗时: {elapsedMs:F2} ms");
             sb.AppendLine();
@@ -1369,33 +1372,6 @@ namespace DlcvDemo2
             return sb.ToString();
         }
 
-        private string BuildSpeedTestText(List<double> costsMs, int rounds, PipelineRunResult lastResult)
-        {
-            double total = costsMs.Sum();
-            double avg = costsMs.Average();
-            double min = costsMs.Min();
-            double max = costsMs.Max();
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"测速图片: {imagePath}");
-            sb.AppendLine($"测速轮数: {rounds}");
-            sb.AppendLine($"总耗时: {total / 1000.0:F2} s");
-            sb.AppendLine($"平均耗时: {avg:F1} ms/张");
-            sb.AppendLine($"最快耗时: {min:F1} ms");
-            sb.AppendLine($"最慢耗时: {max:F1} ms");
-            sb.AppendLine("说明: 测速执行完整双模型管线，不覆盖当前图像区显示结果。");
-
-            if (lastResult != null)
-            {
-                sb.AppendLine();
-                sb.AppendLine($"（最后一轮）滑窗数量: {lastResult.SlidingWindowCount}");
-                sb.AppendLine($"（最后一轮）模型1合并后目标数: {lastResult.MergedModel1Count}");
-                sb.AppendLine($"（最后一轮）最终结果数: {lastResult.FinalObjects.Count}");
-            }
-
-            return sb.ToString();
-        }
-
         private static string BuildRectText(CSharpObjectResult obj)
         {
             if (obj.Bbox == null || obj.Bbox.Count < 4)
@@ -1422,13 +1398,14 @@ namespace DlcvDemo2
                 WindowWidth = (int)numWindowWidth.Value,
                 WindowHeight = (int)numWindowHeight.Value,
                 OverlapX = (int)numOverlapX.Value,
-                OverlapY = (int)numOverlapY.Value
+                OverlapY = (int)numOverlapY.Value,
+                ComponentPadding = (int)numComponentPadding.Value
             };
         }
 
         private bool TryEnsureIdle(string busyMessage)
         {
-            if (isInferenceRunning || isSpeedTesting)
+            if (isInferenceRunning)
             {
                 richTextBox1.Text = busyMessage;
                 return false;
@@ -1438,22 +1415,23 @@ namespace DlcvDemo2
 
         private void UpdateBusyControlState()
         {
-            bool isBusy = isInferenceRunning || isSpeedTesting;
-            btnBrowseModel1.Enabled = !isBusy;
-            btnBrowseModel2.Enabled = !isBusy;
+            bool isBusy = isInferenceRunning;
+            btnBrowseExtractModel.Enabled = !isBusy;
+            btnBrowseComponentModel.Enabled = !isBusy;
+            btnBrowseIcModel.Enabled = !isBusy;
             btnBrowseImage.Enabled = !isBusy;
             btnInfer.Enabled = !isBusy;
-            btnSpeedTest.Enabled = !isBusy;
             btnReleaseModels.Enabled = !isBusy;
 
-            txtModel1Path.Enabled = !isBusy;
-            txtModel2Path.Enabled = !isBusy;
+            txtExtractModelPath.Enabled = !isBusy;
+            txtComponentModelPath.Enabled = !isBusy;
+            txtIcModelPath.Enabled = !isBusy;
             txtImagePath.Enabled = !isBusy;
             numWindowWidth.Enabled = !isBusy;
             numWindowHeight.Enabled = !isBusy;
             numOverlapX.Enabled = !isBusy;
             numOverlapY.Enabled = !isBusy;
-            numSpeedRounds.Enabled = !isBusy;
+            numComponentPadding.Enabled = !isBusy;
         }
 
         private void UpdateInferenceProgress(InferenceProgressInfo info)
@@ -1510,20 +1488,29 @@ namespace DlcvDemo2
         {
             imagePath = (txtImagePath.Text ?? string.Empty).Trim();
 
-            if (model1 == null)
+            if (extractModel == null)
             {
                 if (showMessage)
                 {
-                    MessageBox.Show("请先加载模型1。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("请先加载元件提取模型。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 return false;
             }
 
-            if (model2 == null)
+            if (componentDetectModel == null)
             {
                 if (showMessage)
                 {
-                    MessageBox.Show("请先加载模型2。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("请先加载元件检测模型。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                return false;
+            }
+
+            if (icDetectModel == null)
+            {
+                if (showMessage)
+                {
+                    MessageBox.Show("请先加载IC检测模型。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 return false;
             }
@@ -1621,14 +1608,16 @@ namespace DlcvDemo2
 
         private void ReleaseModels()
         {
-            DisposeModel(ref model1);
-            DisposeModel(ref model2);
+            DisposeModel(ref extractModel);
+            DisposeModel(ref componentDetectModel);
+            DisposeModel(ref icDetectModel);
         }
 
         private void RestoreUiSettings()
         {
-            txtModel1Path.Text = Properties.Settings.Default.LastModel1Path ?? string.Empty;
-            txtModel2Path.Text = Properties.Settings.Default.LastModel2Path ?? string.Empty;
+            txtExtractModelPath.Text = Properties.Settings.Default.LastExtractModelPath ?? string.Empty;
+            txtComponentModelPath.Text = Properties.Settings.Default.LastComponentDetectModelPath ?? string.Empty;
+            txtIcModelPath.Text = Properties.Settings.Default.LastIcDetectModelPath ?? string.Empty;
             txtImagePath.Text = Properties.Settings.Default.LastImagePath ?? string.Empty;
             imagePath = txtImagePath.Text;
 
@@ -1636,17 +1625,20 @@ namespace DlcvDemo2
             SetNumericValue(numWindowHeight, Properties.Settings.Default.SlidingWindowHeight, 2560);
             SetNumericValue(numOverlapX, Properties.Settings.Default.SlidingOverlapX, 1024);
             SetNumericValue(numOverlapY, Properties.Settings.Default.SlidingOverlapY, 1024);
+            SetNumericValue(numComponentPadding, Properties.Settings.Default.ComponentPadding, DefaultComponentPadding);
         }
 
         private void SaveUiSettings()
         {
-            Properties.Settings.Default.LastModel1Path = (txtModel1Path.Text ?? string.Empty).Trim();
-            Properties.Settings.Default.LastModel2Path = (txtModel2Path.Text ?? string.Empty).Trim();
+            Properties.Settings.Default.LastExtractModelPath = (txtExtractModelPath.Text ?? string.Empty).Trim();
+            Properties.Settings.Default.LastComponentDetectModelPath = (txtComponentModelPath.Text ?? string.Empty).Trim();
+            Properties.Settings.Default.LastIcDetectModelPath = (txtIcModelPath.Text ?? string.Empty).Trim();
             Properties.Settings.Default.LastImagePath = (txtImagePath.Text ?? string.Empty).Trim();
             Properties.Settings.Default.SlidingWindowWidth = (int)numWindowWidth.Value;
             Properties.Settings.Default.SlidingWindowHeight = (int)numWindowHeight.Value;
             Properties.Settings.Default.SlidingOverlapX = (int)numOverlapX.Value;
             Properties.Settings.Default.SlidingOverlapY = (int)numOverlapY.Value;
+            Properties.Settings.Default.ComponentPadding = (int)numComponentPadding.Value;
             Properties.Settings.Default.Save();
         }
 
