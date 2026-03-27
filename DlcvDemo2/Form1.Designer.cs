@@ -20,12 +20,15 @@ namespace DlcvDemo2
             this.labelExtractModel = new System.Windows.Forms.Label();
             this.txtExtractModelPath = new System.Windows.Forms.TextBox();
             this.btnBrowseExtractModel = new System.Windows.Forms.Button();
+            this.btnLoadExtractModel = new System.Windows.Forms.Button();
             this.labelComponentModel = new System.Windows.Forms.Label();
             this.txtComponentModelPath = new System.Windows.Forms.TextBox();
             this.btnBrowseComponentModel = new System.Windows.Forms.Button();
+            this.btnLoadComponentModel = new System.Windows.Forms.Button();
             this.labelIcModel = new System.Windows.Forms.Label();
             this.txtIcModelPath = new System.Windows.Forms.TextBox();
             this.btnBrowseIcModel = new System.Windows.Forms.Button();
+            this.btnLoadIcModel = new System.Windows.Forms.Button();
             this.labelImage = new System.Windows.Forms.Label();
             this.txtImagePath = new System.Windows.Forms.TextBox();
             this.btnBrowseImage = new System.Windows.Forms.Button();
@@ -67,19 +70,30 @@ namespace DlcvDemo2
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtExtractModelPath.Location = new System.Drawing.Point(136, 13);
             this.txtExtractModelPath.Name = "txtExtractModelPath";
-            this.txtExtractModelPath.Size = new System.Drawing.Size(988, 31);
+            this.txtExtractModelPath.Size = new System.Drawing.Size(862, 31);
             this.txtExtractModelPath.TabIndex = 1;
             // 
             // btnBrowseExtractModel
             // 
             this.btnBrowseExtractModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseExtractModel.Location = new System.Drawing.Point(1130, 12);
+            this.btnBrowseExtractModel.Location = new System.Drawing.Point(1004, 12);
             this.btnBrowseExtractModel.Name = "btnBrowseExtractModel";
             this.btnBrowseExtractModel.Size = new System.Drawing.Size(120, 34);
             this.btnBrowseExtractModel.TabIndex = 2;
             this.btnBrowseExtractModel.Text = "浏览...";
             this.btnBrowseExtractModel.UseVisualStyleBackColor = true;
             this.btnBrowseExtractModel.Click += new System.EventHandler(this.btnBrowseExtractModel_Click);
+            // 
+            // btnLoadExtractModel
+            // 
+            this.btnLoadExtractModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnLoadExtractModel.Location = new System.Drawing.Point(1130, 12);
+            this.btnLoadExtractModel.Name = "btnLoadExtractModel";
+            this.btnLoadExtractModel.Size = new System.Drawing.Size(120, 34);
+            this.btnLoadExtractModel.TabIndex = 3;
+            this.btnLoadExtractModel.Text = "加载模型";
+            this.btnLoadExtractModel.UseVisualStyleBackColor = true;
+            this.btnLoadExtractModel.Click += new System.EventHandler(this.btnLoadExtractModel_Click);
             // 
             // labelComponentModel
             // 
@@ -96,19 +110,30 @@ namespace DlcvDemo2
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtComponentModelPath.Location = new System.Drawing.Point(136, 51);
             this.txtComponentModelPath.Name = "txtComponentModelPath";
-            this.txtComponentModelPath.Size = new System.Drawing.Size(988, 31);
+            this.txtComponentModelPath.Size = new System.Drawing.Size(862, 31);
             this.txtComponentModelPath.TabIndex = 4;
             // 
             // btnBrowseComponentModel
             // 
             this.btnBrowseComponentModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseComponentModel.Location = new System.Drawing.Point(1130, 50);
+            this.btnBrowseComponentModel.Location = new System.Drawing.Point(1004, 50);
             this.btnBrowseComponentModel.Name = "btnBrowseComponentModel";
             this.btnBrowseComponentModel.Size = new System.Drawing.Size(120, 34);
             this.btnBrowseComponentModel.TabIndex = 5;
             this.btnBrowseComponentModel.Text = "浏览...";
             this.btnBrowseComponentModel.UseVisualStyleBackColor = true;
             this.btnBrowseComponentModel.Click += new System.EventHandler(this.btnBrowseComponentModel_Click);
+            // 
+            // btnLoadComponentModel
+            // 
+            this.btnLoadComponentModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnLoadComponentModel.Location = new System.Drawing.Point(1130, 50);
+            this.btnLoadComponentModel.Name = "btnLoadComponentModel";
+            this.btnLoadComponentModel.Size = new System.Drawing.Size(120, 34);
+            this.btnLoadComponentModel.TabIndex = 6;
+            this.btnLoadComponentModel.Text = "加载模型";
+            this.btnLoadComponentModel.UseVisualStyleBackColor = true;
+            this.btnLoadComponentModel.Click += new System.EventHandler(this.btnLoadComponentModel_Click);
             // 
             // labelIcModel
             // 
@@ -125,19 +150,30 @@ namespace DlcvDemo2
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtIcModelPath.Location = new System.Drawing.Point(136, 89);
             this.txtIcModelPath.Name = "txtIcModelPath";
-            this.txtIcModelPath.Size = new System.Drawing.Size(988, 31);
+            this.txtIcModelPath.Size = new System.Drawing.Size(862, 31);
             this.txtIcModelPath.TabIndex = 7;
             // 
             // btnBrowseIcModel
             // 
             this.btnBrowseIcModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseIcModel.Location = new System.Drawing.Point(1130, 88);
+            this.btnBrowseIcModel.Location = new System.Drawing.Point(1004, 88);
             this.btnBrowseIcModel.Name = "btnBrowseIcModel";
             this.btnBrowseIcModel.Size = new System.Drawing.Size(120, 34);
             this.btnBrowseIcModel.TabIndex = 8;
             this.btnBrowseIcModel.Text = "浏览...";
             this.btnBrowseIcModel.UseVisualStyleBackColor = true;
             this.btnBrowseIcModel.Click += new System.EventHandler(this.btnBrowseIcModel_Click);
+            // 
+            // btnLoadIcModel
+            // 
+            this.btnLoadIcModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnLoadIcModel.Location = new System.Drawing.Point(1130, 88);
+            this.btnLoadIcModel.Name = "btnLoadIcModel";
+            this.btnLoadIcModel.Size = new System.Drawing.Size(120, 34);
+            this.btnLoadIcModel.TabIndex = 9;
+            this.btnLoadIcModel.Text = "加载模型";
+            this.btnLoadIcModel.UseVisualStyleBackColor = true;
+            this.btnLoadIcModel.Click += new System.EventHandler(this.btnLoadIcModel_Click);
             // 
             // labelImage
             // 
@@ -401,12 +437,15 @@ namespace DlcvDemo2
             this.Controls.Add(this.btnBrowseImage);
             this.Controls.Add(this.txtImagePath);
             this.Controls.Add(this.labelImage);
+            this.Controls.Add(this.btnLoadIcModel);
             this.Controls.Add(this.btnBrowseIcModel);
             this.Controls.Add(this.txtIcModelPath);
             this.Controls.Add(this.labelIcModel);
+            this.Controls.Add(this.btnLoadComponentModel);
             this.Controls.Add(this.btnBrowseComponentModel);
             this.Controls.Add(this.txtComponentModelPath);
             this.Controls.Add(this.labelComponentModel);
+            this.Controls.Add(this.btnLoadExtractModel);
             this.Controls.Add(this.btnBrowseExtractModel);
             this.Controls.Add(this.txtExtractModelPath);
             this.Controls.Add(this.labelExtractModel);
@@ -431,12 +470,15 @@ namespace DlcvDemo2
         private System.Windows.Forms.Label labelExtractModel;
         private System.Windows.Forms.TextBox txtExtractModelPath;
         private System.Windows.Forms.Button btnBrowseExtractModel;
+        private System.Windows.Forms.Button btnLoadExtractModel;
         private System.Windows.Forms.Label labelComponentModel;
         private System.Windows.Forms.TextBox txtComponentModelPath;
         private System.Windows.Forms.Button btnBrowseComponentModel;
+        private System.Windows.Forms.Button btnLoadComponentModel;
         private System.Windows.Forms.Label labelIcModel;
         private System.Windows.Forms.TextBox txtIcModelPath;
         private System.Windows.Forms.Button btnBrowseIcModel;
+        private System.Windows.Forms.Button btnLoadIcModel;
         private System.Windows.Forms.Label labelImage;
         private System.Windows.Forms.TextBox txtImagePath;
         private System.Windows.Forms.Button btnBrowseImage;

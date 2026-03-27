@@ -117,24 +117,23 @@ namespace DlcvDemo2
                 return;
             }
 
-            var selected = BrowseFile("选择元件提取模型", ModelFileFilter, txtExtractModelPath.Text);
-            if (!string.IsNullOrWhiteSpace(selected))
+            if (BrowseModelPath(txtExtractModelPath, "选择元件提取模型"))
             {
-                txtExtractModelPath.Text = selected;
-                SaveUiSettings();
-
-                try
-                {
-                    if (LoadExtractModel())
-                    {
-                        richTextBox1.Text = $"元件提取模型加载成功:\n{txtExtractModelPath.Text.Trim()}";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    richTextBox1.Text = $"元件提取模型加载失败:\n{ex.Message}";
-                }
+                LoadModelWithStatus(
+                    "当前正在执行推理，暂不能加载元件提取模型。",
+                    txtExtractModelPath,
+                    "元件提取模型",
+                    LoadExtractModel);
             }
+        }
+
+        private void btnLoadExtractModel_Click(object sender, EventArgs e)
+        {
+            LoadModelWithStatus(
+                "当前正在执行推理，暂不能加载元件提取模型。",
+                txtExtractModelPath,
+                "元件提取模型",
+                LoadExtractModel);
         }
 
         private void btnBrowseComponentModel_Click(object sender, EventArgs e)
@@ -144,24 +143,23 @@ namespace DlcvDemo2
                 return;
             }
 
-            var selected = BrowseFile("选择元件检测模型", ModelFileFilter, txtComponentModelPath.Text);
-            if (!string.IsNullOrWhiteSpace(selected))
+            if (BrowseModelPath(txtComponentModelPath, "选择元件检测模型"))
             {
-                txtComponentModelPath.Text = selected;
-                SaveUiSettings();
-
-                try
-                {
-                    if (LoadComponentDetectModel())
-                    {
-                        richTextBox1.Text = $"元件检测模型加载成功:\n{txtComponentModelPath.Text.Trim()}";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    richTextBox1.Text = $"元件检测模型加载失败:\n{ex.Message}";
-                }
+                LoadModelWithStatus(
+                    "当前正在执行推理，暂不能加载元件检测模型。",
+                    txtComponentModelPath,
+                    "元件检测模型",
+                    LoadComponentDetectModel);
             }
+        }
+
+        private void btnLoadComponentModel_Click(object sender, EventArgs e)
+        {
+            LoadModelWithStatus(
+                "当前正在执行推理，暂不能加载元件检测模型。",
+                txtComponentModelPath,
+                "元件检测模型",
+                LoadComponentDetectModel);
         }
 
         private void btnBrowseIcModel_Click(object sender, EventArgs e)
@@ -171,24 +169,23 @@ namespace DlcvDemo2
                 return;
             }
 
-            var selected = BrowseFile("选择IC检测模型", ModelFileFilter, txtIcModelPath.Text);
-            if (!string.IsNullOrWhiteSpace(selected))
+            if (BrowseModelPath(txtIcModelPath, "选择IC检测模型"))
             {
-                txtIcModelPath.Text = selected;
-                SaveUiSettings();
-
-                try
-                {
-                    if (LoadIcDetectModel())
-                    {
-                        richTextBox1.Text = $"IC检测模型加载成功:\n{txtIcModelPath.Text.Trim()}";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    richTextBox1.Text = $"IC检测模型加载失败:\n{ex.Message}";
-                }
+                LoadModelWithStatus(
+                    "当前正在执行推理，暂不能加载IC检测模型。",
+                    txtIcModelPath,
+                    "IC检测模型",
+                    LoadIcDetectModel);
             }
+        }
+
+        private void btnLoadIcModel_Click(object sender, EventArgs e)
+        {
+            LoadModelWithStatus(
+                "当前正在执行推理，暂不能加载IC检测模型。",
+                txtIcModelPath,
+                "IC检测模型",
+                LoadIcDetectModel);
         }
 
         private async void btnBrowseImage_Click(object sender, EventArgs e)
@@ -202,13 +199,13 @@ namespace DlcvDemo2
                 txtImagePath.Text = selected;
                 imagePath = selected;
                 SaveUiSettings();
-                await StartInferenceAsync(triggeredByImageSelection: true);
+                await RunInferenceAsync(triggeredByImageSelection: true);
             }
         }
 
         private async void btnInfer_Click(object sender, EventArgs e)
         {
-            await StartInferenceAsync(triggeredByImageSelection: false);
+            await RunInferenceAsync(triggeredByImageSelection: false);
         }
 
         private void btnReleaseModels_Click(object sender, EventArgs e)
@@ -222,7 +219,7 @@ namespace DlcvDemo2
             richTextBox1.Text = "模型已释放";
         }
 
-        private async Task StartInferenceAsync(bool triggeredByImageSelection)
+        private async Task RunInferenceAsync(bool triggeredByImageSelection)
         {
             if (isInferenceRunning)
             {
@@ -248,7 +245,48 @@ namespace DlcvDemo2
                 SetInferenceProgress(0, "准备推理");
 
                 var progress = new Progress<InferenceProgressInfo>(UpdateInferenceProgress);
-                using (InferenceExecutionResult result = await Task.Run(() => RunInferenceCore(inferImagePath, config, progress)))
+                using (InferenceExecutionResult result = await Task.Run(() =>
+                {
+                    Mat imageBgr = null;
+                    Mat imageRgb = null;
+                    try
+                    {
+                        ReportInferenceProgress(progress, 2, "读取图片");
+
+                        string error;
+                        if (!TryLoadImageForInfer(inferImagePath, out imageBgr, out imageRgb, out error))
+                        {
+                            throw new InvalidOperationException(error);
+                        }
+
+                        Stopwatch sw = Stopwatch.StartNew();
+                        PipelineRunResult runResult = RunPipeline(imageRgb, config, progress);
+                        sw.Stop();
+
+                        return new InferenceExecutionResult
+                        {
+                            ImageBgr = imageBgr,
+                            RunResult = runResult,
+                            ElapsedMs = sw.Elapsed.TotalMilliseconds
+                        };
+                    }
+                    catch
+                    {
+                        if (imageBgr != null)
+                        {
+                            imageBgr.Dispose();
+                            imageBgr = null;
+                        }
+                        throw;
+                    }
+                    finally
+                    {
+                        if (imageRgb != null)
+                        {
+                            imageRgb.Dispose();
+                        }
+                    }
+                }))
                 {
                     imagePanel1.UpdateImageAndResult(result.ImageBgr, result.RunResult.DisplayResult);
                     richTextBox1.Text = BuildInferenceText(result.RunResult, result.ElapsedMs);
@@ -266,94 +304,6 @@ namespace DlcvDemo2
                 isInferenceRunning = false;
                 UpdateBusyControlState();
             }
-        }
-
-        private InferenceExecutionResult RunInferenceCore(string inferImagePath, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress)
-        {
-            Mat imageBgr = null;
-            Mat imageRgb = null;
-            try
-            {
-                ReportInferenceProgress(progress, 2, "读取图片");
-
-                string error;
-                if (!TryLoadImageForInfer(inferImagePath, out imageBgr, out imageRgb, out error))
-                {
-                    throw new InvalidOperationException(error);
-                }
-
-                var sw = Stopwatch.StartNew();
-                PipelineRunResult runResult = RunPipeline(imageRgb, config, progress);
-                sw.Stop();
-
-                return new InferenceExecutionResult
-                {
-                    ImageBgr = imageBgr,
-                    RunResult = runResult,
-                    ElapsedMs = sw.Elapsed.TotalMilliseconds
-                };
-            }
-            catch
-            {
-                if (imageBgr != null)
-                {
-                    imageBgr.Dispose();
-                    imageBgr = null;
-                }
-                throw;
-            }
-            finally
-            {
-                if (imageRgb != null)
-                {
-                    imageRgb.Dispose();
-                }
-            }
-        }
-
-        private bool LoadExtractModel()
-        {
-            string path = (txtExtractModelPath.Text ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            {
-                MessageBox.Show("请先选择有效的元件提取模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return false;
-            }
-
-            DisposeModel(ref extractModel);
-            extractModel = new Model(path, 0, false);
-            SaveUiSettings();
-            return true;
-        }
-
-        private bool LoadComponentDetectModel()
-        {
-            string path = (txtComponentModelPath.Text ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            {
-                MessageBox.Show("请先选择有效的元件检测模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return false;
-            }
-
-            DisposeModel(ref componentDetectModel);
-            componentDetectModel = new Model(path, 0, false);
-            SaveUiSettings();
-            return true;
-        }
-
-        private bool LoadIcDetectModel()
-        {
-            string path = (txtIcModelPath.Text ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            {
-                MessageBox.Show("请先选择有效的IC检测模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return false;
-            }
-
-            DisposeModel(ref icDetectModel);
-            icDetectModel = new Model(path, 0, false);
-            SaveUiSettings();
-            return true;
         }
 
         private PipelineRunResult RunPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null)
@@ -720,6 +670,85 @@ namespace DlcvDemo2
                 obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3]);
         }
 
+        private bool BrowseModelPath(TextBox targetTextBox, string dialogTitle)
+        {
+            var selected = BrowseFile(dialogTitle, ModelFileFilter, targetTextBox.Text);
+            if (string.IsNullOrWhiteSpace(selected))
+            {
+                return false;
+            }
+
+            targetTextBox.Text = selected;
+            SaveUiSettings();
+            return true;
+        }
+
+        private void LoadModelWithStatus(string busyMessage, TextBox targetTextBox, string modelDisplayName, Func<bool> loadAction)
+        {
+            if (!TryEnsureIdle(busyMessage))
+            {
+                return;
+            }
+
+            SaveUiSettings();
+            try
+            {
+                if (loadAction())
+                {
+                    richTextBox1.Text = string.Format("{0}加载成功:\n{1}", modelDisplayName, targetTextBox.Text.Trim());
+                }
+            }
+            catch (Exception ex)
+            {
+                richTextBox1.Text = string.Format("{0}加载失败:\n{1}", modelDisplayName, ex.Message);
+            }
+        }
+
+        private bool LoadExtractModel()
+        {
+            string path = (txtExtractModelPath.Text ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                MessageBox.Show("请先选择有效的元件提取模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+
+            DisposeModel(ref extractModel);
+            extractModel = new Model(path, 0, false);
+            SaveUiSettings();
+            return true;
+        }
+
+        private bool LoadComponentDetectModel()
+        {
+            string path = (txtComponentModelPath.Text ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                MessageBox.Show("请先选择有效的元件检测模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+
+            DisposeModel(ref componentDetectModel);
+            componentDetectModel = new Model(path, 0, false);
+            SaveUiSettings();
+            return true;
+        }
+
+        private bool LoadIcDetectModel()
+        {
+            string path = (txtIcModelPath.Text ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                MessageBox.Show("请先选择有效的IC检测模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+
+            DisposeModel(ref icDetectModel);
+            icDetectModel = new Model(path, 0, false);
+            SaveUiSettings();
+            return true;
+        }
+
         private SlidingWindowConfig CaptureSlidingWindowConfig()
         {
             return new SlidingWindowConfig
@@ -746,8 +775,11 @@ namespace DlcvDemo2
         {
             bool isBusy = isInferenceRunning;
             btnBrowseExtractModel.Enabled = !isBusy;
+            btnLoadExtractModel.Enabled = !isBusy;
             btnBrowseComponentModel.Enabled = !isBusy;
+            btnLoadComponentModel.Enabled = !isBusy;
             btnBrowseIcModel.Enabled = !isBusy;
+            btnLoadIcModel.Enabled = !isBusy;
             btnBrowseImage.Enabled = !isBusy;
             btnInfer.Enabled = !isBusy;
             btnReleaseModels.Enabled = !isBusy;
