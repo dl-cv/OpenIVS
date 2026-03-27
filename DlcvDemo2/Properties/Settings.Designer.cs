@@ -140,19 +140,5 @@ namespace DlcvDemo2.Properties
             }
         }
 
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("32")]
-        public int ComponentPadding
-        {
-            get
-            {
-                return ((int)(this["ComponentPadding"]));
-            }
-            set
-            {
-                this["ComponentPadding"] = value;
-            }
-        }
     }
 }

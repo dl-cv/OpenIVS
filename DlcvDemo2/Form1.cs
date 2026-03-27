@@ -17,7 +17,6 @@ namespace DlcvDemo2
     public partial class Form1 : Form
     {
         private const string ModelFileFilter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
-        private const int DefaultComponentPadding = 32;
         private Model extractModel;
         private Model componentDetectModel;
         private Model icDetectModel;
@@ -58,7 +57,6 @@ namespace DlcvDemo2
             public int WindowHeight { get; set; }
             public int OverlapX { get; set; }
             public int OverlapY { get; set; }
-            public int ComponentPadding { get; set; }
         }
 
         private sealed class InferenceProgressInfo
@@ -340,7 +338,7 @@ namespace DlcvDemo2
                     string.Equals(baseName, "IC", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(baseName, "BGA", StringComparison.OrdinalIgnoreCase);
 
-                using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, normalizeAngle, config.ComponentPadding))
+                using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, normalizeAngle))
                 {
                     if (!roi.IsValid)
                     {
@@ -440,7 +438,7 @@ namespace DlcvDemo2
             return output;
         }
 
-        private RoiProcessResult CropAndRotateRoi(Mat fullImageRgb, ExtractDetection target, int normalizeAngle, int padding)
+        private RoiProcessResult CropAndRotateRoi(Mat fullImageRgb, ExtractDetection target, int normalizeAngle)
         {
             var result = new RoiProcessResult
             {
@@ -454,14 +452,13 @@ namespace DlcvDemo2
 
             try
             {
-                if (DetectionGeometryUtils.TryBuildRotatedCrop(fullImageRgb, target.ObjectResult, padding, out roi, out fullToCropAffine))
+                if (DetectionGeometryUtils.TryBuildRotatedCrop(fullImageRgb, target.ObjectResult, 0, out roi, out fullToCropAffine))
                 {
                     // 使用旋转裁剪结果
                 }
                 else
                 {
-                    Rect2d expandedRect = DetectionGeometryUtils.ExpandRect(target.MergeAabb, padding, fullImageRgb.Width, fullImageRgb.Height);
-                    Rect roiRect = DetectionGeometryUtils.ClampRectToImage(expandedRect, fullImageRgb.Width, fullImageRgb.Height);
+                    Rect roiRect = DetectionGeometryUtils.ClampRectToImage(target.MergeAabb, fullImageRgb.Width, fullImageRgb.Height);
                     if (roiRect.Width <= 1 || roiRect.Height <= 1)
                     {
                         result.InvalidReason = "ROI无效";
@@ -615,7 +612,6 @@ namespace DlcvDemo2
             sb.AppendLine($"元件检测模型: {txtComponentModelPath.Text.Trim()}");
             sb.AppendLine($"IC检测模型: {txtIcModelPath.Text.Trim()}");
             sb.AppendLine($"滑窗参数: {(int)numWindowWidth.Value} x {(int)numWindowHeight.Value}, overlap=({(int)numOverlapX.Value}, {(int)numOverlapY.Value})");
-            sb.AppendLine($"元件外扩: {(int)numComponentPadding.Value}");
             sb.AppendLine($"滑窗数量: {runResult.SlidingWindowCount}");
             sb.AppendLine($"元件提取模型合并后目标数: {runResult.MergedExtractCount}");
             sb.AppendLine($"元件检测模型结果数: {runResult.ComponentModelResultCount}");
@@ -756,8 +752,7 @@ namespace DlcvDemo2
                 WindowWidth = (int)numWindowWidth.Value,
                 WindowHeight = (int)numWindowHeight.Value,
                 OverlapX = (int)numOverlapX.Value,
-                OverlapY = (int)numOverlapY.Value,
-                ComponentPadding = (int)numComponentPadding.Value
+                OverlapY = (int)numOverlapY.Value
             };
         }
 
@@ -792,7 +787,6 @@ namespace DlcvDemo2
             numWindowHeight.Enabled = !isBusy;
             numOverlapX.Enabled = !isBusy;
             numOverlapY.Enabled = !isBusy;
-            numComponentPadding.Enabled = !isBusy;
         }
 
         private void UpdateInferenceProgress(InferenceProgressInfo info)
@@ -986,7 +980,6 @@ namespace DlcvDemo2
             SetNumericValue(numWindowHeight, Properties.Settings.Default.SlidingWindowHeight, 2560);
             SetNumericValue(numOverlapX, Properties.Settings.Default.SlidingOverlapX, 1024);
             SetNumericValue(numOverlapY, Properties.Settings.Default.SlidingOverlapY, 1024);
-            SetNumericValue(numComponentPadding, Properties.Settings.Default.ComponentPadding, DefaultComponentPadding);
         }
 
         private void SaveUiSettings()
@@ -999,7 +992,6 @@ namespace DlcvDemo2
             Properties.Settings.Default.SlidingWindowHeight = (int)numWindowHeight.Value;
             Properties.Settings.Default.SlidingOverlapX = (int)numOverlapX.Value;
             Properties.Settings.Default.SlidingOverlapY = (int)numOverlapY.Value;
-            Properties.Settings.Default.ComponentPadding = (int)numComponentPadding.Value;
             Properties.Settings.Default.Save();
         }
 

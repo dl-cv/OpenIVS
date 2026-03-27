@@ -41,8 +41,6 @@ namespace DlcvDemo2
             this.numOverlapX = new System.Windows.Forms.NumericUpDown();
             this.labelOverlapY = new System.Windows.Forms.Label();
             this.numOverlapY = new System.Windows.Forms.NumericUpDown();
-            this.labelComponentPadding = new System.Windows.Forms.Label();
-            this.numComponentPadding = new System.Windows.Forms.NumericUpDown();
             this.btnReleaseModels = new System.Windows.Forms.Button();
             this.progressBarInference = new System.Windows.Forms.ProgressBar();
             this.lblInferenceProgress = new System.Windows.Forms.Label();
@@ -52,7 +50,6 @@ namespace DlcvDemo2
             ((System.ComponentModel.ISupportInitialize)(this.numWindowHeight)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numOverlapX)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numOverlapY)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numComponentPadding)).BeginInit();
             this.SuspendLayout();
             // 
             // labelExtractModel
@@ -329,36 +326,10 @@ namespace DlcvDemo2
             0,
             0});
             // 
-            // labelComponentPadding
-            // 
-            this.labelComponentPadding.AutoSize = true;
-            this.labelComponentPadding.Location = new System.Drawing.Point(732, 171);
-            this.labelComponentPadding.Name = "labelComponentPadding";
-            this.labelComponentPadding.Size = new System.Drawing.Size(82, 24);
-            this.labelComponentPadding.TabIndex = 21;
-            this.labelComponentPadding.Text = "元件外扩";
-            // 
-            // numComponentPadding
-            // 
-            this.numComponentPadding.Location = new System.Drawing.Point(820, 167);
-            this.numComponentPadding.Maximum = new decimal(new int[] {
-            30000,
-            0,
-            0,
-            0});
-            this.numComponentPadding.Name = "numComponentPadding";
-            this.numComponentPadding.Size = new System.Drawing.Size(86, 31);
-            this.numComponentPadding.TabIndex = 22;
-            this.numComponentPadding.Value = new decimal(new int[] {
-            32,
-            0,
-            0,
-            0});
-            // 
             // btnReleaseModels
             // 
             this.btnReleaseModels.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnReleaseModels.Location = new System.Drawing.Point(928, 166);
+            this.btnReleaseModels.Location = new System.Drawing.Point(732, 166);
             this.btnReleaseModels.Name = "btnReleaseModels";
             this.btnReleaseModels.Size = new System.Drawing.Size(322, 34);
             this.btnReleaseModels.TabIndex = 23;
@@ -423,8 +394,6 @@ namespace DlcvDemo2
             this.Controls.Add(this.lblInferenceProgress);
             this.Controls.Add(this.progressBarInference);
             this.Controls.Add(this.btnReleaseModels);
-            this.Controls.Add(this.numComponentPadding);
-            this.Controls.Add(this.labelComponentPadding);
             this.Controls.Add(this.numOverlapY);
             this.Controls.Add(this.labelOverlapY);
             this.Controls.Add(this.numOverlapX);
@@ -460,7 +429,6 @@ namespace DlcvDemo2
             ((System.ComponentModel.ISupportInitialize)(this.numWindowHeight)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numOverlapX)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numOverlapY)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numComponentPadding)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
         }
@@ -491,8 +459,6 @@ namespace DlcvDemo2
         private System.Windows.Forms.NumericUpDown numOverlapX;
         private System.Windows.Forms.Label labelOverlapY;
         private System.Windows.Forms.NumericUpDown numOverlapY;
-        private System.Windows.Forms.Label labelComponentPadding;
-        private System.Windows.Forms.NumericUpDown numComponentPadding;
         private System.Windows.Forms.Button btnReleaseModels;
         private System.Windows.Forms.ProgressBar progressBarInference;
         private System.Windows.Forms.Label lblInferenceProgress;
