@@ -84,6 +84,7 @@
     <Compile Include="MaskRleUtils.cs" />
     <Compile Include="Models.cs" />
     <Compile Include="Outputs.cs" />
+    <Compile Include="ResultCategoryOverride.cs" />
     <Compile Include="SlidingMerge.cs" />
     <Compile Include="SlidingWindow.cs" />
     <Compile Include="StrokeToPoints.cs" />
