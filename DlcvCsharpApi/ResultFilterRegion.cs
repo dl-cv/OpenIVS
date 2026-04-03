@@ -14,6 +14,8 @@ namespace DlcvModules
     /// - “完全不在区域内”的结果将被分流到第二路（ExtraOutputs[0]）。
     /// - 若存在 mask_rle / mask_array：优先用 mask 与区域的像素级重叠判断（任意像素重叠即视为区域内）。
     /// - 若不存在 mask：使用 bbox 与区域的相交判断。
+    /// - result_region 支持 any_bbox / top1_bbox 两种模式（由 result_region_mode 控制）。
+    /// - 当 result_region 已连接但当前图像无有效 bbox 时，按“空区域”处理（全部判到区域外，不回退 x/y/w/h）。
     /// - 区域属性 x/y/w/h 默认认为处于“原图坐标”；若结果处于当前图坐标，会自动做一定的容错匹配。
     /// - 标量输出：has_positive（第一路是否存在任何结果）。
     /// </summary>
@@ -55,6 +57,12 @@ namespace DlcvModules
             int y = ReadInt("y", 0);
             int w = Math.Max(1, ReadInt("w", 100));
             int h = Math.Max(1, ReadInt("h", 100));
+            string resultRegionMode = ReadString("result_region_mode", "any_bbox");
+            if (!string.Equals(resultRegionMode, "any_bbox", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(resultRegionMode, "top1_bbox", StringComparison.OrdinalIgnoreCase))
+            {
+                resultRegionMode = "any_bbox";
+            }
 
             // ROI 规则（与 Python 最新一致）：
             // - ROI 的数值永远取输入的 x/y/w/h，不做 original<->current 的几何变换
@@ -237,6 +245,139 @@ namespace DlcvModules
                 ? convertOutputToOriginalOverride.Value
                 : forceOriginal;
 
+            // 读取第 3 输入口 result_region（C# 执行器按 pair 聚合：第 3 口对应 ExtraInputsIn[0]）
+            var rrInput = ReadResultRegionInput();
+            bool resultRegionConnected = rrInput.Item1;
+            var resultRegionResults = rrInput.Item2 ?? new JArray();
+            var regionBoxesByWrapIndex = new Dictionary<int, List<int[]>>();
+            if (resultRegionConnected)
+            {
+                var regionCandidatesByWrapIndex = new Dictionary<int, List<Tuple<int[], double?>>>();
+                foreach (var token in resultRegionResults)
+                {
+                    if (!(token is JObject regionEntry) ||
+                        !string.Equals(regionEntry["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var regionDets = regionEntry["sample_results"] as JArray;
+                    if (regionDets == null || regionDets.Count == 0) continue;
+
+                    var regionWrap = PickWrapForEntry(regionEntry);
+                    if (regionWrap == null) continue;
+
+                    int regionWrapId = RuntimeHelpers.GetHashCode(regionWrap);
+                    if (!wrapIdToIndex.TryGetValue(regionWrapId, out int regionWrapIdx) || regionWrapIdx < 0) continue;
+
+                    var regionBaseImg = regionWrap.GetImage();
+                    int regionWc = regionBaseImg != null && !regionBaseImg.Empty() ? regionBaseImg.Width : 1;
+                    int regionHc = regionBaseImg != null && !regionBaseImg.Empty() ? regionBaseImg.Height : 1;
+                    int regionW0 = regionWrap.TransformState != null ? regionWrap.TransformState.OriginalWidth : regionWc;
+                    int regionH0 = regionWrap.TransformState != null ? regionWrap.TransformState.OriginalHeight : regionHc;
+                    if (regionW0 <= 0) regionW0 = regionWc;
+                    if (regionH0 <= 0) regionH0 = regionHc;
+
+                    foreach (var dTok in regionDets)
+                    {
+                        if (!(dTok is JObject d)) continue;
+                        if (!TryExtractBboxAabbCurrent(d, out double rbx1, out double rby1, out double rbx2, out double rby2)) continue;
+
+                        var bboxCur = ClampXYXY(rbx1, rby1, rbx2, rby2, regionWc, regionHc);
+                        int[] bboxUse = bboxCur;
+                        if (forceOriginal)
+                        {
+                            int[] bboxMetaOri = null;
+                            try
+                            {
+                                var meta = d["metadata"] as JObject;
+                                var gb = meta != null ? (meta["global_bbox"] as JArray) : null;
+                                if (gb != null && (gb.Count == 4 || gb.Count == 5))
+                                {
+                                    bboxMetaOri = ParseGlobalBboxToAabb(gb);
+                                    if (bboxMetaOri != null)
+                                    {
+                                        bboxMetaOri = ClampXYXY(bboxMetaOri[0], bboxMetaOri[1], bboxMetaOri[2], bboxMetaOri[3], regionW0, regionH0);
+                                    }
+                                }
+                            }
+                            catch { bboxMetaOri = null; }
+
+                            if (bboxMetaOri != null)
+                            {
+                                bboxUse = bboxMetaOri;
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    var mapped = MapAabbToOriginalAndClamp(regionWrap.TransformState, bboxCur, regionW0, regionH0);
+                                    if (mapped != null) bboxUse = mapped;
+                                }
+                                catch { }
+                            }
+                        }
+
+                        if (!regionCandidatesByWrapIndex.TryGetValue(regionWrapIdx, out var cands))
+                        {
+                            cands = new List<Tuple<int[], double?>>();
+                            regionCandidatesByWrapIndex[regionWrapIdx] = cands;
+                        }
+                        cands.Add(Tuple.Create(bboxUse, TryExtractScore(d)));
+                    }
+                }
+
+                foreach (var kv in regionCandidatesByWrapIndex)
+                {
+                    var cands = kv.Value;
+                    if (cands == null || cands.Count == 0) continue;
+
+                    if (string.Equals(resultRegionMode, "top1_bbox", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Tuple<int[], double?> best = null;
+                        foreach (var cand in cands)
+                        {
+                            if (cand == null || cand.Item1 == null) continue;
+                            if (!cand.Item2.HasValue) continue;
+                            double s = cand.Item2.Value;
+                            if (double.IsNaN(s) || double.IsInfinity(s)) continue;
+                            if (best == null || s > best.Item2.GetValueOrDefault(double.MinValue))
+                            {
+                                best = cand;
+                            }
+                        }
+
+                        if (best != null)
+                        {
+                            regionBoxesByWrapIndex[kv.Key] = new List<int[]> { best.Item1 };
+                        }
+                        else
+                        {
+                            foreach (var cand in cands)
+                            {
+                                if (cand != null && cand.Item1 != null)
+                                {
+                                    regionBoxesByWrapIndex[kv.Key] = new List<int[]> { cand.Item1 };
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var boxes = new List<int[]>();
+                        foreach (var cand in cands)
+                        {
+                            if (cand != null && cand.Item1 != null) boxes.Add(cand.Item1);
+                        }
+                        if (boxes.Count > 0)
+                        {
+                            regionBoxesByWrapIndex[kv.Key] = boxes;
+                        }
+                    }
+                }
+            }
+
             JObject ConvertDetToOriginal(JObject det, int[] bboxOriXYXY)
             {
                 if (det == null || bboxOriXYXY == null || bboxOriXYXY.Length < 4) return det;
@@ -327,7 +468,28 @@ namespace DlcvModules
 
                 // useOriginal：仅用于“判定”使用的坐标系
                 bool useOriginal = forceOriginal;
-                var roiUse = GetRoi(wrap, useOriginal, Wc, Hc, W0, H0);
+                var fallbackRoi = GetRoi(wrap, useOriginal, Wc, Hc, W0, H0);
+                List<int[]> activeRois = null;
+                bool forceOutsideByEmptyRegion = false;
+                if (resultRegionConnected)
+                {
+                    if (oldIdx >= 0 &&
+                        regionBoxesByWrapIndex.TryGetValue(oldIdx, out var regionRois) &&
+                        regionRois != null &&
+                        regionRois.Count > 0)
+                    {
+                        activeRois = regionRois;
+                    }
+                    else
+                    {
+                        // 已连接 result_region 且当前图无有效 bbox：按“空区域”语义处理
+                        forceOutsideByEmptyRegion = true;
+                    }
+                }
+                else
+                {
+                    activeRois = new List<int[]> { fallbackRoi };
+                }
                 int spaceW = useOriginal ? W0 : Wc;
                 int spaceH = useOriginal ? H0 : Hc;
 
@@ -383,10 +545,16 @@ namespace DlcvModules
                     // 判定：mask 优先，其次 bbox
                     bool isIn = false;
                     bool decided = false;
+                    if (forceOutsideByEmptyRegion)
+                    {
+                        // 空区域语义：不回退 fallback ROI，直接判外
+                        decided = true;
+                        isIn = false;
+                    }
 
                     // mask_rle
                     var maskRle = d["mask_rle"];
-                    if (maskRle != null)
+                    if (!decided && maskRle != null)
                     {
                         try
                         {
@@ -394,7 +562,19 @@ namespace DlcvModules
                             {
                                 if (maskMat0 != null && !maskMat0.Empty())
                                 {
-                                    isIn = CheckMaskOverlapWithRegion(maskMat0, bboxUse, roiUse, spaceW, spaceH);
+                                    isIn = false;
+                                    if (activeRois != null)
+                                    {
+                                        foreach (var roi in activeRois)
+                                        {
+                                            if (roi == null || roi.Length < 4) continue;
+                                            if (CheckMaskOverlapWithRegion(maskMat0, bboxUse, roi, spaceW, spaceH))
+                                            {
+                                                isIn = true;
+                                                break;
+                                            }
+                                        }
+                                    }
                                     decided = true;
                                 }
                             }
@@ -411,7 +591,19 @@ namespace DlcvModules
                             {
                                 if (maskMat != null && !maskMat.Empty())
                                 {
-                                    isIn = CheckMaskOverlapWithRegion(maskMat, bboxUse, roiUse, spaceW, spaceH);
+                                    isIn = false;
+                                    if (activeRois != null)
+                                    {
+                                        foreach (var roi in activeRois)
+                                        {
+                                            if (roi == null || roi.Length < 4) continue;
+                                            if (CheckMaskOverlapWithRegion(maskMat, bboxUse, roi, spaceW, spaceH))
+                                            {
+                                                isIn = true;
+                                                break;
+                                            }
+                                        }
+                                    }
                                     decided = true;
                                 }
                             }
@@ -422,7 +614,19 @@ namespace DlcvModules
                     if (!decided)
                     {
                         // bbox 相交判定
-                        isIn = BboxIntersects(bboxUse, roiUse);
+                        isIn = false;
+                        if (activeRois != null)
+                        {
+                            foreach (var roi in activeRois)
+                            {
+                                if (roi == null || roi.Length < 4) continue;
+                                if (BboxIntersects(bboxUse, roi))
+                                {
+                                    isIn = true;
+                                    break;
+                                }
+                            }
+                        }
                     }
 
                     if (isIn)
@@ -555,6 +759,56 @@ namespace DlcvModules
             }
             catch { }
             return dv;
+        }
+
+        private string ReadString(string key, string dv)
+        {
+            try
+            {
+                if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+                {
+                    var s = v.ToString();
+                    if (!string.IsNullOrWhiteSpace(s)) return s.Trim();
+                }
+            }
+            catch { }
+            return dv;
+        }
+
+        private Tuple<bool, JArray> ReadResultRegionInput()
+        {
+            if (ExtraInputsIn == null || ExtraInputsIn.Count <= 0)
+            {
+                return Tuple.Create(false, new JArray());
+            }
+            try
+            {
+                var ch = ExtraInputsIn[0];
+                return Tuple.Create(true, ch?.ResultList ?? new JArray());
+            }
+            catch
+            {
+                return Tuple.Create(true, new JArray());
+            }
+        }
+
+        private static double? TryExtractScore(JObject det)
+        {
+            if (det == null) return null;
+            string[] keys = new[] { "score", "conf", "confidence" };
+            foreach (var key in keys)
+            {
+                try
+                {
+                    var tok = det[key];
+                    if (tok == null || tok.Type == JTokenType.Null) continue;
+                    double v = Convert.ToDouble((tok as JValue)?.Value ?? tok.ToString(), System.Globalization.CultureInfo.InvariantCulture);
+                    if (double.IsNaN(v) || double.IsInfinity(v)) continue;
+                    return v;
+                }
+                catch { }
+            }
+            return null;
         }
 
         // 对齐 Python: _serialize_transform(transform_dict) 的“稳定签名”

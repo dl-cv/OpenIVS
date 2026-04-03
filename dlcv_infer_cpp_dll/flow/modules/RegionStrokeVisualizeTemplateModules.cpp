@@ -1,16 +1,20 @@
-﻿#include "flow/BaseModule.h"
+#include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/MaskRleUtils.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #ifndef NOMINMAX
@@ -87,12 +91,26 @@ static bool RectIntersects(const cv::Rect& a, const cv::Rect& b) {
     return (a & b).area() > 0;
 }
 
-// -------------------- ResultFilterRegion (简化版) --------------------
+// -------------------- ResultFilterRegion --------------------
 class ResultFilterRegionModule : public BaseModule {
 public:
     using BaseModule::BaseModule;
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        return ProcessInternal(imageList, resultList,
+                               /*hasForceOriginalOverride*/ false, /*forceOriginalOverride*/ false,
+                               /*hasConvertOutputOverride*/ false, /*convertOutputOverride*/ false);
+    }
+
+protected:
+    using Box = std::array<int, 4>; // [x1,y1,x2,y2]
+
+    ModuleIO ProcessInternal(const std::vector<ModuleImage>& imageList,
+                             const Json& resultList,
+                             bool hasForceOriginalOverride,
+                             bool forceOriginalOverride,
+                             bool hasConvertOutputOverride,
+                             bool convertOutputOverride) {
         const std::vector<ModuleImage>& images = imageList;
         const Json results = resultList.is_array() ? resultList : Json::array();
 
@@ -101,139 +119,955 @@ public:
         const int w = std::max(1, ReadInt("w", 100));
         const int h = std::max(1, ReadInt("h", 100));
 
-        std::vector<ModuleImage> mainImages;
-        Json mainResults = Json::array();
-        std::vector<ModuleImage> altImages;
-        Json altResults = Json::array();
+        std::string resultRegionMode = ToLowerCopy(ReadString("result_region_mode", "any_bbox"));
+        if (resultRegionMode != "any_bbox" && resultRegionMode != "top1_bbox") {
+            resultRegionMode = "any_bbox";
+        }
+
+        std::unordered_map<int, int> originToWrapIndex;
+        std::unordered_map<std::string, int> sigToWrapIndex;
+        for (int i = 0; i < static_cast<int>(images.size()); i++) {
+            const ModuleImage& wrap = images[static_cast<size_t>(i)];
+            originToWrapIndex[wrap.OriginalIndex] = i;
+            const std::string sig = SerializeTransformSig(wrap.TransformState);
+            if (!sig.empty()) sigToWrapIndex[sig] = i;
+        }
+
+        const auto pickWrapIndexForEntry = [&](const Json& entry) -> int {
+            if (!entry.is_object()) return -1;
+            try {
+                if (entry.contains("transform") && entry.at("transform").is_object()) {
+                    const std::string sig = SerializeTransformSig(entry.at("transform"));
+                    auto itSig = sigToWrapIndex.find(sig);
+                    if (!sig.empty() && itSig != sigToWrapIndex.end()) return itSig->second;
+                }
+            } catch (...) {}
+
+            int idx = -1;
+            try { idx = entry.value("index", -1); } catch (...) { idx = -1; }
+            if (idx >= 0 && idx < static_cast<int>(images.size())) return idx;
+
+            int originIdx = -1;
+            try { originIdx = entry.value("origin_index", -1); } catch (...) { originIdx = -1; }
+            auto itOrigin = originToWrapIndex.find(originIdx);
+            if (originIdx >= 0 && itOrigin != originToWrapIndex.end()) return itOrigin->second;
+            return -1;
+        };
+
+        bool forceOriginal = false;
+        for (const auto& token : results) {
+            if (!token.is_object()) continue;
+            const Json& entry = token;
+            if (!CaseEquals(entry.value("type", ""), "local")) continue;
+
+            if (!entry.contains("transform") || entry.at("transform").is_null()) {
+                forceOriginal = true;
+                break;
+            }
+            if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) continue;
+
+            const int wrapIndex = pickWrapIndexForEntry(entry);
+            if (wrapIndex < 0 || wrapIndex >= static_cast<int>(images.size())) continue;
+            const ModuleImage& wrap = images[static_cast<size_t>(wrapIndex)];
+            const int Wc = std::max(1, wrap.ImageObject.empty() ? 1 : wrap.ImageObject.cols);
+            const int Hc = std::max(1, wrap.ImageObject.empty() ? 1 : wrap.ImageObject.rows);
+            int W0 = wrap.TransformState.OriginalWidth;
+            int H0 = wrap.TransformState.OriginalHeight;
+            if (W0 <= 0) W0 = Wc;
+            if (H0 <= 0) H0 = Hc;
+
+            for (const auto& detToken : entry.at("sample_results")) {
+                if (!detToken.is_object()) continue;
+                double bx1 = 0.0, by1 = 0.0, bx2 = 0.0, by2 = 0.0;
+                if (!TryExtractBboxAabbCurrent(detToken, bx1, by1, bx2, by2)) continue;
+                const Box bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
+                (void)bboxCur;
+
+                Box bboxMetaOri{};
+                bool hasMetaOri = false;
+                try {
+                    if (detToken.contains("metadata") && detToken.at("metadata").is_object()) {
+                        const Json& meta = detToken.at("metadata");
+                        if (meta.contains("global_bbox") && meta.at("global_bbox").is_array()) {
+                            if (TryParseGlobalBboxToAabb(meta.at("global_bbox"), bboxMetaOri)) {
+                                bboxMetaOri = ClampXYXY(
+                                    static_cast<double>(bboxMetaOri[0]), static_cast<double>(bboxMetaOri[1]),
+                                    static_cast<double>(bboxMetaOri[2]), static_cast<double>(bboxMetaOri[3]), W0, H0);
+                                hasMetaOri = true;
+                            }
+                        }
+                    }
+                } catch (...) { hasMetaOri = false; }
+
+                if (hasMetaOri) {
+                    if (std::abs(bboxMetaOri[0] - bboxCur[0]) > 1 ||
+                        std::abs(bboxMetaOri[1] - bboxCur[1]) > 1 ||
+                        std::abs(bboxMetaOri[2] - bboxCur[2]) > 1 ||
+                        std::abs(bboxMetaOri[3] - bboxCur[3]) > 1 ||
+                        bboxMetaOri[2] > Wc + 1 || bboxMetaOri[3] > Hc + 1) {
+                        forceOriginal = true;
+                        break;
+                    }
+                }
+
+                if (bx2 > Wc + 1 || by2 > Hc + 1) {
+                    forceOriginal = true;
+                    break;
+                }
+            }
+            if (forceOriginal) break;
+        }
+
+        if (hasForceOriginalOverride) {
+            forceOriginal = forceOriginalOverride;
+        }
+        const bool convertOutputToOriginal = hasConvertOutputOverride ? convertOutputOverride : forceOriginal;
+
+        const auto rrInput = ReadResultRegionInput();
+        const bool resultRegionConnected = rrInput.first;
+        const Json resultRegionResults = rrInput.second;
+
+        std::unordered_map<int, std::vector<Box>> regionBoxesByWrapIndex;
+        if (resultRegionConnected) {
+            struct BoxCandidate {
+                Box BBox{};
+                bool HasScore = false;
+                double Score = 0.0;
+            };
+            std::unordered_map<int, std::vector<BoxCandidate>> candidatesByWrapIndex;
+
+            for (const auto& token : resultRegionResults) {
+                if (!token.is_object()) continue;
+                const Json& regionEntry = token;
+                if (!CaseEquals(regionEntry.value("type", ""), "local")) continue;
+                if (!regionEntry.contains("sample_results") || !regionEntry.at("sample_results").is_array()) continue;
+
+                const int wrapIndex = pickWrapIndexForEntry(regionEntry);
+                if (wrapIndex < 0 || wrapIndex >= static_cast<int>(images.size())) continue;
+                const ModuleImage& wrap = images[static_cast<size_t>(wrapIndex)];
+                const int Wc = std::max(1, wrap.ImageObject.empty() ? 1 : wrap.ImageObject.cols);
+                const int Hc = std::max(1, wrap.ImageObject.empty() ? 1 : wrap.ImageObject.rows);
+                int W0 = wrap.TransformState.OriginalWidth;
+                int H0 = wrap.TransformState.OriginalHeight;
+                if (W0 <= 0) W0 = Wc;
+                if (H0 <= 0) H0 = Hc;
+
+                for (const auto& detToken : regionEntry.at("sample_results")) {
+                    if (!detToken.is_object()) continue;
+                    double bx1 = 0.0, by1 = 0.0, bx2 = 0.0, by2 = 0.0;
+                    if (!TryExtractBboxAabbCurrent(detToken, bx1, by1, bx2, by2)) continue;
+
+                    const Box bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
+                    Box bboxUse = bboxCur;
+                    if (forceOriginal) {
+                        Box bboxMetaOri{};
+                        bool hasMetaOri = false;
+                        try {
+                            if (detToken.contains("metadata") && detToken.at("metadata").is_object()) {
+                                const Json& meta = detToken.at("metadata");
+                                if (meta.contains("global_bbox") && meta.at("global_bbox").is_array()) {
+                                    if (TryParseGlobalBboxToAabb(meta.at("global_bbox"), bboxMetaOri)) {
+                                        bboxMetaOri = ClampXYXY(
+                                            static_cast<double>(bboxMetaOri[0]), static_cast<double>(bboxMetaOri[1]),
+                                            static_cast<double>(bboxMetaOri[2]), static_cast<double>(bboxMetaOri[3]), W0, H0);
+                                        hasMetaOri = true;
+                                    }
+                                }
+                            }
+                        } catch (...) { hasMetaOri = false; }
+
+                        if (hasMetaOri) {
+                            bboxUse = bboxMetaOri;
+                        } else {
+                            bboxUse = MapAabbToOriginalAndClamp(wrap.TransformState, bboxCur, W0, H0);
+                        }
+                    }
+
+                    double score = 0.0;
+                    const bool hasScore = TryExtractScore(detToken, score);
+                    candidatesByWrapIndex[wrapIndex].push_back(BoxCandidate{ bboxUse, hasScore, score });
+                }
+            }
+
+            for (const auto& kv : candidatesByWrapIndex) {
+                const int wrapIndex = kv.first;
+                const std::vector<BoxCandidate>& cands = kv.second;
+                if (cands.empty()) continue;
+
+                if (resultRegionMode == "top1_bbox") {
+                    bool foundScored = false;
+                    double bestScore = -1e100;
+                    Box bestBox{};
+                    for (const auto& cand : cands) {
+                        if (!cand.HasScore || std::isnan(cand.Score) || std::isinf(cand.Score)) continue;
+                        if (!foundScored || cand.Score > bestScore) {
+                            foundScored = true;
+                            bestScore = cand.Score;
+                            bestBox = cand.BBox;
+                        }
+                    }
+                    if (foundScored) {
+                        regionBoxesByWrapIndex[wrapIndex] = { bestBox };
+                    } else {
+                        regionBoxesByWrapIndex[wrapIndex] = { cands.front().BBox };
+                    }
+                } else {
+                    std::vector<Box> boxes;
+                    boxes.reserve(cands.size());
+                    for (const auto& cand : cands) boxes.push_back(cand.BBox);
+                    if (!boxes.empty()) regionBoxesByWrapIndex[wrapIndex] = std::move(boxes);
+                }
+            }
+        }
+
+        struct EntryWithIndex {
+            Json Entry;
+            int OldIndex = -1;
+        };
+
+        std::vector<EntryWithIndex> insideEntries;
+        std::vector<EntryWithIndex> outsideEntries;
+        std::vector<Json> others;
+        std::vector<unsigned char> inFlags(images.size(), 0);
+        std::vector<unsigned char> outFlags(images.size(), 0);
 
         bool hasAnyInside = false;
 
         for (const auto& token : results) {
-            if (!token.is_object()) continue;
-            const Json& entry = token;
-            if (entry.value("type", "") != "local") continue;
-            const int idx = entry.value("index", -1);
-            const int originIndex = entry.value("origin_index", idx);
-            int imgIdx = (idx >= 0 && idx < static_cast<int>(images.size())) ? idx : -1;
-            if (imgIdx < 0) {
-                // fallback by origin_index
-                for (int i = 0; i < static_cast<int>(images.size()); i++) {
-                    if (images[static_cast<size_t>(i)].OriginalIndex == originIndex) { imgIdx = i; break; }
-                }
+            if (!token.is_object()) {
+                others.push_back(token);
+                continue;
             }
-            if (imgIdx < 0 || imgIdx >= static_cast<int>(images.size())) continue;
-            const ModuleImage imgObj = images[static_cast<size_t>(imgIdx)];
-            const int W = imgObj.ImageObject.empty() ? 0 : imgObj.ImageObject.cols;
-            const int H = imgObj.ImageObject.empty() ? 0 : imgObj.ImageObject.rows;
-            const cv::Rect roi = ClampRect(x, y, w, h, W, H);
-            if (roi.area() <= 0) continue;
+            const Json& entry = token;
+            if (!CaseEquals(entry.value("type", ""), "local")) {
+                others.push_back(entry);
+                continue;
+            }
+            if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) {
+                others.push_back(entry);
+                continue;
+            }
 
-            std::vector<Json> inside;
-            std::vector<Json> outside;
+            const int wrapIndex = pickWrapIndexForEntry(entry);
+            if (wrapIndex < 0 || wrapIndex >= static_cast<int>(images.size())) {
+                others.push_back(entry);
+                continue;
+            }
 
-            if (entry.contains("sample_results") && entry.at("sample_results").is_array()) {
-                for (const auto& s : entry.at("sample_results")) {
-                    if (!s.is_object()) continue;
-                    const Json& so = s;
-                    if (!so.contains("bbox") || !so.at("bbox").is_array() || so.at("bbox").size() < 4) { outside.push_back(so); continue; }
-                    const Json& bb = so.at("bbox");
-                    double bx = 0, by = 0, bw = 0, bh = 0;
+            const ModuleImage& wrap = images[static_cast<size_t>(wrapIndex)];
+            const int Wc = std::max(1, wrap.ImageObject.empty() ? 1 : wrap.ImageObject.cols);
+            const int Hc = std::max(1, wrap.ImageObject.empty() ? 1 : wrap.ImageObject.rows);
+            int W0 = wrap.TransformState.OriginalWidth;
+            int H0 = wrap.TransformState.OriginalHeight;
+            if (W0 <= 0) W0 = Wc;
+            if (H0 <= 0) H0 = Hc;
+
+            const bool useOriginal = forceOriginal;
+            const Box fallbackRoi = useOriginal
+                ? ClampXYXY(static_cast<double>(x), static_cast<double>(y), static_cast<double>(x + w), static_cast<double>(y + h), W0, H0)
+                : ClampXYXY(static_cast<double>(x), static_cast<double>(y), static_cast<double>(x + w), static_cast<double>(y + h), Wc, Hc);
+
+            std::vector<Box> activeRois;
+            bool forceOutsideByEmptyRegion = false;
+            if (resultRegionConnected) {
+                auto itRoi = regionBoxesByWrapIndex.find(wrapIndex);
+                if (itRoi != regionBoxesByWrapIndex.end() && !itRoi->second.empty()) {
+                    activeRois = itRoi->second;
+                } else {
+                    forceOutsideByEmptyRegion = true;
+                }
+            } else {
+                activeRois.push_back(fallbackRoi);
+            }
+
+            const int spaceW = useOriginal ? W0 : Wc;
+            const int spaceH = useOriginal ? H0 : Hc;
+
+            Json inArr = Json::array();
+            Json outArr = Json::array();
+            for (const auto& detToken : entry.at("sample_results")) {
+                if (!detToken.is_object()) {
+                    outArr.push_back(detToken);
+                    continue;
+                }
+                const Json& det = detToken;
+
+                double bx1 = 0.0, by1 = 0.0, bx2 = 0.0, by2 = 0.0;
+                if (!TryExtractBboxAabbCurrent(det, bx1, by1, bx2, by2)) {
+                    outArr.push_back(det);
+                    continue;
+                }
+
+                const Box bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
+                Box bboxUse = bboxCur;
+                if (useOriginal) {
+                    Box bboxMetaOri{};
+                    bool hasMetaOri = false;
                     try {
-                        if (bb.size() >= 5) {
-                            // rotated: [cx,cy,w,h,...] -> AABB
-                            const double cx = bb.at(0).get<double>();
-                            const double cy = bb.at(1).get<double>();
-                            bw = std::abs(bb.at(2).get<double>());
-                            bh = std::abs(bb.at(3).get<double>());
-                            bx = cx - bw / 2.0;
-                            by = cy - bh / 2.0;
-                        } else {
-                            bx = bb.at(0).get<double>();
-                            by = bb.at(1).get<double>();
-                            bw = bb.at(2).get<double>();
-                            bh = bb.at(3).get<double>();
-                        }
-                    } catch (...) { outside.push_back(so); continue; }
-
-                    const cv::Rect bboxRect = ClampRect(static_cast<int>(std::floor(bx)),
-                                                        static_cast<int>(std::floor(by)),
-                                                        static_cast<int>(std::ceil(bw)),
-                                                        static_cast<int>(std::ceil(bh)),
-                                                        W, H);
-                    if (bboxRect.area() <= 0 || !RectIntersects(bboxRect, roi)) {
-                        outside.push_back(so);
-                        continue;
-                    }
-
-                    bool insideFlag = true;
-                    if (so.contains("mask_rle") && so.at("mask_rle").is_object()) {
-                        insideFlag = false;
-                        try {
-                            cv::Mat patch = MaskInfoToMat(so.at("mask_rle"));
-                            if (!patch.empty()) {
-                                // resize patch to bbox size if needed
-                                const int roiW = std::max(1, bboxRect.width);
-                                const int roiH = std::max(1, bboxRect.height);
-                                if (patch.cols != roiW || patch.rows != roiH) {
-                                    cv::Mat resized;
-                                    cv::resize(patch, resized, cv::Size(roiW, roiH), 0, 0, cv::INTER_NEAREST);
-                                    patch = resized;
-                                }
-                                const cv::Rect inter = bboxRect & roi;
-                                const int sx0 = std::max(0, inter.x - bboxRect.x);
-                                const int sy0 = std::max(0, inter.y - bboxRect.y);
-                                const int sw = std::max(0, inter.width);
-                                const int sh = std::max(0, inter.height);
-                                if (sw > 0 && sh > 0) {
-                                    cv::Rect roiSrc(sx0, sy0, std::min(sw, patch.cols - sx0), std::min(sh, patch.rows - sy0));
-                                    if (roiSrc.width > 0 && roiSrc.height > 0) {
-                                        cv::Mat sub = patch(roiSrc);
-                                        if (cv::countNonZero(sub) > 0) insideFlag = true;
-                                    }
+                        if (det.contains("metadata") && det.at("metadata").is_object()) {
+                            const Json& meta = det.at("metadata");
+                            if (meta.contains("global_bbox") && meta.at("global_bbox").is_array()) {
+                                if (TryParseGlobalBboxToAabb(meta.at("global_bbox"), bboxMetaOri)) {
+                                    bboxMetaOri = ClampXYXY(
+                                        static_cast<double>(bboxMetaOri[0]), static_cast<double>(bboxMetaOri[1]),
+                                        static_cast<double>(bboxMetaOri[2]), static_cast<double>(bboxMetaOri[3]), W0, H0);
+                                    hasMetaOri = true;
                                 }
                             }
-                        } catch (...) {}
-                    }
+                        }
+                    } catch (...) { hasMetaOri = false; }
 
-                    if (insideFlag) inside.push_back(so);
-                    else outside.push_back(so);
+                    if (hasMetaOri) {
+                        bboxUse = bboxMetaOri;
+                    } else {
+                        bboxUse = MapAabbToOriginalAndClamp(wrap.TransformState, bboxCur, W0, H0);
+                    }
+                }
+
+                bool isIn = false;
+                bool decided = false;
+                if (forceOutsideByEmptyRegion) {
+                    decided = true;
+                    isIn = false;
+                }
+
+                if (!decided && det.contains("mask_rle") && det.at("mask_rle").is_object()) {
+                    try {
+                        cv::Mat maskMat = MaskInfoToMat(det.at("mask_rle"));
+                        if (!maskMat.empty()) {
+                            isIn = false;
+                            for (const auto& roi : activeRois) {
+                                if (CheckMaskOverlapWithRegion(maskMat, bboxUse, roi, spaceW, spaceH)) {
+                                    isIn = true;
+                                    break;
+                                }
+                            }
+                            decided = true;
+                        }
+                    } catch (...) {
+                        decided = false;
+                    }
+                }
+
+                if (!decided && det.contains("mask_array") && det.at("mask_array").is_array()) {
+                    try {
+                        cv::Mat maskArray = TryParseMaskArrayToMat(det.at("mask_array"));
+                        if (!maskArray.empty()) {
+                            isIn = false;
+                            for (const auto& roi : activeRois) {
+                                if (CheckMaskOverlapWithRegion(maskArray, bboxUse, roi, spaceW, spaceH)) {
+                                    isIn = true;
+                                    break;
+                                }
+                            }
+                            decided = true;
+                        }
+                    } catch (...) {
+                        decided = false;
+                    }
+                }
+
+                if (!decided) {
+                    isIn = false;
+                    for (const auto& roi : activeRois) {
+                        if (BboxIntersects(bboxUse, roi)) {
+                            isIn = true;
+                            break;
+                        }
+                    }
+                }
+
+                Json detOut = det;
+                if (convertOutputToOriginal && useOriginal) {
+                    detOut = ConvertDetToOriginal(det, bboxUse);
+                }
+
+                if (isIn) {
+                    inArr.push_back(detOut);
+                    hasAnyInside = true;
+                } else {
+                    outArr.push_back(detOut);
                 }
             }
 
-            if (!inside.empty()) {
-                hasAnyInside = true;
-                mainImages.push_back(imgObj);
-                Json e = Json::object();
-                e["type"] = "local";
-                e["index"] = static_cast<int>(mainResults.size());
-                e["origin_index"] = originIndex;
-                e["transform"] = entry.contains("transform") ? entry.at("transform") : Json();
-                Json arr = Json::array(); for (const auto& x : inside) arr.push_back(x);
-                e["sample_results"] = arr;
-                mainResults.push_back(e);
+            if (!inArr.empty()) {
+                Json entryIn = entry;
+                entryIn["sample_results"] = inArr;
+                if (convertOutputToOriginal && useOriginal) {
+                    entryIn["transform"] = nullptr;
+                    entryIn["origin_index"] = wrap.OriginalIndex;
+                }
+                insideEntries.push_back(EntryWithIndex{ entryIn, wrapIndex });
+                if (wrapIndex >= 0 && wrapIndex < static_cast<int>(inFlags.size())) inFlags[static_cast<size_t>(wrapIndex)] = 1;
             }
-            if (!outside.empty()) {
-                altImages.push_back(imgObj);
-                Json e2 = Json::object();
-                e2["type"] = "local";
-                e2["index"] = static_cast<int>(altResults.size());
-                e2["origin_index"] = originIndex;
-                e2["transform"] = entry.contains("transform") ? entry.at("transform") : Json();
-                Json arr2 = Json::array(); for (const auto& x : outside) arr2.push_back(x);
-                e2["sample_results"] = arr2;
-                altResults.push_back(e2);
+            if (!outArr.empty()) {
+                Json entryOut = entry;
+                entryOut["sample_results"] = outArr;
+                if (convertOutputToOriginal && useOriginal) {
+                    entryOut["transform"] = nullptr;
+                    entryOut["origin_index"] = wrap.OriginalIndex;
+                }
+                outsideEntries.push_back(EntryWithIndex{ entryOut, wrapIndex });
+                if (wrapIndex >= 0 && wrapIndex < static_cast<int>(outFlags.size())) outFlags[static_cast<size_t>(wrapIndex)] = 1;
             }
         }
 
-        this->ExtraOutputs.push_back(ModuleChannel(altImages, altResults));
+        std::vector<ModuleImage> outImagesIn;
+        std::vector<ModuleImage> outImagesOut;
+        for (int i = 0; i < static_cast<int>(images.size()); i++) {
+            if (i >= 0 && i < static_cast<int>(inFlags.size()) && inFlags[static_cast<size_t>(i)] != 0) {
+                outImagesIn.push_back(images[static_cast<size_t>(i)]);
+            }
+            if (i >= 0 && i < static_cast<int>(outFlags.size()) && outFlags[static_cast<size_t>(i)] != 0) {
+                outImagesOut.push_back(images[static_cast<size_t>(i)]);
+            }
+        }
+
+        std::unordered_map<int, int> inReindex;
+        std::unordered_map<int, int> outReindex;
+        int ptr = 0;
+        for (int i = 0; i < static_cast<int>(inFlags.size()); i++) {
+            if (inFlags[static_cast<size_t>(i)] != 0) inReindex[i] = ptr++;
+        }
+        ptr = 0;
+        for (int i = 0; i < static_cast<int>(outFlags.size()); i++) {
+            if (outFlags[static_cast<size_t>(i)] != 0) outReindex[i] = ptr++;
+        }
+
+        Json outResultsIn = Json::array();
+        for (auto& item : insideEntries) {
+            Json entry = item.Entry;
+            auto it = inReindex.find(item.OldIndex);
+            if (it != inReindex.end()) entry["index"] = it->second;
+            outResultsIn.push_back(entry);
+        }
+
+        Json outResultsOut = Json::array();
+        for (auto& item : outsideEntries) {
+            Json entry = item.Entry;
+            auto it = outReindex.find(item.OldIndex);
+            if (it != outReindex.end()) entry["index"] = it->second;
+            outResultsOut.push_back(entry);
+        }
+
+        for (const auto& other : others) {
+            outResultsIn.push_back(other);
+            outResultsOut.push_back(other);
+        }
+
+        this->ExtraOutputs.push_back(ModuleChannel(outImagesOut, outResultsOut));
         this->ScalarOutputsByName["has_positive"] = hasAnyInside;
-        return ModuleIO(std::move(mainImages), std::move(mainResults), Json::array());
+        return ModuleIO(std::move(outImagesIn), std::move(outResultsIn), Json::array());
+    }
+
+private:
+    static std::string ToLowerCopy(const std::string& s) {
+        std::string out = s;
+        std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return out;
+    }
+
+    static bool CaseEquals(const std::string& a, const std::string& b) {
+        return ToLowerCopy(a) == ToLowerCopy(b);
+    }
+
+    static bool TryToDouble(const Json& token, double& outVal) {
+        try {
+            if (token.is_number()) {
+                outVal = token.get<double>();
+                return true;
+            }
+            if (token.is_string()) {
+                outVal = std::stod(token.get<std::string>());
+                return true;
+            }
+        } catch (...) {}
+        return false;
+    }
+
+    static std::string Round6(double v) {
+        if (std::isnan(v) || std::isinf(v)) return "0";
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(6) << v;
+        std::string s = oss.str();
+        while (!s.empty() && s.back() == '0') s.pop_back();
+        if (!s.empty() && s.back() == '.') s.pop_back();
+        return s.empty() ? "0" : s;
+    }
+
+    static std::string SerializeTransformSig(const TransformationState& st) {
+        if (st.AffineMatrix2x3.size() < 6) return std::string();
+        int cbx = 0, cby = 0, cbw = 0, cbh = 0;
+        if (st.CropBox.size() >= 4) {
+            cbx = st.CropBox[0];
+            cby = st.CropBox[1];
+            cbw = st.CropBox[2];
+            cbh = st.CropBox[3];
+        }
+        int outW = 0, outH = 0;
+        if (st.OutputSize.size() >= 2) {
+            outW = st.OutputSize[0];
+            outH = st.OutputSize[1];
+        }
+        const std::vector<double>& a = st.AffineMatrix2x3;
+        std::ostringstream oss;
+        oss << "cb:" << cbx << "," << cby << "," << cbw << "," << cbh
+            << "|os:" << outW << "," << outH
+            << "|ori:" << st.OriginalWidth << "," << st.OriginalHeight
+            << "|A:" << Round6(a[0]) << "," << Round6(a[1]) << "," << Round6(a[2]) << ","
+            << Round6(a[3]) << "," << Round6(a[4]) << "," << Round6(a[5]);
+        return oss.str();
+    }
+
+    static bool TryGetAffine2x3FromJson(const Json& transformObj, std::array<double, 6>& outAffine) {
+        try {
+            if (transformObj.contains("affine_2x3") && transformObj.at("affine_2x3").is_array()) {
+                const Json& a23 = transformObj.at("affine_2x3");
+                if (a23.size() >= 6) {
+                    for (int i = 0; i < 6; i++) {
+                        double v = 0.0;
+                        if (!TryToDouble(a23.at(static_cast<size_t>(i)), v)) return false;
+                        outAffine[static_cast<size_t>(i)] = v;
+                    }
+                    return true;
+                }
+            }
+            if (transformObj.contains("affine_matrix") && transformObj.at("affine_matrix").is_array()) {
+                const Json& amat = transformObj.at("affine_matrix");
+                if (amat.size() >= 2 && amat.at(0).is_array() && amat.at(1).is_array() &&
+                    amat.at(0).size() >= 3 && amat.at(1).size() >= 3) {
+                    for (int r = 0; r < 2; r++) {
+                        for (int c = 0; c < 3; c++) {
+                            double v = 0.0;
+                            if (!TryToDouble(amat.at(static_cast<size_t>(r)).at(static_cast<size_t>(c)), v)) return false;
+                            outAffine[static_cast<size_t>(r * 3 + c)] = v;
+                        }
+                    }
+                    return true;
+                }
+            }
+        } catch (...) {}
+        return false;
+    }
+
+    static std::string SerializeTransformSig(const Json& transformObj) {
+        if (!transformObj.is_object()) return std::string();
+        try {
+            int cbx = 0, cby = 0, cbw = 0, cbh = 0;
+            if (transformObj.contains("crop_box") && transformObj.at("crop_box").is_array() &&
+                transformObj.at("crop_box").size() >= 4) {
+                cbx = transformObj.at("crop_box").at(0).get<int>();
+                cby = transformObj.at("crop_box").at(1).get<int>();
+                cbw = transformObj.at("crop_box").at(2).get<int>();
+                cbh = transformObj.at("crop_box").at(3).get<int>();
+            }
+
+            int outW = 0, outH = 0;
+            if (transformObj.contains("output_size") && transformObj.at("output_size").is_array() &&
+                transformObj.at("output_size").size() >= 2) {
+                outW = transformObj.at("output_size").at(0).get<int>();
+                outH = transformObj.at("output_size").at(1).get<int>();
+            }
+
+            int ow = 0, oh = 0;
+            if (transformObj.contains("original_size") && transformObj.at("original_size").is_array() &&
+                transformObj.at("original_size").size() >= 2) {
+                ow = transformObj.at("original_size").at(0).get<int>();
+                oh = transformObj.at("original_size").at(1).get<int>();
+            } else {
+                try { ow = transformObj.value("original_width", 0); } catch (...) { ow = 0; }
+                try { oh = transformObj.value("original_height", 0); } catch (...) { oh = 0; }
+            }
+
+            std::array<double, 6> affine{};
+            if (!TryGetAffine2x3FromJson(transformObj, affine)) return std::string();
+
+            std::ostringstream oss;
+            oss << "cb:" << cbx << "," << cby << "," << cbw << "," << cbh
+                << "|os:" << outW << "," << outH
+                << "|ori:" << ow << "," << oh
+                << "|A:" << Round6(affine[0]) << "," << Round6(affine[1]) << "," << Round6(affine[2]) << ","
+                << Round6(affine[3]) << "," << Round6(affine[4]) << "," << Round6(affine[5]);
+            return oss.str();
+        } catch (...) {
+            return std::string();
+        }
+    }
+
+    static Box ClampXYXY(double x1, double y1, double x2, double y2, int W, int H) {
+        W = std::max(1, W);
+        H = std::max(1, H);
+        const double a1 = std::min(x1, x2);
+        const double a2 = std::max(x1, x2);
+        const double b1 = std::min(y1, y2);
+        const double b2 = std::max(y1, y2);
+
+        const int ix1 = static_cast<int>(std::max(0.0, std::min(static_cast<double>(W - 1), std::floor(a1))));
+        const int iy1 = static_cast<int>(std::max(0.0, std::min(static_cast<double>(H - 1), std::floor(b1))));
+        const int ix2 = static_cast<int>(std::max(static_cast<double>(ix1 + 1), std::min(static_cast<double>(W), std::ceil(a2))));
+        const int iy2 = static_cast<int>(std::max(static_cast<double>(iy1 + 1), std::min(static_cast<double>(H), std::ceil(b2))));
+        return Box{ ix1, iy1, ix2, iy2 };
+    }
+
+    static bool BboxIntersects(const Box& a, const Box& b) {
+        const int iw = std::min(a[2], b[2]) - std::max(a[0], b[0]);
+        const int ih = std::min(a[3], b[3]) - std::max(a[1], b[1]);
+        return iw > 0 && ih > 0;
+    }
+
+    static bool TryExtractBboxAabbCurrent(const Json& det, double& x1, double& y1, double& x2, double& y2) {
+        x1 = y1 = x2 = y2 = 0.0;
+        if (!det.is_object()) return false;
+        if (!det.contains("bbox") || !det.at("bbox").is_array() || det.at("bbox").size() < 4) return false;
+        const Json& bbox = det.at("bbox");
+
+        bool withAngle = false;
+        double angle = -100.0;
+        try { withAngle = det.value("with_angle", false); } catch (...) { withAngle = false; }
+        try {
+            if (det.contains("angle")) {
+                double av = 0.0;
+                if (TryToDouble(det.at("angle"), av)) angle = av;
+            }
+        } catch (...) { angle = -100.0; }
+
+        if (withAngle && angle != -100.0) {
+            double cx = 0.0, cy = 0.0, bw = 0.0, bh = 0.0;
+            if (!TryToDouble(bbox.at(0), cx) || !TryToDouble(bbox.at(1), cy) ||
+                !TryToDouble(bbox.at(2), bw) || !TryToDouble(bbox.at(3), bh)) {
+                return false;
+            }
+            bw = std::abs(bw);
+            bh = std::abs(bh);
+            if (bw <= 0.0 || bh <= 0.0) return false;
+            const double angRad = std::abs(angle) > 3.2 ? (angle * kPi / 180.0) : angle;
+            const double c = std::cos(angRad);
+            const double s = std::sin(angRad);
+            const double hw = bw / 2.0;
+            const double hh = bh / 2.0;
+            const std::array<std::array<double, 2>, 4> offs{{
+                { -hw, -hh }, { hw, -hh }, { hw, hh }, { -hw, hh }
+            }};
+            double minX = 1e100, minY = 1e100, maxX = -1e100, maxY = -1e100;
+            for (const auto& off : offs) {
+                const double px = cx + c * off[0] - s * off[1];
+                const double py = cy + s * off[0] + c * off[1];
+                minX = std::min(minX, px);
+                minY = std::min(minY, py);
+                maxX = std::max(maxX, px);
+                maxY = std::max(maxY, py);
+            }
+            x1 = minX; y1 = minY; x2 = maxX; y2 = maxY;
+            return true;
+        }
+
+        double bx = 0.0, by = 0.0, bw = 0.0, bh = 0.0;
+        if (!TryToDouble(bbox.at(0), bx) || !TryToDouble(bbox.at(1), by) ||
+            !TryToDouble(bbox.at(2), bw) || !TryToDouble(bbox.at(3), bh)) {
+            return false;
+        }
+        bw = std::abs(bw);
+        bh = std::abs(bh);
+        x1 = bx;
+        y1 = by;
+        x2 = bx + bw;
+        y2 = by + bh;
+        return true;
+    }
+
+    static bool TryParseGlobalBboxToAabb(const Json& gb, Box& outBox) {
+        if (!gb.is_array()) return false;
+        try {
+            if (gb.size() == 4) {
+                double a0 = 0.0, a1 = 0.0, a2 = 0.0, a3 = 0.0;
+                if (!TryToDouble(gb.at(0), a0) || !TryToDouble(gb.at(1), a1) ||
+                    !TryToDouble(gb.at(2), a2) || !TryToDouble(gb.at(3), a3)) {
+                    return false;
+                }
+                if (a2 > a0 && a3 > a1) {
+                    outBox = Box{
+                        static_cast<int>(std::floor(a0)),
+                        static_cast<int>(std::floor(a1)),
+                        static_cast<int>(std::ceil(a2)),
+                        static_cast<int>(std::ceil(a3))
+                    };
+                } else {
+                    const double w = std::abs(a2);
+                    const double h = std::abs(a3);
+                    outBox = Box{
+                        static_cast<int>(std::floor(a0)),
+                        static_cast<int>(std::floor(a1)),
+                        static_cast<int>(std::ceil(a0 + w)),
+                        static_cast<int>(std::ceil(a1 + h))
+                    };
+                }
+                return true;
+            }
+            if (gb.size() == 5) {
+                double cx = 0.0, cy = 0.0, w = 0.0, h = 0.0, angle = 0.0;
+                if (!TryToDouble(gb.at(0), cx) || !TryToDouble(gb.at(1), cy) ||
+                    !TryToDouble(gb.at(2), w) || !TryToDouble(gb.at(3), h) ||
+                    !TryToDouble(gb.at(4), angle)) {
+                    return false;
+                }
+                w = std::abs(w);
+                h = std::abs(h);
+                if (w <= 0.0 || h <= 0.0) return false;
+                const double angRad = std::abs(angle) > 3.2 ? (angle * kPi / 180.0) : angle;
+                const double c = std::cos(angRad);
+                const double s = std::sin(angRad);
+                const double hw = w / 2.0;
+                const double hh = h / 2.0;
+                const std::array<std::array<double, 2>, 4> offs{{
+                    { -hw, -hh }, { hw, -hh }, { hw, hh }, { -hw, hh }
+                }};
+                double minX = 1e100, minY = 1e100, maxX = -1e100, maxY = -1e100;
+                for (const auto& off : offs) {
+                    const double px = cx + c * off[0] - s * off[1];
+                    const double py = cy + s * off[0] + c * off[1];
+                    minX = std::min(minX, px);
+                    minY = std::min(minY, py);
+                    maxX = std::max(maxX, px);
+                    maxY = std::max(maxY, py);
+                }
+                outBox = Box{
+                    static_cast<int>(std::floor(minX)),
+                    static_cast<int>(std::floor(minY)),
+                    static_cast<int>(std::ceil(maxX)),
+                    static_cast<int>(std::ceil(maxY))
+                };
+                return true;
+            }
+        } catch (...) {}
+        return false;
+    }
+
+    static Box MapAabbToOriginalAndClamp(const TransformationState& st, const Box& bboxCur, int W0, int H0) {
+        if (st.AffineMatrix2x3.size() != 6) {
+            return ClampXYXY(
+                static_cast<double>(bboxCur[0]), static_cast<double>(bboxCur[1]),
+                static_cast<double>(bboxCur[2]), static_cast<double>(bboxCur[3]), W0, H0);
+        }
+
+        const std::vector<double> inv = TransformationState::Inverse2x3(st.AffineMatrix2x3);
+        int x0 = 0;
+        int y0 = 0;
+        bool hasCropOffset = false;
+        if (st.CropBox.size() >= 4) {
+            x0 = st.CropBox[0];
+            y0 = st.CropBox[1];
+            hasCropOffset = (x0 != 0 || y0 != 0);
+        }
+
+        const std::array<std::array<double, 2>, 4> pts{{
+            { static_cast<double>(bboxCur[0]), static_cast<double>(bboxCur[1]) },
+            { static_cast<double>(bboxCur[2]), static_cast<double>(bboxCur[1]) },
+            { static_cast<double>(bboxCur[2]), static_cast<double>(bboxCur[3]) },
+            { static_cast<double>(bboxCur[0]), static_cast<double>(bboxCur[3]) }
+        }};
+
+        double minX = 1e100, minY = 1e100, maxX = -1e100, maxY = -1e100;
+        for (const auto& p : pts) {
+            const double x = p[0];
+            const double y = p[1];
+            double ox = inv[0] * x + inv[1] * y + inv[2];
+            double oy = inv[3] * x + inv[4] * y + inv[5];
+            if (hasCropOffset) {
+                ox += x0;
+                oy += y0;
+            }
+            minX = std::min(minX, ox);
+            minY = std::min(minY, oy);
+            maxX = std::max(maxX, ox);
+            maxY = std::max(maxY, oy);
+        }
+        return ClampXYXY(minX, minY, maxX, maxY, W0, H0);
+    }
+
+    static bool ClampBboxAndCropMask(const Box& bboxXYXY,
+                                     const cv::Mat& maskMat,
+                                     int W,
+                                     int H,
+                                     Box& clampedBox,
+                                     cv::Mat& croppedMask) {
+        W = std::max(1, W);
+        H = std::max(1, H);
+        const int x1 = bboxXYXY[0];
+        const int y1 = bboxXYXY[1];
+        const int x2 = bboxXYXY[2];
+        const int y2 = bboxXYXY[3];
+
+        const int nx1 = std::max(0, std::min(W - 1, x1));
+        const int ny1 = std::max(0, std::min(H - 1, y1));
+        const int nx2 = std::max(nx1 + 1, std::min(W, x2));
+        const int ny2 = std::max(ny1 + 1, std::min(H, y2));
+        clampedBox = Box{ nx1, ny1, nx2, ny2 };
+
+        if (maskMat.empty()) {
+            croppedMask.release();
+            return true;
+        }
+
+        try {
+            const int dh0 = y2 - y1;
+            const int dw0 = x2 - x1;
+            if (dh0 <= 0 || dw0 <= 0) {
+                croppedMask.release();
+                return true;
+            }
+            if (maskMat.rows != dh0 || maskMat.cols != dw0) {
+                croppedMask.release();
+                return true;
+            }
+
+            const int cutL = std::max(0, nx1 - x1);
+            const int cutT = std::max(0, ny1 - y1);
+            const int cutR = std::max(0, x2 - nx2);
+            const int cutB = std::max(0, y2 - ny2);
+
+            const int rw = maskMat.cols - cutL - cutR;
+            const int rh = maskMat.rows - cutT - cutB;
+            if (rw <= 0 || rh <= 0) {
+                croppedMask.release();
+                return true;
+            }
+
+            const cv::Rect cropRect(cutL, cutT, rw, rh);
+            croppedMask = maskMat(cropRect).clone();
+            return true;
+        } catch (...) {
+            croppedMask.release();
+            return true;
+        }
+    }
+
+    static bool CheckMaskOverlapWithRegion(const cv::Mat& maskMat0,
+                                           const Box& bboxXYXY,
+                                           const Box& roiXYXY,
+                                           int W,
+                                           int H) {
+        if (maskMat0.empty()) return false;
+        Box clampedBbox{};
+        cv::Mat croppedMask;
+        if (!ClampBboxAndCropMask(bboxXYXY, maskMat0, W, H, clampedBbox, croppedMask)) return false;
+
+        cv::Mat workMask = croppedMask.empty() ? maskMat0 : croppedMask;
+        const int bw = clampedBbox[2] - clampedBbox[0];
+        const int bh = clampedBbox[3] - clampedBbox[1];
+        if (bw <= 0 || bh <= 0) return false;
+
+        cv::Mat resized;
+        if (workMask.cols != bw || workMask.rows != bh) {
+            cv::resize(workMask, resized, cv::Size(bw, bh), 0, 0, cv::INTER_NEAREST);
+            workMask = resized;
+        }
+
+        const int ix1 = std::max(clampedBbox[0], roiXYXY[0]);
+        const int iy1 = std::max(clampedBbox[1], roiXYXY[1]);
+        const int ix2 = std::min(clampedBbox[2], roiXYXY[2]);
+        const int iy2 = std::min(clampedBbox[3], roiXYXY[3]);
+        if (ix2 <= ix1 || iy2 <= iy1) return false;
+
+        int lx1 = ix1 - clampedBbox[0];
+        int ly1 = iy1 - clampedBbox[1];
+        int lx2 = ix2 - clampedBbox[0];
+        int ly2 = iy2 - clampedBbox[1];
+        lx1 = std::max(0, std::min(bw, lx1));
+        ly1 = std::max(0, std::min(bh, ly1));
+        lx2 = std::max(lx1 + 1, std::min(bw, lx2));
+        ly2 = std::max(ly1 + 1, std::min(bh, ly2));
+        if (lx2 <= lx1 || ly2 <= ly1) return false;
+
+        const cv::Rect roiSrc(lx1, ly1, lx2 - lx1, ly2 - ly1);
+        cv::Mat sub = workMask(roiSrc);
+        return cv::countNonZero(sub) > 0;
+    }
+
+    static cv::Mat TryParseMaskArrayToMat(const Json& token) {
+        if (!token.is_array() || token.empty()) return cv::Mat();
+        if (!token.at(0).is_array()) return cv::Mat();
+        const int H = static_cast<int>(token.size());
+        const int W = static_cast<int>(token.at(0).size());
+        if (H <= 0 || W <= 0) return cv::Mat();
+
+        cv::Mat mask(H, W, CV_8UC1, cv::Scalar(0));
+        for (int y = 0; y < H; y++) {
+            if (!token.at(static_cast<size_t>(y)).is_array() ||
+                static_cast<int>(token.at(static_cast<size_t>(y)).size()) != W) {
+                return cv::Mat();
+            }
+            for (int x = 0; x < W; x++) {
+                double dv = 0.0;
+                if (TryToDouble(token.at(static_cast<size_t>(y)).at(static_cast<size_t>(x)), dv) && dv > 0.0) {
+                    mask.at<unsigned char>(y, x) = 255;
+                }
+            }
+        }
+        return mask;
+    }
+
+    static bool TryExtractScore(const Json& det, double& scoreOut) {
+        if (!det.is_object()) return false;
+        static const std::array<const char*, 3> kScoreKeys = { "score", "conf", "confidence" };
+        for (const char* key : kScoreKeys) {
+            try {
+                if (!det.contains(key) || det.at(key).is_null()) continue;
+                double v = 0.0;
+                if (!TryToDouble(det.at(key), v)) continue;
+                if (std::isnan(v) || std::isinf(v)) continue;
+                scoreOut = v;
+                return true;
+            } catch (...) {}
+        }
+        return false;
+    }
+
+    static Json ConvertDetToOriginal(const Json& det, const Box& bboxOriXYXY) {
+        if (!det.is_object()) return det;
+        Json d2 = det;
+        const int ox1 = bboxOriXYXY[0];
+        const int oy1 = bboxOriXYXY[1];
+        const int ox2 = bboxOriXYXY[2];
+        const int oy2 = bboxOriXYXY[3];
+        const int ow = std::max(1, ox2 - ox1);
+        const int oh = std::max(1, oy2 - oy1);
+        d2["bbox"] = Json::array({ ox1, oy1, ow, oh });
+        try {
+            Json meta = Json::object();
+            if (d2.contains("metadata") && d2.at("metadata").is_object()) {
+                meta = d2.at("metadata");
+            }
+            meta["global_bbox"] = Json::array({ ox1, oy1, ox2, oy2 });
+            d2["metadata"] = std::move(meta);
+        } catch (...) {}
+        return d2;
+    }
+
+    std::pair<bool, Json> ReadResultRegionInput() const {
+        if (ExtraInputsIn.empty()) {
+            return { false, Json::array() };
+        }
+        try {
+            const ModuleChannel& ch = ExtraInputsIn[0];
+            return { true, ch.ResultList.is_array() ? ch.ResultList : Json::array() };
+        } catch (...) {
+            return { true, Json::array() };
+        }
     }
 };
 
 class ResultFilterRegionGlobalModule final : public ResultFilterRegionModule {
 public:
     using ResultFilterRegionModule::ResultFilterRegionModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        // 对齐 C#：global 变体强制按原图坐标判定，但不改写输出坐标系。
+        return ProcessInternal(imageList, resultList,
+                               /*hasForceOriginalOverride*/ true, /*forceOriginalOverride*/ true,
+                               /*hasConvertOutputOverride*/ true, /*convertOutputOverride*/ false);
+    }
 };
 
 // -------------------- StrokeToPoints (简化版) --------------------
