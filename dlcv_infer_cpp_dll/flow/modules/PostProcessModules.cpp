@@ -473,6 +473,120 @@ public:
     }
 };
 
+/// post_process/result_category_override, features/result_category_override
+class ResultCategoryOverrideModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        const std::vector<ModuleImage>& images = imageList;
+        const Json results = resultList.is_array() ? resultList : Json::array();
+
+        // Python: extra_inputs_in[1]["result_list"]；C++ 执行器聚合后对应 ExtraInputsIn[0].ResultList。
+        Json replaceResults = Json::array();
+        if (!ExtraInputsIn.empty() && ExtraInputsIn[0].ResultList.is_array()) {
+            replaceResults = ExtraInputsIn[0].ResultList;
+        }
+
+        const std::string overrideName = ExtractFirstCategoryName(replaceResults);
+        if (overrideName.empty()) {
+            return ModuleIO(images, results, Json::array());
+        }
+
+        Json outResults = Json::array();
+        for (const auto& token : results) {
+            if (!token.is_object()) {
+                outResults.push_back(token);
+                continue;
+            }
+
+            const Json& entry = token;
+            bool changed = false;
+            Json entryCopy = entry;
+
+            if (entry.contains("category_name") && entry.at("category_name").is_string()) {
+                entryCopy["category_name"] = overrideName;
+                changed = true;
+            }
+
+            if (entry.contains("sample_results") && entry.at("sample_results").is_array()) {
+                bool sampleChanged = false;
+                Json newSampleResults = OverrideSampleResults(entry.at("sample_results"), overrideName, sampleChanged);
+                if (sampleChanged) {
+                    entryCopy["sample_results"] = std::move(newSampleResults);
+                    changed = true;
+                }
+            }
+
+            outResults.push_back(changed ? entryCopy : entry);
+        }
+
+        return ModuleIO(images, outResults, Json::array());
+    }
+
+private:
+    static std::string NormalizeCategoryName(const Json& token) {
+        if (!token.is_string()) return std::string();
+        std::string s = token.get<std::string>();
+        bool hasNonSpace = false;
+        for (char c : s) {
+            if (!std::isspace(static_cast<unsigned char>(c))) {
+                hasNonSpace = true;
+                break;
+            }
+        }
+        return hasNonSpace ? s : std::string();
+    }
+
+    static std::string ExtractFirstCategoryName(const Json& replaceResults) {
+        if (!replaceResults.is_array()) return std::string();
+
+        for (const auto& token : replaceResults) {
+            if (!token.is_object()) continue;
+            const Json& entry = token;
+
+            if (entry.contains("category_name")) {
+                const std::string entryName = NormalizeCategoryName(entry.at("category_name"));
+                if (!entryName.empty()) return entryName;
+            }
+
+            if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) continue;
+            for (const auto& detToken : entry.at("sample_results")) {
+                if (!detToken.is_object()) continue;
+                const Json& det = detToken;
+                if (!det.contains("category_name")) continue;
+                const std::string detName = NormalizeCategoryName(det.at("category_name"));
+                if (!detName.empty()) return detName;
+            }
+        }
+
+        return std::string();
+    }
+
+    static Json OverrideSampleResults(const Json& sampleResults, const std::string& overrideName, bool& changed) {
+        changed = false;
+        Json out = Json::array();
+        if (!sampleResults.is_array()) return out;
+
+        for (const auto& detToken : sampleResults) {
+            if (!detToken.is_object()) {
+                out.push_back(detToken);
+                continue;
+            }
+            const Json& det = detToken;
+            if (det.contains("category_name") && det.at("category_name").is_string()) {
+                Json detCopy = det;
+                detCopy["category_name"] = overrideName;
+                out.push_back(std::move(detCopy));
+                changed = true;
+            } else {
+                out.push_back(det);
+            }
+        }
+        return out;
+    }
+};
+
 /// post_process/mask_to_rbox, features/mask_to_rbox
 class MaskToRBoxModule final : public BaseModule {
 public:
@@ -929,6 +1043,8 @@ DLCV_FLOW_REGISTER_MODULE("post_process/result_filter_advanced", ResultFilterAdv
 DLCV_FLOW_REGISTER_MODULE("features/result_filter_advanced", ResultFilterAdvancedModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/text_replacement", TextReplacementModule)
 DLCV_FLOW_REGISTER_MODULE("features/text_replacement", TextReplacementModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/result_category_override", ResultCategoryOverrideModule)
+DLCV_FLOW_REGISTER_MODULE("features/result_category_override", ResultCategoryOverrideModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/mask_to_rbox", MaskToRBoxModule)
 DLCV_FLOW_REGISTER_MODULE("features/mask_to_rbox", MaskToRBoxModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/rbox_correction", RBoxCorrectionModule)
