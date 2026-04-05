@@ -762,13 +762,21 @@ namespace DlcvModules
             var altImages = new List<ModuleImage>();
             var altResults = new JArray();
 
-            // 构建 image 键映射
+            // 构建 image 映射：优先 index/origin_index（折回 batch 槽位），transform+origin 兜底
+            int imageCount = inImages.Count;
+            var indexToImageObj = new Dictionary<int, ModuleImage>();
+            var originToImageObj = new Dictionary<int, ModuleImage>();
             var keyToImageObj = new Dictionary<string, ModuleImage>();
             for (int i = 0; i < inImages.Count; i++)
             {
                 var (wrap, bmp) = ImageGeneration_Unwrap(inImages[i]);
                 if (bmp == null) continue;
-                string key = SerializeTransform(wrap != null ? wrap.TransformState : null, i, wrap != null ? wrap.OriginalIndex : i);
+                int originRaw = wrap != null ? wrap.OriginalIndex : i;
+                int idxFolded = FoldAliasIndex(i, imageCount);
+                int originFolded = FoldAliasIndex(originRaw, imageCount);
+                string key = SerializeTransform(wrap != null ? wrap.TransformState : null, idxFolded, originFolded);
+                indexToImageObj[idxFolded] = inImages[i];
+                originToImageObj[originFolded] = inImages[i];
                 keyToImageObj[key] = inImages[i];
             }
 
@@ -776,11 +784,14 @@ namespace DlcvModules
             {
                 var r = t as JObject;
                 if (r == null) continue;
-                int idx = r["index"]?.Value<int?>() ?? -1;
-                int originIndex = r["origin_index"]?.Value<int?>() ?? idx;
+                int idxRaw = r["index"]?.Value<int?>() ?? -1;
+                int originRaw = r["origin_index"]?.Value<int?>() ?? idxRaw;
+                int idx = FoldAliasIndex(idxRaw, imageCount);
+                int originIndex = FoldAliasIndex(originRaw, imageCount);
                 var stDict = r["transform"] as JObject;
                 var st = stDict != null ? TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()) : null;
                 string key = SerializeTransform(st, idx, originIndex);
+                ModuleImage imgObj = null;
 
                 // 复制结果，并按 categories 过滤 sample_results
                 var srsArray = r["sample_results"] as JArray;
@@ -797,7 +808,15 @@ namespace DlcvModules
                     }
                 }
 
-                if (keyToImageObj.TryGetValue(key, out ModuleImage imgObj))
+                if (!indexToImageObj.TryGetValue(idx, out imgObj))
+                {
+                    if (!originToImageObj.TryGetValue(originIndex, out imgObj))
+                    {
+                        keyToImageObj.TryGetValue(key, out imgObj);
+                    }
+                }
+
+                if (imgObj != null)
                 {
                     if (sKeep.Count > 0 || srsArray == null)
                     {
@@ -907,6 +926,13 @@ namespace DlcvModules
             var a = st.AffineMatrix2x3;
             return $"idx:{index}|org:{originIndex}|T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
         }
+
+        private static int FoldAliasIndex(int rawIndex, int imageCount)
+        {
+            if (imageCount <= 0) return rawIndex >= 0 ? rawIndex : 0;
+            if (rawIndex < 0) return 0;
+            return rawIndex % imageCount;
+        }
     }
 
     /// <summary>
@@ -963,15 +989,22 @@ namespace DlcvModules
             double? maskAreaMin = ReadNullableDouble("mask_area_min");
             double? maskAreaMax = ReadNullableDouble("mask_area_max");
 
-            // 构建 image 键映射：仅 transform；空则退回 origin_index
+            // 构建 image 映射：优先 index/origin_index（折回 batch 槽位），transform+origin 兜底
+            int imageCount = inImages.Count;
+            var indexToImageObj = new Dictionary<int, ModuleImage>();
+            var originToImageObj = new Dictionary<int, ModuleImage>();
             var keyToImageObj = new Dictionary<string, ModuleImage>();
             for (int i = 0; i < inImages.Count; i++)
             {
                 var tup = RFAdv_Unwrap(inImages[i]);
                 var wrap = tup.Item1; var bmp = tup.Item2;
                 if (bmp == null) continue;
-                int org = wrap != null ? wrap.OriginalIndex : i;
-                string key = SerializeTransformOnly(wrap != null ? wrap.TransformState : null, org);
+                int orgRaw = wrap != null ? wrap.OriginalIndex : i;
+                int idxFolded = FoldAliasIndex(i, imageCount);
+                int orgFolded = FoldAliasIndex(orgRaw, imageCount);
+                string key = SerializeTransformOnly(wrap != null ? wrap.TransformState : null, orgFolded);
+                indexToImageObj[idxFolded] = inImages[i];
+                originToImageObj[orgFolded] = inImages[i];
                 keyToImageObj[key] = inImages[i];
             }
 
@@ -979,12 +1012,15 @@ namespace DlcvModules
             {
                 var r = t as JObject;
                 if (r == null) continue;
-                int idx = r["index"]?.Value<int?>() ?? -1;
-                int originIndex = r["origin_index"]?.Value<int?>() ?? idx;
+                int idxRaw = r["index"]?.Value<int?>() ?? -1;
+                int originRaw = r["origin_index"]?.Value<int?>() ?? idxRaw;
+                int idx = FoldAliasIndex(idxRaw, imageCount);
+                int originIndex = FoldAliasIndex(originRaw, imageCount);
                 var stDict = r["transform"] as JObject;
                 TransformationState st = null;
                 try { if (stDict != null) st = TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()); } catch { st = null; }
                 string key = SerializeTransformOnly(st, originIndex);
+                ModuleImage imgObj = null;
 
                 var srsArray = r["sample_results"] as JArray;
                 var passList = new List<JObject>();
@@ -1048,7 +1084,15 @@ namespace DlcvModules
                     }
                 }
 
-                if (keyToImageObj.TryGetValue(key, out ModuleImage imgObj))
+                if (!indexToImageObj.TryGetValue(idx, out imgObj))
+                {
+                    if (!originToImageObj.TryGetValue(originIndex, out imgObj))
+                    {
+                        keyToImageObj.TryGetValue(key, out imgObj);
+                    }
+                }
+
+                if (imgObj != null)
                 {
                     if (passList.Count > 0 || srsArray == null)
                     {
@@ -1117,13 +1161,20 @@ namespace DlcvModules
                 return $"org:{originIndex}|T:null";
             }
             var a = st.AffineMatrix2x3;
-            return $"T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
+            return $"org:{originIndex}|T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
         }
 
         private static Tuple<ModuleImage, Mat> RFAdv_Unwrap(ModuleImage obj)
         {
             if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
             return Tuple.Create(obj, obj.ImageObject);
+        }
+
+        private static int FoldAliasIndex(int rawIndex, int imageCount)
+        {
+            if (imageCount <= 0) return rawIndex >= 0 ? rawIndex : 0;
+            if (rawIndex < 0) return 0;
+            return rawIndex % imageCount;
         }
     }
 
