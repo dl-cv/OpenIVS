@@ -512,9 +512,8 @@ namespace DlcvModules
                     int originIndex = Convert.ToInt32(item["origin_index"]);
                     if (originIndex >= 0)
                     {
-                        // merge_results 等模块可能会把同一批原图展开为多组“别名索引”
-                        // （例如 batch=2 时出现 0,1,2,3,4,5...）。
-                        // 这里统一折回原始 batch 槽位，保证最终只返回 n 个 sample。
+                        // merge_results 等模块可能输出别名索引（例如 batch=2 时出现 2,3...），
+                        // 这里统一折回到原始 batch 槽位。
                         return originIndex % imageCount;
                     }
                 }
@@ -523,6 +522,7 @@ namespace DlcvModules
                 }
             }
 
+            // 没有合法 origin_index 时，回退到 by_image 的位置索引并折回。
             return position >= 0 ? (position % imageCount) : -1;
         }
 
@@ -540,10 +540,47 @@ namespace DlcvModules
         private static void AppendResultsArray(JArray target, JArray source)
         {
             if (target == null || source == null || source.Count == 0) return;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < target.Count; i++)
+            {
+                var existing = target[i];
+                if (existing == null) continue;
+                try
+                {
+                    seen.Add(existing.ToString(Formatting.None));
+                }
+                catch
+                {
+                }
+            }
+
             for (int i = 0; i < source.Count; i++)
             {
                 var token = source[i];
-                target.Add(token != null ? token.DeepClone() : JValue.CreateNull());
+                if (token == null)
+                {
+                    target.Add(JValue.CreateNull());
+                    continue;
+                }
+
+                string sig = null;
+                try
+                {
+                    sig = token.ToString(Formatting.None);
+                }
+                catch
+                {
+                    sig = null;
+                }
+
+                // 同一张图同一次请求内，跳过重复结果，避免 batch>1 时可视化和文本翻倍
+                if (sig != null && seen.Contains(sig))
+                {
+                    continue;
+                }
+
+                target.Add(token.DeepClone());
+                if (sig != null) seen.Add(sig);
             }
         }
 
