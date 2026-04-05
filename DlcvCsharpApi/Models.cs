@@ -15,6 +15,9 @@ namespace DlcvModules
 		protected string _modelPath;
 		protected int _deviceId;
 		protected Model _model;
+		protected JObject _modelInfo;
+		protected JArray _maxShape;
+		protected int _maxBatchSize = 1;
 
 		protected BaseModelModule(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
 			: base(nodeId, title, properties, context)
@@ -59,7 +62,45 @@ namespace DlcvModules
 				}
 
 				_model = new Model(_modelPath, deviceId, rpcMode, true);
+				SyncModelMeta();
 			}
+			else
+			{
+				SyncModelMeta();
+			}
+		}
+
+		protected void SyncModelMeta()
+		{
+			if (_model == null) return;
+			try
+			{
+				_modelInfo = _model.GetCachedModelInfo();
+				if (_modelInfo == null)
+				{
+					_modelInfo = _model.GetModelInfo();
+				}
+			}
+			catch { }
+
+			try { _maxShape = _model.GetCachedMaxShape(); } catch { _maxShape = null; }
+			try { _maxBatchSize = Math.Max(1, _model.GetMaxBatchSize()); } catch { _maxBatchSize = 1; }
+		}
+
+		protected int ResolveEffectiveBatchLimit()
+		{
+			int modelLimit = Math.Max(1, _maxBatchSize);
+			int cfg = 0;
+			try
+			{
+				if (Properties != null && Properties.TryGetValue("batch_size", out object bv) && bv != null)
+				{
+					cfg = Convert.ToInt32(bv);
+				}
+			}
+			catch { cfg = 0; }
+			if (cfg <= 0) return modelLimit;
+			return Math.Max(1, Math.Min(modelLimit, cfg));
 		}
 
 		protected string ReadString(string key, string dv)
@@ -123,50 +164,118 @@ namespace DlcvModules
 			TryAddParam(p, "epsilon");
 			TryAddParam(p, "batch_size");
 
-			int outIndex = 0;
-			for (int i = 0; i < images.Count; i++)
+			int effectiveBatch = ResolveEffectiveBatchLimit();
+			p["batch_size"] = effectiveBatch;
+
+			var rgbInputs = new List<Mat>();
+			var wraps = new List<ModuleImage>();
+			var sourceIndices = new List<int>();
+			var buckets = new Dictionary<string, List<int>>();
+			var bucketAreas = new Dictionary<string, int>();
+
+			try
 			{
-				var tup = Unwrap(images[i]);
-				var wrap = tup.Item1; var mat = tup.Item2;
-				if (mat == null || mat.Empty()) continue;
-
-				// mat 转为 RGB 格式
-				Mat rgbMat = new Mat();
-				Cv2.CvtColor(mat, rgbMat, ColorConversionCodes.BGR2RGB);
-
-				Utils.CSharpResult res;
-				if (p.Count > 0)
+				// 1) 收集可用输入并按 shape 分桶
+				for (int i = 0; i < images.Count; i++)
 				{
-					res = _model.Infer(rgbMat, p);
+					var tup = Unwrap(images[i]);
+					var wrap = tup.Item1;
+					var mat = tup.Item2;
+					if (mat == null || mat.Empty()) continue;
+
+					var rgbMat = new Mat();
+					Cv2.CvtColor(mat, rgbMat, ColorConversionCodes.BGR2RGB);
+
+					int localIdx = rgbInputs.Count;
+					rgbInputs.Add(rgbMat);
+					wraps.Add(wrap);
+					sourceIndices.Add(i);
+
+					int h = Math.Max(0, rgbMat.Height);
+					int w = Math.Max(0, rgbMat.Width);
+					int c = Math.Max(1, rgbMat.Channels());
+					string key = h.ToString() + "x" + w.ToString() + "x" + c.ToString();
+					if (!buckets.ContainsKey(key))
+					{
+						buckets[key] = new List<int>();
+						bucketAreas[key] = h * w;
+					}
+					buckets[key].Add(localIdx);
 				}
-				else
-				{
-					res = _model.Infer(rgbMat, null);
-				}
-				rgbMat.Dispose();
 
-				// 输出：沿用输入图像对象；结果转为统一 local entry
-				outImages.Add(images[i]);
-				var entry = new JObject
+				var sampleByLocal = new List<Utils.CSharpSampleResult>();
+				for (int i = 0; i < rgbInputs.Count; i++)
 				{
-					["type"] = "local",
-					["index"] = outIndex,
-					["origin_index"] = wrap != null ? wrap.OriginalIndex : i,
-					["transform"] = wrap != null && wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null,
-					["sample_results"] = ConvertToLocalSamples(res)
-				};
-				outResults.Add(entry);
-				outIndex += 1;
+					sampleByLocal.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
+				}
+
+				// 2) 按桶面积从大到小执行 batch，并回填到 local 下标
+				var bucketKeys = new List<string>(buckets.Keys);
+				bucketKeys.Sort((a, b) => bucketAreas[b].CompareTo(bucketAreas[a]));
+				foreach (var key in bucketKeys)
+				{
+					var localIndices = buckets[key];
+					for (int start = 0; start < localIndices.Count; start += effectiveBatch)
+					{
+						int take = Math.Min(effectiveBatch, localIndices.Count - start);
+						var chunkLocals = localIndices.GetRange(start, take);
+						var chunkMats = new List<Mat>(chunkLocals.Count);
+						for (int k = 0; k < chunkLocals.Count; k++)
+						{
+							chunkMats.Add(rgbInputs[chunkLocals[k]]);
+						}
+
+						Utils.CSharpResult res = p.Count > 0 ? _model.InferBatch(chunkMats, p) : _model.InferBatch(chunkMats, null);
+						var batchSamples = res.SampleResults ?? new List<Utils.CSharpSampleResult>();
+						for (int k = 0; k < chunkLocals.Count; k++)
+						{
+							int localIdx = chunkLocals[k];
+							if (k < batchSamples.Count)
+							{
+								sampleByLocal[localIdx] = batchSamples[k];
+							}
+							else
+							{
+								sampleByLocal[localIdx] = new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>());
+							}
+						}
+					}
+				}
+
+				// 3) 按原输入顺序回填结果
+				int outIndex = 0;
+				for (int localIdx = 0; localIdx < rgbInputs.Count; localIdx++)
+				{
+					int srcIdx = sourceIndices[localIdx];
+					var wrap = wraps[localIdx];
+					outImages.Add(images[srcIdx]);
+
+					var entry = new JObject
+					{
+						["type"] = "local",
+						["index"] = outIndex,
+						["origin_index"] = wrap != null ? wrap.OriginalIndex : srcIdx,
+						["transform"] = wrap != null && wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null,
+						["sample_results"] = ConvertToLocalSamples(sampleByLocal[localIdx])
+					};
+					outResults.Add(entry);
+					outIndex += 1;
+				}
+
+				return new ModuleIO(outImages, outResults);
 			}
-
-			return new ModuleIO(outImages, outResults);
+			finally
+			{
+				for (int i = 0; i < rgbInputs.Count; i++)
+				{
+					try { rgbInputs[i].Dispose(); } catch { }
+				}
+			}
 		}
 
-		private static JArray ConvertToLocalSamples(Utils.CSharpResult res)
+		private static JArray ConvertToLocalSamples(Utils.CSharpSampleResult sr)
 		{
 			var list = new JArray();
-			if (res.SampleResults == null || res.SampleResults.Count == 0) return list;
-			var sr = res.SampleResults[0];
 			if (sr.Results == null) return list;
 			foreach (var obj in sr.Results)
 			{

@@ -126,97 +126,124 @@ namespace DlcvModules
         {
             if (!_loaded) throw new InvalidOperationException("模型未加载");
             if (images == null || images.Count == 0) throw new ArgumentException("输入图像列表为空", nameof(images));
-
-            var merged = new JArray();
-            for (int i = 0; i < images.Count; i++)
+            var bgrBatch = new List<Mat>();
+            var convertedToDispose = new List<Mat>();
+            try
             {
-                var img = images[i];
-                if (img == null || img.Empty())
+                // UI 统一传入 RGB，这里批量转换为 BGR 进入流程（流程内约定 BGR）
+                for (int i = 0; i < images.Count; i++)
                 {
-                    merged.Add(new JObject());
-                    continue;
-                }
-
-                // UI 统一传入 RGB，这里转换为 BGR 进入流程（流程内约定 BGR）
-                Mat bgrMat = img;
-                Mat converted = null;
-                try
-                {
-                    if (img != null && img.Channels() == 3)
+                    var img = images[i];
+                    if (img == null || img.Empty())
                     {
-                        converted = new Mat();
-                        Cv2.CvtColor(img, converted, ColorConversionCodes.RGB2BGR);
-                        bgrMat = converted;
+                        bgrBatch.Add(null);
+                        continue;
                     }
+
+                    Mat bgrMat = img;
+                    Mat converted = null;
+                    try
+                    {
+                        if (img.Channels() == 3)
+                        {
+                            converted = new Mat();
+                            Cv2.CvtColor(img, converted, ColorConversionCodes.RGB2BGR);
+                            bgrMat = converted;
+                            convertedToDispose.Add(converted);
+                        }
+                    }
+                    catch { bgrMat = img; }
+                    bgrBatch.Add(bgrMat);
                 }
-                catch { bgrMat = img; }
 
                 var ctx = new ExecutionContext();
-                ctx.Set("frontend_image_mat", bgrMat);
+                ctx.Set("frontend_image_mat", bgrBatch.Count > 0 ? bgrBatch[0] : null); // 兼容旧单图入口
+                ctx.Set("frontend_image_mats", bgrBatch);
+                ctx.Set("frontend_image_mat_list", bgrBatch);
                 ctx.Set("frontend_image_path", "");
                 ctx.Set("device_id", _deviceId);
 
                 var exec = new GraphExecutor(_nodes, ctx);
                 var outputs = exec.Run();
 
-                try { if (converted != null) { converted.Dispose(); } } catch { }
+                // 从 output/return_json 读取每张图结果
+                var perImageResults = new List<JArray>();
+                for (int i = 0; i < images.Count; i++)
+                {
+                    perImageResults.Add(new JArray());
+                }
 
-                // 获取 output/return_json 的结果
-                JArray resultList = new JArray();
                 var feJson = ctx.Get<Dictionary<string, object>>("frontend_json");
                 if (feJson != null && feJson.ContainsKey("last"))
                 {
                     var lastPayload = feJson["last"] as Dictionary<string, object>;
                     if (lastPayload != null && lastPayload.ContainsKey("by_image"))
                     {
-                        var byImg = lastPayload["by_image"] as List<Dictionary<string, object>>;
-                        if (byImg != null && byImg.Count > 0)
+                        var byImg = ParseByImagePayload(lastPayload["by_image"]);
+                        if (byImg != null)
                         {
-                            foreach (var item in byImg)
+                            // 先按列表顺序回填，保持与 image_list 同步
+                            for (int i = 0; i < byImg.Count && i < perImageResults.Count; i++)
                             {
-                                if (item.ContainsKey("results"))
+                                perImageResults[i] = ExtractResultsArray(byImg[i]);
+                            }
+                            // 再按 origin_index 精确覆盖，保证 mixed/bucket 场景稳定
+                            for (int i = 0; i < byImg.Count; i++)
+                            {
+                                var item = byImg[i];
+                                if (item == null || !item.ContainsKey("origin_index")) continue;
+                                int originIndex = -1;
+                                try { originIndex = Convert.ToInt32(item["origin_index"]); } catch { originIndex = -1; }
+                                if (originIndex >= 0 && originIndex < perImageResults.Count)
                                 {
-                                    var resultsObj = item["results"];
-                                    JArray resultsArr = null;
-                                    if (resultsObj is JArray ja) resultsArr = ja;
-                                    else if (resultsObj is List<Dictionary<string, object>> ldo) resultsArr = JArray.FromObject(ldo);
-                                    else if (resultsObj is List<object> lo) resultsArr = JArray.FromObject(lo);
-                                    else resultsArr = new JArray();
-                                    // 合并
-                                    foreach (var r in resultsArr) resultList.Add(r);
+                                    perImageResults[originIndex] = ExtractResultsArray(item);
                                 }
                             }
                         }
                     }
                 }
-                // 注意：一次流程执行（针对单张输入图 i）内部可能生成多张输出图（例如 merge_results）。
-                // 这里将 by_image 中所有结果合并返回给该输入图，避免按 origin_index==i 过滤导致丢结果。
-                merged.Add(resultList);
-            }
 
-            var root = new JObject();
-            root["result_list"] = images.Count == 1 ? merged[0] : merged;
-            return new Tuple<JObject, IntPtr>(root, IntPtr.Zero);
+                var root = new JObject();
+                if (images.Count == 1)
+                {
+                    root["result_list"] = perImageResults.Count > 0 ? perImageResults[0] : new JArray();
+                }
+                else
+                {
+                    var batchContainer = new JArray();
+                    for (int i = 0; i < perImageResults.Count; i++)
+                    {
+                        batchContainer.Add(new JObject
+                        {
+                            ["result_list"] = perImageResults[i] ?? new JArray()
+                        });
+                    }
+                    root["result_list"] = batchContainer;
+                }
+                return new Tuple<JObject, IntPtr>(root, IntPtr.Zero);
+            }
+            finally
+            {
+                for (int i = 0; i < convertedToDispose.Count; i++)
+                {
+                    try { convertedToDispose[i].Dispose(); } catch { }
+                }
+            }
         }
 
         public Utils.CSharpResult Infer(Mat image, JObject paramsJson = null)
         {
-            var t = InferInternal(new List<Mat> { image }, paramsJson);
-            var resultListToken = t.Item1["result_list"];
-            JArray resultList;
-            if (resultListToken is JArray ja)
+            var batch = InferBatch(new List<Mat> { image }, paramsJson);
+            var single = new List<Utils.CSharpSampleResult>();
+            if (batch.SampleResults != null && batch.SampleResults.Count > 0)
             {
-                resultList = ja;
-            }
-            else if (resultListToken is JObject jo)
-            {
-                resultList = jo["result_list"] as JArray ?? new JArray();
+                single.Add(batch.SampleResults[0]);
             }
             else
             {
-                resultList = new JArray();
+                single.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
             }
-            return ConvertFlowResultsToCSharp(resultList);
+            return new Utils.CSharpResult(single);
         }
 
         public Utils.CSharpResult InferBatch(List<Mat> imageList, JObject paramsJson = null)
@@ -226,22 +253,20 @@ namespace DlcvModules
 
             if (!IsLoaded) throw new InvalidOperationException("模型未加载");
 
-            var samples = new List<Utils.CSharpSampleResult>();
-            for (int i = 0; i < imageList.Count; i++)
+            var tuple = InferInternal(imageList, paramsJson);
+            try
             {
-                var single = Infer(imageList[i], paramsJson);
-                if (single.SampleResults != null && single.SampleResults.Count > 0)
+                var resultToken = tuple.Item1["result_list"];
+                var resultList = resultToken as JArray ?? new JArray();
+                return ConvertFlowResultsToCSharp(resultList);
+            }
+            finally
+            {
+                if (tuple.Item2 != IntPtr.Zero)
                 {
-                    // 按照其它模式的约定：一张图像使用第一个 SampleResult
-                    samples.Add(single.SampleResults[0]);
-                }
-                else
-                {
-                    samples.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
+                    DllLoader.Instance.dlcv_free_model_result(tuple.Item2);
                 }
             }
-
-            return new Utils.CSharpResult(samples);
         }
 
         /// <summary>
@@ -325,6 +350,39 @@ namespace DlcvModules
         ~FlowGraphModel()
         {
             Dispose(false);
+        }
+
+        private static List<Dictionary<string, object>> ParseByImagePayload(object byImageObj)
+        {
+            if (byImageObj is List<Dictionary<string, object>> listDict)
+            {
+                return listDict;
+            }
+
+            if (byImageObj is JArray byImageJa)
+            {
+                var outList = new List<Dictionary<string, object>>();
+                for (int i = 0; i < byImageJa.Count; i++)
+                {
+                    var jo = byImageJa[i] as JObject;
+                    if (jo == null) continue;
+                    try { outList.Add(jo.ToObject<Dictionary<string, object>>()); } catch { }
+                }
+                return outList;
+            }
+
+            return null;
+        }
+
+        private static JArray ExtractResultsArray(Dictionary<string, object> item)
+        {
+            if (item == null || !item.ContainsKey("results")) return new JArray();
+            var resultsObj = item["results"];
+            if (resultsObj is JArray ja) return ja;
+            if (resultsObj is List<Dictionary<string, object>> ldo) return JArray.FromObject(ldo);
+            if (resultsObj is List<object> lo) return JArray.FromObject(lo);
+            if (resultsObj is JObject jo && jo["result_list"] is JArray jarr) return jarr;
+            return new JArray();
         }
 
         private Utils.CSharpResult ConvertFlowResultsToCSharp(JArray resultList)

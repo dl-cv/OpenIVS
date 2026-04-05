@@ -32,6 +32,43 @@ namespace DlcvModules
             // 优先从 ExecutionContext 注入的前端 BGR Mat 读取
             try
             {
+                List<Mat> matsFromContext = null;
+                try { matsFromContext = Context != null ? Context.Get<List<Mat>>("frontend_image_mats", null) : null; } catch { matsFromContext = null; }
+                if (matsFromContext == null || matsFromContext.Count == 0)
+                {
+                    try { matsFromContext = Context != null ? Context.Get<List<Mat>>("frontend_image_mat_list", null) : null; } catch { matsFromContext = null; }
+                }
+                if (matsFromContext != null && matsFromContext.Count > 0)
+                {
+                    int ctxIndex = 0;
+                    foreach (var mat in matsFromContext)
+                    {
+                        if (mat == null || mat.Empty()) { ctxIndex += 1; continue; }
+                        var bgr = mat;
+                        var state = new TransformationState(bgr.Width, bgr.Height);
+                        var wrap = new ModuleImage(bgr, bgr, state, ctxIndex);
+                        images.Add(wrap);
+
+                        var entryBatch = new JObject
+                        {
+                            ["type"] = "local",
+                            ["index"] = ctxIndex,
+                            ["origin_index"] = ctxIndex,
+                            ["transform"] = JObject.FromObject(state.ToDict()),
+                            ["sample_results"] = new JArray(),
+                            ["filename"] = "frontend_mat_" + ctxIndex.ToString(),
+                            ["filepath"] = ""
+                        };
+                        results.Add(entryBatch);
+                        ctxIndex += 1;
+                    }
+                    if (images.Count > 0)
+                    {
+                        try { ScalarOutputsByName["filename"] = "frontend_mat"; } catch { }
+                        return new ModuleIO(images, results);
+                    }
+                }
+
                 Mat matFromContext = null;
                 try { matFromContext = Context != null ? Context.Get<Mat>("frontend_image_mat", null) : null; } catch { matFromContext = null; }
                 if (matFromContext != null && !matFromContext.Empty())
@@ -171,6 +208,41 @@ namespace DlcvModules
             // 优先从 ExecutionContext 注入前端图像 Mat（BGR）
             try
             {
+                List<Mat> matsFromContext = null;
+                try { matsFromContext = Context != null ? Context.Get<List<Mat>>("frontend_image_mats", null) : null; } catch { matsFromContext = null; }
+                if (matsFromContext == null || matsFromContext.Count == 0)
+                {
+                    try { matsFromContext = Context != null ? Context.Get<List<Mat>>("frontend_image_mat_list", null) : null; } catch { matsFromContext = null; }
+                }
+                if (matsFromContext != null && matsFromContext.Count > 0)
+                {
+                    int ctxIndex = 0;
+                    foreach (var mat in matsFromContext)
+                    {
+                        if (mat == null || mat.Empty()) { ctxIndex += 1; continue; }
+                        var bgr = mat;
+                        var state = new TransformationState(bgr.Width, bgr.Height);
+                        var wrap = new ModuleImage(bgr, bgr, state, ctxIndex);
+                        images.Add(wrap);
+
+                        var entryBatch = new JObject
+                        {
+                            ["type"] = "local",
+                            ["index"] = ctxIndex,
+                            ["origin_index"] = ctxIndex,
+                            ["transform"] = JObject.FromObject(state.ToDict()),
+                            ["sample_results"] = new JArray(),
+                            ["filename"] = "frontend_mat_" + ctxIndex.ToString()
+                        };
+                        results.Add(entryBatch);
+                        ctxIndex += 1;
+                    }
+                    if (images.Count > 0)
+                    {
+                        return new ModuleIO(images, results);
+                    }
+                }
+
                 Mat matFromContext = null;
                 try { matFromContext = Context != null ? Context.Get<Mat>("frontend_image_mat", null) : null; } catch { matFromContext = null; }
                 if (matFromContext != null && !matFromContext.Empty())
