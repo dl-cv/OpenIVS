@@ -90,25 +90,24 @@ namespace DlcvModules
 				var dets = entry["sample_results"] as JArray;
 				if (dets == null) continue;
 
-				var cloned = CloneDetList(dets);
 				string sig = SerializeTransform(entry["transform"] as JObject);
 				if (!string.IsNullOrEmpty(sig))
 				{
-					AddClonedSamples(transToSamples, sig, cloned);
+					AddSamplesRef(transToSamples, sig, dets);
 					continue;
 				}
 
 				int idx = SafeInt(entry["index"], -1);
 				if (idx >= 0)
 				{
-					AddClonedSamples(indexToSamples, idx, cloned);
+					AddSamplesRef(indexToSamples, idx, dets);
 					continue;
 				}
 
 				int originIdx = SafeInt(entry["origin_index"], -1);
 				if (originIdx >= 0)
 				{
-					AddClonedSamples(originToSamples, originIdx, cloned);
+					AddSamplesRef(originToSamples, originIdx, dets);
 					continue;
 				}
 
@@ -591,7 +590,7 @@ namespace DlcvModules
 
 		private static List<JObject> CloneDetList(JArray array)
 		{
-			var list = new List<JObject>();
+			var list = new List<JObject>(array != null ? array.Count : 0);
 			if (array == null) return list;
 			foreach (var token in array)
 			{
@@ -602,7 +601,7 @@ namespace DlcvModules
 
 		private static List<JObject> CloneDetList(List<JObject> list)
 		{
-			var clone = new List<JObject>();
+			var clone = new List<JObject>(list != null ? list.Count : 0);
 			if (list == null) return clone;
 			foreach (var item in list)
 			{
@@ -611,16 +610,31 @@ namespace DlcvModules
 			return clone;
 		}
 
-		private static void AddClonedSamples<TKey>(Dictionary<TKey, List<JObject>> map, TKey key, List<JObject> samples)
+		private static void AddSamplesRef<TKey>(Dictionary<TKey, List<JObject>> map, TKey key, JArray samples)
 		{
 			if (!map.TryGetValue(key, out List<JObject> list))
 			{
 				list = new List<JObject>();
 				map[key] = list;
 			}
+			if (samples == null) return;
 			foreach (var sample in samples)
 			{
-				if (sample != null) list.Add((JObject)sample.DeepClone());
+				if (sample is JObject obj) list.Add(obj);
+			}
+		}
+
+		private static void AddSamplesRef<TKey>(Dictionary<TKey, List<JObject>> map, TKey key, List<JObject> samples)
+		{
+			if (!map.TryGetValue(key, out List<JObject> list))
+			{
+				list = new List<JObject>();
+				map[key] = list;
+			}
+			if (samples == null) return;
+			foreach (var sample in samples)
+			{
+				if (sample != null) list.Add(sample);
 			}
 		}
 

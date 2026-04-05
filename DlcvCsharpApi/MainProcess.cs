@@ -383,7 +383,10 @@ namespace DlcvModules
                 string dtype = inp.TryGetValue("type", out object tv) && tv != null ? tv.ToString() : null;
                 if (linkId < 0 || !linkToSource.TryGetValue(linkId, out Tuple<int, int> src)) continue;
                 int pairIdx = ii / 2;
-                var ch = pairs.ContainsKey(pairIdx) ? pairs[pairIdx] : new ModuleChannel(new List<ModuleImage>(), new JArray());
+                if (!pairs.TryGetValue(pairIdx, out ModuleChannel ch))
+                {
+                    ch = new ModuleChannel(new List<ModuleImage>(), new JArray());
+                }
                 var srcNodeId = src.Item1; var srcOutIdx = src.Item2;
                 if (!_nodeExecMap.TryGetValue(srcNodeId, out NodeExecOutput srcOut))
                 {
@@ -412,9 +415,8 @@ namespace DlcvModules
                 }
                 else if (string.Equals(dtype, "result_chan", StringComparison.OrdinalIgnoreCase))
                 {
-                    var r = new JArray();
-                    if (picked.ResultList != null) foreach (var t in picked.ResultList) r.Add(t);
-                    ch = new ModuleChannel(ch.ImageList ?? new List<ModuleImage>(), r, ch.TemplateList ?? new List<SimpleTemplate>());
+                    // 结果通道仅做路由，直接复用引用避免高频 JToken 逐项拷贝。
+                    ch = new ModuleChannel(ch.ImageList ?? new List<ModuleImage>(), picked.ResultList ?? new JArray(), ch.TemplateList ?? new List<SimpleTemplate>());
                 }
                 else if (string.Equals(dtype, "template_chan", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(dtype, "template", StringComparison.OrdinalIgnoreCase))
