@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
@@ -769,7 +769,7 @@ namespace dlcv_infer_csharp
                 }
 
                 var resultObject = JObject.Parse(responseJson);
-                Log($"Model info: {resultObject}");
+                //Log($"Model info: {resultObject}");
                 return resultObject;
             }
             catch (Exception ex)
@@ -790,7 +790,7 @@ namespace dlcv_infer_csharp
             var resultJson = Marshal.PtrToStringAnsi(resultPtr);
             var resultObject = JObject.Parse(resultJson);
 
-            Log("Model info: " + resultObject.ToString());
+            //Log("Model info: " + resultObject.ToString());
             DllLoader.Instance.dlcv_free_result(resultPtr);
             return resultObject;
         }
