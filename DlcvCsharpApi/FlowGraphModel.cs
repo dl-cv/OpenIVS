@@ -130,7 +130,8 @@ namespace DlcvModules
             var convertedToDispose = new List<Mat>();
             try
             {
-                // UI 统一传入 RGB，这里批量转换为 BGR 进入流程（流程内约定 BGR）
+                // C# 入口约定前端传入 RGB。当前流程中的 sliding/model/output 节点
+                // 不依赖入口再做一次整图 RGB->BGR 拷贝，因此直接透传可减少 CPU 开销。
                 for (int i = 0; i < images.Count; i++)
                 {
                     var img = images[i];
@@ -139,27 +140,14 @@ namespace DlcvModules
                         bgrBatch.Add(null);
                         continue;
                     }
-
-                    Mat bgrMat = img;
-                    Mat converted = null;
-                    try
-                    {
-                        if (img.Channels() == 3)
-                        {
-                            converted = new Mat();
-                            Cv2.CvtColor(img, converted, ColorConversionCodes.RGB2BGR);
-                            bgrMat = converted;
-                            convertedToDispose.Add(converted);
-                        }
-                    }
-                    catch { bgrMat = img; }
-                    bgrBatch.Add(bgrMat);
+                    bgrBatch.Add(img);
                 }
 
                 var ctx = new ExecutionContext();
                 ctx.Set("frontend_image_mat", bgrBatch.Count > 0 ? bgrBatch[0] : null); // 兼容旧单图入口
                 ctx.Set("frontend_image_mats", bgrBatch);
                 ctx.Set("frontend_image_mat_list", bgrBatch);
+                ctx.Set("frontend_image_color_space", "rgb");
                 ctx.Set("frontend_image_path", "");
                 ctx.Set("device_id", _deviceId);
 
