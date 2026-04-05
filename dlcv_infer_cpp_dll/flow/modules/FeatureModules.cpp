@@ -532,6 +532,46 @@ public:
     }
 };
 
+/// pre_process/image_rescale, features/image_rescale
+class ImageRescaleModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        const std::vector<ModuleImage>& images = imageList;
+        const Json results = resultList.is_array() ? resultList : Json::array();
+        double scale = GetDoubleProp(Properties, "scale", 1.0);
+        if (scale <= 0.0) scale = 1.0;
+
+        std::vector<ModuleImage> outImages;
+        for (const auto& wrap : images) {
+            if (wrap.ImageObject.empty()) continue;
+            const cv::Mat baseMat = wrap.ImageObject;
+            const int W = std::max(1, baseMat.cols);
+            const int H = std::max(1, baseMat.rows);
+            const int tw = std::max(1, static_cast<int>(std::lround(static_cast<double>(W) / scale)));
+            const int th = std::max(1, static_cast<int>(std::lround(static_cast<double>(H) / scale)));
+            cv::Mat resized;
+            cv::resize(baseMat, resized, cv::Size(tw, th));
+            const std::vector<double> A = {
+                static_cast<double>(tw) / static_cast<double>(W), 0.0, 0.0,
+                0.0, static_cast<double>(th) / static_cast<double>(H), 0.0
+            };
+            const TransformationState parentState = (wrap.TransformState.OriginalWidth > 0 && wrap.TransformState.OriginalHeight > 0)
+                ? wrap.TransformState
+                : TransformationState(W, H);
+            const TransformationState childState = parentState.DeriveChild(A, tw, th);
+            outImages.emplace_back(
+                resized,
+                wrap.OriginalImage.empty() ? baseMat : wrap.OriginalImage,
+                childState,
+                wrap.OriginalIndex
+            );
+        }
+        return ModuleIO(std::move(outImages), results, Json::array());
+    }
+};
+
 /// features/image_rotate_by_cls
 class ImageRotateByClsModule final : public BaseModule {
 public:
@@ -841,6 +881,8 @@ DLCV_FLOW_REGISTER_MODULE("features/image_generation", ImageGenerationModule)
 DLCV_FLOW_REGISTER_MODULE("features/image_flip", ImageFlipModule)
 DLCV_FLOW_REGISTER_MODULE("pre_process/coordinate_crop", CoordinateCropModule)
 DLCV_FLOW_REGISTER_MODULE("features/coordinate_crop", CoordinateCropModule)
+DLCV_FLOW_REGISTER_MODULE("pre_process/image_rescale", ImageRescaleModule)
+DLCV_FLOW_REGISTER_MODULE("features/image_rescale", ImageRescaleModule)
 DLCV_FLOW_REGISTER_MODULE("features/image_rotate_by_cls", ImageRotateByClsModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/result_label_merge", ResultLabelMergeModule)
 DLCV_FLOW_REGISTER_MODULE("features/result_label_merge", ResultLabelMergeModule)

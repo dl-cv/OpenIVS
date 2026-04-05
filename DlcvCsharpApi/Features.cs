@@ -1215,6 +1215,59 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 模块名称：按比例缩放
+    /// 按比例缩放（scale=2 表示宽高各缩小 2 倍）并透传结果；注册名：pre_process/image_rescale, features/image_rescale
+    /// properties: scale(double>0)
+    /// </summary>
+    public class ImageRescale : BaseModule
+    {
+        static ImageRescale()
+        {
+            ModuleRegistry.Register("pre_process/image_rescale", typeof(ImageRescale));
+            ModuleRegistry.Register("features/image_rescale", typeof(ImageRescale));
+        }
+
+        public ImageRescale(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var images = imageList ?? new List<ModuleImage>();
+            var results = resultList ?? new JArray();
+            double scale = ReadDoubleLike("scale", 1.0);
+            if (scale <= 0) scale = 1.0;
+            var outImages = new List<ModuleImage>();
+
+            foreach (var wrap in images)
+            {
+                if (wrap == null || wrap.ImageObject == null || wrap.ImageObject.Empty()) continue;
+                var baseMat = wrap.ImageObject;
+                int W = Math.Max(1, baseMat.Width), H = Math.Max(1, baseMat.Height);
+                int tw = Math.Max(1, (int)Math.Round(W / scale));
+                int th = Math.Max(1, (int)Math.Round(H / scale));
+                var resized = new Mat();
+                Cv2.Resize(baseMat, resized, new Size(tw, th));
+                var A = new double[] { (double)tw / W, 0, 0, 0, (double)th / H, 0 };
+                var parentState = wrap.TransformState ?? new TransformationState(W, H);
+                var childState = parentState.DeriveChild(A, tw, th);
+                outImages.Add(new ModuleImage(resized, wrap.OriginalImage ?? baseMat, childState, wrap.OriginalIndex));
+            }
+            return new ModuleIO(outImages, results);
+        }
+
+        private double ReadDoubleLike(string key, double dv)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+            {
+                try { return Convert.ToDouble(v); } catch { return dv; }
+            }
+            return dv;
+        }
+    }
+
+    /// <summary>
     /// 模块名称：分类矫正
     /// features/image_rotate_by_cls：根据分类结果对图像做整图旋转，并同步更新旋转框/检测结果的几何与 transform。
     /// 使用场景：上游分类结果给出方向类别（例如 “90/180/270/0” 的自定义名称），且已经存在对应图像的检测/旋转框结果。
