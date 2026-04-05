@@ -180,21 +180,34 @@ namespace DlcvModules
                         var byImg = ParseByImagePayload(lastPayload["by_image"]);
                         if (byImg != null)
                         {
-                            // 先按列表顺序回填，保持与 image_list 同步
-                            for (int i = 0; i < byImg.Count && i < perImageResults.Count; i++)
+                            // 单图输入时，流程里可能会产生多条 by_image（例如滑窗/多分类链路）。
+                            // 这里必须聚合全部结果，避免只保留第一个条目。
+                            if (images.Count == 1)
                             {
-                                perImageResults[i] = ExtractResultsArray(byImg[i]);
-                            }
-                            // 再按 origin_index 精确覆盖，保证 mixed/bucket 场景稳定
-                            for (int i = 0; i < byImg.Count; i++)
-                            {
-                                var item = byImg[i];
-                                if (item == null || !item.ContainsKey("origin_index")) continue;
-                                int originIndex = -1;
-                                try { originIndex = Convert.ToInt32(item["origin_index"]); } catch { originIndex = -1; }
-                                if (originIndex >= 0 && originIndex < perImageResults.Count)
+                                var merged = new JArray();
+                                for (int i = 0; i < byImg.Count; i++)
                                 {
-                                    perImageResults[originIndex] = ExtractResultsArray(item);
+                                    AppendResultsArray(merged, ExtractResultsArray(byImg[i]));
+                                }
+                                perImageResults[0] = merged;
+                            }
+                            else
+                            {
+                                // 多图场景：先按列表顺序回填，再按 origin_index 追加修正。
+                                for (int i = 0; i < byImg.Count && i < perImageResults.Count; i++)
+                                {
+                                    AppendResultsArray(perImageResults[i], ExtractResultsArray(byImg[i]));
+                                }
+                                for (int i = 0; i < byImg.Count; i++)
+                                {
+                                    var item = byImg[i];
+                                    if (item == null || !item.ContainsKey("origin_index")) continue;
+                                    int originIndex = -1;
+                                    try { originIndex = Convert.ToInt32(item["origin_index"]); } catch { originIndex = -1; }
+                                    if (originIndex >= 0 && originIndex < perImageResults.Count)
+                                    {
+                                        AppendResultsArray(perImageResults[originIndex], ExtractResultsArray(item));
+                                    }
                                 }
                             }
                         }
@@ -381,6 +394,16 @@ namespace DlcvModules
             if (resultsObj is List<object> lo) return JArray.FromObject(lo);
             if (resultsObj is JObject jo && jo["result_list"] is JArray jarr) return jarr;
             return new JArray();
+        }
+
+        private static void AppendResultsArray(JArray target, JArray source)
+        {
+            if (target == null || source == null || source.Count == 0) return;
+            for (int i = 0; i < source.Count; i++)
+            {
+                var token = source[i];
+                target.Add(token != null ? token.DeepClone() : JValue.CreateNull());
+            }
         }
 
         private Utils.CSharpResult ConvertFlowResultsToCSharp(JArray resultList)
