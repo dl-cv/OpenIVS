@@ -19,6 +19,7 @@ namespace DlcvDemo3
     {
         private const string ModelFileFilter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
         private const string ImageFileFilter = "图片文件 (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif|所有文件 (*.*)|*.*";
+        private const string UiStateFileName = "DlcvDemo3.ui-state.json";
         private const int FixedCropWidth = 128;
         private const int FixedCropHeight = 192;
 
@@ -26,6 +27,13 @@ namespace DlcvDemo3
         private Model model2;
         private string imagePath;
         private bool isInferenceRunning;
+
+        private sealed class UiState
+        {
+            public string Model1Path { get; set; }
+            public string Model2Path { get; set; }
+            public string ImagePath { get; set; }
+        }
 
         private sealed class PipelineRunResult
         {
@@ -94,11 +102,27 @@ namespace DlcvDemo3
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            txtModel1Path.Text = string.Empty;
-            txtModel2Path.Text = string.Empty;
-            txtImagePath.Text = string.Empty;
-            imagePath = string.Empty;
+            UiState state = LoadUiState();
+            txtModel1Path.Text = state?.Model1Path ?? string.Empty;
+            txtModel2Path.Text = state?.Model2Path ?? string.Empty;
+            txtImagePath.Text = state?.ImagePath ?? string.Empty;
+            imagePath = txtImagePath.Text;
             richTextBox1.Text = "请先加载模型并选择图片。";
+
+            StringBuilder startupSb = new StringBuilder();
+            if (TryLoadModelFromPath(txtModel1Path.Text, ref model1, "模型1", startupSb))
+            {
+                startupSb.AppendLine("模型1已自动加载。");
+            }
+            if (TryLoadModelFromPath(txtModel2Path.Text, ref model2, "模型2", startupSb))
+            {
+                startupSb.AppendLine("模型2已自动加载。");
+            }
+            if (startupSb.Length > 0)
+            {
+                richTextBox1.Text = startupSb.ToString().TrimEnd();
+            }
+
             SetInferenceProgress(0, "空闲");
             UpdateBusyControlState();
         }
@@ -112,6 +136,7 @@ namespace DlcvDemo3
                 return;
             }
 
+            SaveUiState();
             ReleaseModels();
             Utils.FreeAllModels();
         }
@@ -127,6 +152,12 @@ namespace DlcvDemo3
             if (!string.IsNullOrWhiteSpace(selected))
             {
                 txtModel1Path.Text = selected;
+                SaveUiState();
+                LoadModelWithStatus(
+                    "当前正在推理，暂不能加载模型1。",
+                    txtModel1Path,
+                    "模型1",
+                    LoadModel1);
             }
         }
 
@@ -150,6 +181,12 @@ namespace DlcvDemo3
             if (!string.IsNullOrWhiteSpace(selected))
             {
                 txtModel2Path.Text = selected;
+                SaveUiState();
+                LoadModelWithStatus(
+                    "当前正在推理，暂不能加载模型2。",
+                    txtModel2Path,
+                    "模型2",
+                    LoadModel2);
             }
         }
 
@@ -172,6 +209,7 @@ namespace DlcvDemo3
 
             txtImagePath.Text = selected;
             imagePath = selected;
+            SaveUiState();
         }
 
         private async void btnInfer_Click(object sender, EventArgs e)
@@ -671,6 +709,7 @@ namespace DlcvDemo3
             {
                 if (loadAction())
                 {
+                    SaveUiState();
                     richTextBox1.Text = $"{modelDisplayName}加载成功:\n{targetTextBox.Text.Trim()}";
                 }
             }
@@ -682,30 +721,22 @@ namespace DlcvDemo3
 
         private bool LoadModel1()
         {
-            string path = (txtModel1Path.Text ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            {
-                MessageBox.Show("请先选择有效的模型1文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return false;
-            }
-
-            DisposeModel(ref model1);
-            model1 = new Model(path, 0, false);
-            return true;
+            return TryLoadModelFromPath(
+                txtModel1Path.Text,
+                ref model1,
+                "模型1",
+                null,
+                showPathInvalidMessage: true);
         }
 
         private bool LoadModel2()
         {
-            string path = (txtModel2Path.Text ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            {
-                MessageBox.Show("请先选择有效的模型2文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return false;
-            }
-
-            DisposeModel(ref model2);
-            model2 = new Model(path, 0, false);
-            return true;
+            return TryLoadModelFromPath(
+                txtModel2Path.Text,
+                ref model2,
+                "模型2",
+                null,
+                showPathInvalidMessage: true);
         }
 
         private bool TryEnsureIdle(string busyMessage)
@@ -876,6 +907,104 @@ namespace DlcvDemo3
 
                 return dialog.ShowDialog() == DialogResult.OK ? dialog.FileName : null;
             }
+        }
+
+        private static bool TryLoadModelFromPath(
+            string rawPath,
+            ref Model targetModel,
+            string modelDisplayName,
+            StringBuilder logBuilder = null,
+            bool showPathInvalidMessage = false)
+        {
+            string path = (rawPath ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                if (showPathInvalidMessage)
+                {
+                    MessageBox.Show($"请先选择有效的{modelDisplayName}文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else if (!string.IsNullOrWhiteSpace(path))
+                {
+                    logBuilder?.AppendLine($"{modelDisplayName}路径不存在，已跳过自动加载：{path}");
+                }
+                return false;
+            }
+
+            try
+            {
+                DisposeModel(ref targetModel);
+                targetModel = new Model(path, 0, false);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logBuilder?.AppendLine($"{modelDisplayName}自动加载失败：{ex.Message}");
+                if (showPathInvalidMessage)
+                {
+                    throw;
+                }
+                return false;
+            }
+        }
+
+        private UiState LoadUiState()
+        {
+            try
+            {
+                string path = GetUiStateFilePath();
+                if (!File.Exists(path))
+                {
+                    return null;
+                }
+
+                string json = File.ReadAllText(path, Encoding.UTF8);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return null;
+                }
+
+                JObject obj = JObject.Parse(json);
+                return new UiState
+                {
+                    Model1Path = (string)obj["model1_path"] ?? string.Empty,
+                    Model2Path = (string)obj["model2_path"] ?? string.Empty,
+                    ImagePath = (string)obj["image_path"] ?? string.Empty
+                };
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void SaveUiState()
+        {
+            try
+            {
+                string path = GetUiStateFilePath();
+                string folder = Path.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(folder) && !Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                JObject obj = new JObject
+                {
+                    ["model1_path"] = (txtModel1Path.Text ?? string.Empty).Trim(),
+                    ["model2_path"] = (txtModel2Path.Text ?? string.Empty).Trim(),
+                    ["image_path"] = (txtImagePath.Text ?? string.Empty).Trim()
+                };
+
+                File.WriteAllText(path, obj.ToString(), Encoding.UTF8);
+            }
+            catch
+            {
+            }
+        }
+
+        private static string GetUiStateFilePath()
+        {
+            return Path.Combine(Application.UserAppDataPath, UiStateFileName);
         }
 
         private static void DisposeModel(ref Model model)
