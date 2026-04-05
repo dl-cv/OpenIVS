@@ -80,6 +80,46 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 线程内推理计时：用于区分 dlcv_infer 耗时与流程总耗时。
+    /// </summary>
+    public static class InferTiming
+    {
+        [ThreadStatic] private static double _currentDlcvInferMs;
+        [ThreadStatic] private static double _lastDlcvInferMs;
+        [ThreadStatic] private static double _lastFlowInferMs;
+
+        public static void BeginFlowRequest()
+        {
+            _currentDlcvInferMs = 0.0;
+        }
+
+        public static void AddDlcvInferMs(double costMs)
+        {
+            if (costMs <= 0) return;
+            _currentDlcvInferMs += costMs;
+        }
+
+        public static void EndFlowRequest(double flowInferMs)
+        {
+            _lastDlcvInferMs = Math.Max(0.0, _currentDlcvInferMs);
+            _lastFlowInferMs = Math.Max(0.0, flowInferMs);
+        }
+
+        public static void SetDirectRequest(double inferMs)
+        {
+            var ms = Math.Max(0.0, inferMs);
+            _lastDlcvInferMs = ms;
+            _lastFlowInferMs = ms;
+        }
+
+        public static void GetLast(out double dlcvInferMs, out double flowInferMs)
+        {
+            dlcvInferMs = Math.Max(0.0, _lastDlcvInferMs);
+            flowInferMs = Math.Max(0.0, _lastFlowInferMs);
+        }
+    }
+
+    /// <summary>
     /// 表示从原图到当前图的线性变换状态（仿射：2x3），以及尺寸信息
     /// 仅实现数学变换链路的维护，图像实际变换由具体功能模块完成
     /// </summary>

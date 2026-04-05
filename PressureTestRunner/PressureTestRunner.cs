@@ -27,6 +27,9 @@ namespace DLCV
         private DateTime _startTime;
         private TimeSpan _duration;
         private Queue<double> _recentLatencies;
+        private Queue<double> _recentDlcvInferLatencies;
+        private Queue<double> _recentTotalInferLatencies;
+        private volatile bool _isFlowModelTiming;
         private Queue<DateTime> _requestTimestamps; // 记录请求完成时间戳
         private const int MAX_LATENCY_SAMPLES = 100; // 保存最近几次请求的延迟
         private const int RECENT_RATE_WINDOW_SECONDS = 3; // 最近速率统计窗口（秒）
@@ -86,6 +89,8 @@ namespace DLCV
             _completedRequests = 0;
             _batchSize = batchSize;
             _recentLatencies = new Queue<double>(MAX_LATENCY_SAMPLES);
+            _recentDlcvInferLatencies = new Queue<double>(MAX_LATENCY_SAMPLES);
+            _recentTotalInferLatencies = new Queue<double>(MAX_LATENCY_SAMPLES);
             _requestTimestamps = new Queue<DateTime>();
         }
 
@@ -126,6 +131,8 @@ namespace DLCV
             lock (_lockObject)
             {
                 _recentLatencies.Clear();
+                _recentDlcvInferLatencies.Clear();
+                _recentTotalInferLatencies.Clear();
                 _requestTimestamps.Clear();
             }
 
@@ -209,20 +216,60 @@ namespace DLCV
             
             // 计算最近请求的平均延迟（毫秒）
             double averageLatency = 0;
+            double averageDlcvInferLatency = 0;
+            double averageTotalInferLatency = 0;
             lock (_lockObject)
             {
                 if (_recentLatencies.Count > 0)
                 {
                     averageLatency = _recentLatencies.Average();
                 }
+                if (_recentDlcvInferLatencies.Count > 0)
+                {
+                    averageDlcvInferLatency = _recentDlcvInferLatencies.Average();
+                }
+                if (_recentTotalInferLatencies.Count > 0)
+                {
+                    averageTotalInferLatency = _recentTotalInferLatencies.Average();
+                }
             }
-            sb.AppendLine($"平均延迟: {averageLatency:F2}ms");
+            if (averageDlcvInferLatency > 0)
+            {
+                sb.AppendLine($"平均延迟(SDK): {averageDlcvInferLatency:F2}ms");
+            }
+            if (_isFlowModelTiming && averageTotalInferLatency > 0)
+            {
+                sb.AppendLine($"平均延迟(总时间): {averageTotalInferLatency:F2}ms");
+            }
             sb.AppendLine($"实时速率: {recentRate:F2} 请求/秒");
 
             return sb.ToString();
         }
 
         #endregion
+
+        public void SetFlowModelTiming(bool isFlowModel)
+        {
+            _isFlowModelTiming = isFlowModel;
+        }
+
+        public void RecordLatencyBreakdown(double dlcvInferMs, double totalInferMs)
+        {
+            lock (_lockObject)
+            {
+                if (_recentDlcvInferLatencies.Count >= MAX_LATENCY_SAMPLES)
+                {
+                    _recentDlcvInferLatencies.Dequeue();
+                }
+                _recentDlcvInferLatencies.Enqueue(Math.Max(0.0, dlcvInferMs));
+
+                if (_recentTotalInferLatencies.Count >= MAX_LATENCY_SAMPLES)
+                {
+                    _recentTotalInferLatencies.Dequeue();
+                }
+                _recentTotalInferLatencies.Enqueue(Math.Max(0.0, totalInferMs));
+            }
+        }
 
         #region 私有方法
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using dlcv_infer_csharp;
@@ -240,7 +241,10 @@ namespace DlcvModules
 							chunkMats.Add(rgbInputs[chunkLocals[k]]);
 						}
 
-						Utils.CSharpResult res = p.Count > 0 ? _model.InferBatch(chunkMats, p) : _model.InferBatch(chunkMats, null);
+                        var inferSw = Stopwatch.StartNew();
+                        Utils.CSharpResult res = p.Count > 0 ? _model.InferBatch(chunkMats, p) : _model.InferBatch(chunkMats, null);
+                        inferSw.Stop();
+                        InferTiming.AddDlcvInferMs(inferSw.Elapsed.TotalMilliseconds);
 						var batchSamples = res.SampleResults ?? new List<Utils.CSharpSampleResult>();
 						for (int k = 0; k < chunkLocals.Count; k++)
 						{

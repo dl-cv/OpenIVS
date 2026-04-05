@@ -112,6 +112,7 @@ namespace DlcvDemo
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
+        private bool isCurrentFlowModel = false; // 当前是否为流程模型(dvst/dvso/dvsp)
 
         private void DisposeCurrentModel()
         {
@@ -153,6 +154,11 @@ namespace DlcvDemo
                 string selectedFilePath = openFileDialog.FileName;
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
                 Properties.Settings.Default.Save();
+                string ext = Path.GetExtension(selectedFilePath) ?? "";
+                isCurrentFlowModel =
+                    ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase) ||
+                    ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase) ||
+                    ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase);
                 int device_id = GetSelectedDeviceId();
                 try
                 {
@@ -348,8 +354,22 @@ namespace DlcvDemo
                 JObject infer_config = new JObject();
                 infer_config["with_mask"] = false;
 
+                var inferSw = Stopwatch.StartNew();
                 var resultTuple = model.InferInternal(image_list, infer_config);
+                inferSw.Stop();
                 IntPtr currentResultPtr = resultTuple.Item2;
+                double dlcvInferMs = 0.0;
+                double totalInferMs = 0.0;
+                DlcvModules.InferTiming.GetLast(out dlcvInferMs, out totalInferMs);
+                if (totalInferMs <= 0.0)
+                {
+                    totalInferMs = inferSw.Elapsed.TotalMilliseconds;
+                }
+                if (dlcvInferMs <= 0.0)
+                {
+                    dlcvInferMs = totalInferMs;
+                }
+                pressureTestRunner?.RecordLatencyBreakdown(dlcvInferMs, totalInferMs);
 
                 try
                 {
@@ -514,6 +534,7 @@ namespace DlcvDemo
 
                 // 创建测试实例
                 pressureTestRunner = new PressureTestRunner(threadCount, 1000000, batch_size);
+                pressureTestRunner.SetFlowModelTiming(isCurrentFlowModel);
                 pressureTestRunner.SetTestAction(ModelInferAction, image_list);
 
                 // 创建并启动定时器更新UI

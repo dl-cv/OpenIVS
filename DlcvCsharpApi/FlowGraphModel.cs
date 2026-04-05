@@ -151,8 +151,18 @@ namespace DlcvModules
                 ctx.Set("frontend_image_path", "");
                 ctx.Set("device_id", _deviceId);
 
-                var exec = new GraphExecutor(_nodes, ctx);
-                var outputs = exec.Run();
+                InferTiming.BeginFlowRequest();
+                var flowSw = System.Diagnostics.Stopwatch.StartNew();
+                try
+                {
+                    var exec = new GraphExecutor(_nodes, ctx);
+                    var outputs = exec.Run();
+                }
+                finally
+                {
+                    flowSw.Stop();
+                    InferTiming.EndFlowRequest(flowSw.Elapsed.TotalMilliseconds);
+                }
 
                 // 从 output/return_json 读取每张图结果
                 var perImageResults = new List<JArray>();
