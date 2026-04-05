@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -110,7 +110,7 @@ namespace DlcvModules
                         if ((endX - startX) < minSize || (endY - startY) < minSize) continue;
 
                         var rect = new Rect(startX, startY, endX - startX, endY - startY);
-                        var cropped = new Mat(mat, rect).Clone();
+                        var cropped = new Mat(mat, rect);
 
                         var parentState = wrap != null ? wrap.TransformState : new TransformationState(W, H);
 						// 2x3 matrix: [1, 0, -dx, 0, 1, -dy]
