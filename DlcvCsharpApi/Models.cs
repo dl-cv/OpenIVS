@@ -168,10 +168,20 @@ namespace DlcvModules
 			p["batch_size"] = effectiveBatch;
 
 			var rgbInputs = new List<Mat>();
+			var convertedRgbToDispose = new List<Mat>();
 			var wraps = new List<ModuleImage>();
 			var sourceIndices = new List<int>();
 			var buckets = new Dictionary<string, List<int>>();
 			var bucketAreas = new Dictionary<string, int>();
+			bool inputsAreRgb = false;
+			try
+			{
+				inputsAreRgb = string.Equals(
+					Context != null ? Context.Get<string>("frontend_image_color_space", null) : null,
+					"rgb",
+					StringComparison.OrdinalIgnoreCase);
+			}
+			catch { inputsAreRgb = false; }
 
 			try
 			{
@@ -183,8 +193,13 @@ namespace DlcvModules
 					var mat = tup.Item2;
 					if (mat == null || mat.Empty()) continue;
 
-					var rgbMat = new Mat();
-					Cv2.CvtColor(mat, rgbMat, ColorConversionCodes.BGR2RGB);
+					Mat rgbMat = mat;
+					if (!inputsAreRgb)
+					{
+						rgbMat = new Mat();
+						Cv2.CvtColor(mat, rgbMat, ColorConversionCodes.BGR2RGB);
+						convertedRgbToDispose.Add(rgbMat);
+					}
 
 					int localIdx = rgbInputs.Count;
 					rgbInputs.Add(rgbMat);
@@ -266,9 +281,9 @@ namespace DlcvModules
 			}
 			finally
 			{
-				for (int i = 0; i < rgbInputs.Count; i++)
+				for (int i = 0; i < convertedRgbToDispose.Count; i++)
 				{
-					try { rgbInputs[i].Dispose(); } catch { }
+					try { convertedRgbToDispose[i].Dispose(); } catch { }
 				}
 			}
 		}
