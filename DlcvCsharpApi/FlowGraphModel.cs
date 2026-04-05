@@ -193,48 +193,7 @@ namespace DlcvModules
                     perImageResults.Add(new JArray());
                 }
 
-                var feJson = ctx.Get<Dictionary<string, object>>("frontend_json");
-                if (feJson != null && feJson.ContainsKey("last"))
-                {
-                    var lastPayload = feJson["last"] as Dictionary<string, object>;
-                    if (lastPayload != null && lastPayload.ContainsKey("by_image"))
-                    {
-                        var byImg = ParseByImagePayload(lastPayload["by_image"]);
-                        if (byImg != null)
-                        {
-                            // 单图输入时，流程里可能会产生多条 by_image（例如滑窗/多分类链路）。
-                            // 这里必须聚合全部结果，避免只保留第一个条目。
-                            if (images.Count == 1)
-                            {
-                                var merged = new JArray();
-                                for (int i = 0; i < byImg.Count; i++)
-                                {
-                                    AppendResultsArray(merged, ExtractResultsArray(byImg[i]));
-                                }
-                                perImageResults[0] = merged;
-                            }
-                            else
-                            {
-                                // 多图场景：先按列表顺序回填，再按 origin_index 追加修正。
-                                for (int i = 0; i < byImg.Count && i < perImageResults.Count; i++)
-                                {
-                                    AppendResultsArray(perImageResults[i], ExtractResultsArray(byImg[i]));
-                                }
-                                for (int i = 0; i < byImg.Count; i++)
-                                {
-                                    var item = byImg[i];
-                                    if (item == null || !item.ContainsKey("origin_index")) continue;
-                                    int originIndex = -1;
-                                    try { originIndex = Convert.ToInt32(item["origin_index"]); } catch { originIndex = -1; }
-                                    if (originIndex >= 0 && originIndex < perImageResults.Count)
-                                    {
-                                        AppendResultsArray(perImageResults[originIndex], ExtractResultsArray(item));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                AggregateFrontendResults(ctx, perImageResults);
 
                 var root = new JObject();
                 if (images.Count == 1)
@@ -405,6 +364,166 @@ namespace DlcvModules
             }
 
             return null;
+        }
+
+        private sealed class FrontendPayloadItem
+        {
+            public int Order { get; set; }
+            public int FallbackOrder { get; set; }
+            public Dictionary<string, object> Payload { get; set; }
+        }
+
+        private static void AggregateFrontendResults(ExecutionContext ctx, List<JArray> perImageResults)
+        {
+            if (ctx == null || perImageResults == null || perImageResults.Count == 0)
+            {
+                return;
+            }
+
+            var payloads = CollectFrontendPayloads(ctx);
+            foreach (var payload in payloads)
+            {
+                if (payload == null || !payload.ContainsKey("by_image"))
+                {
+                    continue;
+                }
+
+                var byImg = ParseByImagePayload(payload["by_image"]);
+                if (byImg == null || byImg.Count == 0)
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < byImg.Count; i++)
+                {
+                    var item = byImg[i];
+                    if (item == null)
+                    {
+                        continue;
+                    }
+
+                    int targetIndex = ResolvePerImageTargetIndex(item, i, perImageResults.Count);
+                    if (targetIndex < 0 || targetIndex >= perImageResults.Count)
+                    {
+                        continue;
+                    }
+
+                    AppendResultsArray(perImageResults[targetIndex], ExtractResultsArray(item));
+                }
+            }
+        }
+
+        private static List<Dictionary<string, object>> CollectFrontendPayloads(ExecutionContext ctx)
+        {
+            var payloads = new List<Dictionary<string, object>>();
+            Dictionary<string, object> feJson = null;
+            try
+            {
+                feJson = ctx.Get<Dictionary<string, object>>("frontend_json", null);
+            }
+            catch
+            {
+                feJson = null;
+            }
+
+            Dictionary<string, object> byNode = null;
+            if (feJson != null && feJson.ContainsKey("by_node"))
+            {
+                byNode = feJson["by_node"] as Dictionary<string, object>;
+            }
+            if (byNode == null)
+            {
+                try
+                {
+                    byNode = ctx.Get<Dictionary<string, object>>("frontend_json_by_node", null);
+                }
+                catch
+                {
+                    byNode = null;
+                }
+            }
+
+            if (byNode != null && byNode.Count > 0)
+            {
+                var ordered = new List<FrontendPayloadItem>();
+                int fallbackOrder = 0;
+                foreach (var kv in byNode)
+                {
+                    var payload = kv.Value as Dictionary<string, object>;
+                    if (payload == null)
+                    {
+                        continue;
+                    }
+
+                    ordered.Add(new FrontendPayloadItem
+                    {
+                        Order = ParseNodeOrder(kv.Key),
+                        FallbackOrder = fallbackOrder++,
+                        Payload = payload
+                    });
+                }
+
+                ordered.Sort((a, b) =>
+                {
+                    int cmp = a.Order.CompareTo(b.Order);
+                    if (cmp != 0) return cmp;
+                    return a.FallbackOrder.CompareTo(b.FallbackOrder);
+                });
+
+                for (int i = 0; i < ordered.Count; i++)
+                {
+                    payloads.Add(ordered[i].Payload);
+                }
+            }
+
+            if (payloads.Count == 0 && feJson != null && feJson.ContainsKey("last"))
+            {
+                var lastPayload = feJson["last"] as Dictionary<string, object>;
+                if (lastPayload != null)
+                {
+                    payloads.Add(lastPayload);
+                }
+            }
+
+            return payloads;
+        }
+
+        private static int ParseNodeOrder(string nodeKey)
+        {
+            if (!string.IsNullOrWhiteSpace(nodeKey) && int.TryParse(nodeKey, out int nodeId))
+            {
+                return nodeId;
+            }
+
+            return int.MaxValue;
+        }
+
+        private static int ResolvePerImageTargetIndex(Dictionary<string, object> item, int position, int imageCount)
+        {
+            if (imageCount <= 0)
+            {
+                return -1;
+            }
+
+            if (item != null && item.ContainsKey("origin_index"))
+            {
+                try
+                {
+                    int originIndex = Convert.ToInt32(item["origin_index"]);
+                    if (originIndex >= 0)
+                    {
+                        // merge_results 等模块可能会把同一批原图展开为多组“别名索引”
+                        // （例如 batch=2 时出现 0,1,2,3,4,5...）。
+                        // 这里统一折回原始 batch 槽位，保证最终只返回 n 个 sample。
+                        return originIndex % imageCount;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return position >= 0 ? (position % imageCount) : -1;
         }
 
         private static JArray ExtractResultsArray(Dictionary<string, object> item)
