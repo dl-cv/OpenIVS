@@ -144,6 +144,18 @@ namespace DlcvModules
 			}
 
 			bool hasSlidingMeta = wrappers.Any(w => w != null && w.SlidingMeta != null);
+			var tCache = new Dictionary<ModuleImage, double[]>();
+
+			double[] getT(ModuleImage wrap)
+			{
+				if (wrap == null) return new double[] { 1, 0, 0, 0, 1, 0 };
+				if (!tCache.TryGetValue(wrap, out double[] t))
+				{
+					t = BuildTC2O(wrap.TransformState);
+					tCache[wrap] = t;
+				}
+				return t;
+			}
 
 			Point2f[] polyFromGlobalBbox(JToken token)
 			{
@@ -182,13 +194,13 @@ namespace DlcvModules
 				};
 			}
 
-			Point2f[] polyForDet(JObject det, ModuleImage wrap)
+			Point2f[] polyForDet(JObject det, ModuleImage wrap, double[] t)
 			{
 				if (det == null || wrap == null) return null;
 				var bbox = det["bbox"] as JArray;
 				if (bbox == null || bbox.Count < 4) return null;
 
-				double[] t = BuildTC2O(wrap.TransformState);
+				if (t == null) t = getT(wrap);
 				if (IsRotatedDet(det))
 				{
 					double cx = SafeDouble(bbox[0]);
@@ -216,6 +228,18 @@ namespace DlcvModules
 					new Point2f((float)(x + w0), (float)(y + h0)),
 					new Point2f((float)x, (float)(y + h0))
 				});
+			}
+
+			var detPolyCache = new Dictionary<Tuple<int, int>, Point2f[]>();
+			Point2f[] getDetPoly(int winIdx, int detIdx, JObject det, ModuleImage wrap)
+			{
+				var key = Tuple.Create(winIdx, detIdx);
+				if (!detPolyCache.TryGetValue(key, out Point2f[] poly))
+				{
+					poly = polyForDet(det, wrap, getT(wrap)) ?? polyFromGlobalBbox(ReadGlobalBbox(det));
+					detPolyCache[key] = poly;
+				}
+				return poly;
 			}
 
 			JObject mappedAabbDet(JObject det, double[] aabb, bool setCombineFlag, List<JToken> sliceIndexTokens)
@@ -276,13 +300,14 @@ namespace DlcvModules
 			{
 				var items = new List<JObject>();
 				if (wrap == null || !windowDets.TryGetValue(winIdx, out List<JObject> dets)) return items;
+				var t = getT(wrap);
 
 				foreach (var det in dets)
 				{
 					if (det == null) continue;
 					if (IsRotatedDet(det))
 					{
-						var rbox = RBoxLocalToGlobal(det, wrap);
+						var rbox = RBoxLocalToGlobal(det, wrap, t);
 						if (rbox == null)
 						{
 							var gb = ReadGlobalBbox(det) as JArray;
@@ -302,24 +327,12 @@ namespace DlcvModules
 						continue;
 					}
 
-					var poly = polyForDet(det, wrap) ?? polyFromGlobalBbox(ReadGlobalBbox(det));
+					var poly = polyForDet(det, wrap, t) ?? polyFromGlobalBbox(ReadGlobalBbox(det));
 					if (poly == null) continue;
 					items.Add(mappedAabbDet(det, PolyAabb(poly), false, null));
 				}
 
 				return items;
-			}
-
-			var originIdxToItems = new Dictionary<int, List<JObject>>();
-			if (!dedupResults || !hasSlidingMeta)
-			{
-				for (int i = 0; i < wrappers.Count; i++)
-				{
-					var wrap = wrappers[i];
-					if (wrap == null) continue;
-					AddRange(originIdxToItems, wrap.OriginalIndex, toGlobalItemsForWindow(i, wrap));
-				}
-				return BuildOutput(originIdxToImgwrap, originIdxToItems, otherResults);
 			}
 
 			var groups = new Dictionary<int, List<int>>();
@@ -333,6 +346,18 @@ namespace DlcvModules
 					groups[wrap.OriginalIndex] = list;
 				}
 				list.Add(i);
+			}
+
+			var originIdxToItems = new Dictionary<int, List<JObject>>();
+			if (!dedupResults || !hasSlidingMeta)
+			{
+				for (int i = 0; i < wrappers.Count; i++)
+				{
+					var wrap = wrappers[i];
+					if (wrap == null) continue;
+					AddRange(originIdxToItems, wrap.OriginalIndex, toGlobalItemsForWindow(i, wrap));
+				}
+				return BuildOutput(originIdxToImgwrap, originIdxToItems, otherResults);
 			}
 
 			foreach (var group in groups)
@@ -368,7 +393,7 @@ namespace DlcvModules
 						for (int ia = 0; ia < detsA.Count; ia++)
 						{
 							var da = detsA[ia];
-							var polyA = polyForDet(da, wrappers[curIdx]) ?? polyFromGlobalBbox(ReadGlobalBbox(da));
+							var polyA = getDetPoly(curIdx, ia, da, wrappers[curIdx]);
 							if (polyA == null) continue;
 							bool aIsRot = IsRotatedDet(da);
 
@@ -376,7 +401,7 @@ namespace DlcvModules
 							{
 								var db = detsB[ib];
 								if (!SameCategory(da, db)) continue;
-								var polyB = polyForDet(db, wrappers[nbIdx]) ?? polyFromGlobalBbox(ReadGlobalBbox(db));
+								var polyB = getDetPoly(nbIdx, ib, db, wrappers[nbIdx]);
 								if (polyB == null) continue;
 								bool bIsRot = IsRotatedDet(db);
 								bool modeRotate = taskType == "rotate" || (taskType == "auto" && aIsRot && bIsRot);
@@ -423,10 +448,10 @@ namespace DlcvModules
 					if (!IsRotatedDet(det)) continue;
 					if (removed.TryGetValue(uid.Item1, out HashSet<int> removedSet) && removedSet.Contains(uid.Item2)) continue;
 
-					var rbox = RBoxLocalToGlobal(det, wrappers[uid.Item1]);
+					var rbox = RBoxLocalToGlobal(det, wrappers[uid.Item1], getT(wrappers[uid.Item1]));
 					if (rbox == null)
 					{
-						var poly = polyForDet(det, wrappers[uid.Item1]) ?? polyFromGlobalBbox(ReadGlobalBbox(det));
+						var poly = getDetPoly(uid.Item1, uid.Item2, det, wrappers[uid.Item1]);
 						if (poly == null) continue;
 						rbox = PolyMinAreaRect(poly);
 					}
@@ -461,7 +486,7 @@ namespace DlcvModules
 					foreach (var uid in members)
 					{
 						var det = windowDets[uid.Item1][uid.Item2];
-						var poly = polyForDet(det, wrappers[uid.Item1]) ?? polyFromGlobalBbox(ReadGlobalBbox(det));
+						var poly = getDetPoly(uid.Item1, uid.Item2, det, wrappers[uid.Item1]);
 						if (poly == null) continue;
 
 						if (seedDet == null) seedDet = det;
@@ -882,7 +907,7 @@ namespace DlcvModules
 			return true;
 		}
 
-		private static double[] RBoxLocalToGlobal(JObject det, ModuleImage wrap)
+		private static double[] RBoxLocalToGlobal(JObject det, ModuleImage wrap, double[] t = null)
 		{
 			if (det == null || wrap == null) return null;
 			var bbox = det["bbox"] as JArray;
@@ -895,7 +920,7 @@ namespace DlcvModules
 			if (w <= 0.0 || h <= 0.0) return null;
 
 			double ang = ReadAngle(bbox, det);
-			double[] t = BuildTC2O(wrap.TransformState);
+			if (t == null) t = BuildTC2O(wrap.TransformState);
 			double ncx = t[0] * cx + t[1] * cy + t[2];
 			double ncy = t[3] * cx + t[4] * cy + t[5];
 
