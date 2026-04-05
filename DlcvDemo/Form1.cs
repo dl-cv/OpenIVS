@@ -320,6 +320,7 @@ namespace DlcvDemo
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine($"推理时间: {delay_ms:F2}ms\n");
                 sb.AppendLine($"推理结果: ");
+                sb.AppendLine($"个数: {result.SampleResults[0].Results.Count}");
                 sb.AppendLine(result.SampleResults[0].ToString());
                 richTextBox1.Text = sb.ToString();
             }
