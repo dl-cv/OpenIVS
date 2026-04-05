@@ -79,6 +79,7 @@ namespace dlcv_infer_csharp
             _isDvpMode = extension == ".dvp";
             _isDvsMode = extension == ".dvst" || extension == ".dvso" || extension == ".dvsp";
             _isRpcMode = rpc_mode;
+            string cacheKey = BuildModelCacheKey(modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
 
             if (enableCache)
             {
@@ -87,15 +88,15 @@ namespace dlcv_infer_csharp
                     lock (_cacheLock)
                     {
                         int cachedIndex;
-                        if (_modelCache.TryGetValue(modelPath, out cachedIndex))
+                        if (_modelCache.TryGetValue(cacheKey, out cachedIndex))
                         {
                             modelIndex = cachedIndex;
                             TryCacheModelInfo();
                             return;
                         }
-                        if (!_loadingModels.Contains(modelPath))
+                        if (!_loadingModels.Contains(cacheKey))
                         {
-                            _loadingModels.Add(modelPath);
+                            _loadingModels.Add(cacheKey);
                             break;
                         }
                     }
@@ -132,8 +133,8 @@ namespace dlcv_infer_csharp
                 {
                     lock (_cacheLock)
                     {
-                        _modelCache[modelPath] = modelIndex;
-                        _loadingModels.Remove(modelPath);
+                        _modelCache[cacheKey] = modelIndex;
+                        _loadingModels.Remove(cacheKey);
                     }
                 }
             }
@@ -143,17 +144,23 @@ namespace dlcv_infer_csharp
                 {
                     lock (_cacheLock)
                     {
-                        _loadingModels.Remove(modelPath);
+                        _loadingModels.Remove(cacheKey);
                     }
                 }
                 throw;
             }
         }
 
+        private static string BuildModelCacheKey(string modelPath, int deviceId, bool isDvpMode, bool isDvsMode, bool isRpcMode)
+        {
+            string mode = isDvpMode ? "dvp" : (isDvsMode ? "dvs" : (isRpcMode ? "rpc" : "dvt"));
+            string normalizedPath = Path.GetFullPath(modelPath).Trim().ToLowerInvariant();
+            return $"{normalizedPath}|{deviceId}|{mode}";
+        }
+
         private void InitializeDvpMode(string modelPath, int device_id)
         {
-            _httpClient = new HttpClient();
-            _httpClient.Timeout = TimeSpan.FromSeconds(30);
+            EnsureDvpHttpClient();
 
             // 检查后端服务是否启动
             if (!CheckBackendService())
@@ -206,6 +213,15 @@ namespace dlcv_infer_csharp
             catch (Exception ex)
             {
                 throw new Exception($"加载模型失败: {ex.Message}", ex);
+            }
+        }
+
+        private void EnsureDvpHttpClient()
+        {
+            if (_httpClient == null)
+            {
+                _httpClient = new HttpClient();
+                _httpClient.Timeout = TimeSpan.FromSeconds(30);
             }
         }
 
@@ -267,6 +283,7 @@ namespace dlcv_infer_csharp
         {
             try
             {
+                EnsureDvpHttpClient();
                 var response = _httpClient.GetAsync($"{_serverUrl}/docs").GetAwaiter().GetResult();
                 return response.IsSuccessStatusCode;
             }
@@ -442,6 +459,7 @@ namespace dlcv_infer_csharp
         {
             try
             {
+                EnsureDvpHttpClient();
                 var response = _httpClient.GetAsync($"{_serverUrl}/version").GetAwaiter().GetResult();
                 var responseJson = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
 
@@ -509,6 +527,7 @@ namespace dlcv_infer_csharp
                 }
                 try
                 {
+                    EnsureDvpHttpClient();
                     var request = new { model_index = modelIndex };
                     var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
                     var response = _httpClient.PostAsync($"{_serverUrl}/free_model", content).Result;
@@ -752,6 +771,7 @@ namespace dlcv_infer_csharp
         {
             try
             {
+                EnsureDvpHttpClient();
                 var request = new
                 {
                     model_path = _modelPath
@@ -917,10 +937,7 @@ namespace dlcv_infer_csharp
         {
             try
             {
-                if (_httpClient is null)
-                {
-                    _httpClient = new HttpClient();
-                }
+                EnsureDvpHttpClient();
                 // DVP 模式只支持单张图片，如果有多张图片需要分别处理
                 var allResults = new List<JObject>();
 
