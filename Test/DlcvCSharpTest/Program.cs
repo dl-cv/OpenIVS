@@ -31,10 +31,24 @@ namespace DlcvCSharpTest
             new ModelCase("OCR.dvt", "OCR-1.jpg")
         };
 
-        private static int Main()
+        private static int Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
             Model.EnableConsoleLog = false;
+
+            if (args != null && args.Length >= 2)
+            {
+                string modelPath = args[0];
+                string imagePath = args[1];
+                int batch = 2;
+                if (args.Length >= 3)
+                {
+                    int.TryParse(args[2], out batch);
+                    if (batch <= 0) batch = 2;
+                }
+                return RunSingleBatchValidation(modelPath, imagePath, batch);
+            }
+
             Console.WriteLine("==== C# 测试程序 ====");
             Console.WriteLine("模型目录: " + ModelRoot);
             Console.WriteLine("固定设备: GPU(" + GpuDeviceId + ")");
@@ -157,6 +171,89 @@ namespace DlcvCSharpTest
             }
             if (!modelRootOk) return 2;
             return total == pass ? 0 : 1;
+        }
+
+        private static int RunSingleBatchValidation(string modelPath, string imagePath, int batch)
+        {
+            Console.WriteLine("==== 单次批量验证 ====");
+            Console.WriteLine("model: " + modelPath);
+            Console.WriteLine("image: " + imagePath);
+            Console.WriteLine("batch: " + batch);
+
+            if (!File.Exists(modelPath))
+            {
+                Console.WriteLine("模型不存在");
+                return 2;
+            }
+            if (!File.Exists(imagePath))
+            {
+                Console.WriteLine("图片不存在");
+                return 2;
+            }
+
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                var list = new List<Mat>();
+                for (int i = 0; i < batch; i++) list.Add(rgb);
+                var p = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = true,
+                    ["batch_size"] = batch
+                };
+                var r = model.InferBatch(list, p);
+
+                int sampleCount = (r.SampleResults != null) ? r.SampleResults.Count : 0;
+                var detCounts = new List<int>();
+                if (r.SampleResults != null)
+                {
+                    foreach (var sr in r.SampleResults)
+                    {
+                        detCounts.Add((sr.Results != null) ? sr.Results.Count : 0);
+                    }
+                }
+
+                Console.WriteLine("sample_count: " + sampleCount);
+                Console.WriteLine("det_counts: [" + string.Join(", ", detCounts) + "]");
+
+                int nonEmpty = detCounts.Count(x => x > 0);
+                Console.WriteLine("non_empty_samples: " + nonEmpty);
+
+                DisposeResultMasks(r);
+                if (sampleCount != batch)
+                {
+                    Console.WriteLine("验证失败：sample 数量与 batch 不一致");
+                    return 1;
+                }
+                if (nonEmpty <= 0)
+                {
+                    Console.WriteLine("验证失败：所有样本结果为空");
+                    return 1;
+                }
+                Console.WriteLine("验证通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("验证异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
         }
 
         private static CaseRow RunCase(string modelPath, string imagePath)
