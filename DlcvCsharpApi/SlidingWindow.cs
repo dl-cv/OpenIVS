@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -110,19 +110,33 @@ namespace DlcvModules
                         if ((endX - startX) < minSize || (endY - startY) < minSize) continue;
 
                         var rect = new Rect(startX, startY, endX - startX, endY - startY);
-                        var cropped = new Mat(mat, rect).Clone();
+                        var cropped = new Mat(mat, rect);
 
                         var parentState = wrap != null ? wrap.TransformState : new TransformationState(W, H);
 						// 2x3 matrix: [1, 0, -dx, 0, 1, -dy]
 						var childA2x3 = new double[] { 1, 0, -startX, 0, 1, -startY };
 						var childState = parentState.DeriveChild(childA2x3, endX - startX, endY - startY);
 						
+                        var slidingMeta = new JObject
+                        {
+                            ["grid_x"] = c,
+                            ["grid_y"] = r,
+                            ["grid_size"] = new JArray { colNum, rowNum },
+                            ["win_size"] = new JArray { endX - startX, endY - startY },
+                            ["slice_index"] = new JArray { r, c },
+                            ["x"] = startX,
+                            ["y"] = startY,
+                            ["w"] = endX - startX,
+                            ["h"] = endY - startY
+                        };
+
                         var childWrap = new ModuleImage(
-                            cropped, 
-                            wrap != null ? wrap.OriginalImage : mat, 
-                            childState, 
+                            cropped,
+                            wrap != null ? wrap.OriginalImage : mat,
+                            childState,
                             wrap != null ? wrap.OriginalIndex : i
                         );
+                        childWrap.SlidingMeta = (JObject)slidingMeta.DeepClone();
 						outImages.Add(childWrap);
 
                         var entry = new JObject
@@ -132,18 +146,7 @@ namespace DlcvModules
                             ["origin_index"] = wrap != null ? wrap.OriginalIndex : i,
                             ["transform"] = JObject.FromObject(childState.ToDict()),
                             ["sample_results"] = new JArray(),
-                            ["sliding_meta"] = new JObject
-                            {
-                                ["grid_x"] = c,
-                                ["grid_y"] = r,
-                                ["grid_size"] = new JArray { colNum, rowNum },
-                                ["win_size"] = new JArray { endX - startX, endY - startY },
-                                ["slice_index"] = new JArray { r, c },
-                                ["x"] = startX, 
-                                ["y"] = startY, 
-                                ["w"] = endX - startX, 
-                                ["h"] = endY - startY
-                            }
+                            ["sliding_meta"] = slidingMeta
                         };
                         outResults.Add(entry);
 						outIndex += 1;

@@ -263,6 +263,7 @@ namespace DlcvModules
         public Mat OriginalImage { get; private set; }
         public TransformationState TransformState { get; private set; }
         public int OriginalIndex { get; private set; }
+        public JObject SlidingMeta { get; set; }
 
         public ModuleImage(Mat imageObject, Mat originalImage, TransformationState transformState, int originalIndex = 0)
         {
@@ -282,6 +283,7 @@ namespace DlcvModules
             var meta = new Dictionary<string, object>();
             meta["origin_index"] = OriginalIndex;
             meta["transform"] = TransformState != null ? (object)TransformState.ToDict() : null;
+            if (SlidingMeta != null) meta["sliding_meta"] = SlidingMeta.DeepClone();
             return meta;
         }
     }
