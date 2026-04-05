@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using dlcv_infer_csharp;
@@ -86,6 +87,72 @@ namespace DlcvModules
 
 			try { _maxShape = _model.GetCachedMaxShape(); } catch { _maxShape = null; }
 			try { _maxBatchSize = Math.Max(1, _model.GetMaxBatchSize()); } catch { _maxBatchSize = 1; }
+
+			// 将每个子模型加载时读取到的 batch 元信息写入流程上下文，供外层 DVS 包装模型汇总。
+			try
+			{
+				if (Context != null)
+				{
+					var list = Context.Get<List<Dictionary<string, object>>>("loaded_model_meta", null);
+					if (list == null)
+					{
+						list = new List<Dictionary<string, object>>();
+						Context.Set("loaded_model_meta", list);
+					}
+
+					var entry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+					{
+						["node_id"] = NodeId,
+						["title"] = Title ?? string.Empty,
+						["model_path"] = _modelPath ?? string.Empty,
+						["max_batch_size"] = _maxBatchSize,
+						["max_shape"] = _maxShape != null ? (JArray)_maxShape.DeepClone() : null
+					};
+
+					string originalPath = null;
+					string modelName = null;
+					try
+					{
+						if (Properties != null)
+						{
+							if (Properties.TryGetValue("model_path_original", out object op) && op != null)
+							{
+								originalPath = op.ToString();
+							}
+							if (Properties.TryGetValue("model_name", out object mn) && mn != null)
+							{
+								modelName = mn.ToString();
+							}
+						}
+					}
+					catch
+					{
+					}
+
+					if (string.IsNullOrWhiteSpace(originalPath))
+					{
+						originalPath = _modelPath ?? string.Empty;
+					}
+					if (string.IsNullOrWhiteSpace(modelName))
+					{
+						try
+						{
+							modelName = Path.GetFileName(originalPath);
+						}
+						catch
+						{
+							modelName = originalPath;
+						}
+					}
+
+					entry["model_path_original"] = originalPath ?? string.Empty;
+					entry["model_name"] = modelName ?? string.Empty;
+					list.Add(entry);
+				}
+			}
+			catch
+			{
+			}
 		}
 
 		protected int ResolveEffectiveBatchLimit()

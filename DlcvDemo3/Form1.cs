@@ -109,20 +109,6 @@ namespace DlcvDemo3
             imagePath = txtImagePath.Text;
             richTextBox1.Text = "请先加载模型并选择图片。";
 
-            StringBuilder startupSb = new StringBuilder();
-            if (TryLoadModelFromPath(txtModel1Path.Text, ref model1, "模型1", startupSb))
-            {
-                startupSb.AppendLine("模型1已自动加载。");
-            }
-            if (TryLoadModelFromPath(txtModel2Path.Text, ref model2, "模型2", startupSb))
-            {
-                startupSb.AppendLine("模型2已自动加载。");
-            }
-            if (startupSb.Length > 0)
-            {
-                richTextBox1.Text = startupSb.ToString().TrimEnd();
-            }
-
             SetInferenceProgress(0, "空闲");
             UpdateBusyControlState();
         }
@@ -710,7 +696,12 @@ namespace DlcvDemo3
                 if (loadAction())
                 {
                     SaveUiState();
-                    richTextBox1.Text = $"{modelDisplayName}加载成功:\n{targetTextBox.Text.Trim()}";
+                    var sb = new StringBuilder();
+                    sb.AppendLine($"{modelDisplayName}加载成功:");
+                    sb.AppendLine(targetTextBox.Text.Trim());
+                    sb.AppendLine();
+                    sb.AppendLine(BuildModelLoadReport(modelDisplayName, modelDisplayName == "模型1" ? model1 : model2, targetTextBox.Text));
+                    richTextBox1.Text = sb.ToString().TrimEnd();
                 }
             }
             catch (Exception ex)
@@ -737,6 +728,129 @@ namespace DlcvDemo3
                 "模型2",
                 null,
                 showPathInvalidMessage: true);
+        }
+
+        private static string BuildModelLoadReport(string modelDisplayName, Model model, string modelPathForFallback)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"{modelDisplayName}信息:");
+
+            if (model == null)
+            {
+                sb.AppendLine("- 模型对象为空");
+                return sb.ToString().TrimEnd();
+            }
+
+            int resolvedBatch = 1;
+            try
+            {
+                resolvedBatch = Math.Max(1, model.GetMaxBatchSize());
+            }
+            catch
+            {
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            bool hasShape = false;
+
+            try
+            {
+                List<JObject> subModels = model.GetResolvedSubModelBatchItems();
+                if (subModels != null)
+                {
+                    foreach (JObject item in subModels)
+                    {
+                        if (item == null)
+                        {
+                            continue;
+                        }
+
+                        string name = NormalizeModelName(
+                            (string)item["name"]
+                            ?? (string)item["model_name"]
+                            ?? (string)item["model_path_original"]
+                            ?? (string)item["model_path"]);
+                        JArray shape = item["max_shape"] as JArray;
+                        if (shape == null || shape.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        string key = name + "|" + FormatMaxShape(shape);
+                        if (seen.Add(key))
+                        {
+                            sb.AppendLine($"- {name}： {FormatMaxShape(shape)}");
+                            hasShape = true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            if (!hasShape)
+            {
+                try
+                {
+                    JArray cached = model.GetCachedMaxShape();
+                    if (cached != null && cached.Count > 0)
+                    {
+                        string fallbackName = NormalizeModelName(modelPathForFallback);
+                        string key = fallbackName + "|" + FormatMaxShape(cached);
+                        if (seen.Add(key))
+                        {
+                            sb.AppendLine($"- {fallbackName}： {FormatMaxShape(cached)}");
+                            hasShape = true;
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            if (!hasShape)
+            {
+                sb.AppendLine("- 无模型形状信息");
+            }
+
+            sb.AppendLine("- BatchSize: " + resolvedBatch);
+            return sb.ToString().TrimEnd();
+        }
+
+        private static string NormalizeModelName(string rawNameOrPath)
+        {
+            if (string.IsNullOrWhiteSpace(rawNameOrPath))
+            {
+                return "未命名模型";
+            }
+
+            string text = rawNameOrPath.Trim();
+            try
+            {
+                string fileName = Path.GetFileName(text);
+                if (!string.IsNullOrWhiteSpace(fileName))
+                {
+                    return fileName;
+                }
+            }
+            catch
+            {
+            }
+
+            return text;
+        }
+
+        private static string FormatMaxShape(JArray shape)
+        {
+            if (shape == null || shape.Count == 0)
+            {
+                return "[]";
+            }
+
+            var values = shape.Select(t => t != null ? t.ToString() : "null");
+            return "[" + string.Join(", ", values) + "]";
         }
 
         private bool TryEnsureIdle(string busyMessage)

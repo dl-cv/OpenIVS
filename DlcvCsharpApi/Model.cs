@@ -59,6 +59,8 @@ namespace dlcv_infer_csharp
         private JObject _cachedModelInfo = null;
         private JArray _cachedMaxShape = null;
         private int _cachedMaxBatchSize = 1;
+        private readonly object _batchMetaLock = new object();
+        private List<JObject> _cachedSubModelBatchItems = new List<JObject>();
 
         public Model()
         {
@@ -156,6 +158,22 @@ namespace dlcv_infer_csharp
             string mode = isDvpMode ? "dvp" : (isDvsMode ? "dvs" : (isRpcMode ? "rpc" : "dvt"));
             string normalizedPath = Path.GetFullPath(modelPath).Trim().ToLowerInvariant();
             return $"{normalizedPath}|{deviceId}|{mode}";
+        }
+
+        public List<JObject> GetResolvedSubModelBatchItems()
+        {
+            lock (_batchMetaLock)
+            {
+                var subModels = new List<JObject>();
+                foreach (var item in _cachedSubModelBatchItems)
+                {
+                    if (item != null)
+                    {
+                        subModels.Add((JObject)item.DeepClone());
+                    }
+                }
+                return subModels;
+            }
         }
 
         private void InitializeDvpMode(string modelPath, int device_id)
@@ -598,6 +616,23 @@ namespace dlcv_infer_csharp
                 else if (_isDvsMode)
                 {
                     modelInfo = _dvsModel != null ? _dvsModel.GetModelInfo() : null;
+                    if (modelInfo != null && _dvsModel != null)
+                    {
+                        JArray loadedMeta = null;
+                        try
+                        {
+                            loadedMeta = _dvsModel.GetLoadedModelMeta();
+                        }
+                        catch
+                        {
+                            loadedMeta = null;
+                        }
+
+                        if (loadedMeta != null && loadedMeta.Count > 0)
+                        {
+                            modelInfo["loaded_model_meta"] = loadedMeta;
+                        }
+                    }
                 }
                 else if (_isRpcMode)
                 {
@@ -671,12 +706,260 @@ namespace dlcv_infer_csharp
             }
         }
 
+        private static int ParsePositiveIntToken(JToken token)
+        {
+            if (token == null) return 0;
+            try
+            {
+                int v = token.Value<int>();
+                return v > 0 ? v : 0;
+            }
+            catch
+            {
+                try
+                {
+                    if (int.TryParse(token.ToString(), out int parsed) && parsed > 0)
+                    {
+                        return parsed;
+                    }
+                }
+                catch
+                {
+                }
+                return 0;
+            }
+        }
+
+        private static string NormalizeDisplayName(string rawNameOrPath)
+        {
+            if (string.IsNullOrWhiteSpace(rawNameOrPath))
+            {
+                return string.Empty;
+            }
+
+            string text = rawNameOrPath.Trim();
+            try
+            {
+                if (text.IndexOf('\\') >= 0 || text.IndexOf('/') >= 0)
+                {
+                    string fileName = Path.GetFileName(text);
+                    if (!string.IsNullOrWhiteSpace(fileName))
+                    {
+                        return fileName;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return text;
+        }
+
+        private static void AddUniqueSubModelItem(List<JObject> subModelItems, string nameOrPath, JArray maxShape, int maxBatchSize)
+        {
+            if (subModelItems == null)
+            {
+                return;
+            }
+
+            string name = NormalizeDisplayName(nameOrPath);
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = "未命名模型";
+            }
+
+            var shape = maxShape != null ? (JArray)maxShape.DeepClone() : null;
+            int shapeBatch = ParseMaxBatchSize(shape);
+            int resolvedBatch = Math.Max(1, Math.Max(maxBatchSize, shapeBatch));
+
+            string key = name + "|" + (shape != null ? shape.ToString(Formatting.None) : "null");
+            foreach (var existed in subModelItems)
+            {
+                if (existed == null) continue;
+                string existedName = (string)existed["name"] ?? string.Empty;
+                var existedShape = existed["max_shape"] as JArray;
+                string existedKey = existedName + "|" + (existedShape != null ? existedShape.ToString(Formatting.None) : "null");
+                if (string.Equals(key, existedKey, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            var item = new JObject
+            {
+                ["name"] = name,
+                ["max_shape"] = shape,
+                ["max_batch_size"] = resolvedBatch
+            };
+            subModelItems.Add(item);
+        }
+
+        private static JArray ParseMaxShapeToken(JToken maxShapeToken)
+        {
+            if (maxShapeToken == null) return null;
+
+            if (maxShapeToken is JArray arr && arr.Count > 0)
+            {
+                return (JArray)arr.DeepClone();
+            }
+
+            if (maxShapeToken.Type == JTokenType.String)
+            {
+                try
+                {
+                    var parsed = JArray.Parse(maxShapeToken.Value<string>());
+                    if (parsed.Count > 0)
+                    {
+                        return parsed;
+                    }
+                }
+                catch
+                {
+                }
+            }
+            return null;
+        }
+
+        private static void CollectBatchCandidatesFromToken(JToken token, List<int> candidates)
+        {
+            if (token == null || candidates == null) return;
+
+            if (token is JObject obj)
+            {
+                foreach (var prop in obj.Properties())
+                {
+                    string key = prop.Name ?? string.Empty;
+                    var value = prop.Value;
+
+                    if (string.Equals(key, "max_batch_size", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int batch = ParsePositiveIntToken(value);
+                        if (batch > 0 && !candidates.Contains(batch))
+                        {
+                            candidates.Add(batch);
+                        }
+                    }
+                    else if (string.Equals(key, "max_shape", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var shape = ParseMaxShapeToken(value);
+                        if (shape != null && shape.Count > 0)
+                        {
+                            int batch = ParsePositiveIntToken(shape[0]);
+                            if (batch > 0 && !candidates.Contains(batch))
+                            {
+                                candidates.Add(batch);
+                            }
+                        }
+                    }
+
+                    CollectBatchCandidatesFromToken(value, candidates);
+                }
+                return;
+            }
+
+            if (token is JArray jarr)
+            {
+                foreach (var item in jarr)
+                {
+                    CollectBatchCandidatesFromToken(item, candidates);
+                }
+            }
+        }
+
+        private static void CollectBatchCandidatesFromLoadedMeta(JObject modelInfoRoot, List<int> candidates, List<JObject> subModelItems)
+        {
+            if (modelInfoRoot == null || candidates == null) return;
+            var loadedMeta = modelInfoRoot["loaded_model_meta"] as JArray;
+            if (loadedMeta == null || loadedMeta.Count == 0) return;
+
+            foreach (var token in loadedMeta)
+            {
+                var obj = token as JObject;
+                if (obj == null) continue;
+
+                int maxBatchSize = ParsePositiveIntToken(obj["max_batch_size"]);
+                var maxShape = ParseMaxShapeToken(obj["max_shape"]);
+
+                if (maxBatchSize > 0 && !candidates.Contains(maxBatchSize))
+                {
+                    candidates.Add(maxBatchSize);
+                }
+                if (maxShape != null && maxShape.Count > 0)
+                {
+                    int shapeBatch = ParsePositiveIntToken(maxShape[0]);
+                    if (shapeBatch > 0 && !candidates.Contains(shapeBatch))
+                    {
+                        candidates.Add(shapeBatch);
+                    }
+                }
+
+                string name = (string)obj["model_name"]
+                    ?? (string)obj["model_path_original"]
+                    ?? (string)obj["model_path"]
+                    ?? (string)obj["title"]
+                    ?? string.Empty;
+                AddUniqueSubModelItem(subModelItems, name, maxShape, maxBatchSize);
+            }
+        }
+
         private void UpdateModelMetaCache(JObject modelInfo)
         {
             _cachedModelInfo = modelInfo != null ? (JObject)modelInfo.DeepClone() : null;
             var maxShape = ExtractMaxShapeFromModelInfo(_cachedModelInfo);
             _cachedMaxShape = maxShape != null ? (JArray)maxShape.DeepClone() : null;
-            _cachedMaxBatchSize = ParseMaxBatchSize(_cachedMaxShape);
+
+            int parsedByMaxShape = ParseMaxBatchSize(_cachedMaxShape);
+            var parsedCandidates = new List<int>();
+            var parsedSubModelItems = new List<JObject>();
+
+            // flow/dvs：优先用加载期收集到的子模型信息。
+            CollectBatchCandidatesFromLoadedMeta(_cachedModelInfo, parsedCandidates, parsedSubModelItems);
+
+            // 非 flow 或 flow 信息缺失时，回退到通用扫描。
+            if (parsedCandidates.Count == 0)
+            {
+                CollectBatchCandidatesFromToken(_cachedModelInfo, parsedCandidates);
+            }
+
+            int parsedByModelInfo = 1;
+            if (parsedCandidates.Count > 0)
+            {
+                int minGtOne = parsedCandidates.Where(x => x > 1).DefaultIfEmpty(0).Min();
+                if (minGtOne > 1)
+                {
+                    parsedByModelInfo = minGtOne;
+                }
+                else
+                {
+                    int anyPositive = parsedCandidates.DefaultIfEmpty(0).Min();
+                    parsedByModelInfo = anyPositive > 0 ? anyPositive : 1;
+                }
+            }
+
+            int parsedBatch = Math.Max(parsedByMaxShape, parsedByModelInfo);
+
+            // 修复：避免后续一次信息不全的刷新把正确 batch（>1）覆盖回 1。
+            if (parsedBatch > 1)
+            {
+                _cachedMaxBatchSize = parsedBatch;
+            }
+            else if (_cachedMaxBatchSize <= 1)
+            {
+                _cachedMaxBatchSize = 1;
+            }
+
+            lock (_batchMetaLock)
+            {
+                _cachedSubModelBatchItems = parsedSubModelItems
+                    .Where(x => x != null)
+                    .Select(x => (JObject)x.DeepClone())
+                    .ToList();
+                if (_cachedSubModelBatchItems.Count == 0)
+                {
+                    AddUniqueSubModelItem(_cachedSubModelBatchItems, _modelPath, _cachedMaxShape, _cachedMaxBatchSize);
+                }
+            }
         }
 
         public JObject GetCachedModelInfo()
@@ -731,6 +1014,20 @@ namespace dlcv_infer_csharp
             else if (_isDvsMode)
             {
                 modelInfo = _dvsModel.GetModelInfo();
+                if (modelInfo != null && _dvsModel != null)
+                {
+                    try
+                    {
+                        JArray loadedMeta = _dvsModel.GetLoadedModelMeta();
+                        if (loadedMeta != null && loadedMeta.Count > 0)
+                        {
+                            modelInfo["loaded_model_meta"] = loadedMeta;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
             }
             else if (_isRpcMode)
             {

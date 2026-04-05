@@ -20,6 +20,7 @@ namespace DlcvModules
         private bool _disposed = false;
         private int _deviceId = 0;
         private string _flowJsonPath;
+        private JArray _loadedModelMeta = new JArray();
 
         public bool IsLoaded { get { return _loaded; } }
 
@@ -58,6 +59,22 @@ namespace DlcvModules
             ctx.Set("device_id", deviceId);
             var exec = new GraphExecutor(_nodes, ctx);
             var report = exec.LoadModels();
+            try
+            {
+                var loadedMeta = ctx.Get<List<Dictionary<string, object>>>("loaded_model_meta", null);
+                if (loadedMeta != null && loadedMeta.Count > 0)
+                {
+                    _loadedModelMeta = JArray.FromObject(loadedMeta);
+                }
+                else
+                {
+                    _loadedModelMeta = new JArray();
+                }
+            }
+            catch
+            {
+                _loadedModelMeta = new JArray();
+            }
             int code = report != null && report["code"] != null ? (int)report["code"] : 1;
             if (code != 0)
             {
@@ -114,6 +131,11 @@ namespace DlcvModules
             }
             _loaded = true;
             return report;
+        }
+
+        public JArray GetLoadedModelMeta()
+        {
+            return _loadedModelMeta != null ? (JArray)_loadedModelMeta.DeepClone() : new JArray();
         }
 
         public JObject GetModelInfo()
