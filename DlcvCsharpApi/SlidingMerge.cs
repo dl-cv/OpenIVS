@@ -1,7 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
-using System.Linq;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 
@@ -19,6 +19,13 @@ namespace DlcvModules
 	/// </summary>
 	public class SlidingMergeResults : BaseModule
 	{
+#if DEBUG
+		/// <summary>
+		/// 设为 true 时，在 DEBUG 构建下将各阶段耗时写入 GlobalDebug（仅用于定位热点）。
+		/// </summary>
+		private static bool LogSlidingMergeInternalPhases = false;
+#endif
+
 		private sealed class UnionFind
 		{
 			private readonly Dictionary<Tuple<int, int>, Tuple<int, int>> _parent = new Dictionary<Tuple<int, int>, Tuple<int, int>>();
@@ -49,6 +56,46 @@ namespace DlcvModules
 			}
 		}
 
+		private sealed class PassthroughDetUpdate
+		{
+			public JObject Det;
+			public bool IsRotated;
+			public double[] Aabb;
+			public double[] Rbox;
+		}
+
+		private sealed class PassthroughEntryPlan
+		{
+			public JObject Entry;
+			public ModuleImage OriginWrap;
+			public int OriginIndex;
+			public List<PassthroughDetUpdate> Updates;
+		}
+
+		private sealed class FastDetSnapshot
+		{
+			public JObject SourceDet;
+			public JObject Metadata;
+			public JToken CategoryIdToken;
+			public JToken MaskRleToken;
+			public string CategoryName;
+			public bool HasCategoryName;
+			public double Score;
+			public bool HasScore;
+			public double Area;
+			public bool HasArea;
+			public bool WithMask;
+			public bool HasWithMask;
+			public bool IsRotated;
+			public double X;
+			public double Y;
+			public double W;
+			public double H;
+			public double AngleRad;
+			public bool HasUnknownProps;
+		}
+
+
 		static SlidingMergeResults()
 		{
 			ModuleRegistry.Register("pre_process/sliding_merge", typeof(SlidingMergeResults));
@@ -69,9 +116,33 @@ namespace DlcvModules
 				return new ModuleIO(new List<ModuleImage>(), CloneJArray(results));
 			}
 
+#if DEBUG
+			Stopwatch swPhase = null;
+			if (LogSlidingMergeInternalPhases) swPhase = Stopwatch.StartNew();
+#endif
+
 			double iouTh = ReadDoubleProperty("iou_threshold", 0.2);
 			bool dedupResults = ReadBoolProperty("dedup_results", true);
 			string taskType = ReadStringProperty("task_type", "auto").Trim().ToLowerInvariant();
+
+			bool hasSlidingMeta = false;
+			for (int wi = 0; wi < wrappers.Count; wi++)
+			{
+				var w = wrappers[wi];
+				if (w != null && w.SlidingMeta != null)
+				{
+					hasSlidingMeta = true;
+					break;
+				}
+			}
+
+			if (!hasSlidingMeta)
+			{
+				if (TryProcessNoSlidingMetaInPlace(wrappers, results, out ModuleIO passthroughIo))
+				{
+					return passthroughIo;
+				}
+			}
 
 			var transToSamples = new Dictionary<string, List<JObject>>(StringComparer.Ordinal);
 			var indexToSamples = new Dictionary<int, List<JObject>>();
@@ -114,6 +185,15 @@ namespace DlcvModules
 				otherResults.Add(entry.DeepClone());
 			}
 
+#if DEBUG
+			if (LogSlidingMergeInternalPhases && swPhase != null)
+			{
+				swPhase.Stop();
+				GlobalDebug.Log($"[sliding_merge] parse resultList: {swPhase.Elapsed.TotalMilliseconds:F3}ms (locals={indexToSamples.Count + originToSamples.Count + transToSamples.Count})");
+				swPhase.Restart();
+			}
+#endif
+
 			var windowDets = new Dictionary<int, List<JObject>>();
 			for (int i = 0; i < wrappers.Count; i++)
 			{
@@ -135,6 +215,15 @@ namespace DlcvModules
 				windowDets[i] = dets;
 			}
 
+#if DEBUG
+			if (LogSlidingMergeInternalPhases && swPhase != null)
+			{
+				swPhase.Stop();
+				GlobalDebug.Log($"[sliding_merge] bind windowDets: {swPhase.Elapsed.TotalMilliseconds:F3}ms (windows={wrappers.Count})");
+				swPhase.Restart();
+			}
+#endif
+
 			var originIdxToImgwrap = new SortedDictionary<int, ModuleImage>();
 			foreach (var wrap in wrappers)
 			{
@@ -143,7 +232,6 @@ namespace DlcvModules
 				if (originWrap != null) originIdxToImgwrap[wrap.OriginalIndex] = originWrap;
 			}
 
-			bool hasSlidingMeta = wrappers.Any(w => w != null && w.SlidingMeta != null);
 			var tCache = new Dictionary<ModuleImage, double[]>();
 
 			double[] getT(ModuleImage wrap)
@@ -230,11 +318,11 @@ namespace DlcvModules
 				});
 			}
 
-			var detPolyCache = new Dictionary<Tuple<int, int>, Point2f[]>();
-			var detAabbCache = new Dictionary<Tuple<int, int>, double[]>();
+			var detPolyCache = new Dictionary<long, Point2f[]>();
+			var detAabbCache = new Dictionary<long, double[]>();
 			Point2f[] getDetPoly(int winIdx, int detIdx, JObject det, ModuleImage wrap)
 			{
-				var key = Tuple.Create(winIdx, detIdx);
+				long key = DetCacheKey(winIdx, detIdx);
 				if (!detPolyCache.TryGetValue(key, out Point2f[] poly))
 				{
 					poly = polyForDet(det, wrap, getT(wrap)) ?? polyFromGlobalBbox(ReadGlobalBbox(det));
@@ -245,7 +333,7 @@ namespace DlcvModules
 
 			double[] getDetAabb(int winIdx, int detIdx, JObject det, ModuleImage wrap)
 			{
-				var key = Tuple.Create(winIdx, detIdx);
+				long key = DetCacheKey(winIdx, detIdx);
 				if (!detAabbCache.TryGetValue(key, out double[] aabb))
 				{
 					aabb = TryMapAxisAlignedDetToAabb(det, wrap, getT(wrap));
@@ -346,6 +434,42 @@ namespace DlcvModules
 				return items;
 			}
 
+			var originIdxToItems = new Dictionary<int, List<JObject>>();
+			if (!dedupResults || !hasSlidingMeta)
+			{
+#if DEBUG
+				if (LogSlidingMergeInternalPhases && swPhase != null)
+				{
+					swPhase.Stop();
+					GlobalDebug.Log($"[sliding_merge] prep passthrough (no neighbor merge): {swPhase.Elapsed.TotalMilliseconds:F3}ms");
+					swPhase.Restart();
+				}
+#endif
+				for (int i = 0; i < wrappers.Count; i++)
+				{
+					var wrap = wrappers[i];
+					if (wrap == null) continue;
+					AddRange(originIdxToItems, wrap.OriginalIndex, toGlobalItemsForWindow(i, wrap));
+				}
+#if DEBUG
+				if (LogSlidingMergeInternalPhases && swPhase != null)
+				{
+					swPhase.Stop();
+					GlobalDebug.Log($"[sliding_merge] passthrough toGlobalItems: {swPhase.Elapsed.TotalMilliseconds:F3}ms");
+					swPhase.Restart();
+				}
+#endif
+				var passthroughIo = BuildOutput(originIdxToImgwrap, originIdxToItems, otherResults);
+#if DEBUG
+				if (LogSlidingMergeInternalPhases && swPhase != null)
+				{
+					swPhase.Stop();
+					GlobalDebug.Log($"[sliding_merge] BuildOutput: {swPhase.Elapsed.TotalMilliseconds:F3}ms");
+				}
+#endif
+				return passthroughIo;
+			}
+
 			var groups = new Dictionary<int, List<int>>();
 			for (int i = 0; i < wrappers.Count; i++)
 			{
@@ -357,18 +481,6 @@ namespace DlcvModules
 					groups[wrap.OriginalIndex] = list;
 				}
 				list.Add(i);
-			}
-
-			var originIdxToItems = new Dictionary<int, List<JObject>>();
-			if (!dedupResults || !hasSlidingMeta)
-			{
-				for (int i = 0; i < wrappers.Count; i++)
-				{
-					var wrap = wrappers[i];
-					if (wrap == null) continue;
-					AddRange(originIdxToItems, wrap.OriginalIndex, toGlobalItemsForWindow(i, wrap));
-				}
-				return BuildOutput(originIdxToImgwrap, originIdxToItems, otherResults);
 			}
 
 			foreach (var group in groups)
@@ -677,7 +789,7 @@ namespace DlcvModules
 					case "metadata":
 						continue;
 				}
-				result[prop.Name] = prop.Value != null ? prop.Value.DeepClone() : JValue.CreateNull();
+				result[prop.Name] = CloneJsonTokenForOutput(prop.Value);
 			}
 			return result;
 		}
@@ -697,9 +809,406 @@ namespace DlcvModules
 					case "is_rotated":
 						continue;
 				}
-				result[prop.Name] = prop.Value != null ? prop.Value.DeepClone() : JValue.CreateNull();
+				result[prop.Name] = CloneJsonTokenForOutput(prop.Value);
 			}
 			return result;
+		}
+
+		private static bool TryProcessNoSlidingMetaInPlace(List<ModuleImage> wrappers, JArray results, out ModuleIO io)
+		{
+			io = null;
+			if (wrappers == null || results == null || wrappers.Count == 0) return false;
+
+			var localEntries = new List<JObject>(wrappers.Count);
+			var otherTokens = new List<JToken>();
+			for (int i = 0; i < results.Count; i++)
+			{
+				var token = results[i];
+				if (token is JObject entry && string.Equals(entry.Value<string>("type"), "local", StringComparison.OrdinalIgnoreCase))
+				{
+					localEntries.Add(entry);
+				}
+				else if (token != null)
+				{
+					otherTokens.Add(token);
+				}
+			}
+
+			if (localEntries.Count != wrappers.Count) return false;
+
+			var plans = new List<PassthroughEntryPlan>(wrappers.Count);
+			for (int i = 0; i < wrappers.Count; i++)
+			{
+				var wrap = wrappers[i];
+				var entry = localEntries[i];
+				if (wrap == null || entry == null) return false;
+
+				string wrapSig = SerializeTransform(wrap.TransformState);
+				string entrySig = SerializeTransform(entry["transform"] as JObject);
+				if (!string.IsNullOrEmpty(wrapSig) && !string.IsNullOrEmpty(entrySig) && !string.Equals(wrapSig, entrySig, StringComparison.Ordinal))
+				{
+					return false;
+				}
+
+				var originWrap = BuildOriginWrap(wrap, wrap.OriginalIndex);
+				if (originWrap == null) return false;
+
+				var dets = entry["sample_results"] as JArray;
+				var updates = new List<PassthroughDetUpdate>(dets != null ? dets.Count : 0);
+				var t = BuildTC2O(wrap.TransformState);
+				if (dets != null)
+				{
+					for (int detIdx = 0; detIdx < dets.Count; detIdx++)
+					{
+						if (!(dets[detIdx] is JObject det)) continue;
+
+						if (IsRotatedDet(det))
+						{
+							var rbox = RBoxLocalToGlobal(det, wrap, t);
+							if (rbox == null)
+							{
+								var gb = ReadGlobalBbox(det) as JArray;
+								if (gb != null && gb.Count >= 5)
+								{
+									rbox = new[]
+									{
+										SafeDouble(gb[0]),
+										SafeDouble(gb[1]),
+										Math.Abs(SafeDouble(gb[2])),
+										Math.Abs(SafeDouble(gb[3])),
+										ReadAngle(gb, null)
+									};
+								}
+							}
+							if (rbox == null) return false;
+							updates.Add(new PassthroughDetUpdate { Det = det, IsRotated = true, Rbox = rbox });
+							continue;
+						}
+
+						var aabb = TryMapAxisAlignedDetToAabb(det, wrap, t);
+						if (aabb == null) return false;
+						updates.Add(new PassthroughDetUpdate { Det = det, IsRotated = false, Aabb = aabb });
+					}
+				}
+
+				plans.Add(new PassthroughEntryPlan
+				{
+					Entry = entry,
+					OriginWrap = originWrap,
+					OriginIndex = wrap.OriginalIndex,
+					Updates = updates
+				});
+			}
+
+			var outImages = new List<ModuleImage>(plans.Count);
+			var outResults = new JArray();
+			for (int i = 0; i < plans.Count; i++)
+			{
+				var plan = plans[i];
+				var mappedDets = new JArray();
+				for (int j = 0; j < plan.Updates.Count; j++)
+				{
+					var update = plan.Updates[j];
+					ApplyInPlaceMappedDet(update);
+					if (update.Det != null) mappedDets.Add(update.Det);
+				}
+
+				plan.Entry["index"] = i;
+				plan.Entry["origin_index"] = plan.OriginIndex;
+				plan.Entry["transform"] = null;
+				plan.Entry["sample_results"] = mappedDets;
+
+				outImages.Add(plan.OriginWrap);
+				outResults.Add(plan.Entry);
+			}
+
+			for (int i = 0; i < otherTokens.Count; i++)
+			{
+				outResults.Add(otherTokens[i]);
+			}
+
+			io = new ModuleIO(outImages, outResults);
+			return true;
+		}
+
+		private static void ApplyInPlaceMappedDet(PassthroughDetUpdate update)
+		{
+			if (update == null || update.Det == null) return;
+
+			if (update.IsRotated)
+			{
+				var rbox = update.Rbox;
+				if (rbox == null || rbox.Length < 5) return;
+				update.Det["bbox"] = new JArray { rbox[0], rbox[1], rbox[2], rbox[3] };
+				update.Det["with_bbox"] = true;
+				update.Det["with_angle"] = true;
+				update.Det["angle"] = rbox[4];
+
+				var meta = EnsureMutableMetadata(update.Det);
+				meta["global_bbox"] = new JArray { rbox[0], rbox[1], rbox[2], rbox[3], rbox[4] };
+				meta["is_rotated"] = true;
+				meta.Remove("combine_flag");
+				meta.Remove("slice_index");
+				return;
+			}
+
+			var aabb = update.Aabb;
+			if (aabb == null || aabb.Length < 4) return;
+
+			int x1 = (int)Math.Round(aabb[0]);
+			int y1 = (int)Math.Round(aabb[1]);
+			int x2 = (int)Math.Round(aabb[2]);
+			int y2 = (int)Math.Round(aabb[3]);
+			int w = Math.Max(1, x2 - x1);
+			int h = Math.Max(1, y2 - y1);
+
+			update.Det["bbox"] = new JArray { x1, y1, w, h };
+			update.Det["with_bbox"] = true;
+			update.Det["with_angle"] = false;
+			update.Det["angle"] = -100.0;
+
+			var metaAligned = EnsureMutableMetadata(update.Det);
+			metaAligned["global_bbox"] = new JArray { x1, y1, x2, y2 };
+			metaAligned.Remove("combine_flag");
+			metaAligned.Remove("slice_index");
+			metaAligned.Remove("is_rotated");
+		}
+
+		private static JObject EnsureMutableMetadata(JObject det)
+		{
+			var meta = det != null ? det["metadata"] as JObject : null;
+			if (meta == null)
+			{
+				meta = new JObject();
+				if (det != null) det["metadata"] = meta;
+			}
+			return meta;
+		}
+
+		private static bool TryBuildMappedDetFast(JObject det, ModuleImage wrap, double[] t, out JObject mapped)
+		{
+			mapped = null;
+			if (!TrySnapshotFastDet(det, out FastDetSnapshot snap)) return false;
+			if (snap.HasUnknownProps) return false;
+			if (snap.Metadata != null) return false;
+			if (wrap == null) return false;
+
+			if (snap.IsRotated)
+			{
+				var rbox = FastRBoxLocalToGlobal(snap, wrap, t);
+				if (rbox == null) return false;
+				mapped = CreateFastMappedRotatedDet(snap, rbox);
+				return mapped != null;
+			}
+
+			var aabb = FastMapAxisAlignedDetToAabb(snap, t);
+			if (aabb == null) return false;
+			mapped = CreateFastMappedAabbDet(snap, aabb);
+			return mapped != null;
+		}
+
+		private static bool TrySnapshotFastDet(JObject det, out FastDetSnapshot snap)
+		{
+			snap = null;
+			if (det == null) return false;
+
+			var bbox = det["bbox"] as JArray;
+			if (bbox == null || bbox.Count < 4) return false;
+
+			snap = new FastDetSnapshot();
+			snap.SourceDet = det;
+			snap.Metadata = det["metadata"] as JObject;
+			snap.CategoryIdToken = det["category_id"];
+			snap.MaskRleToken = det["mask_rle"];
+
+			if (det["category_name"] != null && det["category_name"].Type != JTokenType.Null)
+			{
+				snap.CategoryName = det.Value<string>("category_name");
+				snap.HasCategoryName = true;
+			}
+			if (det["score"] != null && det["score"].Type != JTokenType.Null)
+			{
+				snap.Score = SafeDouble(det["score"]);
+				snap.HasScore = true;
+			}
+			if (det["area"] != null && det["area"].Type != JTokenType.Null)
+			{
+				snap.Area = SafeDouble(det["area"]);
+				snap.HasArea = true;
+			}
+			if (det["with_mask"] != null && det["with_mask"].Type != JTokenType.Null)
+			{
+				snap.WithMask = det["with_mask"]?.Value<bool?>() ?? false;
+				snap.HasWithMask = true;
+			}
+
+			snap.X = SafeDouble(bbox[0]);
+			snap.Y = SafeDouble(bbox[1]);
+			snap.W = Math.Abs(SafeDouble(bbox[2]));
+			snap.H = Math.Abs(SafeDouble(bbox[3]));
+			if (snap.W <= 0.0 || snap.H <= 0.0) return false;
+
+			bool withAngle = det["with_angle"]?.Value<bool?>() ?? false;
+			double angle = SafeDouble(det["angle"]);
+			snap.IsRotated = (withAngle && Math.Abs(angle - (-100.0)) > 1e-8) || bbox.Count >= 5;
+			if (snap.IsRotated)
+			{
+				snap.AngleRad = ReadAngle(bbox, det);
+			}
+
+			foreach (var prop in det.Properties())
+			{
+				if (prop == null) continue;
+				switch (prop.Name)
+				{
+					case "category_id":
+					case "category_name":
+					case "score":
+					case "area":
+					case "bbox":
+					case "with_bbox":
+					case "with_mask":
+					case "mask_rle":
+					case "with_angle":
+					case "angle":
+					case "metadata":
+						break;
+					default:
+						snap.HasUnknownProps = true;
+						return true;
+				}
+			}
+
+			return true;
+		}
+
+		private static double[] FastMapAxisAlignedDetToAabb(FastDetSnapshot snap, double[] t)
+		{
+			if (snap == null || snap.IsRotated) return null;
+			if (t == null || !IsAxisAlignedTransform(t)) return null;
+
+			double x1 = t[0] * snap.X + t[2];
+			double y1 = t[4] * snap.Y + t[5];
+			double x2 = t[0] * (snap.X + snap.W) + t[2];
+			double y2 = t[4] * (snap.Y + snap.H) + t[5];
+			return new[]
+			{
+				Math.Min(x1, x2),
+				Math.Min(y1, y2),
+				Math.Max(x1, x2),
+				Math.Max(y1, y2)
+			};
+		}
+
+		private static double[] FastRBoxLocalToGlobal(FastDetSnapshot snap, ModuleImage wrap, double[] t)
+		{
+			if (snap == null || !snap.IsRotated || wrap == null) return null;
+			if (t == null) t = BuildTC2O(wrap.TransformState);
+
+			double ncx = t[0] * snap.X + t[1] * snap.Y + t[2];
+			double ncy = t[3] * snap.X + t[4] * snap.Y + t[5];
+
+			double ux = Math.Cos(snap.AngleRad);
+			double uy = Math.Sin(snap.AngleRad);
+			double vx = -Math.Sin(snap.AngleRad);
+			double vy = Math.Cos(snap.AngleRad);
+			double tuxX = t[0] * ux + t[1] * uy;
+			double tuxY = t[3] * ux + t[4] * uy;
+			double tvxX = t[0] * vx + t[1] * vy;
+			double tvxY = t[3] * vx + t[4] * vy;
+			double scaleW = Math.Sqrt(tuxX * tuxX + tuxY * tuxY);
+			double scaleH = Math.Sqrt(tvxX * tvxX + tvxY * tvxY);
+
+			return new[]
+			{
+				ncx,
+				ncy,
+				Math.Max(1.0, snap.W * scaleW),
+				Math.Max(1.0, snap.H * scaleH),
+				Math.Atan2(tuxY, tuxX)
+			};
+		}
+
+		private static JObject CreateFastMappedAabbDet(FastDetSnapshot snap, double[] aabb)
+		{
+			if (snap == null || aabb == null) return null;
+
+			int x1 = (int)Math.Round(aabb[0]);
+			int y1 = (int)Math.Round(aabb[1]);
+			int x2 = (int)Math.Round(aabb[2]);
+			int y2 = (int)Math.Round(aabb[3]);
+			int w = Math.Max(1, x2 - x1);
+			int h = Math.Max(1, y2 - y1);
+
+			var result = new JObject();
+			if (snap.CategoryIdToken != null && snap.CategoryIdToken.Type != JTokenType.Null) result["category_id"] = CloneJsonTokenForOutput(snap.CategoryIdToken);
+			if (snap.HasCategoryName) result["category_name"] = snap.CategoryName;
+			if (snap.HasScore) result["score"] = snap.Score;
+			if (snap.HasArea) result["area"] = snap.Area;
+			if (snap.HasWithMask) result["with_mask"] = snap.WithMask;
+			if (snap.MaskRleToken != null && snap.MaskRleToken.Type != JTokenType.Null) result["mask_rle"] = CloneJsonTokenForOutput(snap.MaskRleToken);
+			result["bbox"] = new JArray { x1, y1, w, h };
+			result["with_bbox"] = true;
+			result["with_angle"] = false;
+			result["angle"] = -100.0;
+			result["metadata"] = new JObject
+			{
+				["global_bbox"] = new JArray { x1, y1, x2, y2 }
+			};
+			return result;
+		}
+
+
+		private static JObject CreateFastMappedRotatedDet(FastDetSnapshot snap, double[] rbox)
+		{
+			if (snap == null || rbox == null || rbox.Length < 5) return null;
+
+			var result = new JObject();
+			if (snap.CategoryIdToken != null && snap.CategoryIdToken.Type != JTokenType.Null) result["category_id"] = CloneJsonTokenForOutput(snap.CategoryIdToken);
+			if (snap.HasCategoryName) result["category_name"] = snap.CategoryName;
+			if (snap.HasScore) result["score"] = snap.Score;
+			if (snap.HasArea) result["area"] = snap.Area;
+			if (snap.HasWithMask) result["with_mask"] = snap.WithMask;
+			if (snap.MaskRleToken != null && snap.MaskRleToken.Type != JTokenType.Null) result["mask_rle"] = CloneJsonTokenForOutput(snap.MaskRleToken);
+			result["bbox"] = new JArray { rbox[0], rbox[1], rbox[2], rbox[3] };
+			result["with_bbox"] = true;
+			result["with_angle"] = true;
+			result["angle"] = rbox[4];
+			result["metadata"] = new JObject
+			{
+				["global_bbox"] = new JArray { rbox[0], rbox[1], rbox[2], rbox[3], rbox[4] },
+				["is_rotated"] = true
+			};
+			return result;
+		}
+
+		/// <summary>
+		/// 输出侧复制：标量/日期等用新 JValue 包装，避免对整棵子树无条件 DeepClone。
+		/// </summary>
+		private static JToken CloneJsonTokenForOutput(JToken token)
+		{
+			if (token == null || token.Type == JTokenType.Null) return JValue.CreateNull();
+			switch (token.Type)
+			{
+				case JTokenType.Integer:
+				case JTokenType.Float:
+				case JTokenType.String:
+				case JTokenType.Boolean:
+				case JTokenType.Date:
+				case JTokenType.Guid:
+				case JTokenType.Uri:
+				case JTokenType.TimeSpan:
+					return new JValue(((JValue)token).Value);
+				case JTokenType.Raw:
+					return token.DeepClone();
+				default:
+					return token.DeepClone();
+			}
+		}
+
+		private static long DetCacheKey(int winIdx, int detIdx)
+		{
+			return ((long)(uint)winIdx << 32) | (uint)detIdx;
 		}
 
 		private static void AddSamplesRef<TKey>(Dictionary<TKey, List<JObject>> map, TKey key, JArray samples)
