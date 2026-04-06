@@ -551,7 +551,7 @@ namespace DlcvModules
 
                     if (GlobalDebug.PrintDebug)
                     {
-                        GlobalDebug.Log($"[MaskToRBox] bbox大小: {rw:F2}x{rh:F2}, 最小外接矩坐标: ({rr.Center.X:F2},{rr.Center.Y:F2}), 宽高: {rw:F2}x{rh:F2}, 角度: {angDeg:F2}");
+                        // GlobalDebug.Log($"[MaskToRBox] bbox大小: {rw:F2}x{rh:F2}, 最小外接矩坐标: ({rr.Center.X:F2},{rr.Center.Y:F2}), 宽高: {rw:F2}x{rh:F2}, 角度: {angDeg:F2}");
                     }
 
                     // 转换为 le90：长边在前
