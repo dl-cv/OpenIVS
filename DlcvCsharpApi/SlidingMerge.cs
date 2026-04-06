@@ -231,6 +231,7 @@ namespace DlcvModules
 			}
 
 			var detPolyCache = new Dictionary<Tuple<int, int>, Point2f[]>();
+			var detAabbCache = new Dictionary<Tuple<int, int>, double[]>();
 			Point2f[] getDetPoly(int winIdx, int detIdx, JObject det, ModuleImage wrap)
 			{
 				var key = Tuple.Create(winIdx, detIdx);
@@ -240,6 +241,22 @@ namespace DlcvModules
 					detPolyCache[key] = poly;
 				}
 				return poly;
+			}
+
+			double[] getDetAabb(int winIdx, int detIdx, JObject det, ModuleImage wrap)
+			{
+				var key = Tuple.Create(winIdx, detIdx);
+				if (!detAabbCache.TryGetValue(key, out double[] aabb))
+				{
+					aabb = TryMapAxisAlignedDetToAabb(det, wrap, getT(wrap));
+					if (aabb == null)
+					{
+						var poly = getDetPoly(winIdx, detIdx, det, wrap);
+						aabb = PolyAabb(poly);
+					}
+					detAabbCache[key] = aabb;
+				}
+				return aabb;
 			}
 
 			JObject mappedAabbDet(JObject det, double[] aabb, bool setCombineFlag, List<JToken> sliceIndexTokens)
@@ -253,17 +270,14 @@ namespace DlcvModules
 				int w = Math.Max(1, x2 - x1);
 				int h = Math.Max(1, y2 - y1);
 
-				var d2 = (JObject)det.DeepClone();
+				var d2 = CloneDetForOutput(det);
 				d2["bbox"] = new JArray { x1, y1, w, h };
 				d2["with_bbox"] = true;
 				d2["with_angle"] = false;
+				d2["angle"] = -100.0;
 
-				var meta = d2["metadata"] as JObject;
-				if (meta == null)
-				{
-					meta = new JObject();
-					d2["metadata"] = meta;
-				}
+				var meta = CloneMetadataForOutput(det["metadata"] as JObject);
+				d2["metadata"] = meta;
 				meta["global_bbox"] = new JArray { x1, y1, x2, y2 };
 				if (setCombineFlag) meta["combine_flag"] = false;
 				if (sliceIndexTokens != null && sliceIndexTokens.Count > 0)
@@ -279,18 +293,14 @@ namespace DlcvModules
 			{
 				if (det == null || rbox == null || rbox.Length < 5) return null;
 
-				var d2 = (JObject)det.DeepClone();
+				var d2 = CloneDetForOutput(det);
 				d2["bbox"] = new JArray { rbox[0], rbox[1], rbox[2], rbox[3] };
 				d2["with_bbox"] = true;
 				d2["with_angle"] = true;
 				d2["angle"] = rbox[4];
 
-				var meta = d2["metadata"] as JObject;
-				if (meta == null)
-				{
-					meta = new JObject();
-					d2["metadata"] = meta;
-				}
+				var meta = CloneMetadataForOutput(det["metadata"] as JObject);
+				d2["metadata"] = meta;
 				meta["global_bbox"] = new JArray { rbox[0], rbox[1], rbox[2], rbox[3], rbox[4] };
 				meta["is_rotated"] = true;
 				return d2;
@@ -302,8 +312,9 @@ namespace DlcvModules
 				if (wrap == null || !windowDets.TryGetValue(winIdx, out List<JObject> dets)) return items;
 				var t = getT(wrap);
 
-				foreach (var det in dets)
+				for (int detIdx = 0; detIdx < dets.Count; detIdx++)
 				{
+					var det = dets[detIdx];
 					if (det == null) continue;
 					if (IsRotatedDet(det))
 					{
@@ -327,9 +338,9 @@ namespace DlcvModules
 						continue;
 					}
 
-					var poly = polyForDet(det, wrap, t) ?? polyFromGlobalBbox(ReadGlobalBbox(det));
-					if (poly == null) continue;
-					items.Add(mappedAabbDet(det, PolyAabb(poly), false, null));
+					var aabb = getDetAabb(winIdx, detIdx, det, wrap);
+					if (aabb == null) continue;
+					items.Add(mappedAabbDet(det, aabb, false, null));
 				}
 
 				return items;
@@ -363,6 +374,21 @@ namespace DlcvModules
 			foreach (var group in groups)
 			{
 				var idxList = group.Value;
+				if (idxList == null || idxList.Count == 0)
+				{
+					continue;
+				}
+				if (idxList.Count == 1)
+				{
+					int onlyIdx = idxList[0];
+					var onlyWrap = wrappers[onlyIdx];
+					if (onlyWrap != null)
+					{
+						AddRange(originIdxToItems, onlyWrap.OriginalIndex, toGlobalItemsForWindow(onlyIdx, onlyWrap));
+					}
+					continue;
+				}
+
 				var gridToIdx = new Dictionary<Tuple<int, int>, int>();
 				foreach (int idx in idxList)
 				{
@@ -393,22 +419,22 @@ namespace DlcvModules
 						for (int ia = 0; ia < detsA.Count; ia++)
 						{
 							var da = detsA[ia];
-							var polyA = getDetPoly(curIdx, ia, da, wrappers[curIdx]);
-							if (polyA == null) continue;
+							var aabbA = getDetAabb(curIdx, ia, da, wrappers[curIdx]);
+							if (aabbA == null) continue;
 							bool aIsRot = IsRotatedDet(da);
 
 							for (int ib = 0; ib < detsB.Count; ib++)
 							{
 								var db = detsB[ib];
 								if (!SameCategory(da, db)) continue;
-								var polyB = getDetPoly(nbIdx, ib, db, wrappers[nbIdx]);
-								if (polyB == null) continue;
+								var aabbB = getDetAabb(nbIdx, ib, db, wrappers[nbIdx]);
+								if (aabbB == null) continue;
 								bool bIsRot = IsRotatedDet(db);
 								bool modeRotate = taskType == "rotate" || (taskType == "auto" && aIsRot && bIsRot);
 
 								if (modeRotate)
 								{
-									double riou = ComputeIoU(PolyAabb(polyA), PolyAabb(polyB));
+									double riou = ComputeIoU(aabbA, aabbB);
 									if (riou > iouTh)
 									{
 										if (SafeDouble(da["score"]) < SafeDouble(db["score"])) removed[curIdx].Add(ia);
@@ -417,7 +443,7 @@ namespace DlcvModules
 									continue;
 								}
 
-								if (ComputeIoS(PolyAabb(polyA), PolyAabb(polyB)) > iouTh)
+								if (ComputeIoS(aabbA, aabbB) > iouTh)
 								{
 									var uidA = Tuple.Create(curIdx, ia);
 									var uidB = Tuple.Create(nbIdx, ib);
@@ -486,11 +512,11 @@ namespace DlcvModules
 					foreach (var uid in members)
 					{
 						var det = windowDets[uid.Item1][uid.Item2];
-						var poly = getDetPoly(uid.Item1, uid.Item2, det, wrappers[uid.Item1]);
-						if (poly == null) continue;
+						var aabb = getDetAabb(uid.Item1, uid.Item2, det, wrappers[uid.Item1]);
+						if (aabb == null) continue;
 
 						if (seedDet == null) seedDet = det;
-						unionAabb = CombineAabb(unionAabb, PolyAabb(poly));
+						unionAabb = CombineAabb(unionAabb, aabb);
 						double score = SafeDouble(det["score"]);
 						if (score > mergedScore) mergedScore = score;
 						if (mergedCatId == null && det["category_id"] != null) mergedCatId = det["category_id"].DeepClone();
@@ -619,7 +645,7 @@ namespace DlcvModules
 			if (array == null) return list;
 			foreach (var token in array)
 			{
-				if (token is JObject obj) list.Add((JObject)obj.DeepClone());
+				if (token is JObject obj) list.Add(obj);
 			}
 			return list;
 		}
@@ -630,9 +656,50 @@ namespace DlcvModules
 			if (list == null) return clone;
 			foreach (var item in list)
 			{
-				if (item != null) clone.Add((JObject)item.DeepClone());
+				if (item != null) clone.Add(item);
 			}
 			return clone;
+		}
+
+		private static JObject CloneDetForOutput(JObject det)
+		{
+			var result = new JObject();
+			if (det == null) return result;
+			foreach (var prop in det.Properties())
+			{
+				if (prop == null) continue;
+				switch (prop.Name)
+				{
+					case "bbox":
+					case "with_bbox":
+					case "with_angle":
+					case "angle":
+					case "metadata":
+						continue;
+				}
+				result[prop.Name] = prop.Value != null ? prop.Value.DeepClone() : JValue.CreateNull();
+			}
+			return result;
+		}
+
+		private static JObject CloneMetadataForOutput(JObject meta)
+		{
+			var result = new JObject();
+			if (meta == null) return result;
+			foreach (var prop in meta.Properties())
+			{
+				if (prop == null) continue;
+				switch (prop.Name)
+				{
+					case "global_bbox":
+					case "combine_flag":
+					case "slice_index":
+					case "is_rotated":
+						continue;
+				}
+				result[prop.Name] = prop.Value != null ? prop.Value.DeepClone() : JValue.CreateNull();
+			}
+			return result;
 		}
 
 		private static void AddSamplesRef<TKey>(Dictionary<TKey, List<JObject>> map, TKey key, JArray samples)
@@ -769,6 +836,38 @@ namespace DlcvModules
 
 			var meta = det["metadata"] as JObject;
 			return meta != null && (meta["is_rotated"]?.Value<bool?>() ?? false);
+		}
+
+		private static bool IsAxisAlignedTransform(double[] t)
+		{
+			if (t == null || t.Length != 6) return false;
+			return Math.Abs(t[1]) <= 1e-8 && Math.Abs(t[3]) <= 1e-8;
+		}
+
+		private static double[] TryMapAxisAlignedDetToAabb(JObject det, ModuleImage wrap, double[] t)
+		{
+			if (det == null || wrap == null || IsRotatedDet(det)) return null;
+			var bbox = det["bbox"] as JArray;
+			if (bbox == null || bbox.Count < 4) return null;
+			if (t == null || !IsAxisAlignedTransform(t)) return null;
+
+			double x = SafeDouble(bbox[0]);
+			double y = SafeDouble(bbox[1]);
+			double w = Math.Abs(SafeDouble(bbox[2]));
+			double h = Math.Abs(SafeDouble(bbox[3]));
+			if (w <= 0.0 || h <= 0.0) return null;
+
+			double x1 = t[0] * x + t[2];
+			double y1 = t[4] * y + t[5];
+			double x2 = t[0] * (x + w) + t[2];
+			double y2 = t[4] * (y + h) + t[5];
+			return new[]
+			{
+				Math.Min(x1, x2),
+				Math.Min(y1, y2),
+				Math.Max(x1, x2),
+				Math.Max(y1, y2)
+			};
 		}
 
 		private static double ReadAngle(JArray bbox, JObject det)

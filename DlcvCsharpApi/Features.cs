@@ -989,6 +989,31 @@ namespace DlcvModules
             double? maskAreaMin = ReadNullableDouble("mask_area_min");
             double? maskAreaMax = ReadNullableDouble("mask_area_max");
 
+            // 常见 batch 路径里，image_list 与 result_list 是按相同顺序一一对应的。
+            // 这里直接走顺序匹配，避免每次都做 transform 反序列化和多张映射表构建。
+            if (CanUseAlignedFastPath(inImages, inResults))
+            {
+                return ProcessAlignedFastPath(
+                    inImages,
+                    inResults,
+                    enableBBoxWh,
+                    enableRBoxWh,
+                    enableBBoxArea,
+                    enableMaskArea,
+                    bboxWMin,
+                    bboxWMax,
+                    bboxHMin,
+                    bboxHMax,
+                    rboxWMin,
+                    rboxWMax,
+                    rboxHMin,
+                    rboxHMax,
+                    bboxAreaMin,
+                    bboxAreaMax,
+                    maskAreaMin,
+                    maskAreaMax);
+            }
+
             // 构建 image 映射：优先 index/origin_index（折回 batch 槽位），transform+origin 兜底
             int imageCount = inImages.Count;
             var indexToImageObj = new Dictionary<int, ModuleImage>();
@@ -1126,6 +1151,177 @@ namespace DlcvModules
             // 通过 extra output 暴露第二路（未通过项）
             this.ExtraOutputs.Add(new ModuleChannel(altImages, altResults));
             return new ModuleIO(mainImages, mainResults);
+        }
+
+        private ModuleIO ProcessAlignedFastPath(
+            List<ModuleImage> inImages,
+            JArray inResults,
+            bool enableBBoxWh,
+            bool enableRBoxWh,
+            bool enableBBoxArea,
+            bool enableMaskArea,
+            double? bboxWMin,
+            double? bboxWMax,
+            double? bboxHMin,
+            double? bboxHMax,
+            double? rboxWMin,
+            double? rboxWMax,
+            double? rboxHMin,
+            double? rboxHMax,
+            double? bboxAreaMin,
+            double? bboxAreaMax,
+            double? maskAreaMin,
+            double? maskAreaMax)
+        {
+            var mainImages = new List<ModuleImage>();
+            var mainResults = new JArray();
+            var altImages = new List<ModuleImage>();
+            var altResults = new JArray();
+
+            for (int i = 0; i < inImages.Count; i++)
+            {
+                var imgObj = inImages[i];
+                var resultObj = i < inResults.Count ? inResults[i] as JObject : null;
+                if (imgObj == null || resultObj == null) continue;
+
+                var srsArray = resultObj["sample_results"] as JArray;
+                var passList = new List<JObject>();
+                var failList = new List<JObject>();
+                SplitAdvancedFilterSamples(
+                    srsArray,
+                    enableBBoxWh,
+                    enableRBoxWh,
+                    enableBBoxArea,
+                    enableMaskArea,
+                    bboxWMin,
+                    bboxWMax,
+                    bboxHMin,
+                    bboxHMax,
+                    rboxWMin,
+                    rboxWMax,
+                    rboxHMin,
+                    rboxHMax,
+                    bboxAreaMin,
+                    bboxAreaMax,
+                    maskAreaMin,
+                    maskAreaMax,
+                    passList,
+                    failList);
+
+                int originIndex = resultObj["origin_index"]?.Value<int?>() ?? (imgObj != null ? imgObj.OriginalIndex : i);
+                JToken transformToken = resultObj["transform"];
+                JToken transformClone = transformToken != null ? transformToken.DeepClone() : null;
+
+                if (passList.Count > 0 || srsArray == null)
+                {
+                    mainImages.Add(imgObj);
+                    mainResults.Add(new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = mainResults.Count,
+                        ["origin_index"] = originIndex,
+                        ["transform"] = transformClone,
+                        ["sample_results"] = new JArray(passList)
+                    });
+                }
+
+                if (failList.Count > 0)
+                {
+                    altImages.Add(imgObj);
+                    altResults.Add(new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = altResults.Count,
+                        ["origin_index"] = originIndex,
+                        ["transform"] = transformToken != null ? transformToken.DeepClone() : null,
+                        ["sample_results"] = new JArray(failList)
+                    });
+                }
+            }
+
+            this.ExtraOutputs.Add(new ModuleChannel(altImages, altResults));
+            return new ModuleIO(mainImages, mainResults);
+        }
+
+        private static bool CanUseAlignedFastPath(List<ModuleImage> inImages, JArray inResults)
+        {
+            if (inImages == null || inResults == null) return false;
+            if (inImages.Count == 0 || inImages.Count != inResults.Count) return false;
+            for (int i = 0; i < inResults.Count; i++)
+            {
+                var obj = inResults[i] as JObject;
+                if (obj == null) return false;
+                string type = obj["type"] != null ? obj["type"].ToString() : null;
+                if (!string.Equals(type, "local", StringComparison.OrdinalIgnoreCase)) return false;
+            }
+            return true;
+        }
+
+        private static void SplitAdvancedFilterSamples(
+            JArray srsArray,
+            bool enableBBoxWh,
+            bool enableRBoxWh,
+            bool enableBBoxArea,
+            bool enableMaskArea,
+            double? bboxWMin,
+            double? bboxWMax,
+            double? bboxHMin,
+            double? bboxHMax,
+            double? rboxWMin,
+            double? rboxWMax,
+            double? rboxHMin,
+            double? rboxHMax,
+            double? bboxAreaMin,
+            double? bboxAreaMax,
+            double? maskAreaMin,
+            double? maskAreaMax,
+            List<JObject> passList,
+            List<JObject> failList)
+        {
+            if (passList == null || failList == null || srsArray == null) return;
+            foreach (var sToken in srsArray)
+            {
+                if (!(sToken is JObject s)) continue;
+
+                bool withAngle = s.Value<bool?>("with_angle") ?? false;
+                var bbox = s["bbox"] as JArray;
+                double w = 0.0, h = 0.0;
+                bool hasWH = false;
+                if (bbox != null && bbox.Count >= 4)
+                {
+                    try
+                    {
+                        w = Math.Abs(bbox[2].Value<double>());
+                        h = Math.Abs(bbox[3].Value<double>());
+                        hasWH = true;
+                    }
+                    catch { hasWH = false; }
+                }
+
+                double bboxArea = hasWH ? (w * h) : 0.0;
+                double maskArea = MaskRleUtils.CalculateMaskArea(s["mask_rle"]);
+
+                bool pass = true;
+                if (enableBBoxWh && hasWH)
+                {
+                    pass = pass && InRange(w, bboxWMin, bboxWMax) && InRange(h, bboxHMin, bboxHMax);
+                }
+                if (enableRBoxWh && hasWH && withAngle)
+                {
+                    pass = pass && InRange(w, rboxWMin, rboxWMax) && InRange(h, rboxHMin, rboxHMax);
+                }
+                if (enableBBoxArea && hasWH)
+                {
+                    pass = pass && InRange(bboxArea, bboxAreaMin, bboxAreaMax);
+                }
+                if (enableMaskArea && maskArea > 0)
+                {
+                    pass = pass && InRange(maskArea, maskAreaMin, maskAreaMax);
+                }
+
+                if (pass) passList.Add(s);
+                else failList.Add(s);
+            }
         }
 
         private static bool InRange(double v, double? minV, double? maxV)

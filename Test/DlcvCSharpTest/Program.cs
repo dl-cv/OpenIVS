@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
+using DlcvModules;
 using dlcv_infer_csharp;
 
 namespace DlcvCSharpTest
@@ -35,6 +36,11 @@ namespace DlcvCSharpTest
         {
             Console.OutputEncoding = Encoding.UTF8;
             Model.EnableConsoleLog = false;
+
+            if (args != null && args.Length >= 1 && string.Equals(args[0], "bench", StringComparison.OrdinalIgnoreCase))
+            {
+                return RunBenchmarkCommand(args);
+            }
 
             if (args != null && args.Length >= 2)
             {
@@ -171,6 +177,157 @@ namespace DlcvCSharpTest
             }
             if (!modelRootOk) return 2;
             return total == pass ? 0 : 1;
+        }
+
+        private static int RunBenchmarkCommand(string[] args)
+        {
+            if (args == null || args.Length < 3)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest bench <modelPath> <imagePath> [batch] [runs] [warmup]");
+                return 2;
+            }
+
+            string modelPath = args[1];
+            string imagePath = args[2];
+            int batch = ParsePositiveIntArg(args, 3, 1);
+            int runs = ParsePositiveIntArg(args, 4, 20);
+            int warmup = ParsePositiveIntArg(args, 5, 5);
+
+            Console.WriteLine("==== 基准测试 ====");
+            Console.WriteLine("model: " + modelPath);
+            Console.WriteLine("image: " + imagePath);
+            Console.WriteLine("batch: " + batch);
+            Console.WriteLine("runs: " + runs);
+            Console.WriteLine("warmup: " + warmup);
+
+            if (!File.Exists(modelPath))
+            {
+                Console.WriteLine("模型不存在");
+                return 2;
+            }
+            if (!File.Exists(imagePath))
+            {
+                Console.WriteLine("图片不存在");
+                return 2;
+            }
+
+            bool isFlowModel = IsFlowModelPath(modelPath);
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                var list = new List<Mat>(batch);
+                for (int i = 0; i < batch; i++) list.Add(rgb);
+
+                var p = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = false,
+                    ["batch_size"] = batch
+                };
+
+                for (int i = 0; i < warmup; i++)
+                {
+                    var warm = model.InferBatch(list, p);
+                    DisposeResultMasks(warm);
+                }
+
+                double sdkSum = 0.0;
+                double flowSum = 0.0;
+                double outerSum = 0.0;
+                int sampleCount = -1;
+                var nodeStats = new Dictionary<string, NodeTimingAggregate>(StringComparer.Ordinal);
+
+                for (int i = 0; i < runs; i++)
+                {
+                    var sw = Stopwatch.StartNew();
+                    var result = model.InferBatch(list, p);
+                    sw.Stop();
+
+                    if (sampleCount < 0)
+                    {
+                        sampleCount = result.SampleResults != null ? result.SampleResults.Count : 0;
+                    }
+
+                    double sdkMs = 0.0;
+                    double flowMs = 0.0;
+                    InferTiming.GetLast(out sdkMs, out flowMs);
+                    if (sdkMs <= 0.0) sdkMs = sw.Elapsed.TotalMilliseconds;
+                    if (flowMs <= 0.0) flowMs = sw.Elapsed.TotalMilliseconds;
+
+                    sdkSum += sdkMs;
+                    flowSum += flowMs;
+                    outerSum += sw.Elapsed.TotalMilliseconds;
+
+                    if (isFlowModel)
+                    {
+                        var timings = InferTiming.GetLastFlowNodeTimings();
+                        for (int j = 0; j < timings.Count; j++)
+                        {
+                            var timing = timings[j];
+                            if (timing == null) continue;
+                            string key = timing.NodeId.ToString() + "|" + timing.NodeType + "|" + timing.NodeTitle;
+                            if (!nodeStats.TryGetValue(key, out NodeTimingAggregate aggregate))
+                            {
+                                aggregate = new NodeTimingAggregate(timing.NodeId, timing.NodeType, timing.NodeTitle);
+                                nodeStats[key] = aggregate;
+                            }
+                            aggregate.Add(timing.ElapsedMs);
+                        }
+                    }
+
+                    DisposeResultMasks(result);
+                }
+
+                double avgSdk = sdkSum / Math.Max(1, runs);
+                double avgFlow = flowSum / Math.Max(1, runs);
+                double avgOuter = outerSum / Math.Max(1, runs);
+
+                Console.WriteLine("sample_count: " + sampleCount);
+                Console.WriteLine("avg_sdk_ms: " + avgSdk.ToString("F2", CultureInfo.InvariantCulture));
+                Console.WriteLine("avg_flow_ms: " + avgFlow.ToString("F2", CultureInfo.InvariantCulture));
+                Console.WriteLine("avg_outer_ms: " + avgOuter.ToString("F2", CultureInfo.InvariantCulture));
+                Console.WriteLine("avg_overhead_ms: " + Math.Max(0.0, avgFlow - avgSdk).ToString("F2", CultureInfo.InvariantCulture));
+
+                if (isFlowModel)
+                {
+                    Console.WriteLine("---- 节点平均耗时 ----");
+                    foreach (var item in nodeStats.Values.OrderByDescending(v => v.AverageMs))
+                    {
+                        double share = avgFlow > 0.0 ? item.AverageMs * 100.0 / avgFlow : 0.0;
+                        Console.WriteLine(
+                            string.Format(
+                                CultureInfo.InvariantCulture,
+                                "#{0} [{1}] {2} -> avg={3:F2}ms, share={4:F1}%",
+                                item.NodeId,
+                                item.NodeType,
+                                string.IsNullOrWhiteSpace(item.NodeTitle) ? "-" : item.NodeTitle,
+                                item.AverageMs,
+                                share));
+                    }
+                }
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("基准异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
         }
 
         private static int RunSingleBatchValidation(string modelPath, string imagePath, int batch)
@@ -498,6 +655,21 @@ namespace DlcvCSharpTest
             GC.Collect();
         }
 
+        private static bool IsFlowModelPath(string modelPath)
+        {
+            string ext = Path.GetExtension(modelPath) ?? string.Empty;
+            return ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase)
+                || ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase)
+                || ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int ParsePositiveIntArg(string[] args, int index, int defaultValue)
+        {
+            if (args == null || index < 0 || index >= args.Length) return defaultValue;
+            if (int.TryParse(args[index], out int value) && value > 0) return value;
+            return defaultValue;
+        }
+
 
         private struct ModelCase
         {
@@ -522,6 +694,31 @@ namespace DlcvCSharpTest
             public readonly bool Supported;
             public SpeedResult(double fps, bool supported) { Fps = fps; Supported = supported; }
             public static SpeedResult Na() { return new SpeedResult(0, false); }
+        }
+
+        private sealed class NodeTimingAggregate
+        {
+            public int NodeId { get; private set; }
+            public string NodeType { get; private set; }
+            public string NodeTitle { get; private set; }
+            public int Count { get; private set; }
+            public double TotalMs { get; private set; }
+            public double AverageMs { get { return Count > 0 ? TotalMs / Count : 0.0; } }
+
+            public NodeTimingAggregate(int nodeId, string nodeType, string nodeTitle)
+            {
+                NodeId = nodeId;
+                NodeType = nodeType ?? string.Empty;
+                NodeTitle = nodeTitle ?? string.Empty;
+                Count = 0;
+                TotalMs = 0.0;
+            }
+
+            public void Add(double elapsedMs)
+            {
+                Count += 1;
+                TotalMs += Math.Max(0.0, elapsedMs);
+            }
         }
 
         private struct MemorySnapshot

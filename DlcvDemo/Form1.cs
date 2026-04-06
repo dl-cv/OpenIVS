@@ -369,7 +369,22 @@ namespace DlcvDemo
                 {
                     dlcvInferMs = totalInferMs;
                 }
-                pressureTestRunner?.RecordLatencyBreakdown(dlcvInferMs, totalInferMs);
+                var flowNodeTimings = new List<PressureNodeTiming>();
+                var rawNodeTimings = DlcvModules.InferTiming.GetLastFlowNodeTimings();
+                for (int i = 0; i < rawNodeTimings.Count; i++)
+                {
+                    var timing = rawNodeTimings[i];
+                    if (timing == null) continue;
+                    flowNodeTimings.Add(new PressureNodeTiming(
+                        timing.NodeId,
+                        timing.NodeType,
+                        timing.NodeTitle,
+                        timing.ElapsedMs));
+                }
+                pressureTestRunner?.RecordLatencyBreakdown(
+                    dlcvInferMs,
+                    totalInferMs,
+                    flowNodeTimings);
 
                 try
                 {

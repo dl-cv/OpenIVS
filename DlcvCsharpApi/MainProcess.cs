@@ -40,6 +40,7 @@ namespace DlcvModules
 			public Dictionary<int, Dictionary<string, object>> Run()
 		{
 			var outputs = new Dictionary<int, Dictionary<string, object>>();
+			var graphSetupSw = System.Diagnostics.Stopwatch.StartNew();
 
 			// 按 order 排序（若缺失则回退到 id），保证与前端配置顺序一致
 			var ordered = new List<Dictionary<string, object>>(_nodes);
@@ -55,9 +56,12 @@ namespace DlcvModules
 
 			// 预构建 linkId -> (srcNodeId, srcOutIdx)
 			var linkToSource = BuildLinkSourceMap(ordered);
+			graphSetupSw.Stop();
+			InferTiming.AddFlowNodeMs(-1, "graph/setup", "sort+link_map", graphSetupSw.Elapsed.TotalMilliseconds);
 
 			for (int i = 0; i < ordered.Count; i++)
 			{
+				var nodeSetupSw = System.Diagnostics.Stopwatch.StartNew();
 				var node = ordered[i];
 				string type = node != null && node.TryGetValue("type", out object tv) ? (tv != null ? tv.ToString() : null) : null;
 				int nodeId = node != null && node.TryGetValue("id", out object iv) ? SafeToInt(iv, i) : i;
@@ -138,10 +142,23 @@ namespace DlcvModules
 				catch (Exception ex) { Console.WriteLine($"Error in CollectInputPairs: {ex.Message}"); }
 				module.ScalarInputsByIndex = scalarInputsByIdx;
 				module.ScalarInputsByName = scalarInputsByName;
+				nodeSetupSw.Stop();
+				InferTiming.AddFlowNodeMs(nodeId, "graph/setup", title ?? type, nodeSetupSw.Elapsed.TotalMilliseconds);
 
 				// 执行当前节点
-				var io = module.Process(mainImages, mainResults);
+				ModuleIO io = null;
+				var nodeSw = System.Diagnostics.Stopwatch.StartNew();
+				try
+				{
+					io = module.Process(mainImages, mainResults);
+				}
+				finally
+				{
+					nodeSw.Stop();
+					InferTiming.AddFlowNodeMs(nodeId, type, title, nodeSw.Elapsed.TotalMilliseconds);
+				}
 
+				var publishSw = System.Diagnostics.Stopwatch.StartNew();
 				// 保存该节点的全部输出通道
 				var nodeOut = new NodeExecOutput
 				{
@@ -153,9 +170,9 @@ namespace DlcvModules
 				// 对外暴露主通道（与原行为一致）
 				outputs[nodeId] = new Dictionary<string, object>
 				{
-					{ "image_list", new List<ModuleImage>(io.ImageList ?? new List<ModuleImage>()) },
-					{ "result_list", new JArray(io.ResultList ?? new JArray()) },
-					{ "template_list", new List<SimpleTemplate>(io.TemplateList ?? new List<SimpleTemplate>()) }
+					{ "image_list", io.ImageList ?? new List<ModuleImage>() },
+					{ "result_list", io.ResultList ?? new JArray() },
+					{ "template_list", io.TemplateList ?? new List<SimpleTemplate>() }
 				};
 
 				// 标量输出：依据节点 outputs 元信息，从 module.ScalarOutputsByName 取值并按索引写入
@@ -200,6 +217,8 @@ namespace DlcvModules
 				{
 					outputs[nodeId]["scalars"] = scalarsByIdx;
 				}
+				publishSw.Stop();
+				InferTiming.AddFlowNodeMs(nodeId, "graph/publish", title ?? type, publishSw.Elapsed.TotalMilliseconds);
 			}
 
 			return outputs;
