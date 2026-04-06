@@ -538,14 +538,7 @@ namespace DlcvModules
                     RotatedRect rr;
                     try
                     {
-                        using (var maskMat = MaskRleUtils.MaskInfoToMat(maskRleToken))
-                        using (var points = new Mat())
-                        {
-                            if (maskMat == null || maskMat.Empty()) continue;
-                            Cv2.FindNonZero(maskMat, points);
-                            if (points.Empty()) continue;
-                            rr = Cv2.MinAreaRect(points);
-                        }
+                        if (!MaskRleUtils.TryComputeMinAreaRectFromMaskInfo(maskRleToken, out rr)) continue;
                     }
                     catch { continue; }
 
@@ -572,17 +565,10 @@ namespace DlcvModules
                     double angRad = angDeg * Math.PI / 180.0;
                     angRad = NormalizeAngleLe90Rad(angRad);
 
-                    var d2 = (JObject)d.DeepClone();
-                    d2["bbox"] = new JArray(rr.Center.X, rr.Center.Y, rw, rh, angRad);
-                    d2["with_angle"] = true;
-                    d2["angle"] = angRad;
-                    d2.Remove("mask_rle"); // 移除 mask_rle 以减小体积
-                    d2.Remove("mask");
-
-                    newDets.Add(d2);
+                    newDets.Add(CloneDetectionWithoutMask(d, rr.Center.X, rr.Center.Y, rw, rh, angRad));
                 }
 
-                var entry2 = (JObject)entry.DeepClone();
+                var entry2 = CloneEntryWithoutSampleResults(entry);
                 entry2["sample_results"] = newDets;
                 outResults.Add(entry2);
             }
@@ -595,6 +581,33 @@ namespace DlcvModules
             double x = aRad;
             x = (x + Math.PI / 2.0) % Math.PI - Math.PI / 2.0;
             return x;
+        }
+
+        private static JObject CloneDetectionWithoutMask(JObject source, float cx, float cy, float rw, float rh, double angRad)
+        {
+            var cloned = new JObject();
+            foreach (var prop in source.Properties())
+            {
+                string name = prop.Name;
+                if (name == "mask_rle" || name == "mask" || name == "bbox" || name == "with_angle" || name == "angle") continue;
+                cloned[name] = prop.Value != null ? prop.Value.DeepClone() : JValue.CreateNull();
+            }
+
+            cloned["bbox"] = new JArray(cx, cy, rw, rh, angRad);
+            cloned["with_angle"] = true;
+            cloned["angle"] = angRad;
+            return cloned;
+        }
+
+        private static JObject CloneEntryWithoutSampleResults(JObject entry)
+        {
+            var cloned = new JObject();
+            foreach (var prop in entry.Properties())
+            {
+                if (prop.Name == "sample_results") continue;
+                cloned[prop.Name] = prop.Value != null ? prop.Value.DeepClone() : JValue.CreateNull();
+            }
+            return cloned;
         }
     }
 

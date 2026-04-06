@@ -37,6 +37,11 @@ namespace DlcvCSharpTest
             Console.OutputEncoding = Encoding.UTF8;
             Model.EnableConsoleLog = false;
 
+            if (args != null && args.Length >= 1 && string.Equals(args[0], "maskrbox-selftest", StringComparison.OrdinalIgnoreCase))
+            {
+                return RunMaskToRBoxSelfTest();
+            }
+
             if (args != null && args.Length >= 1 && string.Equals(args[0], "bench", StringComparison.OrdinalIgnoreCase))
             {
                 return RunBenchmarkCommand(args);
@@ -668,6 +673,116 @@ namespace DlcvCSharpTest
             if (args == null || index < 0 || index >= args.Length) return defaultValue;
             if (int.TryParse(args[index], out int value) && value > 0) return value;
             return defaultValue;
+        }
+
+        private static int RunMaskToRBoxSelfTest()
+        {
+            Console.WriteLine("==== mask_to_rbox 自测 ====");
+
+            using (var mask = new Mat(64, 64, MatType.CV_8UC1, Scalar.Black))
+            {
+                Cv2.Rectangle(mask, new Rect(6, 12, 12, 28), Scalar.White, -1);
+                Cv2.Rectangle(mask, new Rect(28, 20, 20, 12), Scalar.White, -1);
+
+                var maskInfo = MaskRleUtils.MatToMaskInfo(mask);
+                var bbox = new JArray(100.0, 200.0, mask.Cols, mask.Rows);
+
+                RotatedRect expected;
+                using (var baselineMask = MaskRleUtils.MaskInfoToMat(maskInfo))
+                using (var points = new Mat())
+                {
+                    Cv2.FindNonZero(baselineMask, points);
+                    if (points.Empty())
+                    {
+                        Console.WriteLine("基线算法未找到非零点");
+                        return 1;
+                    }
+                    expected = Cv2.MinAreaRect(points);
+                }
+
+                RotatedRect actual;
+                if (!MaskRleUtils.TryComputeMinAreaRectFromMaskInfo(maskInfo, out actual))
+                {
+                    Console.WriteLine("优化算法未得到旋转框");
+                    return 1;
+                }
+
+                AssertNear(expected.Center.X, actual.Center.X, 0.01, "center.x");
+                AssertNear(expected.Center.Y, actual.Center.Y, 0.01, "center.y");
+                AssertNear(expected.Size.Width, actual.Size.Width, 0.01, "size.width");
+                AssertNear(expected.Size.Height, actual.Size.Height, 0.01, "size.height");
+                AssertNear(NormalizeAngleDeg(expected.Angle), NormalizeAngleDeg(actual.Angle), 0.01, "angle");
+
+                var module = new MaskToRBox(39);
+                var resultList = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = 0,
+                        ["origin_index"] = 0,
+                        ["sample_results"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["bbox"] = bbox,
+                                ["score"] = 0.99,
+                                ["category_name"] = "demo",
+                                ["mask_rle"] = maskInfo
+                            }
+                        }
+                    }
+                };
+
+                var output = module.Process(new List<ModuleImage>(), resultList);
+                var det = (((output.ResultList[0] as JObject)?["sample_results"] as JArray)?[0]) as JObject;
+                if (det == null)
+                {
+                    Console.WriteLine("模块输出为空");
+                    return 1;
+                }
+                if (det["mask_rle"] != null)
+                {
+                    Console.WriteLine("mask_rle 未被移除");
+                    return 1;
+                }
+                if ((string)det["category_name"] != "demo")
+                {
+                    Console.WriteLine("category_name 未保留");
+                    return 1;
+                }
+                if (Math.Abs(det["score"].Value<double>() - 0.99) > 1e-6)
+                {
+                    Console.WriteLine("score 未保留");
+                    return 1;
+                }
+
+                Console.WriteLine("mask_to_rbox 自测通过");
+                return 0;
+            }
+        }
+
+        private static void AssertNear(double expected, double actual, double tolerance, string label)
+        {
+            if (Math.Abs(expected - actual) > tolerance)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0} mismatch, expected={1:F4}, actual={2:F4}, tol={3:F4}",
+                        label,
+                        expected,
+                        actual,
+                        tolerance));
+            }
+        }
+
+        private static double NormalizeAngleDeg(double angleDeg)
+        {
+            double x = angleDeg % 180.0;
+            if (x < -90.0) x += 180.0;
+            if (x >= 90.0) x -= 180.0;
+            return x;
         }
 
 

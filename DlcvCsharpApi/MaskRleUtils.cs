@@ -115,6 +115,67 @@ namespace DlcvModules
 			return dst;
 		}
 
+		/// <summary>
+		/// 从 RLE mask 直接提取最小外接旋转框。
+		/// 相比逐像素 FindNonZero，使用轮廓点可显著减少参与 MinAreaRect 的点数。
+		/// </summary>
+		public static bool TryComputeMinAreaRectFromMaskInfo(JToken maskInfo, out RotatedRect rotatedRect)
+		{
+			rotatedRect = default(RotatedRect);
+			using (var maskMat = MaskInfoToMat(maskInfo))
+			{
+				return TryComputeMinAreaRect(maskMat, out rotatedRect);
+			}
+		}
+
+		/// <summary>
+		/// 从二值 mask 提取最小外接旋转框。
+		/// 使用所有外轮廓点，保证与“全部非零像素”的几何结果一致。
+		/// </summary>
+		public static bool TryComputeMinAreaRect(Mat maskMat, out RotatedRect rotatedRect)
+		{
+			rotatedRect = default(RotatedRect);
+			if (maskMat == null || maskMat.Empty()) return false;
+
+			Point[][] contours;
+			HierarchyIndex[] hierarchy;
+			Cv2.FindContours(maskMat, out contours, out hierarchy, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+			if (contours == null || contours.Length == 0) return false;
+
+			int totalPoints = 0;
+			int firstNonEmptyIndex = -1;
+			int nonEmptyContourCount = 0;
+			for (int i = 0; i < contours.Length; i++)
+			{
+				var contour = contours[i];
+				if (contour == null || contour.Length == 0) continue;
+				if (firstNonEmptyIndex < 0) firstNonEmptyIndex = i;
+				totalPoints += contour.Length;
+				nonEmptyContourCount += 1;
+			}
+
+			if (totalPoints <= 0 || firstNonEmptyIndex < 0) return false;
+
+			if (nonEmptyContourCount == 1)
+			{
+				rotatedRect = Cv2.MinAreaRect(contours[firstNonEmptyIndex]);
+				return true;
+			}
+
+			var allPoints = new Point[totalPoints];
+			int offset = 0;
+			for (int i = 0; i < contours.Length; i++)
+			{
+				var contour = contours[i];
+				if (contour == null || contour.Length == 0) continue;
+				Array.Copy(contour, 0, allPoints, offset, contour.Length);
+				offset += contour.Length;
+			}
+
+			rotatedRect = Cv2.MinAreaRect(allPoints);
+			return true;
+		}
+
 		[DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
 		private static extern IntPtr memset(IntPtr dest, int c, UIntPtr count);
 
