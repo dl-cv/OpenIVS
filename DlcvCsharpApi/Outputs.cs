@@ -139,197 +139,9 @@ namespace DlcvModules
             var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
 
-            // 1. 建立 index/origin_index/transform -> dets 映射
-            // 说明：
-            // - transform 在“整图单位变换”等场景下很容易相同，若优先按 transform 匹配会导致跨图串结果/重复结果。
-            // - 因此这里优先使用 index（其次 origin_index），transform 仅作为兜底兼容旧流程。
-            var transToDets = new Dictionary<string, List<JObject>>();
-            var indexToDets = new Dictionary<int, List<JObject>>();
-            var originToDets = new Dictionary<int, List<JObject>>();
-
-            foreach (var entryToken in results)
-            {
-                if (!(entryToken is JObject entry) || entry["type"]?.ToString() != "local") continue;
-
-                var dets = entry["sample_results"] as JArray;
-                if (dets == null) continue;
-
-                var detList = new List<JObject>();
-                foreach (var d in dets) if (d is JObject dojb) detList.Add(dojb);
-
-                // 先记录 index/origin_index（优先匹配）
-                int idx = entry["index"]?.Value<int?>() ?? -1;
-                if (idx >= 0)
-                {
-                    if (!indexToDets.ContainsKey(idx)) indexToDets[idx] = new List<JObject>();
-                    indexToDets[idx].AddRange(detList);
-                }
-                int oidx = entry["origin_index"]?.Value<int?>() ?? -1;
-                if (oidx >= 0)
-                {
-                    if (!originToDets.ContainsKey(oidx)) originToDets[oidx] = new List<JObject>();
-                    originToDets[oidx].AddRange(detList);
-                }
-
-                // transform 作为兜底兼容（仍记录，但不作为首选）
-                try
-                {
-                    var stDict = entry["transform"] as JObject;
-                    var st = stDict != null ? TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()) : null;
-                    string tSig = SerializeTransformKey(st);
-                    if (tSig != null)
-                    {
-                        if (!transToDets.ContainsKey(tSig)) transToDets[tSig] = new List<JObject>();
-                        transToDets[tSig].AddRange(detList);
-                    }
-                }
-                catch { }
-            }
-
-            // 2. 遍历图像，还原坐标
-            var byImage = new List<Dictionary<string, object>>();
-
-            for (int i = 0; i < images.Count; i++)
-            {
-                var wrap = images[i];
-                if (wrap == null) continue;
-
-                var ori = wrap.OriginalImage ?? wrap.ImageObject;
-                int W0 = ori != null ? ori.Width : 0;
-                int H0 = ori != null ? ori.Height : 0;
-
-                string sig = SerializeTransformKey(wrap.TransformState);
-                List<JObject> dets = null;
-
-                // 优先按 index（与 imageList 顺序强绑定），其次 origin_index，最后 transform 兜底
-                if (indexToDets.ContainsKey(i)) dets = indexToDets[i];
-                else if (originToDets.ContainsKey(wrap.OriginalIndex)) dets = originToDets[wrap.OriginalIndex];
-                else if (sig != null && transToDets.ContainsKey(sig)) dets = transToDets[sig];
-
-                var outResults = new List<Dictionary<string, object>>();
-                if (dets != null)
-                {
-                    // 计算 T_c2o
-                    var T_c2o = BuildTC2O(wrap.TransformState);
-
-                    foreach (var d in dets)
-                    {
-                        var item = new Dictionary<string, object>();
-                        item["category_id"] = d["category_id"]?.Value<int>() ?? 0;
-                        item["category_name"] = d["category_name"]?.ToString();
-                        item["score"] = d["score"]?.Value<double>() ?? 0.0;
-
-                        var bboxLocal = d["bbox"] as JArray;
-                        bool isRot = false;
-                        if (bboxLocal != null && bboxLocal.Count == 5) isRot = true;
-
-                        // 还原 bbox 到原图坐标系
-                        if (isRot)
-                        {
-                            var rboxG = RBoxLocalToGlobal(bboxLocal, T_c2o);
-                            if (rboxG != null)
-                            {
-                                item["bbox"] = rboxG;
-                                item["metadata"] = new Dictionary<string, object> { { "is_rotated", true } };
-                            }
-                        }
-                        else if (bboxLocal != null && bboxLocal.Count == 4)
-                        {
-                            // bboxLocal 是 [x, y, w, h]，需要转为 [x1, y1, x2, y2] 供 BBoxPolyInOriginal 使用
-                            try
-                            {
-                                float bx = bboxLocal[0].Value<float>();
-                                float by = bboxLocal[1].Value<float>();
-                                float bw = bboxLocal[2].Value<float>();
-                                float bh = bboxLocal[3].Value<float>();
-                                var bboxXYXY = new JArray(bx, by, bx + bw, by + bh);
-                                
-                                var poly = BBoxPolyInOriginal(bboxXYXY, T_c2o);
-                                if (poly != null)
-                                {
-                                    item["bbox"] = AABBFromPoly(poly);
-                                    item["metadata"] = new Dictionary<string, object> { { "is_rotated", false } };
-                                }
-                            }
-                            catch { }
-                        }
-
-                        // 透传 mask_rle，并在需要时从 RLE 生成 poly（原图坐标系）
-                        var maskInfo = d["mask_rle"];
-                        if (maskInfo != null)
-                        {
-                            item["mask_rle"] = maskInfo;
-
-                            try
-                            {
-                                using (var localMask = MaskRleUtils.MaskInfoToMat(maskInfo))
-                                {
-                                    if (localMask != null && !localMask.Empty())
-                                    {
-                                        int mw = localMask.Cols;
-                                        int mh = localMask.Rows;
-
-                                        // 将 RLE mask 视作在当前裁剪坐标系下的局部掩膜：
-                                        // 若提供 bboxLocal，则以其左上角为偏移；否则默认从 (0,0) 开始。
-                                        double x0 = 0.0;
-                                        double y0 = 0.0;
-                                        if (bboxLocal != null && bboxLocal.Count >= 4)
-                                        {
-                                            try
-                                            {
-                                                x0 = bboxLocal[0].Value<double>();
-                                                y0 = bboxLocal[1].Value<double>();
-                                            }
-                                            catch { x0 = 0.0; y0 = 0.0; }
-                                        }
-
-                                        var nz = new Mat();
-                                        Cv2.FindNonZero(localMask, nz);
-                                        if (!nz.Empty())
-                                        {
-                                            if (!nz.IsContinuous()) nz = nz.Clone();
-                                            int nPts = nz.Rows;
-                                            var raw = new int[nPts * 2]; // CV_32SC2: x,y 交错
-                                            System.Runtime.InteropServices.Marshal.Copy(nz.Data, raw, 0, raw.Length);
-                                            var ptsLocal = new List<Point2f>();
-                                            for (int pi = 0; pi < nPts; pi++)
-                                            {
-                                                int baseIndex = pi * 2;
-                                                int lx = raw[baseIndex];
-                                                int ly = raw[baseIndex + 1];
-                                                double cx = x0 + lx;
-                                                double cy = y0 + ly;
-                                                ptsLocal.Add(new Point2f((float)cx, (float)cy));
-                                            }
-                                            var ptsGlobal = TransformPoints(T_c2o, ptsLocal.ToArray());
-                                            var polyList = new List<List<float>>();
-                                            foreach (var p in ptsGlobal)
-                                            {
-                                                polyList.Add(new List<float> { p.X, p.Y });
-                                            }
-                                            if (polyList.Count > 0)
-                                            {
-                                                item["poly"] = new List<object> { polyList }; // [[[x,y],...]]
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            catch
-                            {
-                            }
-                        }
-
-                        outResults.Add(item);
-                    }
-                }
-
-                var imgEntry = new Dictionary<string, object>();
-                imgEntry["origin_index"] = wrap.OriginalIndex;
-                imgEntry["original_size"] = new int[] { W0, H0 };
-                imgEntry["results"] = outResults;
-                byImage.Add(imgEntry);
-            }
+            List<Dictionary<string, object>> byImage = CanUseAlignedFastPath(images, results)
+                ? BuildByImageAligned(images, results)
+                : BuildByImageMapped(images, results);
 
             var payload = new Dictionary<string, object> { { "by_image", byImage } };
 
@@ -349,6 +161,374 @@ namespace DlcvModules
             }
 
             return new ModuleIO(images, results);
+        }
+
+        private static bool CanUseAlignedFastPath(List<ModuleImage> images, JArray results)
+        {
+            if (images == null || results == null) return false;
+            if (images.Count == 0 || images.Count != results.Count) return false;
+            for (int i = 0; i < results.Count; i++)
+            {
+                var entry = results[i] as JObject;
+                if (entry == null) return false;
+                if (!string.Equals(entry["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase)) return false;
+                int idx = entry["index"]?.Value<int?>() ?? i;
+                if (idx != i) return false;
+            }
+            return true;
+        }
+
+        private static List<Dictionary<string, object>> BuildByImageAligned(List<ModuleImage> images, JArray results)
+        {
+            var byImage = new List<Dictionary<string, object>>(images != null ? images.Count : 0);
+            if (images == null || results == null) return byImage;
+
+            for (int i = 0; i < images.Count; i++)
+            {
+                var wrap = images[i];
+                if (wrap == null) continue;
+
+                var entry = results[i] as JObject;
+                var dets = entry != null ? entry["sample_results"] as JArray : null;
+                var outResults = BuildOutResults(wrap, dets);
+                byImage.Add(BuildImageEntry(wrap, outResults));
+            }
+            return byImage;
+        }
+
+        private static List<Dictionary<string, object>> BuildByImageMapped(List<ModuleImage> images, JArray results)
+        {
+            var byImage = new List<Dictionary<string, object>>(images != null ? images.Count : 0);
+            if (images == null || results == null) return byImage;
+
+            // 建立 index/origin_index/transform -> dets 映射
+            // 说明：
+            // - transform 在“整图单位变换”等场景下很容易相同，若优先按 transform 匹配会导致跨图串结果/重复结果。
+            // - 因此这里优先使用 index（其次 origin_index），transform 仅作为兜底兼容旧流程。
+            var transToDets = new Dictionary<string, List<JObject>>(Math.Max(1, results.Count));
+            var indexToDets = new Dictionary<int, List<JObject>>(Math.Max(1, results.Count));
+            var originToDets = new Dictionary<int, List<JObject>>(Math.Max(1, results.Count));
+
+            foreach (var entryToken in results)
+            {
+                var entry = entryToken as JObject;
+                if (entry == null || !string.Equals(entry["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var dets = entry["sample_results"] as JArray;
+                if (dets == null || dets.Count == 0) continue;
+
+                int idx = entry["index"]?.Value<int?>() ?? -1;
+                int oidx = entry["origin_index"]?.Value<int?>() ?? -1;
+                string tSig = SerializeTransformKey(entry["transform"] as JObject);
+
+                List<JObject> idxBucket = idx >= 0 ? GetOrCreateDetBucket(indexToDets, idx) : null;
+                List<JObject> orgBucket = oidx >= 0 ? GetOrCreateDetBucket(originToDets, oidx) : null;
+                List<JObject> transBucket = !string.IsNullOrEmpty(tSig) ? GetOrCreateDetBucket(transToDets, tSig) : null;
+
+                foreach (var d in dets)
+                {
+                    var detObj = d as JObject;
+                    if (detObj == null) continue;
+                    idxBucket?.Add(detObj);
+                    orgBucket?.Add(detObj);
+                    transBucket?.Add(detObj);
+                }
+            }
+
+            for (int i = 0; i < images.Count; i++)
+            {
+                var wrap = images[i];
+                if (wrap == null) continue;
+
+                List<JObject> dets = null;
+                if (!indexToDets.TryGetValue(i, out dets))
+                {
+                    if (!originToDets.TryGetValue(wrap.OriginalIndex, out dets))
+                    {
+                        string sig = SerializeTransformKey(wrap.TransformState);
+                        if (sig != null) transToDets.TryGetValue(sig, out dets);
+                    }
+                }
+
+                var outResults = BuildOutResults(wrap, dets);
+                byImage.Add(BuildImageEntry(wrap, outResults));
+            }
+
+            return byImage;
+        }
+
+        private static List<JObject> GetOrCreateDetBucket<TKey>(Dictionary<TKey, List<JObject>> map, TKey key)
+        {
+            if (!map.TryGetValue(key, out List<JObject> list))
+            {
+                list = new List<JObject>();
+                map[key] = list;
+            }
+            return list;
+        }
+
+        private static Dictionary<string, object> BuildImageEntry(ModuleImage wrap, List<Dictionary<string, object>> outResults)
+        {
+            var ori = wrap.OriginalImage ?? wrap.ImageObject;
+            int w0 = ori != null ? ori.Width : 0;
+            int h0 = ori != null ? ori.Height : 0;
+            return new Dictionary<string, object>
+            {
+                ["origin_index"] = wrap.OriginalIndex,
+                ["original_size"] = new int[] { w0, h0 },
+                ["results"] = outResults ?? new List<Dictionary<string, object>>()
+            };
+        }
+
+        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, JArray dets)
+        {
+            var outResults = new List<Dictionary<string, object>>(dets != null ? dets.Count : 0);
+            if (wrap == null || dets == null || dets.Count == 0) return outResults;
+
+            var tC2O = BuildTC2O(wrap.TransformState);
+            bool isAxisAlignedTransform = IsAxisAlignedTransform(tC2O);
+            foreach (var d in dets)
+            {
+                if (d is JObject detObj)
+                {
+                    AppendOutResult(detObj, tC2O, isAxisAlignedTransform, outResults);
+                }
+            }
+            return outResults;
+        }
+
+        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, List<JObject> dets)
+        {
+            var outResults = new List<Dictionary<string, object>>(dets != null ? dets.Count : 0);
+            if (wrap == null || dets == null || dets.Count == 0) return outResults;
+
+            var tC2O = BuildTC2O(wrap.TransformState);
+            bool isAxisAlignedTransform = IsAxisAlignedTransform(tC2O);
+            for (int i = 0; i < dets.Count; i++)
+            {
+                var detObj = dets[i];
+                if (detObj == null) continue;
+                AppendOutResult(detObj, tC2O, isAxisAlignedTransform, outResults);
+            }
+            return outResults;
+        }
+
+        private static void AppendOutResult(
+            JObject detObj,
+            double[] tC2O,
+            bool isAxisAlignedTransform,
+            List<Dictionary<string, object>> outResults)
+        {
+            var item = new Dictionary<string, object>(8)
+            {
+                ["category_id"] = detObj["category_id"]?.Value<int>() ?? 0,
+                ["category_name"] = detObj["category_name"]?.ToString(),
+                ["score"] = detObj["score"]?.Value<double>() ?? 0.0
+            };
+
+            var bboxLocal = detObj["bbox"] as JArray;
+            bool isRot = bboxLocal != null && bboxLocal.Count == 5;
+
+            if (isRot)
+            {
+                var rboxG = RBoxLocalToGlobal(bboxLocal, tC2O);
+                if (rboxG != null)
+                {
+                    item["bbox"] = rboxG;
+                    item["metadata"] = new Dictionary<string, object> { { "is_rotated", true } };
+                }
+            }
+            else if (bboxLocal != null && bboxLocal.Count >= 4)
+            {
+                if (TryMapLocalBboxToAabb(bboxLocal, tC2O, isAxisAlignedTransform, out List<int> aabb))
+                {
+                    item["bbox"] = aabb;
+                    item["metadata"] = new Dictionary<string, object> { { "is_rotated", false } };
+                }
+            }
+
+            var maskInfo = detObj["mask_rle"];
+            if (maskInfo != null && maskInfo.Type != JTokenType.Null)
+            {
+                item["mask_rle"] = maskInfo;
+                if (TryBuildMaskPoly(maskInfo, bboxLocal, tC2O, out List<object> poly))
+                {
+                    item["poly"] = poly;
+                }
+            }
+
+            outResults.Add(item);
+        }
+
+        private static bool TryMapLocalBboxToAabb(JArray bboxLocal, double[] t, bool isAxisAlignedTransform, out List<int> aabb)
+        {
+            aabb = null;
+            if (bboxLocal == null || bboxLocal.Count < 4 || t == null || t.Length < 6) return false;
+
+            try
+            {
+                double bx = bboxLocal[0].Value<double>();
+                double by = bboxLocal[1].Value<double>();
+                double bw = bboxLocal[2].Value<double>();
+                double bh = bboxLocal[3].Value<double>();
+
+                double x1 = bx;
+                double y1 = by;
+                double x2 = bx + bw;
+                double y2 = by + bh;
+
+                double minx, miny, maxx, maxy;
+                if (isAxisAlignedTransform)
+                {
+                    double gx1 = t[0] * x1 + t[2];
+                    double gx2 = t[0] * x2 + t[2];
+                    double gy1 = t[4] * y1 + t[5];
+                    double gy2 = t[4] * y2 + t[5];
+
+                    minx = Math.Min(gx1, gx2);
+                    maxx = Math.Max(gx1, gx2);
+                    miny = Math.Min(gy1, gy2);
+                    maxy = Math.Max(gy1, gy2);
+                }
+                else
+                {
+                    double p1x = t[0] * x1 + t[1] * y1 + t[2];
+                    double p1y = t[3] * x1 + t[4] * y1 + t[5];
+                    double p2x = t[0] * x2 + t[1] * y1 + t[2];
+                    double p2y = t[3] * x2 + t[4] * y1 + t[5];
+                    double p3x = t[0] * x2 + t[1] * y2 + t[2];
+                    double p3y = t[3] * x2 + t[4] * y2 + t[5];
+                    double p4x = t[0] * x1 + t[1] * y2 + t[2];
+                    double p4y = t[3] * x1 + t[4] * y2 + t[5];
+
+                    minx = Math.Min(Math.Min(p1x, p2x), Math.Min(p3x, p4x));
+                    maxx = Math.Max(Math.Max(p1x, p2x), Math.Max(p3x, p4x));
+                    miny = Math.Min(Math.Min(p1y, p2y), Math.Min(p3y, p4y));
+                    maxy = Math.Max(Math.Max(p1y, p2y), Math.Max(p3y, p4y));
+                }
+
+                aabb = new List<int>
+                {
+                    (int)Math.Floor(minx),
+                    (int)Math.Floor(miny),
+                    (int)Math.Ceiling(maxx),
+                    (int)Math.Ceiling(maxy)
+                };
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryBuildMaskPoly(JToken maskInfo, JArray bboxLocal, double[] t, out List<object> poly)
+        {
+            poly = null;
+            if (maskInfo == null || t == null || t.Length < 6) return false;
+
+            try
+            {
+                using (var localMask = MaskRleUtils.MaskInfoToMat(maskInfo))
+                {
+                    if (localMask == null || localMask.Empty()) return false;
+
+                    double x0 = 0.0;
+                    double y0 = 0.0;
+                    if (bboxLocal != null && bboxLocal.Count >= 4)
+                    {
+                        try
+                        {
+                            x0 = bboxLocal[0].Value<double>();
+                            y0 = bboxLocal[1].Value<double>();
+                        }
+                        catch
+                        {
+                            x0 = 0.0;
+                            y0 = 0.0;
+                        }
+                    }
+
+                    using (var nz = new Mat())
+                    {
+                        Cv2.FindNonZero(localMask, nz);
+                        if (nz == null || nz.Empty()) return false;
+
+                        Mat nzReadable = nz;
+                        Mat nzClone = null;
+                        if (!nzReadable.IsContinuous())
+                        {
+                            nzClone = nzReadable.Clone();
+                            nzReadable = nzClone;
+                        }
+
+                        try
+                        {
+                            int nPts = nzReadable.Rows;
+                            if (nPts <= 0) return false;
+
+                            var raw = new int[nPts * 2]; // CV_32SC2: x,y 交错
+                            System.Runtime.InteropServices.Marshal.Copy(nzReadable.Data, raw, 0, raw.Length);
+
+                            var polyList = new List<List<float>>(nPts);
+                            for (int i = 0; i < nPts; i++)
+                            {
+                                int baseIndex = i * 2;
+                                int lx = raw[baseIndex];
+                                int ly = raw[baseIndex + 1];
+
+                                double cx = x0 + lx;
+                                double cy = y0 + ly;
+                                float gx = (float)(t[0] * cx + t[1] * cy + t[2]);
+                                float gy = (float)(t[3] * cx + t[4] * cy + t[5]);
+                                polyList.Add(new List<float> { gx, gy });
+                            }
+
+                            if (polyList.Count == 0) return false;
+                            poly = new List<object>(1) { polyList };
+                            return true;
+                        }
+                        finally
+                        {
+                            if (nzClone != null) nzClone.Dispose();
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsAxisAlignedTransform(double[] t)
+        {
+            if (t == null || t.Length < 6) return false;
+            return Math.Abs(t[1]) < 1e-8 && Math.Abs(t[3]) < 1e-8;
+        }
+
+        private static string SerializeTransformKey(JObject stObj)
+        {
+            if (stObj == null) return null;
+            var affine = stObj["affine_2x3"] as JArray;
+            if (affine == null || affine.Count < 6) return null;
+
+            try
+            {
+                return string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "T:{0:F4},{1:F4},{2:F2},{3:F4},{4:F4},{5:F2}",
+                    affine[0].Value<double>(),
+                    affine[1].Value<double>(),
+                    affine[2].Value<double>(),
+                    affine[3].Value<double>(),
+                    affine[4].Value<double>(),
+                    affine[5].Value<double>());
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static string SerializeTransformKey(TransformationState st)

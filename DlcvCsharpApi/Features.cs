@@ -650,7 +650,16 @@ namespace DlcvModules
                 }
             }
 
-            var mergedImages = new List<ModuleImage>();
+            int estimatedImageCount = imageList != null ? imageList.Count : 0;
+            if (ExtraInputsIn != null)
+            {
+                foreach (var ch in ExtraInputsIn)
+                {
+                    if (ch == null || ch.ImageList == null) continue;
+                    estimatedImageCount += ch.ImageList.Count;
+                }
+            }
+            var mergedImages = new List<ModuleImage>(Math.Max(0, estimatedImageCount));
             var mergedResults = new JArray();
 
             foreach (var g in groups)
@@ -662,7 +671,7 @@ namespace DlcvModules
                 //    注意：执行器可能传入空/含 null 的 imageList（但 resultList 仍有数据）。
                 //    若用简单 offset+idx，会把结果绑定到不存在/被跳过的图像索引上，从而在下游（ReturnJson）表现为“结果丢失”。
                 int baseIndex = mergedImages.Count;
-                var localToGlobal = new Dictionary<int, int>();
+                var localToGlobal = new Dictionary<int, int>(Math.Max(1, imgs.Count));
                 int added = 0;
 
                 for (int i = 0; i < imgs.Count; i++)
@@ -695,9 +704,9 @@ namespace DlcvModules
                         continue;
                     }
 
+                    int idx = r["index"]?.Value<int?>() ?? -1;
+                    int oidx = r["origin_index"]?.Value<int?>() ?? idx;
                     var r2 = (JObject)r.DeepClone();
-                    int idx = r2["index"]?.Value<int?>() ?? -1;
-                    int oidx = r2["origin_index"]?.Value<int?>() ?? idx;
 
                     // 若本组只有 1 张图：强制把所有 local 结果都绑定到这张图（典型的 build_results 场景）
                     if (added == 1)
@@ -1097,7 +1106,6 @@ namespace DlcvModules
 
                         // 面积
                         double bboxArea = hasWH ? (w * h) : 0.0;
-                        double maskArea = MaskRleUtils.CalculateMaskArea(s["mask_rle"]);
 
                         bool pass = true;
                         if (enableBBoxWh && hasWH)
@@ -1112,9 +1120,13 @@ namespace DlcvModules
                         {
                             pass = pass && InRange(bboxArea, bboxAreaMin, bboxAreaMax);
                         }
-                        if (enableMaskArea && maskArea > 0)
+                        if (pass && enableMaskArea)
                         {
-                            pass = pass && InRange(maskArea, maskAreaMin, maskAreaMax);
+                            double maskArea = MaskRleUtils.CalculateMaskArea(s["mask_rle"]);
+                            if (maskArea > 0)
+                            {
+                                pass = pass && InRange(maskArea, maskAreaMin, maskAreaMax);
+                            }
                         }
 
                         if (pass) passList.Add(s);
@@ -1223,7 +1235,6 @@ namespace DlcvModules
 
                 int originIndex = resultObj["origin_index"]?.Value<int?>() ?? (imgObj != null ? imgObj.OriginalIndex : i);
                 JToken transformToken = resultObj["transform"];
-                JToken transformClone = transformToken != null ? transformToken.DeepClone() : null;
 
                 if (passList.Count > 0 || srsArray == null)
                 {
@@ -1233,7 +1244,7 @@ namespace DlcvModules
                         ["type"] = "local",
                         ["index"] = mainResults.Count,
                         ["origin_index"] = originIndex,
-                        ["transform"] = transformClone,
+                        ["transform"] = transformToken != null ? transformToken.DeepClone() : null,
                         ["sample_results"] = new JArray(passList)
                     });
                 }
@@ -1312,7 +1323,6 @@ namespace DlcvModules
                 }
 
                 double bboxArea = hasWH ? (w * h) : 0.0;
-                double maskArea = MaskRleUtils.CalculateMaskArea(s["mask_rle"]);
 
                 bool pass = true;
                 if (enableBBoxWh && hasWH)
@@ -1327,9 +1337,13 @@ namespace DlcvModules
                 {
                     pass = pass && InRange(bboxArea, bboxAreaMin, bboxAreaMax);
                 }
-                if (enableMaskArea && maskArea > 0)
+                if (pass && enableMaskArea)
                 {
-                    pass = pass && InRange(maskArea, maskAreaMin, maskAreaMax);
+                    double maskArea = MaskRleUtils.CalculateMaskArea(s["mask_rle"]);
+                    if (maskArea > 0)
+                    {
+                        pass = pass && InRange(maskArea, maskAreaMin, maskAreaMax);
+                    }
                 }
 
                 if (pass) passList.Add(s);
