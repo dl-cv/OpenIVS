@@ -30,11 +30,14 @@ namespace DlcvDemo3
             this.btnBrowseImage = new System.Windows.Forms.Button();
             this.btnInfer = new System.Windows.Forms.Button();
             this.labelFixedCrop = new System.Windows.Forms.Label();
+            this.labelModel2Threads = new System.Windows.Forms.Label();
+            this.numModel2Threads = new System.Windows.Forms.NumericUpDown();
             this.btnReleaseModels = new System.Windows.Forms.Button();
             this.progressBarInference = new System.Windows.Forms.ProgressBar();
             this.lblInferenceProgress = new System.Windows.Forms.Label();
             this.richTextBox1 = new System.Windows.Forms.RichTextBox();
             this.imagePanel1 = new DLCV.ImageViewer();
+            ((System.ComponentModel.ISupportInitialize)(this.numModel2Threads)).BeginInit();
             this.SuspendLayout();
             // 
             // labelModel1
@@ -166,13 +169,45 @@ namespace DlcvDemo3
             this.labelFixedCrop.TabIndex = 12;
             this.labelFixedCrop.Text = "固定裁图大小: 128 x 192";
             // 
+            // labelModel2Threads
+            // 
+            this.labelModel2Threads.AutoSize = true;
+            this.labelModel2Threads.Location = new System.Drawing.Point(260, 133);
+            this.labelModel2Threads.Name = "labelModel2Threads";
+            this.labelModel2Threads.Size = new System.Drawing.Size(154, 24);
+            this.labelModel2Threads.TabIndex = 13;
+            this.labelModel2Threads.Text = "模型2线程数(1-32)";
+            // 
+            // numModel2Threads
+            // 
+            this.numModel2Threads.Location = new System.Drawing.Point(420, 129);
+            this.numModel2Threads.Maximum = new decimal(new int[] {
+            32,
+            0,
+            0,
+            0});
+            this.numModel2Threads.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+            this.numModel2Threads.Name = "numModel2Threads";
+            this.numModel2Threads.Size = new System.Drawing.Size(96, 31);
+            this.numModel2Threads.TabIndex = 14;
+            this.numModel2Threads.Value = new decimal(new int[] {
+            4,
+            0,
+            0,
+            0});
+            this.numModel2Threads.ValueChanged += new System.EventHandler(this.numModel2Threads_ValueChanged);
+            // 
             // btnReleaseModels
             // 
             this.btnReleaseModels.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnReleaseModels.Location = new System.Drawing.Point(928, 128);
             this.btnReleaseModels.Name = "btnReleaseModels";
             this.btnReleaseModels.Size = new System.Drawing.Size(322, 34);
-            this.btnReleaseModels.TabIndex = 13;
+            this.btnReleaseModels.TabIndex = 15;
             this.btnReleaseModels.Text = "释放模型";
             this.btnReleaseModels.UseVisualStyleBackColor = true;
             this.btnReleaseModels.Click += new System.EventHandler(this.btnReleaseModels_Click);
@@ -184,7 +219,7 @@ namespace DlcvDemo3
             this.progressBarInference.Location = new System.Drawing.Point(148, 168);
             this.progressBarInference.Name = "progressBarInference";
             this.progressBarInference.Size = new System.Drawing.Size(758, 24);
-            this.progressBarInference.TabIndex = 14;
+            this.progressBarInference.TabIndex = 16;
             // 
             // lblInferenceProgress
             // 
@@ -193,7 +228,7 @@ namespace DlcvDemo3
             this.lblInferenceProgress.Location = new System.Drawing.Point(912, 169);
             this.lblInferenceProgress.Name = "lblInferenceProgress";
             this.lblInferenceProgress.Size = new System.Drawing.Size(70, 24);
-            this.lblInferenceProgress.TabIndex = 15;
+            this.lblInferenceProgress.TabIndex = 17;
             this.lblInferenceProgress.Text = "0% 空闲";
             // 
             // richTextBox1
@@ -204,7 +239,7 @@ namespace DlcvDemo3
             this.richTextBox1.Name = "richTextBox1";
             this.richTextBox1.ReadOnly = true;
             this.richTextBox1.Size = new System.Drawing.Size(432, 712);
-            this.richTextBox1.TabIndex = 16;
+            this.richTextBox1.TabIndex = 18;
             this.richTextBox1.Text = "";
             // 
             // imagePanel1
@@ -221,7 +256,7 @@ namespace DlcvDemo3
             this.imagePanel1.ShowStatusText = false;
             this.imagePanel1.ShowVisualization = true;
             this.imagePanel1.Size = new System.Drawing.Size(934, 712);
-            this.imagePanel1.TabIndex = 17;
+            this.imagePanel1.TabIndex = 19;
             this.imagePanel1.TabStop = true;
             // 
             // Form1
@@ -234,6 +269,8 @@ namespace DlcvDemo3
             this.Controls.Add(this.lblInferenceProgress);
             this.Controls.Add(this.progressBarInference);
             this.Controls.Add(this.btnReleaseModels);
+            this.Controls.Add(this.numModel2Threads);
+            this.Controls.Add(this.labelModel2Threads);
             this.Controls.Add(this.labelFixedCrop);
             this.Controls.Add(this.btnInfer);
             this.Controls.Add(this.btnBrowseImage);
@@ -254,6 +291,7 @@ namespace DlcvDemo3
             this.Text = "C# 测试程序3";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
+            ((System.ComponentModel.ISupportInitialize)(this.numModel2Threads)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
         }
@@ -273,6 +311,8 @@ namespace DlcvDemo3
         private System.Windows.Forms.Button btnBrowseImage;
         private System.Windows.Forms.Button btnInfer;
         private System.Windows.Forms.Label labelFixedCrop;
+        private System.Windows.Forms.Label labelModel2Threads;
+        private System.Windows.Forms.NumericUpDown numModel2Threads;
         private System.Windows.Forms.Button btnReleaseModels;
         private System.Windows.Forms.ProgressBar progressBarInference;
         private System.Windows.Forms.Label lblInferenceProgress;

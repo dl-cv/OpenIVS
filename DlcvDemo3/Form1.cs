@@ -10,8 +10,6 @@ using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using CSharpObjectResult = dlcv_infer_csharp.Utils.CSharpObjectResult;
-using CSharpResult = dlcv_infer_csharp.Utils.CSharpResult;
-using CSharpSampleResult = dlcv_infer_csharp.Utils.CSharpSampleResult;
 
 namespace DlcvDemo3
 {
@@ -20,8 +18,7 @@ namespace DlcvDemo3
         private const string ModelFileFilter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
         private const string ImageFileFilter = "图片文件 (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif|所有文件 (*.*)|*.*";
         private const string UiStateFileName = "DlcvDemo3.ui-state.json";
-        private const int FixedCropWidth = 128;
-        private const int FixedCropHeight = 192;
+        private const int DefaultModel2ThreadCount = 4;
 
         private Model model1;
         private Model model2;
@@ -33,56 +30,13 @@ namespace DlcvDemo3
             public string Model1Path { get; set; }
             public string Model2Path { get; set; }
             public string ImagePath { get; set; }
-        }
-
-        private sealed class PipelineRunResult
-        {
-            public CSharpResult DisplayResult { get; set; }
-            public int Model1ObjectCount { get; set; }
-            public int CropCount { get; set; }
-            public int Model2BatchLimit { get; set; }
-            public int FinalResultCount { get; set; }
-            public List<CSharpObjectResult> FinalObjects { get; } = new List<CSharpObjectResult>();
-            public List<string> Logs { get; } = new List<string>();
-        }
-
-        private sealed class CenteredCropContext : IDisposable
-        {
-            public bool IsValid { get; set; }
-            public string InvalidReason { get; set; }
-            public Mat CropRgb { get; set; }
-            public Rect RequestedRect { get; set; }
-            public double[] CropToFullAffine { get; set; }
-
-            public static CenteredCropContext Invalid(string reason)
-            {
-                return new CenteredCropContext
-                {
-                    IsValid = false,
-                    InvalidReason = reason ?? "未知错误"
-                };
-            }
-
-            public void Dispose()
-            {
-                if (CropRgb != null)
-                {
-                    CropRgb.Dispose();
-                    CropRgb = null;
-                }
-            }
-        }
-
-        private sealed class InferenceProgressInfo
-        {
-            public int Percent { get; set; }
-            public string Stage { get; set; }
+            public int Model2ThreadCount { get; set; } = DefaultModel2ThreadCount;
         }
 
         private sealed class InferenceExecutionResult : IDisposable
         {
             public Mat ImageBgr { get; set; }
-            public PipelineRunResult RunResult { get; set; }
+            public Demo3Pipeline.PipelineRunResult RunResult { get; set; }
             public double ElapsedMs { get; set; }
 
             public void Dispose()
@@ -106,6 +60,7 @@ namespace DlcvDemo3
             txtModel1Path.Text = state?.Model1Path ?? string.Empty;
             txtModel2Path.Text = state?.Model2Path ?? string.Empty;
             txtImagePath.Text = state?.ImagePath ?? string.Empty;
+            numModel2Threads.Value = GetNormalizedModel2ThreadCount(state?.Model2ThreadCount ?? DefaultModel2ThreadCount);
             imagePath = txtImagePath.Text;
             richTextBox1.Text = "请先加载模型并选择图片。";
 
@@ -198,6 +153,11 @@ namespace DlcvDemo3
             SaveUiState();
         }
 
+        private void numModel2Threads_ValueChanged(object sender, EventArgs e)
+        {
+            SaveUiState();
+        }
+
         private async void btnInfer_Click(object sender, EventArgs e)
         {
             await RunInferenceAsync();
@@ -230,18 +190,19 @@ namespace DlcvDemo3
                 }
 
                 string inferImagePath = imagePath;
+                int model2ThreadCount = GetConfiguredModel2ThreadCount();
                 isInferenceRunning = true;
                 UpdateBusyControlState();
                 SetInferenceProgress(0, "准备推理");
 
-                var progress = new Progress<InferenceProgressInfo>(UpdateInferenceProgress);
+                var progress = new Progress<Demo3Pipeline.InferenceProgressInfo>(UpdateInferenceProgress);
                 using (InferenceExecutionResult result = await Task.Run(() =>
                 {
                     Mat imageBgr = null;
                     Mat imageRgb = null;
                     try
                     {
-                        ReportInferenceProgress(progress, 2, "读取图片");
+                        Demo3Pipeline.ReportProgress(progress, 2, "读取图片");
 
                         string error;
                         if (!TryLoadImageForInfer(inferImagePath, out imageBgr, out imageRgb, out error))
@@ -250,7 +211,7 @@ namespace DlcvDemo3
                         }
 
                         Stopwatch sw = Stopwatch.StartNew();
-                        PipelineRunResult runResult = RunPipeline(imageRgb, progress);
+                        Demo3Pipeline.PipelineRunResult runResult = RunPipeline(imageRgb, model2ThreadCount, progress);
                         sw.Stop();
 
                         return new InferenceExecutionResult
@@ -296,343 +257,25 @@ namespace DlcvDemo3
             }
         }
 
-        private PipelineRunResult RunPipeline(Mat fullImageRgb, IProgress<InferenceProgressInfo> progress = null)
+        private Demo3Pipeline.PipelineRunResult RunPipeline(
+            Mat fullImageRgb,
+            int requestedThreadCount,
+            IProgress<Demo3Pipeline.InferenceProgressInfo> progress = null)
         {
-            var runResult = new PipelineRunResult();
-            var inferParams = new JObject
-            {
-                ["with_mask"] = false
-            };
-
-            List<CenteredCropContext> cropContexts = new List<CenteredCropContext>();
-            try
-            {
-                ReportInferenceProgress(progress, 10, "模型1整图推理");
-                CSharpResult model1Result = model1.Infer(fullImageRgb, inferParams);
-
-                List<CSharpObjectResult> model1Objects = new List<CSharpObjectResult>();
-                foreach (var obj in ExtractObjects(model1Result))
-                {
-                    CSharpObjectResult clamped;
-                    if (TryClampObjectToImage(obj, fullImageRgb.Width, fullImageRgb.Height, out clamped))
-                    {
-                        model1Objects.Add(clamped);
-                    }
-                }
-                runResult.Model1ObjectCount = model1Objects.Count;
-
-                ReportInferenceProgress(progress, 22, "按模型1结果在原图裁图");
-                foreach (var obj in model1Objects)
-                {
-                    Point2d center = GetObjectCenter(obj);
-                    CenteredCropContext context = BuildCenteredCropContext(
-                        fullImageRgb,
-                        center,
-                        FixedCropWidth,
-                        FixedCropHeight);
-
-                    if (context.IsValid)
-                    {
-                        cropContexts.Add(context);
-                    }
-                    else
-                    {
-                        runResult.Logs.Add($"跳过目标[{obj.CategoryName}]：{context.InvalidReason}");
-                        context.Dispose();
-                    }
-                }
-                runResult.CropCount = cropContexts.Count;
-
-                if (runResult.Model1ObjectCount == 0)
-                {
-                    runResult.Logs.Add("模型1未检测到目标。");
-                }
-
-                int batchLimit = Math.Max(1, model2.GetMaxBatchSize());
-                runResult.Model2BatchLimit = batchLimit;
-
-                int processed = 0;
-                int total = cropContexts.Count;
-                foreach (List<CenteredCropContext> chunk in SplitIntoChunks(cropContexts, batchLimit))
-                {
-                    int percent = 30 + (int)Math.Round(55.0 * processed / Math.Max(1, total));
-                    ReportInferenceProgress(progress, percent, $"模型2 batch 推理 {processed}/{total}");
-
-                    List<Mat> mats = chunk.Select(x => x.CropRgb).ToList();
-                    CSharpResult batchResult;
-                    try
-                    {
-                        batchResult = model2.InferBatch(mats, inferParams);
-                    }
-                    catch (Exception ex)
-                    {
-                        runResult.Logs.Add($"模型2 batch 推理失败(从第 {processed + 1} 张开始，共 {chunk.Count} 张)：{ex.Message}");
-                        processed += chunk.Count;
-                        continue;
-                    }
-
-                    for (int i = 0; i < chunk.Count; i++)
-                    {
-                        List<CSharpObjectResult> localObjects = GetSampleObjects(batchResult, i);
-                        foreach (var localObj in localObjects)
-                        {
-                            CSharpObjectResult mapped;
-                            if (!TryMapObjectWithAffine(localObj, chunk[i].CropToFullAffine, out mapped))
-                            {
-                                continue;
-                            }
-
-                            CSharpObjectResult clamped;
-                            if (TryClampObjectToImage(mapped, fullImageRgb.Width, fullImageRgb.Height, out clamped))
-                            {
-                                runResult.FinalObjects.Add(clamped);
-                            }
-                        }
-                    }
-
-                    processed += chunk.Count;
-                }
-
-                ReportInferenceProgress(progress, 95, "整理显示结果");
-                runResult.DisplayResult = BuildDisplayResult(runResult.FinalObjects);
-                runResult.FinalResultCount = runResult.FinalObjects.Count;
-                ReportInferenceProgress(progress, 100, "推理完成");
-                return runResult;
-            }
-            finally
-            {
-                foreach (var context in cropContexts)
-                {
-                    context.Dispose();
-                }
-            }
+            return Demo3Pipeline.Run(fullImageRgb, model1, model2, requestedThreadCount, progress);
         }
 
-        private static IEnumerable<CSharpObjectResult> ExtractObjects(CSharpResult result)
-        {
-            if (result.SampleResults == null || result.SampleResults.Count == 0)
-            {
-                return Enumerable.Empty<CSharpObjectResult>();
-            }
-
-            var sample = result.SampleResults[0];
-            return sample.Results ?? new List<CSharpObjectResult>();
-        }
-
-        private static List<CSharpObjectResult> GetSampleObjects(CSharpResult batchResult, int sampleIndex)
-        {
-            if (batchResult.SampleResults == null)
-            {
-                return new List<CSharpObjectResult>();
-            }
-            if (sampleIndex < 0 || sampleIndex >= batchResult.SampleResults.Count)
-            {
-                return new List<CSharpObjectResult>();
-            }
-
-            return batchResult.SampleResults[sampleIndex].Results ?? new List<CSharpObjectResult>();
-        }
-
-        private static IEnumerable<List<CenteredCropContext>> SplitIntoChunks(List<CenteredCropContext> source, int chunkSize)
-        {
-            if (source == null || source.Count == 0)
-            {
-                yield break;
-            }
-
-            int realChunkSize = Math.Max(1, chunkSize);
-            for (int i = 0; i < source.Count; i += realChunkSize)
-            {
-                int count = Math.Min(realChunkSize, source.Count - i);
-                yield return source.GetRange(i, count);
-            }
-        }
-
-        private static bool TryMapObjectWithAffine(CSharpObjectResult localObj, double[] affine2x3, out CSharpObjectResult mapped)
-        {
-            mapped = localObj;
-            if (localObj.Bbox == null || localObj.Bbox.Count < 4 || affine2x3 == null || affine2x3.Length != 6)
-            {
-                return false;
-            }
-
-            var bbox = new List<double>(localObj.Bbox);
-            double dx = affine2x3[2];
-            double dy = affine2x3[5];
-            bool isRotated = localObj.WithAngle || bbox.Count == 5;
-
-            bbox[0] += dx;
-            bbox[1] += dy;
-
-            mapped.Bbox = bbox;
-            mapped.WithBbox = true;
-            mapped.WithAngle = isRotated || localObj.WithAngle;
-            return true;
-        }
-
-        private static bool TryClampObjectToImage(CSharpObjectResult obj, int imageWidth, int imageHeight, out CSharpObjectResult clamped)
-        {
-            clamped = obj;
-            if (obj.Bbox == null || obj.Bbox.Count < 4 || imageWidth <= 0 || imageHeight <= 0)
-            {
-                return false;
-            }
-
-            var bbox = new List<double>(obj.Bbox);
-            bool isRotated = obj.WithAngle || bbox.Count == 5;
-            if (isRotated)
-            {
-                double cx = bbox[0];
-                double cy = bbox[1];
-                double w = bbox[2];
-                double h = bbox[3];
-                if (w <= 0 || h <= 0)
-                {
-                    return false;
-                }
-
-                double left = cx - w / 2.0;
-                double right = cx + w / 2.0;
-                double top = cy - h / 2.0;
-                double bottom = cy + h / 2.0;
-
-                double clampedLeft = Math.Max(0.0, left);
-                double clampedTop = Math.Max(0.0, top);
-                double clampedRight = Math.Min(imageWidth, right);
-                double clampedBottom = Math.Min(imageHeight, bottom);
-                if (clampedRight <= clampedLeft || clampedBottom <= clampedTop)
-                {
-                    return false;
-                }
-
-                bbox[0] = (clampedLeft + clampedRight) / 2.0;
-                bbox[1] = (clampedTop + clampedBottom) / 2.0;
-                bbox[2] = clampedRight - clampedLeft;
-                bbox[3] = clampedBottom - clampedTop;
-            }
-            else
-            {
-                double x = bbox[0];
-                double y = bbox[1];
-                double w = bbox[2];
-                double h = bbox[3];
-                if (w <= 0 || h <= 0)
-                {
-                    return false;
-                }
-
-                double left = Math.Max(0.0, x);
-                double top = Math.Max(0.0, y);
-                double right = Math.Min(imageWidth, x + w);
-                double bottom = Math.Min(imageHeight, y + h);
-                if (right <= left || bottom <= top)
-                {
-                    return false;
-                }
-
-                bbox[0] = left;
-                bbox[1] = top;
-                bbox[2] = right - left;
-                bbox[3] = bottom - top;
-            }
-
-            clamped.Bbox = bbox;
-            clamped.WithBbox = true;
-            return true;
-        }
-
-        private static Point2d GetObjectCenter(CSharpObjectResult obj)
-        {
-            if (obj.Bbox == null || obj.Bbox.Count < 4)
-            {
-                return new Point2d(0, 0);
-            }
-
-            bool isRotated = obj.WithAngle || obj.Bbox.Count == 5;
-            if (isRotated)
-            {
-                return new Point2d(obj.Bbox[0], obj.Bbox[1]);
-            }
-
-            return new Point2d(obj.Bbox[0] + obj.Bbox[2] / 2.0, obj.Bbox[1] + obj.Bbox[3] / 2.0);
-        }
-
-        private static CenteredCropContext BuildCenteredCropContext(Mat fullImageRgb, Point2d center, int cropW, int cropH)
-        {
-            int requestLeft = (int)Math.Round(center.X - cropW / 2.0);
-            int requestTop = (int)Math.Round(center.Y - cropH / 2.0);
-            Rect requestedRect = new Rect(requestLeft, requestTop, cropW, cropH);
-            Rect imageRect = new Rect(0, 0, fullImageRgb.Width, fullImageRgb.Height);
-            Rect srcRect = IntersectRect(requestedRect, imageRect);
-
-            if (srcRect.Width <= 0 || srcRect.Height <= 0)
-            {
-                return CenteredCropContext.Invalid("裁图完全落在图像外");
-            }
-
-            Mat crop = null;
-            try
-            {
-                crop = new Mat(new Size(cropW, cropH), fullImageRgb.Type(), Scalar.Black);
-                Rect dstRect = new Rect(srcRect.X - requestLeft, srcRect.Y - requestTop, srcRect.Width, srcRect.Height);
-
-                using (var srcView = new Mat(fullImageRgb, srcRect))
-                using (var dstView = new Mat(crop, dstRect))
-                {
-                    srcView.CopyTo(dstView);
-                }
-
-                return new CenteredCropContext
-                {
-                    IsValid = true,
-                    InvalidReason = string.Empty,
-                    CropRgb = crop,
-                    RequestedRect = requestedRect,
-                    CropToFullAffine = new[] { 1.0, 0.0, (double)requestLeft, 0.0, 1.0, (double)requestTop }
-                };
-            }
-            catch (Exception ex)
-            {
-                if (crop != null)
-                {
-                    crop.Dispose();
-                }
-                return CenteredCropContext.Invalid(ex.Message);
-            }
-        }
-
-        private static Rect IntersectRect(Rect a, Rect b)
-        {
-            int x1 = Math.Max(a.X, b.X);
-            int y1 = Math.Max(a.Y, b.Y);
-            int x2 = Math.Min(a.X + a.Width, b.X + b.Width);
-            int y2 = Math.Min(a.Y + a.Height, b.Y + b.Height);
-            if (x2 <= x1 || y2 <= y1)
-            {
-                return new Rect(0, 0, 0, 0);
-            }
-            return new Rect(x1, y1, x2 - x1, y2 - y1);
-        }
-
-        private static CSharpResult BuildDisplayResult(List<CSharpObjectResult> finalObjects)
-        {
-            var sampleResults = new List<CSharpSampleResult>
-            {
-                new CSharpSampleResult(finalObjects ?? new List<CSharpObjectResult>())
-            };
-            return new CSharpResult(sampleResults);
-        }
-
-        private string BuildInferenceText(PipelineRunResult runResult, double elapsedMs)
+        private string BuildInferenceText(Demo3Pipeline.PipelineRunResult runResult, double elapsedMs)
         {
             var sb = new StringBuilder();
             sb.AppendLine("图片: " + imagePath);
             sb.AppendLine("模型1: " + (txtModel1Path.Text ?? string.Empty).Trim());
             sb.AppendLine("模型2: " + (txtModel2Path.Text ?? string.Empty).Trim());
-            sb.AppendLine($"固定裁图大小: {FixedCropWidth} x {FixedCropHeight}");
+            sb.AppendLine($"固定裁图大小: {Demo3Pipeline.FixedCropWidth} x {Demo3Pipeline.FixedCropHeight}");
             sb.AppendLine("模型1目标数: " + runResult.Model1ObjectCount);
             sb.AppendLine("有效裁图数: " + runResult.CropCount);
             sb.AppendLine("模型2最大Batch: " + runResult.Model2BatchLimit);
+            sb.AppendLine("模型2线程数: " + runResult.Model2ThreadCount);
             sb.AppendLine("最终结果数: " + runResult.FinalResultCount);
             sb.AppendLine($"推理耗时: {elapsedMs:F2} ms");
             sb.AppendLine();
@@ -878,9 +521,10 @@ namespace DlcvDemo3
             txtModel1Path.Enabled = !isBusy;
             txtModel2Path.Enabled = !isBusy;
             txtImagePath.Enabled = !isBusy;
+            numModel2Threads.Enabled = !isBusy;
         }
 
-        private void UpdateInferenceProgress(InferenceProgressInfo info)
+        private void UpdateInferenceProgress(Demo3Pipeline.InferenceProgressInfo info)
         {
             if (info == null)
             {
@@ -896,23 +540,9 @@ namespace DlcvDemo3
 
         private void SetInferenceProgress(int percent, string stage)
         {
-            UpdateInferenceProgress(new InferenceProgressInfo
+            UpdateInferenceProgress(new Demo3Pipeline.InferenceProgressInfo
             {
                 Percent = percent,
-                Stage = stage ?? string.Empty
-            });
-        }
-
-        private static void ReportInferenceProgress(IProgress<InferenceProgressInfo> progress, int percent, string stage)
-        {
-            if (progress == null)
-            {
-                return;
-            }
-
-            progress.Report(new InferenceProgressInfo
-            {
-                Percent = ClampProgressPercent(percent),
                 Stage = stage ?? string.Empty
             });
         }
@@ -962,6 +592,16 @@ namespace DlcvDemo3
             }
 
             return true;
+        }
+
+        private int GetConfiguredModel2ThreadCount()
+        {
+            return GetNormalizedModel2ThreadCount((int)numModel2Threads.Value);
+        }
+
+        private static int GetNormalizedModel2ThreadCount(int requested)
+        {
+            return Demo3Pipeline.NormalizeThreadCount(requested);
         }
 
         private static bool TryLoadImageForInfer(string path, out Mat imageBgr, out Mat imageRgb, out string error)
@@ -1082,7 +722,8 @@ namespace DlcvDemo3
                 {
                     Model1Path = (string)obj["model1_path"] ?? string.Empty,
                     Model2Path = (string)obj["model2_path"] ?? string.Empty,
-                    ImagePath = (string)obj["image_path"] ?? string.Empty
+                    ImagePath = (string)obj["image_path"] ?? string.Empty,
+                    Model2ThreadCount = GetNormalizedModel2ThreadCount((int?)obj["model2_thread_count"] ?? DefaultModel2ThreadCount)
                 };
             }
             catch
@@ -1106,7 +747,8 @@ namespace DlcvDemo3
                 {
                     ["model1_path"] = (txtModel1Path.Text ?? string.Empty).Trim(),
                     ["model2_path"] = (txtModel2Path.Text ?? string.Empty).Trim(),
-                    ["image_path"] = (txtImagePath.Text ?? string.Empty).Trim()
+                    ["image_path"] = (txtImagePath.Text ?? string.Empty).Trim(),
+                    ["model2_thread_count"] = GetConfiguredModel2ThreadCount()
                 };
 
                 File.WriteAllText(path, obj.ToString(), Encoding.UTF8);

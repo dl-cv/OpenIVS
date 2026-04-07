@@ -102,6 +102,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Demo3Pipeline.cs" />
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>
     </Compile>
