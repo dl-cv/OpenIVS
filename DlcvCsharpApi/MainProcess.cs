@@ -40,6 +40,7 @@ namespace DlcvModules
 			public Dictionary<int, Dictionary<string, object>> Run()
 		{
 			var outputs = new Dictionary<int, Dictionary<string, object>>();
+			var graphSetupSw = System.Diagnostics.Stopwatch.StartNew();
 
 			// 按 order 排序（若缺失则回退到 id），保证与前端配置顺序一致
 			var ordered = new List<Dictionary<string, object>>(_nodes);
@@ -55,9 +56,12 @@ namespace DlcvModules
 
 			// 预构建 linkId -> (srcNodeId, srcOutIdx)
 			var linkToSource = BuildLinkSourceMap(ordered);
+			graphSetupSw.Stop();
+			InferTiming.AddFlowNodeMs(-1, "graph/setup", "sort+link_map", graphSetupSw.Elapsed.TotalMilliseconds);
 
 			for (int i = 0; i < ordered.Count; i++)
 			{
+				var nodeSetupSw = System.Diagnostics.Stopwatch.StartNew();
 				var node = ordered[i];
 				string type = node != null && node.TryGetValue("type", out object tv) ? (tv != null ? tv.ToString() : null) : null;
 				int nodeId = node != null && node.TryGetValue("id", out object iv) ? SafeToInt(iv, i) : i;
@@ -138,10 +142,23 @@ namespace DlcvModules
 				catch (Exception ex) { Console.WriteLine($"Error in CollectInputPairs: {ex.Message}"); }
 				module.ScalarInputsByIndex = scalarInputsByIdx;
 				module.ScalarInputsByName = scalarInputsByName;
+				nodeSetupSw.Stop();
+				InferTiming.AddFlowNodeMs(nodeId, "graph/setup", title ?? type, nodeSetupSw.Elapsed.TotalMilliseconds);
 
 				// 执行当前节点
-				var io = module.Process(mainImages, mainResults);
+				ModuleIO io = null;
+				var nodeSw = System.Diagnostics.Stopwatch.StartNew();
+				try
+				{
+					io = module.Process(mainImages, mainResults);
+				}
+				finally
+				{
+					nodeSw.Stop();
+					InferTiming.AddFlowNodeMs(nodeId, type, title, nodeSw.Elapsed.TotalMilliseconds);
+				}
 
+				var publishSw = System.Diagnostics.Stopwatch.StartNew();
 				// 保存该节点的全部输出通道
 				var nodeOut = new NodeExecOutput
 				{
@@ -153,9 +170,9 @@ namespace DlcvModules
 				// 对外暴露主通道（与原行为一致）
 				outputs[nodeId] = new Dictionary<string, object>
 				{
-					{ "image_list", new List<ModuleImage>(io.ImageList ?? new List<ModuleImage>()) },
-					{ "result_list", new JArray(io.ResultList ?? new JArray()) },
-					{ "template_list", new List<SimpleTemplate>(io.TemplateList ?? new List<SimpleTemplate>()) }
+					{ "image_list", io.ImageList ?? new List<ModuleImage>() },
+					{ "result_list", io.ResultList ?? new JArray() },
+					{ "template_list", io.TemplateList ?? new List<SimpleTemplate>() }
 				};
 
 				// 标量输出：依据节点 outputs 元信息，从 module.ScalarOutputsByName 取值并按索引写入
@@ -200,6 +217,8 @@ namespace DlcvModules
 				{
 					outputs[nodeId]["scalars"] = scalarsByIdx;
 				}
+				publishSw.Stop();
+				InferTiming.AddFlowNodeMs(nodeId, "graph/publish", title ?? type, publishSw.Elapsed.TotalMilliseconds);
 			}
 
 			return outputs;
@@ -383,7 +402,10 @@ namespace DlcvModules
                 string dtype = inp.TryGetValue("type", out object tv) && tv != null ? tv.ToString() : null;
                 if (linkId < 0 || !linkToSource.TryGetValue(linkId, out Tuple<int, int> src)) continue;
                 int pairIdx = ii / 2;
-                var ch = pairs.ContainsKey(pairIdx) ? pairs[pairIdx] : new ModuleChannel(new List<ModuleImage>(), new JArray());
+                if (!pairs.TryGetValue(pairIdx, out ModuleChannel ch))
+                {
+                    ch = new ModuleChannel(new List<ModuleImage>(), new JArray());
+                }
                 var srcNodeId = src.Item1; var srcOutIdx = src.Item2;
                 if (!_nodeExecMap.TryGetValue(srcNodeId, out NodeExecOutput srcOut))
                 {
@@ -412,9 +434,8 @@ namespace DlcvModules
                 }
                 else if (string.Equals(dtype, "result_chan", StringComparison.OrdinalIgnoreCase))
                 {
-                    var r = new JArray();
-                    if (picked.ResultList != null) foreach (var t in picked.ResultList) r.Add(t);
-                    ch = new ModuleChannel(ch.ImageList ?? new List<ModuleImage>(), r, ch.TemplateList ?? new List<SimpleTemplate>());
+                    // 结果通道仅做路由，直接复用引用避免高频 JToken 逐项拷贝。
+                    ch = new ModuleChannel(ch.ImageList ?? new List<ModuleImage>(), picked.ResultList ?? new JArray(), ch.TemplateList ?? new List<SimpleTemplate>());
                 }
                 else if (string.Equals(dtype, "template_chan", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(dtype, "template", StringComparison.OrdinalIgnoreCase))

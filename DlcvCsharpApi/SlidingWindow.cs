@@ -45,6 +45,11 @@ namespace DlcvModules
 			int ovX = Math.Max(0, ov.Item1);
 			int ovY = Math.Max(0, ov.Item2);
 
+            if (results.Count == 0 && CanPassthroughAllImages(images, winW, winH))
+            {
+                return new ModuleIO(new List<ModuleImage>(images), new JArray());
+            }
+
             var outImages = new List<ModuleImage>();
             var outResults = new JArray();
 			int outIndex = 0;
@@ -86,6 +91,31 @@ namespace DlcvModules
                     int effW = Math.Max(1, smallW - ovX);
                     colNum = W / effW;
                     if (W % effW > 0) colNum++;
+                }
+
+                if (rowNum == 1 && colNum == 1 && smallW == W && smallH == H)
+                {
+                    var passthroughState = wrap != null && wrap.TransformState != null
+                        ? wrap.TransformState.Clone()
+                        : new TransformationState(W, H);
+                    var passthroughWrap = new ModuleImage(
+                        mat,
+                        wrap != null ? wrap.OriginalImage : mat,
+                        passthroughState,
+                        wrap != null ? wrap.OriginalIndex : i
+                    );
+                    outImages.Add(passthroughWrap);
+
+                    outResults.Add(new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = outIndex,
+                        ["origin_index"] = wrap != null ? wrap.OriginalIndex : i,
+                        ["transform"] = JObject.FromObject(passthroughState.ToDict()),
+                        ["sample_results"] = new JArray()
+                    });
+                    outIndex += 1;
+                    continue;
                 }
 
                 // 遍历格点
@@ -204,6 +234,20 @@ namespace DlcvModules
 
 			return Tuple.Create(dv1, dv2);
 		}
+
+        private static bool CanPassthroughAllImages(List<ModuleImage> images, int winW, int winH)
+        {
+            if (images == null || images.Count == 0) return false;
+            for (int i = 0; i < images.Count; i++)
+            {
+                var wrap = images[i];
+                var mat = wrap != null ? wrap.ImageObject : null;
+                if (mat == null || mat.Empty()) return false;
+                if (Math.Min(winW, mat.Width) != mat.Width) return false;
+                if (Math.Min(winH, mat.Height) != mat.Height) return false;
+            }
+            return true;
+        }
 
         private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj)
 		{

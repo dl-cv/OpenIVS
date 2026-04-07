@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
+using DlcvModules;
 using dlcv_infer_csharp;
 
 namespace DlcvCSharpTest
@@ -19,6 +20,12 @@ namespace DlcvCSharpTest
         private const int GpuDeviceId = 0;
         private const int FixedBatchSize = 8;
         private const string ModelRoot = @"Y:\测试模型";
+        private const string DefaultPressureModelPath = @"C:\Users\Administrator\Desktop\dvst速度优化\流程2-各项检测_120_50.dvst";
+        private const string DefaultPressureImagePath = @"C:\Users\Administrator\Desktop\dvst速度优化\detect_20260401153742_0_6_2904_5248_627_804.jpg";
+        private const int DefaultPressureThreadCount = 1;
+        private const int DefaultPressureBatchSize = 128;
+        private const int DefaultPressureRuns = 9;
+        private const int DefaultPressureWarmup = 5;
 
         private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
         {
@@ -31,132 +38,541 @@ namespace DlcvCSharpTest
             new ModelCase("OCR.dvt", "OCR-1.jpg")
         };
 
-        private static int Main()
+        private static int Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
             Model.EnableConsoleLog = false;
-            Console.WriteLine("==== C# 测试程序 ====");
-            Console.WriteLine("模型目录: " + ModelRoot);
-            Console.WriteLine("固定设备: GPU(" + GpuDeviceId + ")");
-            Console.WriteLine("固定Batch: " + FixedBatchSize);
-            Console.WriteLine();
-
-            bool modelRootOk = Directory.Exists(ModelRoot);
-            if (!modelRootOk)
+            try
             {
-                Console.WriteLine("模型目录不存在: " + ModelRoot);
-            }
-
-            // 内存泄露专项：只跑一个实例分割模型
-            string leakModelPath = null;
-            string leakImagePath = null;
-            if (modelRootOk)
-            {
-                foreach (var c in DefaultCases)
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "maskrbox-selftest", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!c.ModelFile.Contains("实例分割")) continue;
-                    string mp = Path.Combine(ModelRoot, c.ModelFile);
-                    string ip = Path.Combine(ModelRoot, c.ImageFile);
-                    if (!File.Exists(mp) || !File.Exists(ip)) continue;
-                    leakModelPath = mp;
-                    leakImagePath = ip;
-                    break;
+                    return RunMaskToRBoxSelfTest();
                 }
-            }
 
-            var rows = new List<CaseRow>(DefaultCases.Count);
-            int total = 0;
-            int pass = 0;
-            foreach (var c in DefaultCases)
-            {
-                string modelPath = Path.Combine(ModelRoot, c.ModelFile);
-                string imagePath = Path.Combine(ModelRoot, c.ImageFile);
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "bench", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunBenchmarkCommand(args);
+                }
+
+                if (args != null && args.Length >= 2)
+                {
+                    string modelPath = args[0];
+                    string imagePath = args[1];
+                    int batch = DefaultPressureBatchSize;
+                    if (args.Length >= 3)
+                    {
+                        int.TryParse(args[2], out batch);
+                        if (batch <= 0) batch = DefaultPressureBatchSize;
+                    }
+                    return RunSingleBatchValidation(modelPath, imagePath, batch);
+                }
+
+                if (args == null || args.Length == 0)
+                {
+                    return RunDefaultPressureBenchmark();
+                }
+
+                Console.WriteLine("==== C# 测试程序 ====");
+                Console.WriteLine("模型目录: " + ModelRoot);
+                Console.WriteLine("固定设备: GPU(" + GpuDeviceId + ")");
+                Console.WriteLine("固定Batch: " + FixedBatchSize);
+                Console.WriteLine();
+
+                bool modelRootOk = Directory.Exists(ModelRoot);
                 if (!modelRootOk)
                 {
-                    rows.Add(new CaseRow
+                    Console.WriteLine("模型目录不存在: " + ModelRoot);
+                }
+
+                // 内存泄露专项：只跑一个实例分割模型
+                string leakModelPath = null;
+                string leakImagePath = null;
+                if (modelRootOk)
+                {
+                    foreach (var c in DefaultCases)
                     {
-                        ModelName = c.ModelFile,
-                        LoadStatus = "跳过",
-                        InferStatus = "-",
-                        CategoryList = "模型目录不存在",
-                        SpeedText = "-",
-                        BatchText = "-"
-                    });
-                    continue;
+                        if (!c.ModelFile.Contains("实例分割")) continue;
+                        string mp = Path.Combine(ModelRoot, c.ModelFile);
+                        string ip = Path.Combine(ModelRoot, c.ImageFile);
+                        if (!File.Exists(mp) || !File.Exists(ip)) continue;
+                        leakModelPath = mp;
+                        leakImagePath = ip;
+                        break;
+                    }
                 }
-                if (!File.Exists(modelPath) || !File.Exists(imagePath))
+
+                var rows = new List<CaseRow>(DefaultCases.Count);
+                int total = 0;
+                int pass = 0;
+                foreach (var c in DefaultCases)
                 {
-                    rows.Add(new CaseRow
+                    string modelPath = Path.Combine(ModelRoot, c.ModelFile);
+                    string imagePath = Path.Combine(ModelRoot, c.ImageFile);
+                    if (!modelRootOk)
                     {
-                        ModelName = Path.GetFileName(modelPath),
-                        LoadStatus = "跳过",
-                        InferStatus = "-",
-                        CategoryList = "模型或图片不存在",
-                        SpeedText = "-",
-                        BatchText = "-"
-                    });
-                    continue;
+                        rows.Add(new CaseRow
+                        {
+                            ModelName = c.ModelFile,
+                            LoadStatus = "跳过",
+                            InferStatus = "-",
+                            CategoryList = "模型目录不存在",
+                            SpeedText = "-",
+                            BatchText = "-"
+                        });
+                        continue;
+                    }
+                    if (!File.Exists(modelPath) || !File.Exists(imagePath))
+                    {
+                        rows.Add(new CaseRow
+                        {
+                            ModelName = Path.GetFileName(modelPath),
+                            LoadStatus = "跳过",
+                            InferStatus = "-",
+                            CategoryList = "模型或图片不存在",
+                            SpeedText = "-",
+                            BatchText = "-"
+                        });
+                        continue;
+                    }
+
+                    total++;
+                    var row = RunCase(modelPath, imagePath);
+                    rows.Add(row);
+                    if (row.LoadStatus.StartsWith("成功") && row.InferStatus == "成功") pass++;
                 }
 
-                total++;
-                var row = RunCase(modelPath, imagePath);
-                rows.Add(row);
-                if (row.LoadStatus.StartsWith("成功") && row.InferStatus == "成功") pass++;
-            }
-
-            rows.Add(new CaseRow
-            {
-                ModelName = "汇总",
-                LoadStatus = "总数=" + total,
-                InferStatus = "成功=" + pass,
-                CategoryList = "失败=" + (total - pass),
-                SpeedText = "-",
-                BatchText = "-"
-            });
-
-            PrintHeader();
-            foreach (var r in rows)
-            {
-                PrintRow(r.ModelName, r.LoadStatus, r.InferStatus, r.CategoryList, r.SpeedText, r.BatchText);
-            }
-            PrintFooter();
-            try { Utils.FreeAllModels(); } catch { }
-            ForceGc();
-
-            Console.WriteLine("==== 内存泄露专项(仅测1个实例分割模型) ====");
-            if (!modelRootOk)
-            {
-                Console.WriteLine("跳过：模型目录不存在");
-            }
-            else if (string.IsNullOrEmpty(leakModelPath) || string.IsNullOrEmpty(leakImagePath))
-            {
-                Console.WriteLine("跳过：未找到可用实例分割模型");
-            }
-            else
-            {
-                Console.WriteLine("模型: " + Path.GetFileName(leakModelPath));
-                try
+                rows.Add(new CaseRow
                 {
-                    double inc = RunLoadFreeLeak(leakModelPath, GpuDeviceId);
-                    Console.WriteLine("加载/释放循环" + LeakLoopCount + "次内存增量: " + inc.ToString("F2", CultureInfo.InvariantCulture) + "MB");
-                }
-                catch (Exception ex)
+                    ModelName = "汇总",
+                    LoadStatus = "总数=" + total,
+                    InferStatus = "成功=" + pass,
+                    CategoryList = "失败=" + (total - pass),
+                    SpeedText = "-",
+                    BatchText = "-"
+                });
+
+                PrintHeader();
+                foreach (var r in rows)
                 {
-                    Console.WriteLine("加载/释放循环" + LeakLoopCount + "次内存增量: 错误:" + Trim(ex.Message));
+                    PrintRow(r.ModelName, r.LoadStatus, r.InferStatus, r.CategoryList, r.SpeedText, r.BatchText);
+                }
+                PrintFooter();
+
+                Console.WriteLine("==== 内存泄露专项(仅测1个实例分割模型) ====");
+                if (!modelRootOk)
+                {
+                    Console.WriteLine("跳过：模型目录不存在");
+                }
+                else if (string.IsNullOrEmpty(leakModelPath) || string.IsNullOrEmpty(leakImagePath))
+                {
+                    Console.WriteLine("跳过：未找到可用实例分割模型");
+                }
+                else
+                {
+                    Console.WriteLine("模型: " + Path.GetFileName(leakModelPath));
+                    try
+                    {
+                        double inc = RunLoadFreeLeak(leakModelPath, GpuDeviceId);
+                        Console.WriteLine("加载/释放循环" + LeakLoopCount + "次内存增量: " + inc.ToString("F2", CultureInfo.InvariantCulture) + "MB");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("加载/释放循环" + LeakLoopCount + "次内存增量: 错误:" + Trim(ex.Message));
+                    }
+
+                    try
+                    {
+                        double inc = RunInferLeak3s(leakModelPath, leakImagePath, GpuDeviceId);
+                        Console.WriteLine("推理" + SpeedWindowSeconds + "秒内存增量: " + inc.ToString("F2", CultureInfo.InvariantCulture) + "MB");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("推理" + SpeedWindowSeconds + "秒内存增量: 错误:" + Trim(ex.Message));
+                    }
+                }
+                if (!modelRootOk) return 2;
+                return total == pass ? 0 : 1;
+            }
+            finally
+            {
+                try { Utils.FreeAllModels(); } catch { }
+                ForceGc();
+            }
+        }
+
+        private static int RunDefaultPressureBenchmark()
+        {
+            string modelPath = DefaultPressureModelPath;
+            string imagePath = DefaultPressureImagePath;
+            int batch = DefaultPressureBatchSize;
+            int runs = DefaultPressureRuns;
+            int warmup = DefaultPressureWarmup;
+
+            Console.WriteLine("模型: " + modelPath);
+            Console.WriteLine("图片: " + imagePath);
+
+            if (!File.Exists(modelPath))
+            {
+                Console.WriteLine("模型不存在");
+                return 2;
+            }
+            if (!File.Exists(imagePath))
+            {
+                Console.WriteLine("图片不存在");
+                return 2;
+            }
+
+            bool isFlowModel = IsFlowModelPath(modelPath);
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                var list = new List<Mat>(batch);
+                for (int i = 0; i < batch; i++) list.Add(rgb);
+
+                var p = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = false,
+                    ["batch_size"] = batch
+                };
+
+                for (int i = 0; i < warmup; i++)
+                {
+                    var warm = model.InferBatch(list, p);
+                    DisposeResultMasks(warm);
                 }
 
-                try
+                double sdkSum = 0.0;
+                double flowSum = 0.0;
+                var nodeStats = new Dictionary<string, NodeTimingAggregate>(StringComparer.Ordinal);
+                var total = Stopwatch.StartNew();
+
+                for (int i = 0; i < runs; i++)
                 {
-                    double inc = RunInferLeak3s(leakModelPath, leakImagePath, GpuDeviceId);
-                    Console.WriteLine("推理" + SpeedWindowSeconds + "秒内存增量: " + inc.ToString("F2", CultureInfo.InvariantCulture) + "MB");
+                    var sw = Stopwatch.StartNew();
+                    var result = model.InferBatch(list, p);
+                    sw.Stop();
+
+                    double sdkMs = 0.0;
+                    double flowMs = 0.0;
+                    InferTiming.GetLast(out sdkMs, out flowMs);
+                    if (sdkMs <= 0.0) sdkMs = sw.Elapsed.TotalMilliseconds;
+                    if (flowMs <= 0.0) flowMs = sw.Elapsed.TotalMilliseconds;
+
+                    sdkSum += sdkMs;
+                    flowSum += flowMs;
+
+                    if (isFlowModel)
+                    {
+                        var timings = InferTiming.GetLastFlowNodeTimings();
+                        for (int j = 0; j < timings.Count; j++)
+                        {
+                            var timing = timings[j];
+                            if (timing == null) continue;
+                            string key = timing.NodeId.ToString() + "|" + timing.NodeType + "|" + timing.NodeTitle;
+                            if (!nodeStats.TryGetValue(key, out NodeTimingAggregate aggregate))
+                            {
+                                aggregate = new NodeTimingAggregate(timing.NodeId, timing.NodeType, timing.NodeTitle);
+                                nodeStats[key] = aggregate;
+                            }
+                            aggregate.Add(timing.ElapsedMs);
+                        }
+                    }
+
+                    DisposeResultMasks(result);
                 }
-                catch (Exception ex)
+
+                total.Stop();
+                double avgSdk = sdkSum / Math.Max(1, runs);
+                double avgFlow = flowSum / Math.Max(1, runs);
+
+                Console.WriteLine();
+                Console.WriteLine("压力测试统计:");
+                Console.WriteLine("线程数: " + DefaultPressureThreadCount);
+                Console.WriteLine("批量大小: " + batch);
+                Console.WriteLine("运行时间: " + total.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + " 秒");
+                Console.WriteLine("完成请求: " + ((long)runs * batch).ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("平均延迟(SDK): " + avgSdk.ToString("F2", CultureInfo.InvariantCulture) + "ms");
+                Console.WriteLine("平均延迟(总时间): " + avgFlow.ToString("F2", CultureInfo.InvariantCulture) + "ms");
+                Console.WriteLine("模块平均耗时:");
+
+                if (!isFlowModel || nodeStats.Count == 0)
                 {
-                    Console.WriteLine("推理" + SpeedWindowSeconds + "秒内存增量: 错误:" + Trim(ex.Message));
+                    Console.WriteLine("(无流程节点统计)");
                 }
+                else
+                {
+                    foreach (var item in nodeStats.Values.OrderByDescending(v => v.AverageMs))
+                    {
+                        double share = avgFlow > 0.0 ? item.AverageMs * 100.0 / avgFlow : 0.0;
+                        Console.WriteLine(
+                            string.Format(
+                                CultureInfo.InvariantCulture,
+                                "#{0} [{1}] {2}: {3:F2}ms ({4:F1}%)",
+                                item.NodeId,
+                                item.NodeType,
+                                string.IsNullOrWhiteSpace(item.NodeTitle) ? "-" : item.NodeTitle,
+                                item.AverageMs,
+                                share));
+                    }
+                }
+
+                return 0;
             }
-            if (!modelRootOk) return 2;
-            return total == pass ? 0 : 1;
+            catch (Exception ex)
+            {
+                Console.WriteLine("压力测试异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
+        }
+
+        private static int RunBenchmarkCommand(string[] args)
+        {
+            if (args == null || args.Length < 3)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest bench <modelPath> <imagePath> [batch] [runs] [warmup]");
+                return 2;
+            }
+
+            string modelPath = args[1];
+            string imagePath = args[2];
+            int batch = ParsePositiveIntArg(args, 3, 1);
+            int runs = ParsePositiveIntArg(args, 4, 20);
+            int warmup = ParsePositiveIntArg(args, 5, 5);
+
+            Console.WriteLine("==== 基准测试 ====");
+            Console.WriteLine("model: " + modelPath);
+            Console.WriteLine("image: " + imagePath);
+            Console.WriteLine("batch: " + batch);
+            Console.WriteLine("runs: " + runs);
+            Console.WriteLine("warmup: " + warmup);
+
+            if (!File.Exists(modelPath))
+            {
+                Console.WriteLine("模型不存在");
+                return 2;
+            }
+            if (!File.Exists(imagePath))
+            {
+                Console.WriteLine("图片不存在");
+                return 2;
+            }
+
+            bool isFlowModel = IsFlowModelPath(modelPath);
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                var list = new List<Mat>(batch);
+                for (int i = 0; i < batch; i++) list.Add(rgb);
+
+                var p = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = false,
+                    ["batch_size"] = batch
+                };
+
+                for (int i = 0; i < warmup; i++)
+                {
+                    var warm = model.InferBatch(list, p);
+                    DisposeResultMasks(warm);
+                }
+
+                double sdkSum = 0.0;
+                double flowSum = 0.0;
+                double outerSum = 0.0;
+                int sampleCount = -1;
+                var nodeStats = new Dictionary<string, NodeTimingAggregate>(StringComparer.Ordinal);
+
+                for (int i = 0; i < runs; i++)
+                {
+                    var sw = Stopwatch.StartNew();
+                    var result = model.InferBatch(list, p);
+                    sw.Stop();
+
+                    if (sampleCount < 0)
+                    {
+                        sampleCount = result.SampleResults != null ? result.SampleResults.Count : 0;
+                    }
+
+                    double sdkMs = 0.0;
+                    double flowMs = 0.0;
+                    InferTiming.GetLast(out sdkMs, out flowMs);
+                    if (sdkMs <= 0.0) sdkMs = sw.Elapsed.TotalMilliseconds;
+                    if (flowMs <= 0.0) flowMs = sw.Elapsed.TotalMilliseconds;
+
+                    sdkSum += sdkMs;
+                    flowSum += flowMs;
+                    outerSum += sw.Elapsed.TotalMilliseconds;
+
+                    if (isFlowModel)
+                    {
+                        var timings = InferTiming.GetLastFlowNodeTimings();
+                        for (int j = 0; j < timings.Count; j++)
+                        {
+                            var timing = timings[j];
+                            if (timing == null) continue;
+                            string key = timing.NodeId.ToString() + "|" + timing.NodeType + "|" + timing.NodeTitle;
+                            if (!nodeStats.TryGetValue(key, out NodeTimingAggregate aggregate))
+                            {
+                                aggregate = new NodeTimingAggregate(timing.NodeId, timing.NodeType, timing.NodeTitle);
+                                nodeStats[key] = aggregate;
+                            }
+                            aggregate.Add(timing.ElapsedMs);
+                        }
+                    }
+
+                    DisposeResultMasks(result);
+                }
+
+                double avgSdk = sdkSum / Math.Max(1, runs);
+                double avgFlow = flowSum / Math.Max(1, runs);
+                double avgOuter = outerSum / Math.Max(1, runs);
+
+                Console.WriteLine("sample_count: " + sampleCount);
+                Console.WriteLine("avg_sdk_ms: " + avgSdk.ToString("F2", CultureInfo.InvariantCulture));
+                Console.WriteLine("avg_flow_ms: " + avgFlow.ToString("F2", CultureInfo.InvariantCulture));
+                Console.WriteLine("avg_outer_ms: " + avgOuter.ToString("F2", CultureInfo.InvariantCulture));
+                Console.WriteLine("avg_overhead_ms: " + Math.Max(0.0, avgFlow - avgSdk).ToString("F2", CultureInfo.InvariantCulture));
+
+                if (isFlowModel)
+                {
+                    Console.WriteLine("---- 节点平均耗时 ----");
+                    foreach (var item in nodeStats.Values.OrderByDescending(v => v.AverageMs))
+                    {
+                        double share = avgFlow > 0.0 ? item.AverageMs * 100.0 / avgFlow : 0.0;
+                        Console.WriteLine(
+                            string.Format(
+                                CultureInfo.InvariantCulture,
+                                "#{0} [{1}] {2} -> avg={3:F2}ms, share={4:F1}%",
+                                item.NodeId,
+                                item.NodeType,
+                                string.IsNullOrWhiteSpace(item.NodeTitle) ? "-" : item.NodeTitle,
+                                item.AverageMs,
+                                share));
+                    }
+                }
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("基准异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
+        }
+
+        private static int RunSingleBatchValidation(string modelPath, string imagePath, int batch)
+        {
+            Console.WriteLine("==== 单次批量验证 ====");
+            Console.WriteLine("model: " + modelPath);
+            Console.WriteLine("image: " + imagePath);
+            Console.WriteLine("batch: " + batch);
+
+            if (!File.Exists(modelPath))
+            {
+                Console.WriteLine("模型不存在");
+                return 2;
+            }
+            if (!File.Exists(imagePath))
+            {
+                Console.WriteLine("图片不存在");
+                return 2;
+            }
+
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                var list = new List<Mat>();
+                for (int i = 0; i < batch; i++) list.Add(rgb);
+                var p = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = true,
+                    ["batch_size"] = batch
+                };
+                var r = model.InferBatch(list, p);
+
+                int sampleCount = (r.SampleResults != null) ? r.SampleResults.Count : 0;
+                var detCounts = new List<int>();
+                if (r.SampleResults != null)
+                {
+                    foreach (var sr in r.SampleResults)
+                    {
+                        detCounts.Add((sr.Results != null) ? sr.Results.Count : 0);
+                    }
+                }
+
+                Console.WriteLine("sample_count: " + sampleCount);
+                Console.WriteLine("det_counts: [" + string.Join(", ", detCounts) + "]");
+
+                int nonEmpty = detCounts.Count(x => x > 0);
+                Console.WriteLine("non_empty_samples: " + nonEmpty);
+
+                DisposeResultMasks(r);
+                if (sampleCount != batch)
+                {
+                    Console.WriteLine("验证失败：sample 数量与 batch 不一致");
+                    return 1;
+                }
+                if (nonEmpty <= 0)
+                {
+                    Console.WriteLine("验证失败：所有样本结果为空");
+                    return 1;
+                }
+                Console.WriteLine("验证通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("验证异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
         }
 
         private static CaseRow RunCase(string modelPath, string imagePath)
@@ -401,6 +817,131 @@ namespace DlcvCSharpTest
             GC.Collect();
         }
 
+        private static bool IsFlowModelPath(string modelPath)
+        {
+            string ext = Path.GetExtension(modelPath) ?? string.Empty;
+            return ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase)
+                || ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase)
+                || ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int ParsePositiveIntArg(string[] args, int index, int defaultValue)
+        {
+            if (args == null || index < 0 || index >= args.Length) return defaultValue;
+            if (int.TryParse(args[index], out int value) && value > 0) return value;
+            return defaultValue;
+        }
+
+        private static int RunMaskToRBoxSelfTest()
+        {
+            Console.WriteLine("==== mask_to_rbox 自测 ====");
+
+            using (var mask = new Mat(64, 64, MatType.CV_8UC1, Scalar.Black))
+            {
+                Cv2.Rectangle(mask, new Rect(6, 12, 12, 28), Scalar.White, -1);
+                Cv2.Rectangle(mask, new Rect(28, 20, 20, 12), Scalar.White, -1);
+
+                var maskInfo = MaskRleUtils.MatToMaskInfo(mask);
+                var bbox = new JArray(100.0, 200.0, mask.Cols, mask.Rows);
+
+                RotatedRect expected;
+                using (var baselineMask = MaskRleUtils.MaskInfoToMat(maskInfo))
+                using (var points = new Mat())
+                {
+                    Cv2.FindNonZero(baselineMask, points);
+                    if (points.Empty())
+                    {
+                        Console.WriteLine("基线算法未找到非零点");
+                        return 1;
+                    }
+                    expected = Cv2.MinAreaRect(points);
+                }
+
+                RotatedRect actual;
+                if (!MaskRleUtils.TryComputeMinAreaRectFromMaskInfo(maskInfo, out actual))
+                {
+                    Console.WriteLine("优化算法未得到旋转框");
+                    return 1;
+                }
+
+                AssertNear(expected.Center.X, actual.Center.X, 0.01, "center.x");
+                AssertNear(expected.Center.Y, actual.Center.Y, 0.01, "center.y");
+                AssertNear(expected.Size.Width, actual.Size.Width, 0.01, "size.width");
+                AssertNear(expected.Size.Height, actual.Size.Height, 0.01, "size.height");
+                AssertNear(NormalizeAngleDeg(expected.Angle), NormalizeAngleDeg(actual.Angle), 0.01, "angle");
+
+                var module = new MaskToRBox(39);
+                var resultList = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = 0,
+                        ["origin_index"] = 0,
+                        ["sample_results"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["bbox"] = bbox,
+                                ["score"] = 0.99,
+                                ["category_name"] = "demo",
+                                ["mask_rle"] = maskInfo
+                            }
+                        }
+                    }
+                };
+
+                var output = module.Process(new List<ModuleImage>(), resultList);
+                var det = (((output.ResultList[0] as JObject)?["sample_results"] as JArray)?[0]) as JObject;
+                if (det == null)
+                {
+                    Console.WriteLine("模块输出为空");
+                    return 1;
+                }
+                if (det["mask_rle"] != null)
+                {
+                    Console.WriteLine("mask_rle 未被移除");
+                    return 1;
+                }
+                if ((string)det["category_name"] != "demo")
+                {
+                    Console.WriteLine("category_name 未保留");
+                    return 1;
+                }
+                if (Math.Abs(det["score"].Value<double>() - 0.99) > 1e-6)
+                {
+                    Console.WriteLine("score 未保留");
+                    return 1;
+                }
+
+                Console.WriteLine("mask_to_rbox 自测通过");
+                return 0;
+            }
+        }
+
+        private static void AssertNear(double expected, double actual, double tolerance, string label)
+        {
+            if (Math.Abs(expected - actual) > tolerance)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0} mismatch, expected={1:F4}, actual={2:F4}, tol={3:F4}",
+                        label,
+                        expected,
+                        actual,
+                        tolerance));
+            }
+        }
+
+        private static double NormalizeAngleDeg(double angleDeg)
+        {
+            double x = angleDeg % 180.0;
+            if (x < -90.0) x += 180.0;
+            if (x >= 90.0) x -= 180.0;
+            return x;
+        }
+
 
         private struct ModelCase
         {
@@ -425,6 +966,31 @@ namespace DlcvCSharpTest
             public readonly bool Supported;
             public SpeedResult(double fps, bool supported) { Fps = fps; Supported = supported; }
             public static SpeedResult Na() { return new SpeedResult(0, false); }
+        }
+
+        private sealed class NodeTimingAggregate
+        {
+            public int NodeId { get; private set; }
+            public string NodeType { get; private set; }
+            public string NodeTitle { get; private set; }
+            public int Count { get; private set; }
+            public double TotalMs { get; private set; }
+            public double AverageMs { get { return Count > 0 ? TotalMs / Count : 0.0; } }
+
+            public NodeTimingAggregate(int nodeId, string nodeType, string nodeTitle)
+            {
+                NodeId = nodeId;
+                NodeType = nodeType ?? string.Empty;
+                NodeTitle = nodeTitle ?? string.Empty;
+                Count = 0;
+                TotalMs = 0.0;
+            }
+
+            public void Add(double elapsedMs)
+            {
+                Count += 1;
+                TotalMs += Math.Max(0.0, elapsedMs);
+            }
         }
 
         private struct MemorySnapshot

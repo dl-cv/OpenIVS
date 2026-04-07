@@ -120,6 +120,20 @@ namespace DlcvModules
                         if (props.ContainsKey("model_path"))
                         {
                             string originalPath = props["model_path"].ToString();
+                            props["model_path_original"] = originalPath;
+                            string originalName = originalPath;
+                            try
+                            {
+                                string fileName = Path.GetFileName(originalPath);
+                                if (!string.IsNullOrWhiteSpace(fileName))
+                                {
+                                    originalName = fileName;
+                                }
+                            }
+                            catch
+                            {
+                            }
+                            props["model_name"] = originalName;
                             
                             // 尝试匹配策略：
                             // 1. 原始路径是否就是文件名且在映射中？

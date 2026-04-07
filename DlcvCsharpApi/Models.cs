@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using dlcv_infer_csharp;
@@ -15,6 +17,9 @@ namespace DlcvModules
 		protected string _modelPath;
 		protected int _deviceId;
 		protected Model _model;
+		protected JObject _modelInfo;
+		protected JArray _maxShape;
+		protected int _maxBatchSize = 1;
 
 		protected BaseModelModule(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
 			: base(nodeId, title, properties, context)
@@ -59,7 +64,111 @@ namespace DlcvModules
 				}
 
 				_model = new Model(_modelPath, deviceId, rpcMode, true);
+				SyncModelMeta();
 			}
+			else
+			{
+				SyncModelMeta();
+			}
+		}
+
+		protected void SyncModelMeta()
+		{
+			if (_model == null) return;
+			try
+			{
+				_modelInfo = _model.GetCachedModelInfo();
+				if (_modelInfo == null)
+				{
+					_modelInfo = _model.GetModelInfo();
+				}
+			}
+			catch { }
+
+			try { _maxShape = _model.GetCachedMaxShape(); } catch { _maxShape = null; }
+			try { _maxBatchSize = Math.Max(1, _model.GetMaxBatchSize()); } catch { _maxBatchSize = 1; }
+
+			// 将每个子模型加载时读取到的 batch 元信息写入流程上下文，供外层 DVS 包装模型汇总。
+			try
+			{
+				if (Context != null)
+				{
+					var list = Context.Get<List<Dictionary<string, object>>>("loaded_model_meta", null);
+					if (list == null)
+					{
+						list = new List<Dictionary<string, object>>();
+						Context.Set("loaded_model_meta", list);
+					}
+
+					var entry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+					{
+						["node_id"] = NodeId,
+						["title"] = Title ?? string.Empty,
+						["model_path"] = _modelPath ?? string.Empty,
+						["max_batch_size"] = _maxBatchSize,
+						["max_shape"] = _maxShape != null ? (JArray)_maxShape.DeepClone() : null
+					};
+
+					string originalPath = null;
+					string modelName = null;
+					try
+					{
+						if (Properties != null)
+						{
+							if (Properties.TryGetValue("model_path_original", out object op) && op != null)
+							{
+								originalPath = op.ToString();
+							}
+							if (Properties.TryGetValue("model_name", out object mn) && mn != null)
+							{
+								modelName = mn.ToString();
+							}
+						}
+					}
+					catch
+					{
+					}
+
+					if (string.IsNullOrWhiteSpace(originalPath))
+					{
+						originalPath = _modelPath ?? string.Empty;
+					}
+					if (string.IsNullOrWhiteSpace(modelName))
+					{
+						try
+						{
+							modelName = Path.GetFileName(originalPath);
+						}
+						catch
+						{
+							modelName = originalPath;
+						}
+					}
+
+					entry["model_path_original"] = originalPath ?? string.Empty;
+					entry["model_name"] = modelName ?? string.Empty;
+					list.Add(entry);
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		protected int ResolveEffectiveBatchLimit()
+		{
+			int modelLimit = Math.Max(1, _maxBatchSize);
+			int cfg = 0;
+			try
+			{
+				if (Properties != null && Properties.TryGetValue("batch_size", out object bv) && bv != null)
+				{
+					cfg = Convert.ToInt32(bv);
+				}
+			}
+			catch { cfg = 0; }
+			if (cfg <= 0) return modelLimit;
+			return Math.Max(1, Math.Min(modelLimit, cfg));
 		}
 
 		protected string ReadString(string key, string dv)
@@ -123,50 +232,136 @@ namespace DlcvModules
 			TryAddParam(p, "epsilon");
 			TryAddParam(p, "batch_size");
 
-			int outIndex = 0;
-			for (int i = 0; i < images.Count; i++)
+			int effectiveBatch = ResolveEffectiveBatchLimit();
+			p["batch_size"] = effectiveBatch;
+
+			var rgbInputs = new List<Mat>();
+			var convertedRgbToDispose = new List<Mat>();
+			var wraps = new List<ModuleImage>();
+			var sourceIndices = new List<int>();
+			var buckets = new Dictionary<string, List<int>>();
+			var bucketAreas = new Dictionary<string, int>();
+			bool inputsAreRgb = false;
+			try
 			{
-				var tup = Unwrap(images[i]);
-				var wrap = tup.Item1; var mat = tup.Item2;
-				if (mat == null || mat.Empty()) continue;
-
-				// mat 转为 RGB 格式
-				Mat rgbMat = new Mat();
-				Cv2.CvtColor(mat, rgbMat, ColorConversionCodes.BGR2RGB);
-
-				Utils.CSharpResult res;
-				if (p.Count > 0)
-				{
-					res = _model.Infer(rgbMat, p);
-				}
-				else
-				{
-					res = _model.Infer(rgbMat, null);
-				}
-				rgbMat.Dispose();
-
-				// 输出：沿用输入图像对象；结果转为统一 local entry
-				outImages.Add(images[i]);
-				var entry = new JObject
-				{
-					["type"] = "local",
-					["index"] = outIndex,
-					["origin_index"] = wrap != null ? wrap.OriginalIndex : i,
-					["transform"] = wrap != null && wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null,
-					["sample_results"] = ConvertToLocalSamples(res)
-				};
-				outResults.Add(entry);
-				outIndex += 1;
+				inputsAreRgb = string.Equals(
+					Context != null ? Context.Get<string>("frontend_image_color_space", null) : null,
+					"rgb",
+					StringComparison.OrdinalIgnoreCase);
 			}
+			catch { inputsAreRgb = false; }
 
-			return new ModuleIO(outImages, outResults);
+			try
+			{
+				// 1) 收集可用输入并按 shape 分桶
+				for (int i = 0; i < images.Count; i++)
+				{
+					var tup = Unwrap(images[i]);
+					var wrap = tup.Item1;
+					var mat = tup.Item2;
+					if (mat == null || mat.Empty()) continue;
+
+					Mat rgbMat = mat;
+					if (!inputsAreRgb)
+					{
+						rgbMat = new Mat();
+						Cv2.CvtColor(mat, rgbMat, ColorConversionCodes.BGR2RGB);
+						convertedRgbToDispose.Add(rgbMat);
+					}
+
+					int localIdx = rgbInputs.Count;
+					rgbInputs.Add(rgbMat);
+					wraps.Add(wrap);
+					sourceIndices.Add(i);
+
+					int h = Math.Max(0, rgbMat.Height);
+					int w = Math.Max(0, rgbMat.Width);
+					int c = Math.Max(1, rgbMat.Channels());
+					string key = h.ToString() + "x" + w.ToString() + "x" + c.ToString();
+					if (!buckets.ContainsKey(key))
+					{
+						buckets[key] = new List<int>();
+						bucketAreas[key] = h * w;
+					}
+					buckets[key].Add(localIdx);
+				}
+
+				var sampleByLocal = new List<Utils.CSharpSampleResult>();
+				for (int i = 0; i < rgbInputs.Count; i++)
+				{
+					sampleByLocal.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
+				}
+
+				// 2) 按桶面积从大到小执行 batch，并回填到 local 下标
+				var bucketKeys = new List<string>(buckets.Keys);
+				bucketKeys.Sort((a, b) => bucketAreas[b].CompareTo(bucketAreas[a]));
+				foreach (var key in bucketKeys)
+				{
+					var localIndices = buckets[key];
+					for (int start = 0; start < localIndices.Count; start += effectiveBatch)
+					{
+						int take = Math.Min(effectiveBatch, localIndices.Count - start);
+						var chunkLocals = localIndices.GetRange(start, take);
+						var chunkMats = new List<Mat>(chunkLocals.Count);
+						for (int k = 0; k < chunkLocals.Count; k++)
+						{
+							chunkMats.Add(rgbInputs[chunkLocals[k]]);
+						}
+
+                        var inferSw = Stopwatch.StartNew();
+                        Utils.CSharpResult res = p.Count > 0 ? _model.InferBatch(chunkMats, p) : _model.InferBatch(chunkMats, null);
+                        inferSw.Stop();
+                        InferTiming.AddDlcvInferMs(inferSw.Elapsed.TotalMilliseconds);
+						var batchSamples = res.SampleResults ?? new List<Utils.CSharpSampleResult>();
+						for (int k = 0; k < chunkLocals.Count; k++)
+						{
+							int localIdx = chunkLocals[k];
+							if (k < batchSamples.Count)
+							{
+								sampleByLocal[localIdx] = batchSamples[k];
+							}
+							else
+							{
+								sampleByLocal[localIdx] = new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>());
+							}
+						}
+					}
+				}
+
+				// 3) 按原输入顺序回填结果
+				int outIndex = 0;
+				for (int localIdx = 0; localIdx < rgbInputs.Count; localIdx++)
+				{
+					int srcIdx = sourceIndices[localIdx];
+					var wrap = wraps[localIdx];
+					outImages.Add(images[srcIdx]);
+
+					var entry = new JObject
+					{
+						["type"] = "local",
+						["index"] = outIndex,
+						["origin_index"] = wrap != null ? wrap.OriginalIndex : srcIdx,
+						["transform"] = wrap != null && wrap.TransformState != null ? JObject.FromObject(wrap.TransformState.ToDict()) : null,
+						["sample_results"] = ConvertToLocalSamples(sampleByLocal[localIdx])
+					};
+					outResults.Add(entry);
+					outIndex += 1;
+				}
+
+				return new ModuleIO(outImages, outResults);
+			}
+			finally
+			{
+				for (int i = 0; i < convertedRgbToDispose.Count; i++)
+				{
+					try { convertedRgbToDispose[i].Dispose(); } catch { }
+				}
+			}
 		}
 
-		private static JArray ConvertToLocalSamples(Utils.CSharpResult res)
+		private static JArray ConvertToLocalSamples(Utils.CSharpSampleResult sr)
 		{
 			var list = new JArray();
-			if (res.SampleResults == null || res.SampleResults.Count == 0) return list;
-			var sr = res.SampleResults[0];
 			if (sr.Results == null) return list;
 			foreach (var obj in sr.Results)
 			{

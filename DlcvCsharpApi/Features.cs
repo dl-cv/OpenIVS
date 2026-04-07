@@ -498,11 +498,14 @@ namespace DlcvModules
             var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
             var outResults = new JArray();
+            var rectCache = new Dictionary<JToken, RotatedRect>(new JTokenEqualityComparer());
 
-            foreach (var entryToken in results)
+            for (int i = 0; i < results.Count; i++)
             {
+                var entryToken = results[i];
                 if (!(entryToken is JObject entry) || entry["type"]?.ToString() != "local")
                 {
+                    results[i] = null;
                     outResults.Add(entryToken);
                     continue;
                 }
@@ -510,13 +513,16 @@ namespace DlcvModules
                 var dets = entry["sample_results"] as JArray;
                 if (dets == null)
                 {
-                    outResults.Add(entryToken);
+                    results[i] = null;
+                    outResults.Add(entry);
                     continue;
                 }
 
                 var newDets = new JArray();
-                foreach (var dToken in dets)
+                for (int j = 0; j < dets.Count; j++)
                 {
+                    var dToken = dets[j];
+                    dets[j] = null;
                     if (!(dToken is JObject d)) continue;
 
                     // 检查 mask_rle
@@ -538,13 +544,10 @@ namespace DlcvModules
                     RotatedRect rr;
                     try
                     {
-                        using (var maskMat = MaskRleUtils.MaskInfoToMat(maskRleToken))
-                        using (var points = new Mat())
+                        if (!rectCache.TryGetValue(maskRleToken, out rr))
                         {
-                            if (maskMat == null || maskMat.Empty()) continue;
-                            Cv2.FindNonZero(maskMat, points);
-                            if (points.Empty()) continue;
-                            rr = Cv2.MinAreaRect(points);
+                            if (!MaskRleUtils.TryComputeMinAreaRectFromMaskInfo(maskRleToken, out rr)) continue;
+                            rectCache[maskRleToken] = rr;
                         }
                     }
                     catch { continue; }
@@ -558,7 +561,7 @@ namespace DlcvModules
 
                     if (GlobalDebug.PrintDebug)
                     {
-                        GlobalDebug.Log($"[MaskToRBox] bbox大小: {rw:F2}x{rh:F2}, 最小外接矩坐标: ({rr.Center.X:F2},{rr.Center.Y:F2}), 宽高: {rw:F2}x{rh:F2}, 角度: {angDeg:F2}");
+                        // GlobalDebug.Log($"[MaskToRBox] bbox大小: {rw:F2}x{rh:F2}, 最小外接矩坐标: ({rr.Center.X:F2},{rr.Center.Y:F2}), 宽高: {rw:F2}x{rh:F2}, 角度: {angDeg:F2}");
                     }
 
                     // 转换为 le90：长边在前
@@ -572,19 +575,17 @@ namespace DlcvModules
                     double angRad = angDeg * Math.PI / 180.0;
                     angRad = NormalizeAngleLe90Rad(angRad);
 
-                    var d2 = (JObject)d.DeepClone();
-                    d2["bbox"] = new JArray(rr.Center.X, rr.Center.Y, rw, rh, angRad);
-                    d2["with_angle"] = true;
-                    d2["angle"] = angRad;
-                    d2.Remove("mask_rle"); // 移除 mask_rle 以减小体积
-                    d2.Remove("mask");
-
-                    newDets.Add(d2);
+                    d.Remove("mask_rle");
+                    d.Remove("mask");
+                    d["bbox"] = new JArray(rr.Center.X, rr.Center.Y, rw, rh, angRad);
+                    d["with_angle"] = true;
+                    d["angle"] = angRad;
+                    newDets.Add(d);
                 }
 
-                var entry2 = (JObject)entry.DeepClone();
-                entry2["sample_results"] = newDets;
-                outResults.Add(entry2);
+                entry["sample_results"] = newDets;
+                results[i] = null;
+                outResults.Add(entry);
             }
 
             return new ModuleIO(images, outResults);
@@ -596,6 +597,7 @@ namespace DlcvModules
             x = (x + Math.PI / 2.0) % Math.PI - Math.PI / 2.0;
             return x;
         }
+
     }
 
     /// <summary>
@@ -625,36 +627,49 @@ namespace DlcvModules
 
         public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
-            // 组装输入组：主输入在前，ExtraInputsIn 顺序在后
-            var groups = new List<Tuple<List<ModuleImage>, JArray>>();
-            groups.Add(Tuple.Create(imageList ?? new List<ModuleImage>(), resultList ?? new JArray()));
+            int estimatedImageCount = imageList != null ? imageList.Count : 0;
+            if (ExtraInputsIn != null)
+            {
+                foreach (var ch in ExtraInputsIn)
+                {
+                    if (ch == null || ch.ImageList == null) continue;
+                    estimatedImageCount += ch.ImageList.Count;
+                }
+            }
+            var mergedImages = new List<ModuleImage>(Math.Max(0, estimatedImageCount));
+            var mergedResults = new JArray();
+
+            MergeGroup(imageList, resultList, mergedImages, mergedResults);
             if (ExtraInputsIn != null)
             {
                 foreach (var ch in ExtraInputsIn)
                 {
                     if (ch == null) continue;
-                    groups.Add(Tuple.Create(ch.ImageList ?? new List<ModuleImage>(), ch.ResultList ?? new JArray()));
+                    MergeGroup(ch.ImageList, ch.ResultList, mergedImages, mergedResults);
                 }
             }
 
-            var mergedImages = new List<ModuleImage>();
-            var mergedResults = new JArray();
+            return new ModuleIO(mergedImages, mergedResults);
+        }
 
-            foreach (var g in groups)
+        private static void MergeGroup(
+            List<ModuleImage> imageList,
+            JArray resultList,
+            List<ModuleImage> mergedImages,
+            JArray mergedResults)
+        {
+            int baseIndex = mergedImages.Count;
+            int added = 0;
+
+            int[] localToGlobal = null;
+            if (imageList != null && imageList.Count > 0)
             {
-                var imgs = g.Item1 ?? new List<ModuleImage>();
-                var res = g.Item2 ?? new JArray();
+                localToGlobal = new int[imageList.Count];
+                for (int i = 0; i < localToGlobal.Length; i++) localToGlobal[i] = -1;
 
-                // 1) 追加图像，并建立“本组 local 索引 -> 全局索引”的映射
-                //    注意：执行器可能传入空/含 null 的 imageList（但 resultList 仍有数据）。
-                //    若用简单 offset+idx，会把结果绑定到不存在/被跳过的图像索引上，从而在下游（ReturnJson）表现为“结果丢失”。
-                int baseIndex = mergedImages.Count;
-                var localToGlobal = new Dictionary<int, int>();
-                int added = 0;
-
-                for (int i = 0; i < imgs.Count; i++)
+                for (int i = 0; i < imageList.Count; i++)
                 {
-                    var im = imgs[i];
+                    var im = imageList[i];
                     if (im == null) continue;
 
                     int globalIdx = baseIndex + added;
@@ -663,56 +678,66 @@ namespace DlcvModules
 
                     // 关键：一定要重包，确保 OriginalIndex 与全局顺序一致（Base.cs 中 OriginalIndex 为 private set，无法原地修改）
                     // 若这里退回透传，将导致多个图像的 OriginalIndex 仍为 0，进而在下游/前端按 origin_index 聚合时只保留一个。
-                    var newWrap = new ModuleImage(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
-                    mergedImages.Add(newWrap);
-                }
-
-                // 2) 追加结果：尽量把 local 结果绑定到本组输出的图像索引上（不依赖 transform）
-                foreach (var t in res)
-                {
-                    if (!(t is JObject r))
-                    {
-                        // 非对象结构直接跳过（避免异常）
-                        continue;
-                    }
-
-                    if (!string.Equals(r["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase))
-                    {
-                        mergedResults.Add(r);
-                        continue;
-                    }
-
-                    var r2 = (JObject)r.DeepClone();
-                    int idx = r2["index"]?.Value<int?>() ?? -1;
-                    int oidx = r2["origin_index"]?.Value<int?>() ?? idx;
-
-                    // 若本组只有 1 张图：强制把所有 local 结果都绑定到这张图（典型的 build_results 场景）
-                    if (added == 1)
-                    {
-                        r2["index"] = baseIndex;
-                        r2["origin_index"] = baseIndex;
-                    }
-                    else
-                    {
-                        // 否则按 idx/oidx 尝试映射到全局索引
-                        if (idx >= 0 && localToGlobal.TryGetValue(idx, out int gidx))
-                            r2["index"] = gidx;
-
-                        if (oidx >= 0 && localToGlobal.TryGetValue(oidx, out int goidx))
-                            r2["origin_index"] = goidx;
-
-                        // 兜底：若 origin_index 仍缺失，则用 index 补齐
-                        if ((r2["origin_index"] == null || r2["origin_index"].Type == JTokenType.Null) && r2["index"] != null)
-                        {
-                            try { r2["origin_index"] = r2["index"].Value<int>(); } catch { }
-                        }
-                    }
-
-                    mergedResults.Add(r2);
+                    mergedImages.Add(new ModuleImage(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx));
                 }
             }
 
-            return new ModuleIO(mergedImages, mergedResults);
+            if (resultList == null || resultList.Count == 0) return;
+
+            for (int i = 0; i < resultList.Count; i++)
+            {
+                var token = resultList[i];
+                if (!(token is JObject r))
+                {
+                    // 非对象结构直接跳过（避免异常）
+                    continue;
+                }
+
+                if (!string.Equals(r["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    resultList[i] = null;
+                    mergedResults.Add(r);
+                    continue;
+                }
+
+                int idx = r["index"]?.Value<int?>() ?? -1;
+                int oidx = r["origin_index"]?.Value<int?>() ?? idx;
+
+                // 若本组只有 1 张图：强制把所有 local 结果都绑定到这张图（典型的 build_results 场景）
+                if (added == 1)
+                {
+                    r["index"] = baseIndex;
+                    r["origin_index"] = baseIndex;
+                }
+                else
+                {
+                    // 否则按 idx/oidx 尝试映射到全局索引
+                    if (TryMapLocalIndex(localToGlobal, idx, out int gidx))
+                        r["index"] = gidx;
+
+                    if (TryMapLocalIndex(localToGlobal, oidx, out int goidx))
+                        r["origin_index"] = goidx;
+
+                    // 兜底：若 origin_index 仍缺失，则用 index 补齐
+                    if ((r["origin_index"] == null || r["origin_index"].Type == JTokenType.Null) && r["index"] != null)
+                    {
+                        try { r["origin_index"] = r["index"].Value<int>(); } catch { }
+                    }
+                }
+
+                resultList[i] = null;
+                mergedResults.Add(r);
+            }
+        }
+
+        private static bool TryMapLocalIndex(int[] localToGlobal, int localIdx, out int globalIdx)
+        {
+            globalIdx = -1;
+            if (localToGlobal == null || localIdx < 0 || localIdx >= localToGlobal.Length) return false;
+            int mapped = localToGlobal[localIdx];
+            if (mapped < 0) return false;
+            globalIdx = mapped;
+            return true;
         }
     }
 
@@ -762,25 +787,36 @@ namespace DlcvModules
             var altImages = new List<ModuleImage>();
             var altResults = new JArray();
 
-            // 构建 image 键映射
+            // 构建 image 映射：优先 index/origin_index（折回 batch 槽位），transform+origin 兜底
+            int imageCount = inImages.Count;
+            var indexToImageObj = new Dictionary<int, ModuleImage>();
+            var originToImageObj = new Dictionary<int, ModuleImage>();
             var keyToImageObj = new Dictionary<string, ModuleImage>();
             for (int i = 0; i < inImages.Count; i++)
             {
                 var (wrap, bmp) = ImageGeneration_Unwrap(inImages[i]);
                 if (bmp == null) continue;
-                string key = SerializeTransform(wrap != null ? wrap.TransformState : null, i, wrap != null ? wrap.OriginalIndex : i);
+                int originRaw = wrap != null ? wrap.OriginalIndex : i;
+                int idxFolded = FoldAliasIndex(i, imageCount);
+                int originFolded = FoldAliasIndex(originRaw, imageCount);
+                string key = SerializeTransform(wrap != null ? wrap.TransformState : null, idxFolded, originFolded);
+                indexToImageObj[idxFolded] = inImages[i];
+                originToImageObj[originFolded] = inImages[i];
                 keyToImageObj[key] = inImages[i];
             }
 
-            foreach (var t in inResults)
+            for (int ri = 0; ri < inResults.Count; ri++)
             {
-                var r = t as JObject;
+                var r = inResults[ri] as JObject;
                 if (r == null) continue;
-                int idx = r["index"]?.Value<int?>() ?? -1;
-                int originIndex = r["origin_index"]?.Value<int?>() ?? idx;
+                int idxRaw = r["index"]?.Value<int?>() ?? -1;
+                int originRaw = r["origin_index"]?.Value<int?>() ?? idxRaw;
+                int idx = FoldAliasIndex(idxRaw, imageCount);
+                int originIndex = FoldAliasIndex(originRaw, imageCount);
                 var stDict = r["transform"] as JObject;
                 var st = stDict != null ? TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()) : null;
                 string key = SerializeTransform(st, idx, originIndex);
+                ModuleImage imgObj = null;
 
                 // 复制结果，并按 categories 过滤 sample_results
                 var srsArray = r["sample_results"] as JArray;
@@ -797,7 +833,15 @@ namespace DlcvModules
                     }
                 }
 
-                if (keyToImageObj.TryGetValue(key, out ModuleImage imgObj))
+                if (!indexToImageObj.TryGetValue(idx, out imgObj))
+                {
+                    if (!originToImageObj.TryGetValue(originIndex, out imgObj))
+                    {
+                        keyToImageObj.TryGetValue(key, out imgObj);
+                    }
+                }
+
+                if (imgObj != null)
                 {
                     if (sKeep.Count > 0 || srsArray == null)
                     {
@@ -907,6 +951,13 @@ namespace DlcvModules
             var a = st.AffineMatrix2x3;
             return $"idx:{index}|org:{originIndex}|T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
         }
+
+        private static int FoldAliasIndex(int rawIndex, int imageCount)
+        {
+            if (imageCount <= 0) return rawIndex >= 0 ? rawIndex : 0;
+            if (rawIndex < 0) return 0;
+            return rawIndex % imageCount;
+        }
     }
 
     /// <summary>
@@ -937,11 +988,6 @@ namespace DlcvModules
             var inImages = imageList ?? new List<ModuleImage>();
             var inResults = resultList ?? new JArray();
 
-            var mainImages = new List<ModuleImage>();
-            var mainResults = new JArray();
-            var altImages = new List<ModuleImage>();
-            var altResults = new JArray();
-
             // 读取配置
             bool enableBBoxWh = ReadBool("enable_bbox_wh", false);
             bool enableRBoxWh = ReadBool("enable_rbox_wh", false);
@@ -962,119 +1008,131 @@ namespace DlcvModules
             double? bboxAreaMax = ReadNullableDouble("bbox_area_max");
             double? maskAreaMin = ReadNullableDouble("mask_area_min");
             double? maskAreaMax = ReadNullableDouble("mask_area_max");
+            bool noFilter = !enableBBoxWh && !enableRBoxWh && !enableBBoxArea && !enableMaskArea;
+            var maskAreaCache = enableMaskArea ? new Dictionary<JToken, double>(new JTokenEqualityComparer()) : null;
 
-            // 构建 image 键映射：仅 transform；空则退回 origin_index
+            // 常见 batch 路径里，image_list 与 result_list 是按相同顺序一一对应的。
+            // 这里直接走顺序匹配，避免每次都做 transform 反序列化和多张映射表构建。
+            if (CanUseAlignedFastPath(inImages, inResults))
+            {
+                return ProcessAlignedFastPath(
+                    inImages,
+                    inResults,
+                    enableBBoxWh,
+                    enableRBoxWh,
+                    enableBBoxArea,
+                    enableMaskArea,
+                    bboxWMin,
+                    bboxWMax,
+                    bboxHMin,
+                    bboxHMax,
+                    rboxWMin,
+                    rboxWMax,
+                    rboxHMin,
+                    rboxHMax,
+                    bboxAreaMin,
+                    bboxAreaMax,
+                    maskAreaMin,
+                    maskAreaMax,
+                    noFilter,
+                    maskAreaCache);
+            }
+
+            var mainImages = new List<ModuleImage>();
+            var mainResults = new JArray();
+            var altImages = new List<ModuleImage>();
+            var altResults = new JArray();
+
+            // 构建 image 映射：优先 index/origin_index（折回 batch 槽位），transform+origin 兜底
+            int imageCount = inImages.Count;
+            var indexToImageObj = new Dictionary<int, ModuleImage>();
+            var originToImageObj = new Dictionary<int, ModuleImage>();
             var keyToImageObj = new Dictionary<string, ModuleImage>();
             for (int i = 0; i < inImages.Count; i++)
             {
-                var tup = RFAdv_Unwrap(inImages[i]);
-                var wrap = tup.Item1; var bmp = tup.Item2;
-                if (bmp == null) continue;
-                int org = wrap != null ? wrap.OriginalIndex : i;
-                string key = SerializeTransformOnly(wrap != null ? wrap.TransformState : null, org);
-                keyToImageObj[key] = inImages[i];
+                var wrap = inImages[i];
+                if (wrap == null || wrap.ImageObject == null) continue;
+                int orgRaw = wrap.OriginalIndex;
+                int idxFolded = FoldAliasIndex(i, imageCount);
+                int orgFolded = FoldAliasIndex(orgRaw, imageCount);
+                string key = SerializeTransformOnly(wrap.TransformState, orgFolded);
+                indexToImageObj[idxFolded] = wrap;
+                originToImageObj[orgFolded] = wrap;
+                keyToImageObj[key] = wrap;
             }
 
-            foreach (var t in inResults)
+            for (int ri = 0; ri < inResults.Count; ri++)
             {
-                var r = t as JObject;
+                var r = inResults[ri] as JObject;
                 if (r == null) continue;
-                int idx = r["index"]?.Value<int?>() ?? -1;
-                int originIndex = r["origin_index"]?.Value<int?>() ?? idx;
+                int idxRaw = r["index"]?.Value<int?>() ?? -1;
+                int originRaw = r["origin_index"]?.Value<int?>() ?? idxRaw;
+                int idx = FoldAliasIndex(idxRaw, imageCount);
+                int originIndex = FoldAliasIndex(originRaw, imageCount);
                 var stDict = r["transform"] as JObject;
-                TransformationState st = null;
-                try { if (stDict != null) st = TransformationState.FromDict(stDict.ToObject<Dictionary<string, object>>()); } catch { st = null; }
-                string key = SerializeTransformOnly(st, originIndex);
+                string key = SerializeTransformOnly(stDict, originIndex);
+                ModuleImage imgObj = null;
 
                 var srsArray = r["sample_results"] as JArray;
-                var passList = new List<JObject>();
-                var failList = new List<JObject>();
-
-                if (srsArray != null)
+                JArray failArray = null;
+                if (!noFilter && srsArray != null && srsArray.Count > 0)
                 {
-                    foreach (var sToken in srsArray)
+                    SplitAdvancedFilterSamplesFast(
+                        srsArray,
+                        enableBBoxWh,
+                        enableRBoxWh,
+                        enableBBoxArea,
+                        enableMaskArea,
+                        bboxWMin,
+                        bboxWMax,
+                        bboxHMin,
+                        bboxHMax,
+                        rboxWMin,
+                        rboxWMax,
+                        rboxHMin,
+                        rboxHMax,
+                        bboxAreaMin,
+                        bboxAreaMax,
+                        maskAreaMin,
+                        maskAreaMax,
+                        maskAreaCache,
+                        out srsArray,
+                        out failArray);
+                }
+
+                if (!indexToImageObj.TryGetValue(idx, out imgObj))
+                {
+                    if (!originToImageObj.TryGetValue(originIndex, out imgObj))
                     {
-                        if (!(sToken is JObject s)) continue;
-
-                        bool withAngle = s.Value<bool?>("with_angle") ?? false;
-                        var bbox = s["bbox"] as JArray;
-                        double w = 0.0, h = 0.0;
-                        bool hasWH = false;
-                        if (bbox != null && bbox.Count >= 4)
-                        {
-                            try
-                            {
-                                if (withAngle)
-                                {
-                                    // 旋转框：bbox=[cx,cy,w,h]
-                                    w = Math.Abs(bbox[2].Value<double>());
-                                    h = Math.Abs(bbox[3].Value<double>());
-                                }
-                                else
-                                {
-                                    // 轴对齐：bbox=[x,y,w,h]
-                                    w = Math.Abs(bbox[2].Value<double>());
-                                    h = Math.Abs(bbox[3].Value<double>());
-                                }
-                                hasWH = true;
-                            }
-                            catch { hasWH = false; }
-                        }
-
-                        // 面积
-                        double bboxArea = hasWH ? (w * h) : 0.0;
-                        double maskArea = MaskRleUtils.CalculateMaskArea(s["mask_rle"]);
-
-                        bool pass = true;
-                        if (enableBBoxWh && hasWH)
-                        {
-                            pass = pass && InRange(w, bboxWMin, bboxWMax) && InRange(h, bboxHMin, bboxHMax);
-                        }
-                        if (enableRBoxWh && hasWH && withAngle)
-                        {
-                            pass = pass && InRange(w, rboxWMin, rboxWMax) && InRange(h, rboxHMin, rboxHMax);
-                        }
-                        if (enableBBoxArea && hasWH)
-                        {
-                            pass = pass && InRange(bboxArea, bboxAreaMin, bboxAreaMax);
-                        }
-                        if (enableMaskArea && maskArea > 0)
-                        {
-                            pass = pass && InRange(maskArea, maskAreaMin, maskAreaMax);
-                        }
-
-                        if (pass) passList.Add(s);
-                        else failList.Add(s);
+                        keyToImageObj.TryGetValue(key, out imgObj);
                     }
                 }
 
-                if (keyToImageObj.TryGetValue(key, out ModuleImage imgObj))
+                if (imgObj != null)
                 {
-                    if (passList.Count > 0 || srsArray == null)
+                    if ((srsArray != null && srsArray.Count > 0) || srsArray == null)
                     {
                         mainImages.Add(imgObj);
-                        var e = new JObject
-                        {
-                            ["type"] = "local",
-                            ["index"] = mainResults.Count,
-                            ["origin_index"] = originIndex,
-                            ["transform"] = st != null ? JObject.FromObject(st.ToDict()) : null,
-                            ["sample_results"] = new JArray(passList)
-                        };
-                        mainResults.Add(e);
+                        r["type"] = "local";
+                        r["index"] = mainResults.Count;
+                        r["origin_index"] = originIndex;
+                        if (srsArray == null) r["sample_results"] = new JArray();
+                        else if (!ReferenceEquals(r["sample_results"], srsArray)) r["sample_results"] = srsArray;
+                        // 先从输入数组摘除，再加入输出，避免 JToken 因 Parent 存在而被隐式 DeepClone。
+                        inResults[ri] = null;
+                        mainResults.Add(r);
                     }
-                    if (failList.Count > 0)
+                    if (failArray != null && failArray.Count > 0)
                     {
                         altImages.Add(imgObj);
-                        var e2 = new JObject
+                        altResults.Add(new JObject
                         {
                             ["type"] = "local",
                             ["index"] = altResults.Count,
                             ["origin_index"] = originIndex,
-                            ["transform"] = st != null ? JObject.FromObject(st.ToDict()) : null,
-                            ["sample_results"] = new JArray(failList)
-                        };
-                        altResults.Add(e2);
+                            ["transform"] = stDict != null ? stDict.DeepClone() : null,
+                            ["sample_results"] = failArray
+                        });
                     }
                 }
             }
@@ -1082,6 +1140,255 @@ namespace DlcvModules
             // 通过 extra output 暴露第二路（未通过项）
             this.ExtraOutputs.Add(new ModuleChannel(altImages, altResults));
             return new ModuleIO(mainImages, mainResults);
+        }
+
+        private ModuleIO ProcessAlignedFastPath(
+            List<ModuleImage> inImages,
+            JArray inResults,
+            bool enableBBoxWh,
+            bool enableRBoxWh,
+            bool enableBBoxArea,
+            bool enableMaskArea,
+            double? bboxWMin,
+            double? bboxWMax,
+            double? bboxHMin,
+            double? bboxHMax,
+            double? rboxWMin,
+            double? rboxWMax,
+            double? rboxHMin,
+            double? rboxHMax,
+            double? bboxAreaMin,
+            double? bboxAreaMax,
+            double? maskAreaMin,
+            double? maskAreaMax,
+            bool noFilter,
+            Dictionary<JToken, double> maskAreaCache)
+        {
+            var mainImages = new List<ModuleImage>();
+            var mainResults = new JArray();
+            var altImages = new List<ModuleImage>();
+            var altResults = new JArray();
+
+            for (int i = 0; i < inImages.Count; i++)
+            {
+                var imgObj = inImages[i];
+                var resultObj = i < inResults.Count ? inResults[i] as JObject : null;
+                if (imgObj == null || resultObj == null) continue;
+
+                var srsArray = resultObj["sample_results"] as JArray;
+                JArray failArray = null;
+                if (!noFilter && srsArray != null && srsArray.Count > 0)
+                {
+                    SplitAdvancedFilterSamplesFast(
+                        srsArray,
+                        enableBBoxWh,
+                        enableRBoxWh,
+                        enableBBoxArea,
+                        enableMaskArea,
+                        bboxWMin,
+                        bboxWMax,
+                        bboxHMin,
+                        bboxHMax,
+                        rboxWMin,
+                        rboxWMax,
+                        rboxHMin,
+                        rboxHMax,
+                        bboxAreaMin,
+                        bboxAreaMax,
+                        maskAreaMin,
+                        maskAreaMax,
+                        maskAreaCache,
+                        out srsArray,
+                        out failArray);
+                }
+
+                int originIndex = resultObj["origin_index"]?.Value<int?>() ?? (imgObj != null ? imgObj.OriginalIndex : i);
+                JToken transformToken = resultObj["transform"];
+
+                if ((srsArray != null && srsArray.Count > 0) || srsArray == null)
+                {
+                    mainImages.Add(imgObj);
+                    resultObj["type"] = "local";
+                    resultObj["index"] = mainResults.Count;
+                    resultObj["origin_index"] = originIndex;
+                    if (srsArray == null) resultObj["sample_results"] = new JArray();
+                    else if (!ReferenceEquals(resultObj["sample_results"], srsArray)) resultObj["sample_results"] = srsArray;
+                    inResults[i] = null;
+                    mainResults.Add(resultObj);
+                }
+
+                if (failArray != null && failArray.Count > 0)
+                {
+                    altImages.Add(imgObj);
+                    altResults.Add(new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = altResults.Count,
+                        ["origin_index"] = originIndex,
+                        ["transform"] = transformToken != null ? transformToken.DeepClone() : null,
+                        ["sample_results"] = failArray
+                    });
+                }
+            }
+
+            this.ExtraOutputs.Add(new ModuleChannel(altImages, altResults));
+            return new ModuleIO(mainImages, mainResults);
+        }
+
+        private static bool CanUseAlignedFastPath(List<ModuleImage> inImages, JArray inResults)
+        {
+            if (inImages == null || inResults == null) return false;
+            if (inImages.Count == 0 || inImages.Count != inResults.Count) return false;
+            for (int i = 0; i < inResults.Count; i++)
+            {
+                var obj = inResults[i] as JObject;
+                if (obj == null) return false;
+                string type = obj["type"] != null ? obj["type"].ToString() : null;
+                if (!string.Equals(type, "local", StringComparison.OrdinalIgnoreCase)) return false;
+            }
+            return true;
+        }
+
+        private static void SplitAdvancedFilterSamplesFast(
+            JArray srsArray,
+            bool enableBBoxWh,
+            bool enableRBoxWh,
+            bool enableBBoxArea,
+            bool enableMaskArea,
+            double? bboxWMin,
+            double? bboxWMax,
+            double? bboxHMin,
+            double? bboxHMax,
+            double? rboxWMin,
+            double? rboxWMax,
+            double? rboxHMin,
+            double? rboxHMax,
+            double? bboxAreaMin,
+            double? bboxAreaMax,
+            double? maskAreaMin,
+            double? maskAreaMax,
+            Dictionary<JToken, double> maskAreaCache,
+            out JArray passArray,
+            out JArray failArray)
+        {
+            passArray = new JArray();
+            failArray = null;
+            if (srsArray == null || srsArray.Count == 0) return;
+
+            for (int i = 0; i < srsArray.Count; i++)
+            {
+                var token = srsArray[i];
+                srsArray[i] = null;
+                if (!(token is JObject s))
+                {
+                    // 与旧实现保持一致：非对象样本直接丢弃
+                    continue;
+                }
+
+                if (EvaluateAdvancedFilterPass(
+                    s,
+                    enableBBoxWh,
+                    enableRBoxWh,
+                    enableBBoxArea,
+                    enableMaskArea,
+                    bboxWMin,
+                    bboxWMax,
+                    bboxHMin,
+                    bboxHMax,
+                    rboxWMin,
+                    rboxWMax,
+                    rboxHMin,
+                    rboxHMax,
+                    bboxAreaMin,
+                    bboxAreaMax,
+                    maskAreaMin,
+                    maskAreaMax,
+                    maskAreaCache))
+                {
+                    passArray.Add(s);
+                    continue;
+                }
+
+                if (failArray == null) failArray = new JArray();
+                failArray.Add(s);
+            }
+        }
+
+        private static bool EvaluateAdvancedFilterPass(
+            JObject s,
+            bool enableBBoxWh,
+            bool enableRBoxWh,
+            bool enableBBoxArea,
+            bool enableMaskArea,
+            double? bboxWMin,
+            double? bboxWMax,
+            double? bboxHMin,
+            double? bboxHMax,
+            double? rboxWMin,
+            double? rboxWMax,
+            double? rboxHMin,
+            double? rboxHMax,
+            double? bboxAreaMin,
+            double? bboxAreaMax,
+            double? maskAreaMin,
+            double? maskAreaMax,
+            Dictionary<JToken, double> maskAreaCache)
+        {
+            if (s == null) return false;
+
+            bool withAngle = s.Value<bool?>("with_angle") ?? false;
+            var bbox = s["bbox"] as JArray;
+            double w = 0.0, h = 0.0;
+            bool hasWH = false;
+            if (bbox != null && bbox.Count >= 4)
+            {
+                try
+                {
+                    w = Math.Abs(bbox[2].Value<double>());
+                    h = Math.Abs(bbox[3].Value<double>());
+                    hasWH = true;
+                }
+                catch { hasWH = false; }
+            }
+
+            double bboxArea = hasWH ? (w * h) : 0.0;
+
+            bool pass = true;
+            if (enableBBoxWh && hasWH)
+            {
+                pass = pass && InRange(w, bboxWMin, bboxWMax) && InRange(h, bboxHMin, bboxHMax);
+            }
+            if (enableRBoxWh && hasWH && withAngle)
+            {
+                pass = pass && InRange(w, rboxWMin, rboxWMax) && InRange(h, rboxHMin, rboxHMax);
+            }
+            if (enableBBoxArea && hasWH)
+            {
+                pass = pass && InRange(bboxArea, bboxAreaMin, bboxAreaMax);
+            }
+            if (pass && enableMaskArea)
+            {
+                var maskToken = s["mask_rle"];
+                double maskArea = 0.0;
+                if (maskAreaCache != null && maskToken != null)
+                {
+                    if (!maskAreaCache.TryGetValue(maskToken, out maskArea))
+                    {
+                        maskArea = MaskRleUtils.CalculateMaskArea(maskToken);
+                        maskAreaCache[maskToken] = maskArea;
+                    }
+                }
+                else
+                {
+                    maskArea = MaskRleUtils.CalculateMaskArea(maskToken);
+                }
+                if (maskArea > 0)
+                {
+                    pass = pass && InRange(maskArea, maskAreaMin, maskAreaMax);
+                }
+            }
+
+            return pass;
         }
 
         private static bool InRange(double v, double? minV, double? maxV)
@@ -1117,13 +1424,35 @@ namespace DlcvModules
                 return $"org:{originIndex}|T:null";
             }
             var a = st.AffineMatrix2x3;
-            return $"T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
+            return $"org:{originIndex}|T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
         }
 
-        private static Tuple<ModuleImage, Mat> RFAdv_Unwrap(ModuleImage obj)
+        private static string SerializeTransformOnly(JObject stObj, int originIndex)
         {
-            if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
-            return Tuple.Create(obj, obj.ImageObject);
+            if (stObj == null) return $"org:{originIndex}|T:null";
+            var affine = stObj["affine_2x3"] as JArray;
+            if (affine == null || affine.Count < 6) return $"org:{originIndex}|T:null";
+            try
+            {
+                double a0 = affine[0].Value<double>();
+                double a1 = affine[1].Value<double>();
+                double a2 = affine[2].Value<double>();
+                double a3 = affine[3].Value<double>();
+                double a4 = affine[4].Value<double>();
+                double a5 = affine[5].Value<double>();
+                return $"org:{originIndex}|T:{a0:F4},{a1:F4},{a2:F2},{a3:F4},{a4:F4},{a5:F2}";
+            }
+            catch
+            {
+                return $"org:{originIndex}|T:null";
+            }
+        }
+
+        private static int FoldAliasIndex(int rawIndex, int imageCount)
+        {
+            if (imageCount <= 0) return rawIndex >= 0 ? rawIndex : 0;
+            if (rawIndex < 0) return 0;
+            return rawIndex % imageCount;
         }
     }
 
@@ -1209,6 +1538,59 @@ namespace DlcvModules
                     return Convert.ToInt32(Convert.ToDouble(v));
                 }
                 catch { return dv; }
+            }
+            return dv;
+        }
+    }
+
+    /// <summary>
+    /// 模块名称：按比例缩放
+    /// 按比例缩放（scale=2 表示宽高各缩小 2 倍）并透传结果；注册名：pre_process/image_rescale, features/image_rescale
+    /// properties: scale(double>0)
+    /// </summary>
+    public class ImageRescale : BaseModule
+    {
+        static ImageRescale()
+        {
+            ModuleRegistry.Register("pre_process/image_rescale", typeof(ImageRescale));
+            ModuleRegistry.Register("features/image_rescale", typeof(ImageRescale));
+        }
+
+        public ImageRescale(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var images = imageList ?? new List<ModuleImage>();
+            var results = resultList ?? new JArray();
+            double scale = ReadDoubleLike("scale", 1.0);
+            if (scale <= 0) scale = 1.0;
+            var outImages = new List<ModuleImage>();
+
+            foreach (var wrap in images)
+            {
+                if (wrap == null || wrap.ImageObject == null || wrap.ImageObject.Empty()) continue;
+                var baseMat = wrap.ImageObject;
+                int W = Math.Max(1, baseMat.Width), H = Math.Max(1, baseMat.Height);
+                int tw = Math.Max(1, (int)Math.Round(W / scale));
+                int th = Math.Max(1, (int)Math.Round(H / scale));
+                var resized = new Mat();
+                Cv2.Resize(baseMat, resized, new Size(tw, th));
+                var A = new double[] { (double)tw / W, 0, 0, 0, (double)th / H, 0 };
+                var parentState = wrap.TransformState ?? new TransformationState(W, H);
+                var childState = parentState.DeriveChild(A, tw, th);
+                outImages.Add(new ModuleImage(resized, wrap.OriginalImage ?? baseMat, childState, wrap.OriginalIndex));
+            }
+            return new ModuleIO(outImages, results);
+        }
+
+        private double ReadDoubleLike(string key, double dv)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+            {
+                try { return Convert.ToDouble(v); } catch { return dv; }
             }
             return dv;
         }
