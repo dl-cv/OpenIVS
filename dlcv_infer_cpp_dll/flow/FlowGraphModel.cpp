@@ -1,9 +1,12 @@
 ﻿#include "flow/FlowGraphModel.h"
+#include "flow/FlowPayloadTypes.h"
 #include "flow/modules/ModelModules.h"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace dlcv_infer {
 namespace flow {
@@ -20,6 +23,148 @@ static std::string ReadAllTextUtf8(const std::string& path) {
         ifs.read(&s[0], len);
     }
     return s;
+}
+
+static int ParseNodeOrder(const std::string& nodeKey) {
+    if (nodeKey.empty()) return INT_MAX;
+    try {
+        return std::stoi(nodeKey);
+    } catch (...) {
+        return INT_MAX;
+    }
+}
+
+static int ResolvePerImageTargetIndex(const FlowByImageEntry& item, int position, int imageCount) {
+    if (imageCount <= 0) return -1;
+    if (item.OriginIndex >= 0) {
+        return item.OriginIndex % imageCount;
+    }
+    return position >= 0 ? (position % imageCount) : -1;
+}
+
+static std::string BuildResultSignature(const FlowResultItem& item) {
+    Json j = item.ToJson();
+    try {
+        return j.dump();
+    } catch (...) {
+        return std::string();
+    }
+}
+
+static void AppendResultsDedup(std::vector<FlowResultItem>& target, const std::vector<FlowResultItem>& source) {
+    if (source.empty()) return;
+    std::unordered_set<std::string> seen;
+    seen.reserve(target.size() + source.size());
+
+    for (const auto& item : target) {
+        const std::string sig = BuildResultSignature(item);
+        if (!sig.empty()) seen.insert(sig);
+    }
+
+    for (const auto& item : source) {
+        const std::string sig = BuildResultSignature(item);
+        if (!sig.empty()) {
+            if (seen.find(sig) != seen.end()) {
+                continue;
+            }
+            seen.insert(sig);
+        }
+        target.push_back(item);
+    }
+}
+
+static std::vector<FlowFrontendByNodePayload> CollectFrontendPayloads(ExecutionContext& ctx) {
+    std::vector<FlowFrontendByNodePayload> payloads;
+
+    // 优先原生 payload（由 output/return_json 直接写入）
+    try {
+        std::vector<FlowFrontendByNodePayload> typed = ctx.Get<std::vector<FlowFrontendByNodePayload>>(
+            "frontend_payloads_by_node", std::vector<FlowFrontendByNodePayload>());
+        if (!typed.empty()) {
+            std::sort(typed.begin(), typed.end(), [](const FlowFrontendByNodePayload& a, const FlowFrontendByNodePayload& b) {
+                if (a.NodeOrder != b.NodeOrder) return a.NodeOrder < b.NodeOrder;
+                return a.FallbackOrder < b.FallbackOrder;
+            });
+            return typed;
+        }
+    } catch (...) {}
+
+    // 回退 JSON by_node
+    Json feJson = ctx.Get<Json>("frontend_json", Json::object());
+    Json byNode = Json::object();
+    try {
+        if (feJson.is_object() && feJson.contains("by_node") && feJson.at("by_node").is_object()) {
+            byNode = feJson.at("by_node");
+        }
+    } catch (...) {}
+    if (!byNode.is_object() || byNode.empty()) {
+        try {
+            byNode = ctx.Get<Json>("frontend_json_by_node", Json::object());
+        } catch (...) {
+            byNode = Json::object();
+        }
+    }
+
+    if (byNode.is_object() && !byNode.empty()) {
+        int fallbackOrder = 0;
+        for (auto it = byNode.begin(); it != byNode.end(); ++it) {
+            if (!it.value().is_object()) continue;
+            FlowFrontendByNodePayload one;
+            one.NodeOrder = ParseNodeOrder(it.key());
+            one.FallbackOrder = fallbackOrder++;
+            one.Payload = FlowFrontendPayload::FromJson(it.value());
+            payloads.push_back(std::move(one));
+        }
+        std::sort(payloads.begin(), payloads.end(), [](const FlowFrontendByNodePayload& a, const FlowFrontendByNodePayload& b) {
+            if (a.NodeOrder != b.NodeOrder) return a.NodeOrder < b.NodeOrder;
+            return a.FallbackOrder < b.FallbackOrder;
+        });
+        return payloads;
+    }
+
+    // 回退 last
+    try {
+        if (feJson.is_object() && feJson.contains("last") && feJson.at("last").is_object()) {
+            FlowFrontendByNodePayload lastPayload;
+            lastPayload.NodeOrder = INT_MAX;
+            lastPayload.FallbackOrder = 0;
+            lastPayload.Payload = FlowFrontendPayload::FromJson(feJson.at("last"));
+            payloads.push_back(std::move(lastPayload));
+            return payloads;
+        }
+    } catch (...) {}
+
+    try {
+        FlowFrontendPayload lastTyped = ctx.Get<FlowFrontendPayload>("frontend_payload_last", FlowFrontendPayload());
+        if (!lastTyped.ByImage.empty()) {
+            FlowFrontendByNodePayload one;
+            one.NodeOrder = INT_MAX;
+            one.FallbackOrder = 0;
+            one.Payload = std::move(lastTyped);
+            payloads.push_back(std::move(one));
+        }
+    } catch (...) {}
+
+    return payloads;
+}
+
+static FlowBatchResult AggregateFrontendResults(ExecutionContext& ctx, int imageCount) {
+    FlowBatchResult batch;
+    if (imageCount <= 0) return batch;
+    batch.PerImageResults.assign(static_cast<size_t>(imageCount), std::vector<FlowResultItem>());
+
+    const std::vector<FlowFrontendByNodePayload> payloads = CollectFrontendPayloads(ctx);
+    for (const auto& payload : payloads) {
+        const auto& byImage = payload.Payload.ByImage;
+        for (int i = 0; i < static_cast<int>(byImage.size()); i++) {
+            const FlowByImageEntry& item = byImage[static_cast<size_t>(i)];
+            const int targetIndex = ResolvePerImageTargetIndex(item, i, imageCount);
+            if (targetIndex < 0 || targetIndex >= imageCount) continue;
+            AppendResultsDedup(batch.PerImageResults[static_cast<size_t>(targetIndex)], item.Results);
+        }
+    }
+
+    return batch;
 }
 
 void FlowGraphModel::ReleaseNoexcept() {
@@ -150,59 +295,28 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
     if (images.empty()) throw std::invalid_argument("images is empty");
 
-    Json merged = Json::array();
-    for (size_t i = 0; i < images.size(); i++) {
-        const cv::Mat& img = images[i];
-        if (img.empty()) {
-            merged.push_back(Json::array());
-            continue;
-        }
-
-        // 约定：C++ 侧使用 OpenCV 默认 BGR，不做强制转换
-        cv::Mat bgrMat = img;
-
-        ExecutionContext ctx;
-        ctx.Set<cv::Mat>("frontend_image_mat", bgrMat);
-        ctx.Set<std::string>("frontend_image_path", std::string());
-        ctx.Set<int>("device_id", _deviceId);
-
-        GraphExecutor exec(_nodes, &ctx);
-        (void)exec.Run();
-
-        Json resultList = Json::array();
-        Json feJson = ctx.Get<Json>("frontend_json", Json());
-        try {
-            if (feJson.is_object() && feJson.contains("last")) {
-                const auto& lastPayload = feJson.at("last");
-                if (lastPayload.is_object() && lastPayload.contains("by_image") && lastPayload.at("by_image").is_array()) {
-                    for (const auto& item : lastPayload.at("by_image")) {
-                        if (!item.is_object()) continue;
-                        if (!item.contains("results")) continue;
-                        const auto& resultsObj = item.at("results");
-                        if (resultsObj.is_array()) {
-                            for (const auto& r : resultsObj) resultList.push_back(r);
-                        } else if (!resultsObj.is_null()) {
-                            // 兜底：非数组当作单个结果
-                            resultList.push_back(resultsObj);
-                        }
-                    }
-                }
-            }
-        } catch (...) {
-            // ignore
-        }
-
-        merged.push_back(resultList);
+    // 入口与 C# 对齐：前端输入语义为 RGB。
+    // 当前流程节点按 frontend_image_color_space 决定是否转换，因此此处仅透传。
+    std::vector<cv::Mat> rgbBatch;
+    rgbBatch.reserve(images.size());
+    for (const auto& img : images) {
+        rgbBatch.push_back(img);
     }
 
-    Json out = Json::object();
-    if (images.size() == 1) {
-        out["result_list"] = merged.size() > 0 ? merged.at(0) : Json::array();
-    } else {
-        out["result_list"] = merged;
-    }
+    ExecutionContext ctx;
+    ctx.Set<cv::Mat>("frontend_image_mat", rgbBatch.empty() ? cv::Mat() : rgbBatch[0]); // 兼容旧单图入口
+    ctx.Set<std::vector<cv::Mat>>("frontend_image_mats", rgbBatch);
+    ctx.Set<std::vector<cv::Mat>>("frontend_image_mat_list", rgbBatch);
+    ctx.Set<std::string>("frontend_image_color_space", "rgb");
+    ctx.Set<std::string>("frontend_image_path", std::string());
+    ctx.Set<int>("device_id", _deviceId);
+
+    GraphExecutor exec(_nodes, &ctx);
+    (void)exec.Run();
+
+    const FlowBatchResult batch = AggregateFrontendResults(ctx, static_cast<int>(images.size()));
     (void)paramsJson; // 预留：未来可将 paramsJson 注入 ctx 或模块属性覆盖
-    return out;
+    return batch.ToFlowRootJson();
 }
 
 Json FlowGraphModel::InferOneOutJson(const cv::Mat& image, const Json& paramsJson) {

@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <unordered_map>
+
+#include "opencv2/imgproc.hpp"
 
 namespace dlcv_infer {
 namespace flow {
@@ -103,6 +106,90 @@ static Json ConvertToLocalSamples(const dlcv_infer::Result& res) {
     return list;
 }
 
+static Json ConvertSampleResultToLocalSamples(const dlcv_infer::SampleResult& sr) {
+    Json list = Json::array();
+    for (const auto& obj : sr.results) {
+        Json o = Json::object();
+        o["category_id"] = obj.categoryId;
+        // dlcv_infer::Model 侧把 categoryName 从 UTF-8 转为 GBK 了；FlowGraph 内统一使用 UTF-8
+        o["category_name"] = dlcv_infer::convertGbkToUtf8(obj.categoryName);
+        o["score"] = obj.score;
+        o["area"] = obj.area;
+        o["bbox"] = obj.bbox;
+        o["with_bbox"] = obj.withBbox;
+        o["with_mask"] = obj.withMask;
+        o["with_angle"] = obj.withAngle;
+        o["angle"] = obj.withAngle ? obj.angle : -100.0;
+
+        if (obj.withMask && !obj.mask.empty()) {
+            try {
+                o["mask_rle"] = MatToMaskInfo(obj.mask);
+            } catch (...) {
+                // ignore
+            }
+        }
+        list.push_back(o);
+    }
+    return list;
+}
+
+static int ReadIntLike(const Json& v, int dv) {
+    try {
+        if (v.is_number_integer()) return v.get<int>();
+        if (v.is_number()) return static_cast<int>(std::llround(v.get<double>()));
+        if (v.is_string()) return std::stoi(v.get<std::string>());
+    } catch (...) {}
+    return dv;
+}
+
+static int FindMaxBatchSizeRecursively(const Json& token, int current) {
+    int best = std::max(1, current);
+    try {
+        if (token.is_object()) {
+            if (token.contains("max_batch_size")) {
+                best = std::max(best, std::max(1, ReadIntLike(token.at("max_batch_size"), 1)));
+            }
+            if (token.contains("max_batch")) {
+                best = std::max(best, std::max(1, ReadIntLike(token.at("max_batch"), 1)));
+            }
+            if (token.contains("batch_size")) {
+                best = std::max(best, std::max(1, ReadIntLike(token.at("batch_size"), 1)));
+            }
+            for (auto it = token.begin(); it != token.end(); ++it) {
+                best = std::max(best, FindMaxBatchSizeRecursively(it.value(), best));
+            }
+        } else if (token.is_array()) {
+            for (const auto& one : token) {
+                best = std::max(best, FindMaxBatchSizeRecursively(one, best));
+            }
+        }
+    } catch (...) {}
+    return std::max(1, best);
+}
+
+static int ResolveEffectiveBatchLimit(const std::shared_ptr<dlcv_infer::Model>& model, const Json& props) {
+    int modelLimit = 1;
+    try {
+        if (model) {
+            modelLimit = FindMaxBatchSizeRecursively(model->GetModelInfo(), 1);
+        }
+    } catch (...) {
+        modelLimit = 1;
+    }
+    modelLimit = std::max(1, modelLimit);
+
+    int cfg = 0;
+    try {
+        if (props.is_object() && props.contains("batch_size")) {
+            cfg = ReadIntLike(props.at("batch_size"), 0);
+        }
+    } catch (...) {
+        cfg = 0;
+    }
+    if (cfg <= 0) return modelLimit;
+    return std::max(1, std::min(modelLimit, cfg));
+}
+
 static double ReadScoreForSort(const Json& token) {
     try {
         if (token.is_object() && token.contains("score")) {
@@ -150,23 +237,109 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     TryAddParam(p, this->Properties, "epsilon");
     TryAddParam(p, this->Properties, "batch_size");
 
-    int outIndex = 0;
+    const int effectiveBatch = ResolveEffectiveBatchLimit(_model, this->Properties);
+    p["batch_size"] = effectiveBatch;
+
+    std::vector<cv::Mat> rgbInputs;
+    std::vector<cv::Mat> convertedRgbToDispose;
+    std::vector<ModuleImage> wraps;
+    std::vector<int> sourceIndices;
+    std::unordered_map<std::string, std::vector<int>> buckets;
+    std::unordered_map<std::string, int> bucketAreas;
+
+    bool inputsAreRgb = false;
+    try {
+        if (Context != nullptr) {
+            const std::string colorSpace = Context->Get<std::string>("frontend_image_color_space", std::string());
+            inputsAreRgb = (colorSpace == "rgb" || colorSpace == "RGB");
+        }
+    } catch (...) {
+        inputsAreRgb = false;
+    }
+
+    // 1) 收集可用输入并按 shape 分桶
     for (size_t i = 0; i < images.size(); i++) {
         const ModuleImage& wrap = images[i];
         const cv::Mat& mat = wrap.ImageObject;
         if (mat.empty()) continue;
 
-        // C++ 侧约定使用 BGR；不做 RGB/BGR 强制转换
-        dlcv_infer::json paramsToPass = p.empty() ? dlcv_infer::json(nullptr) : dlcv_infer::json(p);
-        dlcv_infer::Result res = _model->Infer(mat, paramsToPass);
+        cv::Mat rgbMat = mat;
+        if (!inputsAreRgb) {
+            cv::cvtColor(mat, rgbMat, cv::COLOR_BGR2RGB);
+            convertedRgbToDispose.push_back(rgbMat);
+        }
 
-        outImages.push_back(wrap);
+        const int localIdx = static_cast<int>(rgbInputs.size());
+        rgbInputs.push_back(rgbMat);
+        wraps.push_back(wrap);
+        sourceIndices.push_back(static_cast<int>(i));
+
+        const int h = std::max(0, rgbMat.rows);
+        const int w = std::max(0, rgbMat.cols);
+        const int c = std::max(1, rgbMat.channels());
+        const std::string key = std::to_string(h) + "x" + std::to_string(w) + "x" + std::to_string(c);
+        auto it = buckets.find(key);
+        if (it == buckets.end()) {
+            buckets[key] = std::vector<int>();
+            bucketAreas[key] = h * w;
+        }
+        buckets[key].push_back(localIdx);
+    }
+
+    std::vector<Json> sampleByLocal(rgbInputs.size(), Json::array());
+    dlcv_infer::json paramsToPass = p.empty() ? dlcv_infer::json(nullptr) : dlcv_infer::json(p);
+
+    // 2) 按桶面积从大到小执行 batch，并回填到 local 下标
+    std::vector<std::string> bucketKeys;
+    bucketKeys.reserve(buckets.size());
+    for (const auto& kv : buckets) bucketKeys.push_back(kv.first);
+    std::sort(bucketKeys.begin(), bucketKeys.end(), [&bucketAreas](const std::string& a, const std::string& b) {
+        const int aa = bucketAreas.count(a) ? bucketAreas.at(a) : 0;
+        const int bb = bucketAreas.count(b) ? bucketAreas.at(b) : 0;
+        if (aa != bb) return aa > bb;
+        return a < b;
+    });
+
+    for (const auto& key : bucketKeys) {
+        const auto& localIndices = buckets[key];
+        for (int start = 0; start < static_cast<int>(localIndices.size()); start += effectiveBatch) {
+            const int take = std::min(effectiveBatch, static_cast<int>(localIndices.size()) - start);
+            std::vector<int> chunkLocals;
+            std::vector<cv::Mat> chunkMats;
+            chunkLocals.reserve(static_cast<size_t>(take));
+            chunkMats.reserve(static_cast<size_t>(take));
+            for (int k = 0; k < take; k++) {
+                const int localIdx = localIndices[static_cast<size_t>(start + k)];
+                chunkLocals.push_back(localIdx);
+                chunkMats.push_back(rgbInputs[static_cast<size_t>(localIdx)]);
+            }
+
+            dlcv_infer::Result res = _model->InferBatch(chunkMats, paramsToPass);
+            const auto& batchSamples = res.sampleResults;
+            for (int k = 0; k < static_cast<int>(chunkLocals.size()); k++) {
+                const int localIdx = chunkLocals[static_cast<size_t>(k)];
+                if (k < static_cast<int>(batchSamples.size())) {
+                    sampleByLocal[static_cast<size_t>(localIdx)] = ConvertSampleResultToLocalSamples(batchSamples[static_cast<size_t>(k)]);
+                } else {
+                    sampleByLocal[static_cast<size_t>(localIdx)] = Json::array();
+                }
+            }
+        }
+    }
+
+    // 3) 按原输入顺序回填结果
+    int outIndex = 0;
+    for (int localIdx = 0; localIdx < static_cast<int>(rgbInputs.size()); localIdx++) {
+        const int srcIdx = sourceIndices[static_cast<size_t>(localIdx)];
+        const ModuleImage& wrap = wraps[static_cast<size_t>(localIdx)];
+        outImages.push_back(images[static_cast<size_t>(srcIdx)]);
+
         Json entry = Json::object();
         entry["type"] = "local";
         entry["index"] = outIndex;
         entry["origin_index"] = wrap.OriginalIndex;
         entry["transform"] = wrap.TransformState.ToJson();
-        entry["sample_results"] = ConvertToLocalSamples(res);
+        entry["sample_results"] = sampleByLocal[static_cast<size_t>(localIdx)];
         outResults.push_back(entry);
         outIndex += 1;
     }
