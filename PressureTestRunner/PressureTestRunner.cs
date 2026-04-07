@@ -287,6 +287,7 @@ namespace DLCV
             {
                 sb.AppendLine($"平均延迟(总时间): {averageTotalInferLatency:F2}ms");
             }
+            sb.AppendLine($"实时速率: {recentRate:F2} 请求/秒");
             if (_isFlowModelTiming && averageNodeTimings != null && averageNodeTimings.Count > 0)
             {
                 sb.AppendLine("模块平均耗时:");
@@ -297,7 +298,6 @@ namespace DLCV
                     sb.AppendLine($"#{item.NodeId} [{item.NodeType}] {title}: {item.AverageMs:F2}ms ({share:F1}%)");
                 }
             }
-            sb.AppendLine($"实时速率: {recentRate:F2} 请求/秒");
 
             return sb.ToString();
         }
