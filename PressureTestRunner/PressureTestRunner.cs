@@ -276,7 +276,10 @@ namespace DLCV
                             aggregate.Add(timing.ElapsedMs);
                         }
                     }
-                    averageNodeTimings = nodeStats.Values.OrderByDescending(x => x.AverageMs).ToList();
+                    averageNodeTimings = nodeStats.Values
+                        .Where(x => x.AverageMs >= 1.0)
+                        .OrderByDescending(x => x.AverageMs)
+                        .ToList();
                 }
             }
             if (averageDlcvInferLatency > 0)
