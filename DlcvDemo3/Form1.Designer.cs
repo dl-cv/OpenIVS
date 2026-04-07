@@ -29,6 +29,7 @@ namespace DlcvDemo3
             this.txtImagePath = new System.Windows.Forms.TextBox();
             this.btnBrowseImage = new System.Windows.Forms.Button();
             this.btnInfer = new System.Windows.Forms.Button();
+            this.btnSpeedTest = new System.Windows.Forms.Button();
             this.labelFixedCrop = new System.Windows.Forms.Label();
             this.labelModel2Threads = new System.Windows.Forms.Label();
             this.numModel2Threads = new System.Windows.Forms.NumericUpDown();
@@ -152,13 +153,24 @@ namespace DlcvDemo3
             // btnInfer
             // 
             this.btnInfer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnInfer.Location = new System.Drawing.Point(1054, 88);
+            this.btnInfer.Location = new System.Drawing.Point(928, 88);
             this.btnInfer.Name = "btnInfer";
-            this.btnInfer.Size = new System.Drawing.Size(196, 34);
+            this.btnInfer.Size = new System.Drawing.Size(120, 34);
             this.btnInfer.TabIndex = 11;
             this.btnInfer.Text = "执行推理";
             this.btnInfer.UseVisualStyleBackColor = true;
             this.btnInfer.Click += new System.EventHandler(this.btnInfer_Click);
+            // 
+            // btnSpeedTest
+            // 
+            this.btnSpeedTest.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnSpeedTest.Location = new System.Drawing.Point(1054, 88);
+            this.btnSpeedTest.Name = "btnSpeedTest";
+            this.btnSpeedTest.Size = new System.Drawing.Size(196, 34);
+            this.btnSpeedTest.TabIndex = 20;
+            this.btnSpeedTest.Text = "速度测试";
+            this.btnSpeedTest.UseVisualStyleBackColor = true;
+            this.btnSpeedTest.Click += new System.EventHandler(this.btnSpeedTest_Click);
             // 
             // labelFixedCrop
             // 
@@ -272,6 +284,7 @@ namespace DlcvDemo3
             this.Controls.Add(this.numModel2Threads);
             this.Controls.Add(this.labelModel2Threads);
             this.Controls.Add(this.labelFixedCrop);
+            this.Controls.Add(this.btnSpeedTest);
             this.Controls.Add(this.btnInfer);
             this.Controls.Add(this.btnBrowseImage);
             this.Controls.Add(this.txtImagePath);
@@ -310,6 +323,7 @@ namespace DlcvDemo3
         private System.Windows.Forms.TextBox txtImagePath;
         private System.Windows.Forms.Button btnBrowseImage;
         private System.Windows.Forms.Button btnInfer;
+        private System.Windows.Forms.Button btnSpeedTest;
         private System.Windows.Forms.Label labelFixedCrop;
         private System.Windows.Forms.Label labelModel2Threads;
         private System.Windows.Forms.NumericUpDown numModel2Threads;

@@ -138,6 +138,10 @@
       <Project>{E11DDCC6-84D1-4CAF-9534-2266651E7787}</Project>
       <Name>ImageViewer</Name>
     </ProjectReference>
+    <ProjectReference Include="..\PressureTestRunner\PressureTestRunner.csproj">
+      <Project>{980F03F3-3648-4160-BF60-9668C7701785}</Project>
+      <Name>PressureTestRunner</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">

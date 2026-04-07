@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using DLCV;
 using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -24,6 +25,13 @@ namespace DlcvDemo3
         private Model model2;
         private string imagePath;
         private bool isInferenceRunning;
+
+        private PressureTestRunner pressureTestRunner;
+        private System.Windows.Forms.Timer speedTestUpdateTimer;
+        private Mat speedTestImageRgb;
+        private bool isSpeedTestRunning;
+        private volatile bool speedTestStopRequested;
+        private int speedTestModel2ThreadCount;
 
         private sealed class UiState
         {
@@ -73,6 +81,13 @@ namespace DlcvDemo3
             if (isInferenceRunning)
             {
                 MessageBox.Show("当前正在执行推理，请等待完成后再关闭。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                e.Cancel = true;
+                return;
+            }
+
+            if (isSpeedTestRunning)
+            {
+                MessageBox.Show("当前正在进行速度测试，请先点击「停止」结束测试后再关闭。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 e.Cancel = true;
                 return;
             }
@@ -170,8 +185,179 @@ namespace DlcvDemo3
                 return;
             }
 
+            StopSpeedTestIfRunning();
             ReleaseModels();
             richTextBox1.Text = "模型释放完成。";
+        }
+
+        private void btnSpeedTest_Click(object sender, EventArgs e)
+        {
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
+            {
+                StopSpeedTest();
+                return;
+            }
+
+            StartSpeedTest();
+        }
+
+        private void StartSpeedTest()
+        {
+            try
+            {
+                if (!EnsureReadyForPipeline(showMessage: true))
+                {
+                    return;
+                }
+
+                string path = (txtImagePath.Text ?? string.Empty).Trim();
+                using (Mat imageBgr = Cv2.ImRead(path, ImreadModes.Color))
+                {
+                    if (imageBgr == null || imageBgr.Empty())
+                    {
+                        MessageBox.Show("图像解码失败或文件无效。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    Mat newRgb = new Mat();
+                    Cv2.CvtColor(imageBgr, newRgb, ColorConversionCodes.BGR2RGB);
+                    DisposeSpeedTestImage();
+                    speedTestImageRgb = newRgb;
+                }
+
+                isSpeedTestRunning = true;
+                speedTestStopRequested = false;
+                speedTestModel2ThreadCount = GetConfiguredModel2ThreadCount();
+                UpdateBusyControlState();
+
+                pressureTestRunner = new PressureTestRunner(1, 1000000, 1);
+                pressureTestRunner.SetFlowModelTiming(false);
+                pressureTestRunner.SetTestAction(Demo3PipelineSpeedAction, speedTestImageRgb);
+
+                if (speedTestUpdateTimer == null)
+                {
+                    speedTestUpdateTimer = new System.Windows.Forms.Timer();
+                    speedTestUpdateTimer.Interval = 500;
+                    speedTestUpdateTimer.Tick += SpeedTestUpdateTimer_Tick;
+                }
+
+                speedTestUpdateTimer.Start();
+                pressureTestRunner.Start();
+                btnSpeedTest.Text = "停止";
+            }
+            catch (Exception ex)
+            {
+                isSpeedTestRunning = false;
+                DisposeSpeedTestImage();
+                pressureTestRunner = null;
+                UpdateBusyControlState();
+                btnSpeedTest.Text = "速度测试";
+                MessageBox.Show("启动速度测试失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void StopSpeedTest()
+        {
+            string finalStats = null;
+            if (pressureTestRunner != null)
+            {
+                pressureTestRunner.Stop();
+                finalStats = pressureTestRunner.GetStatistics(false);
+                pressureTestRunner = null;
+            }
+
+            if (speedTestUpdateTimer != null)
+            {
+                speedTestUpdateTimer.Stop();
+            }
+
+            DisposeSpeedTestImage();
+            isSpeedTestRunning = false;
+            speedTestStopRequested = false;
+            btnSpeedTest.Text = "速度测试";
+            UpdateBusyControlState();
+
+            if (!string.IsNullOrEmpty(finalStats))
+            {
+                richTextBox1.Text = finalStats;
+            }
+        }
+
+        private void StopSpeedTestIfRunning()
+        {
+            if (isSpeedTestRunning || (pressureTestRunner != null && pressureTestRunner.IsRunning))
+            {
+                StopSpeedTest();
+            }
+            else
+            {
+                DisposeSpeedTestImage();
+            }
+        }
+
+        private void DisposeSpeedTestImage()
+        {
+            if (speedTestImageRgb != null)
+            {
+                speedTestImageRgb.Dispose();
+                speedTestImageRgb = null;
+            }
+        }
+
+        private void Demo3PipelineSpeedAction(object parameter)
+        {
+            if (speedTestStopRequested)
+            {
+                throw new OperationCanceledException();
+            }
+
+            Mat rgb = parameter as Mat;
+            if (rgb == null || rgb.Empty())
+            {
+                return;
+            }
+
+            try
+            {
+                Demo3Pipeline.Run(rgb, model1, model2, speedTestModel2ThreadCount, progress: null);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("速度测试推理出错: " + ex.Message);
+                speedTestStopRequested = true;
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        StopSpeedTest();
+                        MessageBox.Show("速度测试过程中发生错误: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        richTextBox1.Text = "推理错误: " + ex.Message;
+                    });
+                }
+                catch
+                {
+                }
+
+                throw;
+            }
+        }
+
+        private void SpeedTestUpdateTimer_Tick(object sender, EventArgs e)
+        {
+            if (pressureTestRunner == null || !pressureTestRunner.IsRunning)
+            {
+                return;
+            }
+
+            string stats = pressureTestRunner.GetStatistics(false);
+            if (InvokeRequired)
+            {
+                BeginInvoke((MethodInvoker)delegate { richTextBox1.Text = stats; });
+            }
+            else
+            {
+                richTextBox1.Text = stats;
+            }
         }
 
         private async Task RunInferenceAsync()
@@ -504,18 +690,25 @@ namespace DlcvDemo3
                 return false;
             }
 
+            if (isSpeedTestRunning)
+            {
+                richTextBox1.Text = "当前正在进行速度测试，请先停止速度测试。";
+                return false;
+            }
+
             return true;
         }
 
         private void UpdateBusyControlState()
         {
-            bool isBusy = isInferenceRunning;
+            bool isBusy = isInferenceRunning || isSpeedTestRunning;
             btnBrowseModel1.Enabled = !isBusy;
             btnLoadModel1.Enabled = !isBusy;
             btnBrowseModel2.Enabled = !isBusy;
             btnLoadModel2.Enabled = !isBusy;
             btnBrowseImage.Enabled = !isBusy;
-            btnInfer.Enabled = !isBusy;
+            btnInfer.Enabled = !isInferenceRunning && !isSpeedTestRunning;
+            btnSpeedTest.Enabled = !isInferenceRunning;
             btnReleaseModels.Enabled = !isBusy;
 
             txtModel1Path.Enabled = !isBusy;

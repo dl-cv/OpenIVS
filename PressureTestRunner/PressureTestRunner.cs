@@ -282,14 +282,18 @@ namespace DLCV
                         .ToList();
                 }
             }
+            if (averageLatency > 0)
+            {
+                sb.AppendLine($"平均延迟: {averageLatency:F2}ms");
+            }
             if (averageDlcvInferLatency > 0)
             {
                 sb.AppendLine($"平均延迟(SDK): {averageDlcvInferLatency:F2}ms");
             }
-            if (_isFlowModelTiming && averageTotalInferLatency > 0)
-            {
-                sb.AppendLine($"平均延迟(总时间): {averageTotalInferLatency:F2}ms");
-            }
+            // if (_isFlowModelTiming && averageTotalInferLatency > 0)
+            // {
+            //     sb.AppendLine($"平均延迟(总时间): {averageTotalInferLatency:F2}ms");
+            // }
             sb.AppendLine($"实时速率: {recentRate:F2} 请求/秒");
             if (_isFlowModelTiming && averageNodeTimings != null && averageNodeTimings.Count > 0)
             {
