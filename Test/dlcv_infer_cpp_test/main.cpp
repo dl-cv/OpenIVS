@@ -32,6 +32,10 @@ const std::wstring kDefaultPressureImagePath = L"C:\\Users\\Administrator\\Deskt
 constexpr int kDefaultPressureBatchSize = 128;
 constexpr int kDefaultPressureRuns = 9;
 constexpr int kDefaultPressureWarmup = 5;
+const std::wstring kSlidingAlignModelPath = L"C:\\Users\\Administrator\\Desktop\\滑窗裁图分割合并\\model_120_50.dvst";
+const std::wstring kSlidingAlignImagePath = L"C:\\Users\\Administrator\\Desktop\\滑窗裁图分割合并\\T000001-P000001-C22-I1-G9PHG5X0VFT0000HU8+4JKC-OK.png";
+constexpr int kSlidingAlignBatchSize = 1;
+constexpr float kSlidingAlignThreshold = 0.5f;
 const std::wstring kDemo3Model1Path = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程1-目标检测-降采样_120_50.dvst";
 const std::wstring kDemo3Model2Path = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程2-各项检测_120_50.dvst";
 const std::wstring kDemo3ChainImagePath = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\detect_20260401151406_0.jpg";
@@ -797,6 +801,60 @@ int RunBenchmark(const std::wstring& modelPath, const std::wstring& imagePath, i
         return 1;
     }
 }
+
+int RunSlidingAlignOnce(const std::wstring& modelPath, const std::wstring& imagePath) {
+    std::cout << "图片: " << WideToUtf8(imagePath) << "\n";
+    std::cout << "batch_size: " << kSlidingAlignBatchSize << "\n";
+    std::cout << "threshold: " << ToFixed(kSlidingAlignThreshold, 2) << "\n";
+    if (!FileExistsW(modelPath) || !FileExistsW(imagePath)) {
+        std::cout << "模型或图片不存在，请检查路径。\n";
+        return 2;
+    }
+
+    try {
+        dlcv_infer::Model model(modelPath, kGpuDeviceId);
+        cv::Mat bgr = LoadImageByDecode(imagePath);
+        if (bgr.empty()) throw std::runtime_error("图像解码失败");
+        cv::Mat rgb;
+        cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+
+        json params;
+        params["threshold"] = kSlidingAlignThreshold;
+        params["with_mask"] = true;
+        params["batch_size"] = kSlidingAlignBatchSize;
+
+        const auto t0 = Clock::now();
+        auto out = model.InferBatch(std::vector<cv::Mat>{rgb}, params);
+        const auto t1 = Clock::now();
+
+        const double elapsedMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        std::cout << "\n推理时间: " << ToFixed(elapsedMs, 2) << "ms\n\n";
+        std::cout << "输入: RGB\n\n";
+        std::cout << "推理结果:\n";
+        if (out.sampleResults.empty() || out.sampleResults.front().results.empty()) {
+            std::cout << "(空)\n";
+        } else {
+            const auto& objs = out.sampleResults.front().results;
+            for (const auto& obj : objs) {
+                std::cout << dlcv_infer::convertGbkToUtf8(obj.categoryName)
+                          << ", Score: " << ToFixed(static_cast<double>(obj.score) * 100.0, 1)
+                          << ", Area: " << ToFixed(static_cast<double>(obj.area), 1);
+                if (obj.bbox.size() >= 4) {
+                    std::cout << ", Bbox: [" << ToFixed(obj.bbox[0], 1)
+                              << ", " << ToFixed(obj.bbox[1], 1)
+                              << ", " << ToFixed(obj.bbox[2], 1)
+                              << ", " << ToFixed(obj.bbox[3], 1) << "]";
+                }
+                std::cout << ", \n";
+            }
+        }
+        DisposeResultMasks(out);
+        return 0;
+    } catch (const std::exception& e) {
+        std::cout << "推理异常: " << e.what() << "\n";
+        return 1;
+    }
+}
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -804,12 +862,7 @@ int main(int argc, char* argv[]) {
     SetConsoleCP(CP_UTF8);
 
     if (argc <= 1) {
-        return RunBenchmark(
-            kDefaultPressureModelPath,
-            kDefaultPressureImagePath,
-            kDefaultPressureBatchSize,
-            kDefaultPressureRuns,
-            kDefaultPressureWarmup);
+        return RunSlidingAlignOnce(kSlidingAlignModelPath, kSlidingAlignImagePath);
     }
 
     if (argc >= 2 && std::string(argv[1]) == "demo3check") {

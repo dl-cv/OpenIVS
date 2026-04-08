@@ -130,6 +130,10 @@ static double BoxIoU(const std::array<double, 4>& a, const std::array<double, 4>
     return uni > 0.0 ? (inter / uni) : 0.0;
 }
 
+static double BoxArea(const std::array<double, 4>& a) {
+    return std::max(0.0, a[2] - a[0]) * std::max(0.0, a[3] - a[1]);
+}
+
 static std::string CategoryKeyOfDet(const Json& det) {
     std::string name;
     int categoryId = 0;
@@ -144,6 +148,21 @@ struct SlidingMappedDet {
     std::string CategoryKey;
     double Score = 0.0;
 };
+
+static std::array<double, 4> UnionAabb(const std::vector<SlidingMappedDet>& items) {
+    if (items.empty()) return { 0.0, 0.0, 0.0, 0.0 };
+    double minx = items.front().Aabb[0];
+    double miny = items.front().Aabb[1];
+    double maxx = items.front().Aabb[2];
+    double maxy = items.front().Aabb[3];
+    for (const auto& item : items) {
+        minx = std::min(minx, item.Aabb[0]);
+        miny = std::min(miny, item.Aabb[1]);
+        maxx = std::max(maxx, item.Aabb[2]);
+        maxy = std::max(maxy, item.Aabb[3]);
+    }
+    return { minx, miny, maxx, maxy };
+}
 
 static bool TryMapDetToGlobal(const Json& det, const ModuleImage& wrap, SlidingMappedDet& mapped) {
     if (!det.is_object()) return false;
@@ -334,6 +353,7 @@ public:
         const std::vector<ModuleImage>& inImages = imageList;
         const Json inResults = resultList.is_array() ? resultList : Json::array();
         const double iouThreshold = std::max(0.0, ReadDouble("iou_threshold", 0.2));
+        const double combineIosThreshold = std::max(0.0, ReadDouble("combine_ios_threshold", 0.2));
         const bool dedupResults = ReadBool("dedup_results", true);
 
         std::map<int, ModuleImage> originIndexToImage;
@@ -423,6 +443,63 @@ public:
                     if (!drop) kept.push_back(cand);
                 }
                 mappedList = std::move(kept);
+            }
+
+            // 对齐 C# 侧滑窗合并行为：
+            // 当同类结果在多切片上呈现“大范围碎片化”时，额外做一轮按类别融合（输出并集框）。
+            // 该逻辑受 combine_ios_threshold 控制，默认仅在覆盖比例较大时触发，避免误合并普通小目标。
+            if (combineIosThreshold > 0.0 && mappedList.size() > 1) {
+                const cv::Mat& originMat = kv.second.ImageObject;
+                const double imageArea = static_cast<double>(std::max(1, originMat.cols)) * static_cast<double>(std::max(1, originMat.rows));
+                std::unordered_map<std::string, std::vector<SlidingMappedDet>> grouped;
+                for (const auto& det : mappedList) {
+                    grouped[det.CategoryKey].push_back(det);
+                }
+
+                std::vector<SlidingMappedDet> mergedByCategory;
+                mergedByCategory.reserve(grouped.size());
+                for (auto& g : grouped) {
+                    auto& list = g.second;
+                    if (list.size() <= 1) {
+                        mergedByCategory.push_back(list.front());
+                        continue;
+                    }
+
+                    const auto uni = UnionAabb(list);
+                    const double unionArea = BoxArea(uni);
+                    const double coverage = imageArea > 0.0 ? (unionArea / imageArea) : 0.0;
+                    if (coverage < combineIosThreshold) {
+                        for (const auto& det : list) mergedByCategory.push_back(det);
+                        continue;
+                    }
+
+                    auto bestIt = std::max_element(list.begin(), list.end(), [](const SlidingMappedDet& a, const SlidingMappedDet& b) {
+                        return a.Score < b.Score;
+                    });
+                    SlidingMappedDet merged = *bestIt;
+
+                    double left = uni[0];
+                    double top = uni[1];
+                    double right = uni[2];
+                    double bottom = uni[3];
+                    const double snapXTol = std::max(2.0, static_cast<double>(originMat.cols) * 0.01);
+                    const double snapYTol = std::max(2.0, static_cast<double>(originMat.rows) * 0.01);
+                    if (left <= snapXTol) left = 0.0;
+                    if (top <= snapYTol) top = 0.0;
+                    if (right >= static_cast<double>(originMat.cols) - snapXTol) right = static_cast<double>(originMat.cols);
+                    if (bottom >= static_cast<double>(originMat.rows) - snapYTol) bottom = static_cast<double>(originMat.rows);
+
+                    const double w = std::max(0.0, right - left);
+                    const double h = std::max(0.0, bottom - top);
+                    merged.Aabb = { left, top, right, bottom };
+                    merged.Det["bbox"] = Json::array({ left, top, w, h });
+                    merged.Det["with_bbox"] = true;
+                    merged.Det["with_angle"] = false;
+                    merged.Det["angle"] = -100.0;
+                    merged.Det["area"] = w * h;
+                    mergedByCategory.push_back(std::move(merged));
+                }
+                mappedList = std::move(mergedByCategory);
             }
 
             Json samples = Json::array();
