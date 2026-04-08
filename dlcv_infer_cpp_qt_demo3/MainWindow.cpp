@@ -150,7 +150,6 @@ void MainWindow::setupUi() {
     row2->addWidget(editModel2Path_, 1);
     row2->addWidget(buttonBrowseModel2_);
     row2->addWidget(buttonLoadModel2_);
-    row2->addWidget(buttonGetModelInfo_);
 
     auto* row3 = new QHBoxLayout();
     row3->setSpacing(8);
@@ -166,6 +165,7 @@ void MainWindow::setupUi() {
     row4->addStretch(1);
     row4->addWidget(labelModel2Threads_);
     row4->addWidget(spinModel2Threads_);
+    row4->addWidget(buttonGetModelInfo_);
     row4->addWidget(buttonReleaseModels_);
 
     auto* row5 = new QHBoxLayout();
@@ -531,6 +531,43 @@ void MainWindow::onInfer() {
                 text += QString("模型2线程数: %1\n").arg(runResult.model2ThreadCount);
                 text += QString("最终结果数: %1\n").arg(runResult.finalResultCount);
                 text += QString("推理耗时: %1 ms\n").arg(elapsedMs, 0, 'f', 2);
+
+                auto buildObjectLocationText = [](const dlcv_infer::ObjectResult& obj) -> QString {
+                    if (!obj.withBbox || obj.bbox.size() < 4) {
+                        return "rect=(N/A)";
+                    }
+
+                    const bool isRotated = obj.withAngle || obj.bbox.size() >= 5;
+                    if (isRotated) {
+                        return QString("rbox=(cx=%1, cy=%2, w=%3, h=%4, angle=%5)")
+                            .arg(obj.bbox[0], 0, 'f', 1)
+                            .arg(obj.bbox[1], 0, 'f', 1)
+                            .arg(obj.bbox[2], 0, 'f', 1)
+                            .arg(obj.bbox[3], 0, 'f', 1)
+                            .arg(obj.angle, 0, 'f', 3);
+                    }
+
+                    return QString("rect=(%1, %2, %3, %4)")
+                        .arg(obj.bbox[0], 0, 'f', 1)
+                        .arg(obj.bbox[1], 0, 'f', 1)
+                        .arg(obj.bbox[2], 0, 'f', 1)
+                        .arg(obj.bbox[3], 0, 'f', 1);
+                };
+
+                if (runResult.finalObjects.empty()) {
+                    text += "\n未检测到最终结果。\n";
+                } else {
+                    text += "\n结果明细:\n";
+                    for (int i = 0; i < static_cast<int>(runResult.finalObjects.size()); ++i) {
+                        const auto& obj = runResult.finalObjects[i];
+                        text += QString("[%1] %2  score=%3  %4\n")
+                                    .arg(i + 1)
+                                    .arg(QString::fromUtf8(obj.categoryName.c_str()))
+                                    .arg(obj.score, 0, 'f', 2)
+                                    .arg(buildObjectLocationText(obj));
+                    }
+                }
+
                 if (!runResult.logs.isEmpty()) {
                     text += "\n日志:\n";
                     text += runResult.logs.join("\n");
