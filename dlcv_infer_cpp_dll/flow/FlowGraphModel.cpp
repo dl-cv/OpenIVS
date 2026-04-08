@@ -310,6 +310,8 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     ctx.Set<std::string>("frontend_image_color_space", "rgb");
     ctx.Set<std::string>("frontend_image_path", std::string());
     ctx.Set<int>("device_id", _deviceId);
+    ctx.Set<Json>("infer_params", paramsJson.is_object() ? paramsJson : Json::object());
+    ctx.Set<double>("flow_dlcv_infer_ms_acc", 0.0);
 
     GraphExecutor exec(_nodes, &ctx);
     const auto runStart = std::chrono::steady_clock::now();
@@ -317,7 +319,6 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     const auto runEnd = std::chrono::steady_clock::now();
 
     const FlowBatchResult batch = AggregateFrontendResults(ctx, static_cast<int>(images.size()));
-    (void)paramsJson; // 预留：未来可将 paramsJson 注入 ctx 或模块属性覆盖
     Json root = batch.ToFlowRootJson();
 
     const std::vector<GraphExecutor::NodeTiming> nodeTimings = exec.GetLastNodeTimings();
@@ -336,6 +337,10 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
         if (item.NodeType.rfind("model/", 0) == 0) {
             dlcvInferMs += item.ElapsedMs;
         }
+    }
+    const double inferMsAcc = ctx.Get<double>("flow_dlcv_infer_ms_acc", 0.0);
+    if (inferMsAcc > 0.0) {
+        dlcvInferMs = inferMsAcc;
     }
     timing["dlcv_infer_ms"] = dlcvInferMs;
     timing["node_timings"] = std::move(timingItems);

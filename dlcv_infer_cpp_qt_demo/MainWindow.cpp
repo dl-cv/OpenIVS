@@ -471,6 +471,7 @@ void MainWindow::onInfer() {
         json params;
         params["threshold"] = spinThreshold_->value();
         params["with_mask"] = true;
+        params["batch_size"] = batchSize;
 
         const auto start = std::chrono::steady_clock::now();
         output = model_->InferBatch(imageList, params);
@@ -518,6 +519,7 @@ void MainWindow::onInferJson() {
         json params;
         params["threshold"] = spinThreshold_->value();
         params["with_mask"] = true;
+        params["batch_size"] = 1;
 
         const json resultArray = model_->InferOneOutJson(inferImage, params);
         if (resultArray.empty()) {
@@ -664,6 +666,7 @@ void MainWindow::startPressureTest() {
             json params;
             params["threshold"] = threshold;
             params["with_mask"] = false;
+            params["batch_size"] = batchSize;
 
             std::vector<cv::Mat> images;
             images.reserve(batchSize);

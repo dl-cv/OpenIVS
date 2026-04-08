@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -77,7 +78,7 @@ static void TryAddParam(Json& p, const Json& props, const std::string& key) {
     p[key] = v;
 }
 
-static Json ConvertToLocalSamples(const dlcv_infer::Result& res) {
+static Json ConvertToLocalSamples(const dlcv_infer::Result& res, bool includeMask) {
     Json list = Json::array();
     if (res.sampleResults.empty()) return list;
     const auto& sr = res.sampleResults[0];
@@ -90,11 +91,12 @@ static Json ConvertToLocalSamples(const dlcv_infer::Result& res) {
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
         o["with_bbox"] = obj.withBbox;
-        o["with_mask"] = obj.withMask;
+        const bool withMask = includeMask && obj.withMask;
+        o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;
         o["angle"] = obj.withAngle ? obj.angle : -100.0;
 
-        if (obj.withMask && !obj.mask.empty()) {
+        if (withMask && !obj.mask.empty()) {
             try {
                 o["mask_rle"] = MatToMaskInfo(obj.mask);
             } catch (...) {
@@ -106,7 +108,7 @@ static Json ConvertToLocalSamples(const dlcv_infer::Result& res) {
     return list;
 }
 
-static Json ConvertSampleResultToLocalSamples(const dlcv_infer::SampleResult& sr) {
+static Json ConvertSampleResultToLocalSamples(const dlcv_infer::SampleResult& sr, bool includeMask) {
     Json list = Json::array();
     for (const auto& obj : sr.results) {
         Json o = Json::object();
@@ -117,11 +119,12 @@ static Json ConvertSampleResultToLocalSamples(const dlcv_infer::SampleResult& sr
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
         o["with_bbox"] = obj.withBbox;
-        o["with_mask"] = obj.withMask;
+        const bool withMask = includeMask && obj.withMask;
+        o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;
         o["angle"] = obj.withAngle ? obj.angle : -100.0;
 
-        if (obj.withMask && !obj.mask.empty()) {
+        if (withMask && !obj.mask.empty()) {
             try {
                 o["mask_rle"] = MatToMaskInfo(obj.mask);
             } catch (...) {
@@ -155,6 +158,12 @@ static int FindMaxBatchSizeRecursively(const Json& token, int current) {
             if (token.contains("batch_size")) {
                 best = std::max(best, std::max(1, ReadIntLike(token.at("batch_size"), 1)));
             }
+            if (token.contains("max_shape")) {
+                const Json& ms = token.at("max_shape");
+                if (ms.is_array() && !ms.empty()) {
+                    best = std::max(best, std::max(1, ReadIntLike(ms.at(0), 1)));
+                }
+            }
             for (auto it = token.begin(); it != token.end(); ++it) {
                 best = std::max(best, FindMaxBatchSizeRecursively(it.value(), best));
             }
@@ -167,17 +176,35 @@ static int FindMaxBatchSizeRecursively(const Json& token, int current) {
     return std::max(1, best);
 }
 
-static int ResolveEffectiveBatchLimit(const std::shared_ptr<dlcv_infer::Model>& model, const Json& props) {
-    int modelLimit = 1;
-    try {
-        if (model) {
-            modelLimit = FindMaxBatchSizeRecursively(model->GetModelInfo(), 1);
-        }
-    } catch (...) {
-        modelLimit = 1;
-    }
-    modelLimit = std::max(1, modelLimit);
+static int GetCachedModelBatchLimit(const std::shared_ptr<dlcv_infer::Model>& model) {
+    if (!model) return 1;
+    static std::mutex s_mu;
+    static std::unordered_map<int, int> s_modelLimit;
 
+    const int modelIndex = model->modelIndex;
+    {
+        std::lock_guard<std::mutex> lk(s_mu);
+        auto it = s_modelLimit.find(modelIndex);
+        if (it != s_modelLimit.end()) return std::max(1, it->second);
+    }
+
+    int limit = 1;
+    try {
+        const Json info = model->GetModelInfo();
+        limit = FindMaxBatchSizeRecursively(info, 1);
+    } catch (...) {
+        limit = 1;
+    }
+    limit = std::max(1, limit);
+
+    {
+        std::lock_guard<std::mutex> lk(s_mu);
+        s_modelLimit[modelIndex] = limit;
+    }
+    return limit;
+}
+
+static int ResolveEffectiveBatchLimit(const std::shared_ptr<dlcv_infer::Model>& model, const Json& props) {
     int cfg = 0;
     try {
         if (props.is_object() && props.contains("batch_size")) {
@@ -186,6 +213,7 @@ static int ResolveEffectiveBatchLimit(const std::shared_ptr<dlcv_infer::Model>& 
     } catch (...) {
         cfg = 0;
     }
+    const int modelLimit = GetCachedModelBatchLimit(model);
     if (cfg <= 0) return modelLimit;
     return std::max(1, std::min(modelLimit, cfg));
 }
@@ -233,9 +261,11 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     TryAddParam(p, this->Properties, "threshold");
     TryAddParam(p, this->Properties, "iou_threshold");
     TryAddParam(p, this->Properties, "top_k");
+    TryAddParam(p, this->Properties, "with_mask");
     TryAddParam(p, this->Properties, "return_polygon");
     TryAddParam(p, this->Properties, "epsilon");
     TryAddParam(p, this->Properties, "batch_size");
+    const bool includeMask = p.value("with_mask", true);
 
     const int effectiveBatch = ResolveEffectiveBatchLimit(_model, this->Properties);
     p["batch_size"] = effectiveBatch;
@@ -315,11 +345,24 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
             }
 
             dlcv_infer::Result res = _model->InferBatch(chunkMats, paramsToPass);
+            try {
+                if (Context != nullptr) {
+                    double prev = Context->Get<double>("flow_dlcv_infer_ms_acc", 0.0);
+                    double sdkMs = 0.0;
+                    double totalMs = 0.0;
+                    dlcv_infer::Model::GetLastInferTiming(sdkMs, totalMs);
+                    if (sdkMs <= 0.0) sdkMs = totalMs;
+                    if (sdkMs > 0.0) {
+                        Context->Set<double>("flow_dlcv_infer_ms_acc", prev + sdkMs);
+                    }
+                }
+            } catch (...) {}
             const auto& batchSamples = res.sampleResults;
             for (int k = 0; k < static_cast<int>(chunkLocals.size()); k++) {
                 const int localIdx = chunkLocals[static_cast<size_t>(k)];
                 if (k < static_cast<int>(batchSamples.size())) {
-                    sampleByLocal[static_cast<size_t>(localIdx)] = ConvertSampleResultToLocalSamples(batchSamples[static_cast<size_t>(k)]);
+                    sampleByLocal[static_cast<size_t>(localIdx)] =
+                        ConvertSampleResultToLocalSamples(batchSamples[static_cast<size_t>(k)], includeMask);
                 } else {
                     sampleByLocal[static_cast<size_t>(localIdx)] = Json::array();
                 }

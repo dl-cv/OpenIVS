@@ -71,6 +71,17 @@ bool GraphExecutor::IsScalarPortType(const std::string& tLower) {
             tLower == "scalar");
 }
 
+static void ApplyInferParamOverrides(Json& props, const Json& inferParams) {
+    if (!props.is_object() || !inferParams.is_object()) return;
+    for (auto it = inferParams.begin(); it != inferParams.end(); ++it) {
+        const Json& value = it.value();
+        // 推理参数只透传基础配置，避免把复杂结构误覆盖到节点属性。
+        if (value.is_primitive() || value.is_null()) {
+            props[it.key()] = value;
+        }
+    }
+}
+
 void GraphExecutor::NormalizeBboxProperties(Json& props) {
     if (!props.is_object()) return;
     if (!(props.contains("bbox_x1") && props.contains("bbox_y1") && props.contains("bbox_x2") && props.contains("bbox_y2"))) return;
@@ -218,6 +229,11 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
                 props = node.at("properties");
             }
         } catch (...) { props = Json::object(); }
+
+        try {
+            const Json inferParams = _context->Get<Json>("infer_params", Json::object());
+            ApplyInferParamOverrides(props, inferParams);
+        } catch (...) {}
 
         try { NormalizeBboxProperties(props); } catch (...) {}
 
