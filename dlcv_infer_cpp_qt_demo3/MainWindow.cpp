@@ -562,7 +562,7 @@ void MainWindow::onInfer() {
                         const auto& obj = runResult.finalObjects[i];
                         text += QString("[%1] %2  score=%3  %4\n")
                                     .arg(i + 1)
-                                    .arg(QString::fromUtf8(obj.categoryName.c_str()))
+                                    .arg(QString::fromLocal8Bit(obj.categoryName.c_str()))
                                     .arg(obj.score, 0, 'f', 2)
                                     .arg(buildObjectLocationText(obj));
                     }
