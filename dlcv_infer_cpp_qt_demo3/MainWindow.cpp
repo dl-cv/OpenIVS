@@ -156,8 +156,8 @@ void MainWindow::setupUi() {
     row3->addWidget(new QLabel("图片路径", this));
     row3->addWidget(editImagePath_, 1);
     row3->addWidget(buttonBrowseImage_);
-    row3->addWidget(buttonInfer_);
     row3->addWidget(buttonPressureTest_);
+    row3->addWidget(buttonInfer_);
 
     auto* row4 = new QHBoxLayout();
     row4->setSpacing(8);
