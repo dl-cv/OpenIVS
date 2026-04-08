@@ -185,50 +185,40 @@ namespace DlcvModules
                 {
                     var exec = new GraphExecutor(_nodes, ctx);
                     var outputs = exec.Run();
-
-                    var aggregateSw = System.Diagnostics.Stopwatch.StartNew();
-                    try
-                    {
-                        // 从 output/return_json 读取每张图结果，并组装最终返回格式。
-                        var perImageResults = new List<JArray>();
-                        for (int i = 0; i < images.Count; i++)
-                        {
-                            perImageResults.Add(new JArray());
-                        }
-
-                        AggregateFrontendResults(ctx, perImageResults);
-
-                        var root = new JObject();
-                        if (images.Count == 1)
-                        {
-                            root["result_list"] = perImageResults.Count > 0 ? perImageResults[0] : new JArray();
-                        }
-                        else
-                        {
-                            var batchContainer = new JArray();
-                            for (int i = 0; i < perImageResults.Count; i++)
-                            {
-                                batchContainer.Add(new JObject
-                                {
-                                    ["result_list"] = perImageResults[i] ?? new JArray()
-                                });
-                            }
-                            root["result_list"] = batchContainer;
-                        }
-
-                        return new Tuple<JObject, IntPtr>(root, IntPtr.Zero);
-                    }
-                    finally
-                    {
-                        aggregateSw.Stop();
-                        InferTiming.AddFlowNodeMs(-1, "graph/finalize", "aggregate_frontend_results", aggregateSw.Elapsed.TotalMilliseconds);
-                    }
                 }
                 finally
                 {
                     flowSw.Stop();
                     InferTiming.EndFlowRequest(flowSw.Elapsed.TotalMilliseconds);
                 }
+
+                // 从 output/return_json 读取每张图结果
+                var perImageResults = new List<JArray>();
+                for (int i = 0; i < images.Count; i++)
+                {
+                    perImageResults.Add(new JArray());
+                }
+
+                AggregateFrontendResults(ctx, perImageResults);
+
+                var root = new JObject();
+                if (images.Count == 1)
+                {
+                    root["result_list"] = perImageResults.Count > 0 ? perImageResults[0] : new JArray();
+                }
+                else
+                {
+                    var batchContainer = new JArray();
+                    for (int i = 0; i < perImageResults.Count; i++)
+                    {
+                        batchContainer.Add(new JObject
+                        {
+                            ["result_list"] = perImageResults[i] ?? new JArray()
+                        });
+                    }
+                    root["result_list"] = batchContainer;
+                }
+                return new Tuple<JObject, IntPtr>(root, IntPtr.Zero);
             }
             finally
             {
