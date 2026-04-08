@@ -95,6 +95,12 @@ namespace DlcvModules
 			public bool HasUnknownProps;
 		}
 
+		private sealed class MaskPlacement
+		{
+			public JObject Det;
+			public double[] Aabb;
+		}
+
 
 		static SlidingMergeResults()
 		{
@@ -555,7 +561,24 @@ namespace DlcvModules
 									continue;
 								}
 
-								if (ComputeIoS(aabbA, aabbB) > iouTh)
+								bool shouldUnion = false;
+								double ios = ComputeIoS(aabbA, aabbB);
+								if (ios > iouTh)
+								{
+									bool hasMaskA = HasMaskPayload(da);
+									bool hasMaskB = HasMaskPayload(db);
+									if (hasMaskA && hasMaskB)
+									{
+										// 分割场景：仅在 mask 像素级重叠时合并，避免 bbox-only 误合并。
+										shouldUnion = CheckMaskOverlapForDets(da, aabbA, db, aabbB);
+									}
+									else
+									{
+										// 普通检测场景：保持 bbox-only 合并行为。
+										shouldUnion = true;
+									}
+								}
+								if (shouldUnion)
 								{
 									var uidA = Tuple.Create(curIdx, ia);
 									var uidB = Tuple.Create(nbIdx, ib);
@@ -619,6 +642,7 @@ namespace DlcvModules
 					string mergedCatName = null;
 					var sliceIndexUnion = new HashSet<string>(StringComparer.Ordinal);
 					var sliceIndexTokens = new List<JToken>();
+					var maskPlacements = new List<MaskPlacement>();
 					JObject seedDet = null;
 
 					foreach (var uid in members)
@@ -633,6 +657,14 @@ namespace DlcvModules
 						if (score > mergedScore) mergedScore = score;
 						if (mergedCatId == null && det["category_id"] != null) mergedCatId = det["category_id"].DeepClone();
 						if (mergedCatName == null) mergedCatName = det.Value<string>("category_name");
+						if (HasMaskPayload(det))
+						{
+							maskPlacements.Add(new MaskPlacement
+							{
+								Det = det,
+								Aabb = (double[])aabb.Clone()
+							});
+						}
 
 						var meta = det["metadata"] as JObject;
 						var sliceIndex = meta != null ? meta["slice_index"] : null;
@@ -644,12 +676,32 @@ namespace DlcvModules
 					}
 
 					if (unionAabb == null || seedDet == null) continue;
+					var mergedMaskRle = BuildMergedMaskRle(maskPlacements, unionAabb);
 					var merged = mappedAabbDet(seedDet, unionAabb, true, sliceIndexTokens);
 					if (merged != null)
 					{
 						merged["score"] = mergedScore;
 						merged["category_id"] = mergedCatId != null ? mergedCatId : JValue.CreateNull();
 						merged["category_name"] = mergedCatName;
+						if (mergedMaskRle != null)
+						{
+							merged["with_mask"] = true;
+							merged["mask_rle"] = mergedMaskRle;
+							merged.Remove("mask_array");
+						}
+						else
+						{
+							merged["with_mask"] = false;
+							merged.Remove("mask_rle");
+							merged.Remove("mask_array");
+						}
+						var metaOut = merged["metadata"] as JObject;
+						if (metaOut == null)
+						{
+							metaOut = new JObject();
+							merged["metadata"] = metaOut;
+						}
+						metaOut["merge_mode"] = mergedMaskRle != null ? "mask_union" : "bbox_union";
 						outItems.Add(merged);
 					}
 				}
@@ -1471,6 +1523,240 @@ namespace DlcvModules
 			double areaB = Math.Max(0.0, b[2] - b[0]) * Math.Max(0.0, b[3] - b[1]);
 			double smaller = Math.Min(areaA, areaB);
 			return smaller > 0.0 ? inter / smaller : 0.0;
+		}
+
+		private static bool HasMaskPayload(JObject det)
+		{
+			if (det == null) return false;
+			var maskRle = det["mask_rle"];
+			if (maskRle != null && maskRle.Type != JTokenType.Null) return true;
+			var maskArray = det["mask_array"];
+			return maskArray != null && maskArray.Type != JTokenType.Null;
+		}
+
+		private static bool TryAabbToIntXYXY(double[] aabb, out int x1, out int y1, out int x2, out int y2)
+		{
+			x1 = y1 = x2 = y2 = 0;
+			if (aabb == null || aabb.Length < 4) return false;
+			double ax1 = Math.Min(aabb[0], aabb[2]);
+			double ay1 = Math.Min(aabb[1], aabb[3]);
+			double ax2 = Math.Max(aabb[0], aabb[2]);
+			double ay2 = Math.Max(aabb[1], aabb[3]);
+			x1 = (int)Math.Floor(ax1);
+			y1 = (int)Math.Floor(ay1);
+			x2 = (int)Math.Ceiling(ax2);
+			y2 = (int)Math.Ceiling(ay2);
+			if (x2 <= x1) x2 = x1 + 1;
+			if (y2 <= y1) y2 = y1 + 1;
+			return true;
+		}
+
+		private static Mat TryParseMaskArrayToMat(JToken token)
+		{
+			var ja = token as JArray;
+			if (ja == null || ja.Count == 0) return null;
+			var row0 = ja[0] as JArray;
+			if (row0 == null || row0.Count == 0) return null;
+			int h = ja.Count;
+			int w = row0.Count;
+			var mat = new Mat(h, w, MatType.CV_8UC1);
+			try
+			{
+				for (int y = 0; y < h; y++)
+				{
+					var row = ja[y] as JArray;
+					if (row == null || row.Count != w)
+					{
+						mat.Dispose();
+						return null;
+					}
+					for (int x = 0; x < w; x++)
+					{
+						byte v = 0;
+						try
+						{
+							double dv = Convert.ToDouble(((JValue)row[x]).Value, CultureInfo.InvariantCulture);
+							v = (byte)(dv > 0.0 ? 255 : 0);
+						}
+						catch
+						{
+							v = 0;
+						}
+						mat.Set(y, x, v);
+					}
+				}
+				return mat;
+			}
+			catch
+			{
+				mat.Dispose();
+				return null;
+			}
+		}
+
+		private static bool TryBuildAlignedMaskFromDet(JObject det, double[] aabb, out Mat alignedMask)
+		{
+			alignedMask = null;
+			if (det == null || aabb == null) return false;
+			if (!TryAabbToIntXYXY(aabb, out int x1, out int y1, out int x2, out int y2)) return false;
+			int w = x2 - x1;
+			int h = y2 - y1;
+			if (w <= 0 || h <= 0) return false;
+
+			Mat srcMask = null;
+			try
+			{
+				var maskRle = det["mask_rle"];
+				if (maskRle != null && maskRle.Type != JTokenType.Null)
+				{
+					srcMask = MaskRleUtils.MaskInfoToMat(maskRle);
+				}
+				if ((srcMask == null || srcMask.Empty()) && det["mask_array"] != null && det["mask_array"].Type != JTokenType.Null)
+				{
+					srcMask = TryParseMaskArrayToMat(det["mask_array"]);
+				}
+				if (srcMask == null || srcMask.Empty()) return false;
+
+				if (srcMask.Rows != h || srcMask.Cols != w)
+				{
+					alignedMask = new Mat();
+					Cv2.Resize(srcMask, alignedMask, new Size(w, h), 0, 0, InterpolationFlags.Nearest);
+				}
+				else
+				{
+					alignedMask = srcMask.Clone();
+				}
+				return alignedMask != null && !alignedMask.Empty();
+			}
+			catch
+			{
+				if (alignedMask != null)
+				{
+					alignedMask.Dispose();
+					alignedMask = null;
+				}
+				return false;
+			}
+			finally
+			{
+				if (srcMask != null) srcMask.Dispose();
+			}
+		}
+
+		private static bool CheckMaskOverlapForDets(JObject detA, double[] aabbA, JObject detB, double[] aabbB)
+		{
+			if (detA == null || detB == null || aabbA == null || aabbB == null) return false;
+			if (!TryAabbToIntXYXY(aabbA, out int ax1, out int ay1, out int ax2, out int ay2)) return false;
+			if (!TryAabbToIntXYXY(aabbB, out int bx1, out int by1, out int bx2, out int by2)) return false;
+
+			Mat maskA = null;
+			try
+			{
+				if (!TryBuildAlignedMaskFromDet(detA, aabbA, out maskA) || maskA == null || maskA.Empty()) return false;
+				Mat maskB = null;
+				try
+				{
+					if (!TryBuildAlignedMaskFromDet(detB, aabbB, out maskB) || maskB == null || maskB.Empty()) return false;
+
+					int ix1 = Math.Max(ax1, bx1);
+					int iy1 = Math.Max(ay1, by1);
+					int ix2 = Math.Min(ax2, bx2);
+					int iy2 = Math.Min(ay2, by2);
+					if (ix2 <= ix1 || iy2 <= iy1) return false;
+
+					int aw = ix2 - ix1;
+					int ah = iy2 - iy1;
+					int aox = ix1 - ax1;
+					int aoy = iy1 - ay1;
+					int box = ix1 - bx1;
+					int boy = iy1 - by1;
+					if (aox < 0 || aoy < 0 || box < 0 || boy < 0) return false;
+					if (aox + aw > maskA.Cols || aoy + ah > maskA.Rows) return false;
+					if (box + aw > maskB.Cols || boy + ah > maskB.Rows) return false;
+
+					using (var subA = new Mat(maskA, new Rect(aox, aoy, aw, ah)))
+					using (var subB = new Mat(maskB, new Rect(box, boy, aw, ah)))
+					using (var overlap = new Mat())
+					{
+						Cv2.BitwiseAnd(subA, subB, overlap);
+						return Cv2.CountNonZero(overlap) > 0;
+					}
+				}
+				finally
+				{
+					if (maskB != null) maskB.Dispose();
+				}
+			}
+			finally
+			{
+				if (maskA != null) maskA.Dispose();
+			}
+		}
+
+		private static JToken BuildMergedMaskRle(List<MaskPlacement> placements, double[] unionAabb)
+		{
+			if (placements == null || placements.Count == 0 || unionAabb == null) return null;
+			if (!TryAabbToIntXYXY(unionAabb, out int ux1, out int uy1, out int ux2, out int uy2)) return null;
+			int uw = ux2 - ux1;
+			int uh = uy2 - uy1;
+			if (uw <= 0 || uh <= 0) return null;
+
+			using (var mergedMask = new Mat(uh, uw, MatType.CV_8UC1, Scalar.Black))
+			{
+				for (int i = 0; i < placements.Count; i++)
+				{
+					var placement = placements[i];
+					if (placement == null || placement.Det == null || placement.Aabb == null) continue;
+					if (!TryAabbToIntXYXY(placement.Aabb, out int sx1, out int sy1, out int sx2, out int sy2)) continue;
+					int sw = sx2 - sx1;
+					int sh = sy2 - sy1;
+					if (sw <= 0 || sh <= 0) continue;
+
+					Mat src = null;
+					try
+					{
+						if (!TryBuildAlignedMaskFromDet(placement.Det, placement.Aabb, out src) || src == null || src.Empty()) continue;
+
+						int dstX = sx1 - ux1;
+						int dstY = sy1 - uy1;
+						int srcX = 0;
+						int srcY = 0;
+						int rw = src.Cols;
+						int rh = src.Rows;
+
+						if (dstX < 0)
+						{
+							srcX = -dstX;
+							rw += dstX;
+							dstX = 0;
+						}
+						if (dstY < 0)
+						{
+							srcY = -dstY;
+							rh += dstY;
+							dstY = 0;
+						}
+
+						rw = Math.Min(rw, uw - dstX);
+						rh = Math.Min(rh, uh - dstY);
+						if (rw <= 0 || rh <= 0) continue;
+						if (srcX + rw > src.Cols || srcY + rh > src.Rows) continue;
+
+						using (var srcRoi = new Mat(src, new Rect(srcX, srcY, rw, rh)))
+						using (var dstRoi = new Mat(mergedMask, new Rect(dstX, dstY, rw, rh)))
+						{
+							Cv2.Max(dstRoi, srcRoi, dstRoi);
+						}
+					}
+					finally
+					{
+						if (src != null) src.Dispose();
+					}
+				}
+
+				if (Cv2.CountNonZero(mergedMask) <= 0) return null;
+				return MaskRleUtils.MatToMaskInfo(mergedMask);
+			}
 		}
 
 		private static bool TryGetGrid(JObject slidingMeta, out int gx, out int gy)
