@@ -283,7 +283,8 @@ public:
                     if ((endX - startX) < minSize || (endY - startY) < minSize) continue;
 
                     const cv::Rect rect(startX, startY, endX - startX, endY - startY);
-                    cv::Mat cropped = mat(rect).clone();
+                    // Use ROI view to avoid per-tile deep copy.
+                    cv::Mat cropped = mat(rect);
 
                     const TransformationState parentState = (wrap.TransformState.OriginalWidth > 0 && wrap.TransformState.OriginalHeight > 0)
                         ? wrap.TransformState
