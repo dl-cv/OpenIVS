@@ -9,6 +9,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <opencv2/imgcodecs.hpp>
@@ -25,6 +26,11 @@ constexpr int kLeakLoopCount = 10;
 constexpr int kGpuDeviceId = 0;
 constexpr int kFixedBatchSize = 8;
 const std::wstring kModelRoot = L"Y:\\测试模型";
+const std::wstring kDefaultPressureModelPath = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程2-各项检测_120_50.dvst";
+const std::wstring kDefaultPressureImagePath = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\detect_20260401153742_0_6_2904_5248_627_804.jpg";
+constexpr int kDefaultPressureBatchSize = 128;
+constexpr int kDefaultPressureRuns = 9;
+constexpr int kDefaultPressureWarmup = 5;
 
 struct ModelCase {
     std::wstring modelFile;
@@ -142,6 +148,15 @@ std::wstring BaseName(const std::wstring& p) {
     const size_t pos = p.find_last_of(L"\\/");
     if (pos == std::wstring::npos) return p;
     return p.substr(pos + 1);
+}
+
+std::wstring Utf8ToWide(const std::string& s) {
+    if (s.empty()) return {};
+    int chars = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0);
+    if (chars <= 0) return {};
+    std::wstring out(static_cast<size_t>(chars), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), out.data(), chars);
+    return out;
 }
 
 std::string BuildCategoryList(const dlcv_infer::Result& out) {
@@ -294,11 +309,169 @@ void PrintRow(const CaseRow& r) {
     std::cout << "| " << Safe(r.modelName) << " | " << Safe(r.loadText) << " | " << Safe(r.inferText) << " | "
               << Safe(r.categories) << " | " << Safe(r.speedText) << " | " << Safe(r.batchText) << " |\n";
 }
+
+struct NodeTimingAggregate {
+    int nodeId{-1};
+    std::string nodeType;
+    std::string nodeTitle;
+    int count{0};
+    double totalMs{0.0};
+    double AverageMs() const { return count > 0 ? totalMs / static_cast<double>(count) : 0.0; }
+    void Add(double elapsedMs) {
+        count += 1;
+        totalMs += std::max(0.0, elapsedMs);
+    }
+};
+
+int ParsePositiveIntArg(const char* s, int fallback) {
+    if (s == nullptr) return fallback;
+    try {
+        const int v = std::stoi(std::string(s));
+        return v > 0 ? v : fallback;
+    } catch (...) {
+        return fallback;
+    }
+}
+
+int RunBenchmark(const std::wstring& modelPath, const std::wstring& imagePath, int batch, int runs, int warmup) {
+    std::cout << "==== 基准测试 ====\n";
+    std::cout << "model: " << WideToUtf8(modelPath) << "\n";
+    std::cout << "image: " << WideToUtf8(imagePath) << "\n";
+    std::cout << "batch: " << batch << "\n";
+    std::cout << "runs: " << runs << "\n";
+    std::cout << "warmup: " << warmup << "\n";
+
+    if (!FileExistsW(modelPath)) {
+        std::cout << "模型不存在\n";
+        return 2;
+    }
+    if (!FileExistsW(imagePath)) {
+        std::cout << "图片不存在\n";
+        return 2;
+    }
+
+    try {
+        dlcv_infer::Model model(modelPath, kGpuDeviceId);
+        cv::Mat bgr = LoadImageByDecode(imagePath);
+        if (bgr.empty()) throw std::runtime_error("图像解码失败");
+        cv::Mat rgb;
+        cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+
+        std::vector<cv::Mat> list;
+        list.reserve(static_cast<size_t>(batch));
+        for (int i = 0; i < batch; ++i) list.push_back(rgb);
+
+        json params;
+        params["threshold"] = 0.5;
+        params["with_mask"] = false;
+        params["batch_size"] = batch;
+
+        for (int i = 0; i < warmup; ++i) {
+            auto warm = model.InferBatch(list, params);
+            DisposeResultMasks(warm);
+        }
+
+        double sdkSum = 0.0;
+        double flowSum = 0.0;
+        double outerSum = 0.0;
+        int sampleCount = -1;
+        std::unordered_map<std::string, NodeTimingAggregate> nodeStats;
+
+        for (int i = 0; i < runs; ++i) {
+            const auto t0 = Clock::now();
+            auto out = model.InferBatch(list, params);
+            const auto t1 = Clock::now();
+
+            if (sampleCount < 0) {
+                sampleCount = static_cast<int>(out.sampleResults.size());
+            }
+
+            double sdkMs = 0.0;
+            double flowMs = 0.0;
+            dlcv_infer::Model::GetLastInferTiming(sdkMs, flowMs);
+            const double outerMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            if (sdkMs <= 0.0) sdkMs = outerMs;
+            if (flowMs <= 0.0) flowMs = outerMs;
+            sdkSum += sdkMs;
+            flowSum += flowMs;
+            outerSum += outerMs;
+
+            const auto timings = dlcv_infer::Model::GetLastFlowNodeTimings();
+            for (const auto& timing : timings) {
+                const std::string key = std::to_string(timing.nodeId) + "|" + timing.nodeType + "|" + timing.nodeTitle;
+                auto& agg = nodeStats[key];
+                if (agg.count == 0) {
+                    agg.nodeId = timing.nodeId;
+                    agg.nodeType = timing.nodeType;
+                    agg.nodeTitle = timing.nodeTitle;
+                }
+                agg.Add(timing.elapsedMs);
+            }
+
+            DisposeResultMasks(out);
+        }
+
+        const double avgSdk = sdkSum / std::max(1, runs);
+        const double avgFlow = flowSum / std::max(1, runs);
+        const double avgOuter = outerSum / std::max(1, runs);
+        const double avgOverhead = std::max(0.0, avgFlow - avgSdk);
+
+        std::cout << "sample_count: " << sampleCount << "\n";
+        std::cout << "avg_sdk_ms: " << ToFixed(avgSdk, 2) << "\n";
+        std::cout << "avg_flow_ms: " << ToFixed(avgFlow, 2) << "\n";
+        std::cout << "avg_outer_ms: " << ToFixed(avgOuter, 2) << "\n";
+        std::cout << "avg_overhead_ms: " << ToFixed(avgOverhead, 2) << "\n";
+
+        std::vector<NodeTimingAggregate> rows;
+        rows.reserve(nodeStats.size());
+        for (const auto& kv : nodeStats) rows.push_back(kv.second);
+        std::sort(rows.begin(), rows.end(), [](const NodeTimingAggregate& a, const NodeTimingAggregate& b) {
+            return a.AverageMs() > b.AverageMs();
+        });
+
+        if (!rows.empty()) {
+            std::cout << "---- 节点平均耗时 ----\n";
+            for (const auto& item : rows) {
+                const double share = avgFlow > 0.0 ? item.AverageMs() * 100.0 / avgFlow : 0.0;
+                std::cout << "#" << item.nodeId << " [" << item.nodeType << "] "
+                          << (item.nodeTitle.empty() ? "-" : item.nodeTitle)
+                          << " -> avg=" << ToFixed(item.AverageMs(), 2)
+                          << "ms, share=" << ToFixed(share, 1) << "%\n";
+            }
+        }
+        return 0;
+    } catch (const std::exception& e) {
+        std::cout << "基准异常: " << e.what() << "\n";
+        return 1;
+    }
+}
 }  // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+
+    if (argc <= 1) {
+        return RunBenchmark(
+            kDefaultPressureModelPath,
+            kDefaultPressureImagePath,
+            kDefaultPressureBatchSize,
+            kDefaultPressureRuns,
+            kDefaultPressureWarmup);
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "bench") {
+        if (argc < 4) {
+            std::cout << "用法: dlcv_infer_cpp_test bench <modelPath> <imagePath> [batch] [runs] [warmup]\n";
+            return 2;
+        }
+        const std::wstring modelPath = Utf8ToWide(argv[2]);
+        const std::wstring imagePath = Utf8ToWide(argv[3]);
+        const int batch = (argc >= 5) ? ParsePositiveIntArg(argv[4], 1) : 1;
+        const int runs = (argc >= 6) ? ParsePositiveIntArg(argv[5], 20) : 20;
+        const int warmup = (argc >= 7) ? ParsePositiveIntArg(argv[6], 5) : 5;
+        return RunBenchmark(modelPath, imagePath, batch, runs, warmup);
+    }
 
     std::cout << "==== C++ 测试程序 ====\n";
     std::cout << "模型目录: " << WideToUtf8(kModelRoot) << "\n";
