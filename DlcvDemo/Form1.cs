@@ -272,8 +272,6 @@ namespace DlcvDemo
 
         private void button_infer_Click(object sender, EventArgs e)
         {
-            
-
             try
             {
                 if (model == null)
@@ -318,15 +316,61 @@ namespace DlcvDemo
                 imagePanel1.UpdateImageAndResult(image, result);
 
                 StringBuilder sb = new StringBuilder();
-                sb.AppendLine($"推理时间: {delay_ms:F2}ms\n");
-                sb.AppendLine($"推理结果（{result.SampleResults[0].Results.Count}个）: ");
-                sb.AppendLine(result.SampleResults[0].ToString());
+                sb.AppendLine("图片: " + image_path);
+                sb.AppendLine($"batch_size: {batch_size}");
+                sb.AppendLine($"threshold: {(float)numericUpDown_threshold.Value:F2}");
+                sb.AppendLine($"推理时间: {delay_ms:F2}ms");
+
+                List<CSharpObjectResult> objects = null;
+                if (result.SampleResults != null && result.SampleResults.Count > 0)
+                {
+                    objects = result.SampleResults[0].Results;
+                }
+                if (objects == null)
+                {
+                    objects = new List<CSharpObjectResult>();
+                }
+
+                sb.AppendLine($"推理结果: {objects.Count}个");
+                if (objects.Count == 0)
+                {
+                    sb.AppendLine("未检测到目标。");
+                }
+                else
+                {
+                    sb.AppendLine();
+                    for (int i = 0; i < objects.Count; i++)
+                    {
+                        CSharpObjectResult obj = objects[i];
+                        sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}");
+                    }
+                }
                 richTextBox1.Text = sb.ToString();
             }
             catch (Exception ex)
             {
                 ReportError("推理失败", ex);
             }
+        }
+
+        private static string BuildResultLocationText(CSharpObjectResult obj)
+        {
+            if (!obj.WithBbox || obj.Bbox == null || obj.Bbox.Count < 4)
+            {
+                return "rect=(N/A)";
+            }
+
+            bool isRotated = obj.WithAngle || obj.Bbox.Count >= 5;
+            if (isRotated)
+            {
+                return string.Format(
+                    "rbox=(cx={0:F1}, cy={1:F1}, w={2:F1}, h={3:F1}, angle={4:F3})",
+                    obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3], obj.Angle);
+            }
+
+            return string.Format(
+                "rect=({0:F1}, {1:F1}, {2:F1}, {3:F1})",
+                obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3]);
         }
 
         /// <summary>
