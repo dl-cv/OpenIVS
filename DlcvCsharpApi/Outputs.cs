@@ -139,9 +139,10 @@ namespace DlcvModules
             var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
 
+            bool emitPoly = ShouldEmitPoly();
             List<Dictionary<string, object>> byImage = CanUseAlignedFastPath(images, results)
-                ? BuildByImageAligned(images, results)
-                : BuildByImageMapped(images, results);
+                ? BuildByImageAligned(images, results, emitPoly)
+                : BuildByImageMapped(images, results, emitPoly);
 
             var payload = new Dictionary<string, object> { { "by_image", byImage } };
 
@@ -163,6 +164,38 @@ namespace DlcvModules
             return new ModuleIO(images, results);
         }
 
+        private bool ShouldEmitPoly()
+        {
+            // 默认关闭 poly 输出，避免在批量汇总链路中放大 JSON 体积。
+            // 仅在明确请求（节点属性或上下文开关）时输出 poly。
+            bool emitPoly = ReadBoolProperty("emit_poly", false) || ReadBoolProperty("return_poly", false);
+            if (Context != null)
+            {
+                emitPoly = emitPoly || Context.Get<bool>("return_json_emit_poly", false);
+            }
+            return emitPoly;
+        }
+
+        private bool ReadBoolProperty(string key, bool defaultValue)
+        {
+            if (Properties == null || string.IsNullOrWhiteSpace(key)) return defaultValue;
+            if (!Properties.TryGetValue(key, out object raw) || raw == null) return defaultValue;
+            try
+            {
+                if (raw is bool b) return b;
+                if (raw is string s)
+                {
+                    if (bool.TryParse(s, out bool parsedBool)) return parsedBool;
+                    if (int.TryParse(s, out int parsedInt)) return parsedInt != 0;
+                }
+                return Convert.ToBoolean(raw);
+            }
+            catch
+            {
+                return defaultValue;
+            }
+        }
+
         private static bool CanUseAlignedFastPath(List<ModuleImage> images, JArray results)
         {
             if (images == null || results == null) return false;
@@ -178,7 +211,7 @@ namespace DlcvModules
             return true;
         }
 
-        private static List<Dictionary<string, object>> BuildByImageAligned(List<ModuleImage> images, JArray results)
+        private static List<Dictionary<string, object>> BuildByImageAligned(List<ModuleImage> images, JArray results, bool emitPoly)
         {
             var byImage = new List<Dictionary<string, object>>(images != null ? images.Count : 0);
             if (images == null || results == null) return byImage;
@@ -190,13 +223,13 @@ namespace DlcvModules
 
                 var entry = results[i] as JObject;
                 var dets = entry != null ? entry["sample_results"] as JArray : null;
-                var outResults = BuildOutResults(wrap, dets);
+                var outResults = BuildOutResults(wrap, dets, emitPoly);
                 byImage.Add(BuildImageEntry(wrap, outResults));
             }
             return byImage;
         }
 
-        private static List<Dictionary<string, object>> BuildByImageMapped(List<ModuleImage> images, JArray results)
+        private static List<Dictionary<string, object>> BuildByImageMapped(List<ModuleImage> images, JArray results, bool emitPoly)
         {
             var byImage = new List<Dictionary<string, object>>(images != null ? images.Count : 0);
             if (images == null || results == null) return byImage;
@@ -250,7 +283,7 @@ namespace DlcvModules
                     }
                 }
 
-                var outResults = BuildOutResults(wrap, dets);
+                var outResults = BuildOutResults(wrap, dets, emitPoly);
                 byImage.Add(BuildImageEntry(wrap, outResults));
             }
 
@@ -280,7 +313,7 @@ namespace DlcvModules
             };
         }
 
-        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, JArray dets)
+        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, JArray dets, bool emitPoly)
         {
             var outResults = new List<Dictionary<string, object>>(dets != null ? dets.Count : 0);
             if (wrap == null || dets == null || dets.Count == 0) return outResults;
@@ -291,13 +324,13 @@ namespace DlcvModules
             {
                 if (d is JObject detObj)
                 {
-                    AppendOutResult(detObj, tC2O, isAxisAlignedTransform, outResults);
+                    AppendOutResult(detObj, tC2O, isAxisAlignedTransform, emitPoly, outResults);
                 }
             }
             return outResults;
         }
 
-        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, List<JObject> dets)
+        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, List<JObject> dets, bool emitPoly)
         {
             var outResults = new List<Dictionary<string, object>>(dets != null ? dets.Count : 0);
             if (wrap == null || dets == null || dets.Count == 0) return outResults;
@@ -308,7 +341,7 @@ namespace DlcvModules
             {
                 var detObj = dets[i];
                 if (detObj == null) continue;
-                AppendOutResult(detObj, tC2O, isAxisAlignedTransform, outResults);
+                AppendOutResult(detObj, tC2O, isAxisAlignedTransform, emitPoly, outResults);
             }
             return outResults;
         }
@@ -317,6 +350,7 @@ namespace DlcvModules
             JObject detObj,
             double[] tC2O,
             bool isAxisAlignedTransform,
+            bool emitPoly,
             List<Dictionary<string, object>> outResults)
         {
             var item = new Dictionary<string, object>(8)
@@ -351,7 +385,7 @@ namespace DlcvModules
             if (maskInfo != null && maskInfo.Type != JTokenType.Null)
             {
                 item["mask_rle"] = maskInfo;
-                if (TryBuildMaskPoly(maskInfo, bboxLocal, tC2O, out List<object> poly))
+                if (emitPoly && TryBuildMaskPoly(maskInfo, bboxLocal, tC2O, out List<object> poly))
                 {
                     item["poly"] = poly;
                 }
