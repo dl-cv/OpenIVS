@@ -146,6 +146,11 @@ namespace DlcvModules
 
         public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject paramsJson)
         {
+            return InferInternalCore(images, paramsJson, false);
+        }
+
+        private Tuple<JObject, IntPtr> InferInternalCore(List<Mat> images, JObject paramsJson, bool emitPoly)
+        {
             if (!_loaded) throw new InvalidOperationException("模型未加载");
             if (images == null || images.Count == 0) throw new ArgumentException("输入图像列表为空", nameof(images));
             var bgrBatch = new List<Mat>();
@@ -172,6 +177,7 @@ namespace DlcvModules
                 ctx.Set("frontend_image_color_space", "rgb");
                 ctx.Set("frontend_image_path", "");
                 ctx.Set("device_id", _deviceId);
+                ctx.Set("return_json_emit_poly", emitPoly);
 
                 InferTiming.BeginFlowRequest();
                 var flowSw = System.Diagnostics.Stopwatch.StartNew();
@@ -279,7 +285,8 @@ namespace DlcvModules
                 throw new ArgumentException("输入图像为空", nameof(image));
 
             // 复用 InferInternal 的流程图执行逻辑，保持与 Infer/InferBatch 一致
-            var resultTuple = InferInternal(new List<Mat> { image }, paramsJson);
+            // InferOneOutJson 需要保留 poly 语义用于 JSON 输出；批量/结构化路径默认关闭 poly。
+            var resultTuple = InferInternalCore(new List<Mat> { image }, paramsJson, true);
             try
             {
                 // FlowGraphModel.InferInternal 在单张图片情况下，
