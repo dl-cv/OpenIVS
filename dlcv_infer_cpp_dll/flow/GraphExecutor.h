@@ -26,9 +26,17 @@ struct NodePublicOutput final {
 /// </summary>
 class GraphExecutor final {
 public:
+    struct NodeTiming final {
+        int NodeId = -1;
+        std::string NodeType;
+        std::string NodeTitle;
+        double ElapsedMs = 0.0;
+    };
+
     GraphExecutor(std::vector<Json> nodes, ExecutionContext* context = nullptr);
 
     std::unordered_map<int, NodePublicOutput> Run();
+    std::vector<NodeTiming> GetLastNodeTimings() const;
 
     /// <summary>
     /// 预加载模型：对 type 以 "model/" 开头的节点调用 module->LoadModel()，
@@ -47,6 +55,7 @@ private:
 
     std::unordered_map<int, NodeExecOutput> _nodeExecMap;     // nodeId -> exec outputs (main+extra)
     std::unordered_map<int, NodePublicOutput> _publicOutputs; // nodeId -> image/result/template/scalars
+    std::vector<NodeTiming> _lastNodeTimings;
 
     static int SafeToInt(const Json& v, int dv);
     static std::string SafeToString(const Json& v, const std::string& dv);

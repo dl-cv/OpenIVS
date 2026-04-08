@@ -312,11 +312,35 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     ctx.Set<int>("device_id", _deviceId);
 
     GraphExecutor exec(_nodes, &ctx);
+    const auto runStart = std::chrono::steady_clock::now();
     (void)exec.Run();
+    const auto runEnd = std::chrono::steady_clock::now();
 
     const FlowBatchResult batch = AggregateFrontendResults(ctx, static_cast<int>(images.size()));
     (void)paramsJson; // 预留：未来可将 paramsJson 注入 ctx 或模块属性覆盖
-    return batch.ToFlowRootJson();
+    Json root = batch.ToFlowRootJson();
+
+    const std::vector<GraphExecutor::NodeTiming> nodeTimings = exec.GetLastNodeTimings();
+    Json timing = Json::object();
+    timing["flow_infer_ms"] = std::chrono::duration<double, std::milli>(runEnd - runStart).count();
+
+    double dlcvInferMs = 0.0;
+    Json timingItems = Json::array();
+    for (const auto& item : nodeTimings) {
+        Json one = Json::object();
+        one["node_id"] = item.NodeId;
+        one["node_type"] = item.NodeType;
+        one["node_title"] = item.NodeTitle;
+        one["elapsed_ms"] = item.ElapsedMs;
+        timingItems.push_back(std::move(one));
+        if (item.NodeType.rfind("model/", 0) == 0) {
+            dlcvInferMs += item.ElapsedMs;
+        }
+    }
+    timing["dlcv_infer_ms"] = dlcvInferMs;
+    timing["node_timings"] = std::move(timingItems);
+    root["timing"] = std::move(timing);
+    return root;
 }
 
 Json FlowGraphModel::InferOneOutJson(const cv::Mat& image, const Json& paramsJson) {

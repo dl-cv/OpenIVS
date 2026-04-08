@@ -16,6 +16,16 @@ namespace {
 
 using Json = dlcv_infer::json;
 
+thread_local double g_lastDlcvInferMs = 0.0;
+thread_local double g_lastTotalInferMs = 0.0;
+thread_local std::vector<dlcv_infer::FlowNodeTiming> g_lastFlowNodeTimings;
+
+void SetLastInferTiming(double dlcvInferMs, double totalInferMs, std::vector<dlcv_infer::FlowNodeTiming> nodeTimings = {}) {
+    g_lastDlcvInferMs = std::max(0.0, dlcvInferMs);
+    g_lastTotalInferMs = std::max(0.0, totalInferMs);
+    g_lastFlowNodeTimings = std::move(nodeTimings);
+}
+
 bool DllExists(const std::string& dllName, const std::string& dllPath) {
     if (SearchPathA(nullptr, dllName.c_str(), nullptr, 0, nullptr, nullptr) != 0) {
         return true;
@@ -603,6 +613,41 @@ dlcv_infer::flow::FlowBatchResult ParseFlowBatchResultFromRoot(const Json& flowR
     return batch;
 }
 
+void ParseFlowTimingFromRoot(
+    const Json& flowRoot,
+    double& dlcvInferMs,
+    double& totalInferMs,
+    std::vector<dlcv_infer::FlowNodeTiming>& nodeTimings) {
+
+    dlcvInferMs = 0.0;
+    totalInferMs = 0.0;
+    nodeTimings.clear();
+
+    if (!flowRoot.is_object() || !flowRoot.contains("timing") || !flowRoot.at("timing").is_object()) {
+        return;
+    }
+
+    const Json& timing = flowRoot.at("timing");
+    try { dlcvInferMs = std::max(0.0, timing.value("dlcv_infer_ms", 0.0)); } catch (...) { dlcvInferMs = 0.0; }
+    try { totalInferMs = std::max(0.0, timing.value("flow_infer_ms", 0.0)); } catch (...) { totalInferMs = 0.0; }
+
+    try {
+        if (timing.contains("node_timings") && timing.at("node_timings").is_array()) {
+            for (const auto& one : timing.at("node_timings")) {
+                if (!one.is_object()) continue;
+                dlcv_infer::FlowNodeTiming item;
+                try { item.nodeId = one.value("node_id", -1); } catch (...) { item.nodeId = -1; }
+                try { item.nodeType = one.value("node_type", std::string()); } catch (...) { item.nodeType.clear(); }
+                try { item.nodeTitle = one.value("node_title", std::string()); } catch (...) { item.nodeTitle.clear(); }
+                try { item.elapsedMs = std::max(0.0, one.value("elapsed_ms", 0.0)); } catch (...) { item.elapsedMs = 0.0; }
+                nodeTimings.push_back(std::move(item));
+            }
+        }
+    } catch (...) {
+        nodeTimings.clear();
+    }
+}
+
 } // namespace
 
 namespace dlcv_infer {
@@ -1078,7 +1123,22 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
+            const auto begin = std::chrono::steady_clock::now();
             json flowRoot = _flowModel->InferInternal(std::vector<cv::Mat>{ image }, params_json);
+            const auto end = std::chrono::steady_clock::now();
+
+            double dlcvInferMs = 0.0;
+            double totalInferMs = 0.0;
+            std::vector<FlowNodeTiming> nodeTimings;
+            ParseFlowTimingFromRoot(flowRoot, dlcvInferMs, totalInferMs, nodeTimings);
+            if (totalInferMs <= 0.0) {
+                totalInferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+            }
+            if (dlcvInferMs <= 0.0) {
+                dlcvInferMs = totalInferMs;
+            }
+            SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
+
             flow::FlowBatchResult batch = ParseFlowBatchResultFromRoot(flowRoot, 1);
             json flowResults = json::array();
             if (!batch.PerImageResults.empty()) {
@@ -1091,7 +1151,11 @@ namespace dlcv_infer {
         }
 
         // 将单张图像放入列表中传递
+        const auto begin = std::chrono::steady_clock::now();
         auto resultTuple = InferInternal({ image }, params_json);
+        const auto end = std::chrono::steady_clock::now();
+        const double inferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+        SetLastInferTiming(inferMs, inferMs);
 
         try
         {
@@ -1111,9 +1175,27 @@ namespace dlcv_infer {
     Result Model::InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json) {
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
-            if (image_list.empty()) return Result(std::vector<SampleResult>{});
+            if (image_list.empty()) {
+                SetLastInferTiming(0.0, 0.0);
+                return Result(std::vector<SampleResult>{});
+            }
 
+            const auto begin = std::chrono::steady_clock::now();
             json flowRoot = _flowModel->InferInternal(image_list, params_json);
+            const auto end = std::chrono::steady_clock::now();
+
+            double dlcvInferMs = 0.0;
+            double totalInferMs = 0.0;
+            std::vector<FlowNodeTiming> nodeTimings;
+            ParseFlowTimingFromRoot(flowRoot, dlcvInferMs, totalInferMs, nodeTimings);
+            if (totalInferMs <= 0.0) {
+                totalInferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+            }
+            if (dlcvInferMs <= 0.0) {
+                dlcvInferMs = totalInferMs;
+            }
+            SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
+
             flow::FlowBatchResult batch = ParseFlowBatchResultFromRoot(flowRoot, image_list.size());
             std::vector<SampleResult> sampleResults;
             sampleResults.reserve(image_list.size());
@@ -1127,7 +1209,11 @@ namespace dlcv_infer {
             return Result(std::move(sampleResults));
         }
 
+        const auto begin = std::chrono::steady_clock::now();
         auto resultTuple = InferInternal(image_list, params_json);
+        const auto end = std::chrono::steady_clock::now();
+        const double inferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+        SetLastInferTiming(inferMs, inferMs);
 
         try
         {
@@ -1149,7 +1235,22 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
+            const auto begin = std::chrono::steady_clock::now();
             json flowRoot = _flowModel->InferInternal(std::vector<cv::Mat>{ image }, params_json);
+            const auto end = std::chrono::steady_clock::now();
+
+            double dlcvInferMs = 0.0;
+            double totalInferMs = 0.0;
+            std::vector<FlowNodeTiming> nodeTimings;
+            ParseFlowTimingFromRoot(flowRoot, dlcvInferMs, totalInferMs, nodeTimings);
+            if (totalInferMs <= 0.0) {
+                totalInferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+            }
+            if (dlcvInferMs <= 0.0) {
+                dlcvInferMs = totalInferMs;
+            }
+            SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
+
             flow::FlowBatchResult batch = ParseFlowBatchResultFromRoot(flowRoot, 1);
             json flowResults = json::array();
             if (!batch.PerImageResults.empty()) {
@@ -1158,7 +1259,11 @@ namespace dlcv_infer {
             return NormalizeFlowOneOutJson(flowResults);
         }
 
+        const auto begin = std::chrono::steady_clock::now();
         auto resultTuple = InferInternal({ image }, params_json);
+        const auto end = std::chrono::steady_clock::now();
+        const double inferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+        SetLastInferTiming(inferMs, inferMs);
 
         try
         {
@@ -1213,6 +1318,15 @@ namespace dlcv_infer {
             DllLoader::Instance().GetFreeModelResultFunc()(resultTuple.second);
             throw;
         }
+    }
+
+    void Model::GetLastInferTiming(double& dlcvInferMs, double& totalInferMs) {
+        dlcvInferMs = g_lastDlcvInferMs;
+        totalInferMs = g_lastTotalInferMs;
+    }
+
+    std::vector<FlowNodeTiming> Model::GetLastFlowNodeTimings() {
+        return g_lastFlowNodeTimings;
     }
 
     // SlidingWindowModel类实现

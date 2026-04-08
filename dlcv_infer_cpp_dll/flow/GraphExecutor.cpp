@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
@@ -185,6 +186,7 @@ std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
 std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
     _nodeExecMap.clear();
     _publicOutputs.clear();
+    _lastNodeTimings.clear();
 
     // 1) 排序：按 order，其次按 id
     std::vector<Json> ordered = _nodes;
@@ -280,8 +282,17 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
         module->ScalarInputsByIndex = std::move(scalarInputsByIdx);
         module->ScalarInputsByName = std::move(scalarInputsByName);
 
-        // 执行当前节点
+        // 执行当前节点并记录节点耗时（用于压测模块耗时统计）
+        const auto nodeStart = std::chrono::steady_clock::now();
         ModuleIO io = module->Process(mainCh.ImageList, mainCh.ResultList);
+        const auto nodeEnd = std::chrono::steady_clock::now();
+        const double elapsedMs = std::chrono::duration<double, std::milli>(nodeEnd - nodeStart).count();
+        NodeTiming timing;
+        timing.NodeId = nodeId;
+        timing.NodeType = type;
+        timing.NodeTitle = title;
+        timing.ElapsedMs = elapsedMs > 0.0 ? elapsedMs : 0.0;
+        _lastNodeTimings.push_back(std::move(timing));
 
         // 保存该节点的全部输出通道（供后续路由）
         NodeExecOutput nodeOut;
@@ -342,6 +353,10 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
     }
 
     return _publicOutputs;
+}
+
+std::vector<GraphExecutor::NodeTiming> GraphExecutor::GetLastNodeTimings() const {
+    return _lastNodeTimings;
 }
 
 Json GraphExecutor::LoadModels() {

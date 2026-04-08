@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <chrono>
+#include <algorithm>
 #include <mutex>
 #include <atomic>
 #include <thread>
@@ -568,6 +569,12 @@ void MainWindow::startPressureTest() {
     pressureError_.store(false, std::memory_order_relaxed);
     pressureCompletedRequests_.store(0, std::memory_order_relaxed);
     pressureTotalLatencyUs_.store(0, std::memory_order_relaxed);
+    pressureTotalSdkLatencyUs_.store(0, std::memory_order_relaxed);
+    pressureTotalFlowLatencyUs_.store(0, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(pressureNodeStatsMutex_);
+        pressureNodeStats_.clear();
+    }
     {
         std::lock_guard<std::mutex> lock(pressureErrorMutex_);
         pressureErrorDetail_.clear();
@@ -669,6 +676,33 @@ void MainWindow::startPressureTest() {
                 try
                 {
                     (void)modelPtr->InferBatch(images, params);
+                    double sdkInferMs = 0.0;
+                    double totalInferMs = 0.0;
+                    dlcv_infer::Model::GetLastInferTiming(sdkInferMs, totalInferMs);
+                    if (sdkInferMs > 0.0) {
+                        const long long sdkUs = static_cast<long long>(std::llround(sdkInferMs * 1000.0));
+                        pressureTotalSdkLatencyUs_.fetch_add(sdkUs, std::memory_order_relaxed);
+                    }
+                    if (totalInferMs > 0.0) {
+                        const long long flowUs = static_cast<long long>(std::llround(totalInferMs * 1000.0));
+                        pressureTotalFlowLatencyUs_.fetch_add(flowUs, std::memory_order_relaxed);
+                    }
+                    const std::vector<dlcv_infer::FlowNodeTiming> nodeTimings = dlcv_infer::Model::GetLastFlowNodeTimings();
+                    if (!nodeTimings.empty()) {
+                        std::lock_guard<std::mutex> lock(pressureNodeStatsMutex_);
+                        for (const auto& timing : nodeTimings) {
+                            const std::string key =
+                                std::to_string(timing.nodeId) + "|" + timing.nodeType + "|" + timing.nodeTitle;
+                            auto& agg = pressureNodeStats_[key];
+                            if (agg.count == 0) {
+                                agg.nodeId = timing.nodeId;
+                                agg.nodeType = timing.nodeType;
+                                agg.nodeTitle = timing.nodeTitle;
+                            }
+                            agg.totalMs += std::max(0.0, timing.elapsedMs);
+                            agg.count += 1;
+                        }
+                    }
                 }
                 catch (const std::exception& e)
                 {
@@ -743,9 +777,17 @@ void MainWindow::updatePressureTestStatistics() {
 
     const long long completedRequests = pressureCompletedRequests_.load(std::memory_order_relaxed);
     const long long totalLatencyUs = pressureTotalLatencyUs_.load(std::memory_order_relaxed);
+    const long long totalSdkLatencyUs = pressureTotalSdkLatencyUs_.load(std::memory_order_relaxed);
+    const long long totalFlowLatencyUs = pressureTotalFlowLatencyUs_.load(std::memory_order_relaxed);
 
     const double averageLatencyMs =
         completedRequests > 0 ? (static_cast<double>(totalLatencyUs) / 1000.0 / static_cast<double>(completedRequests))
+                              : 0.0;
+    const double averageSdkLatencyMs =
+        completedRequests > 0 ? (static_cast<double>(totalSdkLatencyUs) / 1000.0 / static_cast<double>(completedRequests))
+                              : 0.0;
+    const double averageFlowLatencyMs =
+        completedRequests > 0 ? (static_cast<double>(totalFlowLatencyUs) / 1000.0 / static_cast<double>(completedRequests))
                               : 0.0;
 
     const double tickSeconds = std::chrono::duration<double>(now - pressureLastTickTime_).count();
@@ -764,7 +806,39 @@ void MainWindow::updatePressureTestStatistics() {
     text += QString("运行时间: %1 秒\n").arg(elapsedSeconds, 0, 'f', 2);
     text += QString("完成请求: %1\n").arg(completedRequests * static_cast<long long>(pressureBatchSize_));
     text += QString("平均延迟: %1ms\n").arg(averageLatencyMs, 0, 'f', 2);
+    if (averageSdkLatencyMs > 0.0) {
+        text += QString("平均延迟(SDK): %1ms\n").arg(averageSdkLatencyMs, 0, 'f', 2);
+    }
     text += QString("实时速率: %1 请求/秒\n").arg(recentRate, 0, 'f', 2);
+
+    std::vector<PressureNodeAggregate> nodeItems;
+    {
+        std::lock_guard<std::mutex> lock(pressureNodeStatsMutex_);
+        nodeItems.reserve(pressureNodeStats_.size());
+        for (const auto& kv : pressureNodeStats_) {
+            const PressureNodeAggregate& agg = kv.second;
+            if (agg.count <= 0) continue;
+            if (agg.AverageMs() < 1.0) continue;
+            nodeItems.push_back(agg);
+        }
+    }
+    if (!nodeItems.empty()) {
+        std::sort(nodeItems.begin(), nodeItems.end(), [](const PressureNodeAggregate& a, const PressureNodeAggregate& b) {
+            return a.AverageMs() > b.AverageMs();
+        });
+        text += "模块平均耗时:\n";
+        for (const auto& item : nodeItems) {
+            const QString title = item.nodeTitle.empty() ? "-" : QString::fromUtf8(item.nodeTitle.c_str());
+            const double avgMs = item.AverageMs();
+            const double share = averageFlowLatencyMs > 0.0 ? (avgMs * 100.0 / averageFlowLatencyMs) : 0.0;
+            text += QString("#%1 [%2] %3: %4ms (%5%)\n")
+                        .arg(item.nodeId)
+                        .arg(QString::fromUtf8(item.nodeType.c_str()))
+                        .arg(title)
+                        .arg(avgMs, 0, 'f', 2)
+                        .arg(share, 0, 'f', 1);
+        }
+    }
     outputText_->setPlainText(text);
 }
 
