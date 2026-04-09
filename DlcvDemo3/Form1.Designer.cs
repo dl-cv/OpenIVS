@@ -56,13 +56,13 @@ namespace DlcvDemo3
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtModel1Path.Location = new System.Drawing.Point(148, 13);
             this.txtModel1Path.Name = "txtModel1Path";
-            this.txtModel1Path.Size = new System.Drawing.Size(850, 31);
+            this.txtModel1Path.Size = new System.Drawing.Size(984, 31);
             this.txtModel1Path.TabIndex = 1;
             // 
             // btnBrowseModel1
             // 
             this.btnBrowseModel1.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseModel1.Location = new System.Drawing.Point(1004, 12);
+            this.btnBrowseModel1.Location = new System.Drawing.Point(1138, 12);
             this.btnBrowseModel1.Name = "btnBrowseModel1";
             this.btnBrowseModel1.Size = new System.Drawing.Size(120, 34);
             this.btnBrowseModel1.TabIndex = 2;
@@ -73,7 +73,7 @@ namespace DlcvDemo3
             // btnLoadModel1
             // 
             this.btnLoadModel1.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnLoadModel1.Location = new System.Drawing.Point(1130, 12);
+            this.btnLoadModel1.Location = new System.Drawing.Point(1264, 12);
             this.btnLoadModel1.Name = "btnLoadModel1";
             this.btnLoadModel1.Size = new System.Drawing.Size(120, 34);
             this.btnLoadModel1.TabIndex = 3;
@@ -96,13 +96,13 @@ namespace DlcvDemo3
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtModel2Path.Location = new System.Drawing.Point(148, 51);
             this.txtModel2Path.Name = "txtModel2Path";
-            this.txtModel2Path.Size = new System.Drawing.Size(850, 31);
+            this.txtModel2Path.Size = new System.Drawing.Size(984, 31);
             this.txtModel2Path.TabIndex = 5;
             // 
             // btnBrowseModel2
             // 
             this.btnBrowseModel2.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseModel2.Location = new System.Drawing.Point(1004, 50);
+            this.btnBrowseModel2.Location = new System.Drawing.Point(1138, 50);
             this.btnBrowseModel2.Name = "btnBrowseModel2";
             this.btnBrowseModel2.Size = new System.Drawing.Size(120, 34);
             this.btnBrowseModel2.TabIndex = 6;
@@ -113,7 +113,7 @@ namespace DlcvDemo3
             // btnLoadModel2
             // 
             this.btnLoadModel2.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnLoadModel2.Location = new System.Drawing.Point(1130, 50);
+            this.btnLoadModel2.Location = new System.Drawing.Point(1264, 50);
             this.btnLoadModel2.Name = "btnLoadModel2";
             this.btnLoadModel2.Size = new System.Drawing.Size(120, 34);
             this.btnLoadModel2.TabIndex = 7;
@@ -136,13 +136,13 @@ namespace DlcvDemo3
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtImagePath.Location = new System.Drawing.Point(148, 89);
             this.txtImagePath.Name = "txtImagePath";
-            this.txtImagePath.Size = new System.Drawing.Size(774, 31);
+            this.txtImagePath.Size = new System.Drawing.Size(782, 31);
             this.txtImagePath.TabIndex = 9;
             // 
             // btnBrowseImage
             // 
             this.btnBrowseImage.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseImage.Location = new System.Drawing.Point(928, 88);
+            this.btnBrowseImage.Location = new System.Drawing.Point(936, 88);
             this.btnBrowseImage.Name = "btnBrowseImage";
             this.btnBrowseImage.Size = new System.Drawing.Size(120, 34);
             this.btnBrowseImage.TabIndex = 10;
@@ -153,7 +153,7 @@ namespace DlcvDemo3
             // btnInfer
             // 
             this.btnInfer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnInfer.Location = new System.Drawing.Point(928, 88);
+            this.btnInfer.Location = new System.Drawing.Point(1062, 88);
             this.btnInfer.Name = "btnInfer";
             this.btnInfer.Size = new System.Drawing.Size(120, 34);
             this.btnInfer.TabIndex = 11;
@@ -164,7 +164,7 @@ namespace DlcvDemo3
             // btnSpeedTest
             // 
             this.btnSpeedTest.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnSpeedTest.Location = new System.Drawing.Point(1054, 88);
+            this.btnSpeedTest.Location = new System.Drawing.Point(1188, 88);
             this.btnSpeedTest.Name = "btnSpeedTest";
             this.btnSpeedTest.Size = new System.Drawing.Size(196, 34);
             this.btnSpeedTest.TabIndex = 20;
@@ -216,7 +216,7 @@ namespace DlcvDemo3
             // btnReleaseModels
             // 
             this.btnReleaseModels.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnReleaseModels.Location = new System.Drawing.Point(928, 128);
+            this.btnReleaseModels.Location = new System.Drawing.Point(1062, 128);
             this.btnReleaseModels.Name = "btnReleaseModels";
             this.btnReleaseModels.Size = new System.Drawing.Size(322, 34);
             this.btnReleaseModels.TabIndex = 15;
@@ -230,14 +230,14 @@ namespace DlcvDemo3
             | System.Windows.Forms.AnchorStyles.Right)));
             this.progressBarInference.Location = new System.Drawing.Point(148, 168);
             this.progressBarInference.Name = "progressBarInference";
-            this.progressBarInference.Size = new System.Drawing.Size(758, 24);
+            this.progressBarInference.Size = new System.Drawing.Size(1124, 24);
             this.progressBarInference.TabIndex = 16;
             // 
             // lblInferenceProgress
             // 
             this.lblInferenceProgress.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.lblInferenceProgress.AutoSize = true;
-            this.lblInferenceProgress.Location = new System.Drawing.Point(912, 169);
+            this.lblInferenceProgress.Location = new System.Drawing.Point(1280, 169);
             this.lblInferenceProgress.Name = "lblInferenceProgress";
             this.lblInferenceProgress.Size = new System.Drawing.Size(70, 24);
             this.lblInferenceProgress.TabIndex = 17;

@@ -73,7 +73,7 @@
             // 
             this.button_get_model_info.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.button_get_model_info.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button_get_model_info.Location = new System.Drawing.Point(677, 93);
+            this.button_get_model_info.Location = new System.Drawing.Point(1119, 161);
             this.button_get_model_info.Margin = new System.Windows.Forms.Padding(4);
             this.button_get_model_info.Name = "button_get_model_info";
             this.button_get_model_info.Size = new System.Drawing.Size(140, 60);
