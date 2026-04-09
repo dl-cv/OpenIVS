@@ -160,7 +160,7 @@ namespace DlcvModules
 				var entry = token as JObject;
 				if (entry == null || !string.Equals(entry.Value<string>("type"), "local", StringComparison.OrdinalIgnoreCase))
 				{
-					if (token != null) otherResults.Add(token.DeepClone());
+					if (token != null) otherResults.Add(token);
 					continue;
 				}
 
@@ -188,7 +188,7 @@ namespace DlcvModules
 					continue;
 				}
 
-				otherResults.Add(entry.DeepClone());
+				otherResults.Add(entry);
 			}
 
 #if DEBUG
@@ -208,15 +208,15 @@ namespace DlcvModules
 				string sig = SerializeTransform(wrap != null ? wrap.TransformState : null);
 				if (!string.IsNullOrEmpty(sig) && transToSamples.TryGetValue(sig, out List<JObject> byTransform))
 				{
-					dets = CloneDetList(byTransform);
+					dets = byTransform;
 				}
 				else if (indexToSamples.TryGetValue(i, out List<JObject> byIndex))
 				{
-					dets = CloneDetList(byIndex);
+					dets = byIndex;
 				}
 				else if (wrap != null && originToSamples.TryGetValue(wrap.OriginalIndex, out List<JObject> byOrigin))
 				{
-					dets = CloneDetList(byOrigin);
+					dets = byOrigin;
 				}
 				windowDets[i] = dets;
 			}
@@ -801,28 +801,6 @@ namespace DlcvModules
 		private static JArray CloneJArray(JArray array)
 		{
 			return array != null ? (JArray)array.DeepClone() : new JArray();
-		}
-
-		private static List<JObject> CloneDetList(JArray array)
-		{
-			var list = new List<JObject>(array != null ? array.Count : 0);
-			if (array == null) return list;
-			foreach (var token in array)
-			{
-				if (token is JObject obj) list.Add(obj);
-			}
-			return list;
-		}
-
-		private static List<JObject> CloneDetList(List<JObject> list)
-		{
-			var clone = new List<JObject>(list != null ? list.Count : 0);
-			if (list == null) return clone;
-			foreach (var item in list)
-			{
-				if (item != null) clone.Add(item);
-			}
-			return clone;
 		}
 
 		private static JObject CloneDetForOutput(JObject det)

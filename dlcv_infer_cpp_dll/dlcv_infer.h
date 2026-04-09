@@ -178,6 +178,13 @@ namespace dlcv_infer {
         explicit Result(std::vector<SampleResult> sr) : sampleResults(std::move(sr)) {}
     };
 
+    struct FlowNodeTiming {
+        int nodeId = -1;
+        std::string nodeType;
+        std::string nodeTitle;
+        double elapsedMs = 0.0;
+    };
+
     // 模型封装
     class DLCV_INFER_CPP_DLL_API Model {
     protected:
@@ -221,6 +228,9 @@ namespace dlcv_infer {
         Result InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json = nullptr);
 
         json InferOneOutJson(const cv::Mat& image, const json& params_json = nullptr);
+
+        static void GetLastInferTiming(double& dlcvInferMs, double& totalInferMs);
+        static std::vector<FlowNodeTiming> GetLastFlowNodeTimings();
 
     private:
         bool _isFlowGraphMode = false;

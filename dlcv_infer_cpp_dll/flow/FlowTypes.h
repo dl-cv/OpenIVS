@@ -149,6 +149,8 @@ struct ModuleImage final {
     cv::Mat OriginalImage;        // 原图（用于回写到原图坐标）
     TransformationState TransformState;
     int OriginalIndex = 0;
+    /// 滑窗切片元数据（对齐 C# ModuleImage.SlidingMeta）；合并模块优先从此读取 grid，不依赖 result JSON 是否仍带 sliding_meta。
+    Json SlidingMeta = Json();
 
     ModuleImage() = default;
     ModuleImage(const cv::Mat& imageObject, const cv::Mat& originalImage, const TransformationState& ts, int originalIndex = 0)

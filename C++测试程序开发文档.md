@@ -141,8 +141,16 @@
 运行时间: {elapsedSeconds:F2} 秒
 完成请求: {completedRequests * batchSize}
 平均延迟: {averageLatencyMs:F2}ms
+平均延迟(SDK): {averageSdkLatencyMs:F2}ms
 实时速率: {recentRate:F2} 请求/秒
+模块平均耗时:
+#{nodeId} [{nodeType}] {nodeTitleOrDash}: {averageNodeLatencyMs:F2}ms ({sharePercent:F1}%)
 ```
+
+说明：
+
+- `平均延迟(SDK)` 为 SDK 推理耗时均值；若当前模型未返回该耗时则不显示该行。
+- `模块平均耗时` 仅在流程模型（如 `.dvst/.dvso/.dvsp`）且存在节点统计时显示；模块按平均耗时降序输出，`nodeTitle` 为空时显示 `-`。
 
 - **停止行为**：点击 `停止` / 窗口关闭 / 加载模型 / 打开图片推理 / 释放模型 / 释放所有模型 时必须停止并 join 所有 worker，恢复按钮文案为 `多线程测试`，恢复 UI 可用。
 - **异常处理**：worker 遇到任意异常立即停止测试，并弹 `QMessageBox::critical`（标题 `错误`），同时左侧输出 `title + "\n" + detail`。

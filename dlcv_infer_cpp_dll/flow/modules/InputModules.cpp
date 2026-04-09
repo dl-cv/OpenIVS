@@ -63,6 +63,56 @@ static std::vector<std::string> ResolveFileList(const Json& props, ExecutionCont
     return files;
 }
 
+static bool TryBuildContextBatchImages(
+    ExecutionContext* ctx,
+    std::vector<ModuleImage>& images,
+    Json& results,
+    bool includeFilepathField) {
+    if (ctx == nullptr) return false;
+
+    std::vector<cv::Mat> matsFromContext;
+    try {
+        matsFromContext = ctx->Get<std::vector<cv::Mat>>("frontend_image_mats", std::vector<cv::Mat>());
+    } catch (...) {
+        matsFromContext.clear();
+    }
+    if (matsFromContext.empty()) {
+        try {
+            matsFromContext = ctx->Get<std::vector<cv::Mat>>("frontend_image_mat_list", std::vector<cv::Mat>());
+        } catch (...) {
+            matsFromContext.clear();
+        }
+    }
+    if (matsFromContext.empty()) return false;
+
+    int ctxIndex = 0;
+    for (const auto& mat : matsFromContext) {
+        if (mat.empty()) {
+            ctxIndex += 1;
+            continue;
+        }
+
+        TransformationState st(mat.cols, mat.rows);
+        ModuleImage wrap(mat, mat, st, ctxIndex);
+        images.push_back(wrap);
+
+        Json entry = Json::object();
+        entry["type"] = "local";
+        entry["index"] = ctxIndex;
+        entry["origin_index"] = ctxIndex;
+        entry["transform"] = st.ToJson();
+        entry["sample_results"] = Json::array();
+        entry["filename"] = std::string("frontend_mat_") + std::to_string(ctxIndex);
+        if (includeFilepathField) {
+            entry["filepath"] = "";
+        }
+        results.push_back(entry);
+        ctxIndex += 1;
+    }
+
+    return !images.empty();
+}
+
 /// input/image
 class InputImageModule final : public BaseInputModule {
 public:
@@ -71,6 +121,14 @@ public:
     ModuleIO Generate() override {
         std::vector<ModuleImage> images;
         Json results = Json::array();
+
+        // 优先从 ExecutionContext 注入的前端 Mat 列表读取
+        try {
+            if (TryBuildContextBatchImages(Context, images, results, true)) {
+                try { ScalarOutputsByName["filename"] = "frontend_mat"; } catch (...) {}
+                return ModuleIO(std::move(images), std::move(results), Json::array());
+            }
+        } catch (...) {}
 
         // 优先从 ExecutionContext 注入的前端 BGR Mat 读取
         try {
@@ -144,6 +202,13 @@ public:
     ModuleIO Generate() override {
         std::vector<ModuleImage> images;
         Json results = Json::array();
+
+        // 优先从 ExecutionContext 注入的前端 Mat 列表读取
+        try {
+            if (TryBuildContextBatchImages(Context, images, results, false)) {
+                return ModuleIO(std::move(images), std::move(results), Json::array());
+            }
+        } catch (...) {}
 
         // 优先从 ExecutionContext 注入前端图像 Mat（BGR）
         try {

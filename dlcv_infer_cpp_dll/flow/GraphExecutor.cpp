@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
@@ -68,6 +69,27 @@ bool GraphExecutor::IsScalarPortType(const std::string& tLower) {
             tLower == "int" || tLower == "integer" ||
             tLower == "str" || tLower == "string" ||
             tLower == "scalar");
+}
+
+static void ApplyInferParamOverrides(Json& props, const Json& inferParams) {
+    if (!props.is_object() || !inferParams.is_object()) return;
+    for (auto it = inferParams.begin(); it != inferParams.end(); ++it) {
+        // with_mask 仅用于控制最终返回格式，不应该全局覆盖流程节点属性。
+        // 否则会导致依赖 mask_rle 的后处理节点（如 mask_to_rbox）在流程内部被意外打断。
+        std::string keyLower = it.key();
+        std::transform(keyLower.begin(), keyLower.end(), keyLower.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        if (keyLower == "with_mask") {
+            continue;
+        }
+
+        const Json& value = it.value();
+        // 推理参数只透传基础配置，避免把复杂结构误覆盖到节点属性。
+        if (value.is_primitive() || value.is_null()) {
+            props[it.key()] = value;
+        }
+    }
 }
 
 void GraphExecutor::NormalizeBboxProperties(Json& props) {
@@ -185,6 +207,7 @@ std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
 std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
     _nodeExecMap.clear();
     _publicOutputs.clear();
+    _lastNodeTimings.clear();
 
     // 1) 排序：按 order，其次按 id
     std::vector<Json> ordered = _nodes;
@@ -216,6 +239,11 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
                 props = node.at("properties");
             }
         } catch (...) { props = Json::object(); }
+
+        try {
+            const Json inferParams = _context->Get<Json>("infer_params", Json::object());
+            ApplyInferParamOverrides(props, inferParams);
+        } catch (...) {}
 
         try { NormalizeBboxProperties(props); } catch (...) {}
 
@@ -280,8 +308,17 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
         module->ScalarInputsByIndex = std::move(scalarInputsByIdx);
         module->ScalarInputsByName = std::move(scalarInputsByName);
 
-        // 执行当前节点
+        // 执行当前节点并记录节点耗时（用于压测模块耗时统计）
+        const auto nodeStart = std::chrono::steady_clock::now();
         ModuleIO io = module->Process(mainCh.ImageList, mainCh.ResultList);
+        const auto nodeEnd = std::chrono::steady_clock::now();
+        const double elapsedMs = std::chrono::duration<double, std::milli>(nodeEnd - nodeStart).count();
+        NodeTiming timing;
+        timing.NodeId = nodeId;
+        timing.NodeType = type;
+        timing.NodeTitle = title;
+        timing.ElapsedMs = elapsedMs > 0.0 ? elapsedMs : 0.0;
+        _lastNodeTimings.push_back(std::move(timing));
 
         // 保存该节点的全部输出通道（供后续路由）
         NodeExecOutput nodeOut;
@@ -342,6 +379,10 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
     }
 
     return _publicOutputs;
+}
+
+std::vector<GraphExecutor::NodeTiming> GraphExecutor::GetLastNodeTimings() const {
+    return _lastNodeTimings;
 }
 
 Json GraphExecutor::LoadModels() {
