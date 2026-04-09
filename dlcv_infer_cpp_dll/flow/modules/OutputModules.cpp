@@ -288,39 +288,11 @@ static std::vector<FlowResultItem> BuildOutResultItems(const ModuleImage& wrap, 
             }
         }
 
-        // mask_rle 透传，并生成 poly（原图坐标）
+        // mask_rle 透传即可。下游 ConvertFlowResultListToObjects / BuildMaskFromFlowEntry 优先使用 mask_rle。
+        // 注意：不要再用 findNonZero 把每个前景像素写成 poly——大图语义分割会产生千万级点，
+        // JSON 序列化与内存会拖垮 return_json（用户可见 4s+ 仅耗在本节点）。
         if (d.contains("mask_rle") && d.at("mask_rle").is_object()) {
-            const Json maskInfo = d.at("mask_rle");
-            item["mask_rle"] = maskInfo;
-            try {
-                cv::Mat localMask = MaskInfoToMat(maskInfo);
-                if (!localMask.empty()) {
-                    // 偏移：bbox 左上角（若有）
-                    double x0 = 0.0, y0 = 0.0;
-                    if (d.contains("bbox") && d.at("bbox").is_array() && d.at("bbox").size() >= 2) {
-                        try { x0 = d.at("bbox")[0].get<double>(); } catch (...) { x0 = 0.0; }
-                        try { y0 = d.at("bbox")[1].get<double>(); } catch (...) { y0 = 0.0; }
-                    }
-
-                    std::vector<cv::Point> nz;
-                    cv::findNonZero(localMask, nz);
-                    if (!nz.empty()) {
-                        std::vector<cv::Point2f> ptsLocal;
-                        ptsLocal.reserve(nz.size());
-                        for (const auto& p : nz) {
-                            ptsLocal.emplace_back(static_cast<float>(x0 + p.x), static_cast<float>(y0 + p.y));
-                        }
-                        const auto ptsGlobal = TransformPoints2x3(T_c2o, ptsLocal);
-                        Json polyList = Json::array();
-                        for (const auto& p : ptsGlobal) {
-                            polyList.push_back(Json::array({ p.x, p.y }));
-                        }
-                        if (!polyList.empty()) {
-                            item["poly"] = Json::array({ polyList }); // [[[x,y],...]]
-                        }
-                    }
-                }
-            } catch (...) {}
+            item["mask_rle"] = d.at("mask_rle");
         }
 
         outResults.push_back(FlowResultItem::FromJson(item));
