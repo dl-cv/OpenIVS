@@ -1,5 +1,6 @@
 ﻿#include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
+#include "flow/utils/MaskRleUtils.h"
 
 #include <algorithm>
 #include <array>
@@ -164,6 +165,64 @@ static std::array<double, 4> UnionAabb(const std::vector<SlidingMappedDet>& item
     return { minx, miny, maxx, maxy };
 }
 
+static bool TryReadBboxXywh(const Json& det, double& x, double& y, double& w, double& h) {
+    if (!det.is_object() || !det.contains("bbox") || !det.at("bbox").is_array()) return false;
+    const Json& bbox = det.at("bbox");
+    if (bbox.size() < 4) return false;
+    if (!TryReadDoubleToken(bbox.at(0), x) ||
+        !TryReadDoubleToken(bbox.at(1), y) ||
+        !TryReadDoubleToken(bbox.at(2), w) ||
+        !TryReadDoubleToken(bbox.at(3), h)) {
+        return false;
+    }
+    return true;
+}
+
+static Json BuildMergedMaskRle(const std::vector<SlidingMappedDet>& items, const std::array<double, 4>& unionAabb) {
+    if (items.empty()) return Json();
+    const int unionW = std::max(1, static_cast<int>(std::llround(std::max(0.0, unionAabb[2] - unionAabb[0]))));
+    const int unionH = std::max(1, static_cast<int>(std::llround(std::max(0.0, unionAabb[3] - unionAabb[1]))));
+    cv::Mat merged = cv::Mat::zeros(unionH, unionW, CV_8UC1);
+    bool anyMask = false;
+
+    for (const auto& item : items) {
+        if (!item.Det.is_object() || !item.Det.contains("mask_rle") || !item.Det.at("mask_rle").is_object()) {
+            continue;
+        }
+        cv::Mat partMask;
+        try {
+            partMask = MaskInfoToMat(item.Det.at("mask_rle"));
+        } catch (...) {
+            partMask = cv::Mat();
+        }
+        if (partMask.empty()) continue;
+
+        double x = 0.0, y = 0.0, w = 0.0, h = 0.0;
+        if (!TryReadBboxXywh(item.Det, x, y, w, h)) continue;
+        const int bw = std::max(1, static_cast<int>(std::llround(std::max(0.0, w))));
+        const int bh = std::max(1, static_cast<int>(std::llround(std::max(0.0, h))));
+        if (partMask.cols != bw || partMask.rows != bh) {
+            cv::Mat resized;
+            cv::resize(partMask, resized, cv::Size(bw, bh), 0, 0, cv::INTER_NEAREST);
+            partMask = resized;
+        }
+
+        const int px = static_cast<int>(std::llround(x - unionAabb[0]));
+        const int py = static_cast<int>(std::llround(y - unionAabb[1]));
+        const cv::Rect dstRect(px, py, partMask.cols, partMask.rows);
+        const cv::Rect canvasRect(0, 0, unionW, unionH);
+        const cv::Rect clipped = dstRect & canvasRect;
+        if (clipped.width <= 0 || clipped.height <= 0) continue;
+
+        const cv::Rect srcRect(clipped.x - dstRect.x, clipped.y - dstRect.y, clipped.width, clipped.height);
+        cv::bitwise_or(merged(clipped), partMask(srcRect), merged(clipped));
+        anyMask = true;
+    }
+
+    if (!anyMask) return Json();
+    return MatToMaskInfo(merged);
+}
+
 static bool TryMapDetToGlobal(const Json& det, const ModuleImage& wrap, SlidingMappedDet& mapped) {
     if (!det.is_object()) return false;
     if (!det.contains("bbox") || !det.at("bbox").is_array()) return false;
@@ -172,7 +231,7 @@ static bool TryMapDetToGlobal(const Json& det, const ModuleImage& wrap, SlidingM
 
     const std::vector<double> T_c2o = BuildTC2O(wrap.TransformState);
     Json detOut = det;
-    detOut.erase("mask_rle");
+    // 保留 mask_rle（用于 UI 可视化）；但删除原始 mask 指针结构，避免悬空指针透传。
     detOut.erase("mask");
 
     double score = 0.0;
@@ -497,6 +556,12 @@ public:
                     merged.Det["with_angle"] = false;
                     merged.Det["angle"] = -100.0;
                     merged.Det["area"] = w * h;
+                    Json mergedMaskRle = BuildMergedMaskRle(list, merged.Aabb);
+                    if (mergedMaskRle.is_object()) {
+                        merged.Det["mask_rle"] = std::move(mergedMaskRle);
+                    } else {
+                        merged.Det.erase("mask_rle");
+                    }
                     mergedByCategory.push_back(std::move(merged));
                 }
                 mappedList = std::move(mergedByCategory);
