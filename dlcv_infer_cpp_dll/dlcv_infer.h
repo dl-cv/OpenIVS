@@ -236,11 +236,10 @@ namespace dlcv_infer {
         bool _isFlowGraphMode = false;
         int _deviceId = 0;
         flow::FlowGraphModel* _flowModel = nullptr;
-        /// 缓存自 GetModelInfo 解析的输入通道期望：-2 未初始化，-1 无法识别（按三通道默认策略），1/3 为明确值。
-        int _cachedExpectedInputCh = -2;
+        int _expectedChCache = -2;
 
-        int resolveExpectedInputChannels();
-        std::vector<cv::Mat> prepareImagesForInfer(const std::vector<cv::Mat>& images);
+        int resolveEffectiveInputCh();
+        std::vector<cv::Mat> prepareInferImages(const std::vector<cv::Mat>& images);
     };
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS

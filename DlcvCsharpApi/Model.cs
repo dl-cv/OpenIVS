@@ -59,8 +59,7 @@ namespace dlcv_infer_csharp
         private JObject _cachedModelInfo = null;
         private JArray _cachedMaxShape = null;
         private int _cachedMaxBatchSize = 1;
-        /// <summary>从 model_info.input_shapes 解析得到的期望输入通道数（1 或 3）；0 表示未知。</summary>
-        private int _cachedExpectedInputChannels = 0;
+        private int _expectedChCache = -2;
         private readonly object _batchMetaLock = new object();
         private List<JObject> _cachedSubModelBatchItems = new List<JObject>();
 
@@ -530,6 +529,8 @@ namespace dlcv_infer_csharp
 
         public void FreeModel()
         {
+            _expectedChCache = -2;
+
             // 仅借用/共享模式，不释放底层模型，只标记无效
             if (!OwnModelIndex)
             {
@@ -963,15 +964,10 @@ namespace dlcv_infer_csharp
                 }
             }
 
-            RefreshExpectedInputChannels();
+            _expectedChCache = -2;
         }
 
-        private void RefreshExpectedInputChannels()
-        {
-            _cachedExpectedInputChannels = ParseExpectedInputChannelsFromModelInfoRoot(_cachedModelInfo);
-        }
-
-        private static bool IsLikelySpatialDimForChannels(int v)
+        private static bool IsLikelySpatialDim(int v)
         {
             return v >= 8 && v <= 65536;
         }
@@ -1000,12 +996,12 @@ namespace dlcv_infer_csharp
                 int d1 = ReadJsonIntLike(shapeArr[1], -1);
                 int d2 = ReadJsonIntLike(shapeArr[2], -1);
                 int d3 = ReadJsonIntLike(shapeArr[3], -1);
-                if (IsLikelySpatialDimForChannels(d2) && IsLikelySpatialDimForChannels(d3))
+                if (IsLikelySpatialDim(d2) && IsLikelySpatialDim(d3))
                 {
                     if (d1 == 1 || d1 == 3) return d1;
                 }
                 int d0 = ReadJsonIntLike(shapeArr[0], -1);
-                if (IsLikelySpatialDimForChannels(d0) && IsLikelySpatialDimForChannels(d1))
+                if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1))
                 {
                     if (d3 == 1 || d3 == 3) return d3;
                 }
@@ -1015,9 +1011,9 @@ namespace dlcv_infer_csharp
                 int d0 = ReadJsonIntLike(shapeArr[0], -1);
                 int d1 = ReadJsonIntLike(shapeArr[1], -1);
                 int d2 = ReadJsonIntLike(shapeArr[2], -1);
-                if ((d0 == 1 || d0 == 3) && IsLikelySpatialDimForChannels(d1) && IsLikelySpatialDimForChannels(d2))
+                if ((d0 == 1 || d0 == 3) && IsLikelySpatialDim(d1) && IsLikelySpatialDim(d2))
                     return d0;
-                if (IsLikelySpatialDimForChannels(d0) && IsLikelySpatialDimForChannels(d1) && (d2 == 1 || d2 == 3))
+                if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1) && (d2 == 1 || d2 == 3))
                     return d2;
             }
             return 0;
@@ -1035,7 +1031,7 @@ namespace dlcv_infer_csharp
             return null;
         }
 
-        private static int ParseExpectedInputChannelsFromModelInfoRoot(JObject modelInfoRoot)
+        private static int ParseInputChFromModelInfo(JObject modelInfoRoot)
         {
             JObject shapes = FindInputShapesObject(modelInfoRoot);
             if (shapes == null) return 0;
@@ -1075,9 +1071,6 @@ namespace dlcv_infer_csharp
             }
         }
 
-        /// <summary>
-        /// 将非 8 位深度缩放到 8 位（与 C++ PrepareSingleImageForBackend 对齐），便于底层推理。
-        /// </summary>
         private static Mat ConvertMatDepthTo8U(Mat src, List<Mat> disposables)
         {
             if (src == null || src.Empty()) return src;
@@ -1115,32 +1108,107 @@ namespace dlcv_infer_csharp
             return dst;
         }
 
-        private Mat PrepareOneImageForInference(Mat image, List<Mat> disposables)
+        private int ResolveEffectiveInputCh()
         {
-            if (image == null || image.Empty()) return image;
-            Mat work = ConvertMatDepthTo8U(image, disposables);
-            int exp = _cachedExpectedInputChannels;
-            if (exp == 3 && work.Channels() == 1)
+            if (_expectedChCache != -2)
+                return (_expectedChCache == -1) ? 3 : _expectedChCache;
+            try
             {
-                var rgb = new Mat();
-                Cv2.CvtColor(work, rgb, ColorConversionCodes.GRAY2RGB);
-                disposables.Add(rgb);
-                return rgb;
+                if (modelIndex < 0 && !_isDvsMode && !_isDvpMode && !_isRpcMode)
+                {
+                    _expectedChCache = -1;
+                    return 3;
+                }
+                if (_isDvsMode && (_dvsModel == null || !_dvsModel.IsLoaded))
+                {
+                    _expectedChCache = -1;
+                    return 3;
+                }
+                int p = ParseInputChFromModelInfo(_cachedModelInfo);
+                if (p == 1 || p == 3)
+                {
+                    _expectedChCache = p;
+                    return p;
+                }
             }
-            return work;
+            catch
+            {
+            }
+            _expectedChCache = -1;
+            return 3;
         }
 
-        private List<Mat> NormalizeIncomingImages(IList<Mat> images, out List<Mat> disposables)
+        private static Mat PrepareInferImage(Mat src, int expectedChannels, List<Mat> disposables)
+        {
+            if (src == null || src.Empty()) return src;
+            int ec = (expectedChannels == 1 || expectedChannels == 3) ? expectedChannels : 3;
+            Mat u8 = ConvertMatDepthTo8U(src, disposables);
+            if (u8.Empty()) return u8;
+
+            if (ec == 3)
+            {
+                if (u8.Channels() == 1)
+                {
+                    var rgb = new Mat();
+                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.GRAY2RGB);
+                    disposables.Add(rgb);
+                    return rgb;
+                }
+                if (u8.Channels() == 4)
+                {
+                    var rgb = new Mat();
+                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.BGRA2RGB);
+                    disposables.Add(rgb);
+                    return rgb;
+                }
+                if (u8.Channels() == 3)
+                {
+                    var rgb = new Mat();
+                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.BGR2RGB);
+                    disposables.Add(rgb);
+                    return rgb;
+                }
+                var rgbFallback = new Mat();
+                Cv2.CvtColor(u8, rgbFallback, ColorConversionCodes.BGR2RGB);
+                disposables.Add(rgbFallback);
+                return rgbFallback;
+            }
+
+            if (u8.Channels() == 1)
+                return u8;
+            if (u8.Channels() == 3)
+            {
+                var gray = new Mat();
+                Cv2.CvtColor(u8, gray, ColorConversionCodes.BGR2GRAY);
+                disposables.Add(gray);
+                return gray;
+            }
+            if (u8.Channels() == 4)
+            {
+                var gray = new Mat();
+                Cv2.CvtColor(u8, gray, ColorConversionCodes.BGRA2GRAY);
+                disposables.Add(gray);
+                return gray;
+            }
+            var grayFallback = new Mat();
+            Cv2.CvtColor(u8, grayFallback, ColorConversionCodes.BGR2GRAY);
+            disposables.Add(grayFallback);
+            return grayFallback;
+        }
+
+        private List<Mat> PrepareInferImages(IList<Mat> images, out List<Mat> disposables)
         {
             disposables = new List<Mat>();
             if (images == null) return null;
+            int expCh = ResolveEffectiveInputCh();
+            int ec = (expCh == 1 || expCh == 3) ? expCh : 3;
             var list = new List<Mat>(images.Count);
             foreach (var img in images)
-                list.Add(PrepareOneImageForInference(img, disposables));
+                list.Add(PrepareInferImage(img, ec, disposables));
             return list;
         }
 
-        private static void DisposePreparedMats(List<Mat> disposables)
+        private static void DisposeTempMats(List<Mat> disposables)
         {
             if (disposables == null) return;
             foreach (var m in disposables)
@@ -1315,11 +1383,11 @@ namespace dlcv_infer_csharp
             List<Mat> normalized;
             try
             {
-                normalized = NormalizeIncomingImages(images, out disposables);
+                normalized = PrepareInferImages(images, out disposables);
             }
             catch
             {
-                DisposePreparedMats(disposables);
+                DisposeTempMats(disposables);
                 throw;
             }
 
@@ -1341,7 +1409,7 @@ namespace dlcv_infer_csharp
             }
             finally
             {
-                DisposePreparedMats(disposables);
+                DisposeTempMats(disposables);
             }
         }
 
@@ -1861,14 +1929,14 @@ namespace dlcv_infer_csharp
             if (_isDvsMode)
             {
                 List<Mat> dvsDisp;
-                var normList = NormalizeIncomingImages(new List<Mat> { image }, out dvsDisp);
+                var normList = PrepareInferImages(new List<Mat> { image }, out dvsDisp);
                 try
                 {
                     result = _dvsModel.InferBatch(normList, params_json);
                 }
                 finally
                 {
-                    DisposePreparedMats(dvsDisp);
+                    DisposeTempMats(dvsDisp);
                 }
             }
             else
@@ -1913,14 +1981,14 @@ namespace dlcv_infer_csharp
             if (_isDvsMode)
             {
                 List<Mat> dvsDisp;
-                var normList = NormalizeIncomingImages(image_list, out dvsDisp);
+                var normList = PrepareInferImages(image_list, out dvsDisp);
                 try
                 {
                     return _dvsModel.InferBatch(normList, params_json);
                 }
                 finally
                 {
-                    DisposePreparedMats(dvsDisp);
+                    DisposeTempMats(dvsDisp);
                 }
             }
 
@@ -1968,7 +2036,7 @@ namespace dlcv_infer_csharp
             if (_isDvsMode)
             {
                 List<Mat> dvsDisp;
-                var normList = NormalizeIncomingImages(new List<Mat> { image }, out dvsDisp);
+                var normList = PrepareInferImages(new List<Mat> { image }, out dvsDisp);
                 Tuple<JObject, IntPtr> res;
                 try
                 {
@@ -1976,7 +2044,7 @@ namespace dlcv_infer_csharp
                 }
                 finally
                 {
-                    DisposePreparedMats(dvsDisp);
+                    DisposeTempMats(dvsDisp);
                 }
                 rawResults = res.Item1["result_list"] as JArray ?? new JArray();
                 

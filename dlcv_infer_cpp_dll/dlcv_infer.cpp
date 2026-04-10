@@ -728,7 +728,7 @@ const MIJson* FindInputShapesObject(const MIJson& root) {
     return nullptr;
 }
 
-int ParseExpectedInputChannelsFromModelInfo(const MIJson& modelInfoRoot) {
+int ParseInputChFromModelInfo(const MIJson& modelInfoRoot) {
     const MIJson* shapesPtr = FindInputShapesObject(modelInfoRoot);
     if (shapesPtr == nullptr || !shapesPtr->is_object()) {
         return 0;
@@ -788,7 +788,7 @@ cv::Mat ConvertMatDepthTo8U(const cv::Mat& src) {
     return dst;
 }
 
-cv::Mat PrepareSingleImageForBackend(const cv::Mat& src, int expectedChannels) {
+cv::Mat PrepareInferImage(const cv::Mat& src, int expectedChannels) {
     if (src.empty()) {
         return {};
     }
@@ -1032,13 +1032,13 @@ namespace dlcv_infer {
         _isFlowGraphMode(other._isFlowGraphMode),
         _deviceId(other._deviceId),
         _flowModel(other._flowModel),
-        _cachedExpectedInputCh(other._cachedExpectedInputCh) {
+        _expectedChCache(other._expectedChCache) {
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
         other._deviceId = 0;
         other._flowModel = nullptr;
-        other._cachedExpectedInputCh = -2;
+        other._expectedChCache = -2;
     }
 
     Model& Model::operator=(Model&& other) noexcept {
@@ -1053,14 +1053,14 @@ namespace dlcv_infer {
         _isFlowGraphMode = other._isFlowGraphMode;
         _deviceId = other._deviceId;
         _flowModel = other._flowModel;
-        _cachedExpectedInputCh = other._cachedExpectedInputCh;
+        _expectedChCache = other._expectedChCache;
 
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
         other._deviceId = 0;
         other._flowModel = nullptr;
-        other._cachedExpectedInputCh = -2;
+        other._expectedChCache = -2;
         return *this;
     }
 
@@ -1069,7 +1069,7 @@ namespace dlcv_infer {
     }
 
     void Model::FreeModel() {
-        _cachedExpectedInputCh = -2;
+        _expectedChCache = -2;
         if (_isFlowGraphMode) {
             delete _flowModel;
             _flowModel = nullptr;
@@ -1113,34 +1113,34 @@ namespace dlcv_infer {
         return resultObject;
     }
 
-    int Model::resolveExpectedInputChannels() {
-        if (_cachedExpectedInputCh != -2) {
-            return (_cachedExpectedInputCh == -1) ? 3 : _cachedExpectedInputCh;
+    int Model::resolveEffectiveInputCh() {
+        if (_expectedChCache != -2) {
+            return (_expectedChCache == -1) ? 3 : _expectedChCache;
         }
         try {
             if (modelIndex < 0 && !_isFlowGraphMode) {
-                _cachedExpectedInputCh = -1;
+                _expectedChCache = -1;
                 return 3;
             }
             const json info = GetModelInfo();
-            const int p = ParseExpectedInputChannelsFromModelInfo(info);
+            const int p = ParseInputChFromModelInfo(info);
             if (p == 1 || p == 3) {
-                _cachedExpectedInputCh = p;
+                _expectedChCache = p;
                 return p;
             }
         } catch (...) {
         }
-        _cachedExpectedInputCh = -1;
+        _expectedChCache = -1;
         return 3;
     }
 
-    std::vector<cv::Mat> Model::prepareImagesForInfer(const std::vector<cv::Mat>& images) {
-        const int expCh = resolveExpectedInputChannels();
+    std::vector<cv::Mat> Model::prepareInferImages(const std::vector<cv::Mat>& images) {
+        const int expCh = resolveEffectiveInputCh();
         const int ec = (expCh == 1 || expCh == 3) ? expCh : 3;
         std::vector<cv::Mat> out;
         out.reserve(images.size());
         for (const auto& im : images) {
-            out.push_back(PrepareSingleImageForBackend(im, ec));
+            out.push_back(PrepareInferImage(im, ec));
         }
         return out;
     }
@@ -1349,7 +1349,7 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
-            const std::vector<cv::Mat> prepared = prepareImagesForInfer({ image });
+            const std::vector<cv::Mat> prepared = prepareInferImages({ image });
             if (prepared.empty() || prepared.front().empty()) {
                 throw std::invalid_argument("image is empty after preparation");
             }
@@ -1381,7 +1381,7 @@ namespace dlcv_infer {
             return Result(std::move(sampleResults));
         }
 
-        const std::vector<cv::Mat> prepared = prepareImagesForInfer({ image });
+        const std::vector<cv::Mat> prepared = prepareInferImages({ image });
         if (prepared.empty() || prepared.front().empty()) {
             throw std::invalid_argument("image is empty after preparation");
         }
@@ -1415,9 +1415,9 @@ namespace dlcv_infer {
                 return Result(std::vector<SampleResult>{});
             }
 
-            const std::vector<cv::Mat> prepared = prepareImagesForInfer(image_list);
+            const std::vector<cv::Mat> prepared = prepareInferImages(image_list);
             if (prepared.size() != image_list.size()) {
-                throw std::runtime_error("prepareImagesForInfer size mismatch");
+                throw std::runtime_error("prepareInferImages size mismatch");
             }
             for (const auto& m : prepared) {
                 if (m.empty()) {
@@ -1454,9 +1454,9 @@ namespace dlcv_infer {
             return Result(std::move(sampleResults));
         }
 
-        const std::vector<cv::Mat> prepared = prepareImagesForInfer(image_list);
+        const std::vector<cv::Mat> prepared = prepareInferImages(image_list);
         if (prepared.size() != image_list.size()) {
-            throw std::runtime_error("prepareImagesForInfer size mismatch");
+            throw std::runtime_error("prepareInferImages size mismatch");
         }
         for (const auto& m : prepared) {
             if (m.empty()) {
@@ -1490,7 +1490,7 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
-            const std::vector<cv::Mat> prepared = prepareImagesForInfer({ image });
+            const std::vector<cv::Mat> prepared = prepareInferImages({ image });
             if (prepared.empty() || prepared.front().empty()) {
                 throw std::invalid_argument("image is empty after preparation");
             }
@@ -1519,7 +1519,7 @@ namespace dlcv_infer {
             return NormalizeFlowOneOutJson(flowResults);
         }
 
-        const std::vector<cv::Mat> prepared = prepareImagesForInfer({ image });
+        const std::vector<cv::Mat> prepared = prepareInferImages({ image });
         if (prepared.empty() || prepared.front().empty()) {
             throw std::invalid_argument("image is empty after preparation");
         }

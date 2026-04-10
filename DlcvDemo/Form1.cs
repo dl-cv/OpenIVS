@@ -39,22 +39,6 @@ namespace DlcvDemo
             return -1; // 默认使用CPU
         }
 
-        /// <summary>
-        /// 将 <see cref="Cv2.ImRead(string, ImreadModes.Unchanged)"/> 得到的 Mat 转为 SDK 推理入口约定的 RGB 布局 Mat。
-        /// 单通道图像原样复制，通道扩展由 <c>DlcvCsharpApi.Model</c> 在解析到三通道模型时完成。
-        /// </summary>
-        private static void CopyMatToRgbTensorForSdk(Mat src, Mat dst)
-        {
-            if (src.Channels() == 1)
-                src.CopyTo(dst);
-            else if (src.Channels() == 3)
-                Cv2.CvtColor(src, dst, ColorConversionCodes.BGR2RGB);
-            else if (src.Channels() == 4)
-                Cv2.CvtColor(src, dst, ColorConversionCodes.BGRA2RGB);
-            else
-                throw new Exception("不支持的图像通道数: " + src.Channels());
-        }
-
         public Form1()
         {
             InitializeComponent();
@@ -221,14 +205,11 @@ namespace DlcvDemo
 					Console.WriteLine("图像解码失败！");
 					return;
 				}
-				Mat image_rgb = new Mat();
-				CopyMatToRgbTensorForSdk(image, image_rgb);
-
 				JObject data = new JObject();
 				data["threshold"] = (float)numericUpDown_threshold.Value;
 				data["with_mask"] = true;
 
-				var json = model.InferOneOutJson(image_rgb, data);
+				var json = model.InferOneOutJson(image, data);
 				richTextBox1.Text = JsonConvert.SerializeObject(json, Formatting.Indented);
 			}
 			catch (Exception ex)
@@ -306,14 +287,11 @@ namespace DlcvDemo
                 {
                     throw new Exception("图像解码失败！");
                 }
-                Mat image_rgb = new Mat();
-                CopyMatToRgbTensorForSdk(image, image_rgb);
-
                 batch_size = (int)numericUpDown_batch_size.Value;
                 var image_list = new List<Mat>();
                 for (int i = 0; i < batch_size; i++)
                 {
-                    image_list.Add(image_rgb);
+                    image_list.Add(image);
                 }
 
                 JObject data = new JObject();
@@ -595,16 +573,12 @@ namespace DlcvDemo
                 batch_size = (int)numericUpDown_batch_size.Value;
                 int threadCount = (int)numericUpDown_num_thread.Value;
 
-                // 读取图像（保留位深/通道），再转为 SDK 约定的 RGB 张量布局
                 Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
-                Mat image_rgb = new Mat();
-                CopyMatToRgbTensorForSdk(image, image_rgb);
 
-                // 创建批量图像列表
                 var image_list = new List<Mat>();
                 for (int i = 0; i < batch_size; i++)
                 {
-                    image_list.Add(image_rgb);
+                    image_list.Add(image);
                 }
 
                 // 创建测试实例

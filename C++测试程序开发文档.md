@@ -93,11 +93,11 @@
 
 ### API 侧图像兼容规则（`dlcv_infer_cpp_dll`）
 
-- **适用范围**：`dlcv_infer::Model::Infer`、`InferBatch`、`InferOneOutJson` 在调用底层推理或流程图推理**之前**，对输入 `cv::Mat` 做统一规整。
-- **期望通道数**：自 `GetModelInfo()` 返回的 JSON 中解析 `model_info` → `input_shapes` → 各输入的 `max_shape`（兼容 `NCHW` / `NHWC` 及常见 4 维、3 维形状）；若仅能识别通道为 **1** 或 **3**，则按该值处理；若无法识别，则**默认按三通道模型**处理（与历史「彩色 RGB 推理」行为一致）。
-- **三通道模型**：先将非 `CV_8U` 深度转换为 **8bit**（16bit 无符号按 `1/256` 缩放；浮点按数值范围映射到 0–255），再将 **单通道灰度** 转为 **RGB**、**BGR** 转为 **RGB**、**BGRA** 转为 **RGB**，以满足底层对三通道输入的约定。
-- **单通道模型**：同样先统一到 **8bit**，再将多通道图像按 **BGR/BGRA** 语义转为灰度（`BGR2GRAY` / `BGRA2GRAY`）。
-- **说明**：规整后的 `Mat` 仅用于当次推理请求；调用方保留的原始 `Mat` 不受影响。流程图模式（`.dvst` 等）与普通模型共用上述入口逻辑。
+- **适用范围**：`dlcv_infer::Model::Infer`、`InferBatch`、`InferOneOutJson` 在调用底层推理或流程图推理**之前**，对输入 `cv::Mat` 做统一规整（`prepareInferImages` → 逐张 `PrepareInferImage`）。
+- **通道缓存 `_expectedChCache`**：**-2** 未解析或已失效（`FreeModel`、对象被移动后）；**-1** 无法从模型信息识别通道（按三通道默认策略）；**1** / **3** 为从 `input_shapes` 解析得到的期望通道。首次推理时由 `resolveEffectiveInputCh()` 结合 `ParseInputChFromModelInfo` 与 `GetModelInfo()` 写入缓存。
+- **三通道期望**：`ConvertMatDepthTo8U` 后到 8bit，再将单通道→RGB、BGR→RGB、BGRA→RGB。
+- **单通道期望**：统一到 8bit 后，将 BGR/BGRA 转为灰度。
+- **说明**：规整结果仅用于当次推理；调用方持有的原始 `Mat` 不变。流程图模式与普通模型共用上述入口。
 
 - **加载模型**：
   - 文件对话框标题：`选择模型`
