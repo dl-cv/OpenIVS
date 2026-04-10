@@ -91,6 +91,14 @@
   - Qt 侧正确写法：使用 `QString::toLocal8Bit().toStdString()` 获取路径字符串；不要使用 `toUtf8()` 或自行把路径转 UTF-8 再传入，否则遇到中文路径时可能导致加载失败。
   - 典型现象：日志出现 `load model failed: {"code":1,"message":"[ModelInternal::decode_file] Failed to open file"}`，但文件实际存在（多为编码不匹配导致路径打不开）。
 
+### API 侧图像兼容规则（`dlcv_infer_cpp_dll`）
+
+- **适用范围**：`dlcv_infer::Model::Infer`、`InferBatch`、`InferOneOutJson` 在调用底层推理或流程图推理**之前**，对输入 `cv::Mat` 做统一规整。
+- **期望通道数**：自 `GetModelInfo()` 返回的 JSON 中解析 `model_info` → `input_shapes` → 各输入的 `max_shape`（兼容 `NCHW` / `NHWC` 及常见 4 维、3 维形状）；若仅能识别通道为 **1** 或 **3**，则按该值处理；若无法识别，则**默认按三通道模型**处理（与历史「彩色 RGB 推理」行为一致）。
+- **三通道模型**：先将非 `CV_8U` 深度转换为 **8bit**（16bit 无符号按 `1/256` 缩放；浮点按数值范围映射到 0–255），再将 **单通道灰度** 转为 **RGB**、**BGR** 转为 **RGB**、**BGRA** 转为 **RGB**，以满足底层对三通道输入的约定。
+- **单通道模型**：同样先统一到 **8bit**，再将多通道图像按 **BGR/BGRA** 语义转为灰度（`BGR2GRAY` / `BGRA2GRAY`）。
+- **说明**：规整后的 `Mat` 仅用于当次推理请求；调用方保留的原始 `Mat` 不受影响。流程图模式（`.dvst` 等）与普通模型共用上述入口逻辑。
+
 - **加载模型**：
   - 文件对话框标题：`选择模型`
   - 过滤器：`AI模型 (*.dvt *.dvo *.dvr *.dvst);;所有文件 (*.*)`
@@ -100,19 +108,20 @@
   - 过滤器：`图片文件 (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.tif);;所有文件 (*.*)`
 - **单次推理**：
   - `batch_size` 通过重复同一张图组成 batch
-  - **输入像素格式**：按 **RGB** 传入
+  - **输入图像（用户侧）**：使用 OpenCV `imread(..., IMREAD_UNCHANGED)` 解码，须支持 **8bit 灰度、8bit/16bit 彩色（含 BGR/BGRA）、16bit 单通道** 等常见格式；路径仍须 `toLocal8Bit()`（见上文 Windows 约定）。右侧预览与叠加以解码后的 `Mat` 为准（16bit 等在显示前会降为 8bit 以便 Qt 绘制）。
+  - **输入像素格式（推理侧）**：调用侧将 **解码后的原样 `Mat`** 传入 `dlcv_infer::Model::Infer` / `InferBatch` / `InferOneOutJson`；**通道顺序与深度由 `dlcv_infer_cpp_dll` 在推理入口按模型信息自动规整**（见下文「API 侧图像兼容规则」）。左侧输出中的「输入」行为对当前图像的简要描述（通道数、位深、布局），而非固定写死 `RGB`。
   - 成功时左侧输出（格式固定）：
 
 ```text
 推理时间: {elapsedMs:F2}ms
 
-输入: RGB
+输入: {例如：三通道(BGR) 8bit}
 
 推理结果:
 {formatResultText}
 ```
 
-- **推理JSON**：正常情况下输出推理结果 JSON（缩进 4）；若结果为空数组，则输出调试对象 `{"input":"RGB","one_out":[]}`（缩进 2）；若图像解码失败则静默返回（无弹窗/无输出刷新）
+- **推理JSON**：正常情况下输出推理结果 JSON（缩进 4）；若结果为空数组，则输出调试对象 `{"input":"{与单次推理一致的描述}","one_out":[]}`（缩进 2）；若图像解码失败则静默返回（无弹窗/无输出刷新）
 - **通用前置条件提示**（弹窗标题均为 `提示`）：
   - 未加载模型：`请先加载模型文件！`
   - 未选择图片：`请先选择图片文件！`
@@ -127,7 +136,7 @@
 - **前置条件**：同上（未满足直接弹窗提示）
 - **启动行为**：
   - 读取当前图像，保存 `batch_size/threshold/threadCount`
-  - **输入像素格式**：按 **RGB**
+  - **输入图像**：与单次推理相同，为 `IMREAD_UNCHANGED` 解码后的原样 `Mat`；多线程内对该 `Mat` 做 `clone()` 后重复送入 `InferBatch`，API 侧自动按模型做通道/位深规整。
   - 禁用：模型加载/模型信息/打开图/单次推理/推理JSON/设备下拉框/三个数值输入
   - 创建 `线程数` 个 worker：循环调用 `Model::InferBatch()`（`with_mask=false`），并累计：
     - `completedRequests`（每次 infer +1）

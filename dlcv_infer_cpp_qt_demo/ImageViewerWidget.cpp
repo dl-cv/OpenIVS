@@ -173,13 +173,35 @@ QImage ImageViewerWidget::bgrToQImage(const cv::Mat& bgrImage) {
         return {};
     }
 
+    cv::Mat src8 = bgrImage;
+    cv::Mat converted;
+    if (bgrImage.depth() != CV_8U) {
+        if (bgrImage.depth() == CV_16U) {
+            bgrImage.convertTo(converted, CV_8U, 1.0 / 256.0);
+        } else if (bgrImage.depth() == CV_16S) {
+            cv::normalize(bgrImage, converted, 0, 255, cv::NORM_MINMAX, CV_8U);
+        } else if (bgrImage.depth() == CV_32F || bgrImage.depth() == CV_64F) {
+            double mn = 0.0;
+            double mx = 0.0;
+            cv::minMaxLoc(bgrImage, &mn, &mx);
+            if (mx <= 1.0 + 1e-6 && mn >= -1e-6) {
+                bgrImage.convertTo(converted, CV_8U, 255.0);
+            } else {
+                cv::normalize(bgrImage, converted, 0, 255, cv::NORM_MINMAX, CV_8U);
+            }
+        } else {
+            bgrImage.convertTo(converted, CV_8U);
+        }
+        src8 = converted;
+    }
+
     cv::Mat rgb;
-    if (bgrImage.channels() == 3) {
-        cv::cvtColor(bgrImage, rgb, cv::COLOR_BGR2RGB);
-    } else if (bgrImage.channels() == 4) {
-        cv::cvtColor(bgrImage, rgb, cv::COLOR_BGRA2RGBA);
+    if (src8.channels() == 3) {
+        cv::cvtColor(src8, rgb, cv::COLOR_BGR2RGB);
+    } else if (src8.channels() == 4) {
+        cv::cvtColor(src8, rgb, cv::COLOR_BGRA2RGBA);
     } else {
-        cv::cvtColor(bgrImage, rgb, cv::COLOR_GRAY2RGB);
+        cv::cvtColor(src8, rgb, cv::COLOR_GRAY2RGB);
     }
 
     if (!rgb.isContinuous()) {

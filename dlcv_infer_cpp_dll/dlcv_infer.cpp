@@ -650,6 +650,195 @@ void ParseFlowTimingFromRoot(
 
 } // namespace
 
+namespace {
+
+using MIJson = dlcv_infer::json;
+
+int ReadJsonIntLike(const MIJson& v, int dv) {
+    try {
+        if (v.is_number_integer()) {
+            return v.get<int>();
+        }
+        if (v.is_number()) {
+            return static_cast<int>(std::llround(v.get<double>()));
+        }
+        if (v.is_string()) {
+            return std::stoi(v.get<std::string>());
+        }
+    } catch (...) {
+    }
+    return dv;
+}
+
+bool IsLikelySpatialDim(int v) {
+    return v >= 8 && v <= 65536;
+}
+
+int InferChannelCountFromMaxShape(const MIJson& shapeArr) {
+    if (!shapeArr.is_array()) {
+        return 0;
+    }
+    const size_t n = shapeArr.size();
+    if (n >= 4) {
+        const int d1 = ReadJsonIntLike(shapeArr.at(1), -1);
+        const int d2 = ReadJsonIntLike(shapeArr.at(2), -1);
+        const int d3 = ReadJsonIntLike(shapeArr.at(3), -1);
+        if (IsLikelySpatialDim(d2) && IsLikelySpatialDim(d3)) {
+            if (d1 == 1 || d1 == 3) {
+                return d1;
+            }
+        }
+        const int d0 = ReadJsonIntLike(shapeArr.at(0), -1);
+        if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1)) {
+            if (d3 == 1 || d3 == 3) {
+                return d3;
+            }
+        }
+    }
+    if (n == 3) {
+        const int d0 = ReadJsonIntLike(shapeArr.at(0), -1);
+        const int d1 = ReadJsonIntLike(shapeArr.at(1), -1);
+        const int d2 = ReadJsonIntLike(shapeArr.at(2), -1);
+        if ((d0 == 1 || d0 == 3) && IsLikelySpatialDim(d1) && IsLikelySpatialDim(d2)) {
+            return d0;
+        }
+        if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1) && (d2 == 1 || d2 == 3)) {
+            return d2;
+        }
+    }
+    return 0;
+}
+
+const MIJson* FindInputShapesObject(const MIJson& root) {
+    if (root.contains("model_info") && root.at("model_info").is_object()) {
+        const MIJson& mi = root.at("model_info");
+        if (mi.contains("input_shapes") && mi.at("input_shapes").is_object()) {
+            return &mi.at("input_shapes");
+        }
+        if (mi.contains("model_info") && mi.at("model_info").is_object()) {
+            const MIJson& inner = mi.at("model_info");
+            if (inner.contains("input_shapes") && inner.at("input_shapes").is_object()) {
+                return &inner.at("input_shapes");
+            }
+        }
+    }
+    if (root.contains("input_shapes") && root.at("input_shapes").is_object()) {
+        return &root.at("input_shapes");
+    }
+    return nullptr;
+}
+
+int ParseExpectedInputChannelsFromModelInfo(const MIJson& modelInfoRoot) {
+    const MIJson* shapesPtr = FindInputShapesObject(modelInfoRoot);
+    if (shapesPtr == nullptr || !shapesPtr->is_object()) {
+        return 0;
+    }
+    const MIJson& shapes = *shapesPtr;
+
+    auto tryInputDesc = [](const MIJson& inputDesc) -> int {
+        if (!inputDesc.is_object() || !inputDesc.contains("max_shape")) {
+            return 0;
+        }
+        return InferChannelCountFromMaxShape(inputDesc.at("max_shape"));
+    };
+
+    if (shapes.contains("input")) {
+        const int ch = tryInputDesc(shapes.at("input"));
+        if (ch == 1 || ch == 3) {
+            return ch;
+        }
+    }
+    for (const auto& kv : shapes.items()) {
+        const int ch = tryInputDesc(kv.value());
+        if (ch == 1 || ch == 3) {
+            return ch;
+        }
+    }
+    return 0;
+}
+
+cv::Mat ConvertMatDepthTo8U(const cv::Mat& src) {
+    if (src.empty()) {
+        return {};
+    }
+    if (src.depth() == CV_8U) {
+        return src;
+    }
+    cv::Mat dst;
+    if (src.depth() == CV_16U) {
+        src.convertTo(dst, CV_8U, 1.0 / 256.0);
+        return dst;
+    }
+    if (src.depth() == CV_16S) {
+        cv::normalize(src, dst, 0, 255, cv::NORM_MINMAX, CV_8U);
+        return dst;
+    }
+    if (src.depth() == CV_32F || src.depth() == CV_64F) {
+        double mn = 0.0;
+        double mx = 0.0;
+        cv::minMaxLoc(src, &mn, &mx);
+        if (mx <= 1.0 + 1e-6 && mn >= -1e-6) {
+            src.convertTo(dst, CV_8U, 255.0);
+        } else {
+            cv::normalize(src, dst, 0, 255, cv::NORM_MINMAX, CV_8U);
+        }
+        return dst;
+    }
+    src.convertTo(dst, CV_8U);
+    return dst;
+}
+
+cv::Mat PrepareSingleImageForBackend(const cv::Mat& src, int expectedChannels) {
+    if (src.empty()) {
+        return {};
+    }
+    const int ec = (expectedChannels == 1 || expectedChannels == 3) ? expectedChannels : 3;
+    cv::Mat u8 = ConvertMatDepthTo8U(src);
+    if (u8.empty()) {
+        return {};
+    }
+
+    if (ec == 3) {
+        if (u8.channels() == 1) {
+            cv::Mat rgb;
+            cv::cvtColor(u8, rgb, cv::COLOR_GRAY2RGB);
+            return rgb;
+        }
+        if (u8.channels() == 4) {
+            cv::Mat rgb;
+            cv::cvtColor(u8, rgb, cv::COLOR_BGRA2RGB);
+            return rgb;
+        }
+        if (u8.channels() == 3) {
+            cv::Mat rgb;
+            cv::cvtColor(u8, rgb, cv::COLOR_BGR2RGB);
+            return rgb;
+        }
+        cv::Mat rgb;
+        cv::cvtColor(u8, rgb, cv::COLOR_BGR2RGB);
+        return rgb;
+    }
+
+    if (u8.channels() == 1) {
+        return u8;
+    }
+    if (u8.channels() == 3) {
+        cv::Mat gray;
+        cv::cvtColor(u8, gray, cv::COLOR_BGR2GRAY);
+        return gray;
+    }
+    if (u8.channels() == 4) {
+        cv::Mat gray;
+        cv::cvtColor(u8, gray, cv::COLOR_BGRA2GRAY);
+        return gray;
+    }
+    cv::Mat gray;
+    cv::cvtColor(u8, gray, cv::COLOR_BGR2GRAY);
+    return gray;
+}
+
+} // namespace
+
 namespace dlcv_infer {
 
     std::wstring convertStringToWstring(const std::string& inputString) {
@@ -842,12 +1031,14 @@ namespace dlcv_infer {
         OwnModelIndex(other.OwnModelIndex),
         _isFlowGraphMode(other._isFlowGraphMode),
         _deviceId(other._deviceId),
-        _flowModel(other._flowModel) {
+        _flowModel(other._flowModel),
+        _cachedExpectedInputCh(other._cachedExpectedInputCh) {
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
         other._deviceId = 0;
         other._flowModel = nullptr;
+        other._cachedExpectedInputCh = -2;
     }
 
     Model& Model::operator=(Model&& other) noexcept {
@@ -862,12 +1053,14 @@ namespace dlcv_infer {
         _isFlowGraphMode = other._isFlowGraphMode;
         _deviceId = other._deviceId;
         _flowModel = other._flowModel;
+        _cachedExpectedInputCh = other._cachedExpectedInputCh;
 
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
         other._deviceId = 0;
         other._flowModel = nullptr;
+        other._cachedExpectedInputCh = -2;
         return *this;
     }
 
@@ -876,6 +1069,7 @@ namespace dlcv_infer {
     }
 
     void Model::FreeModel() {
+        _cachedExpectedInputCh = -2;
         if (_isFlowGraphMode) {
             delete _flowModel;
             _flowModel = nullptr;
@@ -917,6 +1111,38 @@ namespace dlcv_infer {
         json resultObject = json::parse(resultJson);
         DllLoader::Instance().GetFreeResultFunc()(resultPtr);
         return resultObject;
+    }
+
+    int Model::resolveExpectedInputChannels() {
+        if (_cachedExpectedInputCh != -2) {
+            return (_cachedExpectedInputCh == -1) ? 3 : _cachedExpectedInputCh;
+        }
+        try {
+            if (modelIndex < 0 && !_isFlowGraphMode) {
+                _cachedExpectedInputCh = -1;
+                return 3;
+            }
+            const json info = GetModelInfo();
+            const int p = ParseExpectedInputChannelsFromModelInfo(info);
+            if (p == 1 || p == 3) {
+                _cachedExpectedInputCh = p;
+                return p;
+            }
+        } catch (...) {
+        }
+        _cachedExpectedInputCh = -1;
+        return 3;
+    }
+
+    std::vector<cv::Mat> Model::prepareImagesForInfer(const std::vector<cv::Mat>& images) {
+        const int expCh = resolveExpectedInputChannels();
+        const int ec = (expCh == 1 || expCh == 3) ? expCh : 3;
+        std::vector<cv::Mat> out;
+        out.reserve(images.size());
+        for (const auto& im : images) {
+            out.push_back(PrepareSingleImageForBackend(im, ec));
+        }
+        return out;
     }
 
     std::pair<json, void*> Model::InferInternal(const std::vector<cv::Mat>& images, const json& params_json) {
@@ -1123,8 +1349,13 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
+            const std::vector<cv::Mat> prepared = prepareImagesForInfer({ image });
+            if (prepared.empty() || prepared.front().empty()) {
+                throw std::invalid_argument("image is empty after preparation");
+            }
+
             const auto begin = std::chrono::steady_clock::now();
-            json flowRoot = _flowModel->InferInternal(std::vector<cv::Mat>{ image }, params_json);
+            json flowRoot = _flowModel->InferInternal(prepared, params_json);
             const auto end = std::chrono::steady_clock::now();
 
             double dlcvInferMs = 0.0;
@@ -1150,9 +1381,13 @@ namespace dlcv_infer {
             return Result(std::move(sampleResults));
         }
 
-        // 将单张图像放入列表中传递
+        const std::vector<cv::Mat> prepared = prepareImagesForInfer({ image });
+        if (prepared.empty() || prepared.front().empty()) {
+            throw std::invalid_argument("image is empty after preparation");
+        }
+
         const auto begin = std::chrono::steady_clock::now();
-        auto resultTuple = InferInternal({ image }, params_json);
+        auto resultTuple = InferInternal(prepared, params_json);
         const auto end = std::chrono::steady_clock::now();
         const double inferMs = std::chrono::duration<double, std::milli>(end - begin).count();
         SetLastInferTiming(inferMs, inferMs);
@@ -1180,8 +1415,18 @@ namespace dlcv_infer {
                 return Result(std::vector<SampleResult>{});
             }
 
+            const std::vector<cv::Mat> prepared = prepareImagesForInfer(image_list);
+            if (prepared.size() != image_list.size()) {
+                throw std::runtime_error("prepareImagesForInfer size mismatch");
+            }
+            for (const auto& m : prepared) {
+                if (m.empty()) {
+                    throw std::invalid_argument("image is empty after preparation");
+                }
+            }
+
             const auto begin = std::chrono::steady_clock::now();
-            json flowRoot = _flowModel->InferInternal(image_list, params_json);
+            json flowRoot = _flowModel->InferInternal(prepared, params_json);
             const auto end = std::chrono::steady_clock::now();
 
             double dlcvInferMs = 0.0;
@@ -1209,8 +1454,18 @@ namespace dlcv_infer {
             return Result(std::move(sampleResults));
         }
 
+        const std::vector<cv::Mat> prepared = prepareImagesForInfer(image_list);
+        if (prepared.size() != image_list.size()) {
+            throw std::runtime_error("prepareImagesForInfer size mismatch");
+        }
+        for (const auto& m : prepared) {
+            if (m.empty()) {
+                throw std::invalid_argument("image is empty after preparation");
+            }
+        }
+
         const auto begin = std::chrono::steady_clock::now();
-        auto resultTuple = InferInternal(image_list, params_json);
+        auto resultTuple = InferInternal(prepared, params_json);
         const auto end = std::chrono::steady_clock::now();
         const double inferMs = std::chrono::duration<double, std::milli>(end - begin).count();
         SetLastInferTiming(inferMs, inferMs);
@@ -1235,8 +1490,13 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
+            const std::vector<cv::Mat> prepared = prepareImagesForInfer({ image });
+            if (prepared.empty() || prepared.front().empty()) {
+                throw std::invalid_argument("image is empty after preparation");
+            }
+
             const auto begin = std::chrono::steady_clock::now();
-            json flowRoot = _flowModel->InferInternal(std::vector<cv::Mat>{ image }, params_json);
+            json flowRoot = _flowModel->InferInternal(prepared, params_json);
             const auto end = std::chrono::steady_clock::now();
 
             double dlcvInferMs = 0.0;
@@ -1259,8 +1519,13 @@ namespace dlcv_infer {
             return NormalizeFlowOneOutJson(flowResults);
         }
 
+        const std::vector<cv::Mat> prepared = prepareImagesForInfer({ image });
+        if (prepared.empty() || prepared.front().empty()) {
+            throw std::invalid_argument("image is empty after preparation");
+        }
+
         const auto begin = std::chrono::steady_clock::now();
-        auto resultTuple = InferInternal({ image }, params_json);
+        auto resultTuple = InferInternal(prepared, params_json);
         const auto end = std::chrono::steady_clock::now();
         const double inferMs = std::chrono::duration<double, std::milli>(end - begin).count();
         SetLastInferTiming(inferMs, inferMs);
