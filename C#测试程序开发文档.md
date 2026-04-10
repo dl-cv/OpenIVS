@@ -73,6 +73,22 @@
   - `DlcvDemo` 与 `ImageViewer` 建议启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加相关的 `unsafe` 代码）
   - 建议将 `DlcvDemo` 也统一按 x64 配置编译运行（与解决方案一致）
 
+#### 2.4 图像解码与通道/位深约定（DlcvDemo 与 DlcvCsharpApi，必须一致）
+
+- **Demo 侧（用户打开的图片）**
+  - 使用 OpenCvSharp：`Cv2.ImRead(path, ImreadModes.Unchanged)`，保留文件原始通道数与位深（8 位/16 位灰度或彩色、含 Alpha 的 PNG 等）。
+  - 送入 `Model.Infer*` / `InferOneOutJson` 之前，将 Mat 整理为 **与 SDK 入口一致的布局**：
+    - 单通道：原样复制到目标 Mat（不在 Demo 里强行扩成三通道）。
+    - 三通道（OpenCV 默认 BGR）：`BGR2RGB`。
+    - 四通道：`BGRA2RGB`。
+  - 界面 **显示** 仍使用 `ImRead` 得到的 `image`（与 `ImageViewer` 一致）；推理使用上述 RGB 张量（或单通道张量）。
+
+- **API 侧（`DlcvCsharpApi/Model.cs`）**
+  - 在 `Infer`、`InferBatch`、`InferOneOutJson` 及内部 `InferInternal` 路径上，对输入做统一预处理（含 DVS 分支）：
+    - **位深**：非 `CV_8U` 时缩放到 8 位（16 位无符号按 `1/256` 缩放；浮点若数值在 \([0,1]\) 则乘 255，否则 MinMax 归一化到 8 位等，与 C++ `PrepareSingleImageForBackend` 对齐）。
+    - **通道**：根据加载时缓存的 `model_info.input_shapes.*.max_shape` 解析 **期望输入通道数**（仅识别 1 或 3）。若解析为 **三通道模型** 且当前图像为 **单通道**，则自动 `GRAY2RGB` 后再交给 DVT/RPC/DVP/DVS 等后端。
+    - 若无法从模型信息解析通道数（为 0），则 **不做** 单通道到三通道的自动扩展，仅做位深转换（若有）。
+
 ### 3. 功能边界（必须严格一致）
 
 - **必须具备的功能**：
@@ -258,7 +274,7 @@
   - 已加载模型。
   - 已选择图片。
 - **输入**：
-  - 图片：当前选择的图片（读取为RGB）。
+  - 图片：当前选择的图片（`ImreadModes.Unchanged` 读取；再按 2.4 转为 SDK 入口 Mat：单通道复制 / BGR→RGB / BGRA→RGB）。
   - 参数：UI设置的 Batch Size, Threshold，强制 `with_mask=true`。
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
@@ -269,9 +285,9 @@
 
 - 前置条件同 7.6（模型与图片均必须存在）
 - 处理流程：
-  - 读取图片（BGR）
+  - 读取图片（`ImreadModes.Unchanged`）
   - 若 `image.Empty()==true`：输出控制台 `图像解码失败！` 并直接返回（不弹窗、不更新 UI）
-  - 转为 RGB（BGR→RGB）
+  - 按 2.4 转为 SDK 入口 Mat（单通道复制或 BGR/BGRA→RGB）
   - 参数 JSON：
     - `threshold = numericUpDown_threshold`
     - `with_mask = true`
@@ -290,8 +306,7 @@
   - `isConsistencyTestMode=false`
   - `shouldStopPressureTest=false`
   - batch_size、线程数从 UI 读取
-  - 读取图片并转 RGB
-  - 构造 image_list（重复同一张 Mat）
+  - 读取图片（`Unchanged`）并按 2.4 得到 SDK 入口 Mat，构造 image_list（重复同一张 Mat）
   - 创建 `PressureTestRunner(threadCount, targetRate=1000000, batchSize=batch_size)`
   - 设置 action 为 `ModelInferAction(image_list)`
   - 启动 500ms 定时器刷新统计：
