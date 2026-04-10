@@ -324,14 +324,18 @@ bool MainWindow::loadCurrentImage(cv::Mat& bgrImage, cv::Mat& rgbImage, bool sil
         return false;
     }
     // Windows 下 OpenCV 的 imread(std::string) 走本地窄字符路径，Qt 这里需要用本地编码而不是 UTF-8。
-    bgrImage = cv::imread(imagePath_.toLocal8Bit().toStdString(), cv::IMREAD_COLOR);
+    bgrImage = cv::imread(imagePath_.toLocal8Bit().toStdString(), cv::IMREAD_UNCHANGED);
     if (bgrImage.empty()) {
         if (silentOnDecodeFail) {
             qWarning("图像解码失败！");
         }
         return false;
     }
-    cv::cvtColor(bgrImage, rgbImage, cv::COLOR_BGR2RGB);
+    if (bgrImage.channels() != 1) {
+        cv::cvtColor(bgrImage, rgbImage, cv::COLOR_BGR2RGB);
+    } else {
+        rgbImage = bgrImage;
+    }
     return true;
 }
 
