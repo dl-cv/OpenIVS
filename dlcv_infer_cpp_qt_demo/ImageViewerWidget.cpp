@@ -327,8 +327,8 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
             statusText = "NG";
         }
 
-        if (obj.bbox.size() < 4) {
-            // 分类任务没有 bbox，仅通过分类结果更新状态文本。
+        // 分类或 JSON 中 with_bbox=false 时，不绘制检测框
+        if (obj.bbox.size() < 4 || !obj.withBbox) {
             statusText = categoryLower.contains("ok") ? "OK" : "NG";
             continue;
         }
