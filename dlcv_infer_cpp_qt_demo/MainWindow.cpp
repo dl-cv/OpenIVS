@@ -649,8 +649,7 @@ void MainWindow::startPressureTest() {
 
     for (int t = 0; t < pressureThreadCount_; ++t) {
         pressureThreads_.emplace_back([this, modelPtr, batchSize, threshold, baseImage, pressureInputDesc]() {
-            cv::Mat threadImage = baseImage.clone();
-            if (threadImage.empty()) {
+            if (baseImage.empty()) {
                 const QString detail = "输入图像为空。";
                 if (!pressureError_.exchange(true)) {
                     {
@@ -712,7 +711,7 @@ void MainWindow::startPressureTest() {
             std::vector<cv::Mat> images;
             images.reserve(batchSize);
             for (int i = 0; i < batchSize; ++i) {
-                images.push_back(threadImage);
+                images.push_back(baseImage);
             }
 
             while (!pressureStopRequested_.load(std::memory_order_relaxed)) {
