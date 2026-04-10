@@ -195,11 +195,12 @@ QImage ImageViewerWidget::bgrToQImage(const cv::Mat& bgrImage) {
         src8 = converted;
     }
 
+    // 预览与叠加仅按三通道 RGB888 绘制；四通道须先去掉 alpha，不能按四通道步长配合 RGB888。
     cv::Mat rgb;
     if (src8.channels() == 3) {
         cv::cvtColor(src8, rgb, cv::COLOR_BGR2RGB);
     } else if (src8.channels() == 4) {
-        cv::cvtColor(src8, rgb, cv::COLOR_BGRA2RGBA);
+        cv::cvtColor(src8, rgb, cv::COLOR_BGRA2RGB);
     } else {
         cv::cvtColor(src8, rgb, cv::COLOR_GRAY2RGB);
     }

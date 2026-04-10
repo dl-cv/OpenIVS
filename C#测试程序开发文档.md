@@ -78,7 +78,7 @@
 - **Demo**：`Cv2.ImRead(path, ImreadModes.Unchanged)`；将**同一张**解码后的 `Mat` 交给 `ImageViewer` 与 `Model.Infer*` / `InferOneOutJson`（不在 Demo 里做 `BGR2RGB` 等预处理）。
 - **API（`Model.cs`）**：经 `PrepareInferImages` → 逐张 `PrepareInferImage` 规整后再进各后端（含 DVS）。
   - **位深**：非 `CV_8U` 时转为 8 位（`ConvertMatDepthTo8U`：16U 按 `1/256`，浮点按值域映射等）。
-  - **通道**：`ParseInputChFromModelInfo` 从 `model_info.input_shapes.*.max_shape` 推断 1 或 3；结果缓存在 `_expectedChCache`：**-2** 未解析或已失效（释放模型、`GetModelInfo` 刷新元数据后），**-1** 无法识别（按三通道策略：灰度/BGR/BGRA → RGB），**1**/**3** 为明确期望（单通道模型时多通道转灰度；三通道模型时转 RGB）。
+  - **通道**：`ParseInputChFromModelInfo` 从 `model_info.input_shapes.*.max_shape` 推断 1 或 3；结果缓存在 `_expectedChCache`：**-2** 未解析或已失效（释放模型、`GetModelInfo` 刷新元数据后），**-1** 无法识别（按三通道策略：灰度/BGR/BGRA → RGB），**1**/**3** 为明确期望（单通道模型时多通道转灰度；**三通道模型时若输入为四通道，须先 `BGRA2RGB` 再推理**）。
 
 ### 3. 功能边界（必须严格一致）
 
@@ -156,6 +156,7 @@
 
 #### 5.2 绘制规则（框/文字/Mask）
 
+- **底图通道**：`ImageViewer.UpdateImage(Mat)` 在显示前若检测到 **4 通道**，会先 `BGRA2BGR` 再 `ToBitmap`，**不直接可视化四通道**（当前 UI 绘制按三通道位图处理）。
 - **输入**：仅可视化 `SampleResults[0]`（Batch中第一张图的结果）。
 - **坐标**：基于**原图像素坐标**。
 - **可视化输出**：

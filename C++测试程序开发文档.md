@@ -95,9 +95,10 @@
 
 - **适用范围**：`dlcv_infer::Model::Infer`、`InferBatch`、`InferOneOutJson` 在调用底层推理或流程图推理**之前**，对输入 `cv::Mat` 做统一规整（`prepareInferImages` → 逐张 `PrepareInferImage`）。
 - **通道缓存 `_expectedChCache`**：**-2** 未解析或已失效（`FreeModel`、对象被移动后）；**-1** 无法从模型信息识别通道（按三通道默认策略）；**1** / **3** 为从 `input_shapes` 解析得到的期望通道。首次推理时由 `resolveEffectiveInputCh()` 结合 `ParseInputChFromModelInfo` 与 `GetModelInfo()` 写入缓存。
-- **三通道期望**：`ConvertMatDepthTo8U` 后到 8bit，再将单通道→RGB、BGR→RGB、BGRA→RGB。
-- **单通道期望**：统一到 8bit 后，将 BGR/BGRA 转为灰度。
+- **三通道期望**：`ConvertMatDepthTo8U` 后到 8bit，再将单通道→RGB、BGR→RGB、**BGRA→RGB（四通道输入必须先去掉 alpha 再送三通道模型）**。
+- **单通道期望**：统一到 8bit 后，将 BGR/BGRA 转为灰度（四通道时 `BGRA2GRAY`）。
 - **说明**：规整结果仅用于当次推理；调用方持有的原始 `Mat` 不变。流程图模式与普通模型共用上述入口。
+- **与显示的关系**：推理侧由 DLL 按模型通道自动规整；**右侧预览/可视化只支持三通道 RGB 绘制**，四通道图像在 `ImageViewerWidget` 内会先 `BGRA2RGB` 再生成 `QImage`，不得将四通道缓冲区按 `RGB888` 直接显示。
 
 - **加载模型**：
   - 文件对话框标题：`选择模型`
@@ -108,7 +109,7 @@
   - 过滤器：`图片文件 (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.tif);;所有文件 (*.*)`
 - **单次推理**：
   - `batch_size` 通过重复同一张图组成 batch
-  - **输入图像（用户侧）**：使用 OpenCV `imread(..., IMREAD_UNCHANGED)` 解码，须支持 **8bit 灰度、8bit/16bit 彩色（含 BGR/BGRA）、16bit 单通道** 等常见格式；路径仍须 `toLocal8Bit()`（见上文 Windows 约定）。右侧预览与叠加以解码后的 `Mat` 为准（16bit 等在显示前会降为 8bit 以便 Qt 绘制）。
+  - **输入图像（用户侧）**：使用 OpenCV `imread(..., IMREAD_UNCHANGED)` 解码，须支持 **8bit 灰度、8bit/16bit 彩色（含 BGR/BGRA）、16bit 单通道** 等常见格式；路径仍须 `toLocal8Bit()`（见上文 Windows 约定）。右侧预览与叠加以解码后的 `Mat` 为准（16bit 等在显示前会降为 8bit 以便 Qt 绘制）；**若为四通道，显示前会转为三通道 RGB**，因当前绘制链路仅支持三通道。
   - **输入像素格式（推理侧）**：调用侧将 **解码后的原样 `Mat`** 传入 `dlcv_infer::Model::Infer` / `InferBatch` / `InferOneOutJson`；**通道顺序与深度由 `dlcv_infer_cpp_dll` 在推理入口按模型信息自动规整**（见下文「API 侧图像兼容规则」）。左侧输出中的「输入」行为对当前图像的简要描述（通道数、位深、布局），而非固定写死 `RGB`。
   - 成功时左侧输出（格式固定）：
 
