@@ -319,6 +319,8 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
     QFont labelFont("Microsoft YaHei", static_cast<int>(fontSize));
     painter.setFont(labelFont);
     const QFontMetricsF metrics(labelFont);
+    const qreal labelPadH = 4.0;
+    qreal orphanLabelTop = 0.0;
 
     for (const dlcv_infer::ObjectResult& obj : results_) {
         const QString categoryName = QString::fromLocal8Bit(obj.categoryName.c_str());
@@ -327,22 +329,63 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
             statusText = "NG";
         }
 
-        // 分类或 JSON 中 with_bbox=false 时，不绘制检测框
-        if (obj.bbox.size() < 4 || !obj.withBbox) {
-            statusText = categoryLower.contains("ok") ? "OK" : "NG";
-            continue;
-        }
-
         const QColor color = categoryColor(categoryName);
         QPen pen(color);
         pen.setWidthF(borderWidth);
         painter.setPen(pen);
 
+        const bool canDrawBox =
+            obj.withBbox && obj.bbox.size() >= 4 && obj.bbox[2] > 0.0 && obj.bbox[3] > 0.0;
+        if (!canDrawBox) {
+            statusText = categoryLower.contains("ok") ? "OK" : "NG";
+        }
+
+        if (obj.withMask && !obj.mask.empty()) {
+            const QImage overlay = createMaskOverlayImage(obj.mask);
+            if (!overlay.isNull()) {
+                if (canDrawBox && !obj.withAngle) {
+                    const double x = obj.bbox[0];
+                    const double y = obj.bbox[1];
+                    const double w = obj.bbox[2];
+                    const double h = obj.bbox[3];
+                    painter.drawImage(QRectF(x, y, w, h), overlay);
+                } else if (!canDrawBox) {
+                    painter.drawImage(
+                        QRectF(0.0, 0.0, static_cast<qreal>(image_.width()), static_cast<qreal>(image_.height())),
+                        overlay);
+                }
+            }
+        }
+
+        const QString scoreLabel = QString("%1 %2").arg(categoryName).arg(obj.score, 0, 'f', 2);
+        const QRectF scoreLabelRect = metrics.boundingRect(scoreLabel);
+        auto paintScoreLabelBar = [&](qreal textLeftX, qreal textTopY) {
+            painter.fillRect(
+                QRectF(textLeftX - labelPadH, textTopY, scoreLabelRect.width() + 2.0 * labelPadH, scoreLabelRect.height()),
+                QColor(0, 0, 0, 160));
+            painter.setPen(color);
+            painter.drawText(
+                QPointF(textLeftX, textTopY + scoreLabelRect.height() - metrics.descent()),
+                scoreLabel);
+        };
+
+        if (!canDrawBox) {
+            paintScoreLabelBar(0.0, orphanLabelTop);
+            orphanLabelTop += scoreLabelRect.height();
+            continue;
+        }
+
+        const double bx = obj.bbox[0];
+        const double by = obj.bbox[1];
+        const double bw = obj.bbox[2];
+        const double bh = obj.bbox[3];
+        const QRectF bboxRect(bx, by, bw, bh);
+
         if (obj.withAngle) {
-            const double cx = obj.bbox[0];
-            const double cy = obj.bbox[1];
-            const double w = obj.bbox[2];
-            const double h = obj.bbox[3];
+            const double cx = bx;
+            const double cy = by;
+            const double w = bw;
+            const double h = bh;
             const double angle = obj.angle;
 
             const double cosA = std::cos(angle);
@@ -362,36 +405,15 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
             }
             painter.drawPolygon(polygon);
 
-            const QString label = QString("%1 %2").arg(categoryName).arg(obj.score, 0, 'f', 2);
-            const QRectF textRect = metrics.boundingRect(label);
-            const qreal textX = cx - textRect.width() / 2.0;
-            const qreal textY = cy - h / 2.0 - textRect.height() - 2.0;
-            painter.fillRect(QRectF(textX, textY, textRect.width(), textRect.height()), QColor(0, 0, 0, 160));
-            painter.setPen(color);
-            painter.drawText(QPointF(textX, textY + textRect.height() - metrics.descent()), label);
+            const qreal textLeftX = static_cast<qreal>(cx) - scoreLabelRect.width() / 2.0;
+            const qreal textTopY = static_cast<qreal>(cy) - h / 2.0 - scoreLabelRect.height() - 2.0;
+            paintScoreLabelBar(textLeftX, textTopY);
             continue;
-        }
-
-        const double x = obj.bbox[0];
-        const double y = obj.bbox[1];
-        const double w = obj.bbox[2];
-        const double h = obj.bbox[3];
-        const QRectF bboxRect(x, y, w, h);
-
-        if (obj.withMask && !obj.mask.empty()) {
-            const QImage overlay = createMaskOverlayImage(obj.mask);
-            if (!overlay.isNull()) {
-                painter.drawImage(bboxRect, overlay);
-            }
         }
 
         painter.drawRect(bboxRect);
 
-        const QString label = QString("%1 %2").arg(categoryName).arg(obj.score, 0, 'f', 2);
-        const QRectF textRect = metrics.boundingRect(label);
-        const qreal textY = y - textRect.height() - 2.0;
-        painter.fillRect(QRectF(x, textY, textRect.width(), textRect.height()), QColor(0, 0, 0, 160));
-        painter.setPen(color);
-        painter.drawText(QPointF(x, textY + textRect.height() - metrics.descent()), label);
+        const qreal textTopY = static_cast<qreal>(by) - scoreLabelRect.height() - 2.0;
+        paintScoreLabelBar(static_cast<qreal>(bx), textTopY);
     }
 }
