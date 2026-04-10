@@ -136,7 +136,7 @@
 - **前置条件**：同上（未满足直接弹窗提示）
 - **启动行为**：
   - 读取当前图像，保存 `batch_size/threshold/threadCount`
-  - **输入图像**：与单次推理相同，为 `IMREAD_UNCHANGED` 解码后的原样 `Mat`；多线程内对该 `Mat` 做 `clone()` 后重复送入 `InferBatch`，API 侧自动按模型做通道/位深规整。
+  - **输入图像**：与单次推理相同，为 `IMREAD_UNCHANGED` 解码后的原样 `Mat`；多线程内将同一 `Mat`（浅拷贝头、共享像素数据）重复送入 `InferBatch`，API 侧自动按模型做通道/位深规整。
   - 禁用：模型加载/模型信息/打开图/单次推理/推理JSON/设备下拉框/三个数值输入
   - 创建 `线程数` 个 worker：循环调用 `Model::InferBatch()`（`with_mask=false`），并累计：
     - `completedRequests`（每次 infer +1）
