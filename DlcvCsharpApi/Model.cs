@@ -59,6 +59,7 @@ namespace dlcv_infer_csharp
         private JObject _cachedModelInfo = null;
         private JArray _cachedMaxShape = null;
         private int _cachedMaxBatchSize = 1;
+        private int _expectedChCache = -2;
         private readonly object _batchMetaLock = new object();
         private List<JObject> _cachedSubModelBatchItems = new List<JObject>();
 
@@ -528,6 +529,8 @@ namespace dlcv_infer_csharp
 
         public void FreeModel()
         {
+            _expectedChCache = -2;
+
             // 仅借用/共享模式，不释放底层模型，只标记无效
             if (!OwnModelIndex)
             {
@@ -960,6 +963,264 @@ namespace dlcv_infer_csharp
                     AddUniqueSubModelItem(_cachedSubModelBatchItems, _modelPath, _cachedMaxShape, _cachedMaxBatchSize);
                 }
             }
+
+            _expectedChCache = -2;
+        }
+
+        private static bool IsLikelySpatialDim(int v)
+        {
+            return v >= 8 && v <= 65536;
+        }
+
+        private static int ReadJsonIntLike(JToken v, int dv)
+        {
+            if (v == null) return dv;
+            try
+            {
+                if (v.Type == JTokenType.Integer) return v.Value<int>();
+                if (v.Type == JTokenType.Float) return (int)Math.Round(v.Value<double>());
+                if (v.Type == JTokenType.String) return int.Parse(v.Value<string>(), System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+            }
+            return dv;
+        }
+
+        private static int InferChannelCountFromMaxShape(JArray shapeArr)
+        {
+            if (shapeArr == null || shapeArr.Count == 0) return 0;
+            int n = shapeArr.Count;
+            if (n >= 4)
+            {
+                int d1 = ReadJsonIntLike(shapeArr[1], -1);
+                int d2 = ReadJsonIntLike(shapeArr[2], -1);
+                int d3 = ReadJsonIntLike(shapeArr[3], -1);
+                if (IsLikelySpatialDim(d2) && IsLikelySpatialDim(d3))
+                {
+                    if (d1 == 1 || d1 == 3) return d1;
+                }
+                int d0 = ReadJsonIntLike(shapeArr[0], -1);
+                if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1))
+                {
+                    if (d3 == 1 || d3 == 3) return d3;
+                }
+            }
+            if (n == 3)
+            {
+                int d0 = ReadJsonIntLike(shapeArr[0], -1);
+                int d1 = ReadJsonIntLike(shapeArr[1], -1);
+                int d2 = ReadJsonIntLike(shapeArr[2], -1);
+                if ((d0 == 1 || d0 == 3) && IsLikelySpatialDim(d1) && IsLikelySpatialDim(d2))
+                    return d0;
+                if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1) && (d2 == 1 || d2 == 3))
+                    return d2;
+            }
+            return 0;
+        }
+
+        private static JObject FindInputShapesObject(JObject root)
+        {
+            if (root == null) return null;
+            if (root["model_info"] is JObject mi)
+            {
+                if (mi["input_shapes"] is JObject ish) return ish;
+                if (mi["model_info"] is JObject inner && inner["input_shapes"] is JObject ish2) return ish2;
+            }
+            if (root["input_shapes"] is JObject ish3) return ish3;
+            return null;
+        }
+
+        private static int ParseInputChFromModelInfo(JObject modelInfoRoot)
+        {
+            JObject shapes = FindInputShapesObject(modelInfoRoot);
+            if (shapes == null) return 0;
+
+            int TryInputDesc(JToken inputDesc)
+            {
+                var jo = inputDesc as JObject;
+                if (jo == null) return 0;
+                var ms = jo["max_shape"] as JArray;
+                if (ms == null) return 0;
+                int ch = InferChannelCountFromMaxShape(ms);
+                return (ch == 1 || ch == 3) ? ch : 0;
+            }
+
+            if (shapes["input"] != null)
+            {
+                int ch = TryInputDesc(shapes["input"]);
+                if (ch != 0) return ch;
+            }
+            foreach (var prop in shapes.Properties())
+            {
+                int ch = TryInputDesc(prop.Value);
+                if (ch != 0) return ch;
+            }
+            return 0;
+        }
+
+        private static MatType Mat8UTypeForChannels(int ch)
+        {
+            switch (ch)
+            {
+                case 1: return MatType.CV_8UC1;
+                case 2: return MatType.CV_8UC2;
+                case 3: return MatType.CV_8UC3;
+                case 4: return MatType.CV_8UC4;
+                default: return MatType.CV_8UC1;
+            }
+        }
+
+        private static Mat ConvertMatDepthTo8U(Mat src, List<Mat> disposables)
+        {
+            if (src == null || src.Empty()) return src;
+            int ch = src.Channels();
+            MatType targetT = Mat8UTypeForChannels(ch);
+            MatType st = src.Type();
+            if (st == targetT)
+                return src;
+
+            Mat dst = new Mat();
+            MatType depth = st.Depth;
+            int targetRtype = targetT.ToInt32();
+            if (depth == MatType.CV_16U)
+            {
+                src.ConvertTo(dst, targetT, 1.0 / 256.0);
+            }
+            else if (depth == MatType.CV_8S || depth == MatType.CV_16S)
+            {
+                Cv2.Normalize(src, dst, 0, 255, NormTypes.MinMax, targetRtype);
+            }
+            else if (depth == MatType.CV_32F || depth == MatType.CV_64F)
+            {
+                Cv2.MinMaxLoc(src, out double min, out double max);
+                if (max <= 1.0 + 1e-6 && min >= -1e-6)
+                    src.ConvertTo(dst, targetT, 255.0);
+                else
+                    Cv2.Normalize(src, dst, 0, 255, NormTypes.MinMax, targetRtype);
+            }
+            else
+            {
+                src.ConvertTo(dst, targetT);
+            }
+
+            disposables.Add(dst);
+            return dst;
+        }
+
+        private int ResolveEffectiveInputCh()
+        {
+            if (_expectedChCache != -2)
+                return (_expectedChCache == -1) ? 3 : _expectedChCache;
+            try
+            {
+                if (modelIndex < 0 && !_isDvsMode && !_isDvpMode && !_isRpcMode)
+                {
+                    _expectedChCache = -1;
+                    return 3;
+                }
+                if (_isDvsMode && (_dvsModel == null || !_dvsModel.IsLoaded))
+                {
+                    _expectedChCache = -1;
+                    return 3;
+                }
+                int p = ParseInputChFromModelInfo(_cachedModelInfo);
+                if (p == 1 || p == 3)
+                {
+                    _expectedChCache = p;
+                    return p;
+                }
+            }
+            catch
+            {
+            }
+            _expectedChCache = -1;
+            return 3;
+        }
+
+        private static Mat PrepareInferImage(Mat src, int expectedChannels, List<Mat> disposables)
+        {
+            if (src == null || src.Empty()) return src;
+            int ec = (expectedChannels == 1 || expectedChannels == 3) ? expectedChannels : 3;
+            Mat u8 = ConvertMatDepthTo8U(src, disposables);
+            if (u8.Empty()) return u8;
+
+            if (ec == 3)
+            {
+                if (u8.Channels() == 1)
+                {
+                    var rgb = new Mat();
+                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.GRAY2RGB);
+                    disposables.Add(rgb);
+                    return rgb;
+                }
+                if (u8.Channels() == 4)
+                {
+                    var rgb = new Mat();
+                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.BGRA2RGB);
+                    disposables.Add(rgb);
+                    return rgb;
+                }
+                if (u8.Channels() == 3)
+                {
+                    var rgb = new Mat();
+                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.BGR2RGB);
+                    disposables.Add(rgb);
+                    return rgb;
+                }
+                var rgbFallback = new Mat();
+                Cv2.CvtColor(u8, rgbFallback, ColorConversionCodes.BGR2RGB);
+                disposables.Add(rgbFallback);
+                return rgbFallback;
+            }
+
+            if (u8.Channels() == 1)
+                return u8;
+            if (u8.Channels() == 3)
+            {
+                var gray = new Mat();
+                Cv2.CvtColor(u8, gray, ColorConversionCodes.BGR2GRAY);
+                disposables.Add(gray);
+                return gray;
+            }
+            if (u8.Channels() == 4)
+            {
+                var gray = new Mat();
+                Cv2.CvtColor(u8, gray, ColorConversionCodes.BGRA2GRAY);
+                disposables.Add(gray);
+                return gray;
+            }
+            var grayFallback = new Mat();
+            Cv2.CvtColor(u8, grayFallback, ColorConversionCodes.BGR2GRAY);
+            disposables.Add(grayFallback);
+            return grayFallback;
+        }
+
+        private List<Mat> PrepareInferImages(IList<Mat> images, out List<Mat> disposables)
+        {
+            disposables = new List<Mat>();
+            if (images == null) return null;
+            int expCh = ResolveEffectiveInputCh();
+            int ec = (expCh == 1 || expCh == 3) ? expCh : 3;
+            var list = new List<Mat>(images.Count);
+            foreach (var img in images)
+                list.Add(PrepareInferImage(img, ec, disposables));
+            return list;
+        }
+
+        private static void DisposeTempMats(List<Mat> disposables)
+        {
+            if (disposables == null) return;
+            foreach (var m in disposables)
+            {
+                try
+                {
+                    m?.Dispose();
+                }
+                catch
+                {
+                }
+            }
         }
 
         public JObject GetCachedModelInfo()
@@ -1115,21 +1376,40 @@ namespace dlcv_infer_csharp
         // 内部通用推理方法，处理单张或多张图像
         public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject params_json)
         {
-            if (_isDvpMode)
+            if (images == null)
+                throw new ArgumentNullException(nameof(images));
+
+            List<Mat> disposables = new List<Mat>();
+            List<Mat> normalized;
+            try
             {
-                return InferInternalDvp(images, params_json);
+                normalized = PrepareInferImages(images, out disposables);
             }
-            else if (_isDvsMode)
+            catch
             {
-                return _dvsModel.InferInternal(images, params_json);
+                DisposeTempMats(disposables);
+                throw;
             }
-            else if (_isRpcMode)
+
+            try
             {
-                return InferInternalRpc(images, params_json);
+                if (_isDvpMode)
+                {
+                    return InferInternalDvp(normalized, params_json);
+                }
+                if (_isDvsMode)
+                {
+                    return _dvsModel.InferInternal(normalized, params_json);
+                }
+                if (_isRpcMode)
+                {
+                    return InferInternalRpc(normalized, params_json);
+                }
+                return InferInternalDvt(normalized, params_json);
             }
-            else
+            finally
             {
-                return InferInternalDvt(images, params_json);
+                DisposeTempMats(disposables);
             }
         }
 
@@ -1648,7 +1928,16 @@ namespace dlcv_infer_csharp
             Utils.CSharpResult result = default(Utils.CSharpResult);
             if (_isDvsMode)
             {
-                result = _dvsModel.InferBatch(new List<Mat> { image }, params_json);
+                List<Mat> dvsDisp;
+                var normList = PrepareInferImages(new List<Mat> { image }, out dvsDisp);
+                try
+                {
+                    result = _dvsModel.InferBatch(normList, params_json);
+                }
+                finally
+                {
+                    DisposeTempMats(dvsDisp);
+                }
             }
             else
             {
@@ -1691,7 +1980,16 @@ namespace dlcv_infer_csharp
         {
             if (_isDvsMode)
             {
-                return _dvsModel.InferBatch(image_list, params_json);
+                List<Mat> dvsDisp;
+                var normList = PrepareInferImages(image_list, out dvsDisp);
+                try
+                {
+                    return _dvsModel.InferBatch(normList, params_json);
+                }
+                finally
+                {
+                    DisposeTempMats(dvsDisp);
+                }
             }
 
             var resultTuple = InferInternal(image_list, params_json);
@@ -1737,7 +2035,17 @@ namespace dlcv_infer_csharp
 
             if (_isDvsMode)
             {
-                var res = _dvsModel.InferInternal(new List<Mat> { image }, params_json);
+                List<Mat> dvsDisp;
+                var normList = PrepareInferImages(new List<Mat> { image }, out dvsDisp);
+                Tuple<JObject, IntPtr> res;
+                try
+                {
+                    res = _dvsModel.InferInternal(normList, params_json);
+                }
+                finally
+                {
+                    DisposeTempMats(dvsDisp);
+                }
                 rawResults = res.Item1["result_list"] as JArray ?? new JArray();
                 
                 // DVS 模式下不需要释放非托管资源，直接处理

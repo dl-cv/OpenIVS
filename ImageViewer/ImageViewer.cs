@@ -233,11 +233,28 @@ namespace DLCV
             CalculateMinScale(); // 新图像加载时计算MinScale
         }
 
-        // 支持 opencv 的 Mat 类型
+        // 支持 opencv 的 Mat 类型（显示仅三通道；四通道先 BGRA→BGR 再转 Bitmap）
         public void UpdateImage(Mat image)
         {
-            Bitmap bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(image);
-            UpdateImage(bitmap);
+            if (image == null || image.Empty())
+                return;
+            Mat display = image;
+            Mat converted = null;
+            try
+            {
+                if (image.Channels() == 4)
+                {
+                    converted = new Mat();
+                    Cv2.CvtColor(image, converted, ColorConversionCodes.BGRA2BGR);
+                    display = converted;
+                }
+                Bitmap bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(display);
+                UpdateImage(bitmap);
+            }
+            finally
+            {
+                converted?.Dispose();
+            }
         }
 
         public void UpdateResults(dynamic result)

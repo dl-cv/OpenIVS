@@ -199,20 +199,17 @@ namespace DlcvDemo
 					return;
 				}
 
-				Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+				Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
 				if (image.Empty())
 				{
 					Console.WriteLine("图像解码失败！");
 					return;
 				}
-				Mat image_rgb = new Mat();
-				Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
-
 				JObject data = new JObject();
 				data["threshold"] = (float)numericUpDown_threshold.Value;
 				data["with_mask"] = true;
 
-				var json = model.InferOneOutJson(image_rgb, data);
+				var json = model.InferOneOutJson(image, data);
 				richTextBox1.Text = JsonConvert.SerializeObject(json, Formatting.Indented);
 			}
 			catch (Exception ex)
@@ -285,19 +282,16 @@ namespace DlcvDemo
                     return;
                 }
 
-                Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+                Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
                 if (image.Empty())
                 {
                     throw new Exception("图像解码失败！");
                 }
-                Mat image_rgb = new Mat();
-                Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
-
                 batch_size = (int)numericUpDown_batch_size.Value;
                 var image_list = new List<Mat>();
                 for (int i = 0; i < batch_size; i++)
                 {
-                    image_list.Add(image_rgb);
+                    image_list.Add(image);
                 }
 
                 JObject data = new JObject();
@@ -579,16 +573,12 @@ namespace DlcvDemo
                 batch_size = (int)numericUpDown_batch_size.Value;
                 int threadCount = (int)numericUpDown_num_thread.Value;
 
-                // 读取图像并转换为RGB格式
-                Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
-                Mat image_rgb = new Mat();
-                Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
+                Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
 
-                // 创建批量图像列表
                 var image_list = new List<Mat>();
                 for (int i = 0; i < batch_size; i++)
                 {
-                    image_list.Add(image_rgb);
+                    image_list.Add(image);
                 }
 
                 // 创建测试实例

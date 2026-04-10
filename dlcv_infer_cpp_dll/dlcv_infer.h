@@ -236,6 +236,10 @@ namespace dlcv_infer {
         bool _isFlowGraphMode = false;
         int _deviceId = 0;
         flow::FlowGraphModel* _flowModel = nullptr;
+        int _expectedChCache = -2;
+
+        int resolveEffectiveInputCh();
+        std::vector<cv::Mat> prepareInferImages(const std::vector<cv::Mat>& images);
     };
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS

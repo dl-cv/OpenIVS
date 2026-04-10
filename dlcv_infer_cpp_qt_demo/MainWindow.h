@@ -52,7 +52,7 @@ private:
     int selectedDeviceId() const;
     bool ensureModelLoaded();
     bool ensureImageSelected();
-    bool loadCurrentImage(cv::Mat& bgrImage, cv::Mat& rgbImage, bool silentOnDecodeFail) const;
+    bool loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const;
 
     void reportError(const QString& title, const QString& detail);
     QString formatResultText(const dlcv_infer::Result& output) const;

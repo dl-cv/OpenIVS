@@ -73,6 +73,13 @@
   - `DlcvDemo` 与 `ImageViewer` 建议启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加相关的 `unsafe` 代码）
   - 建议将 `DlcvDemo` 也统一按 x64 配置编译运行（与解决方案一致）
 
+#### 2.4 图像解码与通道/位深约定（DlcvDemo 与 DlcvCsharpApi，必须一致）
+
+- **Demo**：`Cv2.ImRead(path, ImreadModes.Unchanged)`；将**同一张**解码后的 `Mat` 交给 `ImageViewer` 与 `Model.Infer*` / `InferOneOutJson`（不在 Demo 里做 `BGR2RGB` 等预处理）。
+- **API（`Model.cs`）**：经 `PrepareInferImages` → 逐张 `PrepareInferImage` 规整后再进各后端（含 DVS）。
+  - **位深**：非 `CV_8U` 时转为 8 位（`ConvertMatDepthTo8U`：16U 按 `1/256`，浮点按值域映射等）。
+  - **通道**：`ParseInputChFromModelInfo` 从 `model_info.input_shapes.*.max_shape` 推断 1 或 3；结果缓存在 `_expectedChCache`：**-2** 未解析或已失效（释放模型、`GetModelInfo` 刷新元数据后），**-1** 无法识别（按三通道策略：灰度/BGR/BGRA → RGB），**1**/**3** 为明确期望（单通道模型时多通道转灰度；**三通道模型时若输入为四通道，须先 `BGRA2RGB` 再推理**）。
+
 ### 3. 功能边界（必须严格一致）
 
 - **必须具备的功能**：
@@ -149,6 +156,7 @@
 
 #### 5.2 绘制规则（框/文字/Mask）
 
+- **底图通道**：`ImageViewer.UpdateImage(Mat)` 在显示前若检测到 **4 通道**，会先 `BGRA2BGR` 再 `ToBitmap`，**不直接可视化四通道**（当前 UI 绘制按三通道位图处理）。
 - **输入**：仅可视化 `SampleResults[0]`（Batch中第一张图的结果）。
 - **坐标**：基于**原图像素坐标**。
 - **可视化输出**：
@@ -258,7 +266,7 @@
   - 已加载模型。
   - 已选择图片。
 - **输入**：
-  - 图片：当前选择的图片（读取为RGB）。
+  - 图片：当前选择的图片（`ImreadModes.Unchanged` 读取，原样送入 `Model.InferBatch`，见 2.4）。
   - 参数：UI设置的 Batch Size, Threshold，强制 `with_mask=true`。
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
@@ -269,9 +277,9 @@
 
 - 前置条件同 7.6（模型与图片均必须存在）
 - 处理流程：
-  - 读取图片（BGR）
+  - 读取图片（`ImreadModes.Unchanged`）
   - 若 `image.Empty()==true`：输出控制台 `图像解码失败！` 并直接返回（不弹窗、不更新 UI）
-  - 转为 RGB（BGR→RGB）
+  - 将解码后的 `Mat` 原样传入 `InferOneOutJson`（规整见 2.4）
   - 参数 JSON：
     - `threshold = numericUpDown_threshold`
     - `with_mask = true`
@@ -290,8 +298,7 @@
   - `isConsistencyTestMode=false`
   - `shouldStopPressureTest=false`
   - batch_size、线程数从 UI 读取
-  - 读取图片并转 RGB
-  - 构造 image_list（重复同一张 Mat）
+  - 读取图片（`Unchanged`），构造 image_list（重复同一张 Mat，与 2.4 一致）
   - 创建 `PressureTestRunner(threadCount, targetRate=1000000, batchSize=batch_size)`
   - 设置 action 为 `ModelInferAction(image_list)`
   - 启动 500ms 定时器刷新统计：
