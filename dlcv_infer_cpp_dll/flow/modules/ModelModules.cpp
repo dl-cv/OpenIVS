@@ -78,28 +78,15 @@ static void TryAddParam(Json& p, const Json& props, const std::string& key) {
     p[key] = v;
 }
 
-static const std::string& ConvertCategoryNameCached(
-    const std::string& gbkName,
-    std::unordered_map<std::string, std::string>& cache) {
-    const auto it = cache.find(gbkName);
-    if (it != cache.end()) return it->second;
-    const std::string utf8 = dlcv_infer::convertGbkToUtf8(gbkName);
-    return cache.emplace(gbkName, utf8).first->second;
-}
-
 static Json ConvertToLocalSamples(const dlcv_infer::Result& res, bool includeMask) {
     Json list = Json::array();
     if (res.sampleResults.empty()) return list;
     const auto& sr = res.sampleResults[0];
-    auto& listArr = list.get_ref<Json::array_t&>();
-    listArr.reserve(sr.results.size());
-    std::unordered_map<std::string, std::string> categoryNameCache;
-    categoryNameCache.reserve(16);
     for (const auto& obj : sr.results) {
         Json o = Json::object();
         o["category_id"] = obj.categoryId;
         // dlcv_infer::Model 侧把 categoryName 从 UTF-8 转为 GBK 了；FlowGraph 内统一使用 UTF-8
-        o["category_name"] = ConvertCategoryNameCached(obj.categoryName, categoryNameCache);
+        o["category_name"] = dlcv_infer::convertGbkToUtf8(obj.categoryName);
         o["score"] = obj.score;
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
@@ -116,22 +103,18 @@ static Json ConvertToLocalSamples(const dlcv_infer::Result& res, bool includeMas
                 // ignore
             }
         }
-        list.push_back(std::move(o));
+        list.push_back(o);
     }
     return list;
 }
 
 static Json ConvertSampleResultToLocalSamples(const dlcv_infer::SampleResult& sr, bool includeMask) {
     Json list = Json::array();
-    auto& listArr = list.get_ref<Json::array_t&>();
-    listArr.reserve(sr.results.size());
-    std::unordered_map<std::string, std::string> categoryNameCache;
-    categoryNameCache.reserve(16);
     for (const auto& obj : sr.results) {
         Json o = Json::object();
         o["category_id"] = obj.categoryId;
         // dlcv_infer::Model 侧把 categoryName 从 UTF-8 转为 GBK 了；FlowGraph 内统一使用 UTF-8
-        o["category_name"] = ConvertCategoryNameCached(obj.categoryName, categoryNameCache);
+        o["category_name"] = dlcv_infer::convertGbkToUtf8(obj.categoryName);
         o["score"] = obj.score;
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
@@ -148,7 +131,7 @@ static Json ConvertSampleResultToLocalSamples(const dlcv_infer::SampleResult& sr
                 // ignore
             }
         }
-        list.push_back(std::move(o));
+        list.push_back(o);
     }
     return list;
 }
@@ -399,8 +382,8 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
         entry["index"] = outIndex;
         entry["origin_index"] = wrap.OriginalIndex;
         entry["transform"] = wrap.TransformState.ToJson();
-        entry["sample_results"] = std::move(sampleByLocal[static_cast<size_t>(localIdx)]);
-        outResults.push_back(std::move(entry));
+        entry["sample_results"] = sampleByLocal[static_cast<size_t>(localIdx)];
+        outResults.push_back(entry);
         outIndex += 1;
     }
 
