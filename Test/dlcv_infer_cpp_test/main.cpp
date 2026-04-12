@@ -691,8 +691,8 @@ int ParsePositiveIntArg(const char* s, int fallback) {
 
 int RunBenchmark(const std::wstring& modelPath, const std::wstring& imagePath, int batch, int runs, int warmup) {
     std::cout << "==== 基准测试 ====\n";
-    std::cout << "model: " << WideToUtf8(modelPath) << "\n";
-    std::cout << "image: " << WideToUtf8(imagePath) << "\n";
+    std::cout << "模型: " << WideToUtf8(modelPath) << "\n";
+    std::cout << "图片: " << WideToUtf8(imagePath) << "\n";
     std::cout << "batch: " << batch << "\n";
     std::cout << "runs: " << runs << "\n";
     std::cout << "warmup: " << warmup << "\n";
@@ -727,20 +727,16 @@ int RunBenchmark(const std::wstring& modelPath, const std::wstring& imagePath, i
             DisposeResultMasks(warm);
         }
 
+        const auto benchmarkStart = Clock::now();
         double sdkSum = 0.0;
         double flowSum = 0.0;
         double outerSum = 0.0;
-        int sampleCount = -1;
         std::unordered_map<std::string, NodeTimingAggregate> nodeStats;
 
         for (int i = 0; i < runs; ++i) {
             const auto t0 = Clock::now();
             auto out = model.InferBatch(list, params);
             const auto t1 = Clock::now();
-
-            if (sampleCount < 0) {
-                sampleCount = static_cast<int>(out.sampleResults.size());
-            }
 
             double sdkMs = 0.0;
             double flowMs = 0.0;
@@ -770,13 +766,19 @@ int RunBenchmark(const std::wstring& modelPath, const std::wstring& imagePath, i
         const double avgSdk = sdkSum / std::max(1, runs);
         const double avgFlow = flowSum / std::max(1, runs);
         const double avgOuter = outerSum / std::max(1, runs);
-        const double avgOverhead = std::max(0.0, avgFlow - avgSdk);
+        const auto benchmarkEnd = Clock::now();
+        const double elapsedSec = std::chrono::duration<double>(benchmarkEnd - benchmarkStart).count();
+        const long long completedRequests = static_cast<long long>(runs) * static_cast<long long>(batch);
+        const double realtimeRate = elapsedSec > 0.0 ? static_cast<double>(completedRequests) / elapsedSec : 0.0;
 
-        std::cout << "sample_count: " << sampleCount << "\n";
-        std::cout << "avg_sdk_ms: " << ToFixed(avgSdk, 2) << "\n";
-        std::cout << "avg_flow_ms: " << ToFixed(avgFlow, 2) << "\n";
-        std::cout << "avg_outer_ms: " << ToFixed(avgOuter, 2) << "\n";
-        std::cout << "avg_overhead_ms: " << ToFixed(avgOverhead, 2) << "\n";
+        std::cout << "\n压力测试统计:\n";
+        std::cout << "线程数: 1\n";
+        std::cout << "批量大小: " << batch << "\n";
+        std::cout << "运行时间: " << ToFixed(elapsedSec, 2) << " 秒\n";
+        std::cout << "完成请求: " << completedRequests << "\n";
+        std::cout << "平均延迟: " << ToFixed(avgOuter, 2) << "ms\n";
+        std::cout << "平均延迟(SDK): " << ToFixed(avgSdk, 2) << "ms\n";
+        std::cout << "实时速率: " << ToFixed(realtimeRate, 2) << " 请求/秒\n";
 
         std::vector<NodeTimingAggregate> rows;
         rows.reserve(nodeStats.size());
@@ -785,14 +787,16 @@ int RunBenchmark(const std::wstring& modelPath, const std::wstring& imagePath, i
             return a.AverageMs() > b.AverageMs();
         });
 
-        if (!rows.empty()) {
-            std::cout << "---- 节点平均耗时 ----\n";
+        std::cout << "模块平均耗时:\n";
+        if (rows.empty()) {
+            std::cout << "(无流程节点统计)\n";
+        } else {
             for (const auto& item : rows) {
                 const double share = avgFlow > 0.0 ? item.AverageMs() * 100.0 / avgFlow : 0.0;
                 std::cout << "#" << item.nodeId << " [" << item.nodeType << "] "
                           << (item.nodeTitle.empty() ? "-" : item.nodeTitle)
-                          << " -> avg=" << ToFixed(item.AverageMs(), 2)
-                          << "ms, share=" << ToFixed(share, 1) << "%\n";
+                          << ": " << ToFixed(item.AverageMs(), 2)
+                          << "ms (" << ToFixed(share, 1) << "%)\n";
             }
         }
         return 0;
@@ -862,7 +866,12 @@ int main(int argc, char* argv[]) {
     SetConsoleCP(CP_UTF8);
 
     if (argc <= 1) {
-        return RunSlidingAlignOnce(kSlidingAlignModelPath, kSlidingAlignImagePath);
+        return RunBenchmark(
+            kDefaultPressureModelPath,
+            kDefaultPressureImagePath,
+            kDefaultPressureBatchSize,
+            kDefaultPressureRuns,
+            kDefaultPressureWarmup);
     }
 
     if (argc >= 2 && std::string(argv[1]) == "demo3check") {
@@ -881,9 +890,9 @@ int main(int argc, char* argv[]) {
         }
         const std::wstring modelPath = Utf8ToWide(argv[2]);
         const std::wstring imagePath = Utf8ToWide(argv[3]);
-        const int batch = (argc >= 5) ? ParsePositiveIntArg(argv[4], 1) : 1;
-        const int runs = (argc >= 6) ? ParsePositiveIntArg(argv[5], 20) : 20;
-        const int warmup = (argc >= 7) ? ParsePositiveIntArg(argv[6], 5) : 5;
+        const int batch = (argc >= 5) ? ParsePositiveIntArg(argv[4], kDefaultPressureBatchSize) : kDefaultPressureBatchSize;
+        const int runs = (argc >= 6) ? ParsePositiveIntArg(argv[5], kDefaultPressureRuns) : kDefaultPressureRuns;
+        const int warmup = (argc >= 7) ? ParsePositiveIntArg(argv[6], kDefaultPressureWarmup) : kDefaultPressureWarmup;
         return RunBenchmark(modelPath, imagePath, batch, runs, warmup);
     }
 
