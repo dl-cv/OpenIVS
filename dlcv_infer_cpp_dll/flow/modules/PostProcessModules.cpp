@@ -301,6 +301,7 @@ public:
         Json mainResults = Json::array();
         std::vector<ModuleImage> altImages;
         Json altResults = Json::array();
+        std::unordered_map<const Json*, double> maskAreaCache;
 
         // map entry->image by (idx, origin, transform sig)
         std::unordered_map<int, int> originToIdx;
@@ -340,7 +341,15 @@ public:
             if (enableMaskArea) {
                 double marea = 0.0;
                 if (so.contains("mask_rle") && so.at("mask_rle").is_object()) {
-                    marea = CalculateMaskArea(so.at("mask_rle"));
+                    const Json& maskInfo = so.at("mask_rle");
+                    const Json* maskKey = &maskInfo;
+                    auto it = maskAreaCache.find(maskKey);
+                    if (it != maskAreaCache.end()) {
+                        marea = it->second;
+                    } else {
+                        marea = CalculateMaskArea(maskInfo);
+                        maskAreaCache.emplace(maskKey, marea);
+                    }
                 }
                 if (has_mask_area_min && marea < maskAreaMin) return false;
                 if (has_mask_area_max && marea > maskAreaMax) return false;
@@ -596,6 +605,7 @@ public:
         const std::vector<ModuleImage>& images = imageList;
         const Json results = resultList.is_array() ? resultList : Json::array();
         Json outResults = Json::array();
+        std::unordered_map<const Json*, cv::RotatedRect> rectCache;
 
         auto NormalizeAngleLe90Rad = [](double aRad) -> double {
             double x = aRad;
@@ -626,14 +636,17 @@ public:
                 const Json& bbox = d.at("bbox");
                 const float bx = static_cast<float>(bbox.at(0).get<double>());
                 const float by = static_cast<float>(bbox.at(1).get<double>());
+                const Json& maskInfo = d.at("mask_rle");
+                const Json* maskKey = &maskInfo;
 
-                cv::Mat maskMat = MaskInfoToMat(d.at("mask_rle"));
-                if (maskMat.empty()) continue;
-                std::vector<cv::Point> pts;
-                cv::findNonZero(maskMat, pts);
-                if (pts.empty()) continue;
-
-                cv::RotatedRect rr = cv::minAreaRect(pts);
+                cv::RotatedRect rr;
+                auto it = rectCache.find(maskKey);
+                if (it != rectCache.end()) {
+                    rr = it->second;
+                } else {
+                    if (!TryComputeMinAreaRectFromMaskInfo(maskInfo, rr)) continue;
+                    rectCache.emplace(maskKey, rr);
+                }
                 rr.center += cv::Point2f(bx, by);
 
                 float rw = rr.size.width;
