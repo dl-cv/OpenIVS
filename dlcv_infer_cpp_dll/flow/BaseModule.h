@@ -60,6 +60,14 @@ public:
         return ModuleIO(imageList, resultList, Json::array());
     }
 
+    /// <summary>
+    /// 可选：接收可移动的 result_list，热点模块可覆写以减少 JSON 深拷贝。
+    /// 默认回落到只读 Process。
+    /// </summary>
+    virtual ModuleIO ProcessOwned(const std::vector<ModuleImage>& imageList, Json&& resultList) {
+        return Process(imageList, resultList);
+    }
+
 protected:
     // ---- Properties helpers (best-effort) ----
     std::string ReadString(const std::string& key, const std::string& dv) const {

@@ -5,14 +5,20 @@
 #include <array>
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "opencv2/imgproc.hpp"
+
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
 
 namespace dlcv_infer {
 namespace flow {
@@ -98,61 +104,146 @@ static bool TryReadDouble(const Json& token, double& outVal) {
     return false;
 }
 
+static std::uint64_t ReadCurrentOutputMask(const ExecutionContext* ctx) {
+    if (ctx == nullptr) return std::numeric_limits<std::uint64_t>::max();
+    try {
+        return ctx->Get<std::uint64_t>(
+            "__graph_current_output_mask",
+            std::numeric_limits<std::uint64_t>::max());
+    } catch (...) {
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+}
+
+static bool IsCurrentOutputConnected(const ExecutionContext* ctx, int outputIndex) {
+    if (outputIndex < 0 || outputIndex >= 64) return true;
+    const std::uint64_t mask = ReadCurrentOutputMask(ctx);
+    if (mask == std::numeric_limits<std::uint64_t>::max()) return true;
+    return ((mask >> outputIndex) & static_cast<std::uint64_t>(1)) != 0;
+}
+
 /// post_process/merge_results, features/merge_results
 class MergeResultsModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
-        // 组装输入组：主输入在前，ExtraInputsIn 顺序在后
-        std::vector<std::pair<std::vector<ModuleImage>, Json>> groups;
-        groups.push_back({ imageList, resultList.is_array() ? resultList : Json::array() });
-        for (const auto& ch : ExtraInputsIn) {
-            groups.push_back({ ch.ImageList, ch.ResultList.is_array() ? ch.ResultList : Json::array() });
+        const Json emptyResults = Json::array();
+        const Json& inResults = resultList.is_array() ? resultList : emptyResults;
+        return ProcessCore(imageList, inResults, nullptr);
+    }
+
+    ModuleIO ProcessOwned(const std::vector<ModuleImage>& imageList, Json&& resultList) override {
+        const Json emptyResults = Json::array();
+        const bool hasOwnedArray = resultList.is_array();
+        const Json& inResults = hasOwnedArray ? resultList : emptyResults;
+        return ProcessCore(imageList, inResults, hasOwnedArray ? &resultList : nullptr);
+    }
+
+private:
+    ModuleIO ProcessCore(const std::vector<ModuleImage>& imageList, const Json& resultList, Json* movableMainResults) {
+        struct LocalResultIndex final {
+            bool IsLocal = false;
+            int Index = -1;
+            int OriginIndex = -1;
+        };
+
+        auto readLocalResultIndex = [](const Json& token) -> LocalResultIndex {
+            LocalResultIndex out;
+            if (!token.is_object()) return out;
+            if (token.value("type", "") != "local") return out;
+            out.IsLocal = true;
+            out.Index = token.contains("index") ? SafeIntFromJson(token.at("index"), -1) : -1;
+            out.OriginIndex = token.contains("origin_index")
+                ? SafeIntFromJson(token.at("origin_index"), out.Index)
+                : out.Index;
+            return out;
+        };
+
+        struct GroupRef final {
+            const std::vector<ModuleImage>* Images;
+            const Json* Results;
+            Json* MutableResults = nullptr;
+        };
+
+        std::vector<GroupRef> groups;
+        groups.reserve(1 + ExtraInputsIn.size());
+        groups.push_back(GroupRef{ &imageList, &resultList, movableMainResults });
+        for (auto& ch : ExtraInputsIn) {
+            Json* mutableResults = ch.ResultList.is_array() ? &ch.ResultList : nullptr;
+            groups.push_back(GroupRef{ &ch.ImageList, &ch.ResultList, mutableResults });
         }
 
         std::vector<ModuleImage> mergedImages;
         Json mergedResults = Json::array();
+        auto& mergedResultsArr = mergedResults.get_ref<Json::array_t&>();
+
+        size_t estimatedImageCount = 0;
+        size_t estimatedResultCount = 0;
+        for (const auto& g : groups) {
+            if (g.Images != nullptr) estimatedImageCount += g.Images->size();
+            if (g.Results != nullptr && g.Results->is_array()) estimatedResultCount += g.Results->size();
+        }
+        mergedImages.reserve(estimatedImageCount);
+        mergedResultsArr.reserve(estimatedResultCount);
 
         for (const auto& g : groups) {
-            const auto& imgs = g.first;
-            const Json& res = g.second;
+            if (g.Images == nullptr) continue;
+            const auto& imgs = *(g.Images);
+            const Json* res = (g.Results != nullptr && g.Results->is_array()) ? g.Results : nullptr;
 
             const int baseIndex = static_cast<int>(mergedImages.size());
-            std::unordered_map<int, int> localToGlobal;
+            std::vector<int> localToGlobal(imgs.size(), -1);
             int added = 0;
 
             for (int i = 0; i < static_cast<int>(imgs.size()); i++) {
                 const ModuleImage& im = imgs[static_cast<size_t>(i)];
                 if (im.ImageObject.empty()) continue;
                 const int globalIdx = baseIndex + added;
-                localToGlobal[i] = globalIdx;
+                localToGlobal[static_cast<size_t>(i)] = globalIdx;
                 added++;
                 // 重包：确保 OriginalIndex 与全局顺序一致
                 ModuleImage newWrap(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
                 mergedImages.push_back(newWrap);
             }
+            if (res == nullptr) continue;
 
-            for (const auto& t : res) {
-                if (!t.is_object()) continue;
-                const Json& r = t;
-                if (r.value("type", "") != "local") {
-                    mergedResults.push_back(r);
-                    continue;
+            auto appendMappedToken = [&](Json token) {
+                if (!token.is_object()) return;
+                const LocalResultIndex localIndex = readLocalResultIndex(token);
+                if (!localIndex.IsLocal) {
+                    mergedResultsArr.push_back(std::move(token));
+                    return;
                 }
-                Json r2 = r;
-                int idx = r2.contains("index") ? r2.at("index").get<int>() : -1;
-                int oidx = r2.contains("origin_index") ? r2.at("origin_index").get<int>() : idx;
+                int idx = localIndex.Index;
+                int oidx = localIndex.OriginIndex;
+                Json& r2 = token;
 
                 if (added == 1) {
                     r2["index"] = baseIndex;
                     r2["origin_index"] = baseIndex;
                 } else {
-                    if (idx >= 0 && localToGlobal.count(idx)) r2["index"] = localToGlobal[idx];
-                    if (oidx >= 0 && localToGlobal.count(oidx)) r2["origin_index"] = localToGlobal[oidx];
+                    if (idx >= 0 && idx < static_cast<int>(localToGlobal.size()) && localToGlobal[static_cast<size_t>(idx)] >= 0) {
+                        r2["index"] = localToGlobal[static_cast<size_t>(idx)];
+                    }
+                    if (oidx >= 0 && oidx < static_cast<int>(localToGlobal.size()) && localToGlobal[static_cast<size_t>(oidx)] >= 0) {
+                        r2["origin_index"] = localToGlobal[static_cast<size_t>(oidx)];
+                    }
                     if (!r2.contains("origin_index") && r2.contains("index")) r2["origin_index"] = r2["index"];
                 }
-                mergedResults.push_back(r2);
+                mergedResultsArr.push_back(std::move(token));
+            };
+
+            const bool canMoveTokens = (g.MutableResults != nullptr && g.MutableResults->is_array() && g.MutableResults == res);
+            if (canMoveTokens) {
+                auto& srcArr = g.MutableResults->get_ref<Json::array_t&>();
+                for (auto& token : srcArr) {
+                    appendMappedToken(std::move(token));
+                }
+            } else {
+                for (const auto& token : *res) {
+                    appendMappedToken(token);
+                }
             }
         }
 
@@ -167,7 +258,8 @@ public:
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
         const std::vector<ModuleImage>& inImages = imageList;
-        const Json inResults = resultList.is_array() ? resultList : Json::array();
+        const Json emptyResults = Json::array();
+        const Json& inResults = resultList.is_array() ? resultList : emptyResults;
 
         const auto cats = ReadStringList(Properties, "categories");
         std::unordered_set<std::string> keepSet(cats.begin(), cats.end());
@@ -257,8 +349,21 @@ public:
     using BaseModule::BaseModule;
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        const Json emptyResults = Json::array();
+        const Json& inResults = resultList.is_array() ? resultList : emptyResults;
+        return ProcessCore(imageList, inResults, nullptr);
+    }
+
+    ModuleIO ProcessOwned(const std::vector<ModuleImage>& imageList, Json&& resultList) override {
+        const Json emptyResults = Json::array();
+        const bool hasOwnedArray = resultList.is_array();
+        const Json& inResults = hasOwnedArray ? resultList : emptyResults;
+        return ProcessCore(imageList, inResults, hasOwnedArray ? &resultList : nullptr);
+    }
+
+private:
+    ModuleIO ProcessCore(const std::vector<ModuleImage>& imageList, const Json& inResults, Json* ownedResults) {
         const std::vector<ModuleImage>& inImages = imageList;
-        const Json inResults = resultList.is_array() ? resultList : Json::array();
 
         const bool enableBBoxWh = ReadBool("enable_bbox_wh", false);
         const bool enableRBoxWh = ReadBool("enable_rbox_wh", false);
@@ -296,11 +401,31 @@ public:
         const double bboxAreaMax = optD(readOpt("bbox_area_max"), has_bbox_area_max);
         const double maskAreaMin = optD(readOpt("mask_area_min"), has_mask_area_min);
         const double maskAreaMax = optD(readOpt("mask_area_max"), has_mask_area_max);
+        const bool noFilter = !enableBBoxWh && !enableRBoxWh && !enableBBoxArea && !enableMaskArea;
+        const bool emitFailBranch = IsCurrentOutputConnected(Context, 2) || IsCurrentOutputConnected(Context, 3);
+
+        if (noFilter && !emitFailBranch) {
+            bool hasPositive = false;
+            for (const auto& t : inResults) {
+                if (!t.is_object()) continue;
+                if (!t.contains("sample_results") || !t.at("sample_results").is_array()) continue;
+                if (!t.at("sample_results").empty()) {
+                    hasPositive = true;
+                    break;
+                }
+            }
+            this->ScalarOutputsByName["has_positive"] = hasPositive;
+            if (ownedResults != nullptr) {
+                return ModuleIO(inImages, std::move(*ownedResults), Json::array());
+            }
+            return ModuleIO(inImages, inResults, Json::array());
+        }
 
         std::vector<ModuleImage> mainImages;
         Json mainResults = Json::array();
         std::vector<ModuleImage> altImages;
         Json altResults = Json::array();
+        std::unordered_map<const Json*, double> maskAreaCache;
 
         // map entry->image by (idx, origin, transform sig)
         std::unordered_map<int, int> originToIdx;
@@ -339,14 +464,151 @@ public:
             }
             if (enableMaskArea) {
                 double marea = 0.0;
-                if (so.contains("mask_rle") && so.at("mask_rle").is_object()) {
-                    marea = CalculateMaskArea(so.at("mask_rle"));
+                bool hasMaskArea = false;
+                if (so.contains("mask_area")) {
+                    hasMaskArea = TryReadDouble(so.at("mask_area"), marea);
                 }
+                if (!hasMaskArea && so.contains("mask_rle") && so.at("mask_rle").is_object()) {
+                    const Json& maskInfo = so.at("mask_rle");
+                    const Json* maskKey = &maskInfo;
+                    auto it = maskAreaCache.find(maskKey);
+                    if (it != maskAreaCache.end()) {
+                        marea = it->second;
+                        hasMaskArea = true;
+                    } else {
+                        marea = CalculateMaskArea(maskInfo);
+                        maskAreaCache.emplace(maskKey, marea);
+                        hasMaskArea = true;
+                    }
+                }
+                if (!hasMaskArea) marea = 0.0;
                 if (has_mask_area_min && marea < maskAreaMin) return false;
                 if (has_mask_area_max && marea > maskAreaMax) return false;
             }
             return true;
         };
+
+        // 常见 batch 场景下 image_list 与 result_list 一一对应，优先走顺序快路径。
+        bool alignedLocalFastPath = false;
+        if (inResults.is_array() && !inImages.empty() && inImages.size() == inResults.size()) {
+            alignedLocalFastPath = true;
+            for (size_t i = 0; i < inResults.size(); i++) {
+                const Json& obj = inResults.at(i);
+                if (!obj.is_object()) {
+                    alignedLocalFastPath = false;
+                    break;
+                }
+                if (obj.value("type", "") != "local") {
+                    alignedLocalFastPath = false;
+                    break;
+                }
+            }
+        }
+        Json::array_t* movableAlignedEntries = nullptr;
+        if (alignedLocalFastPath && ownedResults != nullptr && ownedResults->is_array() && ownedResults->size() == inImages.size()) {
+            movableAlignedEntries = &ownedResults->get_ref<Json::array_t&>();
+        }
+
+        if (alignedLocalFastPath) {
+            for (size_t i = 0; i < inImages.size(); i++) {
+                const ModuleImage& imgObj = inImages[i];
+                if (imgObj.ImageObject.empty()) continue;
+
+                Json* mutableEntry = nullptr;
+                const Json* entryPtr = nullptr;
+                if (movableAlignedEntries != nullptr) {
+                    mutableEntry = &(*movableAlignedEntries)[i];
+                    entryPtr = mutableEntry;
+                } else {
+                    entryPtr = &inResults.at(i);
+                }
+                const Json& entry = *entryPtr;
+                const bool hasSampleResults = entry.contains("sample_results") && entry.at("sample_results").is_array();
+                Json passArr = Json::array();
+                Json failArr = emitFailBranch ? Json::array() : Json();
+
+                if (hasSampleResults) {
+                    auto& passVec = passArr.get_ref<Json::array_t&>();
+                    const size_t sampleCount = entry.at("sample_results").size();
+                    passVec.reserve(sampleCount);
+                    Json::array_t* failVec = nullptr;
+                    if (emitFailBranch) {
+                        failVec = &failArr.get_ref<Json::array_t&>();
+                        failVec->reserve(sampleCount);
+                    }
+                    if (mutableEntry != nullptr) {
+                        auto& samples = (*mutableEntry)["sample_results"].get_ref<Json::array_t&>();
+                        for (auto& s : samples) {
+                            if (!s.is_object()) continue;
+                            if (noFilter || passOne(s)) {
+                                passVec.push_back(std::move(s));
+                            } else if (failVec != nullptr) {
+                                failVec->push_back(std::move(s));
+                            }
+                        }
+                    } else {
+                        const Json& samples = entry.at("sample_results");
+                        for (const auto& s : samples) {
+                            if (!s.is_object()) continue;
+                            if (noFilter || passOne(s)) {
+                                passVec.push_back(s);
+                            } else if (failVec != nullptr) {
+                                failVec->push_back(s);
+                            }
+                        }
+                    }
+                }
+
+                int originIndex = imgObj.OriginalIndex;
+                if (entry.contains("origin_index")) {
+                    originIndex = SafeIntFromJson(entry.at("origin_index"), originIndex);
+                }
+
+                Json transformOut = Json();
+                if (entry.contains("transform") && entry.at("transform").is_object()) {
+                    if (mutableEntry != nullptr && mutableEntry->contains("transform") && (*mutableEntry)["transform"].is_object()) {
+                        transformOut = std::move((*mutableEntry)["transform"]);
+                    } else {
+                        transformOut = entry.at("transform");
+                    }
+                }
+
+                if (!hasSampleResults || !passArr.empty()) {
+                    mainImages.push_back(imgObj);
+                    Json e = Json::object();
+                    e["type"] = "local";
+                    e["index"] = static_cast<int>(mainResults.size());
+                    e["origin_index"] = originIndex;
+                    e["transform"] = transformOut;
+                    e["sample_results"] = hasSampleResults ? std::move(passArr) : Json::array();
+                    mainResults.push_back(std::move(e));
+                }
+
+                if (emitFailBranch && hasSampleResults && !failArr.empty()) {
+                    altImages.push_back(imgObj);
+                    Json e2 = Json::object();
+                    e2["type"] = "local";
+                    e2["index"] = static_cast<int>(altResults.size());
+                    e2["origin_index"] = originIndex;
+                    e2["transform"] = transformOut;
+                    e2["sample_results"] = std::move(failArr);
+                    altResults.push_back(std::move(e2));
+                }
+            }
+
+            if (emitFailBranch) {
+                this->ExtraOutputs.push_back(ModuleChannel(std::move(altImages), std::move(altResults)));
+            }
+            bool hasPositive = false;
+            for (const auto& t : mainResults) {
+                if (t.is_object() && t.contains("sample_results") && t.at("sample_results").is_array() && !t.at("sample_results").empty()) {
+                    hasPositive = true;
+                    break;
+                }
+            }
+            this->ScalarOutputsByName["has_positive"] = hasPositive;
+            return ModuleIO(std::move(mainImages), std::move(mainResults), Json::array());
+        }
 
         for (const auto& token : inResults) {
             if (!token.is_object()) continue;
@@ -364,44 +626,54 @@ public:
 
             const ModuleImage imgObj = inImages[static_cast<size_t>(imgIdx)];
 
-            std::vector<Json> passList;
-            std::vector<Json> failList;
+            Json passArr = Json::array();
+            Json failArr = emitFailBranch ? Json::array() : Json();
             if (entry.contains("sample_results") && entry.at("sample_results").is_array()) {
+                const Json& samples = entry.at("sample_results");
+                auto& passVec = passArr.get_ref<Json::array_t&>();
+                passVec.reserve(samples.size());
+                Json::array_t* failVec = nullptr;
+                if (emitFailBranch) {
+                    failVec = &failArr.get_ref<Json::array_t&>();
+                    failVec->reserve(samples.size());
+                }
                 for (const auto& s : entry.at("sample_results")) {
                     if (!s.is_object()) continue;
-                    if (passOne(s)) passList.push_back(s);
-                    else failList.push_back(s);
+                    if (noFilter || passOne(s)) passVec.push_back(s);
+                    else if (failVec != nullptr) failVec->push_back(s);
                 }
             }
 
-            TransformationState st;
-            try { if (entry.contains("transform") && entry.at("transform").is_object()) st = TransformationState::FromJson(entry.at("transform")); } catch (...) {}
+            Json transformOut = Json();
+            if (entry.contains("transform") && entry.at("transform").is_object()) {
+                transformOut = entry.at("transform");
+            }
 
-            if (!passList.empty()) {
+            if (!passArr.empty()) {
                 mainImages.push_back(imgObj);
                 Json e = Json::object();
                 e["type"] = "local";
                 e["index"] = static_cast<int>(mainResults.size());
                 e["origin_index"] = originIndex;
-                e["transform"] = st.ToJson();
-                Json arr = Json::array(); for (const auto& x : passList) arr.push_back(x);
-                e["sample_results"] = arr;
+                e["transform"] = transformOut;
+                e["sample_results"] = std::move(passArr);
                 mainResults.push_back(e);
             }
-            if (!failList.empty()) {
+            if (emitFailBranch && !failArr.empty()) {
                 altImages.push_back(imgObj);
                 Json e2 = Json::object();
                 e2["type"] = "local";
                 e2["index"] = static_cast<int>(altResults.size());
                 e2["origin_index"] = originIndex;
-                e2["transform"] = st.ToJson();
-                Json arr2 = Json::array(); for (const auto& x : failList) arr2.push_back(x);
-                e2["sample_results"] = arr2;
+                e2["transform"] = transformOut;
+                e2["sample_results"] = std::move(failArr);
                 altResults.push_back(e2);
             }
         }
 
-        this->ExtraOutputs.push_back(ModuleChannel(altImages, altResults));
+        if (emitFailBranch) {
+            this->ExtraOutputs.push_back(ModuleChannel(std::move(altImages), std::move(altResults)));
+        }
         bool hasPositive = false;
         for (const auto& t : mainResults) {
             if (t.is_object() && t.contains("sample_results") && t.at("sample_results").is_array() && !t.at("sample_results").empty()) { hasPositive = true; break; }
@@ -418,7 +690,8 @@ public:
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
         const std::vector<ModuleImage>& images = imageList;
-        const Json results = resultList.is_array() ? resultList : Json::array();
+        const Json emptyResults = Json::array();
+        const Json& results = resultList.is_array() ? resultList : emptyResults;
 
         std::unordered_map<std::string, std::string> mapping;
         try {
@@ -593,9 +866,21 @@ public:
     using BaseModule::BaseModule;
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        Json outResults = resultList.is_array() ? resultList : Json::array();
+        return ProcessCore(imageList, std::move(outResults));
+    }
+
+    ModuleIO ProcessOwned(const std::vector<ModuleImage>& imageList, Json&& resultList) override {
+        Json outResults = resultList.is_array() ? std::move(resultList) : Json::array();
+        return ProcessCore(imageList, std::move(outResults));
+    }
+
+private:
+    ModuleIO ProcessCore(const std::vector<ModuleImage>& imageList, Json outResults) {
         const std::vector<ModuleImage>& images = imageList;
-        const Json results = resultList.is_array() ? resultList : Json::array();
-        Json outResults = Json::array();
+        if (!outResults.is_array()) outResults = Json::array();
+        auto& outEntries = outResults.get_ref<Json::array_t&>();
+        std::unordered_map<const Json*, cv::RotatedRect> rectCache;
 
         auto NormalizeAngleLe90Rad = [](double aRad) -> double {
             double x = aRad;
@@ -605,36 +890,60 @@ public:
             return x;
         };
 
-        for (const auto& entryToken : results) {
+        for (auto& entryToken : outEntries) {
             if (!entryToken.is_object() || entryToken.value("type", "") != "local") {
-                outResults.push_back(entryToken);
                 continue;
             }
-            const Json& entry = entryToken;
+            Json& entry = entryToken;
             if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) {
-                outResults.push_back(entryToken);
                 continue;
             }
             Json newDets = Json::array();
-            for (const auto& dToken : entry.at("sample_results")) {
+            auto& newDetArr = newDets.get_ref<Json::array_t&>();
+            auto& srcDetArr = entry["sample_results"].get_ref<Json::array_t&>();
+            newDetArr.reserve(srcDetArr.size());
+            for (auto& dToken : srcDetArr) {
                 if (!dToken.is_object()) continue;
-                const Json& d = dToken;
-                if (!d.contains("mask_rle") || !d.at("mask_rle").is_object()) {
+
+                Json& d = dToken;
+                const bool hasPrecomputedRect = d.contains("mask_min_area_rect")
+                    && d.at("mask_min_area_rect").is_array()
+                    && d.at("mask_min_area_rect").size() >= 5;
+                if (!hasPrecomputedRect && (!d.contains("mask_rle") || !d.at("mask_rle").is_object())) {
                     continue; // 与 C# 对齐：无 mask_rle 直接跳过该条
                 }
                 if (!d.contains("bbox") || !d.at("bbox").is_array() || d.at("bbox").size() < 4) continue;
                 const Json& bbox = d.at("bbox");
-                const float bx = static_cast<float>(bbox.at(0).get<double>());
-                const float by = static_cast<float>(bbox.at(1).get<double>());
+                const float offsetX = static_cast<float>(bbox.at(0).get<double>());
+                const float offsetY = static_cast<float>(bbox.at(1).get<double>());
 
-                cv::Mat maskMat = MaskInfoToMat(d.at("mask_rle"));
-                if (maskMat.empty()) continue;
-                std::vector<cv::Point> pts;
-                cv::findNonZero(maskMat, pts);
-                if (pts.empty()) continue;
-
-                cv::RotatedRect rr = cv::minAreaRect(pts);
-                rr.center += cv::Point2f(bx, by);
+                cv::RotatedRect rr;
+                if (hasPrecomputedRect) {
+                    try {
+                        const Json& maskRect = d.at("mask_min_area_rect");
+                        rr = cv::RotatedRect(
+                            cv::Point2f(
+                                static_cast<float>(maskRect.at(0).get<double>()),
+                                static_cast<float>(maskRect.at(1).get<double>())),
+                            cv::Size2f(
+                                static_cast<float>(std::abs(maskRect.at(2).get<double>())),
+                                static_cast<float>(std::abs(maskRect.at(3).get<double>()))),
+                            static_cast<float>(maskRect.at(4).get<double>()));
+                    } catch (...) {
+                        continue;
+                    }
+                } else {
+                    const Json& maskInfo = d.at("mask_rle");
+                    const Json* maskKey = &maskInfo;
+                    auto it = rectCache.find(maskKey);
+                    if (it != rectCache.end()) {
+                        rr = it->second;
+                    } else {
+                        if (!TryComputeMinAreaRectFromMaskInfo(maskInfo, rr)) continue;
+                        rectCache.emplace(maskKey, rr);
+                    }
+                }
+                rr.center += cv::Point2f(offsetX, offsetY);
 
                 float rw = rr.size.width;
                 float rh = rr.size.height;
@@ -645,20 +954,19 @@ public:
                 }
                 double angRad = NormalizeAngleLe90Rad(static_cast<double>(angDeg) * kPi / 180.0);
 
-                Json d2 = d;
-                d2["bbox"] = Json::array({ rr.center.x, rr.center.y, rw, rh, angRad });
-                d2["with_angle"] = true;
-                d2["angle"] = angRad;
-                d2.erase("mask_rle");
-                d2.erase("mask");
-                newDets.push_back(d2);
+                d.erase("mask_rle");
+                d.erase("mask");
+                d.erase("mask_min_area_rect");
+                d.erase("mask_area");
+                d["bbox"] = Json::array({ rr.center.x, rr.center.y, rw, rh, angRad });
+                d["with_angle"] = true;
+                d["angle"] = angRad;
+                newDetArr.push_back(std::move(d));
             }
-            Json entry2 = entry;
-            entry2["sample_results"] = newDets;
-            outResults.push_back(entry2);
+            entry["sample_results"] = std::move(newDets);
         }
 
-        return ModuleIO(images, outResults, Json::array());
+        return ModuleIO(images, std::move(outResults), Json::array());
     }
 };
 

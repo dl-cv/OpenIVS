@@ -64,7 +64,10 @@ private:
     static void NormalizeBboxProperties(Json& props);
     static std::unordered_map<int, std::pair<int, int>> BuildLinkSourceMap(const std::vector<Json>& nodesOrdered);
 
-    std::map<int, ModuleChannel> CollectInputPairs(const Json& node, const std::unordered_map<int, std::pair<int, int>>& linkToSource);
+    std::map<int, ModuleChannel> CollectInputPairs(
+        const Json& node,
+        const std::unordered_map<int, std::pair<int, int>>& linkToSource,
+        std::unordered_map<long long, int>* remainingConsumers);
 
     static bool IsScalarPortType(const std::string& tLower);
     static std::string ToLower(std::string s);

@@ -239,7 +239,7 @@ namespace dlcv_infer {
         int _expectedChCache = -2;
 
         int resolveEffectiveInputCh();
-        std::vector<cv::Mat> prepareInferImages(const std::vector<cv::Mat>& images);
+        std::vector<cv::Mat> prepareInferInputBatch(const std::vector<cv::Mat>& images);
     };
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS

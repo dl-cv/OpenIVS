@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -19,6 +21,10 @@
 
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
+
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
 
 namespace dlcv_infer {
 namespace flow {
@@ -137,6 +143,11 @@ static Json RBoxLocalToGlobal(const Json& rbox, const std::vector<double>& T) {
     const double ncx = l00 * cx + l01 * cy + ((T.size() >= 6) ? T[2] : 0.0);
     const double ncy = l10 * cx + l11 * cy + ((T.size() >= 6) ? T[5] : 0.0);
 
+    // 常见场景：仅平移/等比缩放（无旋转剪切），直接走轻量路径。
+    if (std::abs(l01) < 1e-9 && std::abs(l10) < 1e-9 && l00 > 0.0 && l11 > 0.0) {
+        return Json::array({ ncx, ncy, w * l00, h * l11, ang });
+    }
+
     const double c = std::cos(ang);
     const double s = std::sin(ang);
     // unit vectors
@@ -156,6 +167,22 @@ static Json RBoxLocalToGlobal(const Json& rbox, const std::vector<double>& T) {
     return Json::array({ ncx, ncy, nw, nh, nang });
 }
 
+static std::uint64_t GetCurrentOutputMask(const ExecutionContext* ctx) {
+    if (ctx == nullptr) return std::numeric_limits<std::uint64_t>::max();
+    try {
+        return ctx->Get<std::uint64_t>(
+            "__graph_current_output_mask",
+            std::numeric_limits<std::uint64_t>::max());
+    } catch (...) {
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+}
+
+static bool HasCurrentNodeOutputConsumer(const ExecutionContext* ctx) {
+    const std::uint64_t mask = GetCurrentOutputMask(ctx);
+    return mask != 0;
+}
+
 /// output/save_image
 class SaveImageModule final : public BaseModule {
 public:
@@ -163,7 +190,8 @@ public:
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
         const std::vector<ModuleImage>& images = imageList;
-        const Json results = resultList.is_array() ? resultList : Json::array();
+        const Json emptyResults = Json::array();
+        const Json& results = resultList.is_array() ? resultList : emptyResults;
 
         std::string saveDir = ReadString("save_path", std::string());
         std::string suffix = ReadString("suffix", std::string("_out"));
@@ -240,75 +268,136 @@ static bool CanUseAlignedFastPath(const std::vector<ModuleImage>& images, const 
     return true;
 }
 
-static std::vector<FlowResultItem> BuildOutResultItems(const ModuleImage& wrap, const std::vector<Json>& dets) {
+static bool IsAxisAlignedTransform(const std::vector<double>& T_c2o) {
+    if (T_c2o.size() < 6) return false;
+    return std::abs(T_c2o[1]) < 1e-9 && std::abs(T_c2o[3]) < 1e-9;
+}
+
+static Json AABBFromLocalBboxFast(const Json& bboxLocal, const std::vector<double>& T_c2o, bool isAxisAlignedTransform) {
+    if (!bboxLocal.is_array() || bboxLocal.size() < 4 || T_c2o.size() < 6) return Json();
+    try {
+        const double bx = bboxLocal[0].get<double>();
+        const double by = bboxLocal[1].get<double>();
+        const double bw = bboxLocal[2].get<double>();
+        const double bh = bboxLocal[3].get<double>();
+
+        const double x1 = bx;
+        const double y1 = by;
+        const double x2 = bx + bw;
+        const double y2 = by + bh;
+
+        double minX = 0.0;
+        double minY = 0.0;
+        double maxX = 0.0;
+        double maxY = 0.0;
+
+        if (isAxisAlignedTransform) {
+            const double gx1 = T_c2o[0] * x1 + T_c2o[2];
+            const double gx2 = T_c2o[0] * x2 + T_c2o[2];
+            const double gy1 = T_c2o[4] * y1 + T_c2o[5];
+            const double gy2 = T_c2o[4] * y2 + T_c2o[5];
+            minX = std::min(gx1, gx2);
+            maxX = std::max(gx1, gx2);
+            minY = std::min(gy1, gy2);
+            maxY = std::max(gy1, gy2);
+        } else {
+            const auto tx = [&T_c2o](double x, double y) {
+                const double gx = T_c2o[0] * x + T_c2o[1] * y + T_c2o[2];
+                const double gy = T_c2o[3] * x + T_c2o[4] * y + T_c2o[5];
+                return std::pair<double, double>(gx, gy);
+            };
+
+            auto p0 = tx(x1, y1);
+            auto p1 = tx(x2, y1);
+            auto p2 = tx(x2, y2);
+            auto p3 = tx(x1, y2);
+
+            minX = std::min(std::min(p0.first, p1.first), std::min(p2.first, p3.first));
+            minY = std::min(std::min(p0.second, p1.second), std::min(p2.second, p3.second));
+            maxX = std::max(std::max(p0.first, p1.first), std::max(p2.first, p3.first));
+            maxY = std::max(std::max(p0.second, p1.second), std::max(p2.second, p3.second));
+        }
+
+        return Json::array({
+            static_cast<int>(std::floor(minX)),
+            static_cast<int>(std::floor(minY)),
+            static_cast<int>(std::ceil(maxX)),
+            static_cast<int>(std::ceil(maxY))
+        });
+    } catch (...) {
+        return Json();
+    }
+}
+
+static void InitializeByImageEntry(const ModuleImage& wrap, FlowByImageEntry& outEntry) {
+    const cv::Mat& ori = wrap.OriginalImage.empty() ? wrap.ImageObject : wrap.OriginalImage;
+    outEntry.OriginIndex = wrap.OriginalIndex;
+    outEntry.OriginalWidth = ori.empty() ? 0 : ori.cols;
+    outEntry.OriginalHeight = ori.empty() ? 0 : ori.rows;
+}
+
+static void AppendOutResultItemTyped(
+    const Json& d,
+    const std::vector<double>& T_c2o,
+    bool isAxisAlignedTransform,
+    std::vector<FlowResultItem>& outResults) {
+    if (!d.is_object()) return;
+
+    FlowResultItem item;
+    item.CategoryId = d.value("category_id", 0);
+    item.CategoryName = d.value("category_name", std::string());
+    item.Score = d.value("score", 0.0);
+
+    if (d.contains("bbox") && d.at("bbox").is_array()) {
+        const Json& bboxLocal = d.at("bbox");
+        const bool isRot = (bboxLocal.size() == 5);
+        if (isRot) {
+            Json rboxG = RBoxLocalToGlobal(bboxLocal, T_c2o);
+            if (!rboxG.is_null()) {
+                item.Bbox = std::move(rboxG);
+                item.Metadata = Json::object({ {"is_rotated", true} });
+            }
+        } else if (bboxLocal.size() >= 4) {
+            Json bboxGlobal = AABBFromLocalBboxFast(bboxLocal, T_c2o, isAxisAlignedTransform);
+            if (!bboxGlobal.is_null()) {
+                item.Bbox = std::move(bboxGlobal);
+                item.Metadata = Json::object({ {"is_rotated", false} });
+            }
+        }
+    }
+
+    if (d.contains("mask_rle") && d.at("mask_rle").is_object()) {
+        item.MaskRle = d.at("mask_rle");
+    }
+
+    outResults.push_back(std::move(item));
+}
+
+static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& wrap, const Json& dets) {
+    std::vector<FlowResultItem> outResults;
+    if (!dets.is_array() || dets.empty()) return outResults;
+
+    const std::vector<double> T_c2o = BuildTC2O(wrap.TransformState);
+    const bool isAxisAlignedTransform = IsAxisAlignedTransform(T_c2o);
+    outResults.reserve(dets.size());
+    for (const auto& d : dets) {
+        AppendOutResultItemTyped(d, T_c2o, isAxisAlignedTransform, outResults);
+    }
+    return outResults;
+}
+
+static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& wrap, const std::vector<const Json*>& dets) {
     std::vector<FlowResultItem> outResults;
     if (dets.empty()) return outResults;
 
     const std::vector<double> T_c2o = BuildTC2O(wrap.TransformState);
+    const bool isAxisAlignedTransform = IsAxisAlignedTransform(T_c2o);
     outResults.reserve(dets.size());
-
-    for (const auto& d : dets) {
-        if (!d.is_object()) continue;
-        Json item = Json::object();
-        item["category_id"] = d.value("category_id", 0);
-        item["category_name"] = d.value("category_name", "");
-        item["score"] = d.value("score", 0.0);
-
-        // bbox
-        if (d.contains("bbox") && d.at("bbox").is_array()) {
-            const Json& bboxLocal = d.at("bbox");
-            const bool isRot = (bboxLocal.size() == 5);
-            if (isRot) {
-                Json rboxG = RBoxLocalToGlobal(bboxLocal, T_c2o);
-                if (!rboxG.is_null()) {
-                    item["bbox"] = rboxG;
-                    item["metadata"] = Json::object({ {"is_rotated", true} });
-                }
-            } else if (bboxLocal.size() >= 4) {
-                // bboxLocal: [x,y,w,h] -> xyxy
-                try {
-                    const double bx = bboxLocal[0].get<double>();
-                    const double by = bboxLocal[1].get<double>();
-                    const double bw = bboxLocal[2].get<double>();
-                    const double bh = bboxLocal[3].get<double>();
-                    const double x1 = bx;
-                    const double y1 = by;
-                    const double x2 = bx + bw;
-                    const double y2 = by + bh;
-                    std::vector<cv::Point2f> pts = {
-                        cv::Point2f(static_cast<float>(x1), static_cast<float>(y1)),
-                        cv::Point2f(static_cast<float>(x2), static_cast<float>(y1)),
-                        cv::Point2f(static_cast<float>(x2), static_cast<float>(y2)),
-                        cv::Point2f(static_cast<float>(x1), static_cast<float>(y2))
-                    };
-                    const auto ptsG = TransformPoints2x3(T_c2o, pts);
-                    item["bbox"] = AABBFromPoly(ptsG);
-                    item["metadata"] = Json::object({ {"is_rotated", false} });
-                } catch (...) {}
-            }
-        }
-
-        // mask_rle 透传即可。下游 ConvertFlowResultListToObjects / BuildMaskFromFlowEntry 优先使用 mask_rle。
-        // 注意：不要再用 findNonZero 把每个前景像素写成 poly——大图语义分割会产生千万级点，
-        // JSON 序列化与内存会拖垮 return_json（用户可见 4s+ 仅耗在本节点）。
-        if (d.contains("mask_rle") && d.at("mask_rle").is_object()) {
-            item["mask_rle"] = d.at("mask_rle");
-        }
-
-        outResults.push_back(FlowResultItem::FromJson(item));
+    for (const Json* d : dets) {
+        if (d == nullptr) continue;
+        AppendOutResultItemTyped(*d, T_c2o, isAxisAlignedTransform, outResults);
     }
-
     return outResults;
-}
-
-static FlowByImageEntry BuildImagePayloadEntry(const ModuleImage& wrap, std::vector<FlowResultItem> outResults) {
-    const cv::Mat& ori = wrap.OriginalImage.empty() ? wrap.ImageObject : wrap.OriginalImage;
-    FlowByImageEntry entry;
-    entry.OriginIndex = wrap.OriginalIndex;
-    entry.OriginalWidth = ori.empty() ? 0 : ori.cols;
-    entry.OriginalHeight = ori.empty() ? 0 : ori.rows;
-    entry.Results = std::move(outResults);
-    return entry;
 }
 
 class ReturnJsonModule final : public BaseModule {
@@ -316,31 +405,42 @@ public:
     using BaseModule::BaseModule;
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
-        const std::vector<ModuleImage>& images = imageList;
-        const Json results = resultList.is_array() ? resultList : Json::array();
+        const Json emptyResults = Json::array();
+        const Json& results = resultList.is_array() ? resultList : emptyResults;
+        return ProcessCore(imageList, results, nullptr);
+    }
 
-        std::vector<FlowByImageEntry> byImageEntries;
-        byImageEntries.reserve(images.size());
+    ModuleIO ProcessOwned(const std::vector<ModuleImage>& imageList, Json&& resultList) override {
+        const Json emptyResults = Json::array();
+        const bool hasOwnedArray = resultList.is_array();
+        const Json& results = hasOwnedArray ? resultList : emptyResults;
+        return ProcessCore(imageList, results, hasOwnedArray ? &resultList : nullptr);
+    }
+
+private:
+    ModuleIO ProcessCore(const std::vector<ModuleImage>& imageList, const Json& results, Json* ownedResults) {
+        const std::vector<ModuleImage>& images = imageList;
+        FlowFrontendPayload payload;
+        payload.ByImage.reserve(images.size());
 
         if (CanUseAlignedFastPath(images, results)) {
             for (size_t i = 0; i < images.size(); i++) {
                 const ModuleImage& wrap = images[i];
-                std::vector<Json> dets;
+                FlowByImageEntry byImageEntry;
+                InitializeByImageEntry(wrap, byImageEntry);
                 try {
                     const auto& entry = results.at(i);
                     if (entry.is_object() && entry.contains("sample_results") && entry.at("sample_results").is_array()) {
-                        for (const auto& one : entry.at("sample_results")) {
-                            if (one.is_object()) dets.push_back(one);
-                        }
+                        byImageEntry.Results = BuildOutResultItemsTyped(wrap, entry.at("sample_results"));
                     }
                 } catch (...) {}
-                byImageEntries.push_back(BuildImagePayloadEntry(wrap, BuildOutResultItems(wrap, dets)));
+                payload.ByImage.push_back(std::move(byImageEntry));
             }
         } else {
             // 建立 index/origin_index/transform -> dets 映射
-            std::unordered_map<std::string, std::vector<Json>> transToDets;
-            std::unordered_map<int, std::vector<Json>> indexToDets;
-            std::unordered_map<int, std::vector<Json>> originToDets;
+            std::unordered_map<std::string, std::vector<const Json*>> transToDets;
+            std::unordered_map<int, std::vector<const Json*>> indexToDets;
+            std::unordered_map<int, std::vector<const Json*>> originToDets;
 
             for (const auto& entryToken : results) {
                 if (!entryToken.is_object()) continue;
@@ -349,10 +449,12 @@ public:
                 if (entry.at("type").get<std::string>() != "local") continue;
                 if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) continue;
 
-                std::vector<Json> detList;
+                std::vector<const Json*> detList;
+                detList.reserve(entry.at("sample_results").size());
                 for (const auto& d : entry.at("sample_results")) {
-                    if (d.is_object()) detList.push_back(d);
+                    if (d.is_object()) detList.push_back(&d);
                 }
+                if (detList.empty()) continue;
 
                 const int idx = entry.contains("index") ? entry.at("index").get<int>() : -1;
                 if (idx >= 0) {
@@ -383,7 +485,7 @@ public:
                 const ModuleImage& wrap = images[i];
                 const std::string sig = SerializeTransformKey(wrap.TransformState);
 
-                const std::vector<Json>* dets = nullptr;
+                const std::vector<const Json*>* dets = nullptr;
                 auto itIdx = indexToDets.find(static_cast<int>(i));
                 if (itIdx != indexToDets.end()) dets = &itIdx->second;
                 if (dets == nullptr) {
@@ -395,51 +497,35 @@ public:
                     if (itT != transToDets.end()) dets = &itT->second;
                 }
 
-                std::vector<FlowResultItem> outItems;
-                if (dets != nullptr) outItems = BuildOutResultItems(wrap, *dets);
-                byImageEntries.push_back(BuildImagePayloadEntry(wrap, std::move(outItems)));
+                FlowByImageEntry byImageEntry;
+                InitializeByImageEntry(wrap, byImageEntry);
+                if (dets != nullptr) {
+                    byImageEntry.Results = BuildOutResultItemsTyped(wrap, *dets);
+                }
+                payload.ByImage.push_back(std::move(byImageEntry));
             }
         }
-
-        FlowFrontendPayload payloadTyped;
-        payloadTyped.ByImage = std::move(byImageEntries);
-        Json payload = payloadTyped.ToJson();
 
         // 写入 Context
         if (Context != nullptr) {
             try {
                 std::vector<FlowFrontendByNodePayload> typedByNode = Context->Get<std::vector<FlowFrontendByNodePayload>>(
-                    "frontend_payloads_by_node", std::vector<FlowFrontendByNodePayload>());
-                typedByNode.erase(
-                    std::remove_if(
-                        typedByNode.begin(),
-                        typedByNode.end(),
-                        [this](const FlowFrontendByNodePayload& one) { return one.NodeOrder == this->NodeId; }),
-                    typedByNode.end());
-
-                FlowFrontendByNodePayload typedNodePayload;
-                typedNodePayload.NodeOrder = NodeId;
-                typedNodePayload.FallbackOrder = static_cast<int>(typedByNode.size());
-                typedNodePayload.Payload = payloadTyped;
-                typedByNode.push_back(std::move(typedNodePayload));
-
-                Context->Set<std::vector<FlowFrontendByNodePayload>>("frontend_payloads_by_node", typedByNode);
-                Context->Set<FlowFrontendPayload>("frontend_payload_last", payloadTyped);
+                    "frontend_payloads_by_node",
+                    std::vector<FlowFrontendByNodePayload>());
+                FlowFrontendByNodePayload current;
+                current.NodeOrder = NodeId;
+                current.FallbackOrder = static_cast<int>(typedByNode.size());
+                current.Payload = std::move(payload);
+                typedByNode.push_back(std::move(current));
+                Context->Set<std::vector<FlowFrontendByNodePayload>>("frontend_payloads_by_node", std::move(typedByNode));
             } catch (...) {}
-
-            Json existing = Context->Get<Json>("frontend_json", Json::object());
-            if (!existing.is_object()) existing = Json::object();
-            Json byNode = Context->Get<Json>("frontend_json_by_node", Json::object());
-            if (!byNode.is_object()) byNode = Json::object();
-
-            byNode[std::to_string(NodeId)] = payload;
-            existing["last"] = payload;
-            existing["by_node"] = byNode;
-
-            Context->Set<Json>("frontend_json_by_node", byNode);
-            Context->Set<Json>("frontend_json", existing);
         }
-
+        if (!HasCurrentNodeOutputConsumer(Context)) {
+            return ModuleIO(std::vector<ModuleImage>(), Json::array(), Json::array());
+        }
+        if (ownedResults != nullptr) {
+            return ModuleIO(images, std::move(*ownedResults), Json::array());
+        }
         return ModuleIO(images, results, Json::array());
     }
 };
