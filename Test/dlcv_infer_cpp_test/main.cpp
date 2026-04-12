@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <opencv2/imgcodecs.hpp>
@@ -196,6 +197,55 @@ std::unordered_map<std::string, int> CountCategories(const std::vector<dlcv_infe
         counts[category] += 1;
     }
     return counts;
+}
+
+int CountObjectsWithMask(const std::vector<dlcv_infer::ObjectResult>& objects) {
+    int count = 0;
+    for (const auto& obj : objects) {
+        if (obj.withMask || !obj.mask.empty()) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+bool AreCategoryCountsEqual(
+    const std::unordered_map<std::string, int>& a,
+    const std::unordered_map<std::string, int>& b) {
+
+    if (a.size() != b.size()) return false;
+    for (const auto& kv : a) {
+        auto it = b.find(kv.first);
+        if (it == b.end()) return false;
+        if (it->second != kv.second) return false;
+    }
+    return true;
+}
+
+std::string BuildObjectSignature(const dlcv_infer::ObjectResult& obj) {
+    std::ostringstream oss;
+    oss << dlcv_infer::convertGbkToUtf8(obj.categoryName) << "|"
+        << std::fixed << std::setprecision(4) << obj.score << "|"
+        << std::setprecision(2);
+    for (size_t i = 0; i < obj.bbox.size(); ++i) {
+        if (i > 0) oss << ",";
+        oss << obj.bbox[i];
+    }
+    oss << "|" << (obj.withAngle ? 1 : 0) << "|" << std::setprecision(2) << obj.angle;
+    return oss.str();
+}
+
+int CountExactDuplicateObjects(const std::vector<dlcv_infer::ObjectResult>& objects) {
+    std::unordered_set<std::string> seen;
+    seen.reserve(objects.size() * 2 + 1);
+    int duplicates = 0;
+    for (const auto& obj : objects) {
+        const std::string sig = BuildObjectSignature(obj);
+        if (!seen.insert(sig).second) {
+            duplicates += 1;
+        }
+    }
+    return duplicates;
 }
 
 bool ContainsCategory(const std::unordered_map<std::string, int>& counts, const std::string& nameUtf8) {
@@ -469,6 +519,29 @@ int RunDemo3Validation(
         std::cout << "单图包含 LED: " << (singleHasLed ? "是" : "否")
                   << "，包含 焊盘: " << (singleHasPad ? "是" : "否") << "\n";
         DisposeResultMasks(singleResult);
+        bool mismatchDetected = false;
+
+        // RGB 语义回归：同一张 RGB 图，快路径(8U) 与慢路径(16U->8U 归一化)类别统计应一致。
+        json rgbSemanticsParams;
+        rgbSemanticsParams["threshold"] = 0.05;
+        rgbSemanticsParams["with_mask"] = false;
+        rgbSemanticsParams["batch_size"] = 1;
+        dlcv_infer::Result rgbFastResult = model2.InferBatch(std::vector<cv::Mat>{singleRgb}, rgbSemanticsParams);
+        cv::Mat singleRgb16;
+        singleRgb.convertTo(singleRgb16, CV_16UC3, 256.0);
+        dlcv_infer::Result rgbSlowResult = model2.InferBatch(std::vector<cv::Mat>{singleRgb16}, rgbSemanticsParams);
+        std::vector<dlcv_infer::ObjectResult> rgbFastObjects;
+        std::vector<dlcv_infer::ObjectResult> rgbSlowObjects;
+        if (!rgbFastResult.sampleResults.empty()) rgbFastObjects = rgbFastResult.sampleResults.front().results;
+        if (!rgbSlowResult.sampleResults.empty()) rgbSlowObjects = rgbSlowResult.sampleResults.front().results;
+        const auto rgbFastCounts = CountCategories(rgbFastObjects);
+        const auto rgbSlowCounts = CountCategories(rgbSlowObjects);
+        const bool rgbSemanticsConsistent = AreCategoryCountsEqual(rgbFastCounts, rgbSlowCounts);
+        std::cout << "RGB语义一致性(8U快路径 vs 16U慢路径): "
+                  << (rgbSemanticsConsistent ? "通过" : "失败") << "\n";
+        if (!rgbSemanticsConsistent) mismatchDetected = true;
+        DisposeResultMasks(rgbFastResult);
+        DisposeResultMasks(rgbSlowResult);
 
         cv::Mat chainBgr = LoadImageByDecode(chainImagePath);
         if (chainBgr.empty()) throw std::runtime_error("串联图像解码失败");
@@ -485,8 +558,14 @@ int RunDemo3Validation(
         PrintCategorySummary("串联类别统计(with_mask=false)", chainFalseCounts);
         const bool chainFalseHasLed = ContainsCategory(chainFalseCounts, "LED");
         const bool chainFalseHasPad = ContainsCategory(chainFalseCounts, "焊盘");
+        const int chainFalseWithMaskCount = CountObjectsWithMask(chainWithMaskFalse.finalObjects);
+        const int chainFalseDuplicateCount = CountExactDuplicateObjects(chainWithMaskFalse.finalObjects);
         std::cout << "串联(with_mask=false)包含 LED: " << (chainFalseHasLed ? "是" : "否")
-                  << "，包含 焊盘: " << (chainFalseHasPad ? "是" : "否") << "\n";
+                  << "，包含 焊盘: " << (chainFalseHasPad ? "是" : "否")
+                  << "，with_mask对象数: " << chainFalseWithMaskCount
+                  << "，重复结果数: " << chainFalseDuplicateCount << "\n";
+        if (chainFalseWithMaskCount > 0) mismatchDetected = true;
+        if (chainFalseDuplicateCount > 0) mismatchDetected = true;
 
         Demo3ChainDebugResult chainWithMaskTrue = RunDemo3ChainReference(model1, model2, chainRgb, true);
         const auto chainTrueCounts = CountCategories(chainWithMaskTrue.finalObjects);
@@ -498,10 +577,12 @@ int RunDemo3Validation(
         PrintCategorySummary("串联类别统计(with_mask=true)", chainTrueCounts);
         const bool chainTrueHasLed = ContainsCategory(chainTrueCounts, "LED");
         const bool chainTrueHasPad = ContainsCategory(chainTrueCounts, "焊盘");
+        const int chainTrueDuplicateCount = CountExactDuplicateObjects(chainWithMaskTrue.finalObjects);
         std::cout << "串联(with_mask=true)包含 LED: " << (chainTrueHasLed ? "是" : "否")
-                  << "，包含 焊盘: " << (chainTrueHasPad ? "是" : "否") << "\n";
+                  << "，包含 焊盘: " << (chainTrueHasPad ? "是" : "否")
+                  << "，重复结果数: " << chainTrueDuplicateCount << "\n";
+        if (chainTrueDuplicateCount > 0) mismatchDetected = true;
 
-        bool mismatchDetected = false;
         if (singleHasLed && !chainFalseHasLed) mismatchDetected = true;
         if (singleHasPad && !chainFalseHasPad) mismatchDetected = true;
 

@@ -367,8 +367,9 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
             }
         } catch (...) {}
     }
+    // 内存敏感场景下，with_mask=false 时不构建 mask_rle；同时也不再计算派生 mask 元数据。
     const bool emitMaskRle = includeMask && requestMaskOutput;
-    const bool emitMaskDerivedMeta = includeMask && !emitMaskRle;
+    const bool emitMaskDerivedMeta = false;
 
     const int effectiveBatch = ResolveEffectiveBatchLimit(_model, this->Properties);
     p["batch_size"] = effectiveBatch;

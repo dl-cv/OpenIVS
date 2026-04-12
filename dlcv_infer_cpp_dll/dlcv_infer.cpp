@@ -342,6 +342,15 @@ bool ReadJsonBool(const Json& v, bool dv = false) {
     return dv;
 }
 
+bool ResolveWithMaskOutputFlag(const Json& paramsJson, bool defaultValue = true) {
+    try {
+        if (paramsJson.is_object() && paramsJson.contains("with_mask")) {
+            return ReadJsonBool(paramsJson.at("with_mask"), defaultValue);
+        }
+    } catch (...) {}
+    return defaultValue;
+}
+
 std::vector<double> ParseFlowBboxToModel(
     const Json& entry,
     bool& withBbox,
@@ -439,16 +448,16 @@ cv::Mat BuildMaskFromFlowEntry(const Json& entry, const std::vector<double>& bbo
     return BuildMaskFromFlowPoly(entry, bbox, isRotated);
 }
 
-double ComputeFlowArea(const Json& entry, const cv::Mat& mask, const std::vector<double>& bbox) {
+double ComputeFlowArea(const Json& entry, const cv::Mat& mask, const std::vector<double>& bbox, bool allowMaskDerived) {
     if (entry.is_object() && entry.contains("area")) {
         return ReadJsonNumber(entry.at("area"), 0.0);
     }
 
-    if (entry.is_object() && entry.contains("mask_rle") && entry.at("mask_rle").is_object()) {
+    if (allowMaskDerived && entry.is_object() && entry.contains("mask_rle") && entry.at("mask_rle").is_object()) {
         try { return dlcv_infer::flow::CalculateMaskArea(entry.at("mask_rle")); } catch (...) {}
     }
 
-    if (!mask.empty()) {
+    if (allowMaskDerived && !mask.empty()) {
         return static_cast<double>(cv::countNonZero(mask));
     }
 
@@ -458,7 +467,7 @@ double ComputeFlowArea(const Json& entry, const cv::Mat& mask, const std::vector
     return 0.0;
 }
 
-std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json& flowResultList) {
+std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json& flowResultList, bool emitMaskOutput) {
     std::vector<dlcv_infer::ObjectResult> out;
     if (!flowResultList.is_array()) return out;
     std::unordered_map<std::string, std::string> categoryNameCache;
@@ -482,9 +491,12 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
         bool isRotated = false;
         std::vector<double> bbox = ParseFlowBboxToModel(entry, withBbox, withAngle, angle, isRotated);
 
-        cv::Mat mask = BuildMaskFromFlowEntry(entry, bbox, isRotated);
-        const bool withMask = !mask.empty();
-        const float area = static_cast<float>(ComputeFlowArea(entry, mask, bbox));
+        cv::Mat mask;
+        if (emitMaskOutput) {
+            mask = BuildMaskFromFlowEntry(entry, bbox, isRotated);
+        }
+        const bool withMask = emitMaskOutput && !mask.empty();
+        const float area = static_cast<float>(ComputeFlowArea(entry, mask, bbox, emitMaskOutput));
 
         out.emplace_back(
             categoryId,
@@ -519,7 +531,7 @@ Json MaskToPointsJson(const cv::Mat& mask, double xOffset, double yOffset) {
     return points;
 }
 
-Json NormalizeFlowOneOutJson(const Json& flowResultList) {
+Json NormalizeFlowOneOutJson(const Json& flowResultList, bool emitMaskOutput) {
     Json normalized = Json::array();
     if (!flowResultList.is_array()) return normalized;
 
@@ -542,10 +554,13 @@ Json NormalizeFlowOneOutJson(const Json& flowResultList) {
         out["with_angle"] = withAngle;
         out["angle"] = withAngle ? static_cast<double>(angle) : -100.0;
 
-        cv::Mat mask = BuildMaskFromFlowEntry(entry, bbox, isRotated);
+        cv::Mat mask;
         Json maskPoints = Json::array();
-        if (!mask.empty() && bbox.size() >= 4 && !isRotated) {
-            maskPoints = MaskToPointsJson(mask, bbox[0], bbox[1]);
+        if (emitMaskOutput) {
+            mask = BuildMaskFromFlowEntry(entry, bbox, isRotated);
+            if (!mask.empty() && bbox.size() >= 4 && !isRotated) {
+                maskPoints = MaskToPointsJson(mask, bbox[0], bbox[1]);
+            }
         }
 
         if (!maskPoints.empty()) {
@@ -556,7 +571,7 @@ Json NormalizeFlowOneOutJson(const Json& flowResultList) {
             out["with_mask"] = false;
         }
 
-        out["area"] = ComputeFlowArea(entry, mask, bbox);
+        out["area"] = ComputeFlowArea(entry, mask, bbox, emitMaskOutput);
         normalized.push_back(out);
     }
     return normalized;
@@ -640,7 +655,8 @@ Json ExtractFlowResultListToken(const Json& flowRoot) {
 
 std::vector<dlcv_infer::SampleResult> ConvertFlowResultListTokenToSampleResults(
     const Json& resultListToken,
-    size_t expectedImageCount) {
+    size_t expectedImageCount,
+    bool emitMaskOutput) {
 
     std::vector<dlcv_infer::SampleResult> sampleResults;
     if (!resultListToken.is_array()) {
@@ -667,13 +683,13 @@ std::vector<dlcv_infer::SampleResult> ConvertFlowResultListTokenToSampleResults(
         sampleResults.reserve(std::max(expectedImageCount, resultListToken.size()));
         for (const auto& token : resultListToken) {
             if (token.is_object() && token.contains("result_list") && token.at("result_list").is_array()) {
-                sampleResults.emplace_back(ConvertFlowResultListToObjects(token.at("result_list")));
+                sampleResults.emplace_back(ConvertFlowResultListToObjects(token.at("result_list"), emitMaskOutput));
             } else {
                 sampleResults.emplace_back(std::vector<dlcv_infer::ObjectResult>{});
             }
         }
     } else {
-        sampleResults.emplace_back(ConvertFlowResultListToObjects(resultListToken));
+        sampleResults.emplace_back(ConvertFlowResultListToObjects(resultListToken, emitMaskOutput));
     }
 
     if (expectedImageCount > 0 && sampleResults.size() < expectedImageCount) {
@@ -858,7 +874,7 @@ cv::Mat ConvertMatDepthTo8U(const cv::Mat& src) {
     return dst;
 }
 
-cv::Mat PrepareInferImage(const cv::Mat& src, int expectedChannels) {
+cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
     if (src.empty()) {
         return {};
     }
@@ -876,17 +892,23 @@ cv::Mat PrepareInferImage(const cv::Mat& src, int expectedChannels) {
         }
         if (u8.channels() == 4) {
             cv::Mat rgb;
-            cv::cvtColor(u8, rgb, cv::COLOR_BGRA2RGB);
+            cv::cvtColor(u8, rgb, cv::COLOR_RGBA2RGB);
             return rgb;
         }
         if (u8.channels() == 3) {
-            cv::Mat rgb;
-            cv::cvtColor(u8, rgb, cv::COLOR_BGR2RGB);
-            return rgb;
+            return u8;
         }
+
+        // 兜底：未知多通道时取第 0 通道并扩展到 RGB，避免引入 BGR 语义假设。
+        cv::Mat single;
         cv::Mat rgb;
-        cv::cvtColor(u8, rgb, cv::COLOR_BGR2RGB);
-        return rgb;
+        try {
+            cv::extractChannel(u8, single, 0);
+            cv::cvtColor(single, rgb, cv::COLOR_GRAY2RGB);
+            return rgb;
+        } catch (...) {
+            return {};
+        }
     }
 
     if (u8.channels() == 1) {
@@ -894,17 +916,23 @@ cv::Mat PrepareInferImage(const cv::Mat& src, int expectedChannels) {
     }
     if (u8.channels() == 3) {
         cv::Mat gray;
-        cv::cvtColor(u8, gray, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(u8, gray, cv::COLOR_RGB2GRAY);
         return gray;
     }
     if (u8.channels() == 4) {
         cv::Mat gray;
-        cv::cvtColor(u8, gray, cv::COLOR_BGRA2GRAY);
+        cv::cvtColor(u8, gray, cv::COLOR_RGBA2GRAY);
         return gray;
     }
+
+    // 兜底：未知多通道时取第 0 通道作为灰度。
     cv::Mat gray;
-    cv::cvtColor(u8, gray, cv::COLOR_BGR2GRAY);
-    return gray;
+    try {
+        cv::extractChannel(u8, gray, 0);
+        return gray;
+    } catch (...) {
+        return {};
+    }
 }
 
 } // namespace
@@ -1204,7 +1232,7 @@ namespace dlcv_infer {
         return 3;
     }
 
-    std::vector<cv::Mat> Model::prepareInferImages(const std::vector<cv::Mat>& images) {
+    std::vector<cv::Mat> Model::prepareInferInputBatch(const std::vector<cv::Mat>& images) {
         const int expCh = resolveEffectiveInputCh();
         const int ec = (expCh == 1 || expCh == 3) ? expCh : 3;
         std::vector<cv::Mat> out;
@@ -1215,7 +1243,7 @@ namespace dlcv_infer {
                 out.push_back(im);
                 continue;
             }
-            out.push_back(PrepareInferImage(im, ec));
+            out.push_back(NormalizeInferInputImage(im, ec));
         }
         return out;
     }
@@ -1424,7 +1452,7 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
-            const std::vector<cv::Mat> prepared = prepareInferImages({ image });
+            const std::vector<cv::Mat> prepared = prepareInferInputBatch({ image });
             if (prepared.empty() || prepared.front().empty()) {
                 throw std::invalid_argument("image is empty after preparation");
             }
@@ -1445,12 +1473,14 @@ namespace dlcv_infer {
             }
             SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
 
+            const bool emitMaskOutput = ResolveWithMaskOutputFlag(params_json, true);
             const Json resultListToken = ExtractFlowResultListToken(flowRoot);
-            std::vector<SampleResult> sampleResults = ConvertFlowResultListTokenToSampleResults(resultListToken, 1);
+            std::vector<SampleResult> sampleResults =
+                ConvertFlowResultListTokenToSampleResults(resultListToken, 1, emitMaskOutput);
             return Result(std::move(sampleResults));
         }
 
-        const std::vector<cv::Mat> prepared = prepareInferImages({ image });
+        const std::vector<cv::Mat> prepared = prepareInferInputBatch({ image });
         if (prepared.empty() || prepared.front().empty()) {
             throw std::invalid_argument("image is empty after preparation");
         }
@@ -1484,9 +1514,9 @@ namespace dlcv_infer {
                 return Result(std::vector<SampleResult>{});
             }
 
-            const std::vector<cv::Mat> prepared = prepareInferImages(image_list);
+            const std::vector<cv::Mat> prepared = prepareInferInputBatch(image_list);
             if (prepared.size() != image_list.size()) {
-                throw std::runtime_error("prepareInferImages size mismatch");
+                throw std::runtime_error("prepareInferInputBatch size mismatch");
             }
             for (const auto& m : prepared) {
                 if (m.empty()) {
@@ -1510,15 +1540,16 @@ namespace dlcv_infer {
             }
             SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
 
+            const bool emitMaskOutput = ResolveWithMaskOutputFlag(params_json, true);
             const Json resultListToken = ExtractFlowResultListToken(flowRoot);
             std::vector<SampleResult> sampleResults =
-                ConvertFlowResultListTokenToSampleResults(resultListToken, image_list.size());
+                ConvertFlowResultListTokenToSampleResults(resultListToken, image_list.size(), emitMaskOutput);
             return Result(std::move(sampleResults));
         }
 
-        const std::vector<cv::Mat> prepared = prepareInferImages(image_list);
+        const std::vector<cv::Mat> prepared = prepareInferInputBatch(image_list);
         if (prepared.size() != image_list.size()) {
-            throw std::runtime_error("prepareInferImages size mismatch");
+            throw std::runtime_error("prepareInferInputBatch size mismatch");
         }
         for (const auto& m : prepared) {
             if (m.empty()) {
@@ -1552,7 +1583,7 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
-            const std::vector<cv::Mat> prepared = prepareInferImages({ image });
+            const std::vector<cv::Mat> prepared = prepareInferInputBatch({ image });
             if (prepared.empty() || prepared.front().empty()) {
                 throw std::invalid_argument("image is empty after preparation");
             }
@@ -1573,6 +1604,7 @@ namespace dlcv_infer {
             }
             SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
 
+            const bool emitMaskOutput = ResolveWithMaskOutputFlag(params_json, true);
             const Json resultListToken = ExtractFlowResultListToken(flowRoot);
             json flowResults = json::array();
             try {
@@ -1589,10 +1621,10 @@ namespace dlcv_infer {
             } catch (...) {
                 flowResults = json::array();
             }
-            return NormalizeFlowOneOutJson(flowResults);
+            return NormalizeFlowOneOutJson(flowResults, emitMaskOutput);
         }
 
-        const std::vector<cv::Mat> prepared = prepareInferImages({ image });
+        const std::vector<cv::Mat> prepared = prepareInferInputBatch({ image });
         if (prepared.empty() || prepared.front().empty()) {
             throw std::invalid_argument("image is empty after preparation");
         }

@@ -130,14 +130,14 @@ public:
             }
         } catch (...) {}
 
-        // 优先从 ExecutionContext 注入的前端 BGR Mat 读取
+        // 优先从 ExecutionContext 注入的前端 Mat 读取（接口约定为 RGB）
         try {
             if (Context != nullptr && Context->Has("frontend_image_mat")) {
                 cv::Mat matFromContext = Context->Get<cv::Mat>("frontend_image_mat", cv::Mat());
                 if (!matFromContext.empty()) {
-                    cv::Mat bgr = matFromContext;
-                    TransformationState st(bgr.cols, bgr.rows);
-                    ModuleImage wrap(bgr, bgr, st, 0);
+                    cv::Mat frontendMat = matFromContext;
+                    TransformationState st(frontendMat.cols, frontendMat.rows);
+                    ModuleImage wrap(frontendMat, frontendMat, st, 0);
                     images.push_back(wrap);
 
                     Json entry = Json::object();
@@ -210,14 +210,14 @@ public:
             }
         } catch (...) {}
 
-        // 优先从 ExecutionContext 注入前端图像 Mat（BGR）
+        // 优先从 ExecutionContext 注入前端图像 Mat（接口约定为 RGB）
         try {
             if (Context != nullptr && Context->Has("frontend_image_mat")) {
                 cv::Mat matFromContext = Context->Get<cv::Mat>("frontend_image_mat", cv::Mat());
                 if (!matFromContext.empty()) {
-                    cv::Mat bgr = matFromContext;
-                    TransformationState st(bgr.cols, bgr.rows);
-                    ModuleImage wrap(bgr, bgr, st, 0);
+                    cv::Mat frontendMat = matFromContext;
+                    TransformationState st(frontendMat.cols, frontendMat.rows);
+                    ModuleImage wrap(frontendMat, frontendMat, st, 0);
                     images.push_back(wrap);
 
                     Json entry = Json::object();
