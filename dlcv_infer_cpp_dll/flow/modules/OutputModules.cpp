@@ -240,19 +240,23 @@ static bool CanUseAlignedFastPath(const std::vector<ModuleImage>& images, const 
     return true;
 }
 
-static std::vector<FlowResultItem> BuildOutResultItems(const ModuleImage& wrap, const std::vector<Json>& dets) {
+using DetPtrList = std::vector<const Json*>;
+
+static std::vector<FlowResultItem> BuildOutResultItems(const ModuleImage& wrap, const DetPtrList& dets) {
     std::vector<FlowResultItem> outResults;
     if (dets.empty()) return outResults;
 
     const std::vector<double> T_c2o = BuildTC2O(wrap.TransformState);
     outResults.reserve(dets.size());
 
-    for (const auto& d : dets) {
-        if (!d.is_object()) continue;
-        Json item = Json::object();
-        item["category_id"] = d.value("category_id", 0);
-        item["category_name"] = d.value("category_name", "");
-        item["score"] = d.value("score", 0.0);
+    for (const Json* detPtr : dets) {
+        if (detPtr == nullptr || !detPtr->is_object()) continue;
+        const Json& d = *detPtr;
+
+        FlowResultItem item;
+        item.CategoryId = d.value("category_id", 0);
+        item.CategoryName = d.value("category_name", "");
+        item.Score = d.value("score", 0.0);
 
         // bbox
         if (d.contains("bbox") && d.at("bbox").is_array()) {
@@ -261,8 +265,8 @@ static std::vector<FlowResultItem> BuildOutResultItems(const ModuleImage& wrap, 
             if (isRot) {
                 Json rboxG = RBoxLocalToGlobal(bboxLocal, T_c2o);
                 if (!rboxG.is_null()) {
-                    item["bbox"] = rboxG;
-                    item["metadata"] = Json::object({ {"is_rotated", true} });
+                    item.Bbox = std::move(rboxG);
+                    item.Metadata = Json::object({ {"is_rotated", true} });
                 }
             } else if (bboxLocal.size() >= 4) {
                 // bboxLocal: [x,y,w,h] -> xyxy
@@ -282,8 +286,8 @@ static std::vector<FlowResultItem> BuildOutResultItems(const ModuleImage& wrap, 
                         cv::Point2f(static_cast<float>(x1), static_cast<float>(y2))
                     };
                     const auto ptsG = TransformPoints2x3(T_c2o, pts);
-                    item["bbox"] = AABBFromPoly(ptsG);
-                    item["metadata"] = Json::object({ {"is_rotated", false} });
+                    item.Bbox = AABBFromPoly(ptsG);
+                    item.Metadata = Json::object({ {"is_rotated", false} });
                 } catch (...) {}
             }
         }
@@ -292,13 +296,23 @@ static std::vector<FlowResultItem> BuildOutResultItems(const ModuleImage& wrap, 
         // 注意：不要再用 findNonZero 把每个前景像素写成 poly——大图语义分割会产生千万级点，
         // JSON 序列化与内存会拖垮 return_json（用户可见 4s+ 仅耗在本节点）。
         if (d.contains("mask_rle") && d.at("mask_rle").is_object()) {
-            item["mask_rle"] = d.at("mask_rle");
+            item.MaskRle = d.at("mask_rle");
         }
 
-        outResults.push_back(FlowResultItem::FromJson(item));
+        outResults.push_back(std::move(item));
     }
 
     return outResults;
+}
+
+static std::vector<FlowResultItem> BuildOutResultItemsFromJsonArray(const ModuleImage& wrap, const Json& detArray) {
+    if (!detArray.is_array() || detArray.empty()) return {};
+    DetPtrList detPtrs;
+    detPtrs.reserve(detArray.size());
+    for (const auto& one : detArray) {
+        if (one.is_object()) detPtrs.push_back(&one);
+    }
+    return BuildOutResultItems(wrap, detPtrs);
 }
 
 static FlowByImageEntry BuildImagePayloadEntry(const ModuleImage& wrap, std::vector<FlowResultItem> outResults) {
@@ -325,22 +339,20 @@ public:
         if (CanUseAlignedFastPath(images, results)) {
             for (size_t i = 0; i < images.size(); i++) {
                 const ModuleImage& wrap = images[i];
-                std::vector<Json> dets;
+                std::vector<FlowResultItem> outItems;
                 try {
                     const auto& entry = results.at(i);
                     if (entry.is_object() && entry.contains("sample_results") && entry.at("sample_results").is_array()) {
-                        for (const auto& one : entry.at("sample_results")) {
-                            if (one.is_object()) dets.push_back(one);
-                        }
+                        outItems = BuildOutResultItemsFromJsonArray(wrap, entry.at("sample_results"));
                     }
                 } catch (...) {}
-                byImageEntries.push_back(BuildImagePayloadEntry(wrap, BuildOutResultItems(wrap, dets)));
+                byImageEntries.push_back(BuildImagePayloadEntry(wrap, std::move(outItems)));
             }
         } else {
             // 建立 index/origin_index/transform -> dets 映射
-            std::unordered_map<std::string, std::vector<Json>> transToDets;
-            std::unordered_map<int, std::vector<Json>> indexToDets;
-            std::unordered_map<int, std::vector<Json>> originToDets;
+            std::unordered_map<std::string, DetPtrList> transToDets;
+            std::unordered_map<int, DetPtrList> indexToDets;
+            std::unordered_map<int, DetPtrList> originToDets;
 
             for (const auto& entryToken : results) {
                 if (!entryToken.is_object()) continue;
@@ -349,33 +361,32 @@ public:
                 if (entry.at("type").get<std::string>() != "local") continue;
                 if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) continue;
 
-                std::vector<Json> detList;
-                for (const auto& d : entry.at("sample_results")) {
-                    if (d.is_object()) detList.push_back(d);
-                }
-
                 const int idx = entry.contains("index") ? entry.at("index").get<int>() : -1;
-                if (idx >= 0) {
-                    auto& v = indexToDets[idx];
-                    v.insert(v.end(), detList.begin(), detList.end());
-                }
                 const int oidx = entry.contains("origin_index") ? entry.at("origin_index").get<int>() : -1;
-                if (oidx >= 0) {
-                    auto& v = originToDets[oidx];
-                    v.insert(v.end(), detList.begin(), detList.end());
-                }
-
-                // transform 兜底兼容
+                std::string sig;
                 try {
                     if (entry.contains("transform") && entry.at("transform").is_object()) {
                         TransformationState st = TransformationState::FromJson(entry.at("transform"));
-                        const std::string sig = SerializeTransformKey(st);
-                        if (!sig.empty()) {
-                            auto& v = transToDets[sig];
-                            v.insert(v.end(), detList.begin(), detList.end());
-                        }
+                        sig = SerializeTransformKey(st);
                     }
                 } catch (...) {}
+
+                for (const auto& d : entry.at("sample_results")) {
+                    if (!d.is_object()) continue;
+                    const Json* detPtr = &d;
+                    if (idx >= 0) {
+                        auto& v = indexToDets[idx];
+                        v.push_back(detPtr);
+                    }
+                    if (oidx >= 0) {
+                        auto& v = originToDets[oidx];
+                        v.push_back(detPtr);
+                    }
+                    if (!sig.empty()) {
+                        auto& v = transToDets[sig];
+                        v.push_back(detPtr);
+                    }
+                }
             }
 
             // 遍历图像，还原坐标
@@ -383,7 +394,7 @@ public:
                 const ModuleImage& wrap = images[i];
                 const std::string sig = SerializeTransformKey(wrap.TransformState);
 
-                const std::vector<Json>* dets = nullptr;
+                const DetPtrList* dets = nullptr;
                 auto itIdx = indexToDets.find(static_cast<int>(i));
                 if (itIdx != indexToDets.end()) dets = &itIdx->second;
                 if (dets == nullptr) {
@@ -403,13 +414,15 @@ public:
 
         FlowFrontendPayload payloadTyped;
         payloadTyped.ByImage = std::move(byImageEntries);
-        Json payload = payloadTyped.ToJson();
 
         // 写入 Context
         if (Context != nullptr) {
             try {
-                std::vector<FlowFrontendByNodePayload> typedByNode = Context->Get<std::vector<FlowFrontendByNodePayload>>(
-                    "frontend_payloads_by_node", std::vector<FlowFrontendByNodePayload>());
+                std::vector<FlowFrontendByNodePayload> typedByNode;
+                if (Context->Has("frontend_payloads_by_node")) {
+                    typedByNode = Context->Get<std::vector<FlowFrontendByNodePayload>>(
+                        "frontend_payloads_by_node", std::vector<FlowFrontendByNodePayload>());
+                }
                 typedByNode.erase(
                     std::remove_if(
                         typedByNode.begin(),
@@ -427,17 +440,30 @@ public:
                 Context->Set<FlowFrontendPayload>("frontend_payload_last", payloadTyped);
             } catch (...) {}
 
-            Json existing = Context->Get<Json>("frontend_json", Json::object());
-            if (!existing.is_object()) existing = Json::object();
-            Json byNode = Context->Get<Json>("frontend_json_by_node", Json::object());
-            if (!byNode.is_object()) byNode = Json::object();
+            // legacy JSON 仅在明确需要时写入，避免与 typed payload 重复物化导致的高额开销。
+            bool writeLegacyJson = ReadBool("write_json_context", false) || ReadBool("legacy_json_context", false);
+            if (!writeLegacyJson) {
+                try {
+                    writeLegacyJson = Context->Get<bool>("return_json_write_legacy", false);
+                } catch (...) {
+                    writeLegacyJson = false;
+                }
+            }
+            if (writeLegacyJson) {
+                Json payload = payloadTyped.ToJson();
 
-            byNode[std::to_string(NodeId)] = payload;
-            existing["last"] = payload;
-            existing["by_node"] = byNode;
+                Json existing = Context->Get<Json>("frontend_json", Json::object());
+                if (!existing.is_object()) existing = Json::object();
+                Json byNode = Context->Get<Json>("frontend_json_by_node", Json::object());
+                if (!byNode.is_object()) byNode = Json::object();
 
-            Context->Set<Json>("frontend_json_by_node", byNode);
-            Context->Set<Json>("frontend_json", existing);
+                byNode[std::to_string(NodeId)] = payload;
+                existing["last"] = payload;
+                existing["by_node"] = byNode;
+
+                Context->Set<Json>("frontend_json_by_node", byNode);
+                Context->Set<Json>("frontend_json", existing);
+            }
         }
 
         return ModuleIO(images, results, Json::array());

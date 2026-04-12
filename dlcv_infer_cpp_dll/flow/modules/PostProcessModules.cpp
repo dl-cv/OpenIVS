@@ -5,8 +5,10 @@
 #include <array>
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cmath>
 #include <cstdio>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -98,41 +100,68 @@ static bool TryReadDouble(const Json& token, double& outVal) {
     return false;
 }
 
+static std::string BuildMaskRleCacheKey(const Json& maskInfo) {
+    if (!maskInfo.is_object()) return std::string();
+    if (!maskInfo.contains("runs") || !maskInfo.at("runs").is_array()) return std::string();
+    const int width = maskInfo.value("width", 0);
+    const int height = maskInfo.value("height", 0);
+    const Json& runs = maskInfo.at("runs");
+    if (width <= 0 || height <= 0 || runs.empty()) return std::string();
+
+    uint64_t hash = 1469598103934665603ULL; // FNV offset basis
+    auto mix = [&](uint64_t v) {
+        hash ^= v;
+        hash *= 1099511628211ULL; // FNV prime
+    };
+
+    mix(static_cast<uint64_t>(width));
+    mix(static_cast<uint64_t>(height));
+    mix(static_cast<uint64_t>(runs.size()));
+    for (const auto& one : runs) {
+        long long rv = 0;
+        try { rv = one.get<long long>(); } catch (...) { rv = 0; }
+        mix(static_cast<uint64_t>(rv));
+    }
+
+    char buf[96] = {0};
+    std::snprintf(buf, sizeof(buf), "%d|%d|%zu|%016llx",
+                  width, height, runs.size(), static_cast<unsigned long long>(hash));
+    return std::string(buf);
+}
+
 /// post_process/merge_results, features/merge_results
 class MergeResultsModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
-        // 组装输入组：主输入在前，ExtraInputsIn 顺序在后
-        std::vector<std::pair<std::vector<ModuleImage>, Json>> groups;
-        groups.push_back({ imageList, resultList.is_array() ? resultList : Json::array() });
+        size_t expectedImageCount = imageList.size();
         for (const auto& ch : ExtraInputsIn) {
-            groups.push_back({ ch.ImageList, ch.ResultList.is_array() ? ch.ResultList : Json::array() });
+            expectedImageCount += ch.ImageList.size();
         }
 
         std::vector<ModuleImage> mergedImages;
+        mergedImages.reserve(expectedImageCount);
         Json mergedResults = Json::array();
 
-        for (const auto& g : groups) {
-            const auto& imgs = g.first;
-            const Json& res = g.second;
-
+        auto mergeGroup = [&](const std::vector<ModuleImage>& imgs, const Json& res) {
             const int baseIndex = static_cast<int>(mergedImages.size());
-            std::unordered_map<int, int> localToGlobal;
+            std::vector<int> localToGlobal;
+            localToGlobal.assign(imgs.size(), -1);
             int added = 0;
 
             for (int i = 0; i < static_cast<int>(imgs.size()); i++) {
                 const ModuleImage& im = imgs[static_cast<size_t>(i)];
                 if (im.ImageObject.empty()) continue;
                 const int globalIdx = baseIndex + added;
-                localToGlobal[i] = globalIdx;
+                localToGlobal[static_cast<size_t>(i)] = globalIdx;
                 added++;
                 // 重包：确保 OriginalIndex 与全局顺序一致
                 ModuleImage newWrap(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
                 mergedImages.push_back(newWrap);
             }
 
+            if (!res.is_array()) return;
             for (const auto& t : res) {
                 if (!t.is_object()) continue;
                 const Json& r = t;
@@ -148,12 +177,22 @@ public:
                     r2["index"] = baseIndex;
                     r2["origin_index"] = baseIndex;
                 } else {
-                    if (idx >= 0 && localToGlobal.count(idx)) r2["index"] = localToGlobal[idx];
-                    if (oidx >= 0 && localToGlobal.count(oidx)) r2["origin_index"] = localToGlobal[oidx];
+                    if (idx >= 0 && idx < static_cast<int>(localToGlobal.size()) && localToGlobal[static_cast<size_t>(idx)] >= 0) {
+                        r2["index"] = localToGlobal[static_cast<size_t>(idx)];
+                    }
+                    if (oidx >= 0 && oidx < static_cast<int>(localToGlobal.size()) &&
+                        localToGlobal[static_cast<size_t>(oidx)] >= 0) {
+                        r2["origin_index"] = localToGlobal[static_cast<size_t>(oidx)];
+                    }
                     if (!r2.contains("origin_index") && r2.contains("index")) r2["origin_index"] = r2["index"];
                 }
                 mergedResults.push_back(r2);
             }
+        };
+
+        mergeGroup(imageList, resultList);
+        for (const auto& ch : ExtraInputsIn) {
+            mergeGroup(ch.ImageList, ch.ResultList);
         }
 
         return ModuleIO(std::move(mergedImages), std::move(mergedResults), Json::array());
@@ -343,9 +382,9 @@ public:
                 if (so.contains("mask_rle") && so.at("mask_rle").is_object()) {
                     const Json& maskInfo = so.at("mask_rle");
                     const Json* maskKey = &maskInfo;
-                    auto it = maskAreaCache.find(maskKey);
-                    if (it != maskAreaCache.end()) {
-                        marea = it->second;
+                    auto itLocal = maskAreaCache.find(maskKey);
+                    if (itLocal != maskAreaCache.end()) {
+                        marea = itLocal->second;
                     } else {
                         marea = CalculateMaskArea(maskInfo);
                         maskAreaCache.emplace(maskKey, marea);
@@ -357,56 +396,106 @@ public:
             return true;
         };
 
-        for (const auto& token : inResults) {
-            if (!token.is_object()) continue;
-            const Json& entry = token;
-            if (entry.value("type", "") != "local") continue;
+        auto splitSamples = [&](const Json& sampleResults, Json& passList, Json& failList) {
+            passList = Json::array();
+            failList = Json::array();
+            if (!sampleResults.is_array()) return;
+            for (const auto& s : sampleResults) {
+                if (!s.is_object()) continue;
+                if (passOne(s)) passList.push_back(s);
+                else failList.push_back(s);
+            }
+        };
 
-            int idx = entry.contains("index") ? entry.at("index").get<int>() : -1;
-            int originIndex = entry.contains("origin_index") ? entry.at("origin_index").get<int>() : idx;
-            std::string sig;
-            try { if (entry.contains("transform") && entry.at("transform").is_object()) sig = SerializeTransformSigFromJson(entry.at("transform")); } catch (...) {}
-            int imgIdx = (idx >= 0 && idx < static_cast<int>(inImages.size())) ? idx : -1;
-            if (imgIdx < 0 && originToIdx.count(originIndex)) imgIdx = originToIdx[originIndex];
-            if (imgIdx < 0 && !sig.empty() && sigToIdx.count(sig)) imgIdx = sigToIdx[sig];
-            if (imgIdx < 0 || imgIdx >= static_cast<int>(inImages.size())) continue;
-
-            const ModuleImage imgObj = inImages[static_cast<size_t>(imgIdx)];
-
-            std::vector<Json> passList;
-            std::vector<Json> failList;
-            if (entry.contains("sample_results") && entry.at("sample_results").is_array()) {
-                for (const auto& s : entry.at("sample_results")) {
-                    if (!s.is_object()) continue;
-                    if (passOne(s)) passList.push_back(s);
-                    else failList.push_back(s);
+        bool alignedFastPath = inImages.size() == inResults.size();
+        if (alignedFastPath) {
+            for (size_t i = 0; i < inResults.size(); i++) {
+                if (!inResults.at(i).is_object() || inResults.at(i).value("type", "") != "local") {
+                    alignedFastPath = false;
+                    break;
                 }
             }
+        }
 
-            TransformationState st;
-            try { if (entry.contains("transform") && entry.at("transform").is_object()) st = TransformationState::FromJson(entry.at("transform")); } catch (...) {}
+        auto appendMainEntry = [&](const ModuleImage& imgObj, int originIndex, const Json& transformJson, Json&& passList) {
+            if (!passList.is_array() || passList.empty()) return;
+            mainImages.push_back(imgObj);
+            Json e = Json::object();
+            e["type"] = "local";
+            e["index"] = static_cast<int>(mainResults.size());
+            e["origin_index"] = originIndex;
+            e["transform"] = transformJson;
+            e["sample_results"] = std::move(passList);
+            mainResults.push_back(std::move(e));
+        };
 
-            if (!passList.empty()) {
-                mainImages.push_back(imgObj);
-                Json e = Json::object();
-                e["type"] = "local";
-                e["index"] = static_cast<int>(mainResults.size());
-                e["origin_index"] = originIndex;
-                e["transform"] = st.ToJson();
-                Json arr = Json::array(); for (const auto& x : passList) arr.push_back(x);
-                e["sample_results"] = arr;
-                mainResults.push_back(e);
+        auto appendAltEntry = [&](const ModuleImage& imgObj, int originIndex, const Json& transformJson, Json&& failList) {
+            if (!failList.is_array() || failList.empty()) return;
+            altImages.push_back(imgObj);
+            Json e2 = Json::object();
+            e2["type"] = "local";
+            e2["index"] = static_cast<int>(altResults.size());
+            e2["origin_index"] = originIndex;
+            e2["transform"] = transformJson;
+            e2["sample_results"] = std::move(failList);
+            altResults.push_back(std::move(e2));
+        };
+
+        if (alignedFastPath) {
+            for (size_t i = 0; i < inImages.size(); i++) {
+                const ModuleImage& imgObj = inImages[i];
+                if (imgObj.ImageObject.empty()) continue;
+
+                const Json& entry = inResults.at(i);
+                const int idx = entry.contains("index") ? entry.at("index").get<int>() : static_cast<int>(i);
+                const int originIndex = entry.contains("origin_index") ? entry.at("origin_index").get<int>() : idx;
+                const Json transformJson =
+                    (entry.contains("transform") && entry.at("transform").is_object()) ? entry.at("transform")
+                                                                                        : imgObj.TransformState.ToJson();
+
+                Json passList = Json::array();
+                Json failList = Json::array();
+                if (entry.contains("sample_results") && entry.at("sample_results").is_array()) {
+                    splitSamples(entry.at("sample_results"), passList, failList);
+                }
+
+                appendMainEntry(imgObj, originIndex, transformJson, std::move(passList));
+                appendAltEntry(imgObj, originIndex, transformJson, std::move(failList));
             }
-            if (!failList.empty()) {
-                altImages.push_back(imgObj);
-                Json e2 = Json::object();
-                e2["type"] = "local";
-                e2["index"] = static_cast<int>(altResults.size());
-                e2["origin_index"] = originIndex;
-                e2["transform"] = st.ToJson();
-                Json arr2 = Json::array(); for (const auto& x : failList) arr2.push_back(x);
-                e2["sample_results"] = arr2;
-                altResults.push_back(e2);
+        } else {
+            for (const auto& token : inResults) {
+                if (!token.is_object()) continue;
+                const Json& entry = token;
+                if (entry.value("type", "") != "local") continue;
+
+                const int idx = entry.contains("index") ? entry.at("index").get<int>() : -1;
+                const int originIndex = entry.contains("origin_index") ? entry.at("origin_index").get<int>() : idx;
+                std::string sig;
+                try {
+                    if (entry.contains("transform") && entry.at("transform").is_object()) {
+                        sig = SerializeTransformSigFromJson(entry.at("transform"));
+                    }
+                } catch (...) {}
+
+                int imgIdx = (idx >= 0 && idx < static_cast<int>(inImages.size())) ? idx : -1;
+                if (imgIdx < 0 && originToIdx.count(originIndex)) imgIdx = originToIdx[originIndex];
+                if (imgIdx < 0 && !sig.empty() && sigToIdx.count(sig)) imgIdx = sigToIdx[sig];
+                if (imgIdx < 0 || imgIdx >= static_cast<int>(inImages.size())) continue;
+
+                const ModuleImage& imgObj = inImages[static_cast<size_t>(imgIdx)];
+                if (imgObj.ImageObject.empty()) continue;
+                const Json transformJson =
+                    (entry.contains("transform") && entry.at("transform").is_object()) ? entry.at("transform")
+                                                                                        : imgObj.TransformState.ToJson();
+
+                Json passList = Json::array();
+                Json failList = Json::array();
+                if (entry.contains("sample_results") && entry.at("sample_results").is_array()) {
+                    splitSamples(entry.at("sample_results"), passList, failList);
+                }
+
+                appendMainEntry(imgObj, originIndex, transformJson, std::move(passList));
+                appendAltEntry(imgObj, originIndex, transformJson, std::move(failList));
             }
         }
 
@@ -644,7 +733,28 @@ public:
                 if (it != rectCache.end()) {
                     rr = it->second;
                 } else {
-                    if (!TryComputeMinAreaRectFromMaskInfo(maskInfo, rr)) continue;
+                    bool hitGlobal = false;
+                    const std::string cacheKey = BuildMaskRleCacheKey(maskInfo);
+                    if (!cacheKey.empty()) {
+                        static std::unordered_map<std::string, cv::RotatedRect> sRectCache;
+                        static std::mutex sRectCacheMu;
+                        {
+                            std::lock_guard<std::mutex> lk(sRectCacheMu);
+                            auto itGlobal = sRectCache.find(cacheKey);
+                            if (itGlobal != sRectCache.end()) {
+                                rr = itGlobal->second;
+                                hitGlobal = true;
+                            }
+                        }
+                        if (!hitGlobal) {
+                            if (!TryComputeMinAreaRectFromMaskInfo(maskInfo, rr)) continue;
+                            std::lock_guard<std::mutex> lk(sRectCacheMu);
+                            if (sRectCache.size() > 100000) sRectCache.clear();
+                            sRectCache.emplace(cacheKey, rr);
+                        }
+                    } else {
+                        if (!TryComputeMinAreaRectFromMaskInfo(maskInfo, rr)) continue;
+                    }
                     rectCache.emplace(maskKey, rr);
                 }
                 rr.center += cv::Point2f(bx, by);
