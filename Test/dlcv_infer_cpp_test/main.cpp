@@ -691,6 +691,15 @@ int ParsePositiveIntArg(const char* s, int fallback) {
 
 int RunBenchmark(const std::wstring& modelPath, const std::wstring& imagePath, int batch, int runs, int warmup) {
     std::cout << "==== 基准测试 ====\n";
+#if defined(_DEBUG)
+    const char* buildMode = "Debug";
+#else
+    const char* buildMode = "Release";
+#endif
+    std::cout << "构建模式: " << buildMode << "\n";
+#if defined(_DEBUG)
+    std::cout << "提示: 当前为 Debug 构建，性能会显著偏慢，建议使用 Release|x64 进行压测。\n";
+#endif
     std::cout << "模型: " << WideToUtf8(modelPath) << "\n";
     std::cout << "图片: " << WideToUtf8(imagePath) << "\n";
     std::cout << "batch: " << batch << "\n";
