@@ -237,6 +237,90 @@ inline bool TryComputeMinAreaRect(const cv::Mat& maskMat, cv::RotatedRect& rotat
 /// 从 RLE mask 直接提取最小外接旋转框。
 /// </summary>
 inline bool TryComputeMinAreaRectFromMaskInfo(const Json& maskInfo, cv::RotatedRect& rotatedRect) {
+    int width = 0;
+    int height = 0;
+    const Json::array_t* runsArr = nullptr;
+    if (!TryReadMaskInfoHeader(maskInfo, width, height, runsArr)) {
+        rotatedRect = cv::RotatedRect();
+        return false;
+    }
+
+    const int total = width * height;
+    if (total <= 0) {
+        rotatedRect = cv::RotatedRect();
+        return false;
+    }
+
+    // 快速路径：直接基于 RLE 统计每行前景范围，避免完整解码与 findContours。
+    std::vector<int> rowMin(static_cast<size_t>(height), std::numeric_limits<int>::max());
+    std::vector<int> rowMax(static_cast<size_t>(height), -1);
+    int idx = 0;
+    int value = 0;
+
+    for (size_t i = 0; i < runsArr->size() && idx < total; i++) {
+        int count = 0;
+        if (!TryReadIntLike((*runsArr)[i], count)) count = 0;
+        if (count <= 0) {
+            value ^= 1;
+            continue;
+        }
+
+        const int writeCount = std::min(count, total - idx);
+        if (value == 1 && writeCount > 0) {
+            int remain = writeCount;
+            int pos = idx;
+            while (remain > 0) {
+                const int y = pos / width;
+                const int x = pos - y * width;
+                const int seg = std::min(remain, width - x);
+                const int x0 = x;
+                const int x1 = x + seg - 1;
+                if (y >= 0 && y < height && x1 >= x0) {
+                    int& minRef = rowMin[static_cast<size_t>(y)];
+                    int& maxRef = rowMax[static_cast<size_t>(y)];
+                    if (x0 < minRef) minRef = x0;
+                    if (x1 > maxRef) maxRef = x1;
+                }
+                pos += seg;
+                remain -= seg;
+            }
+        }
+
+        idx += writeCount;
+        value ^= 1;
+    }
+
+    std::vector<cv::Point2f> points;
+    points.reserve(static_cast<size_t>(height) * 4);
+    for (int y = 0; y < height; y++) {
+        const int xMin = rowMin[static_cast<size_t>(y)];
+        const int xMax = rowMax[static_cast<size_t>(y)];
+        if (xMax < xMin) continue;
+
+        const bool prevSame = (y > 0 &&
+            rowMin[static_cast<size_t>(y - 1)] == xMin &&
+            rowMax[static_cast<size_t>(y - 1)] == xMax);
+        const bool nextSame = (y + 1 < height &&
+            rowMin[static_cast<size_t>(y + 1)] == xMin &&
+            rowMax[static_cast<size_t>(y + 1)] == xMax);
+        if (prevSame && nextSame) continue;
+
+        const float fy = static_cast<float>(y);
+        const float fy1 = static_cast<float>(y + 1);
+        const float fx0 = static_cast<float>(xMin);
+        const float fx1 = static_cast<float>(xMax + 1);
+        points.emplace_back(fx0, fy);
+        points.emplace_back(fx1, fy);
+        points.emplace_back(fx0, fy1);
+        points.emplace_back(fx1, fy1);
+    }
+
+    if (points.size() >= 3) {
+        rotatedRect = cv::minAreaRect(points);
+        return true;
+    }
+
+    // 兜底路径：与原实现保持一致。
     cv::Mat binaryMask = MaskInfoToMat(maskInfo);
     if (binaryMask.empty()) {
         rotatedRect = cv::RotatedRect();

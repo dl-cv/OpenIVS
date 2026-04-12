@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -37,6 +38,24 @@ static std::pair<int, int> ReadInt2(const Json& props, const std::string& key, i
         }
     } catch (...) {}
     return { dv1, dv2 };
+}
+
+static std::uint64_t ReadCurrentOutputMask(const ExecutionContext* ctx) {
+    if (ctx == nullptr) return std::numeric_limits<std::uint64_t>::max();
+    try {
+        return ctx->Get<std::uint64_t>(
+            "__graph_current_output_mask",
+            std::numeric_limits<std::uint64_t>::max());
+    } catch (...) {
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+}
+
+static bool IsCurrentOutputConnected(const ExecutionContext* ctx, int outputIndex) {
+    if (outputIndex < 0 || outputIndex >= 64) return true;
+    const std::uint64_t mask = ReadCurrentOutputMask(ctx);
+    if (mask == std::numeric_limits<std::uint64_t>::max()) return true;
+    return ((mask >> outputIndex) & static_cast<std::uint64_t>(1)) != 0;
 }
 
 static bool TryReadDoubleToken(const Json& token, double& outVal) {
@@ -479,6 +498,15 @@ static Json BuildMergedMaskRlePlacements(const std::vector<MaskPlacementSliding>
     return MatToMaskInfo(mergedMask);
 }
 
+static bool TryGetGridFromSlidingMeta(const ModuleImage::SlidingMetaInfo& slidingMeta, int& gx, int& gy) {
+    gx = -1;
+    gy = -1;
+    if (!slidingMeta.Valid) return false;
+    gx = slidingMeta.GridX;
+    gy = slidingMeta.GridY;
+    return gx >= 0 && gy >= 0;
+}
+
 static bool TryGetGridFromSlidingMeta(const Json& slidingMeta, int& gx, int& gy) {
     gx = -1;
     gy = -1;
@@ -662,7 +690,8 @@ public:
         const int ovY = std::max(0, ov.second);
 
         std::vector<ModuleImage> outImages;
-        Json outResults = Json::array();
+        const bool emitResultEntries = IsCurrentOutputConnected(Context, 1);
+        Json outResults = emitResultEntries ? Json::array() : Json();
         int outIndex = 0;
 
         for (size_t i = 0; i < images.size(); i++) {
@@ -711,38 +740,40 @@ public:
                     const std::vector<double> childA2x3 = { 1,0,-static_cast<double>(startX), 0,1,-static_cast<double>(startY) };
                     const TransformationState childState = parentState.DeriveChild(childA2x3, rect.width, rect.height);
 
-                    Json slidingMetaObj = Json::object({
-                        {"grid_x", c},
-                        {"grid_y", r},
-                        {"grid_size", Json::array({ colNum, rowNum })},
-                        {"win_size", Json::array({ rect.width, rect.height })},
-                        {"slice_index", Json::array({ r, c })},
-                        {"x", startX},
-                        {"y", startY},
-                        {"w", rect.width},
-                        {"h", rect.height}
-                    });
+                    ModuleImage::SlidingMetaInfo slidingMeta;
+                    slidingMeta.Valid = true;
+                    slidingMeta.GridX = c;
+                    slidingMeta.GridY = r;
+                    slidingMeta.GridCols = colNum;
+                    slidingMeta.GridRows = rowNum;
+                    slidingMeta.X = startX;
+                    slidingMeta.Y = startY;
+                    slidingMeta.W = rect.width;
+                    slidingMeta.H = rect.height;
 
                     ModuleImage childWrap(cropped,
                                           wrap.OriginalImage.empty() ? mat : wrap.OriginalImage,
                                           childState,
                                           wrap.OriginalIndex);
-                    childWrap.SlidingMeta = slidingMetaObj;
+                    childWrap.SlidingMeta = slidingMeta;
                     outImages.push_back(childWrap);
 
-                    Json entry = Json::object();
-                    entry["type"] = "local";
-                    entry["index"] = outIndex;
-                    entry["origin_index"] = wrap.OriginalIndex;
-                    entry["transform"] = childState.ToJson();
-                    entry["sample_results"] = Json::array();
-                    entry["sliding_meta"] = std::move(slidingMetaObj);
-                    outResults.push_back(entry);
-                    outIndex += 1;
+                    if (emitResultEntries) {
+                        Json entry = Json::object();
+                        entry["type"] = "local";
+                        entry["index"] = outIndex;
+                        entry["origin_index"] = wrap.OriginalIndex;
+                        entry["transform"] = childState.ToJson();
+                        entry["sample_results"] = Json::array();
+                        entry["sliding_meta"] = slidingMeta.ToJson();
+                        outResults.push_back(std::move(entry));
+                        outIndex += 1;
+                    }
                 }
             }
         }
 
+        if (!emitResultEntries) outResults = Json::array();
         return ModuleIO(std::move(outImages), std::move(outResults), Json::array());
     }
 };
@@ -766,7 +797,7 @@ public:
         std::unordered_map<std::string, std::vector<Json>> transToSamples;
         std::unordered_map<int, std::vector<Json>> indexToSamples;
         std::unordered_map<int, std::vector<Json>> originToSamples;
-        std::unordered_map<int, Json> indexToSlidingMeta;
+        std::unordered_map<int, ModuleImage::SlidingMetaInfo> indexToSlidingMeta;
         Json otherResults = Json::array();
 
         for (const auto& token : inResults) {
@@ -838,8 +869,7 @@ public:
 
         bool hasSlidingMeta = false;
         for (int i = 0; i < nWin; i++) {
-            const Json& sm = wrappers[static_cast<size_t>(i)].SlidingMeta;
-            if (!sm.is_object() || sm.empty()) continue;
+            const ModuleImage::SlidingMetaInfo& sm = wrappers[static_cast<size_t>(i)].SlidingMeta;
             int gx = 0, gy = 0;
             if (TryGetGridFromSlidingMeta(sm, gx, gy)) {
                 hasSlidingMeta = true;

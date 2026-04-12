@@ -390,9 +390,26 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
         module->ScalarInputsByIndex = std::move(scalarInputsByIdx);
         module->ScalarInputsByName = std::move(scalarInputsByName);
 
+        try {
+            std::uint64_t outputMask = 0;
+            if (node.contains("outputs")) {
+                const auto outPorts = AsArrayOfObjects(node.at("outputs"));
+                for (int oi = 0; oi < static_cast<int>(outPorts.size()) && oi < 64; oi++) {
+                    const auto& meta = outPorts[static_cast<size_t>(oi)];
+                    bool connected = false;
+                    if (meta.is_object() && meta.contains("links")) {
+                        const Json& links = meta.at("links");
+                        connected = links.is_array() && !links.empty();
+                    }
+                    if (connected) outputMask |= (static_cast<std::uint64_t>(1) << oi);
+                }
+            }
+            _context->Set<std::uint64_t>("__graph_current_output_mask", outputMask);
+        } catch (...) {}
+
         // 执行当前节点并记录节点耗时（用于压测模块耗时统计）
         const auto nodeStart = std::chrono::steady_clock::now();
-        ModuleIO io = module->Process(mainCh.ImageList, mainCh.ResultList);
+        ModuleIO io = module->ProcessOwned(mainCh.ImageList, std::move(mainCh.ResultList));
         const auto nodeEnd = std::chrono::steady_clock::now();
         const double elapsedMs = std::chrono::duration<double, std::milli>(nodeEnd - nodeStart).count();
         NodeTiming timing;
