@@ -53,6 +53,10 @@ static std::string BuildResultSignature(const FlowResultItem& item) {
 
 static void AppendResultsDedup(std::vector<FlowResultItem>& target, const std::vector<FlowResultItem>& source) {
     if (source.empty()) return;
+    if (target.empty()) {
+        target.insert(target.end(), source.begin(), source.end());
+        return;
+    }
     std::unordered_set<std::string> seen;
     seen.reserve(target.size() + source.size());
 

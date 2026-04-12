@@ -163,7 +163,8 @@ public:
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
         const std::vector<ModuleImage>& images = imageList;
-        const Json results = resultList.is_array() ? resultList : Json::array();
+        const Json emptyResults = Json::array();
+        const Json& results = resultList.is_array() ? resultList : emptyResults;
 
         std::string saveDir = ReadString("save_path", std::string());
         std::string suffix = ReadString("suffix", std::string("_out"));

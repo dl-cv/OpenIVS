@@ -188,7 +188,8 @@ public:
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
         const std::vector<ModuleImage>& inImages = imageList;
-        const Json inResults = resultList.is_array() ? resultList : Json::array();
+        const Json emptyResults = Json::array();
+        const Json& inResults = resultList.is_array() ? resultList : emptyResults;
 
         const auto cats = ReadStringList(Properties, "categories");
         std::unordered_set<std::string> keepSet(cats.begin(), cats.end());
@@ -540,7 +541,8 @@ public:
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
         const std::vector<ModuleImage>& images = imageList;
-        const Json results = resultList.is_array() ? resultList : Json::array();
+        const Json emptyResults = Json::array();
+        const Json& results = resultList.is_array() ? resultList : emptyResults;
 
         std::unordered_map<std::string, std::string> mapping;
         try {
