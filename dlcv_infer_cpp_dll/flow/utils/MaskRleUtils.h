@@ -102,6 +102,70 @@ inline cv::Mat MaskInfoToMat(const Json& maskInfo) {
 }
 
 /// <summary>
+/// 从二值 mask 提取最小外接旋转框。
+/// 使用外轮廓点代替全量前景点，降低 minAreaRect 输入规模。
+/// </summary>
+inline bool TryComputeMinAreaRect(const cv::Mat& maskMat, cv::RotatedRect& rotatedRect) {
+    rotatedRect = cv::RotatedRect();
+    if (maskMat.empty()) return false;
+
+    cv::Mat binary;
+    if (maskMat.type() == CV_8UC1) {
+        binary = maskMat.clone();
+    } else if (maskMat.channels() == 1) {
+        maskMat.convertTo(binary, CV_8U);
+    } else {
+        cv::cvtColor(maskMat, binary, cv::COLOR_BGR2GRAY);
+    }
+    if (binary.empty()) return false;
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(binary, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    if (contours.empty()) return false;
+
+    size_t totalPoints = 0;
+    int firstNonEmptyIndex = -1;
+    int nonEmptyContourCount = 0;
+    for (size_t i = 0; i < contours.size(); i++) {
+        const auto& contour = contours[i];
+        if (contour.empty()) continue;
+        if (firstNonEmptyIndex < 0) firstNonEmptyIndex = static_cast<int>(i);
+        totalPoints += contour.size();
+        nonEmptyContourCount += 1;
+    }
+
+    if (totalPoints == 0 || firstNonEmptyIndex < 0) return false;
+
+    if (nonEmptyContourCount == 1) {
+        rotatedRect = cv::minAreaRect(contours[static_cast<size_t>(firstNonEmptyIndex)]);
+        return true;
+    }
+
+    std::vector<cv::Point> allPoints;
+    allPoints.reserve(totalPoints);
+    for (const auto& contour : contours) {
+        if (contour.empty()) continue;
+        allPoints.insert(allPoints.end(), contour.begin(), contour.end());
+    }
+    if (allPoints.empty()) return false;
+
+    rotatedRect = cv::minAreaRect(allPoints);
+    return true;
+}
+
+/// <summary>
+/// 从 RLE mask 直接提取最小外接旋转框。
+/// </summary>
+inline bool TryComputeMinAreaRectFromMaskInfo(const Json& maskInfo, cv::RotatedRect& rotatedRect) {
+    cv::Mat maskMat = MaskInfoToMat(maskInfo);
+    if (maskMat.empty()) {
+        rotatedRect = cv::RotatedRect();
+        return false;
+    }
+    return TryComputeMinAreaRect(maskMat, rotatedRect);
+}
+
+/// <summary>
 /// 计算 RLE Mask 的非零面积（累加 runs 中奇数索引的长度）
 /// </summary>
 inline double CalculateMaskArea(const Json& maskInfo) {
