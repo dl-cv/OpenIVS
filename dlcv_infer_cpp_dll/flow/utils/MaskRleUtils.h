@@ -129,7 +129,12 @@ inline bool TryReadMaskInfoHeader(const Json& maskInfo, int& width, int& height,
     const auto itRuns = maskInfo.find("runs");
     if (itW == maskInfo.end() || itH == maskInfo.end() || itRuns == maskInfo.end()) return false;
     if (!itRuns->is_array()) return false;
-    if (!TryReadIntLike(*itW, width) || !TryReadIntLike(*itH, height)) return false;
+    if (itW->is_number_integer() && itH->is_number_integer()) {
+        width = itW->get<int>();
+        height = itH->get<int>();
+    } else {
+        if (!TryReadIntLike(*itW, width) || !TryReadIntLike(*itH, height)) return false;
+    }
     if (width <= 0 || height <= 0) return false;
     runsArr = &itRuns->get_ref<const Json::array_t&>();
     return true;

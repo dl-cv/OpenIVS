@@ -8,6 +8,10 @@
 
 #include "opencv2/imgproc.hpp"
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
+
 namespace dlcv_infer {
 namespace flow {
 
@@ -78,15 +82,26 @@ static void TryAddParam(Json& p, const Json& props, const std::string& key) {
     p[key] = v;
 }
 
-static Json ConvertToLocalSamples(const dlcv_infer::Result& res, bool includeMask) {
+static Json ConvertToLocalSamples(
+    const dlcv_infer::Result& res,
+    bool includeMask,
+    bool emitMaskRle,
+    bool emitMaskDerivedMeta) {
     Json list = Json::array();
     if (res.sampleResults.empty()) return list;
     const auto& sr = res.sampleResults[0];
+    std::unordered_map<std::string, std::string> categoryNameCache;
+    categoryNameCache.reserve(16);
     for (const auto& obj : sr.results) {
         Json o = Json::object();
         o["category_id"] = obj.categoryId;
         // dlcv_infer::Model 侧把 categoryName 从 UTF-8 转为 GBK 了；FlowGraph 内统一使用 UTF-8
-        o["category_name"] = dlcv_infer::convertGbkToUtf8(obj.categoryName);
+        auto itCachedName = categoryNameCache.find(obj.categoryName);
+        if (itCachedName == categoryNameCache.end()) {
+            const std::string utf8Name = dlcv_infer::convertGbkToUtf8(obj.categoryName);
+            itCachedName = categoryNameCache.emplace(obj.categoryName, utf8Name).first;
+        }
+        o["category_name"] = itCachedName->second;
         o["score"] = obj.score;
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
@@ -97,10 +112,39 @@ static Json ConvertToLocalSamples(const dlcv_infer::Result& res, bool includeMas
         o["angle"] = obj.withAngle ? obj.angle : -100.0;
 
         if (withMask && !obj.mask.empty()) {
-            try {
-                o["mask_rle"] = MatToMaskInfo(obj.mask);
-            } catch (...) {
-                // ignore
+            if (emitMaskDerivedMeta) {
+                double maskArea = static_cast<double>(obj.area);
+                if (maskArea <= 0.0) {
+                    try {
+                        if (obj.mask.channels() == 1) {
+                            maskArea = static_cast<double>(cv::countNonZero(obj.mask));
+                        } else {
+                            cv::Mat gray;
+                            cv::cvtColor(obj.mask, gray, cv::COLOR_BGR2GRAY);
+                            maskArea = static_cast<double>(cv::countNonZero(gray));
+                        }
+                    } catch (...) {
+                        maskArea = 0.0;
+                    }
+                }
+                o["mask_area"] = maskArea;
+                cv::RotatedRect rr;
+                if (TryComputeMinAreaRect(obj.mask, rr)) {
+                    o["mask_min_area_rect"] = Json::array({
+                        rr.center.x,
+                        rr.center.y,
+                        rr.size.width,
+                        rr.size.height,
+                        rr.angle
+                    });
+                }
+            }
+            if (emitMaskRle) {
+                try {
+                    o["mask_rle"] = MatToMaskInfo(obj.mask);
+                } catch (...) {
+                    // ignore
+                }
             }
         }
         list.push_back(o);
@@ -108,13 +152,24 @@ static Json ConvertToLocalSamples(const dlcv_infer::Result& res, bool includeMas
     return list;
 }
 
-static Json ConvertSampleResultToLocalSamples(const dlcv_infer::SampleResult& sr, bool includeMask) {
+static Json ConvertSampleResultToLocalSamples(
+    const dlcv_infer::SampleResult& sr,
+    bool includeMask,
+    bool emitMaskRle,
+    bool emitMaskDerivedMeta) {
     Json list = Json::array();
+    std::unordered_map<std::string, std::string> categoryNameCache;
+    categoryNameCache.reserve(16);
     for (const auto& obj : sr.results) {
         Json o = Json::object();
         o["category_id"] = obj.categoryId;
         // dlcv_infer::Model 侧把 categoryName 从 UTF-8 转为 GBK 了；FlowGraph 内统一使用 UTF-8
-        o["category_name"] = dlcv_infer::convertGbkToUtf8(obj.categoryName);
+        auto itCachedName = categoryNameCache.find(obj.categoryName);
+        if (itCachedName == categoryNameCache.end()) {
+            const std::string utf8Name = dlcv_infer::convertGbkToUtf8(obj.categoryName);
+            itCachedName = categoryNameCache.emplace(obj.categoryName, utf8Name).first;
+        }
+        o["category_name"] = itCachedName->second;
         o["score"] = obj.score;
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
@@ -125,10 +180,39 @@ static Json ConvertSampleResultToLocalSamples(const dlcv_infer::SampleResult& sr
         o["angle"] = obj.withAngle ? obj.angle : -100.0;
 
         if (withMask && !obj.mask.empty()) {
-            try {
-                o["mask_rle"] = MatToMaskInfo(obj.mask);
-            } catch (...) {
-                // ignore
+            if (emitMaskDerivedMeta) {
+                double maskArea = static_cast<double>(obj.area);
+                if (maskArea <= 0.0) {
+                    try {
+                        if (obj.mask.channels() == 1) {
+                            maskArea = static_cast<double>(cv::countNonZero(obj.mask));
+                        } else {
+                            cv::Mat gray;
+                            cv::cvtColor(obj.mask, gray, cv::COLOR_BGR2GRAY);
+                            maskArea = static_cast<double>(cv::countNonZero(gray));
+                        }
+                    } catch (...) {
+                        maskArea = 0.0;
+                    }
+                }
+                o["mask_area"] = maskArea;
+                cv::RotatedRect rr;
+                if (TryComputeMinAreaRect(obj.mask, rr)) {
+                    o["mask_min_area_rect"] = Json::array({
+                        rr.center.x,
+                        rr.center.y,
+                        rr.size.width,
+                        rr.size.height,
+                        rr.angle
+                    });
+                }
+            }
+            if (emitMaskRle) {
+                try {
+                    o["mask_rle"] = MatToMaskInfo(obj.mask);
+                } catch (...) {
+                    // ignore
+                }
             }
         }
         list.push_back(o);
@@ -266,6 +350,25 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     TryAddParam(p, this->Properties, "epsilon");
     TryAddParam(p, this->Properties, "batch_size");
     const bool includeMask = p.value("with_mask", true);
+    bool requestMaskOutput = includeMask;
+    if (includeMask && Context != nullptr) {
+        try {
+            const Json inferParams = Context->Get<Json>("infer_params", Json::object());
+            if (inferParams.is_object() && inferParams.contains("with_mask")) {
+                const Json& withMaskToken = inferParams.at("with_mask");
+                if (withMaskToken.is_boolean()) {
+                    requestMaskOutput = withMaskToken.get<bool>();
+                } else if (withMaskToken.is_number_integer()) {
+                    requestMaskOutput = (withMaskToken.get<int>() != 0);
+                } else if (withMaskToken.is_string()) {
+                    const std::string s = withMaskToken.get<std::string>();
+                    requestMaskOutput = (s == "1" || s == "true" || s == "True" || s == "TRUE");
+                }
+            }
+        } catch (...) {}
+    }
+    const bool emitMaskRle = includeMask && requestMaskOutput;
+    const bool emitMaskDerivedMeta = includeMask && !emitMaskRle;
 
     const int effectiveBatch = ResolveEffectiveBatchLimit(_model, this->Properties);
     p["batch_size"] = effectiveBatch;
@@ -362,7 +465,11 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
                 const int localIdx = chunkLocals[static_cast<size_t>(k)];
                 if (k < static_cast<int>(batchSamples.size())) {
                     sampleByLocal[static_cast<size_t>(localIdx)] =
-                        ConvertSampleResultToLocalSamples(batchSamples[static_cast<size_t>(k)], includeMask);
+                        ConvertSampleResultToLocalSamples(
+                            batchSamples[static_cast<size_t>(k)],
+                            includeMask,
+                            emitMaskRle,
+                            emitMaskDerivedMeta);
                 } else {
                     sampleByLocal[static_cast<size_t>(localIdx)] = Json::array();
                 }

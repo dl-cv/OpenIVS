@@ -8,6 +8,10 @@
 #include <stdexcept>
 #include <unordered_set>
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
+
 namespace dlcv_infer {
 namespace flow {
 

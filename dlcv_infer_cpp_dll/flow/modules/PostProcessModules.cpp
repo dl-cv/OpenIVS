@@ -16,6 +16,10 @@
 
 #include "opencv2/imgproc.hpp"
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
+
 namespace dlcv_infer {
 namespace flow {
 
@@ -165,8 +169,9 @@ private:
         std::vector<GroupRef> groups;
         groups.reserve(1 + ExtraInputsIn.size());
         groups.push_back(GroupRef{ &imageList, &resultList, movableMainResults });
-        for (const auto& ch : ExtraInputsIn) {
-            groups.push_back(GroupRef{ &ch.ImageList, &ch.ResultList, nullptr });
+        for (auto& ch : ExtraInputsIn) {
+            Json* mutableResults = ch.ResultList.is_array() ? &ch.ResultList : nullptr;
+            groups.push_back(GroupRef{ &ch.ImageList, &ch.ResultList, mutableResults });
         }
 
         std::vector<ModuleImage> mergedImages;
@@ -459,17 +464,24 @@ private:
             }
             if (enableMaskArea) {
                 double marea = 0.0;
-                if (so.contains("mask_rle") && so.at("mask_rle").is_object()) {
+                bool hasMaskArea = false;
+                if (so.contains("mask_area")) {
+                    hasMaskArea = TryReadDouble(so.at("mask_area"), marea);
+                }
+                if (!hasMaskArea && so.contains("mask_rle") && so.at("mask_rle").is_object()) {
                     const Json& maskInfo = so.at("mask_rle");
                     const Json* maskKey = &maskInfo;
                     auto it = maskAreaCache.find(maskKey);
                     if (it != maskAreaCache.end()) {
                         marea = it->second;
+                        hasMaskArea = true;
                     } else {
                         marea = CalculateMaskArea(maskInfo);
                         maskAreaCache.emplace(maskKey, marea);
+                        hasMaskArea = true;
                     }
                 }
+                if (!hasMaskArea) marea = 0.0;
                 if (has_mask_area_min && marea < maskAreaMin) return false;
                 if (has_mask_area_max && marea > maskAreaMax) return false;
             }
@@ -492,32 +504,57 @@ private:
                 }
             }
         }
+        Json::array_t* movableAlignedEntries = nullptr;
+        if (alignedLocalFastPath && ownedResults != nullptr && ownedResults->is_array() && ownedResults->size() == inImages.size()) {
+            movableAlignedEntries = &ownedResults->get_ref<Json::array_t&>();
+        }
 
         if (alignedLocalFastPath) {
             for (size_t i = 0; i < inImages.size(); i++) {
                 const ModuleImage& imgObj = inImages[i];
                 if (imgObj.ImageObject.empty()) continue;
 
-                const Json& entry = inResults.at(i);
+                Json* mutableEntry = nullptr;
+                const Json* entryPtr = nullptr;
+                if (movableAlignedEntries != nullptr) {
+                    mutableEntry = &(*movableAlignedEntries)[i];
+                    entryPtr = mutableEntry;
+                } else {
+                    entryPtr = &inResults.at(i);
+                }
+                const Json& entry = *entryPtr;
                 const bool hasSampleResults = entry.contains("sample_results") && entry.at("sample_results").is_array();
                 Json passArr = Json::array();
                 Json failArr = emitFailBranch ? Json::array() : Json();
 
                 if (hasSampleResults) {
-                    const Json& samples = entry.at("sample_results");
                     auto& passVec = passArr.get_ref<Json::array_t&>();
-                    passVec.reserve(samples.size());
+                    const size_t sampleCount = entry.at("sample_results").size();
+                    passVec.reserve(sampleCount);
                     Json::array_t* failVec = nullptr;
                     if (emitFailBranch) {
                         failVec = &failArr.get_ref<Json::array_t&>();
-                        failVec->reserve(samples.size());
+                        failVec->reserve(sampleCount);
                     }
-                    for (const auto& s : samples) {
-                        if (!s.is_object()) continue;
-                        if (noFilter || passOne(s)) {
-                            passVec.push_back(s);
-                        } else if (failVec != nullptr) {
-                            failVec->push_back(s);
+                    if (mutableEntry != nullptr) {
+                        auto& samples = (*mutableEntry)["sample_results"].get_ref<Json::array_t&>();
+                        for (auto& s : samples) {
+                            if (!s.is_object()) continue;
+                            if (noFilter || passOne(s)) {
+                                passVec.push_back(std::move(s));
+                            } else if (failVec != nullptr) {
+                                failVec->push_back(std::move(s));
+                            }
+                        }
+                    } else {
+                        const Json& samples = entry.at("sample_results");
+                        for (const auto& s : samples) {
+                            if (!s.is_object()) continue;
+                            if (noFilter || passOne(s)) {
+                                passVec.push_back(s);
+                            } else if (failVec != nullptr) {
+                                failVec->push_back(s);
+                            }
                         }
                     }
                 }
@@ -529,7 +566,11 @@ private:
 
                 Json transformOut = Json();
                 if (entry.contains("transform") && entry.at("transform").is_object()) {
-                    transformOut = entry.at("transform");
+                    if (mutableEntry != nullptr && mutableEntry->contains("transform") && (*mutableEntry)["transform"].is_object()) {
+                        transformOut = std::move((*mutableEntry)["transform"]);
+                    } else {
+                        transformOut = entry.at("transform");
+                    }
                 }
 
                 if (!hasSampleResults || !passArr.empty()) {
@@ -836,13 +877,6 @@ public:
 
 private:
     ModuleIO ProcessCore(const std::vector<ModuleImage>& imageList, Json outResults) {
-        struct MaskDetView final {
-            const Json* Det = nullptr;
-            const Json* MaskInfo = nullptr;
-            float OffsetX = 0.0f;
-            float OffsetY = 0.0f;
-        };
-
         const std::vector<ModuleImage>& images = imageList;
         if (!outResults.is_array()) outResults = Json::array();
         auto& outEntries = outResults.get_ref<Json::array_t&>();
@@ -866,32 +900,50 @@ private:
             }
             Json newDets = Json::array();
             auto& newDetArr = newDets.get_ref<Json::array_t&>();
-            newDetArr.reserve(entry.at("sample_results").size());
-            for (const auto& dToken : entry.at("sample_results")) {
+            auto& srcDetArr = entry["sample_results"].get_ref<Json::array_t&>();
+            newDetArr.reserve(srcDetArr.size());
+            for (auto& dToken : srcDetArr) {
                 if (!dToken.is_object()) continue;
 
-                MaskDetView detView;
-                detView.Det = &dToken;
-                const Json& d = *detView.Det;
-                if (!d.contains("mask_rle") || !d.at("mask_rle").is_object()) {
+                Json& d = dToken;
+                const bool hasPrecomputedRect = d.contains("mask_min_area_rect")
+                    && d.at("mask_min_area_rect").is_array()
+                    && d.at("mask_min_area_rect").size() >= 5;
+                if (!hasPrecomputedRect && (!d.contains("mask_rle") || !d.at("mask_rle").is_object())) {
                     continue; // 与 C# 对齐：无 mask_rle 直接跳过该条
                 }
                 if (!d.contains("bbox") || !d.at("bbox").is_array() || d.at("bbox").size() < 4) continue;
                 const Json& bbox = d.at("bbox");
-                detView.OffsetX = static_cast<float>(bbox.at(0).get<double>());
-                detView.OffsetY = static_cast<float>(bbox.at(1).get<double>());
-                detView.MaskInfo = &d.at("mask_rle");
-                const Json* maskKey = detView.MaskInfo;
+                const float offsetX = static_cast<float>(bbox.at(0).get<double>());
+                const float offsetY = static_cast<float>(bbox.at(1).get<double>());
 
                 cv::RotatedRect rr;
-                auto it = rectCache.find(maskKey);
-                if (it != rectCache.end()) {
-                    rr = it->second;
+                if (hasPrecomputedRect) {
+                    try {
+                        const Json& maskRect = d.at("mask_min_area_rect");
+                        rr = cv::RotatedRect(
+                            cv::Point2f(
+                                static_cast<float>(maskRect.at(0).get<double>()),
+                                static_cast<float>(maskRect.at(1).get<double>())),
+                            cv::Size2f(
+                                static_cast<float>(std::abs(maskRect.at(2).get<double>())),
+                                static_cast<float>(std::abs(maskRect.at(3).get<double>()))),
+                            static_cast<float>(maskRect.at(4).get<double>()));
+                    } catch (...) {
+                        continue;
+                    }
                 } else {
-                    if (!TryComputeMinAreaRectFromMaskInfo(*detView.MaskInfo, rr)) continue;
-                    rectCache.emplace(maskKey, rr);
+                    const Json& maskInfo = d.at("mask_rle");
+                    const Json* maskKey = &maskInfo;
+                    auto it = rectCache.find(maskKey);
+                    if (it != rectCache.end()) {
+                        rr = it->second;
+                    } else {
+                        if (!TryComputeMinAreaRectFromMaskInfo(maskInfo, rr)) continue;
+                        rectCache.emplace(maskKey, rr);
+                    }
                 }
-                rr.center += cv::Point2f(detView.OffsetX, detView.OffsetY);
+                rr.center += cv::Point2f(offsetX, offsetY);
 
                 float rw = rr.size.width;
                 float rh = rr.size.height;
@@ -902,13 +954,14 @@ private:
                 }
                 double angRad = NormalizeAngleLe90Rad(static_cast<double>(angDeg) * kPi / 180.0);
 
-                Json d2 = Json::object();
-                if (d.contains("category_id")) d2["category_id"] = d.at("category_id");
-                if (d.contains("category_name")) d2["category_name"] = d.at("category_name");
-                if (d.contains("score")) d2["score"] = d.at("score");
-                if (d.contains("metadata") && d.at("metadata").is_object()) d2["metadata"] = d.at("metadata");
-                d2["bbox"] = Json::array({ rr.center.x, rr.center.y, rw, rh, angRad });
-                newDets.push_back(d2);
+                d.erase("mask_rle");
+                d.erase("mask");
+                d.erase("mask_min_area_rect");
+                d.erase("mask_area");
+                d["bbox"] = Json::array({ rr.center.x, rr.center.y, rw, rh, angRad });
+                d["with_angle"] = true;
+                d["angle"] = angRad;
+                newDetArr.push_back(std::move(d));
             }
             entry["sample_results"] = std::move(newDets);
         }

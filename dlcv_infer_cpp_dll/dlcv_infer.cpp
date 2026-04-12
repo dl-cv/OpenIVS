@@ -12,6 +12,10 @@
 #include <unordered_map>
 #include <utility>
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
+
 namespace {
 
 using Json = dlcv_infer::json;
@@ -457,12 +461,19 @@ double ComputeFlowArea(const Json& entry, const cv::Mat& mask, const std::vector
 std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json& flowResultList) {
     std::vector<dlcv_infer::ObjectResult> out;
     if (!flowResultList.is_array()) return out;
+    std::unordered_map<std::string, std::string> categoryNameCache;
+    categoryNameCache.reserve(16);
 
     for (const auto& entry : flowResultList) {
         if (!entry.is_object()) continue;
 
         const int categoryId = entry.value("category_id", 0);
         const std::string categoryNameUtf8 = entry.value("category_name", std::string());
+        auto itCachedName = categoryNameCache.find(categoryNameUtf8);
+        if (itCachedName == categoryNameCache.end()) {
+            const std::string categoryNameGbk = dlcv_infer::convertUtf8ToGbk(categoryNameUtf8);
+            itCachedName = categoryNameCache.emplace(categoryNameUtf8, categoryNameGbk).first;
+        }
         const float score = static_cast<float>(ReadJsonNumber(entry.contains("score") ? entry.at("score") : Json(), 0.0));
 
         bool withBbox = false;
@@ -477,7 +488,7 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
 
         out.emplace_back(
             categoryId,
-            dlcv_infer::convertUtf8ToGbk(categoryNameUtf8),
+            itCachedName->second,
             score,
             area,
             bbox,
@@ -611,6 +622,65 @@ dlcv_infer::flow::FlowBatchResult ParseFlowBatchResultFromRoot(const Json& flowR
         batch.PerImageResults.resize(expectedImageCount);
     }
     return batch;
+}
+
+Json ExtractFlowResultListToken(const Json& flowRoot) {
+    Json resultListToken = Json::array();
+    try {
+        if (flowRoot.is_object() && flowRoot.contains("result_list")) {
+            resultListToken = flowRoot.at("result_list");
+        } else if (flowRoot.is_array()) {
+            resultListToken = flowRoot;
+        }
+    } catch (...) {
+        resultListToken = Json::array();
+    }
+    return resultListToken;
+}
+
+std::vector<dlcv_infer::SampleResult> ConvertFlowResultListTokenToSampleResults(
+    const Json& resultListToken,
+    size_t expectedImageCount) {
+
+    std::vector<dlcv_infer::SampleResult> sampleResults;
+    if (!resultListToken.is_array()) {
+        if (expectedImageCount > 0) {
+            const dlcv_infer::SampleResult emptySample(std::vector<dlcv_infer::ObjectResult>{});
+            sampleResults.resize(expectedImageCount, emptySample);
+        }
+        return sampleResults;
+    }
+
+    bool isBatchContainer = false;
+    try {
+        if (!resultListToken.empty()) {
+            const auto& first = resultListToken.at(0);
+            isBatchContainer = first.is_object() &&
+                               first.contains("result_list") &&
+                               first.at("result_list").is_array();
+        }
+    } catch (...) {
+        isBatchContainer = false;
+    }
+
+    if (isBatchContainer) {
+        sampleResults.reserve(std::max(expectedImageCount, resultListToken.size()));
+        for (const auto& token : resultListToken) {
+            if (token.is_object() && token.contains("result_list") && token.at("result_list").is_array()) {
+                sampleResults.emplace_back(ConvertFlowResultListToObjects(token.at("result_list")));
+            } else {
+                sampleResults.emplace_back(std::vector<dlcv_infer::ObjectResult>{});
+            }
+        }
+    } else {
+        sampleResults.emplace_back(ConvertFlowResultListToObjects(resultListToken));
+    }
+
+    if (expectedImageCount > 0 && sampleResults.size() < expectedImageCount) {
+        const dlcv_infer::SampleResult emptySample(std::vector<dlcv_infer::ObjectResult>{});
+        sampleResults.resize(expectedImageCount, emptySample);
+    }
+    return sampleResults;
 }
 
 void ParseFlowTimingFromRoot(
@@ -1139,7 +1209,12 @@ namespace dlcv_infer {
         const int ec = (expCh == 1 || expCh == 3) ? expCh : 3;
         std::vector<cv::Mat> out;
         out.reserve(images.size());
+        const bool allowFlowFastPassThrough = _isFlowGraphMode;
         for (const auto& im : images) {
+            if (allowFlowFastPassThrough && !im.empty() && im.depth() == CV_8U && im.channels() == ec) {
+                out.push_back(im);
+                continue;
+            }
             out.push_back(PrepareInferImage(im, ec));
         }
         return out;
@@ -1370,14 +1445,8 @@ namespace dlcv_infer {
             }
             SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
 
-            flow::FlowBatchResult batch = ParseFlowBatchResultFromRoot(flowRoot, 1);
-            json flowResults = json::array();
-            if (!batch.PerImageResults.empty()) {
-                flowResults = flow::FlowResultItemsToJsonArray(batch.PerImageResults[0]);
-            }
-
-            std::vector<SampleResult> sampleResults;
-            sampleResults.emplace_back(ConvertFlowResultListToObjects(flowResults));
+            const Json resultListToken = ExtractFlowResultListToken(flowRoot);
+            std::vector<SampleResult> sampleResults = ConvertFlowResultListTokenToSampleResults(resultListToken, 1);
             return Result(std::move(sampleResults));
         }
 
@@ -1441,16 +1510,9 @@ namespace dlcv_infer {
             }
             SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
 
-            flow::FlowBatchResult batch = ParseFlowBatchResultFromRoot(flowRoot, image_list.size());
-            std::vector<SampleResult> sampleResults;
-            sampleResults.reserve(image_list.size());
-            for (size_t i = 0; i < image_list.size(); i++) {
-                json flowResults = json::array();
-                if (i < batch.PerImageResults.size()) {
-                    flowResults = flow::FlowResultItemsToJsonArray(batch.PerImageResults[i]);
-                }
-                sampleResults.emplace_back(ConvertFlowResultListToObjects(flowResults));
-            }
+            const Json resultListToken = ExtractFlowResultListToken(flowRoot);
+            std::vector<SampleResult> sampleResults =
+                ConvertFlowResultListTokenToSampleResults(resultListToken, image_list.size());
             return Result(std::move(sampleResults));
         }
 
@@ -1511,10 +1573,21 @@ namespace dlcv_infer {
             }
             SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
 
-            flow::FlowBatchResult batch = ParseFlowBatchResultFromRoot(flowRoot, 1);
+            const Json resultListToken = ExtractFlowResultListToken(flowRoot);
             json flowResults = json::array();
-            if (!batch.PerImageResults.empty()) {
-                flowResults = flow::FlowResultItemsToJsonArray(batch.PerImageResults[0]);
+            try {
+                if (resultListToken.is_array() && !resultListToken.empty()) {
+                    const Json& first = resultListToken.at(0);
+                    if (first.is_object() && first.contains("result_list") && first.at("result_list").is_array()) {
+                        flowResults = first.at("result_list");
+                    } else {
+                        flowResults = resultListToken;
+                    }
+                } else if (resultListToken.is_array()) {
+                    flowResults = resultListToken;
+                }
+            } catch (...) {
+                flowResults = json::array();
             }
             return NormalizeFlowOneOutJson(flowResults);
         }

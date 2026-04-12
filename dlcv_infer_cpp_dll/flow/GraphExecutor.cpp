@@ -7,6 +7,10 @@
 #include <cstdint>
 #include <stdexcept>
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
+
 namespace dlcv_infer {
 namespace flow {
 

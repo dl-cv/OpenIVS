@@ -1,4 +1,5 @@
 ﻿#include "flow/BaseModule.h"
+#include "flow/FlowPayloadTypes.h"
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/MaskRleUtils.h"
 
@@ -20,6 +21,10 @@
 
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
+
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
 
 namespace dlcv_infer {
 namespace flow {
@@ -324,80 +329,75 @@ static Json AABBFromLocalBboxFast(const Json& bboxLocal, const std::vector<doubl
     }
 }
 
-static void AppendOutResultItemJson(
+static void InitializeByImageEntry(const ModuleImage& wrap, FlowByImageEntry& outEntry) {
+    const cv::Mat& ori = wrap.OriginalImage.empty() ? wrap.ImageObject : wrap.OriginalImage;
+    outEntry.OriginIndex = wrap.OriginalIndex;
+    outEntry.OriginalWidth = ori.empty() ? 0 : ori.cols;
+    outEntry.OriginalHeight = ori.empty() ? 0 : ori.rows;
+}
+
+static void AppendOutResultItemTyped(
     const Json& d,
     const std::vector<double>& T_c2o,
     bool isAxisAlignedTransform,
-    Json::array_t& outResults) {
+    std::vector<FlowResultItem>& outResults) {
     if (!d.is_object()) return;
 
-    Json item = Json::object();
-    item["category_id"] = d.value("category_id", 0);
-    item["category_name"] = d.value("category_name", "");
-    item["score"] = d.value("score", 0.0);
+    FlowResultItem item;
+    item.CategoryId = d.value("category_id", 0);
+    item.CategoryName = d.value("category_name", std::string());
+    item.Score = d.value("score", 0.0);
 
-    // bbox
     if (d.contains("bbox") && d.at("bbox").is_array()) {
         const Json& bboxLocal = d.at("bbox");
         const bool isRot = (bboxLocal.size() == 5);
         if (isRot) {
             Json rboxG = RBoxLocalToGlobal(bboxLocal, T_c2o);
             if (!rboxG.is_null()) {
-                item["bbox"] = std::move(rboxG);
-                item["metadata"] = Json::object({ {"is_rotated", true} });
+                item.Bbox = std::move(rboxG);
+                item.Metadata = Json::object({ {"is_rotated", true} });
             }
         } else if (bboxLocal.size() >= 4) {
             Json bboxGlobal = AABBFromLocalBboxFast(bboxLocal, T_c2o, isAxisAlignedTransform);
             if (!bboxGlobal.is_null()) {
-                item["bbox"] = std::move(bboxGlobal);
-                item["metadata"] = Json::object({ {"is_rotated", false} });
+                item.Bbox = std::move(bboxGlobal);
+                item.Metadata = Json::object({ {"is_rotated", false} });
             }
         }
     }
 
     if (d.contains("mask_rle") && d.at("mask_rle").is_object()) {
-        item["mask_rle"] = d.at("mask_rle");
+        item.MaskRle = d.at("mask_rle");
     }
 
     outResults.push_back(std::move(item));
 }
 
-static Json BuildOutResultItemsJson(const ModuleImage& wrap, const Json& dets) {
-    Json outResults = Json::array();
+static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& wrap, const Json& dets) {
+    std::vector<FlowResultItem> outResults;
     if (!dets.is_array() || dets.empty()) return outResults;
 
     const std::vector<double> T_c2o = BuildTC2O(wrap.TransformState);
     const bool isAxisAlignedTransform = IsAxisAlignedTransform(T_c2o);
-    auto& outArr = outResults.get_ref<Json::array_t&>();
-    outArr.reserve(dets.size());
+    outResults.reserve(dets.size());
     for (const auto& d : dets) {
-        AppendOutResultItemJson(d, T_c2o, isAxisAlignedTransform, outArr);
+        AppendOutResultItemTyped(d, T_c2o, isAxisAlignedTransform, outResults);
     }
     return outResults;
 }
 
-static Json BuildOutResultItemsJson(const ModuleImage& wrap, const std::vector<const Json*>& dets) {
-    Json outResults = Json::array();
+static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& wrap, const std::vector<const Json*>& dets) {
+    std::vector<FlowResultItem> outResults;
     if (dets.empty()) return outResults;
 
     const std::vector<double> T_c2o = BuildTC2O(wrap.TransformState);
     const bool isAxisAlignedTransform = IsAxisAlignedTransform(T_c2o);
-    auto& outArr = outResults.get_ref<Json::array_t&>();
-    outArr.reserve(dets.size());
+    outResults.reserve(dets.size());
     for (const Json* d : dets) {
         if (d == nullptr) continue;
-        AppendOutResultItemJson(*d, T_c2o, isAxisAlignedTransform, outArr);
+        AppendOutResultItemTyped(*d, T_c2o, isAxisAlignedTransform, outResults);
     }
     return outResults;
-}
-
-static Json BuildImagePayloadEntryJson(const ModuleImage& wrap, Json outResults) {
-    const cv::Mat& ori = wrap.OriginalImage.empty() ? wrap.ImageObject : wrap.OriginalImage;
-    Json entry = Json::object();
-    entry["origin_index"] = wrap.OriginalIndex;
-    entry["original_size"] = Json::array({ ori.empty() ? 0 : ori.cols, ori.empty() ? 0 : ori.rows });
-    entry["results"] = std::move(outResults);
-    return entry;
 }
 
 class ReturnJsonModule final : public BaseModule {
@@ -420,23 +420,21 @@ public:
 private:
     ModuleIO ProcessCore(const std::vector<ModuleImage>& imageList, const Json& results, Json* ownedResults) {
         const std::vector<ModuleImage>& images = imageList;
-
-        Json byImage = Json::array();
-        auto& byImageEntries = byImage.get_ref<Json::array_t&>();
-        byImageEntries.reserve(images.size());
+        FlowFrontendPayload payload;
+        payload.ByImage.reserve(images.size());
 
         if (CanUseAlignedFastPath(images, results)) {
             for (size_t i = 0; i < images.size(); i++) {
                 const ModuleImage& wrap = images[i];
+                FlowByImageEntry byImageEntry;
+                InitializeByImageEntry(wrap, byImageEntry);
                 try {
                     const auto& entry = results.at(i);
                     if (entry.is_object() && entry.contains("sample_results") && entry.at("sample_results").is_array()) {
-                        byImageEntries.push_back(
-                            BuildImagePayloadEntryJson(wrap, BuildOutResultItemsJson(wrap, entry.at("sample_results"))));
-                        continue;
+                        byImageEntry.Results = BuildOutResultItemsTyped(wrap, entry.at("sample_results"));
                     }
                 } catch (...) {}
-                byImageEntries.push_back(BuildImagePayloadEntryJson(wrap, Json::array()));
+                payload.ByImage.push_back(std::move(byImageEntry));
             }
         } else {
             // 建立 index/origin_index/transform -> dets 映射
@@ -499,21 +497,27 @@ private:
                     if (itT != transToDets.end()) dets = &itT->second;
                 }
 
-                Json outItems = Json::array();
-                if (dets != nullptr) outItems = BuildOutResultItemsJson(wrap, *dets);
-                byImageEntries.push_back(BuildImagePayloadEntryJson(wrap, std::move(outItems)));
+                FlowByImageEntry byImageEntry;
+                InitializeByImageEntry(wrap, byImageEntry);
+                if (dets != nullptr) {
+                    byImageEntry.Results = BuildOutResultItemsTyped(wrap, *dets);
+                }
+                payload.ByImage.push_back(std::move(byImageEntry));
             }
         }
 
         // 写入 Context
         if (Context != nullptr) {
             try {
-                Json payload = Json::object();
-                payload["by_image"] = std::move(byImage);
-                Json byNode = Context->Get<Json>("frontend_json_by_node", Json::object());
-                if (!byNode.is_object()) byNode = Json::object();
-                byNode[std::to_string(NodeId)] = std::move(payload);
-                Context->Set<Json>("frontend_json_by_node", std::move(byNode));
+                std::vector<FlowFrontendByNodePayload> typedByNode = Context->Get<std::vector<FlowFrontendByNodePayload>>(
+                    "frontend_payloads_by_node",
+                    std::vector<FlowFrontendByNodePayload>());
+                FlowFrontendByNodePayload current;
+                current.NodeOrder = NodeId;
+                current.FallbackOrder = static_cast<int>(typedByNode.size());
+                current.Payload = std::move(payload);
+                typedByNode.push_back(std::move(current));
+                Context->Set<std::vector<FlowFrontendByNodePayload>>("frontend_payloads_by_node", std::move(typedByNode));
             } catch (...) {}
         }
         if (!HasCurrentNodeOutputConsumer(Context)) {
