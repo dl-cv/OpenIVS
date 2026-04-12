@@ -104,40 +104,57 @@ public:
     using BaseModule::BaseModule;
 
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
-        // 组装输入组：主输入在前，ExtraInputsIn 顺序在后
-        std::vector<std::pair<std::vector<ModuleImage>, Json>> groups;
-        groups.push_back({ imageList, resultList.is_array() ? resultList : Json::array() });
+        struct GroupRef final {
+            const std::vector<ModuleImage>* Images;
+            const Json* Results;
+        };
+
+        std::vector<GroupRef> groups;
+        groups.reserve(1 + ExtraInputsIn.size());
+        groups.push_back(GroupRef{ &imageList, &resultList });
         for (const auto& ch : ExtraInputsIn) {
-            groups.push_back({ ch.ImageList, ch.ResultList.is_array() ? ch.ResultList : Json::array() });
+            groups.push_back(GroupRef{ &ch.ImageList, &ch.ResultList });
         }
 
         std::vector<ModuleImage> mergedImages;
         Json mergedResults = Json::array();
+        auto& mergedResultsArr = mergedResults.get_ref<Json::array_t&>();
+
+        size_t estimatedImageCount = 0;
+        size_t estimatedResultCount = 0;
+        for (const auto& g : groups) {
+            if (g.Images != nullptr) estimatedImageCount += g.Images->size();
+            if (g.Results != nullptr && g.Results->is_array()) estimatedResultCount += g.Results->size();
+        }
+        mergedImages.reserve(estimatedImageCount);
+        mergedResultsArr.reserve(estimatedResultCount);
 
         for (const auto& g : groups) {
-            const auto& imgs = g.first;
-            const Json& res = g.second;
+            if (g.Images == nullptr) continue;
+            const auto& imgs = *(g.Images);
+            const Json* res = (g.Results != nullptr && g.Results->is_array()) ? g.Results : nullptr;
 
             const int baseIndex = static_cast<int>(mergedImages.size());
-            std::unordered_map<int, int> localToGlobal;
+            std::vector<int> localToGlobal(imgs.size(), -1);
             int added = 0;
 
             for (int i = 0; i < static_cast<int>(imgs.size()); i++) {
                 const ModuleImage& im = imgs[static_cast<size_t>(i)];
                 if (im.ImageObject.empty()) continue;
                 const int globalIdx = baseIndex + added;
-                localToGlobal[i] = globalIdx;
+                localToGlobal[static_cast<size_t>(i)] = globalIdx;
                 added++;
                 // 重包：确保 OriginalIndex 与全局顺序一致
                 ModuleImage newWrap(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
                 mergedImages.push_back(newWrap);
             }
+            if (res == nullptr) continue;
 
-            for (const auto& t : res) {
+            for (const auto& t : *res) {
                 if (!t.is_object()) continue;
                 const Json& r = t;
                 if (r.value("type", "") != "local") {
-                    mergedResults.push_back(r);
+                    mergedResultsArr.push_back(r);
                     continue;
                 }
                 Json r2 = r;
@@ -148,11 +165,15 @@ public:
                     r2["index"] = baseIndex;
                     r2["origin_index"] = baseIndex;
                 } else {
-                    if (idx >= 0 && localToGlobal.count(idx)) r2["index"] = localToGlobal[idx];
-                    if (oidx >= 0 && localToGlobal.count(oidx)) r2["origin_index"] = localToGlobal[oidx];
+                    if (idx >= 0 && idx < static_cast<int>(localToGlobal.size()) && localToGlobal[static_cast<size_t>(idx)] >= 0) {
+                        r2["index"] = localToGlobal[static_cast<size_t>(idx)];
+                    }
+                    if (oidx >= 0 && oidx < static_cast<int>(localToGlobal.size()) && localToGlobal[static_cast<size_t>(oidx)] >= 0) {
+                        r2["origin_index"] = localToGlobal[static_cast<size_t>(oidx)];
+                    }
                     if (!r2.contains("origin_index") && r2.contains("index")) r2["origin_index"] = r2["index"];
                 }
-                mergedResults.push_back(r2);
+                mergedResultsArr.push_back(std::move(r2));
             }
         }
 
@@ -296,6 +317,7 @@ public:
         const double bboxAreaMax = optD(readOpt("bbox_area_max"), has_bbox_area_max);
         const double maskAreaMin = optD(readOpt("mask_area_min"), has_mask_area_min);
         const double maskAreaMax = optD(readOpt("mask_area_max"), has_mask_area_max);
+        const bool noFilter = !enableBBoxWh && !enableRBoxWh && !enableBBoxArea && !enableMaskArea;
 
         std::vector<ModuleImage> mainImages;
         Json mainResults = Json::array();
@@ -356,6 +378,97 @@ public:
             }
             return true;
         };
+
+        // 与 C# 一致：常见 batch 场景下 image_list 与 result_list 一一对应，优先走顺序快路径。
+        bool alignedLocalFastPath = false;
+        if (inResults.is_array() && !inImages.empty() && inImages.size() == inResults.size()) {
+            alignedLocalFastPath = true;
+            for (size_t i = 0; i < inResults.size(); i++) {
+                const Json& obj = inResults.at(i);
+                if (!obj.is_object()) {
+                    alignedLocalFastPath = false;
+                    break;
+                }
+                if (obj.value("type", "") != "local") {
+                    alignedLocalFastPath = false;
+                    break;
+                }
+            }
+        }
+
+        if (alignedLocalFastPath) {
+            for (size_t i = 0; i < inImages.size(); i++) {
+                const ModuleImage& imgObj = inImages[i];
+                if (imgObj.ImageObject.empty()) continue;
+
+                const Json& entry = inResults.at(i);
+                const bool hasSampleResults = entry.contains("sample_results") && entry.at("sample_results").is_array();
+                Json passArr = Json::array();
+                Json failArr = Json::array();
+
+                if (hasSampleResults) {
+                    const Json& samples = entry.at("sample_results");
+                    auto& passVec = passArr.get_ref<Json::array_t&>();
+                    passVec.reserve(samples.size());
+                    auto& failVec = failArr.get_ref<Json::array_t&>();
+                    failVec.reserve(samples.size());
+                    for (const auto& s : samples) {
+                        if (!s.is_object()) continue;
+                        if (noFilter || passOne(s)) {
+                            passVec.push_back(s);
+                        } else {
+                            failVec.push_back(s);
+                        }
+                    }
+                }
+
+                int originIndex = imgObj.OriginalIndex;
+                if (entry.contains("origin_index")) {
+                    originIndex = SafeIntFromJson(entry.at("origin_index"), originIndex);
+                }
+
+                TransformationState st;
+                try {
+                    if (entry.contains("transform") && entry.at("transform").is_object()) {
+                        st = TransformationState::FromJson(entry.at("transform"));
+                    }
+                } catch (...) {}
+                Json transformOut = st.ToJson();
+
+                if (!hasSampleResults || !passArr.empty()) {
+                    mainImages.push_back(imgObj);
+                    Json e = Json::object();
+                    e["type"] = "local";
+                    e["index"] = static_cast<int>(mainResults.size());
+                    e["origin_index"] = originIndex;
+                    e["transform"] = transformOut;
+                    e["sample_results"] = hasSampleResults ? std::move(passArr) : Json::array();
+                    mainResults.push_back(std::move(e));
+                }
+
+                if (hasSampleResults && !failArr.empty()) {
+                    altImages.push_back(imgObj);
+                    Json e2 = Json::object();
+                    e2["type"] = "local";
+                    e2["index"] = static_cast<int>(altResults.size());
+                    e2["origin_index"] = originIndex;
+                    e2["transform"] = transformOut;
+                    e2["sample_results"] = std::move(failArr);
+                    altResults.push_back(std::move(e2));
+                }
+            }
+
+            this->ExtraOutputs.push_back(ModuleChannel(altImages, altResults));
+            bool hasPositive = false;
+            for (const auto& t : mainResults) {
+                if (t.is_object() && t.contains("sample_results") && t.at("sample_results").is_array() && !t.at("sample_results").empty()) {
+                    hasPositive = true;
+                    break;
+                }
+            }
+            this->ScalarOutputsByName["has_positive"] = hasPositive;
+            return ModuleIO(std::move(mainImages), std::move(mainResults), Json::array());
+        }
 
         for (const auto& token : inResults) {
             if (!token.is_object()) continue;
@@ -658,15 +771,24 @@ public:
                 }
                 double angRad = NormalizeAngleLe90Rad(static_cast<double>(angDeg) * kPi / 180.0);
 
-                Json d2 = d;
+                Json d2 = Json::object();
+                for (auto itField = d.begin(); itField != d.end(); ++itField) {
+                    const std::string& key = itField.key();
+                    if (key == "mask_rle" || key == "mask" || key == "bbox" || key == "with_angle" || key == "angle") {
+                        continue;
+                    }
+                    d2[key] = itField.value();
+                }
                 d2["bbox"] = Json::array({ rr.center.x, rr.center.y, rw, rh, angRad });
                 d2["with_angle"] = true;
                 d2["angle"] = angRad;
-                d2.erase("mask_rle");
-                d2.erase("mask");
                 newDets.push_back(d2);
             }
-            Json entry2 = entry;
+            Json entry2 = Json::object();
+            for (auto itField = entry.begin(); itField != entry.end(); ++itField) {
+                if (itField.key() == "sample_results") continue;
+                entry2[itField.key()] = itField.value();
+            }
             entry2["sample_results"] = newDets;
             outResults.push_back(entry2);
         }
