@@ -56,6 +56,12 @@ namespace dlcv_infer_csharp
             /// </summary>
             public Mat Mask { get; set; }
 
+            /// <summary>
+            /// 开放折线点集（可选）
+            /// 坐标语义与当前结果中的 bbox/poly 保持一致
+            /// </summary>
+            public List<Point2d> Polyline { get; set; }
+
             // <summary>
             // 是否有角度
             // </summary>
@@ -69,7 +75,7 @@ namespace dlcv_infer_csharp
 
             public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
                 List<double> bbox, bool withMask, Mat mask,
-                bool withBbox = false, bool withAngle = false, float angle = -100)
+                bool withBbox = false, bool withAngle = false, float angle = -100, List<Point2d> polyline = null)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;
@@ -78,6 +84,7 @@ namespace dlcv_infer_csharp
                 Bbox = bbox;
                 WithMask = withMask;
                 Mask = mask;
+                Polyline = polyline;
                 Angle = angle;
                 WithBbox = withBbox;
                 WithAngle = withAngle;
@@ -105,6 +112,10 @@ namespace dlcv_infer_csharp
                 if (WithMask)
                 {
                     sb.Append($"Mask size: {Mask.Width}x{Mask.Height}, ");
+                }
+                if (Polyline != null && Polyline.Count > 0)
+                {
+                    sb.Append($"Polyline points: {Polyline.Count}, ");
                 }
                 return sb.ToString();
             }

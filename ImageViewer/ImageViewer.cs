@@ -331,6 +331,21 @@ namespace DLCV
                     if (!categoryNameLower.Contains("ok"))
                         _statusText = "NG";
 
+                    // 若存在 polyline，优先叠加绘制开放折线（不闭合）。
+                    if (objResult.Polyline != null && objResult.Polyline.Count >= 2)
+                    {
+                        var linePoints = new PointF[objResult.Polyline.Count];
+                        for (int pi = 0; pi < objResult.Polyline.Count; pi++)
+                        {
+                            var p = objResult.Polyline[pi];
+                            linePoints[pi] = new PointF((float)p.X, (float)p.Y);
+                        }
+                        using (Pen linePen = new Pen(color, borderWidth))
+                        {
+                            e.Graphics.DrawLines(linePen, linePoints);
+                        }
+                    }
+
                     // 处理旋转框检测
                     if (objResult.WithAngle)
                     {

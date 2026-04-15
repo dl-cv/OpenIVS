@@ -389,6 +389,16 @@ namespace DlcvModules
 					{
 					}
 				}
+				if (obj.Polyline != null && obj.Polyline.Count > 0)
+				{
+					var line = new JArray();
+					for (int pi = 0; pi < obj.Polyline.Count; pi++)
+					{
+						var p = obj.Polyline[pi];
+						line.Add(new JArray(p.X, p.Y));
+					}
+					o["polyline"] = line;
+				}
 				list.Add(o);
 			}
 			return list;

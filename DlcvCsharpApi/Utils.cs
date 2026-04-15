@@ -190,7 +190,11 @@ namespace dlcv_infer_csharp
                                 detection.Area,
                                 detection.Bbox,
                                 detection.WithMask,
-                                detection.Mask
+                                detection.Mask,
+                                detection.WithBbox,
+                                detection.WithAngle,
+                                detection.Angle,
+                                detection.Polyline
                             );
 
                             // 替换原始检测结果

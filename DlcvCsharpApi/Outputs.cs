@@ -391,6 +391,12 @@ namespace DlcvModules
                 }
             }
 
+            var localPolyline = detObj["polyline"] as JArray;
+            if (TryMapLocalPolyline(localPolyline, tC2O, out List<object> polylineOut))
+            {
+                item["polyline"] = polylineOut;
+            }
+
             outResults.Add(item);
         }
 
@@ -600,6 +606,42 @@ namespace DlcvModules
                 res[i] = new Point2f((float)nx, (float)ny);
             }
             return res;
+        }
+
+        private static bool TryMapLocalPolyline(JArray localPolyline, double[] tC2O, out List<object> mapped)
+        {
+            mapped = null;
+            if (localPolyline == null || localPolyline.Count < 2 || tC2O == null || tC2O.Length < 6) return false;
+
+            var points = new List<object>(localPolyline.Count);
+            for (int i = 0; i < localPolyline.Count; i++)
+            {
+                var token = localPolyline[i];
+                double x;
+                double y;
+                if (token is JArray pa && pa.Count >= 2)
+                {
+                    x = pa[0].Value<double>();
+                    y = pa[1].Value<double>();
+                }
+                else if (token is JObject po && po.ContainsKey("x") && po.ContainsKey("y"))
+                {
+                    x = po["x"].Value<double>();
+                    y = po["y"].Value<double>();
+                }
+                else
+                {
+                    continue;
+                }
+
+                double gx = tC2O[0] * x + tC2O[1] * y + tC2O[2];
+                double gy = tC2O[3] * x + tC2O[4] * y + tC2O[5];
+                points.Add(new List<int> { (int)Math.Round(gx), (int)Math.Round(gy) });
+            }
+
+            if (points.Count < 2) return false;
+            mapped = points;
+            return true;
         }
 
         private static List<double> RBoxLocalToGlobal(JArray rbox, double[] T)
