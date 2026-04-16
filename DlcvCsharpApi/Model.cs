@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
@@ -1849,7 +1849,7 @@ namespace dlcv_infer_csharp
                         angle = (float)bbox[4];
                     }
 
-                    var extraInfo = Utils.NormalizeExtraInfo(result["extra_info"]);
+                    var extraInfo = result["extra_info"] as JObject ?? new JObject();
 
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
                         withMask, mask_img, withBbox, withAngle, angle, extraInfo);
@@ -2146,7 +2146,7 @@ namespace dlcv_infer_csharp
 
             result["angle"] = angle;
             result["with_angle"] = withAngle;
-            var extraInfo = Utils.NormalizeExtraInfo(item["extra_info"]);
+            var extraInfo = item["extra_info"] as JObject ?? new JObject();
             if (extraInfo.HasValues)
             {
                 result["extra_info"] = extraInfo;

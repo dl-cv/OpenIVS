@@ -33,24 +33,6 @@ namespace dlcv_infer_csharp
             return unicodeJson;
         }
 
-        public static JObject NormalizeExtraInfo(JToken token)
-        {
-            if (token is JObject obj)
-            {
-                return (JObject)obj.DeepClone();
-            }
-            return new JObject();
-        }
-
-        public static JObject NormalizeExtraInfo(JObject extraInfo)
-        {
-            if (extraInfo == null)
-            {
-                return new JObject();
-            }
-            return (JObject)extraInfo.DeepClone();
-        }
-
         public static bool TryGetExtraInfoPoint2dList(JObject extraInfo, string key, out List<Point2d> values)
         {
             values = new List<Point2d>();
@@ -355,7 +337,7 @@ namespace dlcv_infer_csharp
                             ["with_angle"] = obj.WithAngle,
                             ["angle"] = obj.Angle,
                             ["with_mask"] = obj.WithMask,
-                            ["extra_info"] = NormalizeExtraInfo(obj.ExtraInfo)
+                            ["extra_info"] = obj.ExtraInfo ?? new JObject()
                         };
                         // 将 mask 以 RLE 的形式存储到 JSON（mask_rle）
                         if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())

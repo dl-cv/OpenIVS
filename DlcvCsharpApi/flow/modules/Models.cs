@@ -389,7 +389,7 @@ namespace DlcvModules
 					{
 					}
 				}
-				var extraInfo = Utils.NormalizeExtraInfo(obj.ExtraInfo);
+				var extraInfo = obj.ExtraInfo ?? new JObject();
 				if (extraInfo.HasValues)
 				{
 					o["extra_info"] = extraInfo;

@@ -85,7 +85,7 @@ namespace dlcv_infer_csharp
                 Bbox = bbox;
                 WithMask = withMask;
                 Mask = mask;
-                ExtraInfo = NormalizeExtraInfo(extraInfo);
+                ExtraInfo = extraInfo ?? new JObject();
                 Angle = angle;
                 WithBbox = withBbox;
                 WithAngle = withAngle;

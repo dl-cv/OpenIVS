@@ -381,7 +381,7 @@ namespace dlcv_infer_csharp
                     bool withMask = result["with_mask"]?.Value<bool>() ?? false;
                     bool withAngle = result["with_angle"]?.Value<bool>() ?? false;
                     float angle = result["angle"]?.Value<float>() ?? -100f;
-                    var extraInfo = Utils.NormalizeExtraInfo(result["extra_info"]);
+                    var extraInfo = result["extra_info"] as JObject ?? new JObject();
 
                     Mat mask_img = new Mat(); // OCR通常不需要mask
 
