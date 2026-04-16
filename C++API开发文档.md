@@ -17,7 +17,7 @@
 
 ## 2. 构建与输出
 
-- 项目级构建与发布前构建验证统一通过 MCP 构建工具执行，解决方案级与项目级入口见 `开发文档.md` 的“统一编译说明”
+- 项目级构建与发布前构建验证统一通过 MCP 构建工具执行，解决方案级与项目级入口见 `开发文档.md` 的“统一编译说明”。
 - 工程配置：
   - `Debug|Win32`
   - `Release|Win32`
@@ -31,7 +31,7 @@
   - Win32 Release：`WIN32;NDEBUG;_WINDOWS;_USRDLL;DLCV_INFER_CPP_DLL_EXPORTS`
   - x64 Debug：`_DEBUG;_WINDOWS;_USRDLL;DLCV_INFER_CPP_DLL_EXPORTS`
   - x64 Release：`NDEBUG;_WINDOWS;_USRDLL;DLCV_INFER_CPP_DLL_EXPORTS`
-- 输出目录仅在 `x64` 配置中显式设置为 `$(SolutionDir)$(Configuration)\`
+- 输出目录仅在 `x64` 配置中显式设置为 `$(SolutionDir)$(Configuration)\`。
 - Debug x64 链接库：`opencv_world4100d.lib`
 - Release x64 链接库：`opencv_world4100.lib`
 
@@ -80,7 +80,9 @@
 
 当前实现使用的编码页是 `CP_ACP`、`CP_UTF8` 和 `936`。`Model(const std::string&, int)` 先尝试把路径按 UTF-8 解码并回转校验，回转一致时按 UTF-8 处理，不一致时按 GBK 处理；`Model(const std::wstring&, int)` 先转 UTF-8 后走同一流程。Flow 内部 `model_path` 固定使用 UTF-8，`ModelPool` 创建 `dlcv_infer::Model` 前再转为 GBK。
 
-## 6. 对外数据结构
+## 6. C++ 对外类型
+
+共享结果语义、JSON 字段语义、Flow 模块分类、模板对象语义和计时口径见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
 ### 6.1 对外类型名
 
@@ -91,7 +93,7 @@
 | `Result` | `sampleResults` |
 | `FlowNodeTiming` | `nodeId`、`nodeType`、`nodeTitle`、`elapsedMs` |
 
-以上为 C++ API 对外结构体字段名。
+以上为 C++ API 对外结构体字段名。C++ 公共成员命名使用 `camelCase`。
 
 ### 6.2 Flow 聚合结构
 
@@ -123,33 +125,33 @@
 
 公开类型为 `SntlAdminStatus`、`SNTLDllLoader`、`SNTLUtils`、`SNTL` 和 `ParseXmlToJson()`。固定 XML 常量中，`DefaultScope` 的厂商 ID 固定为 `26146`，`HaspIdFormat` 读取 `haspid`，`FeatureIdFormat` 读取 `featureid` 与 `haspid`。`SNTL` 构造时调用 `sntl_admin_context_new`，析构时调用 `Dispose()`，`Dispose()` 再调 `sntl_admin_context_delete`；`Get()` 调 `sntl_admin_get`，成功时返回 `{ "code": 0, "message": "成功", "data": ... }`，失败时返回 `{ "code": <status>, "message": "<状态描述>" }`。`SNTLUtils::GetDeviceList()` 返回加密狗 ID 数组，`GetFeatureList()` 返回特性 ID 数组，任一异常都返回空数组 `[]`。
 
-## 10. DVS 归档加载实现
+## 10. Flow 与 DVS 的 C++ 实现
 
-流程与模块统一语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧仅额外处理 DVS 归档解包、`pipeline.json` 中 `model_path` 重写，以及临时目录清理。
+### 10.1 DVS 归档加载
 
-## 11. `FlowGraphModel`
+共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧额外处理 DVS 归档解包、`pipeline.json` 中 `model_path` 重写，以及临时目录清理。
+
+### 10.2 `FlowGraphModel`
 
 `FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并只预加载 `model/*` 节点；`InferInternal()` 在上下文中写入前端图像、设备和参数后返回 `result_list` 与 `timing`；清理阶段只清 `ModelPool`，不调用 `Utils::FreeAllModels()`。
 
-## 12. Flow 执行框架补充
-
-### 12.1 `ExecutionContext`
+### 10.3 `ExecutionContext`
 
 `ExecutionContext` 是轻量键值容器，公开 `Set<T>()`、`Get<T>()`、`Has()`、`Remove()`、`Clear()`；内部用 `shared_ptr<IValue>` 持有值，拷贝时做深拷贝。
 
-### 12.2 `GraphExecutor`
+### 10.4 `GraphExecutor`
 
 `GraphExecutor` 负责节点排序、链路路由、标量注入、`infer_params` 属性覆盖和 `model/*` 预加载。未注册普通节点会跳过，未注册模型节点会记录到加载报告；当前节点输出链路还会写入 `__graph_current_output_mask` 供部分模块读取。
 
-### 12.3 Flow 结果聚合
+### 10.5 Flow 结果聚合
 
 聚合读取优先级为 `frontend_payloads_by_node -> frontend_json.by_node -> frontend_json_by_node -> frontend_json.last -> frontend_payload_last`。单图时 `result_list` 直接是结果数组，多图时为 `[{ "result_list": [...] }, ...]`。
 
-## 13. 已注册 Flow 节点
+### 10.6 已注册 Flow 节点
 
 C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/ModelModules.cpp`、`flow/modules/OutputModules.cpp`、`flow/modules/SlidingModules.cpp`、`flow/modules/FeatureModules.cpp`、`flow/modules/PostProcessModules.cpp`、`flow/modules/RegionStrokeVisualizeTemplateModules.cpp`。当前注册集覆盖输入、模型、预处理/特征、后处理、输出与模板模块；`features/printed_template_match` 由 `features/template_match` 兼容实现。
 
-## 16. 仅 DLL 构建内部使用的类型
+## 11. 仅 DLL 构建内部使用的类型
 
 以下类型位于 `#ifdef DLCV_INFER_CPP_DLL_EXPORTS` 条件编译区域：
 
