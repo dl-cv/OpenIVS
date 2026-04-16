@@ -34,19 +34,21 @@
 - Debug x64 链接库：`opencv_world4100d.lib`
 - Release x64 链接库：`opencv_world4100.lib`
 
-当前工程编译的源文件：
+当前工程的编译单元按“入口绑定 -> Flow 执行框架 -> 节点实现”三层拆分：
 
-- `dlcv_infer.cpp`
-- `dlcv_sntl_admin.cpp`
-- `flow/GraphExecutor.cpp`
-- `flow/FlowGraphModel.cpp`
-- `flow/modules/ModelModules.cpp`
-- `flow/modules/InputModules.cpp`
-- `flow/modules/OutputModules.cpp`
-- `flow/modules/SlidingModules.cpp`
-- `flow/modules/FeatureModules.cpp`
-- `flow/modules/PostProcessModules.cpp`
-- `flow/modules/RegionStrokeVisualizeTemplateModules.cpp`
+| 分组 | 文件 | 当前职责 |
+| --- | --- | --- |
+| 入口与外部绑定 | `dlcv_infer.cpp` | `Model`、`Utils`、底层 `dlcv_infer.dll` 绑定、DVS 归档解包、普通模型与 Flow 结果转换 |
+| 入口与外部绑定 | `dlcv_sntl_admin.cpp` | 加密狗管理 DLL 绑定、XML 转 JSON、设备与特性查询 |
+| Flow 执行框架 | `flow/GraphExecutor.cpp` | 节点排序、链路路由、属性覆盖、标量端口注入、节点计时 |
+| Flow 执行框架 | `flow/FlowGraphModel.cpp` | Flow JSON 加载、`model/*` 预加载、执行上下文初始化、前端结果聚合 |
+| Flow 节点实现 | `flow/modules/InputModules.cpp` | 输入图像读取、前端图像接入、测试结果构造 |
+| Flow 节点实现 | `flow/modules/ModelModules.cpp` | `model/*` 节点、模型池、批量推理调用 |
+| Flow 节点实现 | `flow/modules/OutputModules.cpp` | 图片保存、预览透传、`return_json` 前端结果回写 |
+| Flow 节点实现 | `flow/modules/SlidingModules.cpp` | 滑窗切图、滑窗结果回写与合并 |
+| Flow 节点实现 | `flow/modules/FeatureModules.cpp` | 裁图、翻转、缩放、按分类旋转、标签拼接等通用图像/结果处理 |
+| Flow 节点实现 | `flow/modules/PostProcessModules.cpp` | 结果合并、过滤、替换、覆盖、去重、mask/rbox 互转 |
+| Flow 节点实现 | `flow/modules/RegionStrokeVisualizeTemplateModules.cpp` | 区域过滤、描边转点、可视化、模板生成/保存/加载/匹配 |
 
 ## 3. 构建期依赖解析
 
@@ -852,185 +854,72 @@ public:
 
 ## 15. 已注册 Flow 节点
 
+已注册节点按输入、模型、特征/预处理、滑窗、后处理、输出/模板 6 组组织。表中“主要属性”只保留会直接改变行为的关键键；同类字段按用途合并描述。
+
 ### 15.1 输入节点
 
-- `input/image`
-  - 作用：生成输入图像与空结果项
-  - 主要属性：`path`、`paths`
-  - 输出：`image + result`，并写 `scalar filename`
-- `input/frontend_image`
-  - 作用：生成前端图像输入
-  - 主要属性：`path`
-  - 输出：`image + result`
-- `input/build_results`
-  - 作用：构造一条测试检测结果
-  - 主要属性：`image_path`、`default_width`、`default_height`、`default_color`、`category_id`、`category_name`、`score`、`bbox_x1`、`bbox_y1`、`bbox_x2`、`bbox_y2`、`bbox_x`、`bbox_y`、`bbox_w`、`bbox_h`
-  - 输出：`image + result`
+| 节点类型 | 别名 | 作用 | 主要属性 | 输出 |
+| --- | --- | --- | --- | --- |
+| `input/image` | 无 | 生成输入图像与空结果项，优先接前端注入 Mat，其次按路径读图 | 输入路径：`path`、`paths` | `image + result`，并写 `scalar filename` |
+| `input/frontend_image` | 无 | 生成前端图像输入，优先接前端注入 Mat，回退到单路径读图 | 输入路径：`path` | `image + result` |
+| `input/build_results` | 无 | 基于现有图像、指定路径或默认纯色图，直接构造一条测试结果 | 图像来源：`image_path`、默认尺寸/颜色；结果内容：类别、分数、框坐标；框同时支持 `bbox_x1..bbox_y2` 和 `bbox_x..bbox_h` | `image + result` |
 
 ### 15.2 模型节点
 
-- `model/det`
-  - 作用：检测类模型批量推理
-  - 主要属性：`model_path`、`device_id`、`threshold`、`iou_threshold`、`top_k`、`with_mask`、`return_polygon`、`epsilon`、`batch_size`
-  - 输出：`image + result`
-- `model/rotated_bbox`
-  - 实现与 `model/det` 相同
-- `model/instance_seg`
-  - 实现与 `model/det` 相同
-- `model/semantic_seg`
-  - 实现与 `model/det` 相同
-- `model/cls`
-  - 作用：分类模型结果整理，保证结果带整图 bbox
-  - 主要属性：与 `model/det` 相同
-  - 输出：`image + result`
-- `model/ocr`
-  - 作用：OCR 模型结果整理，保证结果带整图 bbox
-  - 主要属性：与 `model/det` 相同
-  - 输出：`image + result`
+| 节点类型 | 别名 | 作用 | 主要属性 | 输出 |
+| --- | --- | --- | --- | --- |
+| `model/det` | 无 | 检测类模型批量推理 | 模型与设备：`model_path`、`device_id`；阈值与结果控制：`threshold`、`iou_threshold`、`top_k`、`with_mask`、`return_polygon`、`epsilon`；批处理：`batch_size` | `image + result` |
+| `model/rotated_bbox`、`model/instance_seg`、`model/semantic_seg` | 无 | 当前实现与 `model/det` 相同，只使用不同节点类型名 | 同 `model/det` | `image + result` |
+| `model/cls` | 无 | 在 `model/det` 骨架上整理分类结果，并补整图 bbox | 同 `model/det` | `image + result` |
+| `model/ocr` | 无 | 在 `model/det` 骨架上整理 OCR 结果，并补整图 bbox | 同 `model/det` | `image + result` |
 
 ### 15.3 特征与预处理节点
 
-- `features/image_generation`
-  - 作用：按检测框裁局部图并同步局部结果
-  - 主要属性：`crop_expand`、`min_size`、`crop_shape`
-  - 输出：`image + result`
-- `features/image_flip`
-  - 作用：水平或竖直翻转图像并更新变换
-  - 主要属性：`direction`
-  - 输出：`image`
-- `pre_process/coordinate_crop`
-  - 别名：`features/coordinate_crop`
-  - 作用：按固定坐标裁图
-  - 主要属性：`x`、`y`、`w`、`h`
-  - 输出：`image + result`
-- `pre_process/image_rescale`
-  - 别名：`features/image_rescale`
-  - 作用：按比例缩放图像
-  - 主要属性：`scale`
-  - 输出：`image + result`
-- `features/image_rotate_by_cls`
-  - 作用：按分类标签旋转图像并同步结果坐标
-  - 主要属性：`rotate90_labels`、`rotate180_labels`、`rotate270_labels`
-  - 输出：`image + result`
-- `post_process/result_label_merge`
-  - 别名：`features/result_label_merge`
-  - 作用：把一路 top1 标签拼到另一路结果类别名前
-  - 主要属性：`fixed_text`、`use_first_score_top1`
-  - 输出：`image + result`
+| 节点类型 | 别名 | 作用 | 主要属性 | 输出 |
+| --- | --- | --- | --- | --- |
+| `features/image_generation` | 无 | 按检测框裁局部图，并同步局部结果坐标 | 裁图控制：`crop_expand`、`min_size`、`crop_shape` | `image + result` |
+| `features/image_flip` | 无 | 水平或竖直翻转图像，并更新变换状态 | 方向：`direction` | `image` |
+| `pre_process/coordinate_crop` | `features/coordinate_crop` | 按固定坐标裁图 | 坐标与尺寸：`x`、`y`、`w`、`h` | `image + result` |
+| `pre_process/image_rescale` | `features/image_rescale` | 按比例缩放图像 | 缩放：`scale` | `image + result` |
+| `features/image_rotate_by_cls` | 无 | 按分类标签旋转图像，并同步结果坐标 | 标签映射：`rotate90_labels`、`rotate180_labels`、`rotate270_labels` | `image + result` |
+| `post_process/result_label_merge` | `features/result_label_merge` | 把一路 top1 标签拼到另一路结果类别名前 | 文本控制：`fixed_text`、`use_first_score_top1` | `image + result` |
 
 ### 15.4 滑窗节点
 
-- `pre_process/sliding_window`
-  - 别名：`features/sliding_window`
-  - 作用：将图像切为滑窗子图，并写入滑窗元数据
-  - 主要属性：`min_size`、`window_size`、`overlap`
-  - 输出：`image`
-  - 结果端口已连接时，同时输出占位 `result`
-- `pre_process/sliding_merge`
-  - 别名：`features/sliding_merge`
-  - 作用：将滑窗结果映射回原图坐标并合并
-  - 主要属性：`iou_threshold`、`dedup_results`、`task_type`
-  - 输出：`image + result`
+| 节点类型 | 别名 | 作用 | 主要属性 | 输出 |
+| --- | --- | --- | --- | --- |
+| `pre_process/sliding_window` | `features/sliding_window` | 将图像切为滑窗子图，并写入滑窗元数据 | 窗口配置：`min_size`、`window_size`、`overlap` | 主输出 `image`；结果端口已连接时同时输出占位 `result` |
+| `pre_process/sliding_merge` | `features/sliding_merge` | 将滑窗结果映射回原图坐标并合并 | 合并控制：`iou_threshold`、`dedup_results`、`task_type` | `image + result` |
 
 ### 15.5 后处理节点
 
-- `post_process/merge_results`
-  - 别名：`features/merge_results`
-  - 作用：合并主输入与额外输入的图像和结果
-  - 输出：`image + result`
-- `post_process/result_filter`
-  - 别名：`features/result_filter`
-  - 作用：按类别名过滤结果
-  - 主要属性：`categories`
-  - 主输出：命中结果 `image + result`
-  - 额外输出：未命中结果 `image + result`
-  - 标量输出：`has_positive`
-- `post_process/result_filter_advanced`
-  - 别名：`features/result_filter_advanced`
-  - 作用：按框宽高、框面积、mask 面积过滤结果
-  - 主要属性：`enable_bbox_wh`、`enable_rbox_wh`、`enable_bbox_area`、`enable_mask_area`、`bbox_w_min`、`bbox_w_max`、`bbox_h_min`、`bbox_h_max`、`rbox_w_min`、`rbox_w_max`、`rbox_h_min`、`rbox_h_max`、`bbox_area_min`、`bbox_area_max`、`mask_area_min`、`mask_area_max`
-  - 主输出：命中结果 `image + result`
-  - 额外输出：未命中结果 `image + result`
-  - 标量输出：`has_positive`
-- `post_process/text_replacement`
-  - 别名：`features/text_replacement`
-  - 作用：按映射表替换 `category_name`
-  - 主要属性：`mapping`
-  - 输出：`image + result`
-- `post_process/result_category_override`
-  - 别名：`features/result_category_override`
-  - 作用：用额外输入第一条类别名覆盖主输入结果类别名
-  - 输出：`image + result`
-- `post_process/mask_to_rbox`
-  - 别名：`features/mask_to_rbox`
-  - 作用：将 `mask_rle` 或 `mask_min_area_rect` 转为旋转框
-  - 输出：`image + result`
-- `post_process/rbox_correction`
-  - 别名：`features/rbox_correction`
-  - 作用：按旋转角纠正图像与 bbox
-  - 主要属性：`fill_value`
-  - 输出：`image + result`
-- `post_process/bbox_iou_dedup`
-  - 别名：`features/bbox_iou_dedup`
-  - 作用：按 IoU 或 IoS 对普通框去重
-  - 主要属性：`metric`、`iou_threshold`、`per_category`
-  - 输出：`image + result`
-  - 标量输出：`kept_count`、`removed_count`
+| 节点类型 | 别名 | 作用 | 主要属性 | 输出 |
+| --- | --- | --- | --- | --- |
+| `post_process/merge_results` | `features/merge_results` | 合并主输入与额外输入的图像和结果 | 无 | `image + result` |
+| `post_process/result_filter` | `features/result_filter` | 按类别名过滤结果 | 类别列表：`categories` | 主：命中 `image + result`；旁路：未命中 `image + result`；标量：`has_positive` |
+| `post_process/result_filter_advanced` | `features/result_filter_advanced` | 按框宽高、框面积、mask 面积过滤结果 | 开关：`enable_bbox_wh`、`enable_rbox_wh`、`enable_bbox_area`、`enable_mask_area`；范围：bbox/rbox 宽高、bbox/mask 面积上下限 | 主：命中 `image + result`；旁路：未命中 `image + result`；标量：`has_positive` |
+| `post_process/text_replacement` | `features/text_replacement` | 按映射表替换 `category_name` | 映射：`mapping` | `image + result` |
+| `post_process/result_category_override` | `features/result_category_override` | 用额外输入第一条类别名覆盖主输入结果类别名 | 无 | `image + result` |
+| `post_process/mask_to_rbox` | `features/mask_to_rbox` | 将 `mask_rle` 或 `mask_min_area_rect` 转为旋转框 | 无 | `image + result` |
+| `post_process/rbox_correction` | `features/rbox_correction` | 按旋转角纠正图像与 bbox | 填充值：`fill_value` | `image + result` |
+| `post_process/bbox_iou_dedup` | `features/bbox_iou_dedup` | 按 IoU 或 IoS 去重普通框 | 去重规则：`metric`、`iou_threshold`、`per_category` | `image + result`；标量：`kept_count`、`removed_count` |
 
 ### 15.6 输出与模板节点
 
-- `output/save_image`
-  - 作用：将图像保存到目录
-  - 主要属性：`save_path`、`suffix`、`format`
-  - 输出：`image + result`
-- `output/preview`
-  - 作用：纯透传
-  - 输出：`image + result`
-- `output/return_json`
-  - 作用：生成前端结果载荷并回写上下文
-  - 输出：`image + result` 或空输出
-- `post_process/result_filter_region`
-  - 别名：`features/result_filter_region`
-  - 作用：按区域分流结果
-  - 主要属性：`x`、`y`、`w`、`h`、`result_region_mode`
-  - 主输出：区域内 `image + result`
-  - 额外输出：区域外 `image + result`
-  - 标量输出：`has_positive`
-- `post_process/result_filter_region_global`
-  - 别名：`features/result_filter_region_global`
-  - 作用：按原图坐标系区域分流结果
-  - 主要属性：与 `post_process/result_filter_region` 相同
-  - 输出：与 `post_process/result_filter_region` 相同
-- `features/stroke_to_points`
-  - 作用：将 mask 区域转换为点框结果
-  - 主要属性：`counts_dict`、`point_width`、`point_height`
-  - 输出：`image + result`
-- `output/visualize`
-  - 作用：在原图上绘制结果
-  - 主要属性：`black_background`、`display_bbox`、`display_text`、`display_score`、`font_scale`、`font_thickness`、`bbox_color`、`bbox_color_rot`
-  - 输出：`image + result`
-- `output/visualize_local`
-  - 作用：在局部图上绘制普通框与标签
-  - 主要属性：`bbox_color`、`font_scale`、`font_thickness`
-  - 输出：`image + result`
-- `features/template_from_results`
-  - 作用：从结果生成模板 JSON
-  - 主要属性：`product_name`、`product_id`、`template_name`
-  - 输出：`image + result + template`
-- `features/template_save`
-  - 作用：保存模板 JSON 与首张图 PNG
-  - 主要属性：`file_name`
-  - 输出：空
-- `features/template_load`
-  - 作用：从 JSON 文件载入模板
-  - 主要属性：`path`
-  - 输出：`image + result + template`
-- `features/template_match`
-  - 别名：`features/printed_template_match`
-  - 作用：比较主模板与额外输入模板的 OCR 项
-  - 主要属性：`position_tolerance_x`、`position_tolerance_y`、`min_confidence_threshold`、`check_position`
-  - 主输出：空
-  - 标量输出：`ok`、`detail`
+| 节点类型 | 别名 | 作用 | 主要属性 | 输出 |
+| --- | --- | --- | --- | --- |
+| `output/save_image` | 无 | 将图像保存到目录 | 保存参数：`save_path`、`suffix`、`format` | `image + result` |
+| `output/preview` | 无 | 纯透传 | 无 | `image + result` |
+| `output/return_json` | 无 | 生成前端结果载荷并回写上下文 | 无 | `image + result` 或空输出 |
+| `post_process/result_filter_region` | `features/result_filter_region` | 按区域分流结果 | 区域与模式：`x`、`y`、`w`、`h`、`result_region_mode` | 主：区域内 `image + result`；旁路：区域外 `image + result`；标量：`has_positive` |
+| `post_process/result_filter_region_global` | `features/result_filter_region_global` | 按原图坐标系区域分流结果 | 同 `post_process/result_filter_region` | 输出同上 |
+| `features/stroke_to_points` | 无 | 将 mask 区域转换为点框结果 | 点位控制：`counts_dict`、`point_width`、`point_height` | `image + result` |
+| `output/visualize` | 无 | 在原图上绘制结果 | 显示开关、字体样式、框颜色：`black_background`、`display_*`、`font_*`、`bbox_color*` | `image + result` |
+| `output/visualize_local` | 无 | 在局部图上绘制普通框与标签 | 绘制样式：`bbox_color`、`font_scale`、`font_thickness` | `image + result` |
+| `features/template_from_results` | 无 | 从结果生成模板 JSON | 模板标识：`product_name`、`product_id`、`template_name` | `image + result + template` |
+| `features/template_save` | 无 | 保存模板 JSON 与首张图 PNG | 文件名：`file_name` | 空 |
+| `features/template_load` | 无 | 从 JSON 文件载入模板 | 路径：`path` | `image + result + template` |
+| `features/template_match` | `features/printed_template_match` | 比较主模板与额外输入模板的 OCR 项 | 匹配阈值与位置检查：`position_tolerance_x`、`position_tolerance_y`、`min_confidence_threshold`、`check_position` | 主输出空；标量：`ok`、`detail` |
 
 ## 16. 仅 DLL 构建内部使用的类型
 
