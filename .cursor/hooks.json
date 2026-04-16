@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "type": "prompt",
+        "timeout": 20,
+        "failClosed": true,
+        "prompt": "检查即将执行的 shell 命令，输入为：$ARGUMENTS。若命令属于本地编译、构建、重建、发布前构建验证，则必须返回 permission=deny，并把 user_message 与 agent_message 都设为：本项目禁止通过本地 shell 执行编译、构建、重建或发布前构建验证。请改用 MCP 构建工具 `build_solution` 或 `build_project`。本地构建命令包括但不限于：dotnet build、dotnet publish、dotnet test、dotnet pack、dotnet run、dotnet clean、dotnet restore、msbuild、devenv /Build、devenv /Rebuild、cmake --build、ninja、make、xbuild，以及 powershell 或 pwsh 包裹这些构建命令。若命令不属于这些情况，则返回 permission=allow。不要返回 ask。不要改写命令。"
+      }
+    ]
+  }
+}
