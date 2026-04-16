@@ -14,7 +14,7 @@
 - `DlcvModules`
 - `sntl_admin_csharp`
 
-### 源码目录结构
+## 源码目录结构
 
 `DlcvCsharpApi` 当前源码按目录分层组织：
 
@@ -58,7 +58,7 @@
 | `DLCV Test.exe` | `Model` 的 DVP 模式固定从 `C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe` 启动后端服务 |
 | `AIModelRPC.exe` | `Model` 的 RPC 模式优先从当前 AppDomain 目录查找，其次查找 `C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe` |
 
-### 运行模式相关组件
+### 运行模式
 
 | 模式 | 触发条件 | 当前实现中的通信方式 |
 | --- | --- | --- |
@@ -90,21 +90,26 @@
 
 图像数据通过共享内存传递，图像共享内存名格式为 `DlcvModelMmf_<token>`，mask 共享内存名格式为 `DlcvModelMask_<token>`。
 
-## 公共结果数据结构
+## C# 对外类型
 
-### `Utils.CSharpObjectResult`
+共享结果语义、JSON 字段语义、模板对象语义和计时口径见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
-`CSharpObjectResult` 表示单个目标结果，对外字段为 `CategoryId`、`CategoryName`、`Score`、`Area`、`WithBbox`、`Bbox`、`WithAngle`、`Angle`、`WithMask`、`Mask`、`ExtraInfo`。`ToString()` 输出友好文本。
+### 命名约定
 
-### `Utils.CSharpSampleResult`
+- C# 公共属性使用 `PascalCase`。
+- 对外 JSON 字段继续使用标准文档中的 `snake_case` 语义。
 
-`CSharpSampleResult` 表示单张图片结果，核心字段为 `Results`。
+### C# 结果类型
 
-### `Utils.CSharpResult`
+| C# 类型 | 对应共享对象 | 当前公开字段 |
+| --- | --- | --- |
+| `Utils.CSharpObjectResult` | `ObjectResult` | `CategoryId`、`CategoryName`、`Score`、`Area`、`WithBbox`、`Bbox`、`WithAngle`、`Angle`、`WithMask`、`Mask`、`ExtraInfo` |
+| `Utils.CSharpSampleResult` | `SampleResult` | `Results` |
+| `Utils.CSharpResult` | `Result` | `SampleResults` |
 
-`CSharpResult` 表示批量结果，核心字段为 `SampleResults`。
+`CSharpObjectResult.ToString()` 输出友好文本。
 
-## 核心模型类
+## 核心类
 
 ### `Model`
 
@@ -125,11 +130,7 @@
 
 当 `enableCache=true` 时，缓存键由模型绝对路径的小写规范化值、`device_id` 和运行模式标识 `dvp` / `dvs` / `rpc` / `dvt` 组成；命中后直接复用 `modelIndex`，`ClearModelCache()` 会清空静态模型缓存与加载中集合。
 
-#### 图像通道处理
-
-`Model` 在推理前会根据模型信息中解析出的输入通道数完成图像归一化：三通道模型统一转为 `RGB`，单通道模型统一转为灰度；输入若为 16 位、浮点或带符号整型深度，会先转换为 8 位深度。
-
-#### 模式差异
+#### 当前实现中的模式差异
 
 | 模式 | 当前行为 |
 | --- | --- |
@@ -137,6 +138,15 @@
 | DVP | 自动检查后端服务；服务不可用时启动 `DLCV Test.exe --keep_alive`；推理请求固定附带 `return_polygon=true` |
 | DVS | 内部创建 `DlcvModules.DvsModel`；`GetModelInfo()` 返回流程 JSON，并附加 `loaded_model_meta` |
 | RPC | 自动启动 `AIModelRPC.exe`；图像通过共享内存传输；结果中的 mask 可通过共享内存回读 |
+
+#### 输入与输出
+
+- 推理前会根据模型信息中解析出的输入通道数完成图像归一化：三通道模型统一转为 `RGB`，单通道模型统一转为灰度；输入若为 16 位、浮点或带符号整型深度，会先转换为 8 位深度。
+- `Infer()` 与 `InferBatch()` 统一返回 `Utils.CSharpResult`。
+- `Model.InferOneOutJson()` 返回单图 JSON 结果数组。
+- DVP 模式下可由 `polygon` 反算 `bbox` 和局部 `Mask`。
+- DVT / RPC 模式下 `mask` 优先从共享内存或 `mask_ptr` 读取。
+- 无 mask 时输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`。
 
 ### `SlidingWindowModel`
 
@@ -161,23 +171,17 @@
 
 ### `FlowGraphModel`
 
-`FlowGraphModel` 是流程图推理封装类，实现了 `IDisposable`。
+`FlowGraphModel` 是流程图推理封装类，实现了 `IDisposable`。当前实现文件为 `DlcvCsharpApi\flow\FlowGraphModel.cs`。
 
-当前实现文件为 `DlcvCsharpApi\flow\FlowGraphModel.cs`。
+共享的 Flow 节点分类、统一输入输出字段、模板对象与计时口径见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
-流程节点、模块输入输出和统一语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`Benchmark()`、`Dispose()`；执行时会把前端图像、`device_id` 和 `return_json_emit_poly` 写入 `ExecutionContext`，并把 `result_list` 转为结构化结果或 JSON 输出。
+C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`Benchmark()`、`Dispose()`；执行时会把前端图像、`device_id` 和 `return_json_emit_poly` 写入 `ExecutionContext`，并把 `result_list` 转为结构化结果或 JSON 输出。
 
 ### `DvsModel`
 
-`DvsModel` 继承 `FlowGraphModel`，用于加载 `.dvst`、`.dvso`、`.dvsp` 文件。
-
-当前实现文件为 `DlcvCsharpApi\flow\DvsModel.cs`。
+`DvsModel` 继承 `FlowGraphModel`，用于加载 `.dvst`、`.dvso`、`.dvsp` 文件。当前实现文件为 `DlcvCsharpApi\flow\DvsModel.cs`。
 
 C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `model_path` 重写，以及临时目录清理。
-
-## JSON 输出与结构化输出约定
-
-`Infer()` 与 `InferBatch()` 统一返回 `Utils.CSharpResult`。DVP 模式下可由 `polygon` 反算 `bbox` 和局部 `Mask`；DVT / RPC 模式下 `mask` 优先从共享内存或 `mask_ptr` 读取。`Model.InferOneOutJson()` 返回单图 JSON 结果数组；无 mask 时输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`。`FlowGraphModel.InferOneOutJson()` 直接返回流程单图 `result_list`。C# 结构化结果的 `Bbox` 使用 `[x, y, w, h]` 或 `[cx, cy, w, h] + Angle`；`mask_rle`、`poly`、`extra_info.polyline`、`metadata` 的统一语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
 ## 工具类与辅助 API
 
@@ -193,19 +197,23 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 
 `sntl_admin_csharp` 对外提供状态枚举 `SntlAdminStatus`、原生加载器 `SNTLDllLoader`、运行时访问类 `SNTL` 和工具类 `SNTLUtils`。`SNTL` 负责建立上下文并提供 `Get()`、`GetSntlInfo()`、`GetDeviceList()`、`GetFeatureList()`、`Dispose()`；`SNTLUtils` 提供静态的设备列表与特征列表查询。`DllLoader` 通过 `SNTL.GetFeatureList()` 读取授权特征列表，以决定是否切换到 `dlcv_infer2.dll`。
 
-## Flow 与模块
-
-Flow、模块分类、统一输入输出字段和模板数据语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
+## Flow 的 C# 实现入口
 
 ### 执行框架
 
 `ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、链路路由、标量注入、`NormalizeBboxProperties()` 和模型节点预加载；`LoadModels()` 仅对 `BaseModelModule` 调用 `LoadModel()`，并把加载元信息写入 `ExecutionContext.loaded_model_meta`。
 
-### 模块实现
+### 模块实现文件
 
 当前模块实现代码位于 `DlcvCsharpApi\flow\modules\`，主要文件包括 `Inputs.cs`、`Models.cs`、`Outputs.cs`、`Features.cs`、`SlidingWindow.cs`、`SlidingMerge.cs`、`PolyFilter.cs`、`ResultFilterRegion.cs`、`ResultCategoryOverride.cs`、`StrokeToPoints.cs`、`Templates.cs`、`Visualize.cs`。
 
-### 补充约定
+### C# 层补充约定
 
-`ReturnJson` 会把结果聚合到 `ExecutionContext.frontend_json` 的 `last` 与 `by_node`。`VisualizeOnOriginal` 在原图上绘制 mask、轮廓、框和文本。`SlidingWindow` 负责切图并写入 `sliding_meta`；`SlidingMergeResults` 负责把结果映射回原图并合并；`PolyFilter` 会更新 `extra_info.polyline` 以及相关 `metadata`。读盘和写盘遵循 OpenCV 的 BGR 语义；普通 `Model` 在三通道推理前转为 RGB；`FlowGraphModel` 入口按 RGB 语义透传。当前显式使用的标量键包括 `filename`、`has_positive`、`ok`、`detail`、`kept_count`、`removed_count`。模板相关类型为 `SimpleOcrItem`、`SimpleTemplate` 和 `SimpleTemplateMatchDetail`。
+- `ReturnJson` 会把结果聚合到 `ExecutionContext.frontend_json` 的 `last` 与 `by_node`。
+- `VisualizeOnOriginal` 在原图上绘制 mask、轮廓、框和文本。
+- `SlidingWindow` 负责切图并写入 `sliding_meta`；`SlidingMergeResults` 负责把结果映射回原图并合并。
+- `PolyFilter` 会更新 `extra_info.polyline` 以及相关 `metadata`。
+- 读盘和写盘遵循 OpenCV 的 BGR 语义；普通 `Model` 在三通道推理前转为 RGB；`FlowGraphModel` 入口按 RGB 语义透传。
+- 当前显式使用的标量键包括 `filename`、`has_positive`、`ok`、`detail`、`kept_count`、`removed_count`。
+- 模板相关类型为 `SimpleOcrItem`、`SimpleTemplate` 和 `SimpleTemplateMatchDetail`。
 
