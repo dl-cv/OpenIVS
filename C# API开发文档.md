@@ -86,37 +86,15 @@ dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
 
 ### `Utils.CSharpObjectResult`
 
-| 字段 | 类型 | 当前语义 |
-| --- | --- | --- |
-| `CategoryId` | `int` | 类别 ID |
-| `CategoryName` | `string` | 类别名称 |
-| `Score` | `float` | 置信度 |
-| `Area` | `float` | 面积 |
-| `WithBbox` | `bool` | 是否包含框 |
-| `Bbox` | `List<double>` | 普通框为 `[x, y, w, h]`；旋转框为 `[cx, cy, w, h]` |
-| `WithMask` | `bool` | 是否包含 mask |
-| `Mask` | `Mat` | 单通道 8 位图；0 表示非目标像素，255 表示目标像素 |
-| `Polyline` | `List<Point2d>` | 开放折线点集；坐标语义与当前结果中的 `bbox` / `poly` 保持一致 |
-| `WithAngle` | `bool` | 是否包含角度 |
-| `Angle` | `float` | 旋转框角度，弧度制；无角度时为 `-100` |
-
-`Mask` 的尺寸与 `Bbox` 的宽高语义一致。`ToString()` 会输出类别名称、百分制分数、面积，并在存在时追加角度、框、mask 尺寸与折线点数量。
+`CSharpObjectResult` 把单个目标结果组织成四组信息：识别信息 `CategoryId`、`CategoryName`、`Score`、`Area`；几何信息 `WithBbox`、`Bbox`、`WithAngle`、`Angle`，其中普通框使用 `[x, y, w, h]`，旋转框使用 `[cx, cy, w, h]`，无角度时 `Angle = -100`；区域信息 `WithMask`、`Mask`，`Mask` 为与框宽高语义一致的单通道 8 位图，0 表示背景、255 表示目标；折线信息 `Polyline`，用于保存与当前 `bbox` / `poly` 同坐标系的开放折线。`ToString()` 会输出类别、百分制分数、面积，并在存在时追加角度、框、mask 尺寸与折线点数量。
 
 ### `Utils.CSharpSampleResult`
 
-`CSharpSampleResult` 表示单张图片的结果，唯一字段为：
-
-- `Results`：`List<CSharpObjectResult>`
-
-`ToString()` 逐条拼接 `CSharpObjectResult.ToString()` 的输出。
+`CSharpSampleResult` 表示单张图片结果，核心字段只有 `Results`，类型为 `List<CSharpObjectResult>`；`ToString()` 逐条拼接其中每个目标结果的文本表示。
 
 ### `Utils.CSharpResult`
 
-`CSharpResult` 表示批量结果，唯一字段为：
-
-- `SampleResults`：`List<CSharpSampleResult>`
-
-列表长度与输入图片数量一一对应。
+`CSharpResult` 表示批量结果，核心字段为 `SampleResults`，类型为 `List<CSharpSampleResult>`，长度与输入图片数量一一对应。
 
 ## 核心模型类
 
@@ -124,16 +102,9 @@ dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
 
 `Model` 是基础推理封装类，实现了 `IDisposable`。
 
-#### 构造与公共成员
+#### 公开面
 
-| 成员 | 当前实现 |
-| --- | --- |
-| `Model()` | 空构造，不加载模型 |
-| `Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false)` | 按路径后缀与 `rpc_mode` 选择运行模式并加载模型 |
-| `EnableConsoleLog` | 静态属性，默认 `true`；控制内部 `Console.WriteLine` 日志 |
-| `modelIndex` | 公共字段；DVT 模式使用底层返回的 `model_index`，DVP/DVS/RPC 模式加载成功后置为 `1` |
-| `OwnModelIndex` | 公共属性，默认 `true`；为 `false` 时 `FreeModel()` 与 `Dispose()` 不释放底层模型，只将 `modelIndex` 置为 `-1` |
-| `IsDvpMode` | 只读属性，返回当前是否为 DVP 模式 |
+`Model` 的公开面围绕四类能力组织：生命周期与状态包括空构造、带参构造、`EnableConsoleLog`、`modelIndex`、`OwnModelIndex`、`IsDvpMode`、`FreeModel()`、`Dispose()`；缓存与批量元信息包括 `GetCachedModelInfo()`、`GetCachedMaxShape()`、`GetMaxBatchSize()`、`GetResolvedSubModelBatchItems()`、`ClearModelCache()`；模型信息查询使用 `GetModelInfo()`；推理入口使用 `Infer()`、`InferBatch()` 与 `InferOneOutJson()`。
 
 #### 模型加载规则
 
@@ -144,43 +115,11 @@ dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
 
 #### 模型缓存
 
-当 `enableCache=true` 时，缓存键为：
-
-- 模型绝对路径的小写规范化值
-- `device_id`
-- 运行模式标识（`dvp` / `dvs` / `rpc` / `dvt`）
-
-缓存命中后直接复用 `modelIndex`。`ClearModelCache()` 清空静态模型缓存与加载中集合。
-
-#### 公共方法
-
-| 方法 | 返回值 | 当前行为 |
-| --- | --- | --- |
-| `GetResolvedSubModelBatchItems()` | `List<JObject>` | 返回当前缓存的子模型批量信息列表，每项包含 `name`、`max_shape`、`max_batch_size` |
-| `FreeModel()` | `void` | 按当前模式释放模型；DVP 走 HTTP，DVS 释放 `DvsModel`，RPC 走管道，DVT 调用 `dlcv_free_model` |
-| `GetCachedModelInfo()` | `JObject` | 返回当前缓存的模型信息深拷贝 |
-| `GetCachedMaxShape()` | `JArray` | 返回当前缓存的 `max_shape` 深拷贝 |
-| `GetMaxBatchSize()` | `int` | 返回解析后的最大 batch，大于等于 `1` |
-| `GetModelInfo()` | `JObject` | 按当前模式获取模型信息；若 `task_type` 为 `OCR`，会移除 `character`、`dict`、`classes` 字段 |
-| `Infer(Mat image, JObject params_json = null)` | `Utils.CSharpResult` | 单张推理，返回结构化结果 |
-| `InferBatch(List<Mat> image_list, JObject params_json = null)` | `Utils.CSharpResult` | 多张推理，返回结构化结果 |
-| `InferOneOutJson(Mat image, JObject params_json = null)` | `dynamic` | 单张推理，返回 JSON 数组 |
-| `Dispose()` | `void` | 调用 `FreeModel()` 并释放托管资源 |
-| `ClearModelCache()` | `void` | 清空静态缓存 |
+当 `enableCache=true` 时，缓存键由模型绝对路径的小写规范化值、`device_id` 和运行模式标识 `dvp` / `dvs` / `rpc` / `dvt` 组成；命中后直接复用 `modelIndex`，`ClearModelCache()` 会清空静态模型缓存与加载中集合。
 
 #### 图像通道处理
 
-`Model` 在推理前会根据模型信息中解析出的输入通道数执行图像归一化：
-
-- 期望 3 通道时：
-  - 灰度图转 `RGB`
-  - `BGRA` 转 `RGB`
-  - `BGR` 转 `RGB`
-- 期望 1 通道时：
-  - `BGR` 转灰度
-  - `BGRA` 转灰度
-
-16 位、浮点、带符号整型深度会先转换为 8 位深度。
+`Model` 在推理前会根据模型信息中解析出的输入通道数完成图像归一化：三通道模型统一转为 `RGB`，单通道模型统一转为灰度；输入若为 16 位、浮点或带符号整型深度，会先转换为 8 位深度。
 
 #### 模式差异
 
@@ -193,50 +132,15 @@ dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
 
 ### `SlidingWindowModel`
 
-`SlidingWindowModel` 继承 `Model`，构造函数为：
-
-```csharp
-SlidingWindowModel(
-    string modelPath,
-    int device_id,
-    int small_img_width = 832,
-    int small_img_height = 704,
-    int horizontal_overlap = 16,
-    int vertical_overlap = 16,
-    float threshold = 0.5f,
-    float iou_threshold = 0.2f,
-    float combine_ios_threshold = 0.2f)
-```
-
-该类直接向 `dlcv_load_model` 传入 `type = "sliding_window_pipeline"` 的 JSON 配置，加载成功后从返回 JSON 中读取 `model_index`。
+`SlidingWindowModel` 继承 `Model`，构造参数包括 `modelPath`、`device_id`、窗口宽高、横纵重叠、`threshold`、`iou_threshold`、`combine_ios_threshold`。该类直接向 `dlcv_load_model` 传入 `type = "sliding_window_pipeline"` 的 JSON 配置，加载成功后从返回 JSON 中读取 `model_index`。
 
 ### `OcrWithDetModel`
 
 `OcrWithDetModel` 是由一个检测模型和一个 OCR 识别模型组成的组合封装，实现了 `IDisposable`。
 
-#### 状态属性
+#### 公开面
 
-| 属性 | 当前语义 |
-| --- | --- |
-| `IsDetModelLoaded` | 检测模型是否已加载 |
-| `IsOcrModelLoaded` | OCR 模型是否已加载 |
-| `IsLoaded` | 两个模型是否均已加载 |
-
-#### 公共方法
-
-| 方法 | 返回值 | 当前行为 |
-| --- | --- | --- |
-| `SetHorizontalScale(float scale)` | `void` | 设置 OCR 裁剪图的水平缩放倍率 |
-| `GetHorizontalScale()` | `float` | 返回当前水平缩放倍率 |
-| `Load(string detModelPath, string ocrModelPath, int deviceId = 0, bool enableCache = false)` | `void` | 依次加载检测模型与 OCR 模型；任一失败时释放已加载模型 |
-| `GetModelInfo()` | `JObject` | 返回 `det_model` 与 `ocr_model` 两部分信息；单边失败时对应节点返回 `error` |
-| `Infer(Mat image, JObject paramsJson = null)` | `Utils.CSharpResult` | 单张 OCR 推理 |
-| `InferBatch(List<Mat> imageList, JObject paramsJson = null)` | `Utils.CSharpResult` | 批量 OCR 推理 |
-| `InferOneOutJson(Mat image, JObject params_json = null)` | `dynamic` | 返回单张图片的 JSON 结果数组 |
-| `FreeModel()` | `void` | 释放两个底层 `Model` |
-| `GetDetModelInfo()` | `JObject` | 返回检测模型信息 |
-| `GetOcrModelInfo()` | `JObject` | 返回 OCR 模型信息 |
-| `Dispose()` | `void` | 释放两个底层 `Model` |
+`OcrWithDetModel` 的状态由 `IsDetModelLoaded`、`IsOcrModelLoaded`、`IsLoaded` 表示；配置接口为 `SetHorizontalScale()` 与 `GetHorizontalScale()`；生命周期与加载接口为 `Load()`、`FreeModel()`、`Dispose()`；信息查询接口为 `GetModelInfo()`、`GetDetModelInfo()`、`GetOcrModelInfo()`；推理接口为 `Infer()`、`InferBatch()`、`InferOneOutJson()`。`GetModelInfo()` 返回 `det_model` 与 `ocr_model` 两部分信息，任一侧查询失败时，对应节点返回 `error`。
 
 #### 推理行为
 
@@ -251,32 +155,13 @@ SlidingWindowModel(
 
 `FlowGraphModel` 是流程图推理封装类，实现了 `IDisposable`。
 
-#### 公共方法
+#### 公开面
 
-| 方法 | 返回值 | 当前行为 |
-| --- | --- | --- |
-| `Load(string flowJsonPath, int deviceId = 0)` | `JObject` | 从流程 JSON 文件加载流程图并初始化图内模型 |
-| `GetLoadedModelMeta()` | `JArray` | 返回加载阶段收集到的模型元信息 |
-| `GetModelInfo()` | `JObject` | 返回流程 JSON 根对象 |
-| `Infer(Mat image, JObject paramsJson = null)` | `Utils.CSharpResult` | 单张流程图推理 |
-| `InferBatch(List<Mat> imageList, JObject paramsJson = null)` | `Utils.CSharpResult` | 批量流程图推理 |
-| `InferOneOutJson(Mat image, JObject paramsJson = null)` | `dynamic` | 返回单张图片对应的流程 `result_list` |
-| `Benchmark(Mat image, int warmup = 1, int runs = 10)` | `double` | 先预热再重复推理，返回平均毫秒数 |
-| `Dispose()` | `void` | 仅设置内部释放标志 |
+`FlowGraphModel` 的公开接口包括流程加载 `Load()`、模型元信息访问 `GetLoadedModelMeta()` 与 `GetModelInfo()`、推理入口 `Infer()` / `InferBatch()` / `InferOneOutJson()`、测速入口 `Benchmark()` 和生命周期接口 `Dispose()`。
 
 #### 输入约定
 
-`FlowGraphModel` 在执行流程时向 `ExecutionContext` 写入以下固定键：
-
-- `frontend_image_mat`
-- `frontend_image_mats`
-- `frontend_image_mat_list`
-- `frontend_image_color_space = "rgb"`
-- `frontend_image_path = ""`
-- `device_id`
-- `return_json_emit_poly`
-
-流程入口图像按 RGB 语义透传，不在 `FlowGraphModel` 内部整图转换为 BGR。
+`FlowGraphModel` 在执行流程时会向 `ExecutionContext` 写入前端图像单张与批量入口、`frontend_image_color_space = "rgb"`、空的 `frontend_image_path`、`device_id` 和 `return_json_emit_poly`。流程入口图像按 RGB 语义透传，不在 `FlowGraphModel` 内部整图转换为 BGR。
 
 #### 返回行为
 
@@ -289,78 +174,21 @@ SlidingWindowModel(
 
 `DvsModel` 继承 `FlowGraphModel`，用于加载 `.dvst`、`.dvso`、`.dvsp` 文件。
 
-当前实现中的加载流程为：
-
-1. 校验文件头 `DV\n`
-2. 读取第二行 JSON 头
-3. 从 `file_list` 与 `file_size` 逐个解包文件
-4. 将 `pipeline.json` 读入内存
-5. 其他文件写入临时目录
-6. 将流程中各节点的 `model_path` 重写到临时文件路径
-7. 调用 `LoadFromRoot()` 继续完成流程图加载
-8. 在 `finally` 中删除临时目录
-
-流程节点中会为原始模型路径额外写入：
-
-- `model_path_original`
-- `model_name`
+当前实现中，`DvsModel` 会校验 `DV\n` 文件头，解析第二行 JSON 头，按 `file_list` 与 `file_size` 解包 `pipeline.json` 和其他模型文件，将非 `pipeline.json` 文件写入临时目录并把流程中的 `model_path` 重写到临时路径，再调用 `LoadFromRoot()` 完成加载，最后在 `finally` 中删除临时目录。流程节点会额外补充 `model_path_original` 与 `model_name`。
 
 ## JSON 输出与结构化输出约定
 
 ### `Model` / `OcrWithDetModel` 的结构化输出
 
-`Infer()` 与 `InferBatch()` 返回 `Utils.CSharpResult`，其中：
-
-- `SampleResults` 长度等于输入图像数量
-- 每个检测对象都映射为 `CSharpObjectResult`
-- DVP 模式下，如果原始 `bbox` 为 `[x1, y1, x2, y2]`，会转为 `[x, y, w, h]`
-- DVP 模式下，如果 `bbox` 缺失但存在 `polygon`，会由 `polygon` 计算轴对齐框
-- DVP 模式下 `with_mask=true` 且存在 `polygon` 时，会根据 `polygon` 与 `bbox` 生成局部 `Mask`
-- DVT / RPC 模式下，`mask` 优先从共享内存读取，其次从 `mask_ptr` 读取，再按 `bbox` 尺寸缩放到局部 mask
-- `polyline` 支持两种 JSON 形式：
-  - `[[x, y], ...]`
-  - `[{ "x": x, "y": y }, ...]`
+`Infer()` 与 `InferBatch()` 返回 `Utils.CSharpResult`，`SampleResults` 长度等于输入图像数量，每个检测对象都映射为 `CSharpObjectResult`。DVP 模式下，原始 `bbox` 若为 `[x1, y1, x2, y2]` 会转成 `[x, y, w, h]`，缺失 `bbox` 但存在 `polygon` 时会由 `polygon` 反算轴对齐框，`with_mask=true` 且存在 `polygon` 时会进一步生成局部 `Mask`；DVT / RPC 模式下，`mask` 优先从共享内存读取，其次从 `mask_ptr` 读取，再按 `bbox` 尺寸缩放到局部 mask。`polyline` 同时支持 `[[x, y], ...]` 与 `[{ "x": x, "y": y }, ...]` 两种 JSON 形式。
 
 ### `Model.InferOneOutJson()`
 
-返回单张图片的 JSON 数组。每个结果对象当前统一为以下字段集合：
-
-- `category_id`
-- `category_name`
-- `score`
-- `bbox`
-- `with_bbox`
-- `area`
-- `angle`
-- `with_angle`
-- `mask`
-- `with_mask`
-- `polyline`（存在折线时输出）
-
-`mask` 的输出规则：
-
-- DVP 模式：`polygon` 转为点对象数组 `[{ "x": ..., "y": ... }, ...]`
-- DVS 模式：`poly` 的首个轮廓转为点对象数组
-- DVT / RPC 模式：若存在有效 `mask_ptr`，会从 mask 图像提取轮廓并输出点对象数组
-- 无 mask 时固定输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`
+返回值是单张图片的 JSON 结果数组，统一包含基础识别字段 `category_id`、`category_name`、`score`、`area`，几何字段 `bbox`、`with_bbox`、`angle`、`with_angle`，区域字段 `mask`、`with_mask`，以及存在折线时的 `polyline`。`mask` 在 DVP 模式下由 `polygon` 转成点对象数组，在 DVS 模式下由 `poly` 的首个轮廓转成点对象数组，在 DVT / RPC 模式下由有效 `mask_ptr` 对应的 mask 图像提取轮廓；没有 mask 时固定输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`。
 
 ### `FlowGraphModel.InferOneOutJson()`
 
-`FlowGraphModel.InferOneOutJson()` 直接返回流程 `result_list` 的单图结果数组，不再经过 `Model.StandardizeJsonOutput()` 标准化。流程输出可能包含以下字段：
-
-- `category_id`
-- `category_name`
-- `score`
-- `bbox`
-- `area`
-- `with_bbox`
-- `with_mask`
-- `with_angle`
-- `angle`
-- `poly`
-- `polyline`
-- `metadata`
-- `mask_rle`
+`FlowGraphModel.InferOneOutJson()` 直接返回流程 `result_list` 的单图结果数组，不再经过 `Model.StandardizeJsonOutput()` 标准化。流程输出通常包含基础识别字段 `category_id`、`category_name`、`score`、`area`，几何字段 `bbox`、`with_bbox`、`with_angle`、`angle`，形状字段 `poly`、`polyline`、`mask_rle`，以及附加信息字段 `metadata`。
 
 ### 坐标语义
 
@@ -378,92 +206,25 @@ SlidingWindowModel(
 
 ### `Utils`
 
-`Utils` 是 `partial class`，当前公开方法如下：
-
-| 方法 | 返回值 | 当前行为 |
-| --- | --- | --- |
-| `jsonToString(JObject json)` | `string` | 以 `EscapeNonAscii` 方式序列化对象 |
-| `jsonToString(JArray json)` | `string` | 以 `EscapeNonAscii` 方式序列化数组 |
-| `ConvertToVisualizeFormat(CSharpResult result)` | `JArray` | 把结构化结果转成 `VisualizeOnOriginal` 使用的 `sample_results` JSON |
-| `VisualizeResults(List<Mat> images, CSharpResult result, Dictionary<string, object> properties = null)` | `List<Mat>` | 构造 `ModuleImage`，调用 `VisualizeOnOriginal` 返回绘制后的图像 |
-| `FreeAllModels()` | `void` | 调用底层 `dlcv_free_all_models()` |
-| `GetDeviceInfo()` | `JObject` | 优先调用导出的 `dlcv_get_gpu_info`，否则调用 `dlcv_get_device_info` |
-| `OcrInfer(Model detectModel, Model recognizeModel, Mat image)` | `CSharpResult` | 先检测，再对 ROI 做识别，用识别结果的首个类别名覆盖检测结果 |
-| `GetGpuInfo()` | `JObject` | 通过 NVML 枚举 GPU，返回 `code`、`message`、`devices` |
-
-`ConvertToVisualizeFormat()` 在结构化结果中仅序列化：
-
-- `category_id`
-- `category_name`
-- `score`
-- `bbox`
-- `with_angle`
-- `angle`
-- `with_mask`
-- `mask_rle`
+`Utils` 是 `partial class`。公开能力分为四类：JSON 序列化 `jsonToString(JObject)` 与 `jsonToString(JArray)`；结构化结果转可视化 JSON 的 `ConvertToVisualizeFormat()` 与直接绘图的 `VisualizeResults()`；底层资源与设备查询的 `FreeAllModels()`、`GetDeviceInfo()`、`GetGpuInfo()`；以及组合式 OCR 推理 `OcrInfer(Model detectModel, Model recognizeModel, Mat image)`。其中 `ConvertToVisualizeFormat()` 仅把结构化结果中的 `category_id`、`category_name`、`score`、`bbox`、`with_angle`、`angle`、`with_mask` 和 `mask_rle` 写入可视化 JSON。
 
 ### `DllLoader`
 
-`DllLoader` 是单例类，`Instance` 首次访问时加载原生 DLL，并绑定以下委托：
-
-- `dlcv_load_model`
-- `dlcv_free_model`
-- `dlcv_get_model_info`
-- `dlcv_infer`
-- `dlcv_free_model_result`
-- `dlcv_free_result`
-- `dlcv_free_all_models`
-- `dlcv_get_device_info`
-- `dlcv_get_gpu_info`
-- `dlcv_keep_max_clock`
-
-授权特征列表中包含字符串 `"2"` 时，优先改用 `dlcv_infer2.dll`。
+`DllLoader` 是单例原生入口分发器，`Instance` 首次访问时完成三组委托绑定：模型生命周期接口 `dlcv_load_model`、`dlcv_free_model`、`dlcv_free_all_models`；模型信息、推理和结果释放接口 `dlcv_get_model_info`、`dlcv_infer`、`dlcv_free_model_result`、`dlcv_free_result`；设备与时钟查询接口 `dlcv_get_device_info`、`dlcv_get_gpu_info`、`dlcv_keep_max_clock`。授权特征列表中包含字符串 `"2"` 时，优先改用 `dlcv_infer2.dll`。
 
 ### `sntl_admin_csharp`
 
-当前公开类型包括：
-
-- `SntlAdminStatus`
-- `SNTLDllLoader`
-- `SNTL`
-- `SNTLUtils`
-
-`SNTL` 的公开方法包括：
-
-- `Get(string scope, string format)`
-- `GetSntlInfo()`
-- `GetDeviceList()`
-- `GetFeatureList()`
-- `Dispose()`
-
-`SNTLUtils` 的公开静态方法包括：
-
-- `GetDeviceList()`
-- `GetFeatureList()`
-
-`DllLoader` 通过 `SNTL.GetFeatureList()` 读取授权特征列表，以决定是否切换到 `dlcv_infer2.dll`。
+`sntl_admin_csharp` 对外提供状态枚举 `SntlAdminStatus`、原生加载器 `SNTLDllLoader`、运行时访问类 `SNTL` 和工具类 `SNTLUtils`。`SNTL` 负责建立上下文并提供 `Get()`、`GetSntlInfo()`、`GetDeviceList()`、`GetFeatureList()`、`Dispose()`；`SNTLUtils` 提供静态的设备列表与特征列表查询。`DllLoader` 通过 `SNTL.GetFeatureList()` 读取授权特征列表，以决定是否切换到 `dlcv_infer2.dll`。
 
 ## 流程图执行框架
 
 ### 基础运行时类型
 
-| 类型 | 当前职责 |
-| --- | --- |
-| `ExecutionContext` | 区分大小写不敏感的运行时键值容器；公开 `Get<T>()` 与 `Set()` |
-| `ModuleRegistry` | 维护 `moduleType -> Type` 映射；公开 `Register()` 与 `Get()` |
-| `GlobalDebug` | 控制是否打印调试日志；公开 `PrintDebug` 与 `Log()` |
-| `InferTiming` | 记录流程请求耗时与底层推理耗时 |
-| `TransformationState` | 保存原图尺寸、裁剪框、仿射矩阵、输出尺寸，并支持克隆与矩阵运算 |
-| `ModuleImage` | 将 `Mat`、原图、变换状态、原图序号、滑窗元数据打包 |
-| `ModuleIO` | 一次模块调用的图像、结果、模板输出容器 |
-| `ModuleChannel` | 图像、结果、模板三类通道的中间容器 |
+`ExecutionContext` 提供不区分大小写的运行时键值访问；`ModuleRegistry` 维护 `moduleType -> Type` 注册表；`GlobalDebug` 与 `InferTiming` 分别承担调试输出和耗时记录；`TransformationState` 保存原图尺寸、裁剪框、仿射矩阵和输出尺寸；`ModuleImage` 将 `Mat`、原图、变换状态、原图序号和滑窗元数据打包；`ModuleIO` 与 `ModuleChannel` 分别作为模块调用输出容器和通道中间容器。
 
 ### 模块基类
 
-| 类型 | 当前行为 |
-| --- | --- |
-| `BaseModule` | 保存节点 ID、标题、属性、上下文、扩展输入、扩展输出、模板列表、标量输入输出；默认 `Process()` 返回空图像与空结果 |
-| `BaseInputModule` | 继承 `BaseModule`；`Process()` 固定调用 `Generate()` |
+`BaseModule` 保存节点 ID、标题、属性、上下文、扩展输入、扩展输出、模板列表以及标量输入输出，默认 `Process()` 返回空图像与空结果；`BaseInputModule` 继承 `BaseModule`，并把 `Process()` 固定为调用 `Generate()`。
 
 ### `GraphExecutor`
 
@@ -473,27 +234,7 @@ SlidingWindowModel(
 GraphExecutor(List<Dictionary<string, object>> nodes, ExecutionContext context)
 ```
 
-当前执行机制如下：
-
-1. 对所有非抽象 `BaseModule` 子类执行静态构造，触发 `ModuleRegistry.Register()`
-2. 读取节点的 `id`、`type`、`title`、`order`、`properties`、`inputs`、`outputs`
-3. 先按 `order`，再按 `id` 排序
-4. 通过 `outputs[*].links` 建立 `linkId -> (源节点, 源输出端口)` 映射
-5. 实例化模块并填入 `NodeId`、`Title`、`Properties`、`Context`
-6. 每两个输入端口为一组：
-   - 第 0 组为主通道
-   - 第 1 组及以后写入 `ExtraInputsIn`
-7. 标量端口从上游 `scalars` 读取，写入：
-   - `ScalarInputsByIndex`
-   - `ScalarInputsByName`
-8. 调用 `Process(mainImages, mainResults)`
-9. 将主输出写回：
-   - `image_list`
-   - `result_list`
-   - `template_list`
-10. 若节点输出端口声明为标量类型，则从 `ScalarOutputsByName` 写回 `scalars`
-
-`NormalizeBboxProperties()` 会在节点属性中存在 `bbox_x1`、`bbox_y1`、`bbox_x2`、`bbox_y2` 且未显式给出 `bbox_x`、`bbox_y`、`bbox_w`、`bbox_h` 时，自动补齐 `xywh`。
+执行时会先触发所有非抽象 `BaseModule` 子类的静态注册，再读取节点的 `id`、`type`、`title`、`order`、`properties`、`inputs`、`outputs`，按 `order` 再按 `id` 排序，并通过 `outputs[*].links` 建立 `linkId -> (源节点, 源输出端口)` 映射。实例化模块后，每两个输入端口为一组，第 0 组作为主通道，其余写入 `ExtraInputsIn`；标量输入从上游 `scalars` 写入 `ScalarInputsByIndex` 和 `ScalarInputsByName`。`Process(mainImages, mainResults)` 执行完成后，主输出回写 `image_list`、`result_list`、`template_list`，标量输出则从 `ScalarOutputsByName` 回写 `scalars`。`NormalizeBboxProperties()` 会在节点属性中给出 `bbox_x1`、`bbox_y1`、`bbox_x2`、`bbox_y2` 但未显式给出 `bbox_x`、`bbox_y`、`bbox_w`、`bbox_h` 时自动补齐 `xywh`。
 
 ### 流程加载
 
@@ -532,125 +273,55 @@ GraphExecutor(List<Dictionary<string, object>> nodes, ExecutionContext context)
 
 ### 预处理、特征处理与后处理模块
 
-| 注册类型 | 类名 | 当前行为 |
+| 类名 | 注册类型 | 当前行为 |
 | --- | --- | --- |
-| `pre_process/sliding_window` | `SlidingWindow` | 按窗口尺寸与重叠率切图 |
-| `features/sliding_window` | `SlidingWindow` | 同上 |
-| `pre_process/sliding_merge` | `SlidingMergeResults` | 合并滑窗结果 |
-| `features/sliding_merge` | `SlidingMergeResults` | 同上 |
-| `features/image_generation` | `ImageGeneration` | 按检测结果裁剪生成子图 |
-| `features/image_flip` | `ImageFlip` | 对图像做水平或竖直翻转并更新变换状态 |
-| `post_process/mask_to_rbox` | `MaskToRBox` | 由 mask 计算旋转框 |
-| `features/mask_to_rbox` | `MaskToRBox` | 同上 |
-| `post_process/merge_results` | `MergeResults` | 合并主路与扩展路结果 |
-| `features/merge_results` | `MergeResults` | 同上 |
-| `post_process/result_filter` | `ResultFilter` | 按类别拆分结果，未命中项进入 `ExtraOutputs[0]` |
-| `features/result_filter` | `ResultFilter` | 同上 |
-| `post_process/result_filter_advanced` | `ResultFilterAdvanced` | 按 bbox、rbox、bbox area、mask area 过滤 |
-| `features/result_filter_advanced` | `ResultFilterAdvanced` | 同上 |
-| `pre_process/coordinate_crop` | `CoordinateCrop` | 按 `x,y,w,h` 裁剪图像并派生子变换 |
-| `features/coordinate_crop` | `CoordinateCrop` | 同上 |
-| `pre_process/image_rescale` | `ImageRescale` | 按比例缩放图像并更新变换状态 |
-| `features/image_rescale` | `ImageRescale` | 同上 |
-| `features/image_rotate_by_cls` | `ImageRotateByClassification` | 根据分类标签将图像旋转 0/90/180/270 度，并同步更新结果几何 |
-| `post_process/text_replacement` | `TextReplacement` | 按 `mapping` 替换 `category_name` |
-| `features/text_replacement` | `TextReplacement` | 同上 |
-| `post_process/rbox_correction` | `RBoxCorrection` | 根据参考角度回正图像并同步结果几何 |
-| `features/rbox_correction` | `RBoxCorrection` | 同上 |
-| `post_process/result_label_merge` | `ResultLabelMerge` | 用主路标签与第二路标签拼接新类别名 |
-| `features/result_label_merge` | `ResultLabelMerge` | 同上 |
-| `post_process/bbox_iou_dedup` | `BBoxIoUDedup` | 对轴对齐框按 IoU 或 IoS 去重 |
-| `features/bbox_iou_dedup` | `BBoxIoUDedup` | 同上 |
-| `post_process/result_filter_region` | `ResultFilterRegion` | 按 ROI 判断检测是否落在区域内 |
-| `features/result_filter_region` | `ResultFilterRegion` | 同上 |
-| `post_process/result_filter_region_global` | `ResultFilterRegionGlobal` | 按原图坐标判定区域过滤，输出坐标系不改为原图 |
-| `features/result_filter_region_global` | `ResultFilterRegionGlobal` | 同上 |
-| `post_process/result_category_override` | `ResultCategoryOverride` | 用第二路结果覆盖主路已有字符串类别名 |
-| `features/result_category_override` | `ResultCategoryOverride` | 同上 |
-| `post_process/poly_filter` | `PolyFilter` | 从 polygon / mask 提取上沿或下沿折线并写回 `polyline` |
-| `features/poly_filter` | `PolyFilter` | 同上 |
-| `features/stroke_to_points` | `StrokeToPoints` | 从 mask 沿笔画方向生成等间距点框 |
-| `features/template_from_results` | `TemplateFromResults` | 从 OCR 结果构建 `SimpleTemplate` |
-| `features/template_save` | `TemplateSave` | 将模板写为 JSON，可选同时写 PNG |
-| `features/template_load` | `TemplateLoad` | 从 JSON 读取模板 |
-| `features/template_match` | `TemplateMatch` | 比较主模板与第二路模板，输出 `ok` 与 `detail` |
-| `features/printed_template_match` | `PrintedTemplateMatch` | 按产品类型组织模板生成、保存、加载与匹配流程 |
+| `SlidingWindow` | `pre_process/sliding_window`，`features/sliding_window` | 按窗口尺寸与重叠率切图 |
+| `SlidingMergeResults` | `pre_process/sliding_merge`，`features/sliding_merge` | 合并滑窗结果 |
+| `ImageGeneration` | `features/image_generation` | 按检测结果裁剪生成子图 |
+| `ImageFlip` | `features/image_flip` | 对图像做水平或竖直翻转并更新变换状态 |
+| `MaskToRBox` | `post_process/mask_to_rbox`，`features/mask_to_rbox` | 由 mask 计算旋转框 |
+| `MergeResults` | `post_process/merge_results`，`features/merge_results` | 合并主路与扩展路结果 |
+| `ResultFilter` | `post_process/result_filter`，`features/result_filter` | 按类别拆分结果，未命中项进入 `ExtraOutputs[0]` |
+| `ResultFilterAdvanced` | `post_process/result_filter_advanced`，`features/result_filter_advanced` | 按 bbox、rbox、bbox area、mask area 过滤 |
+| `CoordinateCrop` | `pre_process/coordinate_crop`，`features/coordinate_crop` | 按 `x,y,w,h` 裁剪图像并派生子变换 |
+| `ImageRescale` | `pre_process/image_rescale`，`features/image_rescale` | 按比例缩放图像并更新变换状态 |
+| `ImageRotateByClassification` | `features/image_rotate_by_cls` | 根据分类标签将图像旋转 0/90/180/270 度，并同步更新结果几何 |
+| `TextReplacement` | `post_process/text_replacement`，`features/text_replacement` | 按 `mapping` 替换 `category_name` |
+| `RBoxCorrection` | `post_process/rbox_correction`，`features/rbox_correction` | 根据参考角度回正图像并同步结果几何 |
+| `ResultLabelMerge` | `post_process/result_label_merge`，`features/result_label_merge` | 用主路标签与第二路标签拼接新类别名 |
+| `BBoxIoUDedup` | `post_process/bbox_iou_dedup`，`features/bbox_iou_dedup` | 对轴对齐框按 IoU 或 IoS 去重 |
+| `ResultFilterRegion` | `post_process/result_filter_region`，`features/result_filter_region` | 按 ROI 判断检测是否落在区域内 |
+| `ResultFilterRegionGlobal` | `post_process/result_filter_region_global`，`features/result_filter_region_global` | 按原图坐标判定区域过滤，输出坐标系不改为原图 |
+| `ResultCategoryOverride` | `post_process/result_category_override`，`features/result_category_override` | 用第二路结果覆盖主路已有字符串类别名 |
+| `PolyFilter` | `post_process/poly_filter`，`features/poly_filter` | 从 polygon / mask 提取上沿或下沿折线并写回 `polyline` |
+| `StrokeToPoints` | `features/stroke_to_points` | 从 mask 沿笔画方向生成等间距点框 |
+| `TemplateFromResults` | `features/template_from_results` | 从 OCR 结果构建 `SimpleTemplate` |
+| `TemplateSave` | `features/template_save` | 将模板写为 JSON，可选同时写 PNG |
+| `TemplateLoad` | `features/template_load` | 从 JSON 读取模板 |
+| `TemplateMatch` | `features/template_match` | 比较主模板与第二路模板，输出 `ok` 与 `detail` |
+| `PrintedTemplateMatch` | `features/printed_template_match` | 按产品类型组织模板生成、保存、加载与匹配流程 |
 
 ## 主要模块行为补充
 
 ### `ReturnJson`
 
-`ReturnJson` 会将当前节点的结果按图片聚合为：
-
-```json
-{
-  "by_image": [
-    {
-      "origin_index": 0,
-      "original_size": { "width": 0, "height": 0 },
-      "results": []
-    }
-  ]
-}
-```
-
-聚合结果写入 `ExecutionContext.frontend_json`，并维护：
-
-- `frontend_json["last"]`
-- `frontend_json["by_node"][NodeId]`
-- `frontend_json_by_node`
-
-当上下文中 `return_json_emit_poly = true` 或节点属性显式要求输出 `poly` 时，结果中保留 `poly`。
+`ReturnJson` 会按图片把结果聚合到 `by_image`，每项至少包含 `origin_index`、`original_size` 和 `results`，并同步写入 `ExecutionContext.frontend_json` 的 `last`、`by_node[NodeId]` 与 `frontend_json_by_node`。当上下文中 `return_json_emit_poly = true` 或节点属性显式要求输出 `poly` 时，结果中保留 `poly`。
 
 ### `VisualizeOnOriginal`
 
-`VisualizeOnOriginal` 在原图上绘制：
-
-- `mask_rle` 解码后的填充区域
-- 轮廓
-- 普通框与旋转框
-- GDI+ 文本
-
-其颜色配置输入为 RGB 语义，绘制时转换为 OpenCV 使用的 BGR。
+`VisualizeOnOriginal` 会在原图上绘制 `mask_rle` 解码后的填充区域、轮廓、普通框、旋转框和 GDI+ 文本；颜色配置输入使用 RGB 语义，绘制时转换为 OpenCV 使用的 BGR。
 
 ### `SlidingWindow`
 
-`SlidingWindow` 会为每个窗口生成：
-
-- 子图 `ModuleImage`
-- 一条 `local` 结果
-- `sliding_meta`
-
-`sliding_meta` 包含：
-
-- `grid_x`
-- `grid_y`
-- `grid_size`
-- `win_size`
-- `slice_index`
-- `x`
-- `y`
-- `w`
-- `h`
+`SlidingWindow` 会为每个窗口生成子图 `ModuleImage`、一条 `local` 结果和 `sliding_meta`。`sliding_meta` 记录窗口在网格中的位置与尺寸信息，包括 `grid_x`、`grid_y`、`grid_size`、`win_size`、`slice_index` 以及窗口坐标 `x`、`y`、`w`、`h`。
 
 ### `SlidingMergeResults`
 
-`SlidingMergeResults` 会把窗口内结果映射回原图坐标，并按原图索引输出一张合并后的图像包装与一条 `local` 结果。合并逻辑支持：
-
-- 轴对齐框
-- 旋转框
-- mask union
-- bbox union
+`SlidingMergeResults` 会把窗口内结果映射回原图坐标，并按原图索引输出一张合并后的图像包装与一条 `local` 结果。当前合并逻辑同时支持轴对齐框、旋转框、`mask union` 和 `bbox union`。
 
 ### `PolyFilter`
 
-`PolyFilter` 的输出结果会更新：
-
-- `polyline`
-- `bbox`
-- `metadata.poly_filter_direction`
-- `metadata.poly_filter_source`
-- `metadata.poly_filter_mode = "boundary_line"`
+`PolyFilter` 会更新 `polyline`、`bbox` 和 `metadata` 中的 `poly_filter_direction`、`poly_filter_source`、`poly_filter_mode = "boundary_line"`。
 
 ## 图像与颜色约定
 
@@ -680,31 +351,13 @@ GraphExecutor(List<Dictionary<string, object>> nodes, ExecutionContext context)
 
 ### `SimpleOcrItem`
 
-字段包括：
-
-- `Text`
-- `Polygon`
-- `Confidence`
-- `CategoryName`
+`SimpleOcrItem` 表示模板中的单条 OCR 项，`Text` 保存文本内容，`Polygon` 保存对应区域轮廓，`Confidence` 保存该项置信度，`CategoryName` 保存该项类别名。
 
 ### `SimpleTemplate`
 
-字段包括：
-
-- `TemplateName`
-- `ProductName`
-- `ProductId`
-- `CameraPosition`
-- `OCRResults`
-- `template_id`
+`SimpleTemplate` 是可保存、可加载、可匹配的模板对象，由模板标识 `TemplateName`、`template_id`，产品标识 `ProductName`、`ProductId`，相机位 `CameraPosition` 和 OCR 项列表 `OCRResults` 组成。
 
 ### `SimpleTemplateMatchDetail`
 
-模板匹配详情对象当前用于保存：
-
-- `ocr_results`
-- `missing_template_items`
-- `deviation_template_items`
-- `misjudgment_pairs`
-- `template_match_info`
+`SimpleTemplateMatchDetail` 是模板匹配明细容器：`ocr_results` 保存本次识别结果，`missing_template_items` 保存缺失项，`deviation_template_items` 保存偏差项，`misjudgment_pairs` 保存误判配对，`template_match_info` 保存本次匹配汇总信息。
 
