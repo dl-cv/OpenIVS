@@ -7,7 +7,7 @@
 当前仓库内可通过以下命令生成发布版 DLL：
 
 ```bash
-dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
+dotnet build DlcvCsharpApi\DlcvCsharpApi.csproj -c Release -p:Platform=x64
 ```
 
 发布版输出路径为 `DlcvCsharpApi\bin\x64\Release\DlcvCsharpApi.dll`。
@@ -17,6 +17,18 @@ dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
 - `dlcv_infer_csharp`
 - `DlcvModules`
 - `sntl_admin_csharp`
+
+### 源码目录结构
+
+`DlcvCsharpApi` 当前源码按目录分层组织：
+
+| 目录 | 当前内容 |
+| --- | --- |
+| `DlcvCsharpApi\` | 普通模型与外部绑定层：`Model.cs`、`Utils.cs`、`DataTypes.cs`、`DllLoader.cs`、`SlidingWindowModel.cs`、`OcrWithDetModel.cs`、`sntl_admin_csharp.cs` |
+| `DlcvCsharpApi\flow\` | 流程入口与执行框架：`FlowGraphModel.cs`、`DvsModel.cs`、`GraphExecutor.cs` |
+| `DlcvCsharpApi\flow\runtime\` | 流程运行时公共类型：`ExecutionRuntime.cs`、`ModuleRuntime.cs` |
+| `DlcvCsharpApi\flow\modules\` | 流程模块实现：`Inputs.cs`、`Models.cs`、`Outputs.cs`、`Features.cs`、`SlidingWindow.cs`、`SlidingMerge.cs`、`PolyFilter.cs`、`ResultFilterRegion.cs`、`ResultCategoryOverride.cs`、`StrokeToPoints.cs`、`Templates.cs`、`Visualize.cs`、`MaskRleUtils.cs` |
+| `DlcvCsharpApi\Properties\` | 程序集元数据：`AssemblyInfo.cs` |
 
 ## 依赖与运行组件
 
@@ -155,6 +167,8 @@ dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
 
 `FlowGraphModel` 是流程图推理封装类，实现了 `IDisposable`。
 
+当前实现文件为 `DlcvCsharpApi\flow\FlowGraphModel.cs`。
+
 #### 公开面
 
 `FlowGraphModel` 的公开接口包括流程加载 `Load()`、模型元信息访问 `GetLoadedModelMeta()` 与 `GetModelInfo()`、推理入口 `Infer()` / `InferBatch()` / `InferOneOutJson()`、测速入口 `Benchmark()` 和生命周期接口 `Dispose()`。
@@ -173,6 +187,8 @@ dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
 ### `DvsModel`
 
 `DvsModel` 继承 `FlowGraphModel`，用于加载 `.dvst`、`.dvso`、`.dvsp` 文件。
+
+当前实现文件为 `DlcvCsharpApi\flow\DvsModel.cs`。
 
 当前实现中，`DvsModel` 会校验 `DV\n` 文件头，解析第二行 JSON 头，按 `file_list` 与 `file_size` 解包 `pipeline.json` 和其他模型文件，将非 `pipeline.json` 文件写入临时目录并把流程中的 `model_path` 重写到临时路径，再调用 `LoadFromRoot()` 完成加载，最后在 `finally` 中删除临时目录。流程节点会额外补充 `model_path_original` 与 `model_name`。
 
@@ -220,7 +236,7 @@ dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
 
 ### 基础运行时类型
 
-`ExecutionContext` 提供不区分大小写的运行时键值访问；`ModuleRegistry` 维护 `moduleType -> Type` 注册表；`GlobalDebug` 与 `InferTiming` 分别承担调试输出和耗时记录；`TransformationState` 保存原图尺寸、裁剪框、仿射矩阵和输出尺寸；`ModuleImage` 将 `Mat`、原图、变换状态、原图序号和滑窗元数据打包；`ModuleIO` 与 `ModuleChannel` 分别作为模块调用输出容器和通道中间容器。
+`ExecutionContext` 提供不区分大小写的运行时键值访问；`ModuleRegistry` 维护 `moduleType -> Type` 注册表；`GlobalDebug` 与 `InferTiming` 分别承担调试输出和耗时记录；`TransformationState` 保存原图尺寸、裁剪框、仿射矩阵和输出尺寸；`ModuleImage` 将 `Mat`、原图、变换状态、原图序号和滑窗元数据打包；`ModuleIO` 与 `ModuleChannel` 分别作为模块调用输出容器和通道中间容器。以上类型当前位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。
 
 ### 模块基类
 
@@ -234,6 +250,8 @@ dotnet build DlcvCsharpApi.csproj -c Release -p:Platform=x64
 GraphExecutor(List<Dictionary<string, object>> nodes, ExecutionContext context)
 ```
 
+`GraphExecutor` 当前实现文件为 `DlcvCsharpApi\flow\GraphExecutor.cs`。
+
 执行时会先触发所有非抽象 `BaseModule` 子类的静态注册，再读取节点的 `id`、`type`、`title`、`order`、`properties`、`inputs`、`outputs`，按 `order` 再按 `id` 排序，并通过 `outputs[*].links` 建立 `linkId -> (源节点, 源输出端口)` 映射。实例化模块后，每两个输入端口为一组，第 0 组作为主通道，其余写入 `ExtraInputsIn`；标量输入从上游 `scalars` 写入 `ScalarInputsByIndex` 和 `ScalarInputsByName`。`Process(mainImages, mainResults)` 执行完成后，主输出回写 `image_list`、`result_list`、`template_list`，标量输出则从 `ScalarOutputsByName` 回写 `scalars`。`NormalizeBboxProperties()` 会在节点属性中给出 `bbox_x1`、`bbox_y1`、`bbox_x2`、`bbox_y2` 但未显式给出 `bbox_x`、`bbox_y`、`bbox_w`、`bbox_h` 时自动补齐 `xywh`。
 
 ### 流程加载
@@ -241,6 +259,8 @@ GraphExecutor(List<Dictionary<string, object>> nodes, ExecutionContext context)
 `GraphExecutor.LoadModels()` 仅对 `BaseModelModule` 实例调用 `LoadModel()`，并返回加载报告 JSON。每个模型节点的加载元信息会追加到 `ExecutionContext` 的 `loaded_model_meta` 列表中。
 
 ## 模块注册表
+
+当前模块实现代码位于 `DlcvCsharpApi\flow\modules\`。
 
 ### 输入模块
 
