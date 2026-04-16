@@ -51,178 +51,14 @@ namespace dlcv_infer_csharp
             return (JObject)extraInfo.DeepClone();
         }
 
-        public static JObject CloneExtraInfo(JObject extraInfo)
-        {
-            return NormalizeExtraInfo(extraInfo);
-        }
-
-        public static bool TryGetExtraInfoInt(JObject extraInfo, string key, out int value)
-        {
-            value = 0;
-            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || token == null)
-            {
-                return false;
-            }
-            try
-            {
-                if (token.Type == JTokenType.Integer)
-                {
-                    value = token.Value<int>();
-                    return true;
-                }
-                if (token.Type == JTokenType.Float)
-                {
-                    value = (int)Math.Round(token.Value<double>());
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-            return false;
-        }
-
-        public static bool TryGetExtraInfoFloat(JObject extraInfo, string key, out float value)
-        {
-            value = 0f;
-            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || token == null)
-            {
-                return false;
-            }
-            try
-            {
-                if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
-                {
-                    value = token.Value<float>();
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-            return false;
-        }
-
-        public static bool TryGetExtraInfoDouble(JObject extraInfo, string key, out double value)
-        {
-            value = 0d;
-            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || token == null)
-            {
-                return false;
-            }
-            try
-            {
-                if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
-                {
-                    value = token.Value<double>();
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-            return false;
-        }
-
-        public static bool TryGetExtraInfoString(JObject extraInfo, string key, out string value)
-        {
-            value = null;
-            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || token == null)
-            {
-                return false;
-            }
-            if (token.Type == JTokenType.String)
-            {
-                value = token.Value<string>();
-                return true;
-            }
-            return false;
-        }
-
-        public static bool TryGetExtraInfoIntList(JObject extraInfo, string key, out List<int> values)
-        {
-            values = new List<int>();
-            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
-            {
-                return false;
-            }
-            for (int i = 0; i < arr.Count; i++)
-            {
-                if (!TryConvertTokenToInt(arr[i], out int parsed))
-                {
-                    values.Clear();
-                    return false;
-                }
-                values.Add(parsed);
-            }
-            return true;
-        }
-
-        public static bool TryGetExtraInfoFloatList(JObject extraInfo, string key, out List<float> values)
-        {
-            values = new List<float>();
-            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
-            {
-                return false;
-            }
-            for (int i = 0; i < arr.Count; i++)
-            {
-                if (!TryConvertTokenToDouble(arr[i], out double parsed))
-                {
-                    values.Clear();
-                    return false;
-                }
-                values.Add((float)parsed);
-            }
-            return true;
-        }
-
-        public static bool TryGetExtraInfoDoubleList(JObject extraInfo, string key, out List<double> values)
-        {
-            values = new List<double>();
-            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
-            {
-                return false;
-            }
-            for (int i = 0; i < arr.Count; i++)
-            {
-                if (!TryConvertTokenToDouble(arr[i], out double parsed))
-                {
-                    values.Clear();
-                    return false;
-                }
-                values.Add(parsed);
-            }
-            return true;
-        }
-
-        public static bool TryGetExtraInfoStringList(JObject extraInfo, string key, out List<string> values)
-        {
-            values = new List<string>();
-            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
-            {
-                return false;
-            }
-            for (int i = 0; i < arr.Count; i++)
-            {
-                if (arr[i] == null || arr[i].Type != JTokenType.String)
-                {
-                    values.Clear();
-                    return false;
-                }
-                values.Add(arr[i].Value<string>());
-            }
-            return true;
-        }
-
         public static bool TryGetExtraInfoPoint2dList(JObject extraInfo, string key, out List<Point2d> values)
         {
             values = new List<Point2d>();
-            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token))
             {
                 return false;
             }
-            return TryParsePoint2dArray(arr, out values);
+            return TryParsePoint2dToken(token, out values);
         }
 
         public static List<Point2d> GetExtraInfoPolyline(JObject extraInfo, string key = "polyline")
@@ -255,14 +91,13 @@ namespace dlcv_infer_csharp
 
         public static string FormatExtraInfoForDisplay(JObject extraInfo, int maxCollectionItems = 12)
         {
-            var normalized = NormalizeExtraInfo(extraInfo);
-            if (!normalized.HasValues)
+            if (extraInfo == null || !extraInfo.HasValues)
             {
                 return string.Empty;
             }
 
             var parts = new List<string>();
-            foreach (var property in normalized.Properties())
+            foreach (var property in extraInfo.Properties())
             {
                 string formatted = FormatExtraInfoToken(property.Value, maxCollectionItems);
                 parts.Add($"{property.Name}: {formatted}");
@@ -282,29 +117,6 @@ namespace dlcv_infer_csharp
             return token != null && token.Type != JTokenType.Null;
         }
 
-        private static bool TryConvertTokenToInt(JToken token, out int value)
-        {
-            value = 0;
-            if (token == null) return false;
-            try
-            {
-                if (token.Type == JTokenType.Integer)
-                {
-                    value = token.Value<int>();
-                    return true;
-                }
-                if (token.Type == JTokenType.Float)
-                {
-                    value = (int)Math.Round(token.Value<double>());
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-            return false;
-        }
-
         private static bool TryConvertTokenToDouble(JToken token, out double value)
         {
             value = 0.0;
@@ -321,6 +133,16 @@ namespace dlcv_infer_csharp
             {
             }
             return false;
+        }
+
+        private static bool TryParsePoint2dToken(JToken token, out List<Point2d> points)
+        {
+            points = new List<Point2d>();
+            if (!(token is JArray arr))
+            {
+                return false;
+            }
+            return TryParsePoint2dArray(arr, out points);
         }
 
         private static bool TryParsePoint2dArray(JArray arr, out List<Point2d> points)
@@ -674,7 +496,7 @@ namespace dlcv_infer_csharp
                                 detection.WithBbox,
                                 detection.WithAngle,
                                 detection.Angle,
-                                CloneExtraInfo(detection.ExtraInfo)
+                                detection.ExtraInfo
                             );
 
                             // 替换原始检测结果

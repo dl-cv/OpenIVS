@@ -1,14 +1,15 @@
 using System;
 using System.Collections.Generic;
+using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 
 namespace DlcvModules
 {
     /// <summary>
-    /// ?? Python: post_process/poly_filter, features/poly_filter
-    /// ? polygon/poly ? mask??? mask_rle?????/???????
-    /// ??????????? polyline ?????? polygon/poly???? bbox?
+    /// 对齐 Python: post_process/poly_filter, features/poly_filter。
+    /// 从 polygon/poly 或 mask 相关字段（优先 mask_rle）提取上沿/下沿折线。
+    /// 结果写回 extra_info.polyline，同时更新 polygon/poly 对应的 bbox。
     /// </summary>
     public class PolyFilter : BaseModule
     {
@@ -29,8 +30,8 @@ namespace DlcvModules
             var results = resultList ?? new JArray();
             string direction = NormalizeDirection(GetStringProperty("direction", "up"));
             double maskThreshold = GetDoubleProperty("mask_threshold", 0.5);
-            int leftClip = GetNonNegativeIntProperty("left_clip", "left_crop", "left_trim", "???");
-            int rightClip = GetNonNegativeIntProperty("right_clip", "right_crop", "right_trim", "???");
+            int leftClip = GetNonNegativeIntProperty("left_clip", "left_crop", "left_trim", "左裁剪");
+            int rightClip = GetNonNegativeIntProperty("right_clip", "right_crop", "right_trim", "右裁剪");
 
             var outResults = new JArray();
             for (int i = 0; i < results.Count; i++)
@@ -48,8 +49,8 @@ namespace DlcvModules
                     continue;
                 }
 
-                var newEntry = (JObject)entry.DeepClone();
                 var newDets = new JArray();
+                bool anyDetChanged = false;
 
                 for (int di = 0; di < sampleResults.Count; di++)
                 {
@@ -60,51 +61,78 @@ namespace DlcvModules
                         continue;
                     }
 
-                    var detOut = (JObject)detObj.DeepClone();
-                    string sourceType = string.Empty;
-                    List<double> bboxXyxy = null;
-                    using (var sourceMask = BuildSourceMask(detObj, maskThreshold, out bboxXyxy, out sourceType))
+                    if (TryApplyPolyFilterToDetection(detObj, direction, maskThreshold, leftClip, rightClip, out JObject detOut))
                     {
-                        if (sourceMask == null || sourceMask.Empty() || bboxXyxy == null || bboxXyxy.Count < 4)
-                        {
-                            newDets.Add(detOut);
-                            continue;
-                        }
-
-                        List<double> bboxNewXywh;
-                        var polyline = MaskToPolyline(sourceMask, bboxXyxy, direction, leftClip, rightClip, out bboxNewXywh);
-                        if (polyline == null || polyline.Count < 2 || bboxNewXywh == null || bboxNewXywh.Count < 4)
-                        {
-                            newDets.Add(detOut);
-                            continue;
-                        }
-
-                        var lineArr = new JArray();
-                        for (int pi = 0; pi < polyline.Count; pi++)
-                        {
-                            var p = polyline[pi];
-                            lineArr.Add(new JArray(p.X, p.Y));
-                        }
-                        var extraInfo = detOut["extra_info"] as JObject ?? new JObject();
-                        extraInfo["polyline"] = lineArr;
-                        detOut["extra_info"] = extraInfo;
-                        detOut["bbox"] = new JArray(bboxNewXywh[0], bboxNewXywh[1], bboxNewXywh[2], bboxNewXywh[3]);
-
-                        var metadata = detOut["metadata"] as JObject ?? new JObject();
-                        metadata["poly_filter_direction"] = direction;
-                        metadata["poly_filter_source"] = sourceType;
-                        metadata["poly_filter_mode"] = "boundary_line";
-                        detOut["metadata"] = metadata;
+                        anyDetChanged = true;
+                        newDets.Add(detOut);
                     }
-
-                    newDets.Add(detOut);
+                    else
+                    {
+                        newDets.Add(detObj);
+                    }
                 }
 
-                newEntry["sample_results"] = newDets;
-                outResults.Add(newEntry);
+                if (anyDetChanged)
+                {
+                    var newEntry = (JObject)entry.DeepClone();
+                    newEntry["sample_results"] = newDets;
+                    outResults.Add(newEntry);
+                }
+                else
+                {
+                    outResults.Add(entry);
+                }
             }
 
             return new ModuleIO(images, outResults);
+        }
+
+        private static bool TryApplyPolyFilterToDetection(
+            JObject detObj,
+            string direction,
+            double maskThreshold,
+            int leftClip,
+            int rightClip,
+            out JObject detOut)
+        {
+            detOut = null;
+            string sourceType = string.Empty;
+            List<double> bboxXyxy = null;
+            using (var sourceMask = BuildSourceMask(detObj, maskThreshold, out bboxXyxy, out sourceType))
+            {
+                if (sourceMask == null || sourceMask.Empty() || bboxXyxy == null || bboxXyxy.Count < 4)
+                {
+                    return false;
+                }
+
+                List<double> bboxNewXywh;
+                var polyline = MaskToPolyline(sourceMask, bboxXyxy, direction, leftClip, rightClip, out bboxNewXywh);
+                if (polyline == null || polyline.Count < 2 || bboxNewXywh == null || bboxNewXywh.Count < 4)
+                {
+                    return false;
+                }
+
+                detOut = (JObject)detObj.DeepClone();
+                var extraInfo = detOut["extra_info"] as JObject ?? new JObject();
+                Utils.SetExtraInfoPolyline(extraInfo, polyline);
+                if (extraInfo.HasValues)
+                {
+                    detOut["extra_info"] = extraInfo;
+                }
+                else
+                {
+                    detOut.Remove("extra_info");
+                }
+
+                detOut["bbox"] = new JArray(bboxNewXywh[0], bboxNewXywh[1], bboxNewXywh[2], bboxNewXywh[3]);
+
+                var metadata = detOut["metadata"] as JObject ?? new JObject();
+                metadata["poly_filter_direction"] = direction;
+                metadata["poly_filter_source"] = sourceType;
+                metadata["poly_filter_mode"] = "boundary_line";
+                detOut["metadata"] = metadata;
+                return true;
+            }
         }
 
         private string GetStringProperty(string key, string defaultValue)
@@ -134,7 +162,7 @@ namespace DlcvModules
         private static string NormalizeDirection(string value)
         {
             var s = (value ?? "up").Trim().ToLowerInvariant();
-            if (s == "down" || s == "bottom" || s == "lower" || s == "?" || s == "lower_half") return "down";
+            if (s == "down" || s == "bottom" || s == "lower" || s == "下" || s == "lower_half") return "down";
             return "up";
         }
 

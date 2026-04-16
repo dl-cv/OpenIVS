@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using Newtonsoft.Json;
@@ -791,7 +791,7 @@ namespace DlcvModules
                 catch { }
             }
 
-            var extraInfo = Utils.NormalizeExtraInfo(entry["extra_info"]);
+            var extraInfo = entry["extra_info"] as JObject;
 
             var obj = new Utils.CSharpObjectResult(
                 categoryId, categoryName, score, area, bbox,
@@ -873,11 +873,13 @@ namespace DlcvModules
                     }
                 }
 
-                var extraInfo = Utils.NormalizeExtraInfo(so["extra_info"]);
-                var polyline = Utils.GetExtraInfoPolyline(extraInfo);
+                var extraInfoSource = so["extra_info"] as JObject;
+                var extraInfo = extraInfoSource;
+                var polyline = Utils.GetExtraInfoPolyline(extraInfoSource);
                 if (invA23 != null && polyline.Count > 0)
                 {
                     polyline = TransformPolyline(polyline, invA23);
+                    extraInfo = extraInfoSource != null ? (JObject)extraInfoSource.DeepClone() : new JObject();
                     Utils.SetExtraInfoPolyline(extraInfo, polyline);
                 }
 

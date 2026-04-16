@@ -392,15 +392,23 @@ namespace DlcvModules
                 }
             }
 
-            var extraInfoOut = Utils.NormalizeExtraInfo(detObj["extra_info"]);
-            var localPolyline = extraInfoOut["polyline"] as JArray;
-            if (TryMapLocalPolyline(localPolyline, tC2O, out List<Point2d> polylineOut))
+            var extraInfoSource = detObj["extra_info"] as JObject;
+            if (extraInfoSource != null && extraInfoSource.HasValues)
             {
-                Utils.SetExtraInfoPolyline(extraInfoOut, polylineOut);
-            }
-            if (extraInfoOut.HasValues)
-            {
-                item["extra_info"] = extraInfoOut;
+                var localPolyline = Utils.GetExtraInfoPolyline(extraInfoSource);
+                if (TryMapLocalPolyline(localPolyline, tC2O, out List<Point2d> polylineOut))
+                {
+                    var extraInfoOut = (JObject)extraInfoSource.DeepClone();
+                    Utils.SetExtraInfoPolyline(extraInfoOut, polylineOut);
+                    if (extraInfoOut.HasValues)
+                    {
+                        item["extra_info"] = extraInfoOut;
+                    }
+                }
+                else
+                {
+                    item["extra_info"] = extraInfoSource;
+                }
             }
 
             outResults.Add(item);
@@ -614,7 +622,7 @@ namespace DlcvModules
             return res;
         }
 
-        private static bool TryMapLocalPolyline(JArray localPolyline, double[] tC2O, out List<Point2d> mapped)
+        private static bool TryMapLocalPolyline(List<Point2d> localPolyline, double[] tC2O, out List<Point2d> mapped)
         {
             mapped = null;
             if (localPolyline == null || localPolyline.Count < 2 || tC2O == null || tC2O.Length < 6) return false;
@@ -622,24 +630,9 @@ namespace DlcvModules
             var points = new List<Point2d>(localPolyline.Count);
             for (int i = 0; i < localPolyline.Count; i++)
             {
-                var token = localPolyline[i];
-                double x;
-                double y;
-                if (token is JArray pa && pa.Count >= 2)
-                {
-                    x = pa[0].Value<double>();
-                    y = pa[1].Value<double>();
-                }
-                else if (token is JObject po && po.ContainsKey("x") && po.ContainsKey("y"))
-                {
-                    x = po["x"].Value<double>();
-                    y = po["y"].Value<double>();
-                }
-                else
-                {
-                    continue;
-                }
-
+                var p = localPolyline[i];
+                double x = p.X;
+                double y = p.Y;
                 double gx = tC2O[0] * x + tC2O[1] * y + tC2O[2];
                 double gy = tC2O[3] * x + tC2O[4] * y + tC2O[5];
                 points.Add(new Point2d(gx, gy));
