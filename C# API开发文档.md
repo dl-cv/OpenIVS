@@ -94,7 +94,7 @@
 
 ### `Utils.CSharpObjectResult`
 
-`CSharpObjectResult` 把单个目标结果组织成四组信息：识别信息 `CategoryId`、`CategoryName`、`Score`、`Area`；几何信息 `WithBbox`、`Bbox`、`WithAngle`、`Angle`，其中普通框使用 `[x, y, w, h]`，旋转框使用 `[cx, cy, w, h]`，无角度时 `Angle = -100`；区域信息 `WithMask`、`Mask`，`Mask` 为与框宽高语义一致的单通道 8 位图，0 表示背景、255 表示目标；折线信息 `Polyline`，用于保存与当前 `bbox` / `poly` 同坐标系的开放折线。`ToString()` 会输出类别、百分制分数、面积，并在存在时追加角度、框、mask 尺寸与折线点数量。
+`CSharpObjectResult` 把单个目标结果组织成四组信息：识别信息 `CategoryId`、`CategoryName`、`Score`、`Area`；几何信息 `WithBbox`、`Bbox`、`WithAngle`、`Angle`，其中普通框使用 `[x, y, w, h]`，旋转框使用 `[cx, cy, w, h]`，无角度时 `Angle = -100`；区域信息 `WithMask`、`Mask`，`Mask` 为与框宽高语义一致的单通道 8 位图，0 表示背景、255 表示目标；扩展信息 `ExtraInfo`，类型为 `JObject`，用于承载所有额外字段，折线使用 `extra_info.polyline`。`ToString()` 会输出类别、百分制分数、面积，并在存在时追加角度、框、mask 尺寸和 `ExtraInfo` 的友好文本。
 
 ### `Utils.CSharpSampleResult`
 
@@ -192,15 +192,15 @@
 
 ### `Model` / `OcrWithDetModel` 的结构化输出
 
-`Infer()` 与 `InferBatch()` 返回 `Utils.CSharpResult`，`SampleResults` 长度等于输入图像数量，每个检测对象都映射为 `CSharpObjectResult`。DVP 模式下，原始 `bbox` 若为 `[x1, y1, x2, y2]` 会转成 `[x, y, w, h]`，缺失 `bbox` 但存在 `polygon` 时会由 `polygon` 反算轴对齐框，`with_mask=true` 且存在 `polygon` 时会进一步生成局部 `Mask`；DVT / RPC 模式下，`mask` 优先从共享内存读取，其次从 `mask_ptr` 读取，再按 `bbox` 尺寸缩放到局部 mask。`polyline` 同时支持 `[[x, y], ...]` 与 `[{ "x": x, "y": y }, ...]` 两种 JSON 形式。
+`Infer()` 与 `InferBatch()` 返回 `Utils.CSharpResult`，`SampleResults` 长度等于输入图像数量，每个检测对象都映射为 `CSharpObjectResult`。DVP 模式下，原始 `bbox` 若为 `[x1, y1, x2, y2]` 会转成 `[x, y, w, h]`，缺失 `bbox` 但存在 `polygon` 时会由 `polygon` 反算轴对齐框，`with_mask=true` 且存在 `polygon` 时会进一步生成局部 `Mask`；DVT / RPC 模式下，`mask` 优先从共享内存读取，其次从 `mask_ptr` 读取，再按 `bbox` 尺寸缩放到局部 mask。结构化输出只读取 `extra_info`，不再解析顶层 `polyline`。
 
 ### `Model.InferOneOutJson()`
 
-返回值是单张图片的 JSON 结果数组，统一包含基础识别字段 `category_id`、`category_name`、`score`、`area`，几何字段 `bbox`、`with_bbox`、`angle`、`with_angle`，区域字段 `mask`、`with_mask`，以及存在折线时的 `polyline`。`mask` 在 DVP 模式下由 `polygon` 转成点对象数组，在 DVS 模式下由 `poly` 的首个轮廓转成点对象数组，在 DVT / RPC 模式下由有效 `mask_ptr` 对应的 mask 图像提取轮廓；没有 mask 时固定输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`。
+返回值是单张图片的 JSON 结果数组，统一包含基础识别字段 `category_id`、`category_name`、`score`、`area`，几何字段 `bbox`、`with_bbox`、`angle`、`with_angle`，区域字段 `mask`、`with_mask`，以及存在扩展字段时的 `extra_info`。`mask` 在 DVP 模式下由 `polygon` 转成点对象数组，在 DVS 模式下由 `poly` 的首个轮廓转成点对象数组，在 DVT / RPC 模式下由有效 `mask_ptr` 对应的 mask 图像提取轮廓；没有 mask 时固定输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`。
 
 ### `FlowGraphModel.InferOneOutJson()`
 
-`FlowGraphModel.InferOneOutJson()` 直接返回流程 `result_list` 的单图结果数组，不再经过 `Model.StandardizeJsonOutput()` 标准化。流程输出通常包含基础识别字段 `category_id`、`category_name`、`score`、`area`，几何字段 `bbox`、`with_bbox`、`with_angle`、`angle`，形状字段 `poly`、`polyline`、`mask_rle`，以及附加信息字段 `metadata`。
+`FlowGraphModel.InferOneOutJson()` 直接返回流程 `result_list` 的单图结果数组，不再经过 `Model.StandardizeJsonOutput()` 标准化。流程输出通常包含基础识别字段 `category_id`、`category_name`、`score`、`area`，几何字段 `bbox`、`with_bbox`、`with_angle`、`angle`，形状字段 `poly`、`mask_rle`，扩展字段容器 `extra_info`，以及附加信息字段 `metadata`。
 
 ### 坐标语义
 
@@ -212,13 +212,13 @@
 | 流程 `ReturnJson` 的旋转框 | 5 元组 `[cx, cy, w, h, angle]` |
 | `mask_rle` | RLE 编码 mask 信息 |
 | `poly` | 多边形轮廓列表 |
-| `polyline` | 开放折线列表 |
+| `extra_info.polyline` | 开放折线列表 |
 
 ## 工具类与辅助 API
 
 ### `Utils`
 
-`Utils` 是 `partial class`。公开能力分为四类：JSON 序列化 `jsonToString(JObject)` 与 `jsonToString(JArray)`；结构化结果转可视化 JSON 的 `ConvertToVisualizeFormat()` 与直接绘图的 `VisualizeResults()`；底层资源与设备查询的 `FreeAllModels()`、`GetDeviceInfo()`、`GetGpuInfo()`；以及组合式 OCR 推理 `OcrInfer(Model detectModel, Model recognizeModel, Mat image)`。其中 `ConvertToVisualizeFormat()` 仅把结构化结果中的 `category_id`、`category_name`、`score`、`bbox`、`with_angle`、`angle`、`with_mask` 和 `mask_rle` 写入可视化 JSON。
+`Utils` 是 `partial class`。公开能力分为五类：JSON 序列化 `jsonToString(JObject)` 与 `jsonToString(JArray)`；`extra_info` 规范化、深拷贝、已知类型解析、折线读写与友好格式化；结构化结果转可视化 JSON 的 `ConvertToVisualizeFormat()` 与直接绘图的 `VisualizeResults()`；底层资源与设备查询的 `FreeAllModels()`、`GetDeviceInfo()`、`GetGpuInfo()`；以及组合式 OCR 推理 `OcrInfer(Model detectModel, Model recognizeModel, Mat image)`。其中 `ConvertToVisualizeFormat()` 把结构化结果中的 `category_id`、`category_name`、`score`、`bbox`、`with_angle`、`angle`、`with_mask`、`mask_rle` 和 `extra_info` 写入可视化 JSON。
 
 ### `DllLoader`
 
@@ -309,7 +309,7 @@ GraphExecutor(List<Dictionary<string, object>> nodes, ExecutionContext context)
 | `ResultFilterRegion` | `post_process/result_filter_region`，`features/result_filter_region` | 按 ROI 判断检测是否落在区域内 |
 | `ResultFilterRegionGlobal` | `post_process/result_filter_region_global`，`features/result_filter_region_global` | 按原图坐标判定区域过滤，输出坐标系不改为原图 |
 | `ResultCategoryOverride` | `post_process/result_category_override`，`features/result_category_override` | 用第二路结果覆盖主路已有字符串类别名 |
-| `PolyFilter` | `post_process/poly_filter`，`features/poly_filter` | 从 polygon / mask 提取上沿或下沿折线并写回 `polyline` |
+| `PolyFilter` | `post_process/poly_filter`，`features/poly_filter` | 从 polygon / mask 提取上沿或下沿折线并写回 `extra_info.polyline` |
 | `StrokeToPoints` | `features/stroke_to_points` | 从 mask 沿笔画方向生成等间距点框 |
 | `TemplateFromResults` | `features/template_from_results` | 从 OCR 结果构建 `SimpleTemplate` |
 | `TemplateSave` | `features/template_save` | 将模板写为 JSON，可选同时写 PNG |
@@ -337,7 +337,7 @@ GraphExecutor(List<Dictionary<string, object>> nodes, ExecutionContext context)
 
 ### `PolyFilter`
 
-`PolyFilter` 会更新 `polyline`、`bbox` 和 `metadata` 中的 `poly_filter_direction`、`poly_filter_source`、`poly_filter_mode = "boundary_line"`。
+`PolyFilter` 会更新 `extra_info.polyline`、`bbox` 和 `metadata` 中的 `poly_filter_direction`、`poly_filter_source`、`poly_filter_mode = "boundary_line"`。
 
 ## 图像与颜色约定
 
