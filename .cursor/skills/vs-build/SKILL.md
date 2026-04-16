@@ -68,9 +68,17 @@ python ".cursor/skills/vs-build/scripts/build.py" "<target-path>" --configuratio
 
 ### 3. 返回结果
 
-- 成功时说明：构建目标、配置、平台、是否成功
+- 成功时默认只说明：构建目标、配置、平台、是否成功，以及必要的构建摘要
 - 失败时优先返回脚本错误或构建输出摘要
 - 不补充任何“也可以试试 dotnet/msbuild”的替代建议
+- 除非用户明确要求列出下一步可选操作，否则不要主动追加“如果你要，我可以继续帮你”之类的后续建议
+- 不要在成功后自动罗列“运行程序”“改成 Release 再编译”“执行 Rebuild”这类额外动作
+
+成功回复应偏简洁，优先类似：
+
+```text
+已完成编译，DlcvDemo 构建成功，参数是 Debug、x64、Build、minimal。构建过程中同时生成了依赖项目 DlcvCsharpApi、ImageViewer、PressureTestRunner，最终状态是 status: success、exit_code: 0。
+```
 
 ## 示例
 
@@ -114,3 +122,4 @@ python ".cursor/skills/vs-build/scripts/build.py" "<solution-path>" --configurat
 - 不调用外部 `C:/mcp-build-server.py`
 - 不因为脚本失败就自动改走其他编译命令
 - 不把读取项目文件、解决方案文件、目录结构这类动作解释成“可以绕过 skill 脚本”
+- 不在构建成功后主动追加与当前请求无关的下一步建议列表
