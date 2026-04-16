@@ -94,15 +94,15 @@
 
 ### `Utils.CSharpObjectResult`
 
-`CSharpObjectResult` 把单个目标结果组织成四组信息：识别信息 `CategoryId`、`CategoryName`、`Score`、`Area`；几何信息 `WithBbox`、`Bbox`、`WithAngle`、`Angle`，其中普通框使用 `[x, y, w, h]`，旋转框使用 `[cx, cy, w, h]`，无角度时 `Angle = -100`；区域信息 `WithMask`、`Mask`，`Mask` 为与框宽高语义一致的单通道 8 位图，0 表示背景、255 表示目标；扩展信息 `ExtraInfo`，类型为 `JObject`，用于承载所有额外字段，折线使用 `extra_info.polyline`。`ToString()` 会输出类别、百分制分数、面积，并在存在时追加角度、框、mask 尺寸和 `ExtraInfo` 的友好文本。
+`CSharpObjectResult` 表示单个目标结果，对外字段为 `CategoryId`、`CategoryName`、`Score`、`Area`、`WithBbox`、`Bbox`、`WithAngle`、`Angle`、`WithMask`、`Mask`、`ExtraInfo`。`ToString()` 输出友好文本。
 
 ### `Utils.CSharpSampleResult`
 
-`CSharpSampleResult` 表示单张图片结果，核心字段只有 `Results`，类型为 `List<CSharpObjectResult>`；`ToString()` 逐条拼接其中每个目标结果的文本表示。
+`CSharpSampleResult` 表示单张图片结果，核心字段为 `Results`。
 
 ### `Utils.CSharpResult`
 
-`CSharpResult` 表示批量结果，核心字段为 `SampleResults`，类型为 `List<CSharpSampleResult>`，长度与输入图片数量一一对应。
+`CSharpResult` 表示批量结果，核心字段为 `SampleResults`。
 
 ## 核心模型类
 
@@ -165,20 +165,7 @@
 
 当前实现文件为 `DlcvCsharpApi\flow\FlowGraphModel.cs`。
 
-#### 公开面
-
-`FlowGraphModel` 的公开接口包括流程加载 `Load()`、模型元信息访问 `GetLoadedModelMeta()` 与 `GetModelInfo()`、推理入口 `Infer()` / `InferBatch()` / `InferOneOutJson()`、测速入口 `Benchmark()` 和生命周期接口 `Dispose()`。
-
-#### 输入约定
-
-`FlowGraphModel` 在执行流程时会向 `ExecutionContext` 写入前端图像单张与批量入口、`frontend_image_color_space = "rgb"`、空的 `frontend_image_path`、`device_id` 和 `return_json_emit_poly`。流程入口图像按 RGB 语义透传，不在 `FlowGraphModel` 内部整图转换为 BGR。
-
-#### 返回行为
-
-- 单图时 `InferInternal()` 的 `result_list` 直接是结果数组。
-- 多图时 `result_list` 为容器数组，每项形如 `{ "result_list": [...] }`。
-- `InferBatch()` 会把 `result_list` 转成 `Utils.CSharpResult`。
-- `InferOneOutJson()` 保留流程 JSON 输出中的 `poly` 语义。
+流程节点、模块输入输出和统一语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`Benchmark()`、`Dispose()`；执行时会把前端图像、`device_id` 和 `return_json_emit_poly` 写入 `ExecutionContext`，并把 `result_list` 转为结构化结果或 JSON 输出。
 
 ### `DvsModel`
 
@@ -186,33 +173,11 @@
 
 当前实现文件为 `DlcvCsharpApi\flow\DvsModel.cs`。
 
-当前实现中，`DvsModel` 会校验 `DV\n` 文件头，解析第二行 JSON 头，按 `file_list` 与 `file_size` 解包 `pipeline.json` 和其他模型文件，将非 `pipeline.json` 文件写入临时目录并把流程中的 `model_path` 重写到临时路径，再调用 `LoadFromRoot()` 完成加载，最后在 `finally` 中删除临时目录。流程节点会额外补充 `model_path_original` 与 `model_name`。
+C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `model_path` 重写，以及临时目录清理。
 
 ## JSON 输出与结构化输出约定
 
-### `Model` / `OcrWithDetModel` 的结构化输出
-
-`Infer()` 与 `InferBatch()` 返回 `Utils.CSharpResult`，`SampleResults` 长度等于输入图像数量，每个检测对象都映射为 `CSharpObjectResult`。DVP 模式下，原始 `bbox` 若为 `[x1, y1, x2, y2]` 会转成 `[x, y, w, h]`，缺失 `bbox` 但存在 `polygon` 时会由 `polygon` 反算轴对齐框，`with_mask=true` 且存在 `polygon` 时会进一步生成局部 `Mask`；DVT / RPC 模式下，`mask` 优先从共享内存读取，其次从 `mask_ptr` 读取，再按 `bbox` 尺寸缩放到局部 mask。结构化输出只读取 `extra_info`，不再解析顶层 `polyline`。
-
-### `Model.InferOneOutJson()`
-
-返回值是单张图片的 JSON 结果数组，统一包含基础识别字段 `category_id`、`category_name`、`score`、`area`，几何字段 `bbox`、`with_bbox`、`angle`、`with_angle`，区域字段 `mask`、`with_mask`，以及存在扩展字段时的 `extra_info`。`mask` 在 DVP 模式下由 `polygon` 转成点对象数组，在 DVS 模式下由 `poly` 的首个轮廓转成点对象数组，在 DVT / RPC 模式下由有效 `mask_ptr` 对应的 mask 图像提取轮廓；没有 mask 时固定输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`。
-
-### `FlowGraphModel.InferOneOutJson()`
-
-`FlowGraphModel.InferOneOutJson()` 直接返回流程 `result_list` 的单图结果数组，不再经过 `Model.StandardizeJsonOutput()` 标准化。流程输出通常包含基础识别字段 `category_id`、`category_name`、`score`、`area`，几何字段 `bbox`、`with_bbox`、`with_angle`、`angle`，形状字段 `poly`、`mask_rle`，扩展字段容器 `extra_info`，以及附加信息字段 `metadata`。
-
-### 坐标语义
-
-| 场景 | 当前语义 |
-| --- | --- |
-| 普通结构化框 | `[x, y, w, h]` |
-| 旋转结构化框 | `Bbox = [cx, cy, w, h]`，角度在 `Angle` |
-| 流程 `ReturnJson` 的轴对齐框 | `[x1, y1, x2, y2]` 或转换后的 `xywh`，取决于调用路径 |
-| 流程 `ReturnJson` 的旋转框 | 5 元组 `[cx, cy, w, h, angle]` |
-| `mask_rle` | RLE 编码 mask 信息 |
-| `poly` | 多边形轮廓列表 |
-| `extra_info.polyline` | 开放折线列表 |
+`Infer()` 与 `InferBatch()` 统一返回 `Utils.CSharpResult`。DVP 模式下可由 `polygon` 反算 `bbox` 和局部 `Mask`；DVT / RPC 模式下 `mask` 优先从共享内存或 `mask_ptr` 读取。`Model.InferOneOutJson()` 返回单图 JSON 结果数组；无 mask 时输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`。`FlowGraphModel.InferOneOutJson()` 直接返回流程单图 `result_list`。C# 结构化结果的 `Bbox` 使用 `[x, y, w, h]` 或 `[cx, cy, w, h] + Angle`；`mask_rle`、`poly`、`extra_info.polyline`、`metadata` 的统一语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
 ## 工具类与辅助 API
 
@@ -228,152 +193,19 @@
 
 `sntl_admin_csharp` 对外提供状态枚举 `SntlAdminStatus`、原生加载器 `SNTLDllLoader`、运行时访问类 `SNTL` 和工具类 `SNTLUtils`。`SNTL` 负责建立上下文并提供 `Get()`、`GetSntlInfo()`、`GetDeviceList()`、`GetFeatureList()`、`Dispose()`；`SNTLUtils` 提供静态的设备列表与特征列表查询。`DllLoader` 通过 `SNTL.GetFeatureList()` 读取授权特征列表，以决定是否切换到 `dlcv_infer2.dll`。
 
-## 流程图执行框架
+## Flow 与模块
 
-### 基础运行时类型
+Flow、模块分类、统一输入输出字段和模板数据语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
-`ExecutionContext` 提供不区分大小写的运行时键值访问；`ModuleRegistry` 维护 `moduleType -> Type` 注册表；`GlobalDebug` 与 `InferTiming` 分别承担调试输出和耗时记录；`TransformationState` 保存原图尺寸、裁剪框、仿射矩阵和输出尺寸；`ModuleImage` 将 `Mat`、原图、变换状态、原图序号和滑窗元数据打包；`ModuleIO` 与 `ModuleChannel` 分别作为模块调用输出容器和通道中间容器。以上类型当前位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。
+### 执行框架
 
-### 模块基类
+`ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、链路路由、标量注入、`NormalizeBboxProperties()` 和模型节点预加载；`LoadModels()` 仅对 `BaseModelModule` 调用 `LoadModel()`，并把加载元信息写入 `ExecutionContext.loaded_model_meta`。
 
-`BaseModule` 保存节点 ID、标题、属性、上下文、扩展输入、扩展输出、模板列表以及标量输入输出，默认 `Process()` 返回空图像与空结果；`BaseInputModule` 继承 `BaseModule`，并把 `Process()` 固定为调用 `Generate()`。
+### 模块实现
 
-### `GraphExecutor`
+当前模块实现代码位于 `DlcvCsharpApi\flow\modules\`，主要文件包括 `Inputs.cs`、`Models.cs`、`Outputs.cs`、`Features.cs`、`SlidingWindow.cs`、`SlidingMerge.cs`、`PolyFilter.cs`、`ResultFilterRegion.cs`、`ResultCategoryOverride.cs`、`StrokeToPoints.cs`、`Templates.cs`、`Visualize.cs`。
 
-`GraphExecutor` 的构造函数为：
+### 补充约定
 
-```csharp
-GraphExecutor(List<Dictionary<string, object>> nodes, ExecutionContext context)
-```
-
-`GraphExecutor` 当前实现文件为 `DlcvCsharpApi\flow\GraphExecutor.cs`。
-
-执行时会先触发所有非抽象 `BaseModule` 子类的静态注册，再读取节点的 `id`、`type`、`title`、`order`、`properties`、`inputs`、`outputs`，按 `order` 再按 `id` 排序，并通过 `outputs[*].links` 建立 `linkId -> (源节点, 源输出端口)` 映射。实例化模块后，每两个输入端口为一组，第 0 组作为主通道，其余写入 `ExtraInputsIn`；标量输入从上游 `scalars` 写入 `ScalarInputsByIndex` 和 `ScalarInputsByName`。`Process(mainImages, mainResults)` 执行完成后，主输出回写 `image_list`、`result_list`、`template_list`，标量输出则从 `ScalarOutputsByName` 回写 `scalars`。`NormalizeBboxProperties()` 会在节点属性中给出 `bbox_x1`、`bbox_y1`、`bbox_x2`、`bbox_y2` 但未显式给出 `bbox_x`、`bbox_y`、`bbox_w`、`bbox_h` 时自动补齐 `xywh`。
-
-### 流程加载
-
-`GraphExecutor.LoadModels()` 仅对 `BaseModelModule` 实例调用 `LoadModel()`，并返回加载报告 JSON。每个模型节点的加载元信息会追加到 `ExecutionContext` 的 `loaded_model_meta` 列表中。
-
-## 模块注册表
-
-当前模块实现代码位于 `DlcvCsharpApi\flow\modules\`。
-
-### 输入模块
-
-| 注册类型 | 类名 | 当前行为 |
-| --- | --- | --- |
-| `input/image` | `InputImage` | 优先从 `ExecutionContext` 读取 `frontend_image_mats` / `frontend_image_mat_list` / `frontend_image_mat`；否则按 `path` / `paths` 读盘；`ImRead` 使用 `Color` 模式，得到 BGR 图像 |
-| `input/frontend_image` | `InputFrontendImage` | 优先读取上下文中的前端图像；否则按 `path` 或 `frontend_image_path` 读盘 |
-| `input/build_results` | `InputBuildResults` | 生成默认图像或复用输入图，并按节点属性组装一条 `sample_results` |
-
-### 模型模块
-
-| 注册类型 | 类名 | 当前行为 |
-| --- | --- | --- |
-| `model/det` | `DetModel` | 对图像按形状分桶、按面积排序、按批次调用 `_model.InferBatch()` |
-| `model/rotated_bbox` | `RotatedBBoxModel` | 继承 `DetModel`，无额外重写 |
-| `model/instance_seg` | `InstanceSegModel` | 继承 `DetModel`，无额外重写 |
-| `model/semantic_seg` | `SemanticSegModel` | 继承 `DetModel`，无额外重写 |
-| `model/cls` | `ClsModel` | 在 `DetModel` 基础上按 `top_k` 裁剪结果，并在缺框时补整图框 |
-| `model/ocr` | `OCRModel` | 在 `DetModel` 基础上为缺框项补整图框 |
-
-### 输出模块
-
-| 注册类型 | 类名 | 当前行为 |
-| --- | --- | --- |
-| `output/save_image` | `SaveImage` | 将当前图像写入磁盘；默认后缀 `_out`，默认格式 `png` |
-| `output/preview` | `Preview` | 透传图像与结果 |
-| `output/return_json` | `ReturnJson` | 将检测结果写入 `ExecutionContext.frontend_json`，并维护 `last` 与 `by_node` |
-| `output/visualize` | `VisualizeOnOriginal` | 在原图坐标系上绘制框、mask、轮廓和文字 |
-| `output/visualize_local` | `VisualizeOnLocal` | 在当前图像上直接绘制绿色矩形框 |
-
-### 预处理、特征处理与后处理模块
-
-| 类名 | 注册类型 | 当前行为 |
-| --- | --- | --- |
-| `SlidingWindow` | `pre_process/sliding_window`，`features/sliding_window` | 按窗口尺寸与重叠率切图 |
-| `SlidingMergeResults` | `pre_process/sliding_merge`，`features/sliding_merge` | 合并滑窗结果 |
-| `ImageGeneration` | `features/image_generation` | 按检测结果裁剪生成子图 |
-| `ImageFlip` | `features/image_flip` | 对图像做水平或竖直翻转并更新变换状态 |
-| `MaskToRBox` | `post_process/mask_to_rbox`，`features/mask_to_rbox` | 由 mask 计算旋转框 |
-| `MergeResults` | `post_process/merge_results`，`features/merge_results` | 合并主路与扩展路结果 |
-| `ResultFilter` | `post_process/result_filter`，`features/result_filter` | 按类别拆分结果，未命中项进入 `ExtraOutputs[0]` |
-| `ResultFilterAdvanced` | `post_process/result_filter_advanced`，`features/result_filter_advanced` | 按 bbox、rbox、bbox area、mask area 过滤 |
-| `CoordinateCrop` | `pre_process/coordinate_crop`，`features/coordinate_crop` | 按 `x,y,w,h` 裁剪图像并派生子变换 |
-| `ImageRescale` | `pre_process/image_rescale`，`features/image_rescale` | 按比例缩放图像并更新变换状态 |
-| `ImageRotateByClassification` | `features/image_rotate_by_cls` | 根据分类标签将图像旋转 0/90/180/270 度，并同步更新结果几何 |
-| `TextReplacement` | `post_process/text_replacement`，`features/text_replacement` | 按 `mapping` 替换 `category_name` |
-| `RBoxCorrection` | `post_process/rbox_correction`，`features/rbox_correction` | 根据参考角度回正图像并同步结果几何 |
-| `ResultLabelMerge` | `post_process/result_label_merge`，`features/result_label_merge` | 用主路标签与第二路标签拼接新类别名 |
-| `BBoxIoUDedup` | `post_process/bbox_iou_dedup`，`features/bbox_iou_dedup` | 对轴对齐框按 IoU 或 IoS 去重 |
-| `ResultFilterRegion` | `post_process/result_filter_region`，`features/result_filter_region` | 按 ROI 判断检测是否落在区域内 |
-| `ResultFilterRegionGlobal` | `post_process/result_filter_region_global`，`features/result_filter_region_global` | 按原图坐标判定区域过滤，输出坐标系不改为原图 |
-| `ResultCategoryOverride` | `post_process/result_category_override`，`features/result_category_override` | 用第二路结果覆盖主路已有字符串类别名 |
-| `PolyFilter` | `post_process/poly_filter`，`features/poly_filter` | 从 polygon / mask 提取上沿或下沿折线并写回 `extra_info.polyline` |
-| `StrokeToPoints` | `features/stroke_to_points` | 从 mask 沿笔画方向生成等间距点框 |
-| `TemplateFromResults` | `features/template_from_results` | 从 OCR 结果构建 `SimpleTemplate` |
-| `TemplateSave` | `features/template_save` | 将模板写为 JSON，可选同时写 PNG |
-| `TemplateLoad` | `features/template_load` | 从 JSON 读取模板 |
-| `TemplateMatch` | `features/template_match` | 比较主模板与第二路模板，输出 `ok` 与 `detail` |
-| `PrintedTemplateMatch` | `features/printed_template_match` | 按产品类型组织模板生成、保存、加载与匹配流程 |
-
-## 主要模块行为补充
-
-### `ReturnJson`
-
-`ReturnJson` 会按图片把结果聚合到 `by_image`，每项至少包含 `origin_index`、`original_size` 和 `results`，并同步写入 `ExecutionContext.frontend_json` 的 `last`、`by_node[NodeId]` 与 `frontend_json_by_node`。当上下文中 `return_json_emit_poly = true` 或节点属性显式要求输出 `poly` 时，结果中保留 `poly`。
-
-### `VisualizeOnOriginal`
-
-`VisualizeOnOriginal` 会在原图上绘制 `mask_rle` 解码后的填充区域、轮廓、普通框、旋转框和 GDI+ 文本；颜色配置输入使用 RGB 语义，绘制时转换为 OpenCV 使用的 BGR。
-
-### `SlidingWindow`
-
-`SlidingWindow` 会为每个窗口生成子图 `ModuleImage`、一条 `local` 结果和 `sliding_meta`。`sliding_meta` 记录窗口在网格中的位置与尺寸信息，包括 `grid_x`、`grid_y`、`grid_size`、`win_size`、`slice_index` 以及窗口坐标 `x`、`y`、`w`、`h`。
-
-### `SlidingMergeResults`
-
-`SlidingMergeResults` 会把窗口内结果映射回原图坐标，并按原图索引输出一张合并后的图像包装与一条 `local` 结果。当前合并逻辑同时支持轴对齐框、旋转框、`mask union` 和 `bbox union`。
-
-### `PolyFilter`
-
-`PolyFilter` 会更新 `extra_info.polyline`、`bbox` 和 `metadata` 中的 `poly_filter_direction`、`poly_filter_source`、`poly_filter_mode = "boundary_line"`。
-
-## 图像与颜色约定
-
-| 场景 | 当前颜色语义 |
-| --- | --- |
-| `InputImage` / `InputFrontendImage` 从磁盘读取 | BGR |
-| `InputBuildResults` 生成默认图像 | BGR |
-| `Model` 进入三通道模型推理前 | 转为 RGB |
-| `FlowGraphModel` 入口 | 直接按 RGB 语义透传 |
-| `SaveImage` 写盘 | 按 BGR 语义写出 |
-| `VisualizeOnOriginal` / `VisualizeOnLocal` 绘制 | OpenCV BGR |
-
-## 标量输出
-
-当前模块中显式使用的标量输出包括：
-
-| 模块 | 标量键 |
-| --- | --- |
-| `InputImage` | `filename` |
-| `ResultFilter` | `has_positive` |
-| `ResultFilterRegion` | `has_positive` |
-| `TemplateMatch` | `ok`、`detail` |
-| `PrintedTemplateMatch` | `ok`、`detail` |
-| `BBoxIoUDedup` | `kept_count`、`removed_count` |
-
-## 模板数据结构
-
-### `SimpleOcrItem`
-
-`SimpleOcrItem` 表示模板中的单条 OCR 项，`Text` 保存文本内容，`Polygon` 保存对应区域轮廓，`Confidence` 保存该项置信度，`CategoryName` 保存该项类别名。
-
-### `SimpleTemplate`
-
-`SimpleTemplate` 是可保存、可加载、可匹配的模板对象，由模板标识 `TemplateName`、`template_id`，产品标识 `ProductName`、`ProductId`，相机位 `CameraPosition` 和 OCR 项列表 `OCRResults` 组成。
-
-### `SimpleTemplateMatchDetail`
-
-`SimpleTemplateMatchDetail` 是模板匹配明细容器：`ocr_results` 保存本次识别结果，`missing_template_items` 保存缺失项，`deviation_template_items` 保存偏差项，`misjudgment_pairs` 保存误判配对，`template_match_info` 保存本次匹配汇总信息。
+`ReturnJson` 会把结果聚合到 `ExecutionContext.frontend_json` 的 `last` 与 `by_node`。`VisualizeOnOriginal` 在原图上绘制 mask、轮廓、框和文本。`SlidingWindow` 负责切图并写入 `sliding_meta`；`SlidingMergeResults` 负责把结果映射回原图并合并；`PolyFilter` 会更新 `extra_info.polyline` 以及相关 `metadata`。读盘和写盘遵循 OpenCV 的 BGR 语义；普通 `Model` 在三通道推理前转为 RGB；`FlowGraphModel` 入口按 RGB 语义透传。当前显式使用的标量键包括 `filename`、`has_positive`、`ok`、`detail`、`kept_count`、`removed_count`。模板相关类型为 `SimpleOcrItem`、`SimpleTemplate` 和 `SimpleTemplateMatchDetail`。
 
