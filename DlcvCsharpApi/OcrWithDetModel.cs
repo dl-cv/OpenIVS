@@ -15,7 +15,7 @@ namespace dlcv_infer_csharp
         private Model _detModel;
         private Model _ocrModel;
         private bool _disposed = false;
-        private float _horizontalScale = 1.0f;
+        public float HorizontalScale { get; set; } = 1.0f;
 
         /// <summary>
         /// 获取检测模型是否已加载
@@ -31,24 +31,6 @@ namespace dlcv_infer_csharp
         /// 获取两个模型是否都已加载
         /// </summary>
         public bool IsLoaded => IsDetModelLoaded && IsOcrModelLoaded;
-
-        /// <summary>
-        /// 设置水平缩放比例
-        /// </summary>
-        /// <param name="scale">水平缩放比例，默认1.0</param>
-        public void SetHorizontalScale(float scale)
-        {
-            _horizontalScale = scale;
-        }
-
-        /// <summary>
-        /// 获取当前水平缩放比例
-        /// </summary>
-        /// <returns>水平缩放比例</returns>
-        public float GetHorizontalScale()
-        {
-            return _horizontalScale;
-        }
 
         /// <summary>
         /// 加载检测模型和OCR模型
@@ -236,10 +218,10 @@ namespace dlcv_infer_csharp
                             continue;
 
                         // 如果水平缩放比例不是1.0，则进行水平缩放
-                        if (Math.Abs(_horizontalScale - 1.0f) > 0.001f)
+                        if (Math.Abs(HorizontalScale - 1.0f) > 0.001f)
                         {
                             Mat scaledRoi = new Mat();
-                            int newWidth = (int)(roiMat.Width * _horizontalScale);
+                            int newWidth = (int)(roiMat.Width * HorizontalScale);
                             int newHeight = roiMat.Height;
                             Cv2.Resize(roiMat, scaledRoi, new OpenCvSharp.Size(newWidth, newHeight));
                             roiMat.Dispose();

@@ -24,7 +24,7 @@ namespace DlcvModules
 		protected BaseModelModule(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
 			: base(nodeId, title, properties, context)
 		{
-			_modelPath = ReadString("model_path", null);
+			_modelPath = ReadStringOrDefault("model_path", null);
 			_deviceId = ReadInt("device_id", 0);
 			// 简化：初始化在首次推理时完成
 		}
@@ -86,7 +86,7 @@ namespace DlcvModules
 			catch { }
 
 			try { _maxShape = _model.GetCachedMaxShape(); } catch { _maxShape = null; }
-			try { _maxBatchSize = Math.Max(1, _model.GetMaxBatchSize()); } catch { _maxBatchSize = 1; }
+			try { _maxBatchSize = _model.GetMaxBatchSize(); } catch { _maxBatchSize = 1; }
 
 			// 将每个子模型加载时读取到的 batch 元信息写入流程上下文，供外层 DVS 包装模型汇总。
 			try
@@ -169,16 +169,6 @@ namespace DlcvModules
 			catch { cfg = 0; }
 			if (cfg <= 0) return modelLimit;
 			return Math.Max(1, Math.Min(modelLimit, cfg));
-		}
-
-		protected string ReadString(string key, string dv)
-		{
-			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
-			{
-				var s = v.ToString();
-				return string.IsNullOrWhiteSpace(s) ? dv : s;
-			}
-			return dv;
 		}
 
 		protected int ReadInt(string key, int dv)

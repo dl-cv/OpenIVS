@@ -29,9 +29,9 @@ namespace DlcvModules
 			var images = imageList ?? new List<ModuleImage>();
 			var results = resultList ?? new JArray();
 
-			string saveDir = ReadString("save_path", null);
-			string suffix = ReadString("suffix", "_out");
-			string fmt = ReadString("format", "png");
+			string saveDir = ReadStringOrDefault("save_path", null);
+			string suffix = ReadStringOrDefault("suffix", "_out");
+			string fmt = ReadStringOrDefault("format", "png");
 			if (!string.IsNullOrWhiteSpace(saveDir))
 			{
 				try { Directory.CreateDirectory(saveDir); } catch { }
@@ -82,16 +82,6 @@ namespace DlcvModules
 
 			// 透传
 			return new ModuleIO(images, results);
-		}
-
-		private string ReadString(string key, string dv)
-		{
-			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
-			{
-				var s = v.ToString();
-				return string.IsNullOrWhiteSpace(s) ? dv : s;
-			}
-			return dv;
 		}
 
         private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj)

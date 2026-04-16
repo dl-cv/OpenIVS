@@ -282,6 +282,16 @@ namespace DlcvModules
             // 缺省透传
             return new ModuleIO(imageList ?? new List<ModuleImage>(), resultList ?? new JArray(), new List<SimpleTemplate>());
         }
+
+        protected string ReadStringOrDefault(string key, string defaultValue)
+        {
+            if (Properties != null && Properties.TryGetValue(key, out object value) && value != null)
+            {
+                var text = value.ToString();
+                return string.IsNullOrWhiteSpace(text) ? defaultValue : text;
+            }
+            return defaultValue;
+        }
     }
 
     /// <summary>

@@ -15,22 +15,12 @@ namespace dlcv_infer_csharp
     {
         public static String jsonToString(JObject json)
         {
-            var settings = new JsonSerializerSettings
-            {
-                StringEscapeHandling = StringEscapeHandling.EscapeNonAscii // 关键配置
-            };
-            string unicodeJson = JsonConvert.SerializeObject(json, Formatting.Indented, settings);
-            return unicodeJson;
+            return SerializeJson(json);
         }
 
         public static String jsonToString(JArray json)
         {
-            var settings = new JsonSerializerSettings
-            {
-                StringEscapeHandling = StringEscapeHandling.EscapeNonAscii // 关键配置
-            };
-            string unicodeJson = JsonConvert.SerializeObject(json, Formatting.Indented, settings);
-            return unicodeJson;
+            return SerializeJson(json);
         }
 
         public static bool TryGetExtraInfoPoint2dList(JObject extraInfo, string key, out List<Point2d> values)
@@ -312,6 +302,15 @@ namespace dlcv_infer_csharp
                 return ((long)Math.Round(value)).ToString(CultureInfo.InvariantCulture);
             }
             return value.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        private static string SerializeJson(JToken token)
+        {
+            var settings = new JsonSerializerSettings
+            {
+                StringEscapeHandling = StringEscapeHandling.EscapeNonAscii
+            };
+            return JsonConvert.SerializeObject(token, Formatting.Indented, settings);
         }
 
         public static JArray ConvertToVisualizeFormat(CSharpResult result)
