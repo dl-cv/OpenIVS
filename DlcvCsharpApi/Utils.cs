@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -31,6 +33,483 @@ namespace dlcv_infer_csharp
             return unicodeJson;
         }
 
+        public static JObject NormalizeExtraInfo(JToken token)
+        {
+            if (token is JObject obj)
+            {
+                return (JObject)obj.DeepClone();
+            }
+            return new JObject();
+        }
+
+        public static JObject NormalizeExtraInfo(JObject extraInfo)
+        {
+            if (extraInfo == null)
+            {
+                return new JObject();
+            }
+            return (JObject)extraInfo.DeepClone();
+        }
+
+        public static JObject CloneExtraInfo(JObject extraInfo)
+        {
+            return NormalizeExtraInfo(extraInfo);
+        }
+
+        public static bool TryGetExtraInfoInt(JObject extraInfo, string key, out int value)
+        {
+            value = 0;
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || token == null)
+            {
+                return false;
+            }
+            try
+            {
+                if (token.Type == JTokenType.Integer)
+                {
+                    value = token.Value<int>();
+                    return true;
+                }
+                if (token.Type == JTokenType.Float)
+                {
+                    value = (int)Math.Round(token.Value<double>());
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+        public static bool TryGetExtraInfoFloat(JObject extraInfo, string key, out float value)
+        {
+            value = 0f;
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || token == null)
+            {
+                return false;
+            }
+            try
+            {
+                if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+                {
+                    value = token.Value<float>();
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+        public static bool TryGetExtraInfoDouble(JObject extraInfo, string key, out double value)
+        {
+            value = 0d;
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || token == null)
+            {
+                return false;
+            }
+            try
+            {
+                if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+                {
+                    value = token.Value<double>();
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+        public static bool TryGetExtraInfoString(JObject extraInfo, string key, out string value)
+        {
+            value = null;
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || token == null)
+            {
+                return false;
+            }
+            if (token.Type == JTokenType.String)
+            {
+                value = token.Value<string>();
+                return true;
+            }
+            return false;
+        }
+
+        public static bool TryGetExtraInfoIntList(JObject extraInfo, string key, out List<int> values)
+        {
+            values = new List<int>();
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
+            {
+                return false;
+            }
+            for (int i = 0; i < arr.Count; i++)
+            {
+                if (!TryConvertTokenToInt(arr[i], out int parsed))
+                {
+                    values.Clear();
+                    return false;
+                }
+                values.Add(parsed);
+            }
+            return true;
+        }
+
+        public static bool TryGetExtraInfoFloatList(JObject extraInfo, string key, out List<float> values)
+        {
+            values = new List<float>();
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
+            {
+                return false;
+            }
+            for (int i = 0; i < arr.Count; i++)
+            {
+                if (!TryConvertTokenToDouble(arr[i], out double parsed))
+                {
+                    values.Clear();
+                    return false;
+                }
+                values.Add((float)parsed);
+            }
+            return true;
+        }
+
+        public static bool TryGetExtraInfoDoubleList(JObject extraInfo, string key, out List<double> values)
+        {
+            values = new List<double>();
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
+            {
+                return false;
+            }
+            for (int i = 0; i < arr.Count; i++)
+            {
+                if (!TryConvertTokenToDouble(arr[i], out double parsed))
+                {
+                    values.Clear();
+                    return false;
+                }
+                values.Add(parsed);
+            }
+            return true;
+        }
+
+        public static bool TryGetExtraInfoStringList(JObject extraInfo, string key, out List<string> values)
+        {
+            values = new List<string>();
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
+            {
+                return false;
+            }
+            for (int i = 0; i < arr.Count; i++)
+            {
+                if (arr[i] == null || arr[i].Type != JTokenType.String)
+                {
+                    values.Clear();
+                    return false;
+                }
+                values.Add(arr[i].Value<string>());
+            }
+            return true;
+        }
+
+        public static bool TryGetExtraInfoPoint2dList(JObject extraInfo, string key, out List<Point2d> values)
+        {
+            values = new List<Point2d>();
+            if (!TryGetExtraInfoToken(extraInfo, key, out JToken token) || !(token is JArray arr))
+            {
+                return false;
+            }
+            return TryParsePoint2dArray(arr, out values);
+        }
+
+        public static List<Point2d> GetExtraInfoPolyline(JObject extraInfo, string key = "polyline")
+        {
+            if (TryGetExtraInfoPoint2dList(extraInfo, key, out List<Point2d> points))
+            {
+                return points;
+            }
+            return new List<Point2d>();
+        }
+
+        public static void SetExtraInfoPolyline(JObject extraInfo, List<Point2d> polyline, string key = "polyline")
+        {
+            if (extraInfo == null) return;
+
+            if (polyline == null || polyline.Count == 0)
+            {
+                extraInfo.Remove(key);
+                return;
+            }
+
+            var line = new JArray();
+            for (int i = 0; i < polyline.Count; i++)
+            {
+                var p = polyline[i];
+                line.Add(new JArray(p.X, p.Y));
+            }
+            extraInfo[key] = line;
+        }
+
+        public static string FormatExtraInfoForDisplay(JObject extraInfo, int maxCollectionItems = 12)
+        {
+            var normalized = NormalizeExtraInfo(extraInfo);
+            if (!normalized.HasValues)
+            {
+                return string.Empty;
+            }
+
+            var parts = new List<string>();
+            foreach (var property in normalized.Properties())
+            {
+                string formatted = FormatExtraInfoToken(property.Value, maxCollectionItems);
+                parts.Add($"{property.Name}: {formatted}");
+            }
+
+            return string.Join(", ", parts);
+        }
+
+        private static bool TryGetExtraInfoToken(JObject extraInfo, string key, out JToken token)
+        {
+            token = null;
+            if (extraInfo == null || string.IsNullOrWhiteSpace(key) || !extraInfo.ContainsKey(key))
+            {
+                return false;
+            }
+            token = extraInfo[key];
+            return token != null && token.Type != JTokenType.Null;
+        }
+
+        private static bool TryConvertTokenToInt(JToken token, out int value)
+        {
+            value = 0;
+            if (token == null) return false;
+            try
+            {
+                if (token.Type == JTokenType.Integer)
+                {
+                    value = token.Value<int>();
+                    return true;
+                }
+                if (token.Type == JTokenType.Float)
+                {
+                    value = (int)Math.Round(token.Value<double>());
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+        private static bool TryConvertTokenToDouble(JToken token, out double value)
+        {
+            value = 0.0;
+            if (token == null) return false;
+            try
+            {
+                if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+                {
+                    value = token.Value<double>();
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+        private static bool TryParsePoint2dArray(JArray arr, out List<Point2d> points)
+        {
+            points = new List<Point2d>();
+            if (arr == null || arr.Count == 0) return false;
+
+            for (int i = 0; i < arr.Count; i++)
+            {
+                var item = arr[i];
+                if (item is JArray pa && pa.Count >= 2)
+                {
+                    if (!TryConvertTokenToDouble(pa[0], out double x) || !TryConvertTokenToDouble(pa[1], out double y))
+                    {
+                        points.Clear();
+                        return false;
+                    }
+                    points.Add(new Point2d(x, y));
+                    continue;
+                }
+
+                if (item is JObject po && po.ContainsKey("x") && po.ContainsKey("y"))
+                {
+                    if (!TryConvertTokenToDouble(po["x"], out double x) || !TryConvertTokenToDouble(po["y"], out double y))
+                    {
+                        points.Clear();
+                        return false;
+                    }
+                    points.Add(new Point2d(x, y));
+                    continue;
+                }
+
+                points.Clear();
+                return false;
+            }
+
+            return points.Count > 0;
+        }
+
+        private static string FormatExtraInfoToken(JToken token, int maxCollectionItems)
+        {
+            if (token == null || token.Type == JTokenType.Null) return "null";
+
+            switch (token.Type)
+            {
+                case JTokenType.Integer:
+                    return token.Value<long>().ToString(CultureInfo.InvariantCulture);
+                case JTokenType.Float:
+                    return FormatDouble(token.Value<double>());
+                case JTokenType.String:
+                    return token.Value<string>();
+                case JTokenType.Boolean:
+                    return token.Value<bool>() ? "true" : "false";
+            }
+
+            if (token is JArray arr)
+            {
+                if (TryParsePoint2dArray(arr, out List<Point2d> points))
+                {
+                    return FormatPointList(points, maxCollectionItems);
+                }
+                if (TryFormatScalarList(arr, maxCollectionItems, out string scalarListText))
+                {
+                    return scalarListText;
+                }
+                return arr.ToString(Formatting.None);
+            }
+
+            if (token is JObject obj)
+            {
+                string nested = FormatExtraInfoForDisplay(obj, maxCollectionItems);
+                return "{" + nested + "}";
+            }
+
+            return token.ToString(Formatting.None);
+        }
+
+        private static bool TryFormatScalarList(JArray arr, int maxCollectionItems, out string formatted)
+        {
+            formatted = null;
+            if (arr == null)
+            {
+                return false;
+            }
+
+            var textItems = new List<string>();
+            bool allString = true;
+            bool allNumber = true;
+
+            int limit = Math.Min(arr.Count, Math.Max(1, maxCollectionItems));
+            for (int i = 0; i < limit; i++)
+            {
+                var token = arr[i];
+                if (token == null)
+                {
+                    allString = false;
+                    allNumber = false;
+                    break;
+                }
+
+                if (token.Type == JTokenType.String)
+                {
+                    textItems.Add(token.Value<string>());
+                    allNumber = false;
+                }
+                else if (token.Type == JTokenType.Integer)
+                {
+                    textItems.Add(token.Value<long>().ToString(CultureInfo.InvariantCulture));
+                    allString = false;
+                }
+                else if (token.Type == JTokenType.Float)
+                {
+                    double number = token.Value<double>();
+                    textItems.Add(FormatDouble(number));
+                    allString = false;
+                }
+                else
+                {
+                    allString = false;
+                    allNumber = false;
+                    break;
+                }
+            }
+
+            if (!allString && !allNumber)
+            {
+                return false;
+            }
+
+            if (arr.Count > limit)
+            {
+                textItems.Add("...");
+            }
+
+            var sb = new StringBuilder();
+            sb.Append("[");
+            for (int i = 0; i < textItems.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                if (allString)
+                {
+                    sb.Append("\"");
+                    sb.Append(textItems[i]);
+                    sb.Append("\"");
+                }
+                else
+                {
+                    sb.Append(textItems[i]);
+                }
+            }
+            sb.Append("]");
+
+            formatted = sb.ToString();
+            return true;
+        }
+
+        private static string FormatPointList(List<Point2d> points, int maxCollectionItems)
+        {
+            int limit = Math.Min(points.Count, Math.Max(1, maxCollectionItems));
+            var sb = new StringBuilder();
+            sb.Append("[");
+            for (int i = 0; i < limit; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var p = points[i];
+                sb.Append("[");
+                sb.Append(FormatDouble(p.X));
+                sb.Append(", ");
+                sb.Append(FormatDouble(p.Y));
+                sb.Append("]");
+            }
+            if (points.Count > limit)
+            {
+                if (limit > 0) sb.Append(", ");
+                sb.Append("...");
+            }
+            sb.Append("]");
+            return sb.ToString();
+        }
+
+        private static string FormatDouble(double value)
+        {
+            if (Math.Abs(value - Math.Round(value)) < 1e-9)
+            {
+                return ((long)Math.Round(value)).ToString(CultureInfo.InvariantCulture);
+            }
+            return value.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
         public static JArray ConvertToVisualizeFormat(CSharpResult result)
         {
             var array = new JArray();
@@ -53,7 +532,8 @@ namespace dlcv_infer_csharp
                             ["bbox"] = obj.Bbox != null ? JArray.FromObject(obj.Bbox) : null,
                             ["with_angle"] = obj.WithAngle,
                             ["angle"] = obj.Angle,
-                            ["with_mask"] = obj.WithMask
+                            ["with_mask"] = obj.WithMask,
+                            ["extra_info"] = NormalizeExtraInfo(obj.ExtraInfo)
                         };
                         // 将 mask 以 RLE 的形式存储到 JSON（mask_rle）
                         if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
@@ -194,7 +674,7 @@ namespace dlcv_infer_csharp
                                 detection.WithBbox,
                                 detection.WithAngle,
                                 detection.Angle,
-                                detection.Polyline
+                                CloneExtraInfo(detection.ExtraInfo)
                             );
 
                             // 替换原始检测结果

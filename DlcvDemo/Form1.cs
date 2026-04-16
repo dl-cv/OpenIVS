@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
@@ -336,7 +336,15 @@ namespace DlcvDemo
                     for (int i = 0; i < objects.Count; i++)
                     {
                         CSharpObjectResult obj = objects[i];
-                        sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}");
+                        string extraInfoText = Utils.FormatExtraInfoForDisplay(obj.ExtraInfo);
+                        if (string.IsNullOrWhiteSpace(extraInfoText))
+                        {
+                            sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}");
+                        }
+                        else
+                        {
+                            sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}  extra_info={{ {extraInfoText} }}");
+                        }
                     }
                 }
                 richTextBox1.Text = sb.ToString();

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 
@@ -353,7 +354,7 @@ namespace DlcvModules
             bool emitPoly,
             List<Dictionary<string, object>> outResults)
         {
-            var item = new Dictionary<string, object>(8)
+            var item = new Dictionary<string, object>(9)
             {
                 ["category_id"] = detObj["category_id"]?.Value<int>() ?? 0,
                 ["category_name"] = detObj["category_name"]?.ToString(),
@@ -391,10 +392,15 @@ namespace DlcvModules
                 }
             }
 
-            var localPolyline = detObj["polyline"] as JArray;
-            if (TryMapLocalPolyline(localPolyline, tC2O, out List<object> polylineOut))
+            var extraInfoOut = Utils.NormalizeExtraInfo(detObj["extra_info"]);
+            var localPolyline = extraInfoOut["polyline"] as JArray;
+            if (TryMapLocalPolyline(localPolyline, tC2O, out List<Point2d> polylineOut))
             {
-                item["polyline"] = polylineOut;
+                Utils.SetExtraInfoPolyline(extraInfoOut, polylineOut);
+            }
+            if (extraInfoOut.HasValues)
+            {
+                item["extra_info"] = extraInfoOut;
             }
 
             outResults.Add(item);
@@ -608,12 +614,12 @@ namespace DlcvModules
             return res;
         }
 
-        private static bool TryMapLocalPolyline(JArray localPolyline, double[] tC2O, out List<object> mapped)
+        private static bool TryMapLocalPolyline(JArray localPolyline, double[] tC2O, out List<Point2d> mapped)
         {
             mapped = null;
             if (localPolyline == null || localPolyline.Count < 2 || tC2O == null || tC2O.Length < 6) return false;
 
-            var points = new List<object>(localPolyline.Count);
+            var points = new List<Point2d>(localPolyline.Count);
             for (int i = 0; i < localPolyline.Count; i++)
             {
                 var token = localPolyline[i];
@@ -636,7 +642,7 @@ namespace DlcvModules
 
                 double gx = tC2O[0] * x + tC2O[1] * y + tC2O[2];
                 double gy = tC2O[3] * x + tC2O[4] * y + tC2O[5];
-                points.Add(new List<int> { (int)Math.Round(gx), (int)Math.Round(gy) });
+                points.Add(new Point2d(gx, gy));
             }
 
             if (points.Count < 2) return false;

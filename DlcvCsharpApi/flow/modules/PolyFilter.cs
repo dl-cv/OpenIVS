@@ -85,7 +85,9 @@ namespace DlcvModules
                             var p = polyline[pi];
                             lineArr.Add(new JArray(p.X, p.Y));
                         }
-                        detOut["polyline"] = lineArr;
+                        var extraInfo = detOut["extra_info"] as JObject ?? new JObject();
+                        extraInfo["polyline"] = lineArr;
+                        detOut["extra_info"] = extraInfo;
                         detOut["bbox"] = new JArray(bboxNewXywh[0], bboxNewXywh[1], bboxNewXywh[2], bboxNewXywh[3]);
 
                         var metadata = detOut["metadata"] as JObject ?? new JObject();

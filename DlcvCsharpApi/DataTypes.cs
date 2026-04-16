@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 
 namespace dlcv_infer_csharp
@@ -57,10 +58,10 @@ namespace dlcv_infer_csharp
             public Mat Mask { get; set; }
 
             /// <summary>
-            /// 开放折线点集（可选）
-            /// 坐标语义与当前结果中的 bbox/poly 保持一致
+            /// 扩展字段容器（统一收口）
+            /// 例如折线使用 extra_info.polyline
             /// </summary>
-            public List<Point2d> Polyline { get; set; }
+            public JObject ExtraInfo { get; set; }
 
             // <summary>
             // 是否有角度
@@ -75,7 +76,7 @@ namespace dlcv_infer_csharp
 
             public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
                 List<double> bbox, bool withMask, Mat mask,
-                bool withBbox = false, bool withAngle = false, float angle = -100, List<Point2d> polyline = null)
+                bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;
@@ -84,7 +85,7 @@ namespace dlcv_infer_csharp
                 Bbox = bbox;
                 WithMask = withMask;
                 Mask = mask;
-                Polyline = polyline;
+                ExtraInfo = NormalizeExtraInfo(extraInfo);
                 Angle = angle;
                 WithBbox = withBbox;
                 WithAngle = withAngle;
@@ -113,9 +114,10 @@ namespace dlcv_infer_csharp
                 {
                     sb.Append($"Mask size: {Mask.Width}x{Mask.Height}, ");
                 }
-                if (Polyline != null && Polyline.Count > 0)
+                string extraInfoText = FormatExtraInfoForDisplay(ExtraInfo);
+                if (!string.IsNullOrWhiteSpace(extraInfoText))
                 {
-                    sb.Append($"Polyline points: {Polyline.Count}, ");
+                    sb.Append($"ExtraInfo: {{{extraInfoText}}}, ");
                 }
                 return sb.ToString();
             }

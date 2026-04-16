@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
@@ -1849,10 +1849,10 @@ namespace dlcv_infer_csharp
                         angle = (float)bbox[4];
                     }
 
-                    var polyline = ParsePolylinePoints(result["polyline"]);
+                    var extraInfo = Utils.NormalizeExtraInfo(result["extra_info"]);
 
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
-                        withMask, mask_img, withBbox, withAngle, angle, polyline);
+                        withMask, mask_img, withBbox, withAngle, angle, extraInfo);
                     results.Add(objectResult);
                 }
 
@@ -1923,47 +1923,6 @@ namespace dlcv_infer_csharp
                 Log($"创建mask失败: {ex.Message}");
                 return new Mat();
             }
-        }
-
-        private static List<Point2d> ParsePolylinePoints(JToken token)
-        {
-            var points = new List<Point2d>();
-            if (!(token is JArray arr) || arr.Count == 0) return points;
-
-            for (int i = 0; i < arr.Count; i++)
-            {
-                var item = arr[i];
-                if (item is JArray pa && pa.Count >= 2)
-                {
-                    points.Add(new Point2d(pa[0].Value<double>(), pa[1].Value<double>()));
-                }
-                else if (item is JObject po && po.ContainsKey("x") && po.ContainsKey("y"))
-                {
-                    points.Add(new Point2d(po["x"].Value<double>(), po["y"].Value<double>()));
-                }
-            }
-            return points;
-        }
-
-        private static JArray NormalizePolylineToken(JToken token)
-        {
-            var src = token as JArray;
-            var outArr = new JArray();
-            if (src == null || src.Count == 0) return outArr;
-
-            for (int i = 0; i < src.Count; i++)
-            {
-                var item = src[i];
-                if (item is JArray pa && pa.Count >= 2)
-                {
-                    outArr.Add(new JArray(pa[0].Value<double>(), pa[1].Value<double>()));
-                }
-                else if (item is JObject po && po.ContainsKey("x") && po.ContainsKey("y"))
-                {
-                    outArr.Add(new JArray(po["x"].Value<double>(), po["y"].Value<double>()));
-                }
-            }
-            return outArr;
         }
 
         public Utils.CSharpResult Infer(Mat image, JObject params_json = null)
@@ -2187,11 +2146,10 @@ namespace dlcv_infer_csharp
 
             result["angle"] = angle;
             result["with_angle"] = withAngle;
-
-            var polyline = NormalizePolylineToken(item["polyline"]);
-            if (polyline.Count > 0)
+            var extraInfo = Utils.NormalizeExtraInfo(item["extra_info"]);
+            if (extraInfo.HasValues)
             {
-                result["polyline"] = polyline;
+                result["extra_info"] = extraInfo;
             }
 
             // 5. Handle Mask
