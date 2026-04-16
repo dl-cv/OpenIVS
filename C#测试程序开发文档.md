@@ -25,6 +25,7 @@
 #### 2.1 解决方案与编译配置（必须满足）
 
 - **解决方案**：`OpenIVS.sln`
+- **构建入口**：解决方案级构建、项目级构建与发布前构建验证统一通过 MCP 构建工具执行，入口见 `开发文档.md` 的“统一编译说明”
 - **平台**：只提供 `x64`（Debug/Release），必须以 **x64** 方式编译与运行
 - **启动项目**：`DlcvDemo`
 - **输出**：
@@ -70,8 +71,8 @@
   - `ImageViewer` 引用：`DlcvCsharpApi`
   - `DlcvModelRPC` 引用：`DlcvCsharpApi`
 - **编译设置**
-  - `DlcvDemo` 与 `ImageViewer` 建议启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加相关的 `unsafe` 代码）
-  - 建议将 `DlcvDemo` 也统一按 x64 配置编译运行（与解决方案一致）
+  - `DlcvDemo` 与 `ImageViewer` 启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加相关的 `unsafe` 代码）
+  - `DlcvDemo` 统一按 x64 配置编译运行（与解决方案一致）
 
 #### 2.4 图像解码与通道/位深约定（DlcvDemo 与 DlcvCsharpApi，必须一致）
 

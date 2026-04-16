@@ -11,7 +11,7 @@
 
 ## 依赖（构建期 + 运行期）
 
-- **Visual Studio**：VS2022（v143），建议 **x64**
+- **Visual Studio**：VS2022（v143），使用 **x64**
 - **C++ 标准**：C++17
 - **Qt**：Qt6（用到 `Core/Gui/Widgets`）
 - **OpenCV**：4.10（工程默认链接 `opencv_world4100(.lib)`）
@@ -21,8 +21,9 @@
 
 ## 构建（Visual Studio 解决方案）
 
-- 打开解决方案：`OpenIVS.sln`
-- 选择配置：`Release|x64`（或 `Debug|x64`）
+- 解决方案：`OpenIVS.sln`
+- 构建入口：解决方案级构建、项目级构建与发布前构建验证统一通过 MCP 构建工具执行，入口见 `开发文档.md` 的“统一编译说明”
+- 构建配置：`Release|x64` 或 `Debug|x64`
 - 生成项目：`dlcv_infer_cpp_qt_demo`
 
 ### Qt 路径约定（非常关键）
@@ -31,7 +32,7 @@
 
 - `Qt6_DIR=C:\Qt\6.10.2\msvc2022_64\lib\cmake`
 
-构建前会调用 `rcc.exe` 生成 `qrc_resources.cpp`；构建后会尝试执行 `windeployqt.exe` 将 Qt 运行时部署到 exe 同目录（若提示找不到 `windeployqt.exe`，请先修正 `Qt6_DIR` 或手动对 `dlcv_infer_cpp_qt_demo.exe` 执行一次 `windeployqt`）。
+构建前会调用 `rcc.exe` 生成 `qrc_resources.cpp`；构建后会尝试执行 `windeployqt.exe` 将 Qt 运行时部署到 exe 同目录。
 
 ### 工程默认路径（来自 `*.vcxproj`，便于排错）
 
@@ -42,7 +43,7 @@
   - Debug：`dlcv_infer_cpp_dll.lib;opencv_world4100d.lib;Qt6Widgetsd.lib;Qt6Guid.lib;Qt6Cored.lib`
   - Release：`dlcv_infer_cpp_dll.lib;opencv_world4100.lib;Qt6Widgets.lib;Qt6Gui.lib;Qt6Core.lib`
 
-> 注：工程文件同时包含 `Win32` 配置，但本文档按实际使用建议以 `x64` 为准。
+> 注：工程文件同时包含 `Win32` 配置，实际使用配置为 `x64`。
 
 ## 运行
 

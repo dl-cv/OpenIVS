@@ -75,10 +75,10 @@
 
 ## 5. 构建与运行
 
-1. 使用 `Release|x64` 编译 `OpenIVS.sln`
-2. 分别运行：
-   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
-   - `Release\dlcv_infer_cpp_test.exe`
+- 解决方案级构建、项目级构建与发布前构建验证统一通过 MCP 构建工具执行，入口见 `开发文档.md` 的“统一编译说明”
+- 运行文件：
+  - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
+  - `Release\dlcv_infer_cpp_test.exe`
 
 说明：
 
