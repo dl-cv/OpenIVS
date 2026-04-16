@@ -83,6 +83,19 @@ namespace DlcvModules
 			s = s.Replace(' ', '_');
 			return string.IsNullOrWhiteSpace(s) ? "Unknown" : s;
 		}
+
+		public static int ClampToInt(double value)
+		{
+			if (double.IsNaN(value) || double.IsInfinity(value)) return 0;
+			if (value > int.MaxValue) return int.MaxValue;
+			if (value < int.MinValue) return int.MinValue;
+			return (int)Math.Round(value);
+		}
+
+		public static float SafeToFloat(JToken token)
+		{
+			try { return token != null ? Convert.ToSingle(((JValue)token).Value) : 0f; } catch { return 0f; }
+		}
 	}
 
 	/// <summary>
@@ -104,9 +117,9 @@ namespace DlcvModules
 		public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
 		{
 			var results = resultList ?? new JArray();
-			string productName = ReadString("product_name", "");
-			string productId = ReadString("product_id", null);
-			string templateName = ReadString("template_name", productName);
+			string productName = ReadStringOrDefault("product_name", "");
+			string productId = ReadStringOrDefault("product_id", null);
+			string templateName = ReadStringOrDefault("template_name", productName);
 
 			var tpl = new SimpleTemplate
 			{
@@ -214,10 +227,10 @@ namespace DlcvModules
 						}
 						if (gx < minx) minx = gx; if (gy < miny) miny = gy; if (gx > maxx) maxx = gx; if (gy > maxy) maxy = gy;
 					}
-					int ix = ClampToInt(minx);
-					int iy = ClampToInt(miny);
-					int iw = Math.Max(1, ClampToInt(maxx - minx));
-					int ih = Math.Max(1, ClampToInt(maxy - miny));
+					int ix = SimpleTemplateUtils.ClampToInt(minx);
+					int iy = SimpleTemplateUtils.ClampToInt(miny);
+					int iw = Math.Max(1, SimpleTemplateUtils.ClampToInt(maxx - minx));
+					int ih = Math.Max(1, SimpleTemplateUtils.ClampToInt(maxy - miny));
 
 					string text =
 						(so["category_name"] != null ? so["category_name"].ToString() : null) ??
@@ -226,7 +239,7 @@ namespace DlcvModules
 						(so["name"] != null ? so["name"].ToString() : null) ??
 						string.Empty;
 					text = text != null ? text.Trim() : string.Empty;
-					float conf = SafeToFloat(so["score"]);
+					float conf = SimpleTemplateUtils.SafeToFloat(so["score"]);
 					string key = SimpleTemplateUtils.NormalizeText(text) + "|" + ix + "," + iy + "," + iw + "," + ih;
 						if (seen.Add(key))
 						{
@@ -246,28 +259,6 @@ namespace DlcvModules
 			return new ModuleIO(imageList ?? new List<ModuleImage>(), results, outTemplates);
 		}
 
-		private string ReadString(string key, string dv)
-		{
-			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
-			{
-				var s = v.ToString();
-				return string.IsNullOrWhiteSpace(s) ? dv : s;
-			}
-			return dv;
-		}
-
-		private static int ClampToInt(double v)
-		{
-			if (double.IsNaN(v) || double.IsInfinity(v)) return 0;
-			if (v > int.MaxValue) return int.MaxValue;
-			if (v < int.MinValue) return int.MinValue;
-			return (int)Math.Round(v);
-		}
-
-		private static float SafeToFloat(JToken t)
-		{
-			try { return t != null ? Convert.ToSingle(((JValue)t).Value) : 0f; } catch { return 0f; }
-		}
 	}
 
 	/// <summary>
@@ -317,7 +308,7 @@ namespace DlcvModules
 			{
 				return new ModuleIO(images, results);
 			}
-			string fileName = ReadString("file_name", null);
+			string fileName = ReadStringOrDefault("file_name", null);
 			if (string.IsNullOrWhiteSpace(fileName)) fileName = tpl?.TemplateId ?? "Template";
 			fileName = SimpleTemplateUtils.MakeSafeFileName(fileName);
 			string jsonPath = Path.Combine(effDir ?? string.Empty, fileName + ".json");
@@ -365,15 +356,6 @@ namespace DlcvModules
 			return null;
 		}
 
-		private string ReadString(string key, string dv)
-		{
-			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
-			{
-				var s = v.ToString();
-				return string.IsNullOrWhiteSpace(s) ? dv : s;
-			}
-			return dv;
-		}
 	}
 
 	/// <summary>
@@ -396,7 +378,7 @@ namespace DlcvModules
 		{
 			var images = imageList ?? new List<ModuleImage>();
 			var results = resultList != null ? new JArray(resultList) : new JArray();
-			string path = ReadString("path", null);
+			string path = ReadStringOrDefault("path", null);
 			if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
 			{
 				return new ModuleIO(images, results);
@@ -412,15 +394,6 @@ namespace DlcvModules
 			return new ModuleIO(images, results);
 		}
 
-		private string ReadString(string key, string dv)
-		{
-			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
-			{
-				var s = v.ToString();
-				return string.IsNullOrWhiteSpace(s) ? dv : s;
-			}
-			return dv;
-		}
 	}
 
 	/// <summary>
@@ -792,13 +765,13 @@ namespace DlcvModules
 					}
 					else
 					{
-						x = ClampToInt(bbox[0].Value<double>());
-						y = ClampToInt(bbox[1].Value<double>());
-						w = Math.Max(1, ClampToInt(bbox[2].Value<double>()));
-						h = Math.Max(1, ClampToInt(bbox[3].Value<double>()));
+						x = SimpleTemplateUtils.ClampToInt(bbox[0].Value<double>());
+						y = SimpleTemplateUtils.ClampToInt(bbox[1].Value<double>());
+						w = Math.Max(1, SimpleTemplateUtils.ClampToInt(bbox[2].Value<double>()));
+						h = Math.Max(1, SimpleTemplateUtils.ClampToInt(bbox[3].Value<double>()));
 					}
 					string text = so["category_name"]?.ToString() ?? string.Empty;
-					float conf = SafeToFloat(so["score"]);
+					float conf = SimpleTemplateUtils.SafeToFloat(so["score"]);
 					list.Add(new SimpleOcrItem { Text = text, Confidence = conf, X = x, Y = y, Width = w, Height = h });
 				}
 			}
@@ -912,19 +885,6 @@ namespace DlcvModules
 			detail.Score = Math.Max(0.0, (double)correct / total - Math.Min(over * 0.15, 0.4) - Math.Min(miss * 0.2, 0.5) - Math.Min(misjudge * 0.5, 0.8));
 			detail.IsMatch = (miss == 0 && over == 0 && misjudge == 0);
 			return detail;
-		}
-
-		private static int ClampToInt(double v)
-		{
-			if (double.IsNaN(v) || double.IsInfinity(v)) return 0;
-			if (v > int.MaxValue) return int.MaxValue;
-			if (v < int.MinValue) return int.MinValue;
-			return (int)Math.Round(v);
-		}
-
-		private static float SafeToFloat(JToken t)
-		{
-			try { return t != null ? Convert.ToSingle(((JValue)t).Value) : 0f; } catch { return 0f; }
 		}
 
 		private double ReadDoubleOr(string key, double dv)
@@ -1097,7 +1057,7 @@ namespace DlcvModules
 
 			string saveDir = this.Context != null ? this.Context.Get<string>("templates_dir", null) : null;
 			if (!string.IsNullOrWhiteSpace(saveDir)) { try { Directory.CreateDirectory(saveDir); } catch { } }
-			string productType = ReadString("product_type", null);
+			string productType = ReadStringOrDefault("product_type", null);
 			productType = productType ?? string.Empty;
 
 			string face = this.Context != null ? this.Context.Get<string>("face", null) : null;
@@ -1307,16 +1267,6 @@ namespace DlcvModules
 			try { if (matcher.ScalarOutputsByName != null && matcher.ScalarOutputsByName.ContainsKey("detail")) detailObj = matcher.ScalarOutputsByName["detail"]; } catch { }
 			try { this.ScalarOutputsByName["ok"] = okObj; this.ScalarOutputsByName["detail"] = detailObj; } catch { }
 			return new ModuleIO(images, results, new List<SimpleTemplate>());
-		}
-
-		private string ReadString(string key, string dv)
-		{
-			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
-			{
-				var s = v.ToString();
-				return string.IsNullOrWhiteSpace(s) ? dv : s;
-			}
-			return dv;
 		}
 
 		private double ReadDoubleOr(string key, double dv)

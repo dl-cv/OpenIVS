@@ -25,6 +25,7 @@
 #### 2.1 解决方案与编译配置（必须满足）
 
 - **解决方案**：`OpenIVS.sln`
+- **构建入口**：解决方案级构建、项目级构建与发布前构建验证统一通过 MCP 构建工具执行，入口见 `开发文档.md` 的“统一编译说明”
 - **平台**：只提供 `x64`（Debug/Release），必须以 **x64** 方式编译与运行
 - **启动项目**：`DlcvDemo`
 - **输出**：
@@ -70,8 +71,8 @@
   - `ImageViewer` 引用：`DlcvCsharpApi`
   - `DlcvModelRPC` 引用：`DlcvCsharpApi`
 - **编译设置**
-  - `DlcvDemo` 与 `ImageViewer` 建议启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加相关的 `unsafe` 代码）
-  - 建议将 `DlcvDemo` 也统一按 x64 配置编译运行（与解决方案一致）
+  - `DlcvDemo` 与 `ImageViewer` 启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加相关的 `unsafe` 代码）
+  - `DlcvDemo` 统一按 x64 配置编译运行（与解决方案一致）
 
 #### 2.4 图像解码与通道/位深约定（DlcvDemo 与 DlcvCsharpApi，必须一致）
 
@@ -163,6 +164,7 @@
   - **边界框**：
     - 普通框：绘制矩形 `[x, y, w, h]`。
     - 旋转框：根据 `[cx, cy, w, h, angle]` 绘制四边形。
+  - **折线**：当 `CSharpObjectResult.ExtraInfo["polyline"]` 存在且点数不少于 2 时，按原图坐标绘制开放折线。
   - **Mask**：若存在，在框内叠加半透明蒙版（仅有效区域）。
   - **标签**：在框上方显示 `{category_name} {score:F2}`。
   - **颜色**：根据类别（OK/NG）区分颜色（如绿/红）。
@@ -271,6 +273,7 @@
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
   - **文本**：输出推理耗时及结果详情；且 `richTextBox1` 文本中必须包含字段名 `推理时间:` 与 `推理结果:`。
+  - **结果详情**：每条结果固定输出类别、分数和框信息；当 `ExtraInfo` 非空时，在同行追加 `extra_info={ ... }`，内容使用 `Utils.FormatExtraInfoForDisplay()` 生成。
 - **异常处理**：若图片无效或推理失败，弹窗提示错误。
 
 #### 7.7 推理 JSON（按钮：`推理JSON`）

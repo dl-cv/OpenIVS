@@ -791,9 +791,11 @@ namespace DlcvModules
                 catch { }
             }
 
+            var extraInfo = entry["extra_info"] as JObject;
+
             var obj = new Utils.CSharpObjectResult(
                 categoryId, categoryName, score, area, bbox,
-                withMask, mask, withBbox, withAngle, angle);
+                withMask, mask, withBbox, withAngle, angle, extraInfo);
             objects.Add(obj);
         }
 
@@ -871,6 +873,16 @@ namespace DlcvModules
                     }
                 }
 
+                var extraInfoSource = so["extra_info"] as JObject;
+                var extraInfo = extraInfoSource;
+                var polyline = Utils.GetExtraInfoPolyline(extraInfoSource);
+                if (invA23 != null && polyline.Count > 0)
+                {
+                    polyline = TransformPolyline(polyline, invA23);
+                    extraInfo = extraInfoSource != null ? (JObject)extraInfoSource.DeepClone() : new JObject();
+                    Utils.SetExtraInfoPolyline(extraInfo, polyline);
+                }
+
                 Mat mask = new Mat();
                 if (withMask)
                 {
@@ -928,7 +940,7 @@ namespace DlcvModules
 
                 var obj = new Utils.CSharpObjectResult(
                     categoryId, categoryName, score, area, bbox,
-                    withMask, mask, withBbox, withAngle, angle);
+                    withMask, mask, withBbox, withAngle, angle, extraInfo);
                 objects.Add(obj);
             }
         }
@@ -939,6 +951,18 @@ namespace DlcvModules
             double nx = a2x3[0] * x + a2x3[1] * y + a2x3[2];
             double ny = a2x3[3] * x + a2x3[4] * y + a2x3[5];
             return new Point2d(nx, ny);
+        }
+
+        private static List<Point2d> TransformPolyline(List<Point2d> polyline, double[] a2x3)
+        {
+            var mapped = new List<Point2d>(polyline != null ? polyline.Count : 0);
+            if (polyline == null || polyline.Count == 0) return mapped;
+            for (int i = 0; i < polyline.Count; i++)
+            {
+                var p = polyline[i];
+                mapped.Add(ApplyAffine(a2x3, p.X, p.Y));
+            }
+            return mapped;
         }
 
         private static double[] Inverse2x3(double[] a2x3)

@@ -1849,8 +1849,10 @@ namespace dlcv_infer_csharp
                         angle = (float)bbox[4];
                     }
 
+                    var extraInfo = result["extra_info"] as JObject ?? new JObject();
+
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
-                        withMask, mask_img, withBbox, withAngle, angle);
+                        withMask, mask_img, withBbox, withAngle, angle, extraInfo);
                     results.Add(objectResult);
                 }
 
@@ -2144,6 +2146,11 @@ namespace dlcv_infer_csharp
 
             result["angle"] = angle;
             result["with_angle"] = withAngle;
+            var extraInfo = item["extra_info"] as JObject ?? new JObject();
+            if (extraInfo.HasValues)
+            {
+                result["extra_info"] = extraInfo;
+            }
 
             // 5. Handle Mask
             bool withMask = false;

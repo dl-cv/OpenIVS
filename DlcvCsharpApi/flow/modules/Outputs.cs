@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 
@@ -28,9 +29,9 @@ namespace DlcvModules
 			var images = imageList ?? new List<ModuleImage>();
 			var results = resultList ?? new JArray();
 
-			string saveDir = ReadString("save_path", null);
-			string suffix = ReadString("suffix", "_out");
-			string fmt = ReadString("format", "png");
+			string saveDir = ReadStringOrDefault("save_path", null);
+			string suffix = ReadStringOrDefault("suffix", "_out");
+			string fmt = ReadStringOrDefault("format", "png");
 			if (!string.IsNullOrWhiteSpace(saveDir))
 			{
 				try { Directory.CreateDirectory(saveDir); } catch { }
@@ -81,16 +82,6 @@ namespace DlcvModules
 
 			// 透传
 			return new ModuleIO(images, results);
-		}
-
-		private string ReadString(string key, string dv)
-		{
-			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
-			{
-				var s = v.ToString();
-				return string.IsNullOrWhiteSpace(s) ? dv : s;
-			}
-			return dv;
 		}
 
         private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj)
@@ -353,7 +344,7 @@ namespace DlcvModules
             bool emitPoly,
             List<Dictionary<string, object>> outResults)
         {
-            var item = new Dictionary<string, object>(8)
+            var item = new Dictionary<string, object>(9)
             {
                 ["category_id"] = detObj["category_id"]?.Value<int>() ?? 0,
                 ["category_name"] = detObj["category_name"]?.ToString(),
@@ -388,6 +379,25 @@ namespace DlcvModules
                 if (emitPoly && TryBuildMaskPoly(maskInfo, bboxLocal, tC2O, out List<object> poly))
                 {
                     item["poly"] = poly;
+                }
+            }
+
+            var extraInfoSource = detObj["extra_info"] as JObject;
+            if (extraInfoSource != null && extraInfoSource.HasValues)
+            {
+                var localPolyline = Utils.GetExtraInfoPolyline(extraInfoSource);
+                if (TryMapLocalPolyline(localPolyline, tC2O, out List<Point2d> polylineOut))
+                {
+                    var extraInfoOut = (JObject)extraInfoSource.DeepClone();
+                    Utils.SetExtraInfoPolyline(extraInfoOut, polylineOut);
+                    if (extraInfoOut.HasValues)
+                    {
+                        item["extra_info"] = extraInfoOut;
+                    }
+                }
+                else
+                {
+                    item["extra_info"] = extraInfoSource;
                 }
             }
 
@@ -600,6 +610,27 @@ namespace DlcvModules
                 res[i] = new Point2f((float)nx, (float)ny);
             }
             return res;
+        }
+
+        private static bool TryMapLocalPolyline(List<Point2d> localPolyline, double[] tC2O, out List<Point2d> mapped)
+        {
+            mapped = null;
+            if (localPolyline == null || localPolyline.Count < 2 || tC2O == null || tC2O.Length < 6) return false;
+
+            var points = new List<Point2d>(localPolyline.Count);
+            for (int i = 0; i < localPolyline.Count; i++)
+            {
+                var p = localPolyline[i];
+                double x = p.X;
+                double y = p.Y;
+                double gx = tC2O[0] * x + tC2O[1] * y + tC2O[2];
+                double gy = tC2O[3] * x + tC2O[4] * y + tC2O[5];
+                points.Add(new Point2d(gx, gy));
+            }
+
+            if (points.Count < 2) return false;
+            mapped = points;
+            return true;
         }
 
         private static List<double> RBoxLocalToGlobal(JArray rbox, double[] T)
