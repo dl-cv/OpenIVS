@@ -8,12 +8,12 @@
 
 ## 编译规则
 
-1. 任何编译、构建、重建与发布前构建验证，必须且只能调用 MCP 构建工具执行。
-2. 解决方案级构建入口为 `build_solution`。
-3. 项目级构建入口为 `build_project`。
-4. 严禁使用 `msbuild`、`dotnet`、`powershell` 或其他本地 shell 命令进行编译。
-5. MCP 构建工具不可用、报错或权限不足时，立即停止构建动作并先报告，不允许切换到本地命令链路。
-6. 构建配置使用 `Debug`、`x64`。
+1. 任何编译、构建、重建与发布前构建验证，必须且只能通过项目级 skill 脚本 `.cursor/skills/vs-build/scripts/build.py` 执行。
+2. 默认构建目标为 `OpenIVS.sln`。
+3. 默认构建配置使用 `Debug`、`x64`、`Build`、`minimal`。
+4. 用户明确指定 `.csproj`、`Release`、`Rebuild`、`Clean` 等参数时，按用户要求覆盖默认值。
+5. 严禁直接使用 `msbuild`、`dotnet`、`powershell` 或其他本地 shell 命令进行编译。
+6. skill 构建脚本不可用、报错或权限不足时，立即停止构建动作并先报告，不允许切换到其他命令链路。
 
 ## 项目实现约束
 
