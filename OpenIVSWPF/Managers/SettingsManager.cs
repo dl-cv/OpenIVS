@@ -285,7 +285,7 @@ namespace OpenIVSWPF.Managers
 
         // 模型设置
         public string ModelPath { get; set; }
-        public string ModelType { get; set; } // 模型类型：DVT 或 DVP
+        public string ModelType { get; set; } // 模型类型：DVT
 
         // 设备设置
         public float Speed { get; set; }

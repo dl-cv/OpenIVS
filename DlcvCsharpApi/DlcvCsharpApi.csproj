@@ -70,8 +70,6 @@
   <ItemGroup>
     <Compile Include="DllLoader.cs" />
     <Compile Include="Model.cs" />
-    <Compile Include="SlidingWindowModel.cs" />
-    <Compile Include="OcrWithDetModel.cs" />
     <Compile Include="DataTypes.cs" />
     <Compile Include="Utils.cs" />
     <Compile Include="flow\runtime\ExecutionRuntime.cs" />
