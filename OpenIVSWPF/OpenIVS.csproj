@@ -148,11 +148,6 @@
       <n>ModbusApi</n>
       <Name>ModbusApi</Name>
     </ProjectReference>
-    <ProjectReference Include="..\DlcvHttpApi\DlcvHttpApi.csproj">
-      <Project>{DFC732A4-410A-453D-9790-30A4358D69BD}</Project>
-      <n>DlcvHttpApi</n>
-      <Name>DlcvHttpApi</Name>
-    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <Resource Include="logo.ico" />
