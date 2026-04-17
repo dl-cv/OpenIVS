@@ -67,6 +67,31 @@ namespace DLCV
         // 控制是否显示可视化结果（框、Mask、文字等）
         public bool ShowVisualization { get; set; } = true;
 
+        // 控制是否显示标签文字（类别名 + 分数）。关闭后只显示框/Mask，不显示任何文字标签。
+        public bool ShowLabelText { get; set; } = true;
+
+        // 标签字体缩放倍率（默认 1.0），支持运行时通过快捷键调整。
+        private float _labelFontScale = 1.0f;
+        public float LabelFontScale
+        {
+            get => _labelFontScale;
+            set
+            {
+                float v = value;
+                if (v < MinLabelFontScale) v = MinLabelFontScale;
+                if (v > MaxLabelFontScale) v = MaxLabelFontScale;
+                if (Math.Abs(v - _labelFontScale) > 1e-4f)
+                {
+                    _labelFontScale = v;
+                    Invalidate();
+                }
+            }
+        }
+
+        public float MinLabelFontScale { get; set; } = 0.3f;
+        public float MaxLabelFontScale { get; set; } = 5.0f;
+        public float LabelFontScaleStep { get; set; } = 1.1f;
+
         public ImageViewer()
         {
             this.DoubleBuffered = true; // Enable double buffering
@@ -79,10 +104,28 @@ namespace DLCV
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
-            if (e.KeyCode == Keys.V)
+            switch (e.KeyCode)
             {
-                ShowVisualization = !ShowVisualization;
-                Invalidate(); // 重绘
+                case Keys.V:
+                    ShowVisualization = !ShowVisualization;
+                    Invalidate();
+                    break;
+                case Keys.C:
+                    ShowLabelText = !ShowLabelText;
+                    Invalidate();
+                    break;
+                case Keys.Oemplus:
+                case Keys.Add:
+                    LabelFontScale = _labelFontScale * LabelFontScaleStep;
+                    break;
+                case Keys.OemMinus:
+                case Keys.Subtract:
+                    LabelFontScale = _labelFontScale / LabelFontScaleStep;
+                    break;
+                case Keys.D0:
+                case Keys.NumPad0:
+                    LabelFontScale = 1.0f;
+                    break;
             }
         }
 
@@ -123,6 +166,20 @@ namespace DLCV
         {
             base.OnMouseWheel(e);
             if (_image == null) return;
+
+            // Ctrl + 滚轮：调整标签字体大小，不缩放图像
+            if ((Control.ModifierKeys & Keys.Control) == Keys.Control)
+            {
+                if (e.Delta > 0)
+                {
+                    LabelFontScale = _labelFontScale * LabelFontScaleStep;
+                }
+                else if (e.Delta < 0)
+                {
+                    LabelFontScale = _labelFontScale / LabelFontScaleStep;
+                }
+                return;
+            }
 
             float oldScale = _scale;
 
@@ -274,7 +331,7 @@ namespace DLCV
             if (currentResults == null || !ShowVisualization) return;
 
             float borderWidth = Math.Max(1, 2 / _scale); // 更细的边框
-            float fontSize = Math.Max(8, 24 / _scale);
+            float fontSize = Math.Max(8, 24 * _labelFontScale / _scale);
             string _statusText = "OK";
 
             // 遍历结构体的嵌套结构
@@ -392,24 +449,27 @@ namespace DLCV
                         }
 
                         // 绘制标签文本
-                        string label = $"{categoryName} {score:F2}";
-                        using (Font font = new Font("Microsoft YaHei", fontSize))
+                        if (ShowLabelText)
                         {
-                            SizeF textSize = e.Graphics.MeasureString(label, font);
-                            // 将文本位置放在旋转框上方
-                            float textX = cx - textSize.Width / 2;
-                            float textY = cy - h / 2 - textSize.Height - 2;
-
-                            // 绘制半透明黑色背景
-                            using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                            string label = $"{categoryName} {score:F2}";
+                            using (Font font = new Font("Microsoft YaHei", fontSize))
                             {
-                                e.Graphics.FillRectangle(backgroundBrush, textX, textY, textSize.Width, textSize.Height);
-                            }
+                                SizeF textSize = e.Graphics.MeasureString(label, font);
+                                // 将文本位置放在旋转框上方
+                                float textX = cx - textSize.Width / 2;
+                                float textY = cy - h / 2 - textSize.Height - 2;
 
-                            // 绘制文字
-                            using (SolidBrush textBrush = new SolidBrush(color))
-                            {
-                                e.Graphics.DrawString(label, font, textBrush, textX, textY);
+                                // 绘制半透明黑色背景
+                                using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                                {
+                                    e.Graphics.FillRectangle(backgroundBrush, textX, textY, textSize.Width, textSize.Height);
+                                }
+
+                                // 绘制文字
+                                using (SolidBrush textBrush = new SolidBrush(color))
+                                {
+                                    e.Graphics.DrawString(label, font, textBrush, textX, textY);
+                                }
                             }
                         }
                     }
@@ -437,22 +497,25 @@ namespace DLCV
                         }
 
                         // 绘制标签文本
-                        string label = $"{categoryName} {score:F2}";
-                        using (Font font = new Font("Microsoft YaHei", fontSize))
+                        if (ShowLabelText)
                         {
-                            SizeF textSize = e.Graphics.MeasureString(label, font);
-                            float textY = y - textSize.Height - 2;
-
-                            // 绘制半透明黑色背景
-                            using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                            string label = $"{categoryName} {score:F2}";
+                            using (Font font = new Font("Microsoft YaHei", fontSize))
                             {
-                                e.Graphics.FillRectangle(backgroundBrush, x, textY, textSize.Width, textSize.Height);
-                            }
+                                SizeF textSize = e.Graphics.MeasureString(label, font);
+                                float textY = y - textSize.Height - 2;
 
-                            // 绘制文字
-                            using (SolidBrush textBrush = new SolidBrush(color))
-                            {
-                                e.Graphics.DrawString(label, font, textBrush, x, textY);
+                                // 绘制半透明黑色背景
+                                using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                                {
+                                    e.Graphics.FillRectangle(backgroundBrush, x, textY, textSize.Width, textSize.Height);
+                                }
+
+                                // 绘制文字
+                                using (SolidBrush textBrush = new SolidBrush(color))
+                                {
+                                    e.Graphics.DrawString(label, font, textBrush, x, textY);
+                                }
                             }
                         }
                     }
