@@ -420,7 +420,6 @@ QString MainWindow::formatResultText(const dlcv_infer::Result& output) const {
 
 void MainWindow::onLoadModel() {
     stopPressureTest();
-    model_.reset();
 
     QFileDialog dialog(this, "选择模型");
     dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvr *.dvst);;所有文件 (*.*)");
@@ -434,12 +433,16 @@ void MainWindow::onLoadModel() {
     }
 
     if (dialog.exec() != QDialog::Accepted) {
+        // 用户取消选择时保留当前已加载的模型
         return;
     }
 
     const QString selectedModelPath = dialog.selectedFiles().front();
 
     settings_.setValue("LastModelPath", selectedModelPath);
+
+    // 用户确认选择后，再释放旧模型并加载新模型
+    model_.reset();
 
     try
     {
