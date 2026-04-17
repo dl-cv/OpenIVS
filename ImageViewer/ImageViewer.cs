@@ -332,11 +332,7 @@ namespace DLCV
 
             float borderWidth = Math.Max(1, 2 / _scale); // 更细的边框
 
-            // 参考 Web 端 ImageViewer.vue 的字号逻辑：
-            //   屏幕渲染字号 = clamp(baseFont * scale, baseFont, 128) * labelFontScale
-            // 即：缩小时至少保持 baseFont 像素可读；放大时随缩放增大，但封顶 128px 避免失控。
-            // 由于 OnPaint 已做 ScaleTransform(_scale, _scale)，此处字号位于图像坐标系，
-            // 因此还需要再除以 _scale，让最终屏幕渲染尺寸与上面公式一致。
+            // 屏幕渲染字号按 clamp(baseFont * scale, baseFont, 128) * labelFontScale 计算
             const float BaseFontPx = 14f;
             const float MaxFontPx = 128f;
             float screenFontPx = Math.Min(Math.Max(BaseFontPx * _scale, BaseFontPx), MaxFontPx) * _labelFontScale;
