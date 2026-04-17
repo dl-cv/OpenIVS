@@ -67,8 +67,23 @@ namespace DLCV
         // 控制是否显示可视化结果（框、Mask、文字等）
         public bool ShowVisualization { get; set; } = true;
 
-        // 控制是否显示标签文字（类别名 + 分数）。关闭后只显示框/Mask，不显示任何文字标签。
-        public bool ShowLabelText { get; set; } = true;
+        // 标签文字显示模式：类别+分数 / 仅类别 / 不显示
+        public enum LabelTextMode
+        {
+            CategoryAndScore = 0,
+            CategoryOnly = 1,
+            None = 2
+        }
+
+        // 当前标签显示模式，按 C 键在三种模式之间循环切换。
+        public LabelTextMode LabelDisplayMode { get; set; } = LabelTextMode.CategoryAndScore;
+
+        // 兼容旧属性：保持 bool 语义——None 关闭，其他模式为显示。
+        public bool ShowLabelText
+        {
+            get => LabelDisplayMode != LabelTextMode.None;
+            set => LabelDisplayMode = value ? LabelTextMode.CategoryAndScore : LabelTextMode.None;
+        }
 
         // 标签字体缩放倍率（默认 1.0），支持运行时通过快捷键调整。
         private float _labelFontScale = 1.0f;
@@ -111,7 +126,7 @@ namespace DLCV
                     Invalidate();
                     break;
                 case Keys.C:
-                    ShowLabelText = !ShowLabelText;
+                    LabelDisplayMode = (LabelTextMode)(((int)LabelDisplayMode + 1) % 3);
                     Invalidate();
                     break;
                 case Keys.Oemplus:
@@ -454,9 +469,11 @@ namespace DLCV
                         }
 
                         // 绘制标签文本
-                        if (ShowLabelText)
+                        if (LabelDisplayMode != LabelTextMode.None)
                         {
-                            string label = $"{categoryName} {score:F2}";
+                            string label = LabelDisplayMode == LabelTextMode.CategoryAndScore
+                                ? $"{categoryName} {score:F2}"
+                                : $"{categoryName}";
                             using (Font font = new Font("Microsoft YaHei", fontSize))
                             {
                                 SizeF textSize = e.Graphics.MeasureString(label, font);
@@ -502,9 +519,11 @@ namespace DLCV
                         }
 
                         // 绘制标签文本
-                        if (ShowLabelText)
+                        if (LabelDisplayMode != LabelTextMode.None)
                         {
-                            string label = $"{categoryName} {score:F2}";
+                            string label = LabelDisplayMode == LabelTextMode.CategoryAndScore
+                                ? $"{categoryName} {score:F2}"
+                                : $"{categoryName}";
                             using (Font font = new Font("Microsoft YaHei", fontSize))
                             {
                                 SizeF textSize = e.Graphics.MeasureString(label, font);
