@@ -336,7 +336,8 @@ namespace DlcvDemo2
                 DetectionGeometryUtils.ParseCategoryAndAngle(target.ObjectResult.CategoryName, out baseName, out normalizeAngle);
                 bool useIcDetectModel =
                     string.Equals(baseName, "IC", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(baseName, "BGA", StringComparison.OrdinalIgnoreCase);
+                    string.Equals(baseName, "BGA", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(baseName, "晶振", StringComparison.OrdinalIgnoreCase);
 
                 using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, normalizeAngle))
                 {
@@ -547,7 +548,7 @@ namespace DlcvDemo2
                 CSharpObjectResult mapped;
                 if (DetectionGeometryUtils.TryMapObjectToFull(obj, roiContext.NormToFullAffine, out mapped))
                 {
-                    mappedObjects.Add(ResolveFinalDetectionObject(mapped, extractFallback, useIcDetectModel));
+                    mappedObjects.Add(ResolveFinalDetectionObject(mapped, extractFallback));
                 }
             }
 
@@ -559,9 +560,9 @@ namespace DlcvDemo2
             return mappedObjects;
         }
 
-        private static CSharpObjectResult ResolveFinalDetectionObject(CSharpObjectResult mappedObject, CSharpObjectResult extractFallback, bool useIcDetectModel)
+        private static CSharpObjectResult ResolveFinalDetectionObject(CSharpObjectResult mappedObject, CSharpObjectResult extractFallback)
         {
-            if (!ShouldMapBackToExtractCategory(mappedObject.CategoryName, useIcDetectModel))
+            if (!ShouldMapBackToExtractCategory(mappedObject.CategoryName))
             {
                 return mappedObject;
             }
@@ -579,7 +580,7 @@ namespace DlcvDemo2
                 mappedObject.Angle);
         }
 
-        private static bool ShouldMapBackToExtractCategory(string detectionCategoryName, bool useIcDetectModel)
+        private static bool ShouldMapBackToExtractCategory(string detectionCategoryName)
         {
             string normalized = (detectionCategoryName ?? string.Empty).Trim();
             if (normalized.Length == 0)
@@ -587,12 +588,11 @@ namespace DlcvDemo2
                 return false;
             }
 
-            if (useIcDetectModel)
-            {
-                return string.Equals(normalized, "IC", StringComparison.OrdinalIgnoreCase);
-            }
-
-            return string.Equals(normalized, "元件", StringComparison.Ordinal);
+            // 元件检测模型与 IC 检测模型检测的主体都是"元件"，主体输出类别统一为 `元件`。
+            // 为兼容老版本模型，仍然支持 `IC` 作为主体类别；两者在映射语义上等价，都映射回元件提取模型的 category_name。
+            // 其他细分类别（焊点/引脚/文字 等）保持原结果不变。
+            return string.Equals(normalized, "元件", StringComparison.Ordinal)
+                || string.Equals(normalized, "IC", StringComparison.OrdinalIgnoreCase);
         }
 
         private CSharpResult BuildDisplayResult(List<CSharpObjectResult> finalObjects)
