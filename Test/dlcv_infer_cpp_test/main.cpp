@@ -4,11 +4,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <opencv2/imgcodecs.hpp>
@@ -25,6 +28,21 @@ constexpr int kLeakLoopCount = 10;
 constexpr int kGpuDeviceId = 0;
 constexpr int kFixedBatchSize = 8;
 const std::wstring kModelRoot = L"Y:\\测试模型";
+const std::wstring kDefaultPressureModelPath = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程2-各项检测_120_50.dvst";
+const std::wstring kDefaultPressureImagePath = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\detect_20260401153742_0_6_2904_5248_627_804.jpg";
+constexpr int kDefaultPressureBatchSize = 128;
+constexpr int kDefaultPressureRuns = 9;
+constexpr int kDefaultPressureWarmup = 5;
+const std::wstring kSlidingAlignModelPath = L"C:\\Users\\Administrator\\Desktop\\滑窗裁图分割合并\\model_120_50.dvst";
+const std::wstring kSlidingAlignImagePath = L"C:\\Users\\Administrator\\Desktop\\滑窗裁图分割合并\\T000001-P000001-C22-I1-G9PHG5X0VFT0000HU8+4JKC-OK.png";
+constexpr int kSlidingAlignBatchSize = 1;
+constexpr float kSlidingAlignThreshold = 0.5f;
+const std::wstring kDemo3Model1Path = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程1-目标检测-降采样_120_50.dvst";
+const std::wstring kDemo3Model2Path = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程2-各项检测_120_50.dvst";
+const std::wstring kDemo3ChainImagePath = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\detect_20260401151406_0.jpg";
+const std::wstring kDemo3Model2SingleImagePath = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\detect_20260401153742_0_6_2904_5248_627_804.jpg";
+constexpr int kDemo3CropWidth = 128;
+constexpr int kDemo3CropHeight = 192;
 
 struct ModelCase {
     std::wstring modelFile;
@@ -58,6 +76,22 @@ struct CaseRow {
     std::string speedText;
     std::string batchText;
 };
+
+struct Demo3CropContext {
+    cv::Mat cropRgb;
+    double translateX{0.0};
+    double translateY{0.0};
+};
+
+struct Demo3ChainDebugResult {
+    int model1ObjectCount{0};
+    int cropCount{0};
+    int model2BatchLimit{1};
+    int finalObjectCount{0};
+    std::vector<dlcv_infer::ObjectResult> finalObjects;
+};
+
+void DisposeResultMasks(dlcv_infer::Result& out);
 
 std::string WideToUtf8(const std::wstring& w) {
     if (w.empty()) return {};
@@ -142,6 +176,424 @@ std::wstring BaseName(const std::wstring& p) {
     const size_t pos = p.find_last_of(L"\\/");
     if (pos == std::wstring::npos) return p;
     return p.substr(pos + 1);
+}
+
+std::wstring Utf8ToWide(const std::string& s) {
+    if (s.empty()) return {};
+    int chars = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0);
+    if (chars <= 0) return {};
+    std::wstring out(static_cast<size_t>(chars), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), out.data(), chars);
+    return out;
+}
+
+std::unordered_map<std::string, int> CountCategories(const std::vector<dlcv_infer::ObjectResult>& objects) {
+    std::unordered_map<std::string, int> counts;
+    for (const auto& obj : objects) {
+        std::string category = dlcv_infer::convertGbkToUtf8(obj.categoryName);
+        if (category.empty()) {
+            category = "unknown";
+        }
+        counts[category] += 1;
+    }
+    return counts;
+}
+
+int CountObjectsWithMask(const std::vector<dlcv_infer::ObjectResult>& objects) {
+    int count = 0;
+    for (const auto& obj : objects) {
+        if (obj.withMask || !obj.mask.empty()) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+bool AreCategoryCountsEqual(
+    const std::unordered_map<std::string, int>& a,
+    const std::unordered_map<std::string, int>& b) {
+
+    if (a.size() != b.size()) return false;
+    for (const auto& kv : a) {
+        auto it = b.find(kv.first);
+        if (it == b.end()) return false;
+        if (it->second != kv.second) return false;
+    }
+    return true;
+}
+
+std::string BuildObjectSignature(const dlcv_infer::ObjectResult& obj) {
+    std::ostringstream oss;
+    oss << dlcv_infer::convertGbkToUtf8(obj.categoryName) << "|"
+        << std::fixed << std::setprecision(4) << obj.score << "|"
+        << std::setprecision(2);
+    for (size_t i = 0; i < obj.bbox.size(); ++i) {
+        if (i > 0) oss << ",";
+        oss << obj.bbox[i];
+    }
+    oss << "|" << (obj.withAngle ? 1 : 0) << "|" << std::setprecision(2) << obj.angle;
+    return oss.str();
+}
+
+int CountExactDuplicateObjects(const std::vector<dlcv_infer::ObjectResult>& objects) {
+    std::unordered_set<std::string> seen;
+    seen.reserve(objects.size() * 2 + 1);
+    int duplicates = 0;
+    for (const auto& obj : objects) {
+        const std::string sig = BuildObjectSignature(obj);
+        if (!seen.insert(sig).second) {
+            duplicates += 1;
+        }
+    }
+    return duplicates;
+}
+
+bool ContainsCategory(const std::unordered_map<std::string, int>& counts, const std::string& nameUtf8) {
+    auto it = counts.find(nameUtf8);
+    return it != counts.end() && it->second > 0;
+}
+
+void PrintCategorySummary(
+    const std::string& title,
+    const std::unordered_map<std::string, int>& counts,
+    size_t maxRows = 30) {
+
+    std::vector<std::pair<std::string, int>> rows;
+    rows.reserve(counts.size());
+    for (const auto& kv : counts) rows.push_back(kv);
+    std::sort(rows.begin(), rows.end(), [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+
+    std::cout << title << "（共" << counts.size() << "类）\n";
+    if (rows.empty()) {
+        std::cout << "  - (空)\n";
+        return;
+    }
+    const size_t show = std::min(maxRows, rows.size());
+    for (size_t i = 0; i < show; ++i) {
+        std::cout << "  - " << rows[i].first << ": " << rows[i].second << "\n";
+    }
+    if (rows.size() > show) {
+        std::cout << "  ... 其余 " << (rows.size() - show) << " 类省略\n";
+    }
+}
+
+bool TryMapObjectByTranslate(const dlcv_infer::ObjectResult& localObj, double dx, double dy, dlcv_infer::ObjectResult& mappedObj) {
+    if (localObj.bbox.size() < 4) return false;
+    mappedObj = localObj;
+    mappedObj.bbox = localObj.bbox;
+    mappedObj.bbox[0] += dx;
+    mappedObj.bbox[1] += dy;
+    mappedObj.withBbox = true;
+    return true;
+}
+
+bool TryClampObjectToImage(const dlcv_infer::ObjectResult& inputObj, int imageW, int imageH, dlcv_infer::ObjectResult& outputObj) {
+    if (inputObj.bbox.size() < 4 || imageW <= 0 || imageH <= 0) return false;
+    outputObj = inputObj;
+    outputObj.bbox = inputObj.bbox;
+    const bool isRotated = inputObj.withAngle || inputObj.bbox.size() == 5;
+    if (isRotated) {
+        const double cx = inputObj.bbox[0];
+        const double cy = inputObj.bbox[1];
+        const double w = inputObj.bbox[2];
+        const double h = inputObj.bbox[3];
+        if (w <= 0.0 || h <= 0.0) return false;
+        const double left = cx - w * 0.5;
+        const double right = cx + w * 0.5;
+        const double top = cy - h * 0.5;
+        const double bottom = cy + h * 0.5;
+        const double cl = std::max(0.0, left);
+        const double ct = std::max(0.0, top);
+        const double cr = std::min(static_cast<double>(imageW), right);
+        const double cb = std::min(static_cast<double>(imageH), bottom);
+        if (cr <= cl || cb <= ct) return false;
+        outputObj.bbox[0] = (cl + cr) * 0.5;
+        outputObj.bbox[1] = (ct + cb) * 0.5;
+        outputObj.bbox[2] = cr - cl;
+        outputObj.bbox[3] = cb - ct;
+    } else {
+        const double x = inputObj.bbox[0];
+        const double y = inputObj.bbox[1];
+        const double w = inputObj.bbox[2];
+        const double h = inputObj.bbox[3];
+        if (w <= 0.0 || h <= 0.0) return false;
+        const double left = std::max(0.0, x);
+        const double top = std::max(0.0, y);
+        const double right = std::min(static_cast<double>(imageW), x + w);
+        const double bottom = std::min(static_cast<double>(imageH), y + h);
+        if (right <= left || bottom <= top) return false;
+        outputObj.bbox[0] = left;
+        outputObj.bbox[1] = top;
+        outputObj.bbox[2] = right - left;
+        outputObj.bbox[3] = bottom - top;
+    }
+    outputObj.withBbox = true;
+    return true;
+}
+
+cv::Point2d GetObjectCenter(const dlcv_infer::ObjectResult& obj) {
+    if (obj.bbox.size() < 4) return cv::Point2d(0.0, 0.0);
+    const bool isRotated = obj.withAngle || obj.bbox.size() == 5;
+    if (isRotated) {
+        return cv::Point2d(obj.bbox[0], obj.bbox[1]);
+    }
+    return cv::Point2d(obj.bbox[0] + obj.bbox[2] * 0.5, obj.bbox[1] + obj.bbox[3] * 0.5);
+}
+
+bool BuildCenteredCropContext(
+    const cv::Mat& fullImageRgb,
+    const cv::Point2d& center,
+    int cropW,
+    int cropH,
+    Demo3CropContext& outCtx) {
+
+    const int requestLeft = static_cast<int>(std::llround(center.x - cropW * 0.5));
+    const int requestTop = static_cast<int>(std::llround(center.y - cropH * 0.5));
+    const cv::Rect requested(requestLeft, requestTop, cropW, cropH);
+    const cv::Rect imageRect(0, 0, fullImageRgb.cols, fullImageRgb.rows);
+    const cv::Rect src = requested & imageRect;
+    if (src.width <= 0 || src.height <= 0) return false;
+
+    cv::Mat crop(cropH, cropW, fullImageRgb.type(), cv::Scalar::all(0));
+    const cv::Rect dst(src.x - requestLeft, src.y - requestTop, src.width, src.height);
+    fullImageRgb(src).copyTo(crop(dst));
+
+    outCtx.cropRgb = crop;
+    outCtx.translateX = static_cast<double>(requestLeft);
+    outCtx.translateY = static_cast<double>(requestTop);
+    return true;
+}
+
+int GetModelMaxBatchSize(dlcv_infer::Model& model) {
+    try {
+        const json info = model.GetModelInfo();
+        int best = 1;
+        std::function<void(const json&)> walk = [&](const json& node) {
+            if (node.is_object()) {
+                auto pullInt = [&](const char* key) {
+                    if (!node.contains(key)) return;
+                    const auto& v = node.at(key);
+                    if (v.is_number_integer()) {
+                        best = std::max(best, std::max(1, v.get<int>()));
+                    } else if (v.is_number_float()) {
+                        best = std::max(best, std::max(1, static_cast<int>(std::llround(v.get<double>()))));
+                    } else if (v.is_string()) {
+                        try {
+                            best = std::max(best, std::max(1, std::stoi(v.get<std::string>())));
+                        } catch (...) {
+                        }
+                    }
+                };
+                pullInt("max_batch_size");
+                pullInt("max_batch");
+                pullInt("batch_size");
+                for (auto it = node.begin(); it != node.end(); ++it) {
+                    walk(it.value());
+                }
+            } else if (node.is_array()) {
+                for (const auto& x : node) walk(x);
+            }
+        };
+        walk(info);
+        return std::max(1, best);
+    } catch (...) {
+        return 1;
+    }
+}
+
+std::vector<std::vector<Demo3CropContext>> SplitCropChunks(const std::vector<Demo3CropContext>& source, int chunkSize) {
+    std::vector<std::vector<Demo3CropContext>> chunks;
+    if (source.empty()) return chunks;
+    const int n = std::max(1, chunkSize);
+    for (int i = 0; i < static_cast<int>(source.size()); i += n) {
+        const int count = std::min(n, static_cast<int>(source.size()) - i);
+        chunks.emplace_back(source.begin() + i, source.begin() + i + count);
+    }
+    return chunks;
+}
+
+Demo3ChainDebugResult RunDemo3ChainReference(
+    dlcv_infer::Model& model1,
+    dlcv_infer::Model& model2,
+    const cv::Mat& fullImageRgb,
+    bool model2WithMask) {
+
+    Demo3ChainDebugResult out;
+    json params;
+    params["with_mask"] = false;
+    dlcv_infer::Result model1Result = model1.Infer(fullImageRgb, params);
+
+    std::vector<dlcv_infer::ObjectResult> model1Objects;
+    if (!model1Result.sampleResults.empty()) {
+        for (const auto& obj : model1Result.sampleResults.front().results) {
+            dlcv_infer::ObjectResult clamped = obj;
+            if (TryClampObjectToImage(obj, fullImageRgb.cols, fullImageRgb.rows, clamped)) {
+                model1Objects.push_back(clamped);
+            }
+        }
+    }
+    out.model1ObjectCount = static_cast<int>(model1Objects.size());
+    DisposeResultMasks(model1Result);
+
+    std::vector<Demo3CropContext> cropContexts;
+    cropContexts.reserve(model1Objects.size());
+    for (const auto& obj : model1Objects) {
+        Demo3CropContext ctx;
+        if (BuildCenteredCropContext(fullImageRgb, GetObjectCenter(obj), kDemo3CropWidth, kDemo3CropHeight, ctx)) {
+            cropContexts.push_back(std::move(ctx));
+        }
+    }
+    out.cropCount = static_cast<int>(cropContexts.size());
+
+    out.model2BatchLimit = GetModelMaxBatchSize(model2);
+    const auto chunks = SplitCropChunks(cropContexts, out.model2BatchLimit);
+    json params2;
+    params2["with_mask"] = model2WithMask;
+    for (const auto& chunk : chunks) {
+        std::vector<cv::Mat> mats;
+        mats.reserve(chunk.size());
+        for (const auto& one : chunk) mats.push_back(one.cropRgb);
+        dlcv_infer::Result batchResult = model2.InferBatch(mats, params2);
+        for (int i = 0; i < static_cast<int>(chunk.size()); ++i) {
+            if (i >= static_cast<int>(batchResult.sampleResults.size())) continue;
+            for (const auto& localObj : batchResult.sampleResults[static_cast<size_t>(i)].results) {
+                dlcv_infer::ObjectResult mapped = localObj;
+                if (!TryMapObjectByTranslate(localObj, chunk[static_cast<size_t>(i)].translateX, chunk[static_cast<size_t>(i)].translateY, mapped)) {
+                    continue;
+                }
+                dlcv_infer::ObjectResult clamped = mapped;
+                if (TryClampObjectToImage(mapped, fullImageRgb.cols, fullImageRgb.rows, clamped)) {
+                    out.finalObjects.push_back(clamped);
+                }
+            }
+        }
+        DisposeResultMasks(batchResult);
+    }
+
+    out.finalObjectCount = static_cast<int>(out.finalObjects.size());
+    return out;
+}
+
+int RunDemo3Validation(
+    const std::wstring& model1Path,
+    const std::wstring& model2Path,
+    const std::wstring& chainImagePath,
+    const std::wstring& model2SingleImagePath) {
+
+    std::cout << "==== Demo3 串联专项验证 ====\n";
+    std::cout << "model1: " << WideToUtf8(model1Path) << "\n";
+    std::cout << "model2: " << WideToUtf8(model2Path) << "\n";
+    std::cout << "chain_image: " << WideToUtf8(chainImagePath) << "\n";
+    std::cout << "model2_single_image: " << WideToUtf8(model2SingleImagePath) << "\n";
+
+    if (!FileExistsW(model1Path) || !FileExistsW(model2Path) || !FileExistsW(chainImagePath) || !FileExistsW(model2SingleImagePath)) {
+        std::cout << "输入文件不存在，请检查路径。\n";
+        return 2;
+    }
+
+    try {
+        dlcv_infer::Model model1(model1Path, kGpuDeviceId);
+        dlcv_infer::Model model2(model2Path, kGpuDeviceId);
+
+        cv::Mat singleBgr = LoadImageByDecode(model2SingleImagePath);
+        if (singleBgr.empty()) throw std::runtime_error("模型2单图解码失败");
+        cv::Mat singleRgb;
+        cv::cvtColor(singleBgr, singleRgb, cv::COLOR_BGR2RGB);
+
+        json singleParams;
+        singleParams["threshold"] = 0.05;
+        singleParams["with_mask"] = true;
+        singleParams["batch_size"] = 1;
+        dlcv_infer::Result singleResult = model2.InferBatch(std::vector<cv::Mat>{singleRgb}, singleParams);
+        std::vector<dlcv_infer::ObjectResult> singleObjects;
+        if (!singleResult.sampleResults.empty()) {
+            singleObjects = singleResult.sampleResults.front().results;
+        }
+        const auto singleCounts = CountCategories(singleObjects);
+        PrintCategorySummary("模型2单图类别统计", singleCounts);
+        const bool singleHasLed = ContainsCategory(singleCounts, "LED");
+        const bool singleHasPad = ContainsCategory(singleCounts, "焊盘");
+        std::cout << "单图包含 LED: " << (singleHasLed ? "是" : "否")
+                  << "，包含 焊盘: " << (singleHasPad ? "是" : "否") << "\n";
+        DisposeResultMasks(singleResult);
+        bool mismatchDetected = false;
+
+        // RGB 语义回归：同一张 RGB 图，快路径(8U) 与慢路径(16U->8U 归一化)类别统计应一致。
+        json rgbSemanticsParams;
+        rgbSemanticsParams["threshold"] = 0.05;
+        rgbSemanticsParams["with_mask"] = false;
+        rgbSemanticsParams["batch_size"] = 1;
+        dlcv_infer::Result rgbFastResult = model2.InferBatch(std::vector<cv::Mat>{singleRgb}, rgbSemanticsParams);
+        cv::Mat singleRgb16;
+        singleRgb.convertTo(singleRgb16, CV_16UC3, 256.0);
+        dlcv_infer::Result rgbSlowResult = model2.InferBatch(std::vector<cv::Mat>{singleRgb16}, rgbSemanticsParams);
+        std::vector<dlcv_infer::ObjectResult> rgbFastObjects;
+        std::vector<dlcv_infer::ObjectResult> rgbSlowObjects;
+        if (!rgbFastResult.sampleResults.empty()) rgbFastObjects = rgbFastResult.sampleResults.front().results;
+        if (!rgbSlowResult.sampleResults.empty()) rgbSlowObjects = rgbSlowResult.sampleResults.front().results;
+        const auto rgbFastCounts = CountCategories(rgbFastObjects);
+        const auto rgbSlowCounts = CountCategories(rgbSlowObjects);
+        const bool rgbSemanticsConsistent = AreCategoryCountsEqual(rgbFastCounts, rgbSlowCounts);
+        std::cout << "RGB语义一致性(8U快路径 vs 16U慢路径): "
+                  << (rgbSemanticsConsistent ? "通过" : "失败") << "\n";
+        if (!rgbSemanticsConsistent) mismatchDetected = true;
+        DisposeResultMasks(rgbFastResult);
+        DisposeResultMasks(rgbSlowResult);
+
+        cv::Mat chainBgr = LoadImageByDecode(chainImagePath);
+        if (chainBgr.empty()) throw std::runtime_error("串联图像解码失败");
+        cv::Mat chainRgb;
+        cv::cvtColor(chainBgr, chainRgb, cv::COLOR_BGR2RGB);
+
+        Demo3ChainDebugResult chainWithMaskFalse = RunDemo3ChainReference(model1, model2, chainRgb, false);
+        const auto chainFalseCounts = CountCategories(chainWithMaskFalse.finalObjects);
+        std::cout << "\n-- 串联(模型2 with_mask=false) --\n";
+        std::cout << "模型1目标数: " << chainWithMaskFalse.model1ObjectCount
+                  << "，有效裁图数: " << chainWithMaskFalse.cropCount
+                  << "，模型2最大Batch: " << chainWithMaskFalse.model2BatchLimit
+                  << "，最终结果数: " << chainWithMaskFalse.finalObjectCount << "\n";
+        PrintCategorySummary("串联类别统计(with_mask=false)", chainFalseCounts);
+        const bool chainFalseHasLed = ContainsCategory(chainFalseCounts, "LED");
+        const bool chainFalseHasPad = ContainsCategory(chainFalseCounts, "焊盘");
+        const int chainFalseWithMaskCount = CountObjectsWithMask(chainWithMaskFalse.finalObjects);
+        const int chainFalseDuplicateCount = CountExactDuplicateObjects(chainWithMaskFalse.finalObjects);
+        std::cout << "串联(with_mask=false)包含 LED: " << (chainFalseHasLed ? "是" : "否")
+                  << "，包含 焊盘: " << (chainFalseHasPad ? "是" : "否")
+                  << "，with_mask对象数: " << chainFalseWithMaskCount
+                  << "，重复结果数: " << chainFalseDuplicateCount << "\n";
+        if (chainFalseWithMaskCount > 0) mismatchDetected = true;
+        if (chainFalseDuplicateCount > 0) mismatchDetected = true;
+
+        Demo3ChainDebugResult chainWithMaskTrue = RunDemo3ChainReference(model1, model2, chainRgb, true);
+        const auto chainTrueCounts = CountCategories(chainWithMaskTrue.finalObjects);
+        std::cout << "\n-- 串联(模型2 with_mask=true) --\n";
+        std::cout << "模型1目标数: " << chainWithMaskTrue.model1ObjectCount
+                  << "，有效裁图数: " << chainWithMaskTrue.cropCount
+                  << "，模型2最大Batch: " << chainWithMaskTrue.model2BatchLimit
+                  << "，最终结果数: " << chainWithMaskTrue.finalObjectCount << "\n";
+        PrintCategorySummary("串联类别统计(with_mask=true)", chainTrueCounts);
+        const bool chainTrueHasLed = ContainsCategory(chainTrueCounts, "LED");
+        const bool chainTrueHasPad = ContainsCategory(chainTrueCounts, "焊盘");
+        const int chainTrueDuplicateCount = CountExactDuplicateObjects(chainWithMaskTrue.finalObjects);
+        std::cout << "串联(with_mask=true)包含 LED: " << (chainTrueHasLed ? "是" : "否")
+                  << "，包含 焊盘: " << (chainTrueHasPad ? "是" : "否")
+                  << "，重复结果数: " << chainTrueDuplicateCount << "\n";
+        if (chainTrueDuplicateCount > 0) mismatchDetected = true;
+
+        if (singleHasLed && !chainFalseHasLed) mismatchDetected = true;
+        if (singleHasPad && !chainFalseHasPad) mismatchDetected = true;
+
+        std::cout << "\n结论: "
+                  << (mismatchDetected ? "检测到串联链路相对单图基线存在类别丢失。" : "未检测到串联链路类别丢失。")
+                  << "\n";
+        return mismatchDetected ? 1 : 0;
+    } catch (const std::exception& e) {
+        std::cout << "专项验证异常: " << e.what() << "\n";
+        return 1;
+    }
 }
 
 std::string BuildCategoryList(const dlcv_infer::Result& out) {
@@ -294,11 +746,245 @@ void PrintRow(const CaseRow& r) {
     std::cout << "| " << Safe(r.modelName) << " | " << Safe(r.loadText) << " | " << Safe(r.inferText) << " | "
               << Safe(r.categories) << " | " << Safe(r.speedText) << " | " << Safe(r.batchText) << " |\n";
 }
+
+struct NodeTimingAggregate {
+    int nodeId{-1};
+    std::string nodeType;
+    std::string nodeTitle;
+    int count{0};
+    double totalMs{0.0};
+    double AverageMs() const { return count > 0 ? totalMs / static_cast<double>(count) : 0.0; }
+    void Add(double elapsedMs) {
+        count += 1;
+        totalMs += std::max(0.0, elapsedMs);
+    }
+};
+
+int ParsePositiveIntArg(const char* s, int fallback) {
+    if (s == nullptr) return fallback;
+    try {
+        const int v = std::stoi(std::string(s));
+        return v > 0 ? v : fallback;
+    } catch (...) {
+        return fallback;
+    }
+}
+
+int RunBenchmark(const std::wstring& modelPath, const std::wstring& imagePath, int batch, int runs, int warmup) {
+    std::cout << "==== 基准测试 ====\n";
+#if defined(_DEBUG)
+    const char* buildMode = "Debug";
+#else
+    const char* buildMode = "Release";
+#endif
+    std::cout << "构建模式: " << buildMode << "\n";
+#if defined(_DEBUG)
+    std::cout << "提示: 当前为 Debug 构建，性能会显著偏慢，建议使用 Release|x64 进行压测。\n";
+#endif
+    std::cout << "模型: " << WideToUtf8(modelPath) << "\n";
+    std::cout << "图片: " << WideToUtf8(imagePath) << "\n";
+    std::cout << "batch: " << batch << "\n";
+    std::cout << "runs: " << runs << "\n";
+    std::cout << "warmup: " << warmup << "\n";
+
+    if (!FileExistsW(modelPath)) {
+        std::cout << "模型不存在\n";
+        return 2;
+    }
+    if (!FileExistsW(imagePath)) {
+        std::cout << "图片不存在\n";
+        return 2;
+    }
+
+    try {
+        dlcv_infer::Model model(modelPath, kGpuDeviceId);
+        cv::Mat bgr = LoadImageByDecode(imagePath);
+        if (bgr.empty()) throw std::runtime_error("图像解码失败");
+        cv::Mat rgb;
+        cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+
+        std::vector<cv::Mat> list;
+        list.reserve(static_cast<size_t>(batch));
+        for (int i = 0; i < batch; ++i) list.push_back(rgb);
+
+        json params;
+        params["threshold"] = 0.5;
+        params["with_mask"] = false;
+        params["batch_size"] = batch;
+
+        for (int i = 0; i < warmup; ++i) {
+            auto warm = model.InferBatch(list, params);
+            DisposeResultMasks(warm);
+        }
+
+        const auto benchmarkStart = Clock::now();
+        double sdkSum = 0.0;
+        double flowSum = 0.0;
+        double outerSum = 0.0;
+        std::unordered_map<std::string, NodeTimingAggregate> nodeStats;
+
+        for (int i = 0; i < runs; ++i) {
+            const auto t0 = Clock::now();
+            auto out = model.InferBatch(list, params);
+            const auto t1 = Clock::now();
+
+            double sdkMs = 0.0;
+            double flowMs = 0.0;
+            dlcv_infer::Model::GetLastInferTiming(sdkMs, flowMs);
+            const double outerMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            if (sdkMs <= 0.0) sdkMs = outerMs;
+            if (flowMs <= 0.0) flowMs = outerMs;
+            sdkSum += sdkMs;
+            flowSum += flowMs;
+            outerSum += outerMs;
+
+            const auto timings = dlcv_infer::Model::GetLastFlowNodeTimings();
+            for (const auto& timing : timings) {
+                const std::string key = std::to_string(timing.nodeId) + "|" + timing.nodeType + "|" + timing.nodeTitle;
+                auto& agg = nodeStats[key];
+                if (agg.count == 0) {
+                    agg.nodeId = timing.nodeId;
+                    agg.nodeType = timing.nodeType;
+                    agg.nodeTitle = timing.nodeTitle;
+                }
+                agg.Add(timing.elapsedMs);
+            }
+
+            DisposeResultMasks(out);
+        }
+
+        const double avgSdk = sdkSum / std::max(1, runs);
+        const double avgFlow = flowSum / std::max(1, runs);
+        const double avgOuter = outerSum / std::max(1, runs);
+        const auto benchmarkEnd = Clock::now();
+        const double elapsedSec = std::chrono::duration<double>(benchmarkEnd - benchmarkStart).count();
+        const long long completedRequests = static_cast<long long>(runs) * static_cast<long long>(batch);
+        const double realtimeRate = elapsedSec > 0.0 ? static_cast<double>(completedRequests) / elapsedSec : 0.0;
+
+        std::cout << "\n压力测试统计:\n";
+        std::cout << "线程数: 1\n";
+        std::cout << "批量大小: " << batch << "\n";
+        std::cout << "运行时间: " << ToFixed(elapsedSec, 2) << " 秒\n";
+        std::cout << "完成请求: " << completedRequests << "\n";
+        std::cout << "平均延迟: " << ToFixed(avgOuter, 2) << "ms\n";
+        std::cout << "平均延迟(SDK): " << ToFixed(avgSdk, 2) << "ms\n";
+        std::cout << "实时速率: " << ToFixed(realtimeRate, 2) << " 请求/秒\n";
+
+        std::vector<NodeTimingAggregate> rows;
+        rows.reserve(nodeStats.size());
+        for (const auto& kv : nodeStats) rows.push_back(kv.second);
+        std::sort(rows.begin(), rows.end(), [](const NodeTimingAggregate& a, const NodeTimingAggregate& b) {
+            return a.AverageMs() > b.AverageMs();
+        });
+
+        std::cout << "模块平均耗时:\n";
+        if (rows.empty()) {
+            std::cout << "(无流程节点统计)\n";
+        } else {
+            for (const auto& item : rows) {
+                const double share = avgFlow > 0.0 ? item.AverageMs() * 100.0 / avgFlow : 0.0;
+                std::cout << "#" << item.nodeId << " [" << item.nodeType << "] "
+                          << (item.nodeTitle.empty() ? "-" : item.nodeTitle)
+                          << ": " << ToFixed(item.AverageMs(), 2)
+                          << "ms (" << ToFixed(share, 1) << "%)\n";
+            }
+        }
+        return 0;
+    } catch (const std::exception& e) {
+        std::cout << "基准异常: " << e.what() << "\n";
+        return 1;
+    }
+}
+
+int RunSlidingAlignOnce(const std::wstring& modelPath, const std::wstring& imagePath) {
+    std::cout << "图片: " << WideToUtf8(imagePath) << "\n";
+    std::cout << "batch_size: " << kSlidingAlignBatchSize << "\n";
+    std::cout << "threshold: " << ToFixed(kSlidingAlignThreshold, 2) << "\n";
+    if (!FileExistsW(modelPath) || !FileExistsW(imagePath)) {
+        std::cout << "模型或图片不存在，请检查路径。\n";
+        return 2;
+    }
+
+    try {
+        dlcv_infer::Model model(modelPath, kGpuDeviceId);
+        cv::Mat bgr = LoadImageByDecode(imagePath);
+        if (bgr.empty()) throw std::runtime_error("图像解码失败");
+        cv::Mat rgb;
+        cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+
+        json params;
+        params["threshold"] = kSlidingAlignThreshold;
+        params["with_mask"] = true;
+        params["batch_size"] = kSlidingAlignBatchSize;
+
+        const auto t0 = Clock::now();
+        auto out = model.InferBatch(std::vector<cv::Mat>{rgb}, params);
+        const auto t1 = Clock::now();
+
+        const double elapsedMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        std::cout << "\n推理时间: " << ToFixed(elapsedMs, 2) << "ms\n\n";
+        std::cout << "输入: RGB\n\n";
+        std::cout << "推理结果:\n";
+        if (out.sampleResults.empty() || out.sampleResults.front().results.empty()) {
+            std::cout << "(空)\n";
+        } else {
+            const auto& objs = out.sampleResults.front().results;
+            for (const auto& obj : objs) {
+                std::cout << dlcv_infer::convertGbkToUtf8(obj.categoryName)
+                          << ", Score: " << ToFixed(static_cast<double>(obj.score) * 100.0, 1)
+                          << ", Area: " << ToFixed(static_cast<double>(obj.area), 1);
+                if (obj.bbox.size() >= 4) {
+                    std::cout << ", Bbox: [" << ToFixed(obj.bbox[0], 1)
+                              << ", " << ToFixed(obj.bbox[1], 1)
+                              << ", " << ToFixed(obj.bbox[2], 1)
+                              << ", " << ToFixed(obj.bbox[3], 1) << "]";
+                }
+                std::cout << ", \n";
+            }
+        }
+        DisposeResultMasks(out);
+        return 0;
+    } catch (const std::exception& e) {
+        std::cout << "推理异常: " << e.what() << "\n";
+        return 1;
+    }
+}
 }  // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+
+    if (argc <= 1) {
+        return RunBenchmark(
+            kDefaultPressureModelPath,
+            kDefaultPressureImagePath,
+            kDefaultPressureBatchSize,
+            kDefaultPressureRuns,
+            kDefaultPressureWarmup);
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "demo3check") {
+        const std::wstring model1Path = (argc >= 3) ? Utf8ToWide(argv[2]) : kDemo3Model1Path;
+        const std::wstring model2Path = (argc >= 4) ? Utf8ToWide(argv[3]) : kDemo3Model2Path;
+        const std::wstring chainImagePath = (argc >= 5) ? Utf8ToWide(argv[4]) : kDemo3ChainImagePath;
+        const std::wstring model2SingleImagePath =
+            (argc >= 6) ? Utf8ToWide(argv[5]) : kDemo3Model2SingleImagePath;
+        return RunDemo3Validation(model1Path, model2Path, chainImagePath, model2SingleImagePath);
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "bench") {
+        if (argc < 4) {
+            std::cout << "用法: dlcv_infer_cpp_test bench <modelPath> <imagePath> [batch] [runs] [warmup]\n";
+            return 2;
+        }
+        const std::wstring modelPath = Utf8ToWide(argv[2]);
+        const std::wstring imagePath = Utf8ToWide(argv[3]);
+        const int batch = (argc >= 5) ? ParsePositiveIntArg(argv[4], kDefaultPressureBatchSize) : kDefaultPressureBatchSize;
+        const int runs = (argc >= 6) ? ParsePositiveIntArg(argv[5], kDefaultPressureRuns) : kDefaultPressureRuns;
+        const int warmup = (argc >= 7) ? ParsePositiveIntArg(argv[6], kDefaultPressureWarmup) : kDefaultPressureWarmup;
+        return RunBenchmark(modelPath, imagePath, batch, runs, warmup);
+    }
 
     std::cout << "==== C++ 测试程序 ====\n";
     std::cout << "模型目录: " << WideToUtf8(kModelRoot) << "\n";

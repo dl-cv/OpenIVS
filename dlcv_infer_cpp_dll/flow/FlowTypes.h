@@ -149,6 +149,35 @@ struct ModuleImage final {
     cv::Mat OriginalImage;        // 原图（用于回写到原图坐标）
     TransformationState TransformState;
     int OriginalIndex = 0;
+    struct SlidingMetaInfo final {
+        bool Valid = false;
+        int GridX = 0;
+        int GridY = 0;
+        int GridCols = 0;
+        int GridRows = 0;
+        int X = 0;
+        int Y = 0;
+        int W = 0;
+        int H = 0;
+
+        Json ToJson() const {
+            if (!Valid) return Json();
+            return Json::object({
+                {"grid_x", GridX},
+                {"grid_y", GridY},
+                {"grid_size", Json::array({ GridCols, GridRows })},
+                {"win_size", Json::array({ W, H })},
+                {"slice_index", Json::array({ GridY, GridX })},
+                {"x", X},
+                {"y", Y},
+                {"w", W},
+                {"h", H}
+            });
+        }
+    };
+
+    /// 滑窗切片元数据（强类型，按需序列化为 JSON）
+    SlidingMetaInfo SlidingMeta;
 
     ModuleImage() = default;
     ModuleImage(const cv::Mat& imageObject, const cv::Mat& originalImage, const TransformationState& ts, int originalIndex = 0)

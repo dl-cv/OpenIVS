@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
@@ -55,6 +55,14 @@ namespace dlcv_infer_csharp
         private static readonly HashSet<string> _loadingModels = new HashSet<string>();
         private static readonly object _cacheLock = new object();
 
+        // 缓存模型信息（加载后即读取一次）
+        private JObject _cachedModelInfo = null;
+        private JArray _cachedMaxShape = null;
+        private int _cachedMaxBatchSize = 1;
+        private int _expectedChCache = -2;
+        private readonly object _batchMetaLock = new object();
+        private List<JObject> _cachedSubModelBatchItems = new List<JObject>();
+
         public Model()
         {
 
@@ -74,6 +82,7 @@ namespace dlcv_infer_csharp
             _isDvpMode = extension == ".dvp";
             _isDvsMode = extension == ".dvst" || extension == ".dvso" || extension == ".dvsp";
             _isRpcMode = rpc_mode;
+            string cacheKey = BuildModelCacheKey(modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
 
             if (enableCache)
             {
@@ -82,14 +91,15 @@ namespace dlcv_infer_csharp
                     lock (_cacheLock)
                     {
                         int cachedIndex;
-                        if (_modelCache.TryGetValue(modelPath, out cachedIndex))
+                        if (_modelCache.TryGetValue(cacheKey, out cachedIndex))
                         {
                             modelIndex = cachedIndex;
+                            TryCacheModelInfo();
                             return;
                         }
-                        if (!_loadingModels.Contains(modelPath))
+                        if (!_loadingModels.Contains(cacheKey))
                         {
-                            _loadingModels.Add(modelPath);
+                            _loadingModels.Add(cacheKey);
                             break;
                         }
                     }
@@ -119,12 +129,15 @@ namespace dlcv_infer_csharp
                     InitializeDvtMode(modelPath, device_id);
                 }
 
+                // 模型加载成功后立即读取并缓存 model_info/max_shape/max_batch_size
+                TryCacheModelInfo();
+
                 if (enableCache)
                 {
                     lock (_cacheLock)
                     {
-                        _modelCache[modelPath] = modelIndex;
-                        _loadingModels.Remove(modelPath);
+                        _modelCache[cacheKey] = modelIndex;
+                        _loadingModels.Remove(cacheKey);
                     }
                 }
             }
@@ -134,17 +147,39 @@ namespace dlcv_infer_csharp
                 {
                     lock (_cacheLock)
                     {
-                        _loadingModels.Remove(modelPath);
+                        _loadingModels.Remove(cacheKey);
                     }
                 }
                 throw;
             }
         }
 
+        private static string BuildModelCacheKey(string modelPath, int deviceId, bool isDvpMode, bool isDvsMode, bool isRpcMode)
+        {
+            string mode = isDvpMode ? "dvp" : (isDvsMode ? "dvs" : (isRpcMode ? "rpc" : "dvt"));
+            string normalizedPath = Path.GetFullPath(modelPath).Trim().ToLowerInvariant();
+            return $"{normalizedPath}|{deviceId}|{mode}";
+        }
+
+        public List<JObject> GetResolvedSubModelBatchItems()
+        {
+            lock (_batchMetaLock)
+            {
+                var subModels = new List<JObject>();
+                foreach (var item in _cachedSubModelBatchItems)
+                {
+                    if (item != null)
+                    {
+                        subModels.Add((JObject)item.DeepClone());
+                    }
+                }
+                return subModels;
+            }
+        }
+
         private void InitializeDvpMode(string modelPath, int device_id)
         {
-            _httpClient = new HttpClient();
-            _httpClient.Timeout = TimeSpan.FromSeconds(30);
+            EnsureDvpHttpClient();
 
             // 检查后端服务是否启动
             if (!CheckBackendService())
@@ -197,6 +232,15 @@ namespace dlcv_infer_csharp
             catch (Exception ex)
             {
                 throw new Exception($"加载模型失败: {ex.Message}", ex);
+            }
+        }
+
+        private void EnsureDvpHttpClient()
+        {
+            if (_httpClient == null)
+            {
+                _httpClient = new HttpClient();
+                _httpClient.Timeout = TimeSpan.FromSeconds(30);
             }
         }
 
@@ -258,6 +302,7 @@ namespace dlcv_infer_csharp
         {
             try
             {
+                EnsureDvpHttpClient();
                 var response = _httpClient.GetAsync($"{_serverUrl}/docs").GetAwaiter().GetResult();
                 return response.IsSuccessStatusCode;
             }
@@ -433,6 +478,7 @@ namespace dlcv_infer_csharp
         {
             try
             {
+                EnsureDvpHttpClient();
                 var response = _httpClient.GetAsync($"{_serverUrl}/version").GetAwaiter().GetResult();
                 var responseJson = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
 
@@ -483,6 +529,8 @@ namespace dlcv_infer_csharp
 
         public void FreeModel()
         {
+            _expectedChCache = -2;
+
             // 仅借用/共享模式，不释放底层模型，只标记无效
             if (!OwnModelIndex)
             {
@@ -500,6 +548,7 @@ namespace dlcv_infer_csharp
                 }
                 try
                 {
+                    EnsureDvpHttpClient();
                     var request = new { model_index = modelIndex };
                     var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
                     var response = _httpClient.PostAsync($"{_serverUrl}/free_model", content).Result;
@@ -558,6 +607,637 @@ namespace dlcv_infer_csharp
             }
         }
 
+        private void TryCacheModelInfo()
+        {
+            try
+            {
+                JObject modelInfo = null;
+                if (_isDvpMode)
+                {
+                    modelInfo = GetModelInfoDvp();
+                }
+                else if (_isDvsMode)
+                {
+                    modelInfo = _dvsModel != null ? _dvsModel.GetModelInfo() : null;
+                    if (modelInfo != null && _dvsModel != null)
+                    {
+                        JArray loadedMeta = null;
+                        try
+                        {
+                            loadedMeta = _dvsModel.GetLoadedModelMeta();
+                        }
+                        catch
+                        {
+                            loadedMeta = null;
+                        }
+
+                        if (loadedMeta != null && loadedMeta.Count > 0)
+                        {
+                            modelInfo["loaded_model_meta"] = loadedMeta;
+                        }
+                    }
+                }
+                else if (_isRpcMode)
+                {
+                    var req = new JObject
+                    {
+                        ["action"] = "get_model_info",
+                        ["model_path"] = _modelPath
+                    };
+                    var resp = SendRpc(req);
+                    if (resp != null && (resp["ok"]?.Value<bool>() ?? false))
+                    {
+                        modelInfo = resp["model_info"] as JObject;
+                    }
+                }
+                else
+                {
+                    modelInfo = GetModelInfoDvt();
+                }
+
+                if (modelInfo != null)
+                {
+                    UpdateModelMetaCache(modelInfo);
+                }
+            }
+            catch
+            {
+                // 缓存失败不影响模型可用性
+            }
+        }
+
+        private static JArray ReadMaxShapeToken(JToken token)
+        {
+            var obj = token as JObject;
+            if (obj == null) return null;
+            var maxShape = obj["max_shape"] as JArray;
+            return maxShape != null && maxShape.Count > 0 ? maxShape : null;
+        }
+
+        private static JArray ExtractMaxShapeFromModelInfo(JObject modelInfoRoot)
+        {
+            if (modelInfoRoot == null) return null;
+            var modelInfo = modelInfoRoot["model_info"] as JObject;
+            if (modelInfo == null) return null;
+            var inputShapes = modelInfo["input_shapes"] as JObject;
+            if (inputShapes == null) return null;
+
+            // 优先 input_shapes.input.max_shape
+            var preferred = ReadMaxShapeToken(inputShapes["input"]);
+            if (preferred != null) return preferred;
+
+            // 退回第一个输入张量的 max_shape
+            foreach (var kv in inputShapes)
+            {
+                var fallback = ReadMaxShapeToken(kv.Value);
+                if (fallback != null) return fallback;
+            }
+            return null;
+        }
+
+        private static int ParseMaxBatchSize(JArray maxShape)
+        {
+            if (maxShape == null || maxShape.Count == 0) return 1;
+            try
+            {
+                int v = maxShape[0].Value<int>();
+                return Math.Max(1, v);
+            }
+            catch
+            {
+                return 1;
+            }
+        }
+
+        private static int ParsePositiveIntToken(JToken token)
+        {
+            if (token == null) return 0;
+            try
+            {
+                int v = token.Value<int>();
+                return v > 0 ? v : 0;
+            }
+            catch
+            {
+                try
+                {
+                    if (int.TryParse(token.ToString(), out int parsed) && parsed > 0)
+                    {
+                        return parsed;
+                    }
+                }
+                catch
+                {
+                }
+                return 0;
+            }
+        }
+
+        private static string NormalizeDisplayName(string rawNameOrPath)
+        {
+            if (string.IsNullOrWhiteSpace(rawNameOrPath))
+            {
+                return string.Empty;
+            }
+
+            string text = rawNameOrPath.Trim();
+            try
+            {
+                if (text.IndexOf('\\') >= 0 || text.IndexOf('/') >= 0)
+                {
+                    string fileName = Path.GetFileName(text);
+                    if (!string.IsNullOrWhiteSpace(fileName))
+                    {
+                        return fileName;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return text;
+        }
+
+        private static void AddUniqueSubModelItem(List<JObject> subModelItems, string nameOrPath, JArray maxShape, int maxBatchSize)
+        {
+            if (subModelItems == null)
+            {
+                return;
+            }
+
+            string name = NormalizeDisplayName(nameOrPath);
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = "未命名模型";
+            }
+
+            var shape = maxShape != null ? (JArray)maxShape.DeepClone() : null;
+            int shapeBatch = ParseMaxBatchSize(shape);
+            int resolvedBatch = Math.Max(1, Math.Max(maxBatchSize, shapeBatch));
+
+            string key = name + "|" + (shape != null ? shape.ToString(Formatting.None) : "null");
+            foreach (var existed in subModelItems)
+            {
+                if (existed == null) continue;
+                string existedName = (string)existed["name"] ?? string.Empty;
+                var existedShape = existed["max_shape"] as JArray;
+                string existedKey = existedName + "|" + (existedShape != null ? existedShape.ToString(Formatting.None) : "null");
+                if (string.Equals(key, existedKey, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            var item = new JObject
+            {
+                ["name"] = name,
+                ["max_shape"] = shape,
+                ["max_batch_size"] = resolvedBatch
+            };
+            subModelItems.Add(item);
+        }
+
+        private static JArray ParseMaxShapeToken(JToken maxShapeToken)
+        {
+            if (maxShapeToken == null) return null;
+
+            if (maxShapeToken is JArray arr && arr.Count > 0)
+            {
+                return (JArray)arr.DeepClone();
+            }
+
+            if (maxShapeToken.Type == JTokenType.String)
+            {
+                try
+                {
+                    var parsed = JArray.Parse(maxShapeToken.Value<string>());
+                    if (parsed.Count > 0)
+                    {
+                        return parsed;
+                    }
+                }
+                catch
+                {
+                }
+            }
+            return null;
+        }
+
+        private static void CollectBatchCandidatesFromToken(JToken token, List<int> candidates)
+        {
+            if (token == null || candidates == null) return;
+
+            if (token is JObject obj)
+            {
+                foreach (var prop in obj.Properties())
+                {
+                    string key = prop.Name ?? string.Empty;
+                    var value = prop.Value;
+
+                    if (string.Equals(key, "max_batch_size", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int batch = ParsePositiveIntToken(value);
+                        if (batch > 0 && !candidates.Contains(batch))
+                        {
+                            candidates.Add(batch);
+                        }
+                    }
+                    else if (string.Equals(key, "max_shape", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var shape = ParseMaxShapeToken(value);
+                        if (shape != null && shape.Count > 0)
+                        {
+                            int batch = ParsePositiveIntToken(shape[0]);
+                            if (batch > 0 && !candidates.Contains(batch))
+                            {
+                                candidates.Add(batch);
+                            }
+                        }
+                    }
+
+                    CollectBatchCandidatesFromToken(value, candidates);
+                }
+                return;
+            }
+
+            if (token is JArray jarr)
+            {
+                foreach (var item in jarr)
+                {
+                    CollectBatchCandidatesFromToken(item, candidates);
+                }
+            }
+        }
+
+        private static void CollectBatchCandidatesFromLoadedMeta(JObject modelInfoRoot, List<int> candidates, List<JObject> subModelItems)
+        {
+            if (modelInfoRoot == null || candidates == null) return;
+            var loadedMeta = modelInfoRoot["loaded_model_meta"] as JArray;
+            if (loadedMeta == null || loadedMeta.Count == 0) return;
+
+            foreach (var token in loadedMeta)
+            {
+                var obj = token as JObject;
+                if (obj == null) continue;
+
+                int maxBatchSize = ParsePositiveIntToken(obj["max_batch_size"]);
+                var maxShape = ParseMaxShapeToken(obj["max_shape"]);
+
+                if (maxBatchSize > 0 && !candidates.Contains(maxBatchSize))
+                {
+                    candidates.Add(maxBatchSize);
+                }
+                if (maxShape != null && maxShape.Count > 0)
+                {
+                    int shapeBatch = ParsePositiveIntToken(maxShape[0]);
+                    if (shapeBatch > 0 && !candidates.Contains(shapeBatch))
+                    {
+                        candidates.Add(shapeBatch);
+                    }
+                }
+
+                string name = (string)obj["model_name"]
+                    ?? (string)obj["model_path_original"]
+                    ?? (string)obj["model_path"]
+                    ?? (string)obj["title"]
+                    ?? string.Empty;
+                AddUniqueSubModelItem(subModelItems, name, maxShape, maxBatchSize);
+            }
+        }
+
+        private void UpdateModelMetaCache(JObject modelInfo)
+        {
+            _cachedModelInfo = modelInfo != null ? (JObject)modelInfo.DeepClone() : null;
+            var maxShape = ExtractMaxShapeFromModelInfo(_cachedModelInfo);
+            _cachedMaxShape = maxShape != null ? (JArray)maxShape.DeepClone() : null;
+
+            int parsedByMaxShape = ParseMaxBatchSize(_cachedMaxShape);
+            var parsedCandidates = new List<int>();
+            var parsedSubModelItems = new List<JObject>();
+
+            // flow/dvs：优先用加载期收集到的子模型信息。
+            CollectBatchCandidatesFromLoadedMeta(_cachedModelInfo, parsedCandidates, parsedSubModelItems);
+
+            // 非 flow 或 flow 信息缺失时，回退到通用扫描。
+            if (parsedCandidates.Count == 0)
+            {
+                CollectBatchCandidatesFromToken(_cachedModelInfo, parsedCandidates);
+            }
+
+            int parsedByModelInfo = 1;
+            if (parsedCandidates.Count > 0)
+            {
+                int minGtOne = parsedCandidates.Where(x => x > 1).DefaultIfEmpty(0).Min();
+                if (minGtOne > 1)
+                {
+                    parsedByModelInfo = minGtOne;
+                }
+                else
+                {
+                    int anyPositive = parsedCandidates.DefaultIfEmpty(0).Min();
+                    parsedByModelInfo = anyPositive > 0 ? anyPositive : 1;
+                }
+            }
+
+            int parsedBatch = Math.Max(parsedByMaxShape, parsedByModelInfo);
+
+            // 修复：避免后续一次信息不全的刷新把正确 batch（>1）覆盖回 1。
+            if (parsedBatch > 1)
+            {
+                _cachedMaxBatchSize = parsedBatch;
+            }
+            else if (_cachedMaxBatchSize <= 1)
+            {
+                _cachedMaxBatchSize = 1;
+            }
+
+            lock (_batchMetaLock)
+            {
+                _cachedSubModelBatchItems = parsedSubModelItems
+                    .Where(x => x != null)
+                    .Select(x => (JObject)x.DeepClone())
+                    .ToList();
+                if (_cachedSubModelBatchItems.Count == 0)
+                {
+                    AddUniqueSubModelItem(_cachedSubModelBatchItems, _modelPath, _cachedMaxShape, _cachedMaxBatchSize);
+                }
+            }
+
+            _expectedChCache = -2;
+        }
+
+        private static bool IsLikelySpatialDim(int v)
+        {
+            return v >= 8 && v <= 65536;
+        }
+
+        private static int ReadJsonIntLike(JToken v, int dv)
+        {
+            if (v == null) return dv;
+            try
+            {
+                if (v.Type == JTokenType.Integer) return v.Value<int>();
+                if (v.Type == JTokenType.Float) return (int)Math.Round(v.Value<double>());
+                if (v.Type == JTokenType.String) return int.Parse(v.Value<string>(), System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+            }
+            return dv;
+        }
+
+        private static int InferChannelCountFromMaxShape(JArray shapeArr)
+        {
+            if (shapeArr == null || shapeArr.Count == 0) return 0;
+            int n = shapeArr.Count;
+            if (n >= 4)
+            {
+                int d1 = ReadJsonIntLike(shapeArr[1], -1);
+                int d2 = ReadJsonIntLike(shapeArr[2], -1);
+                int d3 = ReadJsonIntLike(shapeArr[3], -1);
+                if (IsLikelySpatialDim(d2) && IsLikelySpatialDim(d3))
+                {
+                    if (d1 == 1 || d1 == 3) return d1;
+                }
+                int d0 = ReadJsonIntLike(shapeArr[0], -1);
+                if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1))
+                {
+                    if (d3 == 1 || d3 == 3) return d3;
+                }
+            }
+            if (n == 3)
+            {
+                int d0 = ReadJsonIntLike(shapeArr[0], -1);
+                int d1 = ReadJsonIntLike(shapeArr[1], -1);
+                int d2 = ReadJsonIntLike(shapeArr[2], -1);
+                if ((d0 == 1 || d0 == 3) && IsLikelySpatialDim(d1) && IsLikelySpatialDim(d2))
+                    return d0;
+                if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1) && (d2 == 1 || d2 == 3))
+                    return d2;
+            }
+            return 0;
+        }
+
+        private static JObject FindInputShapesObject(JObject root)
+        {
+            if (root == null) return null;
+            if (root["model_info"] is JObject mi)
+            {
+                if (mi["input_shapes"] is JObject ish) return ish;
+                if (mi["model_info"] is JObject inner && inner["input_shapes"] is JObject ish2) return ish2;
+            }
+            if (root["input_shapes"] is JObject ish3) return ish3;
+            return null;
+        }
+
+        private static int ParseInputChFromModelInfo(JObject modelInfoRoot)
+        {
+            JObject shapes = FindInputShapesObject(modelInfoRoot);
+            if (shapes == null) return 0;
+
+            int TryInputDesc(JToken inputDesc)
+            {
+                var jo = inputDesc as JObject;
+                if (jo == null) return 0;
+                var ms = jo["max_shape"] as JArray;
+                if (ms == null) return 0;
+                int ch = InferChannelCountFromMaxShape(ms);
+                return (ch == 1 || ch == 3) ? ch : 0;
+            }
+
+            if (shapes["input"] != null)
+            {
+                int ch = TryInputDesc(shapes["input"]);
+                if (ch != 0) return ch;
+            }
+            foreach (var prop in shapes.Properties())
+            {
+                int ch = TryInputDesc(prop.Value);
+                if (ch != 0) return ch;
+            }
+            return 0;
+        }
+
+        private static MatType Mat8UTypeForChannels(int ch)
+        {
+            switch (ch)
+            {
+                case 1: return MatType.CV_8UC1;
+                case 2: return MatType.CV_8UC2;
+                case 3: return MatType.CV_8UC3;
+                case 4: return MatType.CV_8UC4;
+                default: return MatType.CV_8UC1;
+            }
+        }
+
+        private static Mat ConvertMatDepthTo8U(Mat src, List<Mat> disposables)
+        {
+            if (src == null || src.Empty()) return src;
+            int ch = src.Channels();
+            MatType targetT = Mat8UTypeForChannels(ch);
+            MatType st = src.Type();
+            if (st == targetT)
+                return src;
+
+            Mat dst = new Mat();
+            MatType depth = st.Depth;
+            int targetRtype = targetT.ToInt32();
+            if (depth == MatType.CV_16U)
+            {
+                src.ConvertTo(dst, targetT, 1.0 / 256.0);
+            }
+            else if (depth == MatType.CV_8S || depth == MatType.CV_16S)
+            {
+                Cv2.Normalize(src, dst, 0, 255, NormTypes.MinMax, targetRtype);
+            }
+            else if (depth == MatType.CV_32F || depth == MatType.CV_64F)
+            {
+                Cv2.MinMaxLoc(src, out double min, out double max);
+                if (max <= 1.0 + 1e-6 && min >= -1e-6)
+                    src.ConvertTo(dst, targetT, 255.0);
+                else
+                    Cv2.Normalize(src, dst, 0, 255, NormTypes.MinMax, targetRtype);
+            }
+            else
+            {
+                src.ConvertTo(dst, targetT);
+            }
+
+            disposables.Add(dst);
+            return dst;
+        }
+
+        private int ResolveEffectiveInputCh()
+        {
+            if (_expectedChCache != -2)
+                return (_expectedChCache == -1) ? 3 : _expectedChCache;
+            try
+            {
+                if (modelIndex < 0 && !_isDvsMode && !_isDvpMode && !_isRpcMode)
+                {
+                    _expectedChCache = -1;
+                    return 3;
+                }
+                if (_isDvsMode && (_dvsModel == null || !_dvsModel.IsLoaded))
+                {
+                    _expectedChCache = -1;
+                    return 3;
+                }
+                int p = ParseInputChFromModelInfo(_cachedModelInfo);
+                if (p == 1 || p == 3)
+                {
+                    _expectedChCache = p;
+                    return p;
+                }
+            }
+            catch
+            {
+            }
+            _expectedChCache = -1;
+            return 3;
+        }
+
+        private static Mat PrepareInferImage(Mat src, int expectedChannels, List<Mat> disposables)
+        {
+            if (src == null || src.Empty()) return src;
+            int ec = (expectedChannels == 1 || expectedChannels == 3) ? expectedChannels : 3;
+            Mat u8 = ConvertMatDepthTo8U(src, disposables);
+            if (u8.Empty()) return u8;
+
+            if (ec == 3)
+            {
+                if (u8.Channels() == 1)
+                {
+                    var rgb = new Mat();
+                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.GRAY2RGB);
+                    disposables.Add(rgb);
+                    return rgb;
+                }
+                if (u8.Channels() == 4)
+                {
+                    var rgb = new Mat();
+                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.BGRA2RGB);
+                    disposables.Add(rgb);
+                    return rgb;
+                }
+                if (u8.Channels() == 3)
+                {
+                    var rgb = new Mat();
+                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.BGR2RGB);
+                    disposables.Add(rgb);
+                    return rgb;
+                }
+                var rgbFallback = new Mat();
+                Cv2.CvtColor(u8, rgbFallback, ColorConversionCodes.BGR2RGB);
+                disposables.Add(rgbFallback);
+                return rgbFallback;
+            }
+
+            if (u8.Channels() == 1)
+                return u8;
+            if (u8.Channels() == 3)
+            {
+                var gray = new Mat();
+                Cv2.CvtColor(u8, gray, ColorConversionCodes.BGR2GRAY);
+                disposables.Add(gray);
+                return gray;
+            }
+            if (u8.Channels() == 4)
+            {
+                var gray = new Mat();
+                Cv2.CvtColor(u8, gray, ColorConversionCodes.BGRA2GRAY);
+                disposables.Add(gray);
+                return gray;
+            }
+            var grayFallback = new Mat();
+            Cv2.CvtColor(u8, grayFallback, ColorConversionCodes.BGR2GRAY);
+            disposables.Add(grayFallback);
+            return grayFallback;
+        }
+
+        private List<Mat> PrepareInferImages(IList<Mat> images, out List<Mat> disposables)
+        {
+            disposables = new List<Mat>();
+            if (images == null) return null;
+            int expCh = ResolveEffectiveInputCh();
+            int ec = (expCh == 1 || expCh == 3) ? expCh : 3;
+            var list = new List<Mat>(images.Count);
+            foreach (var img in images)
+                list.Add(PrepareInferImage(img, ec, disposables));
+            return list;
+        }
+
+        private static void DisposeTempMats(List<Mat> disposables)
+        {
+            if (disposables == null) return;
+            foreach (var m in disposables)
+            {
+                try
+                {
+                    m?.Dispose();
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        public JObject GetCachedModelInfo()
+        {
+            return _cachedModelInfo != null ? (JObject)_cachedModelInfo.DeepClone() : null;
+        }
+
+        public JArray GetCachedMaxShape()
+        {
+            return _cachedMaxShape != null ? (JArray)_cachedMaxShape.DeepClone() : null;
+        }
+
+        public int GetMaxBatchSize()
+        {
+            return Math.Max(1, _cachedMaxBatchSize);
+        }
+
         /// <summary>
         /// 过滤OCR模型信息，移除不需要的字段
         /// </summary>
@@ -595,6 +1275,20 @@ namespace dlcv_infer_csharp
             else if (_isDvsMode)
             {
                 modelInfo = _dvsModel.GetModelInfo();
+                if (modelInfo != null && _dvsModel != null)
+                {
+                    try
+                    {
+                        JArray loadedMeta = _dvsModel.GetLoadedModelMeta();
+                        if (loadedMeta != null && loadedMeta.Count > 0)
+                        {
+                            modelInfo["loaded_model_meta"] = loadedMeta;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
             }
             else if (_isRpcMode)
             {
@@ -616,9 +1310,10 @@ namespace dlcv_infer_csharp
                 modelInfo = GetModelInfoDvt();
             }
             // 过滤OCR模型信息，移除不需要的字段
-            if (modelInfo.ContainsKey("model_info"))
+            if (modelInfo != null && modelInfo.ContainsKey("model_info"))
             {
-                string task_type = modelInfo["model_info"]["task_type"].Value<string>();
+                var taskTypeToken = modelInfo["model_info"] != null ? modelInfo["model_info"]["task_type"] : null;
+                string task_type = taskTypeToken != null ? taskTypeToken.Value<string>() : null;
                 if (task_type == "OCR")
                 {
                     JObject real_model_info = modelInfo["model_info"] as JObject;
@@ -626,6 +1321,7 @@ namespace dlcv_infer_csharp
                     modelInfo["model_info"] = real_model_info;
                 }
             }
+            UpdateModelMetaCache(modelInfo);
             return modelInfo;
         }
 
@@ -633,6 +1329,7 @@ namespace dlcv_infer_csharp
         {
             try
             {
+                EnsureDvpHttpClient();
                 var request = new
                 {
                     model_path = _modelPath
@@ -650,7 +1347,7 @@ namespace dlcv_infer_csharp
                 }
 
                 var resultObject = JObject.Parse(responseJson);
-                Log($"Model info: {resultObject}");
+                //Log($"Model info: {resultObject}");
                 return resultObject;
             }
             catch (Exception ex)
@@ -671,7 +1368,7 @@ namespace dlcv_infer_csharp
             var resultJson = Marshal.PtrToStringAnsi(resultPtr);
             var resultObject = JObject.Parse(resultJson);
 
-            Log("Model info: " + resultObject.ToString());
+            //Log("Model info: " + resultObject.ToString());
             DllLoader.Instance.dlcv_free_result(resultPtr);
             return resultObject;
         }
@@ -679,21 +1376,40 @@ namespace dlcv_infer_csharp
         // 内部通用推理方法，处理单张或多张图像
         public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject params_json)
         {
-            if (_isDvpMode)
+            if (images == null)
+                throw new ArgumentNullException(nameof(images));
+
+            List<Mat> disposables = new List<Mat>();
+            List<Mat> normalized;
+            try
             {
-                return InferInternalDvp(images, params_json);
+                normalized = PrepareInferImages(images, out disposables);
             }
-            else if (_isDvsMode)
+            catch
             {
-                return _dvsModel.InferInternal(images, params_json);
+                DisposeTempMats(disposables);
+                throw;
             }
-            else if (_isRpcMode)
+
+            try
             {
-                return InferInternalRpc(images, params_json);
+                if (_isDvpMode)
+                {
+                    return InferInternalDvp(normalized, params_json);
+                }
+                if (_isDvsMode)
+                {
+                    return _dvsModel.InferInternal(normalized, params_json);
+                }
+                if (_isRpcMode)
+                {
+                    return InferInternalRpc(normalized, params_json);
+                }
+                return InferInternalDvt(normalized, params_json);
             }
-            else
+            finally
             {
-                return InferInternalDvt(images, params_json);
+                DisposeTempMats(disposables);
             }
         }
 
@@ -798,10 +1514,7 @@ namespace dlcv_infer_csharp
         {
             try
             {
-                if (_httpClient is null)
-                {
-                    _httpClient = new HttpClient();
-                }
+                EnsureDvpHttpClient();
                 // DVP 模式只支持单张图片，如果有多张图片需要分别处理
                 var allResults = new List<JObject>();
 
@@ -1136,8 +1849,10 @@ namespace dlcv_infer_csharp
                         angle = (float)bbox[4];
                     }
 
+                    var extraInfo = result["extra_info"] as JObject ?? new JObject();
+
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
-                        withMask, mask_img, withBbox, withAngle, angle);
+                        withMask, mask_img, withBbox, withAngle, angle, extraInfo);
                     results.Add(objectResult);
                 }
 
@@ -1215,7 +1930,16 @@ namespace dlcv_infer_csharp
             Utils.CSharpResult result = default(Utils.CSharpResult);
             if (_isDvsMode)
             {
-                result = _dvsModel.InferBatch(new List<Mat> { image }, params_json);
+                List<Mat> dvsDisp;
+                var normList = PrepareInferImages(new List<Mat> { image }, out dvsDisp);
+                try
+                {
+                    result = _dvsModel.InferBatch(normList, params_json);
+                }
+                finally
+                {
+                    DisposeTempMats(dvsDisp);
+                }
             }
             else
             {
@@ -1258,7 +1982,16 @@ namespace dlcv_infer_csharp
         {
             if (_isDvsMode)
             {
-                return _dvsModel.InferBatch(image_list, params_json);
+                List<Mat> dvsDisp;
+                var normList = PrepareInferImages(image_list, out dvsDisp);
+                try
+                {
+                    return _dvsModel.InferBatch(normList, params_json);
+                }
+                finally
+                {
+                    DisposeTempMats(dvsDisp);
+                }
             }
 
             var resultTuple = InferInternal(image_list, params_json);
@@ -1304,7 +2037,17 @@ namespace dlcv_infer_csharp
 
             if (_isDvsMode)
             {
-                var res = _dvsModel.InferInternal(new List<Mat> { image }, params_json);
+                List<Mat> dvsDisp;
+                var normList = PrepareInferImages(new List<Mat> { image }, out dvsDisp);
+                Tuple<JObject, IntPtr> res;
+                try
+                {
+                    res = _dvsModel.InferInternal(normList, params_json);
+                }
+                finally
+                {
+                    DisposeTempMats(dvsDisp);
+                }
                 rawResults = res.Item1["result_list"] as JArray ?? new JArray();
                 
                 // DVS 模式下不需要释放非托管资源，直接处理
@@ -1403,6 +2146,11 @@ namespace dlcv_infer_csharp
 
             result["angle"] = angle;
             result["with_angle"] = withAngle;
+            var extraInfo = item["extra_info"] as JObject ?? new JObject();
+            if (extraInfo.HasValues)
+            {
+                result["extra_info"] = extraInfo;
+            }
 
             // 5. Handle Mask
             bool withMask = false;

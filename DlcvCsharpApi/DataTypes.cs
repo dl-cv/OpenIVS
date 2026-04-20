@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 
 namespace dlcv_infer_csharp
@@ -56,6 +57,12 @@ namespace dlcv_infer_csharp
             /// </summary>
             public Mat Mask { get; set; }
 
+            /// <summary>
+            /// 扩展字段容器（统一收口）
+            /// 例如折线使用 extra_info.polyline
+            /// </summary>
+            public JObject ExtraInfo { get; set; }
+
             // <summary>
             // 是否有角度
             // </summary>
@@ -69,7 +76,7 @@ namespace dlcv_infer_csharp
 
             public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
                 List<double> bbox, bool withMask, Mat mask,
-                bool withBbox = false, bool withAngle = false, float angle = -100)
+                bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;
@@ -78,6 +85,7 @@ namespace dlcv_infer_csharp
                 Bbox = bbox;
                 WithMask = withMask;
                 Mask = mask;
+                ExtraInfo = extraInfo ?? new JObject();
                 Angle = angle;
                 WithBbox = withBbox;
                 WithAngle = withAngle;
@@ -105,6 +113,11 @@ namespace dlcv_infer_csharp
                 if (WithMask)
                 {
                     sb.Append($"Mask size: {Mask.Width}x{Mask.Height}, ");
+                }
+                string extraInfoText = FormatExtraInfoForDisplay(ExtraInfo);
+                if (!string.IsNullOrWhiteSpace(extraInfoText))
+                {
+                    sb.Append($"ExtraInfo: {{{extraInfoText}}}, ");
                 }
                 return sb.ToString();
             }

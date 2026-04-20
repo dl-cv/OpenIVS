@@ -2,9 +2,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
 
 namespace dlcv_infer {
 namespace flow {
@@ -70,6 +75,27 @@ bool GraphExecutor::IsScalarPortType(const std::string& tLower) {
             tLower == "scalar");
 }
 
+static void ApplyInferParamOverrides(Json& props, const Json& inferParams) {
+    if (!props.is_object() || !inferParams.is_object()) return;
+    for (auto it = inferParams.begin(); it != inferParams.end(); ++it) {
+        // with_mask 仅用于控制最终返回格式，不应该全局覆盖流程节点属性。
+        // 否则会导致依赖 mask_rle 的后处理节点（如 mask_to_rbox）在流程内部被意外打断。
+        std::string keyLower = it.key();
+        std::transform(keyLower.begin(), keyLower.end(), keyLower.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        if (keyLower == "with_mask") {
+            continue;
+        }
+
+        const Json& value = it.value();
+        // 推理参数只透传基础配置，避免把复杂结构误覆盖到节点属性。
+        if (value.is_primitive() || value.is_null()) {
+            props[it.key()] = value;
+        }
+    }
+}
+
 void GraphExecutor::NormalizeBboxProperties(Json& props) {
     if (!props.is_object()) return;
     if (!(props.contains("bbox_x1") && props.contains("bbox_y1") && props.contains("bbox_x2") && props.contains("bbox_y2"))) return;
@@ -116,9 +142,67 @@ std::unordered_map<int, std::pair<int, int>> GraphExecutor::BuildLinkSourceMap(c
     return map;
 }
 
+static long long BuildOutputPortKey(int nodeId, int outIdx) {
+    return (static_cast<long long>(nodeId) << 32) ^ static_cast<unsigned int>(outIdx);
+}
+
+static std::unordered_map<long long, int> BuildOutputConsumerCount(
+    const std::vector<Json>& nodesOrdered,
+    const std::unordered_map<int, std::pair<int, int>>& linkToSource) {
+
+    std::unordered_map<long long, int> counts;
+    for (const auto& node : nodesOrdered) {
+        if (!node.is_object() || !node.contains("inputs")) continue;
+        if (!node.at("inputs").is_array()) continue;
+        for (const auto& inp : node.at("inputs")) {
+            if (!inp.is_object()) continue;
+            std::string dtypeLower;
+            try {
+                if (inp.contains("type")) {
+                    if (inp.at("type").is_string()) {
+                        dtypeLower = inp.at("type").get<std::string>();
+                    } else if (!inp.at("type").is_null()) {
+                        dtypeLower = inp.at("type").dump();
+                    }
+                }
+            } catch (...) {
+                dtypeLower.clear();
+            }
+            std::transform(dtypeLower.begin(), dtypeLower.end(), dtypeLower.begin(), [](unsigned char ch) {
+                return static_cast<char>(std::tolower(ch));
+            });
+            const bool isScalar = (dtypeLower == "bool" || dtypeLower == "boolean" ||
+                                   dtypeLower == "int" || dtypeLower == "integer" ||
+                                   dtypeLower == "str" || dtypeLower == "string" ||
+                                   dtypeLower == "scalar");
+            if (isScalar) continue;
+
+            int linkId = -1;
+            try {
+                if (inp.contains("link")) {
+                    const auto& lv = inp.at("link");
+                    if (lv.is_number_integer()) linkId = lv.get<int>();
+                    else if (lv.is_number()) linkId = static_cast<int>(std::llround(lv.get<double>()));
+                    else if (lv.is_string()) linkId = std::stoi(lv.get<std::string>());
+                }
+            } catch (...) {
+                linkId = -1;
+            }
+            if (linkId < 0) continue;
+            auto itSrc = linkToSource.find(linkId);
+            if (itSrc == linkToSource.end()) continue;
+            const int srcNodeId = itSrc->second.first;
+            const int srcOutIdx = itSrc->second.second;
+            counts[BuildOutputPortKey(srcNodeId, srcOutIdx)] += 1;
+        }
+    }
+    return counts;
+}
+
 std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
     const Json& node,
-    const std::unordered_map<int, std::pair<int, int>>& linkToSource) {
+    const std::unordered_map<int, std::pair<int, int>>& linkToSource,
+    std::unordered_map<long long, int>* remainingConsumers) {
 
     std::map<int, ModuleChannel> pairs;
     if (!node.is_object()) return pairs;
@@ -145,7 +229,7 @@ std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
         if (itSrc == linkToSource.end()) continue;
 
         const int pairIdx = ii / 2;
-        ModuleChannel ch = pairs.count(pairIdx) ? pairs[pairIdx] : ModuleChannel(std::vector<ModuleImage>(), Json::array(), Json::array());
+        ModuleChannel& ch = pairs[pairIdx];
 
         const int srcNodeId = itSrc->second.first;
         const int srcOutIdx = itSrc->second.second;
@@ -153,9 +237,9 @@ std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
         if (itOut == _nodeExecMap.end()) continue;
 
         const int srcPairIdx = srcOutIdx / 2;
-        const NodeExecOutput& srcOut = itOut->second;
+        NodeExecOutput& srcOut = itOut->second;
 
-        const ModuleChannel* picked = nullptr;
+        ModuleChannel* picked = nullptr;
         if (srcPairIdx == 0) {
             picked = &srcOut.Main;
         } else {
@@ -166,17 +250,41 @@ std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
         }
         if (picked == nullptr) continue;
 
+        bool moveNow = false;
+        if (remainingConsumers != nullptr) {
+            const long long key = BuildOutputPortKey(srcNodeId, srcOutIdx);
+            auto itRemain = remainingConsumers->find(key);
+            if (itRemain != remainingConsumers->end()) {
+                if (itRemain->second <= 1) {
+                    moveNow = true;
+                    itRemain->second = 0;
+                } else {
+                    itRemain->second -= 1;
+                }
+            }
+        }
+
         if (dtypeLower == "image_chan") {
-            ch.ImageList = picked->ImageList;
+            if (moveNow) {
+                ch.ImageList = std::move(picked->ImageList);
+            } else {
+                ch.ImageList = picked->ImageList;
+            }
         } else if (dtypeLower == "result_chan") {
-            ch.ResultList = picked->ResultList;
+            if (moveNow) {
+                ch.ResultList = std::move(picked->ResultList);
+            } else {
+                ch.ResultList = picked->ResultList;
+            }
         } else if (dtypeLower == "template_chan" || dtypeLower == "template") {
-            ch.TemplateList = picked->TemplateList;
+            if (moveNow) {
+                ch.TemplateList = std::move(picked->TemplateList);
+            } else {
+                ch.TemplateList = picked->TemplateList;
+            }
         } else {
             // 未知通道类型：忽略
         }
-
-        pairs[pairIdx] = std::move(ch);
     }
 
     return pairs;
@@ -185,6 +293,7 @@ std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
 std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
     _nodeExecMap.clear();
     _publicOutputs.clear();
+    _lastNodeTimings.clear();
 
     // 1) 排序：按 order，其次按 id
     std::vector<Json> ordered = _nodes;
@@ -200,6 +309,7 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
 
     // 2) linkId -> (srcNodeId, srcOutIdx)
     const auto linkToSource = BuildLinkSourceMap(ordered);
+    std::unordered_map<long long, int> remainingConsumers = BuildOutputConsumerCount(ordered, linkToSource);
 
     // 3) 遍历执行
     for (int i = 0; i < static_cast<int>(ordered.size()); i++) {
@@ -217,6 +327,11 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
             }
         } catch (...) { props = Json::object(); }
 
+        try {
+            const Json inferParams = _context->Get<Json>("infer_params", Json::object());
+            ApplyInferParamOverrides(props, inferParams);
+        } catch (...) {}
+
         try { NormalizeBboxProperties(props); } catch (...) {}
 
         auto factory = ModuleRegistry::Get(type);
@@ -228,20 +343,19 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
         if (!module) continue;
 
         // 聚合输入（主对 + 额外对）
-        const auto inputPairs = CollectInputPairs(node, linkToSource);
+        auto inputPairs = CollectInputPairs(node, linkToSource, &remainingConsumers);
         ModuleChannel mainCh;
         auto itMain = inputPairs.find(0);
-        if (itMain != inputPairs.end()) mainCh = itMain->second;
+        if (itMain != inputPairs.end()) mainCh = std::move(itMain->second);
 
         std::vector<ModuleChannel> extraChannels;
-        for (const auto& kv : inputPairs) {
+        for (auto& kv : inputPairs) {
             if (kv.first <= 0) continue;
-            extraChannels.push_back(kv.second);
+            extraChannels.push_back(std::move(kv.second));
         }
 
-        module->ExtraInputsIn.clear();
-        module->ExtraInputsIn.insert(module->ExtraInputsIn.end(), extraChannels.begin(), extraChannels.end());
-        module->MainTemplateList = mainCh.TemplateList;
+        module->ExtraInputsIn = std::move(extraChannels);
+        module->MainTemplateList = std::move(mainCh.TemplateList);
 
         // 标量输入注入（按索引与名称）
         std::map<int, Json> scalarInputsByIdx;
@@ -280,20 +394,43 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
         module->ScalarInputsByIndex = std::move(scalarInputsByIdx);
         module->ScalarInputsByName = std::move(scalarInputsByName);
 
-        // 执行当前节点
-        ModuleIO io = module->Process(mainCh.ImageList, mainCh.ResultList);
+        try {
+            std::uint64_t outputMask = 0;
+            if (node.contains("outputs")) {
+                const auto outPorts = AsArrayOfObjects(node.at("outputs"));
+                for (int oi = 0; oi < static_cast<int>(outPorts.size()) && oi < 64; oi++) {
+                    const auto& meta = outPorts[static_cast<size_t>(oi)];
+                    bool connected = false;
+                    if (meta.is_object() && meta.contains("links")) {
+                        const Json& links = meta.at("links");
+                        connected = links.is_array() && !links.empty();
+                    }
+                    if (connected) outputMask |= (static_cast<std::uint64_t>(1) << oi);
+                }
+            }
+            _context->Set<std::uint64_t>("__graph_current_output_mask", outputMask);
+        } catch (...) {}
+
+        // 执行当前节点并记录节点耗时（用于压测模块耗时统计）
+        const auto nodeStart = std::chrono::steady_clock::now();
+        ModuleIO io = module->ProcessOwned(mainCh.ImageList, std::move(mainCh.ResultList));
+        const auto nodeEnd = std::chrono::steady_clock::now();
+        const double elapsedMs = std::chrono::duration<double, std::milli>(nodeEnd - nodeStart).count();
+        NodeTiming timing;
+        timing.NodeId = nodeId;
+        timing.NodeType = type;
+        timing.NodeTitle = title;
+        timing.ElapsedMs = elapsedMs > 0.0 ? elapsedMs : 0.0;
+        _lastNodeTimings.push_back(std::move(timing));
 
         // 保存该节点的全部输出通道（供后续路由）
         NodeExecOutput nodeOut;
-        nodeOut.Main = ModuleChannel(io.ImageList, io.ResultList, io.TemplateList);
-        nodeOut.Extra = module->ExtraOutputs;
-        _nodeExecMap[nodeId] = nodeOut;
+        nodeOut.Main = ModuleChannel(std::move(io.ImageList), std::move(io.ResultList), std::move(io.TemplateList));
+        nodeOut.Extra = std::move(module->ExtraOutputs);
+        _nodeExecMap[nodeId] = std::move(nodeOut);
 
         // 对外暴露主通道（与 C# 一致）
         NodePublicOutput pub;
-        pub.ImageList = io.ImageList;
-        pub.ResultList = io.ResultList;
-        pub.TemplateList = io.TemplateList;
 
         // 标量输出：依据节点 outputs 元信息，从 module->ScalarOutputsByName 取值并按索引写入
         try {
@@ -338,10 +475,14 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
             }
         } catch (...) {}
 
-        _publicOutputs[nodeId] = pub;
+        _publicOutputs[nodeId] = std::move(pub);
     }
 
     return _publicOutputs;
+}
+
+std::vector<GraphExecutor::NodeTiming> GraphExecutor::GetLastNodeTimings() const {
+    return _lastNodeTimings;
 }
 
 Json GraphExecutor::LoadModels() {

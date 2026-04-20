@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
@@ -112,6 +112,7 @@ namespace DlcvDemo
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
+        private bool isCurrentFlowModel = false; // 当前是否为流程模型(dvst/dvso/dvsp)
 
         private void DisposeCurrentModel()
         {
@@ -153,6 +154,11 @@ namespace DlcvDemo
                 string selectedFilePath = openFileDialog.FileName;
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
                 Properties.Settings.Default.Save();
+                string ext = Path.GetExtension(selectedFilePath) ?? "";
+                isCurrentFlowModel =
+                    ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase) ||
+                    ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase) ||
+                    ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase);
                 int device_id = GetSelectedDeviceId();
                 try
                 {
@@ -193,20 +199,17 @@ namespace DlcvDemo
 					return;
 				}
 
-				Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+				Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
 				if (image.Empty())
 				{
 					Console.WriteLine("图像解码失败！");
 					return;
 				}
-				Mat image_rgb = new Mat();
-				Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
-
 				JObject data = new JObject();
 				data["threshold"] = (float)numericUpDown_threshold.Value;
 				data["with_mask"] = true;
 
-				var json = model.InferOneOutJson(image_rgb, data);
+				var json = model.InferOneOutJson(image, data);
 				richTextBox1.Text = JsonConvert.SerializeObject(json, Formatting.Indented);
 			}
 			catch (Exception ex)
@@ -266,8 +269,6 @@ namespace DlcvDemo
 
         private void button_infer_Click(object sender, EventArgs e)
         {
-            
-
             try
             {
                 if (model == null)
@@ -281,19 +282,16 @@ namespace DlcvDemo
                     return;
                 }
 
-                Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
+                Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
                 if (image.Empty())
                 {
                     throw new Exception("图像解码失败！");
                 }
-                Mat image_rgb = new Mat();
-                Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
-
                 batch_size = (int)numericUpDown_batch_size.Value;
                 var image_list = new List<Mat>();
                 for (int i = 0; i < batch_size; i++)
                 {
-                    image_list.Add(image_rgb);
+                    image_list.Add(image);
                 }
 
                 JObject data = new JObject();
@@ -312,15 +310,69 @@ namespace DlcvDemo
                 imagePanel1.UpdateImageAndResult(image, result);
 
                 StringBuilder sb = new StringBuilder();
-                sb.AppendLine($"推理时间: {delay_ms:F2}ms\n");
-                sb.AppendLine($"推理结果: ");
-                sb.AppendLine(result.SampleResults[0].ToString());
+                sb.AppendLine("图片: " + image_path);
+                sb.AppendLine($"batch_size: {batch_size}");
+                sb.AppendLine($"threshold: {(float)numericUpDown_threshold.Value:F2}");
+                sb.AppendLine($"推理时间: {delay_ms:F2}ms");
+
+                List<CSharpObjectResult> objects = null;
+                if (result.SampleResults != null && result.SampleResults.Count > 0)
+                {
+                    objects = result.SampleResults[0].Results;
+                }
+                if (objects == null)
+                {
+                    objects = new List<CSharpObjectResult>();
+                }
+
+                sb.AppendLine($"推理结果: {objects.Count}个");
+                if (objects.Count == 0)
+                {
+                    sb.AppendLine("未检测到目标。");
+                }
+                else
+                {
+                    sb.AppendLine();
+                    for (int i = 0; i < objects.Count; i++)
+                    {
+                        CSharpObjectResult obj = objects[i];
+                        string extraInfoText = Utils.FormatExtraInfoForDisplay(obj.ExtraInfo);
+                        if (string.IsNullOrWhiteSpace(extraInfoText))
+                        {
+                            sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}");
+                        }
+                        else
+                        {
+                            sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}  extra_info={{ {extraInfoText} }}");
+                        }
+                    }
+                }
                 richTextBox1.Text = sb.ToString();
             }
             catch (Exception ex)
             {
                 ReportError("推理失败", ex);
             }
+        }
+
+        private static string BuildResultLocationText(CSharpObjectResult obj)
+        {
+            if (!obj.WithBbox || obj.Bbox == null || obj.Bbox.Count < 4)
+            {
+                return "rect=(N/A)";
+            }
+
+            bool isRotated = obj.WithAngle || obj.Bbox.Count >= 5;
+            if (isRotated)
+            {
+                return string.Format(
+                    "rbox=(cx={0:F1}, cy={1:F1}, w={2:F1}, h={3:F1}, angle={4:F3})",
+                    obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3], obj.Angle);
+            }
+
+            return string.Format(
+                "rect=({0:F1}, {1:F1}, {2:F1}, {3:F1})",
+                obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3]);
         }
 
         /// <summary>
@@ -348,8 +400,37 @@ namespace DlcvDemo
                 JObject infer_config = new JObject();
                 infer_config["with_mask"] = false;
 
+                var inferSw = Stopwatch.StartNew();
                 var resultTuple = model.InferInternal(image_list, infer_config);
+                inferSw.Stop();
                 IntPtr currentResultPtr = resultTuple.Item2;
+                double dlcvInferMs = 0.0;
+                double totalInferMs = 0.0;
+                DlcvModules.InferTiming.GetLast(out dlcvInferMs, out totalInferMs);
+                if (totalInferMs <= 0.0)
+                {
+                    totalInferMs = inferSw.Elapsed.TotalMilliseconds;
+                }
+                if (dlcvInferMs <= 0.0)
+                {
+                    dlcvInferMs = totalInferMs;
+                }
+                var flowNodeTimings = new List<PressureNodeTiming>();
+                var rawNodeTimings = DlcvModules.InferTiming.GetLastFlowNodeTimings();
+                for (int i = 0; i < rawNodeTimings.Count; i++)
+                {
+                    var timing = rawNodeTimings[i];
+                    if (timing == null) continue;
+                    flowNodeTimings.Add(new PressureNodeTiming(
+                        timing.NodeId,
+                        timing.NodeType,
+                        timing.NodeTitle,
+                        timing.ElapsedMs));
+                }
+                pressureTestRunner?.RecordLatencyBreakdown(
+                    dlcvInferMs,
+                    totalInferMs,
+                    flowNodeTimings);
 
                 try
                 {
@@ -500,20 +581,17 @@ namespace DlcvDemo
                 batch_size = (int)numericUpDown_batch_size.Value;
                 int threadCount = (int)numericUpDown_num_thread.Value;
 
-                // 读取图像并转换为RGB格式
-                Mat image = Cv2.ImRead(image_path, ImreadModes.Color);
-                Mat image_rgb = new Mat();
-                Cv2.CvtColor(image, image_rgb, ColorConversionCodes.BGR2RGB);
+                Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
 
-                // 创建批量图像列表
                 var image_list = new List<Mat>();
                 for (int i = 0; i < batch_size; i++)
                 {
-                    image_list.Add(image_rgb);
+                    image_list.Add(image);
                 }
 
                 // 创建测试实例
                 pressureTestRunner = new PressureTestRunner(threadCount, 1000000, batch_size);
+                pressureTestRunner.SetFlowModelTiming(isCurrentFlowModel);
                 pressureTestRunner.SetTestAction(ModelInferAction, image_list);
 
                 // 创建并启动定时器更新UI

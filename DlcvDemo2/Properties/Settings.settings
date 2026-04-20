@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='utf-8'?>
+<SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="DlcvDemo2.Properties" GeneratedClassName="Settings">
+  <Profiles />
+  <Settings>
+    <Setting Name="LastExtractModelPath" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="LastComponentDetectModelPath" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="LastIcDetectModelPath" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="LastImagePath" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="SlidingWindowWidth" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">2560</Value>
+    </Setting>
+    <Setting Name="SlidingWindowHeight" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">2560</Value>
+    </Setting>
+    <Setting Name="SlidingOverlapX" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">1024</Value>
+    </Setting>
+    <Setting Name="SlidingOverlapY" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">1024</Value>
+    </Setting>
+  </Settings>
+</SettingsFile>

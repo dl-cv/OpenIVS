@@ -49,7 +49,8 @@ public:
 
     /// <summary>
     /// 对多张图片进行推理，返回 { \"result_list\": ... }。
-    /// 若 images.size()==1，则 result_list 为数组；否则为数组的数组。
+    /// 若 images.size()==1，则 result_list 为数组；
+    /// 否则为 [{\"result_list\":[...]} ...] 的批量容器格式。
     /// </summary>
     DLCV_INFER_CPP_DLL_API Json InferInternal(const std::vector<cv::Mat>& images, const Json& paramsJson = Json());
 

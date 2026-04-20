@@ -1,6 +1,7 @@
 #include "dlcv_infer.h"
 #include "dlcv_sntl_admin.h"
 #include "flow/FlowGraphModel.h"
+#include "flow/FlowPayloadTypes.h"
 #include "flow/utils/MaskRleUtils.h"
 #include <Windows.h>
 #include <cmath>
@@ -11,9 +12,23 @@
 #include <unordered_map>
 #include <utility>
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+#pragma optimize("gt", on)
+#endif
+
 namespace {
 
 using Json = dlcv_infer::json;
+
+thread_local double g_lastDlcvInferMs = 0.0;
+thread_local double g_lastTotalInferMs = 0.0;
+thread_local std::vector<dlcv_infer::FlowNodeTiming> g_lastFlowNodeTimings;
+
+void SetLastInferTiming(double dlcvInferMs, double totalInferMs, std::vector<dlcv_infer::FlowNodeTiming> nodeTimings = {}) {
+    g_lastDlcvInferMs = std::max(0.0, dlcvInferMs);
+    g_lastTotalInferMs = std::max(0.0, totalInferMs);
+    g_lastFlowNodeTimings = std::move(nodeTimings);
+}
 
 bool DllExists(const std::string& dllName, const std::string& dllPath) {
     if (SearchPathA(nullptr, dllName.c_str(), nullptr, 0, nullptr, nullptr) != 0) {
@@ -327,6 +342,15 @@ bool ReadJsonBool(const Json& v, bool dv = false) {
     return dv;
 }
 
+bool ResolveWithMaskOutputFlag(const Json& paramsJson, bool defaultValue = true) {
+    try {
+        if (paramsJson.is_object() && paramsJson.contains("with_mask")) {
+            return ReadJsonBool(paramsJson.at("with_mask"), defaultValue);
+        }
+    } catch (...) {}
+    return defaultValue;
+}
+
 std::vector<double> ParseFlowBboxToModel(
     const Json& entry,
     bool& withBbox,
@@ -424,16 +448,16 @@ cv::Mat BuildMaskFromFlowEntry(const Json& entry, const std::vector<double>& bbo
     return BuildMaskFromFlowPoly(entry, bbox, isRotated);
 }
 
-double ComputeFlowArea(const Json& entry, const cv::Mat& mask, const std::vector<double>& bbox) {
+double ComputeFlowArea(const Json& entry, const cv::Mat& mask, const std::vector<double>& bbox, bool allowMaskDerived) {
     if (entry.is_object() && entry.contains("area")) {
         return ReadJsonNumber(entry.at("area"), 0.0);
     }
 
-    if (entry.is_object() && entry.contains("mask_rle") && entry.at("mask_rle").is_object()) {
+    if (allowMaskDerived && entry.is_object() && entry.contains("mask_rle") && entry.at("mask_rle").is_object()) {
         try { return dlcv_infer::flow::CalculateMaskArea(entry.at("mask_rle")); } catch (...) {}
     }
 
-    if (!mask.empty()) {
+    if (allowMaskDerived && !mask.empty()) {
         return static_cast<double>(cv::countNonZero(mask));
     }
 
@@ -443,15 +467,22 @@ double ComputeFlowArea(const Json& entry, const cv::Mat& mask, const std::vector
     return 0.0;
 }
 
-std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json& flowResultList) {
+std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json& flowResultList, bool emitMaskOutput) {
     std::vector<dlcv_infer::ObjectResult> out;
     if (!flowResultList.is_array()) return out;
+    std::unordered_map<std::string, std::string> categoryNameCache;
+    categoryNameCache.reserve(16);
 
     for (const auto& entry : flowResultList) {
         if (!entry.is_object()) continue;
 
         const int categoryId = entry.value("category_id", 0);
         const std::string categoryNameUtf8 = entry.value("category_name", std::string());
+        auto itCachedName = categoryNameCache.find(categoryNameUtf8);
+        if (itCachedName == categoryNameCache.end()) {
+            const std::string categoryNameGbk = dlcv_infer::convertUtf8ToGbk(categoryNameUtf8);
+            itCachedName = categoryNameCache.emplace(categoryNameUtf8, categoryNameGbk).first;
+        }
         const float score = static_cast<float>(ReadJsonNumber(entry.contains("score") ? entry.at("score") : Json(), 0.0));
 
         bool withBbox = false;
@@ -460,13 +491,16 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
         bool isRotated = false;
         std::vector<double> bbox = ParseFlowBboxToModel(entry, withBbox, withAngle, angle, isRotated);
 
-        cv::Mat mask = BuildMaskFromFlowEntry(entry, bbox, isRotated);
-        const bool withMask = !mask.empty();
-        const float area = static_cast<float>(ComputeFlowArea(entry, mask, bbox));
+        cv::Mat mask;
+        if (emitMaskOutput) {
+            mask = BuildMaskFromFlowEntry(entry, bbox, isRotated);
+        }
+        const bool withMask = emitMaskOutput && !mask.empty();
+        const float area = static_cast<float>(ComputeFlowArea(entry, mask, bbox, emitMaskOutput));
 
         out.emplace_back(
             categoryId,
-            dlcv_infer::convertUtf8ToGbk(categoryNameUtf8),
+            itCachedName->second,
             score,
             area,
             bbox,
@@ -497,7 +531,7 @@ Json MaskToPointsJson(const cv::Mat& mask, double xOffset, double yOffset) {
     return points;
 }
 
-Json NormalizeFlowOneOutJson(const Json& flowResultList) {
+Json NormalizeFlowOneOutJson(const Json& flowResultList, bool emitMaskOutput) {
     Json normalized = Json::array();
     if (!flowResultList.is_array()) return normalized;
 
@@ -520,10 +554,13 @@ Json NormalizeFlowOneOutJson(const Json& flowResultList) {
         out["with_angle"] = withAngle;
         out["angle"] = withAngle ? static_cast<double>(angle) : -100.0;
 
-        cv::Mat mask = BuildMaskFromFlowEntry(entry, bbox, isRotated);
+        cv::Mat mask;
         Json maskPoints = Json::array();
-        if (!mask.empty() && bbox.size() >= 4 && !isRotated) {
-            maskPoints = MaskToPointsJson(mask, bbox[0], bbox[1]);
+        if (emitMaskOutput) {
+            mask = BuildMaskFromFlowEntry(entry, bbox, isRotated);
+            if (!mask.empty() && bbox.size() >= 4 && !isRotated) {
+                maskPoints = MaskToPointsJson(mask, bbox[0], bbox[1]);
+            }
         }
 
         if (!maskPoints.empty()) {
@@ -534,10 +571,368 @@ Json NormalizeFlowOneOutJson(const Json& flowResultList) {
             out["with_mask"] = false;
         }
 
-        out["area"] = ComputeFlowArea(entry, mask, bbox);
+        out["area"] = ComputeFlowArea(entry, mask, bbox, emitMaskOutput);
         normalized.push_back(out);
     }
     return normalized;
+}
+
+dlcv_infer::flow::FlowBatchResult ParseFlowBatchResultFromToken(const Json& resultListToken) {
+    dlcv_infer::flow::FlowBatchResult batch;
+    if (!resultListToken.is_array()) return batch;
+
+    bool isBatchContainer = false;
+    try {
+        if (!resultListToken.empty()) {
+            const auto& first = resultListToken.at(0);
+            isBatchContainer = first.is_object() &&
+                               first.contains("result_list") &&
+                               first.at("result_list").is_array();
+        }
+    } catch (...) {
+        isBatchContainer = false;
+    }
+
+    if (isBatchContainer) {
+        for (const auto& token : resultListToken) {
+            std::vector<dlcv_infer::flow::FlowResultItem> oneSample;
+            try {
+                if (token.is_object() && token.contains("result_list") && token.at("result_list").is_array()) {
+                    for (const auto& entry : token.at("result_list")) {
+                        if (entry.is_object()) {
+                            oneSample.push_back(dlcv_infer::flow::FlowResultItem::FromJson(entry));
+                        }
+                    }
+                }
+            } catch (...) {}
+            batch.PerImageResults.push_back(std::move(oneSample));
+        }
+        return batch;
+    }
+
+    std::vector<dlcv_infer::flow::FlowResultItem> oneSample;
+    for (const auto& entry : resultListToken) {
+        if (entry.is_object()) {
+            oneSample.push_back(dlcv_infer::flow::FlowResultItem::FromJson(entry));
+        }
+    }
+    batch.PerImageResults.push_back(std::move(oneSample));
+    return batch;
+}
+
+dlcv_infer::flow::FlowBatchResult ParseFlowBatchResultFromRoot(const Json& flowRoot, size_t expectedImageCount) {
+    Json resultListToken = Json::array();
+    try {
+        if (flowRoot.is_object() && flowRoot.contains("result_list")) {
+            resultListToken = flowRoot.at("result_list");
+        } else if (flowRoot.is_array()) {
+            resultListToken = flowRoot;
+        }
+    } catch (...) {
+        resultListToken = Json::array();
+    }
+
+    dlcv_infer::flow::FlowBatchResult batch = ParseFlowBatchResultFromToken(resultListToken);
+    if (expectedImageCount > 0 && batch.PerImageResults.size() < expectedImageCount) {
+        batch.PerImageResults.resize(expectedImageCount);
+    }
+    return batch;
+}
+
+Json ExtractFlowResultListToken(const Json& flowRoot) {
+    Json resultListToken = Json::array();
+    try {
+        if (flowRoot.is_object() && flowRoot.contains("result_list")) {
+            resultListToken = flowRoot.at("result_list");
+        } else if (flowRoot.is_array()) {
+            resultListToken = flowRoot;
+        }
+    } catch (...) {
+        resultListToken = Json::array();
+    }
+    return resultListToken;
+}
+
+std::vector<dlcv_infer::SampleResult> ConvertFlowResultListTokenToSampleResults(
+    const Json& resultListToken,
+    size_t expectedImageCount,
+    bool emitMaskOutput) {
+
+    std::vector<dlcv_infer::SampleResult> sampleResults;
+    if (!resultListToken.is_array()) {
+        if (expectedImageCount > 0) {
+            const dlcv_infer::SampleResult emptySample(std::vector<dlcv_infer::ObjectResult>{});
+            sampleResults.resize(expectedImageCount, emptySample);
+        }
+        return sampleResults;
+    }
+
+    bool isBatchContainer = false;
+    try {
+        if (!resultListToken.empty()) {
+            const auto& first = resultListToken.at(0);
+            isBatchContainer = first.is_object() &&
+                               first.contains("result_list") &&
+                               first.at("result_list").is_array();
+        }
+    } catch (...) {
+        isBatchContainer = false;
+    }
+
+    if (isBatchContainer) {
+        sampleResults.reserve(std::max(expectedImageCount, resultListToken.size()));
+        for (const auto& token : resultListToken) {
+            if (token.is_object() && token.contains("result_list") && token.at("result_list").is_array()) {
+                sampleResults.emplace_back(ConvertFlowResultListToObjects(token.at("result_list"), emitMaskOutput));
+            } else {
+                sampleResults.emplace_back(std::vector<dlcv_infer::ObjectResult>{});
+            }
+        }
+    } else {
+        sampleResults.emplace_back(ConvertFlowResultListToObjects(resultListToken, emitMaskOutput));
+    }
+
+    if (expectedImageCount > 0 && sampleResults.size() < expectedImageCount) {
+        const dlcv_infer::SampleResult emptySample(std::vector<dlcv_infer::ObjectResult>{});
+        sampleResults.resize(expectedImageCount, emptySample);
+    }
+    return sampleResults;
+}
+
+void ParseFlowTimingFromRoot(
+    const Json& flowRoot,
+    double& dlcvInferMs,
+    double& totalInferMs,
+    std::vector<dlcv_infer::FlowNodeTiming>& nodeTimings) {
+
+    dlcvInferMs = 0.0;
+    totalInferMs = 0.0;
+    nodeTimings.clear();
+
+    if (!flowRoot.is_object() || !flowRoot.contains("timing") || !flowRoot.at("timing").is_object()) {
+        return;
+    }
+
+    const Json& timing = flowRoot.at("timing");
+    try { dlcvInferMs = std::max(0.0, timing.value("dlcv_infer_ms", 0.0)); } catch (...) { dlcvInferMs = 0.0; }
+    try { totalInferMs = std::max(0.0, timing.value("flow_infer_ms", 0.0)); } catch (...) { totalInferMs = 0.0; }
+
+    try {
+        if (timing.contains("node_timings") && timing.at("node_timings").is_array()) {
+            for (const auto& one : timing.at("node_timings")) {
+                if (!one.is_object()) continue;
+                dlcv_infer::FlowNodeTiming item;
+                try { item.nodeId = one.value("node_id", -1); } catch (...) { item.nodeId = -1; }
+                try { item.nodeType = one.value("node_type", std::string()); } catch (...) { item.nodeType.clear(); }
+                try { item.nodeTitle = one.value("node_title", std::string()); } catch (...) { item.nodeTitle.clear(); }
+                try { item.elapsedMs = std::max(0.0, one.value("elapsed_ms", 0.0)); } catch (...) { item.elapsedMs = 0.0; }
+                nodeTimings.push_back(std::move(item));
+            }
+        }
+    } catch (...) {
+        nodeTimings.clear();
+    }
+}
+
+} // namespace
+
+namespace {
+
+using MIJson = dlcv_infer::json;
+
+int ReadJsonIntLike(const MIJson& v, int dv) {
+    try {
+        if (v.is_number_integer()) {
+            return v.get<int>();
+        }
+        if (v.is_number()) {
+            return static_cast<int>(std::llround(v.get<double>()));
+        }
+        if (v.is_string()) {
+            return std::stoi(v.get<std::string>());
+        }
+    } catch (...) {
+    }
+    return dv;
+}
+
+bool IsLikelySpatialDim(int v) {
+    return v >= 8 && v <= 65536;
+}
+
+int InferChannelCountFromMaxShape(const MIJson& shapeArr) {
+    if (!shapeArr.is_array()) {
+        return 0;
+    }
+    const size_t n = shapeArr.size();
+    if (n >= 4) {
+        const int d1 = ReadJsonIntLike(shapeArr.at(1), -1);
+        const int d2 = ReadJsonIntLike(shapeArr.at(2), -1);
+        const int d3 = ReadJsonIntLike(shapeArr.at(3), -1);
+        if (IsLikelySpatialDim(d2) && IsLikelySpatialDim(d3)) {
+            if (d1 == 1 || d1 == 3) {
+                return d1;
+            }
+        }
+        const int d0 = ReadJsonIntLike(shapeArr.at(0), -1);
+        if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1)) {
+            if (d3 == 1 || d3 == 3) {
+                return d3;
+            }
+        }
+    }
+    if (n == 3) {
+        const int d0 = ReadJsonIntLike(shapeArr.at(0), -1);
+        const int d1 = ReadJsonIntLike(shapeArr.at(1), -1);
+        const int d2 = ReadJsonIntLike(shapeArr.at(2), -1);
+        if ((d0 == 1 || d0 == 3) && IsLikelySpatialDim(d1) && IsLikelySpatialDim(d2)) {
+            return d0;
+        }
+        if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1) && (d2 == 1 || d2 == 3)) {
+            return d2;
+        }
+    }
+    return 0;
+}
+
+const MIJson* FindInputShapesObject(const MIJson& root) {
+    if (root.contains("model_info") && root.at("model_info").is_object()) {
+        const MIJson& mi = root.at("model_info");
+        if (mi.contains("input_shapes") && mi.at("input_shapes").is_object()) {
+            return &mi.at("input_shapes");
+        }
+        if (mi.contains("model_info") && mi.at("model_info").is_object()) {
+            const MIJson& inner = mi.at("model_info");
+            if (inner.contains("input_shapes") && inner.at("input_shapes").is_object()) {
+                return &inner.at("input_shapes");
+            }
+        }
+    }
+    if (root.contains("input_shapes") && root.at("input_shapes").is_object()) {
+        return &root.at("input_shapes");
+    }
+    return nullptr;
+}
+
+int ParseInputChFromModelInfo(const MIJson& modelInfoRoot) {
+    const MIJson* shapesPtr = FindInputShapesObject(modelInfoRoot);
+    if (shapesPtr == nullptr || !shapesPtr->is_object()) {
+        return 0;
+    }
+    const MIJson& shapes = *shapesPtr;
+
+    auto tryInputDesc = [](const MIJson& inputDesc) -> int {
+        if (!inputDesc.is_object() || !inputDesc.contains("max_shape")) {
+            return 0;
+        }
+        return InferChannelCountFromMaxShape(inputDesc.at("max_shape"));
+    };
+
+    if (shapes.contains("input")) {
+        const int ch = tryInputDesc(shapes.at("input"));
+        if (ch == 1 || ch == 3) {
+            return ch;
+        }
+    }
+    for (const auto& kv : shapes.items()) {
+        const int ch = tryInputDesc(kv.value());
+        if (ch == 1 || ch == 3) {
+            return ch;
+        }
+    }
+    return 0;
+}
+
+cv::Mat ConvertMatDepthTo8U(const cv::Mat& src) {
+    if (src.empty()) {
+        return {};
+    }
+    if (src.depth() == CV_8U) {
+        return src;
+    }
+    cv::Mat dst;
+    if (src.depth() == CV_16U) {
+        src.convertTo(dst, CV_8U, 1.0 / 256.0);
+        return dst;
+    }
+    if (src.depth() == CV_16S) {
+        cv::normalize(src, dst, 0, 255, cv::NORM_MINMAX, CV_8U);
+        return dst;
+    }
+    if (src.depth() == CV_32F || src.depth() == CV_64F) {
+        double mn = 0.0;
+        double mx = 0.0;
+        cv::minMaxLoc(src, &mn, &mx);
+        if (mx <= 1.0 + 1e-6 && mn >= -1e-6) {
+            src.convertTo(dst, CV_8U, 255.0);
+        } else {
+            cv::normalize(src, dst, 0, 255, cv::NORM_MINMAX, CV_8U);
+        }
+        return dst;
+    }
+    src.convertTo(dst, CV_8U);
+    return dst;
+}
+
+cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
+    if (src.empty()) {
+        return {};
+    }
+    const int ec = (expectedChannels == 1 || expectedChannels == 3) ? expectedChannels : 3;
+    cv::Mat u8 = ConvertMatDepthTo8U(src);
+    if (u8.empty()) {
+        return {};
+    }
+
+    if (ec == 3) {
+        if (u8.channels() == 1) {
+            cv::Mat rgb;
+            cv::cvtColor(u8, rgb, cv::COLOR_GRAY2RGB);
+            return rgb;
+        }
+        if (u8.channels() == 4) {
+            cv::Mat rgb;
+            cv::cvtColor(u8, rgb, cv::COLOR_RGBA2RGB);
+            return rgb;
+        }
+        if (u8.channels() == 3) {
+            return u8;
+        }
+
+        // 兜底：未知多通道时取第 0 通道并扩展到 RGB，避免引入 BGR 语义假设。
+        cv::Mat single;
+        cv::Mat rgb;
+        try {
+            cv::extractChannel(u8, single, 0);
+            cv::cvtColor(single, rgb, cv::COLOR_GRAY2RGB);
+            return rgb;
+        } catch (...) {
+            return {};
+        }
+    }
+
+    if (u8.channels() == 1) {
+        return u8;
+    }
+    if (u8.channels() == 3) {
+        cv::Mat gray;
+        cv::cvtColor(u8, gray, cv::COLOR_RGB2GRAY);
+        return gray;
+    }
+    if (u8.channels() == 4) {
+        cv::Mat gray;
+        cv::cvtColor(u8, gray, cv::COLOR_RGBA2GRAY);
+        return gray;
+    }
+
+    // 兜底：未知多通道时取第 0 通道作为灰度。
+    cv::Mat gray;
+    try {
+        cv::extractChannel(u8, gray, 0);
+        return gray;
+    } catch (...) {
+        return {};
+    }
 }
 
 } // namespace
@@ -734,12 +1129,14 @@ namespace dlcv_infer {
         OwnModelIndex(other.OwnModelIndex),
         _isFlowGraphMode(other._isFlowGraphMode),
         _deviceId(other._deviceId),
-        _flowModel(other._flowModel) {
+        _flowModel(other._flowModel),
+        _expectedChCache(other._expectedChCache) {
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
         other._deviceId = 0;
         other._flowModel = nullptr;
+        other._expectedChCache = -2;
     }
 
     Model& Model::operator=(Model&& other) noexcept {
@@ -754,12 +1151,14 @@ namespace dlcv_infer {
         _isFlowGraphMode = other._isFlowGraphMode;
         _deviceId = other._deviceId;
         _flowModel = other._flowModel;
+        _expectedChCache = other._expectedChCache;
 
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
         other._deviceId = 0;
         other._flowModel = nullptr;
+        other._expectedChCache = -2;
         return *this;
     }
 
@@ -768,6 +1167,7 @@ namespace dlcv_infer {
     }
 
     void Model::FreeModel() {
+        _expectedChCache = -2;
         if (_isFlowGraphMode) {
             delete _flowModel;
             _flowModel = nullptr;
@@ -809,6 +1209,43 @@ namespace dlcv_infer {
         json resultObject = json::parse(resultJson);
         DllLoader::Instance().GetFreeResultFunc()(resultPtr);
         return resultObject;
+    }
+
+    int Model::resolveEffectiveInputCh() {
+        if (_expectedChCache != -2) {
+            return (_expectedChCache == -1) ? 3 : _expectedChCache;
+        }
+        try {
+            if (modelIndex < 0 && !_isFlowGraphMode) {
+                _expectedChCache = -1;
+                return 3;
+            }
+            const json info = GetModelInfo();
+            const int p = ParseInputChFromModelInfo(info);
+            if (p == 1 || p == 3) {
+                _expectedChCache = p;
+                return p;
+            }
+        } catch (...) {
+        }
+        _expectedChCache = -1;
+        return 3;
+    }
+
+    std::vector<cv::Mat> Model::prepareInferInputBatch(const std::vector<cv::Mat>& images) {
+        const int expCh = resolveEffectiveInputCh();
+        const int ec = (expCh == 1 || expCh == 3) ? expCh : 3;
+        std::vector<cv::Mat> out;
+        out.reserve(images.size());
+        const bool allowFlowFastPassThrough = _isFlowGraphMode;
+        for (const auto& im : images) {
+            if (allowFlowFastPassThrough && !im.empty() && im.depth() == CV_8U && im.channels() == ec) {
+                out.push_back(im);
+                continue;
+            }
+            out.push_back(NormalizeInferInputImage(im, ec));
+        }
+        return out;
     }
 
     std::pair<json, void*> Model::InferInternal(const std::vector<cv::Mat>& images, const json& params_json) {
@@ -969,6 +1406,38 @@ namespace dlcv_infer {
                     mask_img = cv::Mat(mask_height, mask_width, CV_8UC1, mask_ptr).clone();
                 }
 
+                // 与 C# 对齐：普通模型路径下，mask 需要归一到 bbox 尺寸，
+                // 否则 flow 的 mask_to_rbox 会把“整图 mask”再次叠加 bbox 偏移，导致旋转框偏大。
+                if (!mask_img.empty() && bbox.size() >= 4)
+                {
+                    const int bbox_w = std::max(0, static_cast<int>(std::llround(std::abs(bbox[2]))));
+                    const int bbox_h = std::max(0, static_cast<int>(std::llround(std::abs(bbox[3]))));
+                    if (bbox_w > 0 && bbox_h > 0 &&
+                        (mask_img.cols != bbox_w || mask_img.rows != bbox_h))
+                    {
+                        cv::Mat resized;
+                        cv::resize(mask_img, resized, cv::Size(bbox_w, bbox_h), 0, 0, cv::INTER_NEAREST);
+                        mask_img = resized;
+                    }
+                }
+
+                if ((bbox.size() < 4) && !mask_img.empty())
+                {
+                    std::vector<cv::Point> nz;
+                    cv::findNonZero(mask_img, nz);
+                    if (!nz.empty())
+                    {
+                        const cv::Rect rect = cv::boundingRect(nz);
+                        bbox = {
+                            static_cast<double>(rect.x),
+                            static_cast<double>(rect.y),
+                            static_cast<double>(rect.width),
+                            static_cast<double>(rect.height)
+                        };
+                        withBbox = true;
+                    }
+                }
+
                 results.emplace_back(categoryId, categoryName, score, area, bbox, withMask, mask_img, withBbox, withAngle, angle);
             }
 
@@ -983,15 +1452,44 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
-            json flowResults = _flowModel->InferOneOutJson(image, params_json);
+            const std::vector<cv::Mat> prepared = prepareInferInputBatch({ image });
+            if (prepared.empty() || prepared.front().empty()) {
+                throw std::invalid_argument("image is empty after preparation");
+            }
 
-            std::vector<SampleResult> sampleResults;
-            sampleResults.emplace_back(ConvertFlowResultListToObjects(flowResults));
+            const auto begin = std::chrono::steady_clock::now();
+            json flowRoot = _flowModel->InferInternal(prepared, params_json);
+            const auto end = std::chrono::steady_clock::now();
+
+            double dlcvInferMs = 0.0;
+            double totalInferMs = 0.0;
+            std::vector<FlowNodeTiming> nodeTimings;
+            ParseFlowTimingFromRoot(flowRoot, dlcvInferMs, totalInferMs, nodeTimings);
+            if (totalInferMs <= 0.0) {
+                totalInferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+            }
+            if (dlcvInferMs <= 0.0) {
+                dlcvInferMs = totalInferMs;
+            }
+            SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
+
+            const bool emitMaskOutput = ResolveWithMaskOutputFlag(params_json, true);
+            const Json resultListToken = ExtractFlowResultListToken(flowRoot);
+            std::vector<SampleResult> sampleResults =
+                ConvertFlowResultListTokenToSampleResults(resultListToken, 1, emitMaskOutput);
             return Result(std::move(sampleResults));
         }
 
-        // 将单张图像放入列表中传递
-        auto resultTuple = InferInternal({ image }, params_json);
+        const std::vector<cv::Mat> prepared = prepareInferInputBatch({ image });
+        if (prepared.empty() || prepared.front().empty()) {
+            throw std::invalid_argument("image is empty after preparation");
+        }
+
+        const auto begin = std::chrono::steady_clock::now();
+        auto resultTuple = InferInternal(prepared, params_json);
+        const auto end = std::chrono::steady_clock::now();
+        const double inferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+        SetLastInferTiming(inferMs, inferMs);
 
         try
         {
@@ -1011,21 +1509,59 @@ namespace dlcv_infer {
     Result Model::InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json) {
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
-
-            std::vector<SampleResult> sampleResults;
-            sampleResults.reserve(image_list.size());
-            for (const auto& image : image_list) {
-                if (image.empty()) {
-                    sampleResults.emplace_back(std::vector<ObjectResult>{});
-                    continue;
-                }
-                json flowResults = _flowModel->InferOneOutJson(image, params_json);
-                sampleResults.emplace_back(ConvertFlowResultListToObjects(flowResults));
+            if (image_list.empty()) {
+                SetLastInferTiming(0.0, 0.0);
+                return Result(std::vector<SampleResult>{});
             }
+
+            const std::vector<cv::Mat> prepared = prepareInferInputBatch(image_list);
+            if (prepared.size() != image_list.size()) {
+                throw std::runtime_error("prepareInferInputBatch size mismatch");
+            }
+            for (const auto& m : prepared) {
+                if (m.empty()) {
+                    throw std::invalid_argument("image is empty after preparation");
+                }
+            }
+
+            const auto begin = std::chrono::steady_clock::now();
+            json flowRoot = _flowModel->InferInternal(prepared, params_json);
+            const auto end = std::chrono::steady_clock::now();
+
+            double dlcvInferMs = 0.0;
+            double totalInferMs = 0.0;
+            std::vector<FlowNodeTiming> nodeTimings;
+            ParseFlowTimingFromRoot(flowRoot, dlcvInferMs, totalInferMs, nodeTimings);
+            if (totalInferMs <= 0.0) {
+                totalInferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+            }
+            if (dlcvInferMs <= 0.0) {
+                dlcvInferMs = totalInferMs;
+            }
+            SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
+
+            const bool emitMaskOutput = ResolveWithMaskOutputFlag(params_json, true);
+            const Json resultListToken = ExtractFlowResultListToken(flowRoot);
+            std::vector<SampleResult> sampleResults =
+                ConvertFlowResultListTokenToSampleResults(resultListToken, image_list.size(), emitMaskOutput);
             return Result(std::move(sampleResults));
         }
 
-        auto resultTuple = InferInternal(image_list, params_json);
+        const std::vector<cv::Mat> prepared = prepareInferInputBatch(image_list);
+        if (prepared.size() != image_list.size()) {
+            throw std::runtime_error("prepareInferInputBatch size mismatch");
+        }
+        for (const auto& m : prepared) {
+            if (m.empty()) {
+                throw std::invalid_argument("image is empty after preparation");
+            }
+        }
+
+        const auto begin = std::chrono::steady_clock::now();
+        auto resultTuple = InferInternal(prepared, params_json);
+        const auto end = std::chrono::steady_clock::now();
+        const double inferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+        SetLastInferTiming(inferMs, inferMs);
 
         try
         {
@@ -1047,11 +1583,57 @@ namespace dlcv_infer {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
 
-            json flowResults = _flowModel->InferOneOutJson(image, params_json);
-            return NormalizeFlowOneOutJson(flowResults);
+            const std::vector<cv::Mat> prepared = prepareInferInputBatch({ image });
+            if (prepared.empty() || prepared.front().empty()) {
+                throw std::invalid_argument("image is empty after preparation");
+            }
+
+            const auto begin = std::chrono::steady_clock::now();
+            json flowRoot = _flowModel->InferInternal(prepared, params_json);
+            const auto end = std::chrono::steady_clock::now();
+
+            double dlcvInferMs = 0.0;
+            double totalInferMs = 0.0;
+            std::vector<FlowNodeTiming> nodeTimings;
+            ParseFlowTimingFromRoot(flowRoot, dlcvInferMs, totalInferMs, nodeTimings);
+            if (totalInferMs <= 0.0) {
+                totalInferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+            }
+            if (dlcvInferMs <= 0.0) {
+                dlcvInferMs = totalInferMs;
+            }
+            SetLastInferTiming(dlcvInferMs, totalInferMs, std::move(nodeTimings));
+
+            const bool emitMaskOutput = ResolveWithMaskOutputFlag(params_json, true);
+            const Json resultListToken = ExtractFlowResultListToken(flowRoot);
+            json flowResults = json::array();
+            try {
+                if (resultListToken.is_array() && !resultListToken.empty()) {
+                    const Json& first = resultListToken.at(0);
+                    if (first.is_object() && first.contains("result_list") && first.at("result_list").is_array()) {
+                        flowResults = first.at("result_list");
+                    } else {
+                        flowResults = resultListToken;
+                    }
+                } else if (resultListToken.is_array()) {
+                    flowResults = resultListToken;
+                }
+            } catch (...) {
+                flowResults = json::array();
+            }
+            return NormalizeFlowOneOutJson(flowResults, emitMaskOutput);
         }
 
-        auto resultTuple = InferInternal({ image }, params_json);
+        const std::vector<cv::Mat> prepared = prepareInferInputBatch({ image });
+        if (prepared.empty() || prepared.front().empty()) {
+            throw std::invalid_argument("image is empty after preparation");
+        }
+
+        const auto begin = std::chrono::steady_clock::now();
+        auto resultTuple = InferInternal(prepared, params_json);
+        const auto end = std::chrono::steady_clock::now();
+        const double inferMs = std::chrono::duration<double, std::milli>(end - begin).count();
+        SetLastInferTiming(inferMs, inferMs);
 
         try
         {
@@ -1106,6 +1688,15 @@ namespace dlcv_infer {
             DllLoader::Instance().GetFreeModelResultFunc()(resultTuple.second);
             throw;
         }
+    }
+
+    void Model::GetLastInferTiming(double& dlcvInferMs, double& totalInferMs) {
+        dlcvInferMs = g_lastDlcvInferMs;
+        totalInferMs = g_lastTotalInferMs;
+    }
+
+    std::vector<FlowNodeTiming> Model::GetLastFlowNodeTimings() {
+        return g_lastFlowNodeTimings;
     }
 
     // SlidingWindowModel类实现

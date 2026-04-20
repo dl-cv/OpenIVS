@@ -20,16 +20,15 @@
   - `DlcvDemo` 引用：`DlcvCsharpApi`、`ImageViewer`、`PressureTestRunner`
   - `ImageViewer` 引用：`DlcvCsharpApi`
   - `PressureTestRunner`：无额外项目引用（纯 .NET 代码）
-  - `DlcvModelRPC`：独立控制台项目（输出名 `AIModelRPC.exe`），不被 `DlcvDemo` 直接引用
 
 #### 2.1 解决方案与编译配置（必须满足）
 
 - **解决方案**：`OpenIVS.sln`
+- **构建入口**：解决方案级构建、项目级构建与发布前构建验证统一通过 MCP 构建工具执行，入口见 `开发文档.md` 的“统一编译说明”
 - **平台**：只提供 `x64`（Debug/Release），必须以 **x64** 方式编译与运行
 - **启动项目**：`DlcvDemo`
 - **输出**：
   - `DlcvDemo`：WinExe（无控制台窗口）
-  - `DlcvModelRPC`：生成 `AIModelRPC.exe`（RPC 模式依赖）
   - 说明：当前源码中 **没有**为 `DlcvDemo` 配置“自动复制 `AIModelRPC.exe`”的构建步骤；若要启用 RPC 模式，请确保 `AIModelRPC.exe` 位于以下任一路径（见 `DlcvCsharpApi/Model.cs` 的查找顺序）：
     - `DlcvDemo` 的输出目录（与主 EXE 同目录）
     - SDK 固定路径：`C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`
@@ -58,7 +57,6 @@
 - **创建解决方案与项目**
   - 创建 WinForms 项目 `DlcvDemo`（.NET Framework 4.7.2，平台 x64）
   - 创建/加入类库项目：`DlcvCsharpApi`、`ImageViewer`、`PressureTestRunner`
-  - 创建控制台项目：`DlcvModelRPC`（输出名 `AIModelRPC.exe`，平台 x64），用于在本机目录提供 RPC 服务进程
 - **NuGet 依赖（版本需与现有一致或兼容）**
   - `Newtonsoft.Json (13.0.3)`
   - `OpenCvSharp4 (4.10.0.20241108)` + `OpenCvSharp4.runtime.win` + `OpenCvSharp4.Extensions`
@@ -68,10 +66,16 @@
 - **项目引用**
   - `DlcvDemo` 引用：`DlcvCsharpApi`、`ImageViewer`、`PressureTestRunner`
   - `ImageViewer` 引用：`DlcvCsharpApi`
-  - `DlcvModelRPC` 引用：`DlcvCsharpApi`
 - **编译设置**
-  - `DlcvDemo` 与 `ImageViewer` 建议启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加相关的 `unsafe` 代码）
-  - 建议将 `DlcvDemo` 也统一按 x64 配置编译运行（与解决方案一致）
+  - `DlcvDemo` 与 `ImageViewer` 启用 `AllowUnsafeBlocks=true`（用于 mask 透明叠加相关的 `unsafe` 代码）
+  - `DlcvDemo` 统一按 x64 配置编译运行（与解决方案一致）
+
+#### 2.4 图像解码与通道/位深约定（DlcvDemo 与 DlcvCsharpApi，必须一致）
+
+- **Demo**：`Cv2.ImRead(path, ImreadModes.Unchanged)`；将**同一张**解码后的 `Mat` 交给 `ImageViewer` 与 `Model.Infer*` / `InferOneOutJson`（不在 Demo 里做 `BGR2RGB` 等预处理）。
+- **API（`Model.cs`）**：经 `PrepareInferImages` → 逐张 `PrepareInferImage` 规整后再进各后端（含 DVS）。
+  - **位深**：非 `CV_8U` 时转为 8 位（`ConvertMatDepthTo8U`：16U 按 `1/256`，浮点按值域映射等）。
+  - **通道**：`ParseInputChFromModelInfo` 从 `model_info.input_shapes.*.max_shape` 推断 1 或 3；结果缓存在 `_expectedChCache`：**-2** 未解析或已失效（释放模型、`GetModelInfo` 刷新元数据后），**-1** 无法识别（按三通道策略：灰度/BGR/BGRA → RGB），**1**/**3** 为明确期望（单通道模型时多通道转灰度；**三通道模型时若输入为四通道，须先 `BGRA2RGB` 再推理**）。
 
 ### 3. 功能边界（必须严格一致）
 
@@ -142,19 +146,34 @@
   - 放大：当 `scale < MaxScale` 时，`scale × 1.1`
   - 缩小：当 `scale > MinScale` 时，`scale ÷ 1.1`
   - 缩放中心：以鼠标指针位置为中心缩放
+  - 按住 `Ctrl` + 滚轮时**不缩放图像**，改为调整标签字体倍率（见下文）
 - **左键拖拽平移**：按住左键拖动图片
 - **右键单击**：重置缩放为“适配面板并居中”（fit-to-panel）
-- **键盘快捷键**：
-  - 在控件获得焦点时（左键点击控件后）按 `V`：切换是否显示可视化结果（框/Mask/标签）
+- **键盘快捷键**（控件需获得焦点，即先左键点击图像区）：
+
+| 快捷键 | 行为 |
+| --- | --- |
+| `V` | 切换可视化总开关（框 / Mask / polyline / 标签是否绘制） |
+| `C` | 切换标签文字显示（关闭后只显示框与 Mask，不显示类别名与分数） |
+| `+` / `=` / 小键盘 `+` | 增大标签字体倍率（步进 `1.1`，上限 `MaxLabelFontScale = 5.0`） |
+| `-` / 小键盘 `-` | 减小标签字体倍率（步进 `1.1`，下限 `MinLabelFontScale = 0.3`） |
+| `0` / 小键盘 `0` | 重置标签字体倍率为 `1.0` |
+| `Ctrl + 滚轮` | 调整标签字体倍率，不会缩放图像 |
+
+  - 字体倍率由控件属性 `LabelFontScale` 承载，绘制时 `fontSize = Math.Max(8, 24 * LabelFontScale / scale)`，即在“反向补偿图像缩放”的基础上再乘用户倍率。
+  - 标签字体倍率**只影响类别名与分数文字**的渲染大小；**不影响**边界框线宽，也**不影响**左上角状态文本（`OK` / `NG` / `No Result`）的大小。
+  - 标签文字显示由控件属性 `ShowLabelText` 承载（默认 `true`）；关闭时仍然绘制框、Mask、polyline 与状态文本。
 
 #### 5.2 绘制规则（框/文字/Mask）
 
+- **底图通道**：`ImageViewer.UpdateImage(Mat)` 在显示前若检测到 **4 通道**，会先 `BGRA2BGR` 再 `ToBitmap`，**不直接可视化四通道**（当前 UI 绘制按三通道位图处理）。
 - **输入**：仅可视化 `SampleResults[0]`（Batch中第一张图的结果）。
 - **坐标**：基于**原图像素坐标**。
 - **可视化输出**：
   - **边界框**：
     - 普通框：绘制矩形 `[x, y, w, h]`。
     - 旋转框：根据 `[cx, cy, w, h, angle]` 绘制四边形。
+  - **折线**：当 `CSharpObjectResult.ExtraInfo["polyline"]` 存在且点数不少于 2 时，按原图坐标绘制开放折线。
   - **Mask**：若存在，在框内叠加半透明蒙版（仅有效区域）。
   - **标签**：在框上方显示 `{category_name} {score:F2}`。
   - **颜色**：根据类别（OK/NG）区分颜色（如绿/红）。
@@ -258,20 +277,21 @@
   - 已加载模型。
   - 已选择图片。
 - **输入**：
-  - 图片：当前选择的图片（读取为RGB）。
+  - 图片：当前选择的图片（`ImreadModes.Unchanged` 读取，原样送入 `Model.InferBatch`，见 2.4）。
   - 参数：UI设置的 Batch Size, Threshold，强制 `with_mask=true`。
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
   - **文本**：输出推理耗时及结果详情；且 `richTextBox1` 文本中必须包含字段名 `推理时间:` 与 `推理结果:`。
+  - **结果详情**：每条结果固定输出类别、分数和框信息；当 `ExtraInfo` 非空时，在同行追加 `extra_info={ ... }`，内容使用 `Utils.FormatExtraInfoForDisplay()` 生成。
 - **异常处理**：若图片无效或推理失败，弹窗提示错误。
 
 #### 7.7 推理 JSON（按钮：`推理JSON`）
 
 - 前置条件同 7.6（模型与图片均必须存在）
 - 处理流程：
-  - 读取图片（BGR）
+  - 读取图片（`ImreadModes.Unchanged`）
   - 若 `image.Empty()==true`：输出控制台 `图像解码失败！` 并直接返回（不弹窗、不更新 UI）
-  - 转为 RGB（BGR→RGB）
+  - 将解码后的 `Mat` 原样传入 `InferOneOutJson`（规整见 2.4）
   - 参数 JSON：
     - `threshold = numericUpDown_threshold`
     - `with_mask = true`
@@ -290,8 +310,7 @@
   - `isConsistencyTestMode=false`
   - `shouldStopPressureTest=false`
   - batch_size、线程数从 UI 读取
-  - 读取图片并转 RGB
-  - 构造 image_list（重复同一张 Mat）
+  - 读取图片（`Unchanged`），构造 image_list（重复同一张 Mat，与 2.4 一致）
   - 创建 `PressureTestRunner(threadCount, targetRate=1000000, batchSize=batch_size)`
   - 设置 action 为 `ModelInferAction(image_list)`
   - 启动 500ms 定时器刷新统计：

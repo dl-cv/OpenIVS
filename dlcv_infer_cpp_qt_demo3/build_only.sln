@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35825.156
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dlcv_infer_cpp_dll", "..\dlcv_infer_cpp_dll\dlcv_infer_cpp_dll.vcxproj", "{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dlcv_infer_cpp_qt_demo3", "dlcv_infer_cpp_qt_demo3.vcxproj", "{F4D6E2A9-AB3B-4FE5-B5A5-2F51796D2F4B}"
+	ProjectSection(ProjectDependencies) = postProject
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0} = {2699EC49-BC3D-4786-9D73-411A0E8B4DE0}
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Debug|x64.ActiveCfg = Debug|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Debug|x64.Build.0 = Debug|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Release|x64.ActiveCfg = Release|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Release|x64.Build.0 = Release|x64
+		{F4D6E2A9-AB3B-4FE5-B5A5-2F51796D2F4B}.Debug|x64.ActiveCfg = Debug|x64
+		{F4D6E2A9-AB3B-4FE5-B5A5-2F51796D2F4B}.Debug|x64.Build.0 = Debug|x64
+		{F4D6E2A9-AB3B-4FE5-B5A5-2F51796D2F4B}.Release|x64.ActiveCfg = Release|x64
+		{F4D6E2A9-AB3B-4FE5-B5A5-2F51796D2F4B}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include <memory>
 
@@ -35,6 +36,15 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
+    struct PressureNodeAggregate {
+        int nodeId = -1;
+        std::string nodeType;
+        std::string nodeTitle;
+        double totalMs = 0.0;
+        long long count = 0;
+        double AverageMs() const { return count > 0 ? (totalMs / static_cast<double>(count)) : 0.0; }
+    };
+
     void setupUi();
     void bindSignals();
     void initializeDevicesAsync();
@@ -42,7 +52,7 @@ private:
     int selectedDeviceId() const;
     bool ensureModelLoaded();
     bool ensureImageSelected();
-    bool loadCurrentImage(cv::Mat& bgrImage, cv::Mat& rgbImage, bool silentOnDecodeFail) const;
+    bool loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const;
 
     void reportError(const QString& title, const QString& detail);
     QString formatResultText(const dlcv_infer::Result& output) const;
@@ -98,6 +108,8 @@ private:
     std::atomic<bool> pressureError_{false};
     std::atomic<long long> pressureCompletedRequests_{0};
     std::atomic<long long> pressureTotalLatencyUs_{0};
+    std::atomic<long long> pressureTotalSdkLatencyUs_{0};
+    std::atomic<long long> pressureTotalFlowLatencyUs_{0};
     int pressureThreadCount_ = 1;
     int pressureBatchSize_ = 1;
     double pressureThreshold_ = 0.05;
@@ -106,6 +118,8 @@ private:
     QTimer* pressureTimer_ = nullptr;
     std::vector<std::thread> pressureThreads_;
     std::mutex pressureErrorMutex_;
+    std::mutex pressureNodeStatsMutex_;
+    std::unordered_map<std::string, PressureNodeAggregate> pressureNodeStats_;
     QString pressureErrorDetail_;
     std::chrono::steady_clock::time_point pressureStartTime_{};
     std::chrono::steady_clock::time_point pressureLastTickTime_{};

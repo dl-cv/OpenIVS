@@ -8,6 +8,27 @@ using System.Diagnostics;
 
 namespace DLCV
 {
+    public sealed class PressureNodeTiming
+    {
+        public int NodeId { get; private set; }
+        public string NodeType { get; private set; }
+        public string NodeTitle { get; private set; }
+        public double ElapsedMs { get; private set; }
+
+        public PressureNodeTiming(int nodeId, string nodeType, string nodeTitle, double elapsedMs)
+        {
+            NodeId = nodeId;
+            NodeType = nodeType ?? string.Empty;
+            NodeTitle = nodeTitle ?? string.Empty;
+            ElapsedMs = Math.Max(0.0, elapsedMs);
+        }
+
+        public PressureNodeTiming Clone()
+        {
+            return new PressureNodeTiming(NodeId, NodeType, NodeTitle, ElapsedMs);
+        }
+    }
+
     /// <summary>
     /// 压力测试运行器类，用于执行可配置的多线程压力测试
     /// </summary>
@@ -27,6 +48,10 @@ namespace DLCV
         private DateTime _startTime;
         private TimeSpan _duration;
         private Queue<double> _recentLatencies;
+        private Queue<double> _recentDlcvInferLatencies;
+        private Queue<double> _recentTotalInferLatencies;
+        private Queue<List<PressureNodeTiming>> _recentFlowNodeTimings;
+        private volatile bool _isFlowModelTiming;
         private Queue<DateTime> _requestTimestamps; // 记录请求完成时间戳
         private const int MAX_LATENCY_SAMPLES = 100; // 保存最近几次请求的延迟
         private const int RECENT_RATE_WINDOW_SECONDS = 3; // 最近速率统计窗口（秒）
@@ -86,6 +111,9 @@ namespace DLCV
             _completedRequests = 0;
             _batchSize = batchSize;
             _recentLatencies = new Queue<double>(MAX_LATENCY_SAMPLES);
+            _recentDlcvInferLatencies = new Queue<double>(MAX_LATENCY_SAMPLES);
+            _recentTotalInferLatencies = new Queue<double>(MAX_LATENCY_SAMPLES);
+            _recentFlowNodeTimings = new Queue<List<PressureNodeTiming>>(MAX_LATENCY_SAMPLES);
             _requestTimestamps = new Queue<DateTime>();
         }
 
@@ -126,6 +154,9 @@ namespace DLCV
             lock (_lockObject)
             {
                 _recentLatencies.Clear();
+                _recentDlcvInferLatencies.Clear();
+                _recentTotalInferLatencies.Clear();
+                _recentFlowNodeTimings.Clear();
                 _requestTimestamps.Clear();
             }
 
@@ -209,20 +240,117 @@ namespace DLCV
             
             // 计算最近请求的平均延迟（毫秒）
             double averageLatency = 0;
+            double averageDlcvInferLatency = 0;
+            double averageTotalInferLatency = 0;
+            List<NodeTimingAggregate> averageNodeTimings = null;
             lock (_lockObject)
             {
                 if (_recentLatencies.Count > 0)
                 {
                     averageLatency = _recentLatencies.Average();
                 }
+                if (_recentDlcvInferLatencies.Count > 0)
+                {
+                    averageDlcvInferLatency = _recentDlcvInferLatencies.Average();
+                }
+                if (_recentTotalInferLatencies.Count > 0)
+                {
+                    averageTotalInferLatency = _recentTotalInferLatencies.Average();
+                }
+
+                if (_isFlowModelTiming && _recentFlowNodeTimings.Count > 0)
+                {
+                    var nodeStats = new Dictionary<string, NodeTimingAggregate>(StringComparer.Ordinal);
+                    foreach (var requestTimings in _recentFlowNodeTimings)
+                    {
+                        if (requestTimings == null) continue;
+                        foreach (var timing in requestTimings)
+                        {
+                            if (timing == null) continue;
+                            string key = timing.NodeId.ToString() + "|" + timing.NodeType + "|" + timing.NodeTitle;
+                            if (!nodeStats.TryGetValue(key, out NodeTimingAggregate aggregate))
+                            {
+                                aggregate = new NodeTimingAggregate(timing.NodeId, timing.NodeType, timing.NodeTitle);
+                                nodeStats[key] = aggregate;
+                            }
+                            aggregate.Add(timing.ElapsedMs);
+                        }
+                    }
+                    averageNodeTimings = nodeStats.Values
+                        .Where(x => x.AverageMs >= 1.0)
+                        .OrderByDescending(x => x.AverageMs)
+                        .ToList();
+                }
             }
-            sb.AppendLine($"平均延迟: {averageLatency:F2}ms");
+            if (averageLatency > 0)
+            {
+                sb.AppendLine($"平均延迟: {averageLatency:F2}ms");
+            }
+            if (averageDlcvInferLatency > 0)
+            {
+                sb.AppendLine($"平均延迟(SDK): {averageDlcvInferLatency:F2}ms");
+            }
+            // if (_isFlowModelTiming && averageTotalInferLatency > 0)
+            // {
+            //     sb.AppendLine($"平均延迟(总时间): {averageTotalInferLatency:F2}ms");
+            // }
             sb.AppendLine($"实时速率: {recentRate:F2} 请求/秒");
+            if (_isFlowModelTiming && averageNodeTimings != null && averageNodeTimings.Count > 0)
+            {
+                sb.AppendLine("模块平均耗时:");
+                foreach (var item in averageNodeTimings)
+                {
+                    string title = string.IsNullOrWhiteSpace(item.NodeTitle) ? "-" : item.NodeTitle;
+                    double share = averageTotalInferLatency > 0 ? item.AverageMs * 100.0 / averageTotalInferLatency : 0.0;
+                    sb.AppendLine($"#{item.NodeId} [{item.NodeType}] {title}: {item.AverageMs:F2}ms ({share:F1}%)");
+                }
+            }
 
             return sb.ToString();
         }
 
         #endregion
+
+        public void SetFlowModelTiming(bool isFlowModel)
+        {
+            _isFlowModelTiming = isFlowModel;
+        }
+
+        public void RecordLatencyBreakdown(double dlcvInferMs, double totalInferMs, List<PressureNodeTiming> flowNodeTimings = null)
+        {
+            lock (_lockObject)
+            {
+                if (_recentDlcvInferLatencies.Count >= MAX_LATENCY_SAMPLES)
+                {
+                    _recentDlcvInferLatencies.Dequeue();
+                }
+                _recentDlcvInferLatencies.Enqueue(Math.Max(0.0, dlcvInferMs));
+
+                if (_recentTotalInferLatencies.Count >= MAX_LATENCY_SAMPLES)
+                {
+                    _recentTotalInferLatencies.Dequeue();
+                }
+                _recentTotalInferLatencies.Enqueue(Math.Max(0.0, totalInferMs));
+
+                if (_isFlowModelTiming)
+                {
+                    if (_recentFlowNodeTimings.Count >= MAX_LATENCY_SAMPLES)
+                    {
+                        _recentFlowNodeTimings.Dequeue();
+                    }
+
+                    var snapshot = new List<PressureNodeTiming>();
+                    if (flowNodeTimings != null)
+                    {
+                        foreach (var timing in flowNodeTimings)
+                        {
+                            if (timing != null) snapshot.Add(timing.Clone());
+                        }
+                    }
+                    _recentFlowNodeTimings.Enqueue(snapshot);
+                }
+            }
+        }
 
         #region 私有方法
 
@@ -287,5 +415,30 @@ namespace DLCV
         }
 
         #endregion
+
+        private sealed class NodeTimingAggregate
+        {
+            public int NodeId { get; private set; }
+            public string NodeType { get; private set; }
+            public string NodeTitle { get; private set; }
+            public int Count { get; private set; }
+            public double TotalMs { get; private set; }
+            public double AverageMs { get { return Count > 0 ? TotalMs / Count : 0.0; } }
+
+            public NodeTimingAggregate(int nodeId, string nodeType, string nodeTitle)
+            {
+                NodeId = nodeId;
+                NodeType = nodeType ?? string.Empty;
+                NodeTitle = nodeTitle ?? string.Empty;
+                Count = 0;
+                TotalMs = 0.0;
+            }
+
+            public void Add(double elapsedMs)
+            {
+                Count += 1;
+                TotalMs += Math.Max(0.0, elapsedMs);
+            }
+        }
     }
 }
