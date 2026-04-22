@@ -1,4 +1,5 @@
 ﻿#include "flow/GraphExecutor.h"
+#include "dlcv_infer.h"
 
 #include <algorithm>
 #include <cctype>
@@ -39,19 +40,29 @@ static bool IsFlowDebugLogEnabled() {
 #endif
 }
 
+// 本 DLL 源码采用 /utf-8 编译，字符串字面量为 UTF-8。
+// Windows 中文控制台默认码页为 CP_ACP(936/GBK)，直接 fprintf(stderr, ...) 会出现"妯″潡"式乱码。
+// 统一走仓库内已有的 dlcv_infer::convertUtf8ToGbk() 转换，再写入 stderr，与项目其它位置保持一致。
 static void LogModuleDebug(const char* stage, const std::string& type, int nodeId, const std::string& title) {
     if (!IsFlowDebugLogEnabled()) return;
-    std::fprintf(stderr, "[flow][DEBUG][%s] 模块已注册: type=\"%s\" node_id=%d title=\"%s\"\n",
-                 stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    char utf8buf[512] = {0};
+    std::snprintf(utf8buf, sizeof(utf8buf),
+                  "[flow][DEBUG][%s] 模块已注册: type=\"%s\" node_id=%d title=\"%s\"\n",
+                  stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    const std::string out = dlcv_infer::convertUtf8ToGbk(std::string(utf8buf));
+    std::fputs(out.c_str(), stderr);
     std::fflush(stderr);
 }
 
 static void LogModuleNotRegistered(const char* stage, const std::string& type, int nodeId, const std::string& title) {
     // 未注册属于严重配置/链接问题：无论 Debug/Release 都输出到 stderr，保证客户现场可见。
-    std::fprintf(stderr,
-                 "[flow][WARN][%s] 模块未注册，已跳过该节点: type=\"%s\" node_id=%d title=\"%s\"。"
-                 "请检查模型/流程 JSON 中的 type 是否正确，或对应模块是否被编译/链接进入当前程序。\n",
-                 stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    char utf8buf[1024] = {0};
+    std::snprintf(utf8buf, sizeof(utf8buf),
+                  "[flow][WARN][%s] 模块未注册，已跳过该节点: type=\"%s\" node_id=%d title=\"%s\"。"
+                  "请检查模型/流程 JSON 中的 type 是否正确，或对应模块是否被编译/链接进入当前程序。\n",
+                  stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    const std::string out = dlcv_infer::convertUtf8ToGbk(std::string(utf8buf));
+    std::fputs(out.c_str(), stderr);
     std::fflush(stderr);
 }
 
