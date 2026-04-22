@@ -267,12 +267,28 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
                     if (!m.is_object()) continue;
                     int sc = 0;
                     try { sc = m.contains("status_code") ? m.at("status_code").get<int>() : 0; } catch (...) { sc = 0; }
-                    if (sc != 0) {
-                        try {
-                            if (m.contains("status_message")) simpleMessage = m.at("status_message").dump();
-                        } catch (...) {}
-                        break;
-                    }
+                    if (sc == 0) continue;
+
+                    std::string statusMsg;
+                    try {
+                        if (m.contains("status_message")) {
+                            const auto& sm = m.at("status_message");
+                            statusMsg = sm.is_string() ? sm.get<std::string>() : sm.dump();
+                        }
+                    } catch (...) {}
+                    if (statusMsg.empty()) statusMsg = "unknown";
+
+                    std::string nodeType, nodeTitle, modelPath;
+                    int nodeId = -1;
+                    try { if (m.contains("type") && m.at("type").is_string()) nodeType = m.at("type").get<std::string>(); } catch (...) {}
+                    try { if (m.contains("title") && m.at("title").is_string()) nodeTitle = m.at("title").get<std::string>(); } catch (...) {}
+                    try { if (m.contains("node_id")) nodeId = m.at("node_id").get<int>(); } catch (...) {}
+                    try { if (m.contains("model_path") && m.at("model_path").is_string()) modelPath = m.at("model_path").get<std::string>(); } catch (...) {}
+
+                    simpleMessage = statusMsg + ": type=\"" + nodeType + "\" node_id=" + std::to_string(nodeId);
+                    if (!nodeTitle.empty()) simpleMessage += " title=\"" + nodeTitle + "\"";
+                    if (!modelPath.empty()) simpleMessage += " model_path=\"" + modelPath + "\"";
+                    break;
                 }
             }
         } catch (...) {}
@@ -324,6 +340,30 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
 
     const FlowBatchResult batch = AggregateFrontendResults(ctx, static_cast<int>(images.size()));
     Json root = batch.ToFlowRootJson();
+
+    const std::vector<GraphExecutor::UnregisteredNodeInfo> unregistered = exec.GetLastUnregisteredNodes();
+    if (!unregistered.empty()) {
+        std::string msg = "以下节点模块未注册，已被跳过，请检查模型/流程 JSON 是否正确：";
+        Json details = Json::array();
+        for (size_t i = 0; i < unregistered.size(); i++) {
+            const auto& u = unregistered[i];
+            Json d = Json::object();
+            d["node_id"] = u.NodeId;
+            d["type"] = u.NodeType;
+            d["title"] = u.NodeTitle;
+            details.push_back(std::move(d));
+
+            if (i > 0) msg += "; ";
+            msg += "type=\"" + u.NodeType + "\", node_id=" + std::to_string(u.NodeId)
+                + (u.NodeTitle.empty() ? std::string() : (", title=\"" + u.NodeTitle + "\""));
+        }
+        root["code"] = 1;
+        root["message"] = msg;
+        root["unregistered_modules"] = std::move(details);
+    } else {
+        root["code"] = 0;
+        root["message"] = "ok";
+    }
 
     const std::vector<GraphExecutor::NodeTiming> nodeTimings = exec.GetLastNodeTimings();
     Json timing = Json::object();
