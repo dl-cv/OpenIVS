@@ -42,9 +42,15 @@ static bool IsFlowDebugLogEnabled() {
 static void LogModuleDebug(const char* stage, const std::string& type, int nodeId, const std::string& title) {
     if (!IsFlowDebugLogEnabled()) return;
     char utf8buf[512] = {0};
-    std::snprintf(utf8buf, sizeof(utf8buf),
-                  "[flow][DEBUG][%s] 模块已注册: type=\"%s\" node_id=%d title=\"%s\"\n",
-                  stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    if (title.empty()) {
+        std::snprintf(utf8buf, sizeof(utf8buf),
+                      "[flow][DEBUG][%s] 模块已注册: type=\"%s\" node_id=%d\n",
+                      stage ? stage : "?", type.c_str(), nodeId);
+    } else {
+        std::snprintf(utf8buf, sizeof(utf8buf),
+                      "[flow][DEBUG][%s] 模块已注册: type=\"%s\" node_id=%d title=\"%s\"\n",
+                      stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    }
     const std::string out = dlcv_infer::convertUtf8ToGbk(std::string(utf8buf));
     std::fputs(out.c_str(), stderr);
     std::fflush(stderr);
@@ -52,10 +58,17 @@ static void LogModuleDebug(const char* stage, const std::string& type, int nodeI
 
 static void LogModuleNotRegistered(const char* stage, const std::string& type, int nodeId, const std::string& title) {
     char utf8buf[1024] = {0};
-    std::snprintf(utf8buf, sizeof(utf8buf),
-                  "[flow][WARN][%s] 模块未注册，已跳过该节点: type=\"%s\" node_id=%d title=\"%s\"。"
-                  "请检查模型/流程 JSON 中的 type 是否正确，或对应模块是否被编译/链接进入当前程序。\n",
-                  stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    if (title.empty()) {
+        std::snprintf(utf8buf, sizeof(utf8buf),
+                      "[flow][WARN][%s] 模块未注册，已跳过该节点: type=\"%s\" node_id=%d。"
+                      "请检查模型/流程 JSON 中的 type 是否正确，或对应模块是否被编译/链接进入当前程序。\n",
+                      stage ? stage : "?", type.c_str(), nodeId);
+    } else {
+        std::snprintf(utf8buf, sizeof(utf8buf),
+                      "[flow][WARN][%s] 模块未注册，已跳过该节点: type=\"%s\" node_id=%d title=\"%s\"。"
+                      "请检查模型/流程 JSON 中的 type 是否正确，或对应模块是否被编译/链接进入当前程序。\n",
+                      stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    }
     const std::string out = dlcv_infer::convertUtf8ToGbk(std::string(utf8buf));
     std::fputs(out.c_str(), stderr);
     std::fflush(stderr);
