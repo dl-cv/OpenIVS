@@ -646,11 +646,9 @@ Json GraphExecutor::LoadModels() {
         items.push_back(item);
     }
 
-    // 将“非 model/* 的未注册节点”也合并进失败计数与 models 报告，方便上层一次拿到完整错误列表。
+    // 合并非 model/* 未注册节点到 report
     for (const auto& info : _lastUnregisteredNodes) {
-        if (info.NodeType.rfind("model/", 0) == 0) {
-            continue; // model/* 的未注册项已写入 items
-        }
+        if (info.NodeType.rfind("model/", 0) == 0) continue;
         Json item = Json::object();
         item["node_id"] = info.NodeId;
         item["type"] = info.NodeType;
