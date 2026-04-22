@@ -16,9 +16,7 @@
 namespace dlcv_infer {
 namespace flow {
 
-// 模块日志开关：
-// - Debug 构建（_DEBUG）默认开启详细日志；
-// - Release 构建可通过设置环境变量 DLCV_FLOW_DEBUG=1 动态开启，方便客户现场排查。
+// Debug 构建默认开启；Release 下由环境变量 DLCV_FLOW_DEBUG=1 打开。
 static bool IsFlowDebugLogEnabled() {
 #if defined(_DEBUG)
     return true;
@@ -40,9 +38,7 @@ static bool IsFlowDebugLogEnabled() {
 #endif
 }
 
-// 本 DLL 源码采用 /utf-8 编译，字符串字面量为 UTF-8。
-// Windows 中文控制台默认码页为 CP_ACP(936/GBK)，直接 fprintf(stderr, ...) 会出现"妯″潡"式乱码。
-// 统一走仓库内已有的 dlcv_infer::convertUtf8ToGbk() 转换，再写入 stderr，与项目其它位置保持一致。
+// 源码为 UTF-8，stderr 需走 convertUtf8ToGbk 转到控制台码页，避免中文乱码。
 static void LogModuleDebug(const char* stage, const std::string& type, int nodeId, const std::string& title) {
     if (!IsFlowDebugLogEnabled()) return;
     char utf8buf[512] = {0};
@@ -55,7 +51,6 @@ static void LogModuleDebug(const char* stage, const std::string& type, int nodeI
 }
 
 static void LogModuleNotRegistered(const char* stage, const std::string& type, int nodeId, const std::string& title) {
-    // 未注册属于严重配置/链接问题：无论 Debug/Release 都输出到 stderr，保证客户现场可见。
     char utf8buf[1024] = {0};
     std::snprintf(utf8buf, sizeof(utf8buf),
                   "[flow][WARN][%s] 模块未注册，已跳过该节点: type=\"%s\" node_id=%d title=\"%s\"。"
@@ -389,7 +384,6 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
 
         auto factory = ModuleRegistry::Get(type);
         if (!factory) {
-            // 未注册模块：控制台报警 + 记录到未注册列表，供上层向调用方返回 code/message。
             LogModuleNotRegistered("run", type, nodeId, title);
             UnregisteredNodeInfo info;
             info.NodeId = nodeId;
@@ -579,8 +573,7 @@ Json GraphExecutor::LoadModels() {
 
         const bool isModelNode = (type.rfind("model/", 0) == 0);
 
-        // 对非 model/* 节点：不参与模型预加载，但仍做一次注册表校验，
-        // 以便在加载阶段就把类似 "features/image_generation" 未注册的问题暴露给客户。
+        // 非 model/* 不参与预加载，但仍校验注册表，提前暴露未注册问题
         if (!isModelNode) {
             if (type.empty()) continue;
             auto factory = ModuleRegistry::Get(type);
@@ -594,7 +587,7 @@ Json GraphExecutor::LoadModels() {
             } else {
                 LogModuleDebug("load", type, nodeId, title);
             }
-            continue; // 仅预加载 model/*，不在此处构造非模型节点
+            continue;
         }
 
         Json props = Json::object();
@@ -619,7 +612,6 @@ Json GraphExecutor::LoadModels() {
 
         auto factory = ModuleRegistry::Get(type);
         if (!factory) {
-            // 未注册模块：视为失败，同时控制台报警并记录，供上层将 code/message 返回给调用方。
             LogModuleNotRegistered("load", type, nodeId, title);
             UnregisteredNodeInfo info;
             info.NodeId = nodeId;
