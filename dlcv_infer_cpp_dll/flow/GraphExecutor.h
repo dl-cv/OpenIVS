@@ -33,10 +33,6 @@ public:
         double ElapsedMs = 0.0;
     };
 
-    /// <summary>
-    /// 未注册模块节点信息：在 Run()/LoadModels() 中如果某个节点的 type 未在 ModuleRegistry 中注册，
-    /// 会被记录到此列表中，上层可用于向调用方反馈 code/message。
-    /// </summary>
     struct UnregisteredNodeInfo final {
         int NodeId = -1;
         std::string NodeType;
