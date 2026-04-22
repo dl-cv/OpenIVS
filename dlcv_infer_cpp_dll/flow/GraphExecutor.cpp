@@ -405,7 +405,6 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
             _lastUnregisteredNodes.push_back(std::move(info));
             continue;
         }
-        LogModuleDebug("run", type, nodeId, title);
 
         std::unique_ptr<BaseModule> module = factory(nodeId, title, props, _context);
         if (!module) continue;
