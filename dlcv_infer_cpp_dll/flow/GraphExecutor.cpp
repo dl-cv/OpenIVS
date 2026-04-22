@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <stdexcept>
 
 #if defined(_MSC_VER) && defined(_DEBUG)
@@ -13,6 +14,46 @@
 
 namespace dlcv_infer {
 namespace flow {
+
+// 模块日志开关：
+// - Debug 构建（_DEBUG）默认开启详细日志；
+// - Release 构建可通过设置环境变量 DLCV_FLOW_DEBUG=1 动态开启，方便客户现场排查。
+static bool IsFlowDebugLogEnabled() {
+#if defined(_DEBUG)
+    return true;
+#else
+    static const bool s_enabled = []() {
+#if defined(_MSC_VER)
+        char buf[8] = {0};
+        size_t len = 0;
+        if (getenv_s(&len, buf, sizeof(buf), "DLCV_FLOW_DEBUG") != 0) return false;
+        if (len == 0) return false;
+        return buf[0] == '1' || buf[0] == 'Y' || buf[0] == 'y' || buf[0] == 'T' || buf[0] == 't';
+#else
+        const char* p = std::getenv("DLCV_FLOW_DEBUG");
+        if (p == nullptr) return false;
+        return p[0] == '1' || p[0] == 'Y' || p[0] == 'y' || p[0] == 'T' || p[0] == 't';
+#endif
+    }();
+    return s_enabled;
+#endif
+}
+
+static void LogModuleDebug(const char* stage, const std::string& type, int nodeId, const std::string& title) {
+    if (!IsFlowDebugLogEnabled()) return;
+    std::fprintf(stderr, "[flow][DEBUG][%s] 模块已注册: type=\"%s\" node_id=%d title=\"%s\"\n",
+                 stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    std::fflush(stderr);
+}
+
+static void LogModuleNotRegistered(const char* stage, const std::string& type, int nodeId, const std::string& title) {
+    // 未注册属于严重配置/链接问题：无论 Debug/Release 都输出到 stderr，保证客户现场可见。
+    std::fprintf(stderr,
+                 "[flow][WARN][%s] 模块未注册，已跳过该节点: type=\"%s\" node_id=%d title=\"%s\"。"
+                 "请检查模型/流程 JSON 中的 type 是否正确，或对应模块是否被编译/链接进入当前程序。\n",
+                 stage ? stage : "?", type.c_str(), nodeId, title.c_str());
+    std::fflush(stderr);
+}
 
 static int ReadNodeOrder(const Json& node) {
     try {
@@ -294,6 +335,7 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
     _nodeExecMap.clear();
     _publicOutputs.clear();
     _lastNodeTimings.clear();
+    _lastUnregisteredNodes.clear();
 
     // 1) 排序：按 order，其次按 id
     std::vector<Json> ordered = _nodes;
@@ -336,8 +378,16 @@ std::unordered_map<int, NodePublicOutput> GraphExecutor::Run() {
 
         auto factory = ModuleRegistry::Get(type);
         if (!factory) {
-            continue; // 未注册模块：跳过
+            // 未注册模块：控制台报警 + 记录到未注册列表，供上层向调用方返回 code/message。
+            LogModuleNotRegistered("run", type, nodeId, title);
+            UnregisteredNodeInfo info;
+            info.NodeId = nodeId;
+            info.NodeType = type;
+            info.NodeTitle = title;
+            _lastUnregisteredNodes.push_back(std::move(info));
+            continue;
         }
+        LogModuleDebug("run", type, nodeId, title);
 
         std::unique_ptr<BaseModule> module = factory(nodeId, title, props, _context);
         if (!module) continue;
@@ -485,7 +535,13 @@ std::vector<GraphExecutor::NodeTiming> GraphExecutor::GetLastNodeTimings() const
     return _lastNodeTimings;
 }
 
+std::vector<GraphExecutor::UnregisteredNodeInfo> GraphExecutor::GetLastUnregisteredNodes() const {
+    return _lastUnregisteredNodes;
+}
+
 Json GraphExecutor::LoadModels() {
+    _lastUnregisteredNodes.clear();
+
     // 排序与 Run 一致
     std::vector<Json> ordered = _nodes;
     std::sort(ordered.begin(), ordered.end(), [](const Json& a, const Json& b) {
@@ -507,12 +563,28 @@ Json GraphExecutor::LoadModels() {
         if (!node.is_object()) continue;
 
         const std::string type = node.contains("type") ? SafeToString(node.at("type"), "") : "";
-        if (type.rfind("model/", 0) != 0) {
-            continue; // 仅预加载 model/*
-        }
-
         const int nodeId = node.contains("id") ? SafeToInt(node.at("id"), i) : i;
         const std::string title = node.contains("title") ? SafeToString(node.at("title"), "") : "";
+
+        const bool isModelNode = (type.rfind("model/", 0) == 0);
+
+        // 对非 model/* 节点：不参与模型预加载，但仍做一次注册表校验，
+        // 以便在加载阶段就把类似 "features/image_generation" 未注册的问题暴露给客户。
+        if (!isModelNode) {
+            if (type.empty()) continue;
+            auto factory = ModuleRegistry::Get(type);
+            if (!factory) {
+                LogModuleNotRegistered("load", type, nodeId, title);
+                UnregisteredNodeInfo info;
+                info.NodeId = nodeId;
+                info.NodeType = type;
+                info.NodeTitle = title;
+                _lastUnregisteredNodes.push_back(std::move(info));
+            } else {
+                LogModuleDebug("load", type, nodeId, title);
+            }
+            continue; // 仅预加载 model/*，不在此处构造非模型节点
+        }
 
         Json props = Json::object();
         try {
@@ -536,13 +608,21 @@ Json GraphExecutor::LoadModels() {
 
         auto factory = ModuleRegistry::Get(type);
         if (!factory) {
-            // 未注册模块：视为失败
+            // 未注册模块：视为失败，同时控制台报警并记录，供上层将 code/message 返回给调用方。
+            LogModuleNotRegistered("load", type, nodeId, title);
+            UnregisteredNodeInfo info;
+            info.NodeId = nodeId;
+            info.NodeType = type;
+            info.NodeTitle = title;
+            _lastUnregisteredNodes.push_back(std::move(info));
+
             failCount++;
             item["status_code"] = 1;
             item["status_message"] = "module_not_registered";
             items.push_back(item);
             continue;
         }
+        LogModuleDebug("load", type, nodeId, title);
 
         try {
             std::unique_ptr<BaseModule> module = factory(nodeId, title, props, _context);
@@ -561,6 +641,21 @@ Json GraphExecutor::LoadModels() {
         }
 
         items.push_back(item);
+    }
+
+    // 将“非 model/* 的未注册节点”也合并进失败计数与 models 报告，方便上层一次拿到完整错误列表。
+    for (const auto& info : _lastUnregisteredNodes) {
+        if (info.NodeType.rfind("model/", 0) == 0) {
+            continue; // model/* 的未注册项已写入 items
+        }
+        Json item = Json::object();
+        item["node_id"] = info.NodeId;
+        item["type"] = info.NodeType;
+        item["title"] = info.NodeTitle;
+        item["status_code"] = 1;
+        item["status_message"] = "module_not_registered";
+        items.push_back(std::move(item));
+        failCount++;
     }
 
     report["code"] = (failCount == 0) ? 0 : 1;

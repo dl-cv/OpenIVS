@@ -325,6 +325,32 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     const FlowBatchResult batch = AggregateFrontendResults(ctx, static_cast<int>(images.size()));
     Json root = batch.ToFlowRootJson();
 
+    // 未注册模块：控制台已经在 GraphExecutor 中报警，这里把 code/message 暴露到返回 JSON，
+    // 方便上层（C++ API / C# 包装）在日志或 UI 中提示“请检查模型是否正确”。
+    const std::vector<GraphExecutor::UnregisteredNodeInfo> unregistered = exec.GetLastUnregisteredNodes();
+    if (!unregistered.empty()) {
+        std::string msg = "以下节点模块未注册，已被跳过，请检查模型/流程 JSON 是否正确：";
+        Json details = Json::array();
+        for (size_t i = 0; i < unregistered.size(); i++) {
+            const auto& u = unregistered[i];
+            Json d = Json::object();
+            d["node_id"] = u.NodeId;
+            d["type"] = u.NodeType;
+            d["title"] = u.NodeTitle;
+            details.push_back(std::move(d));
+
+            if (i > 0) msg += "; ";
+            msg += "type=\"" + u.NodeType + "\", node_id=" + std::to_string(u.NodeId)
+                + (u.NodeTitle.empty() ? std::string() : (", title=\"" + u.NodeTitle + "\""));
+        }
+        root["code"] = 1;
+        root["message"] = msg;
+        root["unregistered_modules"] = std::move(details);
+    } else {
+        root["code"] = 0;
+        root["message"] = "ok";
+    }
+
     const std::vector<GraphExecutor::NodeTiming> nodeTimings = exec.GetLastNodeTimings();
     Json timing = Json::object();
     timing["flow_infer_ms"] = std::chrono::duration<double, std::milli>(runEnd - runStart).count();

@@ -33,10 +33,21 @@ public:
         double ElapsedMs = 0.0;
     };
 
+    /// <summary>
+    /// 未注册模块节点信息：在 Run()/LoadModels() 中如果某个节点的 type 未在 ModuleRegistry 中注册，
+    /// 会被记录到此列表中，上层可用于向调用方反馈 code/message。
+    /// </summary>
+    struct UnregisteredNodeInfo final {
+        int NodeId = -1;
+        std::string NodeType;
+        std::string NodeTitle;
+    };
+
     GraphExecutor(std::vector<Json> nodes, ExecutionContext* context = nullptr);
 
     std::unordered_map<int, NodePublicOutput> Run();
     std::vector<NodeTiming> GetLastNodeTimings() const;
+    std::vector<UnregisteredNodeInfo> GetLastUnregisteredNodes() const;
 
     /// <summary>
     /// 预加载模型：对 type 以 "model/" 开头的节点调用 module->LoadModel()，
@@ -56,6 +67,7 @@ private:
     std::unordered_map<int, NodeExecOutput> _nodeExecMap;     // nodeId -> exec outputs (main+extra)
     std::unordered_map<int, NodePublicOutput> _publicOutputs; // nodeId -> image/result/template/scalars
     std::vector<NodeTiming> _lastNodeTimings;
+    std::vector<UnregisteredNodeInfo> _lastUnregisteredNodes;
 
     static int SafeToInt(const Json& v, int dv);
     static std::string SafeToString(const Json& v, const std::string& dv);
