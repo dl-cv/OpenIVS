@@ -329,7 +329,7 @@
             // btnReleaseModels
             // 
             this.btnReleaseModels.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnReleaseModels.Location = new System.Drawing.Point(1130, 166);
+            this.btnReleaseModels.Location = new System.Drawing.Point(732, 164);
             this.btnReleaseModels.Name = "btnReleaseModels";
             this.btnReleaseModels.Size = new System.Drawing.Size(120, 34);
             this.btnReleaseModels.TabIndex = 23;
