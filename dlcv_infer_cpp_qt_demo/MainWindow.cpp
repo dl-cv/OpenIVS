@@ -105,8 +105,8 @@ cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
         return rgb;
     }
 
-    // 单通道与其他通道输入按原语义透传，通道规整由调用方明确控制。
-    return decodedImage;
+    // 应用层只负责把 OpenCV 颜色图整理为 RGB；灰度补通道由 API 按模型输入要求处理。
+    return decodedImage.clone();
 }
 
 }  // namespace

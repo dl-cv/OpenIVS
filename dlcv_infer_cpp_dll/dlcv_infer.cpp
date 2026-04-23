@@ -1,5 +1,6 @@
 #include "dlcv_infer.h"
 #include "dlcv_sntl_admin.h"
+#include "ImageInputUtils.h"
 #include "flow/FlowGraphModel.h"
 #include "flow/FlowPayloadTypes.h"
 #include "flow/utils/MaskRleUtils.h"
@@ -843,43 +844,13 @@ int ParseInputChFromModelInfo(const MIJson& modelInfoRoot) {
     return 0;
 }
 
-cv::Mat ConvertMatDepthTo8U(const cv::Mat& src) {
+cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
     if (src.empty()) {
         return {};
     }
-    if (src.depth() == CV_8U) {
-        return src;
-    }
-    cv::Mat dst;
-    if (src.depth() == CV_16U) {
-        src.convertTo(dst, CV_8U, 1.0 / 256.0);
-        return dst;
-    }
-    if (src.depth() == CV_16S) {
-        cv::normalize(src, dst, 0, 255, cv::NORM_MINMAX, CV_8U);
-        return dst;
-    }
-    if (src.depth() == CV_32F || src.depth() == CV_64F) {
-        double mn = 0.0;
-        double mx = 0.0;
-        cv::minMaxLoc(src, &mn, &mx);
-        if (mx <= 1.0 + 1e-6 && mn >= -1e-6) {
-            src.convertTo(dst, CV_8U, 255.0);
-        } else {
-            cv::normalize(src, dst, 0, 255, cv::NORM_MINMAX, CV_8U);
-        }
-        return dst;
-    }
-    src.convertTo(dst, CV_8U);
-    return dst;
-}
-
-cv::Mat NormalizeInferInputImage(const cv::Mat& src, int /*expectedChannels*/) {
-    if (src.empty()) {
-        return {};
-    }
-    // 调用方负责准备输入通道顺序与通道数；接口层仅统一位深。
-    return ConvertMatDepthTo8U(src);
+    // 应用层负责把 OpenCV 读盘得到的 BGR/BGRA 颜色图整理为 RGB；
+    // 接口层再按模型期望通道数补齐/压缩通道，并统一位深到 8U。
+    return dlcv_infer::image_input::NormalizeInferInputImage(src, expectedChannels);
 }
 
 } // namespace
