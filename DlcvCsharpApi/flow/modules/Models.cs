@@ -231,15 +231,6 @@ namespace DlcvModules
 			var sourceIndices = new List<int>();
 			var buckets = new Dictionary<string, List<int>>();
 			var bucketAreas = new Dictionary<string, int>();
-			bool inputsAreRgb = false;
-			try
-			{
-				inputsAreRgb = string.Equals(
-					Context != null ? Context.Get<string>("frontend_image_color_space", null) : null,
-					"rgb",
-					StringComparison.OrdinalIgnoreCase);
-			}
-			catch { inputsAreRgb = false; }
 
 			try
 			{
@@ -251,13 +242,8 @@ namespace DlcvModules
 					var mat = tup.Item2;
 					if (mat == null || mat.Empty()) continue;
 
+					// 调用方负责准备通道顺序；流程模型节点直接透传输入 Mat。
 					Mat rgbMat = mat;
-					if (!inputsAreRgb)
-					{
-						rgbMat = new Mat();
-						Cv2.CvtColor(mat, rgbMat, ColorConversionCodes.BGR2RGB);
-						convertedRgbToDispose.Add(rgbMat);
-					}
 
 					int localIdx = rgbInputs.Count;
 					rgbInputs.Add(rgbMat);

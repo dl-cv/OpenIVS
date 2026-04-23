@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using Newtonsoft.Json.Linq;
@@ -44,6 +45,18 @@ namespace DlcvCSharpTest
             Model.EnableConsoleLog = false;
             try
             {
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "model-channel-order-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunModelChannelOrderSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 &&
+                    (string.Equals(args[0], "dvs-rgb-selftest", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(args[0], "dvs-bgr-selftest", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return RunDvsRgbSelfTest(args);
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "maskrbox-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunMaskToRBoxSelfTest();
@@ -832,6 +845,164 @@ namespace DlcvCSharpTest
             return defaultValue;
         }
 
+        private static int RunModelChannelOrderSelfTest()
+        {
+            Console.WriteLine("==== Model 通道顺序自测 ====");
+
+            var helper = typeof(Model).GetMethod("PrepareInferImage", BindingFlags.NonPublic | BindingFlags.Static);
+            if (helper == null)
+            {
+                Console.WriteLine("未找到 PrepareInferImage");
+                return 1;
+            }
+
+            var disposables = new List<Mat>();
+            using (var src = new Mat(1, 1, MatType.CV_8UC3, new Scalar(11, 22, 33)))
+            {
+                try
+                {
+                    var prepared = helper.Invoke(null, new object[] { src, 3, disposables }) as Mat;
+                    if (prepared == null || prepared.Empty())
+                    {
+                        Console.WriteLine("PrepareInferImage 返回空图");
+                        return 1;
+                    }
+
+                    Vec3b inputPixel = src.At<Vec3b>(0, 0);
+                    Vec3b outputPixel = prepared.At<Vec3b>(0, 0);
+
+                    Console.WriteLine(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "input_pixel: [{0}, {1}, {2}]",
+                            inputPixel.Item0,
+                            inputPixel.Item1,
+                            inputPixel.Item2));
+                    Console.WriteLine(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "output_pixel: [{0}, {1}, {2}]",
+                            outputPixel.Item0,
+                            outputPixel.Item1,
+                            outputPixel.Item2));
+
+                    if (inputPixel.Item0 != outputPixel.Item0 ||
+                        inputPixel.Item1 != outputPixel.Item1 ||
+                        inputPixel.Item2 != outputPixel.Item2)
+                    {
+                        Console.WriteLine("自测失败：PrepareInferImage 改变了三通道输入顺序");
+                        return 1;
+                    }
+
+                    Console.WriteLine("Model 通道顺序自测通过");
+                    return 0;
+                }
+                catch (TargetInvocationException ex)
+                {
+                    string msg = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+                    Console.WriteLine("Model 通道顺序自测异常: " + msg);
+                    return 1;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Model 通道顺序自测异常: " + ex.Message);
+                    return 1;
+                }
+                finally
+                {
+                    for (int i = 0; i < disposables.Count; i++)
+                    {
+                        try { disposables[i]?.Dispose(); } catch { }
+                    }
+                }
+            }
+        }
+
+        private static int RunDvsRgbSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 3)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest dvs-rgb-selftest <modelPath> <imagePath>");
+                return 2;
+            }
+
+            string modelPath = args[1];
+            string imagePath = args[2];
+
+            Console.WriteLine("==== DVS RGB 自测 ====");
+            Console.WriteLine("model: " + modelPath);
+            Console.WriteLine("image: " + imagePath);
+
+            if (!File.Exists(modelPath))
+            {
+                Console.WriteLine("模型不存在");
+                return 2;
+            }
+            if (!File.Exists(imagePath))
+            {
+                Console.WriteLine("图片不存在");
+                return 2;
+            }
+
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            DvsModel directModel = null;
+            Utils.CSharpResult wrappedResult = default(Utils.CSharpResult);
+            Utils.CSharpResult directResult = default(Utils.CSharpResult);
+            try
+            {
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                directModel = new DvsModel();
+                directModel.Load(modelPath, GpuDeviceId);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+
+                var inferParams = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = true,
+                    ["batch_size"] = 1
+                };
+
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                wrappedResult = model.InferBatch(new List<Mat> { rgb }, inferParams);
+                directResult = directModel.InferBatch(new List<Mat> { rgb }, inferParams);
+
+                string wrappedSig = BuildResultSignature(wrappedResult);
+                string directSig = BuildResultSignature(directResult);
+
+                Console.WriteLine("wrapped_signature: " + wrappedSig);
+                Console.WriteLine("direct_signature: " + directSig);
+
+                if (!string.Equals(wrappedSig, directSig, StringComparison.Ordinal))
+                {
+                    Console.WriteLine("自测失败：Model(.dvst) 与 DvsModel 直连 flow 的 RGB 结果不一致");
+                    return 1;
+                }
+
+                Console.WriteLine("DVS RGB 自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("DVS RGB 自测异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                DisposeResultMasks(wrappedResult);
+                DisposeResultMasks(directResult);
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (directModel != null) directModel.Dispose(); } catch { }
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
+        }
+
         private static int RunMaskToRBoxSelfTest()
         {
             Console.WriteLine("==== mask_to_rbox 自测 ====");
@@ -917,6 +1088,51 @@ namespace DlcvCSharpTest
                 Console.WriteLine("mask_to_rbox 自测通过");
                 return 0;
             }
+        }
+
+        private static string BuildResultSignature(Utils.CSharpResult result)
+        {
+            var parts = new List<string>();
+            if (result.SampleResults == null)
+            {
+                return string.Empty;
+            }
+
+            for (int sampleIndex = 0; sampleIndex < result.SampleResults.Count; sampleIndex++)
+            {
+                var sample = result.SampleResults[sampleIndex];
+                var sampleParts = new List<string>();
+                if (sample.Results != null)
+                {
+                    foreach (var obj in sample.Results)
+                    {
+                        string bboxSig = string.Empty;
+                        if (obj.Bbox != null && obj.Bbox.Count > 0)
+                        {
+                            var bboxParts = new List<string>(obj.Bbox.Count);
+                            for (int i = 0; i < obj.Bbox.Count; i++)
+                            {
+                                bboxParts.Add(obj.Bbox[i].ToString("F3", CultureInfo.InvariantCulture));
+                            }
+                            bboxSig = string.Join(",", bboxParts);
+                        }
+
+                        sampleParts.Add(string.Format(
+                            CultureInfo.InvariantCulture,
+                            "{0}|{1:F4}|{2}|{3}|{4:F4}",
+                            obj.CategoryId,
+                            obj.Score,
+                            obj.CategoryName ?? string.Empty,
+                            bboxSig,
+                            obj.WithAngle ? obj.Angle : -100.0f));
+                    }
+                }
+
+                sampleParts.Sort(StringComparer.Ordinal);
+                parts.Add("sample" + sampleIndex.ToString(CultureInfo.InvariantCulture) + ":" + string.Join(";", sampleParts));
+            }
+
+            return string.Join(" || ", parts);
         }
 
         private static void AssertNear(double expected, double actual, double tolerance, string label)

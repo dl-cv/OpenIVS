@@ -157,8 +157,8 @@ namespace DlcvModules
             var convertedToDispose = new List<Mat>();
             try
             {
-                // C# 入口约定前端传入 RGB。当前流程中的 sliding/model/output 节点
-                // 不依赖入口再做一次整图 RGB->BGR 拷贝，因此直接透传可减少 CPU 开销。
+                // C# 入口约定调用方自行准备好输入通道顺序；当前三通道约定为 RGB。
+                // Flow 入口只透传图像，不在这里改通道。
                 for (int i = 0; i < images.Count; i++)
                 {
                     var img = images[i];
@@ -270,7 +270,7 @@ namespace DlcvModules
         /// <summary>
         /// 对单张图片进行推理，返回 JSON 格式的结果
         /// </summary>
-        /// <param name="image">输入图像（RGB 格式）</param>
+        /// <param name="image">输入图像（调用方已按约定准备好通道顺序）</param>
         /// <param name="paramsJson">可选的推理参数</param>
         /// <returns>
         /// 返回 JSON 格式的检测结果数组，约定为：

@@ -29,7 +29,7 @@ namespace DlcvModules
             var images = new List<ModuleImage>();
             var results = new JArray();
 
-            // 优先从 ExecutionContext 注入的前端 BGR Mat 读取
+            // 优先从 ExecutionContext 注入的前端 Mat 读取；通道顺序由调用方负责准备
             try
             {
                 List<Mat> matsFromContext = null;
@@ -205,7 +205,7 @@ namespace DlcvModules
             var images = new List<ModuleImage>();
             var results = new JArray();
 
-            // 优先从 ExecutionContext 注入前端图像 Mat（BGR）
+            // 优先从 ExecutionContext 注入前端图像 Mat；通道顺序由调用方负责准备
             try
             {
                 List<Mat> matsFromContext = null;
