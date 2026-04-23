@@ -209,8 +209,19 @@ namespace DlcvDemo
 				data["threshold"] = (float)numericUpDown_threshold.Value;
 				data["with_mask"] = true;
 
-				var json = model.InferOneOutJson(image, data);
-				richTextBox1.Text = JsonConvert.SerializeObject(json, Formatting.Indented);
+				Mat inferImage = PrepareImageForModelInput(image);
+				try
+				{
+					var json = model.InferOneOutJson(inferImage, data);
+					richTextBox1.Text = JsonConvert.SerializeObject(json, Formatting.Indented);
+				}
+				finally
+				{
+					if (!object.ReferenceEquals(inferImage, image))
+					{
+						inferImage.Dispose();
+					}
+				}
 			}
 			catch (Exception ex)
 			{
@@ -288,12 +299,6 @@ namespace DlcvDemo
                     throw new Exception("图像解码失败！");
                 }
                 batch_size = (int)numericUpDown_batch_size.Value;
-                var image_list = new List<Mat>();
-                for (int i = 0; i < batch_size; i++)
-                {
-                    image_list.Add(image);
-                }
-
                 JObject data = new JObject();
                 data["threshold"] = (float)numericUpDown_threshold.Value;
                 data["with_mask"] = true;
@@ -301,7 +306,24 @@ namespace DlcvDemo
                 Stopwatch stopwatch = new Stopwatch();
                 stopwatch.Start();
 
-                CSharpResult result = model.InferBatch(image_list, data);
+				Mat inferImage = PrepareImageForModelInput(image);
+				CSharpResult result;
+				try
+				{
+					var inferImageList = new List<Mat>();
+					for (int i = 0; i < batch_size; i++)
+					{
+						inferImageList.Add(inferImage);
+					}
+					result = model.InferBatch(inferImageList, data);
+				}
+				finally
+				{
+					if (!object.ReferenceEquals(inferImage, image))
+					{
+						inferImage.Dispose();
+					}
+				}
 
                 stopwatch.Stop();
                 double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
@@ -373,6 +395,32 @@ namespace DlcvDemo
             return string.Format(
                 "rect=({0:F1}, {1:F1}, {2:F1}, {3:F1})",
                 obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3]);
+        }
+
+        private static Mat PrepareImageForModelInput(Mat image)
+        {
+            if (image == null || image.Empty())
+            {
+                return image;
+            }
+
+            int channels = image.Channels();
+            if (channels == 3)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGR2RGB);
+                return rgb;
+            }
+
+            if (channels == 4)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGRA2RGB);
+                return rgb;
+            }
+
+            // 灰度图按原样送入推理。
+            return image;
         }
 
         /// <summary>
@@ -582,11 +630,12 @@ namespace DlcvDemo
                 int threadCount = (int)numericUpDown_num_thread.Value;
 
                 Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
+                Mat inferImage = PrepareImageForModelInput(image);
 
                 var image_list = new List<Mat>();
                 for (int i = 0; i < batch_size; i++)
                 {
-                    image_list.Add(image);
+                    image_list.Add(inferImage);
                 }
 
                 // 创建测试实例

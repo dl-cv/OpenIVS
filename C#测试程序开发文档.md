@@ -72,10 +72,10 @@
 
 #### 2.4 图像解码与通道/位深约定（DlcvDemo 与 DlcvCsharpApi，必须一致）
 
-- **Demo**：`Cv2.ImRead(path, ImreadModes.Unchanged)`；将**同一张**解码后的 `Mat` 交给 `ImageViewer` 与 `Model.Infer*` / `InferOneOutJson`（不在 Demo 里做 `BGR2RGB` 等预处理）。
+- **Demo**：`Cv2.ImRead(path, ImreadModes.Unchanged)` 后，显示仍使用解码后的原图；送入 `Model.Infer*` / `InferOneOutJson` 前由 Demo 侧自行预处理：灰度图直接送入，三通道图转为 `RGB`，四通道图转为 `RGB`。
 - **API（`Model.cs`）**：经 `PrepareInferImages` → 逐张 `PrepareInferImage` 规整后再进各后端（含 DVS）。
   - **位深**：非 `CV_8U` 时转为 8 位（`ConvertMatDepthTo8U`：16U 按 `1/256`，浮点按值域映射等）。
-  - **通道**：`ParseInputChFromModelInfo` 从 `model_info.input_shapes.*.max_shape` 推断 1 或 3；结果缓存在 `_expectedChCache`：**-2** 未解析或已失效（释放模型、`GetModelInfo` 刷新元数据后），**-1** 无法识别（按三通道策略：灰度/BGR/BGRA → RGB），**1**/**3** 为明确期望（单通道模型时多通道转灰度；**三通道模型时若输入为四通道，须先 `BGRA2RGB` 再推理**）。
+  - **通道**：`ParseInputChFromModelInfo` 仍可从 `model_info.input_shapes.*.max_shape` 推断 1 或 3，并缓存到 `_expectedChCache`；接口内部不再根据该信息修改输入图像的通道数或通道顺序，输入通道预处理由调用方负责。
 
 ### 3. 功能边界（必须严格一致）
 

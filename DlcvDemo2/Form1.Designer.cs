@@ -1,4 +1,4 @@
-namespace DlcvDemo2
+﻿namespace DlcvDemo2
 {
     partial class Form1
     {
@@ -63,7 +63,7 @@ namespace DlcvDemo2
             // 
             // txtExtractModelPath
             // 
-            this.txtExtractModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.txtExtractModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtExtractModelPath.Location = new System.Drawing.Point(136, 13);
             this.txtExtractModelPath.Name = "txtExtractModelPath";
@@ -103,7 +103,7 @@ namespace DlcvDemo2
             // 
             // txtComponentModelPath
             // 
-            this.txtComponentModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.txtComponentModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtComponentModelPath.Location = new System.Drawing.Point(136, 51);
             this.txtComponentModelPath.Name = "txtComponentModelPath";
@@ -137,13 +137,13 @@ namespace DlcvDemo2
             this.labelIcModel.AutoSize = true;
             this.labelIcModel.Location = new System.Drawing.Point(12, 93);
             this.labelIcModel.Name = "labelIcModel";
-            this.labelIcModel.Size = new System.Drawing.Size(110, 24);
+            this.labelIcModel.Size = new System.Drawing.Size(99, 24);
             this.labelIcModel.TabIndex = 6;
             this.labelIcModel.Text = "IC检测模型";
             // 
             // txtIcModelPath
             // 
-            this.txtIcModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.txtIcModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtIcModelPath.Location = new System.Drawing.Point(136, 89);
             this.txtIcModelPath.Name = "txtIcModelPath";
@@ -183,17 +183,17 @@ namespace DlcvDemo2
             // 
             // txtImagePath
             // 
-            this.txtImagePath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.txtImagePath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtImagePath.Location = new System.Drawing.Point(136, 127);
             this.txtImagePath.Name = "txtImagePath";
-            this.txtImagePath.Size = new System.Drawing.Size(786, 31);
+            this.txtImagePath.Size = new System.Drawing.Size(862, 31);
             this.txtImagePath.TabIndex = 10;
             // 
             // btnBrowseImage
             // 
             this.btnBrowseImage.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseImage.Location = new System.Drawing.Point(928, 126);
+            this.btnBrowseImage.Location = new System.Drawing.Point(1004, 124);
             this.btnBrowseImage.Name = "btnBrowseImage";
             this.btnBrowseImage.Size = new System.Drawing.Size(120, 34);
             this.btnBrowseImage.TabIndex = 11;
@@ -204,9 +204,9 @@ namespace DlcvDemo2
             // btnInfer
             // 
             this.btnInfer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnInfer.Location = new System.Drawing.Point(1054, 126);
+            this.btnInfer.Location = new System.Drawing.Point(1130, 126);
             this.btnInfer.Name = "btnInfer";
-            this.btnInfer.Size = new System.Drawing.Size(196, 34);
+            this.btnInfer.Size = new System.Drawing.Size(120, 34);
             this.btnInfer.TabIndex = 12;
             this.btnInfer.Text = "执行推理";
             this.btnInfer.UseVisualStyleBackColor = true;
@@ -328,10 +328,9 @@ namespace DlcvDemo2
             // 
             // btnReleaseModels
             // 
-            this.btnReleaseModels.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnReleaseModels.Location = new System.Drawing.Point(732, 166);
+            this.btnReleaseModels.Location = new System.Drawing.Point(732, 164);
             this.btnReleaseModels.Name = "btnReleaseModels";
-            this.btnReleaseModels.Size = new System.Drawing.Size(322, 34);
+            this.btnReleaseModels.Size = new System.Drawing.Size(120, 34);
             this.btnReleaseModels.TabIndex = 23;
             this.btnReleaseModels.Text = "释放模型";
             this.btnReleaseModels.UseVisualStyleBackColor = true;
@@ -339,7 +338,7 @@ namespace DlcvDemo2
             // 
             // progressBarInference
             // 
-            this.progressBarInference.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            this.progressBarInference.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.progressBarInference.Location = new System.Drawing.Point(136, 206);
             this.progressBarInference.Name = "progressBarInference";
@@ -352,13 +351,13 @@ namespace DlcvDemo2
             this.lblInferenceProgress.AutoSize = true;
             this.lblInferenceProgress.Location = new System.Drawing.Point(912, 207);
             this.lblInferenceProgress.Name = "lblInferenceProgress";
-            this.lblInferenceProgress.Size = new System.Drawing.Size(70, 24);
+            this.lblInferenceProgress.Size = new System.Drawing.Size(78, 24);
             this.lblInferenceProgress.TabIndex = 25;
             this.lblInferenceProgress.Text = "0% 空闲";
             // 
             // richTextBox1
             // 
-            this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+            this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left)));
             this.richTextBox1.Location = new System.Drawing.Point(12, 236);
             this.richTextBox1.Name = "richTextBox1";
@@ -369,15 +368,21 @@ namespace DlcvDemo2
             // 
             // imagePanel1
             // 
-            this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-            | System.Windows.Forms.AnchorStyles.Left)
+            this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.imagePanel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imagePanel1.image = null;
+            this.imagePanel1.LabelDisplayMode = DLCV.ImageViewer.LabelTextMode.CategoryAndScore;
+            this.imagePanel1.LabelFontScale = 1F;
+            this.imagePanel1.LabelFontScaleStep = 1.1F;
             this.imagePanel1.Location = new System.Drawing.Point(450, 236);
+            this.imagePanel1.MaxLabelFontScale = 5F;
             this.imagePanel1.MaxScale = 100F;
+            this.imagePanel1.MinLabelFontScale = 0.3F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
+            this.imagePanel1.ShowLabelText = true;
             this.imagePanel1.ShowStatusText = false;
             this.imagePanel1.ShowVisualization = true;
             this.imagePanel1.Size = new System.Drawing.Size(934, 674);
@@ -431,6 +436,7 @@ namespace DlcvDemo2
             ((System.ComponentModel.ISupportInitialize)(this.numOverlapY)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
+
         }
 
         #endregion

@@ -32,6 +32,7 @@
   - 推理前将图片从 BGR 转为 RGB
   - 结果中的 `Mask` 显式 `Dispose`
   - 内存采样使用 `GetProcessMemoryInfo`
+  - 支持 `demo2-rgb-selftest` 子命令：反射驱动 `DlcvDemo2.Form1` 的私有图片加载与 `RunPipeline`，对同一张图分别执行“Demo2 实际入口 RGB”“手工 RGB”“原始 BGR”三条路径并输出签名比对结果
 
 ### 2.2 C++ 工程
 
@@ -79,6 +80,10 @@
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
   - `Release\dlcv_infer_cpp_test.exe`
+- `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
+  - `model-channel-order-selftest`
+  - `dvs-rgb-selftest <modelPath> <imagePath>`
+  - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
 
 说明：
 
@@ -86,6 +91,7 @@
 - 模型目录固定为 `Y:\测试模型`，不支持运行参数/环境变量覆盖（规则：目录/行为如需变更，请改代码与提交）。
 - 为避免日志打断阅读：表格在所有测试执行完成后一次性输出（总表）；并在表格末尾追加“汇总”一行。
 - 内存泄露专项在表格输出后自动执行并单独输出结果；专项仅对 1 个实例分割模型执行。
+- `demo2-rgb-selftest` 会输出 `entry_rgb_signature`、`manual_rgb_signature` 与 `raw_bgr_signature`；当 `entry_rgb_signature == manual_rgb_signature` 且与 `raw_bgr_signature` 不同时，判定 Demo2 当前入口保持 RGB 数据流。
 
 ## 6. 文档表述规则
 

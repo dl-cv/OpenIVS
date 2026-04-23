@@ -316,7 +316,7 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     if (images.empty()) throw std::invalid_argument("images is empty");
 
     // 入口与 C# 对齐：前端输入语义为 RGB。
-    // 当前流程节点按 frontend_image_color_space 决定是否转换，因此此处仅透传。
+    // 调用方负责准备通道顺序；FlowGraph 入口仅透传。
     std::vector<cv::Mat> rgbBatch;
     rgbBatch.reserve(images.size());
     for (const auto& img : images) {
@@ -327,7 +327,6 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     ctx.Set<cv::Mat>("frontend_image_mat", rgbBatch.empty() ? cv::Mat() : rgbBatch[0]); // 兼容旧单图入口
     ctx.Set<std::vector<cv::Mat>>("frontend_image_mats", rgbBatch);
     ctx.Set<std::vector<cv::Mat>>("frontend_image_mat_list", rgbBatch);
-    ctx.Set<std::string>("frontend_image_color_space", "rgb");
     ctx.Set<std::string>("frontend_image_path", std::string());
     ctx.Set<int>("device_id", _deviceId);
     ctx.Set<Json>("infer_params", paramsJson.is_object() ? paramsJson : Json::object());

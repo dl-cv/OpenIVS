@@ -1141,59 +1141,8 @@ namespace dlcv_infer_csharp
         private static Mat PrepareInferImage(Mat src, int expectedChannels, List<Mat> disposables)
         {
             if (src == null || src.Empty()) return src;
-            int ec = (expectedChannels == 1 || expectedChannels == 3) ? expectedChannels : 3;
-            Mat u8 = ConvertMatDepthTo8U(src, disposables);
-            if (u8.Empty()) return u8;
-
-            if (ec == 3)
-            {
-                if (u8.Channels() == 1)
-                {
-                    var rgb = new Mat();
-                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.GRAY2RGB);
-                    disposables.Add(rgb);
-                    return rgb;
-                }
-                if (u8.Channels() == 4)
-                {
-                    var rgb = new Mat();
-                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.BGRA2RGB);
-                    disposables.Add(rgb);
-                    return rgb;
-                }
-                if (u8.Channels() == 3)
-                {
-                    var rgb = new Mat();
-                    Cv2.CvtColor(u8, rgb, ColorConversionCodes.BGR2RGB);
-                    disposables.Add(rgb);
-                    return rgb;
-                }
-                var rgbFallback = new Mat();
-                Cv2.CvtColor(u8, rgbFallback, ColorConversionCodes.BGR2RGB);
-                disposables.Add(rgbFallback);
-                return rgbFallback;
-            }
-
-            if (u8.Channels() == 1)
-                return u8;
-            if (u8.Channels() == 3)
-            {
-                var gray = new Mat();
-                Cv2.CvtColor(u8, gray, ColorConversionCodes.BGR2GRAY);
-                disposables.Add(gray);
-                return gray;
-            }
-            if (u8.Channels() == 4)
-            {
-                var gray = new Mat();
-                Cv2.CvtColor(u8, gray, ColorConversionCodes.BGRA2GRAY);
-                disposables.Add(gray);
-                return gray;
-            }
-            var grayFallback = new Mat();
-            Cv2.CvtColor(u8, grayFallback, ColorConversionCodes.BGR2GRAY);
-            disposables.Add(grayFallback);
-            return grayFallback;
+            // 通道顺序与通道数由调用方负责准备；接口层只统一位深。
+            return ConvertMatDepthTo8U(src, disposables);
         }
 
         private List<Mat> PrepareInferImages(IList<Mat> images, out List<Mat> disposables)
@@ -1523,10 +1472,7 @@ namespace dlcv_infer_csharp
                     if (image.Empty())
                         throw new ArgumentException("图像列表中包含空图像");
 
-                    // 将图像转换为 BGR 格式
-                    Mat image_bgr = new Mat();
-                    Cv2.CvtColor(image, image_bgr, ColorConversionCodes.RGB2BGR);
-                    byte[] imageBytes = image_bgr.ToBytes(".png");
+                    byte[] imageBytes = image.ToBytes(".png");
                     string base64Image = Convert.ToBase64String(imageBytes);
 
                     // 创建推理请求，添加 return_polygon=true 参数
@@ -1930,16 +1876,7 @@ namespace dlcv_infer_csharp
             Utils.CSharpResult result = default(Utils.CSharpResult);
             if (_isDvsMode)
             {
-                List<Mat> dvsDisp;
-                var normList = PrepareInferImages(new List<Mat> { image }, out dvsDisp);
-                try
-                {
-                    result = _dvsModel.InferBatch(normList, params_json);
-                }
-                finally
-                {
-                    DisposeTempMats(dvsDisp);
-                }
+                result = _dvsModel.InferBatch(new List<Mat> { image }, params_json);
             }
             else
             {
@@ -1982,16 +1919,7 @@ namespace dlcv_infer_csharp
         {
             if (_isDvsMode)
             {
-                List<Mat> dvsDisp;
-                var normList = PrepareInferImages(image_list, out dvsDisp);
-                try
-                {
-                    return _dvsModel.InferBatch(normList, params_json);
-                }
-                finally
-                {
-                    DisposeTempMats(dvsDisp);
-                }
+                return _dvsModel.InferBatch(image_list, params_json);
             }
 
             var resultTuple = InferInternal(image_list, params_json);
@@ -2037,17 +1965,7 @@ namespace dlcv_infer_csharp
 
             if (_isDvsMode)
             {
-                List<Mat> dvsDisp;
-                var normList = PrepareInferImages(new List<Mat> { image }, out dvsDisp);
-                Tuple<JObject, IntPtr> res;
-                try
-                {
-                    res = _dvsModel.InferInternal(normList, params_json);
-                }
-                finally
-                {
-                    DisposeTempMats(dvsDisp);
-                }
+                var res = _dvsModel.InferInternal(new List<Mat> { image }, params_json);
                 rawResults = res.Item1["result_list"] as JArray ?? new JArray();
                 
                 // DVS 模式下不需要释放非托管资源，直接处理

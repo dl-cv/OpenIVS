@@ -222,14 +222,16 @@ public:
                     const int ch = mat.channels();
                     if (ch == 4) {
                         cv::Mat bgr;
-                        cv::cvtColor(mat, bgr, cv::COLOR_BGRA2BGR);
+                        cv::cvtColor(mat, bgr, cv::COLOR_RGBA2BGR);
                         cv::imwrite(full, bgr);
                     } else if (ch == 1) {
                         cv::Mat bgr;
                         cv::cvtColor(mat, bgr, cv::COLOR_GRAY2BGR);
                         cv::imwrite(full, bgr);
                     } else {
-                        cv::imwrite(full, mat);
+                        cv::Mat bgr;
+                        cv::cvtColor(mat, bgr, cv::COLOR_RGB2BGR);
+                        cv::imwrite(full, bgr);
                     }
                 } catch (...) {
                 }

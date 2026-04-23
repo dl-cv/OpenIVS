@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -258,6 +258,7 @@ namespace DlcvDemo2
                         }
 
                         Stopwatch sw = Stopwatch.StartNew();
+                        // 颜色约定：UI 显示使用 imageBgr；送入 dvst 的整条 pipeline 使用 imageRgb（RGB）。
                         PipelineRunResult runResult = RunPipeline(imageRgb, config, progress);
                         sw.Stop();
 
@@ -334,10 +335,7 @@ namespace DlcvDemo2
                 string baseName;
                 int normalizeAngle;
                 DetectionGeometryUtils.ParseCategoryAndAngle(target.ObjectResult.CategoryName, out baseName, out normalizeAngle);
-                bool useIcDetectModel =
-                    string.Equals(baseName, "IC", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(baseName, "BGA", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(baseName, "晶振", StringComparison.OrdinalIgnoreCase);
+                bool useIcDetectModel = ShouldUseIcDetectModel(baseName);
 
                 using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, normalizeAngle))
                 {
@@ -380,6 +378,15 @@ namespace DlcvDemo2
             runResult.DisplayResult = BuildDisplayResult(runResult.FinalObjects);
             ReportInferenceProgress(progress, 100, "推理完成");
             return runResult;
+        }
+
+        private static bool ShouldUseIcDetectModel(string baseName)
+        {
+            return string.Equals(baseName, "IC", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "BGA", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "座子", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "开关", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "晶振", StringComparison.OrdinalIgnoreCase);
         }
 
         private List<ExtractDetection> InferExtractModelOnWindows(Mat fullImageRgb, List<Rect> windows, IProgress<InferenceProgressInfo> progress)
@@ -889,15 +896,14 @@ namespace DlcvDemo2
             error = string.Empty;
             try
             {
-                imageBgr = Cv2.ImRead(path, ImreadModes.Color);
+                imageBgr = Cv2.ImRead(path, ImreadModes.Unchanged);
                 if (imageBgr == null || imageBgr.Empty())
                 {
                     error = "图片解码失败。";
                     return false;
                 }
 
-                imageRgb = new Mat();
-                Cv2.CvtColor(imageBgr, imageRgb, ColorConversionCodes.BGR2RGB);
+                imageRgb = PrepareImageForModelInput(imageBgr);
                 return true;
             }
             catch (Exception ex)
@@ -915,6 +921,38 @@ namespace DlcvDemo2
                 }
                 return false;
             }
+        }
+
+        private static Mat PrepareImageForModelInput(Mat image)
+        {
+            if (image == null || image.Empty())
+            {
+                return image;
+            }
+
+            // 调用侧颜色约定：OpenCV 解码语义为 BGR/BGRA，进入 dvst 推理前统一转换为 RGB；
+            // 灰度图保持单通道直送。
+            int channels = image.Channels();
+            if (channels == 1)
+            {
+                return image.Clone();
+            }
+
+            if (channels == 3)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGR2RGB);
+                return rgb;
+            }
+
+            if (channels == 4)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGRA2RGB);
+                return rgb;
+            }
+
+            return image.Clone();
         }
 
         private static string BrowseFile(string title, string filter, string currentPath)

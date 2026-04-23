@@ -6,6 +6,60 @@ using OpenCvSharp;
 
 namespace DlcvModules
 {
+    internal static class FlowInputColorUtils
+    {
+        // Flow 三通道约定为 RGB；从 OpenCV 读盘得到的 BGR/BGRA 需要在入口转换。
+        public static Mat PrepareForFlow(Mat image)
+        {
+            if (image == null || image.Empty())
+            {
+                return image;
+            }
+
+            int channels = image.Channels();
+            if (channels == 3)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGR2RGB);
+                return rgb;
+            }
+
+            if (channels == 4)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGRA2RGB);
+                return rgb;
+            }
+
+            // 灰度与其他通道数按原语义透传（复制一份，避免悬空引用外部 Mat）。
+            return image.Clone();
+        }
+
+        public static Mat ReadFromPathForFlow(string path)
+        {
+            var decoded = Cv2.ImRead(path, ImreadModes.Unchanged);
+            if (decoded == null || decoded.Empty())
+            {
+                return decoded;
+            }
+
+            try
+            {
+                Mat prepared = PrepareForFlow(decoded);
+                if (!object.ReferenceEquals(prepared, decoded))
+                {
+                    decoded.Dispose();
+                }
+                return prepared;
+            }
+            catch
+            {
+                decoded.Dispose();
+                throw;
+            }
+        }
+    }
+
     /// <summary>
     /// input/image：从磁盘读取图片，输出 (image_list, result_list)
     /// properties:
@@ -29,7 +83,7 @@ namespace DlcvModules
             var images = new List<ModuleImage>();
             var results = new JArray();
 
-            // 优先从 ExecutionContext 注入的前端 BGR Mat 读取
+            // 优先从 ExecutionContext 注入的前端 Mat 读取；调用方负责准备通道顺序（当前三通道约定为 RGB）。
             try
             {
                 List<Mat> matsFromContext = null;
@@ -44,9 +98,9 @@ namespace DlcvModules
                     foreach (var mat in matsFromContext)
                     {
                         if (mat == null || mat.Empty()) { ctxIndex += 1; continue; }
-                        var bgr = mat;
-                        var state = new TransformationState(bgr.Width, bgr.Height);
-                        var wrap = new ModuleImage(bgr, bgr, state, ctxIndex);
+                        var frontendMat = mat;
+                        var state = new TransformationState(frontendMat.Width, frontendMat.Height);
+                        var wrap = new ModuleImage(frontendMat, frontendMat, state, ctxIndex);
                         images.Add(wrap);
 
                         var entryBatch = new JObject
@@ -73,9 +127,9 @@ namespace DlcvModules
                 try { matFromContext = Context != null ? Context.Get<Mat>("frontend_image_mat", null) : null; } catch { matFromContext = null; }
                 if (matFromContext != null && !matFromContext.Empty())
                 {
-                    var bgr = matFromContext;
-                    var state = new TransformationState(bgr.Width, bgr.Height);
-                    var wrap = new ModuleImage(bgr, bgr, state, 0);
+                    var frontendMat = matFromContext;
+                    var state = new TransformationState(frontendMat.Width, frontendMat.Height);
+                    var wrap = new ModuleImage(frontendMat, frontendMat, state, 0);
                     images.Add(wrap);
 
                     var entryCtx = new JObject
@@ -102,11 +156,11 @@ namespace DlcvModules
                 try
                 {
                     if (!File.Exists(file)) continue;
-                    var bgr = Cv2.ImRead(file, ImreadModes.Color);
-                    if (bgr.Empty()) { bgr.Dispose(); continue; }
+                    var rgb = FlowInputColorUtils.ReadFromPathForFlow(file);
+                    if (rgb == null || rgb.Empty()) { rgb?.Dispose(); continue; }
 
-                    var state = new TransformationState(bgr.Width, bgr.Height);
-                    var wrap = new ModuleImage(bgr, bgr, state, index);
+                    var state = new TransformationState(rgb.Width, rgb.Height);
+                    var wrap = new ModuleImage(rgb, rgb, state, index);
                     images.Add(wrap);
 
                     var entry = new JObject
@@ -205,7 +259,7 @@ namespace DlcvModules
             var images = new List<ModuleImage>();
             var results = new JArray();
 
-            // 优先从 ExecutionContext 注入前端图像 Mat（BGR）
+            // 优先从 ExecutionContext 注入前端图像 Mat；调用方负责准备通道顺序（当前三通道约定为 RGB）。
             try
             {
                 List<Mat> matsFromContext = null;
@@ -220,9 +274,9 @@ namespace DlcvModules
                     foreach (var mat in matsFromContext)
                     {
                         if (mat == null || mat.Empty()) { ctxIndex += 1; continue; }
-                        var bgr = mat;
-                        var state = new TransformationState(bgr.Width, bgr.Height);
-                        var wrap = new ModuleImage(bgr, bgr, state, ctxIndex);
+                        var frontendMat = mat;
+                        var state = new TransformationState(frontendMat.Width, frontendMat.Height);
+                        var wrap = new ModuleImage(frontendMat, frontendMat, state, ctxIndex);
                         images.Add(wrap);
 
                         var entryBatch = new JObject
@@ -247,9 +301,9 @@ namespace DlcvModules
                 try { matFromContext = Context != null ? Context.Get<Mat>("frontend_image_mat", null) : null; } catch { matFromContext = null; }
                 if (matFromContext != null && !matFromContext.Empty())
                 {
-                    var bgr = matFromContext;
-                    var state = new TransformationState(bgr.Width, bgr.Height);
-                    var wrap = new ModuleImage(bgr, bgr, state, 0);
+                    var frontendMat = matFromContext;
+                    var state = new TransformationState(frontendMat.Width, frontendMat.Height);
+                    var wrap = new ModuleImage(frontendMat, frontendMat, state, 0);
                     images.Add(wrap);
 
                     var entry = new JObject
@@ -267,7 +321,7 @@ namespace DlcvModules
             }
             catch { }
 
-            // 回退到从路径读取（BGR）
+            // 回退到从路径读取，并统一整理为 Flow 约定的输入通道语义。
             string path = ResolvePath();
             if (string.IsNullOrWhiteSpace(path))
             {
@@ -278,11 +332,11 @@ namespace DlcvModules
             {
                 if (File.Exists(path))
                 {
-                    var bgr = Cv2.ImRead(path, ImreadModes.Color);
-                    if (!bgr.Empty())
+                    var rgb = FlowInputColorUtils.ReadFromPathForFlow(path);
+                    if (rgb != null && !rgb.Empty())
                     {
-                        var state = new TransformationState(bgr.Width, bgr.Height);
-                        var wrap = new ModuleImage(bgr, bgr, state, 0);
+                        var state = new TransformationState(rgb.Width, rgb.Height);
+                        var wrap = new ModuleImage(rgb, rgb, state, 0);
                         images.Add(wrap);
 
                         var entry = new JObject
@@ -374,7 +428,7 @@ namespace DlcvModules
                 {
                     try
                     {
-                        img = Cv2.ImRead(imagePath, ImreadModes.Color);
+                        img = FlowInputColorUtils.ReadFromPathForFlow(imagePath);
                         if (img != null && !img.Empty())
                         {
                             w = img.Width; h = img.Height;
@@ -404,7 +458,7 @@ namespace DlcvModules
                     }
                 }
                 catch { r = 0; g = 255; b = 0; }
-                img = new Mat(dh, dw, MatType.CV_8UC3, new Scalar(b, g, r)); // BGR
+                img = new Mat(dh, dw, MatType.CV_8UC3, new Scalar(r, g, b)); // RGB
                 w = dw; h = dh;
                 var stateDef = new TransformationState(w, h);
                 usedWrap = new ModuleImage(img, img, stateDef, 0);

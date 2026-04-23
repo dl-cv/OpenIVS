@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 #include "opencv2/imgcodecs.hpp"
+#include "opencv2/imgproc.hpp"
 
 namespace dlcv_infer {
 namespace flow {
@@ -26,6 +27,35 @@ static std::string GetFileNameWithoutExt(const std::string& path) {
 static bool FileExists(const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
     return static_cast<bool>(ifs);
+}
+
+static cv::Mat PrepareDecodedImageForFlow(const cv::Mat& image) {
+    if (image.empty()) {
+        return {};
+    }
+
+    const int channels = image.channels();
+    if (channels == 3) {
+        cv::Mat rgb;
+        cv::cvtColor(image, rgb, cv::COLOR_BGR2RGB);
+        return rgb;
+    }
+    if (channels == 4) {
+        cv::Mat rgb;
+        cv::cvtColor(image, rgb, cv::COLOR_BGRA2RGB);
+        return rgb;
+    }
+
+    // 灰度与其他通道按原语义透传，但复制一份避免悬空引用。
+    return image.clone();
+}
+
+static cv::Mat ReadFromPathForFlow(const std::string& path) {
+    cv::Mat decoded = cv::imread(path, cv::IMREAD_UNCHANGED);
+    if (decoded.empty()) {
+        return {};
+    }
+    return PrepareDecodedImageForFlow(decoded);
 }
 
 static std::vector<std::string> ResolveFileList(const Json& props, ExecutionContext* ctx) {
@@ -161,11 +191,11 @@ public:
         for (const auto& file : files) {
             try {
                 if (!FileExists(file)) continue;
-                cv::Mat bgr = cv::imread(file, cv::IMREAD_COLOR);
-                if (bgr.empty()) continue;
+                cv::Mat rgb = ReadFromPathForFlow(file);
+                if (rgb.empty()) continue;
 
-                TransformationState st(bgr.cols, bgr.rows);
-                ModuleImage wrap(bgr, bgr, st, index);
+                TransformationState st(rgb.cols, rgb.rows);
+                ModuleImage wrap(rgb, rgb, st, index);
                 images.push_back(wrap);
 
                 Json entry = Json::object();
@@ -233,7 +263,7 @@ public:
             }
         } catch (...) {}
 
-        // 回退到从路径读取（BGR）
+        // 回退到从路径读取，并统一整理为 Flow 约定的输入通道语义。
         std::string path;
         try {
             if (Properties.is_object() && Properties.contains("path") && Properties.at("path").is_string()) {
@@ -248,10 +278,10 @@ public:
         }
 
         try {
-            cv::Mat bgr = cv::imread(path, cv::IMREAD_COLOR);
-            if (!bgr.empty()) {
-                TransformationState st(bgr.cols, bgr.rows);
-                ModuleImage wrap(bgr, bgr, st, 0);
+            cv::Mat rgb = ReadFromPathForFlow(path);
+            if (!rgb.empty()) {
+                TransformationState st(rgb.cols, rgb.rows);
+                ModuleImage wrap(rgb, rgb, st, 0);
                 images.push_back(wrap);
 
                 Json entry = Json::object();
@@ -302,7 +332,7 @@ public:
 
             if (!imagePath.empty() && FileExists(imagePath)) {
                 try {
-                    img = cv::imread(imagePath, cv::IMREAD_COLOR);
+                    img = ReadFromPathForFlow(imagePath);
                     if (!img.empty()) {
                         w = img.cols; h = img.rows;
                         TransformationState st(w, h);
@@ -324,7 +354,7 @@ public:
                 sscanf_s(colorStr.c_str(), "%d,%d,%d", &rr, &gg, &bb);
                 r = rr; g = gg; b = bb;
             } catch (...) { r = 0; g = 255; b = 0; }
-            img = cv::Mat(dh, dw, CV_8UC3, cv::Scalar(b, g, r));
+            img = cv::Mat(dh, dw, CV_8UC3, cv::Scalar(r, g, b));
             w = dw; h = dh;
             TransformationState st(w, h);
             used = ModuleImage(img, img, st, 0);

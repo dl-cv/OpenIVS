@@ -118,26 +118,38 @@ namespace OpenIVSWPF.Managers
             Mat mat = BitmapToMat(image);
             if (mat == null) return "图像转换失败";
 
-            // 创建批处理列表
-            var imageList = new System.Collections.Generic.List<Mat> { mat };
-
-            // 执行推理
-            dlcv_infer_csharp.Utils.CSharpResult result = _model.InferBatch(imageList);
-
-            // 提取结果文本
-            StringBuilder sb = new StringBuilder();
-            var sampleResults = result.SampleResults[0];
-
-            foreach (var item in sampleResults.Results)
+            Mat inferMat = PrepareImageForModelInput(mat);
+            try
             {
-                sb.AppendLine($"{item.CategoryName}: {item.Score:F2}");
+                // 创建批处理列表
+                var imageList = new System.Collections.Generic.List<Mat> { inferMat };
+
+                // 执行推理
+                dlcv_infer_csharp.Utils.CSharpResult result = _model.InferBatch(imageList);
+
+                // 提取结果文本
+                StringBuilder sb = new StringBuilder();
+                var sampleResults = result.SampleResults[0];
+
+                foreach (var item in sampleResults.Results)
+                {
+                    sb.AppendLine($"{item.CategoryName}: {item.Score:F2}");
+                }
+
+                // 更新ImageViewer以显示检测结果
+                _displayImageCallback?.Invoke(image, result);
+
+                // 返回结果文本
+                return sb.ToString();
             }
-
-            // 更新ImageViewer以显示检测结果
-            _displayImageCallback?.Invoke(image, result);
-
-            // 返回结果文本
-            return sb.ToString();
+            finally
+            {
+                if (!object.ReferenceEquals(inferMat, mat))
+                {
+                    inferMat.Dispose();
+                }
+                mat.Dispose();
+            }
         }
 
         /// <summary>
@@ -156,6 +168,31 @@ namespace OpenIVSWPF.Managers
                 _statusCallback?.Invoke($"图像转换错误：{ex.Message}");
                 return null;
             }
+        }
+
+        private static Mat PrepareImageForModelInput(Mat image)
+        {
+            if (image == null || image.Empty())
+            {
+                return image;
+            }
+
+            int channels = image.Channels();
+            if (channels == 3)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGR2RGB);
+                return rgb;
+            }
+
+            if (channels == 4)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGRA2RGB);
+                return rgb;
+            }
+
+            return image;
         }
 
         /// <summary>

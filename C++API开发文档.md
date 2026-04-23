@@ -111,7 +111,7 @@
 
 ### 7.3 推理前图像规整
 
-`prepareInferInputBatch()` 会先从模型信息推断目标通道数，并用 `_expectedChCache` 缓存结果；FlowGraph 模式下若输入已经是目标通道且位深为 `CV_8U`，则直接透传。
+`prepareInferInputBatch()` 会先从模型信息推断目标通道数，并用 `_expectedChCache` 缓存结果。当前入口仅统一位深到 `CV_8U`（`ConvertMatDepthTo8U`），不再在 `Model::Infer*` 内部改输入通道数或通道顺序；三通道输入由调用方负责按 RGB 送入，单通道输入由调用方负责按灰度送入。
 
 ### 7.4 推理、结果与计时
 
@@ -149,7 +149,7 @@
 
 ### 10.6 已注册 Flow 节点
 
-C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/ModelModules.cpp`、`flow/modules/OutputModules.cpp`、`flow/modules/SlidingModules.cpp`、`flow/modules/FeatureModules.cpp`、`flow/modules/PostProcessModules.cpp`、`flow/modules/RegionStrokeVisualizeTemplateModules.cpp`。当前注册集覆盖输入、模型、预处理/特征、后处理、输出与模板模块；`features/printed_template_match` 由 `features/template_match` 兼容实现。
+C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/ModelModules.cpp`、`flow/modules/OutputModules.cpp`、`flow/modules/SlidingModules.cpp`、`flow/modules/FeatureModules.cpp`、`flow/modules/PostProcessModules.cpp`、`flow/modules/RegionStrokeVisualizeTemplateModules.cpp`。当前注册集覆盖输入、模型、预处理/特征、后处理、输出与模板模块；`features/printed_template_match` 由 `features/template_match` 兼容实现。当前实现中，`input/*` 从磁盘读图时会把三/四通道输入统一整理为 RGB 语义后再入 Flow，`model/*` 入口不再隐式执行 BGR→RGB 转换，`output/save_image` 按内部固定 RGB 语义把三通道/四通道图像转换回 OpenCV 写盘所需的 BGR 语义。
 
 ## 11. 仅 DLL 构建内部使用的类型
 

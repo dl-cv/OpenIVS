@@ -153,28 +153,27 @@ namespace DlcvModules
         {
             if (!_loaded) throw new InvalidOperationException("模型未加载");
             if (images == null || images.Count == 0) throw new ArgumentException("输入图像列表为空", nameof(images));
-            var bgrBatch = new List<Mat>();
+            var flowInputBatch = new List<Mat>();
             var convertedToDispose = new List<Mat>();
             try
             {
-                // C# 入口约定前端传入 RGB。当前流程中的 sliding/model/output 节点
-                // 不依赖入口再做一次整图 RGB->BGR 拷贝，因此直接透传可减少 CPU 开销。
+                // C# 入口约定调用方自行准备好输入通道顺序；当前三通道约定为 RGB。
+                // Flow 入口只透传图像，不在这里改通道。
                 for (int i = 0; i < images.Count; i++)
                 {
                     var img = images[i];
                     if (img == null || img.Empty())
                     {
-                        bgrBatch.Add(null);
+                        flowInputBatch.Add(null);
                         continue;
                     }
-                    bgrBatch.Add(img);
+                    flowInputBatch.Add(img);
                 }
 
                 var ctx = new ExecutionContext();
-                ctx.Set("frontend_image_mat", bgrBatch.Count > 0 ? bgrBatch[0] : null); // 兼容旧单图入口
-                ctx.Set("frontend_image_mats", bgrBatch);
-                ctx.Set("frontend_image_mat_list", bgrBatch);
-                ctx.Set("frontend_image_color_space", "rgb");
+                ctx.Set("frontend_image_mat", flowInputBatch.Count > 0 ? flowInputBatch[0] : null); // 兼容旧单图入口
+                ctx.Set("frontend_image_mats", flowInputBatch);
+                ctx.Set("frontend_image_mat_list", flowInputBatch);
                 ctx.Set("frontend_image_path", "");
                 ctx.Set("device_id", _deviceId);
                 ctx.Set("return_json_emit_poly", emitPoly);
@@ -270,7 +269,7 @@ namespace DlcvModules
         /// <summary>
         /// 对单张图片进行推理，返回 JSON 格式的结果
         /// </summary>
-        /// <param name="image">输入图像（RGB 格式）</param>
+        /// <param name="image">输入图像（调用方已按约定准备好通道顺序）</param>
         /// <param name="paramsJson">可选的推理参数</param>
         /// <returns>
         /// 返回 JSON 格式的检测结果数组，约定为：

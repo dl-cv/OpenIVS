@@ -4,8 +4,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using DlcvModules;
@@ -44,9 +46,31 @@ namespace DlcvCSharpTest
             Model.EnableConsoleLog = false;
             try
             {
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "model-channel-order-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunModelChannelOrderSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 &&
+                    (string.Equals(args[0], "dvs-rgb-selftest", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(args[0], "dvs-bgr-selftest", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return RunDvsRgbSelfTest(args);
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "maskrbox-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunMaskToRBoxSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "demo2-rgb-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDemo2RgbSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "demo2-route-rule-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDemo2RouteRuleSelfTest();
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bench", StringComparison.OrdinalIgnoreCase))
@@ -832,6 +856,164 @@ namespace DlcvCSharpTest
             return defaultValue;
         }
 
+        private static int RunModelChannelOrderSelfTest()
+        {
+            Console.WriteLine("==== Model 通道顺序自测 ====");
+
+            var helper = typeof(Model).GetMethod("PrepareInferImage", BindingFlags.NonPublic | BindingFlags.Static);
+            if (helper == null)
+            {
+                Console.WriteLine("未找到 PrepareInferImage");
+                return 1;
+            }
+
+            var disposables = new List<Mat>();
+            using (var src = new Mat(1, 1, MatType.CV_8UC3, new Scalar(11, 22, 33)))
+            {
+                try
+                {
+                    var prepared = helper.Invoke(null, new object[] { src, 3, disposables }) as Mat;
+                    if (prepared == null || prepared.Empty())
+                    {
+                        Console.WriteLine("PrepareInferImage 返回空图");
+                        return 1;
+                    }
+
+                    Vec3b inputPixel = src.At<Vec3b>(0, 0);
+                    Vec3b outputPixel = prepared.At<Vec3b>(0, 0);
+
+                    Console.WriteLine(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "input_pixel: [{0}, {1}, {2}]",
+                            inputPixel.Item0,
+                            inputPixel.Item1,
+                            inputPixel.Item2));
+                    Console.WriteLine(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "output_pixel: [{0}, {1}, {2}]",
+                            outputPixel.Item0,
+                            outputPixel.Item1,
+                            outputPixel.Item2));
+
+                    if (inputPixel.Item0 != outputPixel.Item0 ||
+                        inputPixel.Item1 != outputPixel.Item1 ||
+                        inputPixel.Item2 != outputPixel.Item2)
+                    {
+                        Console.WriteLine("自测失败：PrepareInferImage 改变了三通道输入顺序");
+                        return 1;
+                    }
+
+                    Console.WriteLine("Model 通道顺序自测通过");
+                    return 0;
+                }
+                catch (TargetInvocationException ex)
+                {
+                    string msg = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+                    Console.WriteLine("Model 通道顺序自测异常: " + msg);
+                    return 1;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Model 通道顺序自测异常: " + ex.Message);
+                    return 1;
+                }
+                finally
+                {
+                    for (int i = 0; i < disposables.Count; i++)
+                    {
+                        try { disposables[i]?.Dispose(); } catch { }
+                    }
+                }
+            }
+        }
+
+        private static int RunDvsRgbSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 3)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest dvs-rgb-selftest <modelPath> <imagePath>");
+                return 2;
+            }
+
+            string modelPath = args[1];
+            string imagePath = args[2];
+
+            Console.WriteLine("==== DVS RGB 自测 ====");
+            Console.WriteLine("model: " + modelPath);
+            Console.WriteLine("image: " + imagePath);
+
+            if (!File.Exists(modelPath))
+            {
+                Console.WriteLine("模型不存在");
+                return 2;
+            }
+            if (!File.Exists(imagePath))
+            {
+                Console.WriteLine("图片不存在");
+                return 2;
+            }
+
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            DvsModel directModel = null;
+            Utils.CSharpResult wrappedResult = default(Utils.CSharpResult);
+            Utils.CSharpResult directResult = default(Utils.CSharpResult);
+            try
+            {
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                directModel = new DvsModel();
+                directModel.Load(modelPath, GpuDeviceId);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+
+                var inferParams = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = true,
+                    ["batch_size"] = 1
+                };
+
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                wrappedResult = model.InferBatch(new List<Mat> { rgb }, inferParams);
+                directResult = directModel.InferBatch(new List<Mat> { rgb }, inferParams);
+
+                string wrappedSig = BuildResultSignature(wrappedResult);
+                string directSig = BuildResultSignature(directResult);
+
+                Console.WriteLine("wrapped_signature: " + wrappedSig);
+                Console.WriteLine("direct_signature: " + directSig);
+
+                if (!string.Equals(wrappedSig, directSig, StringComparison.Ordinal))
+                {
+                    Console.WriteLine("自测失败：Model(.dvst) 与 DvsModel 直连 flow 的 RGB 结果不一致");
+                    return 1;
+                }
+
+                Console.WriteLine("DVS RGB 自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("DVS RGB 自测异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                DisposeResultMasks(wrappedResult);
+                DisposeResultMasks(directResult);
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (directModel != null) directModel.Dispose(); } catch { }
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
+        }
+
         private static int RunMaskToRBoxSelfTest()
         {
             Console.WriteLine("==== mask_to_rbox 自测 ====");
@@ -917,6 +1099,536 @@ namespace DlcvCSharpTest
                 Console.WriteLine("mask_to_rbox 自测通过");
                 return 0;
             }
+        }
+
+        private static int RunDemo2RgbSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 5)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>");
+                return 2;
+            }
+
+            string extractModelPath = args[1];
+            string componentModelPath = args[2];
+            string icModelPath = args[3];
+            string imagePath = args[4];
+
+            Console.WriteLine("==== Demo2 RGB 闭环自测 ====");
+            Console.WriteLine("extract_model: " + extractModelPath);
+            Console.WriteLine("component_model: " + componentModelPath);
+            Console.WriteLine("ic_model: " + icModelPath);
+            Console.WriteLine("image: " + imagePath);
+
+            string[] requiredFiles =
+            {
+                extractModelPath,
+                componentModelPath,
+                icModelPath,
+                imagePath
+            };
+            for (int i = 0; i < requiredFiles.Length; i++)
+            {
+                if (!File.Exists(requiredFiles[i]))
+                {
+                    Console.WriteLine("文件不存在: " + requiredFiles[i]);
+                    return 2;
+                }
+            }
+
+            int exitCode = 1;
+            Exception threadException = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    exitCode = ExecuteDemo2RgbSelfTest(extractModelPath, componentModelPath, icModelPath, imagePath);
+                }
+                catch (Exception ex)
+                {
+                    threadException = ex;
+                }
+            });
+
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+
+            if (threadException != null)
+            {
+                Console.WriteLine("Demo2 RGB 自测异常: " + threadException);
+                return 1;
+            }
+
+            return exitCode;
+        }
+
+        private static int ExecuteDemo2RgbSelfTest(
+            string extractModelPath,
+            string componentModelPath,
+            string icModelPath,
+            string imagePath)
+        {
+            string demo2AssemblyPath = ResolveDemo2AssemblyPath();
+            if (!File.Exists(demo2AssemblyPath))
+            {
+                Console.WriteLine("未找到 Demo2 可执行文件: " + demo2AssemblyPath);
+                Console.WriteLine("请先构建 DlcvDemo2.csproj。");
+                return 2;
+            }
+
+            Assembly demo2Assembly = Assembly.LoadFrom(demo2AssemblyPath);
+            Type formType = demo2Assembly.GetType("DlcvDemo2.Form1", throwOnError: true);
+            Type configType = formType.GetNestedType("SlidingWindowConfig", BindingFlags.NonPublic);
+            if (configType == null)
+            {
+                Console.WriteLine("未找到 Demo2.SlidingWindowConfig");
+                return 1;
+            }
+
+            MethodInfo tryLoadImageForInfer = formType.GetMethod("TryLoadImageForInfer", BindingFlags.NonPublic | BindingFlags.Static);
+            MethodInfo runPipeline = formType.GetMethod("RunPipeline", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (tryLoadImageForInfer == null || runPipeline == null)
+            {
+                Console.WriteLine("未找到 Demo2 关键私有方法");
+                return 1;
+            }
+
+            FieldInfo extractField = formType.GetField("extractModel", BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo componentField = formType.GetField("componentDetectModel", BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo icField = formType.GetField("icDetectModel", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (extractField == null || componentField == null || icField == null)
+            {
+                Console.WriteLine("未找到 Demo2 模型字段");
+                return 1;
+            }
+
+            object form = null;
+            object extractModel = null;
+            object componentModel = null;
+            object icModel = null;
+            Mat imageBgr = null;
+            Mat entryRgb = null;
+            Mat manualRgb = null;
+            object entryRunResult = null;
+            object manualRunResult = null;
+            object rawBgrRunResult = null;
+
+            try
+            {
+                form = Activator.CreateInstance(formType);
+
+                extractModel = Activator.CreateInstance(extractField.FieldType, new object[] { extractModelPath, GpuDeviceId, false, false });
+                componentModel = Activator.CreateInstance(componentField.FieldType, new object[] { componentModelPath, GpuDeviceId, false, false });
+                icModel = Activator.CreateInstance(icField.FieldType, new object[] { icModelPath, GpuDeviceId, false, false });
+
+                extractField.SetValue(form, extractModel);
+                componentField.SetValue(form, componentModel);
+                icField.SetValue(form, icModel);
+
+                object[] loadArgs = { imagePath, null, null, string.Empty };
+                bool loaded = (bool)tryLoadImageForInfer.Invoke(null, loadArgs);
+                if (!loaded)
+                {
+                    Console.WriteLine("TryLoadImageForInfer 失败: " + Convert.ToString(loadArgs[3], CultureInfo.InvariantCulture));
+                    return 1;
+                }
+
+                imageBgr = loadArgs[1] as Mat;
+                entryRgb = loadArgs[2] as Mat;
+                if (imageBgr == null || imageBgr.Empty() || entryRgb == null || entryRgb.Empty())
+                {
+                    Console.WriteLine("Demo2 加载图片后得到空图");
+                    return 1;
+                }
+
+                manualRgb = PrepareDemo2ExpectedInput(imageBgr);
+                object config = CreateDemo2SlidingWindowConfig(configType, 2560, 2560, 1024, 1024);
+
+                entryRunResult = runPipeline.Invoke(form, new object[] { entryRgb, config, null });
+                manualRunResult = runPipeline.Invoke(form, new object[] { manualRgb, config, null });
+                rawBgrRunResult = runPipeline.Invoke(form, new object[] { imageBgr, config, null });
+
+                string entrySig = BuildDemo2PipelineSignature(entryRunResult);
+                string manualSig = BuildDemo2PipelineSignature(manualRunResult);
+                string rawBgrSig = BuildDemo2PipelineSignature(rawBgrRunResult);
+
+                Console.WriteLine("entry_rgb_signature: " + entrySig);
+                Console.WriteLine("manual_rgb_signature: " + manualSig);
+                Console.WriteLine("raw_bgr_signature: " + rawBgrSig);
+
+                if (!string.Equals(entrySig, manualSig, StringComparison.Ordinal))
+                {
+                    Console.WriteLine("自测失败：Demo2 实际入口结果与手工 RGB 结果不一致");
+                    return 1;
+                }
+
+                if (string.Equals(entrySig, rawBgrSig, StringComparison.Ordinal))
+                {
+                    Console.WriteLine("自测失败：当前样例未把 RGB 与 BGR 路径区分开，无法形成有效闭环");
+                    return 1;
+                }
+
+                Console.WriteLine("Demo2 RGB 闭环自测通过");
+                return 0;
+            }
+            catch (TargetInvocationException ex)
+            {
+                string message = ex.InnerException != null ? ex.InnerException.ToString() : ex.ToString();
+                Console.WriteLine("Demo2 RGB 自测异常: " + message);
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Demo2 RGB 自测异常: " + ex);
+                return 1;
+            }
+            finally
+            {
+                DisposePipelineResultMasks(entryRunResult);
+                DisposePipelineResultMasks(manualRunResult);
+                DisposePipelineResultMasks(rawBgrRunResult);
+
+                if (manualRgb != null) manualRgb.Dispose();
+                if (entryRgb != null) entryRgb.Dispose();
+                if (imageBgr != null) imageBgr.Dispose();
+
+                TryDispose(icModel);
+                TryDispose(componentModel);
+                TryDispose(extractModel);
+                TryDispose(form);
+                ForceGc();
+            }
+        }
+
+        private static int RunDemo2RouteRuleSelfTest()
+        {
+            Console.WriteLine("==== Demo2 分流规则自测 ====");
+
+            string demo2AssemblyPath = ResolveDemo2AssemblyPath();
+            if (!File.Exists(demo2AssemblyPath))
+            {
+                Console.WriteLine("未找到 Demo2 可执行文件: " + demo2AssemblyPath);
+                Console.WriteLine("请先构建 DlcvDemo2.csproj。");
+                return 2;
+            }
+
+            try
+            {
+                Assembly demo2Assembly = Assembly.LoadFrom(demo2AssemblyPath);
+                Type formType = demo2Assembly.GetType("DlcvDemo2.Form1", throwOnError: true);
+                MethodInfo routeMethod = formType.GetMethod("ShouldUseIcDetectModel", BindingFlags.NonPublic | BindingFlags.Static);
+                if (routeMethod == null)
+                {
+                    Console.WriteLine("未找到 Demo2 分流规则方法");
+                    return 1;
+                }
+
+                var cases = new[]
+                {
+                    new { BaseName = "IC", Expected = true },
+                    new { BaseName = "ic", Expected = true },
+                    new { BaseName = "BGA", Expected = true },
+                    new { BaseName = "座子", Expected = true },
+                    new { BaseName = "开关", Expected = true },
+                    new { BaseName = "晶振", Expected = true },
+                    new { BaseName = "电阻", Expected = false },
+                    new { BaseName = "", Expected = false },
+                    new { BaseName = (string)null, Expected = false }
+                };
+
+                for (int i = 0; i < cases.Length; i++)
+                {
+                    bool actual = (bool)routeMethod.Invoke(null, new object[] { cases[i].BaseName });
+                    string baseNameText = cases[i].BaseName ?? "<null>";
+                    Console.WriteLine("base_name: " + baseNameText + ", expected: " + cases[i].Expected + ", actual: " + actual);
+                    if (actual != cases[i].Expected)
+                    {
+                        Console.WriteLine("自测失败：Demo2 分流规则与预期不一致");
+                        return 1;
+                    }
+                }
+
+                Console.WriteLine("Demo2 分流规则自测通过");
+                return 0;
+            }
+            catch (TargetInvocationException ex)
+            {
+                string message = ex.InnerException != null ? ex.InnerException.ToString() : ex.ToString();
+                Console.WriteLine("Demo2 分流规则自测异常: " + message);
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Demo2 分流规则自测异常: " + ex);
+                return 1;
+            }
+        }
+
+        private static Mat PrepareDemo2ExpectedInput(Mat image)
+        {
+            if (image == null || image.Empty())
+            {
+                return image;
+            }
+
+            int channels = image.Channels();
+            if (channels == 1)
+            {
+                return image.Clone();
+            }
+
+            if (channels == 3)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGR2RGB);
+                return rgb;
+            }
+
+            if (channels == 4)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGRA2RGB);
+                return rgb;
+            }
+
+            return image.Clone();
+        }
+
+        private static object CreateDemo2SlidingWindowConfig(Type configType, int width, int height, int overlapX, int overlapY)
+        {
+            object config = Activator.CreateInstance(configType);
+            configType.GetProperty("WindowWidth")?.SetValue(config, width);
+            configType.GetProperty("WindowHeight")?.SetValue(config, height);
+            configType.GetProperty("OverlapX")?.SetValue(config, overlapX);
+            configType.GetProperty("OverlapY")?.SetValue(config, overlapY);
+            return config;
+        }
+
+        private static string BuildDemo2PipelineSignature(object pipelineRunResult)
+        {
+            if (pipelineRunResult == null)
+            {
+                return string.Empty;
+            }
+
+            PropertyInfo finalObjectsProperty = pipelineRunResult.GetType().GetProperty("FinalObjects", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (finalObjectsProperty == null)
+            {
+                return string.Empty;
+            }
+
+            var items = new List<string>();
+            var enumerable = finalObjectsProperty.GetValue(pipelineRunResult, null) as System.Collections.IEnumerable;
+            if (enumerable == null)
+            {
+                return string.Empty;
+            }
+
+            foreach (object obj in enumerable)
+            {
+                if (obj == null) continue;
+                items.Add(BuildReflectedObjectSignature(obj));
+            }
+
+            items.Sort(StringComparer.Ordinal);
+            return string.Join(";", items);
+        }
+
+        private static string BuildReflectedObjectSignature(object obj)
+        {
+            Type t = obj.GetType();
+            int categoryId = ReadReflectedValue<int>(obj, t, "CategoryId");
+            string categoryName = ReadReflectedValue<string>(obj, t, "CategoryName") ?? string.Empty;
+            float score = ReadReflectedValue<float>(obj, t, "Score");
+            bool withAngle = ReadReflectedValue<bool>(obj, t, "WithAngle");
+            float angle = ReadReflectedValue<float>(obj, t, "Angle");
+
+            string bboxSignature = string.Empty;
+            object bboxValue = t.GetProperty("Bbox")?.GetValue(obj, null);
+            var bboxEnumerable = bboxValue as System.Collections.IEnumerable;
+            if (bboxEnumerable != null)
+            {
+                var bboxParts = new List<string>();
+                foreach (object item in bboxEnumerable)
+                {
+                    double value = Convert.ToDouble(item, CultureInfo.InvariantCulture);
+                    bboxParts.Add(value.ToString("F3", CultureInfo.InvariantCulture));
+                }
+                bboxSignature = string.Join(",", bboxParts);
+            }
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}|{1:F4}|{2}|{3}|{4:F4}",
+                categoryId,
+                score,
+                categoryName,
+                bboxSignature,
+                withAngle ? angle : -100.0f);
+        }
+
+        private static T ReadReflectedValue<T>(object instance, Type type, string propertyName)
+        {
+            PropertyInfo property = type.GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property == null)
+            {
+                return default(T);
+            }
+
+            object value = property.GetValue(instance, null);
+            if (value == null)
+            {
+                return default(T);
+            }
+
+            if (value is T typed)
+            {
+                return typed;
+            }
+
+            return (T)Convert.ChangeType(value, typeof(T), CultureInfo.InvariantCulture);
+        }
+
+        private static void DisposePipelineResultMasks(object pipelineRunResult)
+        {
+            if (pipelineRunResult == null)
+            {
+                return;
+            }
+
+            PropertyInfo displayResultProperty = pipelineRunResult.GetType().GetProperty("DisplayResult", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (displayResultProperty == null)
+            {
+                return;
+            }
+
+            var displayResult = displayResultProperty.GetValue(pipelineRunResult, null) as Utils.CSharpResult?;
+            if (displayResult.HasValue)
+            {
+                DisposeResultMasks(displayResult.Value);
+            }
+        }
+
+        private static void TryDispose(object obj)
+        {
+            try
+            {
+                (obj as IDisposable)?.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        private static string ResolveDemo2AssemblyPath()
+        {
+            string repoRoot = ResolveRepoRoot();
+            string[] candidates =
+            {
+                Path.Combine(repoRoot, "DlcvDemo2", "bin", "C# 测试程序2.exe"),
+                Path.Combine(repoRoot, "DlcvDemo2", "bin", "x64", "Debug", "C# 测试程序2.exe"),
+                Path.Combine(repoRoot, "DlcvDemo2", "bin", "Debug", "C# 测试程序2.exe")
+            };
+
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                if (File.Exists(candidates[i]))
+                {
+                    return candidates[i];
+                }
+            }
+
+            return candidates[0];
+        }
+
+        private static string ResolveRepoRoot()
+        {
+            string root = TryFindRepoRoot(Environment.CurrentDirectory);
+            if (!string.IsNullOrWhiteSpace(root))
+            {
+                return root;
+            }
+
+            root = TryFindRepoRoot(AppDomain.CurrentDomain.BaseDirectory);
+            if (!string.IsNullOrWhiteSpace(root))
+            {
+                return root;
+            }
+
+            throw new DirectoryNotFoundException("未找到 OpenIVS.sln，无法定位仓库根目录。");
+        }
+
+        private static string TryFindRepoRoot(string startPath)
+        {
+            if (string.IsNullOrWhiteSpace(startPath))
+            {
+                return null;
+            }
+
+            string fullPath = Path.GetFullPath(startPath);
+            var dir = new DirectoryInfo(fullPath);
+            if (!dir.Exists && dir.Parent != null)
+            {
+                dir = dir.Parent;
+            }
+
+            while (dir != null)
+            {
+                if (File.Exists(Path.Combine(dir.FullName, "OpenIVS.sln")))
+                {
+                    return dir.FullName;
+                }
+
+                dir = dir.Parent;
+            }
+
+            return null;
+        }
+
+        private static string BuildResultSignature(Utils.CSharpResult result)
+        {
+            var parts = new List<string>();
+            if (result.SampleResults == null)
+            {
+                return string.Empty;
+            }
+
+            for (int sampleIndex = 0; sampleIndex < result.SampleResults.Count; sampleIndex++)
+            {
+                var sample = result.SampleResults[sampleIndex];
+                var sampleParts = new List<string>();
+                if (sample.Results != null)
+                {
+                    foreach (var obj in sample.Results)
+                    {
+                        string bboxSig = string.Empty;
+                        if (obj.Bbox != null && obj.Bbox.Count > 0)
+                        {
+                            var bboxParts = new List<string>(obj.Bbox.Count);
+                            for (int i = 0; i < obj.Bbox.Count; i++)
+                            {
+                                bboxParts.Add(obj.Bbox[i].ToString("F3", CultureInfo.InvariantCulture));
+                            }
+                            bboxSig = string.Join(",", bboxParts);
+                        }
+
+                        sampleParts.Add(string.Format(
+                            CultureInfo.InvariantCulture,
+                            "{0}|{1:F4}|{2}|{3}|{4:F4}",
+                            obj.CategoryId,
+                            obj.Score,
+                            obj.CategoryName ?? string.Empty,
+                            bboxSig,
+                            obj.WithAngle ? obj.Angle : -100.0f));
+                    }
+                }
+
+                sampleParts.Sort(StringComparer.Ordinal);
+                parts.Add("sample" + sampleIndex.ToString(CultureInfo.InvariantCulture) + ":" + string.Join(";", sampleParts));
+            }
+
+            return string.Join(" || ", parts);
         }
 
         private static void AssertNear(double expected, double actual, double tolerance, string label)
