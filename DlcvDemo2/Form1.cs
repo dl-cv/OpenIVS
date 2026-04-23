@@ -335,10 +335,7 @@ namespace DlcvDemo2
                 string baseName;
                 int normalizeAngle;
                 DetectionGeometryUtils.ParseCategoryAndAngle(target.ObjectResult.CategoryName, out baseName, out normalizeAngle);
-                bool useIcDetectModel =
-                    string.Equals(baseName, "IC", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(baseName, "BGA", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(baseName, "晶振", StringComparison.OrdinalIgnoreCase);
+                bool useIcDetectModel = ShouldUseIcDetectModel(baseName);
 
                 using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, normalizeAngle))
                 {
@@ -381,6 +378,15 @@ namespace DlcvDemo2
             runResult.DisplayResult = BuildDisplayResult(runResult.FinalObjects);
             ReportInferenceProgress(progress, 100, "推理完成");
             return runResult;
+        }
+
+        private static bool ShouldUseIcDetectModel(string baseName)
+        {
+            return string.Equals(baseName, "IC", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "BGA", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "座子", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "开关", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "晶振", StringComparison.OrdinalIgnoreCase);
         }
 
         private List<ExtractDetection> InferExtractModelOnWindows(Mat fullImageRgb, List<Rect> windows, IProgress<InferenceProgressInfo> progress)

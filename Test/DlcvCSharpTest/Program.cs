@@ -68,6 +68,11 @@ namespace DlcvCSharpTest
                     return RunDemo2RgbSelfTest(args);
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "demo2-route-rule-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDemo2RouteRuleSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bench", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunBenchmarkCommand(args);
@@ -1293,6 +1298,70 @@ namespace DlcvCSharpTest
                 TryDispose(extractModel);
                 TryDispose(form);
                 ForceGc();
+            }
+        }
+
+        private static int RunDemo2RouteRuleSelfTest()
+        {
+            Console.WriteLine("==== Demo2 分流规则自测 ====");
+
+            string demo2AssemblyPath = ResolveDemo2AssemblyPath();
+            if (!File.Exists(demo2AssemblyPath))
+            {
+                Console.WriteLine("未找到 Demo2 可执行文件: " + demo2AssemblyPath);
+                Console.WriteLine("请先构建 DlcvDemo2.csproj。");
+                return 2;
+            }
+
+            try
+            {
+                Assembly demo2Assembly = Assembly.LoadFrom(demo2AssemblyPath);
+                Type formType = demo2Assembly.GetType("DlcvDemo2.Form1", throwOnError: true);
+                MethodInfo routeMethod = formType.GetMethod("ShouldUseIcDetectModel", BindingFlags.NonPublic | BindingFlags.Static);
+                if (routeMethod == null)
+                {
+                    Console.WriteLine("未找到 Demo2 分流规则方法");
+                    return 1;
+                }
+
+                var cases = new[]
+                {
+                    new { BaseName = "IC", Expected = true },
+                    new { BaseName = "ic", Expected = true },
+                    new { BaseName = "BGA", Expected = true },
+                    new { BaseName = "座子", Expected = true },
+                    new { BaseName = "开关", Expected = true },
+                    new { BaseName = "晶振", Expected = true },
+                    new { BaseName = "电阻", Expected = false },
+                    new { BaseName = "", Expected = false },
+                    new { BaseName = (string)null, Expected = false }
+                };
+
+                for (int i = 0; i < cases.Length; i++)
+                {
+                    bool actual = (bool)routeMethod.Invoke(null, new object[] { cases[i].BaseName });
+                    string baseNameText = cases[i].BaseName ?? "<null>";
+                    Console.WriteLine("base_name: " + baseNameText + ", expected: " + cases[i].Expected + ", actual: " + actual);
+                    if (actual != cases[i].Expected)
+                    {
+                        Console.WriteLine("自测失败：Demo2 分流规则与预期不一致");
+                        return 1;
+                    }
+                }
+
+                Console.WriteLine("Demo2 分流规则自测通过");
+                return 0;
+            }
+            catch (TargetInvocationException ex)
+            {
+                string message = ex.InnerException != null ? ex.InnerException.ToString() : ex.ToString();
+                Console.WriteLine("Demo2 分流规则自测异常: " + message);
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Demo2 分流规则自测异常: " + ex);
+                return 1;
             }
         }
 
