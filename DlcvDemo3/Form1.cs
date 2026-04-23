@@ -804,15 +804,14 @@ namespace DlcvDemo3
             error = string.Empty;
             try
             {
-                imageBgr = Cv2.ImRead(path, ImreadModes.Color);
+                imageBgr = Cv2.ImRead(path, ImreadModes.Unchanged);
                 if (imageBgr == null || imageBgr.Empty())
                 {
                     error = "图片解码失败。";
                     return false;
                 }
 
-                imageRgb = new Mat();
-                Cv2.CvtColor(imageBgr, imageRgb, ColorConversionCodes.BGR2RGB);
+                imageRgb = PrepareImageForModelInput(imageBgr);
                 return true;
             }
             catch (Exception ex)
@@ -830,6 +829,36 @@ namespace DlcvDemo3
                 }
                 return false;
             }
+        }
+
+        private static Mat PrepareImageForModelInput(Mat image)
+        {
+            if (image == null || image.Empty())
+            {
+                return image;
+            }
+
+            int channels = image.Channels();
+            if (channels == 1)
+            {
+                return image.Clone();
+            }
+
+            if (channels == 3)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGR2RGB);
+                return rgb;
+            }
+
+            if (channels == 4)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(image, rgb, ColorConversionCodes.BGRA2RGB);
+                return rgb;
+            }
+
+            return image.Clone();
         }
 
         private static string BrowseFile(string title, string filter, string currentPath)
