@@ -258,6 +258,7 @@ namespace DlcvDemo2
                         }
 
                         Stopwatch sw = Stopwatch.StartNew();
+                        // 颜色约定：UI 显示使用 imageBgr；送入 dvst 的整条 pipeline 使用 imageRgb（RGB）。
                         PipelineRunResult runResult = RunPipeline(imageRgb, config, progress);
                         sw.Stop();
 
@@ -923,6 +924,8 @@ namespace DlcvDemo2
                 return image;
             }
 
+            // 调用侧颜色约定：OpenCV 解码语义为 BGR/BGRA，进入 dvst 推理前统一转换为 RGB；
+            // 灰度图保持单通道直送。
             int channels = image.Channels();
             if (channels == 1)
             {

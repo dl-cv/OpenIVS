@@ -32,6 +32,19 @@ namespace DlcvModules
 			string saveDir = ReadStringOrDefault("save_path", null);
 			string suffix = ReadStringOrDefault("suffix", "_out");
 			string fmt = ReadStringOrDefault("format", "png");
+            string flowColorSpace = "rgb";
+            try
+            {
+                if (Context != null)
+                {
+                    flowColorSpace = Context.Get<string>("frontend_image_color_space", "rgb");
+                }
+            }
+            catch
+            {
+                flowColorSpace = "rgb";
+            }
+            bool flowThreeChannelIsRgb = string.Equals((flowColorSpace ?? "rgb").Trim(), "rgb", StringComparison.OrdinalIgnoreCase);
 			if (!string.IsNullOrWhiteSpace(saveDir))
 			{
 				try { Directory.CreateDirectory(saveDir); } catch { }
@@ -53,14 +66,17 @@ namespace DlcvModules
                     string full = Path.Combine(saveDir, fileName);
                     try
                     {
-                        // 统一按BGR写盘：
-                        // 4通道 -> BGRA2BGR；1通道 -> GRAY2BGR；3通道视为BGR直写
+                        // 写盘统一使用 OpenCV BGR 语义：
+                        // Flow 内部三通道当前约定为 RGB，因此三通道需要先 RGB2BGR 再写盘。
                         int ch = matRgb.Channels();
                         if (ch == 4)
                         {
                             using (var matBgr = new Mat())
                             {
-                                Cv2.CvtColor(matRgb, matBgr, ColorConversionCodes.BGRA2BGR);
+                                Cv2.CvtColor(
+                                    matRgb,
+                                    matBgr,
+                                    flowThreeChannelIsRgb ? ColorConversionCodes.RGBA2BGR : ColorConversionCodes.BGRA2BGR);
                                 Cv2.ImWrite(full, matBgr);
                             }
                         }
@@ -74,7 +90,18 @@ namespace DlcvModules
                         }
                         else
                         {
-                            Cv2.ImWrite(full, matRgb);
+                            if (flowThreeChannelIsRgb)
+                            {
+                                using (var matBgr = new Mat())
+                                {
+                                    Cv2.CvtColor(matRgb, matBgr, ColorConversionCodes.RGB2BGR);
+                                    Cv2.ImWrite(full, matBgr);
+                                }
+                            }
+                            else
+                            {
+                                Cv2.ImWrite(full, matRgb);
+                            }
                         }
                     } catch { }
                 }

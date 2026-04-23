@@ -153,7 +153,7 @@ namespace DlcvModules
         {
             if (!_loaded) throw new InvalidOperationException("模型未加载");
             if (images == null || images.Count == 0) throw new ArgumentException("输入图像列表为空", nameof(images));
-            var bgrBatch = new List<Mat>();
+            var flowInputBatch = new List<Mat>();
             var convertedToDispose = new List<Mat>();
             try
             {
@@ -164,16 +164,16 @@ namespace DlcvModules
                     var img = images[i];
                     if (img == null || img.Empty())
                     {
-                        bgrBatch.Add(null);
+                        flowInputBatch.Add(null);
                         continue;
                     }
-                    bgrBatch.Add(img);
+                    flowInputBatch.Add(img);
                 }
 
                 var ctx = new ExecutionContext();
-                ctx.Set("frontend_image_mat", bgrBatch.Count > 0 ? bgrBatch[0] : null); // 兼容旧单图入口
-                ctx.Set("frontend_image_mats", bgrBatch);
-                ctx.Set("frontend_image_mat_list", bgrBatch);
+                ctx.Set("frontend_image_mat", flowInputBatch.Count > 0 ? flowInputBatch[0] : null); // 兼容旧单图入口
+                ctx.Set("frontend_image_mats", flowInputBatch);
+                ctx.Set("frontend_image_mat_list", flowInputBatch);
                 ctx.Set("frontend_image_color_space", "rgb");
                 ctx.Set("frontend_image_path", "");
                 ctx.Set("device_id", _deviceId);
