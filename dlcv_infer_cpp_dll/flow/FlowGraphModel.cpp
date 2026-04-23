@@ -327,7 +327,6 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     ctx.Set<cv::Mat>("frontend_image_mat", rgbBatch.empty() ? cv::Mat() : rgbBatch[0]); // 兼容旧单图入口
     ctx.Set<std::vector<cv::Mat>>("frontend_image_mats", rgbBatch);
     ctx.Set<std::vector<cv::Mat>>("frontend_image_mat_list", rgbBatch);
-    ctx.Set<std::string>("frontend_image_color_space", "rgb");
     ctx.Set<std::string>("frontend_image_path", std::string());
     ctx.Set<int>("device_id", _deviceId);
     ctx.Set<Json>("infer_params", paramsJson.is_object() ? paramsJson : Json::object());

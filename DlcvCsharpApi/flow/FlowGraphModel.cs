@@ -174,7 +174,6 @@ namespace DlcvModules
                 ctx.Set("frontend_image_mat", flowInputBatch.Count > 0 ? flowInputBatch[0] : null); // 兼容旧单图入口
                 ctx.Set("frontend_image_mats", flowInputBatch);
                 ctx.Set("frontend_image_mat_list", flowInputBatch);
-                ctx.Set("frontend_image_color_space", "rgb");
                 ctx.Set("frontend_image_path", "");
                 ctx.Set("device_id", _deviceId);
                 ctx.Set("return_json_emit_poly", emitPoly);

@@ -32,19 +32,6 @@ namespace DlcvModules
 			string saveDir = ReadStringOrDefault("save_path", null);
 			string suffix = ReadStringOrDefault("suffix", "_out");
 			string fmt = ReadStringOrDefault("format", "png");
-            string flowColorSpace = "rgb";
-            try
-            {
-                if (Context != null)
-                {
-                    flowColorSpace = Context.Get<string>("frontend_image_color_space", "rgb");
-                }
-            }
-            catch
-            {
-                flowColorSpace = "rgb";
-            }
-            bool flowThreeChannelIsRgb = string.Equals((flowColorSpace ?? "rgb").Trim(), "rgb", StringComparison.OrdinalIgnoreCase);
 			if (!string.IsNullOrWhiteSpace(saveDir))
 			{
 				try { Directory.CreateDirectory(saveDir); } catch { }
@@ -73,10 +60,7 @@ namespace DlcvModules
                         {
                             using (var matBgr = new Mat())
                             {
-                                Cv2.CvtColor(
-                                    matRgb,
-                                    matBgr,
-                                    flowThreeChannelIsRgb ? ColorConversionCodes.RGBA2BGR : ColorConversionCodes.BGRA2BGR);
+                                Cv2.CvtColor(matRgb, matBgr, ColorConversionCodes.RGBA2BGR);
                                 Cv2.ImWrite(full, matBgr);
                             }
                         }
@@ -90,17 +74,10 @@ namespace DlcvModules
                         }
                         else
                         {
-                            if (flowThreeChannelIsRgb)
+                            using (var matBgr = new Mat())
                             {
-                                using (var matBgr = new Mat())
-                                {
-                                    Cv2.CvtColor(matRgb, matBgr, ColorConversionCodes.RGB2BGR);
-                                    Cv2.ImWrite(full, matBgr);
-                                }
-                            }
-                            else
-                            {
-                                Cv2.ImWrite(full, matRgb);
+                                Cv2.CvtColor(matRgb, matBgr, ColorConversionCodes.RGB2BGR);
+                                Cv2.ImWrite(full, matBgr);
                             }
                         }
                     } catch { }

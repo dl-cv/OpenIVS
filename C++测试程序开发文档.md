@@ -98,7 +98,7 @@
 - **通道缓存 `_expectedChCache`**：**-2** 未解析或已失效（`FreeModel`、对象被移动后）；**-1** 无法从模型信息识别通道（按三通道默认策略）；**1** / **3** 为从 `input_shapes` 解析得到的期望通道。首次推理时由 `resolveEffectiveInputCh()` 结合 `ParseInputChFromModelInfo` 与 `GetModelInfo()` 写入缓存。
 - **位深处理**：`Model::Infer*` 入口仅执行 `ConvertMatDepthTo8U`（16U 按 `1/256`，浮点按值域映射等），不在入口改通道顺序。
 - **通道处理**：接口内部不再根据模型信息自动执行 BGR→RGB、BGRA→RGB 或彩色转灰度；三通道输入由调用方负责整理为 RGB，单通道输入由调用方负责整理为灰度。
-- **Flow 侧约定**：`FlowGraphModel` 前端注入键 `frontend_image_color_space` 固定为 `rgb`；`model/*` 节点直接透传输入 Mat，不再隐式改通道顺序。
+- **Flow 侧约定**：`FlowGraphModel` 入口直接透传调用侧准备好的图像；`model/*` 节点不再隐式改通道顺序。
 - **与显示的关系**：右侧预览/可视化链路仍按 `ImageViewerWidget` 当前实现显示；四通道图像在显示前会转三通道 RGB 后再生成 `QImage`。
 
 - **加载模型**：

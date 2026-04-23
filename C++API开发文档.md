@@ -133,7 +133,7 @@
 
 ### 10.2 `FlowGraphModel`
 
-`FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并只预加载 `model/*` 节点；`InferInternal()` 在上下文中写入前端图像、设备和参数，并把 `frontend_image_color_space` 固定写为 `rgb` 后返回 `result_list` 与 `timing`；清理阶段只清 `ModelPool`，不调用 `Utils::FreeAllModels()`。
+`FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并只预加载 `model/*` 节点；`InferInternal()` 在上下文中写入前端图像、设备和参数后返回 `result_list` 与 `timing`；清理阶段只清 `ModelPool`，不调用 `Utils::FreeAllModels()`。
 
 ### 10.3 `ExecutionContext`
 
@@ -149,7 +149,7 @@
 
 ### 10.6 已注册 Flow 节点
 
-C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/ModelModules.cpp`、`flow/modules/OutputModules.cpp`、`flow/modules/SlidingModules.cpp`、`flow/modules/FeatureModules.cpp`、`flow/modules/PostProcessModules.cpp`、`flow/modules/RegionStrokeVisualizeTemplateModules.cpp`。当前注册集覆盖输入、模型、预处理/特征、后处理、输出与模板模块；`features/printed_template_match` 由 `features/template_match` 兼容实现。当前实现中，`input/*` 从磁盘读图时会把三/四通道输入统一整理为 RGB 语义后再入 Flow，`model/*` 入口不再隐式执行 BGR→RGB 转换，`output/save_image` 写盘前按 `frontend_image_color_space` 把 RGB 语义三通道转换回 OpenCV BGR 语义。
+C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/ModelModules.cpp`、`flow/modules/OutputModules.cpp`、`flow/modules/SlidingModules.cpp`、`flow/modules/FeatureModules.cpp`、`flow/modules/PostProcessModules.cpp`、`flow/modules/RegionStrokeVisualizeTemplateModules.cpp`。当前注册集覆盖输入、模型、预处理/特征、后处理、输出与模板模块；`features/printed_template_match` 由 `features/template_match` 兼容实现。当前实现中，`input/*` 从磁盘读图时会把三/四通道输入统一整理为 RGB 语义后再入 Flow，`model/*` 入口不再隐式执行 BGR→RGB 转换，`output/save_image` 按内部固定 RGB 语义把三通道/四通道图像转换回 OpenCV 写盘所需的 BGR 语义。
 
 ## 11. 仅 DLL 构建内部使用的类型
 
