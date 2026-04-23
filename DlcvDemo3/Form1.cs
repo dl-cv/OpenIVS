@@ -211,18 +211,26 @@ namespace DlcvDemo3
                 }
 
                 string path = (txtImagePath.Text ?? string.Empty).Trim();
-                using (Mat imageBgr = Cv2.ImRead(path, ImreadModes.Color))
+                Mat imageBgr = null;
+                Mat imageRgb = null;
+                try
                 {
+                    imageBgr = Cv2.ImRead(path, ImreadModes.Unchanged);
                     if (imageBgr == null || imageBgr.Empty())
                     {
-                        MessageBox.Show("图像解码失败或文件无效。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        MessageBox.Show("图片解码失败。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
+                    imageRgb = PrepareImageForModelInput(imageBgr);
 
-                    Mat newRgb = new Mat();
-                    Cv2.CvtColor(imageBgr, newRgb, ColorConversionCodes.BGR2RGB);
                     DisposeSpeedTestImage();
-                    speedTestImageRgb = newRgb;
+                    speedTestImageRgb = imageRgb;
+                    imageRgb = null;
+                }
+                finally
+                {
+                    imageBgr?.Dispose();
+                    imageRgb?.Dispose();
                 }
 
                 isSpeedTestRunning = true;
@@ -390,11 +398,12 @@ namespace DlcvDemo3
                     {
                         Demo3Pipeline.ReportProgress(progress, 2, "读取图片");
 
-                        string error;
-                        if (!TryLoadImageForInfer(inferImagePath, out imageBgr, out imageRgb, out error))
+                        imageBgr = Cv2.ImRead(inferImagePath, ImreadModes.Unchanged);
+                        if (imageBgr == null || imageBgr.Empty())
                         {
-                            throw new InvalidOperationException(error);
+                            throw new InvalidOperationException("图片解码失败。");
                         }
+                        imageRgb = PrepareImageForModelInput(imageBgr);
 
                         Stopwatch sw = Stopwatch.StartNew();
                         Demo3Pipeline.PipelineRunResult runResult = RunPipeline(imageRgb, model2ThreadCount, progress);
@@ -797,40 +806,6 @@ namespace DlcvDemo3
             return Demo3Pipeline.NormalizeThreadCount(requested);
         }
 
-        private static bool TryLoadImageForInfer(string path, out Mat imageBgr, out Mat imageRgb, out string error)
-        {
-            imageBgr = null;
-            imageRgb = null;
-            error = string.Empty;
-            try
-            {
-                imageBgr = Cv2.ImRead(path, ImreadModes.Unchanged);
-                if (imageBgr == null || imageBgr.Empty())
-                {
-                    error = "图片解码失败。";
-                    return false;
-                }
-
-                imageRgb = PrepareImageForModelInput(imageBgr);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = "图片读取失败: " + ex.Message;
-                if (imageBgr != null)
-                {
-                    imageBgr.Dispose();
-                    imageBgr = null;
-                }
-                if (imageRgb != null)
-                {
-                    imageRgb.Dispose();
-                    imageRgb = null;
-                }
-                return false;
-            }
-        }
-
         private static Mat PrepareImageForModelInput(Mat image)
         {
             if (image == null || image.Empty())
@@ -838,6 +813,8 @@ namespace DlcvDemo3
                 return image;
             }
 
+            // 应用层只负责把 OpenCV 读盘得到的 BGR/BGRA 颜色图整理为 RGB；
+            // 灰度图保持单通道，是否补成 RGB 由 API 根据模型输入自动处理。
             int channels = image.Channels();
             if (channels == 1)
             {
