@@ -1108,6 +1108,60 @@ namespace dlcv_infer_csharp
             return dst;
         }
 
+        private static Mat ConvertMatChannels(Mat src, int expectedChannels, List<Mat> disposables)
+        {
+            if (src == null || src.Empty()) return src;
+            if (expectedChannels != 1 && expectedChannels != 3) return src;
+
+            int srcChannels = src.Channels();
+            if (srcChannels == expectedChannels) return src;
+
+            Mat converted = null;
+            try
+            {
+                if (expectedChannels == 3)
+                {
+                    if (srcChannels == 1)
+                    {
+                        converted = new Mat();
+                        Cv2.CvtColor(src, converted, ColorConversionCodes.GRAY2RGB);
+                    }
+                    else if (srcChannels == 4)
+                    {
+                        converted = new Mat();
+                        Cv2.CvtColor(src, converted, ColorConversionCodes.BGRA2RGB);
+                    }
+                }
+                else if (expectedChannels == 1)
+                {
+                    if (srcChannels == 3)
+                    {
+                        converted = new Mat();
+                        Cv2.CvtColor(src, converted, ColorConversionCodes.RGB2GRAY);
+                    }
+                    else if (srcChannels == 4)
+                    {
+                        converted = new Mat();
+                        Cv2.CvtColor(src, converted, ColorConversionCodes.BGRA2GRAY);
+                    }
+                }
+
+                if (converted == null || converted.Empty())
+                {
+                    converted?.Dispose();
+                    return src;
+                }
+
+                disposables.Add(converted);
+                return converted;
+            }
+            catch
+            {
+                converted?.Dispose();
+                throw;
+            }
+        }
+
         private int ResolveEffectiveInputCh()
         {
             if (_expectedChCache != -2)
@@ -1141,8 +1195,9 @@ namespace dlcv_infer_csharp
         private static Mat PrepareInferImage(Mat src, int expectedChannels, List<Mat> disposables)
         {
             if (src == null || src.Empty()) return src;
-            // 通道顺序与通道数由调用方负责准备；接口层只统一位深。
-            return ConvertMatDepthTo8U(src, disposables);
+            // 接口层统一位深，并按模型输入通道数做最小必要规整（例如 1->3 通道复制）。
+            Mat normalizedDepth = ConvertMatDepthTo8U(src, disposables);
+            return ConvertMatChannels(normalizedDepth, expectedChannels, disposables);
         }
 
         private List<Mat> PrepareInferImages(IList<Mat> images, out List<Mat> disposables)
@@ -1876,7 +1931,16 @@ namespace dlcv_infer_csharp
             Utils.CSharpResult result = default(Utils.CSharpResult);
             if (_isDvsMode)
             {
-                result = _dvsModel.InferBatch(new List<Mat> { image }, params_json);
+                List<Mat> disposables = null;
+                try
+                {
+                    var normalized = PrepareInferImages(new List<Mat> { image }, out disposables);
+                    result = _dvsModel.InferBatch(normalized, params_json);
+                }
+                finally
+                {
+                    DisposeTempMats(disposables);
+                }
             }
             else
             {
@@ -1919,7 +1983,16 @@ namespace dlcv_infer_csharp
         {
             if (_isDvsMode)
             {
-                return _dvsModel.InferBatch(image_list, params_json);
+                List<Mat> disposables = null;
+                try
+                {
+                    var normalized = PrepareInferImages(image_list, out disposables);
+                    return _dvsModel.InferBatch(normalized, params_json);
+                }
+                finally
+                {
+                    DisposeTempMats(disposables);
+                }
             }
 
             var resultTuple = InferInternal(image_list, params_json);
@@ -1965,19 +2038,28 @@ namespace dlcv_infer_csharp
 
             if (_isDvsMode)
             {
-                var res = _dvsModel.InferInternal(new List<Mat> { image }, params_json);
-                rawResults = res.Item1["result_list"] as JArray ?? new JArray();
-                
-                // DVS 模式下不需要释放非托管资源，直接处理
-                var finalResults = new JArray();
-                foreach (var item in rawResults)
+                List<Mat> disposables = null;
+                try
                 {
-                    if (item is JObject obj)
+                    var normalized = PrepareInferImages(new List<Mat> { image }, out disposables);
+                    var res = _dvsModel.InferInternal(normalized, params_json);
+                    rawResults = res.Item1["result_list"] as JArray ?? new JArray();
+
+                    // DVS 模式下不需要释放非托管资源，直接处理
+                    var finalResults = new JArray();
+                    foreach (var item in rawResults)
                     {
-                        finalResults.Add(StandardizeJsonOutput(obj, false));
+                        if (item is JObject obj)
+                        {
+                            finalResults.Add(StandardizeJsonOutput(obj, false));
+                        }
                     }
+                    return finalResults;
                 }
-                return finalResults;
+                finally
+                {
+                    DisposeTempMats(disposables);
+                }
             }
 
             var resultTuple = InferInternal(new List<Mat> { image }, params_json);
