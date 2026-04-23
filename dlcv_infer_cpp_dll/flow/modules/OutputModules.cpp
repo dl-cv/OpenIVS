@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -71,6 +72,11 @@ static std::string GetFileNameWithoutExt(const std::string& path) {
     size_t dot = name.find_last_of('.');
     if (dot == std::string::npos) return name;
     return name.substr(0, dot);
+}
+
+static std::string ToLowerCopy(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
 }
 
 static std::string SerializeTransformKeyFromAffine2x3(const std::vector<double>& a) {
@@ -196,6 +202,15 @@ public:
         std::string saveDir = ReadString("save_path", std::string());
         std::string suffix = ReadString("suffix", std::string("_out"));
         std::string fmt = ReadString("format", std::string("png"));
+        std::string flowColorSpace = "rgb";
+        try {
+            if (Context != nullptr) {
+                flowColorSpace = Context->Get<std::string>("frontend_image_color_space", std::string("rgb"));
+            }
+        } catch (...) {
+            flowColorSpace = "rgb";
+        }
+        const bool flowThreeChannelIsRgb = ToLowerCopy(flowColorSpace) == "rgb";
         if (!saveDir.empty()) {
             try { EnsureDirExists(saveDir); } catch (...) {}
         }
@@ -222,14 +237,20 @@ public:
                     const int ch = mat.channels();
                     if (ch == 4) {
                         cv::Mat bgr;
-                        cv::cvtColor(mat, bgr, cv::COLOR_BGRA2BGR);
+                        cv::cvtColor(mat, bgr, flowThreeChannelIsRgb ? cv::COLOR_RGBA2BGR : cv::COLOR_BGRA2BGR);
                         cv::imwrite(full, bgr);
                     } else if (ch == 1) {
                         cv::Mat bgr;
                         cv::cvtColor(mat, bgr, cv::COLOR_GRAY2BGR);
                         cv::imwrite(full, bgr);
                     } else {
-                        cv::imwrite(full, mat);
+                        if (flowThreeChannelIsRgb) {
+                            cv::Mat bgr;
+                            cv::cvtColor(mat, bgr, cv::COLOR_RGB2BGR);
+                            cv::imwrite(full, bgr);
+                        } else {
+                            cv::imwrite(full, mat);
+                        }
                     }
                 } catch (...) {
                 }

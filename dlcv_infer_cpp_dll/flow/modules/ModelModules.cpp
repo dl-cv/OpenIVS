@@ -375,21 +375,10 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     p["batch_size"] = effectiveBatch;
 
     std::vector<cv::Mat> rgbInputs;
-    std::vector<cv::Mat> convertedRgbToDispose;
     std::vector<ModuleImage> wraps;
     std::vector<int> sourceIndices;
     std::unordered_map<std::string, std::vector<int>> buckets;
     std::unordered_map<std::string, int> bucketAreas;
-
-    bool inputsAreRgb = false;
-    try {
-        if (Context != nullptr) {
-            const std::string colorSpace = Context->Get<std::string>("frontend_image_color_space", std::string());
-            inputsAreRgb = (colorSpace == "rgb" || colorSpace == "RGB");
-        }
-    } catch (...) {
-        inputsAreRgb = false;
-    }
 
     // 1) 收集可用输入并按 shape 分桶
     for (size_t i = 0; i < images.size(); i++) {
@@ -397,11 +386,8 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
         const cv::Mat& mat = wrap.ImageObject;
         if (mat.empty()) continue;
 
+        // 调用方负责准备通道顺序；流程模型节点直接透传输入 Mat。
         cv::Mat rgbMat = mat;
-        if (!inputsAreRgb) {
-            cv::cvtColor(mat, rgbMat, cv::COLOR_BGR2RGB);
-            convertedRgbToDispose.push_back(rgbMat);
-        }
 
         const int localIdx = static_cast<int>(rgbInputs.size());
         rgbInputs.push_back(rgbMat);

@@ -46,7 +46,7 @@ QString jsonToQStringPretty(const json& obj, int indent = 2) {
     return QString::fromUtf8(obj.dump(indent).c_str());
 }
 
-QString describeOpenCvImageForUi(const cv::Mat& m) {
+QString describeOpenCvImageForUi(const cv::Mat& m, bool threeChannelIsRgb = false) {
     if (m.empty()) {
         return QStringLiteral("(空)");
     }
@@ -77,16 +77,36 @@ QString describeOpenCvImageForUi(const cv::Mat& m) {
         chStr = QStringLiteral("单通道");
         break;
     case 3:
-        chStr = QStringLiteral("三通道(BGR)");
+        chStr = threeChannelIsRgb ? QStringLiteral("三通道(RGB)") : QStringLiteral("三通道(BGR)");
         break;
     case 4:
-        chStr = QStringLiteral("四通道(BGRA)");
+        chStr = threeChannelIsRgb ? QStringLiteral("四通道(RGBA)") : QStringLiteral("四通道(BGRA)");
         break;
     default:
         chStr = QStringLiteral("%1通道").arg(m.channels());
         break;
     }
     return chStr + QStringLiteral("，") + depthStr;
+}
+
+cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
+    if (decodedImage.empty()) {
+        return {};
+    }
+
+    if (decodedImage.channels() == 3) {
+        cv::Mat rgb;
+        cv::cvtColor(decodedImage, rgb, cv::COLOR_BGR2RGB);
+        return rgb;
+    }
+    if (decodedImage.channels() == 4) {
+        cv::Mat rgb;
+        cv::cvtColor(decodedImage, rgb, cv::COLOR_BGRA2RGB);
+        return rgb;
+    }
+
+    // 单通道与其他通道输入按原语义透传，通道规整由调用方明确控制。
+    return decodedImage;
 }
 
 }  // namespace
@@ -367,7 +387,7 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
         return false;
     }
     // Windows 下 OpenCV 的 imread(std::string) 走本地窄字符路径，Qt 这里需要用本地编码而不是 UTF-8。
-    // IMREAD_UNCHANGED：保留位深与通道（8bit/16bit、灰度/彩色/BGRA 等），规整由 dlcv_infer API 在推理前完成。
+    // IMREAD_UNCHANGED：保留位深与通道（8bit/16bit、灰度/彩色/BGRA 等），调用侧按约定转换后再送推理。
     image = cv::imread(imagePath_.toLocal8Bit().toStdString(), cv::IMREAD_UNCHANGED);
     if (image.empty()) {
         if (silentOnDecodeFail) {
@@ -502,9 +522,14 @@ void MainWindow::onInfer() {
     }
 
     const int batchSize = spinBatchSize_->value();
+    const cv::Mat inferImage = prepareImageForInference(bgrImage);
+    if (inferImage.empty()) {
+        reportError("推理失败", "输入图像通道转换失败！");
+        return;
+    }
+    const QString inferInputDesc = describeOpenCvImageForUi(inferImage, true);
     std::vector<cv::Mat> imageList;
     imageList.reserve(batchSize);
-    const cv::Mat& inferImage = bgrImage;
     for (int i = 0; i < batchSize; ++i) {
         imageList.push_back(inferImage);
     }
@@ -536,7 +561,7 @@ void MainWindow::onInfer() {
 
     QString text;
     text += QString("推理时间: %1ms\n\n").arg(elapsedMs, 0, 'f', 2);
-    text += QString("输入: %1\n\n").arg(describeOpenCvImageForUi(bgrImage));
+    text += QString("输入: %1\n\n").arg(inferInputDesc);
     text += "推理结果:\n";
     text += formatResultText(output);
     outputText_->setPlainText(text);
@@ -556,7 +581,11 @@ void MainWindow::onInferJson() {
         return;
     }
 
-    const cv::Mat& inferImage = bgrImage;
+    const cv::Mat inferImage = prepareImageForInference(bgrImage);
+    if (inferImage.empty()) {
+        reportError("推理JSON失败", "输入图像通道转换失败！");
+        return;
+    }
 
     try
     {
@@ -568,7 +597,7 @@ void MainWindow::onInferJson() {
         const json resultArray = model_->InferOneOutJson(inferImage, params);
         if (resultArray.empty()) {
             json debugObj;
-            debugObj["input"] = describeOpenCvImageForUi(bgrImage).toUtf8().toStdString();
+            debugObj["input"] = describeOpenCvImageForUi(inferImage, true).toUtf8().toStdString();
             debugObj["one_out"] = resultArray;
             outputText_->setPlainText(jsonToQStringPretty(debugObj, 2));
             return;
@@ -604,11 +633,16 @@ void MainWindow::startPressureTest() {
         reportError("启动压力测试失败", "图像解码失败！");
         return;
     }
+    const cv::Mat inferBaseImage = prepareImageForInference(bgrImage);
+    if (inferBaseImage.empty()) {
+        reportError("启动压力测试失败", "输入图像通道转换失败！");
+        return;
+    }
 
     pressureThreadCount_ = spinThreadCount_->value();
     pressureBatchSize_ = spinBatchSize_->value();
     pressureThreshold_ = spinThreshold_->value();
-    pressureBaseImage_ = bgrImage;
+    pressureBaseImage_ = inferBaseImage;
 
     pressureStopRequested_.store(false, std::memory_order_relaxed);
     pressureError_.store(false, std::memory_order_relaxed);
@@ -647,7 +681,7 @@ void MainWindow::startPressureTest() {
     const int batchSize = pressureBatchSize_;
     const double threshold = pressureThreshold_;
     const cv::Mat baseImage = pressureBaseImage_;
-    const QString pressureInputDesc = describeOpenCvImageForUi(baseImage);
+    const QString pressureInputDesc = describeOpenCvImageForUi(baseImage, true);
     dlcv_infer::Model* const modelPtr = model_.get();
 
     for (int t = 0; t < pressureThreadCount_; ++t) {

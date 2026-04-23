@@ -874,65 +874,12 @@ cv::Mat ConvertMatDepthTo8U(const cv::Mat& src) {
     return dst;
 }
 
-cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
+cv::Mat NormalizeInferInputImage(const cv::Mat& src, int /*expectedChannels*/) {
     if (src.empty()) {
         return {};
     }
-    const int ec = (expectedChannels == 1 || expectedChannels == 3) ? expectedChannels : 3;
-    cv::Mat u8 = ConvertMatDepthTo8U(src);
-    if (u8.empty()) {
-        return {};
-    }
-
-    if (ec == 3) {
-        if (u8.channels() == 1) {
-            cv::Mat rgb;
-            cv::cvtColor(u8, rgb, cv::COLOR_GRAY2RGB);
-            return rgb;
-        }
-        if (u8.channels() == 4) {
-            cv::Mat rgb;
-            cv::cvtColor(u8, rgb, cv::COLOR_RGBA2RGB);
-            return rgb;
-        }
-        if (u8.channels() == 3) {
-            return u8;
-        }
-
-        // 兜底：未知多通道时取第 0 通道并扩展到 RGB，避免引入 BGR 语义假设。
-        cv::Mat single;
-        cv::Mat rgb;
-        try {
-            cv::extractChannel(u8, single, 0);
-            cv::cvtColor(single, rgb, cv::COLOR_GRAY2RGB);
-            return rgb;
-        } catch (...) {
-            return {};
-        }
-    }
-
-    if (u8.channels() == 1) {
-        return u8;
-    }
-    if (u8.channels() == 3) {
-        cv::Mat gray;
-        cv::cvtColor(u8, gray, cv::COLOR_RGB2GRAY);
-        return gray;
-    }
-    if (u8.channels() == 4) {
-        cv::Mat gray;
-        cv::cvtColor(u8, gray, cv::COLOR_RGBA2GRAY);
-        return gray;
-    }
-
-    // 兜底：未知多通道时取第 0 通道作为灰度。
-    cv::Mat gray;
-    try {
-        cv::extractChannel(u8, gray, 0);
-        return gray;
-    } catch (...) {
-        return {};
-    }
+    // 调用方负责准备输入通道顺序与通道数；接口层仅统一位深。
+    return ConvertMatDepthTo8U(src);
 }
 
 } // namespace
