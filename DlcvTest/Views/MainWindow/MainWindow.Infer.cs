@@ -446,19 +446,26 @@ namespace DlcvTest
                                         leftImage = saveImg ? DrawLabelMeAnnotations(mat.Clone(), labelMePath, visProperties) 
                                                             : DrawLabelMeAnnotationsInPlace(mat, labelMePath, visProperties);
                                         
-                                        // 2. 右边：原图 + 推理结果绘制（需要重新读取，因为 mat 可能被修改）
+                                        // 2. 右边：原图 + 推理结果绘制
+                                        // Visualize 内部三通道现统一按 RGB 语义处理；这里只在最终写盘边界做 BGR↔RGB。
                                         using (var matForVis = saveImg ? mat.Clone() : Cv2.ImRead(imgPath, ImreadModes.Color))
+                                        using (var matForVisRgb = new Mat())
                                         {
+                                            Cv2.CvtColor(matForVis, matForVisRgb, ColorConversionCodes.BGR2RGB);
                                             var visList = Utils.VisualizeResults(
-                                                new List<Mat> { matForVis }, result, visProperties);
+                                                new List<Mat> { matForVisRgb }, result, visProperties);
                                             if (visList != null && visList.Count > 0 && visList[0] != null)
                                             {
-                                                using (var rightImage = visList[0])
-                                                // 3. 使用 HConcat 高效拼接
-                                                using (var combined = ConcatImagesHorizontallyFast(leftImage, rightImage))
+                                                using (var rightImageRgb = visList[0])
+                                                using (var rightImage = new Mat())
                                                 {
-                                                    // 4. 保存
-                                                    Cv2.ImWrite(visOutPath, combined);
+                                                    Cv2.CvtColor(rightImageRgb, rightImage, ColorConversionCodes.RGB2BGR);
+                                                    // 3. 使用 HConcat 高效拼接
+                                                    using (var combined = ConcatImagesHorizontallyFast(leftImage, rightImage))
+                                                    {
+                                                        // 4. 保存
+                                                        Cv2.ImWrite(visOutPath, combined);
+                                                    }
                                                 }
                                             }
                                         }
