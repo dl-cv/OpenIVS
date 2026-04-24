@@ -220,6 +220,8 @@ namespace DlcvModules
                             
                             // 使用 GDI+ 绘制文本（支持中文），与 WPF 预览保持一致
                             float fontSize = (float)(vis.FontScale * 26); // 转换为像素大小
+                            // GDI+ 的 24bpp 共享 Bitmap 按 BGR 字节顺序写入内存，
+                            // 这里对 RGB 语义颜色做一次 R/B 对调，保证写回 Mat 后仍保持 RGB 语义。
                             var fontColor = System.Drawing.Color.FromArgb(
                                 (int)vis.FontColor.Val2, (int)vis.FontColor.Val1, (int)vis.FontColor.Val0);
                             
@@ -345,7 +347,7 @@ namespace DlcvModules
                 BboxLineWidth = ReadInt(props, "bbox_line_width", 2),
                 FontScale = Math.Max(0.3, ReadInt(props, "font_size", 13) / 26.0),
                 FontThickness = 1,
-                BboxColor = ReadColor(props, "bbox_color", new Scalar(0, 0, 255)),
+                BboxColor = ReadColor(props, "bbox_color", new Scalar(255, 0, 0)),
                 BboxColorRot = ReadColor(props, "bbox_color_rot", new Scalar(0, 255, 0)),
                 FontColor = ReadColor(props, "font_color", new Scalar(255, 255, 255)),
                 MaskFillColor = new Scalar(0, 255, 0)
@@ -385,8 +387,8 @@ namespace DlcvModules
                     }
                     if (list.Count >= 3)
                     {
-                        // JSON 配置为 [R,G,B]，OpenCv Scalar 为 (B,G,R)
-                        return new Scalar(list[2], list[1], list[0]);
+                        // Flow/API 内部三通道统一按 RGB 语义；配置 [R,G,B] 直接映射到 Mat 三通道。
+                        return new Scalar(list[0], list[1], list[2]);
                     }
                 }
             }
@@ -403,13 +405,13 @@ namespace DlcvModules
 		}
 
         /// <summary>
-        /// 使用 GDI+ 在 Mat 上绘制文本（支持中文），与 WPF OverlayRenderer 风格一致
+        /// 使用 GDI+ 在 RGB Mat 上绘制文本（支持中文），与 WPF OverlayRenderer 风格一致
         /// </summary>
         private static void DrawTextGdiPlus(Mat mat, string text, int x, int y,
             float fontSize, System.Drawing.Color fontColor, bool withShadow)
         {
             if (mat == null || mat.Empty() || string.IsNullOrEmpty(text)) return;
-            if (mat.Channels() != 3) return; // 仅支持 BGR 图像
+            if (mat.Channels() != 3) return; // 仅支持 RGB 图像
 
             try
             {
