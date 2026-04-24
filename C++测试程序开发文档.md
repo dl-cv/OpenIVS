@@ -96,9 +96,9 @@
 
 - **适用范围**：`dlcv_infer::Model::Infer`、`InferBatch`、`InferOneOutJson` 在调用底层推理或流程图推理之前，统一走 `prepareInferInputBatch()`。
 - **通道缓存 `_expectedChCache`**：**-2** 未解析或已失效（`FreeModel`、对象被移动后）；**-1** 无法从模型信息识别通道（按三通道默认策略）；**1** / **3** 为从 `input_shapes` 解析得到的期望通道。首次推理时由 `resolveEffectiveInputCh()` 结合 `ParseInputChFromModelInfo` 与 `GetModelInfo()` 写入缓存。
-- **位深处理**：`Model::Infer*` 入口仅执行 `ConvertMatDepthTo8U`（16U 按 `1/256`，浮点按值域映射等），不在入口改通道顺序。
-- **通道处理**：接口内部不再根据模型信息自动执行 BGR→RGB、BGRA→RGB 或彩色转灰度；三通道输入由调用方负责整理为 RGB，单通道输入由调用方负责整理为灰度。
-- **Flow 侧约定**：`FlowGraphModel` 入口直接透传调用侧准备好的图像；`model/*` 节点不再隐式改通道顺序。
+- **位深处理**：`Model::Infer*` 入口先执行 `ConvertMatDepthTo8U`（16U 按 `1/256`，浮点按值域映射等）。
+- **通道处理**：调用方负责把 OpenCV 颜色图整理为 RGB；接口内部再根据模型信息做最小必要的通道规整，例如 `GRAY->RGB`、`BGRA->RGB`、`RGB->GRAY`、`BGRA->GRAY`。
+- **Flow 侧约定**：`FlowGraphModel` 入口沿用调用侧准备好的颜色顺序；`model/*` 节点不再隐式改 `BGR->RGB`，但会保留按模型输入做最小通道规整的行为。
 - **与显示的关系**：右侧预览/可视化链路仍按 `ImageViewerWidget` 当前实现显示；四通道图像在显示前会转三通道 RGB 后再生成 `QImage`。
 
 - **加载模型**：
@@ -113,7 +113,7 @@
 - **单次推理**：
   - `batch_size` 通过重复同一张图组成 batch
   - **输入图像（用户侧）**：使用 OpenCV `imread(..., IMREAD_UNCHANGED)` 解码，须支持 **8bit 灰度、8bit/16bit 彩色（含 BGR/BGRA）、16bit 单通道** 等常见格式；路径仍须 `toLocal8Bit()`（见上文 Windows 约定）。右侧预览与叠加以解码后的 `Mat` 为准（16bit 等在显示前会降为 8bit 以便 Qt 绘制）；**若为四通道，显示前会转为三通道 RGB**，因当前绘制链路仅支持三通道。
-  - **输入像素格式（推理侧）**：调用侧在送入 `dlcv_infer::Model::Infer` / `InferBatch` / `InferOneOutJson` 前执行通道整理：三通道 `BGR->RGB`、四通道 `BGRA->RGB`、单通道直接透传；接口侧仅统一位深，不再改通道顺序。左侧输出中的「输入」显示的是实际送入推理的图像描述。
+- **输入像素格式（推理侧）**：调用侧在送入 `dlcv_infer::Model::Infer` / `InferBatch` / `InferOneOutJson` 前执行颜色顺序整理：三通道 `BGR->RGB`、四通道 `BGRA->RGB`、单通道直接透传；接口侧再统一位深，并按模型输入自动补齐或压缩通道。左侧输出中的「输入」显示的是实际送入推理前、由调用侧整理后的图像描述。
   - 成功时左侧输出（格式固定）：
 
 ```text
@@ -140,7 +140,7 @@
 - **前置条件**：同上（未满足直接弹窗提示）
 - **启动行为**：
   - 读取当前图像，保存 `batch_size/threshold/threadCount`
-  - **输入图像**：与单次推理相同，先 `IMREAD_UNCHANGED` 解码，再在调用侧完成 `BGR/BGRA -> RGB` 通道整理；多线程内将同一份已整理的 `Mat`（浅拷贝头、共享像素数据）重复送入 `InferBatch`。
+- **输入图像**：与单次推理相同，先 `IMREAD_UNCHANGED` 解码，再在调用侧完成 `BGR/BGRA -> RGB` 颜色整理；多线程内将同一份已整理的 `Mat`（浅拷贝头、共享像素数据）重复送入 `InferBatch`，接口侧再按模型输入自动补齐或压缩通道。
   - 禁用：模型加载/模型信息/打开图/单次推理/推理JSON/设备下拉框/三个数值输入
   - 创建 `线程数` 个 worker：循环调用 `Model::InferBatch()`（`with_mask=false`），并累计：
     - `completedRequests`（每次 infer +1）

@@ -213,7 +213,7 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 - `VisualizeOnOriginal` 在原图上绘制 mask、轮廓、框和文本。
 - `SlidingWindow` 负责切图并写入 `sliding_meta`；`SlidingMergeResults` 负责把结果映射回原图并合并。
 - `PolyFilter` 会更新 `extra_info.polyline` 以及相关 `metadata`。
-- 读盘和写盘遵循 OpenCV 的 BGR 语义；调用方负责把三通道输入整理为 RGB、把单通道输入整理为灰度；`Model` 与 `FlowGraphModel` 入口只透传当前通道顺序，不在接口内部改通道。
+- 读盘和写盘遵循 OpenCV 的 BGR 语义；调用方负责把三/四通道颜色图整理为 RGB；`Model` 与 `FlowGraphModel` 入口会按模型输入自动做最小必要的通道规整，例如把灰度图补成 RGB、或把三/四通道图压成灰度，但不负责 BGR/BGRA 到 RGB 的颜色顺序转换。
 - 当前显式使用的标量键包括 `filename`、`has_positive`、`ok`、`detail`、`kept_count`、`removed_count`。
 - 模板相关类型为 `SimpleOcrItem`、`SimpleTemplate` 和 `SimpleTemplateMatchDetail`。
 

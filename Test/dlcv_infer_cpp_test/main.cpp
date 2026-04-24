@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <functional>
 #include <iomanip>
@@ -17,6 +18,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "../../dlcv_infer_cpp_dll/ImageInputUtils.h"
 #include "dlcv_infer.h"
 
 namespace {
@@ -949,6 +951,60 @@ int RunSlidingAlignOnce(const std::wstring& modelPath, const std::wstring& image
         return 1;
     }
 }
+
+int RunImagePrepCheck() {
+    auto fail = [](const std::string& message) -> int {
+        std::cout << "imageprepcheck 失败: " << message << "\n";
+        return 1;
+    };
+
+    {
+        cv::Mat gray16(1, 3, CV_16UC1);
+        gray16.at<std::uint16_t>(0, 0) = 0;
+        gray16.at<std::uint16_t>(0, 1) = 256;
+        gray16.at<std::uint16_t>(0, 2) = 512;
+        const cv::Mat rgb = dlcv_infer::image_input::NormalizeInferInputImage(gray16, 3);
+        if (rgb.type() != CV_8UC3) {
+            return fail("16 位灰度图转 RGB 后类型不是 CV_8UC3");
+        }
+        const cv::Vec3b p0 = rgb.at<cv::Vec3b>(0, 0);
+        const cv::Vec3b p1 = rgb.at<cv::Vec3b>(0, 1);
+        const cv::Vec3b p2 = rgb.at<cv::Vec3b>(0, 2);
+        if (p0 != cv::Vec3b(0, 0, 0) || p1 != cv::Vec3b(1, 1, 1) || p2 != cv::Vec3b(2, 2, 2)) {
+            return fail("16 位灰度图转 RGB 后像素值不符合预期");
+        }
+    }
+
+    {
+        cv::Mat bgra(1, 1, CV_8UC4);
+        bgra.at<cv::Vec4b>(0, 0) = cv::Vec4b(10, 20, 30, 200);
+        const cv::Mat rgb = dlcv_infer::image_input::NormalizeInferInputImage(bgra, 3);
+        if (rgb.type() != CV_8UC3) {
+            return fail("BGRA 转 RGB 后类型不是 CV_8UC3");
+        }
+        const cv::Vec3b pixel = rgb.at<cv::Vec3b>(0, 0);
+        if (pixel != cv::Vec3b(30, 20, 10)) {
+            return fail("BGRA 转 RGB 后像素顺序不正确");
+        }
+    }
+
+    {
+        cv::Mat rgb(1, 1, CV_8UC3);
+        rgb.at<cv::Vec3b>(0, 0) = cv::Vec3b(30, 20, 10);
+        cv::Mat expectedGray;
+        cv::cvtColor(rgb, expectedGray, cv::COLOR_RGB2GRAY);
+        const cv::Mat gray = dlcv_infer::image_input::NormalizeInferInputImage(rgb, 1);
+        if (gray.type() != CV_8UC1) {
+            return fail("RGB 转灰度后类型不是 CV_8UC1");
+        }
+        if (gray.at<std::uint8_t>(0, 0) != expectedGray.at<std::uint8_t>(0, 0)) {
+            return fail("RGB 转灰度后的像素值不正确");
+        }
+    }
+
+    std::cout << "imageprepcheck 通过\n";
+    return 0;
+}
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -984,6 +1040,10 @@ int main(int argc, char* argv[]) {
         const int runs = (argc >= 6) ? ParsePositiveIntArg(argv[5], kDefaultPressureRuns) : kDefaultPressureRuns;
         const int warmup = (argc >= 7) ? ParsePositiveIntArg(argv[6], kDefaultPressureWarmup) : kDefaultPressureWarmup;
         return RunBenchmark(modelPath, imagePath, batch, runs, warmup);
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "imageprepcheck") {
+        return RunImagePrepCheck();
     }
 
     std::cout << "==== C++ 测试程序 ====\n";

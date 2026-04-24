@@ -54,6 +54,26 @@ QString buildModelInfoText(const QString& title, const json& modelInfo) {
     }
     return title + "\n" + jsonToQStringPretty(modelInfo, 2);
 }
+
+cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
+    if (decodedImage.empty()) {
+        return {};
+    }
+
+    if (decodedImage.channels() == 3) {
+        cv::Mat rgb;
+        cv::cvtColor(decodedImage, rgb, cv::COLOR_BGR2RGB);
+        return rgb;
+    }
+    if (decodedImage.channels() == 4) {
+        cv::Mat rgb;
+        cv::cvtColor(decodedImage, rgb, cv::COLOR_BGRA2RGB);
+        return rgb;
+    }
+
+    // 应用层只负责把 OpenCV 颜色图整理为 RGB；灰度补通道由 API 按模型输入要求处理。
+    return decodedImage.clone();
+}
 }
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -306,11 +326,14 @@ bool MainWindow::ensureImageSelected() const {
 }
 
 bool MainWindow::loadCurrentImage(cv::Mat& bgrImage, cv::Mat& rgbImage) const {
-    bgrImage = cv::imread(imagePath_.toLocal8Bit().toStdString(), cv::IMREAD_COLOR);
+    bgrImage = cv::imread(imagePath_.toLocal8Bit().toStdString(), cv::IMREAD_UNCHANGED);
     if (bgrImage.empty()) {
         return false;
     }
-    cv::cvtColor(bgrImage, rgbImage, cv::COLOR_BGR2RGB);
+    rgbImage = prepareImageForInference(bgrImage);
+    if (rgbImage.empty()) {
+        return false;
+    }
     return true;
 }
 

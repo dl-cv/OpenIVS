@@ -251,11 +251,12 @@ namespace DlcvDemo2
                     {
                         ReportInferenceProgress(progress, 2, "读取图片");
 
-                        string error;
-                        if (!TryLoadImageForInfer(inferImagePath, out imageBgr, out imageRgb, out error))
+                        imageBgr = Cv2.ImRead(inferImagePath, ImreadModes.Unchanged);
+                        if (imageBgr == null || imageBgr.Empty())
                         {
-                            throw new InvalidOperationException(error);
+                            throw new InvalidOperationException("图片解码失败。");
                         }
+                        imageRgb = PrepareImageForModelInput(imageBgr);
 
                         Stopwatch sw = Stopwatch.StartNew();
                         // 颜色约定：UI 显示使用 imageBgr；送入 dvst 的整条 pipeline 使用 imageRgb（RGB）。
@@ -887,40 +888,6 @@ namespace DlcvDemo2
             }
 
             return true;
-        }
-
-        private static bool TryLoadImageForInfer(string path, out Mat imageBgr, out Mat imageRgb, out string error)
-        {
-            imageBgr = null;
-            imageRgb = null;
-            error = string.Empty;
-            try
-            {
-                imageBgr = Cv2.ImRead(path, ImreadModes.Unchanged);
-                if (imageBgr == null || imageBgr.Empty())
-                {
-                    error = "图片解码失败。";
-                    return false;
-                }
-
-                imageRgb = PrepareImageForModelInput(imageBgr);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = "图片读取失败: " + ex.Message;
-                if (imageBgr != null)
-                {
-                    imageBgr.Dispose();
-                    imageBgr = null;
-                }
-                if (imageRgb != null)
-                {
-                    imageRgb.Dispose();
-                    imageRgb = null;
-                }
-                return false;
-            }
         }
 
         private static Mat PrepareImageForModelInput(Mat image)
