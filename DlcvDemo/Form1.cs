@@ -357,16 +357,7 @@ namespace DlcvDemo
                     sb.AppendLine();
                     for (int i = 0; i < objects.Count; i++)
                     {
-                        CSharpObjectResult obj = objects[i];
-                        string extraInfoText = Utils.FormatExtraInfoForDisplay(obj.ExtraInfo);
-                        if (string.IsNullOrWhiteSpace(extraInfoText))
-                        {
-                            sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}");
-                        }
-                        else
-                        {
-                            sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}  extra_info={{ {extraInfoText} }}");
-                        }
+                        sb.AppendLine(BuildObjectResultText(i + 1, objects[i]));
                     }
                 }
                 richTextBox1.Text = sb.ToString();
@@ -375,6 +366,29 @@ namespace DlcvDemo
             {
                 ReportError("推理失败", ex);
             }
+        }
+
+        private static string BuildObjectResultText(int index, CSharpObjectResult obj)
+        {
+            StringBuilder line = new StringBuilder();
+            line.AppendFormat("[{0}] {1,-12}", index, obj.CategoryName ?? string.Empty);
+            line.AppendFormat("  category_id={0}", obj.CategoryId);
+            line.AppendFormat("  score={0:F2}", obj.Score);
+            line.AppendFormat("  area={0:F1}", obj.Area);
+            line.Append("  ");
+            line.Append(BuildResultLocationText(obj));
+            line.Append("  ");
+            line.Append(BuildResultAngleText(obj));
+            line.Append("  ");
+            line.Append(BuildResultMaskText(obj));
+
+            string extraInfoText = Utils.FormatExtraInfoForDisplay(obj.ExtraInfo);
+            if (!string.IsNullOrWhiteSpace(extraInfoText))
+            {
+                line.AppendFormat("  extra_info={{ {0} }}", extraInfoText);
+            }
+
+            return line.ToString();
         }
 
         private static string BuildResultLocationText(CSharpObjectResult obj)
@@ -387,14 +401,56 @@ namespace DlcvDemo
             bool isRotated = obj.WithAngle || obj.Bbox.Count >= 5;
             if (isRotated)
             {
+                float angle;
+                TryGetResultAngle(obj, out angle);
                 return string.Format(
                     "rbox=(cx={0:F1}, cy={1:F1}, w={2:F1}, h={3:F1}, angle={4:F3})",
-                    obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3], obj.Angle);
+                    obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3], angle);
             }
 
             return string.Format(
                 "rect=({0:F1}, {1:F1}, {2:F1}, {3:F1})",
                 obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3]);
+        }
+
+        private static string BuildResultAngleText(CSharpObjectResult obj)
+        {
+            float angle;
+            if (!TryGetResultAngle(obj, out angle))
+            {
+                return "angle=N/A";
+            }
+
+            double degrees = angle * 180.0 / Math.PI;
+            return string.Format("angle={0:F3}rad({1:F1}deg)", angle, degrees);
+        }
+
+        private static bool TryGetResultAngle(CSharpObjectResult obj, out float angle)
+        {
+            if (obj.WithAngle)
+            {
+                angle = obj.Angle;
+                return true;
+            }
+
+            if (obj.Bbox != null && obj.Bbox.Count >= 5)
+            {
+                angle = (float)obj.Bbox[4];
+                return true;
+            }
+
+            angle = 0.0f;
+            return false;
+        }
+
+        private static string BuildResultMaskText(CSharpObjectResult obj)
+        {
+            if (!obj.WithMask || obj.Mask == null)
+            {
+                return "mask=N/A";
+            }
+
+            return string.Format("mask={0}x{1}", obj.Mask.Width, obj.Mask.Height);
         }
 
         private static Mat PrepareImageForModelInput(Mat image)
