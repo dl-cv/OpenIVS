@@ -282,10 +282,10 @@
             0,
             0});
             this.numericUpDown_threshold.Minimum = new decimal(new int[] {
-            5,
             0,
             0,
-            65536});
+            0,
+            0});
             this.numericUpDown_threshold.Name = "numericUpDown_threshold";
             this.numericUpDown_threshold.Size = new System.Drawing.Size(79, 31);
             this.numericUpDown_threshold.TabIndex = 19;
@@ -294,6 +294,7 @@
             0,
             0,
             65536});
+            this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
             // 
             // button_check_dog
             // 

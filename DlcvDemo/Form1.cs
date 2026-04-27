@@ -278,6 +278,20 @@ namespace DlcvDemo
             }
         }
 
+        private void numericUpDown_threshold_ValueChanged(object sender, EventArgs e)
+        {
+            if (model == null || string.IsNullOrEmpty(image_path) || !File.Exists(image_path))
+            {
+                return;
+            }
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
+            {
+                return;
+            }
+
+            button_infer_Click(sender, e);
+        }
+
         private void button_infer_Click(object sender, EventArgs e)
         {
             try
