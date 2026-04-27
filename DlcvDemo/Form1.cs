@@ -386,15 +386,16 @@ namespace DlcvDemo
         {
             StringBuilder line = new StringBuilder();
             line.AppendFormat("[{0}] {1,-12}", index, obj.CategoryName ?? string.Empty);
-            line.AppendFormat("  category_id={0}", obj.CategoryId);
             line.AppendFormat("  score={0:F2}", obj.Score);
             line.AppendFormat("  area={0:F1}", obj.Area);
             line.Append("  ");
             line.Append(BuildResultLocationText(obj));
-            line.Append("  ");
-            line.Append(BuildResultAngleText(obj));
-            line.Append("  ");
-            line.Append(BuildResultMaskText(obj));
+            string angleText = BuildResultAngleText(obj);
+            if (!string.IsNullOrWhiteSpace(angleText))
+            {
+                line.Append("  ");
+                line.Append(angleText);
+            }
 
             string extraInfoText = Utils.FormatExtraInfoForDisplay(obj.ExtraInfo);
             if (!string.IsNullOrWhiteSpace(extraInfoText))
@@ -409,7 +410,7 @@ namespace DlcvDemo
         {
             if (!obj.WithBbox || obj.Bbox == null || obj.Bbox.Count < 4)
             {
-                return "rect=(N/A)";
+                return "bbox=(N/A)";
             }
 
             bool isRotated = obj.WithAngle || obj.Bbox.Count >= 5;
@@ -423,7 +424,7 @@ namespace DlcvDemo
             }
 
             return string.Format(
-                "rect=({0:F1}, {1:F1}, {2:F1}, {3:F1})",
+                "bbox=({0:F1}, {1:F1}, {2:F1}, {3:F1})",
                 obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3]);
         }
 
@@ -432,7 +433,7 @@ namespace DlcvDemo
             float angle;
             if (!TryGetResultAngle(obj, out angle))
             {
-                return "angle=N/A";
+                return string.Empty;
             }
 
             double degrees = angle * 180.0 / Math.PI;
@@ -455,16 +456,6 @@ namespace DlcvDemo
 
             angle = 0.0f;
             return false;
-        }
-
-        private static string BuildResultMaskText(CSharpObjectResult obj)
-        {
-            if (!obj.WithMask || obj.Mask == null)
-            {
-                return "mask=N/A";
-            }
-
-            return string.Format("mask={0}x{1}", obj.Mask.Width, obj.Mask.Height);
         }
 
         private static Mat PrepareImageForModelInput(Mat image)
