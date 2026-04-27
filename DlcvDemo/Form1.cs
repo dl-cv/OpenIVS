@@ -278,6 +278,20 @@ namespace DlcvDemo
             }
         }
 
+        private void numericUpDown_threshold_ValueChanged(object sender, EventArgs e)
+        {
+            if (model == null || string.IsNullOrEmpty(image_path) || !File.Exists(image_path))
+            {
+                return;
+            }
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
+            {
+                return;
+            }
+
+            button_infer_Click(sender, e);
+        }
+
         private void button_infer_Click(object sender, EventArgs e)
         {
             try
@@ -357,16 +371,7 @@ namespace DlcvDemo
                     sb.AppendLine();
                     for (int i = 0; i < objects.Count; i++)
                     {
-                        CSharpObjectResult obj = objects[i];
-                        string extraInfoText = Utils.FormatExtraInfoForDisplay(obj.ExtraInfo);
-                        if (string.IsNullOrWhiteSpace(extraInfoText))
-                        {
-                            sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}");
-                        }
-                        else
-                        {
-                            sb.AppendLine($"[{i + 1}] {obj.CategoryName,-12} score={obj.Score:F2}  {BuildResultLocationText(obj)}  extra_info={{ {extraInfoText} }}");
-                        }
+                        sb.AppendLine(BuildObjectResultText(i + 1, objects[i]));
                     }
                 }
                 richTextBox1.Text = sb.ToString();
@@ -377,24 +382,80 @@ namespace DlcvDemo
             }
         }
 
+        private static string BuildObjectResultText(int index, CSharpObjectResult obj)
+        {
+            StringBuilder line = new StringBuilder();
+            line.AppendFormat("[{0}] {1,-12}", index, obj.CategoryName ?? string.Empty);
+            line.AppendFormat("  score={0:F2}", obj.Score);
+            line.Append("  ");
+            line.Append(BuildResultLocationText(obj));
+            line.AppendFormat("  area={0:F1}", obj.Area);
+            string angleText = BuildResultAngleText(obj);
+            if (!string.IsNullOrWhiteSpace(angleText))
+            {
+                line.Append("  ");
+                line.Append(angleText);
+            }
+
+            string extraInfoText = Utils.FormatExtraInfoForDisplay(obj.ExtraInfo);
+            if (!string.IsNullOrWhiteSpace(extraInfoText))
+            {
+                line.AppendFormat("  extra_info={{ {0} }}", extraInfoText);
+            }
+
+            return line.ToString();
+        }
+
         private static string BuildResultLocationText(CSharpObjectResult obj)
         {
             if (!obj.WithBbox || obj.Bbox == null || obj.Bbox.Count < 4)
             {
-                return "rect=(N/A)";
+                return "bbox=(N/A)";
             }
 
             bool isRotated = obj.WithAngle || obj.Bbox.Count >= 5;
             if (isRotated)
             {
+                float angle;
+                TryGetResultAngle(obj, out angle);
                 return string.Format(
                     "rbox=(cx={0:F1}, cy={1:F1}, w={2:F1}, h={3:F1}, angle={4:F3})",
-                    obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3], obj.Angle);
+                    obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3], angle);
             }
 
             return string.Format(
-                "rect=({0:F1}, {1:F1}, {2:F1}, {3:F1})",
+                "bbox=({0:F1}, {1:F1}, {2:F1}, {3:F1})",
                 obj.Bbox[0], obj.Bbox[1], obj.Bbox[2], obj.Bbox[3]);
+        }
+
+        private static string BuildResultAngleText(CSharpObjectResult obj)
+        {
+            float angle;
+            if (!TryGetResultAngle(obj, out angle))
+            {
+                return string.Empty;
+            }
+
+            double degrees = angle * 180.0 / Math.PI;
+            return string.Format("angle={0:F3}rad({1:F1}deg)", angle, degrees);
+        }
+
+        private static bool TryGetResultAngle(CSharpObjectResult obj, out float angle)
+        {
+            if (obj.WithAngle)
+            {
+                angle = obj.Angle;
+                return true;
+            }
+
+            if (obj.Bbox != null && obj.Bbox.Count >= 5)
+            {
+                angle = (float)obj.Bbox[4];
+                return true;
+            }
+
+            angle = 0.0f;
+            return false;
         }
 
         private static Mat PrepareImageForModelInput(Mat image)

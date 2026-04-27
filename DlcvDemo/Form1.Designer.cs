@@ -1,4 +1,4 @@
-﻿namespace DlcvDemo
+namespace DlcvDemo
 {
     partial class Form1
     {
@@ -52,9 +52,14 @@
             this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
             this.button_infer_json = new System.Windows.Forms.Button();
             this.button_save_img = new System.Windows.Forms.Button();
+            this.splitContainerMain = new System.Windows.Forms.SplitContainer();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_threshold)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.splitContainerMain)).BeginInit();
+            this.splitContainerMain.Panel1.SuspendLayout();
+            this.splitContainerMain.Panel2.SuspendLayout();
+            this.splitContainerMain.SuspendLayout();
             this.SuspendLayout();
             // 
             // button_load_model
@@ -232,27 +237,23 @@
             // 
             // imagePanel1
             // 
-            this.imagePanel1.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
+            this.imagePanel1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.imagePanel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.imagePanel1.image = null;
-            this.imagePanel1.Location = new System.Drawing.Point(441, 228);
+            this.imagePanel1.Location = new System.Drawing.Point(0, 0);
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
             this.imagePanel1.Name = "imagePanel1";
             this.imagePanel1.ShowStatusText = false;
             this.imagePanel1.ShowVisualization = true;
-            this.imagePanel1.Size = new System.Drawing.Size(818, 604);
+            this.imagePanel1.Size = new System.Drawing.Size(820, 604);
             this.imagePanel1.TabIndex = 17;
             this.imagePanel1.TabStop = true;
             // 
             // richTextBox1
             // 
-            this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left)));
-            this.richTextBox1.Location = new System.Drawing.Point(12, 228);
-            this.richTextBox1.Margin = new System.Windows.Forms.Padding(3, 3, 3, 16);
+            this.richTextBox1.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.richTextBox1.Location = new System.Drawing.Point(0, 0);
             this.richTextBox1.Name = "richTextBox1";
             this.richTextBox1.Size = new System.Drawing.Size(423, 604);
             this.richTextBox1.TabIndex = 7;
@@ -282,10 +283,10 @@
             0,
             0});
             this.numericUpDown_threshold.Minimum = new decimal(new int[] {
-            5,
             0,
             0,
-            65536});
+            0,
+            0});
             this.numericUpDown_threshold.Name = "numericUpDown_threshold";
             this.numericUpDown_threshold.Size = new System.Drawing.Size(79, 31);
             this.numericUpDown_threshold.TabIndex = 19;
@@ -294,6 +295,7 @@
             0,
             0,
             65536});
+            this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
             // 
             // button_check_dog
             // 
@@ -351,6 +353,28 @@
             this.button_save_img.UseVisualStyleBackColor = true;
             this.button_save_img.Click += new System.EventHandler(this.button_save_img_Click);
             // 
+            // splitContainerMain
+            // 
+            this.splitContainerMain.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.splitContainerMain.Location = new System.Drawing.Point(12, 228);
+            this.splitContainerMain.Name = "splitContainerMain";
+            // 
+            // splitContainerMain.Panel1
+            // 
+            this.splitContainerMain.Panel1.Controls.Add(this.richTextBox1);
+            // 
+            // splitContainerMain.Panel2
+            // 
+            this.splitContainerMain.Panel2.Controls.Add(this.imagePanel1);
+            this.splitContainerMain.Panel1MinSize = 220;
+            this.splitContainerMain.Panel2MinSize = 320;
+            this.splitContainerMain.Size = new System.Drawing.Size(1247, 604);
+            this.splitContainerMain.SplitterDistance = 423;
+            this.splitContainerMain.SplitterWidth = 8;
+            this.splitContainerMain.TabIndex = 28;
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
@@ -363,7 +387,7 @@
             this.Controls.Add(this.button_check_dog);
             this.Controls.Add(this.numericUpDown_threshold);
             this.Controls.Add(this.label4);
-            this.Controls.Add(this.imagePanel1);
+            this.Controls.Add(this.splitContainerMain);
             this.Controls.Add(this.numericUpDown_batch_size);
             this.Controls.Add(this.label3);
             this.Controls.Add(this.label2);
@@ -372,7 +396,6 @@
             this.Controls.Add(this.numericUpDown_num_thread);
             this.Controls.Add(this.button_github);
             this.Controls.Add(this.button_free_model);
-            this.Controls.Add(this.richTextBox1);
             this.Controls.Add(this.button_thread_test);
             this.Controls.Add(this.button_consistency_test);
             this.Controls.Add(this.button_infer);
@@ -388,6 +411,10 @@
             this.Text = "C# 测试程序";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
+            this.splitContainerMain.Panel1.ResumeLayout(false);
+            this.splitContainerMain.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)(this.splitContainerMain)).EndInit();
+            this.splitContainerMain.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_num_thread)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_batch_size)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown_threshold)).EndInit();
@@ -420,6 +447,7 @@
         private System.Windows.Forms.CheckBox checkBox_rpc_mode;
         private System.Windows.Forms.Button button_infer_json;
         private System.Windows.Forms.Button button_save_img;
+        private System.Windows.Forms.SplitContainer splitContainerMain;
     }
 }
 

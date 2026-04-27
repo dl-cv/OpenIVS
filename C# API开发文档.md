@@ -147,6 +147,8 @@
 - DVP 模式下可由 `polygon` 反算 `bbox` 和局部 `Mask`。
 - DVT / RPC 模式下 `mask` 优先从共享内存或 `mask_ptr` 读取。
 - 无 mask 时输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`。
+- 无监督加速模型当前按实例分割结果契约返回：`task_type=实例分割` 且 `origin_task_type=us`。
+- 无监督结果按 `bbox + mask` 的实例项进入 C#，当无异常区域时对应样本 `results` 为空数组。
 
 ### `SlidingWindowModel`
 

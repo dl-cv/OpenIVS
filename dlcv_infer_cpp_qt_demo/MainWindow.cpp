@@ -164,9 +164,9 @@ void MainWindow::setupUi() {
     spinThreshold_ = new QDoubleSpinBox(this);
     spinThreshold_->setDecimals(2);
     spinThreshold_->setSingleStep(0.05);
-    spinThreshold_->setMinimum(0.05);
+    spinThreshold_->setMinimum(0.0);
     spinThreshold_->setMaximum(1.0);
-    spinThreshold_->setValue(0.05);
+    spinThreshold_->setValue(0.5);
 
     constexpr int kControlHeight = 36;
     constexpr int kButtonMinWidth = 120;
@@ -294,6 +294,12 @@ void MainWindow::bindSignals() {
     connect(buttonFreeModel_, &QPushButton::clicked, this, &MainWindow::onFreeModel);
     connect(buttonFreeAllModels_, &QPushButton::clicked, this, &MainWindow::onFreeAllModels);
     connect(buttonDoc_, &QPushButton::clicked, this, &MainWindow::onOpenDoc);
+    connect(spinThreshold_, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        if (pressureTestRunning_ || !model_ || imagePath_.isEmpty() || !QFileInfo::exists(imagePath_)) {
+            return;
+        }
+        onInfer();
+    });
 }
 
 void MainWindow::initializeDevicesAsync() {
