@@ -387,9 +387,9 @@ namespace DlcvDemo
             StringBuilder line = new StringBuilder();
             line.AppendFormat("[{0}] {1,-12}", index, obj.CategoryName ?? string.Empty);
             line.AppendFormat("  score={0:F2}", obj.Score);
-            line.AppendFormat("  area={0:F1}", obj.Area);
             line.Append("  ");
             line.Append(BuildResultLocationText(obj));
+            line.AppendFormat("  area={0:F1}", obj.Area);
             string angleText = BuildResultAngleText(obj);
             if (!string.IsNullOrWhiteSpace(angleText))
             {
