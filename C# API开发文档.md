@@ -136,7 +136,7 @@
 | --- | --- |
 | DVT | 通过 `dlcv_load_model`、`dlcv_get_model_info`、`dlcv_infer`、`dlcv_free_model_result`、`dlcv_free_model` 工作 |
 | DVP | 自动检查后端服务；服务不可用时启动 `DLCV Test.exe --keep_alive`；推理请求固定附带 `return_polygon=true` |
-| DVS | 内部创建 `DlcvModules.DvsModel`；`GetModelInfo()` 返回流程 JSON，并附加 `loaded_model_meta` |
+| DVS | 内部创建 `DlcvModules.DvsModel`；`GetModelInfo()` 返回流程 JSON，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info` |
 | RPC | 自动启动 `AIModelRPC.exe`；图像通过共享内存传输；结果中的 mask 可通过共享内存回读 |
 
 #### 输入与输出

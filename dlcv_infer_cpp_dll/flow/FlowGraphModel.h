@@ -62,6 +62,7 @@ public:
 private:
     std::vector<Json> _nodes;
     Json _root = Json::object();
+    Json _loadedModelMeta = Json::array();
     bool _loaded = false;
     // 是否由本对象负责在析构时触发全局释放（ModelPool 清理 + Utils::FreeAllModels）。
     // 注意：这是“全局释放”，若同进程中还有其它模型在用，不应让本对象过早析构。
