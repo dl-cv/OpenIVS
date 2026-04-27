@@ -138,10 +138,68 @@ namespace DlcvModules
             return _loadedModelMeta != null ? (JArray)_loadedModelMeta.DeepClone() : new JArray();
         }
 
+        private static string ResolveModelInfoKey(JObject item)
+        {
+            if (item == null) return null;
+            string name = (string)item["model_name"]
+                ?? (string)item["model_path_original"]
+                ?? (string)item["model_path"]
+                ?? (string)item["title"];
+            if (string.IsNullOrWhiteSpace(name)) return null;
+
+            try
+            {
+                string fileName = Path.GetFileName(name);
+                if (!string.IsNullOrWhiteSpace(fileName))
+                {
+                    return fileName;
+                }
+            }
+            catch
+            {
+            }
+            return name;
+        }
+
+        private JObject BuildModelInfoMap()
+        {
+            var modelInfo = new JObject();
+            if (_loadedModelMeta == null) return modelInfo;
+
+            foreach (var token in _loadedModelMeta)
+            {
+                var item = token as JObject;
+                if (item == null) continue;
+
+                string key = ResolveModelInfoKey(item);
+                if (string.IsNullOrWhiteSpace(key)) continue;
+
+                JToken info = item["model_info"];
+                if (info != null)
+                {
+                    modelInfo[key] = info.DeepClone();
+                }
+            }
+
+            return modelInfo;
+        }
+
         public JObject GetModelInfo()
         {
             if (!_loaded) throw new InvalidOperationException("模型未加载");
-            return _root ?? new JObject();
+            var root = _root != null ? (JObject)_root.DeepClone() : new JObject();
+            if (_loadedModelMeta != null && _loadedModelMeta.Count > 0)
+            {
+                root["loaded_model_meta"] = (JArray)_loadedModelMeta.DeepClone();
+            }
+
+            JObject modelInfo = BuildModelInfoMap();
+            if (modelInfo.Count > 0)
+            {
+                root["model_info"] = modelInfo;
+            }
+
+            return root;
         }
 
         public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject paramsJson)

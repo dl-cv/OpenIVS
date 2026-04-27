@@ -107,7 +107,7 @@
 
 ### 7.2 加载、释放与信息查询
 
-`.dvst/.dvso/.dvsp` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载；FlowGraph 模式创建 `flow::FlowGraphModel` 并完成归档解包后再加载。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引；`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回 `FlowGraphModel::_root`。
+`.dvst/.dvso/.dvsp` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载；FlowGraph 模式创建 `flow::FlowGraphModel` 并完成归档解包后再加载。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引；`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回流程根对象，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`。
 
 ### 7.3 推理前图像规整
 

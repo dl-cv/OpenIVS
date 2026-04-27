@@ -147,6 +147,10 @@ namespace DlcvModules
 
 					entry["model_path_original"] = originalPath ?? string.Empty;
 					entry["model_name"] = modelName ?? string.Empty;
+					if (_modelInfo != null)
+					{
+						entry["model_info"] = (JObject)_modelInfo.DeepClone();
+					}
 					list.Add(entry);
 				}
 			}
