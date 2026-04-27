@@ -222,6 +222,10 @@ void RewritePipelineModelPath(Json& pipelineRoot, const std::unordered_map<std::
         if (!props.contains("model_path") || !props.at("model_path").is_string()) continue;
 
         const std::string originalPath = props.at("model_path").get<std::string>();
+        props["model_path_original"] = originalPath;
+        const std::string originalName = GetFileNameOnly(originalPath);
+        props["model_name"] = originalName.empty() ? originalPath : originalName;
+
         auto it = fileMap.find(ToLowerAscii(originalPath));
         if (it != fileMap.end()) {
             props["model_path"] = it->second;

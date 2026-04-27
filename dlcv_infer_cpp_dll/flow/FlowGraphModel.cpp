@@ -55,6 +55,33 @@ static std::string BuildResultSignature(const FlowResultItem& item) {
     }
 }
 
+static std::string GetFileNameOnlyLocal(const std::string& path) {
+    if (path.empty()) return std::string();
+    const size_t pos = path.find_last_of("/\\");
+    if (pos == std::string::npos) return path;
+    return path.substr(pos + 1);
+}
+
+static std::string ReadStringField(const Json& obj, const char* key) {
+    try {
+        if (obj.is_object() && obj.contains(key) && obj.at(key).is_string()) {
+            return obj.at(key).get<std::string>();
+        }
+    } catch (...) {}
+    return std::string();
+}
+
+static std::string ResolveModelInfoKey(const Json& item) {
+    std::string name = ReadStringField(item, "model_name");
+    if (name.empty()) name = ReadStringField(item, "model_path_original");
+    if (name.empty()) name = ReadStringField(item, "model_path");
+    if (name.empty()) name = ReadStringField(item, "title");
+    if (name.empty()) return std::string();
+
+    const std::string fileName = GetFileNameOnlyLocal(name);
+    return fileName.empty() ? name : fileName;
+}
+
 static void AppendResultsDedup(std::vector<FlowResultItem>& target, const std::vector<FlowResultItem>& source) {
     if (source.empty()) return;
     std::unordered_set<std::string> seen;
@@ -185,6 +212,7 @@ FlowGraphModel::~FlowGraphModel() {
     ReleaseNoexcept();
     _nodes.clear();
     _root = Json::object();
+    _loadedModelMeta = Json::array();
     _loaded = false;
     _deviceId = 0;
     _flowJsonPath.clear();
@@ -193,6 +221,7 @@ FlowGraphModel::~FlowGraphModel() {
 FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     _nodes = std::move(other._nodes);
     _root = std::move(other._root);
+    _loadedModelMeta = std::move(other._loadedModelMeta);
     _loaded = other._loaded;
     _ownsGlobalModels = other._ownsGlobalModels;
     _deviceId = other._deviceId;
@@ -201,6 +230,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     // moved-from：不再负责释放（避免析构二次触发全局释放）
     other._nodes.clear();
     other._root = Json::object();
+    other._loadedModelMeta = Json::array();
     other._loaded = false;
     other._ownsGlobalModels = false;
     other._deviceId = 0;
@@ -215,6 +245,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
 
     _nodes = std::move(other._nodes);
     _root = std::move(other._root);
+    _loadedModelMeta = std::move(other._loadedModelMeta);
     _loaded = other._loaded;
     _ownsGlobalModels = other._ownsGlobalModels;
     _deviceId = other._deviceId;
@@ -222,6 +253,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
 
     other._nodes.clear();
     other._root = Json::object();
+    other._loadedModelMeta = Json::array();
     other._loaded = false;
     other._ownsGlobalModels = false;
     other._deviceId = 0;
@@ -255,6 +287,10 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
     ctx.Set<int>("device_id", deviceId);
     GraphExecutor exec(_nodes, &ctx);
     Json report = exec.LoadModels();
+    _loadedModelMeta = ctx.Get<Json>("loaded_model_meta", Json::array());
+    if (!_loadedModelMeta.is_array()) {
+        _loadedModelMeta = Json::array();
+    }
 
     // 简化错误信息（与 C# FlowGraphModel.LoadFromRoot 的思路一致）
     int code = 1;
@@ -308,7 +344,25 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
 
 Json FlowGraphModel::GetModelInfo() const {
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
-    return _root;
+    Json root = _root.is_object() ? _root : Json::object();
+    if (_loadedModelMeta.is_array() && !_loadedModelMeta.empty()) {
+        root["loaded_model_meta"] = _loadedModelMeta;
+    }
+
+    Json modelInfo = Json::object();
+    if (_loadedModelMeta.is_array()) {
+        for (const auto& item : _loadedModelMeta) {
+            if (!item.is_object() || !item.contains("model_info")) continue;
+            const std::string key = ResolveModelInfoKey(item);
+            if (key.empty()) continue;
+            modelInfo[key] = item.at("model_info");
+        }
+    }
+    if (!modelInfo.empty()) {
+        root["model_info"] = std::move(modelInfo);
+    }
+
+    return root;
 }
 
 Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Json& paramsJson) {

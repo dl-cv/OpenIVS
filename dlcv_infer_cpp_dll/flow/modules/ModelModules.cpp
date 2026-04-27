@@ -47,6 +47,13 @@ void ModelPool::Clear() {
     _cache.clear();
 }
 
+static std::string GetFileNameOnlyLocal(const std::string& path) {
+    if (path.empty()) return std::string();
+    const size_t pos = path.find_last_of("/\\");
+    if (pos == std::string::npos) return path;
+    return path.substr(pos + 1);
+}
+
 void BaseModelModule::LoadModel() {
     if (_model) return;
 
@@ -58,6 +65,48 @@ void BaseModelModule::LoadModel() {
     } catch (...) {}
 
     _model = ModelPool::Instance().Get(_modelPathUtf8, deviceId);
+
+    try {
+        if (Context != nullptr) {
+            Json loadedMeta = Context->Get<Json>("loaded_model_meta", Json::array());
+            if (!loadedMeta.is_array()) {
+                loadedMeta = Json::array();
+            }
+
+            std::string originalPath = _modelPathUtf8;
+            std::string modelName;
+            try {
+                if (Properties.is_object()) {
+                    if (Properties.contains("model_path_original") && Properties.at("model_path_original").is_string()) {
+                        originalPath = Properties.at("model_path_original").get<std::string>();
+                    }
+                    if (Properties.contains("model_name") && Properties.at("model_name").is_string()) {
+                        modelName = Properties.at("model_name").get<std::string>();
+                    }
+                }
+            } catch (...) {}
+            if (modelName.empty()) {
+                modelName = GetFileNameOnlyLocal(originalPath);
+            }
+            if (modelName.empty()) {
+                modelName = originalPath;
+            }
+
+            Json entry = Json::object();
+            entry["node_id"] = NodeId;
+            entry["title"] = Title;
+            entry["model_path"] = _modelPathUtf8;
+            entry["model_path_original"] = originalPath;
+            entry["model_name"] = modelName;
+            try {
+                entry["model_info"] = _model->GetModelInfo();
+            } catch (...) {
+            }
+            loadedMeta.push_back(std::move(entry));
+            Context->Set<Json>("loaded_model_meta", loadedMeta);
+        }
+    } catch (...) {
+    }
 }
 
 static void TryAddParam(Json& p, const Json& props, const std::string& key) {
