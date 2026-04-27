@@ -112,7 +112,7 @@ private:
     std::atomic<long long> pressureTotalFlowLatencyUs_{0};
     int pressureThreadCount_ = 1;
     int pressureBatchSize_ = 1;
-    double pressureThreshold_ = 0.05;
+    double pressureThreshold_ = 0.5;
     int pressureModelIndex_ = -1;
     cv::Mat pressureBaseImage_;
     QTimer* pressureTimer_ = nullptr;
