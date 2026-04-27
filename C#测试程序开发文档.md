@@ -282,7 +282,7 @@
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
   - **文本**：输出推理耗时及结果详情；且 `richTextBox1` 文本中必须包含字段名 `推理时间:` 与 `推理结果:`。
-  - **结果详情**：每条结果固定输出类别、分数和框信息；当 `ExtraInfo` 非空时，在同行追加 `extra_info={ ... }`，内容使用 `Utils.FormatExtraInfoForDisplay()` 生成。
+  - **结果详情**：每条结果固定输出类别、`category_id`、分数、面积、框信息、角度信息和 mask 信息；当 `ExtraInfo` 非空时，在同行追加 `extra_info={ ... }`，内容使用 `Utils.FormatExtraInfoForDisplay()` 生成。
 - **异常处理**：若图片无效或推理失败，弹窗提示错误。
 
 #### 7.7 推理 JSON（按钮：`推理JSON`）
