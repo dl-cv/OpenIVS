@@ -399,25 +399,9 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     TryAddParam(p, this->Properties, "epsilon");
     TryAddParam(p, this->Properties, "batch_size");
     const bool includeMask = p.value("with_mask", true);
-    bool requestMaskOutput = includeMask;
-    if (includeMask && Context != nullptr) {
-        try {
-            const Json inferParams = Context->Get<Json>("infer_params", Json::object());
-            if (inferParams.is_object() && inferParams.contains("with_mask")) {
-                const Json& withMaskToken = inferParams.at("with_mask");
-                if (withMaskToken.is_boolean()) {
-                    requestMaskOutput = withMaskToken.get<bool>();
-                } else if (withMaskToken.is_number_integer()) {
-                    requestMaskOutput = (withMaskToken.get<int>() != 0);
-                } else if (withMaskToken.is_string()) {
-                    const std::string s = withMaskToken.get<std::string>();
-                    requestMaskOutput = (s == "1" || s == "true" || s == "True" || s == "TRUE");
-                }
-            }
-        } catch (...) {}
-    }
-    // 内存敏感场景下，with_mask=false 时不构建 mask_rle；同时也不再计算派生 mask 元数据。
-    const bool emitMaskRle = includeMask && requestMaskOutput;
+    // 入口 infer_params.with_mask 只控制最终返回格式，不能关闭流程内部 mask_rle。
+    // 否则 mask_to_rbox 等后处理节点会拿不到分割 mask 并丢失结果。
+    const bool emitMaskRle = includeMask;
     const bool emitMaskDerivedMeta = false;
 
     const int effectiveBatch = ResolveEffectiveBatchLimit(_model, this->Properties);
