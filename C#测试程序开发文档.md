@@ -154,15 +154,15 @@
 | 快捷键 | 行为 |
 | --- | --- |
 | `V` | 切换可视化总开关（框 / Mask / polyline / 标签是否绘制） |
-| `C` | 切换标签文字显示（关闭后只显示框与 Mask，不显示类别名与分数） |
+| `C` | 标签文字显示模式循环切换：类别+分数 / 仅类别 / 不显示 |
 | `+` / `=` / 小键盘 `+` | 增大标签字体倍率（步进 `1.1`，上限 `MaxLabelFontScale = 5.0`） |
 | `-` / 小键盘 `-` | 减小标签字体倍率（步进 `1.1`，下限 `MinLabelFontScale = 0.3`） |
 | `0` / 小键盘 `0` | 重置标签字体倍率为 `1.0` |
 | `Ctrl + 滚轮` | 调整标签字体倍率，不会缩放图像 |
 
-  - 字体倍率由控件属性 `LabelFontScale` 承载，绘制时 `fontSize = Math.Max(8, 24 * LabelFontScale / scale)`，即在“反向补偿图像缩放”的基础上再乘用户倍率。
+  - 字体倍率由控件属性 `LabelFontScale` 承载，屏幕渲染字号先按 `clamp(24 * scale, 24, 128) * LabelFontScale` 计算，再除以当前图像缩放 `scale` 换算为图像空间字号，最终不小于 `VisualizationMinFontSize = 8`。
   - 标签字体倍率**只影响类别名与分数文字**的渲染大小；**不影响**边界框线宽，也**不影响**左上角状态文本（`OK` / `NG` / `No Result`）的大小。
-  - 标签文字显示由控件属性 `ShowLabelText` 承载（默认 `true`）；关闭时仍然绘制框、Mask、polyline 与状态文本。
+  - 标签文字显示由控件属性 `LabelDisplayMode` 承载（默认 `CategoryAndScore`）；`ShowLabelText` 仅作为兼容旧调用的布尔属性。关闭时仍然绘制框、Mask、polyline 与状态文本。
 
 #### 5.2 绘制规则（框/文字/Mask）
 
@@ -175,7 +175,7 @@
     - 旋转框：根据 `[cx, cy, w, h, angle]` 绘制四边形。
   - **折线**：当 `CSharpObjectResult.ExtraInfo["polyline"]` 存在且点数不少于 2 时，按原图坐标绘制开放折线。
   - **Mask**：若存在，在框内叠加半透明蒙版（仅有效区域）。
-  - **标签**：在框上方显示 `{category_name} {score:F2}`。
+  - **标签**：按 `LabelDisplayMode` 在框上方显示 `{category_name} {score:F2}`、仅 `{category_name}` 或不显示。
   - **颜色**：根据类别（OK/NG）区分颜色（如绿/红）。
   - **无结果状态**：当 `SampleResults.Count==0` 时，自动显示左上角状态文本 `No Result`（控件会将 `ShowStatusText` 置为 `true`）。
 
