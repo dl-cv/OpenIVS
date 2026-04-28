@@ -413,31 +413,51 @@ QString MainWindow::formatResultText(const dlcv_infer::Result& output) const {
     constexpr double kPi = 3.14159265358979323846;
 
     if (output.sampleResults.empty() || output.sampleResults.front().results.empty()) {
-        return "No Result";
+        return "未检测到目标。\n";
     }
 
     QString text;
     const auto& results = output.sampleResults.front().results;
-    for (const auto& obj : results) {
-        text += QString("%1, ").arg(QString::fromLocal8Bit(obj.categoryName.c_str()));
-        text += QString("Score: %1, ").arg(obj.score * 100.0f, 0, 'f', 1);
-        text += QString("Area: %1, ").arg(obj.area, 0, 'f', 1);
+    for (int i = 0; i < static_cast<int>(results.size()); ++i) {
+        const auto& obj = results[static_cast<size_t>(i)];
+        float angle = 0.0f;
+        bool hasAngle = false;
         if (obj.withAngle) {
-            const double angleDegree = obj.angle * 180.0 / kPi;
-            text += QString("Angle: %1, ").arg(angleDegree, 0, 'f', 1);
+            angle = obj.angle;
+            hasAngle = true;
+        } else if (obj.bbox.size() >= 5) {
+            angle = static_cast<float>(obj.bbox[4]);
+            hasAngle = true;
         }
-        if (!obj.bbox.empty()) {
-            text += "Bbox: [";
-            for (size_t i = 0; i < obj.bbox.size(); ++i) {
-                text += QString::number(obj.bbox[i], 'f', 1);
-                if (i + 1 < obj.bbox.size()) {
-                    text += ", ";
-                }
-            }
-            text += "], ";
+
+        text += QString("[%1] %2")
+            .arg(i + 1)
+            .arg(QString::fromLocal8Bit(obj.categoryName.c_str()), -12);
+        text += QString("  score=%1  ").arg(obj.score, 0, 'f', 2);
+
+        if (!obj.withBbox || obj.bbox.size() < 4) {
+            text += "bbox=(N/A)";
+        } else if (obj.withAngle || obj.bbox.size() >= 5) {
+            text += QString("rbox=(cx=%1, cy=%2, w=%3, h=%4, angle=%5)")
+                .arg(obj.bbox[0], 0, 'f', 1)
+                .arg(obj.bbox[1], 0, 'f', 1)
+                .arg(obj.bbox[2], 0, 'f', 1)
+                .arg(obj.bbox[3], 0, 'f', 1)
+                .arg(angle, 0, 'f', 3);
+        } else {
+            text += QString("bbox=(%1, %2, %3, %4)")
+                .arg(obj.bbox[0], 0, 'f', 1)
+                .arg(obj.bbox[1], 0, 'f', 1)
+                .arg(obj.bbox[2], 0, 'f', 1)
+                .arg(obj.bbox[3], 0, 'f', 1);
         }
-        if (obj.withMask && !obj.mask.empty()) {
-            text += QString("Mask size: %1x%2, ").arg(obj.mask.cols).arg(obj.mask.rows);
+
+        text += QString("  area=%1").arg(obj.area, 0, 'f', 1);
+        if (hasAngle) {
+            const double degrees = angle * 180.0 / kPi;
+            text += QString("  angle=%1rad(%2deg)")
+                .arg(angle, 0, 'f', 3)
+                .arg(degrees, 0, 'f', 1);
         }
         text += "\n";
     }
@@ -533,7 +553,6 @@ void MainWindow::onInfer() {
         reportError("推理失败", "输入图像通道转换失败！");
         return;
     }
-    const QString inferInputDesc = describeOpenCvImageForUi(inferImage, true);
     std::vector<cv::Mat> imageList;
     imageList.reserve(batchSize);
     for (int i = 0; i < batchSize; ++i) {
@@ -566,10 +585,17 @@ void MainWindow::onInfer() {
     imageViewer_->setImageAndResults(currentBgrImage_, firstResults);
 
     QString text;
-    text += QString("推理时间: %1ms\n\n").arg(elapsedMs, 0, 'f', 2);
-    text += QString("输入: %1\n\n").arg(inferInputDesc);
-    text += "推理结果:\n";
-    text += formatResultText(output);
+    text += QString("图片: %1\n").arg(imagePath_);
+    text += QString("batch_size: %1\n").arg(batchSize);
+    text += QString("threshold: %1\n").arg(spinThreshold_->value(), 0, 'f', 2);
+    text += QString("推理时间: %1ms\n").arg(elapsedMs, 0, 'f', 2);
+    text += QString("推理结果: %1个\n").arg(static_cast<int>(firstResults.size()));
+    if (firstResults.empty()) {
+        text += "未检测到目标。\n";
+    } else {
+        text += "\n";
+        text += formatResultText(output);
+    }
     outputText_->setPlainText(text);
 }
 
