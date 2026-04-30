@@ -924,8 +924,7 @@ namespace dlcv_infer {
         json feature_list = json::array();
         try
         {
-            sntl_admin::SNTL sntl;
-            feature_list = sntl.GetFeatureList();
+            feature_list = sntl_admin::SNTLUtils::GetFeatureList();
 
             if (std::find_if(feature_list.begin(), feature_list.end(),
                 [](const json& item) { return item.get<std::string>() == "1"; }) != feature_list.end())
