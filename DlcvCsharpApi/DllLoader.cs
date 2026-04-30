@@ -62,8 +62,7 @@ namespace dlcv_infer_csharp
             JArray feature_list = new JArray();
             try
             {
-                SNTL sNTL = new SNTL();
-                feature_list = sNTL.GetFeatureList();
+                feature_list = SNTLUtils.GetFeatureList();
 
                 if (feature_list.Any(item => item.ToString() == "1"))
                 {
@@ -150,6 +149,10 @@ namespace dlcv_infer_csharp
         private T GetDelegate<T>(IntPtr hModule, string procedureName) where T : Delegate
         {
             IntPtr pAddressOfFunctionToCall = GetProcAddress(hModule, procedureName);
+            if (pAddressOfFunctionToCall == IntPtr.Zero)
+            {
+                return null;
+            }
             return (T)Marshal.GetDelegateForFunctionPointer(pAddressOfFunctionToCall, typeof(T));
         }
 
