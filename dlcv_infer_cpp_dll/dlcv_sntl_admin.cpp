@@ -1,5 +1,288 @@
 ﻿#include "dlcv_sntl_admin.h"
 
+namespace {
+    constexpr int VIRBOX_OK = 0;
+    constexpr int VIRBOX_JSON = 2;
+
+    using VirboxClientOpenFunc = int(__stdcall *)(void** ipc);
+    using VirboxClientCloseFunc = int(__stdcall *)(void* ipc);
+    using VirboxGetAllDescriptionFunc = int(__stdcall *)(void* ipc, int format, char** desc);
+    using VirboxGetLicenseIdFunc = int(__stdcall *)(void* ipc, int format, const char* desc, char** result);
+    using VirboxGetDeviceInfoFunc = int(__stdcall *)(void* ipc, const char* desc, char** result);
+    using VirboxFreeFunc = void(__stdcall *)(void* buffer);
+
+    struct VirboxControlApi {
+        HMODULE module = NULL;
+        VirboxClientOpenFunc client_open = nullptr;
+        VirboxClientCloseFunc client_close = nullptr;
+        VirboxGetAllDescriptionFunc get_all_description = nullptr;
+        VirboxGetLicenseIdFunc get_license_id = nullptr;
+        VirboxGetDeviceInfoFunc get_device_info = nullptr;
+        VirboxFreeFunc free_buffer = nullptr;
+
+        VirboxControlApi() {
+            module = LoadLibraryA("slm_control.dll");
+            if (module == NULL)
+            {
+                module = LoadLibraryA("C:\\dlcv\\bin\\slm_control.dll");
+            }
+            if (module == NULL)
+            {
+                return;
+            }
+
+            client_open = reinterpret_cast<VirboxClientOpenFunc>(GetProcAddress(module, "slm_ctrl_client_open"));
+            client_close = reinterpret_cast<VirboxClientCloseFunc>(GetProcAddress(module, "slm_ctrl_client_close"));
+            get_all_description = reinterpret_cast<VirboxGetAllDescriptionFunc>(GetProcAddress(module, "slm_ctrl_get_all_description"));
+            get_license_id = reinterpret_cast<VirboxGetLicenseIdFunc>(GetProcAddress(module, "slm_ctrl_get_license_id"));
+            get_device_info = reinterpret_cast<VirboxGetDeviceInfoFunc>(GetProcAddress(module, "slm_ctrl_get_device_info"));
+            free_buffer = reinterpret_cast<VirboxFreeFunc>(GetProcAddress(module, "slm_ctrl_free"));
+
+            if (!client_open || !client_close || !get_all_description || !get_license_id || !get_device_info || !free_buffer)
+            {
+                FreeLibrary(module);
+                module = NULL;
+                client_open = nullptr;
+                client_close = nullptr;
+                get_all_description = nullptr;
+                get_license_id = nullptr;
+                get_device_info = nullptr;
+                free_buffer = nullptr;
+            }
+        }
+
+        ~VirboxControlApi() {
+            if (module != NULL)
+            {
+                FreeLibrary(module);
+            }
+        }
+
+        bool available() const {
+            return module != NULL;
+        }
+    };
+
+    VirboxControlApi& GetVirboxControlApi() {
+        static VirboxControlApi api;
+        return api;
+    }
+
+    nlohmann::json ParseJsonSafe(const std::string& text) {
+        try
+        {
+            return nlohmann::json::parse(text);
+        }
+        catch (...)
+        {
+            return nlohmann::json();
+        }
+    }
+
+    std::string ReadAndFree(VirboxControlApi& api, char* value) {
+        std::string text = value ? value : "";
+        if (value)
+        {
+            api.free_buffer(value);
+        }
+        return text;
+    }
+
+    std::vector<nlohmann::json> GetVirboxDescriptions(void* ipc, VirboxControlApi& api) {
+        char* desc = nullptr;
+        int status = api.get_all_description(ipc, VIRBOX_JSON, &desc);
+        if (status != VIRBOX_OK)
+        {
+            return {};
+        }
+
+        nlohmann::json root = ParseJsonSafe(ReadAndFree(api, desc));
+        if (root.is_object())
+        {
+            return { root };
+        }
+        if (!root.is_array())
+        {
+            return {};
+        }
+
+        std::vector<nlohmann::json> result;
+        for (const auto& item : root)
+        {
+            if (item.is_object())
+            {
+                result.push_back(item);
+            }
+        }
+        return result;
+    }
+
+    std::string FirstStringByKeys(const nlohmann::json& value, const std::vector<std::string>& keys) {
+        if (value.is_object())
+        {
+            for (const auto& key : keys)
+            {
+                if (value.contains(key) && !value[key].is_null())
+                {
+                    if (value[key].is_string())
+                    {
+                        return value[key].get<std::string>();
+                    }
+                    if (value[key].is_number_integer())
+                    {
+                        return std::to_string(value[key].get<long long>());
+                    }
+                }
+            }
+            for (const auto& item : value.items())
+            {
+                std::string nested = FirstStringByKeys(item.value(), keys);
+                if (!nested.empty())
+                {
+                    return nested;
+                }
+            }
+        } else if (value.is_array())
+        {
+            for (const auto& item : value)
+            {
+                std::string nested = FirstStringByKeys(item, keys);
+                if (!nested.empty())
+                {
+                    return nested;
+                }
+            }
+        }
+        return "";
+    }
+
+    void AddUnique(nlohmann::json& array, const std::string& value) {
+        if (value.empty())
+        {
+            return;
+        }
+        for (const auto& item : array)
+        {
+            if (item.is_string() && item.get<std::string>() == value)
+            {
+                return;
+            }
+        }
+        array.push_back(value);
+    }
+
+    nlohmann::json GetVirboxDeviceList() {
+        nlohmann::json devices = nlohmann::json::array();
+        auto& api = GetVirboxControlApi();
+        if (!api.available())
+        {
+            return devices;
+        }
+
+        void* ipc = nullptr;
+        if (api.client_open(&ipc) != VIRBOX_OK)
+        {
+            return devices;
+        }
+
+        try
+        {
+            for (const auto& desc : GetVirboxDescriptions(ipc, api))
+            {
+                std::string id = FirstStringByKeys(desc, { "sn", "lock_sn", "lockSn", "serial", "shell_num", "user_guid" });
+                if (id.empty())
+                {
+                    char* info = nullptr;
+                    int status = api.get_device_info(ipc, desc.dump().c_str(), &info);
+                    if (status == VIRBOX_OK)
+                    {
+                        id = FirstStringByKeys(ParseJsonSafe(ReadAndFree(api, info)), { "sn", "lock_sn", "lockSn", "serial", "shell_num" });
+                    }
+                }
+                AddUnique(devices, id);
+            }
+        }
+        catch (...)
+        {
+        }
+
+        api.client_close(ipc);
+        return devices;
+    }
+
+    void ExtractLicenseIds(const nlohmann::json& value, nlohmann::json& output) {
+        if (value.is_number_integer())
+        {
+            AddUnique(output, std::to_string(value.get<long long>()));
+            return;
+        }
+        if (value.is_string())
+        {
+            AddUnique(output, value.get<std::string>());
+            return;
+        }
+        if (value.is_array())
+        {
+            for (const auto& item : value)
+            {
+                ExtractLicenseIds(item, output);
+            }
+            return;
+        }
+        if (value.is_object())
+        {
+            for (const auto& key : { "license_id", "licenseId", "licenseid", "lic_id" })
+            {
+                if (value.contains(key))
+                {
+                    ExtractLicenseIds(value[key], output);
+                }
+            }
+            for (const auto& key : { "license_ids", "licenseIds", "licenses", "data", "result" })
+            {
+                if (value.contains(key))
+                {
+                    ExtractLicenseIds(value[key], output);
+                }
+            }
+        }
+    }
+
+    nlohmann::json GetVirboxFeatureList() {
+        nlohmann::json features = nlohmann::json::array();
+        auto& api = GetVirboxControlApi();
+        if (!api.available())
+        {
+            return features;
+        }
+
+        void* ipc = nullptr;
+        if (api.client_open(&ipc) != VIRBOX_OK)
+        {
+            return features;
+        }
+
+        try
+        {
+            for (const auto& desc : GetVirboxDescriptions(ipc, api))
+            {
+                char* result = nullptr;
+                int status = api.get_license_id(ipc, VIRBOX_JSON, desc.dump().c_str(), &result);
+                if (status == VIRBOX_OK)
+                {
+                    ExtractLicenseIds(ParseJsonSafe(ReadAndFree(api, result)), features);
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+
+        api.client_close(ipc);
+        return features;
+    }
+}
+
 // SNTLUtils的静态常量定义
 const std::string sntl_admin::SNTLUtils::DefaultScope =
 "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>"
@@ -35,26 +318,24 @@ nlohmann::json sntl_admin::SNTLUtils::GetDeviceList() {
     try
     {
         SNTL sntl;
-        nlohmann::json deviceList = sntl.GetDeviceList();
-        return deviceList;
+        return sntl.GetDeviceList();
     }
     catch (const std::exception&)
     {
-        return nlohmann::json::array();
     }
+    return nlohmann::json::array();
 }
 
 nlohmann::json sntl_admin::SNTLUtils::GetFeatureList() {
     try
     {
         SNTL sntl;
-        nlohmann::json featureList = sntl.GetFeatureList();
-        return featureList;
+        return sntl.GetFeatureList();
     }
     catch (const std::exception&)
     {
-        return nlohmann::json::array();
     }
+    return nlohmann::json::array();
 }
 
 // 简单的XML解析到JSON的函数实现
