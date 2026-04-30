@@ -28,6 +28,9 @@ namespace DlcvCSharpTest
         private const int DefaultPressureBatchSize = 128;
         private const int DefaultPressureRuns = 9;
         private const int DefaultPressureWarmup = 5;
+        private const string UsLagModelPath = @"C:\Users\Administrator\Desktop\测试无监督\测试无监督-v5_120_50.dvt";
+        private const string UsLagImagePath1 = @"C:\Users\Administrator\Desktop\测试无监督\NG1.png";
+        private const string UsLagImagePath2 = @"C:\Users\Administrator\Desktop\测试无监督\NG3.png";
 
         private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
         {
@@ -76,6 +79,11 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bench", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunBenchmarkCommand(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "us-lag-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunUsLagSelfTest();
                 }
 
                 if (args != null && args.Length >= 2)
@@ -854,6 +862,489 @@ namespace DlcvCSharpTest
             if (args == null || index < 0 || index >= args.Length) return defaultValue;
             if (int.TryParse(args[index], out int value) && value > 0) return value;
             return defaultValue;
+        }
+
+        private static int RunUsLagSelfTest()
+        {
+            Console.WriteLine("==== US 滞后一帧自测 ====");
+            Console.WriteLine("model: " + UsLagModelPath);
+            Console.WriteLine("image_1: " + UsLagImagePath1);
+            Console.WriteLine("image_2: " + UsLagImagePath2);
+
+            string[] requiredFiles =
+            {
+                UsLagModelPath,
+                UsLagImagePath1,
+                UsLagImagePath2
+            };
+            for (int i = 0; i < requiredFiles.Length; i++)
+            {
+                if (!File.Exists(requiredFiles[i]))
+                {
+                    Console.WriteLine("文件不存在: " + requiredFiles[i]);
+                    return 2;
+                }
+            }
+
+            int exitCode = 1;
+            Exception threadException = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    exitCode = ExecuteUsLagSelfTest();
+                }
+                catch (Exception ex)
+                {
+                    threadException = ex;
+                }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+
+            if (threadException != null)
+            {
+                Console.WriteLine("US 滞后一帧自测异常: " + threadException);
+                return 1;
+            }
+
+            return exitCode;
+        }
+
+        private static int ExecuteUsLagSelfTest()
+        {
+            string[] sequence =
+            {
+                UsLagImagePath1,
+                UsLagImagePath2,
+                UsLagImagePath1,
+                UsLagImagePath2
+            };
+
+            List<string> nativeSigs;
+            List<string> csharpSigs;
+            int modelCheckCode = RunUsLagModelLayerCheck(sequence, out nativeSigs, out csharpSigs);
+            if (modelCheckCode != 0)
+            {
+                return modelCheckCode;
+            }
+
+            List<string> demoViewerSigs;
+            List<string> demoJsonSigs;
+            int demoCheckCode = RunUsLagDlcvDemoCheck(sequence, out demoViewerSigs, out demoJsonSigs);
+            if (demoCheckCode != 0)
+            {
+                return demoCheckCode;
+            }
+
+            int nativeLagHits = CountCrossImageRepeat(sequence, nativeSigs);
+            int csharpLagHits = CountCrossImageRepeat(sequence, csharpSigs);
+            int viewerLagHits = CountCrossImageRepeat(sequence, demoViewerSigs);
+            int jsonLagHits = CountCrossImageRepeat(sequence, demoJsonSigs);
+            int nativeSameImageMismatch = CountSameImageMismatch(sequence, nativeSigs);
+            int csharpSameImageMismatch = CountSameImageMismatch(sequence, csharpSigs);
+            int viewerSameImageMismatch = CountSameImageMismatch(sequence, demoViewerSigs);
+            int jsonSameImageMismatch = CountSameImageMismatch(sequence, demoJsonSigs);
+
+            Console.WriteLine("native_lag_hits: " + nativeLagHits);
+            Console.WriteLine("csharp_lag_hits: " + csharpLagHits);
+            Console.WriteLine("demo_viewer_lag_hits: " + viewerLagHits);
+            Console.WriteLine("demo_json_lag_hits: " + jsonLagHits);
+            Console.WriteLine("native_same_image_mismatch: " + nativeSameImageMismatch);
+            Console.WriteLine("csharp_same_image_mismatch: " + csharpSameImageMismatch);
+            Console.WriteLine("demo_viewer_same_image_mismatch: " + viewerSameImageMismatch);
+            Console.WriteLine("demo_json_same_image_mismatch: " + jsonSameImageMismatch);
+
+            if (nativeLagHits > 0 || csharpLagHits > 0 || viewerLagHits > 0 || jsonLagHits > 0 ||
+                nativeSameImageMismatch > 0 || csharpSameImageMismatch > 0 ||
+                viewerSameImageMismatch > 0 || jsonSameImageMismatch > 0)
+            {
+                Console.WriteLine("US 滞后一帧自测失败");
+                return 1;
+            }
+
+            Console.WriteLine("US 滞后一帧自测通过");
+            return 0;
+        }
+
+        private static int RunUsLagModelLayerCheck(string[] sequence, out List<string> nativeSigs, out List<string> csharpSigs)
+        {
+            nativeSigs = new List<string>();
+            csharpSigs = new List<string>();
+
+            Model model = null;
+            try
+            {
+                model = new Model(UsLagModelPath, GpuDeviceId, false, false);
+                JObject inferParams = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = true,
+                    ["batch_size"] = 1
+                };
+
+                for (int i = 0; i < sequence.Length; i++)
+                {
+                    string imagePath = sequence[i];
+                    using (var bgr = Cv2.ImRead(imagePath, ImreadModes.Unchanged))
+                    {
+                        if (bgr == null || bgr.Empty())
+                        {
+                            throw new Exception("图像解码失败: " + imagePath);
+                        }
+
+                        using (var inferInput = PrepareDemo2ExpectedInput(bgr))
+                        {
+                            var tuple = model.InferInternal(new List<Mat> { inferInput }, inferParams);
+                            try
+                            {
+                                string nativeSig = BuildNativeResultSignature(tuple.Item1 as JObject);
+                                nativeSigs.Add(nativeSig);
+
+                                Utils.CSharpResult parsed = model.ParseToStructResult(tuple.Item1 as JObject);
+                                string csharpSig = BuildCSharpResultArraySignature(parsed);
+                                csharpSigs.Add(csharpSig);
+
+                                Console.WriteLine(
+                                    string.Format(
+                                        CultureInfo.InvariantCulture,
+                                        "round={0}, image={1}",
+                                        i + 1,
+                                        Path.GetFileName(imagePath)));
+                                Console.WriteLine("  native_sig: " + nativeSig);
+                                Console.WriteLine("  csharp_sig: " + csharpSig);
+
+                                DisposeResultMasks(parsed);
+                            }
+                            finally
+                            {
+                                if (tuple.Item2 != IntPtr.Zero)
+                                {
+                                    DllLoader.Instance.dlcv_free_model_result(tuple.Item2);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                int mismatch = 0;
+                for (int i = 0; i < nativeSigs.Count && i < csharpSigs.Count; i++)
+                {
+                    if (!string.Equals(nativeSigs[i], csharpSigs[i], StringComparison.Ordinal))
+                    {
+                        mismatch++;
+                    }
+                }
+                Console.WriteLine("native_vs_csharp_mismatch_rounds: " + mismatch);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("模型层对比异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
+        }
+
+        private static int RunUsLagDlcvDemoCheck(string[] sequence, out List<string> viewerSigs, out List<string> jsonSigs)
+        {
+            viewerSigs = new List<string>();
+            jsonSigs = new List<string>();
+
+            string demoAssemblyPath = ResolveDemoAssemblyPath();
+            if (!File.Exists(demoAssemblyPath))
+            {
+                Console.WriteLine("未找到 DlcvDemo 可执行文件: " + demoAssemblyPath);
+                Console.WriteLine("请先构建 DlcvDemo.csproj。");
+                return 2;
+            }
+
+            Assembly demoAssembly = Assembly.LoadFrom(demoAssemblyPath);
+            Type formType = demoAssembly.GetType("DlcvDemo.Form1", throwOnError: true);
+            MethodInfo inferClick = formType.GetMethod("button_infer_Click", BindingFlags.NonPublic | BindingFlags.Instance);
+            MethodInfo inferJsonClick = formType.GetMethod("button_infer_json_Click", BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo modelField = formType.GetField("model", BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo imagePathField = formType.GetField("image_path", BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo richTextField = formType.GetField("richTextBox1", BindingFlags.NonPublic | BindingFlags.Instance);
+            FieldInfo imagePanelField = formType.GetField("imagePanel1", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (inferClick == null || inferJsonClick == null ||
+                modelField == null || imagePathField == null || richTextField == null || imagePanelField == null)
+            {
+                Console.WriteLine("DlcvDemo 关键成员反射失败");
+                return 1;
+            }
+
+            object form = null;
+            Model model = null;
+            try
+            {
+                form = Activator.CreateInstance(formType);
+                model = new Model(UsLagModelPath, GpuDeviceId, false, false);
+                modelField.SetValue(form, model);
+
+                object richTextObj = richTextField.GetValue(form);
+                object imagePanelObj = imagePanelField.GetValue(form);
+                if (richTextObj == null || imagePanelObj == null)
+                {
+                    Console.WriteLine("DlcvDemo 控件实例无效");
+                    return 1;
+                }
+                PropertyInfo richTextProperty = richTextObj.GetType().GetProperty("Text", BindingFlags.Public | BindingFlags.Instance);
+                if (richTextProperty == null)
+                {
+                    Console.WriteLine("DlcvDemo richTextBox1 缺少 Text 属性");
+                    return 1;
+                }
+
+                for (int i = 0; i < sequence.Length; i++)
+                {
+                    string imagePath = sequence[i];
+                    imagePathField.SetValue(form, imagePath);
+
+                    inferClick.Invoke(form, new object[] { null, EventArgs.Empty });
+                    string inferText = Convert.ToString(richTextProperty.GetValue(richTextObj, null), CultureInfo.InvariantCulture) ?? string.Empty;
+                    string viewerSig = ExtractImagePanelCurrentResultSignature(imagePanelObj);
+                    viewerSigs.Add(viewerSig);
+
+                    inferJsonClick.Invoke(form, new object[] { null, EventArgs.Empty });
+                    string jsonText = Convert.ToString(richTextProperty.GetValue(richTextObj, null), CultureInfo.InvariantCulture) ?? string.Empty;
+                    string jsonSig = BuildJsonTextSignature(jsonText);
+                    jsonSigs.Add(jsonSig);
+
+                    Console.WriteLine(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "demo_round={0}, image={1}, text_contains_path={2}",
+                            i + 1,
+                            Path.GetFileName(imagePath),
+                            inferText.IndexOf(imagePath, StringComparison.OrdinalIgnoreCase) >= 0));
+                    Console.WriteLine("  demo_viewer_sig: " + viewerSig);
+                    Console.WriteLine("  demo_json_sig: " + jsonSig);
+                }
+
+                return 0;
+            }
+            catch (TargetInvocationException ex)
+            {
+                string msg = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+                Console.WriteLine("DlcvDemo 链路对比异常: " + msg);
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("DlcvDemo 链路对比异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                try { if (model != null) model.Dispose(); } catch { }
+                TryDispose(form);
+                ForceGc();
+            }
+        }
+
+        private static int CountCrossImageRepeat(string[] sequence, List<string> signatures)
+        {
+            int hits = 0;
+            if (sequence == null || signatures == null) return 0;
+            int n = Math.Min(sequence.Length, signatures.Count);
+            for (int i = 1; i < n; i++)
+            {
+                bool imageChanged = !string.Equals(sequence[i], sequence[i - 1], StringComparison.OrdinalIgnoreCase);
+                bool resultRepeated = string.Equals(signatures[i], signatures[i - 1], StringComparison.Ordinal);
+                if (imageChanged && resultRepeated)
+                {
+                    hits++;
+                }
+            }
+            return hits;
+        }
+
+        private static int CountSameImageMismatch(string[] sequence, List<string> signatures)
+        {
+            if (sequence == null || signatures == null) return 0;
+            int mismatch = 0;
+            var seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            int n = Math.Min(sequence.Length, signatures.Count);
+            for (int i = 0; i < n; i++)
+            {
+                string imagePath = sequence[i] ?? string.Empty;
+                string signature = signatures[i] ?? string.Empty;
+                if (!seen.TryGetValue(imagePath, out string firstSignature))
+                {
+                    seen[imagePath] = signature;
+                    continue;
+                }
+                if (!string.Equals(firstSignature, signature, StringComparison.Ordinal))
+                {
+                    mismatch++;
+                }
+            }
+            return mismatch;
+        }
+
+        private static string BuildNativeResultSignature(JObject inferResult)
+        {
+            if (inferResult == null) return string.Empty;
+            var sampleResults = inferResult["sample_results"] as JArray;
+            if (sampleResults == null || sampleResults.Count == 0) return string.Empty;
+            var firstSample = sampleResults[0] as JObject;
+            if (firstSample == null) return string.Empty;
+            var results = firstSample["results"] as JArray;
+            return BuildJsonResultArraySignature(results);
+        }
+
+        private static string BuildCSharpResultArraySignature(Utils.CSharpResult result)
+        {
+            if (result.SampleResults == null || result.SampleResults.Count == 0) return string.Empty;
+            var first = result.SampleResults[0];
+            if (first.Results == null || first.Results.Count == 0) return string.Empty;
+
+            var items = new List<string>(first.Results.Count);
+            for (int i = 0; i < first.Results.Count; i++)
+            {
+                var obj = first.Results[i];
+                items.Add(FormatResultSignatureItem(
+                    obj.CategoryId,
+                    obj.CategoryName ?? string.Empty,
+                    obj.Score,
+                    obj.Bbox,
+                    obj.WithAngle,
+                    obj.Angle));
+            }
+            items.Sort(StringComparer.Ordinal);
+            return string.Join(";", items);
+        }
+
+        private static string BuildJsonTextSignature(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            try
+            {
+                JToken token = JToken.Parse(text);
+                if (token is JArray array)
+                {
+                    return BuildJsonResultArraySignature(array);
+                }
+
+                var obj = token as JObject;
+                if (obj != null && obj["sample_results"] is JArray sampleResults && sampleResults.Count > 0)
+                {
+                    var firstSample = sampleResults[0] as JObject;
+                    if (firstSample != null)
+                    {
+                        return BuildJsonResultArraySignature(firstSample["results"] as JArray);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return string.Empty;
+        }
+
+        private static string BuildJsonResultArraySignature(JArray array)
+        {
+            if (array == null || array.Count == 0) return string.Empty;
+
+            var items = new List<string>(array.Count);
+            for (int i = 0; i < array.Count; i++)
+            {
+                var obj = array[i] as JObject;
+                if (obj == null) continue;
+                int categoryId = obj["category_id"] != null ? obj["category_id"].Value<int>() : 0;
+                string categoryName = obj["category_name"] != null ? obj["category_name"].Value<string>() : string.Empty;
+                double score = obj["score"] != null ? obj["score"].Value<double>() : 0.0;
+                List<double> bbox = ParseBbox(obj["bbox"]);
+                bool withAngle = obj["with_angle"] != null && obj["with_angle"].Value<bool>();
+                double angle = obj["angle"] != null ? obj["angle"].Value<double>() : -100.0;
+                items.Add(FormatResultSignatureItem(categoryId, categoryName, score, bbox, withAngle, angle));
+            }
+
+            items.Sort(StringComparer.Ordinal);
+            return string.Join(";", items);
+        }
+
+        private static List<double> ParseBbox(JToken bboxToken)
+        {
+            var bbox = new List<double>();
+            var arr = bboxToken as JArray;
+            if (arr == null) return bbox;
+            for (int i = 0; i < arr.Count; i++)
+            {
+                try
+                {
+                    bbox.Add(arr[i].Value<double>());
+                }
+                catch
+                {
+                    bbox.Add(0.0);
+                }
+            }
+            return bbox;
+        }
+
+        private static string FormatResultSignatureItem(int categoryId, string categoryName, double score, IList<double> bbox, bool withAngle, double angle)
+        {
+            var bboxParts = new List<string>();
+            if (bbox != null)
+            {
+                for (int i = 0; i < bbox.Count; i++)
+                {
+                    bboxParts.Add(bbox[i].ToString("F3", CultureInfo.InvariantCulture));
+                }
+            }
+            string bboxSig = string.Join(",", bboxParts);
+            double usedAngle = withAngle ? angle : -100.0;
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}|{1:F4}|{2}|{3}|{4:F4}",
+                categoryId,
+                score,
+                categoryName ?? string.Empty,
+                bboxSig,
+                usedAngle);
+        }
+
+        private static string ExtractImagePanelCurrentResultSignature(object imagePanelObj)
+        {
+            if (imagePanelObj == null) return string.Empty;
+            Type panelType = imagePanelObj.GetType();
+            FieldInfo currentResultsField = panelType.GetField("currentResults", BindingFlags.Public | BindingFlags.Instance);
+            if (currentResultsField == null) return string.Empty;
+            object boxed = currentResultsField.GetValue(imagePanelObj);
+            if (boxed is Utils.CSharpResult)
+            {
+                return BuildCSharpResultArraySignature((Utils.CSharpResult)boxed);
+            }
+            return string.Empty;
+        }
+
+        private static string ResolveDemoAssemblyPath()
+        {
+            string repoRoot = ResolveRepoRoot();
+            string[] candidates =
+            {
+                Path.Combine(repoRoot, "DlcvDemo", "bin", "C# 测试程序.exe"),
+                Path.Combine(repoRoot, "DlcvDemo", "bin", "x64", "Debug", "C# 测试程序.exe"),
+                Path.Combine(repoRoot, "DlcvDemo", "bin", "Debug", "C# 测试程序.exe")
+            };
+
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                if (File.Exists(candidates[i]))
+                {
+                    return candidates[i];
+                }
+            }
+
+            return candidates[0];
         }
 
         private static int RunModelChannelOrderSelfTest()
