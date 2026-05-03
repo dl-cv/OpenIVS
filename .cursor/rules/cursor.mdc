@@ -1,21 +1,25 @@
 ---
-description: OpenIVS 项目级开发与编译规则
+description: OpenIVS 项目开发与编译规则
 alwaysApply: true
 ---
 
 # OpenIVS 项目规则
 
-- 开始任何项目任务前先读取 `开发文档.md`。
-- 更新任何项目文档时，以 `开发文档.md` 中的文档规则为唯一规则来源，不在子文档重复书写这些规则。
-- 项目使用 `.NET Framework 4.7.2`。
-- WinForms 工程的界面定义写在 `Form1.Designer.cs`，代码逻辑写在 `Form1.cs`。
-- WPF 工程优先使用 WPF 风格实现，例如绑定显示。
-- 代码保持规范、清晰、便于开源维护。
-- 任何编译、构建、重建与发布前构建验证，必须且只能通过项目级 skill 脚本 `.cursor/skills/vs-build/scripts/build.py` 执行。
-- 收到任何编译请求时，首个动作是读取 `开发文档.md`，然后按需使用项目级 skill `vs-build`。
-- 默认构建目标为 `OpenIVS.sln`，默认参数为 `Debug`、`x64`、`Build`、`minimal`。
-- 用户明确指定 `.csproj` 时，构建该项目；明确指定 `Release`、`Rebuild`、`Clean` 等时，按要求覆盖默认参数。
-- 严禁直接使用 `msbuild`、`dotnet`、`powershell` 或其他本地 shell 命令进行编译。
-- 不描述、不提议、不规划任何绕过 skill 脚本的直接编译步骤，例如“先用 dotnet build 试一下”。
-- skill 构建脚本不可用、报错或权限不足时，立即停止构建动作并先报告，不允许切换到其他命令链路。
-- 构建配置使用 `Debug`、`x64`。
+## 项目基础
+
+- 项目使用 `.NET Framework 4.7.2`
+- WinForms 工程：界面定义在 `Form1.Designer.cs`，代码逻辑在 `Form1.cs`
+- WPF 工程优先使用 WPF 风格（绑定显示等）
+- 代码保持规范、清晰、便于开源维护
+
+## 文档规范
+
+- 开始任务前先读取 `开发文档.md`
+- 更新文档时，以 `开发文档.md` 的规则为准，不在子文档重复
+
+## 构建规则
+
+- **唯一入口**：必须使用 `.cursor/skills/vs-build/scripts/build.py` 执行编译/构建/重建
+- **默认配置**：`OpenIVS.sln`、`Debug`、`x64`、`Build`、`minimal`
+- 禁止直接使用 `msbuild`、`dotnet`、`powershell` 等命令编译
+- 构建脚本不可用或报错时，立即停止并报告
