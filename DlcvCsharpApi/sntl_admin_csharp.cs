@@ -454,20 +454,24 @@ namespace sntl_admin_csharp
             {
                 foreach (JObject desc in GetDescriptions(ipc))
                 {
-                    string id = null;
-                    // 优先调用 get_device_info 获取详细设备信息
-                    IntPtr infoPtr = IntPtr.Zero;
-                    if (getDeviceInfo(ipc, desc.ToString(Newtonsoft.Json.Formatting.None), ref infoPtr) == SS_OK)
+                    try
                     {
-                        JToken info = ParseJson(ReadAndFree(infoPtr));
-                        id = FirstStringByKeys(info, new[] { "dog_id", "sn", "lock_sn", "lockSn", "serial", "shell_num" });
+                        IntPtr infoPtr = IntPtr.Zero;
+                        if (getDeviceInfo(ipc, desc.ToString(Newtonsoft.Json.Formatting.None), ref infoPtr) == SS_OK)
+                        {
+                            string infoJson = Marshal.PtrToStringAnsi(infoPtr);
+                            freeBuffer(infoPtr);
+                            JObject infoObj = JObject.Parse(infoJson);
+                            if (infoObj["shell_num"] != null)
+                            {
+                                AddUnique(result, infoObj["shell_num"].ToString());
+                            }
+                        }
                     }
-                    // 如果 get_device_info 没有返回有效 ID，再从 description 中查找
-                    if (string.IsNullOrEmpty(id))
+                    catch (Exception ex)
                     {
-                        id = FirstStringByKeys(desc, new[] { "dog_id", "sn", "lock_sn", "lockSn", "serial", "shell_num", "user_guid" });
+                        Console.WriteLine($"Virbox GetDeviceList error: {ex.Message}");
                     }
-                    AddUnique(result, id);
                 }
             }
             finally

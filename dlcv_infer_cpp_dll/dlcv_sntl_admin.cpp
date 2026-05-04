@@ -230,24 +230,28 @@ nlohmann::json sntl_admin::Virbox::GetDeviceList() {
     {
         for (const auto& desc : GetVirboxDescriptions(ipc, api))
         {
-            std::string id;
-            // 优先调用 get_device_info 获取详细设备信息
-            char* info = nullptr;
-            int status = api.get_device_info(ipc, desc.dump().c_str(), &info);
-            if (status == VIRBOX_OK)
+            try
             {
-                id = FirstStringByKeys(ParseJsonSafe(ReadAndFree(api, info)), { "dog_id", "sn", "lock_sn", "lockSn", "serial", "shell_num" });
+                char* info = nullptr;
+                int status = api.get_device_info(ipc, desc.dump().c_str(), &info);
+                if (status == VIRBOX_OK)
+                {
+                    nlohmann::json infoObj = ParseJsonSafe(ReadAndFree(api, info));
+                    if (infoObj.is_object() && infoObj.contains("shell_num") && infoObj["shell_num"].is_string())
+                    {
+                        AddUnique(devices, infoObj["shell_num"].get<std::string>());
+                    }
+                }
             }
-            // 如果 get_device_info 没有返回有效 ID，再从 description 中查找
-            if (id.empty())
+            catch (const std::exception& ex)
             {
-                id = FirstStringByKeys(desc, { "dog_id", "sn", "lock_sn", "lockSn", "serial", "shell_num", "user_guid" });
+                std::cerr << "Virbox GetDeviceList device error: " << ex.what() << std::endl;
             }
-            AddUnique(devices, id);
         }
     }
-    catch (...)
+    catch (const std::exception& ex)
     {
+        std::cerr << "Virbox GetDeviceList loop error: " << ex.what() << std::endl;
     }
 
     api.client_close(ipc);
