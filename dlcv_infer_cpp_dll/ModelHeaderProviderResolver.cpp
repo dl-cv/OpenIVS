@@ -8,7 +8,7 @@ namespace sntl_admin {
 
     static DogProvider ParseProviderFromHeaderJson(const nlohmann::json& headerJson) {
         if (!headerJson.contains("dog_provider")) {
-            throw std::runtime_error("dog provider not found in header_json");
+            return DogProvider::Sentinel;
         }
         std::string provider = headerJson["dog_provider"].get<std::string>();
         for (auto& c : provider) {

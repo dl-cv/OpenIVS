@@ -43,7 +43,7 @@ namespace dlcv_infer_csharp
                 JObject headerJson = JObject.Parse(headerJsonStr);
                 if (!headerJson.ContainsKey("dog_provider"))
                 {
-                    throw new Exception("dog provider not found in header_json");
+                    return DogProvider.Sentinel;
                 }
 
                 string provider = headerJson["dog_provider"]?.ToString()?.ToLower() ?? "";
