@@ -99,6 +99,7 @@ namespace dlcv_infer_csharp
                         if (_modelCache.TryGetValue(cacheKey, out cachedIndex))
                         {
                             modelIndex = cachedIndex;
+                            _dllLoader = DllLoader.ForModel(modelPath);
                             TryCacheModelInfo();
                             return;
                         }
