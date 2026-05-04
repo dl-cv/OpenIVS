@@ -20,7 +20,7 @@
 
 | 目录 | 当前内容 |
 | --- | --- |
-| `DlcvCsharpApi\` | 普通模型与外部绑定层：`Model.cs`、`Utils.cs`、`DataTypes.cs`、`DllLoader.cs`、`SlidingWindowModel.cs`、`OcrWithDetModel.cs`、`sntl_admin_csharp.cs` |
+| `DlcvCsharpApi\` | 普通模型与外部绑定层：`Model.cs`、`Utils.cs`、`DataTypes.cs`、`DllLoader.cs`、`sntl_admin_csharp.cs` |
 | `DlcvCsharpApi\flow\` | 流程入口与执行框架：`FlowGraphModel.cs`、`DvsModel.cs`、`GraphExecutor.cs` |
 | `DlcvCsharpApi\flow\runtime\` | 流程运行时公共类型：`ExecutionRuntime.cs`、`ModuleRuntime.cs` |
 | `DlcvCsharpApi\flow\modules\` | 流程模块实现：`Inputs.cs`、`Models.cs`、`Outputs.cs`、`Features.cs`、`SlidingWindow.cs`、`SlidingMerge.cs`、`PolyFilter.cs`、`ResultFilterRegion.cs`、`ResultCategoryOverride.cs`、`StrokeToPoints.cs`、`Templates.cs`、`Visualize.cs`、`MaskRleUtils.cs` |
@@ -150,28 +150,7 @@
 - 无监督加速模型当前按实例分割结果契约返回：`task_type=实例分割` 且 `origin_task_type=us`。
 - 无监督结果按 `bbox + mask` 的实例项进入 C#，当无异常区域时对应样本 `results` 为空数组。
 
-### `SlidingWindowModel`
 
-`SlidingWindowModel` 继承 `Model`，构造参数包括 `modelPath`、`device_id`、窗口宽高、横纵重叠、`threshold`、`iou_threshold`、`combine_ios_threshold`。该类直接向 `dlcv_load_model` 传入 `type = "sliding_window_pipeline"` 的 JSON 配置，加载成功后从返回 JSON 中读取 `model_index`。
-
-### `OcrWithDetModel`
-
-`OcrWithDetModel` 是由一个检测模型和一个 OCR 识别模型组成的组合封装，实现了 `IDisposable`。
-
-#### 公开面
-
-`OcrWithDetModel` 的状态由 `IsDetModelLoaded`、`IsOcrModelLoaded`、`IsLoaded` 表示；配置接口为 `SetHorizontalScale()` 与 `GetHorizontalScale()`；生命周期与加载接口为 `Load()`、`FreeModel()`、`Dispose()`；信息查询接口为 `GetModelInfo()`、`GetDetModelInfo()`、`GetOcrModelInfo()`；推理接口为 `Infer()`、`InferBatch()`、`InferOneOutJson()`。`GetModelInfo()` 返回 `det_model` 与 `ocr_model` 两部分信息，任一侧查询失败时，对应节点返回 `error`。
-
-#### 推理行为
-
-- 先执行检测模型推理。
-- 对每个检测结果裁剪 ROI。
-- 旋转框通过 `WarpAffine` 直接裁剪到 `[w, h]` 尺寸。
-- 当水平缩放倍率不为 `1.0` 时，仅对裁剪图做水平缩放。
-- OCR 模型结果的首个类别名称覆盖检测结果中的 `category_name`。
-- 结构化返回结果中的 `bbox`、`with_bbox`、`with_mask`、`with_angle`、`angle` 继承检测模型结果。
-
-### `FlowGraphModel`
 
 `FlowGraphModel` 是流程图推理封装类，实现了 `IDisposable`。当前实现文件为 `DlcvCsharpApi\flow\FlowGraphModel.cs`。
 
