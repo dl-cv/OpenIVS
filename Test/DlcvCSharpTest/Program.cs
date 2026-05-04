@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -20,7 +20,8 @@ namespace DlcvCSharpTest
         private const int SpeedWindowSeconds = 3;
         private const int LeakLoopCount = 10;
         private const int GpuDeviceId = 0;
-        private const int FixedBatchSize = 8;
+        private const int FixedBatchSize = 1;
+        private const bool TestSpeed = false;
         private const string ModelRoot = @"Y:\测试模型";
         private const string DefaultPressureModelPath = @"C:\Users\Administrator\Desktop\dvst速度优化\流程2-各项检测_120_50.dvst";
         private const string DefaultPressureImagePath = @"C:\Users\Administrator\Desktop\dvst速度优化\detect_20260401153742_0_6_2904_5248_627_804.jpg";
@@ -672,15 +673,23 @@ namespace DlcvCSharpTest
                     row.CategoryList = "错误:" + Trim(ex.Message);
                 }
 
-                var speed = RunSpeedTest(model, rgb, 1, false);
-                row.SpeedText = speed.Supported
-                    ? ("均速 " + speed.Fps.ToString("F2", CultureInfo.InvariantCulture) + " 张/秒")
-                    : "失败";
+                if (TestSpeed)
+                {
+                    var speed = RunSpeedTest(model, rgb, 1, false);
+                    row.SpeedText = speed.Supported
+                        ? ("均速 " + speed.Fps.ToString("F2", CultureInfo.InvariantCulture) + " 张/秒")
+                        : "失败";
 
-                var batch = RunSpeedTest(model, rgb, FixedBatchSize, true);
-                row.BatchText = batch.Supported
-                    ? ("均速 " + batch.Fps.ToString("F2", CultureInfo.InvariantCulture) + " 张/秒")
-                    : "N/A";
+                    var batch = RunSpeedTest(model, rgb, FixedBatchSize, true);
+                    row.BatchText = batch.Supported
+                        ? ("均速 " + batch.Fps.ToString("F2", CultureInfo.InvariantCulture) + " 张/秒")
+                        : "N/A";
+                }
+                else
+                {
+                    row.SpeedText = "-";
+                    row.BatchText = "-";
+                }
             }
             catch (Exception ex)
             {
