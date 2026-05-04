@@ -193,7 +193,16 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 
 ### `DllLoader`
 
-`DllLoader` 是 provider-aware 原生入口分发器。`ForProvider(DogProvider)` 按 provider 返回对应 loader：`sentinel` 加载 `dlcv_infer.dll`，`virbox` 加载 `dlcv_infer_v.dll`。`ForModel(string)` 先读取模型包 `header_json.dog_provider`，再调用 `ForProvider`。每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续 `GetModelInfoDvt`、`InferInternalDvt`、`FreeModel` 都走该 loader。`Utils` 的 `FreeAllModels`、`GetDeviceInfo`、`KeepMaxClock` 遍历所有已创建 loader 执行。
+`DllLoader` 是 provider-aware 原生入口分发器。`ForProvider(DogProvider)` 按 provider 返回对应 loader：`sentinel` 加载 `dlcv_infer.dll`，`virbox` 加载 `dlcv_infer_v.dll`。
+
+`ForModel(string)` 的加载策略：
+- 先通过 `ModelHeaderProviderResolver.TryResolveExplicitProvider` 判断模型头是否**明确指定**了 `dog_provider`。
+- 若**明确指定**（`sentinel` 或 `virbox`），则校验对应加密狗是否存在；不存在时抛出异常，不静默 fallback。
+- 若**未指定**（旧模型或省略该字段），则调用 `AutoDetectProvider()` 自动检测当前插入的加密狗，按 **Sentinel 优先、Virbox 第二** 的顺序选择 Provider；检测不到任何狗时，默认使用 Sentinel。
+
+`Instance`（兼容旧代码的单例）在首次创建时同样调用 `AutoDetectProvider()`，而非硬编码 Sentinel。
+
+每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续 `GetModelInfoDvt`、`InferInternalDvt`、`FreeModel` 都走该 loader。`Utils` 的 `FreeAllModels`、`GetDeviceInfo`、`KeepMaxClock` 遍历所有已创建 loader 执行。
 
 ### `sntl_admin_csharp`
 
