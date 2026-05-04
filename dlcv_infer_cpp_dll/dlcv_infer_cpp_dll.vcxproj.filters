@@ -21,12 +21,18 @@
     <ClCompile Include="dlcv_sntl_admin.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="ModelHeaderProviderResolver.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dlcv_infer.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="dlcv_sntl_admin.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ModelHeaderProviderResolver.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

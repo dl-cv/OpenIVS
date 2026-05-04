@@ -386,30 +386,44 @@ namespace dlcv_infer_csharp
 
         public static void FreeAllModels()
         {
-            DllLoader.Instance.dlcv_free_all_models();
+            foreach (var loader in DllLoader.GetAllLoaders())
+            {
+                loader.dlcv_free_all_models?.Invoke();
+            }
         }
 
         public static JObject GetDeviceInfo()
         {
-            var loader = DllLoader.Instance;
-            IntPtr resultPtr = IntPtr.Zero;
-            if (loader.dlcv_get_gpu_info != null)
+            // 若尚未创建任何 loader，通过 Instance 触发默认 Sentinel loader，确保底层 DLL 已被加载
+            var loaders = DllLoader.GetAllLoaders();
+            if (loaders.Count == 0)
             {
-                resultPtr = loader.dlcv_get_gpu_info();
-            }
-            else if (loader.dlcv_get_device_info != null)
-            {
-                resultPtr = loader.dlcv_get_device_info();
-            }
-            else
-            {
-                return JObject.FromObject(new { code = -1, message = "dlcv_get_gpu_info 与 dlcv_get_device_info 均不可用" });
+                var _ = DllLoader.Instance;
+                loaders = DllLoader.GetAllLoaders();
             }
 
-            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-            var resultObject = JObject.Parse(resultJson);
-            loader.dlcv_free_result(resultPtr);
-            return resultObject;
+            foreach (var loader in loaders)
+            {
+                IntPtr resultPtr = IntPtr.Zero;
+                if (loader.dlcv_get_gpu_info != null)
+                {
+                    resultPtr = loader.dlcv_get_gpu_info();
+                }
+                else if (loader.dlcv_get_device_info != null)
+                {
+                    resultPtr = loader.dlcv_get_device_info();
+                }
+                else
+                {
+                    continue;
+                }
+
+                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                var resultObject = JObject.Parse(resultJson);
+                loader.dlcv_free_result(resultPtr);
+                return resultObject;
+            }
+            return JObject.FromObject(new { code = -1, message = "dlcv_get_gpu_info 与 dlcv_get_device_info 均不可用" });
         }
 
         /// <summary>

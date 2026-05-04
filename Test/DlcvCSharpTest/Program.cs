@@ -261,6 +261,7 @@ namespace DlcvCSharpTest
             try
             {
                 model = new Model(modelPath, GpuDeviceId, false, false);
+                Console.WriteLine("provider=" + model.LoadedDogProvider + ", dll=" + model.LoadedNativeDllName);
                 bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
                 if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
                 rgb = new Mat();
@@ -412,6 +413,7 @@ namespace DlcvCSharpTest
             try
             {
                 model = new Model(modelPath, GpuDeviceId, false, false);
+                Console.WriteLine("provider=" + model.LoadedDogProvider + ", dll=" + model.LoadedNativeDllName);
                 bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
                 if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
                 rgb = new Mat();
@@ -548,6 +550,7 @@ namespace DlcvCSharpTest
             try
             {
                 model = new Model(modelPath, GpuDeviceId, false, false);
+                Console.WriteLine("provider=" + model.LoadedDogProvider + ", dll=" + model.LoadedNativeDllName);
                 bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
                 if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
                 rgb = new Mat();
@@ -635,7 +638,9 @@ namespace DlcvCSharpTest
             swLoad.Stop();
             var memAfter = MemorySnapshot.Capture();
             row.LoadStatus = row.LoadStatus + "(" + swLoad.Elapsed.TotalMilliseconds.ToString("F2", CultureInfo.InvariantCulture) + "ms,Δ"
-                + (memAfter.PrivateMb - memBefore.PrivateMb).ToString("F2", CultureInfo.InvariantCulture) + "MB)";
+                + (memAfter.PrivateMb - memBefore.PrivateMb).ToString("F2", CultureInfo.InvariantCulture) + "MB"
+                + (model != null && model.modelIndex != -1 ? ",provider=" + model.LoadedDogProvider + ",dll=" + model.LoadedNativeDllName : "")
+                + ")";
 
             if (model == null || model.modelIndex == -1)
             {

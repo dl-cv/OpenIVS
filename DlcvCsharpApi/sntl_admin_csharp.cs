@@ -374,7 +374,7 @@ namespace sntl_admin_csharp
         #endregion
     }
 
-    internal class VirboxControl
+    public class Virbox
     {
         private const string DllName = "slm_control.dll";
         private const string DllPath = @"C:\dlcv\bin\slm_control.dll";
@@ -407,7 +407,7 @@ namespace sntl_admin_csharp
         private readonly GetDeviceInfoDelegate getDeviceInfo;
         private readonly FreeDelegate freeBuffer;
 
-        public VirboxControl()
+        public Virbox()
         {
             hModule = LoadLibrary(DllName);
             if (hModule == IntPtr.Zero)
@@ -669,6 +669,85 @@ namespace sntl_admin_csharp
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
     }
 
+    public enum DogProvider
+    {
+        Sentinel,
+        Virbox
+    }
+
+    public class DogInfo
+    {
+        public DogProvider Provider { get; set; }
+        public JArray Devices { get; set; }
+        public JArray Features { get; set; }
+    }
+
+    public class DogUtils
+    {
+        public static DogInfo GetSentinelInfo()
+        {
+            try
+            {
+                using (SNTL sntl = new SNTL())
+                {
+                    JArray devices = sntl.GetDeviceList();
+                    JArray features = sntl.GetFeatureList();
+                    if ((devices != null && devices.Count > 0) || (features != null && features.Count > 0))
+                    {
+                        return new DogInfo { Provider = DogProvider.Sentinel, Devices = devices, Features = features };
+                    }
+                }
+            }
+            catch
+            {
+            }
+            return null;
+        }
+
+        public static DogInfo GetVirboxInfo()
+        {
+            try
+            {
+                Virbox virbox = new Virbox();
+                JArray devices = virbox.GetDeviceList();
+                JArray features = virbox.GetFeatureList();
+                if ((devices != null && devices.Count > 0) || (features != null && features.Count > 0))
+                {
+                    return new DogInfo { Provider = DogProvider.Virbox, Devices = devices, Features = features };
+                }
+            }
+            catch
+            {
+            }
+            return null;
+        }
+
+        public static List<DogProvider> GetAvailableProviders()
+        {
+            List<DogProvider> providers = new List<DogProvider>();
+            if (GetSentinelInfo() != null) providers.Add(DogProvider.Sentinel);
+            if (GetVirboxInfo() != null) providers.Add(DogProvider.Virbox);
+            return providers;
+        }
+
+        public static JObject GetAllDogInfo()
+        {
+            JObject result = new JObject();
+            DogInfo sentinel = GetSentinelInfo();
+            DogInfo virbox = GetVirboxInfo();
+
+            result["sentinel"] = sentinel != null
+                ? new JObject { ["devices"] = sentinel.Devices, ["features"] = sentinel.Features }
+                : new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
+
+            result["virbox"] = virbox != null
+                ? new JObject { ["devices"] = virbox.Devices, ["features"] = virbox.Features }
+                : new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
+
+            return result;
+        }
+    }
+
     public class SNTLUtils
     {
         /// <summary>
@@ -707,36 +786,30 @@ namespace sntl_admin_csharp
         {
             try
             {
-                SNTL sntl = new SNTL();
-                JArray deviceList = sntl.GetDeviceList();
-                sntl.Dispose();
-                if (deviceList.Count > 0)
+                using (SNTL sntl = new SNTL())
                 {
-                    return deviceList;
+                    return sntl.GetDeviceList();
                 }
             }
             catch
             {
             }
-            return new VirboxControl().GetDeviceList();
+            return new JArray();
         }
 
         public static JArray GetFeatureList()
         {
             try
             {
-                SNTL sntl = new SNTL();
-                JArray featureList = sntl.GetFeatureList();
-                sntl.Dispose();
-                if (featureList.Count > 0)
+                using (SNTL sntl = new SNTL())
                 {
-                    return featureList;
+                    return sntl.GetFeatureList();
                 }
             }
             catch
             {
             }
-            return new VirboxControl().GetFeatureList();
+            return new JArray();
         }
     }
 }

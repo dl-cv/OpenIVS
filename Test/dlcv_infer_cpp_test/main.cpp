@@ -51,6 +51,14 @@ struct ModelCase {
     std::wstring imageFile;
 };
 
+std::string DogProviderToString(sntl_admin::DogProvider p) {
+    switch (p) {
+        case sntl_admin::DogProvider::Sentinel: return "sentinel";
+        case sntl_admin::DogProvider::Virbox: return "virbox";
+        default: return "unknown";
+    }
+}
+
 const std::vector<ModelCase> kCases = {
     {L"AOI-旋转框检测.dvt", L"AOI-测试.jpg"},
     {L"猫狗-分类.dvt", L"猫狗-猫.jpg"},
@@ -499,6 +507,10 @@ int RunDemo3Validation(
     try {
         dlcv_infer::Model model1(model1Path, kGpuDeviceId);
         dlcv_infer::Model model2(model2Path, kGpuDeviceId);
+        std::cout << "model1 provider=" << DogProviderToString(model1.LoadedDogProvider())
+                  << ", dll=" << model1.LoadedNativeDllName() << "\n";
+        std::cout << "model2 provider=" << DogProviderToString(model2.LoadedDogProvider())
+                  << ", dll=" << model2.LoadedNativeDllName() << "\n";
 
         cv::Mat singleBgr = LoadImageByDecode(model2SingleImagePath);
         if (singleBgr.empty()) throw std::runtime_error("模型2单图解码失败");
@@ -706,7 +718,8 @@ CaseRow RunCase(const std::wstring& modelPath, const std::wstring& imagePath) {
     const bool loadOk = model && model->modelIndex != -1;
     row.loadText = std::string(loadOk ? "成功" : "失败") + "(" +
                    std::to_string(std::chrono::duration<double, std::milli>(t1 - t0).count()) + "ms,Δ" +
-                   std::to_string(memAfter.privateMb - memBefore.privateMb) + "MB)";
+                   std::to_string(memAfter.privateMb - memBefore.privateMb) + "MB," +
+                   "provider=" + DogProviderToString(model->LoadedDogProvider()) + ",dll=" + model->LoadedNativeDllName() + ")";
     if (!loadOk) return row;
 
     cv::Mat bgr = LoadImageByDecode(imagePath);
@@ -800,6 +813,8 @@ int RunBenchmark(const std::wstring& modelPath, const std::wstring& imagePath, i
 
     try {
         dlcv_infer::Model model(modelPath, kGpuDeviceId);
+        std::cout << "provider=" << DogProviderToString(model.LoadedDogProvider())
+                  << ", dll=" << model.LoadedNativeDllName() << "\n";
         cv::Mat bgr = LoadImageByDecode(imagePath);
         if (bgr.empty()) throw std::runtime_error("图像解码失败");
         cv::Mat rgb;
@@ -909,6 +924,8 @@ int RunSlidingAlignOnce(const std::wstring& modelPath, const std::wstring& image
 
     try {
         dlcv_infer::Model model(modelPath, kGpuDeviceId);
+        std::cout << "provider=" << DogProviderToString(model.LoadedDogProvider())
+                  << ", dll=" << model.LoadedNativeDllName() << "\n";
         cv::Mat bgr = LoadImageByDecode(imagePath);
         if (bgr.empty()) throw std::runtime_error("图像解码失败");
         cv::Mat rgb;

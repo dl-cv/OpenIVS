@@ -171,45 +171,6 @@ namespace {
         array.push_back(value);
     }
 
-    nlohmann::json GetVirboxDeviceList() {
-        nlohmann::json devices = nlohmann::json::array();
-        auto& api = GetVirboxControlApi();
-        if (!api.available())
-        {
-            return devices;
-        }
-
-        void* ipc = nullptr;
-        if (api.client_open(&ipc) != VIRBOX_OK)
-        {
-            return devices;
-        }
-
-        try
-        {
-            for (const auto& desc : GetVirboxDescriptions(ipc, api))
-            {
-                std::string id = FirstStringByKeys(desc, { "sn", "lock_sn", "lockSn", "serial", "shell_num", "user_guid" });
-                if (id.empty())
-                {
-                    char* info = nullptr;
-                    int status = api.get_device_info(ipc, desc.dump().c_str(), &info);
-                    if (status == VIRBOX_OK)
-                    {
-                        id = FirstStringByKeys(ParseJsonSafe(ReadAndFree(api, info)), { "sn", "lock_sn", "lockSn", "serial", "shell_num" });
-                    }
-                }
-                AddUnique(devices, id);
-            }
-        }
-        catch (...)
-        {
-        }
-
-        api.client_close(ipc);
-        return devices;
-    }
-
     void ExtractLicenseIds(const nlohmann::json& value, nlohmann::json& output) {
         if (value.is_number_integer())
         {
@@ -248,39 +209,80 @@ namespace {
         }
     }
 
-    nlohmann::json GetVirboxFeatureList() {
-        nlohmann::json features = nlohmann::json::array();
-        auto& api = GetVirboxControlApi();
-        if (!api.available())
-        {
-            return features;
-        }
+}
 
-        void* ipc = nullptr;
-        if (api.client_open(&ipc) != VIRBOX_OK)
-        {
-            return features;
-        }
+// Virbox类实现
+nlohmann::json sntl_admin::Virbox::GetDeviceList() {
+    nlohmann::json devices = nlohmann::json::array();
+    auto& api = GetVirboxControlApi();
+    if (!api.available())
+    {
+        return devices;
+    }
 
-        try
+    void* ipc = nullptr;
+    if (api.client_open(&ipc) != VIRBOX_OK)
+    {
+        return devices;
+    }
+
+    try
+    {
+        for (const auto& desc : GetVirboxDescriptions(ipc, api))
         {
-            for (const auto& desc : GetVirboxDescriptions(ipc, api))
+            std::string id = FirstStringByKeys(desc, { "sn", "lock_sn", "lockSn", "serial", "shell_num", "user_guid" });
+            if (id.empty())
             {
-                char* result = nullptr;
-                int status = api.get_license_id(ipc, VIRBOX_JSON, desc.dump().c_str(), &result);
+                char* info = nullptr;
+                int status = api.get_device_info(ipc, desc.dump().c_str(), &info);
                 if (status == VIRBOX_OK)
                 {
-                    ExtractLicenseIds(ParseJsonSafe(ReadAndFree(api, result)), features);
+                    id = FirstStringByKeys(ParseJsonSafe(ReadAndFree(api, info)), { "sn", "lock_sn", "lockSn", "serial", "shell_num" });
                 }
             }
+            AddUnique(devices, id);
         }
-        catch (...)
-        {
-        }
+    }
+    catch (...)
+    {
+    }
 
-        api.client_close(ipc);
+    api.client_close(ipc);
+    return devices;
+}
+
+nlohmann::json sntl_admin::Virbox::GetFeatureList() {
+    nlohmann::json features = nlohmann::json::array();
+    auto& api = GetVirboxControlApi();
+    if (!api.available())
+    {
         return features;
     }
+
+    void* ipc = nullptr;
+    if (api.client_open(&ipc) != VIRBOX_OK)
+    {
+        return features;
+    }
+
+    try
+    {
+        for (const auto& desc : GetVirboxDescriptions(ipc, api))
+        {
+            char* result = nullptr;
+            int status = api.get_license_id(ipc, VIRBOX_JSON, desc.dump().c_str(), &result);
+            if (status == VIRBOX_OK)
+            {
+                ExtractLicenseIds(ParseJsonSafe(ReadAndFree(api, result)), features);
+            }
+        }
+    }
+    catch (...)
+    {
+    }
+
+    api.client_close(ipc);
+    return features;
 }
 
 // SNTLUtils的静态常量定义
@@ -336,6 +338,59 @@ nlohmann::json sntl_admin::SNTLUtils::GetFeatureList() {
     {
     }
     return nlohmann::json::array();
+}
+
+// DogUtils实现
+sntl_admin::DogInfo sntl_admin::DogUtils::GetSentinelInfo() {
+    try
+    {
+        SNTL sntl;
+        auto devices = sntl.GetDeviceList();
+        auto features = sntl.GetFeatureList();
+        if (!devices.empty() || !features.empty())
+        {
+            return { DogProvider::Sentinel, devices, features };
+        }
+    }
+    catch (...)
+    {
+    }
+    return { DogProvider::Unknown, nlohmann::json::array(), nlohmann::json::array() };
+}
+
+sntl_admin::DogInfo sntl_admin::DogUtils::GetVirboxInfo() {
+    try
+    {
+        Virbox virbox;
+        auto devices = virbox.GetDeviceList();
+        auto features = virbox.GetFeatureList();
+        if (!devices.empty() || !features.empty())
+        {
+            return { DogProvider::Virbox, devices, features };
+        }
+    }
+    catch (...)
+    {
+    }
+    return { DogProvider::Unknown, nlohmann::json::array(), nlohmann::json::array() };
+}
+
+std::vector<sntl_admin::DogProvider> sntl_admin::DogUtils::GetAvailableProviders() {
+    std::vector<DogProvider> providers;
+    auto sentinel = GetSentinelInfo();
+    if (sentinel.provider != DogProvider::Unknown) providers.push_back(DogProvider::Sentinel);
+    auto virbox = GetVirboxInfo();
+    if (virbox.provider != DogProvider::Unknown) providers.push_back(DogProvider::Virbox);
+    return providers;
+}
+
+nlohmann::json sntl_admin::DogUtils::GetAllDogInfo() {
+    nlohmann::json result;
+    auto sentinel = GetSentinelInfo();
+    auto virbox = GetVirboxInfo();
+    result["sentinel"] = { {"devices", sentinel.devices}, {"features", sentinel.features} };
+    result["virbox"] = { {"devices", virbox.devices}, {"features", virbox.features} };
+    return result;
 }
 
 // 简单的XML解析到JSON的函数实现

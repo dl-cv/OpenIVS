@@ -34,6 +34,8 @@
 
 namespace dlcv_infer {
 
+    class DllLoader;
+
     namespace flow {
         class FlowGraphModel;
     }
@@ -50,6 +52,8 @@ namespace dlcv_infer {
 
     // 使用 nlohmann/json
     using json = nlohmann::json;
+
+    DLCV_INFER_CPP_DLL_API json GetAllDogInfo();
 
 #ifndef NVML_TYPES_H
 #define NVML_TYPES_H
@@ -83,12 +87,10 @@ namespace dlcv_infer {
     // DLL 加载器（内部使用）
     class DllLoader {
     private:
-        std::string dllName = "dlcv_infer.dll";
-        std::string dllName2 = "dlcv_infer2.dll";
-        std::string dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll";
-        std::string dllPath2 = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer2.dll";
-
+        std::string dllName;
+        std::string dllPath;
         void* hModule = nullptr;
+        sntl_admin::DogProvider dogProvider;
 
         // 函数指针
         LoadModelFuncType dlcv_load_model = nullptr;
@@ -104,15 +106,20 @@ namespace dlcv_infer {
         // 加载 DLL
         void LoadDll();
 
-        // 单例模式实现
+        static std::vector<DllLoader*> allLoaders;
         static DllLoader* instance;
-        DllLoader();
+        DllLoader(sntl_admin::DogProvider provider);
 
     public:
-        // 单例模式：获取实例
-        static DllLoader& Instance();
+        sntl_admin::DogProvider GetDogProvider() const { return dogProvider; }
+        std::string GetLoadedNativeDllName() const { return dllName; }
 
-        // 获取函数指针接口
+        static DllLoader& Instance();
+        static DllLoader& ForProvider(sntl_admin::DogProvider provider);
+        static DllLoader& ForModel(const std::string& modelPath);
+        static DllLoader& ForModel(const std::wstring& modelPath);
+        static const std::vector<DllLoader*>& GetAllLoaders() { return allLoaders; }
+
         LoadModelFuncType GetLoadModelFunc() const {
             return dlcv_load_model;
         }
@@ -240,6 +247,14 @@ namespace dlcv_infer {
 
         int resolveEffectiveInputCh();
         std::vector<cv::Mat> prepareInferInputBatch(const std::vector<cv::Mat>& images);
+    protected:
+        DllLoader* _dllLoader = nullptr;
+        sntl_admin::DogProvider _loadedDogProvider = sntl_admin::DogProvider::Unknown;
+        std::string _loadedNativeDllName;
+
+    public:
+        sntl_admin::DogProvider LoadedDogProvider() const { return _loadedDogProvider; }
+        std::string LoadedNativeDllName() const { return _loadedNativeDllName; }
     };
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS

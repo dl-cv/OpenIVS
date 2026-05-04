@@ -12,6 +12,7 @@ using System.IO.MemoryMappedFiles;
 using System.Text;
 using System.Linq;
 using DlcvModules;
+using sntl_admin_csharp;
 
 namespace dlcv_infer_csharp
 {
@@ -45,6 +46,7 @@ namespace dlcv_infer_csharp
         private HttpClient _httpClient;
         private bool _disposed = false;
         private readonly string _rpcPipeName = "DlcvModelRpcPipe";
+        private DllLoader _dllLoader;
         private static readonly string[] _rpcExecutableFixedPaths = new string[]
         {
             @"C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe"
@@ -67,6 +69,9 @@ namespace dlcv_infer_csharp
         {
 
         }
+
+        public DogProvider LoadedDogProvider => _dllLoader?.LoadedDogProvider ?? DogProvider.Sentinel;
+        public string LoadedNativeDllName => _dllLoader?.LoadedNativeDllName ?? "dlcv_infer.dll";
 
         public Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false)
         {
@@ -268,6 +273,8 @@ namespace dlcv_infer_csharp
 
         private void InitializeDvtMode(string modelPath, int device_id)
         {
+            _dllLoader = DllLoader.ForModel(modelPath);
+
             var config = new JObject
             {
                 ["model_path"] = modelPath,
@@ -278,7 +285,7 @@ namespace dlcv_infer_csharp
 
             string jsonStr = JsonConvert.SerializeObject(config, setting);
 
-            IntPtr resultPtr = DllLoader.Instance.dlcv_load_model(jsonStr);
+            IntPtr resultPtr = _dllLoader.dlcv_load_model(jsonStr);
             var resultJson = Marshal.PtrToStringAnsi(resultPtr);
             var resultObject = JObject.Parse(resultJson);
 
@@ -291,7 +298,7 @@ namespace dlcv_infer_csharp
             {
                 throw new Exception("加载模型失败：" + resultObject.ToString());
             }
-            DllLoader.Instance.dlcv_free_result(resultPtr);
+            _dllLoader.dlcv_free_result(resultPtr);
         }
 
         /// <summary>
@@ -599,9 +606,9 @@ namespace dlcv_infer_csharp
                     return;
                 }
                 var config = new JObject { ["model_index"] = modelIndex };
-                IntPtr resultPtr = DllLoader.Instance.dlcv_free_model(config.ToString());
+                IntPtr resultPtr = _dllLoader.dlcv_free_model(config.ToString());
                 string resultText = Marshal.PtrToStringAnsi(resultPtr);
-                DllLoader.Instance.dlcv_free_result(resultPtr);
+                _dllLoader.dlcv_free_result(resultPtr);
                 Log($"[FreeModel][DVT] DVT模型释放结果: {resultText}");
                 modelIndex = -1;
             }
@@ -1368,12 +1375,12 @@ namespace dlcv_infer_csharp
             };
 
             string jsonStr = config.ToString();
-            IntPtr resultPtr = DllLoader.Instance.dlcv_get_model_info(jsonStr);
+            IntPtr resultPtr = _dllLoader.dlcv_get_model_info(jsonStr);
             var resultJson = Marshal.PtrToStringAnsi(resultPtr);
             var resultObject = JObject.Parse(resultJson);
 
             //Log("Model info: " + resultObject.ToString());
-            DllLoader.Instance.dlcv_free_result(resultPtr);
+            _dllLoader.dlcv_free_result(resultPtr);
             return resultObject;
         }
 
@@ -1643,14 +1650,14 @@ namespace dlcv_infer_csharp
 
                 // 执行推理
                 string jsonStr = inferRequest.ToString();
-                IntPtr resultPtr = DllLoader.Instance.dlcv_infer(jsonStr);
+                IntPtr resultPtr = _dllLoader.dlcv_infer(jsonStr);
                 var resultJson = Marshal.PtrToStringAnsi(resultPtr);
                 JObject resultObject = JObject.Parse(resultJson);
 
                 // 检查是否返回错误
                 if (resultObject["code"] != null && resultObject["code"].Value<int>() != 0)
                 {
-                    DllLoader.Instance.dlcv_free_model_result(resultPtr);
+                    _dllLoader.dlcv_free_model_result(resultPtr);
                     throw new Exception("Inference failed: " + resultObject["message"]);
                 }
 
@@ -1955,7 +1962,7 @@ namespace dlcv_infer_csharp
                     // 处理完后释放结果，DVP模式下指针为空，不需要释放
                     if (resultTuple.Item2 != IntPtr.Zero)
                     {
-                        DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                        _dllLoader?.dlcv_free_model_result(resultTuple.Item2);
                     }
                 }
             }

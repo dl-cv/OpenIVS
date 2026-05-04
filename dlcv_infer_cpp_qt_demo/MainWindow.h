@@ -66,6 +66,7 @@ private:
     void onFreeModel();
     void onFreeAllModels();
     void onOpenDoc();
+    void onCheckDog();
 
     void startPressureTest();
     void stopPressureTest();
@@ -88,6 +89,7 @@ private:
     QPushButton* buttonFreeModel_ = nullptr;
     QPushButton* buttonFreeAllModels_ = nullptr;
     QPushButton* buttonDoc_ = nullptr;
+    QPushButton* buttonCheckDog_ = nullptr;
 
     QLabel* labelDevice_ = nullptr;
     QLabel* labelBatchSize_ = nullptr;

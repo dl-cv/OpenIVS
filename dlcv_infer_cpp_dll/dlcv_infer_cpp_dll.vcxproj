@@ -178,6 +178,7 @@
   <ItemGroup>
     <ClCompile Include="dlcv_infer.cpp" />
     <ClCompile Include="dlcv_sntl_admin.cpp" />
+    <ClCompile Include="ModelHeaderProviderResolver.cpp" />
     <ClCompile Include="flow\GraphExecutor.cpp" />
     <ClCompile Include="flow\FlowGraphModel.cpp" />
     <ClCompile Include="flow\modules\ModelModules.cpp" />
@@ -191,6 +192,7 @@
   <ItemGroup>
     <ClInclude Include="dlcv_infer.h" />
     <ClInclude Include="dlcv_sntl_admin.h" />
+    <ClInclude Include="ModelHeaderProviderResolver.h" />
     <ClInclude Include="flow\ExecutionContext.h" />
     <ClInclude Include="flow\FlowTypes.h" />
     <ClInclude Include="flow\BaseModule.h" />

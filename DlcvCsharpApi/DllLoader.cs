@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -10,10 +11,8 @@ namespace dlcv_infer_csharp
 {
     public class DllLoader
     {
-        private string DllName = "dlcv_infer.dll";
-        private string DllName2 = "dlcv_infer2.dll";
-        private string DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll";
-        private string DllPath2 = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer2.dll";
+        private string DllName;
+        private string DllPath;
         private const CallingConvention calling_method = CallingConvention.StdCall;
 
         // 定义导入方法的委托
@@ -57,31 +56,90 @@ namespace dlcv_infer_csharp
         public delegate IntPtr KeepMaxClock();
         public KeepMaxClock dlcv_keep_max_clock;
 
-        private void LoadDll()
+        // 追踪所有已创建的 loader
+        private static readonly List<DllLoader> _allLoaders = new List<DllLoader>();
+        private static readonly object _loaderLock = new object();
+
+        public DogProvider LoadedDogProvider { get; private set; }
+        public string LoadedNativeDllName { get; private set; }
+
+        // 为兼容旧代码保留 Instance：返回第一个已创建的 loader，若没有则创建一个默认 Sentinel
+        private static DllLoader _legacyInstance;
+        public static DllLoader Instance
         {
-            JArray feature_list = new JArray();
-            try
+            get
             {
-                feature_list = SNTLUtils.GetFeatureList();
-
-                if (feature_list.Any(item => item.ToString() == "1"))
+                if (_legacyInstance == null)
                 {
-
-                }
-                else if (feature_list.Any(item => item.ToString() == "2"))
-                {
-                    if (DllExists(DllName2, DllPath2))
+                    lock (_loaderLock)
                     {
-                        DllName = DllName2;
-                        DllPath = DllPath2;
+                        if (_legacyInstance == null)
+                        {
+                            if (_allLoaders.Count > 0)
+                            {
+                                _legacyInstance = _allLoaders[0];
+                            }
+                            else
+                            {
+                                _legacyInstance = ForProvider(DogProvider.Sentinel);
+                            }
+                        }
                     }
                 }
+                return _legacyInstance;
             }
-            catch (Exception)
-            {
-                // 如果获取特征列表失败，则使用默认的 DLL 路径
-            }
+        }
 
+        public static IReadOnlyList<DllLoader> GetAllLoaders()
+        {
+            lock (_loaderLock)
+            {
+                return new List<DllLoader>(_allLoaders);
+            }
+        }
+
+        private DllLoader(DogProvider provider)
+        {
+            LoadedDogProvider = provider;
+            switch (provider)
+            {
+                case DogProvider.Sentinel:
+                    DllName = "dlcv_infer.dll";
+                    DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll";
+                    break;
+                case DogProvider.Virbox:
+                    DllName = "dlcv_infer_v.dll";
+                    DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll";
+                    break;
+                default:
+                    throw new ArgumentException("不支持的 dog provider: " + provider);
+            }
+            LoadedNativeDllName = DllName;
+            LoadDll();
+            lock (_loaderLock)
+            {
+                _allLoaders.Add(this);
+            }
+        }
+
+        public static DllLoader ForProvider(DogProvider provider)
+        {
+            return new DllLoader(provider);
+        }
+
+        public static DllLoader ForModel(string modelPath)
+        {
+            DogProvider provider = ModelHeaderProviderResolver.ResolveProvider(modelPath);
+            DogInfo dogInfo = provider == DogProvider.Sentinel ? DogUtils.GetSentinelInfo() : DogUtils.GetVirboxInfo();
+            if (dogInfo == null || ((dogInfo.Devices == null || dogInfo.Devices.Count == 0) && (dogInfo.Features == null || dogInfo.Features.Count == 0)))
+            {
+                throw new Exception($"模型要求 provider {provider}，但未检测到对应的加密狗设备或特性");
+            }
+            return ForProvider(provider);
+        }
+
+        private void LoadDll()
+        {
             if (!DllExists(DllName, DllPath))
             {
                 MessageBox(IntPtr.Zero, "需要先安装 dlcv_infer", "提示", 0x00000030u);
@@ -167,14 +225,5 @@ namespace dlcv_infer_csharp
 
         [DllImport("user32.dll", EntryPoint = "MessageBoxW", CharSet = CharSet.Unicode)]
         private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
-
-        private static readonly Lazy<DllLoader> _instance = new Lazy<DllLoader>(() => new DllLoader());
-
-        public static DllLoader Instance => _instance.Value;
-        private DllLoader()
-        {
-            LoadDll();
-        }
     }
 }
-
