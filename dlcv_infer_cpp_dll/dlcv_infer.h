@@ -106,7 +106,6 @@ namespace dlcv_infer {
         // 加载 DLL
         void LoadDll();
 
-        static std::vector<DllLoader*> allLoaders;
         static DllLoader* instance;
         DllLoader(sntl_admin::DogProvider provider);
 
@@ -115,10 +114,8 @@ namespace dlcv_infer {
         std::string GetLoadedNativeDllName() const { return dllName; }
 
         static DllLoader& Instance();
-        static DllLoader& ForProvider(sntl_admin::DogProvider provider);
-        static DllLoader& ForModel(const std::string& modelPath);
-        static DllLoader& ForModel(const std::wstring& modelPath);
-        static const std::vector<DllLoader*>& GetAllLoaders() { return allLoaders; }
+        static void EnsureForModel(const std::string& modelPath);
+        static void EnsureForModel(const std::wstring& modelPath);
 
         /// <summary>
         /// 自动检测当前插入的加密狗，按 Sentinel 优先、Virbox 第二返回 Provider。

@@ -99,10 +99,7 @@ namespace dlcv_infer_csharp
                         if (_modelCache.TryGetValue(cacheKey, out cachedIndex))
                         {
                             modelIndex = cachedIndex;
-                            // 缓存命中时不应再打开模型文件解析 provider（临时文件可能已被删除）。
-                            // 直接复用已有 loader：_allLoaders 不为空时取第一个，否则走 Instance（自动检测）。
-                            var loaders = DllLoader.GetAllLoaders();
-                            _dllLoader = loaders.Count > 0 ? loaders[0] : DllLoader.Instance;
+                            _dllLoader = DllLoader.Instance;
                             TryCacheModelInfo();
                             return;
                         }
@@ -277,7 +274,8 @@ namespace dlcv_infer_csharp
 
         private void InitializeDvtMode(string modelPath, int device_id)
         {
-            _dllLoader = DllLoader.ForModel(modelPath);
+            DllLoader.EnsureForModel(modelPath);
+            _dllLoader = DllLoader.Instance;
 
             var config = new JObject
             {

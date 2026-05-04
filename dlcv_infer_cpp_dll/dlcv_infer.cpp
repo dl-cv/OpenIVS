@@ -1,6 +1,5 @@
 #include "dlcv_infer.h"
 #include "dlcv_sntl_admin.h"
-#include "ModelHeaderProviderResolver.h"
 #include "ImageInputUtils.h"
 #include "flow/FlowGraphModel.h"
 #include "flow/FlowPayloadTypes.h"
@@ -919,7 +918,6 @@ namespace dlcv_infer {
     }
 
     // DllLoader类实现
-    std::vector<DllLoader*> DllLoader::allLoaders;
     DllLoader* DllLoader::instance = nullptr;
 
     DllLoader::DllLoader(sntl_admin::DogProvider provider) : dogProvider(provider) {
@@ -936,7 +934,6 @@ namespace dlcv_infer {
             throw std::runtime_error("unsupported dog provider");
         }
         LoadDll();
-        allLoaders.push_back(this);
     }
 
     void DllLoader::LoadDll() {
@@ -995,64 +992,84 @@ namespace dlcv_infer {
     DllLoader& DllLoader::Instance() {
         if (!instance)
         {
-            if (!allLoaders.empty())
-            {
-                instance = allLoaders[0];
-            }
-            else
-            {
-                instance = new DllLoader(AutoDetectProvider());
-            }
+            instance = new DllLoader(AutoDetectProvider());
         }
         return *instance;
     }
 
-    DllLoader& DllLoader::ForProvider(sntl_admin::DogProvider provider) {
-        return *(new DllLoader(provider));
+    namespace {
+        bool TryResolveExplicitProviderFromStream(std::istream& stream, sntl_admin::DogProvider& outProvider) {
+            std::string header;
+            std::string headerJsonStr;
+            std::getline(stream, header);
+            std::getline(stream, headerJsonStr);
+            if (header != "DV") {
+                throw std::runtime_error("invalid model format: missing DV header");
+            }
+            auto headerJson = nlohmann::json::parse(headerJsonStr);
+            if (!headerJson.contains("dog_provider")) {
+                return false;
+            }
+            std::string p = headerJson["dog_provider"].get<std::string>();
+            for (auto& c : p) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (p == "sentinel") {
+                outProvider = sntl_admin::DogProvider::Sentinel;
+                return true;
+            }
+            if (p == "virbox") {
+                outProvider = sntl_admin::DogProvider::Virbox;
+                return true;
+            }
+            throw std::runtime_error("invalid dog provider in header_json: " + p);
+        }
     }
 
-    DllLoader& DllLoader::ForModel(const std::string& modelPath) {
-        sntl_admin::DogProvider provider;
-        if (!sntl_admin::TryResolveExplicitProvider(modelPath, provider))
-        {
-            // 模型未明确指定 provider，按 Sentinel 优先、Virbox 第二自动检测当前加密狗
-            provider = AutoDetectProvider();
+    void DllLoader::EnsureForModel(const std::string& modelPath) {
+        std::ifstream file(modelPath);
+        if (!file) {
+            throw std::runtime_error("failed to open model file");
         }
-        else
-        {
-            // 模型明确指定了 provider，验证对应加密狗是否存在
-            auto dogInfo = provider == sntl_admin::DogProvider::Sentinel
-                ? sntl_admin::DogUtils::GetSentinelInfo()
-                : sntl_admin::DogUtils::GetVirboxInfo();
-            if (dogInfo.provider == sntl_admin::DogProvider::Unknown)
-            {
-                throw std::runtime_error(std::string("模型要求 provider ")
-                    + (provider == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
-                    + "，但未检测到对应的加密狗设备或特性");
-            }
+        sntl_admin::DogProvider needed;
+        if (!TryResolveExplicitProviderFromStream(file, needed)) {
+            return;
         }
-        return ForProvider(provider);
+        if (instance && instance->dogProvider == needed) {
+            return;
+        }
+        auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
+            ? sntl_admin::DogUtils::GetSentinelInfo()
+            : sntl_admin::DogUtils::GetVirboxInfo();
+        if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
+            throw std::runtime_error(std::string("模型要求 provider ")
+                + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
+                + "，但未检测到对应的加密狗设备或特性");
+        }
+        instance = new DllLoader(needed);
     }
 
-    DllLoader& DllLoader::ForModel(const std::wstring& modelPath) {
-        sntl_admin::DogProvider provider;
-        if (!sntl_admin::TryResolveExplicitProvider(modelPath, provider))
-        {
-            provider = AutoDetectProvider();
+    void DllLoader::EnsureForModel(const std::wstring& modelPath) {
+        std::ifstream file(modelPath);
+        if (!file) {
+            throw std::runtime_error("failed to open model file");
         }
-        else
-        {
-            auto dogInfo = provider == sntl_admin::DogProvider::Sentinel
-                ? sntl_admin::DogUtils::GetSentinelInfo()
-                : sntl_admin::DogUtils::GetVirboxInfo();
-            if (dogInfo.provider == sntl_admin::DogProvider::Unknown)
-            {
-                throw std::runtime_error(std::string("模型要求 provider ")
-                    + (provider == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
-                    + "，但未检测到对应的加密狗设备或特性");
-            }
+        sntl_admin::DogProvider needed;
+        if (!TryResolveExplicitProviderFromStream(file, needed)) {
+            return;
         }
-        return ForProvider(provider);
+        if (instance && instance->dogProvider == needed) {
+            return;
+        }
+        auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
+            ? sntl_admin::DogUtils::GetSentinelInfo()
+            : sntl_admin::DogUtils::GetVirboxInfo();
+        if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
+            throw std::runtime_error(std::string("模型要求 provider ")
+                + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
+                + "，但未检测到对应的加密狗设备或特性");
+        }
+        instance = new DllLoader(needed);
     }
 
     // Model类实现
@@ -1088,7 +1105,8 @@ namespace dlcv_infer {
             }
         }
 
-        _dllLoader = &DllLoader::ForModel(modelPathUtf8);
+        DllLoader::EnsureForModel(modelPathUtf8);
+        _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
 
@@ -1142,7 +1160,8 @@ namespace dlcv_infer {
             }
         }
 
-        _dllLoader = &DllLoader::ForModel(modelPath);
+        DllLoader::EnsureForModel(modelPath);
+        _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
 
@@ -1765,7 +1784,8 @@ namespace dlcv_infer {
         float threshold,
         float iou_threshold,
         float combine_ios_threshold) {
-        _dllLoader = &DllLoader::ForModel(modelPath);
+        DllLoader::EnsureForModel(modelPath);
+        _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
 
@@ -1804,55 +1824,38 @@ namespace dlcv_infer {
     }
 
     void Utils::FreeAllModels() {
-        for (auto* loader : DllLoader::GetAllLoaders())
+        auto& loader = DllLoader::Instance();
+        if (loader.GetFreeAllModelsFunc())
         {
-            if (loader && loader->GetFreeAllModelsFunc())
-            {
-                loader->GetFreeAllModelsFunc()();
-            }
+            loader.GetFreeAllModelsFunc()();
         }
     }
 
     json Utils::GetDeviceInfo() {
-        // 若尚未创建任何 loader，通过 Instance 触发默认 Sentinel loader，确保底层 DLL 已被加载
-        auto loaders = DllLoader::GetAllLoaders();
-        if (loaders.empty())
+        auto& loader = DllLoader::Instance();
+        void* resultPtr = nullptr;
+        if (loader.GetDeviceInfoFunc())
         {
-            DllLoader::Instance();
-            loaders = DllLoader::GetAllLoaders();
+            resultPtr = loader.GetDeviceInfoFunc()();
         }
-
-        for (auto* loader : loaders)
+        else
         {
-            if (!loader) continue;
-            void* resultPtr = nullptr;
-            if (loader->GetDeviceInfoFunc())
-            {
-                resultPtr = loader->GetDeviceInfoFunc()();
-            }
-            else
-            {
-                continue;
-            }
-            std::string resultJson = std::string(static_cast<const char*>(resultPtr));
-            json resultObject = json::parse(resultJson);
-            loader->GetFreeResultFunc()(resultPtr);
-            return resultObject;
+            json ret;
+            ret["code"] = -1;
+            ret["message"] = "dlcv_get_device_info 不可用";
+            return ret;
         }
-        json ret;
-        ret["code"] = -1;
-        ret["message"] = "dlcv_get_gpu_info 与 dlcv_get_device_info 均不可用";
-        return ret;
+        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+        json resultObject = json::parse(resultJson);
+        loader.GetFreeResultFunc()(resultPtr);
+        return resultObject;
     }
 
     void Utils::KeepMaxClock() {
-        for (auto* loader : DllLoader::GetAllLoaders())
+        auto& loader = DllLoader::Instance();
+        if (loader.GetKeepMaxClockFunc())
         {
-            if (loader && loader->GetKeepMaxClockFunc())
-            {
-                loader->GetKeepMaxClockFunc()();
-                return;
-            }
+            loader.GetKeepMaxClockFunc()();
         }
     }
 
