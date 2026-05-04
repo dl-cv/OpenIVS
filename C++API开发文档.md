@@ -64,8 +64,8 @@
 
 | 组件 | 当前加载方式 | 缺失时行为 |
 | --- | --- | --- |
-| `dlcv_infer.dll` | `DllLoader` 先读 `SNTL.GetFeatureList()`；特性含 `"1"` 时保持默认 DLL，随后先按系统搜索路径查找，再回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
-| `dlcv_infer2.dll` | 当特性不含 `"1"` 且含 `"2"`，并且 DLL 可找到时切换；查找顺序为系统搜索路径，再到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer2.dll` | 切换失败时继续使用默认 DLL |
+| `dlcv_infer.dll` | Sentinel 版本；`DllLoader::ForProvider(DogProvider::Sentinel)` 加载；`Instance()` 与 `ForModel` 在未明确指定 provider 时，通过 `AutoDetectProvider()` 自动检测当前加密狗并按 Sentinel 优先、Virbox 第二选择；先按系统搜索路径查找，再回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
+| `dlcv_infer_v.dll` | Virbox 版本；`DllLoader::ForProvider(DogProvider::Virbox)` 加载；仅在模型头明确指定 `dog_provider=virbox` 或 `AutoDetectProvider()` 检测到 Virbox 且未检测到 Sentinel 时启用；查找顺序为系统搜索路径，再到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
 | `sntl_adminapi_windows_x64.dll` | `SNTLDllLoader` 先按系统搜索路径查找，再回退到 `C:\dlcv\bin\sntl_adminapi_windows_x64.dll` | 切换为空代理：`context_new/get` 返回 `SNTL_ADMIN_LM_NOT_FOUND`，`context_delete` 返回成功，`free` 为空函数 |
 | `nvml.dll` | `Utils::GetGpuInfo()` 与 NVML 包装函数运行时 `LoadLibraryA("nvml.dll")` | `GetGpuInfo()` 返回错误 JSON；初始化失败时 `code=1`，取设备数失败时 `code=2` |
 
@@ -107,7 +107,7 @@
 
 ### 7.2 加载、释放与信息查询
 
-`.dvst/.dvso/.dvsp` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载；FlowGraph 模式创建 `flow::FlowGraphModel` 并完成归档解包后再加载。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引；`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回流程根对象，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`。
+`.dvst/.dvso/.dvsp` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载，加载前由 `DllLoader::ForModel` 解析模型头并绑定对应 provider 的 loader：若模型头明确指定 `dog_provider`，则校验对应加密狗；若未指定，则通过 `AutoDetectProvider()` 按 Sentinel 优先、Virbox 第二自动检测。FlowGraph 模式创建 `flow::FlowGraphModel` 并完成归档解包后再加载，解包流程不得修改模型二进制数据。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引；`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回流程根对象，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`。
 
 ### 7.3 推理前图像规整
 
@@ -123,7 +123,7 @@
 
 ## 9. `sntl_admin`
 
-公开类型为 `SntlAdminStatus`、`SNTLDllLoader`、`SNTLUtils`、`SNTL` 和 `ParseXmlToJson()`。固定 XML 常量中，`DefaultScope` 的厂商 ID 固定为 `26146`，`HaspIdFormat` 读取 `haspid`，`FeatureIdFormat` 读取 `featureid` 与 `haspid`。`SNTL` 构造时调用 `sntl_admin_context_new`，析构时调用 `Dispose()`，`Dispose()` 再调 `sntl_admin_context_delete`；`Get()` 调 `sntl_admin_get`，成功时返回 `{ "code": 0, "message": "成功", "data": ... }`，失败时返回 `{ "code": <status>, "message": "<状态描述>" }`。`SNTLUtils::GetDeviceList()` 返回加密狗 ID 数组，`GetFeatureList()` 返回特性 ID 数组，任一异常都返回空数组 `[]`。
+公开类型为 `SntlAdminStatus`、`SNTLDllLoader`、`SNTL`、`SNTLUtils`、`Virbox`、`DogProvider`、`DogInfo`、`DogUtils` 和 `ParseXmlToJson()`。固定 XML 常量中，`DefaultScope` 的厂商 ID 固定为 `26146`，`HaspIdFormat` 读取 `haspid`，`FeatureIdFormat` 读取 `featureid` 与 `haspid`。`SNTL` 构造时调用 `sntl_admin_context_new`，析构时调用 `Dispose()`，`Dispose()` 再调 `sntl_admin_context_delete`；`Get()` 调 `sntl_admin_get`，成功时返回 `{ "code": 0, "message": "成功", "data": ... }`，失败时返回 `{ "code": <status>, "message": "<状态描述>" }`。`SNTLUtils::GetDeviceList()` 返回 Sentinel 加密狗 ID 数组，`GetFeatureList()` 返回 Sentinel 特性 ID 数组，任一异常都返回空数组 `[]`，不再自动回退到 Virbox。`Virbox` 提供独立的 Virbox 设备列表与特征列表查询。`DogUtils::GetAllDogInfo()` 返回同时包含 Sentinel 与 Virbox 信息的 JSON。
 
 ## 10. Flow 与 DVS 的 C++ 实现
 

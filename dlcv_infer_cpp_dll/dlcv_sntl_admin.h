@@ -143,4 +143,30 @@ namespace sntl_admin {
         nlohmann::json GetRawResponse(const std::string& xml);
     };
 
+    enum class DogProvider {
+        Unknown,
+        Sentinel,
+        Virbox
+    };
+
+    struct DogInfo {
+        DogProvider provider;
+        nlohmann::json devices;
+        nlohmann::json features;
+    };
+
+    class Virbox {
+    public:
+        nlohmann::json GetDeviceList();
+        nlohmann::json GetFeatureList();
+    };
+
+    class DogUtils {
+    public:
+        static DogInfo GetSentinelInfo();
+        static DogInfo GetVirboxInfo();
+        static std::vector<DogProvider> GetAvailableProviders();
+        static nlohmann::json GetAllDogInfo();
+    };
+
 } // namespace sntl_admin

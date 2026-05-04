@@ -386,24 +386,24 @@ namespace dlcv_infer_csharp
 
         public static void FreeAllModels()
         {
-            DllLoader.Instance.dlcv_free_all_models();
+            DllLoader.Instance.dlcv_free_all_models?.Invoke();
         }
 
         public static JObject GetDeviceInfo()
         {
             var loader = DllLoader.Instance;
             IntPtr resultPtr = IntPtr.Zero;
-            if (loader.dlcv_get_gpu_info != null)
-            {
-                resultPtr = loader.dlcv_get_gpu_info();
-            }
-            else if (loader.dlcv_get_device_info != null)
+            if (loader.dlcv_get_device_info != null)
             {
                 resultPtr = loader.dlcv_get_device_info();
             }
+            else if (loader.dlcv_get_gpu_info != null)
+            {
+                resultPtr = loader.dlcv_get_gpu_info();
+            }
             else
             {
-                return JObject.FromObject(new { code = -1, message = "dlcv_get_gpu_info 与 dlcv_get_device_info 均不可用" });
+                return JObject.FromObject(new { code = -1, message = "dlcv_get_device_info 与 dlcv_get_gpu_info 均不可用" });
             }
 
             var resultJson = Marshal.PtrToStringAnsi(resultPtr);

@@ -288,7 +288,7 @@ namespace sntl_admin_csharp
 
                 return deviceList;
             }
-            catch (Exception ex)
+            catch
             {
                 return deviceList;
             }
@@ -336,7 +336,7 @@ namespace sntl_admin_csharp
 
                 return featureList;
             }
-            catch (Exception ex)
+            catch
             {
                 return featureList;
             }
@@ -372,6 +372,387 @@ namespace sntl_admin_csharp
             GC.SuppressFinalize(this);
         }
         #endregion
+    }
+
+    public class Virbox
+    {
+        private const string DllName = "slm_control.dll";
+        private const string DllPath = @"C:\dlcv\bin\slm_control.dll";
+        private const uint SS_OK = 0;
+        private const uint INFO_FORMAT_JSON = 2;
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate uint ClientOpenDelegate(ref IntPtr ipc);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate uint ClientCloseDelegate(IntPtr ipc);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate uint GetAllDescriptionDelegate(IntPtr ipc, uint format, ref IntPtr desc);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate uint GetLicenseIdDelegate(IntPtr ipc, uint format, string desc, ref IntPtr result);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate uint GetDeviceInfoDelegate(IntPtr ipc, string desc, ref IntPtr result);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate void FreeDelegate(IntPtr buffer);
+
+        private readonly IntPtr hModule;
+        private readonly ClientOpenDelegate clientOpen;
+        private readonly ClientCloseDelegate clientClose;
+        private readonly GetAllDescriptionDelegate getAllDescription;
+        private readonly GetLicenseIdDelegate getLicenseId;
+        private readonly GetDeviceInfoDelegate getDeviceInfo;
+        private readonly FreeDelegate freeBuffer;
+
+        public Virbox()
+        {
+            hModule = LoadLibrary(DllName);
+            if (hModule == IntPtr.Zero)
+            {
+                hModule = LoadLibrary(DllPath);
+            }
+            if (hModule == IntPtr.Zero)
+            {
+                return;
+            }
+
+            clientOpen = GetDelegate<ClientOpenDelegate>("slm_ctrl_client_open");
+            clientClose = GetDelegate<ClientCloseDelegate>("slm_ctrl_client_close");
+            getAllDescription = GetDelegate<GetAllDescriptionDelegate>("slm_ctrl_get_all_description");
+            getLicenseId = GetDelegate<GetLicenseIdDelegate>("slm_ctrl_get_license_id");
+            getDeviceInfo = GetDelegate<GetDeviceInfoDelegate>("slm_ctrl_get_device_info");
+            freeBuffer = GetDelegate<FreeDelegate>("slm_ctrl_free");
+        }
+
+        public bool Available =>
+            hModule != IntPtr.Zero &&
+            clientOpen != null &&
+            clientClose != null &&
+            getAllDescription != null &&
+            getLicenseId != null &&
+            getDeviceInfo != null &&
+            freeBuffer != null;
+
+        public JArray GetDeviceList()
+        {
+            JArray result = new JArray();
+            if (!Available)
+            {
+                return result;
+            }
+
+            IntPtr ipc = IntPtr.Zero;
+            if (clientOpen(ref ipc) != SS_OK)
+            {
+                return result;
+            }
+
+            try
+            {
+                foreach (JObject desc in GetDescriptions(ipc))
+                {
+                    try
+                    {
+                        IntPtr infoPtr = IntPtr.Zero;
+                        if (getDeviceInfo(ipc, desc.ToString(Newtonsoft.Json.Formatting.None), ref infoPtr) == SS_OK)
+                        {
+                            string infoJson = Marshal.PtrToStringAnsi(infoPtr);
+                            freeBuffer(infoPtr);
+                            JObject infoObj = JObject.Parse(infoJson);
+                            if (infoObj["shell_num"] != null)
+                            {
+                                AddUnique(result, infoObj["shell_num"].ToString());
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Virbox GetDeviceList error: {ex.Message}");
+                    }
+                }
+            }
+            finally
+            {
+                clientClose(ipc);
+            }
+
+            return result;
+        }
+
+        public JArray GetFeatureList()
+        {
+            JArray result = new JArray();
+            if (!Available)
+            {
+                return result;
+            }
+
+            IntPtr ipc = IntPtr.Zero;
+            if (clientOpen(ref ipc) != SS_OK)
+            {
+                return result;
+            }
+
+            try
+            {
+                foreach (JObject desc in GetDescriptions(ipc))
+                {
+                    IntPtr idsPtr = IntPtr.Zero;
+                    if (getLicenseId(ipc, INFO_FORMAT_JSON, desc.ToString(Newtonsoft.Json.Formatting.None), ref idsPtr) == SS_OK)
+                    {
+                        ExtractLicenseIds(ParseJson(ReadAndFree(idsPtr)), result);
+                    }
+                }
+            }
+            finally
+            {
+                clientClose(ipc);
+            }
+
+            return result;
+        }
+
+        private List<JObject> GetDescriptions(IntPtr ipc)
+        {
+            List<JObject> result = new List<JObject>();
+            IntPtr descPtr = IntPtr.Zero;
+            if (getAllDescription(ipc, INFO_FORMAT_JSON, ref descPtr) != SS_OK)
+            {
+                return result;
+            }
+
+            JToken root = ParseJson(ReadAndFree(descPtr));
+            if (root is JObject obj)
+            {
+                result.Add(obj);
+            }
+            else if (root is JArray array)
+            {
+                foreach (JToken item in array)
+                {
+                    if (item is JObject itemObj)
+                    {
+                        result.Add(itemObj);
+                    }
+                }
+            }
+            return result;
+        }
+
+        private string ReadAndFree(IntPtr ptr)
+        {
+            try
+            {
+                return ptr == IntPtr.Zero ? "" : Marshal.PtrToStringAnsi(ptr);
+            }
+            finally
+            {
+                if (ptr != IntPtr.Zero)
+                {
+                    freeBuffer(ptr);
+                }
+            }
+        }
+
+        private static JToken ParseJson(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return null;
+            }
+            try
+            {
+                return JToken.Parse(text);
+            }
+            catch
+            {
+                return text;
+            }
+        }
+
+        private static string FirstStringByKeys(JToken value, string[] keys)
+        {
+            if (value == null)
+            {
+                return null;
+            }
+            if (value is JObject obj)
+            {
+                foreach (string key in keys)
+                {
+                    JToken token = obj[key];
+                    if (token != null && token.Type != JTokenType.Null)
+                    {
+                        if (token.Type == JTokenType.String || token.Type == JTokenType.Integer)
+                        {
+                            return token.ToString();
+                        }
+                    }
+                }
+                foreach (JProperty property in obj.Properties())
+                {
+                    string nested = FirstStringByKeys(property.Value, keys);
+                    if (!string.IsNullOrEmpty(nested))
+                    {
+                        return nested;
+                    }
+                }
+            }
+            else if (value is JArray array)
+            {
+                foreach (JToken item in array)
+                {
+                    string nested = FirstStringByKeys(item, keys);
+                    if (!string.IsNullOrEmpty(nested))
+                    {
+                        return nested;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static void ExtractLicenseIds(JToken value, JArray output)
+        {
+            if (value == null)
+            {
+                return;
+            }
+            if (value.Type == JTokenType.Integer || value.Type == JTokenType.String)
+            {
+                AddUnique(output, value.ToString());
+                return;
+            }
+            if (value is JArray array)
+            {
+                foreach (JToken item in array)
+                {
+                    ExtractLicenseIds(item, output);
+                }
+                return;
+            }
+            if (value is JObject obj)
+            {
+                foreach (string key in new[] { "license_id", "licenseId", "licenseid", "lic_id" })
+                {
+                    ExtractLicenseIds(obj[key], output);
+                }
+                foreach (string key in new[] { "license_ids", "licenseIds", "licenses", "data", "result" })
+                {
+                    ExtractLicenseIds(obj[key], output);
+                }
+            }
+        }
+
+        private static void AddUnique(JArray array, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+            foreach (JToken item in array)
+            {
+                if (item.ToString() == value)
+                {
+                    return;
+                }
+            }
+            array.Add(value);
+        }
+
+        private T GetDelegate<T>(string name) where T : Delegate
+        {
+            IntPtr proc = GetProcAddress(hModule, name);
+            return proc == IntPtr.Zero ? null : (T)Marshal.GetDelegateForFunctionPointer(proc, typeof(T));
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
+    }
+
+    public enum DogProvider
+    {
+        Sentinel,
+        Virbox
+    }
+
+    public class DogInfo
+    {
+        public DogProvider Provider { get; set; }
+        public JArray Devices { get; set; }
+        public JArray Features { get; set; }
+    }
+
+    public class DogUtils
+    {
+        public static DogInfo GetSentinelInfo()
+        {
+            try
+            {
+                using (SNTL sntl = new SNTL())
+                {
+                    JArray devices = sntl.GetDeviceList();
+                    JArray features = sntl.GetFeatureList();
+                    if ((devices != null && devices.Count > 0) || (features != null && features.Count > 0))
+                    {
+                        return new DogInfo { Provider = DogProvider.Sentinel, Devices = devices, Features = features };
+                    }
+                }
+            }
+            catch
+            {
+            }
+            return null;
+        }
+
+        public static DogInfo GetVirboxInfo()
+        {
+            try
+            {
+                Virbox virbox = new Virbox();
+                JArray devices = virbox.GetDeviceList();
+                JArray features = virbox.GetFeatureList();
+                if ((devices != null && devices.Count > 0) || (features != null && features.Count > 0))
+                {
+                    return new DogInfo { Provider = DogProvider.Virbox, Devices = devices, Features = features };
+                }
+            }
+            catch
+            {
+            }
+            return null;
+        }
+
+        public static List<DogProvider> GetAvailableProviders()
+        {
+            List<DogProvider> providers = new List<DogProvider>();
+            if (GetSentinelInfo() != null) providers.Add(DogProvider.Sentinel);
+            if (GetVirboxInfo() != null) providers.Add(DogProvider.Virbox);
+            return providers;
+        }
+
+        public static JObject GetAllDogInfo()
+        {
+            JObject result = new JObject();
+            DogInfo sentinel = GetSentinelInfo();
+            DogInfo virbox = GetVirboxInfo();
+
+            result["sentinel"] = sentinel != null
+                ? new JObject { ["devices"] = sentinel.Devices, ["features"] = sentinel.Features }
+                : new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
+
+            result["virbox"] = virbox != null
+                ? new JObject { ["devices"] = virbox.Devices, ["features"] = virbox.Features }
+                : new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
+
+            return result;
+        }
     }
 
     public class SNTLUtils
@@ -412,30 +793,30 @@ namespace sntl_admin_csharp
         {
             try
             {
-                SNTL sntl = new SNTL();
-                JArray deviceList = sntl.GetDeviceList();
-                sntl.Dispose();
-                return deviceList;
+                using (SNTL sntl = new SNTL())
+                {
+                    return sntl.GetDeviceList();
+                }
             }
             catch
             {
-                return new JArray();
             }
+            return new JArray();
         }
 
         public static JArray GetFeatureList()
         {
             try
             {
-                SNTL sntl = new SNTL();
-                JArray featureList = sntl.GetFeatureList();
-                sntl.Dispose();
-                return featureList;
+                using (SNTL sntl = new SNTL())
+                {
+                    return sntl.GetFeatureList();
+                }
             }
             catch
             {
-                return new JArray();
             }
+            return new JArray();
         }
     }
 }

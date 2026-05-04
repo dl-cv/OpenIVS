@@ -913,40 +913,30 @@ namespace dlcv_infer {
         return convertWstringToUtf8(wstr);
     }
 
+    json GetAllDogInfo() {
+        return sntl_admin::DogUtils::GetAllDogInfo();
+    }
+
     // DllLoader类实现
     DllLoader* DllLoader::instance = nullptr;
 
-    DllLoader::DllLoader() {
+    DllLoader::DllLoader(sntl_admin::DogProvider provider) : dogProvider(provider) {
+        switch (provider) {
+        case sntl_admin::DogProvider::Sentinel:
+            dllName = "dlcv_infer.dll";
+            dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll";
+            break;
+        case sntl_admin::DogProvider::Virbox:
+            dllName = "dlcv_infer_v.dll";
+            dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer_v.dll";
+            break;
+        default:
+            throw std::runtime_error("unsupported dog provider");
+        }
         LoadDll();
     }
 
     void DllLoader::LoadDll() {
-        json feature_list = json::array();
-        try
-        {
-            sntl_admin::SNTL sntl;
-            feature_list = sntl.GetFeatureList();
-
-            if (std::find_if(feature_list.begin(), feature_list.end(),
-                [](const json& item) { return item.get<std::string>() == "1"; }) != feature_list.end())
-            {
-                // 使用默认DLL
-            }
-            else if (std::find_if(feature_list.begin(), feature_list.end(),
-                [](const json& item) { return item.get<std::string>() == "2"; }) != feature_list.end())
-            {
-                if (DllExists(dllName2, dllPath2))
-                {
-                    dllName = dllName2;
-                    dllPath = dllPath2;
-                }
-            }
-        }
-        catch (...)
-        {
-            // 如果获取功能列表失败，则使用默认的DLL路径
-        }
-
         if (!DllExists(dllName, dllPath))
         {
             MessageBoxA(nullptr, "需要先安装 dlcv_infer", "提示", MB_OK | MB_ICONWARNING);
@@ -981,12 +971,105 @@ namespace dlcv_infer {
 #endif
     }
 
+    sntl_admin::DogProvider DllLoader::AutoDetectProvider() {
+        try {
+            auto sentinel = sntl_admin::DogUtils::GetSentinelInfo();
+            if (sentinel.provider != sntl_admin::DogProvider::Unknown) {
+                return sntl_admin::DogProvider::Sentinel;
+            }
+        } catch (...) {}
+
+        try {
+            auto virbox = sntl_admin::DogUtils::GetVirboxInfo();
+            if (virbox.provider != sntl_admin::DogProvider::Unknown) {
+                return sntl_admin::DogProvider::Virbox;
+            }
+        } catch (...) {}
+
+        return sntl_admin::DogProvider::Sentinel;
+    }
+
     DllLoader& DllLoader::Instance() {
         if (!instance)
         {
-            instance = new DllLoader();
+            instance = new DllLoader(AutoDetectProvider());
         }
         return *instance;
+    }
+
+    namespace {
+        bool TryResolveExplicitProviderFromStream(std::istream& stream, sntl_admin::DogProvider& outProvider) {
+            std::string header;
+            std::string headerJsonStr;
+            std::getline(stream, header);
+            std::getline(stream, headerJsonStr);
+            if (header != "DV") {
+                throw std::runtime_error("invalid model format: missing DV header");
+            }
+            auto headerJson = nlohmann::json::parse(headerJsonStr);
+            if (!headerJson.contains("dog_provider")) {
+                return false;
+            }
+            std::string p = headerJson["dog_provider"].get<std::string>();
+            for (auto& c : p) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (p == "sentinel") {
+                outProvider = sntl_admin::DogProvider::Sentinel;
+                return true;
+            }
+            if (p == "virbox") {
+                outProvider = sntl_admin::DogProvider::Virbox;
+                return true;
+            }
+            throw std::runtime_error("invalid dog provider in header_json: " + p);
+        }
+    }
+
+    void DllLoader::EnsureForModel(const std::string& modelPath) {
+        std::ifstream file(modelPath);
+        if (!file) {
+            throw std::runtime_error("failed to open model file");
+        }
+        sntl_admin::DogProvider needed;
+        if (!TryResolveExplicitProviderFromStream(file, needed)) {
+            return;
+        }
+        if (instance && instance->dogProvider == needed) {
+            return;
+        }
+        auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
+            ? sntl_admin::DogUtils::GetSentinelInfo()
+            : sntl_admin::DogUtils::GetVirboxInfo();
+        if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
+            throw std::runtime_error(std::string("模型要求 provider ")
+                + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
+                + "，但未检测到对应的加密狗设备或特性");
+        }
+        instance = new DllLoader(needed);
+    }
+
+    void DllLoader::EnsureForModel(const std::wstring& modelPath) {
+        std::ifstream file(modelPath);
+        if (!file) {
+            throw std::runtime_error("failed to open model file");
+        }
+        sntl_admin::DogProvider needed;
+        if (!TryResolveExplicitProviderFromStream(file, needed)) {
+            return;
+        }
+        if (instance && instance->dogProvider == needed) {
+            return;
+        }
+        auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
+            ? sntl_admin::DogUtils::GetSentinelInfo()
+            : sntl_admin::DogUtils::GetVirboxInfo();
+        if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
+            throw std::runtime_error(std::string("模型要求 provider ")
+                + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
+                + "，但未检测到对应的加密狗设备或特性");
+        }
+        instance = new DllLoader(needed);
     }
 
     // Model类实现
@@ -1022,13 +1105,18 @@ namespace dlcv_infer {
             }
         }
 
+        DllLoader::EnsureForModel(modelPathUtf8);
+        _dllLoader = &DllLoader::Instance();
+        _loadedDogProvider = _dllLoader->GetDogProvider();
+        _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+
         json config;
         config["model_path"] = modelPathUtf8;
         config["device_id"] = device_id;
 
         std::string jsonStr = config.dump();
 
-        void* resultPtr = DllLoader::Instance().GetLoadModelFunc()(jsonStr.c_str());
+        void* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
         std::string resultJson = std::string(static_cast<const char*>(resultPtr));
         json resultObject = json::parse(resultJson);
         if (resultObject.contains("model_index"))
@@ -1036,15 +1124,67 @@ namespace dlcv_infer {
             modelIndex = resultObject["model_index"].get<int>();
         } else
         {
-            DllLoader::Instance().GetFreeResultFunc()(resultPtr);
+            _dllLoader->GetFreeResultFunc()(resultPtr);
             throw std::runtime_error("load model failed: " + resultObject.dump());
         }
 
-        DllLoader::Instance().GetFreeResultFunc()(resultPtr);
+        _dllLoader->GetFreeResultFunc()(resultPtr);
     }
 
     Model::Model(const std::wstring& modelPath, int device_id)
-        : Model(convertWstringToUtf8(modelPath), device_id) {}
+        : _deviceId(device_id) {
+        const std::string modelPathUtf8 = convertWstringToUtf8(modelPath);
+
+        if (IsFlowArchivePath(modelPathUtf8)) {
+            _isFlowGraphMode = true;
+            _flowModel = new flow::FlowGraphModel();
+            try {
+                DvsUnpackResult unpack = UnpackDvsArchiveToTemp(modelPath);
+                TempDirGuard tempGuard(unpack.tempDir);
+
+                const std::string pipelinePath = JoinPath(unpack.tempDir, "pipeline.json");
+                WriteUtf8Text(pipelinePath, unpack.pipelineRoot.dump());
+
+                json report = _flowModel->Load(pipelinePath, device_id);
+                int code = 1;
+                try { code = report.contains("code") ? report.at("code").get<int>() : 1; } catch (...) { code = 1; }
+                if (code != 0) {
+                    throw std::runtime_error(report.dump());
+                }
+                modelIndex = 1;
+                return;
+            } catch (const std::exception& ex) {
+                delete _flowModel;
+                _flowModel = nullptr;
+                throw std::runtime_error(std::string("failed to load dvs model: ") + ex.what());
+            }
+        }
+
+        DllLoader::EnsureForModel(modelPath);
+        _dllLoader = &DllLoader::Instance();
+        _loadedDogProvider = _dllLoader->GetDogProvider();
+        _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+
+        json config;
+        config["model_path"] = modelPathUtf8;
+        config["device_id"] = device_id;
+
+        std::string jsonStr = config.dump();
+
+        void* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
+        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+        json resultObject = json::parse(resultJson);
+        if (resultObject.contains("model_index"))
+        {
+            modelIndex = resultObject["model_index"].get<int>();
+        } else
+        {
+            _dllLoader->GetFreeResultFunc()(resultPtr);
+            throw std::runtime_error("load model failed: " + resultObject.dump());
+        }
+
+        _dllLoader->GetFreeResultFunc()(resultPtr);
+    }
 
     Model::Model(Model&& other) noexcept
         : modelIndex(other.modelIndex),
@@ -1052,13 +1192,19 @@ namespace dlcv_infer {
         _isFlowGraphMode(other._isFlowGraphMode),
         _deviceId(other._deviceId),
         _flowModel(other._flowModel),
-        _expectedChCache(other._expectedChCache) {
+        _expectedChCache(other._expectedChCache),
+        _dllLoader(other._dllLoader),
+        _loadedDogProvider(other._loadedDogProvider),
+        _loadedNativeDllName(std::move(other._loadedNativeDllName)) {
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
         other._deviceId = 0;
         other._flowModel = nullptr;
         other._expectedChCache = -2;
+        other._dllLoader = nullptr;
+        other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
+        other._loadedNativeDllName.clear();
     }
 
     Model& Model::operator=(Model&& other) noexcept {
@@ -1074,6 +1220,9 @@ namespace dlcv_infer {
         _deviceId = other._deviceId;
         _flowModel = other._flowModel;
         _expectedChCache = other._expectedChCache;
+        _dllLoader = other._dllLoader;
+        _loadedDogProvider = other._loadedDogProvider;
+        _loadedNativeDllName = std::move(other._loadedNativeDllName);
 
         other.modelIndex = -1;
         other.OwnModelIndex = true;
@@ -1081,6 +1230,9 @@ namespace dlcv_infer {
         other._deviceId = 0;
         other._flowModel = nullptr;
         other._expectedChCache = -2;
+        other._dllLoader = nullptr;
+        other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
+        other._loadedNativeDllName.clear();
         return *this;
     }
 
@@ -1109,10 +1261,10 @@ namespace dlcv_infer {
         config["model_index"] = modelIndex;
 
         std::string jsonStr = config.dump();
-        void* resultPtr = DllLoader::Instance().GetFreeModelFunc()(jsonStr.c_str());
+        void* resultPtr = _dllLoader->GetFreeModelFunc()(jsonStr.c_str());
         std::string resultJson = std::string(static_cast<const char*>(resultPtr));
         json resultObject = json::parse(resultJson);
-        DllLoader::Instance().GetFreeResultFunc()(resultPtr);
+        _dllLoader->GetFreeResultFunc()(resultPtr);
         modelIndex = -1;
     }
 
@@ -1126,10 +1278,10 @@ namespace dlcv_infer {
         config["model_index"] = modelIndex;
 
         std::string jsonStr = config.dump();
-        void* resultPtr = DllLoader::Instance().GetModelInfoFunc()(jsonStr.c_str());
+        void* resultPtr = _dllLoader->GetModelInfoFunc()(jsonStr.c_str());
         std::string resultJson = std::string(static_cast<const char*>(resultPtr));
         json resultObject = json::parse(resultJson);
-        DllLoader::Instance().GetFreeResultFunc()(resultPtr);
+        _dllLoader->GetFreeResultFunc()(resultPtr);
         return resultObject;
     }
 
@@ -1215,14 +1367,14 @@ namespace dlcv_infer {
 
             // 执行推理
             std::string jsonStr = inferRequest.dump();
-            void* resultPtr = DllLoader::Instance().GetInferFunc()(jsonStr.c_str());
+            void* resultPtr = _dllLoader->GetInferFunc()(jsonStr.c_str());
             std::string resultJson = std::string(static_cast<const char*>(resultPtr));
             json resultObject = json::parse(resultJson);
 
             // 检查是否返回错误
             if (resultObject.contains("code") && resultObject["code"].get<int>() != 0)
             {
-                DllLoader::Instance().GetFreeModelResultFunc()(resultPtr);
+                _dllLoader->GetFreeModelResultFunc()(resultPtr);
                 throw std::runtime_error("Inference failed: " + resultObject["message"].get<std::string>());
             }
 
@@ -1417,13 +1569,13 @@ namespace dlcv_infer {
         {
             Result result = ParseToStructResult(resultTuple.first);
             // 完成后释放结果
-            DllLoader::Instance().GetFreeModelResultFunc()(resultTuple.second);
+            _dllLoader->GetFreeModelResultFunc()(resultTuple.second);
             return result;
         }
         catch (...)
         {
             // 发生异常时也需要释放结果
-            DllLoader::Instance().GetFreeModelResultFunc()(resultTuple.second);
+            _dllLoader->GetFreeModelResultFunc()(resultTuple.second);
             throw;
         }
     }
@@ -1489,13 +1641,13 @@ namespace dlcv_infer {
         {
             Result result = ParseToStructResult(resultTuple.first);
             // 完成后释放结果
-            DllLoader::Instance().GetFreeModelResultFunc()(resultTuple.second);
+            _dllLoader->GetFreeModelResultFunc()(resultTuple.second);
             return result;
         }
         catch (...)
         {
             // 发生异常时也需要释放结果
-            DllLoader::Instance().GetFreeModelResultFunc()(resultTuple.second);
+            _dllLoader->GetFreeModelResultFunc()(resultTuple.second);
             throw;
         }
     }
@@ -1601,13 +1753,13 @@ namespace dlcv_infer {
             }
 
             // 完成后释放结果
-            DllLoader::Instance().GetFreeModelResultFunc()(resultTuple.second);
+            _dllLoader->GetFreeModelResultFunc()(resultTuple.second);
             return results;
         }
         catch (...)
         {
             // 发生异常时也需要释放结果
-            DllLoader::Instance().GetFreeModelResultFunc()(resultTuple.second);
+            _dllLoader->GetFreeModelResultFunc()(resultTuple.second);
             throw;
         }
     }
@@ -1632,6 +1784,11 @@ namespace dlcv_infer {
         float threshold,
         float iou_threshold,
         float combine_ios_threshold) {
+        DllLoader::EnsureForModel(modelPath);
+        _dllLoader = &DllLoader::Instance();
+        _loadedDogProvider = _dllLoader->GetDogProvider();
+        _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+
         json config;
         config["type"] = "sliding_window_pipeline";
         config["model_path"] = modelPath;
@@ -1646,7 +1803,7 @@ namespace dlcv_infer {
 
         std::string jsonStr = config.dump();
 
-        void* resultPtr = DllLoader::Instance().GetLoadModelFunc()(jsonStr.c_str());
+        void* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
         std::string resultJson = std::string(static_cast<const char*>(resultPtr));
         json resultObject = json::parse(resultJson);
         if (resultObject.contains("model_index"))
@@ -1654,11 +1811,11 @@ namespace dlcv_infer {
             modelIndex = resultObject["model_index"].get<int>();
         } else
         {
-            DllLoader::Instance().GetFreeResultFunc()(resultPtr);
+            _dllLoader->GetFreeResultFunc()(resultPtr);
             throw std::runtime_error("load sliding window model failed: " + resultObject.dump());
         }
 
-        DllLoader::Instance().GetFreeResultFunc()(resultPtr);
+        _dllLoader->GetFreeResultFunc()(resultPtr);
     }
 
     // Utils类实现
@@ -1667,21 +1824,38 @@ namespace dlcv_infer {
     }
 
     void Utils::FreeAllModels() {
-        DllLoader::Instance().GetFreeAllModelsFunc()();
+        auto& loader = DllLoader::Instance();
+        if (loader.GetFreeAllModelsFunc())
+        {
+            loader.GetFreeAllModelsFunc()();
+        }
     }
 
     json Utils::GetDeviceInfo() {
-        void* resultPtr = DllLoader::Instance().GetDeviceInfoFunc()();
+        auto& loader = DllLoader::Instance();
+        void* resultPtr = nullptr;
+        if (loader.GetDeviceInfoFunc())
+        {
+            resultPtr = loader.GetDeviceInfoFunc()();
+        }
+        else
+        {
+            json ret;
+            ret["code"] = -1;
+            ret["message"] = "dlcv_get_device_info 不可用";
+            return ret;
+        }
         std::string resultJson = std::string(static_cast<const char*>(resultPtr));
         json resultObject = json::parse(resultJson);
-        DllLoader::Instance().GetFreeResultFunc()(resultPtr);
+        loader.GetFreeResultFunc()(resultPtr);
         return resultObject;
     }
 
     void Utils::KeepMaxClock() {
-        auto func = DllLoader::Instance().GetKeepMaxClockFunc();
-        if (func != nullptr) {
-            func();
+        auto& loader = DllLoader::Instance();
+        if (loader.GetKeepMaxClockFunc())
+        {
+            loader.GetKeepMaxClockFunc()();
         }
     }
 

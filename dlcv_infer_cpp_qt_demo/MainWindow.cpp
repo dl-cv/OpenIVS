@@ -144,6 +144,7 @@ void MainWindow::setupUi() {
     buttonFreeModel_ = new QPushButton("释放模型", this);
     buttonFreeAllModels_ = new QPushButton("释放所有模型", this);
     buttonDoc_ = new QPushButton("文档", this);
+    buttonCheckDog_ = new QPushButton("检查加密狗", this);
 
     labelDevice_ = new QLabel("选择显卡", this);
     labelBatchSize_ = new QLabel("batch_size", this);
@@ -180,6 +181,7 @@ void MainWindow::setupUi() {
         buttonFreeModel_,
         buttonFreeAllModels_,
         buttonDoc_,
+        buttonCheckDog_,
     };
     for (QPushButton* button : buttons) {
         button->setMinimumWidth(kButtonMinWidth);
@@ -232,6 +234,7 @@ void MainWindow::setupUi() {
     row3Layout->addWidget(spinThreadCount_, 0, Qt::AlignVCenter);
     row3Layout->addStretch(1);
     row3Layout->addWidget(buttonDoc_, 0, Qt::AlignVCenter);
+    row3Layout->addWidget(buttonCheckDog_, 0, Qt::AlignVCenter);
     row3Layout->addWidget(buttonGetModelInfo_, 0, Qt::AlignVCenter);
 
     topControlsLayout->addLayout(row1Layout);
@@ -294,6 +297,7 @@ void MainWindow::bindSignals() {
     connect(buttonFreeModel_, &QPushButton::clicked, this, &MainWindow::onFreeModel);
     connect(buttonFreeAllModels_, &QPushButton::clicked, this, &MainWindow::onFreeAllModels);
     connect(buttonDoc_, &QPushButton::clicked, this, &MainWindow::onOpenDoc);
+    connect(buttonCheckDog_, &QPushButton::clicked, this, &MainWindow::onCheckDog);
     connect(spinThreshold_, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged), this, [this](double) {
         if (pressureTestRunning_ || !model_ || imagePath_.isEmpty() || !QFileInfo::exists(imagePath_)) {
             return;
@@ -1007,4 +1011,26 @@ void MainWindow::onFreeAllModels() {
 
 void MainWindow::onOpenDoc() {
     QDesktopServices::openUrl(QUrl("https://docs.dlcv.com.cn/deploy/sdk/csharp_sdk"));
+}
+
+void MainWindow::onCheckDog() {
+    json allInfo;
+    try {
+        allInfo = dlcv_infer::GetAllDogInfo();
+    } catch (...) {
+        allInfo = json::object();
+        allInfo["sentinel"] = json{{"devices", json::array()}, {"features", json::array()}};
+        allInfo["virbox"] = json{{"devices", json::array()}, {"features", json::array()}};
+    }
+
+    json sentinel = allInfo.value("sentinel", json{{"devices", json::array()}, {"features", json::array()}});
+    json virbox = allInfo.value("virbox", json{{"devices", json::array()}, {"features", json::array()}});
+
+    QString text;
+    text += QStringLiteral("Sentinel加密狗ID：\n") + jsonToQStringPretty(sentinel.value("devices", json::array())) + QStringLiteral("\n\n");
+    text += QStringLiteral("Sentinel加密狗特性：\n") + jsonToQStringPretty(sentinel.value("features", json::array())) + QStringLiteral("\n\n");
+    text += QStringLiteral("Virbox加密狗ID：\n") + jsonToQStringPretty(virbox.value("devices", json::array())) + QStringLiteral("\n\n");
+    text += QStringLiteral("Virbox加密狗特性：\n") + jsonToQStringPretty(virbox.value("features", json::array()));
+
+    outputText_->setPlainText(text);
 }

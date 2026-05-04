@@ -820,26 +820,28 @@ namespace DlcvDemo
 
         private void button1_Click(object sender, EventArgs e)
         {
-            JArray sntl_info;
-            JArray sntl_features;
+            JObject allInfo;
             try
             {
-                sntl_info = sntl_admin_csharp.SNTLUtils.GetDeviceList();
+                allInfo = sntl_admin_csharp.DogUtils.GetAllDogInfo();
             }
             catch
             {
-                sntl_info = new JArray();
+                allInfo = new JObject
+                {
+                    ["sentinel"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() },
+                    ["virbox"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() }
+                };
             }
-            try
-            {
-                sntl_features = sntl_admin_csharp.SNTLUtils.GetFeatureList();
-            }
-            catch
-            {
-                sntl_features = new JArray();
-            }
-            richTextBox1.Text = "加密狗ID：\n" + sntl_info.ToString() + "\n\n" +
-                "加密狗特性：\n" + sntl_features.ToString();
+
+            JObject sentinel = allInfo["sentinel"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
+            JObject virbox = allInfo["virbox"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
+
+            richTextBox1.Text =
+                "Sentinel加密狗ID：\n" + (sentinel["devices"] ?? new JArray()).ToString() + "\n\n" +
+                "Sentinel加密狗特性：\n" + (sentinel["features"] ?? new JArray()).ToString() + "\n\n" +
+                "Virbox加密狗ID：\n" + (virbox["devices"] ?? new JArray()).ToString() + "\n\n" +
+                "Virbox加密狗特性：\n" + (virbox["features"] ?? new JArray()).ToString();
         }
 
         private void button_free_all_model_Click(object sender, EventArgs e)

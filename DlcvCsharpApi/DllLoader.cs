@@ -4,19 +4,15 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using sntl_admin_csharp;
-using System.Linq;
 
 namespace dlcv_infer_csharp
 {
     public class DllLoader
     {
-        private string DllName = "dlcv_infer.dll";
-        private string DllName2 = "dlcv_infer2.dll";
-        private string DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll";
-        private string DllPath2 = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer2.dll";
+        private string DllName;
+        private string DllPath;
         private const CallingConvention calling_method = CallingConvention.StdCall;
 
-        // 定义导入方法的委托
         [UnmanagedFunctionPointer(calling_method)]
         public delegate IntPtr LoadModelDelegate(string config_str);
         public LoadModelDelegate dlcv_load_model;
@@ -57,32 +53,116 @@ namespace dlcv_infer_csharp
         public delegate IntPtr KeepMaxClock();
         public KeepMaxClock dlcv_keep_max_clock;
 
-        private void LoadDll()
+        private static DllLoader _instance;
+        private static readonly object _lock = new object();
+
+        public DogProvider LoadedDogProvider { get; private set; }
+        public string LoadedNativeDllName { get; private set; }
+
+        public static DllLoader Instance
         {
-            JArray feature_list = new JArray();
-            try
+            get
             {
-                SNTL sNTL = new SNTL();
-                feature_list = sNTL.GetFeatureList();
-
-                if (feature_list.Any(item => item.ToString() == "1"))
+                if (_instance == null)
                 {
-
-                }
-                else if (feature_list.Any(item => item.ToString() == "2"))
-                {
-                    if (DllExists(DllName2, DllPath2))
+                    lock (_lock)
                     {
-                        DllName = DllName2;
-                        DllPath = DllPath2;
+                        if (_instance == null)
+                            _instance = CreateLoader(AutoDetectProvider());
                     }
                 }
+                return _instance;
             }
-            catch (Exception)
-            {
-                // 如果获取特征列表失败，则使用默认的 DLL 路径
-            }
+        }
 
+        public static void EnsureForModel(string modelPath)
+        {
+            DogProvider? needed = ResolveProviderFromHeader(modelPath);
+            if (!needed.HasValue) return;
+            if (_instance != null && _instance.LoadedDogProvider == needed.Value) return;
+            lock (_lock)
+            {
+                if (_instance != null && _instance.LoadedDogProvider == needed.Value) return;
+                _instance = CreateLoader(needed.Value);
+            }
+        }
+
+        private static DllLoader CreateLoader(DogProvider provider)
+        {
+            var loader = new DllLoader();
+            loader.LoadedDogProvider = provider;
+            switch (provider)
+            {
+                case DogProvider.Sentinel:
+                    loader.DllName = "dlcv_infer.dll";
+                    loader.DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll";
+                    break;
+                case DogProvider.Virbox:
+                    loader.DllName = "dlcv_infer_v.dll";
+                    loader.DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll";
+                    break;
+                default:
+                    throw new ArgumentException("不支持的 dog provider: " + provider);
+            }
+            loader.LoadedNativeDllName = loader.DllName;
+            loader.LoadDll();
+            return loader;
+        }
+
+        private static DogProvider AutoDetectProvider()
+        {
+            try
+            {
+                var sentinel = DogUtils.GetSentinelInfo();
+                if (sentinel != null && ((sentinel.Devices != null && sentinel.Devices.Count > 0) || (sentinel.Features != null && sentinel.Features.Count > 0)))
+                    return DogProvider.Sentinel;
+            }
+            catch { }
+            try
+            {
+                var virbox = DogUtils.GetVirboxInfo();
+                if (virbox != null && ((virbox.Devices != null && virbox.Devices.Count > 0) || (virbox.Features != null && virbox.Features.Count > 0)))
+                    return DogProvider.Virbox;
+            }
+            catch { }
+            return DogProvider.Sentinel;
+        }
+
+        private static DogProvider? ResolveProviderFromHeader(string modelPath)
+        {
+            if (string.IsNullOrWhiteSpace(modelPath))
+                throw new ArgumentException("模型路径不能为空", nameof(modelPath));
+
+            string ext = Path.GetExtension(modelPath).ToLower();
+            if (ext == ".dvp")
+                throw new NotSupportedException("DVP 模式不通过 header 解析 provider");
+            if (ext == ".dvst" || ext == ".dvso" || ext == ".dvsp")
+                throw new NotSupportedException("DVS 模式在子模型加载时解析 header provider");
+
+            using (var fs = new FileStream(modelPath, FileMode.Open, FileAccess.Read))
+            using (var reader = new StreamReader(fs, Encoding.UTF8))
+            {
+                string header = reader.ReadLine();
+                if (header != "DV")
+                    throw new Exception("模型文件格式错误：缺少 DV 头");
+
+                string headerJsonStr = reader.ReadLine();
+                if (string.IsNullOrWhiteSpace(headerJsonStr))
+                    throw new Exception("模型文件格式错误：缺少 header_json");
+
+                JObject headerJson = JObject.Parse(headerJsonStr);
+                if (!headerJson.ContainsKey("dog_provider"))
+                    return null;
+
+                string p = headerJson["dog_provider"]?.ToString()?.ToLower() ?? "";
+                if (p == "sentinel") return DogProvider.Sentinel;
+                if (p == "virbox") return DogProvider.Virbox;
+                throw new Exception($"invalid dog provider in header_json: {p}");
+            }
+        }
+
+        private void LoadDll()
+        {
             if (!DllExists(DllName, DllPath))
             {
                 MessageBox(IntPtr.Zero, "需要先安装 dlcv_infer", "提示", 0x00000030u);
@@ -92,15 +172,11 @@ namespace dlcv_infer_csharp
             IntPtr hModule = LoadLibrary(DllName);
             if (hModule == IntPtr.Zero)
             {
-                // 如果当前目录下的 DLL 加载失败，尝试加载指定路径的 DLL
                 hModule = LoadLibrary(DllPath);
                 if (hModule == IntPtr.Zero)
-                {
                     throw new Exception("无法加载 DLL");
-                }
             }
 
-            // 获取函数指针
             dlcv_load_model = GetDelegate<LoadModelDelegate>(hModule, "dlcv_load_model");
             dlcv_free_model = GetDelegate<FreeModelDelegate>(hModule, "dlcv_free_model");
             dlcv_get_model_info = GetDelegate<GetModelInfoDelegate>(hModule, "dlcv_get_model_info");
@@ -109,24 +185,9 @@ namespace dlcv_infer_csharp
             dlcv_free_result = GetDelegate<FreeResultDelegate>(hModule, "dlcv_free_result");
             dlcv_free_all_models = GetDelegate<FreeAllModelsDelegate>(hModule, "dlcv_free_all_models");
             IntPtr gpuInfoPtr = GetProcAddress(hModule, "dlcv_get_gpu_info");
-            if (gpuInfoPtr != IntPtr.Zero)
-            {
-                dlcv_get_gpu_info = (GetGpuInfo)Marshal.GetDelegateForFunctionPointer(gpuInfoPtr, typeof(GetGpuInfo));
-            }
-            else
-            {
-                dlcv_get_gpu_info = null;
-            }
-
+            dlcv_get_gpu_info = gpuInfoPtr != IntPtr.Zero ? (GetGpuInfo)Marshal.GetDelegateForFunctionPointer(gpuInfoPtr, typeof(GetGpuInfo)) : null;
             IntPtr devInfoPtr = GetProcAddress(hModule, "dlcv_get_device_info");
-            if (devInfoPtr != IntPtr.Zero)
-            {
-                dlcv_get_device_info = (GetDeviceInfo)Marshal.GetDelegateForFunctionPointer(devInfoPtr, typeof(GetDeviceInfo));
-            }
-            else
-            {
-                dlcv_get_device_info = null;
-            }
+            dlcv_get_device_info = devInfoPtr != IntPtr.Zero ? (GetDeviceInfo)Marshal.GetDelegateForFunctionPointer(devInfoPtr, typeof(GetDeviceInfo)) : null;
             dlcv_keep_max_clock = GetDelegate<KeepMaxClock>(hModule, "dlcv_keep_max_clock");
         }
 
@@ -139,18 +200,13 @@ namespace dlcv_infer_csharp
         {
             var buffer = new StringBuilder(32767);
             uint result = SearchPath(null, dllName, null, (uint)buffer.Capacity, buffer, IntPtr.Zero);
-            if (result == 0 || result >= (uint)buffer.Capacity)
-            {
-                return null;
-            }
-
-            return buffer.ToString();
+            return result == 0 || result >= (uint)buffer.Capacity ? null : buffer.ToString();
         }
 
         private T GetDelegate<T>(IntPtr hModule, string procedureName) where T : Delegate
         {
-            IntPtr pAddressOfFunctionToCall = GetProcAddress(hModule, procedureName);
-            return (T)Marshal.GetDelegateForFunctionPointer(pAddressOfFunctionToCall, typeof(T));
+            IntPtr p = GetProcAddress(hModule, procedureName);
+            return p == IntPtr.Zero ? null : (T)Marshal.GetDelegateForFunctionPointer(p, typeof(T));
         }
 
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -164,14 +220,5 @@ namespace dlcv_infer_csharp
 
         [DllImport("user32.dll", EntryPoint = "MessageBoxW", CharSet = CharSet.Unicode)]
         private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
-
-        private static readonly Lazy<DllLoader> _instance = new Lazy<DllLoader>(() => new DllLoader());
-
-        public static DllLoader Instance => _instance.Value;
-        private DllLoader()
-        {
-            LoadDll();
-        }
     }
 }
-

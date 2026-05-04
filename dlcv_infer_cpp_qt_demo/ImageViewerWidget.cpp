@@ -390,7 +390,14 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
         if (labelDisplayMode_ == LabelTextMode::CategoryOnly) {
             return categoryName;
         }
-        return QString("%1 %2").arg(categoryName).arg(score, 0, 'f', 2);
+        const QString scoreText = std::isfinite(score) ? QString::number(score, 'f', 2) : QString();
+        if (categoryName.isEmpty()) {
+            return scoreText;
+        }
+        if (scoreText.isEmpty()) {
+            return categoryName;
+        }
+        return QString("%1 %2").arg(categoryName, scoreText);
     };
 
     auto paintLabelBar = [&](qreal textLeftX, qreal textTopY, const QString& label, const QColor& color) {
@@ -405,15 +412,37 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
         painter.drawText(textRect, Qt::AlignLeft | Qt::AlignTop, label);
     };
 
+    auto drawMask = [&](const dlcv_infer::ObjectResult& obj, const QRectF& targetRect, bool rotateWithBbox) {
+        if (!obj.withMask || obj.mask.empty()) {
+            return;
+        }
+
+        const QImage overlay = createMaskOverlayImage(obj.mask);
+        if (overlay.isNull()) {
+            return;
+        }
+
+        if (rotateWithBbox) {
+            constexpr qreal radiansToDegrees = 180.0 / 3.14159265358979323846;
+            painter.save();
+            painter.translate(targetRect.center());
+            painter.rotate(static_cast<qreal>(obj.angle) * radiansToDegrees);
+            painter.drawImage(QRectF(-targetRect.width() / 2.0, -targetRect.height() / 2.0, targetRect.width(), targetRect.height()), overlay);
+            painter.restore();
+            return;
+        }
+
+        painter.drawImage(targetRect, overlay);
+    };
+
+    int topLeftLabelIndex = 0;
+    const qreal safeScale = std::max<qreal>(static_cast<qreal>(scale_), 1e-6);
+    const qreal topLeftPadding = std::max<qreal>(2.0, 10.0 / safeScale);
+
     for (const dlcv_infer::ObjectResult& obj : results_) {
         const QString categoryName = QString::fromLocal8Bit(obj.categoryName.c_str());
         const QString categoryLower = categoryName.toLower();
-        if (!obj.withBbox || obj.bbox.size() < 4) {
-            statusText = categoryLower.contains("ok") ? "OK" : "NG";
-            break;
-        }
-
-        if (!categoryLower.contains("ok")) {
+        if (!categoryName.isEmpty() && !categoryLower.contains("ok")) {
             statusText = "NG";
         }
 
@@ -421,18 +450,21 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
         QPen pen(color);
         pen.setWidthF(borderWidth);
         painter.setPen(pen);
+        const bool hasBbox = obj.withBbox && obj.bbox.size() >= 4;
+        const QString label = buildLabelText(categoryName, obj.score);
 
-        if (obj.withMask && !obj.mask.empty()) {
-            const QImage overlay = createMaskOverlayImage(obj.mask);
-            if (!overlay.isNull()) {
-                if (!obj.withAngle) {
-                    const double x = obj.bbox[0];
-                    const double y = obj.bbox[1];
-                    const double w = obj.bbox[2];
-                    const double h = obj.bbox[3];
-                    painter.drawImage(QRectF(x, y, w, h), overlay);
-                }
+        if (!hasBbox) {
+            if (obj.withMask && !obj.mask.empty()) {
+                drawMask(obj, QRectF(0.0, 0.0, obj.mask.cols, obj.mask.rows), false);
             }
+
+            if (!label.isEmpty()) {
+                const QSizeF labelSize = metrics.size(Qt::TextSingleLine, label);
+                const qreal textTopY = topLeftPadding + topLeftLabelIndex * (labelSize.height() + topLeftPadding / 2.0);
+                paintLabelBar(topLeftPadding, textTopY, label, color);
+                ++topLeftLabelIndex;
+            }
+            continue;
         }
 
         const double bx = obj.bbox[0];
@@ -440,7 +472,6 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
         const double bw = obj.bbox[2];
         const double bh = obj.bbox[3];
         const QRectF bboxRect(bx, by, bw, bh);
-        const QString label = buildLabelText(categoryName, obj.score);
         const QSizeF labelSize = metrics.size(Qt::TextSingleLine, label);
 
         if (obj.withAngle) {
@@ -465,6 +496,7 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
                 const double y = cy + offset.x() * sinA + offset.y() * cosA;
                 polygon << QPointF(x, y);
             }
+            drawMask(obj, QRectF(cx - w / 2.0, cy - h / 2.0, w, h), true);
             painter.drawPolygon(polygon);
 
             const qreal textLeftX = static_cast<qreal>(cx) - labelSize.width() / 2.0;
@@ -473,6 +505,7 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
             continue;
         }
 
+        drawMask(obj, bboxRect, false);
         painter.drawRect(bboxRect);
 
         const qreal textTopY = static_cast<qreal>(by) - labelSize.height() - 2.0;
