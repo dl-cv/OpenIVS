@@ -19,48 +19,45 @@ def _write_text_preserve_bom(path: str, text: str, has_bom: bool) -> None:
         f.write(raw)
 
 
-def _extract_version_from_setup_py(setup_py_path: str) -> str:
+def _extract_version_from_setup_py(setup_py_path: str) -> tuple[str, str]:
     text, _ = _read_text_preserve_bom(setup_py_path)
     m = re.search(r"(?m)^\s*version\s*=\s*['\"]([^'\"]+)['\"]\s*$", text)
     if not m:
         raise RuntimeError(f"无法在 {setup_py_path} 中找到 version = 'x.y.z.w' 形式的版本号")
     version = m.group(1).strip()
-    if not re.match(r"^\d+(\.\d+){3}$", version):
-        raise RuntimeError(f"版本号格式不符合 C# AssemblyVersion 要求(必须是 4 段数字): {version}")
-    return version
+    m_num = re.match(r"^(\d+(?:\.\d+){3})", version)
+    if not m_num:
+        raise RuntimeError(f"版本号格式不符合要求(至少包含 4 段数字): {version}")
+    return version, m_num.group(1)
 
 
-def _sync_assembly_info(assembly_info_path: str, version: str) -> bool:
+def _sync_assembly_info(assembly_info_path: str, version: str, numeric_version: str) -> bool:
     text, has_bom = _read_text_preserve_bom(assembly_info_path)
-
-    def repl(attr: str) -> tuple[str, int]:
-        pattern = rf'(?m)^\s*\[assembly:\s*{attr}\("([^"]*)"\)\]\s*$'
-        return re.subn(pattern, f'[assembly: {attr}("{version}")]', text)
 
     changed = False
 
-    # AssemblyVersion
+    # AssemblyVersion (must be numeric x.x.x.x)
     new_text, n = re.subn(
-        r'(?m)^\s*\[assembly:\s*AssemblyVersion\("([^"]*)"\)\]\s*$',
-        f'[assembly: AssemblyVersion("{version}")]',
+        r'(?m)^\s*\[assembly:\s*AssemblyVersion\("([^"]+)"\)\]\s*$',
+        f'[assembly: AssemblyVersion("{numeric_version}")]',
         text,
     )
     if n > 0:
         text = new_text
         changed = True
 
-    # AssemblyFileVersion
+    # AssemblyFileVersion (must be numeric x.x.x.x)
     new_text, n = re.subn(
-        r'(?m)^\s*\[assembly:\s*AssemblyFileVersion\("([^"]*)"\)\]\s*$',
-        f'[assembly: AssemblyFileVersion("{version}")]',
+        r'(?m)^\s*\[assembly:\s*AssemblyFileVersion\("([^"]+)"\)\]\s*$',
+        f'[assembly: AssemblyFileVersion("{numeric_version}")]',
         text,
     )
     if n > 0:
         text = new_text
         changed = True
 
-    # AssemblyInformationalVersion（产品版本更直观；如果没有就插入）
-    info_pat = r'(?m)^\s*\[assembly:\s*AssemblyInformationalVersion\("([^"]*)"\)\]\s*$'
+    # AssemblyInformationalVersion (can contain suffix like a0)
+    info_pat = r'(?m)^\s*\[assembly:\s*AssemblyInformationalVersion\("([^"]+)"\)\]\s*$'
     if re.search(info_pat, text):
         new_text, n = re.subn(
             info_pat,
@@ -74,17 +71,17 @@ def _sync_assembly_info(assembly_info_path: str, version: str) -> bool:
         newline = "\r\n" if "\r\n" in text else "\n"
         insert_line = f'[assembly: AssemblyInformationalVersion("{version}")]'
         # 优先插在 AssemblyFileVersion 后面；没有就插在 AssemblyVersion 后面；都没有就追加到文件末尾
-        if re.search(r'(?m)^\s*\[assembly:\s*AssemblyFileVersion\("([^"]*)"\)\]\s*$', text):
+        if re.search(r'(?m)^\s*\[assembly:\s*AssemblyFileVersion\("([^"]+)"\)\]\s*$', text):
             text = re.sub(
-                r'(?m)^\s*(\[assembly:\s*AssemblyFileVersion\("([^"]*)"\)\]\s*)$',
+                r'(?m)^\s*(\[assembly:\s*AssemblyFileVersion\("([^"]+)"\)\]\s*)$',
                 r"\1" + newline + insert_line,
                 text,
                 count=1,
             )
             changed = True
-        elif re.search(r'(?m)^\s*\[assembly:\s*AssemblyVersion\("([^"]*)"\)\]\s*$', text):
+        elif re.search(r'(?m)^\s*\[assembly:\s*AssemblyVersion\("([^"]+)"\)\]\s*$', text):
             text = re.sub(
-                r'(?m)^\s*(\[assembly:\s*AssemblyVersion\("([^"]*)"\)\]\s*)$',
+                r'(?m)^\s*(\[assembly:\s*AssemblyVersion\("([^"]+)"\)\]\s*)$',
                 r"\1" + newline + insert_line,
                 text,
                 count=1,
@@ -106,19 +103,18 @@ def main() -> int:
     setup_py = os.path.join(repo_root, "setup.py")
     assembly_info = os.path.join(repo_root, "DlcvDemo", "Properties", "AssemblyInfo.cs")
 
-    version = _extract_version_from_setup_py(setup_py)
+    version, numeric_version = _extract_version_from_setup_py(setup_py)
 
     if not os.path.exists(assembly_info):
         print(f"[sync_assembly_version] 未找到目标文件: {assembly_info}", file=sys.stderr)
         return 2
 
-    changed = _sync_assembly_info(assembly_info, version)
+    changed = _sync_assembly_info(assembly_info, version, numeric_version)
     print(
-        f"[sync_assembly_version] DlcvDemo AssemblyInfo 版本已{'更新' if changed else '确认一致'} -> {version}"
+        f"[sync_assembly_version] DlcvDemo AssemblyInfo 版本已{'更新' if changed else '确认一致'} -> {version} (numeric: {numeric_version})"
     )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
