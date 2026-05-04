@@ -230,15 +230,18 @@ nlohmann::json sntl_admin::Virbox::GetDeviceList() {
     {
         for (const auto& desc : GetVirboxDescriptions(ipc, api))
         {
-            std::string id = FirstStringByKeys(desc, { "sn", "lock_sn", "lockSn", "serial", "shell_num", "user_guid" });
+            std::string id;
+            // 优先调用 get_device_info 获取详细设备信息
+            char* info = nullptr;
+            int status = api.get_device_info(ipc, desc.dump().c_str(), &info);
+            if (status == VIRBOX_OK)
+            {
+                id = FirstStringByKeys(ParseJsonSafe(ReadAndFree(api, info)), { "dog_id", "sn", "lock_sn", "lockSn", "serial", "shell_num" });
+            }
+            // 如果 get_device_info 没有返回有效 ID，再从 description 中查找
             if (id.empty())
             {
-                char* info = nullptr;
-                int status = api.get_device_info(ipc, desc.dump().c_str(), &info);
-                if (status == VIRBOX_OK)
-                {
-                    id = FirstStringByKeys(ParseJsonSafe(ReadAndFree(api, info)), { "sn", "lock_sn", "lockSn", "serial", "shell_num" });
-                }
+                id = FirstStringByKeys(desc, { "dog_id", "sn", "lock_sn", "lockSn", "serial", "shell_num", "user_guid" });
             }
             AddUnique(devices, id);
         }

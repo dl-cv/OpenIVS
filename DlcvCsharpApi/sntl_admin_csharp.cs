@@ -454,15 +454,18 @@ namespace sntl_admin_csharp
             {
                 foreach (JObject desc in GetDescriptions(ipc))
                 {
-                    string id = FirstStringByKeys(desc, new[] { "sn", "lock_sn", "lockSn", "serial", "shell_num", "user_guid" });
+                    string id = null;
+                    // 优先调用 get_device_info 获取详细设备信息
+                    IntPtr infoPtr = IntPtr.Zero;
+                    if (getDeviceInfo(ipc, desc.ToString(Newtonsoft.Json.Formatting.None), ref infoPtr) == SS_OK)
+                    {
+                        JToken info = ParseJson(ReadAndFree(infoPtr));
+                        id = FirstStringByKeys(info, new[] { "dog_id", "sn", "lock_sn", "lockSn", "serial", "shell_num" });
+                    }
+                    // 如果 get_device_info 没有返回有效 ID，再从 description 中查找
                     if (string.IsNullOrEmpty(id))
                     {
-                        IntPtr infoPtr = IntPtr.Zero;
-                        if (getDeviceInfo(ipc, desc.ToString(Newtonsoft.Json.Formatting.None), ref infoPtr) == SS_OK)
-                        {
-                            JToken info = ParseJson(ReadAndFree(infoPtr));
-                            id = FirstStringByKeys(info, new[] { "sn", "lock_sn", "lockSn", "serial", "shell_num" });
-                        }
+                        id = FirstStringByKeys(desc, new[] { "dog_id", "sn", "lock_sn", "lockSn", "serial", "shell_num", "user_guid" });
                     }
                     AddUnique(result, id);
                 }
