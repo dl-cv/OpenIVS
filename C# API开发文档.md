@@ -51,8 +51,8 @@
 
 | 组件 | 当前实现中的加载方式 |
 | --- | --- |
-| `dlcv_infer.dll` | 优先按系统搜索路径加载，失败后回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` |
-| `dlcv_infer2.dll` | 仅当授权特征列表包含字符串 `"2"` 时启用；回退路径为 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer2.dll` |
+| `dlcv_infer.dll` | Sentinel 版本；优先按系统搜索路径加载，失败后回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` |
+| `dlcv_infer_v.dll` | Virbox 版本；加载 DVT/DVO/DVR 模型前读取模型包 `header_json.dog_provider`，当 provider 为 `virbox` 时启用；回退路径为 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | `sntl_adminapi_windows_x64.dll` | 优先按系统搜索路径加载，失败后回退到 `C:\dlcv\bin\sntl_adminapi_windows_x64.dll` |
 | `nvml.dll` | `Utils.GetGpuInfo()` 通过 `DllImport` 直接调用 |
 | `DLCV Test.exe` | `Model` 的 DVP 模式固定从 `C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe` 启动后端服务 |
@@ -62,7 +62,7 @@
 
 | 模式 | 触发条件 | 当前实现中的通信方式 |
 | --- | --- | --- |
-| DVT | 文件后缀既不是 `.dvp`，也不是 `.dvst`/`.dvso`/`.dvsp`，且 `rpc_mode=false` | `dlcv_infer.dll` / `dlcv_infer2.dll` 导出的 C 接口 |
+| DVT | 文件后缀既不是 `.dvp`，也不是 `.dvst`/`.dvso`/`.dvsp`，且 `rpc_mode=false` | `dlcv_infer.dll` / `dlcv_infer_v.dll` 导出的 C 接口 |
 | DVP | 模型路径后缀为 `.dvp` | HTTP，固定服务地址 `http://127.0.0.1:9890` |
 | DVS | 模型路径后缀为 `.dvst`、`.dvso` 或 `.dvsp` | `DvsModel` + `FlowGraphModel` |
 | RPC | `rpc_mode=true` 且不属于 DVP/DVS 后缀 | 命名管道 `DlcvModelRpcPipe` + 共享内存 |
@@ -193,11 +193,11 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 
 ### `DllLoader`
 
-`DllLoader` 是单例原生入口分发器，`Instance` 首次访问时完成三组委托绑定：模型生命周期接口 `dlcv_load_model`、`dlcv_free_model`、`dlcv_free_all_models`；模型信息、推理和结果释放接口 `dlcv_get_model_info`、`dlcv_infer`、`dlcv_free_model_result`、`dlcv_free_result`；设备与时钟查询接口 `dlcv_get_device_info`、`dlcv_get_gpu_info`、`dlcv_keep_max_clock`。授权特征列表中包含字符串 `"2"` 时，优先改用 `dlcv_infer2.dll`。
+`DllLoader` 是 provider-aware 原生入口分发器。`ForProvider(DogProvider)` 按 provider 返回对应 loader：`sentinel` 加载 `dlcv_infer.dll`，`virbox` 加载 `dlcv_infer_v.dll`。`ForModel(string)` 先读取模型包 `header_json.dog_provider`，再调用 `ForProvider`。每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续 `GetModelInfoDvt`、`InferInternalDvt`、`FreeModel` 都走该 loader。`Utils` 的 `FreeAllModels`、`GetDeviceInfo`、`KeepMaxClock` 遍历所有已创建 loader 执行。
 
 ### `sntl_admin_csharp`
 
-`sntl_admin_csharp` 对外提供状态枚举 `SntlAdminStatus`、原生加载器 `SNTLDllLoader`、运行时访问类 `SNTL` 和工具类 `SNTLUtils`。`SNTL` 负责建立上下文并提供 `Get()`、`GetSntlInfo()`、`GetDeviceList()`、`GetFeatureList()`、`Dispose()`；`SNTLUtils` 提供静态的设备列表与特征列表查询。`DllLoader` 通过 `SNTL.GetFeatureList()` 读取授权特征列表，以决定是否切换到 `dlcv_infer2.dll`。
+`sntl_admin_csharp` 对外提供状态枚举 `SntlAdminStatus`、原生加载器 `SNTLDllLoader`、运行时访问类 `SNTL`、工具类 `SNTLUtils`、`DogProvider` 枚举、`DogInfo` 与 `DogUtils`。`SNTL` 负责建立上下文并提供 `Get()`、`GetSntlInfo()`、`GetDeviceList()`、`GetFeatureList()`、`Dispose()`；`SNTLUtils` 提供静态的 Sentinel 设备列表与特征列表查询，不再自动回退到 Virbox。`Virbox` 提供独立的 Virbox 设备列表与特征列表查询。`DogUtils` 提供 `GetSentinelInfo()`、`GetVirboxInfo()`、`GetAvailableProviders()` 与 `GetAllDogInfo()`，用于同时查询两类加密狗信息。OpenIVS 不解密模型包内 `dlcv.json`。
 
 ## Flow 的 C# 实现入口
 

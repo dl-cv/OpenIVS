@@ -38,7 +38,7 @@
 > 这些依赖用于保证“加载模型/推理/设备枚举/加密狗检查”行为可用。若缺失，会导致对应功能失败或降级（必须与本文档描述一致）。
 
 - **DLCV 推理 DLL（必须）**
-  - `dlcv_infer.dll` 或 `dlcv_infer2.dll`：必须可被进程加载（通常位于输出目录或系统 PATH，或 SDK 固定路径）
+  - `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）：必须可被进程加载（通常位于输出目录或系统 PATH，或 SDK 固定路径）
 - **OpenCvSharp 运行时（必须）**
   - `OpenCvSharpExtern.dll` + OpenCV 相关运行时 DLL（由 `OpenCvSharp4.runtime.win` 提供）
 - **GPU 枚举（可选）**
@@ -396,11 +396,9 @@
 
 #### 7.12 检查加密狗（按钮：`检查加密狗`）
 
-- 调用：
-  - `SNTLUtils.GetDeviceList()`
-  - `SNTLUtils.GetFeatureList()`
+- 调用：`DogUtils.GetAllDogInfo()`
 - 输出到 `richTextBox1`（格式必须一致）：
-  - `加密狗ID：\n{deviceList}\n\n加密狗特性：\n{featureList}`
+  - `Sentinel加密狗ID：\n{sentinelDeviceList}\n\nSentinel加密狗特性：\n{sentinelFeatureList}\n\nVirbox加密狗ID：\n{virboxDeviceList}\n\nVirbox加密狗特性：\n{virboxFeatureList}`
 
 #### 7.13 文档（按钮：`文档`）
 
