@@ -193,6 +193,8 @@ namespace dlcv_infer {
     };
 
     // 模型封装
+#pragma warning(push)
+#pragma warning(disable: 4251)
     class DLCV_INFER_CPP_DLL_API Model {
     protected:
         // 内部推理
@@ -256,6 +258,7 @@ namespace dlcv_infer {
         sntl_admin::DogProvider LoadedDogProvider() const { return _loadedDogProvider; }
         std::string LoadedNativeDllName() const { return _loadedNativeDllName; }
     };
+#pragma warning(pop)
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS
     // 滑动窗口模型（内部使用，如需对外可再单独开放）
