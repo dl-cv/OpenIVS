@@ -20,44 +20,59 @@ namespace sntl_admin {
     }
 
     DogProvider ResolveModelHeaderProvider(const std::wstring& modelPath) {
+        DogProvider out;
+        if (TryResolveExplicitProvider(modelPath, out)) {
+            return out;
+        }
+        return DogProvider::Sentinel;
+    }
+
+    DogProvider ResolveModelHeaderProvider(const std::string& modelPathUtf8OrGbk) {
+        DogProvider out;
+        if (TryResolveExplicitProvider(modelPathUtf8OrGbk, out)) {
+            return out;
+        }
+        return DogProvider::Sentinel;
+    }
+
+    static bool TryResolveExplicitProviderFromStream(std::istream& stream, DogProvider& outProvider) {
+        std::string header;
+        std::string headerJsonStr;
+        std::getline(stream, header);
+        std::getline(stream, headerJsonStr);
+        if (header != "DV") {
+            throw std::runtime_error("invalid model format: missing DV header");
+        }
+        auto headerJson = nlohmann::json::parse(headerJsonStr);
+        if (!headerJson.contains("dog_provider")) {
+            return false;
+        }
+        outProvider = ParseProviderFromHeaderJson(headerJson);
+        return true;
+    }
+
+    bool TryResolveExplicitProvider(const std::wstring& modelPath, DogProvider& outProvider) {
         std::ifstream file(modelPath);
         if (!file) {
             throw std::runtime_error("failed to open model file");
         }
-        std::string header;
-        std::string headerJsonStr;
-        std::getline(file, header);
-        std::getline(file, headerJsonStr);
-        if (header != "DV") {
-            throw std::runtime_error("invalid model format: missing DV header");
-        }
-        auto headerJson = nlohmann::json::parse(headerJsonStr);
-        return ParseProviderFromHeaderJson(headerJson);
+        return TryResolveExplicitProviderFromStream(file, outProvider);
     }
 
-    DogProvider ResolveModelHeaderProvider(const std::string& modelPathUtf8OrGbk) {
-        // 在 Windows 下优先转为 wstring 打开，以支持非 ASCII 路径
+    bool TryResolveExplicitProvider(const std::string& modelPath, DogProvider& outProvider) {
 #ifdef _WIN32
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, modelPathUtf8OrGbk.c_str(), -1, nullptr, 0);
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, modelPath.c_str(), -1, nullptr, 0);
         if (wlen > 0) {
             std::wstring wpath(wlen - 1, L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, modelPathUtf8OrGbk.c_str(), -1, &wpath[0], wlen);
-            return ResolveModelHeaderProvider(wpath);
+            MultiByteToWideChar(CP_UTF8, 0, modelPath.c_str(), -1, &wpath[0], wlen);
+            return TryResolveExplicitProvider(wpath, outProvider);
         }
 #endif
-        std::ifstream file(modelPathUtf8OrGbk);
+        std::ifstream file(modelPath);
         if (!file) {
             throw std::runtime_error("failed to open model file");
         }
-        std::string header;
-        std::string headerJsonStr;
-        std::getline(file, header);
-        std::getline(file, headerJsonStr);
-        if (header != "DV") {
-            throw std::runtime_error("invalid model format: missing DV header");
-        }
-        auto headerJson = nlohmann::json::parse(headerJsonStr);
-        return ParseProviderFromHeaderJson(headerJson);
+        return TryResolveExplicitProviderFromStream(file, outProvider);
     }
 
 } // namespace sntl_admin

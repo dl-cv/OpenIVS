@@ -120,6 +120,12 @@ namespace dlcv_infer {
         static DllLoader& ForModel(const std::wstring& modelPath);
         static const std::vector<DllLoader*>& GetAllLoaders() { return allLoaders; }
 
+        /// <summary>
+        /// 自动检测当前插入的加密狗，按 Sentinel 优先、Virbox 第二返回 Provider。
+        /// 若均未检测到，默认返回 Sentinel。
+        /// </summary>
+        static sntl_admin::DogProvider AutoDetectProvider();
+
         LoadModelFuncType GetLoadModelFunc() const {
             return dlcv_load_model;
         }

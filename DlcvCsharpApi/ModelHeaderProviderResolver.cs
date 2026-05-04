@@ -10,6 +10,21 @@ namespace dlcv_infer_csharp
     {
         public static DogProvider ResolveProvider(string modelPath)
         {
+            if (TryResolveExplicitProvider(modelPath, out DogProvider provider))
+            {
+                return provider;
+            }
+            return DogProvider.Sentinel;
+        }
+
+        /// <summary>
+        /// 尝试从模型头解析明确指定的 dog_provider。
+        /// 返回 true 表示模型头中明确写入了 dog_provider；
+        /// 返回 false 表示模型头未指定 dog_provider（调用方应走自动检测逻辑）。
+        /// </summary>
+        public static bool TryResolveExplicitProvider(string modelPath, out DogProvider provider)
+        {
+            provider = DogProvider.Sentinel;
             if (string.IsNullOrWhiteSpace(modelPath))
             {
                 throw new ArgumentException("模型路径不能为空", nameof(modelPath));
@@ -43,20 +58,22 @@ namespace dlcv_infer_csharp
                 JObject headerJson = JObject.Parse(headerJsonStr);
                 if (!headerJson.ContainsKey("dog_provider"))
                 {
-                    return DogProvider.Sentinel;
+                    return false;
                 }
 
-                string provider = headerJson["dog_provider"]?.ToString()?.ToLower() ?? "";
-                if (provider == "sentinel")
+                string p = headerJson["dog_provider"]?.ToString()?.ToLower() ?? "";
+                if (p == "sentinel")
                 {
-                    return DogProvider.Sentinel;
+                    provider = DogProvider.Sentinel;
+                    return true;
                 }
-                if (provider == "virbox")
+                if (p == "virbox")
                 {
-                    return DogProvider.Virbox;
+                    provider = DogProvider.Virbox;
+                    return true;
                 }
 
-                throw new Exception($"invalid dog provider in header_json: {provider}");
+                throw new Exception($"invalid dog provider in header_json: {p}");
             }
         }
     }

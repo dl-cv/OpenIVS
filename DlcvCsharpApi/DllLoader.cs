@@ -81,7 +81,7 @@ namespace dlcv_infer_csharp
                             }
                             else
                             {
-                                _legacyInstance = ForProvider(DogProvider.Sentinel);
+                                _legacyInstance = ForProvider(AutoDetectProvider());
                             }
                         }
                     }
@@ -129,13 +129,51 @@ namespace dlcv_infer_csharp
 
         public static DllLoader ForModel(string modelPath)
         {
-            DogProvider provider = ModelHeaderProviderResolver.ResolveProvider(modelPath);
-            DogInfo dogInfo = provider == DogProvider.Sentinel ? DogUtils.GetSentinelInfo() : DogUtils.GetVirboxInfo();
-            if (dogInfo == null || ((dogInfo.Devices == null || dogInfo.Devices.Count == 0) && (dogInfo.Features == null || dogInfo.Features.Count == 0)))
+            DogProvider provider;
+            if (!ModelHeaderProviderResolver.TryResolveExplicitProvider(modelPath, out provider))
             {
-                throw new Exception($"模型要求 provider {provider}，但未检测到对应的加密狗设备或特性");
+                // 模型未明确指定 provider，按 Sentinel 优先、Virbox 第二自动检测当前加密狗
+                provider = AutoDetectProvider();
+            }
+            else
+            {
+                // 模型明确指定了 provider，验证对应加密狗是否存在
+                DogInfo dogInfo = provider == DogProvider.Sentinel ? DogUtils.GetSentinelInfo() : DogUtils.GetVirboxInfo();
+                if (dogInfo == null || ((dogInfo.Devices == null || dogInfo.Devices.Count == 0) && (dogInfo.Features == null || dogInfo.Features.Count == 0)))
+                {
+                    throw new Exception($"模型要求 provider {provider}，但未检测到对应的加密狗设备或特性");
+                }
             }
             return ForProvider(provider);
+        }
+
+        /// <summary>
+        /// 自动检测当前插入的加密狗，按 Sentinel 优先、Virbox 第二返回 Provider。
+        /// 若均未检测到，默认返回 Sentinel。
+        /// </summary>
+        private static DogProvider AutoDetectProvider()
+        {
+            try
+            {
+                var sentinel = DogUtils.GetSentinelInfo();
+                if (sentinel != null && ((sentinel.Devices != null && sentinel.Devices.Count > 0) || (sentinel.Features != null && sentinel.Features.Count > 0)))
+                {
+                    return DogProvider.Sentinel;
+                }
+            }
+            catch { }
+
+            try
+            {
+                var virbox = DogUtils.GetVirboxInfo();
+                if (virbox != null && ((virbox.Devices != null && virbox.Devices.Count > 0) || (virbox.Features != null && virbox.Features.Count > 0)))
+                {
+                    return DogProvider.Virbox;
+                }
+            }
+            catch { }
+
+            return DogProvider.Sentinel;
         }
 
         private void LoadDll()

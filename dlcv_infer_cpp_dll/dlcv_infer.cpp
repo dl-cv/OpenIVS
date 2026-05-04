@@ -974,6 +974,24 @@ namespace dlcv_infer {
 #endif
     }
 
+    sntl_admin::DogProvider DllLoader::AutoDetectProvider() {
+        try {
+            auto sentinel = sntl_admin::DogUtils::GetSentinelInfo();
+            if (sentinel.provider != sntl_admin::DogProvider::Unknown) {
+                return sntl_admin::DogProvider::Sentinel;
+            }
+        } catch (...) {}
+
+        try {
+            auto virbox = sntl_admin::DogUtils::GetVirboxInfo();
+            if (virbox.provider != sntl_admin::DogProvider::Unknown) {
+                return sntl_admin::DogProvider::Virbox;
+            }
+        } catch (...) {}
+
+        return sntl_admin::DogProvider::Sentinel;
+    }
+
     DllLoader& DllLoader::Instance() {
         if (!instance)
         {
@@ -983,7 +1001,7 @@ namespace dlcv_infer {
             }
             else
             {
-                instance = new DllLoader(sntl_admin::DogProvider::Sentinel);
+                instance = new DllLoader(AutoDetectProvider());
             }
         }
         return *instance;
@@ -994,29 +1012,45 @@ namespace dlcv_infer {
     }
 
     DllLoader& DllLoader::ForModel(const std::string& modelPath) {
-        sntl_admin::DogProvider provider = sntl_admin::ResolveModelHeaderProvider(modelPath);
-        auto dogInfo = provider == sntl_admin::DogProvider::Sentinel
-            ? sntl_admin::DogUtils::GetSentinelInfo()
-            : sntl_admin::DogUtils::GetVirboxInfo();
-        if (dogInfo.provider == sntl_admin::DogProvider::Unknown)
+        sntl_admin::DogProvider provider;
+        if (!sntl_admin::TryResolveExplicitProvider(modelPath, provider))
         {
-            throw std::runtime_error(std::string("模型要求 provider ")
-                + (provider == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
-                + "，但未检测到对应的加密狗设备或特性");
+            // 模型未明确指定 provider，按 Sentinel 优先、Virbox 第二自动检测当前加密狗
+            provider = AutoDetectProvider();
+        }
+        else
+        {
+            // 模型明确指定了 provider，验证对应加密狗是否存在
+            auto dogInfo = provider == sntl_admin::DogProvider::Sentinel
+                ? sntl_admin::DogUtils::GetSentinelInfo()
+                : sntl_admin::DogUtils::GetVirboxInfo();
+            if (dogInfo.provider == sntl_admin::DogProvider::Unknown)
+            {
+                throw std::runtime_error(std::string("模型要求 provider ")
+                    + (provider == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
+                    + "，但未检测到对应的加密狗设备或特性");
+            }
         }
         return ForProvider(provider);
     }
 
     DllLoader& DllLoader::ForModel(const std::wstring& modelPath) {
-        sntl_admin::DogProvider provider = sntl_admin::ResolveModelHeaderProvider(modelPath);
-        auto dogInfo = provider == sntl_admin::DogProvider::Sentinel
-            ? sntl_admin::DogUtils::GetSentinelInfo()
-            : sntl_admin::DogUtils::GetVirboxInfo();
-        if (dogInfo.provider == sntl_admin::DogProvider::Unknown)
+        sntl_admin::DogProvider provider;
+        if (!sntl_admin::TryResolveExplicitProvider(modelPath, provider))
         {
-            throw std::runtime_error(std::string("模型要求 provider ")
-                + (provider == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
-                + "，但未检测到对应的加密狗设备或特性");
+            provider = AutoDetectProvider();
+        }
+        else
+        {
+            auto dogInfo = provider == sntl_admin::DogProvider::Sentinel
+                ? sntl_admin::DogUtils::GetSentinelInfo()
+                : sntl_admin::DogUtils::GetVirboxInfo();
+            if (dogInfo.provider == sntl_admin::DogProvider::Unknown)
+            {
+                throw std::runtime_error(std::string("模型要求 provider ")
+                    + (provider == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
+                    + "，但未检测到对应的加密狗设备或特性");
+            }
         }
         return ForProvider(provider);
     }

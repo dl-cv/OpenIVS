@@ -82,7 +82,7 @@ namespace DlcvModules
                         }
                         else
                         {
-                            // 其他文件（.dvt）写入临时目录
+                            // 其他文件（.dvt/.dvs/.dvo/.dvr 等）写入临时目录
                             // 关键修改：为了避免中文文件名导致的底层库打开失败，我们将临时文件重命名为纯英文（Guid）
                             // 保留原始扩展名以便识别
                             string ext = Path.GetExtension(fileName);
