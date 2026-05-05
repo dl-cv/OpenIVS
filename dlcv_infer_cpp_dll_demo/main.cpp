@@ -1,4 +1,4 @@
-﻿#ifndef NOMINMAX
+#ifndef NOMINMAX
 #define NOMINMAX
 #endif
 
@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 #include <windows.h>
+#include <psapi.h>
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -28,12 +29,22 @@ void InitGbkConsole() {
 namespace {
 
 struct InferCase {
-    std::string ModelPath;
-    std::string ImagePath;
+    std::string ModelFile;
+    std::string ImageFile;
+};
+
+struct CaseRow {
+    std::string ModelName;
+    std::string LoadStatus;
+    std::string InferStatus;
+    std::string CategoryList;
+    std::string SpeedText;
+    std::string BatchText;
 };
 
 struct Options {
     bool PressureMode = false;
+    bool DefaultCasesMode = false;
     int DeviceId = 0;
     int ThreadCount = 1;
     int BatchSize = 1;
@@ -43,8 +54,101 @@ struct Options {
     std::string SingleImagePath;
 };
 
+const std::string ModelRoot = R"(Y:\测试模型)";
+
+const std::vector<InferCase> DefaultCases = {
+    { "AOI-旋转框检测_120_50.dvt", "AOI-1.jpg" },
+    { "AOI_120_50.dvst", "AOI-1.jpg" },
+    { "猫狗-分类_120_50.dvt", "猫狗-猫.jpg" },
+    { "猫狗-分类_120_50_v.dvt", "猫狗-猫.jpg" },
+    { "气球-实例分割_120_50.dvt", "气球.jpg" },
+    { "气球-实例分割_120_50_v.dvt", "气球.jpg" },
+    { "气球-语义分割_120_50.dvt", "气球.jpg" },
+    { "手机屏幕-实例分割_120_50.dvt", "手机屏幕.jpg" },
+    { "引脚定位-目标检测_120_50.dvt", "引脚定位-目标检测.jpg" },
+    { "OCR_120_50.dvt", "OCR-1.jpg" }
+};
+
+std::string JoinPath(const std::string& a, const std::string& b) {
+    if (a.empty()) return b;
+    if (b.empty()) return a;
+    const char tail = a.back();
+    if (tail == '\\' || tail == '/') return a + b;
+    return a + "\\" + b;
+}
+
+bool FileExists(const std::string& path) {
+    DWORD attr = GetFileAttributesA(path.c_str());
+    return (attr != INVALID_FILE_ATTRIBUTES) && ((attr & FILE_ATTRIBUTE_DIRECTORY) == 0);
+}
+
+bool DirExists(const std::string& path) {
+    DWORD attr = GetFileAttributesA(path.c_str());
+    return (attr != INVALID_FILE_ATTRIBUTES) && ((attr & FILE_ATTRIBUTE_DIRECTORY) != 0);
+}
+
+double GetCurrentPrivateMemoryMb() {
+    PROCESS_MEMORY_COUNTERS pmc = {};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+    return 0.0;
+}
+
+std::string TrimMessage(const std::string& s) {
+    if (s.empty()) return "";
+    std::string r;
+    r.reserve(s.size());
+    for (char c : s) {
+        if (c == '\r' || c == '\n') r += ' ';
+        else r += c;
+    }
+    if (r.size() > 64) {
+        return r.substr(0, 64) + "...";
+    }
+    return r;
+}
+
+std::string SafeCell(const std::string& s) {
+    if (s.empty()) return "-";
+    std::string r;
+    r.reserve(s.size());
+    for (char c : s) {
+        if (c == '|') r += '/';
+        else if (c == '\r' || c == '\n') r += ' ';
+        else r += c;
+    }
+    return r;
+}
+
+std::string BuildCategoryList(const dlcv_infer::Result& result) {
+    const size_t maxShowCount = 20;
+    if (result.sampleResults.empty()) return "";
+    const auto& first = result.sampleResults[0];
+    if (first.results.empty()) return "";
+
+    std::vector<std::string> all;
+    all.reserve(first.results.size());
+    for (const auto& obj : first.results) {
+        all.push_back(obj.categoryName.empty() ? "unknown" : obj.categoryName);
+    }
+
+    size_t showCount = std::min(maxShowCount, all.size());
+    std::string text;
+    for (size_t i = 0; i < showCount; ++i) {
+        if (i > 0) text += "，";
+        text += all[i];
+    }
+    if (all.size() > maxShowCount) {
+        text += " ...(共" + std::to_string(all.size()) + "个)";
+    }
+    return text;
+}
+
 void PrintUsage(const char* exeName) {
     std::cout << "用法:\n"
+              << "  默认测试（无参数）:\n"
+              << "    " << exeName << "\n\n"
               << "  单次验证（可多组）:\n"
               << "    " << exeName << " --case <model.dvst> <image.jpg> [--case <model2.dvst> <image2.jpg> ...] [--device 0]\n"
               << "    " << exeName << " --model <model.dvst> --image <image.jpg> [--device 0]\n\n"
@@ -52,6 +156,7 @@ void PrintUsage(const char* exeName) {
               << "    " << exeName << " --pressure --model <model.dvst> --image <image.jpg>\n"
               << "                [--threads 4] [--batch 2] [--seconds 30] [--device 0]\n\n"
               << "说明:\n"
+              << "  - 默认测试会按内置模型列表依次加载、推理并打印表格。\n"
               << "  - Flow 模型入口按 RGB 语义执行，demo 会把读取到的 BGR 图像转换为 RGB。\n"
               << "  - 压测统计口径对齐 C#：完成请求 = 完成批次数 * batch_size。\n";
 }
@@ -78,8 +183,8 @@ bool ParseArgs(int argc, char** argv, Options& opt) {
         if (arg == "--case") {
             if (i + 2 >= argc) return false;
             InferCase one;
-            one.ModelPath = argv[++i];
-            one.ImagePath = argv[++i];
+            one.ModelFile = argv[++i];
+            one.ImageFile = argv[++i];
             opt.Cases.push_back(std::move(one));
             continue;
         }
@@ -124,6 +229,10 @@ bool ParseArgs(int argc, char** argv, Options& opt) {
         opt.Cases.push_back(InferCase{ opt.SingleModelPath, opt.SingleImagePath });
     }
 
+    if (!opt.PressureMode && opt.Cases.empty()) {
+        opt.DefaultCasesMode = true;
+    }
+
     opt.ThreadCount = std::max(1, opt.ThreadCount);
     opt.BatchSize = std::max(1, opt.BatchSize);
     opt.DurationSeconds = std::max(1, opt.DurationSeconds);
@@ -138,6 +247,157 @@ cv::Mat LoadRgbImage(const std::string& imagePath) {
     cv::Mat rgb;
     cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
     return rgb;
+}
+
+CaseRow RunCase(const std::string& modelPath, const std::string& imagePath, int deviceId) {
+    CaseRow row;
+    row.ModelName = modelPath;
+    row.LoadStatus = "失败";
+    row.InferStatus = "失败";
+    row.CategoryList = "-";
+    row.SpeedText = "-";
+    row.BatchText = "-";
+
+    const size_t pos = modelPath.find_last_of("\\/");
+    if (pos != std::string::npos) {
+        row.ModelName = modelPath.substr(pos + 1);
+    }
+
+    double memBefore = GetCurrentPrivateMemoryMb();
+    auto tLoad0 = std::chrono::steady_clock::now();
+    dlcv_infer::Model* model = nullptr;
+    try {
+        model = new dlcv_infer::Model(modelPath, deviceId);
+        row.LoadStatus = (model != nullptr && model->modelIndex != -1) ? "成功" : "失败";
+    } catch (const std::exception& ex) {
+        row.LoadStatus = "失败";
+        row.CategoryList = std::string("错误:") + TrimMessage(ex.what());
+    }
+    auto tLoad1 = std::chrono::steady_clock::now();
+    double memAfter = GetCurrentPrivateMemoryMb();
+    double loadMs = std::chrono::duration<double, std::milli>(tLoad1 - tLoad0).count();
+
+    std::string providerInfo;
+    if (model != nullptr && model->modelIndex != -1) {
+        try {
+            auto provider = model->LoadedDogProvider();
+            auto dllName = model->LoadedNativeDllName();
+            std::string providerName;
+            switch (provider) {
+                case sntl_admin::DogProvider::Sentinel: providerName = "Sentinel"; break;
+                case sntl_admin::DogProvider::Virbox: providerName = "Virbox"; break;
+                default: providerName = "Unknown"; break;
+            }
+            providerInfo = ",provider=" + providerName + ",dll=" + dllName;
+        } catch (...) {}
+    }
+
+    std::ostringstream loadStatusSs;
+    loadStatusSs << row.LoadStatus << "(" << std::fixed << std::setprecision(2) << loadMs
+                 << "ms,Δ" << std::fixed << std::setprecision(2) << (memAfter - memBefore)
+                 << "MB" << providerInfo << ")";
+    row.LoadStatus = loadStatusSs.str();
+
+    if (model == nullptr || model->modelIndex == -1) {
+        return row;
+    }
+
+    try {
+        cv::Mat bgr = cv::imread(imagePath, cv::IMREAD_COLOR);
+        if (bgr.empty()) throw std::runtime_error("图像解码失败");
+        cv::Mat rgb;
+        cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+
+        dlcv_infer::json inferParams;
+        inferParams["threshold"] = 0.05;
+        inferParams["with_mask"] = true;
+
+        try {
+            auto result = model->InferBatch(std::vector<cv::Mat>{ rgb }, inferParams);
+            row.InferStatus = (!result.sampleResults.empty()) ? "成功" : "失败";
+            row.CategoryList = BuildCategoryList(result);
+            if (row.CategoryList.empty()) row.CategoryList = "(空)";
+        } catch (const std::exception& ex) {
+            row.InferStatus = "失败";
+            row.CategoryList = std::string("错误:") + TrimMessage(ex.what());
+        }
+    } catch (const std::exception& ex) {
+        row.InferStatus = "失败";
+        row.CategoryList = std::string("错误:") + TrimMessage(ex.what());
+    }
+
+    try {
+        delete model;
+    } catch (...) {}
+    return row;
+}
+
+int RunDefaultCases(int deviceId) {
+    std::cout << "==== C++ 默认测试（DefaultCases） ====" << std::endl;
+    std::cout << "模型目录: " << ModelRoot << std::endl;
+    std::cout << "固定设备: GPU(" << deviceId << ")" << std::endl;
+    std::cout << std::endl;
+
+    bool modelRootOk = DirExists(ModelRoot);
+    if (!modelRootOk) {
+        std::cout << "模型目录不存在: " << ModelRoot << std::endl;
+    }
+
+    std::vector<CaseRow> rows;
+    rows.reserve(DefaultCases.size());
+    int total = 0;
+    int pass = 0;
+
+    for (const auto& c : DefaultCases) {
+        std::string modelPath = JoinPath(ModelRoot, c.ModelFile);
+        std::string imagePath = JoinPath(ModelRoot, c.ImageFile);
+
+        if (!modelRootOk) {
+            rows.push_back(CaseRow{
+                c.ModelFile, "跳过", "-",
+                "模型目录不存在", "-", "-"
+            });
+            continue;
+        }
+        if (!FileExists(modelPath) || !FileExists(imagePath)) {
+            rows.push_back(CaseRow{
+                c.ModelFile, "跳过", "-",
+                "模型或图片不存在", "-", "-"
+            });
+            continue;
+        }
+
+        total++;
+        auto row = RunCase(modelPath, imagePath, deviceId);
+        rows.push_back(row);
+        if (row.LoadStatus.rfind("成功", 0) == 0 && row.InferStatus.rfind("成功", 0) == 0) {
+            pass++;
+        }
+    }
+
+    rows.push_back(CaseRow{
+        "汇总",
+        "总数=" + std::to_string(total),
+        "成功=" + std::to_string(pass),
+        "失败=" + std::to_string(total - pass),
+        "-", "-"
+    });
+
+    std::cout << "| 模型 | 加载 | 推理 | 类别列表 | 3秒速度 | Batch速度 |" << std::endl;
+    std::cout << "|---|---|---|---|---|---|" << std::endl;
+    for (const auto& r : rows) {
+        std::cout << "| " << SafeCell(r.ModelName)
+                  << " | " << SafeCell(r.LoadStatus)
+                  << " | " << SafeCell(r.InferStatus)
+                  << " | " << SafeCell(r.CategoryList)
+                  << " | " << SafeCell(r.SpeedText)
+                  << " | " << SafeCell(r.BatchText)
+                  << " |" << std::endl;
+    }
+    std::cout << std::endl;
+
+    if (!modelRootOk) return 2;
+    return total == pass ? 0 : 1;
 }
 
 void PrintSingleResultSummary(const dlcv_infer::Result& result) {
@@ -176,18 +436,19 @@ void RunSingleCases(const Options& opt) {
 
     dlcv_infer::json inferParams;
     inferParams["with_mask"] = true;
+    inferParams["threshold"] = 0.05;
 
     for (size_t i = 0; i < opt.Cases.size(); i++) {
         const InferCase& one = opt.Cases[i];
         std::cout << "\n=== 单次验证 Case " << (i + 1) << " ===" << std::endl;
-        std::cout << "模型: " << one.ModelPath << std::endl;
-        std::cout << "图片: " << one.ImagePath << std::endl;
+        std::cout << "模型: " << one.ModelFile << std::endl;
+        std::cout << "图片: " << one.ImageFile << std::endl;
 
-        dlcv_infer::Model model(one.ModelPath, opt.DeviceId);
-        const cv::Mat rgb = LoadRgbImage(one.ImagePath);
+        dlcv_infer::Model model(one.ModelFile, opt.DeviceId);
+        const cv::Mat rgb = LoadRgbImage(one.ImageFile);
 
         const auto t0 = std::chrono::steady_clock::now();
-        const dlcv_infer::Result result = model.Infer(rgb, inferParams);
+        const dlcv_infer::Result result = model.InferBatch(std::vector<cv::Mat>{ rgb }, inferParams);
         const auto t1 = std::chrono::steady_clock::now();
 
         const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -200,8 +461,8 @@ void RunPressureTest(const Options& opt) {
     std::string modelPath;
     std::string imagePath;
     if (!opt.Cases.empty()) {
-        modelPath = opt.Cases[0].ModelPath;
-        imagePath = opt.Cases[0].ImagePath;
+        modelPath = opt.Cases[0].ModelFile;
+        imagePath = opt.Cases[0].ImageFile;
     } else {
         modelPath = opt.SingleModelPath;
         imagePath = opt.SingleImagePath;
@@ -217,6 +478,7 @@ void RunPressureTest(const Options& opt) {
     dlcv_infer::json inferParams;
     inferParams["with_mask"] = true;
     inferParams["batch_size"] = opt.BatchSize;
+    inferParams["threshold"] = 0.05;
 
     std::atomic<bool> running{ true };
     std::atomic<long long> completedBatches{ 0 };
@@ -301,14 +563,12 @@ int main(int argc, char** argv) {
         PrintUsage(argv[0]);
         return 1;
     }
-    if (!opt.PressureMode && opt.Cases.empty()) {
-        PrintUsage(argv[0]);
-        return 1;
-    }
 
     try {
         if (opt.PressureMode) {
             RunPressureTest(opt);
+        } else if (opt.DefaultCasesMode) {
+            return RunDefaultCases(opt.DeviceId);
         } else {
             RunSingleCases(opt);
         }

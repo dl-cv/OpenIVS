@@ -1027,7 +1027,8 @@ namespace dlcv_infer {
     }
 
     void DllLoader::EnsureForModel(const std::string& modelPath) {
-        std::ifstream file(modelPath);
+        std::wstring wpath = convertUtf8ToWstring(modelPath);
+        std::ifstream file(wpath);
         if (!file) {
             throw std::runtime_error("failed to open model file");
         }
