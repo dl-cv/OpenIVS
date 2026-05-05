@@ -192,7 +192,7 @@ public void InitializeMultipleCameras(Settings settings)
 1. **修改位置序列**
    ```csharp
    // 位置序列定义可以根据需要调整
-   private readonly float[] _positionSequence = new float[] { 195, 305, 415, 305 };
+   private readonly float[] _positionSequence = new float[] { 220, 330, 440, 330 };
    ```
 
 2. **调整处理流程**

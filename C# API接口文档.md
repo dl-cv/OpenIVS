@@ -14,7 +14,7 @@
 | `DllLoader.cs` | `DllLoader` 类，DLL 加载与函数代理 |
 | `flow/FlowGraphModel.cs` | `FlowGraphModel` 类，流程图推理 |
 | `flow/DvsModel.cs` | `DvsModel` 类，DVS 归档加载 |
-| `InferTiming.cs` | `InferTiming` 类，推理计时 |
+| `flow/runtime/ExecutionRuntime.cs` | `InferTiming` 类，推理计时 |
 
 命名空间：
 - `DlcvModules`：`Model`、`Utils`、`FlowGraphModel`、`DvsModel`、`InferTiming`
@@ -28,24 +28,27 @@
 ### 2.1 CSharpObjectResult
 
 ```csharp
-public class CSharpObjectResult
+public partial class Utils
 {
-    public int CategoryId;           // 类别 ID
-    public string CategoryName;      // 类别名称
-    public float Score;              // 置信度
-    public float Area;               // 面积
-    public List<double> Bbox;        // 水平框: [x, y, w, h]; 旋转框: [cx, cy, w, h]
-    public bool WithMask;            // 是否含 mask
-    public Mat Mask;                 // OpenCV mask（CV_8UC1），未检出时可能为空 Mat
-    public bool WithBbox;            // 是否含 bbox
-    public bool WithAngle;           // 是否含旋转角度
-    public float Angle;              // 旋转角度（弧度），-100 表示无效
-    public JObject ExtraInfo;        // 额外信息（polyline 等）
+    public struct CSharpObjectResult
+    {
+        public int CategoryId { get; set; }           // 类别 ID
+        public string CategoryName { get; set; }      // 类别名称
+        public float Score { get; set; }              // 置信度
+        public float Area { get; set; }               // 面积
+        public List<double> Bbox { get; set; }        // 水平框: [x, y, w, h]; 旋转框: [cx, cy, w, h]
+        public bool WithMask { get; set; }            // 是否含 mask
+        public Mat Mask { get; set; }                 // OpenCV mask（CV_8UC1），未检出时可能为空 Mat
+        public bool WithBbox { get; set; }            // 是否含 bbox
+        public bool WithAngle { get; set; }           // 是否含旋转角度
+        public float Angle { get; set; }              // 旋转角度（弧度），-100 表示无效
+        public JObject ExtraInfo { get; set; }        // 额外信息（polyline 等）
 
-    public CSharpObjectResult(
-        int categoryId, string categoryName, float score, float area,
-        List<double> bbox, bool withMask, Mat mask, bool withBbox,
-        bool withAngle, float angle, JObject extraInfo);
+        public CSharpObjectResult(
+            int categoryId, string categoryName, float score, float area,
+            List<double> bbox, bool withMask, Mat mask,
+            bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null);
+    }
 }
 ```
 
@@ -58,24 +61,28 @@ public class CSharpObjectResult
 ### 2.2 CSharpSampleResult
 
 ```csharp
-public class CSharpSampleResult
+public partial class Utils
 {
-    public List<CSharpObjectResult> Results;
+    public struct CSharpSampleResult
+    {
+        public List<CSharpObjectResult> Results { get; set; }
 
-    public CSharpSampleResult();
-    public CSharpSampleResult(List<CSharpObjectResult> results);
+        public CSharpSampleResult(List<CSharpObjectResult> results);
+    }
 }
 ```
 
 ### 2.3 CSharpResult
 
 ```csharp
-public class CSharpResult
+public partial class Utils
 {
-    public List<CSharpSampleResult> SampleResults;
+    public struct CSharpResult
+    {
+        public List<CSharpSampleResult> SampleResults { get; set; }
 
-    public CSharpResult();
-    public CSharpResult(List<CSharpSampleResult> sampleResults);
+        public CSharpResult(List<CSharpSampleResult> sampleResults);
+    }
 }
 ```
 
@@ -90,7 +97,7 @@ public class CSharpResult
 ```csharp
 public class Model : IDisposable
 {
-    public Model(string modelPath, int deviceId = 0);
+    public Model(string modelPath, int deviceId = 0, bool rpcMode = false, bool enableCache = false);
 }
 ```
 
@@ -103,9 +110,10 @@ public class Model : IDisposable
 ### 3.2 属性
 
 ```csharp
-public bool Loaded { get; }           // 模型是否成功加载
-public int ModelIndex { get; }        // 底层模型索引（普通模型）
-public bool IsFlowGraphModel { get; } // 是否为流程图模式
+public int modelIndex;                // 底层模型索引（普通模型），字段
+public bool OwnModelIndex { get; set; } = true;  // 是否拥有释放权
+public DogProvider LoadedDogProvider { get; }      // 已加载的加密狗类型
+public string LoadedNativeDllName { get; }         // 已加载的原生 DLL 名称
 ```
 
 ### 3.3 单图推理
@@ -289,19 +297,16 @@ public class DllLoader
 
 ---
 
-## 7. InferTiming 类（InferTiming.cs）
+## 7. InferTiming 类（flow/runtime/ExecutionRuntime.cs）
 
 ```csharp
 public static class InferTiming
 {
     public static void BeginFlowRequest();
     public static void EndFlowRequest(double flowMs);
-    public static void SetSdkTiming(double sdkMs);
-    public static double GetLastSdkMs();
-    public static double GetLastFlowMs();
-    public static void SetNodeTimings(List<FlowNodeTiming> timings);
-    public static List<FlowNodeTiming> GetLastNodeTimings();
-    public static void Reset();
+    public static void SetDirectRequest(double inferMs);
+    public static void GetLast(out double dlcvInferMs, out double flowInferMs);
+    public static List<FlowNodeTiming> GetLastFlowNodeTimings();
 }
 ```
 
@@ -323,12 +328,6 @@ public class FlowNodeTiming
 ```csharp
 public static class Utils
 {
-    // 释放底层 C API 返回的 JSON 字符串内存
-    public static void FreeResult(IntPtr ptr);
-
-    // 释放底层 C API 返回的模型结果内存
-    public static void FreeModelResult(IntPtr ptr);
-
     // 释放所有模型
     public static void FreeAllModels();
 
@@ -344,9 +343,16 @@ public static class Utils
     // 加密狗查询
     public static JObject GetAllDogInfo();
 
+    // OCR 推理（检测+识别级联）
+    public static CSharpResult OcrInfer(Model detectModel, Model recognizeModel, Mat image);
+
     // ExtraInfo polyline 读写
-    public static List<Point2d> GetExtraInfoPolyline(JObject extraInfo);
-    public static void SetExtraInfoPolyline(JObject extraInfo, List<Point2d> polyline);
+    public static List<Point2d> GetExtraInfoPolyline(JObject extraInfo, string key = "polyline");
+    public static void SetExtraInfoPolyline(JObject extraInfo, List<Point2d> polyline, string key = "polyline");
+
+    // 可视化
+    public static JArray ConvertToVisualizeFormat(CSharpResult result);
+    public static List<Mat> VisualizeResults(List<Mat> images, CSharpResult result, Dictionary<string, object> properties = null);
 }
 ```
 
