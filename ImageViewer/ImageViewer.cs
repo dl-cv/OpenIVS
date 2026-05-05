@@ -446,6 +446,9 @@ namespace DLCV
             else
             {
                 var sampleResult = currentResults.Value.SampleResults[0];
+                int topLeftLabelIndex = 0;
+                float safeScale = Math.Max(_scale, 1e-6f);
+                float topLeftPadding = Math.Max(2f, 10f / safeScale);
 
                 foreach (var objResult in sampleResult.Results)
                 {
@@ -453,24 +456,7 @@ namespace DLCV
                     string categoryName = objResult.CategoryName;
                     float score = objResult.Score;
                     var bbox = objResult.Bbox;
-
-                    if (bbox.Count < 4)
-                    {
-                        // 这个是分类结果，没有bbox
-                        _statusText = categoryName;
-
-                        // 根据分类结果设置状态
-                        string classificationResultLower = categoryName.ToLower();
-                        if (!classificationResultLower.Contains("ok"))
-                        {
-                            _statusText = "NG";
-                        }
-                        else
-                        {
-                            _statusText = "OK";
-                        }
-                        break;
-                    }
+                    bool hasBbox = objResult.WithBbox && bbox != null && bbox.Count >= 4;
 
                     // 颜色处理（根据结果内容设置颜色）
                     Color color = Color.Red; // 默认红色
@@ -490,6 +476,39 @@ namespace DLCV
                     // 判断是否显示NG状态
                     if (!categoryNameLower.Contains("ok"))
                         _statusText = "NG";
+
+                    if (!hasBbox)
+                    {
+                        // 无框结果（分类、OCR 等）：标签画在图像内部（左上角），与 C++ 测试程序一致
+                        if (LabelDisplayMode != LabelTextMode.None)
+                        {
+                            string label = LabelDisplayMode == LabelTextMode.CategoryAndScore
+                                ? $"{categoryName} {score:F2}"
+                                : $"{categoryName}";
+                            if (!string.IsNullOrEmpty(label))
+                            {
+                                using (Font font = new Font("Microsoft YaHei", fontSize))
+                                {
+                                    SizeF textSize = e.Graphics.MeasureString(label, font);
+                                    float textTopY = topLeftPadding + topLeftLabelIndex * (textSize.Height + topLeftPadding / 2f);
+
+                                    // 绘制半透明黑色背景
+                                    using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                                    {
+                                        e.Graphics.FillRectangle(backgroundBrush, topLeftPadding, textTopY, textSize.Width, textSize.Height);
+                                    }
+
+                                    // 绘制文字
+                                    using (SolidBrush textBrush = new SolidBrush(color))
+                                    {
+                                        e.Graphics.DrawString(label, font, textBrush, topLeftPadding, textTopY);
+                                    }
+                                }
+                                topLeftLabelIndex++;
+                            }
+                        }
+                        continue;
+                    }
 
                     // 若 extra_info 中存在 polyline，优先叠加绘制开放折线（不闭合）。
                     var polyline = GetExtraInfoPolyline(objResult.ExtraInfo);

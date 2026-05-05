@@ -247,6 +247,10 @@ namespace DlcvCamDemo
             string _statusText = "OK";
 
             // 遍历结构体的嵌套结构
+            int topLeftLabelIndex = 0;
+            float safeScale = Math.Max(_scale, 1e-6f);
+            float topLeftPadding = Math.Max(2f, 10f / safeScale);
+
             foreach (var sampleResult in currentResults.Value.SampleResults)
             {
                 foreach (var objResult in sampleResult.Results)
@@ -255,17 +259,7 @@ namespace DlcvCamDemo
                     string categoryName = objResult.CategoryName;
                     float score = objResult.Score;
                     var bbox = objResult.Bbox;
-
-                    if (bbox.Count < 4)
-                    {
-                        Debug.WriteLine($"无效的bbox数据: {string.Join(", ", bbox)}");
-                        continue;
-                    }
-
-                    float x = (float)bbox[0];
-                    float y = (float)bbox[1];
-                    float w = (float)bbox[2];
-                    float h = (float)bbox[3];
+                    bool hasBbox = objResult.WithBbox && bbox != null && bbox.Count >= 4;
 
                     // 颜色处理（假设根据类别ID设置颜色）
                     Color color = Color.Green;
@@ -275,6 +269,39 @@ namespace DlcvCamDemo
                     // 判断是否显示NG状态
                     if (color != Color.Lime)
                         _statusText = "NG";
+
+                    if (!hasBbox)
+                    {
+                        // 无框结果（分类、OCR 等）：标签画在图像内部（左上角）
+                        string label = $"{categoryName} {score:F2}";
+                        if (!string.IsNullOrEmpty(label))
+                        {
+                            using (Font font = new Font("Microsoft YaHei", fontSize))
+                            {
+                                SizeF textSize = e.Graphics.MeasureString(label, font);
+                                float textTopY = topLeftPadding + topLeftLabelIndex * (textSize.Height + topLeftPadding / 2f);
+
+                                // 绘制半透明黑色背景
+                                using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                                {
+                                    e.Graphics.FillRectangle(backgroundBrush, topLeftPadding, textTopY, textSize.Width, textSize.Height);
+                                }
+
+                                // 绘制文字
+                                using (SolidBrush textBrush = new SolidBrush(color))
+                                {
+                                    e.Graphics.DrawString(label, font, textBrush, topLeftPadding, textTopY);
+                                }
+                            }
+                            topLeftLabelIndex++;
+                        }
+                        continue;
+                    }
+
+                    float x = (float)bbox[0];
+                    float y = (float)bbox[1];
+                    float w = (float)bbox[2];
+                    float h = (float)bbox[3];
 
                     // 处理Mask
                     if (objResult.WithMask && objResult.Mask != null)

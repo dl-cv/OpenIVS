@@ -175,7 +175,9 @@
     - 旋转框：根据 `[cx, cy, w, h, angle]` 绘制四边形。
   - **折线**：当 `CSharpObjectResult.ExtraInfo["polyline"]` 存在且点数不少于 2 时，按原图坐标绘制开放折线。
   - **Mask**：若存在，在框内叠加半透明蒙版（仅有效区域）。
-  - **标签**：按 `LabelDisplayMode` 在框上方显示 `{category_name} {score:F2}`、仅 `{category_name}` 或不显示。
+  - **标签**：
+    - 有框结果：按 `LabelDisplayMode` 在框上方显示 `{category_name} {score:F2}`、仅 `{category_name}` 或不显示。
+    - 无框结果（`with_bbox = false`，如分类、OCR）：标签绘制在图像内部左上角，多个结果时自上而下堆叠，与 C++ 测试程序行为一致。
   - **颜色**：根据类别（OK/NG）区分颜色（如绿/红）。
   - **无结果状态**：当 `SampleResults.Count==0` 时，自动显示左上角状态文本 `No Result`（控件会将 `ShowStatusText` 置为 `true`）。
 
