@@ -261,4 +261,4 @@ json gpuInfo = dlcv_infer::Utils::GetGpuInfo();
 
 ---
 
-*本文档只记录当前源码实现。如需了解 API 详细定义，参见 `C++API接口文档.md`。*
+*本文档只记录当前源码实现。如需了解 API 详细定义，参见 `C++ API文档.md`。*
