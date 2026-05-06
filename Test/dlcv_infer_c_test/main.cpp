@@ -125,8 +125,12 @@ int main() {
     }
 
     bool ok = true;
-    if (total_objects < 1) {
-        std::cerr << "ERROR: expected at least 1 object, got " << total_objects << "\n";
+    if (result.n != 1) {
+        std::cerr << "ERROR: expected 1 sample, got " << result.n << "\n";
+        ok = false;
+    }
+    if (total_objects != 2) {
+        std::cerr << "ERROR: expected exactly 2 objects, got " << total_objects << "\n";
         ok = false;
     }
     if (result.sample_results && result.n > 0 && result.sample_results[0].n >= 1) {
@@ -147,6 +151,29 @@ int main() {
         if (std::abs(o0.x - 211.0f) > 1.0f || std::abs(o0.y - 221.0f) > 1.0f ||
             std::abs(o0.w - 160.0f) > 1.0f || std::abs(o0.h - 186.0f) > 1.0f) {
             std::cerr << "ERROR: bbox mismatch\n";
+            ok = false;
+        }
+    } else {
+        ok = false;
+    }
+    if (result.sample_results && result.n > 0 && result.sample_results[0].n >= 2) {
+        const DlcvCObjectResult& o1 = result.sample_results[0].results[1];
+        std::string name1 = GbkToUtf8(o1.category_name);
+        if (name1 != "杯子") {
+            std::cerr << "ERROR: object[1] category mismatch: " << name1 << "\n";
+            ok = false;
+        }
+        if (std::abs(o1.score - 1.0f) > 0.01f) {
+            std::cerr << "ERROR: object[1] score mismatch: " << o1.score << "\n";
+            ok = false;
+        }
+        if (!o1.with_bbox) {
+            std::cerr << "ERROR: object[1] with_bbox mismatch\n";
+            ok = false;
+        }
+        if (std::abs(o1.x - 849.0f) > 1.0f || std::abs(o1.y - 220.0f) > 1.0f ||
+            std::abs(o1.w - 161.0f) > 1.0f || std::abs(o1.h - 185.0f) > 1.0f) {
+            std::cerr << "ERROR: object[1] bbox mismatch\n";
             ok = false;
         }
     } else {

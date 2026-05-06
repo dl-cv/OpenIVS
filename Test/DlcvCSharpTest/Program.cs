@@ -32,6 +32,8 @@ namespace DlcvCSharpTest
         private const string UsLagModelPath = @"C:\Users\Administrator\Desktop\测试无监督\测试无监督-v5_120_50.dvt";
         private const string UsLagImagePath1 = @"C:\Users\Administrator\Desktop\测试无监督\NG1.png";
         private const string UsLagImagePath2 = @"C:\Users\Administrator\Desktop\测试无监督\NG3.png";
+        private const string FlowInstanceSegFilterModelPath = @"Y:\zxc\模块化任务测试\实例分割筛选测试_120_50.dvst";
+        private const string FlowInstanceSegFilterImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png";
 
         private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
         {
@@ -88,6 +90,11 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "us-lag-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunUsLagSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "flow-instance-seg-filter-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunFlowInstanceSegFilterSelfTest();
                 }
 
                 if (args != null && args.Length >= 2)
@@ -612,6 +619,141 @@ namespace DlcvCSharpTest
                 try { if (model != null) model.Dispose(); } catch { }
                 ForceGc();
             }
+        }
+
+        private static int RunFlowInstanceSegFilterSelfTest()
+        {
+            Console.WriteLine("==== Flow 实例分割筛选自测 ====");
+            Console.WriteLine("model: " + FlowInstanceSegFilterModelPath);
+            Console.WriteLine("image: " + FlowInstanceSegFilterImagePath);
+
+            if (!File.Exists(FlowInstanceSegFilterModelPath))
+            {
+                Console.WriteLine("模型不存在");
+                return 2;
+            }
+            if (!File.Exists(FlowInstanceSegFilterImagePath))
+            {
+                Console.WriteLine("图片不存在");
+                return 2;
+            }
+
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            Utils.CSharpResult result = default(Utils.CSharpResult);
+            try
+            {
+                model = new Model(FlowInstanceSegFilterModelPath, GpuDeviceId, false, false);
+                Console.WriteLine("provider=" + model.LoadedDogProvider + ", dll=" + model.LoadedNativeDllName);
+                bgr = Cv2.ImRead(FlowInstanceSegFilterImagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                var p = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = true,
+                    ["batch_size"] = 1
+                };
+                result = model.InferBatch(new List<Mat> { rgb }, p);
+
+                int sampleCount = result.SampleResults != null ? result.SampleResults.Count : 0;
+                int objectCount = sampleCount > 0 && result.SampleResults[0].Results != null
+                    ? result.SampleResults[0].Results.Count
+                    : 0;
+
+                Console.WriteLine("sample_count: " + sampleCount);
+                Console.WriteLine("det_counts: [" + objectCount + "]");
+
+                bool ok = true;
+                if (sampleCount != 1)
+                {
+                    Console.WriteLine("验证失败：期望 1 个 sample，实际 " + sampleCount);
+                    ok = false;
+                }
+                if (objectCount != 2)
+                {
+                    Console.WriteLine("验证失败：期望 2 个目标，实际 " + objectCount);
+                    ok = false;
+                }
+
+                ok = CheckFlowInstanceObject(result, 0, 211.0, 221.0, 160.0, 186.0) && ok;
+                ok = CheckFlowInstanceObject(result, 1, 849.0, 220.0, 161.0, 185.0) && ok;
+
+                if (ok)
+                {
+                    Console.WriteLine("Flow 实例分割筛选自测通过");
+                    return 0;
+                }
+
+                Console.WriteLine("Flow 实例分割筛选自测失败");
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Flow 实例分割筛选自测异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                DisposeResultMasks(result);
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
+        }
+
+        private static bool CheckFlowInstanceObject(Utils.CSharpResult result, int index, double x, double y, double w, double h)
+        {
+            if (result.SampleResults == null || result.SampleResults.Count == 0 ||
+                result.SampleResults[0].Results == null || result.SampleResults[0].Results.Count <= index)
+            {
+                Console.WriteLine("验证失败：缺少目标 " + index);
+                return false;
+            }
+
+            var obj = result.SampleResults[0].Results[index];
+            Console.WriteLine(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "[{0}] {1} score={2:F2} bbox=({3:F1}, {4:F1}, {5:F1}, {6:F1}) area={7:F1}",
+                    index + 1,
+                    obj.CategoryName,
+                    obj.Score,
+                    obj.Bbox != null && obj.Bbox.Count > 0 ? obj.Bbox[0] : 0.0,
+                    obj.Bbox != null && obj.Bbox.Count > 1 ? obj.Bbox[1] : 0.0,
+                    obj.Bbox != null && obj.Bbox.Count > 2 ? obj.Bbox[2] : 0.0,
+                    obj.Bbox != null && obj.Bbox.Count > 3 ? obj.Bbox[3] : 0.0,
+                    obj.Area));
+
+            bool ok = true;
+            if (obj.CategoryName != "杯子")
+            {
+                Console.WriteLine("验证失败：目标 " + index + " 类别错误: " + obj.CategoryName);
+                ok = false;
+            }
+            if (Math.Abs(obj.Score - 1.0f) > 0.01f)
+            {
+                Console.WriteLine("验证失败：目标 " + index + " 分数错误: " + obj.Score.ToString(CultureInfo.InvariantCulture));
+                ok = false;
+            }
+            if (!obj.WithBbox || obj.Bbox == null || obj.Bbox.Count < 4)
+            {
+                Console.WriteLine("验证失败：目标 " + index + " 缺少 bbox");
+                return false;
+            }
+            if (Math.Abs(obj.Bbox[0] - x) > 1.0 ||
+                Math.Abs(obj.Bbox[1] - y) > 1.0 ||
+                Math.Abs(obj.Bbox[2] - w) > 1.0 ||
+                Math.Abs(obj.Bbox[3] - h) > 1.0)
+            {
+                Console.WriteLine("验证失败：目标 " + index + " bbox 错误");
+                ok = false;
+            }
+            return ok;
         }
 
         private static CaseRow RunCase(string modelPath, string imagePath)
