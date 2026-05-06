@@ -65,6 +65,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dlcv_infer_cpp_dll_demo2", 
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dlcv_infer_cpp_test", "Test\dlcv_infer_cpp_test\dlcv_infer_cpp_test.vcxproj", "{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dlcv_infer_c_test", "Test\dlcv_infer_c_test\dlcv_infer_c_test.vcxproj", "{4ACFEF0B-8F95-4E2A-B2E1-3D0262F8BF81}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -169,6 +171,10 @@ Global
 		{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1}.Debug|x64.Build.0 = Debug|x64
 		{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1}.Release|x64.ActiveCfg = Release|x64
 		{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1}.Release|x64.Build.0 = Release|x64
+		{4ACFEF0B-8F95-4E2A-B2E1-3D0262F8BF81}.Debug|x64.ActiveCfg = Debug|x64
+		{4ACFEF0B-8F95-4E2A-B2E1-3D0262F8BF81}.Debug|x64.Build.0 = Debug|x64
+		{4ACFEF0B-8F95-4E2A-B2E1-3D0262F8BF81}.Release|x64.ActiveCfg = Release|x64
+		{4ACFEF0B-8F95-4E2A-B2E1-3D0262F8BF81}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -197,6 +203,7 @@ Global
 		{8B9A9E3B-6E30-4F0E-BB52-5C4D9F7B9F17} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
 		{D3F5B7C1-62A8-4F5C-BE31-6C2C4A77B2E1} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 		{5C5D8D07-8C88-4D1E-BEB4-B9398AE4D6A1} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
+		{4ACFEF0B-8F95-4E2A-B2E1-3D0262F8BF81} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {ECC568E3-465E-4300-ADD1-27469BDF798F}
