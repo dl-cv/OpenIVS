@@ -1,13 +1,16 @@
 #include "dlcv_infer_c_api.h"
 #include "dlcv_infer.h"
-#include "ImageInputUtils.h"
+
 #include <opencv2/core.hpp>
-#include <unordered_map>
+
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <mutex>
-#include <cstring>
-#include <cstdlib>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 static std::unordered_map<int, std::shared_ptr<dlcv_infer::Model>> g_models;
 static std::mutex g_modelsMutex;
