@@ -72,6 +72,11 @@ namespace DlcvCSharpTest
                     return RunMaskToRBoxSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "rect-image-correction-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunRectImageCorrectionSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "demo2-rgb-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunDemo2RgbSelfTest(args);
@@ -754,6 +759,162 @@ namespace DlcvCSharpTest
                 ok = false;
             }
             return ok;
+        }
+
+        private static int RunRectImageCorrectionSelfTest()
+        {
+            Console.WriteLine("==== 矩形图像矫正自测 ====");
+
+            try
+            {
+                using (var portrait = CreateIndexedMat(2, 3))
+                {
+                    var state = new TransformationState(portrait.Width, portrait.Height);
+                    var wrap = new ModuleImage(portrait, portrait, state, 7);
+                    var module = new RectImageCorrection(
+                        41,
+                        "矩形图像矫正",
+                        new Dictionary<string, object> { { "rotate_direction", "clockwise" } });
+
+                    var output = module.Process(new List<ModuleImage> { wrap }, new JArray { new JObject { ["sample_results"] = new JArray() } });
+                    if (output.ImageList.Count != 1)
+                    {
+                        Console.WriteLine("自测失败：顺时针输出图像数量错误");
+                        return 1;
+                    }
+
+                    var rotated = output.ImageList[0];
+                    if (output.ResultList.Count != 0)
+                    {
+                        Console.WriteLine("自测失败：结果通道应为空");
+                        return 1;
+                    }
+                    if (!AssertMatShape(rotated.ImageObject, 3, 2, "顺时针尺寸")) return 1;
+                    if (!AssertMatPixels(rotated.ImageObject, new byte[,] { { 20, 10, 0 }, { 21, 11, 1 } }, "顺时针像素")) return 1;
+                    if (!AssertArrayNear(rotated.TransformState.AffineMatrix2x3, new double[] { 0, -1, 2, 1, 0, 0 }, "顺时针 affine")) return 1;
+                    if (!AssertIntArray(rotated.TransformState.OutputSize, new int[] { 3, 2 }, "顺时针 output_size")) return 1;
+                    if (rotated.OriginalIndex != 7)
+                    {
+                        Console.WriteLine("自测失败：OriginalIndex 未保留");
+                        return 1;
+                    }
+                }
+
+                using (var portrait = CreateIndexedMat(2, 3))
+                {
+                    var wrap = new ModuleImage(portrait, portrait, new TransformationState(portrait.Width, portrait.Height), 0);
+                    var module = new RectImageCorrection(
+                        42,
+                        null,
+                        new Dictionary<string, object> { { "rotate_direction", "ccw" } });
+
+                    var output = module.Process(new List<ModuleImage> { wrap }, null);
+                    var rotated = output.ImageList[0];
+                    if (!AssertMatShape(rotated.ImageObject, 3, 2, "逆时针尺寸")) return 1;
+                    if (!AssertMatPixels(rotated.ImageObject, new byte[,] { { 1, 11, 21 }, { 0, 10, 20 } }, "逆时针像素")) return 1;
+                    if (!AssertArrayNear(rotated.TransformState.AffineMatrix2x3, new double[] { 0, 1, 0, -1, 0, 1 }, "逆时针 affine")) return 1;
+                }
+
+                using (var landscape = CreateIndexedMat(4, 2))
+                {
+                    var wrap = new ModuleImage(landscape, landscape, new TransformationState(landscape.Width, landscape.Height), 3);
+                    var module = new RectImageCorrection(43);
+                    var output = module.Process(new List<ModuleImage> { wrap }, null);
+                    if (output.ImageList.Count != 1 || !object.ReferenceEquals(output.ImageList[0], wrap))
+                    {
+                        Console.WriteLine("自测失败：横图应原样透传");
+                        return 1;
+                    }
+                }
+
+                Console.WriteLine("矩形图像矫正自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("矩形图像矫正自测异常: " + ex);
+                return 1;
+            }
+        }
+
+        private static Mat CreateIndexedMat(int width, int height)
+        {
+            var mat = new Mat(height, width, MatType.CV_8UC1);
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    mat.Set(y, x, (byte)(y * 10 + x));
+                }
+            }
+            return mat;
+        }
+
+        private static bool AssertMatShape(Mat mat, int expectedWidth, int expectedHeight, string label)
+        {
+            if (mat == null || mat.Empty() || mat.Width != expectedWidth || mat.Height != expectedHeight)
+            {
+                Console.WriteLine(label + "错误，expected=" + expectedWidth + "x" + expectedHeight
+                    + ", actual=" + (mat == null ? "<null>" : mat.Width + "x" + mat.Height));
+                return false;
+            }
+            return true;
+        }
+
+        private static bool AssertMatPixels(Mat mat, byte[,] expected, string label)
+        {
+            int rows = expected.GetLength(0);
+            int cols = expected.GetLength(1);
+            for (int y = 0; y < rows; y++)
+            {
+                for (int x = 0; x < cols; x++)
+                {
+                    byte actual = mat.At<byte>(y, x);
+                    if (actual != expected[y, x])
+                    {
+                        Console.WriteLine(label + "错误，位置(" + y + "," + x + ") expected="
+                            + expected[y, x] + ", actual=" + actual);
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private static bool AssertArrayNear(double[] actual, double[] expected, string label)
+        {
+            if (actual == null || actual.Length < expected.Length)
+            {
+                Console.WriteLine(label + "缺失");
+                return false;
+            }
+            for (int i = 0; i < expected.Length; i++)
+            {
+                if (Math.Abs(actual[i] - expected[i]) > 1e-9)
+                {
+                    Console.WriteLine(label + "错误，index=" + i + ", expected=" + expected[i] + ", actual=" + actual[i]);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static bool AssertIntArray(int[] actual, int[] expected, string label)
+        {
+            if (actual == null || actual.Length < expected.Length)
+            {
+                Console.WriteLine(label + "缺失");
+                return false;
+            }
+            for (int i = 0; i < expected.Length; i++)
+            {
+                if (actual[i] != expected[i])
+                {
+                    Console.WriteLine(label + "错误，index=" + i + ", expected=" + expected[i] + ", actual=" + actual[i]);
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static CaseRow RunCase(string modelPath, string imagePath)
