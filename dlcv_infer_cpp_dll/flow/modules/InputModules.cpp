@@ -11,11 +11,6 @@
 #include <stdexcept>
 #include <vector>
 
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <Windows.h>
-
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
 
@@ -31,22 +26,6 @@ static std::string GetFileNameWithoutExt(const std::string& path) {
 }
 
 static bool FileExists(const std::string& path) {
-    std::wstring widePath;
-    if (!path.empty()) {
-        const int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, nullptr, 0);
-        if (len > 0) {
-            widePath.resize(static_cast<size_t>(len - 1));
-            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, &widePath[0], len);
-        }
-    }
-    if (!widePath.empty()) {
-        FILE* fp = nullptr;
-        if (_wfopen_s(&fp, widePath.c_str(), L"rb") == 0 && fp != nullptr) {
-            std::fclose(fp);
-            return true;
-        }
-        return false;
-    }
     std::ifstream ifs(path, std::ios::binary);
     return static_cast<bool>(ifs);
 }
@@ -73,34 +52,7 @@ static cv::Mat PrepareDecodedImageForFlow(const cv::Mat& image) {
 }
 
 static cv::Mat ReadFromPathForFlow(const std::string& path) {
-    cv::Mat decoded;
-    std::wstring widePath;
-    if (!path.empty()) {
-        const int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, nullptr, 0);
-        if (len > 0) {
-            widePath.resize(static_cast<size_t>(len - 1));
-            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, &widePath[0], len);
-        }
-    }
-    if (!widePath.empty()) {
-        FILE* fp = nullptr;
-        if (_wfopen_s(&fp, widePath.c_str(), L"rb") == 0 && fp != nullptr) {
-            std::fseek(fp, 0, SEEK_END);
-            const long size = std::ftell(fp);
-            std::fseek(fp, 0, SEEK_SET);
-            if (size > 0) {
-                std::vector<unsigned char> raw(static_cast<size_t>(size));
-                const size_t readCount = std::fread(raw.data(), 1, raw.size(), fp);
-                if (readCount == raw.size()) {
-                    decoded = cv::imdecode(raw, cv::IMREAD_UNCHANGED);
-                }
-            }
-            std::fclose(fp);
-        }
-    }
-    if (decoded.empty()) {
-        decoded = cv::imread(path, cv::IMREAD_UNCHANGED);
-    }
+    cv::Mat decoded = cv::imread(path, cv::IMREAD_UNCHANGED);
     if (decoded.empty()) {
         return {};
     }
@@ -400,7 +352,7 @@ public:
             int r = 0, g = 255, b = 0;
             try {
                 int rr = 0, gg = 255, bb = 0;
-                sscanf_s(colorStr.c_str(), "%d,%d,%d", &rr, &gg, &bb);
+                sscanf(colorStr.c_str(), "%d,%d,%d", &rr, &gg, &bb);
                 r = rr; g = gg; b = bb;
             } catch (...) { r = 0; g = 255; b = 0; }
             img = cv::Mat(dh, dw, CV_8UC3, cv::Scalar(r, g, b));

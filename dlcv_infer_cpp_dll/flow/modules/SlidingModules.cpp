@@ -32,7 +32,7 @@ static std::pair<int, int> ReadInt2(const Json& props, const std::string& key, i
         if (v.is_string()) {
             const std::string s = v.get<std::string>();
             int a = dv1, b = dv2;
-            if (sscanf_s(s.c_str(), "%d%*[,; ]%d", &a, &b) == 2) {
+            if (sscanf(s.c_str(), "%d%*[,; ]%d", &a, &b) == 2) {
                 return { a, b };
             }
         }

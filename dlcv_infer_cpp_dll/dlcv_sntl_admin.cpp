@@ -4,15 +4,20 @@ namespace {
     constexpr int VIRBOX_OK = 0;
     constexpr int VIRBOX_JSON = 2;
 
-    using VirboxClientOpenFunc = int(__stdcall *)(void** ipc);
-    using VirboxClientCloseFunc = int(__stdcall *)(void* ipc);
-    using VirboxGetAllDescriptionFunc = int(__stdcall *)(void* ipc, int format, char** desc);
-    using VirboxGetLicenseIdFunc = int(__stdcall *)(void* ipc, int format, const char* desc, char** result);
-    using VirboxGetDeviceInfoFunc = int(__stdcall *)(void* ipc, const char* desc, char** result);
-    using VirboxFreeFunc = void(__stdcall *)(void* buffer);
+#ifdef _WIN32
+#define DLCV_STDCALL __stdcall
+#else
+#define DLCV_STDCALL
+#endif
+    using VirboxClientOpenFunc = int(DLCV_STDCALL *)(void** ipc);
+    using VirboxClientCloseFunc = int(DLCV_STDCALL *)(void* ipc);
+    using VirboxGetAllDescriptionFunc = int(DLCV_STDCALL *)(void* ipc, int format, char** desc);
+    using VirboxGetLicenseIdFunc = int(DLCV_STDCALL *)(void* ipc, int format, const char* desc, char** result);
+    using VirboxGetDeviceInfoFunc = int(DLCV_STDCALL *)(void* ipc, const char* desc, char** result);
+    using VirboxFreeFunc = void(DLCV_STDCALL *)(void* buffer);
 
     struct VirboxControlApi {
-        HMODULE module = NULL;
+        QLibrary* library = nullptr;
         VirboxClientOpenFunc client_open = nullptr;
         VirboxClientCloseFunc client_close = nullptr;
         VirboxGetAllDescriptionFunc get_all_description = nullptr;
@@ -21,27 +26,30 @@ namespace {
         VirboxFreeFunc free_buffer = nullptr;
 
         VirboxControlApi() {
-            module = LoadLibraryA("slm_control.dll");
-            if (module == NULL)
+            library = new QLibrary("slm_control");
+            if (!library->load())
             {
-                module = LoadLibraryA("C:\\dlcv\\bin\\slm_control.dll");
-            }
-            if (module == NULL)
-            {
-                return;
+                delete library;
+                library = new QLibrary("C:/dlcv/bin/slm_control");
+                if (!library->load())
+                {
+                    delete library;
+                    library = nullptr;
+                    return;
+                }
             }
 
-            client_open = reinterpret_cast<VirboxClientOpenFunc>(GetProcAddress(module, "slm_ctrl_client_open"));
-            client_close = reinterpret_cast<VirboxClientCloseFunc>(GetProcAddress(module, "slm_ctrl_client_close"));
-            get_all_description = reinterpret_cast<VirboxGetAllDescriptionFunc>(GetProcAddress(module, "slm_ctrl_get_all_description"));
-            get_license_id = reinterpret_cast<VirboxGetLicenseIdFunc>(GetProcAddress(module, "slm_ctrl_get_license_id"));
-            get_device_info = reinterpret_cast<VirboxGetDeviceInfoFunc>(GetProcAddress(module, "slm_ctrl_get_device_info"));
-            free_buffer = reinterpret_cast<VirboxFreeFunc>(GetProcAddress(module, "slm_ctrl_free"));
+            client_open = reinterpret_cast<VirboxClientOpenFunc>(library->resolve("slm_ctrl_client_open"));
+            client_close = reinterpret_cast<VirboxClientCloseFunc>(library->resolve("slm_ctrl_client_close"));
+            get_all_description = reinterpret_cast<VirboxGetAllDescriptionFunc>(library->resolve("slm_ctrl_get_all_description"));
+            get_license_id = reinterpret_cast<VirboxGetLicenseIdFunc>(library->resolve("slm_ctrl_get_license_id"));
+            get_device_info = reinterpret_cast<VirboxGetDeviceInfoFunc>(library->resolve("slm_ctrl_get_device_info"));
+            free_buffer = reinterpret_cast<VirboxFreeFunc>(library->resolve("slm_ctrl_free"));
 
             if (!client_open || !client_close || !get_all_description || !get_license_id || !get_device_info || !free_buffer)
             {
-                FreeLibrary(module);
-                module = NULL;
+                delete library;
+                library = nullptr;
                 client_open = nullptr;
                 client_close = nullptr;
                 get_all_description = nullptr;
@@ -52,14 +60,11 @@ namespace {
         }
 
         ~VirboxControlApi() {
-            if (module != NULL)
-            {
-                FreeLibrary(module);
-            }
+            delete library;
         }
 
         bool available() const {
-            return module != NULL;
+            return library != nullptr && library->isLoaded();
         }
     };
 
@@ -706,28 +711,31 @@ void sntl_admin::SNTLDllLoader::CreateEmptyDelegates() {
 }
 
 void sntl_admin::SNTLDllLoader::LoadDll() {
-    hModule = LoadLibraryA(DllName.c_str());
-    if (hModule == NULL)
+    library = new QLibrary(QString::fromStdString(DllName));
+    if (!library->load())
     {
-        // 如果当前目录下的DLL加载失败，尝试加载指定路径的DLL
-        hModule = LoadLibraryA(DllPath.c_str());
-        if (hModule == NULL)
+        delete library;
+        library = new QLibrary(QString::fromStdString(DllPath));
+        if (!library->load())
         {
-            // DLL加载失败，创建空的代理方法
+            delete library;
+            library = nullptr;
             CreateEmptyDelegates();
             return;
         }
     }
 
     // 获取函数指针
-    m_sntl_admin_context_new = (SntlAdminContextNewFunc)GetProcAddress(hModule, "sntl_admin_context_new");
-    m_sntl_admin_context_delete = (SntlAdminContextDeleteFunc)GetProcAddress(hModule, "sntl_admin_context_delete");
-    m_sntl_admin_get = (SntlAdminGetFunc)GetProcAddress(hModule, "sntl_admin_get");
-    m_sntl_admin_free = (SntlAdminFreeFunc)GetProcAddress(hModule, "sntl_admin_free");
+    m_sntl_admin_context_new = (SntlAdminContextNewFunc)library->resolve("sntl_admin_context_new");
+    m_sntl_admin_context_delete = (SntlAdminContextDeleteFunc)library->resolve("sntl_admin_context_delete");
+    m_sntl_admin_get = (SntlAdminGetFunc)library->resolve("sntl_admin_get");
+    m_sntl_admin_free = (SntlAdminFreeFunc)library->resolve("sntl_admin_free");
 
     // 检查函数指针是否获取成功，失败则创建空的代理
     if (!m_sntl_admin_context_new || !m_sntl_admin_context_delete || !m_sntl_admin_get || !m_sntl_admin_free)
     {
+        delete library;
+        library = nullptr;
         CreateEmptyDelegates();
     }
 }
@@ -737,9 +745,6 @@ sntl_admin::SNTLDllLoader::SNTLDllLoader() {
 }
 
 sntl_admin::SNTLDllLoader::~SNTLDllLoader() {
-    if (hModule != NULL)
-    {
-        FreeLibrary(hModule);
-        hModule = NULL;
-    }
+    delete library;
+    library = nullptr;
 }

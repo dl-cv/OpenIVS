@@ -17,9 +17,6 @@
 #include "opencv2/imgproc.hpp"
 #include "dlcv_sntl_admin.h"
 
-#include <windows.h>
-#include <codecvt>
-#include <locale>
 
 // DLL 导出/导入宏（用于本项目生成的 dlcv_infer_cpp_dll）
 #if defined(_WIN32) || defined(__CYGWIN__)
@@ -89,7 +86,7 @@ namespace dlcv_infer {
     private:
         std::string dllName;
         std::string dllPath;
-        void* hModule = nullptr;
+        QLibrary* library = nullptr;
         sntl_admin::DogProvider dogProvider;
 
         // 函数指针
