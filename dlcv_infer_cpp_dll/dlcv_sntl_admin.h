@@ -4,7 +4,11 @@
 #include <memory>
 #include <vector>
 #include <functional>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <QLibrary>
+#endif
 #include <iostream>
 #include <sstream>
 #include <regex>
@@ -50,7 +54,11 @@ namespace sntl_admin {
     private:
         const std::string DllName = "sntl_adminapi_windows_x64.dll";
         const std::string DllPath = "C:\\dlcv\\bin\\sntl_adminapi_windows_x64.dll";
+#ifdef _WIN32
+        HMODULE hModule = NULL;
+#else
         QLibrary* library = nullptr;
+#endif
 
         // 函数指针
         SntlAdminContextNewFunc m_sntl_admin_context_new = nullptr;

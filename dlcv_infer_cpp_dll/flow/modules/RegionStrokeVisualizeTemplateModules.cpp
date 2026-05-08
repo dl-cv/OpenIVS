@@ -17,7 +17,14 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#else
 #include <QDir>
+#endif
 
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
@@ -29,7 +36,20 @@ static constexpr double kPi = 3.14159265358979323846;
 
 static void EnsureDirExists(const std::string& dir) {
     if (dir.empty()) return;
+#ifdef _WIN32
+    std::string path;
+    path.reserve(dir.size());
+    for (size_t i = 0; i < dir.size(); i++) {
+        const char c = dir[i];
+        path.push_back(c);
+        if (c == '\\' || c == '/') {
+            CreateDirectoryA(path.c_str(), nullptr);
+        }
+    }
+    CreateDirectoryA(dir.c_str(), nullptr);
+#else
     QDir().mkpath(QString::fromStdString(dir));
+#endif
 }
 
 static std::string JoinPath(const std::string& a, const std::string& b) {

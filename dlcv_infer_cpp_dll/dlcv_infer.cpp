@@ -4,12 +4,18 @@
 #include "flow/FlowGraphModel.h"
 #include "flow/FlowPayloadTypes.h"
 #include "flow/utils/MaskRleUtils.h"
+#ifdef _WIN32
+#include <Windows.h>
+#include <codecvt>
+#include <locale>
+#else
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QLibrary>
 #include <QString>
 #include <QTextCodec>
+#endif
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -37,7 +43,14 @@ void SetLastInferTiming(double dlcvInferMs, double totalInferMs, std::vector<dlc
 }
 
 bool DllExists(const std::string& dllName, const std::string& dllPath) {
+#ifdef _WIN32
+    if (SearchPathA(nullptr, dllName.c_str(), nullptr, 0, nullptr, nullptr) != 0) {
+        return true;
+    }
+    return GetFileAttributesA(dllPath.c_str()) != INVALID_FILE_ATTRIBUTES;
+#else
     return QFile::exists(QString::fromStdString(dllName)) || QFile::exists(QString::fromStdString(dllPath));
+#endif
 }
 
 struct DvsUnpackResult {
@@ -59,7 +72,30 @@ private:
     std::string _dir;
 
     static bool DeleteDirectoryRecursive(const std::string& dir) {
+#ifdef _WIN32
+        if (dir.empty()) return true;
+        WIN32_FIND_DATAA ffd;
+        const std::string pattern = dir + "\\*";
+        HANDLE hFind = FindFirstFileA(pattern.c_str(), &ffd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                const std::string name = ffd.cFileName;
+                if (name == "." || name == "..") continue;
+                const std::string path = dir + "\\" + name;
+                if ((ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                    (void)DeleteDirectoryRecursive(path);
+                } else {
+                    SetFileAttributesA(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+                    (void)DeleteFileA(path.c_str());
+                }
+            } while (FindNextFileA(hFind, &ffd) != 0);
+            FindClose(hFind);
+        }
+        SetFileAttributesA(dir.c_str(), FILE_ATTRIBUTE_NORMAL);
+        return RemoveDirectoryA(dir.c_str()) != 0;
+#else
         return QDir(QString::fromStdString(dir)).removeRecursively();
+#endif
     }
 
     void CleanupNoexcept() {
@@ -129,10 +165,22 @@ std::string RandomHex(size_t len) {
 }
 
 std::string CreateTempDir() {
+#ifdef _WIN32
+    char tmpPath[MAX_PATH] = { 0 };
+    DWORD n = GetTempPathA(MAX_PATH, tmpPath);
+    if (n == 0 || n >= MAX_PATH) {
+        throw std::runtime_error("failed to get temp directory");
+    }
+    for (int retry = 0; retry < 8; retry++) {
+        const std::string dir = JoinPath(std::string(tmpPath), "DlcvDvs_" + RandomHex(24));
+        if (CreateDirectoryA(dir.c_str(), nullptr) != 0) return dir;
+    }
+#else
     for (int retry = 0; retry < 8; retry++) {
         const std::string dir = JoinPath(QDir::tempPath().toStdString(), "DlcvDvs_" + RandomHex(24));
         if (QDir().mkpath(QString::fromStdString(dir))) return dir;
     }
+#endif
     throw std::runtime_error("failed to create temp directory");
 }
 
@@ -221,8 +269,13 @@ void WriteUtf8Text(const std::string& path, const std::string& content) {
 }
 
 DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
+#ifdef _WIN32
+    FILE* fp = nullptr;
+    if (_wfopen_s(&fp, archivePathW.c_str(), L"rb") != 0 || fp == nullptr) {
+#else
     FILE* fp = std::fopen(QString::fromStdWString(archivePathW).toUtf8().toStdString().c_str(), "rb");
     if (fp == nullptr) {
+#endif
         throw std::runtime_error("failed to open dvst file");
     }
 
@@ -835,29 +888,71 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
 namespace dlcv_infer {
 
     std::wstring convertStringToWstring(const std::string& inputString) {
+#ifdef _WIN32
+        int len = MultiByteToWideChar(CP_ACP, 0, inputString.c_str(), -1, nullptr, 0);
+        std::vector<wchar_t> str(len);
+        MultiByteToWideChar(CP_ACP, 0, inputString.c_str(), -1, &str[0], len);
+        return std::wstring(str.begin(), str.end() - 1);
+#else
         return QString::fromLocal8Bit(inputString.c_str()).toStdWString();
+#endif
     }
 
     std::string convertWstringToString(const std::wstring& inputWstring) {
+#ifdef _WIN32
+        int len = WideCharToMultiByte(CP_ACP, 0, inputWstring.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        std::vector<char> str(len);
+        WideCharToMultiByte(CP_ACP, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
+        return std::string(str.begin(), str.end() - 1);
+#else
         return QString::fromStdWString(inputWstring).toLocal8Bit().toStdString();
+#endif
     }
 
     std::string convertWstringToUtf8(const std::wstring& inputWstring) {
+#ifdef _WIN32
+        int len = WideCharToMultiByte(CP_UTF8, 0, inputWstring.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        std::vector<char> str(len);
+        WideCharToMultiByte(CP_UTF8, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
+        return std::string(str.begin(), str.end() - 1);
+#else
         return QString::fromStdWString(inputWstring).toUtf8().toStdString();
+#endif
     }
 
     std::wstring convertUtf8ToWstring(const std::string& inputUtf8) {
+#ifdef _WIN32
+        int len = MultiByteToWideChar(CP_UTF8, 0, inputUtf8.c_str(), -1, nullptr, 0);
+        std::vector<wchar_t> str(len);
+        MultiByteToWideChar(CP_UTF8, 0, inputUtf8.c_str(), -1, &str[0], len);
+        return std::wstring(str.begin(), str.end() - 1);
+#else
         return QString::fromUtf8(inputUtf8.c_str()).toStdWString();
+#endif
     }
 
     std::string convertWstringToGbk(const std::wstring& inputWstring) {
+#ifdef _WIN32
+        int len = WideCharToMultiByte(936, 0, inputWstring.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        std::vector<char> str(len);
+        WideCharToMultiByte(936, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
+        return std::string(str.begin(), str.end() - 1);
+#else
         QTextCodec* codec = QTextCodec::codecForName("GBK");
         return codec->fromUnicode(QString::fromStdWString(inputWstring)).toStdString();
+#endif
     }
 
     std::wstring convertGbkToWstring(const std::string& inputGbk) {
+#ifdef _WIN32
+        int len = MultiByteToWideChar(936, 0, inputGbk.c_str(), -1, nullptr, 0);
+        std::vector<wchar_t> str(len);
+        MultiByteToWideChar(936, 0, inputGbk.c_str(), -1, &str[0], len);
+        return std::wstring(str.begin(), str.end() - 1);
+#else
         QTextCodec* codec = QTextCodec::codecForName("GBK");
         return codec->toUnicode(QByteArray(inputGbk.c_str())).toStdWString();
+#endif
     }
 
     std::string convertUtf8ToGbk(const std::string& inputUtf8) {
@@ -904,6 +999,33 @@ namespace dlcv_infer {
     }
 
     void DllLoader::LoadDll() {
+#ifdef _WIN32
+        if (!DllExists(dllName, dllPath))
+        {
+            MessageBoxA(nullptr, "需要先安装 dlcv_infer", "提示", MB_OK | MB_ICONWARNING);
+            throw std::runtime_error("need install dlcv_infer first");
+        }
+
+        hModule = LoadLibraryA(dllName.c_str());
+        if (!hModule)
+        {
+            hModule = LoadLibraryA(dllPath.c_str());
+            if (!hModule)
+            {
+                throw std::runtime_error("failed to load dll");
+            }
+        }
+
+        dlcv_load_model = (LoadModelFuncType)GetProcAddress((HMODULE)hModule, "dlcv_load_model");
+        dlcv_free_model = (FreeModelFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_model");
+        dlcv_get_model_info = (GetModelInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_model_info");
+        dlcv_infer = (InferFuncType)GetProcAddress((HMODULE)hModule, "dlcv_infer");
+        dlcv_free_model_result = (FreeModelResultFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_model_result");
+        dlcv_free_result = (FreeResultFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_result");
+        dlcv_free_all_models = (FreeAllModelsFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_all_models");
+        dlcv_get_device_info = (GetDeviceInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_device_info");
+        dlcv_keep_max_clock = (KeepMaxClockFuncType)GetProcAddress((HMODULE)hModule, "dlcv_keep_max_clock");
+#else
         library = new QLibrary(QString::fromStdString(dllName));
         if (!library->load())
         {
@@ -926,6 +1048,7 @@ namespace dlcv_infer {
         dlcv_free_all_models = (FreeAllModelsFuncType)library->resolve("dlcv_free_all_models");
         dlcv_get_device_info = (GetDeviceInfoFuncType)library->resolve("dlcv_get_device_info");
         dlcv_keep_max_clock = (KeepMaxClockFuncType)library->resolve("dlcv_keep_max_clock");
+#endif
     }
 
     sntl_admin::DogProvider DllLoader::AutoDetectProvider() {
@@ -985,7 +1108,11 @@ namespace dlcv_infer {
 
     void DllLoader::EnsureForModel(const std::string& modelPath) {
         std::wstring wpath = convertUtf8ToWstring(modelPath);
+#ifdef _WIN32
+        std::ifstream file(wpath);
+#else
         std::ifstream file(QString::fromStdWString(wpath).toUtf8().toStdString());
+#endif
         if (!file) {
             throw std::runtime_error("failed to open model file");
         }
@@ -1008,7 +1135,11 @@ namespace dlcv_infer {
     }
 
     void DllLoader::EnsureForModel(const std::wstring& modelPath) {
+#ifdef _WIN32
+        std::ifstream file(modelPath);
+#else
         std::ifstream file(QString::fromStdWString(modelPath).toUtf8().toStdString());
+#endif
         if (!file) {
             throw std::runtime_error("failed to open model file");
         }
@@ -1936,12 +2067,14 @@ namespace dlcv_infer {
     int Utils::nvmlInit() {
         typedef int (*NvmlInitFunc)();
 #ifdef _WIN32
-        QLibrary lib("nvml");
+        HMODULE hModule = LoadLibraryA("nvml.dll");
+        if (!hModule) return -1;
+        NvmlInitFunc func = (NvmlInitFunc)GetProcAddress(hModule, "nvmlInit");
 #else
         QLibrary lib("nvidia-ml");
-#endif
         if (!lib.load()) return -1;
         NvmlInitFunc func = (NvmlInitFunc)lib.resolve("nvmlInit");
+#endif
         if (!func) return -1;
         return func();
     }
@@ -1949,12 +2082,14 @@ namespace dlcv_infer {
     int Utils::nvmlShutdown() {
         typedef int (*NvmlShutdownFunc)();
 #ifdef _WIN32
-        QLibrary lib("nvml");
+        HMODULE hModule = LoadLibraryA("nvml.dll");
+        if (!hModule) return -1;
+        NvmlShutdownFunc func = (NvmlShutdownFunc)GetProcAddress(hModule, "nvmlShutdown");
 #else
         QLibrary lib("nvidia-ml");
-#endif
         if (!lib.load()) return -1;
         NvmlShutdownFunc func = (NvmlShutdownFunc)lib.resolve("nvmlShutdown");
+#endif
         if (!func) return -1;
         return func();
     }
@@ -1962,12 +2097,14 @@ namespace dlcv_infer {
     int Utils::nvmlDeviceGetCount(unsigned int* deviceCount) {
         typedef int (*NvmlDeviceGetCountFunc)(unsigned int*);
 #ifdef _WIN32
-        QLibrary lib("nvml");
+        HMODULE hModule = LoadLibraryA("nvml.dll");
+        if (!hModule) return -1;
+        NvmlDeviceGetCountFunc func = (NvmlDeviceGetCountFunc)GetProcAddress(hModule, "nvmlDeviceGetCount");
 #else
         QLibrary lib("nvidia-ml");
-#endif
         if (!lib.load()) return -1;
         NvmlDeviceGetCountFunc func = (NvmlDeviceGetCountFunc)lib.resolve("nvmlDeviceGetCount");
+#endif
         if (!func) return -1;
         return func(deviceCount);
     }
@@ -1975,12 +2112,14 @@ namespace dlcv_infer {
     int Utils::nvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length) {
         typedef int (*NvmlDeviceGetNameFunc)(nvmlDevice_t, char*, unsigned int);
 #ifdef _WIN32
-        QLibrary lib("nvml");
+        HMODULE hModule = LoadLibraryA("nvml.dll");
+        if (!hModule) return -1;
+        NvmlDeviceGetNameFunc func = (NvmlDeviceGetNameFunc)GetProcAddress(hModule, "nvmlDeviceGetName");
 #else
         QLibrary lib("nvidia-ml");
-#endif
         if (!lib.load()) return -1;
         NvmlDeviceGetNameFunc func = (NvmlDeviceGetNameFunc)lib.resolve("nvmlDeviceGetName");
+#endif
         if (!func) return -1;
         return func(device, name, length);
     }
@@ -1988,12 +2127,14 @@ namespace dlcv_infer {
     int Utils::nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device) {
         typedef int (*NvmlDeviceGetHandleByIndexFunc)(unsigned int, nvmlDevice_t*);
 #ifdef _WIN32
-        QLibrary lib("nvml");
+        HMODULE hModule = LoadLibraryA("nvml.dll");
+        if (!hModule) return -1;
+        NvmlDeviceGetHandleByIndexFunc func = (NvmlDeviceGetHandleByIndexFunc)GetProcAddress(hModule, "nvmlDeviceGetHandleByIndex");
 #else
         QLibrary lib("nvidia-ml");
-#endif
         if (!lib.load()) return -1;
         NvmlDeviceGetHandleByIndexFunc func = (NvmlDeviceGetHandleByIndexFunc)lib.resolve("nvmlDeviceGetHandleByIndex");
+#endif
         if (!func) return -1;
         return func(index, device);
     }

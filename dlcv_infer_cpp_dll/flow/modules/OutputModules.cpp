@@ -15,7 +15,14 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#else
 #include <QDir>
+#endif
 
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
@@ -32,7 +39,11 @@ static std::string NowTimestamp() {
     const auto now = system_clock::now();
     const auto t = system_clock::to_time_t(now);
     std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
     localtime_r(&t, &tm);
+#endif
     char buf[64] = {0};
     std::snprintf(buf, sizeof(buf), "%04d%02d%02d_%02d%02d%02d",
                   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
@@ -42,7 +53,20 @@ static std::string NowTimestamp() {
 
 static void EnsureDirExists(const std::string& dir) {
     if (dir.empty()) return;
+#ifdef _WIN32
+    std::string path;
+    path.reserve(dir.size());
+    for (size_t i = 0; i < dir.size(); i++) {
+        const char c = dir[i];
+        path.push_back(c);
+        if (c == '\\' || c == '/') {
+            CreateDirectoryA(path.c_str(), nullptr);
+        }
+    }
+    CreateDirectoryA(dir.c_str(), nullptr);
+#else
     QDir().mkpath(QString::fromStdString(dir));
+#endif
 }
 
 static std::string JoinPath(const std::string& a, const std::string& b) {
