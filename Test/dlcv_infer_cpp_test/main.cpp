@@ -39,6 +39,8 @@ const std::wstring kSlidingAlignModelPath = L"C:\\Users\\Administrator\\Desktop\
 const std::wstring kSlidingAlignImagePath = L"C:\\Users\\Administrator\\Desktop\\滑窗裁图分割合并\\T000001-P000001-C22-I1-G9PHG5X0VFT0000HU8+4JKC-OK.png";
 constexpr int kSlidingAlignBatchSize = 1;
 constexpr float kSlidingAlignThreshold = 0.5f;
+const std::wstring kFlowInstanceSegFilterModelPath = L"Y:\\zxc\\模块化任务测试\\实例分割筛选测试_120_50.dvst";
+const std::wstring kFlowInstanceSegFilterImagePath = L"Y:\\zxc\\模块化任务测试\\实例分割\\实例分割滑窗大图.png";
 const std::wstring kDemo3Model1Path = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程1-目标检测-降采样_120_50.dvst";
 const std::wstring kDemo3Model2Path = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程2-各项检测_120_50.dvst";
 const std::wstring kDemo3ChainImagePath = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\detect_20260401151406_0.jpg";
@@ -969,6 +971,105 @@ int RunSlidingAlignOnce(const std::wstring& modelPath, const std::wstring& image
     }
 }
 
+int RunFlowInstanceSegFilterSelfTest() {
+    std::cout << "==== Flow 实例分割筛选自测 ====\n";
+    std::cout << "model: " << WideToUtf8(kFlowInstanceSegFilterModelPath) << "\n";
+    std::cout << "image: " << WideToUtf8(kFlowInstanceSegFilterImagePath) << "\n";
+    if (!FileExistsW(kFlowInstanceSegFilterModelPath) || !FileExistsW(kFlowInstanceSegFilterImagePath)) {
+        std::cout << "模型或图片不存在，请检查路径。\n";
+        return 2;
+    }
+
+    try {
+        dlcv_infer::Model model(kFlowInstanceSegFilterModelPath, kGpuDeviceId);
+        std::cout << "provider=" << DogProviderToString(model.LoadedDogProvider())
+                  << ", dll=" << model.LoadedNativeDllName() << "\n";
+
+        cv::Mat bgr = LoadImageByDecode(kFlowInstanceSegFilterImagePath);
+        if (bgr.empty()) throw std::runtime_error("图像解码失败");
+        cv::Mat rgb;
+        cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+
+        json params;
+        params["threshold"] = 0.5;
+        params["with_mask"] = true;
+        params["batch_size"] = 1;
+
+        const json oneOutJson = model.InferOneOutJson(rgb, params);
+        std::cout << "one_out_json_count: " << (oneOutJson.is_array() ? oneOutJson.size() : 0) << "\n";
+
+        dlcv_infer::Result out = model.InferBatch(std::vector<cv::Mat>{ rgb }, params);
+        const size_t sampleCount = out.sampleResults.size();
+        const size_t objectCount = sampleCount > 0 ? out.sampleResults[0].results.size() : 0;
+        std::cout << "sample_count: " << sampleCount << "\n";
+        std::cout << "det_counts: [" << objectCount << "]\n";
+
+        bool ok = true;
+        if (sampleCount != 1) {
+            std::cout << "ERROR: expected 1 sample, got " << sampleCount << "\n";
+            ok = false;
+        }
+        if (objectCount != 2) {
+            std::cout << "ERROR: expected exactly 2 objects, got " << objectCount << "\n";
+            ok = false;
+        }
+
+        const auto checkObj = [&](size_t idx,
+                                  double ex, double ey, double ew, double eh) {
+            if (sampleCount == 0 || idx >= out.sampleResults[0].results.size()) {
+                ok = false;
+                return;
+            }
+            const auto& obj = out.sampleResults[0].results[idx];
+            const std::string name = dlcv_infer::convertGbkToUtf8(obj.categoryName);
+            std::cout << "[" << (idx + 1) << "] " << name
+                      << " score=" << ToFixed(static_cast<double>(obj.score), 2);
+            if (obj.bbox.size() >= 4) {
+                std::cout << " bbox=(" << ToFixed(obj.bbox[0], 1)
+                          << ", " << ToFixed(obj.bbox[1], 1)
+                          << ", " << ToFixed(obj.bbox[2], 1)
+                          << ", " << ToFixed(obj.bbox[3], 1) << ")";
+            }
+            std::cout << " area=" << ToFixed(static_cast<double>(obj.area), 1) << "\n";
+
+            if (name != "杯子") {
+                std::cout << "ERROR: object[" << idx << "] category mismatch: " << name << "\n";
+                ok = false;
+            }
+            if (std::abs(obj.score - 1.0f) > 0.01f) {
+                std::cout << "ERROR: object[" << idx << "] score mismatch: " << obj.score << "\n";
+                ok = false;
+            }
+            if (!obj.withBbox || obj.bbox.size() < 4) {
+                std::cout << "ERROR: object[" << idx << "] bbox missing\n";
+                ok = false;
+                return;
+            }
+            if (std::abs(obj.bbox[0] - ex) > 1.0 ||
+                std::abs(obj.bbox[1] - ey) > 1.0 ||
+                std::abs(obj.bbox[2] - ew) > 1.0 ||
+                std::abs(obj.bbox[3] - eh) > 1.0) {
+                std::cout << "ERROR: object[" << idx << "] bbox mismatch\n";
+                ok = false;
+            }
+        };
+
+        checkObj(0, 211.0, 221.0, 160.0, 186.0);
+        checkObj(1, 849.0, 220.0, 161.0, 185.0);
+
+        DisposeResultMasks(out);
+        if (ok) {
+            std::cout << "Flow 实例分割筛选自测通过\n";
+            return 0;
+        }
+        std::cout << "Flow 实例分割筛选自测失败\n";
+        return 1;
+    } catch (const std::exception& e) {
+        std::cout << "Flow 实例分割筛选自测异常: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int RunImagePrepCheck() {
     auto fail = [](const std::string& message) -> int {
         std::cout << "imageprepcheck 失败: " << message << "\n";
@@ -1061,6 +1162,10 @@ int main(int argc, char* argv[]) {
 
     if (argc >= 2 && std::string(argv[1]) == "imageprepcheck") {
         return RunImagePrepCheck();
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "flow-instance-seg-filter-selftest") {
+        return RunFlowInstanceSegFilterSelfTest();
     }
 
     std::cout << "==== C++ 测试程序 ====\n";
