@@ -19,6 +19,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "../../dlcv_infer_cpp_dll/ImageInputUtils.h"
+#include "../../dlcv_infer_cpp_dll/flow/FlowGraphModel.h"
 #include "dlcv_infer.h"
 
 namespace {
@@ -1123,6 +1124,150 @@ int RunImagePrepCheck() {
     std::cout << "imageprepcheck 通过\n";
     return 0;
 }
+
+std::string BuildTempRectCorrectionDir() {
+    char tempPath[MAX_PATH] = {0};
+    const DWORD n = GetTempPathA(static_cast<DWORD>(sizeof(tempPath)), tempPath);
+    std::string base = (n > 0 && n < sizeof(tempPath)) ? std::string(tempPath) : std::string(".\\");
+    const char last = base.empty() ? '\0' : base.back();
+    if (last != '\\' && last != '/') base.push_back('\\');
+    std::string dir = base + "dlcv_rect_image_correction_" + std::to_string(GetCurrentProcessId());
+    CreateDirectoryA(dir.c_str(), nullptr);
+    return dir;
+}
+
+std::string JoinPathA(const std::string& dir, const std::string& name) {
+    if (dir.empty()) return name;
+    const char last = dir.back();
+    if (last == '\\' || last == '/') return dir + name;
+    return dir + "\\" + name;
+}
+
+void DeleteFilesWithSuffix(const std::string& dir, const std::string& suffixWithExt) {
+    WIN32_FIND_DATAA data{};
+    const std::string pattern = JoinPathA(dir, "*");
+    HANDLE h = FindFirstFileA(pattern.c_str(), &data);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) continue;
+        const std::string name = data.cFileName;
+        if (name.size() >= suffixWithExt.size() &&
+            name.compare(name.size() - suffixWithExt.size(), suffixWithExt.size(), suffixWithExt) == 0) {
+            DeleteFileA(JoinPathA(dir, name).c_str());
+        }
+    } while (FindNextFileA(h, &data));
+    FindClose(h);
+}
+
+cv::Mat LoadSingleFileWithSuffix(const std::string& dir, const std::string& suffixWithExt) {
+    cv::Mat loaded;
+    int matchCount = 0;
+    WIN32_FIND_DATAA data{};
+    const std::string pattern = JoinPathA(dir, "*");
+    HANDLE h = FindFirstFileA(pattern.c_str(), &data);
+    if (h == INVALID_HANDLE_VALUE) return loaded;
+    do {
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) continue;
+        const std::string name = data.cFileName;
+        if (name.size() >= suffixWithExt.size() &&
+            name.compare(name.size() - suffixWithExt.size(), suffixWithExt.size(), suffixWithExt) == 0) {
+            matchCount += 1;
+            loaded = cv::imread(JoinPathA(dir, name), cv::IMREAD_UNCHANGED);
+        }
+    } while (FindNextFileA(h, &data));
+    FindClose(h);
+    return matchCount == 1 ? loaded : cv::Mat();
+}
+
+int RunRectImageCorrectionSelfTest() {
+    auto fail = [](const std::string& message) -> int {
+        std::cout << "rect_image_correction 自测失败: " << message << "\n";
+        return 1;
+    };
+
+    const std::string saveDir = BuildTempRectCorrectionDir();
+    const std::string suffix = "_rect_image_correction_test";
+    DeleteFilesWithSuffix(saveDir, suffix + ".png");
+
+    const std::string flowPath = JoinPathA(saveDir, "rect_image_correction_flow.json");
+    json flow = json::object();
+    flow["nodes"] = json::array({
+        {
+            {"id", 1},
+            {"order", 1},
+            {"type", "input/frontend_image"},
+            {"outputs", json::array({
+                json::object({{"type", "image_chan"}, {"links", json::array({101})}}),
+                json::object({{"type", "result_chan"}, {"links", json::array({102})}})
+            })}
+        },
+        {
+            {"id", 2},
+            {"order", 2},
+            {"type", "pre_process/rect_image_correction"},
+            {"properties", json::object({{"rotate_direction", "clockwise"}})},
+            {"inputs", json::array({
+                json::object({{"type", "image_chan"}, {"link", 101}}),
+                json::object({{"type", "result_chan"}, {"link", 102}})
+            })},
+            {"outputs", json::array({
+                json::object({{"type", "image_chan"}, {"links", json::array({201})}}),
+                json::object({{"type", "result_chan"}, {"links", json::array({202})}})
+            })}
+        },
+        {
+            {"id", 3},
+            {"order", 3},
+            {"type", "output/save_image"},
+            {"properties", json::object({{"save_path", saveDir}, {"suffix", suffix}, {"format", "png"}})},
+            {"inputs", json::array({
+                json::object({{"type", "image_chan"}, {"link", 201}}),
+                json::object({{"type", "result_chan"}, {"link", 202}})
+            })},
+            {"outputs", json::array()}
+        }
+    });
+
+    {
+        std::ofstream ofs(flowPath, std::ios::binary);
+        if (!ofs) return fail("无法写入临时流程文件");
+        ofs << flow.dump(2);
+    }
+
+    cv::Mat tall(3, 2, CV_8UC3);
+    for (int y = 0; y < tall.rows; ++y) {
+        for (int x = 0; x < tall.cols; ++x) {
+            tall.at<cv::Vec3b>(y, x) = cv::Vec3b(static_cast<uchar>(10 + x), static_cast<uchar>(20 + y), 30);
+        }
+    }
+
+    try {
+        dlcv_infer::flow::FlowGraphModel model;
+        const json loadReport = model.Load(flowPath, kGpuDeviceId);
+        if (!loadReport.is_object() || loadReport.value("code", 1) != 0) {
+            return fail(std::string("流程加载失败: ") + loadReport.dump());
+        }
+        const json inferRoot = model.InferInternal(std::vector<cv::Mat>{tall}, json::object());
+        if (!inferRoot.is_object() || inferRoot.value("code", 1) != 0) {
+            return fail(std::string("流程执行失败: ") + inferRoot.dump());
+        }
+    } catch (const std::exception& ex) {
+        return fail(std::string("异常: ") + ex.what());
+    }
+
+    const cv::Mat saved = LoadSingleFileWithSuffix(saveDir, suffix + ".png");
+    if (saved.empty()) {
+        return fail("未保存矫正后的图像");
+    }
+    if (saved.cols != 3 || saved.rows != 2) {
+        return fail("竖图未旋转为横图，实际尺寸=" + std::to_string(saved.cols) + "x" + std::to_string(saved.rows));
+    }
+
+    DeleteFilesWithSuffix(saveDir, suffix + ".png");
+    DeleteFileA(flowPath.c_str());
+    std::cout << "rect_image_correction 自测通过\n";
+    return 0;
+}
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -1162,6 +1307,10 @@ int main(int argc, char* argv[]) {
 
     if (argc >= 2 && std::string(argv[1]) == "imageprepcheck") {
         return RunImagePrepCheck();
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "rect-image-correction-selftest") {
+        return RunRectImageCorrectionSelfTest();
     }
 
     if (argc >= 2 && std::string(argv[1]) == "flow-instance-seg-filter-selftest") {
