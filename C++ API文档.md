@@ -484,10 +484,6 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
   - `dlcv_infer_cpp_dll/dlcv_infer.h`
   - `dlcv_infer_cpp_dll/flow/FlowGraphModel.h`
   - `dlcv_infer_cpp_dll/dlcv_sntl_admin.h`
-- C API 项目目录：`dlcv_infer_c_dll`
-- C API 工程文件：`dlcv_infer_c_dll/dlcv_infer_c_dll.vcxproj`
-- C API 对外头文件：`dlcv_infer_c_dll/dlcv_infer_c_api.h`
-- C API 工程通过 `dlcv_infer_cpp_dll.lib` 显式依赖 C++ API 工程。
 
 ---
 
@@ -510,8 +506,6 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 - 输出目录仅在 `x64` 配置中显式设置为 `$(SolutionDir)$(Configuration)\`。
 - Debug x64 链接库：`opencv_world4100d.lib`
 - Release x64 链接库：`opencv_world4100.lib`
-- `dlcv_infer_c_dll` 工程配置为 `Debug|x64` 和 `Release|x64`，输出目录为 `$(SolutionDir)$(Configuration)\`。
-- `dlcv_infer_c_dll` 编译时定义 `DLCV_INFER_C_DLL_EXPORTS`，链接 `dlcv_infer_cpp_dll.lib` 与对应配置的 OpenCV 库。
 
 当前工程的编译单元按“入口绑定 -> Flow 执行框架 -> 节点实现”三层拆分：
 
