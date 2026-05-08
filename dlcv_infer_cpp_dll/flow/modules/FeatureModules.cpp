@@ -2,6 +2,7 @@
 #include "flow/ModuleRegistry.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -132,6 +133,85 @@ static int SafeInt(const Json& v, int dv = -1) {
         if (v.is_string()) return std::stoi(v.get<std::string>());
     } catch (...) {}
     return dv;
+}
+
+static std::string TrimCopy(const std::string& s) {
+    size_t begin = 0;
+    while (begin < s.size() && std::isspace(static_cast<unsigned char>(s[begin])) != 0) {
+        ++begin;
+    }
+    size_t end = s.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(s[end - 1])) != 0) {
+        --end;
+    }
+    return s.substr(begin, end - begin);
+}
+
+static std::string ToLowerAsciiCopy(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return s;
+}
+
+static std::string NormalizeRectRotateDirection(const std::string& value) {
+    const std::string text = ToLowerAsciiCopy(TrimCopy(value.empty() ? std::string("clockwise") : value));
+    if (text == "counterclockwise" || text == "ccw" || text == "left" ||
+        text == "逆时针" || text == "左转") {
+        return "counterclockwise";
+    }
+    return "clockwise";
+}
+
+static void GetRectRotationAffine(
+    const std::string& direction,
+    int width,
+    int height,
+    std::vector<double>& A,
+    int& newWidth,
+    int& newHeight) {
+
+    const int w = std::max(1, width);
+    const int h = std::max(1, height);
+    if (direction == "counterclockwise") {
+        A = { 0.0, 1.0, 0.0, -1.0, 0.0, static_cast<double>(w - 1) };
+        newWidth = h;
+        newHeight = w;
+        return;
+    }
+
+    A = { 0.0, -1.0, static_cast<double>(h - 1), 1.0, 0.0, 0.0 };
+    newWidth = h;
+    newHeight = w;
+}
+
+static cv::Mat RotateRectView(
+    const cv::Mat& image,
+    const std::string& direction,
+    const std::vector<double>& affine,
+    int newWidth,
+    int newHeight) {
+
+    try {
+        cv::Mat matA(2, 3, CV_64FC1);
+        matA.at<double>(0,0) = affine[0];
+        matA.at<double>(0,1) = affine[1];
+        matA.at<double>(0,2) = affine[2];
+        matA.at<double>(1,0) = affine[3];
+        matA.at<double>(1,1) = affine[4];
+        matA.at<double>(1,2) = affine[5];
+
+        cv::Mat rotated;
+        cv::warpAffine(image, rotated, matA, cv::Size(newWidth, newHeight));
+        return rotated;
+    } catch (...) {
+        cv::Mat rotated;
+        const int flag = (direction == "counterclockwise")
+            ? cv::ROTATE_90_COUNTERCLOCKWISE
+            : cv::ROTATE_90_CLOCKWISE;
+        cv::rotate(image, rotated, flag);
+        return rotated;
+    }
 }
 
 static double SafeScore(const Json& v) {
@@ -473,6 +553,62 @@ public:
                               childState,
                               wrap.OriginalIndex);
             outImages.push_back(child);
+        }
+
+        return ModuleIO(std::move(outImages), Json::array(), Json::array());
+    }
+};
+
+/// pre_process/rect_image_correction
+class RectImageCorrectionModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& /*resultList*/) override {
+        const std::vector<ModuleImage>& images = imageList;
+        if (images.empty()) {
+            return ModuleIO(std::vector<ModuleImage>(), Json::array(), Json::array());
+        }
+
+        const std::string direction = NormalizeRectRotateDirection(ReadString("rotate_direction", "clockwise"));
+        std::vector<ModuleImage> outImages;
+        outImages.reserve(images.size());
+
+        for (const auto& wrap : images) {
+            const cv::Mat baseMat = wrap.ImageObject;
+            if (baseMat.empty()) {
+                outImages.push_back(wrap);
+                continue;
+            }
+
+            const int w = baseMat.cols;
+            const int h = baseMat.rows;
+            if (w >= h) {
+                outImages.push_back(wrap);
+                continue;
+            }
+
+            std::vector<double> A;
+            int newW = w;
+            int newH = h;
+            GetRectRotationAffine(direction, w, h, A, newW, newH);
+
+            cv::Mat rotated = RotateRectView(baseMat, direction, A, newW, newH);
+            if (rotated.empty()) {
+                outImages.push_back(wrap);
+                continue;
+            }
+
+            const TransformationState parentState = (wrap.TransformState.OriginalWidth > 0 && wrap.TransformState.OriginalHeight > 0)
+                ? wrap.TransformState
+                : TransformationState(w, h);
+            const TransformationState childState = parentState.DeriveChild(A, newW, newH);
+            outImages.emplace_back(
+                rotated,
+                wrap.OriginalImage.empty() ? baseMat : wrap.OriginalImage,
+                childState,
+                wrap.OriginalIndex
+            );
         }
 
         return ModuleIO(std::move(outImages), Json::array(), Json::array());
@@ -879,6 +1015,7 @@ public:
 // 注册
 DLCV_FLOW_REGISTER_MODULE("features/image_generation", ImageGenerationModule)
 DLCV_FLOW_REGISTER_MODULE("features/image_flip", ImageFlipModule)
+DLCV_FLOW_REGISTER_MODULE("pre_process/rect_image_correction", RectImageCorrectionModule)
 DLCV_FLOW_REGISTER_MODULE("pre_process/coordinate_crop", CoordinateCropModule)
 DLCV_FLOW_REGISTER_MODULE("features/coordinate_crop", CoordinateCropModule)
 DLCV_FLOW_REGISTER_MODULE("pre_process/image_rescale", ImageRescaleModule)
