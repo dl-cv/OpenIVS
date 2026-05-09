@@ -104,19 +104,49 @@ std::string ConvertEncodingPortable(const std::string& input, const char* fromCo
 }
 #endif
 
-bool DllExists(const std::string& dllName, const std::string& dllPath) {
+std::string GetSelfModuleDirectory() {
 #ifdef _WIN32
+    char path[MAX_PATH];
+    HMODULE hModule = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(&GetSelfModuleDirectory), &hModule)) {
+        if (GetModuleFileNameA(hModule, path, MAX_PATH) > 0) {
+            std::filesystem::path p(path);
+            return p.parent_path().string();
+        }
+    }
+#else
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&GetSelfModuleDirectory), &info) && info.dli_fname) {
+        std::error_code ec;
+        std::filesystem::path p = info.dli_fname;
+        auto canonicalPath = std::filesystem::canonical(p, ec);
+        if (!ec) {
+            return canonicalPath.parent_path().string();
+        }
+        return p.parent_path().string();
+    }
+#endif
+    return "";
+}
+
+bool DllExists(const std::string& dllDevPath, const std::string& dllName, const std::string& dllPath) {
+#ifdef _WIN32
+    if (!dllDevPath.empty() && GetFileAttributesA(dllDevPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return true;
+    }
     if (SearchPathA(nullptr, dllName.c_str(), nullptr, 0, nullptr, nullptr) != 0) {
         return true;
     }
     return GetFileAttributesA(dllPath.c_str()) != INVALID_FILE_ATTRIBUTES;
 #else
-    void* handle = LoadSharedLibrary(dllName, dllPath);
-    if (handle != nullptr) {
-        dlclose(handle);
+    std::error_code ec;
+    if (!dllDevPath.empty() && fs::exists(dllDevPath, ec)) {
         return true;
     }
-    std::error_code ec;
+    if (fs::exists(dllName, ec)) {
+        return true;
+    }
     return fs::exists(dllPath, ec);
 #endif
 }
@@ -1061,7 +1091,7 @@ namespace dlcv_infer {
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll";
 #else
             dllName = "libdlcv_infer.so";
-            dllPath = "/usr/local/dlcv/lib/libdlcv_infer.so";
+            dllPath = "/root/miniconda3/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
 #endif
             break;
         case sntl_admin::DogProvider::Virbox:
@@ -1070,31 +1100,47 @@ namespace dlcv_infer {
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer_v.dll";
 #else
             dllName = "libdlcv_infer.so";
-            dllPath = "/usr/local/dlcv/lib/libdlcv_infer.so";
+            dllPath = "/root/miniconda3/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
 #endif
             break;
         default:
             throw std::runtime_error("unsupported dog provider");
         }
+
+        std::string selfDir = GetSelfModuleDirectory();
+        if (!selfDir.empty()) {
+#ifdef _WIN32
+            dllDevPath = selfDir + "\\" + dllName;
+#else
+            dllDevPath = selfDir + "/" + dllName;
+#endif
+        }
+
         LoadDll();
     }
 
     void DllLoader::LoadDll() {
 #ifdef _WIN32
-        if (!DllExists(dllName, dllPath))
+        if (!DllExists(dllDevPath, dllName, dllPath))
         {
             MessageBoxA(nullptr, "需要先安装 dlcv_infer", "提示", MB_OK | MB_ICONWARNING);
             throw std::runtime_error("need install dlcv_infer first");
         }
 
-        hModule = LoadLibraryA(dllName.c_str());
-        if (!hModule)
-        {
+        // 1. 开发环境路径（与当前模块同目录）
+        if (!dllDevPath.empty()) {
+            hModule = LoadLibraryA(dllDevPath.c_str());
+        }
+        // 2. 当前目录 / 系统搜索路径
+        if (!hModule) {
+            hModule = LoadLibraryA(dllName.c_str());
+        }
+        // 3. site-packages 固定路径
+        if (!hModule) {
             hModule = LoadLibraryA(dllPath.c_str());
-            if (!hModule)
-            {
-                throw std::runtime_error("failed to load dll");
-            }
+        }
+        if (!hModule) {
+            throw std::runtime_error("failed to load dll");
         }
 
         dlcv_load_model = (LoadModelFuncType)GetProcAddress((HMODULE)hModule, "dlcv_load_model");
@@ -1107,7 +1153,18 @@ namespace dlcv_infer {
         dlcv_get_device_info = (GetDeviceInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_device_info");
         dlcv_keep_max_clock = (KeepMaxClockFuncType)GetProcAddress((HMODULE)hModule, "dlcv_keep_max_clock");
 #else
-        hModule = LoadSharedLibrary(dllName, dllPath);
+        // 1. 开发环境路径（与当前模块同目录）
+        if (!dllDevPath.empty()) {
+            hModule = dlopen(dllDevPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        }
+        // 2. 当前目录 / 系统搜索路径
+        if (!hModule) {
+            hModule = dlopen(dllName.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        }
+        // 3. site-packages 固定路径
+        if (!hModule && !dllPath.empty() && dllPath != dllName) {
+            hModule = dlopen(dllPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        }
         if (hModule == nullptr)
         {
             const char* err = dlerror();
