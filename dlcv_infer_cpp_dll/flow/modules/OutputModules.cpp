@@ -1,6 +1,7 @@
 ﻿#include "flow/BaseModule.h"
 #include "flow/FlowPayloadTypes.h"
 #include "flow/ModuleRegistry.h"
+#include "flow/utils/FlowPlatformUtils.h"
 #include "flow/utils/MaskRleUtils.h"
 
 #include <algorithm>
@@ -8,16 +9,19 @@
 #include <cstdint>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 #include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#endif
 
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
@@ -34,35 +38,16 @@ static std::string NowTimestamp() {
     const auto now = system_clock::now();
     const auto t = system_clock::to_time_t(now);
     std::tm tm{};
+#ifdef _WIN32
     localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
     char buf[64] = {0};
     std::snprintf(buf, sizeof(buf), "%04d%02d%02d_%02d%02d%02d",
                   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                   tm.tm_hour, tm.tm_min, tm.tm_sec);
     return std::string(buf);
-}
-
-static void EnsureDirExists(const std::string& dir) {
-    if (dir.empty()) return;
-    // 递归创建：支持 a\\b\\c
-    std::string path;
-    path.reserve(dir.size());
-    for (size_t i = 0; i < dir.size(); i++) {
-        const char c = dir[i];
-        path.push_back(c);
-        if (c == '\\' || c == '/') {
-            CreateDirectoryA(path.c_str(), nullptr);
-        }
-    }
-    CreateDirectoryA(dir.c_str(), nullptr);
-}
-
-static std::string JoinPath(const std::string& a, const std::string& b) {
-    if (a.empty()) return b;
-    if (b.empty()) return a;
-    const char last = a.back();
-    if (last == '\\' || last == '/') return a + b;
-    return a + "\\" + b;
 }
 
 static std::string GetFileNameWithoutExt(const std::string& path) {

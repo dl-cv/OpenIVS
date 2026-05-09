@@ -11,10 +11,12 @@
 #include <stdexcept>
 #include <vector>
 
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#endif
 
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
@@ -30,7 +32,8 @@ static std::string GetFileNameWithoutExt(const std::string& path) {
     return name.substr(0, dot);
 }
 
-static bool FileExists(const std::string& path) {
+#ifdef _WIN32
+static std::wstring Utf8ToWideForWin32(const std::string& path) {
     std::wstring widePath;
     if (!path.empty()) {
         const int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, nullptr, 0);
@@ -39,6 +42,13 @@ static bool FileExists(const std::string& path) {
             MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, &widePath[0], len);
         }
     }
+    return widePath;
+}
+#endif
+
+static bool FileExists(const std::string& path) {
+#ifdef _WIN32
+    std::wstring widePath = Utf8ToWideForWin32(path);
     if (!widePath.empty()) {
         FILE* fp = nullptr;
         if (_wfopen_s(&fp, widePath.c_str(), L"rb") == 0 && fp != nullptr) {
@@ -47,6 +57,7 @@ static bool FileExists(const std::string& path) {
         }
         return false;
     }
+#endif
     std::ifstream ifs(path, std::ios::binary);
     return static_cast<bool>(ifs);
 }
@@ -74,14 +85,8 @@ static cv::Mat PrepareDecodedImageForFlow(const cv::Mat& image) {
 
 static cv::Mat ReadFromPathForFlow(const std::string& path) {
     cv::Mat decoded;
-    std::wstring widePath;
-    if (!path.empty()) {
-        const int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, nullptr, 0);
-        if (len > 0) {
-            widePath.resize(static_cast<size_t>(len - 1));
-            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, &widePath[0], len);
-        }
-    }
+#ifdef _WIN32
+    std::wstring widePath = Utf8ToWideForWin32(path);
     if (!widePath.empty()) {
         FILE* fp = nullptr;
         if (_wfopen_s(&fp, widePath.c_str(), L"rb") == 0 && fp != nullptr) {
@@ -98,6 +103,7 @@ static cv::Mat ReadFromPathForFlow(const std::string& path) {
             std::fclose(fp);
         }
     }
+#endif
     if (decoded.empty()) {
         decoded = cv::imread(path, cv::IMREAD_UNCHANGED);
     }
@@ -400,7 +406,11 @@ public:
             int r = 0, g = 255, b = 0;
             try {
                 int rr = 0, gg = 255, bb = 0;
+#ifdef _WIN32
                 sscanf_s(colorStr.c_str(), "%d,%d,%d", &rr, &gg, &bb);
+#else
+                sscanf(colorStr.c_str(), "%d,%d,%d", &rr, &gg, &bb);
+#endif
                 r = rr; g = gg; b = bb;
             } catch (...) { r = 0; g = 255; b = 0; }
             img = cv::Mat(dh, dw, CV_8UC3, cv::Scalar(r, g, b));

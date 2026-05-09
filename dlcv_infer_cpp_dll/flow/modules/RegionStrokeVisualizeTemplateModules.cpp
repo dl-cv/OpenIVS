@@ -1,5 +1,6 @@
 #include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
+#include "flow/utils/FlowPlatformUtils.h"
 #include "flow/utils/MaskRleUtils.h"
 
 #include <algorithm>
@@ -17,10 +18,12 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#endif
 
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
@@ -29,28 +32,6 @@ namespace dlcv_infer {
 namespace flow {
 
 static constexpr double kPi = 3.14159265358979323846;
-
-static void EnsureDirExists(const std::string& dir) {
-    if (dir.empty()) return;
-    std::string path;
-    path.reserve(dir.size());
-    for (size_t i = 0; i < dir.size(); i++) {
-        const char c = dir[i];
-        path.push_back(c);
-        if (c == '\\' || c == '/') {
-            CreateDirectoryA(path.c_str(), nullptr);
-        }
-    }
-    CreateDirectoryA(dir.c_str(), nullptr);
-}
-
-static std::string JoinPath(const std::string& a, const std::string& b) {
-    if (a.empty()) return b;
-    if (b.empty()) return a;
-    const char last = a.back();
-    if (last == '\\' || last == '/') return a + b;
-    return a + "\\" + b;
-}
 
 static std::string MakeSafeFileName(std::string name) {
     if (name.empty()) return "Unknown";

@@ -4,12 +4,27 @@
 #include "flow/FlowGraphModel.h"
 #include "flow/FlowPayloadTypes.h"
 #include "flow/utils/MaskRleUtils.h"
+#ifdef _WIN32
 #include <Windows.h>
+#else
+#include <dlfcn.h>
+#include <filesystem>
+#include <iconv.h>
+#include <link.h>
+#include <unistd.h>
+#endif
+#include <cerrno>
 #include <cmath>
+#include <iostream>
+#include <codecvt>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <locale>
 #include <random>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 
@@ -31,13 +46,122 @@ void SetLastInferTiming(double dlcvInferMs, double totalInferMs, std::vector<dlc
     g_lastFlowNodeTimings = std::move(nodeTimings);
 }
 
-bool DllExists(const std::string& dllName, const std::string& dllPath) {
+#ifndef _WIN32
+namespace fs = std::filesystem;
+
+void* LoadSharedLibrary(const std::string& name, const std::string& fallbackPath) {
+    void* handle = dlopen(name.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    if (handle == nullptr && !fallbackPath.empty() && fallbackPath != name) {
+        handle = dlopen(fallbackPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    }
+    return handle;
+}
+
+void* ResolveSharedSymbol(void* handle, const char* symbolName) {
+    return handle == nullptr ? nullptr : dlsym(handle, symbolName);
+}
+
+std::string WideToUtf8Portable(const std::wstring& input) {
+    if (input.empty()) return {};
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+    return converter.to_bytes(input);
+}
+
+std::wstring Utf8ToWidePortable(const std::string& input) {
+    if (input.empty()) return {};
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+    return converter.from_bytes(input);
+}
+
+std::string ConvertEncodingPortable(const std::string& input, const char* fromCode, const char* toCode) {
+    if (input.empty()) return {};
+
+    iconv_t cd = iconv_open(toCode, fromCode);
+    if (cd == (iconv_t)-1) {
+        throw std::runtime_error("failed to open iconv converter");
+    }
+
+    size_t inBytesLeft = input.size();
+    char* inBuf = const_cast<char*>(input.data());
+    std::string output(std::max<size_t>(input.size() * 4, 32), '\0');
+    char* outBuf = output.data();
+    size_t outBytesLeft = output.size();
+
+    for (;;) {
+        const size_t ret = iconv(cd, &inBuf, &inBytesLeft, &outBuf, &outBytesLeft);
+        if (ret != static_cast<size_t>(-1)) break;
+        if (errno != E2BIG) {
+            iconv_close(cd);
+            throw std::runtime_error("failed to convert encoding");
+        }
+
+        const size_t used = static_cast<size_t>(outBuf - output.data());
+        output.resize(output.size() * 2);
+        outBuf = output.data() + used;
+        outBytesLeft = output.size() - used;
+    }
+
+    output.resize(output.size() - outBytesLeft);
+    iconv_close(cd);
+    return output;
+}
+#endif
+
+std::string ParentDirectoryOf(const std::string& path) {
+    const size_t pos = path.find_last_of("/\\");
+    if (pos == std::string::npos) return "";
+    return path.substr(0, pos);
+}
+
+std::string GetSelfModuleDirectory() {
+#ifdef _WIN32
+    char path[MAX_PATH];
+    HMODULE hModule = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(&GetSelfModuleDirectory), &hModule)) {
+        if (GetModuleFileNameA(hModule, path, MAX_PATH) > 0) {
+            return ParentDirectoryOf(path);
+        }
+    }
+#else
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&GetSelfModuleDirectory), &info) && info.dli_fname) {
+        std::error_code ec;
+        std::filesystem::path p = info.dli_fname;
+        auto canonicalPath = std::filesystem::canonical(p, ec);
+        if (!ec) {
+            return canonicalPath.parent_path().string();
+        }
+        return p.parent_path().string();
+    }
+#endif
+    return "";
+}
+
+#ifdef _WIN32
+bool DllExists(const std::string& dllDevPath, const std::string& dllCurrentPath, const std::string& dllName, const std::string& dllPath) {
+    if (!dllDevPath.empty() && GetFileAttributesA(dllDevPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return true;
+    }
+    if (!dllCurrentPath.empty() && GetFileAttributesA(dllCurrentPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return true;
+    }
     if (SearchPathA(nullptr, dllName.c_str(), nullptr, 0, nullptr, nullptr) != 0) {
         return true;
     }
-
     return GetFileAttributesA(dllPath.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
+#endif
+
+#ifdef _WIN32
+inline void* ResolveSymbol(void* module, const char* name) {
+    return GetProcAddress((HMODULE)module, name);
+}
+#else
+inline void* ResolveSymbol(void* module, const char* name) {
+    return dlsym(module, name);
+}
+#endif
 
 struct DvsUnpackResult {
     Json pipelineRoot = Json::object();
@@ -59,7 +183,7 @@ private:
 
     static bool DeleteDirectoryRecursive(const std::string& dir) {
         if (dir.empty()) return true;
-
+#ifdef _WIN32
         WIN32_FIND_DATAA ffd;
         const std::string pattern = dir + "\\*";
         HANDLE hFind = FindFirstFileA(pattern.c_str(), &ffd);
@@ -68,7 +192,6 @@ private:
                 const std::string name = ffd.cFileName;
                 if (name == "." || name == "..") continue;
                 const std::string path = dir + "\\" + name;
-
                 if ((ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
                     (void)DeleteDirectoryRecursive(path);
                 } else {
@@ -78,9 +201,13 @@ private:
             } while (FindNextFileA(hFind, &ffd) != 0);
             FindClose(hFind);
         }
-
         SetFileAttributesA(dir.c_str(), FILE_ATTRIBUTE_NORMAL);
         return RemoveDirectoryA(dir.c_str()) != 0;
+#else
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+        return !ec;
+#endif
     }
 
     void CleanupNoexcept() {
@@ -122,7 +249,11 @@ std::string JoinPath(const std::string& a, const std::string& b) {
     if (b.empty()) return a;
     const char tail = a.back();
     if (tail == '\\' || tail == '/') return a + b;
+#ifdef _WIN32
     return a + "\\" + b;
+#else
+    return a + "/" + b;
+#endif
 }
 
 std::string GetFileNameOnly(const std::string& path) {
@@ -150,16 +281,30 @@ std::string RandomHex(size_t len) {
 }
 
 std::string CreateTempDir() {
+#ifdef _WIN32
     char tmpPath[MAX_PATH] = { 0 };
     DWORD n = GetTempPathA(MAX_PATH, tmpPath);
     if (n == 0 || n >= MAX_PATH) {
         throw std::runtime_error("failed to get temp directory");
     }
-
     for (int retry = 0; retry < 8; retry++) {
         const std::string dir = JoinPath(std::string(tmpPath), "DlcvDvs_" + RandomHex(24));
         if (CreateDirectoryA(dir.c_str(), nullptr) != 0) return dir;
     }
+#else
+    std::error_code ec;
+    const fs::path base = fs::temp_directory_path(ec);
+    if (ec) {
+        throw std::runtime_error("failed to get temp directory");
+    }
+    for (int retry = 0; retry < 8; retry++) {
+        const fs::path dirPath = base / ("DlcvDvs_" + RandomHex(24));
+        if (fs::create_directory(dirPath, ec)) {
+            return dirPath.string();
+        }
+        if (ec) ec.clear();
+    }
+#endif
     throw std::runtime_error("failed to create temp directory");
 }
 
@@ -248,8 +393,13 @@ void WriteUtf8Text(const std::string& path, const std::string& content) {
 }
 
 DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
+#ifdef _WIN32
     FILE* fp = nullptr;
     if (_wfopen_s(&fp, archivePathW.c_str(), L"rb") != 0 || fp == nullptr) {
+#else
+    FILE* fp = std::fopen(WideToUtf8Portable(archivePathW).c_str(), "rb");
+    if (fp == nullptr) {
+#endif
         throw std::runtime_error("failed to open dvst file");
     }
 
@@ -857,50 +1007,136 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
     return dlcv_infer::image_input::NormalizeInferInputImage(src, expectedChannels);
 }
 
+    class NvmlLibrary {
+    public:
+        static NvmlLibrary& Get() {
+            static NvmlLibrary instance;
+            return instance;
+        }
+
+        bool IsLoaded() const { return hModule != nullptr; }
+
+        int Init() { return init ? init() : -1; }
+        int Shutdown() { return shutdown ? shutdown() : -1; }
+        int DeviceGetCount(unsigned int* count) { return deviceGetCount ? deviceGetCount(count) : -1; }
+        int DeviceGetName(dlcv_infer::nvmlDevice_t device, char* name, unsigned int length) {
+            return deviceGetName ? deviceGetName(device, name, length) : -1;
+        }
+        int DeviceGetHandleByIndex(unsigned int index, dlcv_infer::nvmlDevice_t* device) {
+            return deviceGetHandleByIndex ? deviceGetHandleByIndex(index, device) : -1;
+        }
+
+    private:
+        NvmlLibrary() {
+#ifdef _WIN32
+            hModule = LoadLibraryA("nvml.dll");
+#else
+            hModule = dlopen("libnvidia-ml.so.1", RTLD_LAZY | RTLD_LOCAL);
+            if (!hModule) {
+                hModule = dlopen("libnvidia-ml.so", RTLD_LAZY | RTLD_LOCAL);
+            }
+#endif
+            if (!hModule) return;
+
+            init = (NvmlInitFunc)ResolveSymbol(hModule, "nvmlInit");
+            shutdown = (NvmlShutdownFunc)ResolveSymbol(hModule, "nvmlShutdown");
+            deviceGetCount = (NvmlDeviceGetCountFunc)ResolveSymbol(hModule, "nvmlDeviceGetCount");
+            deviceGetName = (NvmlDeviceGetNameFunc)ResolveSymbol(hModule, "nvmlDeviceGetName");
+            deviceGetHandleByIndex = (NvmlDeviceGetHandleByIndexFunc)ResolveSymbol(hModule, "nvmlDeviceGetHandleByIndex");
+        }
+
+        ~NvmlLibrary() {
+#ifdef _WIN32
+            if (hModule) FreeLibrary((HMODULE)hModule);
+#else
+            if (hModule) dlclose(hModule);
+#endif
+        }
+
+        NvmlLibrary(const NvmlLibrary&) = delete;
+        NvmlLibrary& operator=(const NvmlLibrary&) = delete;
+
+        void* hModule = nullptr;
+        typedef int (*NvmlInitFunc)();
+        typedef int (*NvmlShutdownFunc)();
+        typedef int (*NvmlDeviceGetCountFunc)(unsigned int*);
+        typedef int (*NvmlDeviceGetNameFunc)(dlcv_infer::nvmlDevice_t, char*, unsigned int);
+        typedef int (*NvmlDeviceGetHandleByIndexFunc)(unsigned int, dlcv_infer::nvmlDevice_t*);
+        NvmlInitFunc init = nullptr;
+        NvmlShutdownFunc shutdown = nullptr;
+        NvmlDeviceGetCountFunc deviceGetCount = nullptr;
+        NvmlDeviceGetNameFunc deviceGetName = nullptr;
+        NvmlDeviceGetHandleByIndexFunc deviceGetHandleByIndex = nullptr;
+    };
+
 } // namespace
 
 namespace dlcv_infer {
 
-    std::wstring convertStringToWstring(const std::string& inputString) {
-        int len = MultiByteToWideChar(CP_ACP, 0, inputString.c_str(), -1, nullptr, 0);
+#ifdef _WIN32
+    std::wstring Win32MultiByteToWide(const std::string& input, uint32_t codePage) {
+        int len = MultiByteToWideChar(codePage, 0, input.c_str(), -1, nullptr, 0);
+        if (len <= 0) return {};
         std::vector<wchar_t> str(len);
-        MultiByteToWideChar(CP_ACP, 0, inputString.c_str(), -1, &str[0], len);
+        MultiByteToWideChar(codePage, 0, input.c_str(), -1, &str[0], len);
         return std::wstring(str.begin(), str.end() - 1);
+    }
+
+    std::string Win32WideToMultiByte(const std::wstring& input, uint32_t codePage) {
+        int len = WideCharToMultiByte(codePage, 0, input.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        if (len <= 0) return {};
+        std::vector<char> str(len);
+        WideCharToMultiByte(codePage, 0, input.c_str(), -1, &str[0], len, nullptr, nullptr);
+        return std::string(str.begin(), str.end() - 1);
+    }
+#endif
+
+    std::wstring convertStringToWstring(const std::string& inputString) {
+#ifdef _WIN32
+        return Win32MultiByteToWide(inputString, CP_ACP);
+#else
+        return Utf8ToWidePortable(inputString);
+#endif
     }
 
     std::string convertWstringToString(const std::wstring& inputWstring) {
-        int len = WideCharToMultiByte(CP_ACP, 0, inputWstring.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::vector<char> str(len);
-        WideCharToMultiByte(CP_ACP, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
-        return std::string(str.begin(), str.end() - 1);
+#ifdef _WIN32
+        return Win32WideToMultiByte(inputWstring, CP_ACP);
+#else
+        return WideToUtf8Portable(inputWstring);
+#endif
     }
 
     std::string convertWstringToUtf8(const std::wstring& inputWstring) {
-        int len = WideCharToMultiByte(CP_UTF8, 0, inputWstring.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::vector<char> str(len);
-        WideCharToMultiByte(CP_UTF8, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
-        return std::string(str.begin(), str.end() - 1);
+#ifdef _WIN32
+        return Win32WideToMultiByte(inputWstring, CP_UTF8);
+#else
+        return WideToUtf8Portable(inputWstring);
+#endif
     }
 
     std::wstring convertUtf8ToWstring(const std::string& inputUtf8) {
-        int len = MultiByteToWideChar(CP_UTF8, 0, inputUtf8.c_str(), -1, nullptr, 0);
-        std::vector<wchar_t> str(len);
-        MultiByteToWideChar(CP_UTF8, 0, inputUtf8.c_str(), -1, &str[0], len);
-        return std::wstring(str.begin(), str.end() - 1);
+#ifdef _WIN32
+        return Win32MultiByteToWide(inputUtf8, CP_UTF8);
+#else
+        return Utf8ToWidePortable(inputUtf8);
+#endif
     }
 
     std::string convertWstringToGbk(const std::wstring& inputWstring) {
-        int len = WideCharToMultiByte(936, 0, inputWstring.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::vector<char> str(len);
-        WideCharToMultiByte(936, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
-        return std::string(str.begin(), str.end() - 1);
+#ifdef _WIN32
+        return Win32WideToMultiByte(inputWstring, 936);
+#else
+        return ConvertEncodingPortable(WideToUtf8Portable(inputWstring), "UTF-8", "GBK");
+#endif
     }
 
     std::wstring convertGbkToWstring(const std::string& inputGbk) {
-        int len = MultiByteToWideChar(936, 0, inputGbk.c_str(), -1, nullptr, 0);
-        std::vector<wchar_t> str(len);
-        MultiByteToWideChar(936, 0, inputGbk.c_str(), -1, &str[0], len);
-        return std::wstring(str.begin(), str.end() - 1);
+#ifdef _WIN32
+        return Win32MultiByteToWide(inputGbk, 936);
+#else
+        return Utf8ToWidePortable(ConvertEncodingPortable(inputGbk, "GBK", "UTF-8"));
+#endif
     }
 
     std::string convertUtf8ToGbk(const std::string& inputUtf8) {
@@ -923,52 +1159,130 @@ namespace dlcv_infer {
     DllLoader::DllLoader(sntl_admin::DogProvider provider) : dogProvider(provider) {
         switch (provider) {
         case sntl_admin::DogProvider::Sentinel:
+#ifdef _WIN32
             dllName = "dlcv_infer.dll";
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll";
+#else
+            dllName = "libdlcv_infer.so";
+            dllPath = "/root/miniconda3/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
+#endif
             break;
         case sntl_admin::DogProvider::Virbox:
+#ifdef _WIN32
             dllName = "dlcv_infer_v.dll";
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer_v.dll";
+#else
+            dllName = "libdlcv_infer.so";
+            dllPath = "/root/miniconda3/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
+#endif
             break;
         default:
             throw std::runtime_error("unsupported dog provider");
         }
+
+        std::string selfDir = GetSelfModuleDirectory();
+        if (!selfDir.empty()) {
+            dllDevPath = JoinPath(selfDir, dllName);
+        }
+
         LoadDll();
     }
 
     void DllLoader::LoadDll() {
-        if (!DllExists(dllName, dllPath))
+#ifdef _WIN32
+        const std::string dllCurrentPath = JoinPath(".", dllName);
+        if (!DllExists(dllDevPath, dllCurrentPath, dllName, dllPath))
         {
             MessageBoxA(nullptr, "需要先安装 dlcv_infer", "提示", MB_OK | MB_ICONWARNING);
             throw std::runtime_error("need install dlcv_infer first");
         }
 
-        // 加载DLL
-#ifdef _WIN32
-        hModule = LoadLibraryA(dllName.c_str());
-        if (!hModule)
-        {
+        // 1. 开发环境路径（与当前模块同目录）
+        if (!dllDevPath.empty()) {
+            hModule = LoadLibraryA(dllDevPath.c_str());
+        }
+        // 2. 当前工作目录
+        if (!hModule) {
+            hModule = LoadLibraryA(dllCurrentPath.c_str());
+        }
+        // 3. 可执行文件目录 / 系统搜索路径
+        if (!hModule) {
+            hModule = LoadLibraryA(dllName.c_str());
+        }
+        // 4. site-packages 固定路径
+        if (!hModule) {
             hModule = LoadLibraryA(dllPath.c_str());
-            if (!hModule)
-            {
-                throw std::runtime_error("failed to load dll");
-            }
+        }
+        if (!hModule) {
+            throw std::runtime_error("failed to load dll");
         }
 
-        // 获取函数指针
-        dlcv_load_model = (LoadModelFuncType)GetProcAddress((HMODULE)hModule, "dlcv_load_model");
-        dlcv_free_model = (FreeModelFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_model");
-        dlcv_get_model_info = (GetModelInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_model_info");
-        dlcv_infer = (InferFuncType)GetProcAddress((HMODULE)hModule, "dlcv_infer");
-        dlcv_free_model_result = (FreeModelResultFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_model_result");
-        dlcv_free_result = (FreeResultFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_result");
-        dlcv_free_all_models = (FreeAllModelsFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_all_models");
-        dlcv_get_device_info = (GetDeviceInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_device_info");
-        dlcv_keep_max_clock = (KeepMaxClockFuncType)GetProcAddress((HMODULE)hModule, "dlcv_keep_max_clock");
+        char pathBuffer[MAX_PATH];
+        if (GetModuleFileNameA((HMODULE)hModule, pathBuffer, MAX_PATH) > 0) {
+            std::cout << "[dlcv_infer] loaded: " << pathBuffer << std::endl;
+        } else {
+            std::cout << "[dlcv_infer] loaded: (unknown path)" << std::endl;
+        }
+
 #else
-        // Linux下的DLL加载实现
-        // ...
+        const std::string dllCurrentPath = JoinPath(".", dllName);
+        // 1. 开发环境路径（与当前模块同目录）
+        if (!dllDevPath.empty()) {
+            hModule = dlopen(dllDevPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        }
+        // 2. 当前工作目录
+        if (!hModule) {
+            hModule = dlopen(dllCurrentPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        }
+        // 3. 系统搜索路径（LD_LIBRARY_PATH / rpath 等）
+        if (!hModule) {
+            hModule = dlopen(dllName.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        }
+        // 4. site-packages 固定路径
+        if (!hModule && !dllPath.empty() && dllPath != dllName) {
+            hModule = dlopen(dllPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        }
+        if (hModule == nullptr)
+        {
+            const char* err = dlerror();
+            throw std::runtime_error(std::string("failed to load dll")
+                + (err != nullptr ? (std::string(": ") + err) : std::string()));
+        }
+
+        struct link_map* linkMap = nullptr;
+        std::string loadedPath;
+        if (dlinfo(hModule, RTLD_DI_LINKMAP, &linkMap) == 0 && linkMap && linkMap->l_name) {
+            loadedPath = linkMap->l_name;
+            if (!loadedPath.empty() && loadedPath[0] != '/') {
+                char origin[4096];
+                if (dlinfo(hModule, RTLD_DI_ORIGIN, origin) == 0) {
+                    loadedPath = std::string(origin) + "/" + loadedPath;
+                }
+            }
+            if (!loadedPath.empty() && loadedPath[0] == '/') {
+                std::error_code ec;
+                auto canonicalPath = fs::canonical(loadedPath, ec);
+                if (!ec) {
+                    loadedPath = canonicalPath.string();
+                }
+            }
+        }
+        if (!loadedPath.empty()) {
+            std::cout << "[dlcv_infer] loaded: " << loadedPath << std::endl;
+        } else {
+            std::cout << "[dlcv_infer] loaded: (unknown path)" << std::endl;
+        }
 #endif
+
+        dlcv_load_model = (LoadModelFuncType)ResolveSymbol(hModule, "dlcv_load_model");
+        dlcv_free_model = (FreeModelFuncType)ResolveSymbol(hModule, "dlcv_free_model");
+        dlcv_get_model_info = (GetModelInfoFuncType)ResolveSymbol(hModule, "dlcv_get_model_info");
+        dlcv_infer = (InferFuncType)ResolveSymbol(hModule, "dlcv_infer");
+        dlcv_free_model_result = (FreeModelResultFuncType)ResolveSymbol(hModule, "dlcv_free_model_result");
+        dlcv_free_result = (FreeResultFuncType)ResolveSymbol(hModule, "dlcv_free_result");
+        dlcv_free_all_models = (FreeAllModelsFuncType)ResolveSymbol(hModule, "dlcv_free_all_models");
+        dlcv_get_device_info = (GetDeviceInfoFuncType)ResolveSymbol(hModule, "dlcv_get_device_info");
+        dlcv_keep_max_clock = (KeepMaxClockFuncType)ResolveSymbol(hModule, "dlcv_keep_max_clock");
     }
 
     sntl_admin::DogProvider DllLoader::AutoDetectProvider() {
@@ -1028,7 +1342,11 @@ namespace dlcv_infer {
 
     void DllLoader::EnsureForModel(const std::string& modelPath) {
         std::wstring wpath = convertUtf8ToWstring(modelPath);
+#ifdef _WIN32
         std::ifstream file(wpath);
+#else
+        std::ifstream file(WideToUtf8Portable(wpath));
+#endif
         if (!file) {
             throw std::runtime_error("failed to open model file");
         }
@@ -1051,7 +1369,11 @@ namespace dlcv_infer {
     }
 
     void DllLoader::EnsureForModel(const std::wstring& modelPath) {
+#ifdef _WIN32
         std::ifstream file(modelPath);
+#else
+        std::ifstream file(WideToUtf8Portable(modelPath));
+#endif
         if (!file) {
             throw std::runtime_error("failed to open model file");
         }
@@ -1925,10 +2247,17 @@ namespace dlcv_infer {
     // 获取GPU信息
     json Utils::GetGpuInfo() {
         std::vector<std::map<std::string, json>> devices;
+        auto& nvml = NvmlLibrary::Get();
 
-        int result = nvmlInit();
-        if (result != 0)
-        {
+        if (!nvml.IsLoaded()) {
+            json ret;
+            ret["code"] = 1;
+            ret["message"] = "Failed to load NVML library.";
+            return ret;
+        }
+
+        int result = nvml.Init();
+        if (result != 0) {
             json ret;
             ret["code"] = 1;
             ret["message"] = "Failed to initialize NVML.";
@@ -1936,29 +2265,25 @@ namespace dlcv_infer {
         }
 
         unsigned int deviceCount = 0;
-        result = nvmlDeviceGetCount(&deviceCount);
-        if (result != 0)
-        {
-            nvmlShutdown();
+        result = nvml.DeviceGetCount(&deviceCount);
+        if (result != 0) {
+            nvml.Shutdown();
             json ret;
             ret["code"] = 2;
             ret["message"] = "Failed to get device count.";
             return ret;
         }
 
-        for (unsigned int i = 0; i < deviceCount; i++)
-        {
+        for (unsigned int i = 0; i < deviceCount; i++) {
             nvmlDevice_t device;
-            result = nvmlDeviceGetHandleByIndex(i, &device);
-            if (result != 0)
-            {
+            result = nvml.DeviceGetHandleByIndex(i, &device);
+            if (result != 0) {
                 continue; // 如果无法获取当前设备
             }
 
             char name[64];
-            result = nvmlDeviceGetName(device, name, 64);
-            if (result == 0)
-            {
+            result = nvml.DeviceGetName(device, name, 64);
+            if (result == 0) {
                 std::map<std::string, json> deviceInfo;
                 deviceInfo["device_id"] = i;
                 deviceInfo["device_name"] = name;
@@ -1966,7 +2291,7 @@ namespace dlcv_infer {
             }
         }
 
-        nvmlShutdown();
+        nvml.Shutdown();
 
         json ret;
         ret["code"] = 0;
@@ -1975,52 +2300,25 @@ namespace dlcv_infer {
         return ret;
     }
 
-#ifdef _WIN32
     // NVML库函数实现
     int Utils::nvmlInit() {
-        typedef int (*NvmlInitFunc)();
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlInitFunc func = (NvmlInitFunc)GetProcAddress(hModule, "nvmlInit");
-        if (!func) return -1;
-        return func();
+        return NvmlLibrary::Get().Init();
     }
 
     int Utils::nvmlShutdown() {
-        typedef int (*NvmlShutdownFunc)();
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlShutdownFunc func = (NvmlShutdownFunc)GetProcAddress(hModule, "nvmlShutdown");
-        if (!func) return -1;
-        return func();
+        return NvmlLibrary::Get().Shutdown();
     }
 
     int Utils::nvmlDeviceGetCount(unsigned int* deviceCount) {
-        typedef int (*NvmlDeviceGetCountFunc)(unsigned int*);
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlDeviceGetCountFunc func = (NvmlDeviceGetCountFunc)GetProcAddress(hModule, "nvmlDeviceGetCount");
-        if (!func) return -1;
-        return func(deviceCount);
+        return NvmlLibrary::Get().DeviceGetCount(deviceCount);
     }
 
     int Utils::nvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length) {
-        typedef int (*NvmlDeviceGetNameFunc)(nvmlDevice_t, char*, unsigned int);
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlDeviceGetNameFunc func = (NvmlDeviceGetNameFunc)GetProcAddress(hModule, "nvmlDeviceGetName");
-        if (!func) return -1;
-        return func(device, name, length);
+        return NvmlLibrary::Get().DeviceGetName(device, name, length);
     }
 
     int Utils::nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device) {
-        typedef int (*NvmlDeviceGetHandleByIndexFunc)(unsigned int, nvmlDevice_t*);
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlDeviceGetHandleByIndexFunc func = (NvmlDeviceGetHandleByIndexFunc)GetProcAddress(hModule, "nvmlDeviceGetHandleByIndex");
-        if (!func) return -1;
-        return func(index, device);
+        return NvmlLibrary::Get().DeviceGetHandleByIndex(index, device);
     }
-#endif
 
 }
