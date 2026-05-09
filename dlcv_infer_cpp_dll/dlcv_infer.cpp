@@ -107,6 +107,12 @@ std::string ConvertEncodingPortable(const std::string& input, const char* fromCo
 }
 #endif
 
+std::string ParentDirectoryOf(const std::string& path) {
+    const size_t pos = path.find_last_of("/\\");
+    if (pos == std::string::npos) return "";
+    return path.substr(0, pos);
+}
+
 std::string GetSelfModuleDirectory() {
 #ifdef _WIN32
     char path[MAX_PATH];
@@ -114,8 +120,7 @@ std::string GetSelfModuleDirectory() {
     if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                            reinterpret_cast<LPCSTR>(&GetSelfModuleDirectory), &hModule)) {
         if (GetModuleFileNameA(hModule, path, MAX_PATH) > 0) {
-            std::filesystem::path p(path);
-            return p.parent_path().string();
+            return ParentDirectoryOf(path);
         }
     }
 #else
@@ -133,55 +138,20 @@ std::string GetSelfModuleDirectory() {
     return "";
 }
 
-std::string GetExecutableDirectory() {
 #ifdef _WIN32
-    char path[MAX_PATH];
-    if (GetModuleFileNameA(nullptr, path, MAX_PATH) > 0) {
-        std::filesystem::path p(path);
-        return p.parent_path().string();
-    }
-#else
-    char path[4096];
-    ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
-    if (len != -1) {
-        path[len] = '\0';
-        std::error_code ec;
-        auto canonicalPath = std::filesystem::canonical(path, ec);
-        if (!ec) {
-            return canonicalPath.parent_path().string();
-        }
-        return std::filesystem::path(path).parent_path().string();
-    }
-#endif
-    return "";
-}
-
-bool DllExists(const std::string& dllDevPath, const std::string& dllExePath, const std::string& dllName, const std::string& dllPath) {
-#ifdef _WIN32
+bool DllExists(const std::string& dllDevPath, const std::string& dllCurrentPath, const std::string& dllName, const std::string& dllPath) {
     if (!dllDevPath.empty() && GetFileAttributesA(dllDevPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
         return true;
     }
-    if (!dllExePath.empty() && GetFileAttributesA(dllExePath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+    if (!dllCurrentPath.empty() && GetFileAttributesA(dllCurrentPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
         return true;
     }
     if (SearchPathA(nullptr, dllName.c_str(), nullptr, 0, nullptr, nullptr) != 0) {
         return true;
     }
     return GetFileAttributesA(dllPath.c_str()) != INVALID_FILE_ATTRIBUTES;
-#else
-    std::error_code ec;
-    if (!dllDevPath.empty() && fs::exists(dllDevPath, ec)) {
-        return true;
-    }
-    if (!dllExePath.empty() && fs::exists(dllExePath, ec)) {
-        return true;
-    }
-    if (fs::exists(dllName, ec)) {
-        return true;
-    }
-    return fs::exists(dllPath, ec);
-#endif
 }
+#endif
 
 struct DvsUnpackResult {
     Json pipelineRoot = Json::object();
@@ -1141,20 +1111,7 @@ namespace dlcv_infer {
 
         std::string selfDir = GetSelfModuleDirectory();
         if (!selfDir.empty()) {
-#ifdef _WIN32
-            dllDevPath = selfDir + "\\" + dllName;
-#else
-            dllDevPath = selfDir + "/" + dllName;
-#endif
-        }
-
-        std::string exeDir = GetExecutableDirectory();
-        if (!exeDir.empty() && exeDir != selfDir) {
-#ifdef _WIN32
-            dllExePath = exeDir + "\\" + dllName;
-#else
-            dllExePath = exeDir + "/" + dllName;
-#endif
+            dllDevPath = JoinPath(selfDir, dllName);
         }
 
         LoadDll();
@@ -1162,7 +1119,8 @@ namespace dlcv_infer {
 
     void DllLoader::LoadDll() {
 #ifdef _WIN32
-        if (!DllExists(dllDevPath, dllExePath, dllName, dllPath))
+        const std::string dllCurrentPath = JoinPath(".", dllName);
+        if (!DllExists(dllDevPath, dllCurrentPath, dllName, dllPath))
         {
             MessageBoxA(nullptr, "需要先安装 dlcv_infer", "提示", MB_OK | MB_ICONWARNING);
             throw std::runtime_error("need install dlcv_infer first");
@@ -1172,11 +1130,11 @@ namespace dlcv_infer {
         if (!dllDevPath.empty()) {
             hModule = LoadLibraryA(dllDevPath.c_str());
         }
-        // 2. 可执行文件同目录
-        if (!hModule && !dllExePath.empty()) {
-            hModule = LoadLibraryA(dllExePath.c_str());
+        // 2. 当前工作目录
+        if (!hModule) {
+            hModule = LoadLibraryA(dllCurrentPath.c_str());
         }
-        // 3. 当前目录 / 系统搜索路径
+        // 3. 可执行文件目录 / 系统搜索路径
         if (!hModule) {
             hModule = LoadLibraryA(dllName.c_str());
         }
@@ -1205,15 +1163,16 @@ namespace dlcv_infer {
         dlcv_get_device_info = (GetDeviceInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_device_info");
         dlcv_keep_max_clock = (KeepMaxClockFuncType)GetProcAddress((HMODULE)hModule, "dlcv_keep_max_clock");
 #else
+        const std::string dllCurrentPath = JoinPath(".", dllName);
         // 1. 开发环境路径（与当前模块同目录）
         if (!dllDevPath.empty()) {
             hModule = dlopen(dllDevPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
         }
-        // 2. 可执行文件同目录
-        if (!hModule && !dllExePath.empty()) {
-            hModule = dlopen(dllExePath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        // 2. 当前工作目录
+        if (!hModule) {
+            hModule = dlopen(dllCurrentPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
         }
-        // 3. 当前目录 / 系统搜索路径
+        // 3. 系统搜索路径（LD_LIBRARY_PATH / rpath 等）
         if (!hModule) {
             hModule = dlopen(dllName.c_str(), RTLD_LAZY | RTLD_LOCAL);
         }

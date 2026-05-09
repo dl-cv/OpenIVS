@@ -86,7 +86,6 @@ namespace dlcv_infer {
         std::string dllName;
         std::string dllPath;
         std::string dllDevPath;
-        std::string dllExePath;
         void* hModule = nullptr;
         sntl_admin::DogProvider dogProvider;
 

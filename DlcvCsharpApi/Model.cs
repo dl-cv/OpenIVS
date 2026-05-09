@@ -46,7 +46,7 @@ namespace dlcv_infer_csharp
         private HttpClient _httpClient;
         private bool _disposed = false;
         private readonly string _rpcPipeName = "DlcvModelRpcPipe";
-        private DllLoader _dllLoader;
+        protected DllLoader _dllLoader;
         private static readonly string[] _rpcExecutableFixedPaths = new string[]
         {
             @"C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe"
@@ -274,33 +274,47 @@ namespace dlcv_infer_csharp
 
         private void InitializeDvtMode(string modelPath, int device_id)
         {
-            DllLoader.EnsureForModel(modelPath);
-            _dllLoader = DllLoader.Instance;
-
             var config = new JObject
             {
                 ["model_path"] = modelPath,
                 ["device_id"] = device_id
             };
 
+            LoadDvtModel(modelPath, config, "加载模型失败");
+        }
+
+        protected void LoadDvtModel(string modelPath, JObject config, string failureMessagePrefix)
+        {
+            DllLoader.EnsureForModel(modelPath);
+            _dllLoader = DllLoader.Instance;
+
             var setting = new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii };
 
             string jsonStr = JsonConvert.SerializeObject(config, setting);
 
             IntPtr resultPtr = _dllLoader.dlcv_load_model(jsonStr);
-            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-            var resultObject = JObject.Parse(resultJson);
+            try
+            {
+                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                var resultObject = JObject.Parse(resultJson);
 
-            Log("Model load result: " + resultObject.ToString());
-            if (resultObject.ContainsKey("model_index"))
-            {
-                modelIndex = resultObject["model_index"].Value<int>();
+                Log("Model load result: " + resultObject.ToString());
+                if (resultObject.ContainsKey("model_index"))
+                {
+                    modelIndex = resultObject["model_index"].Value<int>();
+                }
+                else
+                {
+                    throw new Exception(failureMessagePrefix + "：" + resultObject.ToString());
+                }
             }
-            else
+            finally
             {
-                throw new Exception("加载模型失败：" + resultObject.ToString());
+                if (resultPtr != IntPtr.Zero)
+                {
+                    _dllLoader.dlcv_free_result(resultPtr);
+                }
             }
-            _dllLoader.dlcv_free_result(resultPtr);
         }
 
         /// <summary>
@@ -616,7 +630,7 @@ namespace dlcv_infer_csharp
             }
         }
 
-        private void TryCacheModelInfo()
+        protected void TryCacheModelInfo()
         {
             try
             {
@@ -2319,6 +2333,38 @@ namespace dlcv_infer_csharp
                 _modelCache.Clear();
                 _loadingModels.Clear();
             }
+        }
+    }
+
+    public class SlidingWindowModel : Model
+    {
+        public SlidingWindowModel(
+            string modelPath,
+            int deviceId,
+            int smallImgWidth = 832,
+            int smallImgHeight = 704,
+            int horizontalOverlap = 16,
+            int verticalOverlap = 16,
+            float threshold = 0.5f,
+            float iouThreshold = 0.2f,
+            float combineIosThreshold = 0.2f)
+        {
+            var config = new JObject
+            {
+                ["type"] = "sliding_window_pipeline",
+                ["model_path"] = modelPath,
+                ["device_id"] = deviceId,
+                ["small_img_width"] = smallImgWidth,
+                ["small_img_height"] = smallImgHeight,
+                ["horizontal_overlap"] = horizontalOverlap,
+                ["vertical_overlap"] = verticalOverlap,
+                ["threshold"] = threshold,
+                ["iou_threshold"] = iouThreshold,
+                ["combine_ios_threshold"] = combineIosThreshold
+            };
+
+            LoadDvtModel(modelPath, config, "加载滑窗模型失败");
+            TryCacheModelInfo();
         }
     }
 }
