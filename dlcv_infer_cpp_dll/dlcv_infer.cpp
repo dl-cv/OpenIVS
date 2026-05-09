@@ -10,9 +10,12 @@
 #include <dlfcn.h>
 #include <filesystem>
 #include <iconv.h>
+#include <link.h>
+#include <unistd.h>
 #endif
 #include <cerrno>
 #include <cmath>
+#include <iostream>
 #include <codecvt>
 #include <cstdio>
 #include <cstdlib>
@@ -130,9 +133,35 @@ std::string GetSelfModuleDirectory() {
     return "";
 }
 
-bool DllExists(const std::string& dllDevPath, const std::string& dllName, const std::string& dllPath) {
+std::string GetExecutableDirectory() {
+#ifdef _WIN32
+    char path[MAX_PATH];
+    if (GetModuleFileNameA(nullptr, path, MAX_PATH) > 0) {
+        std::filesystem::path p(path);
+        return p.parent_path().string();
+    }
+#else
+    char path[4096];
+    ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (len != -1) {
+        path[len] = '\0';
+        std::error_code ec;
+        auto canonicalPath = std::filesystem::canonical(path, ec);
+        if (!ec) {
+            return canonicalPath.parent_path().string();
+        }
+        return std::filesystem::path(path).parent_path().string();
+    }
+#endif
+    return "";
+}
+
+bool DllExists(const std::string& dllDevPath, const std::string& dllExePath, const std::string& dllName, const std::string& dllPath) {
 #ifdef _WIN32
     if (!dllDevPath.empty() && GetFileAttributesA(dllDevPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return true;
+    }
+    if (!dllExePath.empty() && GetFileAttributesA(dllExePath.c_str()) != INVALID_FILE_ATTRIBUTES) {
         return true;
     }
     if (SearchPathA(nullptr, dllName.c_str(), nullptr, 0, nullptr, nullptr) != 0) {
@@ -142,6 +171,9 @@ bool DllExists(const std::string& dllDevPath, const std::string& dllName, const 
 #else
     std::error_code ec;
     if (!dllDevPath.empty() && fs::exists(dllDevPath, ec)) {
+        return true;
+    }
+    if (!dllExePath.empty() && fs::exists(dllExePath, ec)) {
         return true;
     }
     if (fs::exists(dllName, ec)) {
@@ -1116,12 +1148,21 @@ namespace dlcv_infer {
 #endif
         }
 
+        std::string exeDir = GetExecutableDirectory();
+        if (!exeDir.empty() && exeDir != selfDir) {
+#ifdef _WIN32
+            dllExePath = exeDir + "\\" + dllName;
+#else
+            dllExePath = exeDir + "/" + dllName;
+#endif
+        }
+
         LoadDll();
     }
 
     void DllLoader::LoadDll() {
 #ifdef _WIN32
-        if (!DllExists(dllDevPath, dllName, dllPath))
+        if (!DllExists(dllDevPath, dllExePath, dllName, dllPath))
         {
             MessageBoxA(nullptr, "需要先安装 dlcv_infer", "提示", MB_OK | MB_ICONWARNING);
             throw std::runtime_error("need install dlcv_infer first");
@@ -1131,16 +1172,27 @@ namespace dlcv_infer {
         if (!dllDevPath.empty()) {
             hModule = LoadLibraryA(dllDevPath.c_str());
         }
-        // 2. 当前目录 / 系统搜索路径
+        // 2. 可执行文件同目录
+        if (!hModule && !dllExePath.empty()) {
+            hModule = LoadLibraryA(dllExePath.c_str());
+        }
+        // 3. 当前目录 / 系统搜索路径
         if (!hModule) {
             hModule = LoadLibraryA(dllName.c_str());
         }
-        // 3. site-packages 固定路径
+        // 4. site-packages 固定路径
         if (!hModule) {
             hModule = LoadLibraryA(dllPath.c_str());
         }
         if (!hModule) {
             throw std::runtime_error("failed to load dll");
+        }
+
+        char pathBuffer[MAX_PATH];
+        if (GetModuleFileNameA((HMODULE)hModule, pathBuffer, MAX_PATH) > 0) {
+            std::cout << "[dlcv_infer] loaded: " << pathBuffer << std::endl;
+        } else {
+            std::cout << "[dlcv_infer] loaded: (unknown path)" << std::endl;
         }
 
         dlcv_load_model = (LoadModelFuncType)GetProcAddress((HMODULE)hModule, "dlcv_load_model");
@@ -1157,11 +1209,15 @@ namespace dlcv_infer {
         if (!dllDevPath.empty()) {
             hModule = dlopen(dllDevPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
         }
-        // 2. 当前目录 / 系统搜索路径
+        // 2. 可执行文件同目录
+        if (!hModule && !dllExePath.empty()) {
+            hModule = dlopen(dllExePath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        }
+        // 3. 当前目录 / 系统搜索路径
         if (!hModule) {
             hModule = dlopen(dllName.c_str(), RTLD_LAZY | RTLD_LOCAL);
         }
-        // 3. site-packages 固定路径
+        // 4. site-packages 固定路径
         if (!hModule && !dllPath.empty() && dllPath != dllName) {
             hModule = dlopen(dllPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
         }
@@ -1170,6 +1226,30 @@ namespace dlcv_infer {
             const char* err = dlerror();
             throw std::runtime_error(std::string("failed to load dll")
                 + (err != nullptr ? (std::string(": ") + err) : std::string()));
+        }
+
+        struct link_map* linkMap = nullptr;
+        std::string loadedPath;
+        if (dlinfo(hModule, RTLD_DI_LINKMAP, &linkMap) == 0 && linkMap && linkMap->l_name) {
+            loadedPath = linkMap->l_name;
+            if (!loadedPath.empty() && loadedPath[0] != '/') {
+                char origin[4096];
+                if (dlinfo(hModule, RTLD_DI_ORIGIN, origin) == 0) {
+                    loadedPath = std::string(origin) + "/" + loadedPath;
+                }
+            }
+            if (!loadedPath.empty() && loadedPath[0] == '/') {
+                std::error_code ec;
+                auto canonicalPath = fs::canonical(loadedPath, ec);
+                if (!ec) {
+                    loadedPath = canonicalPath.string();
+                }
+            }
+        }
+        if (!loadedPath.empty()) {
+            std::cout << "[dlcv_infer] loaded: " << loadedPath << std::endl;
+        } else {
+            std::cout << "[dlcv_infer] loaded: (unknown path)" << std::endl;
         }
 
         dlcv_load_model = (LoadModelFuncType)ResolveSharedSymbol(hModule, "dlcv_load_model");
