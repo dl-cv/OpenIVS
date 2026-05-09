@@ -34,6 +34,16 @@ namespace {
     }
 #endif
 
+#ifdef _WIN32
+    inline void* ResolveSymbol(void* module, const char* name) {
+        return GetProcAddress((HMODULE)module, name);
+    }
+#else
+    inline void* ResolveSymbol(void* module, const char* name) {
+        return dlsym(module, name);
+    }
+#endif
+
     struct VirboxControlApi {
 #ifdef _WIN32
         HMODULE module = NULL;
@@ -58,43 +68,30 @@ namespace {
             {
                 return;
             }
-
-            client_open = reinterpret_cast<VirboxClientOpenFunc>(GetProcAddress(module, "slm_ctrl_client_open"));
-            client_close = reinterpret_cast<VirboxClientCloseFunc>(GetProcAddress(module, "slm_ctrl_client_close"));
-            get_all_description = reinterpret_cast<VirboxGetAllDescriptionFunc>(GetProcAddress(module, "slm_ctrl_get_all_description"));
-            get_license_id = reinterpret_cast<VirboxGetLicenseIdFunc>(GetProcAddress(module, "slm_ctrl_get_license_id"));
-            get_device_info = reinterpret_cast<VirboxGetDeviceInfoFunc>(GetProcAddress(module, "slm_ctrl_get_device_info"));
-            free_buffer = reinterpret_cast<VirboxFreeFunc>(GetProcAddress(module, "slm_ctrl_free"));
-
-            if (!client_open || !client_close || !get_all_description || !get_license_id || !get_device_info || !free_buffer)
-            {
-                FreeLibrary(module);
-                module = NULL;
-                client_open = nullptr;
-                client_close = nullptr;
-                get_all_description = nullptr;
-                get_license_id = nullptr;
-                get_device_info = nullptr;
-                free_buffer = nullptr;
-            }
 #else
             module = LoadSharedLibrary("libslm_control.so", "/usr/local/dlcv/lib/libslm_control.so");
             if (module == nullptr)
             {
                 return;
             }
+#endif
 
-            client_open = reinterpret_cast<VirboxClientOpenFunc>(ResolveSharedSymbol(module, "slm_ctrl_client_open"));
-            client_close = reinterpret_cast<VirboxClientCloseFunc>(ResolveSharedSymbol(module, "slm_ctrl_client_close"));
-            get_all_description = reinterpret_cast<VirboxGetAllDescriptionFunc>(ResolveSharedSymbol(module, "slm_ctrl_get_all_description"));
-            get_license_id = reinterpret_cast<VirboxGetLicenseIdFunc>(ResolveSharedSymbol(module, "slm_ctrl_get_license_id"));
-            get_device_info = reinterpret_cast<VirboxGetDeviceInfoFunc>(ResolveSharedSymbol(module, "slm_ctrl_get_device_info"));
-            free_buffer = reinterpret_cast<VirboxFreeFunc>(ResolveSharedSymbol(module, "slm_ctrl_free"));
+            client_open = reinterpret_cast<VirboxClientOpenFunc>(ResolveSymbol(module, "slm_ctrl_client_open"));
+            client_close = reinterpret_cast<VirboxClientCloseFunc>(ResolveSymbol(module, "slm_ctrl_client_close"));
+            get_all_description = reinterpret_cast<VirboxGetAllDescriptionFunc>(ResolveSymbol(module, "slm_ctrl_get_all_description"));
+            get_license_id = reinterpret_cast<VirboxGetLicenseIdFunc>(ResolveSymbol(module, "slm_ctrl_get_license_id"));
+            get_device_info = reinterpret_cast<VirboxGetDeviceInfoFunc>(ResolveSymbol(module, "slm_ctrl_get_device_info"));
+            free_buffer = reinterpret_cast<VirboxFreeFunc>(ResolveSymbol(module, "slm_ctrl_free"));
 
             if (!client_open || !client_close || !get_all_description || !get_license_id || !get_device_info || !free_buffer)
             {
+#ifdef _WIN32
+                FreeLibrary(module);
+                module = NULL;
+#else
                 dlclose(module);
                 module = nullptr;
+#endif
                 client_open = nullptr;
                 client_close = nullptr;
                 get_all_description = nullptr;
@@ -102,7 +99,6 @@ namespace {
                 get_device_info = nullptr;
                 free_buffer = nullptr;
             }
-#endif
         }
 
         ~VirboxControlApi() {

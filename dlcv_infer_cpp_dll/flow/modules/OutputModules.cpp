@@ -1,6 +1,7 @@
 ﻿#include "flow/BaseModule.h"
 #include "flow/FlowPayloadTypes.h"
 #include "flow/ModuleRegistry.h"
+#include "flow/utils/FlowPlatformUtils.h"
 #include "flow/utils/MaskRleUtils.h"
 
 #include <algorithm>
@@ -12,7 +13,6 @@
 #include <limits>
 #include <sstream>
 #include <string>
-#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -21,8 +21,6 @@
 #define NOMINMAX
 #endif
 #include <Windows.h>
-#else
-#include <filesystem>
 #endif
 
 #include "opencv2/imgcodecs.hpp"
@@ -50,37 +48,6 @@ static std::string NowTimestamp() {
                   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                   tm.tm_hour, tm.tm_min, tm.tm_sec);
     return std::string(buf);
-}
-
-static void EnsureDirExists(const std::string& dir) {
-    if (dir.empty()) return;
-#ifdef _WIN32
-    std::string path;
-    path.reserve(dir.size());
-    for (size_t i = 0; i < dir.size(); i++) {
-        const char c = dir[i];
-        path.push_back(c);
-        if (c == '\\' || c == '/') {
-            CreateDirectoryA(path.c_str(), nullptr);
-        }
-    }
-    CreateDirectoryA(dir.c_str(), nullptr);
-#else
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-#endif
-}
-
-static std::string JoinPath(const std::string& a, const std::string& b) {
-    if (a.empty()) return b;
-    if (b.empty()) return a;
-    const char last = a.back();
-    if (last == '\\' || last == '/') return a + b;
-#ifdef _WIN32
-    return a + "\\" + b;
-#else
-    return a + "/" + b;
-#endif
 }
 
 static std::string GetFileNameWithoutExt(const std::string& path) {

@@ -153,6 +153,16 @@ bool DllExists(const std::string& dllDevPath, const std::string& dllCurrentPath,
 }
 #endif
 
+#ifdef _WIN32
+inline void* ResolveSymbol(void* module, const char* name) {
+    return GetProcAddress((HMODULE)module, name);
+}
+#else
+inline void* ResolveSymbol(void* module, const char* name) {
+    return dlsym(module, name);
+}
+#endif
+
 struct DvsUnpackResult {
     Json pipelineRoot = Json::object();
     std::string tempDir;
@@ -998,6 +1008,68 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
     return dlcv_infer::image_input::NormalizeInferInputImage(src, expectedChannels);
 }
 
+    class NvmlLibrary {
+    public:
+        static NvmlLibrary& Get() {
+            static NvmlLibrary instance;
+            return instance;
+        }
+
+        bool IsLoaded() const { return hModule != nullptr; }
+
+        int Init() { return init ? init() : -1; }
+        int Shutdown() { return shutdown ? shutdown() : -1; }
+        int DeviceGetCount(unsigned int* count) { return deviceGetCount ? deviceGetCount(count) : -1; }
+        int DeviceGetName(dlcv_infer::nvmlDevice_t device, char* name, unsigned int length) {
+            return deviceGetName ? deviceGetName(device, name, length) : -1;
+        }
+        int DeviceGetHandleByIndex(unsigned int index, dlcv_infer::nvmlDevice_t* device) {
+            return deviceGetHandleByIndex ? deviceGetHandleByIndex(index, device) : -1;
+        }
+
+    private:
+        NvmlLibrary() {
+#ifdef _WIN32
+            hModule = LoadLibraryA("nvml.dll");
+#else
+            hModule = dlopen("libnvidia-ml.so.1", RTLD_LAZY | RTLD_LOCAL);
+            if (!hModule) {
+                hModule = dlopen("libnvidia-ml.so", RTLD_LAZY | RTLD_LOCAL);
+            }
+#endif
+            if (!hModule) return;
+
+            init = (NvmlInitFunc)ResolveSymbol(hModule, "nvmlInit");
+            shutdown = (NvmlShutdownFunc)ResolveSymbol(hModule, "nvmlShutdown");
+            deviceGetCount = (NvmlDeviceGetCountFunc)ResolveSymbol(hModule, "nvmlDeviceGetCount");
+            deviceGetName = (NvmlDeviceGetNameFunc)ResolveSymbol(hModule, "nvmlDeviceGetName");
+            deviceGetHandleByIndex = (NvmlDeviceGetHandleByIndexFunc)ResolveSymbol(hModule, "nvmlDeviceGetHandleByIndex");
+        }
+
+        ~NvmlLibrary() {
+#ifdef _WIN32
+            if (hModule) FreeLibrary((HMODULE)hModule);
+#else
+            if (hModule) dlclose(hModule);
+#endif
+        }
+
+        NvmlLibrary(const NvmlLibrary&) = delete;
+        NvmlLibrary& operator=(const NvmlLibrary&) = delete;
+
+        void* hModule = nullptr;
+        typedef int (*NvmlInitFunc)();
+        typedef int (*NvmlShutdownFunc)();
+        typedef int (*NvmlDeviceGetCountFunc)(unsigned int*);
+        typedef int (*NvmlDeviceGetNameFunc)(dlcv_infer::nvmlDevice_t, char*, unsigned int);
+        typedef int (*NvmlDeviceGetHandleByIndexFunc)(unsigned int, dlcv_infer::nvmlDevice_t*);
+        NvmlInitFunc init = nullptr;
+        NvmlShutdownFunc shutdown = nullptr;
+        NvmlDeviceGetCountFunc deviceGetCount = nullptr;
+        NvmlDeviceGetNameFunc deviceGetName = nullptr;
+        NvmlDeviceGetHandleByIndexFunc deviceGetHandleByIndex = nullptr;
+    };
+
 } // namespace
 
 namespace dlcv_infer {
@@ -1153,15 +1225,6 @@ namespace dlcv_infer {
             std::cout << "[dlcv_infer] loaded: (unknown path)" << std::endl;
         }
 
-        dlcv_load_model = (LoadModelFuncType)GetProcAddress((HMODULE)hModule, "dlcv_load_model");
-        dlcv_free_model = (FreeModelFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_model");
-        dlcv_get_model_info = (GetModelInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_model_info");
-        dlcv_infer = (InferFuncType)GetProcAddress((HMODULE)hModule, "dlcv_infer");
-        dlcv_free_model_result = (FreeModelResultFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_model_result");
-        dlcv_free_result = (FreeResultFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_result");
-        dlcv_free_all_models = (FreeAllModelsFuncType)GetProcAddress((HMODULE)hModule, "dlcv_free_all_models");
-        dlcv_get_device_info = (GetDeviceInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_device_info");
-        dlcv_keep_max_clock = (KeepMaxClockFuncType)GetProcAddress((HMODULE)hModule, "dlcv_keep_max_clock");
 #else
         const std::string dllCurrentPath = JoinPath(".", dllName);
         // 1. 开发环境路径（与当前模块同目录）
@@ -1210,17 +1273,17 @@ namespace dlcv_infer {
         } else {
             std::cout << "[dlcv_infer] loaded: (unknown path)" << std::endl;
         }
-
-        dlcv_load_model = (LoadModelFuncType)ResolveSharedSymbol(hModule, "dlcv_load_model");
-        dlcv_free_model = (FreeModelFuncType)ResolveSharedSymbol(hModule, "dlcv_free_model");
-        dlcv_get_model_info = (GetModelInfoFuncType)ResolveSharedSymbol(hModule, "dlcv_get_model_info");
-        dlcv_infer = (InferFuncType)ResolveSharedSymbol(hModule, "dlcv_infer");
-        dlcv_free_model_result = (FreeModelResultFuncType)ResolveSharedSymbol(hModule, "dlcv_free_model_result");
-        dlcv_free_result = (FreeResultFuncType)ResolveSharedSymbol(hModule, "dlcv_free_result");
-        dlcv_free_all_models = (FreeAllModelsFuncType)ResolveSharedSymbol(hModule, "dlcv_free_all_models");
-        dlcv_get_device_info = (GetDeviceInfoFuncType)ResolveSharedSymbol(hModule, "dlcv_get_device_info");
-        dlcv_keep_max_clock = (KeepMaxClockFuncType)ResolveSharedSymbol(hModule, "dlcv_keep_max_clock");
 #endif
+
+        dlcv_load_model = (LoadModelFuncType)ResolveSymbol(hModule, "dlcv_load_model");
+        dlcv_free_model = (FreeModelFuncType)ResolveSymbol(hModule, "dlcv_free_model");
+        dlcv_get_model_info = (GetModelInfoFuncType)ResolveSymbol(hModule, "dlcv_get_model_info");
+        dlcv_infer = (InferFuncType)ResolveSymbol(hModule, "dlcv_infer");
+        dlcv_free_model_result = (FreeModelResultFuncType)ResolveSymbol(hModule, "dlcv_free_model_result");
+        dlcv_free_result = (FreeResultFuncType)ResolveSymbol(hModule, "dlcv_free_result");
+        dlcv_free_all_models = (FreeAllModelsFuncType)ResolveSymbol(hModule, "dlcv_free_all_models");
+        dlcv_get_device_info = (GetDeviceInfoFuncType)ResolveSymbol(hModule, "dlcv_get_device_info");
+        dlcv_keep_max_clock = (KeepMaxClockFuncType)ResolveSymbol(hModule, "dlcv_keep_max_clock");
     }
 
     sntl_admin::DogProvider DllLoader::AutoDetectProvider() {
@@ -2185,10 +2248,17 @@ namespace dlcv_infer {
     // 获取GPU信息
     json Utils::GetGpuInfo() {
         std::vector<std::map<std::string, json>> devices;
+        auto& nvml = NvmlLibrary::Get();
 
-        int result = nvmlInit();
-        if (result != 0)
-        {
+        if (!nvml.IsLoaded()) {
+            json ret;
+            ret["code"] = 1;
+            ret["message"] = "Failed to load NVML library.";
+            return ret;
+        }
+
+        int result = nvml.Init();
+        if (result != 0) {
             json ret;
             ret["code"] = 1;
             ret["message"] = "Failed to initialize NVML.";
@@ -2196,29 +2266,25 @@ namespace dlcv_infer {
         }
 
         unsigned int deviceCount = 0;
-        result = nvmlDeviceGetCount(&deviceCount);
-        if (result != 0)
-        {
-            nvmlShutdown();
+        result = nvml.DeviceGetCount(&deviceCount);
+        if (result != 0) {
+            nvml.Shutdown();
             json ret;
             ret["code"] = 2;
             ret["message"] = "Failed to get device count.";
             return ret;
         }
 
-        for (unsigned int i = 0; i < deviceCount; i++)
-        {
+        for (unsigned int i = 0; i < deviceCount; i++) {
             nvmlDevice_t device;
-            result = nvmlDeviceGetHandleByIndex(i, &device);
-            if (result != 0)
-            {
+            result = nvml.DeviceGetHandleByIndex(i, &device);
+            if (result != 0) {
                 continue; // 如果无法获取当前设备
             }
 
             char name[64];
-            result = nvmlDeviceGetName(device, name, 64);
-            if (result == 0)
-            {
+            result = nvml.DeviceGetName(device, name, 64);
+            if (result == 0) {
                 std::map<std::string, json> deviceInfo;
                 deviceInfo["device_id"] = i;
                 deviceInfo["device_name"] = name;
@@ -2226,7 +2292,7 @@ namespace dlcv_infer {
             }
         }
 
-        nvmlShutdown();
+        nvml.Shutdown();
 
         json ret;
         ret["code"] = 0;
@@ -2237,113 +2303,23 @@ namespace dlcv_infer {
 
     // NVML库函数实现
     int Utils::nvmlInit() {
-        typedef int (*NvmlInitFunc)();
-#ifdef _WIN32
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlInitFunc func = (NvmlInitFunc)GetProcAddress(hModule, "nvmlInit");
-        if (!func) return -1;
-        return func();
-#else
-        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
-        if (hModule == nullptr) return -1;
-        NvmlInitFunc func = (NvmlInitFunc)ResolveSharedSymbol(hModule, "nvmlInit");
-        if (!func) {
-            dlclose(hModule);
-            return -1;
-        }
-        const int result = func();
-        dlclose(hModule);
-        return result;
-#endif
+        return NvmlLibrary::Get().Init();
     }
 
     int Utils::nvmlShutdown() {
-        typedef int (*NvmlShutdownFunc)();
-#ifdef _WIN32
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlShutdownFunc func = (NvmlShutdownFunc)GetProcAddress(hModule, "nvmlShutdown");
-        if (!func) return -1;
-        return func();
-#else
-        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
-        if (hModule == nullptr) return -1;
-        NvmlShutdownFunc func = (NvmlShutdownFunc)ResolveSharedSymbol(hModule, "nvmlShutdown");
-        if (!func) {
-            dlclose(hModule);
-            return -1;
-        }
-        const int result = func();
-        dlclose(hModule);
-        return result;
-#endif
+        return NvmlLibrary::Get().Shutdown();
     }
 
     int Utils::nvmlDeviceGetCount(unsigned int* deviceCount) {
-        typedef int (*NvmlDeviceGetCountFunc)(unsigned int*);
-#ifdef _WIN32
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlDeviceGetCountFunc func = (NvmlDeviceGetCountFunc)GetProcAddress(hModule, "nvmlDeviceGetCount");
-        if (!func) return -1;
-        return func(deviceCount);
-#else
-        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
-        if (hModule == nullptr) return -1;
-        NvmlDeviceGetCountFunc func = (NvmlDeviceGetCountFunc)ResolveSharedSymbol(hModule, "nvmlDeviceGetCount");
-        if (!func) {
-            dlclose(hModule);
-            return -1;
-        }
-        const int result = func(deviceCount);
-        dlclose(hModule);
-        return result;
-#endif
+        return NvmlLibrary::Get().DeviceGetCount(deviceCount);
     }
 
     int Utils::nvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length) {
-        typedef int (*NvmlDeviceGetNameFunc)(nvmlDevice_t, char*, unsigned int);
-#ifdef _WIN32
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlDeviceGetNameFunc func = (NvmlDeviceGetNameFunc)GetProcAddress(hModule, "nvmlDeviceGetName");
-        if (!func) return -1;
-        return func(device, name, length);
-#else
-        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
-        if (hModule == nullptr) return -1;
-        NvmlDeviceGetNameFunc func = (NvmlDeviceGetNameFunc)ResolveSharedSymbol(hModule, "nvmlDeviceGetName");
-        if (!func) {
-            dlclose(hModule);
-            return -1;
-        }
-        const int result = func(device, name, length);
-        dlclose(hModule);
-        return result;
-#endif
+        return NvmlLibrary::Get().DeviceGetName(device, name, length);
     }
 
     int Utils::nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device) {
-        typedef int (*NvmlDeviceGetHandleByIndexFunc)(unsigned int, nvmlDevice_t*);
-#ifdef _WIN32
-        HMODULE hModule = LoadLibraryA("nvml.dll");
-        if (!hModule) return -1;
-        NvmlDeviceGetHandleByIndexFunc func = (NvmlDeviceGetHandleByIndexFunc)GetProcAddress(hModule, "nvmlDeviceGetHandleByIndex");
-        if (!func) return -1;
-        return func(index, device);
-#else
-        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
-        if (hModule == nullptr) return -1;
-        NvmlDeviceGetHandleByIndexFunc func = (NvmlDeviceGetHandleByIndexFunc)ResolveSharedSymbol(hModule, "nvmlDeviceGetHandleByIndex");
-        if (!func) {
-            dlclose(hModule);
-            return -1;
-        }
-        const int result = func(index, device);
-        dlclose(hModule);
-        return result;
-#endif
+        return NvmlLibrary::Get().DeviceGetHandleByIndex(index, device);
     }
 
 }
