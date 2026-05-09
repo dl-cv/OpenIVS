@@ -38,9 +38,17 @@ namespace {
     inline void* ResolveSymbol(void* module, const char* name) {
         return GetProcAddress((HMODULE)module, name);
     }
+
+    inline void FreeModuleHandle(void* module) {
+        FreeLibrary((HMODULE)module);
+    }
 #else
     inline void* ResolveSymbol(void* module, const char* name) {
         return dlsym(module, name);
+    }
+
+    inline void FreeModuleHandle(void* module) {
+        dlclose(module);
     }
 #endif
 
@@ -85,11 +93,10 @@ namespace {
 
             if (!client_open || !client_close || !get_all_description || !get_license_id || !get_device_info || !free_buffer)
             {
+                FreeModuleHandle(module);
 #ifdef _WIN32
-                FreeLibrary(module);
                 module = NULL;
 #else
-                dlclose(module);
                 module = nullptr;
 #endif
                 client_open = nullptr;
@@ -102,18 +109,10 @@ namespace {
         }
 
         ~VirboxControlApi() {
-#ifdef _WIN32
             if (module != NULL)
             {
-                FreeLibrary(module);
+                FreeModuleHandle(module);
             }
-#else
-            if (module != nullptr)
-            {
-                dlclose(module);
-                module = nullptr;
-            }
-#endif
         }
 
         bool available() const {
@@ -779,18 +778,6 @@ void sntl_admin::SNTLDllLoader::LoadDll() {
             return;
         }
     }
-
-    m_sntl_admin_context_new = (SntlAdminContextNewFunc)GetProcAddress(hModule, "sntl_admin_context_new");
-    m_sntl_admin_context_delete = (SntlAdminContextDeleteFunc)GetProcAddress(hModule, "sntl_admin_context_delete");
-    m_sntl_admin_get = (SntlAdminGetFunc)GetProcAddress(hModule, "sntl_admin_get");
-    m_sntl_admin_free = (SntlAdminFreeFunc)GetProcAddress(hModule, "sntl_admin_free");
-
-    if (!m_sntl_admin_context_new || !m_sntl_admin_context_delete || !m_sntl_admin_get || !m_sntl_admin_free)
-    {
-        FreeLibrary(hModule);
-        hModule = NULL;
-        CreateEmptyDelegates();
-    }
 #else
     hModule = LoadSharedLibrary(DllName, DllPath);
     if (hModule == nullptr)
@@ -798,19 +785,23 @@ void sntl_admin::SNTLDllLoader::LoadDll() {
         CreateEmptyDelegates();
         return;
     }
+#endif
 
-    m_sntl_admin_context_new = (SntlAdminContextNewFunc)ResolveSharedSymbol(hModule, "sntl_admin_context_new");
-    m_sntl_admin_context_delete = (SntlAdminContextDeleteFunc)ResolveSharedSymbol(hModule, "sntl_admin_context_delete");
-    m_sntl_admin_get = (SntlAdminGetFunc)ResolveSharedSymbol(hModule, "sntl_admin_get");
-    m_sntl_admin_free = (SntlAdminFreeFunc)ResolveSharedSymbol(hModule, "sntl_admin_free");
+    m_sntl_admin_context_new = (SntlAdminContextNewFunc)ResolveSymbol(hModule, "sntl_admin_context_new");
+    m_sntl_admin_context_delete = (SntlAdminContextDeleteFunc)ResolveSymbol(hModule, "sntl_admin_context_delete");
+    m_sntl_admin_get = (SntlAdminGetFunc)ResolveSymbol(hModule, "sntl_admin_get");
+    m_sntl_admin_free = (SntlAdminFreeFunc)ResolveSymbol(hModule, "sntl_admin_free");
 
     if (!m_sntl_admin_context_new || !m_sntl_admin_context_delete || !m_sntl_admin_get || !m_sntl_admin_free)
     {
-        dlclose(hModule);
+        FreeModuleHandle(hModule);
+#ifdef _WIN32
+        hModule = NULL;
+#else
         hModule = nullptr;
+#endif
         CreateEmptyDelegates();
     }
-#endif
 }
 
 sntl_admin::SNTLDllLoader::SNTLDllLoader() {
@@ -818,17 +809,13 @@ sntl_admin::SNTLDllLoader::SNTLDllLoader() {
 }
 
 sntl_admin::SNTLDllLoader::~SNTLDllLoader() {
-#ifdef _WIN32
     if (hModule != NULL)
     {
-        FreeLibrary(hModule);
+        FreeModuleHandle(hModule);
+#ifdef _WIN32
         hModule = NULL;
-    }
 #else
-    if (hModule != nullptr)
-    {
-        dlclose(hModule);
         hModule = nullptr;
-    }
 #endif
+    }
 }

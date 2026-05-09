@@ -182,8 +182,8 @@ private:
     std::string _dir;
 
     static bool DeleteDirectoryRecursive(const std::string& dir) {
-#ifdef _WIN32
         if (dir.empty()) return true;
+#ifdef _WIN32
         WIN32_FIND_DATAA ffd;
         const std::string pattern = dir + "\\*";
         HANDLE hFind = FindFirstFileA(pattern.c_str(), &ffd);
@@ -204,7 +204,6 @@ private:
         SetFileAttributesA(dir.c_str(), FILE_ATTRIBUTE_NORMAL);
         return RemoveDirectoryA(dir.c_str()) != 0;
 #else
-        if (dir.empty()) return true;
         std::error_code ec;
         fs::remove_all(dir, ec);
         return !ec;
@@ -1074,12 +1073,27 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
 
 namespace dlcv_infer {
 
+#ifdef _WIN32
+    std::wstring Win32MultiByteToWide(const std::string& input, uint32_t codePage) {
+        int len = MultiByteToWideChar(codePage, 0, input.c_str(), -1, nullptr, 0);
+        if (len <= 0) return {};
+        std::vector<wchar_t> str(len);
+        MultiByteToWideChar(codePage, 0, input.c_str(), -1, &str[0], len);
+        return std::wstring(str.begin(), str.end() - 1);
+    }
+
+    std::string Win32WideToMultiByte(const std::wstring& input, uint32_t codePage) {
+        int len = WideCharToMultiByte(codePage, 0, input.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        if (len <= 0) return {};
+        std::vector<char> str(len);
+        WideCharToMultiByte(codePage, 0, input.c_str(), -1, &str[0], len, nullptr, nullptr);
+        return std::string(str.begin(), str.end() - 1);
+    }
+#endif
+
     std::wstring convertStringToWstring(const std::string& inputString) {
 #ifdef _WIN32
-        int len = MultiByteToWideChar(CP_ACP, 0, inputString.c_str(), -1, nullptr, 0);
-        std::vector<wchar_t> str(len);
-        MultiByteToWideChar(CP_ACP, 0, inputString.c_str(), -1, &str[0], len);
-        return std::wstring(str.begin(), str.end() - 1);
+        return Win32MultiByteToWide(inputString, CP_ACP);
 #else
         return Utf8ToWidePortable(inputString);
 #endif
@@ -1087,10 +1101,7 @@ namespace dlcv_infer {
 
     std::string convertWstringToString(const std::wstring& inputWstring) {
 #ifdef _WIN32
-        int len = WideCharToMultiByte(CP_ACP, 0, inputWstring.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::vector<char> str(len);
-        WideCharToMultiByte(CP_ACP, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
-        return std::string(str.begin(), str.end() - 1);
+        return Win32WideToMultiByte(inputWstring, CP_ACP);
 #else
         return WideToUtf8Portable(inputWstring);
 #endif
@@ -1098,10 +1109,7 @@ namespace dlcv_infer {
 
     std::string convertWstringToUtf8(const std::wstring& inputWstring) {
 #ifdef _WIN32
-        int len = WideCharToMultiByte(CP_UTF8, 0, inputWstring.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::vector<char> str(len);
-        WideCharToMultiByte(CP_UTF8, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
-        return std::string(str.begin(), str.end() - 1);
+        return Win32WideToMultiByte(inputWstring, CP_UTF8);
 #else
         return WideToUtf8Portable(inputWstring);
 #endif
@@ -1109,10 +1117,7 @@ namespace dlcv_infer {
 
     std::wstring convertUtf8ToWstring(const std::string& inputUtf8) {
 #ifdef _WIN32
-        int len = MultiByteToWideChar(CP_UTF8, 0, inputUtf8.c_str(), -1, nullptr, 0);
-        std::vector<wchar_t> str(len);
-        MultiByteToWideChar(CP_UTF8, 0, inputUtf8.c_str(), -1, &str[0], len);
-        return std::wstring(str.begin(), str.end() - 1);
+        return Win32MultiByteToWide(inputUtf8, CP_UTF8);
 #else
         return Utf8ToWidePortable(inputUtf8);
 #endif
@@ -1120,10 +1125,7 @@ namespace dlcv_infer {
 
     std::string convertWstringToGbk(const std::wstring& inputWstring) {
 #ifdef _WIN32
-        int len = WideCharToMultiByte(936, 0, inputWstring.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::vector<char> str(len);
-        WideCharToMultiByte(936, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
-        return std::string(str.begin(), str.end() - 1);
+        return Win32WideToMultiByte(inputWstring, 936);
 #else
         return ConvertEncodingPortable(WideToUtf8Portable(inputWstring), "UTF-8", "GBK");
 #endif
@@ -1131,10 +1133,7 @@ namespace dlcv_infer {
 
     std::wstring convertGbkToWstring(const std::string& inputGbk) {
 #ifdef _WIN32
-        int len = MultiByteToWideChar(936, 0, inputGbk.c_str(), -1, nullptr, 0);
-        std::vector<wchar_t> str(len);
-        MultiByteToWideChar(936, 0, inputGbk.c_str(), -1, &str[0], len);
-        return std::wstring(str.begin(), str.end() - 1);
+        return Win32MultiByteToWide(inputGbk, 936);
 #else
         return Utf8ToWidePortable(ConvertEncodingPortable(inputGbk, "GBK", "UTF-8"));
 #endif

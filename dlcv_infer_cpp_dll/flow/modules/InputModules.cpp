@@ -32,8 +32,8 @@ static std::string GetFileNameWithoutExt(const std::string& path) {
     return name.substr(0, dot);
 }
 
-static bool FileExists(const std::string& path) {
 #ifdef _WIN32
+static std::wstring Utf8ToWideForWin32(const std::string& path) {
     std::wstring widePath;
     if (!path.empty()) {
         const int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, nullptr, 0);
@@ -42,6 +42,13 @@ static bool FileExists(const std::string& path) {
             MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, &widePath[0], len);
         }
     }
+    return widePath;
+}
+#endif
+
+static bool FileExists(const std::string& path) {
+#ifdef _WIN32
+    std::wstring widePath = Utf8ToWideForWin32(path);
     if (!widePath.empty()) {
         FILE* fp = nullptr;
         if (_wfopen_s(&fp, widePath.c_str(), L"rb") == 0 && fp != nullptr) {
@@ -79,14 +86,7 @@ static cv::Mat PrepareDecodedImageForFlow(const cv::Mat& image) {
 static cv::Mat ReadFromPathForFlow(const std::string& path) {
     cv::Mat decoded;
 #ifdef _WIN32
-    std::wstring widePath;
-    if (!path.empty()) {
-        const int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, nullptr, 0);
-        if (len > 0) {
-            widePath.resize(static_cast<size_t>(len - 1));
-            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, &widePath[0], len);
-        }
-    }
+    std::wstring widePath = Utf8ToWideForWin32(path);
     if (!widePath.empty()) {
         FILE* fp = nullptr;
         if (_wfopen_s(&fp, widePath.c_str(), L"rb") == 0 && fp != nullptr) {
