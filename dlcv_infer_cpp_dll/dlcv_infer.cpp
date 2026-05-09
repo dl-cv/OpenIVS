@@ -6,21 +6,22 @@
 #include "flow/utils/MaskRleUtils.h"
 #ifdef _WIN32
 #include <Windows.h>
-#include <codecvt>
-#include <locale>
 #else
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QLibrary>
-#include <QString>
-#include <QTextCodec>
+#include <dlfcn.h>
+#include <filesystem>
+#include <iconv.h>
 #endif
+#include <cerrno>
 #include <cmath>
+#include <codecvt>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <locale>
 #include <random>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 
@@ -42,6 +43,67 @@ void SetLastInferTiming(double dlcvInferMs, double totalInferMs, std::vector<dlc
     g_lastFlowNodeTimings = std::move(nodeTimings);
 }
 
+#ifndef _WIN32
+namespace fs = std::filesystem;
+
+void* LoadSharedLibrary(const std::string& name, const std::string& fallbackPath) {
+    void* handle = dlopen(name.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    if (handle == nullptr && !fallbackPath.empty() && fallbackPath != name) {
+        handle = dlopen(fallbackPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    }
+    return handle;
+}
+
+void* ResolveSharedSymbol(void* handle, const char* symbolName) {
+    return handle == nullptr ? nullptr : dlsym(handle, symbolName);
+}
+
+std::string WideToUtf8Portable(const std::wstring& input) {
+    if (input.empty()) return {};
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+    return converter.to_bytes(input);
+}
+
+std::wstring Utf8ToWidePortable(const std::string& input) {
+    if (input.empty()) return {};
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+    return converter.from_bytes(input);
+}
+
+std::string ConvertEncodingPortable(const std::string& input, const char* fromCode, const char* toCode) {
+    if (input.empty()) return {};
+
+    iconv_t cd = iconv_open(toCode, fromCode);
+    if (cd == (iconv_t)-1) {
+        throw std::runtime_error("failed to open iconv converter");
+    }
+
+    size_t inBytesLeft = input.size();
+    char* inBuf = const_cast<char*>(input.data());
+    std::string output(std::max<size_t>(input.size() * 4, 32), '\0');
+    char* outBuf = output.data();
+    size_t outBytesLeft = output.size();
+
+    for (;;) {
+        const size_t ret = iconv(cd, &inBuf, &inBytesLeft, &outBuf, &outBytesLeft);
+        if (ret != static_cast<size_t>(-1)) break;
+        if (errno != E2BIG) {
+            iconv_close(cd);
+            throw std::runtime_error("failed to convert encoding");
+        }
+
+        const size_t used = static_cast<size_t>(outBuf - output.data());
+        output.resize(output.size() * 2);
+        outBuf = output.data() + used;
+        outBytesLeft = output.size() - used;
+    }
+
+    output.resize(output.size() - outBytesLeft);
+    iconv_close(cd);
+    return output;
+}
+#endif
+
 bool DllExists(const std::string& dllName, const std::string& dllPath) {
 #ifdef _WIN32
     if (SearchPathA(nullptr, dllName.c_str(), nullptr, 0, nullptr, nullptr) != 0) {
@@ -49,7 +111,13 @@ bool DllExists(const std::string& dllName, const std::string& dllPath) {
     }
     return GetFileAttributesA(dllPath.c_str()) != INVALID_FILE_ATTRIBUTES;
 #else
-    return QFile::exists(QString::fromStdString(dllName)) || QFile::exists(QString::fromStdString(dllPath));
+    void* handle = LoadSharedLibrary(dllName, dllPath);
+    if (handle != nullptr) {
+        dlclose(handle);
+        return true;
+    }
+    std::error_code ec;
+    return fs::exists(dllPath, ec);
 #endif
 }
 
@@ -94,7 +162,10 @@ private:
         SetFileAttributesA(dir.c_str(), FILE_ATTRIBUTE_NORMAL);
         return RemoveDirectoryA(dir.c_str()) != 0;
 #else
-        return QDir(QString::fromStdString(dir)).removeRecursively();
+        if (dir.empty()) return true;
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+        return !ec;
 #endif
     }
 
@@ -137,7 +208,11 @@ std::string JoinPath(const std::string& a, const std::string& b) {
     if (b.empty()) return a;
     const char tail = a.back();
     if (tail == '\\' || tail == '/') return a + b;
+#ifdef _WIN32
     return a + "\\" + b;
+#else
+    return a + "/" + b;
+#endif
 }
 
 std::string GetFileNameOnly(const std::string& path) {
@@ -176,9 +251,17 @@ std::string CreateTempDir() {
         if (CreateDirectoryA(dir.c_str(), nullptr) != 0) return dir;
     }
 #else
+    std::error_code ec;
+    const fs::path base = fs::temp_directory_path(ec);
+    if (ec) {
+        throw std::runtime_error("failed to get temp directory");
+    }
     for (int retry = 0; retry < 8; retry++) {
-        const std::string dir = JoinPath(QDir::tempPath().toStdString(), "DlcvDvs_" + RandomHex(24));
-        if (QDir().mkpath(QString::fromStdString(dir))) return dir;
+        const fs::path dirPath = base / ("DlcvDvs_" + RandomHex(24));
+        if (fs::create_directory(dirPath, ec)) {
+            return dirPath.string();
+        }
+        if (ec) ec.clear();
     }
 #endif
     throw std::runtime_error("failed to create temp directory");
@@ -273,7 +356,7 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
     FILE* fp = nullptr;
     if (_wfopen_s(&fp, archivePathW.c_str(), L"rb") != 0 || fp == nullptr) {
 #else
-    FILE* fp = std::fopen(QString::fromStdWString(archivePathW).toUtf8().toStdString().c_str(), "rb");
+    FILE* fp = std::fopen(WideToUtf8Portable(archivePathW).c_str(), "rb");
     if (fp == nullptr) {
 #endif
         throw std::runtime_error("failed to open dvst file");
@@ -894,7 +977,7 @@ namespace dlcv_infer {
         MultiByteToWideChar(CP_ACP, 0, inputString.c_str(), -1, &str[0], len);
         return std::wstring(str.begin(), str.end() - 1);
 #else
-        return QString::fromLocal8Bit(inputString.c_str()).toStdWString();
+        return Utf8ToWidePortable(inputString);
 #endif
     }
 
@@ -905,7 +988,7 @@ namespace dlcv_infer {
         WideCharToMultiByte(CP_ACP, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
         return std::string(str.begin(), str.end() - 1);
 #else
-        return QString::fromStdWString(inputWstring).toLocal8Bit().toStdString();
+        return WideToUtf8Portable(inputWstring);
 #endif
     }
 
@@ -916,7 +999,7 @@ namespace dlcv_infer {
         WideCharToMultiByte(CP_UTF8, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
         return std::string(str.begin(), str.end() - 1);
 #else
-        return QString::fromStdWString(inputWstring).toUtf8().toStdString();
+        return WideToUtf8Portable(inputWstring);
 #endif
     }
 
@@ -927,7 +1010,7 @@ namespace dlcv_infer {
         MultiByteToWideChar(CP_UTF8, 0, inputUtf8.c_str(), -1, &str[0], len);
         return std::wstring(str.begin(), str.end() - 1);
 #else
-        return QString::fromUtf8(inputUtf8.c_str()).toStdWString();
+        return Utf8ToWidePortable(inputUtf8);
 #endif
     }
 
@@ -938,8 +1021,7 @@ namespace dlcv_infer {
         WideCharToMultiByte(936, 0, inputWstring.c_str(), -1, &str[0], len, nullptr, nullptr);
         return std::string(str.begin(), str.end() - 1);
 #else
-        QTextCodec* codec = QTextCodec::codecForName("GBK");
-        return codec->fromUnicode(QString::fromStdWString(inputWstring)).toStdString();
+        return ConvertEncodingPortable(WideToUtf8Portable(inputWstring), "UTF-8", "GBK");
 #endif
     }
 
@@ -950,8 +1032,7 @@ namespace dlcv_infer {
         MultiByteToWideChar(936, 0, inputGbk.c_str(), -1, &str[0], len);
         return std::wstring(str.begin(), str.end() - 1);
 #else
-        QTextCodec* codec = QTextCodec::codecForName("GBK");
-        return codec->toUnicode(QByteArray(inputGbk.c_str())).toStdWString();
+        return Utf8ToWidePortable(ConvertEncodingPortable(inputGbk, "GBK", "UTF-8"));
 #endif
     }
 
@@ -980,7 +1061,7 @@ namespace dlcv_infer {
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll";
 #else
             dllName = "libdlcv_infer.so";
-            dllPath = "libdlcv_infer.so";
+            dllPath = "/usr/local/dlcv/lib/libdlcv_infer.so";
 #endif
             break;
         case sntl_admin::DogProvider::Virbox:
@@ -989,7 +1070,7 @@ namespace dlcv_infer {
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer_v.dll";
 #else
             dllName = "libdlcv_infer.so";
-            dllPath = "libdlcv_infer.so";
+            dllPath = "/usr/local/dlcv/lib/libdlcv_infer.so";
 #endif
             break;
         default:
@@ -1026,28 +1107,23 @@ namespace dlcv_infer {
         dlcv_get_device_info = (GetDeviceInfoFuncType)GetProcAddress((HMODULE)hModule, "dlcv_get_device_info");
         dlcv_keep_max_clock = (KeepMaxClockFuncType)GetProcAddress((HMODULE)hModule, "dlcv_keep_max_clock");
 #else
-        library = new QLibrary(QString::fromStdString(dllName));
-        if (!library->load())
+        hModule = LoadSharedLibrary(dllName, dllPath);
+        if (hModule == nullptr)
         {
-            delete library;
-            library = new QLibrary(QString::fromStdString(dllPath));
-            if (!library->load())
-            {
-                delete library;
-                library = nullptr;
-                throw std::runtime_error("failed to load dll");
-            }
+            const char* err = dlerror();
+            throw std::runtime_error(std::string("failed to load dll")
+                + (err != nullptr ? (std::string(": ") + err) : std::string()));
         }
 
-        dlcv_load_model = (LoadModelFuncType)library->resolve("dlcv_load_model");
-        dlcv_free_model = (FreeModelFuncType)library->resolve("dlcv_free_model");
-        dlcv_get_model_info = (GetModelInfoFuncType)library->resolve("dlcv_get_model_info");
-        dlcv_infer = (InferFuncType)library->resolve("dlcv_infer");
-        dlcv_free_model_result = (FreeModelResultFuncType)library->resolve("dlcv_free_model_result");
-        dlcv_free_result = (FreeResultFuncType)library->resolve("dlcv_free_result");
-        dlcv_free_all_models = (FreeAllModelsFuncType)library->resolve("dlcv_free_all_models");
-        dlcv_get_device_info = (GetDeviceInfoFuncType)library->resolve("dlcv_get_device_info");
-        dlcv_keep_max_clock = (KeepMaxClockFuncType)library->resolve("dlcv_keep_max_clock");
+        dlcv_load_model = (LoadModelFuncType)ResolveSharedSymbol(hModule, "dlcv_load_model");
+        dlcv_free_model = (FreeModelFuncType)ResolveSharedSymbol(hModule, "dlcv_free_model");
+        dlcv_get_model_info = (GetModelInfoFuncType)ResolveSharedSymbol(hModule, "dlcv_get_model_info");
+        dlcv_infer = (InferFuncType)ResolveSharedSymbol(hModule, "dlcv_infer");
+        dlcv_free_model_result = (FreeModelResultFuncType)ResolveSharedSymbol(hModule, "dlcv_free_model_result");
+        dlcv_free_result = (FreeResultFuncType)ResolveSharedSymbol(hModule, "dlcv_free_result");
+        dlcv_free_all_models = (FreeAllModelsFuncType)ResolveSharedSymbol(hModule, "dlcv_free_all_models");
+        dlcv_get_device_info = (GetDeviceInfoFuncType)ResolveSharedSymbol(hModule, "dlcv_get_device_info");
+        dlcv_keep_max_clock = (KeepMaxClockFuncType)ResolveSharedSymbol(hModule, "dlcv_keep_max_clock");
 #endif
     }
 
@@ -1111,7 +1187,7 @@ namespace dlcv_infer {
 #ifdef _WIN32
         std::ifstream file(wpath);
 #else
-        std::ifstream file(QString::fromStdWString(wpath).toUtf8().toStdString());
+        std::ifstream file(WideToUtf8Portable(wpath));
 #endif
         if (!file) {
             throw std::runtime_error("failed to open model file");
@@ -1138,7 +1214,7 @@ namespace dlcv_infer {
 #ifdef _WIN32
         std::ifstream file(modelPath);
 #else
-        std::ifstream file(QString::fromStdWString(modelPath).toUtf8().toStdString());
+        std::ifstream file(WideToUtf8Portable(modelPath));
 #endif
         if (!file) {
             throw std::runtime_error("failed to open model file");
@@ -2070,13 +2146,20 @@ namespace dlcv_infer {
         HMODULE hModule = LoadLibraryA("nvml.dll");
         if (!hModule) return -1;
         NvmlInitFunc func = (NvmlInitFunc)GetProcAddress(hModule, "nvmlInit");
-#else
-        QLibrary lib("nvidia-ml");
-        if (!lib.load()) return -1;
-        NvmlInitFunc func = (NvmlInitFunc)lib.resolve("nvmlInit");
-#endif
         if (!func) return -1;
         return func();
+#else
+        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
+        if (hModule == nullptr) return -1;
+        NvmlInitFunc func = (NvmlInitFunc)ResolveSharedSymbol(hModule, "nvmlInit");
+        if (!func) {
+            dlclose(hModule);
+            return -1;
+        }
+        const int result = func();
+        dlclose(hModule);
+        return result;
+#endif
     }
 
     int Utils::nvmlShutdown() {
@@ -2085,13 +2168,20 @@ namespace dlcv_infer {
         HMODULE hModule = LoadLibraryA("nvml.dll");
         if (!hModule) return -1;
         NvmlShutdownFunc func = (NvmlShutdownFunc)GetProcAddress(hModule, "nvmlShutdown");
-#else
-        QLibrary lib("nvidia-ml");
-        if (!lib.load()) return -1;
-        NvmlShutdownFunc func = (NvmlShutdownFunc)lib.resolve("nvmlShutdown");
-#endif
         if (!func) return -1;
         return func();
+#else
+        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
+        if (hModule == nullptr) return -1;
+        NvmlShutdownFunc func = (NvmlShutdownFunc)ResolveSharedSymbol(hModule, "nvmlShutdown");
+        if (!func) {
+            dlclose(hModule);
+            return -1;
+        }
+        const int result = func();
+        dlclose(hModule);
+        return result;
+#endif
     }
 
     int Utils::nvmlDeviceGetCount(unsigned int* deviceCount) {
@@ -2100,13 +2190,20 @@ namespace dlcv_infer {
         HMODULE hModule = LoadLibraryA("nvml.dll");
         if (!hModule) return -1;
         NvmlDeviceGetCountFunc func = (NvmlDeviceGetCountFunc)GetProcAddress(hModule, "nvmlDeviceGetCount");
-#else
-        QLibrary lib("nvidia-ml");
-        if (!lib.load()) return -1;
-        NvmlDeviceGetCountFunc func = (NvmlDeviceGetCountFunc)lib.resolve("nvmlDeviceGetCount");
-#endif
         if (!func) return -1;
         return func(deviceCount);
+#else
+        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
+        if (hModule == nullptr) return -1;
+        NvmlDeviceGetCountFunc func = (NvmlDeviceGetCountFunc)ResolveSharedSymbol(hModule, "nvmlDeviceGetCount");
+        if (!func) {
+            dlclose(hModule);
+            return -1;
+        }
+        const int result = func(deviceCount);
+        dlclose(hModule);
+        return result;
+#endif
     }
 
     int Utils::nvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length) {
@@ -2115,13 +2212,20 @@ namespace dlcv_infer {
         HMODULE hModule = LoadLibraryA("nvml.dll");
         if (!hModule) return -1;
         NvmlDeviceGetNameFunc func = (NvmlDeviceGetNameFunc)GetProcAddress(hModule, "nvmlDeviceGetName");
-#else
-        QLibrary lib("nvidia-ml");
-        if (!lib.load()) return -1;
-        NvmlDeviceGetNameFunc func = (NvmlDeviceGetNameFunc)lib.resolve("nvmlDeviceGetName");
-#endif
         if (!func) return -1;
         return func(device, name, length);
+#else
+        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
+        if (hModule == nullptr) return -1;
+        NvmlDeviceGetNameFunc func = (NvmlDeviceGetNameFunc)ResolveSharedSymbol(hModule, "nvmlDeviceGetName");
+        if (!func) {
+            dlclose(hModule);
+            return -1;
+        }
+        const int result = func(device, name, length);
+        dlclose(hModule);
+        return result;
+#endif
     }
 
     int Utils::nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device) {
@@ -2130,13 +2234,20 @@ namespace dlcv_infer {
         HMODULE hModule = LoadLibraryA("nvml.dll");
         if (!hModule) return -1;
         NvmlDeviceGetHandleByIndexFunc func = (NvmlDeviceGetHandleByIndexFunc)GetProcAddress(hModule, "nvmlDeviceGetHandleByIndex");
-#else
-        QLibrary lib("nvidia-ml");
-        if (!lib.load()) return -1;
-        NvmlDeviceGetHandleByIndexFunc func = (NvmlDeviceGetHandleByIndexFunc)lib.resolve("nvmlDeviceGetHandleByIndex");
-#endif
         if (!func) return -1;
         return func(index, device);
+#else
+        void* hModule = LoadSharedLibrary("libnvidia-ml.so.1", "libnvidia-ml.so");
+        if (hModule == nullptr) return -1;
+        NvmlDeviceGetHandleByIndexFunc func = (NvmlDeviceGetHandleByIndexFunc)ResolveSharedSymbol(hModule, "nvmlDeviceGetHandleByIndex");
+        if (!func) {
+            dlclose(hModule);
+            return -1;
+        }
+        const int result = func(index, device);
+        dlclose(hModule);
+        return result;
+#endif
     }
 
 }

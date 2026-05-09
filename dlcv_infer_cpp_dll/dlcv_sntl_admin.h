@@ -6,8 +6,6 @@
 #include <functional>
 #ifdef _WIN32
 #include <windows.h>
-#else
-#include <QLibrary>
 #endif
 #include <iostream>
 #include <sstream>
@@ -52,12 +50,14 @@ namespace sntl_admin {
 
     class SNTLDllLoader {
     private:
+#ifdef _WIN32
         const std::string DllName = "sntl_adminapi_windows_x64.dll";
         const std::string DllPath = "C:\\dlcv\\bin\\sntl_adminapi_windows_x64.dll";
-#ifdef _WIN32
         HMODULE hModule = NULL;
 #else
-        QLibrary* library = nullptr;
+        const std::string DllName = "libsntl_adminapi.so";
+        const std::string DllPath = "/usr/local/dlcv/lib/libsntl_adminapi.so";
+        void* hModule = nullptr;
 #endif
 
         // 函数指针

@@ -12,6 +12,7 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -23,7 +24,7 @@
 #endif
 #include <Windows.h>
 #else
-#include <QDir>
+#include <filesystem>
 #endif
 
 #include "opencv2/imgcodecs.hpp"
@@ -48,7 +49,8 @@ static void EnsureDirExists(const std::string& dir) {
     }
     CreateDirectoryA(dir.c_str(), nullptr);
 #else
-    QDir().mkpath(QString::fromStdString(dir));
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
 #endif
 }
 
@@ -57,7 +59,11 @@ static std::string JoinPath(const std::string& a, const std::string& b) {
     if (b.empty()) return a;
     const char last = a.back();
     if (last == '\\' || last == '/') return a + b;
+#ifdef _WIN32
     return a + "\\" + b;
+#else
+    return a + "/" + b;
+#endif
 }
 
 static std::string MakeSafeFileName(std::string name) {

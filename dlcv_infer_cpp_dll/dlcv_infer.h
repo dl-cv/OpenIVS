@@ -85,11 +85,7 @@ namespace dlcv_infer {
     private:
         std::string dllName;
         std::string dllPath;
-#ifdef _WIN32
         void* hModule = nullptr;
-#else
-        QLibrary* library = nullptr;
-#endif
         sntl_admin::DogProvider dogProvider;
 
         // 函数指针

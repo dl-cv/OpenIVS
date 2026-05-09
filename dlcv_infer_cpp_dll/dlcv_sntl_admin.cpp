@@ -1,5 +1,9 @@
 ﻿#include "dlcv_sntl_admin.h"
 
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
+
 namespace {
     constexpr int VIRBOX_OK = 0;
     constexpr int VIRBOX_JSON = 2;
@@ -16,11 +20,25 @@ namespace {
     using VirboxGetDeviceInfoFunc = int(DLCV_STDCALL *)(void* ipc, const char* desc, char** result);
     using VirboxFreeFunc = void(DLCV_STDCALL *)(void* buffer);
 
+#ifndef _WIN32
+    void* LoadSharedLibrary(const std::string& name, const std::string& fallbackPath) {
+        void* handle = dlopen(name.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        if (handle == nullptr && !fallbackPath.empty() && fallbackPath != name) {
+            handle = dlopen(fallbackPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        }
+        return handle;
+    }
+
+    void* ResolveSharedSymbol(void* handle, const char* symbolName) {
+        return handle == nullptr ? nullptr : dlsym(handle, symbolName);
+    }
+#endif
+
     struct VirboxControlApi {
 #ifdef _WIN32
         HMODULE module = NULL;
 #else
-        QLibrary* library = nullptr;
+        void* module = nullptr;
 #endif
         VirboxClientOpenFunc client_open = nullptr;
         VirboxClientCloseFunc client_close = nullptr;
@@ -60,30 +78,23 @@ namespace {
                 free_buffer = nullptr;
             }
 #else
-            library = new QLibrary("slm_control");
-            if (!library->load())
+            module = LoadSharedLibrary("libslm_control.so", "/usr/local/dlcv/lib/libslm_control.so");
+            if (module == nullptr)
             {
-                delete library;
-                library = new QLibrary("C:/dlcv/bin/slm_control");
-                if (!library->load())
-                {
-                    delete library;
-                    library = nullptr;
-                    return;
-                }
+                return;
             }
 
-            client_open = reinterpret_cast<VirboxClientOpenFunc>(library->resolve("slm_ctrl_client_open"));
-            client_close = reinterpret_cast<VirboxClientCloseFunc>(library->resolve("slm_ctrl_client_close"));
-            get_all_description = reinterpret_cast<VirboxGetAllDescriptionFunc>(library->resolve("slm_ctrl_get_all_description"));
-            get_license_id = reinterpret_cast<VirboxGetLicenseIdFunc>(library->resolve("slm_ctrl_get_license_id"));
-            get_device_info = reinterpret_cast<VirboxGetDeviceInfoFunc>(library->resolve("slm_ctrl_get_device_info"));
-            free_buffer = reinterpret_cast<VirboxFreeFunc>(library->resolve("slm_ctrl_free"));
+            client_open = reinterpret_cast<VirboxClientOpenFunc>(ResolveSharedSymbol(module, "slm_ctrl_client_open"));
+            client_close = reinterpret_cast<VirboxClientCloseFunc>(ResolveSharedSymbol(module, "slm_ctrl_client_close"));
+            get_all_description = reinterpret_cast<VirboxGetAllDescriptionFunc>(ResolveSharedSymbol(module, "slm_ctrl_get_all_description"));
+            get_license_id = reinterpret_cast<VirboxGetLicenseIdFunc>(ResolveSharedSymbol(module, "slm_ctrl_get_license_id"));
+            get_device_info = reinterpret_cast<VirboxGetDeviceInfoFunc>(ResolveSharedSymbol(module, "slm_ctrl_get_device_info"));
+            free_buffer = reinterpret_cast<VirboxFreeFunc>(ResolveSharedSymbol(module, "slm_ctrl_free"));
 
             if (!client_open || !client_close || !get_all_description || !get_license_id || !get_device_info || !free_buffer)
             {
-                delete library;
-                library = nullptr;
+                dlclose(module);
+                module = nullptr;
                 client_open = nullptr;
                 client_close = nullptr;
                 get_all_description = nullptr;
@@ -101,7 +112,11 @@ namespace {
                 FreeLibrary(module);
             }
 #else
-            delete library;
+            if (module != nullptr)
+            {
+                dlclose(module);
+                module = nullptr;
+            }
 #endif
         }
 
@@ -109,7 +124,7 @@ namespace {
 #ifdef _WIN32
             return module != NULL;
 #else
-            return library != nullptr && library->isLoaded();
+            return module != nullptr;
 #endif
         }
     };
@@ -781,29 +796,22 @@ void sntl_admin::SNTLDllLoader::LoadDll() {
         CreateEmptyDelegates();
     }
 #else
-    library = new QLibrary(QString::fromStdString(DllName));
-    if (!library->load())
+    hModule = LoadSharedLibrary(DllName, DllPath);
+    if (hModule == nullptr)
     {
-        delete library;
-        library = new QLibrary(QString::fromStdString(DllPath));
-        if (!library->load())
-        {
-            delete library;
-            library = nullptr;
-            CreateEmptyDelegates();
-            return;
-        }
+        CreateEmptyDelegates();
+        return;
     }
 
-    m_sntl_admin_context_new = (SntlAdminContextNewFunc)library->resolve("sntl_admin_context_new");
-    m_sntl_admin_context_delete = (SntlAdminContextDeleteFunc)library->resolve("sntl_admin_context_delete");
-    m_sntl_admin_get = (SntlAdminGetFunc)library->resolve("sntl_admin_get");
-    m_sntl_admin_free = (SntlAdminFreeFunc)library->resolve("sntl_admin_free");
+    m_sntl_admin_context_new = (SntlAdminContextNewFunc)ResolveSharedSymbol(hModule, "sntl_admin_context_new");
+    m_sntl_admin_context_delete = (SntlAdminContextDeleteFunc)ResolveSharedSymbol(hModule, "sntl_admin_context_delete");
+    m_sntl_admin_get = (SntlAdminGetFunc)ResolveSharedSymbol(hModule, "sntl_admin_get");
+    m_sntl_admin_free = (SntlAdminFreeFunc)ResolveSharedSymbol(hModule, "sntl_admin_free");
 
     if (!m_sntl_admin_context_new || !m_sntl_admin_context_delete || !m_sntl_admin_get || !m_sntl_admin_free)
     {
-        delete library;
-        library = nullptr;
+        dlclose(hModule);
+        hModule = nullptr;
         CreateEmptyDelegates();
     }
 #endif
@@ -821,7 +829,10 @@ sntl_admin::SNTLDllLoader::~SNTLDllLoader() {
         hModule = NULL;
     }
 #else
-    delete library;
-    library = nullptr;
+    if (hModule != nullptr)
+    {
+        dlclose(hModule);
+        hModule = nullptr;
+    }
 #endif
 }
