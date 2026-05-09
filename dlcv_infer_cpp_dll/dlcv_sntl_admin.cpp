@@ -500,7 +500,7 @@ nlohmann::json sntl_admin::ParseXmlToJson(const std::string& xml) {
             }
 
             // 解析hasp节点
-            std::regex haspRegex("<hasp>\\s*<haspid>([^<]+)</haspid>\\s*</hasp>");
+            std::regex haspRegex("<hasp[^>]*>[\\s\\S]*?<haspid>([^<]+)</haspid>[\\s\\S]*?</hasp>");
             std::string::const_iterator searchStart(xml.cbegin());
             std::smatch haspMatch;
             std::vector<nlohmann::json> hasps;
@@ -522,7 +522,7 @@ nlohmann::json sntl_admin::ParseXmlToJson(const std::string& xml) {
             }
 
             // 解析feature节点
-            std::regex featureRegex("<feature>\\s*<featureid>([^<]+)</featureid>\\s*<haspid>([^<]+)</haspid>\\s*</feature>");
+            std::regex featureRegex("<feature[^>]*>[\\s\\S]*?<featureid>([^<]+)</featureid>[\\s\\S]*?<haspid>([^<]+)</haspid>[\\s\\S]*?</feature>");
             searchStart = xml.cbegin();
             std::smatch featureMatch;
             std::vector<nlohmann::json> features;
