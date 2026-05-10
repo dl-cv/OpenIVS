@@ -1127,7 +1127,7 @@ namespace dlcv_infer {
 #ifdef _WIN32
         return Win32WideToMultiByte(inputWstring, 936);
 #else
-        return ConvertEncodingPortable(WideToUtf8Portable(inputWstring), "UTF-8", "GBK");
+        return WideToUtf8Portable(inputWstring);
 #endif
     }
 
@@ -1135,7 +1135,7 @@ namespace dlcv_infer {
 #ifdef _WIN32
         return Win32MultiByteToWide(inputGbk, 936);
 #else
-        return Utf8ToWidePortable(ConvertEncodingPortable(inputGbk, "GBK", "UTF-8"));
+        return Utf8ToWidePortable(inputGbk);
 #endif
     }
 
