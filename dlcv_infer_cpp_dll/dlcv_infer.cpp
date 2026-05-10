@@ -1164,7 +1164,7 @@ namespace dlcv_infer {
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll";
 #else
             dllName = "libdlcv_infer.so";
-            dllPath = "/root/miniconda3/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
+            dllPath = "/root/dlcv/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
 #endif
             break;
         case sntl_admin::DogProvider::Virbox:
@@ -1173,7 +1173,7 @@ namespace dlcv_infer {
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer_v.dll";
 #else
             dllName = "libdlcv_infer.so";
-            dllPath = "/root/miniconda3/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
+            dllPath = "/root/dlcv/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
 #endif
             break;
         default:
@@ -1226,21 +1226,26 @@ namespace dlcv_infer {
 
 #else
         const std::string dllCurrentPath = JoinPath(".", dllName);
+        std::vector<std::string> candidates;
         // 1. 开发环境路径（与当前模块同目录）
         if (!dllDevPath.empty()) {
-            hModule = dlopen(dllDevPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+            candidates.push_back(dllDevPath);
         }
         // 2. 当前工作目录
-        if (!hModule) {
-            hModule = dlopen(dllCurrentPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+        candidates.push_back(dllCurrentPath);
+        // 3. site-packages 候选路径（新环境）
+        candidates.push_back("/root/dlcv/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so");
+        // 4. site-packages 候选路径（旧环境兼容）
+        candidates.push_back("/root/miniconda3/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so");
+
+        for (const auto& path : candidates) {
+            if (path.empty()) continue;
+            hModule = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+            if (hModule) break;
         }
-        // 3. 系统搜索路径（LD_LIBRARY_PATH / rpath 等）
+        // 5. 系统搜索路径（LD_LIBRARY_PATH / rpath 等）
         if (!hModule) {
             hModule = dlopen(dllName.c_str(), RTLD_LAZY | RTLD_LOCAL);
-        }
-        // 4. site-packages 固定路径
-        if (!hModule && !dllPath.empty() && dllPath != dllName) {
-            hModule = dlopen(dllPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
         }
         if (hModule == nullptr)
         {
