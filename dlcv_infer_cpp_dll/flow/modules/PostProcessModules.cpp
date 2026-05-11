@@ -12,6 +12,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "opencv2/imgproc.hpp"
@@ -1134,6 +1135,18 @@ public:
         std::string metric = NormalizeMetric(ReadString("metric", "iou"));
         const double threshold = Clamp01(ReadDouble("iou_threshold", 0.5));
         const bool perCategory = ReadBool("per_category", true);
+        const bool crossModel = ReadBool("cross_model", true);
+        const std::unordered_map<int, std::string> imageGroups = crossModel ? BuildImageGroupsByIndex(images) : std::unordered_map<int, std::string>();
+        std::string singleImageGroup;
+        if (!imageGroups.empty()) {
+            std::vector<std::string> uniqueGroups;
+            for (const auto& kv : imageGroups) {
+                if (std::find(uniqueGroups.begin(), uniqueGroups.end(), kv.second) == uniqueGroups.end()) {
+                    uniqueGroups.push_back(kv.second);
+                }
+            }
+            if (uniqueGroups.size() == 1) singleImageGroup = uniqueGroups.front();
+        }
 
         std::unordered_map<int, std::vector<bool>> keepFlags;
         std::unordered_map<std::string, std::vector<Candidate>> grouped;
@@ -1150,7 +1163,9 @@ public:
             const int idx = entry.contains("index") ? SafeIntFromJson(entry.at("index"), -1) : -1;
             const int originIdx = entry.contains("origin_index") ? SafeIntFromJson(entry.at("origin_index"), idx) : idx;
             const std::string transformSig = entry.contains("transform") ? SerializeTokenCompact(entry.at("transform")) : "null";
-            const std::string entryGroupKey = std::to_string(idx) + "|" + std::to_string(originIdx) + "|" + transformSig;
+            const std::string entryGroupKey = crossModel
+                ? BuildCrossModelGroupKey(entry, imageGroups, singleImageGroup)
+                : BuildStrictGroupKey(idx, originIdx, transformSig);
 
             for (int detIdx = 0; detIdx < static_cast<int>(dets.size()); detIdx++) {
                 const Json& det = dets.at(static_cast<size_t>(detIdx));
@@ -1257,6 +1272,82 @@ public:
     }
 
 private:
+    static std::unordered_map<int, std::string> BuildImageGroupsByIndex(const std::vector<ModuleImage>& images) {
+        std::unordered_map<int, std::string> groups;
+        for (int i = 0; i < static_cast<int>(images.size()); ++i) {
+            const std::string fingerprint = ImageFingerprint(images[static_cast<size_t>(i)]);
+            if (!fingerprint.empty()) {
+                groups[i] = fingerprint;
+            }
+        }
+        return groups;
+    }
+
+    static std::string BuildCrossModelGroupKey(const Json& entry,
+                                               const std::unordered_map<int, std::string>& imageGroups,
+                                               const std::string& singleImageGroup) {
+        const int idx = entry.contains("index") ? SafeIntFromJson(entry.at("index"), -1) : -1;
+        const int originIdx = entry.contains("origin_index") ? SafeIntFromJson(entry.at("origin_index"), idx) : idx;
+        const std::string transformSig = entry.contains("transform") ? SerializeTokenCompact(entry.at("transform")) : "null";
+
+        auto it = imageGroups.find(originIdx);
+        if (it != imageGroups.end()) return std::string("image|") + it->second + "|" + transformSig;
+        it = imageGroups.find(idx);
+        if (it != imageGroups.end()) return std::string("image|") + it->second + "|" + transformSig;
+
+        if (!singleImageGroup.empty()) return std::string("image|") + singleImageGroup + "|" + transformSig;
+        return BuildStrictGroupKey(idx, originIdx, transformSig);
+    }
+
+    static std::string BuildStrictGroupKey(int idx, int originIdx, const std::string& transformSig) {
+        return std::to_string(idx) + "|" + std::to_string(originIdx) + "|" + transformSig;
+    }
+
+    static std::string ImageFingerprint(const ModuleImage& image) {
+        const cv::Mat* mat = !image.OriginalImage.empty() ? &image.OriginalImage : &image.ImageObject;
+        if (mat == nullptr || mat->empty()) return std::string();
+
+        uint64_t hash = 1469598103934665603ULL;
+        const std::string header = std::to_string(mat->rows) + "x" +
+            std::to_string(mat->cols) + "x" +
+            std::to_string(mat->channels()) + ":" +
+            std::to_string(mat->type());
+        UpdateHash(hash, reinterpret_cast<const unsigned char*>(header.data()), header.size());
+
+        constexpr int patchH = 8;
+        constexpr int patchW = 8;
+        const std::array<std::pair<int, int>, 5> coords = {
+            std::make_pair(0, 0),
+            std::make_pair(0, std::max(0, mat->cols - patchW)),
+            std::make_pair(std::max(0, mat->rows - patchH), 0),
+            std::make_pair(std::max(0, mat->rows - patchH), std::max(0, mat->cols - patchW)),
+            std::make_pair(std::max(0, mat->rows / 2 - patchH / 2), std::max(0, mat->cols / 2 - patchW / 2))
+        };
+
+        for (const auto& coord : coords) {
+            const int yy = coord.first;
+            const int xx = coord.second;
+            const int width = std::min(patchW, mat->cols - xx);
+            const int height = std::min(patchH, mat->rows - yy);
+            if (width <= 0 || height <= 0) continue;
+
+            cv::Mat patch = (*mat)(cv::Rect(xx, yy, width, height)).clone();
+            if (patch.empty()) continue;
+            const size_t byteCount = patch.total() * patch.elemSize();
+            UpdateHash(hash, patch.ptr<unsigned char>(0), byteCount);
+        }
+
+        return std::to_string(hash);
+    }
+
+    static void UpdateHash(uint64_t& hash, const unsigned char* data, size_t size) {
+        if (data == nullptr || size == 0) return;
+        for (size_t i = 0; i < size; ++i) {
+            hash ^= static_cast<uint64_t>(data[i]);
+            hash *= 1099511628211ULL;
+        }
+    }
+
     static bool TryExtractBboxXyxy(const Json& det, std::array<double, 4>& bbox) {
         if (!det.is_object() || !det.contains("bbox") || !det.at("bbox").is_array()) return false;
         const Json& arr = det.at("bbox");

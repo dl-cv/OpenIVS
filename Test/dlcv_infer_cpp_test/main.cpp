@@ -1268,6 +1268,186 @@ int RunRectImageCorrectionSelfTest() {
     std::cout << "rect_image_correction 自测通过\n";
     return 0;
 }
+
+int CountBBoxDedupDetections(const json& results) {
+    if (!results.is_array()) return 0;
+    int count = 0;
+    for (const auto& entry : results) {
+        if (entry.is_object() && entry.contains("sample_results") && entry.at("sample_results").is_array()) {
+            count += static_cast<int>(entry.at("sample_results").size());
+            continue;
+        }
+        if (entry.is_object() && entry.contains("bbox")) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+json BuildBBoxDedupFlow(bool crossModel) {
+    json dedupProps = json::object({{"iou_threshold", 0.5}, {"per_category", true}});
+    if (!crossModel) dedupProps["cross_model"] = false;
+
+    return json::object({
+        {"nodes", json::array({
+            json::object({
+                {"id", 1},
+                {"order", 1},
+                {"type", "input/frontend_image"},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({101})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({102})}})
+                })}
+            }),
+            json::object({
+                {"id", 2},
+                {"order", 2},
+                {"type", "input/build_results"},
+                {"properties", json::object({
+                    {"category_id", 1},
+                    {"category_name", "target"},
+                    {"score", 0.99},
+                    {"bbox_x1", 10.0},
+                    {"bbox_y1", 10.0},
+                    {"bbox_x2", 110.0},
+                    {"bbox_y2", 110.0}
+                })},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 101}}),
+                    json::object({{"type", "result_chan"}, {"link", 102}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({201})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({202})}})
+                })}
+            }),
+            json::object({
+                {"id", 3},
+                {"order", 3},
+                {"type", "input/build_results"},
+                {"properties", json::object({
+                    {"category_id", 1},
+                    {"category_name", "target"},
+                    {"score", 0.88},
+                    {"bbox_x1", 20.0},
+                    {"bbox_y1", 20.0},
+                    {"bbox_x2", 100.0},
+                    {"bbox_y2", 100.0}
+                })},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 101}}),
+                    json::object({{"type", "result_chan"}, {"link", 102}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({301})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({302})}})
+                })}
+            }),
+            json::object({
+                {"id", 4},
+                {"order", 4},
+                {"type", "post_process/merge_results"},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 201}}),
+                    json::object({{"type", "result_chan"}, {"link", 202}}),
+                    json::object({{"type", "image_chan"}, {"link", 301}}),
+                    json::object({{"type", "result_chan"}, {"link", 302}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({401})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({402})}})
+                })}
+            }),
+            json::object({
+                {"id", 5},
+                {"order", 5},
+                {"type", "post_process/bbox_iou_dedup"},
+                {"properties", dedupProps},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 401}}),
+                    json::object({{"type", "result_chan"}, {"link", 402}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({501})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({502})}})
+                })}
+            }),
+            json::object({
+                {"id", 6},
+                {"order", 6},
+                {"type", "output/return_json"},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 501}}),
+                    json::object({{"type", "result_chan"}, {"link", 502}})
+                })},
+                {"outputs", json::array()}
+            })
+        })}
+    });
+}
+
+bool RunBBoxIoUDedupFlowCase(bool crossModel, int expectedCount, std::string& error) {
+    const std::string tempDir = BuildTempRectCorrectionDir();
+    const std::string flowPath = JoinPathA(tempDir, crossModel ? "bbox_dedup_cross.json" : "bbox_dedup_strict.json");
+    {
+        std::ofstream ofs(flowPath, std::ios::binary);
+        if (!ofs) {
+            error = "无法写入临时流程文件";
+            return false;
+        }
+        ofs << BuildBBoxDedupFlow(crossModel).dump(2);
+    }
+
+    try {
+        dlcv_infer::flow::FlowGraphModel model;
+        const json loadReport = model.Load(flowPath, kGpuDeviceId);
+        if (!loadReport.is_object() || loadReport.value("code", 1) != 0) {
+            error = std::string("流程加载失败: ") + loadReport.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        cv::Mat image(320, 320, CV_8UC3, cv::Scalar(0, 255, 0));
+        const json inferRoot = model.InferInternal(std::vector<cv::Mat>{image}, json::object());
+        if (!inferRoot.is_object() || inferRoot.value("code", 1) != 0) {
+            error = std::string("流程执行失败: ") + inferRoot.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        const json results = inferRoot.contains("result_list") ? inferRoot.at("result_list") : json::array();
+        const int kept = CountBBoxDedupDetections(results);
+        if (kept != expectedCount) {
+            error = std::string(crossModel ? "默认 cross_model=true" : "cross_model=false") +
+                " 保留数量不符合预期，actual=" + std::to_string(kept) +
+                ", expected=" + std::to_string(expectedCount) +
+                ", root=" + inferRoot.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+    } catch (const std::exception& ex) {
+        error = std::string("异常: ") + ex.what();
+        DeleteFileA(flowPath.c_str());
+        return false;
+    }
+
+    DeleteFileA(flowPath.c_str());
+    return true;
+}
+
+int RunBBoxIoUDedupSelfTest() {
+    auto fail = [](const std::string& message) -> int {
+        std::cout << "bbox_iou_dedup 自测失败: " << message << "\n";
+        return 1;
+    };
+
+    std::string error;
+    if (!RunBBoxIoUDedupFlowCase(true, 1, error)) return fail(error);
+    if (!RunBBoxIoUDedupFlowCase(false, 2, error)) return fail(error);
+
+    std::cout << "bbox_iou_dedup 自测通过\n";
+    return 0;
+}
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -1311,6 +1491,10 @@ int main(int argc, char* argv[]) {
 
     if (argc >= 2 && std::string(argv[1]) == "rect-image-correction-selftest") {
         return RunRectImageCorrectionSelfTest();
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "bbox-iou-dedup-selftest") {
+        return RunBBoxIoUDedupSelfTest();
     }
 
     if (argc >= 2 && std::string(argv[1]) == "flow-instance-seg-filter-selftest") {

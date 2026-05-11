@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 
@@ -3344,6 +3347,7 @@ namespace DlcvModules
     /// - 仅处理 type == "local" 的条目
     /// - 从 sample_results 提取 bbox=[x,y,w,h]，内部转换为 xyxy 后按分组与面积从大到小去重
     /// - metric 支持 iou / ios；per_category 控制是否按类别分别去重
+    /// - cross_model 默认 true：跨不同模型分支按原图指纹 + transform 分组；false 时按 index/origin_index/transform 严格分组
     /// </summary>
     public class BBoxIoUDedup : BaseModule
     {
@@ -3374,6 +3378,18 @@ namespace DlcvModules
             string metric = NormalizeMetric(GetPropertyString("metric", "iou"));
             double threshold = Clamp01(GetPropertyDouble("iou_threshold", 0.5));
             bool perCategory = GetPropertyBool("per_category", true);
+            bool crossModel = GetPropertyBool("cross_model", true);
+            var imageGroups = crossModel ? BuildImageGroupsByIndex(images) : new Dictionary<int, string>();
+            string singleImageGroup = null;
+            if (imageGroups.Count > 0)
+            {
+                var uniqueGroups = new List<string>();
+                foreach (string group in imageGroups.Values)
+                {
+                    if (!uniqueGroups.Contains(group)) uniqueGroups.Add(group);
+                }
+                if (uniqueGroups.Count == 1) singleImageGroup = uniqueGroups[0];
+            }
 
             var keepFlags = new Dictionary<int, List<bool>>();
             var grouped = new Dictionary<string, List<Candidate>>(StringComparer.Ordinal);
@@ -3394,7 +3410,9 @@ namespace DlcvModules
                 int idx = SafeInt(entry["index"], -1);
                 int originIdx = SafeInt(entry["origin_index"], idx);
                 string transformSig = SerializeTokenCompact(entry["transform"]);
-                string entryGroupKey = string.Format("{0}|{1}|{2}", idx, originIdx, transformSig);
+                string entryGroupKey = crossModel
+                    ? BuildCrossModelGroupKey(entry, imageGroups, singleImageGroup)
+                    : BuildStrictGroupKey(idx, originIdx, transformSig);
 
                 for (int detIdx = 0; detIdx < dets.Count; detIdx++)
                 {
@@ -3537,6 +3555,109 @@ namespace DlcvModules
             return defaultValue;
         }
 
+        private static Dictionary<int, string> BuildImageGroupsByIndex(List<ModuleImage> images)
+        {
+            var groups = new Dictionary<int, string>();
+            if (images == null) return groups;
+
+            for (int i = 0; i < images.Count; i++)
+            {
+                string fingerprint = ImageFingerprint(images[i]);
+                if (!string.IsNullOrEmpty(fingerprint))
+                {
+                    groups[i] = fingerprint;
+                }
+            }
+            return groups;
+        }
+
+        private static string BuildCrossModelGroupKey(JObject entry, Dictionary<int, string> imageGroups, string singleImageGroup)
+        {
+            int idx = SafeInt(entry["index"], -1);
+            int originIdx = SafeInt(entry["origin_index"], idx);
+            string transformSig = SerializeTokenCompact(entry["transform"]);
+
+            string group;
+            if (imageGroups != null)
+            {
+                if (imageGroups.TryGetValue(originIdx, out group)) return "image|" + group + "|" + transformSig;
+                if (imageGroups.TryGetValue(idx, out group)) return "image|" + group + "|" + transformSig;
+            }
+
+            if (!string.IsNullOrEmpty(singleImageGroup)) return "image|" + singleImageGroup + "|" + transformSig;
+            return BuildStrictGroupKey(idx, originIdx, transformSig);
+        }
+
+        private static string BuildStrictGroupKey(int idx, int originIdx, string transformSig)
+        {
+            return string.Format("{0}|{1}|{2}", idx, originIdx, transformSig);
+        }
+
+        private static string ImageFingerprint(ModuleImage image)
+        {
+            try
+            {
+                if (image == null) return null;
+                Mat mat = image.OriginalImage;
+                if (mat == null || mat.Empty()) mat = image.ImageObject;
+                if (mat == null || mat.Empty()) return null;
+
+                using (var md5 = MD5.Create())
+                {
+                    string header = string.Format(
+                        "{0}x{1}x{2}:{3}",
+                        mat.Rows,
+                        mat.Cols,
+                        mat.Channels(),
+                        mat.Type());
+                    AppendBytes(md5, Encoding.UTF8.GetBytes(header));
+
+                    const int patchHeight = 8;
+                    const int patchWidth = 8;
+                    var coords = new[]
+                    {
+                        Tuple.Create(0, 0),
+                        Tuple.Create(0, Math.Max(0, mat.Cols - patchWidth)),
+                        Tuple.Create(Math.Max(0, mat.Rows - patchHeight), 0),
+                        Tuple.Create(Math.Max(0, mat.Rows - patchHeight), Math.Max(0, mat.Cols - patchWidth)),
+                        Tuple.Create(Math.Max(0, mat.Rows / 2 - patchHeight / 2), Math.Max(0, mat.Cols / 2 - patchWidth / 2))
+                    };
+
+                    foreach (var coord in coords)
+                    {
+                        int yy = coord.Item1;
+                        int xx = coord.Item2;
+                        int width = Math.Min(patchWidth, mat.Cols - xx);
+                        int height = Math.Min(patchHeight, mat.Rows - yy);
+                        if (width <= 0 || height <= 0) continue;
+
+                        using (var patch = new Mat(mat, new Rect(xx, yy, width, height)))
+                        using (var contiguous = patch.Clone())
+                        {
+                            long byteCountLong = contiguous.Total() * contiguous.ElemSize();
+                            if (byteCountLong <= 0 || byteCountLong > int.MaxValue) continue;
+                            var bytes = new byte[(int)byteCountLong];
+                            Marshal.Copy(contiguous.Data, bytes, 0, bytes.Length);
+                            AppendBytes(md5, bytes);
+                        }
+                    }
+
+                    md5.TransformFinalBlock(new byte[0], 0, 0);
+                    return BitConverter.ToString(md5.Hash).Replace("-", "").ToLowerInvariant();
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void AppendBytes(HashAlgorithm hash, byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0) return;
+            hash.TransformBlock(bytes, 0, bytes.Length, null, 0);
+        }
+
         private double GetPropertyDouble(string key, double defaultValue)
         {
             if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
@@ -3551,8 +3672,12 @@ namespace DlcvModules
             if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
             {
                 if (v is bool b) return b;
-                if (bool.TryParse(v.ToString(), out bool pb)) return pb;
-                if (int.TryParse(v.ToString(), out int pi)) return pi != 0;
+                string s = v.ToString();
+                if (bool.TryParse(s, out bool pb)) return pb;
+                if (int.TryParse(s, out int pi)) return pi != 0;
+                s = (s ?? string.Empty).Trim().ToLowerInvariant();
+                if (s == "yes" || s == "y" || s == "on") return true;
+                if (s == "no" || s == "n" || s == "off") return false;
             }
             return defaultValue;
         }
