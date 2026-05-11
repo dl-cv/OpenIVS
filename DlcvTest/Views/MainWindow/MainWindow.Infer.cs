@@ -351,7 +351,7 @@ namespace DlcvTest
                                 // 按类别保存：根据 top1 类别创建子文件夹
                                 if (Settings.Default.SaveByCategory)
                                 {
-                                    string categoryName = "Unknown";
+                                    string categoryName = "OK";
                                     try
                                     {
                                         if (result.SampleResults != null && result.SampleResults.Count > 0)
@@ -398,7 +398,7 @@ namespace DlcvTest
                                     if (Settings.Default.SaveByCategory)
                                     {
                                         // 按类别保存：根据 top1 类别创建子文件夹
-                                        string categoryName = "Unknown";
+                                        string categoryName = "OK";
                                         try
                                         {
                                             if (result.SampleResults != null && result.SampleResults.Count > 0)
