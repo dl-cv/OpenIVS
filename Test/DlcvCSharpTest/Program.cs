@@ -72,6 +72,11 @@ namespace DlcvCSharpTest
                     return RunMaskToRBoxSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "bbox-iou-dedup-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunBBoxIoUDedupSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "rect-image-correction-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunRectImageCorrectionSelfTest();
@@ -1910,6 +1915,94 @@ namespace DlcvCSharpTest
                 Console.WriteLine("mask_to_rbox 自测通过");
                 return 0;
             }
+        }
+
+        private static int RunBBoxIoUDedupSelfTest()
+        {
+            Console.WriteLine("==== BBOX IoU 去重自测 ====");
+
+            using (var image = new Mat(320, 320, MatType.CV_8UC3, new Scalar(0, 255, 0)))
+            {
+                var state = new TransformationState(image.Width, image.Height);
+                var moduleImage = new ModuleImage(image, image, state, 0);
+                var images = new List<ModuleImage> { moduleImage };
+
+                var defaultModule = new BBoxIoUDedup(
+                    101,
+                    properties: new Dictionary<string, object>
+                    {
+                        ["iou_threshold"] = 0.5,
+                        ["per_category"] = true
+                    });
+                ModuleIO defaultOutput = defaultModule.Process(images, BuildBBoxDedupResults());
+                int defaultCount = CountBBoxDedupDetections(defaultOutput.ResultList);
+                if (defaultCount != 1)
+                {
+                    Console.WriteLine("默认 cross_model=true 应跨 index 去重，实际保留数量: " + defaultCount);
+                    return 1;
+                }
+
+                var strictModule = new BBoxIoUDedup(
+                    102,
+                    properties: new Dictionary<string, object>
+                    {
+                        ["iou_threshold"] = 0.5,
+                        ["per_category"] = true,
+                        ["cross_model"] = false
+                    });
+                ModuleIO strictOutput = strictModule.Process(images, BuildBBoxDedupResults());
+                int strictCount = CountBBoxDedupDetections(strictOutput.ResultList);
+                if (strictCount != 2)
+                {
+                    Console.WriteLine("cross_model=false 应恢复严格 index 分组，实际保留数量: " + strictCount);
+                    return 1;
+                }
+            }
+
+            Console.WriteLine("BBOX IoU 去重自测通过");
+            return 0;
+        }
+
+        private static JArray BuildBBoxDedupResults()
+        {
+            return new JArray
+            {
+                BuildBBoxDedupEntry(0, new JArray(10.0, 10.0, 100.0, 100.0)),
+                BuildBBoxDedupEntry(1, new JArray(20.0, 20.0, 80.0, 80.0))
+            };
+        }
+
+        private static JObject BuildBBoxDedupEntry(int index, JArray bbox)
+        {
+            return new JObject
+            {
+                ["type"] = "local",
+                ["index"] = index,
+                ["origin_index"] = index,
+                ["sample_results"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["bbox"] = bbox,
+                        ["category_id"] = 1,
+                        ["category_name"] = "target",
+                        ["score"] = 0.9
+                    }
+                }
+            };
+        }
+
+        private static int CountBBoxDedupDetections(JArray results)
+        {
+            int count = 0;
+            if (results == null) return count;
+            foreach (JToken token in results)
+            {
+                var entry = token as JObject;
+                var dets = entry?["sample_results"] as JArray;
+                if (dets != null) count += dets.Count;
+            }
+            return count;
         }
 
         private static int RunDemo2RgbSelfTest(string[] args)
