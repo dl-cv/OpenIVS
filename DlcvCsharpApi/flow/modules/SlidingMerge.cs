@@ -104,6 +104,7 @@ namespace DlcvModules
 
 		static SlidingMergeResults()
 		{
+			ModuleRegistry.Register("post_process/sliding_merge", typeof(SlidingMergeResults));
 			ModuleRegistry.Register("pre_process/sliding_merge", typeof(SlidingMergeResults));
 			ModuleRegistry.Register("features/sliding_merge", typeof(SlidingMergeResults));
 		}

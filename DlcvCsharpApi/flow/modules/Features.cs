@@ -19,6 +19,7 @@ namespace DlcvModules
     {
         static ImageGeneration()
         {
+            ModuleRegistry.Register("pre_process/image_generation", typeof(ImageGeneration));
             ModuleRegistry.Register("features/image_generation", typeof(ImageGeneration));
         }
 
@@ -304,7 +305,7 @@ namespace DlcvModules
                     var outEntry = new JObject
                     {
                         ["type"] = "local",
-                        ["originating_module"] = "features/image_generation",
+                        ["originating_module"] = "pre_process/image_generation",
                         ["index"] = outIndex,
                         ["origin_index"] = parentWrap != null ? parentWrap.OriginalIndex : originIndex,
                         ["transform"] = JObject.FromObject(childState.ToDict()),
@@ -408,6 +409,7 @@ namespace DlcvModules
     {
         static ImageFlip()
         {
+            ModuleRegistry.Register("pre_process/image_flip", typeof(ImageFlip));
             ModuleRegistry.Register("features/image_flip", typeof(ImageFlip));
         }
 
@@ -1762,6 +1764,7 @@ namespace DlcvModules
     {
         static ImageRotateByClassification()
         {
+            ModuleRegistry.Register("pre_process/image_rotate_by_cls", typeof(ImageRotateByClassification));
             ModuleRegistry.Register("features/image_rotate_by_cls", typeof(ImageRotateByClassification));
         }
 

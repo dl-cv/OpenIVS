@@ -1110,6 +1110,7 @@ public:
 // 注册
 DLCV_FLOW_REGISTER_MODULE("pre_process/sliding_window", SlidingWindowModule)
 DLCV_FLOW_REGISTER_MODULE("features/sliding_window", SlidingWindowModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/sliding_merge", SlidingMergeModule)
 DLCV_FLOW_REGISTER_MODULE("pre_process/sliding_merge", SlidingMergeModule)
 DLCV_FLOW_REGISTER_MODULE("features/sliding_merge", SlidingMergeModule)
 

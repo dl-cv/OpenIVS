@@ -489,7 +489,7 @@ public:
 
                 Json outEntry = Json::object();
                 outEntry["type"] = "local";
-                outEntry["originating_module"] = "features/image_generation";
+                outEntry["originating_module"] = "pre_process/image_generation";
                 outEntry["index"] = outIndex;
                 outEntry["origin_index"] = parentWrap.OriginalIndex;
                 outEntry["transform"] = childState.ToJson();
@@ -1013,13 +1013,16 @@ public:
 };
 
 // 注册
+DLCV_FLOW_REGISTER_MODULE("pre_process/image_generation", ImageGenerationModule)
 DLCV_FLOW_REGISTER_MODULE("features/image_generation", ImageGenerationModule)
+DLCV_FLOW_REGISTER_MODULE("pre_process/image_flip", ImageFlipModule)
 DLCV_FLOW_REGISTER_MODULE("features/image_flip", ImageFlipModule)
 DLCV_FLOW_REGISTER_MODULE("pre_process/rect_image_correction", RectImageCorrectionModule)
 DLCV_FLOW_REGISTER_MODULE("pre_process/coordinate_crop", CoordinateCropModule)
 DLCV_FLOW_REGISTER_MODULE("features/coordinate_crop", CoordinateCropModule)
 DLCV_FLOW_REGISTER_MODULE("pre_process/image_rescale", ImageRescaleModule)
 DLCV_FLOW_REGISTER_MODULE("features/image_rescale", ImageRescaleModule)
+DLCV_FLOW_REGISTER_MODULE("pre_process/image_rotate_by_cls", ImageRotateByClsModule)
 DLCV_FLOW_REGISTER_MODULE("features/image_rotate_by_cls", ImageRotateByClsModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/result_label_merge", ResultLabelMergeModule)
 DLCV_FLOW_REGISTER_MODULE("features/result_label_merge", ResultLabelMergeModule)
