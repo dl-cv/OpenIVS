@@ -262,9 +262,13 @@ namespace DlcvTest
             catch { }
 
             string outputDir = Path.Combine(dstDir, $"{modelName}_{timestamp}");
-            // 不再使用固定的 images/visualizations 子目录，直接按 OK/NG/类别名分文件夹
-            string imgDir = outputDir;
-            string visDir = outputDir;
+            string srcFolderName = Path.GetFileName(srcDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrWhiteSpace(srcFolderName))
+            {
+                srcFolderName = "images";
+            }
+            string imgDir = Path.Combine(outputDir, srcFolderName, "images");
+            string visDir = Path.Combine(outputDir, srcFolderName, "visualizations");
 
             try
             {
