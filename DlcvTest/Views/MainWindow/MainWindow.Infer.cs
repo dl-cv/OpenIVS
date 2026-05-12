@@ -262,14 +262,13 @@ namespace DlcvTest
             catch { }
 
             string outputDir = Path.Combine(dstDir, $"{modelName}_{timestamp}");
-            string imgDir = Path.Combine(outputDir, "images");
-            string visDir = Path.Combine(outputDir, "visualizations");
+            // 不再使用固定的 images/visualizations 子目录，直接按 OK/NG/类别名分文件夹
+            string imgDir = outputDir;
+            string visDir = outputDir;
 
             try
             {
                 Directory.CreateDirectory(outputDir);
-                if (saveImg) Directory.CreateDirectory(imgDir);
-                if (saveVis) Directory.CreateDirectory(visDir);
             }
             catch (Exception ex)
             {
@@ -346,143 +345,211 @@ namespace DlcvTest
                             // 保存原图
                             if (saveImg)
                             {
-                                string imgOutPath;
-                                
-                                // 按类别保存：根据 top1 类别创建子文件夹
-                                if (Settings.Default.SaveByCategory)
+                                // 提取图中所有类别名（去重）并判断是否有结果
+                                var categoryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                bool hasResults = false;
+                                try
                                 {
-                                    string categoryName = "OK";
-                                    try
+                                    if (result.SampleResults != null && result.SampleResults.Count > 0)
                                     {
-                                        if (result.SampleResults != null && result.SampleResults.Count > 0)
+                                        var firstSample = result.SampleResults[0];
+                                        if (firstSample.Results != null && firstSample.Results.Count > 0)
                                         {
-                                            var firstSample = result.SampleResults[0];
-                                            if (firstSample.Results != null && firstSample.Results.Count > 0)
+                                            hasResults = true;
+                                            foreach (var r in firstSample.Results)
                                             {
-                                                // 手动找到置信度最高的结果（避免 lambda 表达式与 dynamic 冲突）
-                                                var topResult = firstSample.Results[0];
-                                                for (int ri = 1; ri < firstSample.Results.Count; ri++)
+                                                if (!string.IsNullOrWhiteSpace(r.CategoryName))
                                                 {
-                                                    if (firstSample.Results[ri].Score > topResult.Score)
-                                                        topResult = firstSample.Results[ri];
-                                                }
-                                                if (!string.IsNullOrWhiteSpace(topResult.CategoryName))
-                                                {
-                                                    categoryName = SanitizeFileName(topResult.CategoryName);
+                                                    categoryNames.Add(SanitizeFileName(r.CategoryName));
                                                 }
                                             }
                                         }
                                     }
-                                    catch { }
-                                    
-                                    string targetDir = Path.Combine(imgDir, categoryName);
-                                    try { Directory.CreateDirectory(targetDir); } catch { }
-                                    imgOutPath = Path.Combine(targetDir, baseName + ext);
+                                }
+                                catch { }
+
+                                if (Settings.Default.SaveByCategory)
+                                {
+                                    // 按类别保存：每个出现过的类别都复制一份，保留原目录结构
+                                    if (categoryNames.Count > 0)
+                                    {
+                                        foreach (var categoryName in categoryNames)
+                                        {
+                                            string targetDir = Path.Combine(imgDir, categoryName);
+                                            string imgOutPath = GetRelativeOutputPath(srcDir, imgPath, targetDir, null);
+                                            try { Cv2.ImWrite(imgOutPath, mat); } catch { }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // 无结果 → OK
+                                        if (Settings.Default.SaveOk)
+                                        {
+                                            string targetDir = Path.Combine(imgDir, "OK");
+                                            string imgOutPath = GetRelativeOutputPath(srcDir, imgPath, targetDir, null);
+                                            try { Cv2.ImWrite(imgOutPath, mat); } catch { }
+                                        }
+                                    }
                                 }
                                 else
                                 {
-                                    // 普通保存：保留原文件夹结构
-                                    imgOutPath = GetRelativeOutputPath(srcDir, imgPath, imgDir, null);
+                                    // 按 OK/NG 保存，保留原目录结构
+                                    if (!hasResults)
+                                    {
+                                        if (Settings.Default.SaveOk)
+                                        {
+                                            string targetDir = Path.Combine(imgDir, "OK");
+                                            string imgOutPath = GetRelativeOutputPath(srcDir, imgPath, targetDir, null);
+                                            try { Cv2.ImWrite(imgOutPath, mat); } catch { }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (Settings.Default.SaveNg)
+                                        {
+                                            string targetDir = Path.Combine(imgDir, "NG");
+                                            string imgOutPath = GetRelativeOutputPath(srcDir, imgPath, targetDir, null);
+                                            try { Cv2.ImWrite(imgOutPath, mat); } catch { }
+                                        }
+                                    }
                                 }
-                                
-                                try { Cv2.ImWrite(imgOutPath, mat); } catch { }
                             }
 
                             // 可视化并保存（左边：GT 标注，右边：推理结果）
                             if (saveVis)
                             {
+                                // 提取图中所有类别名（去重）并判断是否有结果
+                                var categoryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                bool hasResults = false;
                                 try
                                 {
-                                    // 计算输出路径
-                                    string visOutPath;
-                                    if (Settings.Default.SaveByCategory)
+                                    if (result.SampleResults != null && result.SampleResults.Count > 0)
                                     {
-                                        // 按类别保存：根据 top1 类别创建子文件夹
-                                        string categoryName = "OK";
-                                        try
+                                        var firstSample = result.SampleResults[0];
+                                        if (firstSample.Results != null && firstSample.Results.Count > 0)
                                         {
-                                            if (result.SampleResults != null && result.SampleResults.Count > 0)
+                                            hasResults = true;
+                                            foreach (var r in firstSample.Results)
                                             {
-                                                var firstSample = result.SampleResults[0];
-                                                if (firstSample.Results != null && firstSample.Results.Count > 0)
+                                                if (!string.IsNullOrWhiteSpace(r.CategoryName))
                                                 {
-                                                    // 手动找到置信度最高的结果（避免 lambda 表达式与 dynamic 冲突）
-                                                    var topResult = firstSample.Results[0];
-                                                    for (int ri = 1; ri < firstSample.Results.Count; ri++)
-                                                    {
-                                                        if (firstSample.Results[ri].Score > topResult.Score)
-                                                            topResult = firstSample.Results[ri];
-                                                    }
-                                                    if (!string.IsNullOrWhiteSpace(topResult.CategoryName))
-                                                    {
-                                                        categoryName = SanitizeFileName(topResult.CategoryName);
-                                                    }
+                                                    categoryNames.Add(SanitizeFileName(r.CategoryName));
                                                 }
                                             }
-                                        }
-                                        catch { }
-                                        
-                                        string targetVisDir = Path.Combine(visDir, categoryName);
-                                        try { Directory.CreateDirectory(targetVisDir); } catch { }
-                                        visOutPath = Path.Combine(targetVisDir, baseName + "_vis.png");
-                                    }
-                                    else
-                                    {
-                                        // 普通保存：保留原文件夹结构，文件名添加 _vis 后缀
-                                        string relativePath = GetRelativeOutputPath(srcDir, imgPath, visDir, ".png");
-                                        string dir = Path.GetDirectoryName(relativePath);
-                                        string name = Path.GetFileNameWithoutExtension(relativePath);
-                                        visOutPath = Path.Combine(dir, name + "_vis.png");
-                                    }
-
-                                    // 1. 左边：原图 + LabelMe 标注绘制（GT）
-                                    // 注意：当 saveImg=false 时，DrawLabelMeAnnotationsInPlace 返回 mat 本身，
-                                    // 不能放入 using 块，否则会导致双重 Dispose（外层 using(mat) 也会释放）
-                                    string labelMePath = Path.ChangeExtension(imgPath, ".json");
-                                    Mat leftImage = null;
-                                    bool shouldDisposeLeftImage = saveImg; // 只有克隆时才需要手动释放
-                                    try
-                                    {
-                                        leftImage = saveImg ? DrawLabelMeAnnotations(mat.Clone(), labelMePath, visProperties) 
-                                                            : DrawLabelMeAnnotationsInPlace(mat, labelMePath, visProperties);
-                                        
-                                        // 2. 右边：原图 + 推理结果绘制
-                                        // Visualize 内部三通道现统一按 RGB 语义处理；这里只在最终写盘边界做 BGR↔RGB。
-                                        using (var matForVis = saveImg ? mat.Clone() : Cv2.ImRead(imgPath, ImreadModes.Color))
-                                        using (var matForVisRgb = new Mat())
-                                        {
-                                            Cv2.CvtColor(matForVis, matForVisRgb, ColorConversionCodes.BGR2RGB);
-                                            var visList = Utils.VisualizeResults(
-                                                new List<Mat> { matForVisRgb }, result, visProperties);
-                                            if (visList != null && visList.Count > 0 && visList[0] != null)
-                                            {
-                                                using (var rightImageRgb = visList[0])
-                                                using (var rightImage = new Mat())
-                                                {
-                                                    Cv2.CvtColor(rightImageRgb, rightImage, ColorConversionCodes.RGB2BGR);
-                                                    // 3. 使用 HConcat 高效拼接
-                                                    using (var combined = ConcatImagesHorizontallyFast(leftImage, rightImage))
-                                                    {
-                                                        // 4. 保存
-                                                        Cv2.ImWrite(visOutPath, combined);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    finally
-                                    {
-                                        // 只有 saveImg=true 时才释放 leftImage（因为是克隆的新 Mat）
-                                        // saveImg=false 时 leftImage 就是 mat 本身，由外层 using 块负责释放
-                                        if (shouldDisposeLeftImage && leftImage != null)
-                                        {
-                                            leftImage.Dispose();
                                         }
                                     }
                                 }
-                                catch (Exception visEx)
+                                catch { }
+
+                                // 确定要保存的目标路径列表
+                                var visOutPaths = new List<string>();
+                                if (Settings.Default.SaveByCategory)
                                 {
-                                    System.Diagnostics.Debug.WriteLine($"[批量推理] 可视化失败: {visEx.Message}");
+                                    if (categoryNames.Count > 0)
+                                    {
+                                        foreach (var categoryName in categoryNames)
+                                        {
+                                            string targetDir = Path.Combine(visDir, categoryName);
+                                            string relativePath = GetRelativeOutputPath(srcDir, imgPath, targetDir, ".png");
+                                            string dir = Path.GetDirectoryName(relativePath);
+                                            string name = Path.GetFileNameWithoutExtension(relativePath);
+                                            visOutPaths.Add(Path.Combine(dir, name + "_vis.png"));
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (Settings.Default.SaveOk)
+                                        {
+                                            string targetDir = Path.Combine(visDir, "OK");
+                                            string relativePath = GetRelativeOutputPath(srcDir, imgPath, targetDir, ".png");
+                                            string dir = Path.GetDirectoryName(relativePath);
+                                            string name = Path.GetFileNameWithoutExtension(relativePath);
+                                            visOutPaths.Add(Path.Combine(dir, name + "_vis.png"));
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    if (!hasResults)
+                                    {
+                                        if (Settings.Default.SaveOk)
+                                        {
+                                            string targetDir = Path.Combine(visDir, "OK");
+                                            string relativePath = GetRelativeOutputPath(srcDir, imgPath, targetDir, ".png");
+                                            string dir = Path.GetDirectoryName(relativePath);
+                                            string name = Path.GetFileNameWithoutExtension(relativePath);
+                                            visOutPaths.Add(Path.Combine(dir, name + "_vis.png"));
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (Settings.Default.SaveNg)
+                                        {
+                                            string targetDir = Path.Combine(visDir, "NG");
+                                            string relativePath = GetRelativeOutputPath(srcDir, imgPath, targetDir, ".png");
+                                            string dir = Path.GetDirectoryName(relativePath);
+                                            string name = Path.GetFileNameWithoutExtension(relativePath);
+                                            visOutPaths.Add(Path.Combine(dir, name + "_vis.png"));
+                                        }
+                                    }
+                                }
+
+                                if (visOutPaths.Count > 0)
+                                {
+                                    try
+                                    {
+                                        // 1. 左边：原图 + LabelMe 标注绘制（GT）
+                                        // 注意：当 saveImg=false 时，DrawLabelMeAnnotationsInPlace 返回 mat 本身，
+                                        // 不能放入 using 块，否则会导致双重 Dispose（外层 using(mat) 也会释放）
+                                        string labelMePath = Path.ChangeExtension(imgPath, ".json");
+                                        Mat leftImage = null;
+                                        bool shouldDisposeLeftImage = saveImg; // 只有克隆时才需要手动释放
+                                        try
+                                        {
+                                            leftImage = saveImg ? DrawLabelMeAnnotations(mat.Clone(), labelMePath, visProperties) 
+                                                                : DrawLabelMeAnnotationsInPlace(mat, labelMePath, visProperties);
+                                            
+                                            // 2. 右边：原图 + 推理结果绘制
+                                            // Visualize 内部三通道现统一按 RGB 语义处理；这里只在最终写盘边界做 BGR↔RGB。
+                                            using (var matForVis = saveImg ? mat.Clone() : Cv2.ImRead(imgPath, ImreadModes.Color))
+                                            using (var matForVisRgb = new Mat())
+                                            {
+                                                Cv2.CvtColor(matForVis, matForVisRgb, ColorConversionCodes.BGR2RGB);
+                                                var visList = Utils.VisualizeResults(
+                                                    new List<Mat> { matForVisRgb }, result, visProperties);
+                                                if (visList != null && visList.Count > 0 && visList[0] != null)
+                                                {
+                                                    using (var rightImageRgb = visList[0])
+                                                    using (var rightImage = new Mat())
+                                                    {
+                                                        Cv2.CvtColor(rightImageRgb, rightImage, ColorConversionCodes.RGB2BGR);
+                                                        // 3. 使用 HConcat 高效拼接
+                                                        using (var combined = ConcatImagesHorizontallyFast(leftImage, rightImage))
+                                                        {
+                                                            // 4. 保存到所有目标路径
+                                                            foreach (var visOutPath in visOutPaths)
+                                                            {
+                                                                try { Cv2.ImWrite(visOutPath, combined); } catch { }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        finally
+                                        {
+                                            // 只有 saveImg=true 时才释放 leftImage（因为是克隆的新 Mat）
+                                            // saveImg=false 时 leftImage 就是 mat 本身，由外层 using 块负责释放
+                                            if (shouldDisposeLeftImage && leftImage != null)
+                                            {
+                                                leftImage.Dispose();
+                                            }
+                                        }
+                                    }
+                                    catch (Exception visEx)
+                                    {
+                                        System.Diagnostics.Debug.WriteLine($"[批量推理] 可视化失败: {visEx.Message}");
+                                    }
                                 }
                             }
                         }

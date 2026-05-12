@@ -174,12 +174,46 @@
                 <Rectangle Height="1" Fill="#E0E0E0" Margin="0,10,0,20"/>
 
                 <!-- ==================== 第一部分：保存原图 ==================== -->
-                <DockPanel Margin="0,0,0,20" LastChildFill="False">
+                <DockPanel Margin="0,0,0,10" LastChildFill="False">
                     <TextBlock Text="保存原图" VerticalAlignment="Center" FontSize="16" Foreground="#333"/>
                     <controls:AnimatedToggleSwitchWithText x:Name="chkSaveOriginal" DockPanel.Dock="Right" VerticalAlignment="Center"
                                                            Checked="ChkSaveOriginal_Checked"
                                                            Unchecked="ChkSaveOriginal_Unchecked"/>
                 </DockPanel>
+
+                <!-- 保存原图子选项：OK / NG -->
+                <StackPanel x:Name="pnlSaveOriginalOptions" Margin="20,0,0,20">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ElementName=chkSaveOriginal, Path=IsChecked}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="保存 OK" VerticalAlignment="Center" FontSize="14" Foreground="#555" HorizontalAlignment="Left" TextAlignment="Left"/>
+                        <controls:AnimatedCheckBox Grid.Column="1" x:Name="chkSaveOk" IsChecked="True" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"
+                                                   Checked="ChkSaveOk_Checked"
+                                                   Unchecked="ChkSaveOk_Unchecked"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="保存 NG" VerticalAlignment="Center" FontSize="14" Foreground="#555" HorizontalAlignment="Left" TextAlignment="Left"/>
+                        <controls:AnimatedCheckBox Grid.Column="1" x:Name="chkSaveNg" IsChecked="True" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"
+                                                   Checked="ChkSaveNg_Checked"
+                                                   Unchecked="ChkSaveNg_Unchecked"/>
+                    </Grid>
+                </StackPanel>
 
                 <!-- 分割线 -->
                 <Rectangle Height="1" Fill="#E0E0E0" Margin="0,10,0,20"/>
