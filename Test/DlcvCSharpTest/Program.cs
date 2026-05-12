@@ -107,6 +107,11 @@ namespace DlcvCSharpTest
                     return RunFlowInstanceSegFilterSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvst-double-load-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDvstDoubleLoadSelfTest();
+                }
+
                 if (args != null && args.Length >= 2)
                 {
                     string modelPath = args[0];
@@ -2640,6 +2645,124 @@ namespace DlcvCSharpTest
             public IntPtr PagefileUsage;
             public IntPtr PeakPagefileUsage;
             public IntPtr PrivateUsage;
+        }
+
+        private static int RunDvstDoubleLoadSelfTest()
+        {
+            const string modelAPath = @"Y:\zxc\微组BUG测试\pipeline.dvst";
+            const string modelBPath = @"Y:\zxc\微组BUG测试\实例分割筛选测试_120_50.dvst";
+            const string imagePath = @"Y:\zxc\微组BUG测试\实例分割滑窗大图.png";
+            const int deviceId = 0;
+
+            Console.WriteLine("==== dvst 双模型加载-释放-再加载自测 ====");
+
+            if (!File.Exists(modelAPath)) { Console.WriteLine("模型A不存在: " + modelAPath); return 2; }
+            if (!File.Exists(modelBPath)) { Console.WriteLine("模型B不存在: " + modelBPath); return 2; }
+            if (!File.Exists(imagePath))  { Console.WriteLine("图像不存在: " + imagePath); return 2; }
+
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) { Console.WriteLine("图像解码失败"); return 2; }
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("图像读取异常: " + ex.Message);
+                return 2;
+            }
+
+            var p = new JObject { ["threshold"] = 0.5, ["with_mask"] = true, ["batch_size"] = 1 };
+            Model modelA = null;
+            Model modelB = null;
+            int step = 0;
+
+            try
+            {
+                // 1. 加载A
+                step = 1;
+                Console.WriteLine("[" + step + "] 加载模型A...");
+                modelA = new Model(modelAPath, deviceId, false, false);
+                Console.WriteLine("    A loaded, provider=" + modelA.LoadedDogProvider + ", dll=" + modelA.LoadedNativeDllName);
+
+                // 2. 加载B
+                step = 2;
+                Console.WriteLine("[" + step + "] 加载模型B...");
+                modelB = new Model(modelBPath, deviceId, false, false);
+                Console.WriteLine("    B loaded, provider=" + modelB.LoadedDogProvider + ", dll=" + modelB.LoadedNativeDllName);
+
+                // 3. A推理
+                step = 3;
+                Console.WriteLine("[" + step + "] 模型A首次推理...");
+                var ra1 = modelA.InferBatch(new List<Mat> { rgb }, p);
+                Console.WriteLine("    A推理完成, sample_count=" + ra1.SampleResults.Count);
+                DisposeResultMasks(ra1);
+
+                // 4. B推理
+                step = 4;
+                Console.WriteLine("[" + step + "] 模型B首次推理...");
+                var rb1 = modelB.InferBatch(new List<Mat> { rgb }, p);
+                Console.WriteLine("    B推理完成, sample_count=" + rb1.SampleResults.Count);
+                DisposeResultMasks(rb1);
+
+                // 5. 释放A (FreeModel)
+                step = 5;
+                Console.WriteLine("[" + step + "] 释放模型A (FreeModel)...");
+                modelA.FreeModel();
+                Console.WriteLine("    A已释放");
+
+                // 6. 再次加载A
+                step = 6;
+                Console.WriteLine("[" + step + "] 再次加载模型A...");
+                modelA = new Model(modelAPath, deviceId, false, false);
+                Console.WriteLine("    A再次加载完成, provider=" + modelA.LoadedDogProvider);
+
+                // 7. 释放B (FreeModel)
+                step = 7;
+                Console.WriteLine("[" + step + "] 释放模型B (FreeModel)...");
+                modelB.FreeModel();
+                Console.WriteLine("    B已释放");
+
+                // 8. 再次加载B
+                step = 8;
+                Console.WriteLine("[" + step + "] 再次加载模型B...");
+                modelB = new Model(modelBPath, deviceId, false, false);
+                Console.WriteLine("    B再次加载完成, provider=" + modelB.LoadedDogProvider);
+
+                // 9. A再次推理
+                step = 9;
+                Console.WriteLine("[" + step + "] 模型A再次推理...");
+                var ra2 = modelA.InferBatch(new List<Mat> { rgb }, p);
+                Console.WriteLine("    A再次推理完成, sample_count=" + ra2.SampleResults.Count);
+                DisposeResultMasks(ra2);
+
+                // 10. B再次推理
+                step = 10;
+                Console.WriteLine("[" + step + "] 模型B再次推理...");
+                var rb2 = modelB.InferBatch(new List<Mat> { rgb }, p);
+                Console.WriteLine("    B再次推理完成, sample_count=" + rb2.SampleResults.Count);
+                DisposeResultMasks(rb2);
+
+                Console.WriteLine("==== dvst 双模型加载-释放-再加载自测 全部通过 ====");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[" + step + "] 异常: " + ex.Message);
+                Console.WriteLine(ex.StackTrace);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (modelA != null) modelA.Dispose(); } catch { }
+                try { if (modelB != null) modelB.Dispose(); } catch { }
+                ForceGc();
+            }
         }
 
         [DllImport("psapi.dll", SetLastError = true)]
