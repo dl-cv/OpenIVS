@@ -25,8 +25,8 @@ MSBUILD_CANDIDATES = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build a Visual Studio solution or C# project")
-    parser.add_argument("path", nargs="?", help="Target .sln or .csproj path")
+    parser = argparse.ArgumentParser(description="Build a Visual Studio solution, C# project, or C++ project")
+    parser.add_argument("path", nargs="?", help="Target .sln, .csproj, or .vcxproj path")
     parser.add_argument("--configuration", default="Debug", choices=["Debug", "Release"])
     parser.add_argument("--platform", default="x64", choices=["x86", "x64", "Any CPU"])
     parser.add_argument("--target", default="Build", help="MSBuild target, for example Build/Clean/Rebuild")
@@ -59,8 +59,8 @@ def resolve_target(raw_path: str | None) -> Path:
 
     if not target.exists():
         raise FileNotFoundError(f"Target not found: {target}")
-    if target.suffix.lower() not in {".sln", ".csproj"}:
-        raise ValueError(f"Only .sln or .csproj is supported: {target}")
+    if target.suffix.lower() not in {".sln", ".csproj", ".vcxproj"}:
+        raise ValueError(f"Only .sln, .csproj, or .vcxproj is supported: {target}")
     return target
 
 
