@@ -1866,10 +1866,227 @@ bool RunBBoxCropFixOneModel(const std::string& name,
     return ok;
 }
 
+json BuildImageGenerationExpandFlow(const std::string& saveDir,
+                                    const std::string& suffix,
+                                    const json& cropProperties,
+                                    const json& resultProperties) {
+    return json::object({
+        {"nodes", json::array({
+            json::object({
+                {"id", 1},
+                {"order", 1},
+                {"type", "input/frontend_image"},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({101})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({102})}})
+                })}
+            }),
+            json::object({
+                {"id", 2},
+                {"order", 2},
+                {"type", "input/build_results"},
+                {"properties", resultProperties},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 101}}),
+                    json::object({{"type", "result_chan"}, {"link", 102}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({201})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({202})}})
+                })}
+            }),
+            json::object({
+                {"id", 3},
+                {"order", 3},
+                {"type", "features/image_generation"},
+                {"properties", cropProperties},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 201}}),
+                    json::object({{"type", "result_chan"}, {"link", 202}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({301})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({302})}})
+                })}
+            }),
+            json::object({
+                {"id", 4},
+                {"order", 4},
+                {"type", "output/save_image"},
+                {"properties", json::object({{"save_path", saveDir}, {"suffix", suffix}, {"format", "png"}})},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 301}}),
+                    json::object({{"type", "result_chan"}, {"link", 302}})
+                })},
+                {"outputs", json::array()}
+            })
+        })}
+    });
+}
+
+bool AssertImageGenerationCrop(const std::string& caseName,
+                               const std::string& tempDir,
+                               const json& cropProperties,
+                               const json& resultProperties,
+                               int expectedWidth,
+                               int expectedHeight,
+                               std::string& error) {
+    const std::string suffix = "_image_generation_expand_" + std::to_string(std::hash<std::string>{}(caseName));
+    const std::string flowPath = JoinPathA(tempDir, suffix + ".json");
+    DeleteFilesWithSuffix(tempDir, suffix + ".png");
+
+    {
+        std::ofstream ofs(flowPath, std::ios::binary);
+        if (!ofs) {
+            error = caseName + " 无法写入临时流程文件";
+            return false;
+        }
+        ofs << BuildImageGenerationExpandFlow(tempDir, suffix, cropProperties, resultProperties).dump(2);
+    }
+
+    try {
+        dlcv_infer::flow::FlowGraphModel model;
+        const json loadReport = model.Load(flowPath, kGpuDeviceId);
+        if (!loadReport.is_object() || loadReport.value("code", 1) != 0) {
+            error = caseName + " 流程加载失败: " + loadReport.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        cv::Mat image(200, 200, CV_8UC3, cv::Scalar(0, 0, 0));
+        const json inferRoot = model.InferInternal(std::vector<cv::Mat>{image}, json::object());
+        if (!inferRoot.is_object() || inferRoot.value("code", 1) != 0) {
+            error = caseName + " 流程执行失败: " + inferRoot.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+    } catch (const std::exception& ex) {
+        error = caseName + " 异常: " + ex.what();
+        DeleteFileA(flowPath.c_str());
+        return false;
+    }
+
+    const cv::Mat saved = LoadSingleFileWithSuffix(tempDir, suffix + ".png");
+    DeleteFilesWithSuffix(tempDir, suffix + ".png");
+    DeleteFileA(flowPath.c_str());
+    if (saved.empty()) {
+        error = caseName + " 未保存裁图";
+        return false;
+    }
+
+    if (saved.cols != expectedWidth || saved.rows != expectedHeight) {
+        error = caseName + " 裁图尺寸错误，actual=" + std::to_string(saved.cols) + "x" +
+                std::to_string(saved.rows) + ", expected=" + std::to_string(expectedWidth) +
+                "x" + std::to_string(expectedHeight);
+        return false;
+    }
+
+    return true;
+}
+
+bool RunImageGenerationExpandRegression(std::string& error) {
+    const std::string tempDir = BuildTempRectCorrectionDir();
+    const json axisResultProps = json::object({
+        {"category_id", 1},
+        {"category_name", "target"},
+        {"score", 0.99},
+        {"bbox_x", 50.0},
+        {"bbox_y", 60.0},
+        {"bbox_w", 40.0},
+        {"bbox_h", 20.0}
+    });
+
+    if (!AssertImageGenerationCrop(
+            "像素外扩",
+            tempDir,
+            json::object({{"crop_expand", 5}, {"crop_shape", json::array()}, {"min_size", 1}}),
+            axisResultProps,
+            50,
+            30,
+            error)) {
+        return false;
+    }
+
+    if (!AssertImageGenerationCrop(
+            "百分比外扩普通框",
+            tempDir,
+            json::object({{"crop_expand", 0}, {"crop_expand_mode", "percent"}, {"crop_expand_percent", 10}, {"crop_shape", json::array()}, {"min_size", 1}}),
+            axisResultProps,
+            48,
+            24,
+            error)) {
+        return false;
+    }
+
+    if (!AssertImageGenerationCrop(
+            "百分比上限",
+            tempDir,
+            json::object({{"crop_expand", 0}, {"crop_expand_mode", "percent"}, {"crop_expand_percent", 50}, {"crop_shape", json::array()}, {"min_size", 1}}),
+            axisResultProps,
+            66,
+            33,
+            error)) {
+        return false;
+    }
+
+    if (!AssertImageGenerationCrop(
+            "固定尺寸优先",
+            tempDir,
+            json::object({{"crop_expand", 5}, {"crop_expand_mode", "percent"}, {"crop_expand_percent", 10}, {"crop_shape", json::array({30, 25})}, {"min_size", 1}}),
+            axisResultProps,
+            30,
+            25,
+            error)) {
+        return false;
+    }
+
+    const json rotatedResultProps = json::object({
+        {"category_id", 1},
+        {"category_name", "target"},
+        {"score", 0.99},
+        {"bbox_cx", 100.0},
+        {"bbox_cy", 100.0},
+        {"bbox_w", 40.0},
+        {"bbox_h", 20.0},
+        {"with_angle", true},
+        {"angle", 0.0}
+    });
+    if (!AssertImageGenerationCrop(
+            "百分比外扩旋转框",
+            tempDir,
+            json::object({{"crop_expand", 0}, {"crop_expand_mode", "percent"}, {"crop_expand_percent", 10}, {"crop_shape", json::array()}, {"min_size", 1}}),
+            rotatedResultProps,
+            48,
+            24,
+            error)) {
+        return false;
+    }
+
+    return true;
+}
+
+int RunImageGenerationExpandSelfTest() {
+    std::cout << "==== AI 裁图外扩参数自测 ====\n";
+    std::string error;
+    if (!RunImageGenerationExpandRegression(error)) {
+        std::cout << "AI 裁图外扩参数自测失败: " << error << "\n";
+        return 1;
+    }
+
+    std::cout << "AI 裁图外扩参数自测通过\n";
+    return 0;
+}
+
 int RunBBoxCropFixSelfTest() {
     std::cout << "==== BBOX 去重与裁图修复自测 ====\n";
 
     std::string error;
+    if (!RunImageGenerationExpandRegression(error)) {
+        std::cout << "AI 裁图外扩参数逻辑回归失败: " << error << "\n";
+        return 1;
+    }
+    std::cout << "AI 裁图外扩参数逻辑回归通过\n";
+
     if (!RunBBoxIoUDedupFlowCase(true, 1, error)) {
         std::cout << "bbox_iou_dedup 默认跨模型自测失败: " << error << "\n";
         return 1;
@@ -1978,6 +2195,10 @@ int main(int argc, char* argv[]) {
 
     if (argc >= 2 && std::string(argv[1]) == "bbox-crop-fix-selftest") {
         return RunBBoxCropFixSelfTest();
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "image-generation-expand-selftest") {
+        return RunImageGenerationExpandSelfTest();
     }
 
     if (argc >= 2 && std::string(argv[1]) == "flow-instance-seg-filter-selftest") {

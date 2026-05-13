@@ -35,12 +35,24 @@ namespace DlcvModules
 
             // 与 Python 侧一致的裁剪参数
             double cropExpand = 0.0;
+            string cropExpandMode = "pixel";
+            double cropExpandPercent = 0.0;
             int? cropW = null;
             int? cropH = null;
             int minSize = 1;
             if (Properties != null)
             {
-                cropExpand = GetDouble(Properties, "crop_expand", 0.0);
+                cropExpand = Math.Max(0.0, GetDouble(Properties, "crop_expand", 0.0));
+                cropExpandMode = (GetString(Properties, "crop_expand_mode", "pixel") ?? "pixel").Trim().ToLowerInvariant();
+                cropExpandPercent = Math.Max(0.0, Math.Min(32.0, GetDouble(Properties, "crop_expand_percent", 0.0)));
+                if (cropExpandPercent > 0.0 && cropExpandMode != "pixel" && cropExpandMode != "px")
+                {
+                    cropExpandMode = "percent";
+                }
+                else if (cropExpandPercent > 0.0 && cropExpand <= 0.0)
+                {
+                    cropExpandMode = "percent";
+                }
                 minSize = Math.Max(1, GetInt(Properties, "min_size", 1));
 
                 try
@@ -71,6 +83,15 @@ namespace DlcvModules
                     cropH = null;
                 }
             }
+            Func<double, double, Tuple<double, double>> resolveExpand = (baseW, baseH) =>
+            {
+                if (cropExpandMode == "percent")
+                {
+                    double ratio = cropExpandPercent / 100.0;
+                    return Tuple.Create(Math.Max(0.0, baseW) * ratio, Math.Max(0.0, baseH) * ratio);
+                }
+                return Tuple.Create(cropExpand, cropExpand);
+            };
 
             // 构建 transform/index 映射，便于按条目裁剪。transform 仅在唯一时使用，避免多张整图恒等变换互相串图。
             var transformKeyToImage = new Dictionary<string, Tuple<ModuleImage, Mat, int>>();
@@ -165,8 +186,18 @@ namespace DlcvModules
                         double w = Math.Abs(bbox[2].Value<double>());
                         double h = Math.Abs(bbox[3].Value<double>());
 
-                        double w2 = cropW.HasValue && cropH.HasValue ? (double)cropW.Value : Math.Max((double)minSize, w + 2.0 * cropExpand);
-                        double h2 = cropW.HasValue && cropH.HasValue ? (double)cropH.Value : Math.Max((double)minSize, h + 2.0 * cropExpand);
+                        double w2, h2;
+                        if (cropW.HasValue && cropH.HasValue)
+                        {
+                            w2 = cropW.Value;
+                            h2 = cropH.Value;
+                        }
+                        else
+                        {
+                            var expand = resolveExpand(w, h);
+                            w2 = Math.Max((double)minSize, w + 2.0 * expand.Item1);
+                            h2 = Math.Max((double)minSize, h + 2.0 * expand.Item2);
+                        }
 
                         int iw = Math.Max(minSize, (int)w2);
                         int ih = Math.Max(minSize, (int)h2);
@@ -266,13 +297,16 @@ namespace DlcvModules
                         else
                         {
                             // 外扩：左上 int(...)（floor），右下 round 后再 clamp（与 Python 一致）
-                            double tx1 = Math.Max(0.0, Math.Min((double)W, x1 - cropExpand));
-                            double ty1 = Math.Max(0.0, Math.Min((double)H, y1 - cropExpand));
+                            var expand = resolveExpand(bw, bh);
+                            double expandW = expand.Item1;
+                            double expandH = expand.Item2;
+                            double tx1 = Math.Max(0.0, Math.Min((double)W, x1 - expandW));
+                            double ty1 = Math.Max(0.0, Math.Min((double)H, y1 - expandH));
                             nx1 = (int)Math.Floor(tx1);
                             ny1 = (int)Math.Floor(ty1);
 
-                            int rx2 = (int)Math.Round(x2 + cropExpand, MidpointRounding.ToEven);
-                            int ry2 = (int)Math.Round(y2 + cropExpand, MidpointRounding.ToEven);
+                            int rx2 = (int)Math.Round(x2 + expandW, MidpointRounding.ToEven);
+                            int ry2 = (int)Math.Round(y2 + expandH, MidpointRounding.ToEven);
                             nx2 = Math.Min(W, Math.Max(0, rx2));
                             ny2 = Math.Min(H, Math.Max(0, ry2));
                             nx2 = Math.Max(nx1 + minSize, nx2);
@@ -368,6 +402,12 @@ namespace DlcvModules
         {
             if (d == null || k == null || !d.TryGetValue(k, out object v) || v == null) return dv;
             try { return Convert.ToDouble(v); } catch { return dv; }
+        }
+
+        private static string GetString(Dictionary<string, object> d, string k, string dv)
+        {
+            if (d == null || k == null || !d.TryGetValue(k, out object v) || v == null) return dv;
+            try { return Convert.ToString(v); } catch { return dv; }
         }
 
         private static bool GetBool(Dictionary<string, object> d, string k, bool dv)

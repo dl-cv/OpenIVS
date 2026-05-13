@@ -85,6 +85,11 @@ namespace DlcvCSharpTest
                     return RunBBoxCropFixSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "image-generation-expand-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunImageGenerationExpandSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "rect-image-correction-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunRectImageCorrectionSelfTest();
@@ -2035,8 +2040,19 @@ namespace DlcvCSharpTest
             return 0;
         }
 
+        private static int RunImageGenerationExpandSelfTest()
+        {
+            Console.WriteLine("==== AI 裁图外扩参数自测 ====");
+            return RunImageGenerationExpandRegression() ? 0 : 1;
+        }
+
         private static bool RunBBoxCropLogicRegression()
         {
+            if (!RunImageGenerationExpandRegression())
+            {
+                return false;
+            }
+
             using (var img0 = new Mat(320, 320, MatType.CV_8UC3, new Scalar(0, 0, 0)))
             using (var img1 = new Mat(320, 320, MatType.CV_8UC3, new Scalar(0, 0, 0)))
             {
@@ -2136,6 +2152,160 @@ namespace DlcvCSharpTest
 
             Console.WriteLine("BBOX 去重与裁图逻辑回归通过");
             return true;
+        }
+
+        private static bool RunImageGenerationExpandRegression()
+        {
+            using (var img = new Mat(200, 200, MatType.CV_8UC3, new Scalar(0, 0, 0)))
+            {
+                var image = new ModuleImage(img, img, new TransformationState(200, 200), 0);
+                var images = new List<ModuleImage> { image };
+                string error;
+
+                if (!AssertImageGenerationCrop(
+                    "像素外扩",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 5,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 60.0, 40.0, 20.0),
+                    50,
+                    30,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比外扩普通框",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 10,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 60.0, 40.0, 20.0),
+                    48,
+                    24,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比上限",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 50,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 60.0, 40.0, 20.0),
+                    66,
+                    33,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "固定尺寸优先",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 5,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 10,
+                        ["crop_shape"] = new[] { 30, 25 },
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 60.0, 40.0, 20.0),
+                    30,
+                    25,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比外扩旋转框",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 10,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(100.0, 100.0, 40.0, 20.0, true, 0.0),
+                    48,
+                    24,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+            }
+
+            Console.WriteLine("AI 裁图外扩参数逻辑回归通过");
+            return true;
+        }
+
+        private static bool AssertImageGenerationCrop(
+            string caseName,
+            List<ModuleImage> images,
+            Dictionary<string, object> properties,
+            JObject detection,
+            int expectedWidth,
+            int expectedHeight,
+            out string error)
+        {
+            var cropper = new ImageGeneration(220, properties: properties);
+            var resultList = new JArray
+            {
+                BuildBBoxCropLocalEntry(0, 0, null, detection)
+            };
+            ModuleIO output = cropper.Process(images, resultList);
+            if (output.ImageList.Count != 1 || output.ResultList.Count != 1)
+            {
+                error = caseName + " 输出数量错误，image=" + output.ImageList.Count + ", result=" + output.ResultList.Count;
+                return false;
+            }
+
+            Mat cropped = output.ImageList[0].ImageObject;
+            int actualWidth = cropped != null ? cropped.Width : 0;
+            int actualHeight = cropped != null ? cropped.Height : 0;
+            if (actualWidth != expectedWidth || actualHeight != expectedHeight)
+            {
+                error = caseName + " 裁图尺寸错误，actual=" + actualWidth + "x" + actualHeight
+                    + ", expected=" + expectedWidth + "x" + expectedHeight;
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
+        private static JObject BuildImageGenerationDet(double x, double y, double w, double h, bool withAngle = false, double angle = -100.0)
+        {
+            var det = BuildBBoxCropDet(x, y, w, h, 0.99);
+            det["with_angle"] = withAngle;
+            det["angle"] = withAngle ? angle : -100.0;
+            return det;
         }
 
         private static JArray BuildEightToFourDedupResults()

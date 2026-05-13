@@ -11,6 +11,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "opencv2/imgproc.hpp"
@@ -311,7 +312,23 @@ public:
         const std::vector<ModuleImage>& imagesIn = imageList;
         const Json resultsIn = resultList.is_array() ? resultList : Json::array();
 
-        const double cropExpand = GetDoubleProp(Properties, "crop_expand", 0.0);
+        const double cropExpand = std::max(0.0, GetDoubleProp(Properties, "crop_expand", 0.0));
+        std::string cropExpandMode = ReadString("crop_expand_mode", "pixel");
+        cropExpandMode.erase(cropExpandMode.begin(),
+                             std::find_if(cropExpandMode.begin(), cropExpandMode.end(),
+                                          [] (unsigned char c) { return !std::isspace(c); }));
+        cropExpandMode.erase(std::find_if(cropExpandMode.rbegin(), cropExpandMode.rend(),
+                                          [] (unsigned char c) { return !std::isspace(c); }).base(),
+                             cropExpandMode.end());
+        std::transform(cropExpandMode.begin(), cropExpandMode.end(), cropExpandMode.begin(),
+                       [] (unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        double cropExpandPercent = GetDoubleProp(Properties, "crop_expand_percent", 0.0);
+        cropExpandPercent = std::max(0.0, std::min(32.0, cropExpandPercent));
+        if (cropExpandPercent > 0.0 && cropExpandMode != "pixel" && cropExpandMode != "px") {
+            cropExpandMode = "percent";
+        } else if (cropExpandPercent > 0.0 && cropExpand <= 0.0) {
+            cropExpandMode = "percent";
+        }
         const int minSize = std::max(1, GetIntProp(Properties, "min_size", 1));
 
         int cropW = -1, cropH = -1;
@@ -324,6 +341,14 @@ public:
                 }
             }
         } catch (...) { cropW = -1; cropH = -1; }
+        const bool hasCropShape = cropW > 0 && cropH > 0;
+        const auto resolveExpand = [&] (double baseW, double baseH) -> std::pair<double, double> {
+            if (cropExpandMode == "percent") {
+                const double ratio = cropExpandPercent / 100.0;
+                return std::make_pair(std::max(0.0, baseW) * ratio, std::max(0.0, baseH) * ratio);
+            }
+            return std::make_pair(cropExpand, cropExpand);
+        };
 
         // transform/index 映射。transform 仅在唯一时使用，避免多张整图恒等变换互相串图。
         using ImageBinding = std::tuple<ModuleImage, cv::Mat, int>;
@@ -420,8 +445,16 @@ public:
                     const double w = std::abs(bbox.at(2).get<double>());
                     const double h = std::abs(bbox.at(3).get<double>());
 
-                    const double w2 = (cropW > 0 && cropH > 0) ? static_cast<double>(cropW) : std::max<double>(minSize, w + 2.0 * cropExpand);
-                    const double h2 = (cropW > 0 && cropH > 0) ? static_cast<double>(cropH) : std::max<double>(minSize, h + 2.0 * cropExpand);
+                    double w2 = 0.0;
+                    double h2 = 0.0;
+                    if (hasCropShape) {
+                        w2 = static_cast<double>(cropW);
+                        h2 = static_cast<double>(cropH);
+                    } else {
+                        const auto expand = resolveExpand(w, h);
+                        w2 = std::max<double>(minSize, w + 2.0 * expand.first);
+                        h2 = std::max<double>(minSize, h + 2.0 * expand.second);
+                    }
                     const int iw = std::max(minSize, static_cast<int>(w2));
                     const int ih = std::max(minSize, static_cast<int>(h2));
 
@@ -479,25 +512,39 @@ public:
                     // axis-aligned crop: bbox=[x,y,w,h]
                     const double x = bbox.at(0).get<double>();
                     const double y = bbox.at(1).get<double>();
-                    const double bw = bbox.at(2).get<double>();
-                    const double bh = bbox.at(3).get<double>();
+                    const double bw = std::abs(bbox.at(2).get<double>());
+                    const double bh = std::abs(bbox.at(3).get<double>());
                     const double x1 = x;
                     const double y1 = y;
                     const double x2 = x + bw;
                     const double y2 = y + bh;
 
                     int nx1 = 0, ny1 = 0, nx2 = 0, ny2 = 0;
-                    // 外扩：左上 floor，右下 round（对齐 C#）
-                    const double tx1 = std::max(0.0, std::min(static_cast<double>(W), x1 - cropExpand));
-                    const double ty1 = std::max(0.0, std::min(static_cast<double>(H), y1 - cropExpand));
-                    nx1 = static_cast<int>(std::floor(tx1));
-                    ny1 = static_cast<int>(std::floor(ty1));
-                    const int rx2 = static_cast<int>(std::llround(x2 + cropExpand));
-                    const int ry2 = static_cast<int>(std::llround(y2 + cropExpand));
-                    nx2 = std::min(W, std::max(0, rx2));
-                    ny2 = std::min(H, std::max(0, ry2));
-                    nx2 = std::max(nx1 + minSize, nx2);
-                    ny2 = std::max(ny1 + minSize, ny2);
+                    if (hasCropShape) {
+                        const double cx = (x1 + x2) / 2.0;
+                        const double cy = (y1 + y2) / 2.0;
+                        const double tx1 = std::max(0.0, std::min(static_cast<double>(W), cx - static_cast<double>(cropW) / 2.0));
+                        const double ty1 = std::max(0.0, std::min(static_cast<double>(H), cy - static_cast<double>(cropH) / 2.0));
+                        nx1 = static_cast<int>(std::floor(tx1));
+                        ny1 = static_cast<int>(std::floor(ty1));
+                        nx2 = static_cast<int>(std::max(static_cast<double>(nx1 + 1),
+                                                        std::min(static_cast<double>(W), static_cast<double>(nx1 + cropW))));
+                        ny2 = static_cast<int>(std::max(static_cast<double>(ny1 + 1),
+                                                        std::min(static_cast<double>(H), static_cast<double>(ny1 + cropH))));
+                    } else {
+                        // 外扩：左上 floor，右下 round（对齐 C#）
+                        const auto expand = resolveExpand(bw, bh);
+                        const double tx1 = std::max(0.0, std::min(static_cast<double>(W), x1 - expand.first));
+                        const double ty1 = std::max(0.0, std::min(static_cast<double>(H), y1 - expand.second));
+                        nx1 = static_cast<int>(std::floor(tx1));
+                        ny1 = static_cast<int>(std::floor(ty1));
+                        const int rx2 = static_cast<int>(std::llround(x2 + expand.first));
+                        const int ry2 = static_cast<int>(std::llround(y2 + expand.second));
+                        nx2 = std::min(W, std::max(0, rx2));
+                        ny2 = std::min(H, std::max(0, ry2));
+                        nx2 = std::max(nx1 + minSize, nx2);
+                        ny2 = std::max(ny1 + minSize, ny2);
+                    }
 
                     nx1 = std::max(0, std::min(W, nx1));
                     ny1 = std::max(0, std::min(H, ny1));
