@@ -47,6 +47,7 @@ namespace DlcvDemo
         private void Form1_Load(object sender, EventArgs e)
         {
             TopMost = false;
+            this.Text = "C# 测试程序 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
             Thread thread = new Thread(GetDeviceInfo);
             thread.IsBackground = true;
             thread.Start();
