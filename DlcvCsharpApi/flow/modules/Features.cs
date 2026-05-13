@@ -72,14 +72,37 @@ namespace DlcvModules
                 }
             }
 
-            // 构建 transform/index 映射，便于按条目裁剪
+            // 构建 transform/index 映射，便于按条目裁剪。transform 仅在唯一时使用，避免多张整图恒等变换互相串图。
             var transformKeyToImage = new Dictionary<string, Tuple<ModuleImage, Mat, int>>();
+            var duplicateTransformKeys = new HashSet<string>(StringComparer.Ordinal);
+            var indexToImage = new Dictionary<int, Tuple<ModuleImage, Mat, int>>();
+            var originToImage = new Dictionary<int, Tuple<ModuleImage, Mat, int>>();
             for (int i = 0; i < imagesIn.Count; i++)
             {
                 var (wrap, bmp) = UnwrapImage(imagesIn[i]);
                 if (bmp == null || bmp.Empty()) continue;
-                string key = SerializeTransform(wrap != null ? wrap.TransformState : null, i, wrap != null ? wrap.OriginalIndex : i);
-                transformKeyToImage[key] = Tuple.Create(wrap, bmp, i);
+                var tup = Tuple.Create(wrap, bmp, i);
+                indexToImage[i] = tup;
+
+                int originIndex = wrap != null ? wrap.OriginalIndex : i;
+                if (!originToImage.ContainsKey(originIndex))
+                {
+                    originToImage[originIndex] = tup;
+                }
+
+                string key = SerializeTransformKey(wrap != null ? wrap.TransformState : null);
+                if (!string.IsNullOrEmpty(key))
+                {
+                    if (transformKeyToImage.ContainsKey(key))
+                    {
+                        transformKeyToImage.Remove(key);
+                        duplicateTransformKeys.Add(key);
+                    }
+                    else if (!duplicateTransformKeys.Contains(key))
+                    {
+                        transformKeyToImage[key] = tup;
+                    }
+                }
             }
 
             var imagesOut = new List<ModuleImage>();
@@ -92,14 +115,24 @@ namespace DlcvModules
                 int idx = entry["index"]?.Value<int?>() ?? -1;
                 int originIndex = entry["origin_index"]?.Value<int?>() ?? idx;
                 var stateDict = entry["transform"] as JObject;
-                var state = stateDict != null ? TransformationState.FromDict(stateDict.ToObject<Dictionary<string, object>>()) : null;
-                string key = SerializeTransform(state, idx, originIndex);
-                if (!transformKeyToImage.TryGetValue(key, out Tuple<ModuleImage, Mat, int> tup))
+                Tuple<ModuleImage, Mat, int> tup = null;
+
+                string key = SerializeTransformKey(stateDict);
+                if (!string.IsNullOrEmpty(key) && !duplicateTransformKeys.Contains(key))
                 {
-                    // 回退到 index 匹配
-                    key = SerializeTransform(null, idx, originIndex);
                     transformKeyToImage.TryGetValue(key, out tup);
                 }
+
+                if (tup == null && idx >= 0)
+                {
+                    indexToImage.TryGetValue(idx, out tup);
+                }
+
+                if (tup == null && originIndex >= 0)
+                {
+                    originToImage.TryGetValue(originIndex, out tup);
+                }
+
                 if (tup == null) continue;
 
                 var sampleResults = entry["sample_results"] as JArray;
@@ -373,6 +406,62 @@ namespace DlcvModules
             }
             var a = st.AffineMatrix2x3;
             return $"idx:{index}|org:{originIndex}|T:{a[0]:F4},{a[1]:F4},{a[2]:F2},{a[3]:F4},{a[4]:F4},{a[5]:F2}";
+        }
+
+        private static string SerializeTransformKey(TransformationState st)
+        {
+            if (st == null) return null;
+            try
+            {
+                return SerializeTransformKey(JObject.FromObject(st.ToDict()));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string SerializeTransformKey(JObject stObj)
+        {
+            if (stObj == null) return null;
+            try
+            {
+                return NormalizeTransformJson(stObj).ToString(Newtonsoft.Json.Formatting.None);
+            }
+            catch
+            {
+                return stObj.ToString(Newtonsoft.Json.Formatting.None);
+            }
+        }
+
+        private static JToken NormalizeTransformJson(JToken token)
+        {
+            if (token is JObject obj)
+            {
+                var normalized = new JObject();
+                foreach (var prop in obj.Properties().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    normalized[prop.Name] = NormalizeTransformJson(prop.Value);
+                }
+                return normalized;
+            }
+
+            if (token is JArray arr)
+            {
+                var normalized = new JArray();
+                foreach (var item in arr)
+                {
+                    normalized.Add(NormalizeTransformJson(item));
+                }
+                return normalized;
+            }
+
+            if (token != null && token.Type == JTokenType.Float)
+            {
+                return Math.Round(token.Value<double>(), 6);
+            }
+
+            return token != null ? token.DeepClone() : JValue.CreateNull();
         }
 
         
@@ -3412,7 +3501,7 @@ namespace DlcvModules
 
                 int idx = SafeInt(entry["index"], -1);
                 int originIdx = SafeInt(entry["origin_index"], idx);
-                string transformSig = SerializeTokenCompact(entry["transform"]);
+                string transformSig = TransformGroupKey(entry["transform"]);
                 string entryGroupKey = crossModel
                     ? BuildCrossModelGroupKey(entry, imageGroups, singleImageGroup)
                     : BuildStrictGroupKey(idx, originIdx, transformSig);
@@ -3578,7 +3667,7 @@ namespace DlcvModules
         {
             int idx = SafeInt(entry["index"], -1);
             int originIdx = SafeInt(entry["origin_index"], idx);
-            string transformSig = SerializeTokenCompact(entry["transform"]);
+            string transformSig = TransformGroupKey(entry["transform"]);
 
             string group;
             if (imageGroups != null)
@@ -3691,10 +3780,145 @@ namespace DlcvModules
             try { return token.Value<int>(); } catch { return defaultValue; }
         }
 
+        private static double SafeDouble(JToken token, double defaultValue)
+        {
+            if (token == null || token.Type == JTokenType.Null) return defaultValue;
+            try { return token.Value<double>(); } catch { return defaultValue; }
+        }
+
         private static string SerializeTokenCompact(JToken token)
         {
             if (token == null || token.Type == JTokenType.Null) return "null";
             try { return token.ToString(Newtonsoft.Json.Formatting.None); } catch { return token.ToString(); }
+        }
+
+        private static string TransformGroupKey(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null) return "__global__";
+            if (IsIdentityTransform(token as JObject)) return "__global__";
+            return SerializeTokenCompact(token);
+        }
+
+        private static bool IsIdentityTransform(JObject transform)
+        {
+            if (transform == null) return false;
+
+            bool hasOriginalSize = TryReadOriginalSize(transform, out int originalW, out int originalH);
+            bool hasCrop = TryReadCropBox(transform, out int cropX, out int cropY, out int cropW, out int cropH);
+            bool hasOutput = TryReadOutputSize(transform, out int outputW, out int outputH);
+            bool hasAffine = TryReadAffine(transform, out double[] affine);
+
+            if (!hasCrop && !hasAffine)
+            {
+                return hasOriginalSize;
+            }
+
+            if (hasCrop)
+            {
+                if (cropX != 0 || cropY != 0) return false;
+                if (hasOutput && (outputW != cropW || outputH != cropH)) return false;
+                if (hasOriginalSize && (cropW != originalW || cropH != originalH)) return false;
+            }
+            else if (hasOutput && hasOriginalSize && (outputW != originalW || outputH != originalH))
+            {
+                return false;
+            }
+
+            if (hasAffine && !IsIdentityAffine(affine)) return false;
+            return hasAffine || hasCrop;
+        }
+
+        private static bool TryReadOriginalSize(JObject transform, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+            if (transform == null) return false;
+
+            var originalSize = transform["original_size"] as JArray;
+            if (originalSize != null && originalSize.Count >= 2)
+            {
+                width = SafeInt(originalSize[0], 0);
+                height = SafeInt(originalSize[1], 0);
+                return width > 0 && height > 0;
+            }
+
+            width = SafeInt(transform["original_width"], 0);
+            height = SafeInt(transform["original_height"], 0);
+            return width > 0 && height > 0;
+        }
+
+        private static bool TryReadCropBox(JObject transform, out int x, out int y, out int width, out int height)
+        {
+            x = 0;
+            y = 0;
+            width = 0;
+            height = 0;
+            var crop = transform?["crop_box"] as JArray;
+            if (crop == null || crop.Count < 4) return false;
+            x = SafeInt(crop[0], 0);
+            y = SafeInt(crop[1], 0);
+            width = SafeInt(crop[2], 0);
+            height = SafeInt(crop[3], 0);
+            return width > 0 && height > 0;
+        }
+
+        private static bool TryReadOutputSize(JObject transform, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+            var output = transform?["output_size"] as JArray;
+            if (output == null || output.Count < 2) return false;
+            width = SafeInt(output[0], 0);
+            height = SafeInt(output[1], 0);
+            return width > 0 && height > 0;
+        }
+
+        private static bool TryReadAffine(JObject transform, out double[] affine)
+        {
+            affine = null;
+            var flat = transform?["affine_2x3"] as JArray;
+            if (flat != null && flat.Count >= 6)
+            {
+                affine = new[]
+                {
+                    SafeDouble(flat[0], 0.0),
+                    SafeDouble(flat[1], 0.0),
+                    SafeDouble(flat[2], 0.0),
+                    SafeDouble(flat[3], 0.0),
+                    SafeDouble(flat[4], 0.0),
+                    SafeDouble(flat[5], 0.0)
+                };
+                return true;
+            }
+
+            var matrix = transform?["affine_matrix"] as JArray;
+            if (matrix == null || matrix.Count < 2) return false;
+            var row0 = matrix[0] as JArray;
+            var row1 = matrix[1] as JArray;
+            if (row0 == null || row1 == null || row0.Count < 3 || row1.Count < 3) return false;
+
+            affine = new[]
+            {
+                SafeDouble(row0[0], 0.0),
+                SafeDouble(row0[1], 0.0),
+                SafeDouble(row0[2], 0.0),
+                SafeDouble(row1[0], 0.0),
+                SafeDouble(row1[1], 0.0),
+                SafeDouble(row1[2], 0.0)
+            };
+            return true;
+        }
+
+        private static bool IsIdentityAffine(double[] affine)
+        {
+            if (affine == null || affine.Length < 6) return false;
+            const double eps = 1e-6;
+            return Math.Abs(affine[0] - 1.0) < eps
+                && Math.Abs(affine[1]) < eps
+                && Math.Abs(affine[2]) < eps
+                && Math.Abs(affine[3]) < eps
+                && Math.Abs(affine[4] - 1.0) < eps
+                && Math.Abs(affine[5]) < eps;
         }
 
         private static bool TryExtractBboxXyxy(JObject det, out double[] bbox)
