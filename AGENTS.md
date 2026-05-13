@@ -1,6 +1,6 @@
 # OpenIVS Agent 规则
 
-> **规则映射说明**：本文档仅记录本项目特定的技术规则与上下文。关于 Git 工作流、PR 规范、文档原则、Agent 执行规范、编码与工程原则等用户级通用规则，请查阅 [~/.kimi/AGENTS.md](https://github.com/dl-cv/dlcv_mcp/blob/master/AGENTS.md)（dlcv_mcp 仓库）。
+> **规则映射说明**：本文档仅记录本项目特定的技术规则与上下文。关于 Git 工作流、PR 规范、文档原则、Agent 执行规范、编码与工程原则等用户级通用规则，请查阅 ~/.kimi/AGENTS.md（dlcv_mcp 仓库）。
 
 ## 项目概览
 
