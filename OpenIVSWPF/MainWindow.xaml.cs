@@ -68,6 +68,7 @@ namespace OpenIVSWPF
         public MainWindow()
         {
             InitializeComponent();
+            this.Title = "OpenIVS - 深度视觉 开源工业视觉系统 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
             Loaded += MainWindow_Loaded;
 
             // 初始化ViewModel
