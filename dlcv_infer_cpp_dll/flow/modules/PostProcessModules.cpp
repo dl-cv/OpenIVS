@@ -91,6 +91,154 @@ static int SafeIntFromJson(const Json& token, int defaultValue) {
     return defaultValue;
 }
 
+static double SafeDoubleFromJson(const Json& token, double defaultValue) {
+    try {
+        if (token.is_number()) return token.get<double>();
+        if (token.is_string()) return std::stod(token.get<std::string>());
+    } catch (...) {}
+    return defaultValue;
+}
+
+static bool TryReadOriginalSize(const Json& transform, int& width, int& height) {
+    width = 0;
+    height = 0;
+    if (!transform.is_object()) return false;
+
+    try {
+        if (transform.contains("original_size") &&
+            transform.at("original_size").is_array() &&
+            transform.at("original_size").size() >= 2) {
+            width = SafeIntFromJson(transform.at("original_size").at(0), 0);
+            height = SafeIntFromJson(transform.at("original_size").at(1), 0);
+            return width > 0 && height > 0;
+        }
+    } catch (...) {}
+
+    try {
+        width = transform.contains("original_width") ? SafeIntFromJson(transform.at("original_width"), 0) : 0;
+        height = transform.contains("original_height") ? SafeIntFromJson(transform.at("original_height"), 0) : 0;
+    } catch (...) {
+        width = 0;
+        height = 0;
+    }
+    return width > 0 && height > 0;
+}
+
+static bool TryReadCropBox(const Json& transform, int& x, int& y, int& width, int& height) {
+    x = 0;
+    y = 0;
+    width = 0;
+    height = 0;
+    if (!transform.is_object() ||
+        !transform.contains("crop_box") ||
+        !transform.at("crop_box").is_array() ||
+        transform.at("crop_box").size() < 4) {
+        return false;
+    }
+
+    const Json& crop = transform.at("crop_box");
+    x = SafeIntFromJson(crop.at(0), 0);
+    y = SafeIntFromJson(crop.at(1), 0);
+    width = SafeIntFromJson(crop.at(2), 0);
+    height = SafeIntFromJson(crop.at(3), 0);
+    return width > 0 && height > 0;
+}
+
+static bool TryReadOutputSize(const Json& transform, int& width, int& height) {
+    width = 0;
+    height = 0;
+    if (!transform.is_object() ||
+        !transform.contains("output_size") ||
+        !transform.at("output_size").is_array() ||
+        transform.at("output_size").size() < 2) {
+        return false;
+    }
+
+    const Json& output = transform.at("output_size");
+    width = SafeIntFromJson(output.at(0), 0);
+    height = SafeIntFromJson(output.at(1), 0);
+    return width > 0 && height > 0;
+}
+
+static bool TryReadAffine(const Json& transform, std::array<double, 6>& affine) {
+    affine = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    if (!transform.is_object()) return false;
+
+    if (transform.contains("affine_2x3") &&
+        transform.at("affine_2x3").is_array() &&
+        transform.at("affine_2x3").size() >= 6) {
+        const Json& flat = transform.at("affine_2x3");
+        for (size_t i = 0; i < 6; ++i) {
+            affine[i] = SafeDoubleFromJson(flat.at(i), 0.0);
+        }
+        return true;
+    }
+
+    if (!transform.contains("affine_matrix") ||
+        !transform.at("affine_matrix").is_array() ||
+        transform.at("affine_matrix").size() < 2) {
+        return false;
+    }
+
+    const Json& matrix = transform.at("affine_matrix");
+    if (!matrix.at(0).is_array() || !matrix.at(1).is_array() ||
+        matrix.at(0).size() < 3 || matrix.at(1).size() < 3) {
+        return false;
+    }
+
+    affine[0] = SafeDoubleFromJson(matrix.at(0).at(0), 0.0);
+    affine[1] = SafeDoubleFromJson(matrix.at(0).at(1), 0.0);
+    affine[2] = SafeDoubleFromJson(matrix.at(0).at(2), 0.0);
+    affine[3] = SafeDoubleFromJson(matrix.at(1).at(0), 0.0);
+    affine[4] = SafeDoubleFromJson(matrix.at(1).at(1), 0.0);
+    affine[5] = SafeDoubleFromJson(matrix.at(1).at(2), 0.0);
+    return true;
+}
+
+static bool IsIdentityAffine(const std::array<double, 6>& affine) {
+    constexpr double eps = 1e-6;
+    return std::abs(affine[0] - 1.0) < eps &&
+           std::abs(affine[1]) < eps &&
+           std::abs(affine[2]) < eps &&
+           std::abs(affine[3]) < eps &&
+           std::abs(affine[4] - 1.0) < eps &&
+           std::abs(affine[5]) < eps;
+}
+
+static bool IsIdentityTransform(const Json& transform) {
+    if (!transform.is_object()) return false;
+
+    int originalW = 0, originalH = 0;
+    int cropX = 0, cropY = 0, cropW = 0, cropH = 0;
+    int outputW = 0, outputH = 0;
+    std::array<double, 6> affine = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    const bool hasOriginalSize = TryReadOriginalSize(transform, originalW, originalH);
+    const bool hasCrop = TryReadCropBox(transform, cropX, cropY, cropW, cropH);
+    const bool hasOutput = TryReadOutputSize(transform, outputW, outputH);
+    const bool hasAffine = TryReadAffine(transform, affine);
+
+    if (!hasCrop && !hasAffine) {
+        return hasOriginalSize;
+    }
+
+    if (hasCrop) {
+        if (cropX != 0 || cropY != 0) return false;
+        if (hasOutput && (outputW != cropW || outputH != cropH)) return false;
+        if (hasOriginalSize && (cropW != originalW || cropH != originalH)) return false;
+    } else if (hasOutput && hasOriginalSize && (outputW != originalW || outputH != originalH)) {
+        return false;
+    }
+
+    if (hasAffine && !IsIdentityAffine(affine)) return false;
+    return hasAffine || hasCrop;
+}
+
+static std::string TransformGroupKey(const Json* token) {
+    if (token == nullptr || token->is_null()) return "__global__";
+    if (IsIdentityTransform(*token)) return "__global__";
+    return SerializeTokenCompact(*token);
+}
+
 static bool TryReadDouble(const Json& token, double& outVal) {
     try {
         if (token.is_number()) {
@@ -1162,7 +1310,7 @@ public:
 
             const int idx = entry.contains("index") ? SafeIntFromJson(entry.at("index"), -1) : -1;
             const int originIdx = entry.contains("origin_index") ? SafeIntFromJson(entry.at("origin_index"), idx) : idx;
-            const std::string transformSig = entry.contains("transform") ? SerializeTokenCompact(entry.at("transform")) : "null";
+            const std::string transformSig = TransformGroupKey(entry.contains("transform") ? &entry.at("transform") : nullptr);
             const std::string entryGroupKey = crossModel
                 ? BuildCrossModelGroupKey(entry, imageGroups, singleImageGroup)
                 : BuildStrictGroupKey(idx, originIdx, transformSig);
@@ -1288,7 +1436,7 @@ private:
                                                const std::string& singleImageGroup) {
         const int idx = entry.contains("index") ? SafeIntFromJson(entry.at("index"), -1) : -1;
         const int originIdx = entry.contains("origin_index") ? SafeIntFromJson(entry.at("origin_index"), idx) : idx;
-        const std::string transformSig = entry.contains("transform") ? SerializeTokenCompact(entry.at("transform")) : "null";
+        const std::string transformSig = TransformGroupKey(entry.contains("transform") ? &entry.at("transform") : nullptr);
 
         auto it = imageGroups.find(originIdx);
         if (it != imageGroups.end()) return std::string("image|") + it->second + "|" + transformSig;

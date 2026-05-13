@@ -45,6 +45,45 @@ static std::string SerializeTransform(const TransformationState* st, int index, 
     return "idx:" + std::to_string(index) + "|org:" + std::to_string(originIndex) + "|" + FormatAffineKey(st->AffineMatrix2x3);
 }
 
+static Json NormalizeTransformJson(const Json& token) {
+    if (token.is_object()) {
+        Json out = Json::object();
+        for (const auto& item : token.items()) {
+            out[item.key()] = NormalizeTransformJson(item.value());
+        }
+        return out;
+    }
+    if (token.is_array()) {
+        Json out = Json::array();
+        for (const auto& item : token) {
+            out.push_back(NormalizeTransformJson(item));
+        }
+        return out;
+    }
+    if (token.is_number_float()) {
+        return std::round(token.get<double>() * 1000000.0) / 1000000.0;
+    }
+    return token;
+}
+
+static std::string SerializeTransformKey(const TransformationState* st) {
+    if (st == nullptr) return std::string();
+    try {
+        return NormalizeTransformJson(st->ToJson()).dump();
+    } catch (...) {
+        return std::string();
+    }
+}
+
+static std::string SerializeTransformKey(const Json& stObj) {
+    if (!stObj.is_object()) return std::string();
+    try {
+        return NormalizeTransformJson(stObj).dump();
+    } catch (...) {
+        try { return stObj.dump(); } catch (...) { return std::string(); }
+    }
+}
+
 static double GetDoubleProp(const Json& props, const std::string& key, double dv) {
     if (!props.is_object() || !props.contains(key)) return dv;
     try {
@@ -286,13 +325,30 @@ public:
             }
         } catch (...) { cropW = -1; cropH = -1; }
 
-        // transform/index 映射
-        std::unordered_map<std::string, std::tuple<ModuleImage, cv::Mat, int>> keyToImage;
+        // transform/index 映射。transform 仅在唯一时使用，避免多张整图恒等变换互相串图。
+        using ImageBinding = std::tuple<ModuleImage, cv::Mat, int>;
+        std::unordered_map<std::string, ImageBinding> transformKeyToImage;
+        std::unordered_set<std::string> duplicateTransformKeys;
+        std::unordered_map<int, ImageBinding> indexToImage;
+        std::unordered_map<int, ImageBinding> originToImage;
         for (int i = 0; i < static_cast<int>(imagesIn.size()); i++) {
             const ModuleImage& wrap = imagesIn[static_cast<size_t>(i)];
             if (wrap.ImageObject.empty()) continue;
-            const std::string key = SerializeTransform(&wrap.TransformState, i, wrap.OriginalIndex);
-            keyToImage[key] = std::make_tuple(wrap, wrap.ImageObject, i);
+            ImageBinding binding = std::make_tuple(wrap, wrap.ImageObject, i);
+            indexToImage[i] = binding;
+            if (originToImage.find(wrap.OriginalIndex) == originToImage.end()) {
+                originToImage[wrap.OriginalIndex] = binding;
+            }
+
+            const std::string key = SerializeTransformKey(&wrap.TransformState);
+            if (!key.empty()) {
+                if (transformKeyToImage.find(key) != transformKeyToImage.end()) {
+                    transformKeyToImage.erase(key);
+                    duplicateTransformKeys.insert(key);
+                } else if (duplicateTransformKeys.find(key) == duplicateTransformKeys.end()) {
+                    transformKeyToImage[key] = binding;
+                }
+            }
         }
 
         std::vector<ModuleImage> imagesOut;
@@ -304,23 +360,30 @@ public:
             const Json& entry = entryToken;
             int idx = entry.contains("index") ? entry.at("index").get<int>() : -1;
             int originIndex = entry.contains("origin_index") ? entry.at("origin_index").get<int>() : idx;
-            TransformationState stEntry;
-            try {
-                if (entry.contains("transform") && entry.at("transform").is_object()) {
-                    stEntry = TransformationState::FromJson(entry.at("transform"));
+
+            const ImageBinding* binding = nullptr;
+            if (entry.contains("transform") && entry.at("transform").is_object()) {
+                const std::string key = SerializeTransformKey(entry.at("transform"));
+                if (!key.empty() && duplicateTransformKeys.find(key) == duplicateTransformKeys.end()) {
+                    auto it = transformKeyToImage.find(key);
+                    if (it != transformKeyToImage.end()) binding = &it->second;
                 }
-            } catch (...) {}
-
-            std::string key = SerializeTransform(&stEntry, idx, originIndex);
-            auto it = keyToImage.find(key);
-            if (it == keyToImage.end()) {
-                key = SerializeTransform(nullptr, idx, originIndex);
-                it = keyToImage.find(key);
             }
-            if (it == keyToImage.end()) continue;
 
-            const ModuleImage parentWrap = std::get<0>(it->second);
-            const cv::Mat src = std::get<1>(it->second);
+            if (binding == nullptr && idx >= 0) {
+                auto it = indexToImage.find(idx);
+                if (it != indexToImage.end()) binding = &it->second;
+            }
+
+            if (binding == nullptr && originIndex >= 0) {
+                auto it = originToImage.find(originIndex);
+                if (it != originToImage.end()) binding = &it->second;
+            }
+
+            if (binding == nullptr) continue;
+
+            const ModuleImage parentWrap = std::get<0>(*binding);
+            const cv::Mat src = std::get<1>(*binding);
             if (src.empty()) continue;
             const int W = src.cols;
             const int H = src.rows;
