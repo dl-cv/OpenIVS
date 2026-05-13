@@ -15,6 +15,7 @@ packages
 *.exe
 *.dll
 dlcvpro_infer_csharp
+dist/
 
 *.whl
 
