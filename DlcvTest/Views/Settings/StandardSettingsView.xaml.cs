@@ -38,6 +38,14 @@ namespace DlcvTest
                 {
                     chkSaveByCategory.IsChecked = Settings.Default.SaveByCategory;
                 }
+                if (chkSaveOk != null)
+                {
+                    chkSaveOk.IsChecked = Settings.Default.SaveOk;
+                }
+                if (chkSaveNg != null)
+                {
+                    chkSaveNg.IsChecked = Settings.Default.SaveNg;
+                }
 
                 // 加载输出目录
                 try
@@ -145,6 +153,34 @@ namespace DlcvTest
         {
             if (_isInitializing) return;
             Settings.Default.SaveByCategory = false;
+            Settings.Default.Save();
+        }
+
+        private void ChkSaveOk_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveOk = true;
+            Settings.Default.Save();
+        }
+
+        private void ChkSaveOk_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveOk = false;
+            Settings.Default.Save();
+        }
+
+        private void ChkSaveNg_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveNg = true;
+            Settings.Default.Save();
+        }
+
+        private void ChkSaveNg_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveNg = false;
             Settings.Default.Save();
         }
 

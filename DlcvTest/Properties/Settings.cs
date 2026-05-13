@@ -113,9 +113,19 @@ namespace DlcvTest.Properties
         public bool OpenOutputFolderAfterBatch { get; set; } = true;
 
         /// <summary>
-        /// 批量推测：是否按类别保存（根据 top1 类别将图片保存到对应的类别文件夹）
+        /// 批量推测：是否按类别保存（根据图中所有类别将图片复制到对应的类别文件夹）
         /// </summary>
         public bool SaveByCategory { get; set; } = false;
+
+        /// <summary>
+        /// 批量推测：保存原图时是否保存 OK（无检测结果）图片
+        /// </summary>
+        public bool SaveOk { get; set; } = true;
+
+        /// <summary>
+        /// 批量推测：保存原图时是否保存 NG（有检测结果）图片
+        /// </summary>
+        public bool SaveNg { get; set; } = true;
 
         public bool AutoLoadDataPath { get; set; } = true;
 
