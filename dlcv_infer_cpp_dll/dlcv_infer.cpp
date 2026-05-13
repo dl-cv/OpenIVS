@@ -168,6 +168,35 @@ struct DvsUnpackResult {
     std::string tempDir;
 };
 
+static bool DeleteDirectoryRecursive(const std::string& dir) {
+    if (dir.empty()) return true;
+#ifdef _WIN32
+    WIN32_FIND_DATAA ffd;
+    const std::string pattern = dir + "\\*";
+    HANDLE hFind = FindFirstFileA(pattern.c_str(), &ffd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            const std::string name = ffd.cFileName;
+            if (name == "." || name == "..") continue;
+            const std::string path = dir + "\\" + name;
+            if ((ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                (void)DeleteDirectoryRecursive(path);
+            } else {
+                SetFileAttributesA(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+                (void)DeleteFileA(path.c_str());
+            }
+        } while (FindNextFileA(hFind, &ffd) != 0);
+        FindClose(hFind);
+    }
+    SetFileAttributesA(dir.c_str(), FILE_ATTRIBUTE_NORMAL);
+    return RemoveDirectoryA(dir.c_str()) != 0;
+#else
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    return !ec;
+#endif
+}
+
 class TempDirGuard final {
 public:
     explicit TempDirGuard(std::string dir) : _dir(std::move(dir)) {}
@@ -180,35 +209,6 @@ public:
 
 private:
     std::string _dir;
-
-    static bool DeleteDirectoryRecursive(const std::string& dir) {
-        if (dir.empty()) return true;
-#ifdef _WIN32
-        WIN32_FIND_DATAA ffd;
-        const std::string pattern = dir + "\\*";
-        HANDLE hFind = FindFirstFileA(pattern.c_str(), &ffd);
-        if (hFind != INVALID_HANDLE_VALUE) {
-            do {
-                const std::string name = ffd.cFileName;
-                if (name == "." || name == "..") continue;
-                const std::string path = dir + "\\" + name;
-                if ((ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-                    (void)DeleteDirectoryRecursive(path);
-                } else {
-                    SetFileAttributesA(path.c_str(), FILE_ATTRIBUTE_NORMAL);
-                    (void)DeleteFileA(path.c_str());
-                }
-            } while (FindNextFileA(hFind, &ffd) != 0);
-            FindClose(hFind);
-        }
-        SetFileAttributesA(dir.c_str(), FILE_ATTRIBUTE_NORMAL);
-        return RemoveDirectoryA(dir.c_str()) != 0;
-#else
-        std::error_code ec;
-        fs::remove_all(dir, ec);
-        return !ec;
-#endif
-    }
 
     void CleanupNoexcept() {
         if (_dir.empty()) return;
@@ -1073,6 +1073,10 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
 
 namespace dlcv_infer {
 
+    // 底层 modelIndex 全局引用计数（解决底层 DLL content-hash dedup 导致同 modelIndex 被多对象共享的问题）
+    static std::mutex g_modelIndexRefMu;
+    static std::unordered_map<int, int> g_modelIndexRefCount;
+
 #ifdef _WIN32
     std::wstring Win32MultiByteToWide(const std::string& input, uint32_t codePage) {
         int len = MultiByteToWideChar(codePage, 0, input.c_str(), -1, nullptr, 0);
@@ -1413,7 +1417,7 @@ namespace dlcv_infer {
             _flowModel = new flow::FlowGraphModel();
             try {
                 DvsUnpackResult unpack = UnpackDvsArchiveToTemp(modelPathW);
-                TempDirGuard tempGuard(unpack.tempDir);
+                _tempDir = unpack.tempDir;
 
                 const std::string pipelinePath = JoinPath(unpack.tempDir, "pipeline.json");
                 WriteUtf8Text(pipelinePath, unpack.pipelineRoot.dump());
@@ -1429,6 +1433,10 @@ namespace dlcv_infer {
             } catch (const std::exception& ex) {
                 delete _flowModel;
                 _flowModel = nullptr;
+                if (!_tempDir.empty()) {
+                    DeleteDirectoryRecursive(_tempDir);
+                    _tempDir.clear();
+                }
                 throw std::runtime_error(std::string("failed to load dvs model: ") + ex.what());
             }
         }
@@ -1457,6 +1465,11 @@ namespace dlcv_infer {
         }
 
         _dllLoader->GetFreeResultFunc()(resultPtr);
+
+        if (modelIndex >= 0 && OwnModelIndex) {
+            std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
+            g_modelIndexRefCount[modelIndex]++;
+        }
     }
 
     Model::Model(const std::wstring& modelPath, int device_id)
@@ -1468,7 +1481,7 @@ namespace dlcv_infer {
             _flowModel = new flow::FlowGraphModel();
             try {
                 DvsUnpackResult unpack = UnpackDvsArchiveToTemp(modelPath);
-                TempDirGuard tempGuard(unpack.tempDir);
+                _tempDir = unpack.tempDir;
 
                 const std::string pipelinePath = JoinPath(unpack.tempDir, "pipeline.json");
                 WriteUtf8Text(pipelinePath, unpack.pipelineRoot.dump());
@@ -1484,6 +1497,10 @@ namespace dlcv_infer {
             } catch (const std::exception& ex) {
                 delete _flowModel;
                 _flowModel = nullptr;
+                if (!_tempDir.empty()) {
+                    DeleteDirectoryRecursive(_tempDir);
+                    _tempDir.clear();
+                }
                 throw std::runtime_error(std::string("failed to load dvs model: ") + ex.what());
             }
         }
@@ -1512,6 +1529,11 @@ namespace dlcv_infer {
         }
 
         _dllLoader->GetFreeResultFunc()(resultPtr);
+
+        if (modelIndex >= 0 && OwnModelIndex) {
+            std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
+            g_modelIndexRefCount[modelIndex]++;
+        }
     }
 
     Model::Model(Model&& other) noexcept
@@ -1521,6 +1543,7 @@ namespace dlcv_infer {
         _deviceId(other._deviceId),
         _flowModel(other._flowModel),
         _expectedChCache(other._expectedChCache),
+        _tempDir(std::move(other._tempDir)),
         _dllLoader(other._dllLoader),
         _loadedDogProvider(other._loadedDogProvider),
         _loadedNativeDllName(std::move(other._loadedNativeDllName)) {
@@ -1530,6 +1553,7 @@ namespace dlcv_infer {
         other._deviceId = 0;
         other._flowModel = nullptr;
         other._expectedChCache = -2;
+        other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
         other._loadedNativeDllName.clear();
@@ -1548,6 +1572,7 @@ namespace dlcv_infer {
         _deviceId = other._deviceId;
         _flowModel = other._flowModel;
         _expectedChCache = other._expectedChCache;
+        _tempDir = std::move(other._tempDir);
         _dllLoader = other._dllLoader;
         _loadedDogProvider = other._loadedDogProvider;
         _loadedNativeDllName = std::move(other._loadedNativeDllName);
@@ -1558,6 +1583,7 @@ namespace dlcv_infer {
         other._deviceId = 0;
         other._flowModel = nullptr;
         other._expectedChCache = -2;
+        other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
         other._loadedNativeDllName.clear();
@@ -1573,6 +1599,10 @@ namespace dlcv_infer {
         if (_isFlowGraphMode) {
             delete _flowModel;
             _flowModel = nullptr;
+            if (!_tempDir.empty()) {
+                DeleteDirectoryRecursive(_tempDir);
+                _tempDir.clear();
+            }
             modelIndex = -1;
             return;
         }
@@ -1585,14 +1615,31 @@ namespace dlcv_infer {
             modelIndex = -1;
             return;
         }
-        json config;
-        config["model_index"] = modelIndex;
 
-        std::string jsonStr = config.dump();
-        void* resultPtr = _dllLoader->GetFreeModelFunc()(jsonStr.c_str());
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
-        json resultObject = json::parse(resultJson);
-        _dllLoader->GetFreeResultFunc()(resultPtr);
+        bool shouldFreeUnderlying = false;
+        {
+            std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
+            auto it = g_modelIndexRefCount.find(modelIndex);
+            if (it != g_modelIndexRefCount.end()) {
+                it->second--;
+                if (it->second <= 0) {
+                    g_modelIndexRefCount.erase(it);
+                    shouldFreeUnderlying = true;
+                }
+            } else {
+                // 防御性处理：计数表中没有记录，但仍然需要释放
+                shouldFreeUnderlying = true;
+            }
+        }
+
+        if (shouldFreeUnderlying && _dllLoader) {
+            json config;
+            config["model_index"] = modelIndex;
+            std::string jsonStr = config.dump();
+            void* resultPtr = _dllLoader->GetFreeModelFunc()(jsonStr.c_str());
+            std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+            _dllLoader->GetFreeResultFunc()(resultPtr);
+        }
         modelIndex = -1;
     }
 

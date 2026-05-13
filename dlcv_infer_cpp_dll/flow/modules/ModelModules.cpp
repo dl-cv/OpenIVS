@@ -15,7 +15,7 @@
 namespace dlcv_infer {
 namespace flow {
 
-static std::string MakeModelKey(const std::string& modelPathUtf8, int deviceId) {
+std::string ModelPool::MakeKey(const std::string& modelPathUtf8, int deviceId) {
     return modelPathUtf8 + "|dev:" + std::to_string(deviceId);
 }
 
@@ -24,22 +24,43 @@ ModelPool& ModelPool::Instance() {
     return s;
 }
 
-std::shared_ptr<dlcv_infer::Model> ModelPool::Get(const std::string& modelPathUtf8, int deviceId) {
+std::shared_ptr<dlcv_infer::Model> ModelPool::Acquire(const std::string& modelPathUtf8, int deviceId) {
     if (modelPathUtf8.empty()) {
         throw std::invalid_argument("model_path is empty");
     }
-    const std::string key = MakeModelKey(modelPathUtf8, deviceId);
+    const std::string key = ModelPool::MakeKey(modelPathUtf8, deviceId);
     std::lock_guard<std::mutex> lk(_mu);
     auto it = _cache.find(key);
-    if (it != _cache.end() && it->second) {
-        return it->second;
+    if (it != _cache.end() && it->second.model) {
+        it->second.refCount++;
+        return it->second.model;
     }
 
     // FlowGraph 内部按 UTF-8 存储；现有 dlcv_infer::Model 构造函数按“输入为 GBK”处理
     const std::string gbkPath = dlcv_infer::convertUtf8ToGbk(modelPathUtf8);
     auto model = std::make_shared<dlcv_infer::Model>(gbkPath, deviceId);
-    _cache[key] = model;
+    Entry entry;
+    entry.model = model;
+    entry.refCount = 1;
+    _cache[key] = std::move(entry);
     return model;
+}
+
+void ModelPool::Release(const std::string& modelPathUtf8, int deviceId) {
+    if (modelPathUtf8.empty()) return;
+    const std::string key = ModelPool::MakeKey(modelPathUtf8, deviceId);
+    ReleaseByKey(key);
+}
+
+void ModelPool::ReleaseByKey(const std::string& key) {
+    if (key.empty()) return;
+    std::lock_guard<std::mutex> lk(_mu);
+    auto it = _cache.find(key);
+    if (it == _cache.end()) return;
+    it->second.refCount--;
+    if (it->second.refCount <= 0) {
+        _cache.erase(it);
+    }
 }
 
 void ModelPool::Clear() {
@@ -64,7 +85,8 @@ void BaseModelModule::LoadModel() {
         }
     } catch (...) {}
 
-    _model = ModelPool::Instance().Get(_modelPathUtf8, deviceId);
+    _resolvedDeviceId = deviceId;
+    _model = ModelPool::Instance().Acquire(_modelPathUtf8, deviceId);
 
     try {
         if (Context != nullptr) {

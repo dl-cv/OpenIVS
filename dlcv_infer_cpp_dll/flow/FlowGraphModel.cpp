@@ -198,24 +198,24 @@ static FlowBatchResult AggregateFrontendResults(ExecutionContext& ctx, int image
     return batch;
 }
 
-void FlowGraphModel::ReleaseNoexcept() {
-    if (!_ownsGlobalModels) return;
-
-    // 仅清理 FlowGraph 侧缓存，避免释放同进程中其它非 FlowGraph 模型。
-    // 全局释放（Utils::FreeAllModels）应由上层在明确需要时显式调用。
-    try { ModelPool::Instance().Clear(); } catch (...) {}
-
-    _ownsGlobalModels = false;
+void FlowGraphModel::ReleaseOwnedModelsNoexcept() {
+    try {
+        for (const auto& key : _acquiredModelKeys) {
+            ModelPool::Instance().ReleaseByKey(key);
+        }
+    } catch (...) {}
+    _acquiredModelKeys.clear();
 }
 
 FlowGraphModel::~FlowGraphModel() {
-    ReleaseNoexcept();
+    ReleaseOwnedModelsNoexcept();
     _nodes.clear();
     _root = Json::object();
     _loadedModelMeta = Json::array();
     _loaded = false;
     _deviceId = 0;
     _flowJsonPath.clear();
+    _acquiredModelKeys.clear();
 }
 
 FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
@@ -223,41 +223,41 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     _root = std::move(other._root);
     _loadedModelMeta = std::move(other._loadedModelMeta);
     _loaded = other._loaded;
-    _ownsGlobalModels = other._ownsGlobalModels;
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
+    _acquiredModelKeys = std::move(other._acquiredModelKeys);
 
-    // moved-from：不再负责释放（避免析构二次触发全局释放）
+    // moved-from：不再负责释放
     other._nodes.clear();
     other._root = Json::object();
     other._loadedModelMeta = Json::array();
     other._loaded = false;
-    other._ownsGlobalModels = false;
     other._deviceId = 0;
     other._flowJsonPath.clear();
+    other._acquiredModelKeys.clear();
 }
 
 FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     if (this == &other) return *this;
 
-    // 先释放当前对象持有的全局释放责任
-    ReleaseNoexcept();
+    // 先释放当前对象持有的模型引用
+    ReleaseOwnedModelsNoexcept();
 
     _nodes = std::move(other._nodes);
     _root = std::move(other._root);
     _loadedModelMeta = std::move(other._loadedModelMeta);
     _loaded = other._loaded;
-    _ownsGlobalModels = other._ownsGlobalModels;
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
+    _acquiredModelKeys = std::move(other._acquiredModelKeys);
 
     other._nodes.clear();
     other._root = Json::object();
     other._loadedModelMeta = Json::array();
     other._loaded = false;
-    other._ownsGlobalModels = false;
     other._deviceId = 0;
     other._flowJsonPath.clear();
+    other._acquiredModelKeys.clear();
 
     return *this;
 }
@@ -335,10 +335,37 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
         report = Json::object({ {"code", 1}, {"message", simpleMessage} });
     }
 
+    // 收集本流程涉及的所有模型 key，并增加引用
+    _acquiredModelKeys.clear();
+    for (const auto& n : _nodes) {
+        if (!n.is_object()) continue;
+        std::string type;
+        try { if (n.contains("type") && n.at("type").is_string()) type = n.at("type"); } catch (...) {}
+        if (type.rfind("model/", 0) != 0) continue;
+
+        std::string modelPath;
+        int nodeDeviceId = deviceId;
+        try {
+            if (n.contains("properties") && n.at("properties").is_object()) {
+                const auto& props = n.at("properties");
+                if (props.contains("model_path") && props.at("model_path").is_string())
+                    modelPath = props.at("model_path");
+                if (props.contains("device_id"))
+                    nodeDeviceId = props.at("device_id").get<int>();
+            }
+        } catch (...) {}
+        if (modelPath.empty()) continue;
+
+        const std::string key = ModelPool::MakeKey(modelPath, nodeDeviceId);
+        // 去重：同一流程可能多个节点引用同一模型
+        if (std::find(_acquiredModelKeys.begin(), _acquiredModelKeys.end(), key)
+            == _acquiredModelKeys.end()) {
+            ModelPool::Instance().Acquire(modelPath, nodeDeviceId);
+            _acquiredModelKeys.push_back(key);
+        }
+    }
+
     _loaded = true;
-    // 只要执行过 LoadModels，就认为本对象负责在析构时做一次“全局释放”收尾。
-    //（即使部分模型加载失败，也可能有已加载的资源需要释放）
-    _ownsGlobalModels = true;
     return report;
 }
 

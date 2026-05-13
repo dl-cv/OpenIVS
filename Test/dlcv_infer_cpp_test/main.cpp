@@ -42,6 +42,9 @@ constexpr int kSlidingAlignBatchSize = 1;
 constexpr float kSlidingAlignThreshold = 0.5f;
 const std::wstring kFlowInstanceSegFilterModelPath = L"Y:\\zxc\\模块化任务测试\\实例分割筛选测试_120_50.dvst";
 const std::wstring kFlowInstanceSegFilterImagePath = L"Y:\\zxc\\模块化任务测试\\实例分割\\实例分割滑窗大图.png";
+const std::wstring kDvstDoubleLoadModelAPath = L"Y:\\zxc\\微组BUG测试\\pipeline.dvst";
+const std::wstring kDvstDoubleLoadModelBPath = L"Y:\\zxc\\微组BUG测试\\实例分割筛选测试_120_50.dvst";
+const std::wstring kDvstDoubleLoadImagePath = L"Y:\\zxc\\微组BUG测试\\实例分割滑窗大图.png";
 const std::wstring kDemo3Model1Path = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程1-目标检测-降采样_120_50.dvst";
 const std::wstring kDemo3Model2Path = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\流程2-各项检测_120_50.dvst";
 const std::wstring kDemo3ChainImagePath = L"C:\\Users\\Administrator\\Desktop\\dvst速度优化\\detect_20260401151406_0.jpg";
@@ -1071,6 +1074,214 @@ int RunFlowInstanceSegFilterSelfTest() {
     }
 }
 
+int RunDvstDoubleLoadSelfTest() {
+    std::cout << "==== dvst 双模型加载-释放-再加载自测 (C++) ====\n";
+    std::cout << "modelA: " << WideToUtf8(kDvstDoubleLoadModelAPath) << "\n";
+    std::cout << "modelB: " << WideToUtf8(kDvstDoubleLoadModelBPath) << "\n";
+    std::cout << "image:  " << WideToUtf8(kDvstDoubleLoadImagePath) << "\n";
+
+    if (!FileExistsW(kDvstDoubleLoadModelAPath) || !FileExistsW(kDvstDoubleLoadModelBPath) || !FileExistsW(kDvstDoubleLoadImagePath)) {
+        std::cout << "模型或图片不存在，请检查路径。\n";
+        return 2;
+    }
+
+    cv::Mat bgr = LoadImageByDecode(kDvstDoubleLoadImagePath);
+    if (bgr.empty()) {
+        std::cout << "图像解码失败\n";
+        return 2;
+    }
+    cv::Mat rgb;
+    cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+
+    json params;
+    params["threshold"] = 0.5;
+    params["with_mask"] = true;
+    params["with_angle"] = true;
+    params["batch_size"] = 1;
+
+    dlcv_infer::Model* modelA = nullptr;
+    dlcv_infer::Model* modelB = nullptr;
+    int step = 0;
+
+    try {
+        // 1. 加载A
+        step = 1;
+        std::cout << "[" << step << "] 加载模型A...\n";
+        modelA = new dlcv_infer::Model(kDvstDoubleLoadModelAPath, kGpuDeviceId);
+        std::cout << "    A loaded, provider=" << DogProviderToString(modelA->LoadedDogProvider())
+                  << ", dll=" << modelA->LoadedNativeDllName() << "\n";
+
+        // 2. 加载B
+        step = 2;
+        std::cout << "[" << step << "] 加载模型B...\n";
+        modelB = new dlcv_infer::Model(kDvstDoubleLoadModelBPath, kGpuDeviceId);
+        std::cout << "    B loaded, provider=" << DogProviderToString(modelB->LoadedDogProvider())
+                  << ", dll=" << modelB->LoadedNativeDllName() << "\n";
+
+        // 3. A推理
+        step = 3;
+        std::cout << "[" << step << "] 模型A首次推理...\n";
+        {
+            auto out = modelA->InferBatch(std::vector<cv::Mat>{rgb}, params);
+            std::cout << "    A推理完成, sample_count=" << out.sampleResults.size() << "\n";
+            DisposeResultMasks(out);
+        }
+
+        // 4. B推理
+        step = 4;
+        std::cout << "[" << step << "] 模型B首次推理...\n";
+        {
+            auto out = modelB->InferBatch(std::vector<cv::Mat>{rgb}, params);
+            std::cout << "    B推理完成, sample_count=" << out.sampleResults.size() << "\n";
+            DisposeResultMasks(out);
+        }
+
+        // 5. 释放A (FreeModel)
+        step = 5;
+        std::cout << "[" << step << "] 释放模型A (FreeModel)...\n";
+        modelA->FreeModel();
+        std::cout << "    A已释放\n";
+
+        // 6. 再次加载A
+        step = 6;
+        std::cout << "[" << step << "] 再次加载模型A...\n";
+        delete modelA;
+        modelA = new dlcv_infer::Model(kDvstDoubleLoadModelAPath, kGpuDeviceId);
+        std::cout << "    A再次加载完成, provider=" << DogProviderToString(modelA->LoadedDogProvider()) << "\n";
+
+        // 7. 释放B (FreeModel)
+        step = 7;
+        std::cout << "[" << step << "] 释放模型B (FreeModel)...\n";
+        modelB->FreeModel();
+        std::cout << "    B已释放\n";
+
+        // 8. 再次加载B
+        step = 8;
+        std::cout << "[" << step << "] 再次加载模型B...\n";
+        delete modelB;
+        modelB = new dlcv_infer::Model(kDvstDoubleLoadModelBPath, kGpuDeviceId);
+        std::cout << "    B再次加载完成, provider=" << DogProviderToString(modelB->LoadedDogProvider()) << "\n";
+
+        // 9. A再次推理
+        step = 9;
+        std::cout << "[" << step << "] 模型A再次推理...\n";
+        {
+            auto out = modelA->InferBatch(std::vector<cv::Mat>{rgb}, params);
+            std::cout << "    A再次推理完成, sample_count=" << out.sampleResults.size() << "\n";
+            DisposeResultMasks(out);
+        }
+
+        // 10. B再次推理
+        step = 10;
+        std::cout << "[" << step << "] 模型B再次推理...\n";
+        {
+            auto out = modelB->InferBatch(std::vector<cv::Mat>{rgb}, params);
+            std::cout << "    B再次推理完成, sample_count=" << out.sampleResults.size() << "\n";
+            DisposeResultMasks(out);
+        }
+
+        std::cout << "==== dvst 双模型加载-释放-再加载自测 全部通过 ====\n";
+
+        delete modelA;
+        modelA = nullptr;
+        delete modelB;
+        modelB = nullptr;
+        return 0;
+    } catch (const std::exception& e) {
+        std::cout << "[" << step << "] std::exception: " << e.what() << "\n";
+        delete modelA;
+        delete modelB;
+        return 1;
+    } catch (...) {
+        std::cout << "[" << step << "] 未知异常 (非std::exception)\n";
+        delete modelA;
+        delete modelB;
+        return 1;
+    }
+}
+
+int RunDvstSingleLoadSelfTest() {
+    std::cout << "==== dvst 单模型加载-释放-再加载自测 (C++) ====\n";
+    std::cout << "modelA: " << WideToUtf8(kDvstDoubleLoadModelAPath) << "\n";
+    std::cout << "image:  " << WideToUtf8(kDvstDoubleLoadImagePath) << "\n";
+
+    if (!FileExistsW(kDvstDoubleLoadModelAPath) || !FileExistsW(kDvstDoubleLoadImagePath)) {
+        std::cout << "模型或图片不存在，请检查路径。\n";
+        return 2;
+    }
+
+    cv::Mat bgr = LoadImageByDecode(kDvstDoubleLoadImagePath);
+    if (bgr.empty()) {
+        std::cout << "图像解码失败\n";
+        return 2;
+    }
+    cv::Mat rgb;
+    cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+
+    json params;
+    params["threshold"] = 0.5;
+    params["with_mask"] = true;
+    params["with_angle"] = true;
+    params["batch_size"] = 1;
+
+    dlcv_infer::Model* modelA = nullptr;
+    int step = 0;
+
+    try {
+        // 1. 加载A
+        step = 1;
+        std::cout << "[" << step << "] 加载模型A...\n";
+        modelA = new dlcv_infer::Model(kDvstDoubleLoadModelAPath, kGpuDeviceId);
+        std::cout << "    A loaded, provider=" << DogProviderToString(modelA->LoadedDogProvider())
+                  << ", dll=" << modelA->LoadedNativeDllName() << "\n";
+
+        // 2. A推理
+        step = 2;
+        std::cout << "[" << step << "] 模型A首次推理...\n";
+        {
+            auto out = modelA->InferBatch(std::vector<cv::Mat>{rgb}, params);
+            std::cout << "    A推理完成, sample_count=" << out.sampleResults.size() << "\n";
+            DisposeResultMasks(out);
+        }
+
+        // 3. 释放A (FreeModel)
+        step = 3;
+        std::cout << "[" << step << "] 释放模型A (FreeModel)...\n";
+        modelA->FreeModel();
+        std::cout << "    A已释放\n";
+
+        // 4. 再次加载A
+        step = 4;
+        std::cout << "[" << step << "] 再次加载模型A...\n";
+        delete modelA;
+        modelA = new dlcv_infer::Model(kDvstDoubleLoadModelAPath, kGpuDeviceId);
+        std::cout << "    A再次加载完成, provider=" << DogProviderToString(modelA->LoadedDogProvider()) << "\n";
+
+        // 5. A再次推理
+        step = 5;
+        std::cout << "[" << step << "] 模型A再次推理...\n";
+        {
+            auto out = modelA->InferBatch(std::vector<cv::Mat>{rgb}, params);
+            std::cout << "    A再次推理完成, sample_count=" << out.sampleResults.size() << "\n";
+            DisposeResultMasks(out);
+        }
+
+        std::cout << "==== dvst 单模型加载-释放-再加载自测 全部通过 ====\n";
+
+        delete modelA;
+        modelA = nullptr;
+        return 0;
+    } catch (const std::exception& e) {
+        std::cout << "[" << step << "] std::exception: " << e.what() << "\n";
+        delete modelA;
+        return 1;
+    } catch (...) {
+        std::cout << "[" << step << "] 未知异常 (非std::exception)\n";
+        delete modelA;
+        return 1;
+    }
+}
+
 int RunImagePrepCheck() {
     auto fail = [](const std::string& message) -> int {
         std::cout << "imageprepcheck 失败: " << message << "\n";
@@ -1499,6 +1710,14 @@ int main(int argc, char* argv[]) {
 
     if (argc >= 2 && std::string(argv[1]) == "flow-instance-seg-filter-selftest") {
         return RunFlowInstanceSegFilterSelfTest();
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "dvst-double-load-selftest") {
+        return RunDvstDoubleLoadSelfTest();
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "dvst-single-load-selftest") {
+        return RunDvstSingleLoadSelfTest();
     }
 
     std::cout << "==== C++ 测试程序 ====\n";

@@ -21,14 +21,33 @@ class ModelPool final {
 public:
     static ModelPool& Instance();
 
-    std::shared_ptr<dlcv_infer::Model> Get(const std::string& modelPathUtf8, int deviceId);
+    /// 获取模型，增加该 key 的引用计数。
+    /// 若缓存中已存在且有效，直接返回并 +1。
+    /// 若不存在，创建新的 Model 对象，refCount = 1。
+    std::shared_ptr<dlcv_infer::Model> Acquire(
+        const std::string& modelPathUtf8, int deviceId);
 
+    /// 释放一个引用。refCount 减 1；归零时从缓存移除。
+    /// 若 key 不存在，无操作。
+    void Release(const std::string& modelPathUtf8, int deviceId);
+
+    /// 通过 key 释放引用（避免调用方重复拼接/解析）。
+    void ReleaseByKey(const std::string& key);
+
+    [[deprecated("Use Acquire/Release instead")]]
     void Clear();
 
+    static std::string MakeKey(const std::string& modelPathUtf8, int deviceId);
+
 private:
+    struct Entry {
+        std::shared_ptr<dlcv_infer::Model> model;
+        int refCount = 0;
+    };
+
     ModelPool() = default;
     std::mutex _mu;
-    std::unordered_map<std::string, std::shared_ptr<dlcv_infer::Model>> _cache;
+    std::unordered_map<std::string, Entry> _cache;
 };
 
 /// <summary>
@@ -38,6 +57,7 @@ class BaseModelModule : public BaseModule {
 protected:
     std::string _modelPathUtf8;
     int _deviceId = 0;
+    int _resolvedDeviceId = 0;
     std::shared_ptr<dlcv_infer::Model> _model;
 
 public:
@@ -48,6 +68,13 @@ public:
         : BaseModule(nodeId, title, properties, context) {
         _modelPathUtf8 = ReadString("model_path", std::string());
         _deviceId = ReadInt("device_id", 0);
+        _resolvedDeviceId = _deviceId;
+    }
+
+    ~BaseModelModule() {
+        if (!_modelPathUtf8.empty() && _model) {
+            try { ModelPool::Instance().Release(_modelPathUtf8, _resolvedDeviceId); } catch (...) {}
+        }
     }
 
     void LoadModel() override;
