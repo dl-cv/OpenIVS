@@ -18,6 +18,7 @@ extern "C" {
 #endif
 
 DLCV_C_API int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id);
+DLCV_C_API const char* dlcv_infer_cpp_get_last_error_c();
 DLCV_C_API int dlcv_infer_cpp_free_model_c(int model_index);
 DLCV_C_API DlcvCResult dlcv_infer_cpp_infer_c(int model_index, const DlcvCImageList* image_list);
 DLCV_C_API void dlcv_infer_cpp_free_model_result_c(DlcvCResult* result);

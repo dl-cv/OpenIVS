@@ -3,10 +3,15 @@
 
 #include <opencv2/core.hpp>
 
+#include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <iomanip>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -14,21 +19,120 @@
 
 static std::unordered_map<int, std::shared_ptr<dlcv_infer::Model>> g_models;
 static std::mutex g_modelsMutex;
+static thread_local std::string g_lastError;
+static const char* kDlcvCapiDebugLogPath = "C:\\ProgramData\\dlcvInfer_c_api_debug.log";
+
+static void SetLastErrorMessage(const std::string& message) {
+    g_lastError = message;
+}
+
+static void ClearLastErrorMessage() {
+    g_lastError.clear();
+}
+
+static void AppendCapiDebugLog(const char* format, ...) {
+    std::time_t now = std::time(nullptr);
+    std::tm localTime{};
+#if defined(_WIN32)
+    localtime_s(&localTime, &now);
+#else
+    localtime_r(&now, &localTime);
+#endif
+
+    char message[4096] = {0};
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    FILE* fp = nullptr;
+    if (fopen_s(&fp, kDlcvCapiDebugLogPath, "a") == 0 && fp != nullptr) {
+        fprintf(fp, "%04d-%02d-%02d %02d:%02d:%02d [dlcvInferCAPI] %s\n",
+            localTime.tm_year + 1900,
+            localTime.tm_mon + 1,
+            localTime.tm_mday,
+            localTime.tm_hour,
+            localTime.tm_min,
+            localTime.tm_sec,
+            message);
+        fclose(fp);
+    }
+}
+
+static std::string BytesToHex(const std::string& value) {
+    std::ostringstream oss;
+    oss << std::uppercase << std::hex << std::setfill('0');
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (i > 0) {
+            oss << ' ';
+        }
+        oss << std::setw(2) << static_cast<unsigned int>(static_cast<unsigned char>(value[i]));
+    }
+    return oss.str();
+}
+
+static std::string DescribeModelPathBytes(const std::string& modelPath) {
+    std::ostringstream oss;
+    oss << "pathBytesHex=[" << BytesToHex(modelPath) << "]";
+    try {
+        const std::wstring utf8W = dlcv_infer::convertUtf8ToWstring(modelPath);
+        const std::string utf8RoundTrip = dlcv_infer::convertWstringToUtf8(utf8W);
+        oss << ", utf8Valid=" << (utf8RoundTrip == modelPath ? "true" : "false")
+            << ", utf8Decoded=\"" << utf8RoundTrip << "\"";
+    } catch (...) {
+        oss << ", utf8Decoded=<exception>";
+    }
+    try {
+        oss << ", gbkDecodedUtf8=\"" << dlcv_infer::convertGbkToUtf8(modelPath) << "\"";
+    } catch (...) {
+        oss << ", gbkDecodedUtf8=<exception>";
+    }
+    return oss.str();
+}
 
 extern "C" {
 
 int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
-    if (!model_path) return -1;
-    try {
-        auto model = std::make_shared<dlcv_infer::Model>(std::string(model_path), device_id);
-        int idx = model->modelIndex;
-        if (idx < 0) return -1;
-        std::lock_guard<std::mutex> lock(g_modelsMutex);
-        g_models[idx] = model;
-        return idx;
-    } catch (...) {
+    ClearLastErrorMessage();
+    if (!model_path) {
+        SetLastErrorMessage("model_path is null");
+        AppendCapiDebugLog("load_model failed: %s", g_lastError.c_str());
         return -1;
     }
+
+    const std::string modelPath(model_path);
+    const std::string pathDiagnostics = DescribeModelPathBytes(modelPath);
+    AppendCapiDebugLog("load_model begin: device_id=%d, path=%s, %s",
+        device_id,
+        modelPath.c_str(),
+        pathDiagnostics.c_str());
+
+    try {
+        auto model = std::make_shared<dlcv_infer::Model>(modelPath, device_id);
+        int idx = model->modelIndex;
+        if (idx < 0) {
+            SetLastErrorMessage("load model returned negative modelIndex: " + std::to_string(idx) + "; " + pathDiagnostics);
+            AppendCapiDebugLog("load_model failed: %s", g_lastError.c_str());
+            return -1;
+        }
+        std::lock_guard<std::mutex> lock(g_modelsMutex);
+        g_models[idx] = model;
+        ClearLastErrorMessage();
+        AppendCapiDebugLog("load_model success: modelIndex=%d", idx);
+        return idx;
+    } catch (const std::exception& ex) {
+        SetLastErrorMessage(std::string("load model exception: ") + ex.what() + "; " + pathDiagnostics);
+        AppendCapiDebugLog("load_model failed: %s", g_lastError.c_str());
+        return -1;
+    } catch (...) {
+        SetLastErrorMessage("load model unknown exception; " + pathDiagnostics);
+        AppendCapiDebugLog("load_model failed: %s", g_lastError.c_str());
+        return -1;
+    }
+}
+
+const char* dlcv_infer_cpp_get_last_error_c() {
+    return g_lastError.c_str();
 }
 
 int dlcv_infer_cpp_free_model_c(int model_index) {
