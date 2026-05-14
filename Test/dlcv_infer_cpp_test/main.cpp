@@ -1930,7 +1930,9 @@ bool AssertImageGenerationCrop(const std::string& caseName,
                                const json& resultProperties,
                                int expectedWidth,
                                int expectedHeight,
-                               std::string& error) {
+                               std::string& error,
+                               int imageWidth = 200,
+                               int imageHeight = 200) {
     const std::string suffix = "_image_generation_expand_" + std::to_string(std::hash<std::string>{}(caseName));
     const std::string flowPath = JoinPathA(tempDir, suffix + ".json");
     DeleteFilesWithSuffix(tempDir, suffix + ".png");
@@ -1953,7 +1955,7 @@ bool AssertImageGenerationCrop(const std::string& caseName,
             return false;
         }
 
-        cv::Mat image(200, 200, CV_8UC3, cv::Scalar(0, 0, 0));
+        cv::Mat image(imageHeight, imageWidth, CV_8UC3, cv::Scalar(0, 0, 0));
         const json inferRoot = model.InferInternal(std::vector<cv::Mat>{image}, json::object());
         if (!inferRoot.is_object() || inferRoot.value("code", 1) != 0) {
             error = caseName + " 流程执行失败: " + inferRoot.dump();
@@ -2019,13 +2021,48 @@ bool RunImageGenerationExpandRegression(std::string& error) {
     }
 
     if (!AssertImageGenerationCrop(
-            "百分比上限",
+            "百分比值不截断为32",
             tempDir,
             json::object({{"crop_expand", 0}, {"crop_expand_mode", "percent"}, {"crop_expand_percent", 50}, {"crop_shape", json::array()}, {"min_size", 1}}),
             axisResultProps,
-            66,
-            33,
+            80,
+            40,
             error)) {
+        return false;
+    }
+
+    const json largeAxisResultProps = json::object({
+        {"category_id", 1},
+        {"category_name", "target"},
+        {"score", 0.99},
+        {"bbox_x", 50.0},
+        {"bbox_y", 50.0},
+        {"bbox_w", 200.0},
+        {"bbox_h", 200.0}
+    });
+    if (!AssertImageGenerationCrop(
+            "百分比默认像素上限",
+            tempDir,
+            json::object({{"crop_expand", 0}, {"crop_expand_mode", "percent"}, {"crop_expand_percent", 20}, {"crop_shape", json::array()}, {"min_size", 1}}),
+            largeAxisResultProps,
+            264,
+            264,
+            error,
+            320,
+            320)) {
+        return false;
+    }
+
+    if (!AssertImageGenerationCrop(
+            "百分比自定义像素上限",
+            tempDir,
+            json::object({{"crop_expand", 0}, {"crop_expand_mode", "percent"}, {"crop_expand_percent", 20}, {"crop_expand_percent_limit", 10}, {"crop_shape", json::array()}, {"min_size", 1}}),
+            largeAxisResultProps,
+            220,
+            220,
+            error,
+            320,
+            320)) {
         return false;
     }
 
@@ -2059,6 +2096,30 @@ bool RunImageGenerationExpandRegression(std::string& error) {
             48,
             24,
             error)) {
+        return false;
+    }
+
+    const json largeRotatedResultProps = json::object({
+        {"category_id", 1},
+        {"category_name", "target"},
+        {"score", 0.99},
+        {"bbox_cx", 160.0},
+        {"bbox_cy", 160.0},
+        {"bbox_w", 200.0},
+        {"bbox_h", 200.0},
+        {"with_angle", true},
+        {"angle", 0.0}
+    });
+    if (!AssertImageGenerationCrop(
+            "旋转框百分比默认像素上限",
+            tempDir,
+            json::object({{"crop_expand", 0}, {"crop_expand_mode", "percent"}, {"crop_expand_percent", 20}, {"crop_shape", json::array()}, {"min_size", 1}}),
+            largeRotatedResultProps,
+            264,
+            264,
+            error,
+            320,
+            320)) {
         return false;
     }
 

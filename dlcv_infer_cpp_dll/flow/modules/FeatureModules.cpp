@@ -323,7 +323,8 @@ public:
         std::transform(cropExpandMode.begin(), cropExpandMode.end(), cropExpandMode.begin(),
                        [] (unsigned char c) { return static_cast<char>(std::tolower(c)); });
         double cropExpandPercent = GetDoubleProp(Properties, "crop_expand_percent", 0.0);
-        cropExpandPercent = std::max(0.0, std::min(32.0, cropExpandPercent));
+        cropExpandPercent = std::max(0.0, cropExpandPercent);
+        const double cropExpandPercentLimit = std::max(0.0, GetDoubleProp(Properties, "crop_expand_percent_limit", 32.0));
         if (cropExpandPercent > 0.0 && cropExpandMode != "pixel" && cropExpandMode != "px") {
             cropExpandMode = "percent";
         } else if (cropExpandPercent > 0.0 && cropExpand <= 0.0) {
@@ -345,7 +346,13 @@ public:
         const auto resolveExpand = [&] (double baseW, double baseH) -> std::pair<double, double> {
             if (cropExpandMode == "percent") {
                 const double ratio = cropExpandPercent / 100.0;
-                return std::make_pair(std::max(0.0, baseW) * ratio, std::max(0.0, baseH) * ratio);
+                double expandW = std::max(0.0, baseW) * ratio;
+                double expandH = std::max(0.0, baseH) * ratio;
+                if (cropExpandPercentLimit > 0.0) {
+                    expandW = std::min(expandW, cropExpandPercentLimit);
+                    expandH = std::min(expandH, cropExpandPercentLimit);
+                }
+                return std::make_pair(expandW, expandH);
             }
             return std::make_pair(cropExpand, cropExpand);
         };

@@ -37,6 +37,7 @@ namespace DlcvModules
             double cropExpand = 0.0;
             string cropExpandMode = "pixel";
             double cropExpandPercent = 0.0;
+            double cropExpandPercentLimit = 32.0;
             int? cropW = null;
             int? cropH = null;
             int minSize = 1;
@@ -44,7 +45,8 @@ namespace DlcvModules
             {
                 cropExpand = Math.Max(0.0, GetDouble(Properties, "crop_expand", 0.0));
                 cropExpandMode = (GetString(Properties, "crop_expand_mode", "pixel") ?? "pixel").Trim().ToLowerInvariant();
-                cropExpandPercent = Math.Max(0.0, Math.Min(32.0, GetDouble(Properties, "crop_expand_percent", 0.0)));
+                cropExpandPercent = Math.Max(0.0, GetDouble(Properties, "crop_expand_percent", 0.0));
+                cropExpandPercentLimit = Math.Max(0.0, GetDouble(Properties, "crop_expand_percent_limit", 32.0));
                 if (cropExpandPercent > 0.0 && cropExpandMode != "pixel" && cropExpandMode != "px")
                 {
                     cropExpandMode = "percent";
@@ -88,7 +90,14 @@ namespace DlcvModules
                 if (cropExpandMode == "percent")
                 {
                     double ratio = cropExpandPercent / 100.0;
-                    return Tuple.Create(Math.Max(0.0, baseW) * ratio, Math.Max(0.0, baseH) * ratio);
+                    double expandW = Math.Max(0.0, baseW) * ratio;
+                    double expandH = Math.Max(0.0, baseH) * ratio;
+                    if (cropExpandPercentLimit > 0.0)
+                    {
+                        expandW = Math.Min(expandW, cropExpandPercentLimit);
+                        expandH = Math.Min(expandH, cropExpandPercentLimit);
+                    }
+                    return Tuple.Create(expandW, expandH);
                 }
                 return Tuple.Create(cropExpand, cropExpand);
             };

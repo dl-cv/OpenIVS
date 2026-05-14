@@ -2157,9 +2157,12 @@ namespace DlcvCSharpTest
         private static bool RunImageGenerationExpandRegression()
         {
             using (var img = new Mat(200, 200, MatType.CV_8UC3, new Scalar(0, 0, 0)))
+            using (var img320 = new Mat(320, 320, MatType.CV_8UC3, new Scalar(0, 0, 0)))
             {
                 var image = new ModuleImage(img, img, new TransformationState(200, 200), 0);
                 var images = new List<ModuleImage> { image };
+                var image320 = new ModuleImage(img320, img320, new TransformationState(320, 320), 0);
+                var images320 = new List<ModuleImage> { image320 };
                 string error;
 
                 if (!AssertImageGenerationCrop(
@@ -2201,7 +2204,7 @@ namespace DlcvCSharpTest
                 }
 
                 if (!AssertImageGenerationCrop(
-                    "百分比上限",
+                    "百分比值不截断为32",
                     images,
                     new Dictionary<string, object>
                     {
@@ -2212,8 +2215,49 @@ namespace DlcvCSharpTest
                         ["min_size"] = 1
                     },
                     BuildImageGenerationDet(50.0, 60.0, 40.0, 20.0),
-                    66,
-                    33,
+                    80,
+                    40,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比默认像素上限",
+                    images320,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 20,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 50.0, 200.0, 200.0),
+                    264,
+                    264,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比自定义像素上限",
+                    images320,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 20,
+                        ["crop_expand_percent_limit"] = 10,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 50.0, 200.0, 200.0),
+                    220,
+                    220,
                     out error))
                 {
                     Console.WriteLine(error);
@@ -2254,6 +2298,26 @@ namespace DlcvCSharpTest
                     BuildImageGenerationDet(100.0, 100.0, 40.0, 20.0, true, 0.0),
                     48,
                     24,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "旋转框百分比默认像素上限",
+                    images320,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 20,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(160.0, 160.0, 200.0, 200.0, true, 0.0),
+                    264,
+                    264,
                     out error))
                 {
                     Console.WriteLine(error);
