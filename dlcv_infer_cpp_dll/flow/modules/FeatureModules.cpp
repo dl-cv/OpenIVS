@@ -11,6 +11,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "opencv2/imgproc.hpp"
@@ -43,6 +44,45 @@ static std::string SerializeTransform(const TransformationState* st, int index, 
         return "idx:" + std::to_string(index) + "|org:" + std::to_string(originIndex) + "|T:null";
     }
     return "idx:" + std::to_string(index) + "|org:" + std::to_string(originIndex) + "|" + FormatAffineKey(st->AffineMatrix2x3);
+}
+
+static Json NormalizeTransformJson(const Json& token) {
+    if (token.is_object()) {
+        Json out = Json::object();
+        for (const auto& item : token.items()) {
+            out[item.key()] = NormalizeTransformJson(item.value());
+        }
+        return out;
+    }
+    if (token.is_array()) {
+        Json out = Json::array();
+        for (const auto& item : token) {
+            out.push_back(NormalizeTransformJson(item));
+        }
+        return out;
+    }
+    if (token.is_number_float()) {
+        return std::round(token.get<double>() * 1000000.0) / 1000000.0;
+    }
+    return token;
+}
+
+static std::string SerializeTransformKey(const TransformationState* st) {
+    if (st == nullptr) return std::string();
+    try {
+        return NormalizeTransformJson(st->ToJson()).dump();
+    } catch (...) {
+        return std::string();
+    }
+}
+
+static std::string SerializeTransformKey(const Json& stObj) {
+    if (!stObj.is_object()) return std::string();
+    try {
+        return NormalizeTransformJson(stObj).dump();
+    } catch (...) {
+        try { return stObj.dump(); } catch (...) { return std::string(); }
+    }
 }
 
 static double GetDoubleProp(const Json& props, const std::string& key, double dv) {
@@ -272,7 +312,24 @@ public:
         const std::vector<ModuleImage>& imagesIn = imageList;
         const Json resultsIn = resultList.is_array() ? resultList : Json::array();
 
-        const double cropExpand = GetDoubleProp(Properties, "crop_expand", 0.0);
+        const double cropExpand = std::max(0.0, GetDoubleProp(Properties, "crop_expand", 0.0));
+        std::string cropExpandMode = ReadString("crop_expand_mode", "pixel");
+        cropExpandMode.erase(cropExpandMode.begin(),
+                             std::find_if(cropExpandMode.begin(), cropExpandMode.end(),
+                                          [] (unsigned char c) { return !std::isspace(c); }));
+        cropExpandMode.erase(std::find_if(cropExpandMode.rbegin(), cropExpandMode.rend(),
+                                          [] (unsigned char c) { return !std::isspace(c); }).base(),
+                             cropExpandMode.end());
+        std::transform(cropExpandMode.begin(), cropExpandMode.end(), cropExpandMode.begin(),
+                       [] (unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        double cropExpandPercent = GetDoubleProp(Properties, "crop_expand_percent", 0.0);
+        cropExpandPercent = std::max(0.0, cropExpandPercent);
+        const double cropExpandPercentLimit = std::max(0.0, GetDoubleProp(Properties, "crop_expand_percent_limit", 32.0));
+        if (cropExpandPercent > 0.0 && cropExpandMode != "pixel" && cropExpandMode != "px") {
+            cropExpandMode = "percent";
+        } else if (cropExpandPercent > 0.0 && cropExpand <= 0.0) {
+            cropExpandMode = "percent";
+        }
         const int minSize = std::max(1, GetIntProp(Properties, "min_size", 1));
 
         int cropW = -1, cropH = -1;
@@ -285,14 +342,45 @@ public:
                 }
             }
         } catch (...) { cropW = -1; cropH = -1; }
+        const bool hasCropShape = cropW > 0 && cropH > 0;
+        const auto resolveExpand = [&] (double baseW, double baseH) -> std::pair<double, double> {
+            if (cropExpandMode == "percent") {
+                const double ratio = cropExpandPercent / 100.0;
+                double expandW = std::max(0.0, baseW) * ratio;
+                double expandH = std::max(0.0, baseH) * ratio;
+                if (cropExpandPercentLimit > 0.0) {
+                    expandW = std::min(expandW, cropExpandPercentLimit);
+                    expandH = std::min(expandH, cropExpandPercentLimit);
+                }
+                return std::make_pair(expandW, expandH);
+            }
+            return std::make_pair(cropExpand, cropExpand);
+        };
 
-        // transform/index 映射
-        std::unordered_map<std::string, std::tuple<ModuleImage, cv::Mat, int>> keyToImage;
+        // transform/index 映射。transform 仅在唯一时使用，避免多张整图恒等变换互相串图。
+        using ImageBinding = std::tuple<ModuleImage, cv::Mat, int>;
+        std::unordered_map<std::string, ImageBinding> transformKeyToImage;
+        std::unordered_set<std::string> duplicateTransformKeys;
+        std::unordered_map<int, ImageBinding> indexToImage;
+        std::unordered_map<int, ImageBinding> originToImage;
         for (int i = 0; i < static_cast<int>(imagesIn.size()); i++) {
             const ModuleImage& wrap = imagesIn[static_cast<size_t>(i)];
             if (wrap.ImageObject.empty()) continue;
-            const std::string key = SerializeTransform(&wrap.TransformState, i, wrap.OriginalIndex);
-            keyToImage[key] = std::make_tuple(wrap, wrap.ImageObject, i);
+            ImageBinding binding = std::make_tuple(wrap, wrap.ImageObject, i);
+            indexToImage[i] = binding;
+            if (originToImage.find(wrap.OriginalIndex) == originToImage.end()) {
+                originToImage[wrap.OriginalIndex] = binding;
+            }
+
+            const std::string key = SerializeTransformKey(&wrap.TransformState);
+            if (!key.empty()) {
+                if (transformKeyToImage.find(key) != transformKeyToImage.end()) {
+                    transformKeyToImage.erase(key);
+                    duplicateTransformKeys.insert(key);
+                } else if (duplicateTransformKeys.find(key) == duplicateTransformKeys.end()) {
+                    transformKeyToImage[key] = binding;
+                }
+            }
         }
 
         std::vector<ModuleImage> imagesOut;
@@ -304,23 +392,30 @@ public:
             const Json& entry = entryToken;
             int idx = entry.contains("index") ? entry.at("index").get<int>() : -1;
             int originIndex = entry.contains("origin_index") ? entry.at("origin_index").get<int>() : idx;
-            TransformationState stEntry;
-            try {
-                if (entry.contains("transform") && entry.at("transform").is_object()) {
-                    stEntry = TransformationState::FromJson(entry.at("transform"));
+
+            const ImageBinding* binding = nullptr;
+            if (entry.contains("transform") && entry.at("transform").is_object()) {
+                const std::string key = SerializeTransformKey(entry.at("transform"));
+                if (!key.empty() && duplicateTransformKeys.find(key) == duplicateTransformKeys.end()) {
+                    auto it = transformKeyToImage.find(key);
+                    if (it != transformKeyToImage.end()) binding = &it->second;
                 }
-            } catch (...) {}
-
-            std::string key = SerializeTransform(&stEntry, idx, originIndex);
-            auto it = keyToImage.find(key);
-            if (it == keyToImage.end()) {
-                key = SerializeTransform(nullptr, idx, originIndex);
-                it = keyToImage.find(key);
             }
-            if (it == keyToImage.end()) continue;
 
-            const ModuleImage parentWrap = std::get<0>(it->second);
-            const cv::Mat src = std::get<1>(it->second);
+            if (binding == nullptr && idx >= 0) {
+                auto it = indexToImage.find(idx);
+                if (it != indexToImage.end()) binding = &it->second;
+            }
+
+            if (binding == nullptr && originIndex >= 0) {
+                auto it = originToImage.find(originIndex);
+                if (it != originToImage.end()) binding = &it->second;
+            }
+
+            if (binding == nullptr) continue;
+
+            const ModuleImage parentWrap = std::get<0>(*binding);
+            const cv::Mat src = std::get<1>(*binding);
             if (src.empty()) continue;
             const int W = src.cols;
             const int H = src.rows;
@@ -357,8 +452,16 @@ public:
                     const double w = std::abs(bbox.at(2).get<double>());
                     const double h = std::abs(bbox.at(3).get<double>());
 
-                    const double w2 = (cropW > 0 && cropH > 0) ? static_cast<double>(cropW) : std::max<double>(minSize, w + 2.0 * cropExpand);
-                    const double h2 = (cropW > 0 && cropH > 0) ? static_cast<double>(cropH) : std::max<double>(minSize, h + 2.0 * cropExpand);
+                    double w2 = 0.0;
+                    double h2 = 0.0;
+                    if (hasCropShape) {
+                        w2 = static_cast<double>(cropW);
+                        h2 = static_cast<double>(cropH);
+                    } else {
+                        const auto expand = resolveExpand(w, h);
+                        w2 = std::max<double>(minSize, w + 2.0 * expand.first);
+                        h2 = std::max<double>(minSize, h + 2.0 * expand.second);
+                    }
                     const int iw = std::max(minSize, static_cast<int>(w2));
                     const int ih = std::max(minSize, static_cast<int>(h2));
 
@@ -416,25 +519,39 @@ public:
                     // axis-aligned crop: bbox=[x,y,w,h]
                     const double x = bbox.at(0).get<double>();
                     const double y = bbox.at(1).get<double>();
-                    const double bw = bbox.at(2).get<double>();
-                    const double bh = bbox.at(3).get<double>();
+                    const double bw = std::abs(bbox.at(2).get<double>());
+                    const double bh = std::abs(bbox.at(3).get<double>());
                     const double x1 = x;
                     const double y1 = y;
                     const double x2 = x + bw;
                     const double y2 = y + bh;
 
                     int nx1 = 0, ny1 = 0, nx2 = 0, ny2 = 0;
-                    // 外扩：左上 floor，右下 round（对齐 C#）
-                    const double tx1 = std::max(0.0, std::min(static_cast<double>(W), x1 - cropExpand));
-                    const double ty1 = std::max(0.0, std::min(static_cast<double>(H), y1 - cropExpand));
-                    nx1 = static_cast<int>(std::floor(tx1));
-                    ny1 = static_cast<int>(std::floor(ty1));
-                    const int rx2 = static_cast<int>(std::llround(x2 + cropExpand));
-                    const int ry2 = static_cast<int>(std::llround(y2 + cropExpand));
-                    nx2 = std::min(W, std::max(0, rx2));
-                    ny2 = std::min(H, std::max(0, ry2));
-                    nx2 = std::max(nx1 + minSize, nx2);
-                    ny2 = std::max(ny1 + minSize, ny2);
+                    if (hasCropShape) {
+                        const double cx = (x1 + x2) / 2.0;
+                        const double cy = (y1 + y2) / 2.0;
+                        const double tx1 = std::max(0.0, std::min(static_cast<double>(W), cx - static_cast<double>(cropW) / 2.0));
+                        const double ty1 = std::max(0.0, std::min(static_cast<double>(H), cy - static_cast<double>(cropH) / 2.0));
+                        nx1 = static_cast<int>(std::floor(tx1));
+                        ny1 = static_cast<int>(std::floor(ty1));
+                        nx2 = static_cast<int>(std::max(static_cast<double>(nx1 + 1),
+                                                        std::min(static_cast<double>(W), static_cast<double>(nx1 + cropW))));
+                        ny2 = static_cast<int>(std::max(static_cast<double>(ny1 + 1),
+                                                        std::min(static_cast<double>(H), static_cast<double>(ny1 + cropH))));
+                    } else {
+                        // 外扩：左上 floor，右下 round（对齐 C#）
+                        const auto expand = resolveExpand(bw, bh);
+                        const double tx1 = std::max(0.0, std::min(static_cast<double>(W), x1 - expand.first));
+                        const double ty1 = std::max(0.0, std::min(static_cast<double>(H), y1 - expand.second));
+                        nx1 = static_cast<int>(std::floor(tx1));
+                        ny1 = static_cast<int>(std::floor(ty1));
+                        const int rx2 = static_cast<int>(std::llround(x2 + expand.first));
+                        const int ry2 = static_cast<int>(std::llround(y2 + expand.second));
+                        nx2 = std::min(W, std::max(0, rx2));
+                        ny2 = std::min(H, std::max(0, ry2));
+                        nx2 = std::max(nx1 + minSize, nx2);
+                        ny2 = std::max(ny1 + minSize, ny2);
+                    }
 
                     nx1 = std::max(0, std::min(W, nx1));
                     ny1 = std::max(0, std::min(H, ny1));

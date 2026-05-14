@@ -424,6 +424,8 @@ public:
         int categoryId = ReadInt("category_id", 0);
         std::string categoryName = ReadString("category_name", std::string("测试对象"));
         double score = ReadDouble("score", 0.95);
+        const bool withAngle = ReadBool("with_angle", false);
+        const double angle = ReadDouble("angle", -100.0);
 
         // 兼容属性输入为 XYXY（bbox_x1~bbox_y2）或 XYWH（bbox_x/bbox_y/bbox_w/bbox_h）
         double x1 = ReadDouble("bbox_x1", 100.0);
@@ -438,8 +440,14 @@ public:
         try { if (Properties.is_object() && Properties.contains("bbox_y")) by = Properties.at("bbox_y").get<double>(); } catch (...) {}
         try { if (Properties.is_object() && Properties.contains("bbox_w")) bwProp = Properties.at("bbox_w").get<double>(); } catch (...) {}
         try { if (Properties.is_object() && Properties.contains("bbox_h")) bhProp = Properties.at("bbox_h").get<double>(); } catch (...) {}
+        double cxProp = std::numeric_limits<double>::quiet_NaN();
+        double cyProp = std::numeric_limits<double>::quiet_NaN();
+        try { if (Properties.is_object() && Properties.contains("bbox_cx")) cxProp = Properties.at("bbox_cx").get<double>(); } catch (...) {}
+        try { if (Properties.is_object() && Properties.contains("bbox_cy")) cyProp = Properties.at("bbox_cy").get<double>(); } catch (...) {}
 
-        if (!std::isnan(bx) && !std::isnan(by) && !std::isnan(bwProp) && !std::isnan(bhProp)) {
+        if (withAngle && !std::isnan(cxProp) && !std::isnan(cyProp) && !std::isnan(bwProp) && !std::isnan(bhProp)) {
+            // 旋转框测试入口：bbox 使用 [cx, cy, w, h]，angle 为弧度。
+        } else if (!std::isnan(bx) && !std::isnan(by) && !std::isnan(bwProp) && !std::isnan(bhProp)) {
             x1 = bx; y1 = by;
             x2 = bx + std::abs(bwProp);
             y2 = by + std::abs(bhProp);
@@ -460,10 +468,16 @@ public:
         det["category_id"] = categoryId;
         det["category_name"] = categoryName;
         det["score"] = score;
-        det["bbox"] = Json::array({ x1, y1, bw, bh });
         det["with_bbox"] = true;
-        det["with_angle"] = false;
-        det["angle"] = -100.0;
+        if (withAngle && !std::isnan(cxProp) && !std::isnan(cyProp) && !std::isnan(bwProp) && !std::isnan(bhProp)) {
+            det["bbox"] = Json::array({ cxProp, cyProp, std::max(1.0, std::abs(bwProp)), std::max(1.0, std::abs(bhProp)) });
+            det["with_angle"] = true;
+            det["angle"] = angle;
+        } else {
+            det["bbox"] = Json::array({ x1, y1, bw, bh });
+            det["with_angle"] = false;
+            det["angle"] = -100.0;
+        }
 
         Json entry = Json::object();
         entry["type"] = "local";

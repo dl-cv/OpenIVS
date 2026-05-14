@@ -34,6 +34,9 @@ namespace DlcvCSharpTest
         private const string UsLagImagePath2 = @"C:\Users\Administrator\Desktop\测试无监督\NG3.png";
         private const string FlowInstanceSegFilterModelPath = @"Y:\zxc\模块化任务测试\实例分割筛选测试_120_50.dvst";
         private const string FlowInstanceSegFilterImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png";
+        private const string BBoxCropFixModelAPath = @"Z:\A-苏州三谛\A260308-苏州三谛-AOI元器件定位-新方案\Task01-元件提取\现场模型\模型1-元件提取 - 副本_120_50.dvst";
+        private const string BBoxCropFixModelBPath = @"Z:\A-苏州三谛\A260308-苏州三谛-AOI元器件定位-新方案\Task01-元件提取\现场模型\模型1-元件提取 - 裁图_120_50.dvst";
+        private const string BBoxCropFixImagePath = @"Z:\A-苏州三谛\A260308-苏州三谛-AOI元器件定位-新方案\Task01-元件提取\现场模型\PCB20047-23439-TOP_61_4092_0.jpg";
 
         private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
         {
@@ -75,6 +78,16 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bbox-iou-dedup-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunBBoxIoUDedupSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "bbox-crop-fix-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunBBoxCropFixSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "image-generation-expand-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunImageGenerationExpandSelfTest();
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "rect-image-correction-selftest", StringComparison.OrdinalIgnoreCase))
@@ -2008,6 +2021,548 @@ namespace DlcvCSharpTest
                 if (dets != null) count += dets.Count;
             }
             return count;
+        }
+
+        private static int RunBBoxCropFixSelfTest()
+        {
+            Console.WriteLine("==== BBOX 去重与裁图修复自测 ====");
+
+            if (!RunBBoxCropLogicRegression())
+            {
+                Console.WriteLine("BBOX 去重与裁图逻辑回归失败");
+                return 1;
+            }
+
+            int actual = RunBBoxCropActualModelSelfTest();
+            if (actual != 0) return actual;
+
+            Console.WriteLine("BBOX 去重与裁图修复自测通过");
+            return 0;
+        }
+
+        private static int RunImageGenerationExpandSelfTest()
+        {
+            Console.WriteLine("==== AI 裁图外扩参数自测 ====");
+            return RunImageGenerationExpandRegression() ? 0 : 1;
+        }
+
+        private static bool RunBBoxCropLogicRegression()
+        {
+            if (!RunImageGenerationExpandRegression())
+            {
+                return false;
+            }
+
+            using (var img0 = new Mat(320, 320, MatType.CV_8UC3, new Scalar(0, 0, 0)))
+            using (var img1 = new Mat(320, 320, MatType.CV_8UC3, new Scalar(0, 0, 0)))
+            {
+                Cv2.Rectangle(img0, new Rect(10, 10, 10, 10), new Scalar(255, 255, 255), -1);
+                Cv2.Rectangle(img1, new Rect(10, 10, 10, 10), new Scalar(255, 255, 255), -1);
+
+                var image0 = new ModuleImage(img0, img0, new TransformationState(320, 320), 0);
+                var image1 = new ModuleImage(img1, img1, new TransformationState(320, 320), 1);
+                var images = new List<ModuleImage> { image0, image1 };
+
+                var dedup = new BBoxIoUDedup(
+                    201,
+                    properties: new Dictionary<string, object>
+                    {
+                        ["metric"] = "iou",
+                        ["iou_threshold"] = 0.5,
+                        ["per_category"] = true,
+                        ["cross_model"] = true
+                    });
+
+                ModuleIO eightToFour = dedup.Process(images, BuildEightToFourDedupResults());
+                int kept = CountBBoxDedupDetections(eightToFour.ResultList);
+                if (kept != 4)
+                {
+                    Console.WriteLine("8->4 去重失败，实际保留数量: " + kept);
+                    return false;
+                }
+
+                ModuleIO dedupForCrop = dedup.Process(images, BuildDedupThenCropResults());
+                int keptForCrop = CountBBoxDedupDetections(dedupForCrop.ResultList);
+                if (keptForCrop != 4)
+                {
+                    Console.WriteLine("裁图前去重数量错误，实际保留数量: " + keptForCrop);
+                    return false;
+                }
+
+                var cropper = new ImageGeneration(
+                    202,
+                    properties: new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    });
+
+                ModuleIO cropOut = cropper.Process(dedupForCrop.ImageList, dedupForCrop.ResultList);
+                if (cropOut.ImageList.Count != 4 || cropOut.ResultList.Count != 4)
+                {
+                    Console.WriteLine("AI 裁图应输出 4 张图和 4 条结果，实际 image="
+                        + cropOut.ImageList.Count + ", result=" + cropOut.ResultList.Count);
+                    return false;
+                }
+
+                var originCounts = new Dictionary<int, int>();
+                foreach (JToken token in cropOut.ResultList)
+                {
+                    var entry = token as JObject;
+                    if (entry == null) continue;
+                    int origin = entry["origin_index"]?.Value<int?>() ?? -1;
+                    originCounts[origin] = originCounts.ContainsKey(origin) ? originCounts[origin] + 1 : 1;
+                }
+                if (!originCounts.ContainsKey(0) || originCounts[0] != 1 ||
+                    !originCounts.ContainsKey(1) || originCounts[1] != 3 ||
+                    originCounts.Count != 2)
+                {
+                    Console.WriteLine("AI 裁图 origin 归属错误: " + string.Join(",", originCounts.Select(kv => kv.Key + ":" + kv.Value)));
+                    return false;
+                }
+
+                var merger = new SlidingMergeResults(
+                    203,
+                    properties: new Dictionary<string, object>
+                    {
+                        ["dedup_results"] = true
+                    });
+                var mergeImages = new List<ModuleImage>
+                {
+                    new ModuleImage(img0, img0, new TransformationState(320, 320), 10),
+                    new ModuleImage(img1, img1, new TransformationState(320, 320), 20)
+                };
+                ModuleIO mergeOut = merger.Process(mergeImages, new JArray());
+                var indices = new List<int>();
+                foreach (JToken token in mergeOut.ResultList)
+                {
+                    var entry = token as JObject;
+                    if (entry != null && string.Equals(entry.Value<string>("type"), "local", StringComparison.OrdinalIgnoreCase))
+                    {
+                        indices.Add(entry["index"]?.Value<int?>() ?? -1);
+                    }
+                }
+                if (indices.Count != 2 || indices[0] != 0 || indices[1] != 1)
+                {
+                    Console.WriteLine("滑窗合并输出 index 应为 [0,1]，实际: [" + string.Join(",", indices) + "]");
+                    return false;
+                }
+            }
+
+            Console.WriteLine("BBOX 去重与裁图逻辑回归通过");
+            return true;
+        }
+
+        private static bool RunImageGenerationExpandRegression()
+        {
+            using (var img = new Mat(200, 200, MatType.CV_8UC3, new Scalar(0, 0, 0)))
+            using (var img320 = new Mat(320, 320, MatType.CV_8UC3, new Scalar(0, 0, 0)))
+            {
+                var image = new ModuleImage(img, img, new TransformationState(200, 200), 0);
+                var images = new List<ModuleImage> { image };
+                var image320 = new ModuleImage(img320, img320, new TransformationState(320, 320), 0);
+                var images320 = new List<ModuleImage> { image320 };
+                string error;
+
+                if (!AssertImageGenerationCrop(
+                    "像素外扩",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 5,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 60.0, 40.0, 20.0),
+                    50,
+                    30,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比外扩普通框",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 10,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 60.0, 40.0, 20.0),
+                    48,
+                    24,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比值不截断为32",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 50,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 60.0, 40.0, 20.0),
+                    80,
+                    40,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比默认像素上限",
+                    images320,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 20,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 50.0, 200.0, 200.0),
+                    264,
+                    264,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比自定义像素上限",
+                    images320,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 20,
+                        ["crop_expand_percent_limit"] = 10,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 50.0, 200.0, 200.0),
+                    220,
+                    220,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "固定尺寸优先",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 5,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 10,
+                        ["crop_shape"] = new[] { 30, 25 },
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(50.0, 60.0, 40.0, 20.0),
+                    30,
+                    25,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "百分比外扩旋转框",
+                    images,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 10,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(100.0, 100.0, 40.0, 20.0, true, 0.0),
+                    48,
+                    24,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+
+                if (!AssertImageGenerationCrop(
+                    "旋转框百分比默认像素上限",
+                    images320,
+                    new Dictionary<string, object>
+                    {
+                        ["crop_expand"] = 0,
+                        ["crop_expand_mode"] = "percent",
+                        ["crop_expand_percent"] = 20,
+                        ["crop_shape"] = new int[0],
+                        ["min_size"] = 1
+                    },
+                    BuildImageGenerationDet(160.0, 160.0, 200.0, 200.0, true, 0.0),
+                    264,
+                    264,
+                    out error))
+                {
+                    Console.WriteLine(error);
+                    return false;
+                }
+            }
+
+            Console.WriteLine("AI 裁图外扩参数逻辑回归通过");
+            return true;
+        }
+
+        private static bool AssertImageGenerationCrop(
+            string caseName,
+            List<ModuleImage> images,
+            Dictionary<string, object> properties,
+            JObject detection,
+            int expectedWidth,
+            int expectedHeight,
+            out string error)
+        {
+            var cropper = new ImageGeneration(220, properties: properties);
+            var resultList = new JArray
+            {
+                BuildBBoxCropLocalEntry(0, 0, null, detection)
+            };
+            ModuleIO output = cropper.Process(images, resultList);
+            if (output.ImageList.Count != 1 || output.ResultList.Count != 1)
+            {
+                error = caseName + " 输出数量错误，image=" + output.ImageList.Count + ", result=" + output.ResultList.Count;
+                return false;
+            }
+
+            Mat cropped = output.ImageList[0].ImageObject;
+            int actualWidth = cropped != null ? cropped.Width : 0;
+            int actualHeight = cropped != null ? cropped.Height : 0;
+            if (actualWidth != expectedWidth || actualHeight != expectedHeight)
+            {
+                error = caseName + " 裁图尺寸错误，actual=" + actualWidth + "x" + actualHeight
+                    + ", expected=" + expectedWidth + "x" + expectedHeight;
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
+        private static JObject BuildImageGenerationDet(double x, double y, double w, double h, bool withAngle = false, double angle = -100.0)
+        {
+            var det = BuildBBoxCropDet(x, y, w, h, 0.99);
+            det["with_angle"] = withAngle;
+            det["angle"] = withAngle ? angle : -100.0;
+            return det;
+        }
+
+        private static JArray BuildEightToFourDedupResults()
+        {
+            return new JArray
+            {
+                BuildBBoxCropLocalEntry(
+                    0,
+                    0,
+                    BuildPythonIdentityTransform(320, 320),
+                    BuildBBoxCropDet(10.0, 10.0, 100.0, 100.0, 0.99),
+                    BuildBBoxCropDet(220.0, 220.0, 40.0, 40.0, 0.98),
+                    BuildBBoxCropDet(70.0, 10.0, 40.0, 40.0, 0.97),
+                    BuildBBoxCropDet(70.0, 70.0, 40.0, 40.0, 0.96)),
+                BuildBBoxCropLocalEntry(
+                    1,
+                    1,
+                    null,
+                    BuildBBoxCropDet(20.0, 20.0, 80.0, 80.0, 0.88),
+                    BuildBBoxCropDet(222.0, 222.0, 38.0, 38.0, 0.87),
+                    BuildBBoxCropDet(72.0, 12.0, 38.0, 38.0, 0.86),
+                    BuildBBoxCropDet(72.0, 72.0, 38.0, 38.0, 0.85))
+            };
+        }
+
+        private static JArray BuildDedupThenCropResults()
+        {
+            return new JArray
+            {
+                BuildBBoxCropLocalEntry(
+                    0,
+                    0,
+                    BuildPythonIdentityTransform(320, 320),
+                    BuildBBoxCropDet(10.0, 10.0, 40.0, 40.0, 0.99)),
+                BuildBBoxCropLocalEntry(
+                    1,
+                    1,
+                    null,
+                    BuildBBoxCropDet(70.0, 10.0, 40.0, 40.0, 0.98),
+                    BuildBBoxCropDet(10.0, 70.0, 40.0, 40.0, 0.97),
+                    BuildBBoxCropDet(70.0, 70.0, 40.0, 40.0, 0.96))
+            };
+        }
+
+        private static JObject BuildBBoxCropLocalEntry(int index, int originIndex, JToken transform, params JObject[] detections)
+        {
+            var sampleResults = new JArray();
+            if (detections != null)
+            {
+                foreach (var det in detections)
+                {
+                    if (det != null) sampleResults.Add(det);
+                }
+            }
+
+            var entry = new JObject
+            {
+                ["type"] = "local",
+                ["index"] = index,
+                ["origin_index"] = originIndex,
+                ["sample_results"] = sampleResults
+            };
+            entry["transform"] = transform != null ? transform.DeepClone() : JValue.CreateNull();
+            return entry;
+        }
+
+        private static JObject BuildBBoxCropDet(double x, double y, double w, double h, double score)
+        {
+            return new JObject
+            {
+                ["category_id"] = 1,
+                ["category_name"] = "元件",
+                ["score"] = score,
+                ["bbox"] = new JArray(x, y, w, h),
+                ["with_bbox"] = true
+            };
+        }
+
+        private static JObject BuildPythonIdentityTransform(int width, int height)
+        {
+            return new JObject
+            {
+                ["crop_box"] = new JArray(0, 0, width, height),
+                ["affine_matrix"] = new JArray
+                {
+                    new JArray(1.0, 0.0, 0.0),
+                    new JArray(0.0, 1.0, 0.0)
+                },
+                ["output_size"] = new JArray(width, height),
+                ["original_size"] = new JArray(width, height)
+            };
+        }
+
+        private static int RunBBoxCropActualModelSelfTest()
+        {
+            Console.WriteLine("==== 苏州三谛 BBOX 裁图实际模型自测 ====");
+            if (!File.Exists(BBoxCropFixModelAPath)) { Console.WriteLine("模型A不存在: " + BBoxCropFixModelAPath); return 2; }
+            if (!File.Exists(BBoxCropFixModelBPath)) { Console.WriteLine("模型B不存在: " + BBoxCropFixModelBPath); return 2; }
+            if (!File.Exists(BBoxCropFixImagePath)) { Console.WriteLine("图像不存在: " + BBoxCropFixImagePath); return 2; }
+
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                bgr = Cv2.ImRead(BBoxCropFixImagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) { Console.WriteLine("图像解码失败"); return 2; }
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                bool ok = true;
+                ok = RunBBoxCropOneModel("A", BBoxCropFixModelAPath, rgb, 4) && ok;
+                ok = RunBBoxCropOneModel("B", BBoxCropFixModelBPath, rgb, 4) && ok;
+                return ok ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("苏州三谛实际模型自测异常: " + ex.Message);
+                Console.WriteLine(ex.StackTrace);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                ForceGc();
+            }
+        }
+
+        private static bool RunBBoxCropOneModel(string name, string modelPath, Mat rgb, int expectedCount)
+        {
+            Model model = null;
+            Utils.CSharpResult result = default(Utils.CSharpResult);
+            bool hasResult = false;
+            try
+            {
+                Console.WriteLine("[" + name + "] 加载模型: " + modelPath);
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                var p = new JObject { ["threshold"] = 0.5, ["with_mask"] = true, ["batch_size"] = 1 };
+                var sw = Stopwatch.StartNew();
+                result = model.InferBatch(new List<Mat> { rgb }, p);
+                hasResult = true;
+                sw.Stop();
+
+                int sampleCount = result.SampleResults != null ? result.SampleResults.Count : 0;
+                int objectCount = sampleCount > 0 && result.SampleResults[0].Results != null
+                    ? result.SampleResults[0].Results.Count
+                    : 0;
+
+                Console.WriteLine("[" + name + "] sample_count: " + sampleCount);
+                Console.WriteLine("[" + name + "] 推理结果: " + objectCount + "个, elapsed=" + sw.Elapsed.TotalMilliseconds.ToString("F2", CultureInfo.InvariantCulture) + "ms");
+                PrintBBoxCropObjects(result);
+
+                if (sampleCount != 1 || objectCount != expectedCount)
+                {
+                    Console.WriteLine("[" + name + "] 验证失败：期望 1 个 sample 且 " + expectedCount + " 个目标，实际 sample="
+                        + sampleCount + ", target=" + objectCount);
+                    return false;
+                }
+
+                return true;
+            }
+            finally
+            {
+                if (hasResult) DisposeResultMasks(result);
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
+        }
+
+        private static void PrintBBoxCropObjects(Utils.CSharpResult result)
+        {
+            if (result.SampleResults == null || result.SampleResults.Count == 0 || result.SampleResults[0].Results == null)
+            {
+                return;
+            }
+
+            var objects = result.SampleResults[0].Results;
+            for (int i = 0; i < objects.Count; i++)
+            {
+                var obj = objects[i];
+                Console.WriteLine(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "[{0}] {1} score={2:F2} bbox=({3:F1}, {4:F1}, {5:F1}, {6:F1}) area={7:F1}",
+                        i + 1,
+                        obj.CategoryName,
+                        obj.Score,
+                        obj.Bbox != null && obj.Bbox.Count > 0 ? obj.Bbox[0] : 0.0,
+                        obj.Bbox != null && obj.Bbox.Count > 1 ? obj.Bbox[1] : 0.0,
+                        obj.Bbox != null && obj.Bbox.Count > 2 ? obj.Bbox[2] : 0.0,
+                        obj.Bbox != null && obj.Bbox.Count > 3 ? obj.Bbox[3] : 0.0,
+                        obj.Area));
+            }
         }
 
         private static int RunDemo2RgbSelfTest(string[] args)
