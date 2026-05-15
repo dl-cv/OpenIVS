@@ -1321,6 +1321,9 @@ public:
 
                 std::array<double, 4> bbox = {0.0, 0.0, 0.0, 0.0};
                 if (!TryExtractBboxXyxy(det, bbox)) continue;
+                if (crossModel) {
+                    bbox = BBoxToGlobalXyxy(bbox, entry.contains("transform") ? &entry.at("transform") : nullptr);
+                }
 
                 const double area = BBoxArea(bbox);
                 if (area <= 0.0) continue;
@@ -1436,14 +1439,14 @@ private:
                                                const std::string& singleImageGroup) {
         const int idx = entry.contains("index") ? SafeIntFromJson(entry.at("index"), -1) : -1;
         const int originIdx = entry.contains("origin_index") ? SafeIntFromJson(entry.at("origin_index"), idx) : idx;
-        const std::string transformSig = TransformGroupKey(entry.contains("transform") ? &entry.at("transform") : nullptr);
 
         auto it = imageGroups.find(originIdx);
-        if (it != imageGroups.end()) return std::string("image|") + it->second + "|" + transformSig;
+        if (it != imageGroups.end()) return std::string("image|") + it->second;
         it = imageGroups.find(idx);
-        if (it != imageGroups.end()) return std::string("image|") + it->second + "|" + transformSig;
+        if (it != imageGroups.end()) return std::string("image|") + it->second;
 
-        if (!singleImageGroup.empty()) return std::string("image|") + singleImageGroup + "|" + transformSig;
+        if (!singleImageGroup.empty()) return std::string("image|") + singleImageGroup;
+        const std::string transformSig = TransformGroupKey(entry.contains("transform") ? &entry.at("transform") : nullptr);
         return BuildStrictGroupKey(idx, originIdx, transformSig);
     }
 
@@ -1516,6 +1519,99 @@ private:
         if (x2 <= x1 || y2 <= y1) return false;
 
         bbox = {x1, y1, x2, y2};
+        return true;
+    }
+
+    static std::array<double, 4> BBoxToGlobalXyxy(const std::array<double, 4>& bboxLocal, const Json* transform) {
+        if (transform == nullptr || transform->is_null() || IsIdentityTransform(*transform)) return bboxLocal;
+
+        std::array<double, 6> currentToOriginal = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+        if (!TryBuildCurrentToOriginal(*transform, currentToOriginal)) return bboxLocal;
+
+        auto mapPoint = [&currentToOriginal](double x, double y) -> std::pair<double, double> {
+            return {
+                currentToOriginal[0] * x + currentToOriginal[1] * y + currentToOriginal[2],
+                currentToOriginal[3] * x + currentToOriginal[4] * y + currentToOriginal[5]
+            };
+        };
+
+        const std::array<std::pair<double, double>, 4> points = {
+            mapPoint(bboxLocal[0], bboxLocal[1]),
+            mapPoint(bboxLocal[2], bboxLocal[1]),
+            mapPoint(bboxLocal[2], bboxLocal[3]),
+            mapPoint(bboxLocal[0], bboxLocal[3])
+        };
+
+        double minX = points[0].first;
+        double minY = points[0].second;
+        double maxX = points[0].first;
+        double maxY = points[0].second;
+        for (size_t i = 1; i < points.size(); ++i) {
+            minX = std::min(minX, points[i].first);
+            minY = std::min(minY, points[i].second);
+            maxX = std::max(maxX, points[i].first);
+            maxY = std::max(maxY, points[i].second);
+        }
+        return {minX, minY, maxX, maxY};
+    }
+
+    static bool TryBuildCurrentToOriginal(const Json& transform, std::array<double, 6>& currentToOriginal) {
+        if (!transform.is_object()) return false;
+
+        std::array<double, 6> originalToCurrent = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+        if (transform.contains("affine_2x3") &&
+            transform.at("affine_2x3").is_array() &&
+            transform.at("affine_2x3").size() >= 6) {
+            const Json& flat = transform.at("affine_2x3");
+            for (size_t i = 0; i < 6; ++i) {
+                originalToCurrent[i] = SafeDoubleFromJson(flat.at(i), 0.0);
+            }
+        } else {
+            int cropX = 0, cropY = 0, cropW = 0, cropH = 0;
+            if (!TryReadCropBox(transform, cropX, cropY, cropW, cropH)) return false;
+            if (!transform.contains("affine_matrix") ||
+                !transform.at("affine_matrix").is_array() ||
+                transform.at("affine_matrix").size() < 2) {
+                return false;
+            }
+
+            const Json& matrix = transform.at("affine_matrix");
+            if (!matrix.at(0).is_array() || !matrix.at(1).is_array() ||
+                matrix.at(0).size() < 3 || matrix.at(1).size() < 3) {
+                return false;
+            }
+
+            const double a00 = SafeDoubleFromJson(matrix.at(0).at(0), 0.0);
+            const double a01 = SafeDoubleFromJson(matrix.at(0).at(1), 0.0);
+            const double a02 = SafeDoubleFromJson(matrix.at(0).at(2), 0.0);
+            const double a10 = SafeDoubleFromJson(matrix.at(1).at(0), 0.0);
+            const double a11 = SafeDoubleFromJson(matrix.at(1).at(1), 0.0);
+            const double a12 = SafeDoubleFromJson(matrix.at(1).at(2), 0.0);
+            originalToCurrent = {
+                a00,
+                a01,
+                a02 - a00 * cropX - a01 * cropY,
+                a10,
+                a11,
+                a12 - a10 * cropX - a11 * cropY
+            };
+        }
+
+        return InvertAffine2x3(originalToCurrent, currentToOriginal);
+    }
+
+    static bool InvertAffine2x3(const std::array<double, 6>& a, std::array<double, 6>& inv) {
+        const double det = a[0] * a[4] - a[1] * a[3];
+        if (std::abs(det) < 1e-12) return false;
+
+        const double invDet = 1.0 / det;
+        const double ia = a[4] * invDet;
+        const double ib = -a[1] * invDet;
+        const double ic = -a[3] * invDet;
+        const double id = a[0] * invDet;
+        const double itx = -(ia * a[2] + ib * a[5]);
+        const double ity = -(ic * a[2] + id * a[5]);
+        inv = {ia, ib, itx, ic, id, ity};
         return true;
     }
 
