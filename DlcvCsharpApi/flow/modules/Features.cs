@@ -3488,7 +3488,7 @@ namespace DlcvModules
     /// - 仅处理 type == "local" 的条目
     /// - 从 sample_results 提取 bbox=[x,y,w,h]，内部转换为 xyxy 后按分组与面积从大到小去重
     /// - metric 支持 iou / ios；per_category 控制是否按类别分别去重
-    /// - cross_model 默认 true：跨不同模型分支按原图指纹 + transform 分组；false 时按 index/origin_index/transform 严格分组
+    /// - cross_model 默认 true：跨不同模型分支按原图指纹分组，并将 bbox 映射到原图坐标比较；false 时按 index/origin_index/transform 严格分组
     /// </summary>
     public class BBoxIoUDedup : BaseModule
     {
@@ -3561,6 +3561,10 @@ namespace DlcvModules
                     if (det == null) continue;
 
                     if (!TryExtractBboxXyxy(det, out double[] bbox)) continue;
+                    if (crossModel)
+                    {
+                        bbox = BBoxToGlobalXyxy(bbox, entry["transform"]);
+                    }
 
                     double area = BBoxArea(bbox);
                     if (area <= 0.0) continue;
@@ -3716,16 +3720,16 @@ namespace DlcvModules
         {
             int idx = SafeInt(entry["index"], -1);
             int originIdx = SafeInt(entry["origin_index"], idx);
-            string transformSig = TransformGroupKey(entry["transform"]);
 
             string group;
             if (imageGroups != null)
             {
-                if (imageGroups.TryGetValue(originIdx, out group)) return "image|" + group + "|" + transformSig;
-                if (imageGroups.TryGetValue(idx, out group)) return "image|" + group + "|" + transformSig;
+                if (imageGroups.TryGetValue(originIdx, out group)) return "image|" + group;
+                if (imageGroups.TryGetValue(idx, out group)) return "image|" + group;
             }
 
-            if (!string.IsNullOrEmpty(singleImageGroup)) return "image|" + singleImageGroup + "|" + transformSig;
+            if (!string.IsNullOrEmpty(singleImageGroup)) return "image|" + singleImageGroup;
+            string transformSig = TransformGroupKey(entry["transform"]);
             return BuildStrictGroupKey(idx, originIdx, transformSig);
         }
 
@@ -4013,6 +4017,98 @@ namespace DlcvModules
 
             bbox = new[] { x1, y1, x2, y2 };
             return true;
+        }
+
+        private static double[] BBoxToGlobalXyxy(double[] bboxLocal, JToken transformToken)
+        {
+            if (bboxLocal == null || bboxLocal.Length < 4) return bboxLocal;
+            var transform = transformToken as JObject;
+            if (transform == null || IsIdentityTransform(transform)) return bboxLocal;
+            if (!TryBuildCurrentToOriginal(transform, out double[] currentToOriginal)) return bboxLocal;
+
+            var points = new[]
+            {
+                TransformPoint(currentToOriginal, bboxLocal[0], bboxLocal[1]),
+                TransformPoint(currentToOriginal, bboxLocal[2], bboxLocal[1]),
+                TransformPoint(currentToOriginal, bboxLocal[2], bboxLocal[3]),
+                TransformPoint(currentToOriginal, bboxLocal[0], bboxLocal[3])
+            };
+
+            double minX = points[0].Item1;
+            double minY = points[0].Item2;
+            double maxX = points[0].Item1;
+            double maxY = points[0].Item2;
+            for (int i = 1; i < points.Length; i++)
+            {
+                minX = Math.Min(minX, points[i].Item1);
+                minY = Math.Min(minY, points[i].Item2);
+                maxX = Math.Max(maxX, points[i].Item1);
+                maxY = Math.Max(maxY, points[i].Item2);
+            }
+            return new[] { minX, minY, maxX, maxY };
+        }
+
+        private static bool TryBuildCurrentToOriginal(JObject transform, out double[] currentToOriginal)
+        {
+            currentToOriginal = null;
+            if (transform == null) return false;
+
+            double[] originalToCurrent;
+            var flat = transform["affine_2x3"] as JArray;
+            if (flat != null && flat.Count >= 6)
+            {
+                originalToCurrent = new[]
+                {
+                    SafeDouble(flat[0], 0.0),
+                    SafeDouble(flat[1], 0.0),
+                    SafeDouble(flat[2], 0.0),
+                    SafeDouble(flat[3], 0.0),
+                    SafeDouble(flat[4], 0.0),
+                    SafeDouble(flat[5], 0.0)
+                };
+            }
+            else
+            {
+                if (!TryReadCropBox(transform, out int cropX, out int cropY, out _, out _)) return false;
+                var matrix = transform["affine_matrix"] as JArray;
+                if (matrix == null || matrix.Count < 2) return false;
+                var row0 = matrix[0] as JArray;
+                var row1 = matrix[1] as JArray;
+                if (row0 == null || row1 == null || row0.Count < 3 || row1.Count < 3) return false;
+
+                double a00 = SafeDouble(row0[0], 0.0);
+                double a01 = SafeDouble(row0[1], 0.0);
+                double a02 = SafeDouble(row0[2], 0.0);
+                double a10 = SafeDouble(row1[0], 0.0);
+                double a11 = SafeDouble(row1[1], 0.0);
+                double a12 = SafeDouble(row1[2], 0.0);
+                originalToCurrent = new[]
+                {
+                    a00,
+                    a01,
+                    a02 - a00 * cropX - a01 * cropY,
+                    a10,
+                    a11,
+                    a12 - a10 * cropX - a11 * cropY
+                };
+            }
+
+            try
+            {
+                currentToOriginal = TransformationState.Inverse2x3(originalToCurrent);
+                return true;
+            }
+            catch
+            {
+                currentToOriginal = null;
+                return false;
+            }
+        }
+
+        private static Tuple<double, double> TransformPoint(double[] t, double x, double y)
+        {
+            if (t == null || t.Length < 6) return Tuple.Create(x, y);
+            return Tuple.Create(t[0] * x + t[1] * y + t[2], t[3] * x + t[4] * y + t[5]);
         }
 
         private static double BBoxArea(double[] bbox)
