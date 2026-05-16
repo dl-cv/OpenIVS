@@ -305,7 +305,7 @@ namespace DlcvModules
                         }
                         else
                         {
-                            // 外扩：左上 int(...)（floor），右下 round 后再 clamp（与 Python 一致）
+                            // 外扩：左上 int(...)（floor），右下 int 截断后再 clamp（与 Python 一致）
                             var expand = resolveExpand(bw, bh);
                             double expandW = expand.Item1;
                             double expandH = expand.Item2;
@@ -314,8 +314,8 @@ namespace DlcvModules
                             nx1 = (int)Math.Floor(tx1);
                             ny1 = (int)Math.Floor(ty1);
 
-                            int rx2 = (int)Math.Round(x2 + expandW, MidpointRounding.ToEven);
-                            int ry2 = (int)Math.Round(y2 + expandH, MidpointRounding.ToEven);
+                            int rx2 = (int)(x2 + expandW);
+                            int ry2 = (int)(y2 + expandH);
                             nx2 = Math.Min(W, Math.Max(0, rx2));
                             ny2 = Math.Min(H, Math.Max(0, ry2));
                             nx2 = Math.Max(nx1 + minSize, nx2);
