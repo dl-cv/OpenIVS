@@ -1102,19 +1102,6 @@ namespace DlcvModules
             return rawIndex % imageCount;
         }
 
-        private static Dictionary<int, int> BuildReindexMap(bool[] flags)
-        {
-            var mp = new Dictionary<int, int>();
-            int newIdx = 0;
-            for (int i = 0; i < flags.Length; i++)
-            {
-                if (flags[i])
-                {
-                    mp[i] = newIdx++;
-                }
-            }
-            return mp;
-        }
     }
 
     /// <summary>
@@ -1311,18 +1298,18 @@ namespace DlcvModules
             foreach (var e in passEntries)
             {
                 int imgIdx = e["index"]?.Value<int?>() ?? -1;
-                if (imgIdx >= 0 && passReindex.TryGetValue(imgIdx, out int newIdx))
+                if (imgIdx >= 0 && passReindex.TryGetValue(imgIdx, out int pNewIdx))
                 {
-                    e["index"] = newIdx;
+                    e["index"] = pNewIdx;
                 }
                 mainResults.Add(e);
             }
             foreach (var e in failEntries)
             {
                 int imgIdx = e["index"]?.Value<int?>() ?? -1;
-                if (imgIdx >= 0 && failReindex.TryGetValue(imgIdx, out int newIdx))
+                if (imgIdx >= 0 && failReindex.TryGetValue(imgIdx, out int fNewIdx))
                 {
-                    e["index"] = newIdx;
+                    e["index"] = fNewIdx;
                 }
                 altResults.Add(e);
             }
@@ -1643,6 +1630,20 @@ namespace DlcvModules
             if (imageCount <= 0) return rawIndex >= 0 ? rawIndex : 0;
             if (rawIndex < 0) return 0;
             return rawIndex % imageCount;
+        }
+
+        private static Dictionary<int, int> BuildReindexMap(bool[] flags)
+        {
+            var mp = new Dictionary<int, int>();
+            int newIdx = 0;
+            for (int i = 0; i < flags.Length; i++)
+            {
+                if (flags[i])
+                {
+                    mp[i] = newIdx++;
+                }
+            }
+            return mp;
         }
     }
 
