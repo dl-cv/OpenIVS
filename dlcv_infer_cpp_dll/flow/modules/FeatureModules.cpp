@@ -539,14 +539,14 @@ public:
                         ny2 = static_cast<int>(std::max(static_cast<double>(ny1 + 1),
                                                         std::min(static_cast<double>(H), static_cast<double>(ny1 + cropH))));
                     } else {
-                        // 外扩：左上 floor，右下 round（对齐 C#）
+                        // 外扩：左上 floor，右下 int 截断（与 Python 一致）
                         const auto expand = resolveExpand(bw, bh);
                         const double tx1 = std::max(0.0, std::min(static_cast<double>(W), x1 - expand.first));
                         const double ty1 = std::max(0.0, std::min(static_cast<double>(H), y1 - expand.second));
                         nx1 = static_cast<int>(std::floor(tx1));
                         ny1 = static_cast<int>(std::floor(ty1));
-                        const int rx2 = static_cast<int>(std::llround(x2 + expand.first));
-                        const int ry2 = static_cast<int>(std::llround(y2 + expand.second));
+                        const int rx2 = static_cast<int>(x2 + expand.first);
+                        const int ry2 = static_cast<int>(y2 + expand.second);
                         nx2 = std::min(W, std::max(0, rx2));
                         ny2 = std::min(H, std::max(0, ry2));
                         nx2 = std::max(nx1 + minSize, nx2);
