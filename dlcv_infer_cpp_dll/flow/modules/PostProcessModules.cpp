@@ -759,6 +759,11 @@ private:
             return ModuleIO(std::move(mainImages), std::move(mainResults), Json::array());
         }
 
+        std::vector<bool> passFlags(inImages.size(), false);
+        std::vector<bool> failFlags(inImages.size(), false);
+        std::vector<Json> passEntries;
+        std::vector<Json> failEntries;
+
         for (const auto& token : inResults) {
             if (!token.is_object()) continue;
             const Json& entry = token;
@@ -772,8 +777,6 @@ private:
             if (imgIdx < 0 && originToIdx.count(originIndex)) imgIdx = originToIdx[originIndex];
             if (imgIdx < 0 && !sig.empty() && sigToIdx.count(sig)) imgIdx = sigToIdx[sig];
             if (imgIdx < 0 || imgIdx >= static_cast<int>(inImages.size())) continue;
-
-            const ModuleImage imgObj = inImages[static_cast<size_t>(imgIdx)];
 
             Json passArr = Json::array();
             Json failArr = emitFailBranch ? Json::array() : Json();
@@ -799,25 +802,67 @@ private:
             }
 
             if (!passArr.empty()) {
-                mainImages.push_back(imgObj);
+                passFlags[imgIdx] = true;
                 Json e = Json::object();
                 e["type"] = "local";
-                e["index"] = static_cast<int>(mainResults.size());
+                e["index"] = imgIdx;
                 e["origin_index"] = originIndex;
                 e["transform"] = transformOut;
                 e["sample_results"] = std::move(passArr);
-                mainResults.push_back(e);
+                passEntries.push_back(std::move(e));
             }
             if (emitFailBranch && !failArr.empty()) {
-                altImages.push_back(imgObj);
+                failFlags[imgIdx] = true;
                 Json e2 = Json::object();
                 e2["type"] = "local";
-                e2["index"] = static_cast<int>(altResults.size());
+                e2["index"] = imgIdx;
                 e2["origin_index"] = originIndex;
                 e2["transform"] = transformOut;
                 e2["sample_results"] = std::move(failArr);
-                altResults.push_back(e2);
+                failEntries.push_back(std::move(e2));
             }
+        }
+
+        auto buildReindexMap = [](const std::vector<bool>& flags) -> std::unordered_map<int, int> {
+            std::unordered_map<int, int> mp;
+            int newIdx = 0;
+            for (int i = 0; i < static_cast<int>(flags.size()); ++i) {
+                if (flags[i]) {
+                    mp[i] = newIdx++;
+                }
+            }
+            return mp;
+        };
+
+        auto passReindex = buildReindexMap(passFlags);
+        auto failReindex = buildReindexMap(failFlags);
+
+        for (int i = 0; i < static_cast<int>(inImages.size()); ++i) {
+            if (passFlags[i]) mainImages.push_back(inImages[i]);
+            if (failFlags[i]) altImages.push_back(inImages[i]);
+        }
+
+        for (auto& e : passEntries) {
+            int imgIdx = -1;
+            try { if (e.contains("index")) imgIdx = e.at("index").get<int>(); } catch (...) {}
+            if (imgIdx >= 0) {
+                auto it = passReindex.find(imgIdx);
+                if (it != passReindex.end()) {
+                    e["index"] = it->second;
+                }
+            }
+            mainResults.push_back(std::move(e));
+        }
+        for (auto& e : failEntries) {
+            int imgIdx = -1;
+            try { if (e.contains("index")) imgIdx = e.at("index").get<int>(); } catch (...) {}
+            if (imgIdx >= 0) {
+                auto it = failReindex.find(imgIdx);
+                if (it != failReindex.end()) {
+                    e["index"] = it->second;
+                }
+            }
+            altResults.push_back(std::move(e));
         }
 
         if (emitFailBranch) {

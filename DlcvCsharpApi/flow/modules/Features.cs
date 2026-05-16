@@ -1101,6 +1101,7 @@ namespace DlcvModules
             if (rawIndex < 0) return 0;
             return rawIndex % imageCount;
         }
+
     }
 
     /// <summary>
@@ -1186,8 +1187,13 @@ namespace DlcvModules
             var altImages = new List<ModuleImage>();
             var altResults = new JArray();
 
-            // 构建 image 映射：优先 index/origin_index（折回 batch 槽位），transform+origin 兜底
+            // 精确标记哪些图像有通过/未通过结果，避免 transform 相同导致串图
             int imageCount = inImages.Count;
+            var passFlags = new bool[imageCount];
+            var failFlags = new bool[imageCount];
+            var passEntries = new List<JObject>();
+            var failEntries = new List<JObject>();
+
             var indexToImageObj = new Dictionary<int, ModuleImage>();
             var originToImageObj = new Dictionary<int, ModuleImage>();
             var keyToImageObj = new Dictionary<string, ModuleImage>();
@@ -1216,6 +1222,15 @@ namespace DlcvModules
                 string key = SerializeTransformOnly(stDict, originIndex);
                 ModuleImage imgObj = null;
 
+                if (!indexToImageObj.TryGetValue(idx, out imgObj))
+                {
+                    if (!originToImageObj.TryGetValue(originIndex, out imgObj))
+                    {
+                        keyToImageObj.TryGetValue(key, out imgObj);
+                    }
+                }
+                if (imgObj == null) continue;
+
                 var srsArray = r["sample_results"] as JArray;
                 JArray failArray = null;
                 if (!noFilter && srsArray != null && srsArray.Count > 0)
@@ -1243,41 +1258,60 @@ namespace DlcvModules
                         out failArray);
                 }
 
-                if (!indexToImageObj.TryGetValue(idx, out imgObj))
+                if ((srsArray != null && srsArray.Count > 0) || srsArray == null)
                 {
-                    if (!originToImageObj.TryGetValue(originIndex, out imgObj))
+                    passFlags[idx] = true;
+                    var e = new JObject
                     {
-                        keyToImageObj.TryGetValue(key, out imgObj);
-                    }
+                        ["type"] = "local",
+                        ["index"] = idx,
+                        ["origin_index"] = originIndex,
+                        ["transform"] = stDict != null ? (JToken)stDict.DeepClone() : null,
+                        ["sample_results"] = srsArray ?? new JArray()
+                    };
+                    passEntries.Add(e);
                 }
+                if (failArray != null && failArray.Count > 0)
+                {
+                    failFlags[idx] = true;
+                    var e2 = new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = idx,
+                        ["origin_index"] = originIndex,
+                        ["transform"] = stDict != null ? (JToken)stDict.DeepClone() : null,
+                        ["sample_results"] = failArray
+                    };
+                    failEntries.Add(e2);
+                }
+            }
 
-                if (imgObj != null)
+            var passReindex = BuildReindexMap(passFlags);
+            var failReindex = BuildReindexMap(failFlags);
+
+            for (int i = 0; i < imageCount; i++)
+            {
+                if (passFlags[i]) mainImages.Add(inImages[i]);
+                if (failFlags[i]) altImages.Add(inImages[i]);
+            }
+
+            foreach (var e in passEntries)
+            {
+                int imgIdx = e["index"]?.Value<int?>() ?? -1;
+                if (imgIdx >= 0 && passReindex.TryGetValue(imgIdx, out int pNewIdx))
                 {
-                    if ((srsArray != null && srsArray.Count > 0) || srsArray == null)
-                    {
-                        mainImages.Add(imgObj);
-                        r["type"] = "local";
-                        r["index"] = mainResults.Count;
-                        r["origin_index"] = originIndex;
-                        if (srsArray == null) r["sample_results"] = new JArray();
-                        else if (!ReferenceEquals(r["sample_results"], srsArray)) r["sample_results"] = srsArray;
-                        // 先从输入数组摘除，再加入输出，避免 JToken 因 Parent 存在而被隐式 DeepClone。
-                        inResults[ri] = null;
-                        mainResults.Add(r);
-                    }
-                    if (failArray != null && failArray.Count > 0)
-                    {
-                        altImages.Add(imgObj);
-                        altResults.Add(new JObject
-                        {
-                            ["type"] = "local",
-                            ["index"] = altResults.Count,
-                            ["origin_index"] = originIndex,
-                            ["transform"] = stDict != null ? stDict.DeepClone() : null,
-                            ["sample_results"] = failArray
-                        });
-                    }
+                    e["index"] = pNewIdx;
                 }
+                mainResults.Add(e);
+            }
+            foreach (var e in failEntries)
+            {
+                int imgIdx = e["index"]?.Value<int?>() ?? -1;
+                if (imgIdx >= 0 && failReindex.TryGetValue(imgIdx, out int fNewIdx))
+                {
+                    e["index"] = fNewIdx;
+                }
+                altResults.Add(e);
             }
 
             // 通过 extra output 暴露第二路（未通过项）
@@ -1597,6 +1631,20 @@ namespace DlcvModules
             if (rawIndex < 0) return 0;
             return rawIndex % imageCount;
         }
+
+        private static Dictionary<int, int> BuildReindexMap(bool[] flags)
+        {
+            var mp = new Dictionary<int, int>();
+            int newIdx = 0;
+            for (int i = 0; i < flags.Length; i++)
+            {
+                if (flags[i])
+                {
+                    mp[i] = newIdx++;
+                }
+            }
+            return mp;
+        }
     }
 
     /// <summary>
@@ -1852,7 +1900,7 @@ namespace DlcvModules
             var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
             double scale = ReadDoubleLike("scale", 1.0);
-            if (scale <= 0) scale = 1.0;
+            scale = Math.Max(0.01, Math.Min(10.0, scale));
             var outImages = new List<ModuleImage>();
 
             foreach (var wrap in images)
