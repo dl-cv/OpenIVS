@@ -794,7 +794,7 @@ public:
         const std::vector<ModuleImage>& images = imageList;
         const Json results = resultList.is_array() ? resultList : Json::array();
         double scale = GetDoubleProp(Properties, "scale", 1.0);
-        if (scale <= 0.0) scale = 1.0;
+        scale = std::max(0.01, std::min(10.0, scale));
 
         std::vector<ModuleImage> outImages;
         for (const auto& wrap : images) {

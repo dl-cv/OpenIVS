@@ -1899,7 +1899,7 @@ namespace DlcvModules
             var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
             double scale = ReadDoubleLike("scale", 1.0);
-            if (scale <= 0) scale = 1.0;
+            scale = Math.Max(0.01, Math.Min(10.0, scale));
             var outImages = new List<ModuleImage>();
 
             foreach (var wrap in images)
