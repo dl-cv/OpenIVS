@@ -384,7 +384,8 @@ namespace DlcvDemo2
         private static bool ShouldUseIcDetectModel(string baseName)
         {
             return string.Equals(baseName, "IC", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(baseName, "BGA", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "IC-BGA", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(baseName, "IC-排阻", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(baseName, "座子", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(baseName, "开关", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(baseName, "晶振", StringComparison.OrdinalIgnoreCase);
