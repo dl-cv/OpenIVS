@@ -415,3 +415,6 @@ FodyWeavers.xsd
 .remember/memory/self.md
 .remember/memory/project.md
 MiniAreaDemo/ExternalCallExample.cs
+
+# Release packages
+*.zip
