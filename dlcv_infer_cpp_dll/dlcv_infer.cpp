@@ -1350,6 +1350,11 @@ namespace dlcv_infer {
     }
 
     void DllLoader::EnsureForModel(const std::string& modelPath) {
+#ifndef _WIN32
+        // Linux 默认认为有加密狗，跳过 sntl_adminapi 检测
+        (void)modelPath;
+        return;
+#endif
         std::wstring wpath = convertUtf8ToWstring(modelPath);
 #ifdef _WIN32
         std::ifstream file(wpath);
@@ -1378,6 +1383,11 @@ namespace dlcv_infer {
     }
 
     void DllLoader::EnsureForModel(const std::wstring& modelPath) {
+#ifndef _WIN32
+        // Linux 默认认为有加密狗，跳过 sntl_adminapi 检测
+        (void)modelPath;
+        return;
+#endif
 #ifdef _WIN32
         std::ifstream file(modelPath);
 #else
