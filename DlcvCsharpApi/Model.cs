@@ -1255,6 +1255,28 @@ namespace dlcv_infer_csharp
             return false;
         }
 
+        private static JArray ExtractShapeForWarmup(JObject modelInfoRoot)
+        {
+            if (modelInfoRoot == null) return null;
+            var shapes = FindInputShapesObject(modelInfoRoot);
+            if (shapes == null) return null;
+            JToken inputDesc = shapes["input"];
+            if (inputDesc == null) return null;
+
+            if (inputDesc is JObject inputObj)
+            {
+                if (inputObj["opt_shape"] is JArray optShape && optShape.Count > 0)
+                    return (JArray)optShape.DeepClone();
+                if (inputObj["max_shape"] is JArray maxShape && maxShape.Count > 0)
+                    return (JArray)maxShape.DeepClone();
+            }
+
+            if (inputDesc is JArray arr && arr.Count > 0)
+                return (JArray)arr.DeepClone();
+
+            return null;
+        }
+
         protected void WarmupInfer()
         {
             try
@@ -1267,8 +1289,9 @@ namespace dlcv_infer_csharp
                 if (ch != 1 && ch != 3)
                     return;
 
+                var shape = ExtractShapeForWarmup(_cachedModelInfo);
                 int h = 0, w = 0;
-                if (!TryExtractSpatialDims(_cachedMaxShape, out h, out w) || h <= 0 || w <= 0)
+                if (!TryExtractSpatialDims(shape, out h, out w) || h <= 0 || w <= 0)
                     return;
 
                 using (var warmupImg = new Mat(h, w, Mat8UTypeForChannels(ch), Scalar.All(0)))
