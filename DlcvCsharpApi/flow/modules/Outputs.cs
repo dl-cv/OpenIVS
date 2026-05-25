@@ -355,6 +355,11 @@ namespace DlcvModules
                 ["score"] = detObj["score"]?.Value<double>() ?? 0.0
             };
 
+            if (detObj["area"] != null)
+            {
+                item["area"] = detObj["area"];
+            }
+
             var bboxLocal = detObj["bbox"] as JArray;
             bool isRot = bboxLocal != null && bboxLocal.Count == 5;
 
