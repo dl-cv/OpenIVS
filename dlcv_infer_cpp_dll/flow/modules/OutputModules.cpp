@@ -357,6 +357,10 @@ static void AppendOutResultItemTyped(
         item.MaskRle = d.at("mask_rle");
     }
 
+    if (d.contains("area")) {
+        item.Extra["area"] = d.at("area");
+    }
+
     outResults.push_back(std::move(item));
 }
 
