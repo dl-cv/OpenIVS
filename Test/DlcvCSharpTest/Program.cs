@@ -989,8 +989,10 @@ namespace DlcvCSharpTest
                 var p = new JObject { ["threshold"] = 0.05, ["with_mask"] = true };
                 try
                 {
+                    var swInfer = Stopwatch.StartNew();
                     var r = model.InferBatch(new List<Mat> { rgb }, p);
-                    row.InferStatus = (r.SampleResults != null && r.SampleResults.Count > 0) ? "成功" : "失败";
+                    swInfer.Stop();
+                    row.InferStatus = (r.SampleResults != null && r.SampleResults.Count > 0) ? "成功(" + swInfer.Elapsed.TotalMilliseconds.ToString("F2", CultureInfo.InvariantCulture) + "ms)" : "失败";
                     row.CategoryList = BuildCategoryList(r);
                     if (string.IsNullOrWhiteSpace(row.CategoryList)) row.CategoryList = "(空)";
                     DisposeResultMasks(r);

@@ -1664,9 +1664,13 @@ namespace dlcv_infer_csharp
                     }
                 }
 
-                // 执行推理
+                // JSON 序列化
                 string jsonStr = inferRequest.ToString();
+
+                // C API 调用
                 IntPtr resultPtr = _dllLoader.dlcv_infer(jsonStr);
+
+                // 结果反序列化
                 var resultJson = Marshal.PtrToStringAnsi(resultPtr);
                 JObject resultObject = JObject.Parse(resultJson);
 
