@@ -138,6 +138,9 @@ namespace dlcv_infer_csharp
                 // 模型加载成功后立即读取并缓存 model_info/max_shape/max_batch_size
                 TryCacheModelInfo();
 
+                // 使用 opt shape 预热一次，消除首次 JIT 延迟
+                WarmupInfer();
+
                 if (enableCache)
                 {
                     lock (_cacheLock)
@@ -1213,6 +1216,89 @@ namespace dlcv_infer_csharp
             }
             _expectedChCache = -1;
             return 3;
+        }
+
+        private static bool TryExtractSpatialDims(JArray shape, out int h, out int w)
+        {
+            h = 0; w = 0;
+            if (shape == null || shape.Count == 0) return false;
+            int n = shape.Count;
+            if (n >= 4)
+            {
+                int d1 = ReadJsonIntLike(shape[1], -1);
+                int d2 = ReadJsonIntLike(shape[2], -1);
+                int d3 = ReadJsonIntLike(shape[3], -1);
+                if (IsLikelySpatialDim(d2) && IsLikelySpatialDim(d3))
+                {
+                    h = d2; w = d3; return true;
+                }
+                int d0 = ReadJsonIntLike(shape[0], -1);
+                if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1))
+                {
+                    h = d1; w = d2; return true;
+                }
+            }
+            if (n == 3)
+            {
+                int d0 = ReadJsonIntLike(shape[0], -1);
+                int d1 = ReadJsonIntLike(shape[1], -1);
+                int d2 = ReadJsonIntLike(shape[2], -1);
+                if ((d0 == 1 || d0 == 3) && IsLikelySpatialDim(d1) && IsLikelySpatialDim(d2))
+                {
+                    h = d1; w = d2; return true;
+                }
+                if (IsLikelySpatialDim(d0) && IsLikelySpatialDim(d1) && (d2 == 1 || d2 == 3))
+                {
+                    h = d0; w = d1; return true;
+                }
+            }
+            return false;
+        }
+
+        protected void WarmupInfer()
+        {
+            try
+            {
+                // 仅对本地加载成功的模型做预热
+                if (modelIndex < 0 && !_isDvsMode)
+                    return;
+
+                int ch = ResolveEffectiveInputCh();
+                if (ch != 1 && ch != 3)
+                    return;
+
+                int h = 0, w = 0;
+                if (!TryExtractSpatialDims(_cachedMaxShape, out h, out w) || h <= 0 || w <= 0)
+                    return;
+
+                using (var warmupImg = new Mat(h, w, Mat8UTypeForChannels(ch), Scalar.All(0)))
+                {
+                    var p = new JObject
+                    {
+                        ["threshold"] = 0.5,
+                        ["with_mask"] = false,
+                        ["batch_size"] = 1
+                    };
+                    var result = InferBatch(new List<Mat> { warmupImg }, p);
+                    if (result.SampleResults != null)
+                    {
+                        foreach (var sr in result.SampleResults)
+                        {
+                            if (sr.Results != null)
+                            {
+                                foreach (var obj in sr.Results)
+                                {
+                                    try { obj.Mask?.Dispose(); } catch { }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 预热失败不影响模型可用性
+            }
         }
 
         private static Mat PrepareInferImage(Mat src, int expectedChannels, List<Mat> disposables)
@@ -2369,6 +2455,7 @@ namespace dlcv_infer_csharp
 
             LoadDvtModel(modelPath, config, "加载滑窗模型失败");
             TryCacheModelInfo();
+            WarmupInfer();
         }
     }
 }

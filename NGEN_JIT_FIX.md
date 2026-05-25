@@ -18,50 +18,22 @@ OpenIVS C# API 首次推理显著慢于 C++：
 
 C++ 后端 `dlcv_infer` 本身仅 ~1.3ms，C# 层的 JIT 编译额外增加了 ~12ms。
 
-## 修复方案：NGEN 预编译
+## 修复方案：模型加载后使用 opt shape 预热推理
 
-使用 .NET Framework 自带的 `ngen.exe`（Native Image Generator）对关键 DLL 执行预编译，将 IL 代码提前编译为原生机器码，彻底消除首次调用的 JIT 开销。
+在 C# `Model` 加载完成后，立即使用模型 `max_shape`（即 opt shape）构造一张空白图像执行一次推理，走通 `PrepareInferImages` → `InferInternal` → `ParseToStructResult` 完整路径，让 .NET JIT 在业务首次真实推理前完成编译。
 
 ### 已修改文件
 
-1. **`ngen_installed_dlls.py`**（新增）
-   - 通过 `pip show` 定位 `dlcvpro_infer_csharp` 的实际安装路径
-   - 对以下 DLL 执行 `ngen.exe install`：
-     - `DlcvCsharpApi.dll`
-     - `OpenCvSharp.dll`
-     - `Newtonsoft.Json.dll`
+1. **`DlcvCsharpApi/Model.cs`**
+   - 新增 `TryExtractSpatialDims`：从 `max_shape` 解析空间维度（支持 NCHW / NHWC / CHW / HWC）。
+   - 新增 `WarmupInfer`：在模型加载成功后，使用解析出的 H/W 和通道数创建 `Mat.Zeros`，调用 `InferBatch` 执行一次预热推理并释放结果。
+   - `Model` 构造函数：在 `TryCacheModelInfo()` 之后调用 `WarmupInfer()`。
+   - `SlidingWindowModel` 构造函数：在 `TryCacheModelInfo()` 之后调用 `WarmupInfer()`。
 
-2. **`2_安装新版.bat`**
-   - 在 `pip install` 完成后，调用 `ngen_installed_dlls.py`
-   - 确保每次安装新版后自动对 site-packages 中的 DLL 做 NGEN
+2. **已移除的 NGEN 相关文件**
+   - 删除 `ngen_installed_dlls.py`
+   - 从 `1_编译打包.bat` 中移除 NGEN 预编译逻辑
 
-3. **`1_编译打包.bat`**
-   - 在构建 wheel 前，对本地 `dlcvpro_infer_csharp\` 目录下的 DLL 执行 NGEN
-   - 确保开发环境本地测试（如 `DlcvCSharpTest.exe`）也能享受优化
+## 验证方式
 
-4. **`DlcvCsharpApi/Model.cs`**
-   - 移除了调试用的 Stopwatch 分段计时和 `Console.WriteLine`
-
-5. **`Test/DlcvCSharpTest/Program.cs`**
-   - 在 `RunCase` 中为推理添加了 `Stopwatch` 计时打印
-
-## 验证结果
-
-| 模型 | NGEN 前 | NGEN 后 |
-|---|---|---|
-| 猫狗-分类 | 14.85 ms | **3.65 ms** |
-| 气球-实例分割 | 96.21 ms | 94.04 ms（后端占主导，变化不明显） |
-
-## 待排查残留
-
-用户反馈某些入口仍存在首次推理 ~7ms、后续 ~1ms 的差距：
-
-```
-推理时间: 7.02ms
-推理时间: 1.06ms
-```
-
-可能原因：
-- 该入口加载的 `DlcvCsharpApi.dll` 路径未被 NGEN 覆盖
-- 或存在其他首次调用开销（如 `DllLoader` 的首次 P/Invoke 加载、OpenCV 初始化等）
-- 需要进一步在该入口执行路径上插入分段计时定位
+加载模型后立即执行两次推理，观察耗时是否一致（均应在 ~1ms 级别，不再出现首次 ~7ms、后续 ~1ms 的差距）。
