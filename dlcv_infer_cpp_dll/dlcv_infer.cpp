@@ -1167,8 +1167,8 @@ namespace dlcv_infer {
             dllName = "dlcv_infer.dll";
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll";
 #else
-            dllName = "libdlcv_infer.so";
-            dllPath = "/root/dlcv/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
+            dllName = "libdlcv_infer_s.so";
+            dllPath = "/root/dlcv/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer_s.so";
 #endif
             break;
         case sntl_admin::DogProvider::Virbox:
@@ -1176,8 +1176,8 @@ namespace dlcv_infer {
             dllName = "dlcv_infer_v.dll";
             dllPath = "C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer_v.dll";
 #else
-            dllName = "libdlcv_infer.so";
-            dllPath = "/root/dlcv/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so";
+            dllName = "libdlcv_infer_v.so";
+            dllPath = "/root/dlcv/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer_v.so";
 #endif
             break;
         default:
@@ -1238,9 +1238,9 @@ namespace dlcv_infer {
         // 2. 当前工作目录
         candidates.push_back(dllCurrentPath);
         // 3. site-packages 候选路径（新环境）
-        candidates.push_back("/root/dlcv/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so");
+        candidates.push_back(dllPath);
         // 4. site-packages 候选路径（旧环境兼容）
-        candidates.push_back("/root/miniconda3/lib/python3.11/site-packages/dlcvpro_infer/libdlcv_infer.so");
+        candidates.push_back("/root/miniconda3/lib/python3.11/site-packages/dlcvpro_infer/" + dllName);
 
         for (const auto& path : candidates) {
             if (path.empty()) continue;
