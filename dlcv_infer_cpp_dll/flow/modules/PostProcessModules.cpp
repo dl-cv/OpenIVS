@@ -941,6 +941,9 @@ public:
 };
 
 /// post_process/result_category_override, features/result_category_override
+/// 行为：按图像索引将第二路结果的类别名一一对应覆盖主结果。
+/// 匹配优先级：index > origin_index > transform 签名。
+/// 若某条主结果找不到对应替换标签，保持原类别不变。
 class ResultCategoryOverrideModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
@@ -955,8 +958,12 @@ public:
             replaceResults = ExtraInputsIn[0].ResultList;
         }
 
-        const std::string overrideName = ExtractFirstCategoryName(replaceResults);
-        if (overrideName.empty()) {
+        // 构建替换标签映射
+        std::map<int, std::string> indexMap;
+        std::map<int, std::string> originMap;
+        std::map<std::string, std::string> transformMap;
+        BuildOverrideMap(replaceResults, indexMap, originMap, transformMap);
+        if (indexMap.empty() && originMap.empty() && transformMap.empty()) {
             return ModuleIO(images, results, Json::array());
         }
 
@@ -968,6 +975,18 @@ public:
             }
 
             const Json& entry = token;
+            // 非 local 条目透传
+            if (!entry.contains("type") || entry.at("type") != "local") {
+                outResults.push_back(entry);
+                continue;
+            }
+
+            const std::string overrideName = ResolveOverrideName(entry, indexMap, originMap, transformMap);
+            if (overrideName.empty()) {
+                outResults.push_back(entry);
+                continue;
+            }
+
             bool changed = false;
             Json entryCopy = entry;
 
@@ -1005,26 +1024,96 @@ private:
         return hasNonSpace ? s : std::string();
     }
 
-    static std::string ExtractFirstCategoryName(const Json& replaceResults) {
-        if (!replaceResults.is_array()) return std::string();
+    static std::string ExtractEntryCategoryName(const Json& entry) {
+        if (!entry.is_object()) return std::string();
+        if (entry.contains("category_name")) {
+            const std::string name = NormalizeCategoryName(entry.at("category_name"));
+            if (!name.empty()) return name;
+        }
+        if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) {
+            return std::string();
+        }
+        for (const auto& detToken : entry.at("sample_results")) {
+            if (!detToken.is_object()) continue;
+            const Json& det = detToken;
+            if (!det.contains("category_name")) continue;
+            const std::string detName = NormalizeCategoryName(det.at("category_name"));
+            if (!detName.empty()) return detName;
+        }
+        return std::string();
+    }
 
+    static void BuildOverrideMap(
+        const Json& replaceResults,
+        std::map<int, std::string>& indexMap,
+        std::map<int, std::string>& originMap,
+        std::map<std::string, std::string>& transformMap
+    ) {
+        if (!replaceResults.is_array()) return;
         for (const auto& token : replaceResults) {
             if (!token.is_object()) continue;
             const Json& entry = token;
+            if (!entry.contains("type") || entry.at("type") != "local") continue;
 
-            if (entry.contains("category_name")) {
-                const std::string entryName = NormalizeCategoryName(entry.at("category_name"));
-                if (!entryName.empty()) return entryName;
-            }
+            const std::string label = ExtractEntryCategoryName(entry);
+            if (label.empty()) continue;
 
-            if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) continue;
-            for (const auto& detToken : entry.at("sample_results")) {
-                if (!detToken.is_object()) continue;
-                const Json& det = detToken;
-                if (!det.contains("category_name")) continue;
-                const std::string detName = NormalizeCategoryName(det.at("category_name"));
-                if (!detName.empty()) return detName;
+            if (entry.contains("index") && entry.at("index").is_number()) {
+                try {
+                    int idx = entry.at("index").get<int>();
+                    if (idx >= 0) indexMap[idx] = label;
+                } catch (...) {}
             }
+            if (entry.contains("origin_index") && entry.at("origin_index").is_number()) {
+                try {
+                    int oidx = entry.at("origin_index").get<int>();
+                    if (oidx >= 0) originMap[oidx] = label;
+                } catch (...) {}
+            }
+            if (entry.contains("transform") && entry.at("transform").is_object()) {
+                try {
+                    transformMap[entry.at("transform").dump()] = label;
+                } catch (...) {}
+            }
+        }
+    }
+
+    static std::string ResolveOverrideName(
+        const Json& entry,
+        const std::map<int, std::string>& indexMap,
+        const std::map<int, std::string>& originMap,
+        const std::map<std::string, std::string>& transformMap
+    ) {
+        if (!entry.is_object()) return std::string();
+
+        // 1) index
+        if (entry.contains("index") && entry.at("index").is_number()) {
+            try {
+                int idx = entry.at("index").get<int>();
+                if (idx >= 0) {
+                    auto it = indexMap.find(idx);
+                    if (it != indexMap.end()) return it->second;
+                }
+            } catch (...) {}
+        }
+
+        // 2) origin_index
+        if (entry.contains("origin_index") && entry.at("origin_index").is_number()) {
+            try {
+                int oidx = entry.at("origin_index").get<int>();
+                if (oidx >= 0) {
+                    auto it = originMap.find(oidx);
+                    if (it != originMap.end()) return it->second;
+                }
+            } catch (...) {}
+        }
+
+        // 3) transform
+        if (entry.contains("transform") && entry.at("transform").is_object()) {
+            try {
+                auto it = transformMap.find(entry.at("transform").dump());
+                if (it != transformMap.end()) return it->second;
+            } catch (...) {}
         }
 
         return std::string();
