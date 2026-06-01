@@ -149,6 +149,7 @@ struct ModuleImage final {
     cv::Mat OriginalImage;        // 原图（用于回写到原图坐标）
     TransformationState TransformState;
     int OriginalIndex = 0;
+    std::string UniqueId;
     struct SlidingMetaInfo final {
         bool Valid = false;
         int GridX = 0;
@@ -182,12 +183,15 @@ struct ModuleImage final {
     ModuleImage() = default;
     ModuleImage(const cv::Mat& imageObject, const cv::Mat& originalImage, const TransformationState& ts, int originalIndex = 0)
         : ImageObject(imageObject), OriginalImage(originalImage.empty() ? imageObject : originalImage), TransformState(ts), OriginalIndex(originalIndex) {}
+    ModuleImage(const cv::Mat& imageObject, const cv::Mat& originalImage, const TransformationState& ts, int originalIndex, const std::string& uniqueId)
+        : ImageObject(imageObject), OriginalImage(originalImage.empty() ? imageObject : originalImage), TransformState(ts), OriginalIndex(originalIndex), UniqueId(uniqueId) {}
 
     const cv::Mat& GetImage() const { return ImageObject; }
 
     Json ToMeta() const {
         Json m = Json::object();
         m["origin_index"] = OriginalIndex;
+        if (!UniqueId.empty()) m["unique_id"] = UniqueId;
         m["transform"] = TransformState.ToJson();
         return m;
     }

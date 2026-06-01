@@ -361,6 +361,7 @@ namespace DlcvModules
                     var parentState = parentWrap != null ? parentWrap.TransformState : new TransformationState(tup.Item2.Width, tup.Item2.Height);
                     var childState = parentState.DeriveChild(childA2x3, cw, ch);
                     var childWrap = new ModuleImage(cropped, parentWrap != null ? parentWrap.OriginalImage : tup.Item2, childState, parentWrap != null ? parentWrap.OriginalIndex : originIndex);
+                    childWrap.UniqueId = Guid.NewGuid().ToString();
                     imagesOut.Add(childWrap);
 
                     var outDet = (JObject)srObj.DeepClone();
@@ -611,6 +612,7 @@ namespace DlcvModules
                 var parentState = wrap.TransformState ?? new TransformationState(w, h);
                 var childState = parentState.DeriveChild(A, w, h);
                 var child = new ModuleImage(flipped, wrap.OriginalImage ?? baseImg, childState, wrap.OriginalIndex);
+                child.UniqueId = wrap.UniqueId;
                 outImages.Add(child);
             }
 
@@ -821,7 +823,9 @@ namespace DlcvModules
 
                     // 关键：一定要重包，确保 OriginalIndex 与全局顺序一致（Base.cs 中 OriginalIndex 为 private set，无法原地修改）
                     // 若这里退回透传，将导致多个图像的 OriginalIndex 仍为 0，进而在下游/前端按 origin_index 聚合时只保留一个。
-                    mergedImages.Add(new ModuleImage(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx));
+                    var newWrap = new ModuleImage(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
+                    newWrap.UniqueId = im.UniqueId;
+                    mergedImages.Add(newWrap);
                 }
             }
 
@@ -1713,6 +1717,7 @@ namespace DlcvModules
                 var childState = parentState.DeriveChild(trans, cw, ch);
 
                 var child = new ModuleImage(crop, wrap.OriginalImage ?? baseMat, childState, wrap.OriginalIndex);
+                child.UniqueId = wrap.UniqueId;
                 outImages.Add(child);
             }
 
@@ -1802,7 +1807,9 @@ namespace DlcvModules
 
                 var parentState = wrap.TransformState ?? new TransformationState(w, h);
                 var childState = parentState.DeriveChild(A, newW, newH);
-                outImages.Add(new ModuleImage(rotated, wrap.OriginalImage ?? baseMat, childState, wrap.OriginalIndex));
+                var child = new ModuleImage(rotated, wrap.OriginalImage ?? baseMat, childState, wrap.OriginalIndex);
+                child.UniqueId = wrap.UniqueId;
+                outImages.Add(child);
             }
 
             return new ModuleIO(outImages, new JArray());
@@ -1915,7 +1922,9 @@ namespace DlcvModules
                 var A = new double[] { (double)tw / W, 0, 0, 0, (double)th / H, 0 };
                 var parentState = wrap.TransformState ?? new TransformationState(W, H);
                 var childState = parentState.DeriveChild(A, tw, th);
-                outImages.Add(new ModuleImage(resized, wrap.OriginalImage ?? baseMat, childState, wrap.OriginalIndex));
+                var child = new ModuleImage(resized, wrap.OriginalImage ?? baseMat, childState, wrap.OriginalIndex);
+                child.UniqueId = wrap.UniqueId;
+                outImages.Add(child);
             }
             return new ModuleIO(outImages, results);
         }
@@ -2101,6 +2110,7 @@ namespace DlcvModules
                 var parentState = wrap.TransformState ?? new TransformationState(w, h);
                 var childState = parentState.DeriveChild(A, newW, newH);
                 var child = new ModuleImage(rotated, wrap.OriginalImage ?? baseImg, childState, wrap.OriginalIndex);
+                child.UniqueId = wrap.UniqueId;
                 outImages.Add(child);
                 imgNewStates[i] = childState;
             }
@@ -3005,6 +3015,7 @@ namespace DlcvModules
                 var parentState = wrap.TransformState ?? new TransformationState(w, h);
                 var childState = parentState.DeriveChild(A, w, h);
                 var newWrap = new ModuleImage(rotatedImg, wrap.OriginalImage ?? baseImg, childState, wrap.OriginalIndex);
+                newWrap.UniqueId = wrap.UniqueId;
                 outImages.Add(newWrap);
 
                 imgTransforms[i] = Tuple.Create(A, childState, refAngleRad);
@@ -4221,6 +4232,255 @@ namespace DlcvModules
             double w = Math.Max(0.0, x2 - x1);
             double h = Math.Max(0.0, y2 - y1);
             return w * h;
+        }
+    }
+
+    /// <summary>
+    /// 模块名称：跨模型标签合并
+    /// 对齐 Python: post_process/cross_model_label_merge
+    /// </summary>
+    public class CrossModelLabelMerge : BaseModule
+    {
+        static CrossModelLabelMerge()
+        {
+            ModuleRegistry.Register("post_process/cross_model_label_merge", typeof(CrossModelLabelMerge));
+            ModuleRegistry.Register("features/cross_model_label_merge", typeof(CrossModelLabelMerge));
+        }
+
+        public CrossModelLabelMerge(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var baseImages = imageList ?? new List<ModuleImage>();
+            var baseResults = resultList ?? new JArray();
+
+            var groups = new List<Tuple<List<ModuleImage>, JArray>>();
+            groups.Add(Tuple.Create(baseImages, baseResults));
+            if (ExtraInputsIn != null)
+            {
+                foreach (var ch in ExtraInputsIn)
+                {
+                    if (ch == null) continue;
+                    groups.Add(Tuple.Create(ch.ImageList ?? new List<ModuleImage>(), ch.ResultList ?? new JArray()));
+                }
+            }
+
+            if (groups.Count == 0)
+            {
+                return new ModuleIO(new List<ModuleImage>(), new JArray());
+            }
+
+            string fixedText = "";
+            if (Properties != null && Properties.TryGetValue("fixed_text", out object ftObj) && ftObj != null)
+            {
+                fixedText = ftObj.ToString() ?? "";
+            }
+
+            var groupMaps = new List<Dictionary<string, JObject>>();
+            foreach (var g in groups)
+            {
+                groupMaps.Add(BuildUidToResultMap(g.Item1, g.Item2));
+            }
+
+            var outResults = new JArray();
+            foreach (var token in baseResults)
+            {
+                var entry = token as JObject;
+                if (entry == null)
+                {
+                    outResults.Add(token);
+                    continue;
+                }
+
+                var typeStr = entry.Value<string>("type") ?? string.Empty;
+                if (!string.Equals(typeStr, "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                string baseLabel = ExtractFirstCategoryName(entry);
+                if (string.IsNullOrEmpty(baseLabel))
+                {
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                string entryUid = null;
+                int idx = entry["index"] != null ? (entry["index"].Value<int?>() ?? -1) : -1;
+                if (idx >= 0 && idx < baseImages.Count)
+                {
+                    entryUid = baseImages[idx].UniqueId;
+                }
+
+                if (string.IsNullOrEmpty(entryUid))
+                {
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                var suffixes = new List<string>();
+                for (int i = 1; i < groupMaps.Count; i++)
+                {
+                    if (groupMaps[i].TryGetValue(entryUid, out JObject otherEntry))
+                    {
+                        string suffix = ExtractFirstCategoryName(otherEntry);
+                        if (!string.IsNullOrEmpty(suffix))
+                        {
+                            suffixes.Add(suffix);
+                        }
+                    }
+                }
+
+                if (suffixes.Count == 0)
+                {
+                    outResults.Add(entry);
+                    continue;
+                }
+
+                string mergedLabel = MergeCategoryNames(baseLabel, suffixes, fixedText);
+
+                bool changed = false;
+                var entryCopy = (JObject)entry.DeepClone();
+
+                if (entry["category_name"] != null && entry["category_name"].Type == JTokenType.String)
+                {
+                    entryCopy["category_name"] = mergedLabel;
+                    changed = true;
+                }
+
+                var sampleResults = entry["sample_results"] as JArray;
+                if (sampleResults != null)
+                {
+                    bool sampleChanged = false;
+                    var newSampleResults = new JArray();
+                    foreach (var detToken in sampleResults)
+                    {
+                        var det = detToken as JObject;
+                        if (det == null)
+                        {
+                            newSampleResults.Add(detToken);
+                            continue;
+                        }
+                        if (det["category_name"] != null && det["category_name"].Type == JTokenType.String)
+                        {
+                            var detCopy = (JObject)det.DeepClone();
+                            detCopy["category_name"] = mergedLabel;
+                            newSampleResults.Add(detCopy);
+                            sampleChanged = true;
+                        }
+                        else
+                        {
+                            newSampleResults.Add(det);
+                        }
+                    }
+                    if (sampleChanged)
+                    {
+                        entryCopy["sample_results"] = newSampleResults;
+                        changed = true;
+                    }
+                }
+
+                outResults.Add(changed ? (JToken)entryCopy : entry);
+            }
+
+            return new ModuleIO(baseImages, outResults);
+        }
+
+        private static string ExtractFirstCategoryName(JObject entry)
+        {
+            if (entry == null) return null;
+
+            string entryName = ValidCategoryName(entry["category_name"]);
+            if (entryName != null) return entryName;
+
+            var dets = entry["sample_results"] as JArray;
+            if (dets == null) return null;
+
+            foreach (var detToken in dets)
+            {
+                var det = detToken as JObject;
+                if (det == null) continue;
+
+                string detName = ValidCategoryName(det["category_name"]);
+                if (detName != null) return detName;
+            }
+
+            return null;
+        }
+
+        private static string ValidCategoryName(JToken token)
+        {
+            if (token == null || token.Type != JTokenType.String) return null;
+            string value = token.Value<string>();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
+        private static Dictionary<string, JObject> BuildUidToResultMap(List<ModuleImage> images, JArray results)
+        {
+            var uidToEntry = new Dictionary<string, JObject>();
+
+            var indexToUid = new Dictionary<int, string>();
+            var originToUid = new Dictionary<int, string>();
+            for (int i = 0; i < images.Count; i++)
+            {
+                string uid = images[i].UniqueId;
+                if (!string.IsNullOrEmpty(uid))
+                {
+                    indexToUid[i] = uid;
+                    originToUid[images[i].OriginalIndex] = uid;
+                }
+            }
+
+            foreach (var token in results)
+            {
+                var entry = token as JObject;
+                if (entry == null) continue;
+                var typeStr = entry.Value<string>("type") ?? string.Empty;
+                if (!string.Equals(typeStr, "local", StringComparison.OrdinalIgnoreCase)) continue;
+
+                string matchedUid = null;
+
+                int idx = entry["index"] != null ? (entry["index"].Value<int?>() ?? -1) : -1;
+                if (idx >= 0 && indexToUid.TryGetValue(idx, out string uid1))
+                {
+                    matchedUid = uid1;
+                }
+
+                if (matchedUid == null)
+                {
+                    int oidx = entry["origin_index"] != null ? (entry["origin_index"].Value<int?>() ?? -1) : -1;
+                    if (oidx >= 0 && originToUid.TryGetValue(oidx, out string uid2))
+                    {
+                        matchedUid = uid2;
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(matchedUid) && !uidToEntry.ContainsKey(matchedUid))
+                {
+                    uidToEntry[matchedUid] = entry;
+                }
+            }
+
+            return uidToEntry;
+        }
+
+        private static string MergeCategoryNames(string baseName, List<string> suffixes, string fixedText)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append(baseName);
+            foreach (var s in suffixes)
+            {
+                if (!string.IsNullOrEmpty(s))
+                {
+                    sb.Append(fixedText);
+                    sb.Append(s);
+                }
+            }
+            return sb.ToString();
         }
     }
 }

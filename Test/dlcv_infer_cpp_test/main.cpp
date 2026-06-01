@@ -2138,6 +2138,175 @@ int RunImageGenerationExpandSelfTest() {
     return 0;
 }
 
+json BuildCrossModelLabelMergeFlow() {
+    return json::object({
+        {"nodes", json::array({
+            json::object({
+                {"id", 1},
+                {"order", 1},
+                {"type", "input/frontend_image"},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({101})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({102})}})
+                })}
+            }),
+            json::object({
+                {"id", 2},
+                {"order", 2},
+                {"type", "input/build_results"},
+                {"properties", json::object({
+                    {"category_id", 1},
+                    {"category_name", "base"},
+                    {"score", 0.99},
+                    {"bbox_x", 50.0},
+                    {"bbox_y", 50.0},
+                    {"bbox_w", 40.0},
+                    {"bbox_h", 20.0}
+                })},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 101}}),
+                    json::object({{"type", "result_chan"}, {"link", 102}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({201})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({202})}})
+                })}
+            }),
+            json::object({
+                {"id", 3},
+                {"order", 3},
+                {"type", "features/image_generation"},
+                {"properties", json::object({{"crop_expand", 0}, {"min_size", 1}})},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 201}}),
+                    json::object({{"type", "result_chan"}, {"link", 202}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({301})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({302})}})
+                })}
+            }),
+            json::object({
+                {"id", 4},
+                {"order", 4},
+                {"type", "input/build_results"},
+                {"properties", json::object({
+                    {"category_id", 1},
+                    {"category_name", "suffix"},
+                    {"score", 0.99},
+                    {"bbox_x", 50.0},
+                    {"bbox_y", 50.0},
+                    {"bbox_w", 40.0},
+                    {"bbox_h", 20.0}
+                })},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 101}}),
+                    json::object({{"type", "result_chan"}, {"link", 102}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({401})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({402})}})
+                })}
+            }),
+            json::object({
+                {"id", 5},
+                {"order", 5},
+                {"type", "post_process/cross_model_label_merge"},
+                {"properties", json::object({{"fixed_text", "-"}})},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 301}}),
+                    json::object({{"type", "result_chan"}, {"link", 302}}),
+                    json::object({{"type", "image_chan"}, {"link", 301}}),
+                    json::object({{"type", "result_chan"}, {"link", 402}})
+                })},
+                {"outputs", json::array({
+                    json::object({{"type", "image_chan"}, {"links", json::array({501})}}),
+                    json::object({{"type", "result_chan"}, {"links", json::array({502})}})
+                })}
+            }),
+            json::object({
+                {"id", 6},
+                {"order", 6},
+                {"type", "output/return_json"},
+                {"inputs", json::array({
+                    json::object({{"type", "image_chan"}, {"link", 501}}),
+                    json::object({{"type", "result_chan"}, {"link", 502}})
+                })},
+                {"outputs", json::array()}
+            })
+        })}
+    });
+}
+
+bool RunCrossModelLabelMergeCase(std::string& error) {
+    const std::string tempDir = BuildTempRectCorrectionDir();
+    const std::string flowPath = JoinPathA(tempDir, "cross_model_label_merge.json");
+    {
+        std::ofstream ofs(flowPath, std::ios::binary);
+        if (!ofs) {
+            error = "无法写入临时流程文件";
+            return false;
+        }
+        ofs << BuildCrossModelLabelMergeFlow().dump(2);
+    }
+
+    try {
+        dlcv_infer::flow::FlowGraphModel model;
+        const json loadReport = model.Load(flowPath, kGpuDeviceId);
+        if (!loadReport.is_object() || loadReport.value("code", 1) != 0) {
+            error = std::string("流程加载失败: ") + loadReport.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        cv::Mat image(200, 200, CV_8UC3, cv::Scalar(0, 0, 0));
+        const json inferRoot = model.InferInternal(std::vector<cv::Mat>{image}, json::object());
+        if (!inferRoot.is_object() || inferRoot.value("code", 1) != 0) {
+            error = std::string("流程执行失败: ") + inferRoot.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        const json results = inferRoot.contains("result_list") ? inferRoot.at("result_list") : json::array();
+        if (!results.is_array() || results.size() != 1) {
+            error = "结果数量错误，actual=" + std::to_string(results.size()) + ", expected=1, root=" + inferRoot.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        const json& det = results.at(0);
+        if (!det.is_object() || !det.contains("category_name") || !det.at("category_name").is_string()) {
+            error = "检测结果缺少 category_name, det=" + det.dump() + ", root=" + inferRoot.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        const std::string cat = det.at("category_name").get<std::string>();
+        if (cat != "base-suffix") {
+            error = "合并标签错误，actual=" + cat + ", expected=base-suffix";
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+    } catch (const std::exception& ex) {
+        error = std::string("异常: ") + ex.what();
+        DeleteFileA(flowPath.c_str());
+        return false;
+    }
+
+    DeleteFileA(flowPath.c_str());
+    return true;
+}
+
+int RunCrossModelLabelMergeSelfTest() {
+    std::string error;
+    if (!RunCrossModelLabelMergeCase(error)) {
+        std::cout << "cross_model_label_merge 自测失败: " << error << "\n";
+        return 1;
+    }
+    std::cout << "cross_model_label_merge 自测通过\n";
+    return 0;
+}
+
 int RunBBoxCropFixSelfTest() {
     std::cout << "==== BBOX 去重与裁图修复自测 ====\n";
 
@@ -2260,6 +2429,10 @@ int main(int argc, char* argv[]) {
 
     if (argc >= 2 && std::string(argv[1]) == "image-generation-expand-selftest") {
         return RunImageGenerationExpandSelfTest();
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "cross-model-label-merge-selftest") {
+        return RunCrossModelLabelMergeSelfTest();
     }
 
     if (argc >= 2 && std::string(argv[1]) == "flow-instance-seg-filter-selftest") {
