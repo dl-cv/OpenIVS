@@ -90,6 +90,11 @@ namespace DlcvCSharpTest
                     return RunImageGenerationExpandSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "cross-model-label-merge-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunCrossModelLabelMergeSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "rect-image-correction-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunRectImageCorrectionSelfTest();
@@ -2046,6 +2051,95 @@ namespace DlcvCSharpTest
         {
             Console.WriteLine("==== AI 裁图外扩参数自测 ====");
             return RunImageGenerationExpandRegression() ? 0 : 1;
+        }
+
+        private static int RunCrossModelLabelMergeSelfTest()
+        {
+            Console.WriteLine("==== 跨模型标签合并自测 ====");
+
+            using (var img0 = new Mat(200, 200, MatType.CV_8UC3, new Scalar(0, 0, 0)))
+            {
+                var image0 = new ModuleImage(img0, img0, new TransformationState(200, 200), 0);
+                image0.UniqueId = "uid-0";
+                var images = new List<ModuleImage> { image0 };
+
+                var baseResults = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = 0,
+                        ["origin_index"] = 0,
+                        ["sample_results"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["category_name"] = "base",
+                                ["score"] = 0.99
+                            }
+                        }
+                    }
+                };
+
+                var suffixResults = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = 0,
+                        ["origin_index"] = 0,
+                        ["sample_results"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["category_name"] = "suffix",
+                                ["score"] = 0.99
+                            }
+                        }
+                    }
+                };
+
+                var merger = new CrossModelLabelMerge(
+                    301,
+                    properties: new Dictionary<string, object>
+                    {
+                        ["fixed_text"] = "-"
+                    });
+
+                merger.ExtraInputsIn.Add(new ModuleChannel(images, suffixResults));
+
+                ModuleIO output = merger.Process(images, baseResults);
+                if (output.ResultList.Count != 1)
+                {
+                    Console.WriteLine("结果数量错误，实际=" + output.ResultList.Count);
+                    return 1;
+                }
+
+                var entry = output.ResultList[0] as JObject;
+                if (entry == null)
+                {
+                    Console.WriteLine("结果条目类型错误");
+                    return 1;
+                }
+
+                var dets = entry["sample_results"] as JArray;
+                if (dets == null || dets.Count != 1)
+                {
+                    Console.WriteLine("sample_results 数量错误");
+                    return 1;
+                }
+
+                var det = dets[0] as JObject;
+                string cat = det?["category_name"]?.Value<string>();
+                if (cat != "base-suffix")
+                {
+                    Console.WriteLine("合并标签错误，实际=" + cat + "，期望=base-suffix");
+                    return 1;
+                }
+            }
+
+            Console.WriteLine("跨模型标签合并自测通过");
+            return 0;
         }
 
         private static bool RunBBoxCropLogicRegression()

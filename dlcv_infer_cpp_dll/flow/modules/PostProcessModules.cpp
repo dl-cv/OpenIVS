@@ -353,6 +353,7 @@ private:
                 added++;
                 // 重包：确保 OriginalIndex 与全局顺序一致
                 ModuleImage newWrap(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
+                newWrap.UniqueId = im.UniqueId;
                 mergedImages.push_back(newWrap);
             }
             if (res == nullptr) continue;
@@ -1333,6 +1334,7 @@ public:
                               wrap.OriginalImage.empty() ? baseImg : wrap.OriginalImage,
                               childState,
                               wrap.OriginalIndex);
+            child.UniqueId = wrap.UniqueId;
             outImages.push_back(child);
         }
 
@@ -1811,6 +1813,213 @@ private:
 };
 
 
+/// post_process/cross_model_label_merge, features/cross_model_label_merge
+class CrossModelLabelMergeModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        const std::vector<ModuleImage>& baseImages = imageList;
+        const Json baseResults = resultList.is_array() ? resultList : Json::array();
+
+        std::vector<std::pair<const std::vector<ModuleImage>*, const Json*>> groups;
+        groups.reserve(1 + ExtraInputsIn.size());
+        groups.push_back({ &baseImages, &baseResults });
+        for (const auto& ch : ExtraInputsIn) {
+            groups.push_back({ &ch.ImageList, ch.ResultList.is_array() ? &ch.ResultList : nullptr });
+        }
+
+        if (groups.empty()) {
+            return ModuleIO(std::vector<ModuleImage>(), Json::array(), Json::array());
+        }
+
+        const std::string fixedText = ReadString("fixed_text", std::string());
+
+        std::vector<std::unordered_map<std::string, Json>> groupMaps;
+        groupMaps.reserve(groups.size());
+        for (const auto& g : groups) {
+            groupMaps.push_back(BuildUidToResultMap(g.first, g.second));
+        }
+
+        Json outResults = Json::array();
+        for (const auto& token : baseResults) {
+            if (!token.is_object() || token.value("type", "") != "local") {
+                outResults.push_back(token);
+                continue;
+            }
+
+            Json entry = token;
+            const std::string baseLabel = ExtractFirstCategoryName(entry);
+            if (baseLabel.empty()) {
+                outResults.push_back(entry);
+                continue;
+            }
+
+            std::string entryUid;
+            if (entry.contains("index") && entry.at("index").is_number()) {
+                try {
+                    int idx = entry.at("index").get<int>();
+                    if (idx >= 0 && idx < static_cast<int>(baseImages.size())) {
+                        entryUid = baseImages[static_cast<size_t>(idx)].UniqueId;
+                    }
+                } catch (...) {}
+            }
+
+            if (entryUid.empty()) {
+                outResults.push_back(entry);
+                continue;
+            }
+
+            std::vector<std::string> suffixes;
+            for (size_t i = 1; i < groupMaps.size(); ++i) {
+                auto it = groupMaps[i].find(entryUid);
+                if (it == groupMaps[i].end()) continue;
+                const std::string suffix = ExtractFirstCategoryName(it->second);
+                if (!suffix.empty()) suffixes.push_back(suffix);
+            }
+
+            if (suffixes.empty()) {
+                outResults.push_back(entry);
+                continue;
+            }
+
+            const std::string mergedLabel = MergeCategoryNames(baseLabel, suffixes, fixedText);
+
+            bool changed = false;
+            Json entryCopy = entry;
+
+            if (entry.contains("category_name") && entry.at("category_name").is_string()) {
+                entryCopy["category_name"] = mergedLabel;
+                changed = true;
+            }
+
+            if (entry.contains("sample_results") && entry.at("sample_results").is_array()) {
+                bool sampleChanged = false;
+                Json newSampleResults = Json::array();
+                for (const auto& detToken : entry.at("sample_results")) {
+                    if (!detToken.is_object()) {
+                        newSampleResults.push_back(detToken);
+                        continue;
+                    }
+                    Json det = detToken;
+                    if (det.contains("category_name") && det.at("category_name").is_string()) {
+                        det["category_name"] = mergedLabel;
+                        newSampleResults.push_back(std::move(det));
+                        sampleChanged = true;
+                    } else {
+                        newSampleResults.push_back(detToken);
+                    }
+                }
+                if (sampleChanged) {
+                    entryCopy["sample_results"] = std::move(newSampleResults);
+                    changed = true;
+                }
+            }
+
+            outResults.push_back(changed ? entryCopy : entry);
+        }
+
+        return ModuleIO(baseImages, outResults, Json::array());
+    }
+
+private:
+    static std::string NormalizeCategoryName(const Json& token) {
+        if (!token.is_string()) return std::string();
+        std::string s = token.get<std::string>();
+        bool hasNonSpace = false;
+        for (char c : s) {
+            if (!std::isspace(static_cast<unsigned char>(c))) {
+                hasNonSpace = true;
+                break;
+            }
+        }
+        return hasNonSpace ? s : std::string();
+    }
+
+    static std::string ExtractFirstCategoryName(const Json& entry) {
+        if (!entry.is_object()) return std::string();
+        if (entry.contains("category_name")) {
+            const std::string name = NormalizeCategoryName(entry.at("category_name"));
+            if (!name.empty()) return name;
+        }
+        if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) {
+            return std::string();
+        }
+        for (const auto& detToken : entry.at("sample_results")) {
+            if (!detToken.is_object()) continue;
+            const Json& det = detToken;
+            if (!det.contains("category_name")) continue;
+            const std::string detName = NormalizeCategoryName(det.at("category_name"));
+            if (!detName.empty()) return detName;
+        }
+        return std::string();
+    }
+
+    static std::unordered_map<std::string, Json> BuildUidToResultMap(
+        const std::vector<ModuleImage>* images,
+        const Json* results
+    ) {
+        std::unordered_map<std::string, Json> uidToEntry;
+        if (images == nullptr || results == nullptr || !results->is_array()) {
+            return uidToEntry;
+        }
+
+        std::unordered_map<int, std::string> indexToUid;
+        std::unordered_map<int, std::string> originToUid;
+        for (int i = 0; i < static_cast<int>(images->size()); ++i) {
+            const std::string& uid = (*images)[static_cast<size_t>(i)].UniqueId;
+            if (!uid.empty()) {
+                indexToUid[i] = uid;
+                originToUid[(*images)[static_cast<size_t>(i)].OriginalIndex] = uid;
+            }
+        }
+
+        for (const auto& token : *results) {
+            if (!token.is_object()) continue;
+            const Json& entry = token;
+            if (entry.value("type", "") != "local") continue;
+
+            std::string matchedUid;
+            if (entry.contains("index") && entry.at("index").is_number()) {
+                try {
+                    int idx = entry.at("index").get<int>();
+                    auto it = indexToUid.find(idx);
+                    if (it != indexToUid.end()) matchedUid = it->second;
+                } catch (...) {}
+            }
+
+            if (matchedUid.empty() && entry.contains("origin_index") && entry.at("origin_index").is_number()) {
+                try {
+                    int oidx = entry.at("origin_index").get<int>();
+                    auto it = originToUid.find(oidx);
+                    if (it != originToUid.end()) matchedUid = it->second;
+                } catch (...) {}
+            }
+
+            if (!matchedUid.empty() && uidToEntry.find(matchedUid) == uidToEntry.end()) {
+                uidToEntry[matchedUid] = entry;
+            }
+        }
+
+        return uidToEntry;
+    }
+
+    static std::string MergeCategoryNames(
+        const std::string& baseName,
+        const std::vector<std::string>& suffixes,
+        const std::string& fixedText
+    ) {
+        std::string out = baseName;
+        for (const auto& s : suffixes) {
+            if (!s.empty()) {
+                out += fixedText;
+                out += s;
+            }
+        }
+        return out;
+    }
+};
+
 // 注册
 DLCV_FLOW_REGISTER_MODULE("post_process/merge_results", MergeResultsModule)
 DLCV_FLOW_REGISTER_MODULE("features/merge_results", MergeResultsModule)
@@ -1828,6 +2037,8 @@ DLCV_FLOW_REGISTER_MODULE("post_process/rbox_correction", RBoxCorrectionModule)
 DLCV_FLOW_REGISTER_MODULE("features/rbox_correction", RBoxCorrectionModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/bbox_iou_dedup", BBoxIoUDedupModule)
 DLCV_FLOW_REGISTER_MODULE("features/bbox_iou_dedup", BBoxIoUDedupModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/cross_model_label_merge", CrossModelLabelMergeModule)
+DLCV_FLOW_REGISTER_MODULE("features/cross_model_label_merge", CrossModelLabelMergeModule)
 
 } // namespace flow
 } // namespace dlcv_infer

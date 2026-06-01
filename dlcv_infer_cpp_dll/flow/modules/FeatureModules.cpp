@@ -5,7 +5,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <iomanip>
 #include <limits>
+#include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -20,6 +23,26 @@ namespace dlcv_infer {
 namespace flow {
 
 static constexpr double kPi = 3.14159265358979323846;
+
+static std::string GenerateUuidString() {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<> dis(0, 15);
+    static std::uniform_int_distribution<> dis2(8, 11);
+    std::stringstream ss;
+    ss << std::hex;
+    for (int i = 0; i < 8; i++) ss << dis(gen);
+    ss << "-";
+    for (int i = 0; i < 4; i++) ss << dis(gen);
+    ss << "-4";
+    for (int i = 0; i < 3; i++) ss << dis(gen);
+    ss << "-";
+    ss << dis2(gen);
+    for (int i = 0; i < 3; i++) ss << dis(gen);
+    ss << "-";
+    for (int i = 0; i < 12; i++) ss << dis(gen);
+    return ss.str();
+}
 
 static std::string FormatAffineKey(const std::vector<double>& a) {
     if (a.size() < 6) return std::string();
@@ -584,6 +607,7 @@ public:
                                       parentWrap.OriginalImage.empty() ? src : parentWrap.OriginalImage,
                                       childState,
                                       parentWrap.OriginalIndex);
+                childWrap.UniqueId = GenerateUuidString();
                 imagesOut.push_back(childWrap);
 
                 Json outDet = sr;
@@ -669,6 +693,7 @@ public:
                               wrap.OriginalImage.empty() ? baseImg : wrap.OriginalImage,
                               childState,
                               wrap.OriginalIndex);
+            child.UniqueId = wrap.UniqueId;
             outImages.push_back(child);
         }
 
@@ -720,12 +745,14 @@ public:
                 ? wrap.TransformState
                 : TransformationState(w, h);
             const TransformationState childState = parentState.DeriveChild(A, newW, newH);
-            outImages.emplace_back(
-                rotated,
-                wrap.OriginalImage.empty() ? baseMat : wrap.OriginalImage,
-                childState,
-                wrap.OriginalIndex
-            );
+            {
+                ModuleImage child(rotated,
+                                  wrap.OriginalImage.empty() ? baseMat : wrap.OriginalImage,
+                                  childState,
+                                  wrap.OriginalIndex);
+                child.UniqueId = wrap.UniqueId;
+                outImages.push_back(child);
+            }
         }
 
         return ModuleIO(std::move(outImages), Json::array(), Json::array());
@@ -778,6 +805,7 @@ public:
                               wrap.OriginalImage.empty() ? baseMat : wrap.OriginalImage,
                               childState,
                               wrap.OriginalIndex);
+            child.UniqueId = wrap.UniqueId;
             outImages.push_back(child);
         }
 
@@ -814,12 +842,14 @@ public:
                 ? wrap.TransformState
                 : TransformationState(W, H);
             const TransformationState childState = parentState.DeriveChild(A, tw, th);
-            outImages.emplace_back(
-                resized,
-                wrap.OriginalImage.empty() ? baseMat : wrap.OriginalImage,
-                childState,
-                wrap.OriginalIndex
-            );
+            {
+                ModuleImage child(resized,
+                                  wrap.OriginalImage.empty() ? baseMat : wrap.OriginalImage,
+                                  childState,
+                                  wrap.OriginalIndex);
+                child.UniqueId = wrap.UniqueId;
+                outImages.push_back(child);
+            }
         }
         return ModuleIO(std::move(outImages), results, Json::array());
     }
@@ -942,6 +972,7 @@ public:
                               wrap.OriginalImage.empty() ? baseImg : wrap.OriginalImage,
                               childState,
                               wrap.OriginalIndex);
+            child.UniqueId = wrap.UniqueId;
             outImages.push_back(child);
         }
 
