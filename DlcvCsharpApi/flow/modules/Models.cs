@@ -21,6 +21,10 @@ namespace DlcvModules
 		protected JArray _maxShape;
 		protected int _maxBatchSize = 1;
 
+		// 按 (modelPath|deviceId|rpcMode) 缓存 Model 实例，避免 Flow 每次推理重复加载
+		private static readonly Dictionary<string, Model> _modelCache = new Dictionary<string, Model>(StringComparer.OrdinalIgnoreCase);
+		private static readonly object _modelCacheLock = new object();
+
 		protected BaseModelModule(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
 			: base(nodeId, title, properties, context)
 		{
@@ -63,7 +67,17 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				_model = new Model(_modelPath, deviceId, rpcMode, true);
+				string cacheKey = (_modelPath ?? "") + "|" + deviceId + "|" + rpcMode;
+				bool cacheHit = false;
+				lock (_modelCacheLock)
+				{
+					cacheHit = _modelCache.TryGetValue(cacheKey, out _model);
+					if (!cacheHit)
+					{
+						_model = new Model(_modelPath, deviceId, rpcMode, true);
+						_modelCache[cacheKey] = _model;
+					}
+				}
 				SyncModelMeta();
 			}
 			else
@@ -75,88 +89,31 @@ namespace DlcvModules
 		protected void SyncModelMeta()
 		{
 			if (_model == null) return;
-			try
+			// 只在首次获取时做 DeepClone，避免每次推理重复复制大对象（OCR 的 model_info 可能包含字符集，DeepClone 很慢）
+			if (_modelInfo == null)
 			{
-				_modelInfo = _model.GetCachedModelInfo();
-				if (_modelInfo == null)
+				try
 				{
-					_modelInfo = _model.GetModelInfo();
+					_modelInfo = _model.GetCachedModelInfo();
+					if (_modelInfo == null)
+					{
+						_modelInfo = _model.GetModelInfo();
+					}
 				}
+				catch { }
 			}
-			catch { }
 
-			try { _maxShape = _model.GetCachedMaxShape(); } catch { _maxShape = null; }
-			try { _maxBatchSize = _model.GetMaxBatchSize(); } catch { _maxBatchSize = 1; }
-
-			// 将每个子模型加载时读取到的 batch 元信息写入流程上下文，供外层 DVS 包装模型汇总。
-			try
+			if (_maxShape == null)
 			{
-				if (Context != null)
-				{
-					var list = Context.Get<List<Dictionary<string, object>>>("loaded_model_meta", null);
-					if (list == null)
-					{
-						list = new List<Dictionary<string, object>>();
-						Context.Set("loaded_model_meta", list);
-					}
-
-					var entry = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
-					{
-						["node_id"] = NodeId,
-						["title"] = Title ?? string.Empty,
-						["model_path"] = _modelPath ?? string.Empty,
-						["max_batch_size"] = _maxBatchSize,
-						["max_shape"] = _maxShape != null ? (JArray)_maxShape.DeepClone() : null
-					};
-
-					string originalPath = null;
-					string modelName = null;
-					try
-					{
-						if (Properties != null)
-						{
-							if (Properties.TryGetValue("model_path_original", out object op) && op != null)
-							{
-								originalPath = op.ToString();
-							}
-							if (Properties.TryGetValue("model_name", out object mn) && mn != null)
-							{
-								modelName = mn.ToString();
-							}
-						}
-					}
-					catch
-					{
-					}
-
-					if (string.IsNullOrWhiteSpace(originalPath))
-					{
-						originalPath = _modelPath ?? string.Empty;
-					}
-					if (string.IsNullOrWhiteSpace(modelName))
-					{
-						try
-						{
-							modelName = Path.GetFileName(originalPath);
-						}
-						catch
-						{
-							modelName = originalPath;
-						}
-					}
-
-					entry["model_path_original"] = originalPath ?? string.Empty;
-					entry["model_name"] = modelName ?? string.Empty;
-					if (_modelInfo != null)
-					{
-						entry["model_info"] = (JObject)_modelInfo.DeepClone();
-					}
-					list.Add(entry);
-				}
+				try { _maxShape = _model.GetCachedMaxShape(); } catch { _maxShape = null; }
 			}
-			catch
+			if (_maxBatchSize <= 0)
 			{
+				try { _maxBatchSize = _model.GetMaxBatchSize(); } catch { _maxBatchSize = 1; }
 			}
+
+			// loaded_model_meta 仅在 LoadModels() 加载阶段被 FlowGraphModel 读取，推理阶段无需重复写入
+			// 跳过此处可避免每次推理创建 Dictionary/JObject 的开销，同时消除 OCR 大 model_info 的引用压力
 		}
 
 		protected int ResolveEffectiveBatchLimit()
