@@ -1654,9 +1654,15 @@ namespace dlcv_infer {
     }
 
     json Model::GetModelInfo() {
+        if (_hasCachedModelInfo) {
+            return _cachedModelInfo;
+        }
+
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
-            return _flowModel->GetModelInfo();
+            _cachedModelInfo = _flowModel->GetModelInfo();
+            _hasCachedModelInfo = true;
+            return _cachedModelInfo;
         }
 
         json config;
@@ -1667,6 +1673,8 @@ namespace dlcv_infer {
         std::string resultJson = std::string(static_cast<const char*>(resultPtr));
         json resultObject = json::parse(resultJson);
         _dllLoader->GetFreeResultFunc()(resultPtr);
+        _cachedModelInfo = resultObject;
+        _hasCachedModelInfo = true;
         return resultObject;
     }
 

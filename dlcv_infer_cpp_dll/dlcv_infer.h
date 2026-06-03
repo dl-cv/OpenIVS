@@ -246,6 +246,8 @@ namespace dlcv_infer {
         int _deviceId = 0;
         flow::FlowGraphModel* _flowModel = nullptr;
         int _expectedChCache = -2;
+        bool _hasCachedModelInfo = false;
+        json _cachedModelInfo;
         // DVS 模式：持有临时目录路径，确保在 Model 对象存活期间文件不被删除
         std::string _tempDir;
 
