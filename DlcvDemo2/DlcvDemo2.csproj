@@ -139,6 +139,7 @@
     <Compile Include="Utils\DetectionGeometryUtils.cs" />
     <Compile Include="Utils\ExtractMergeUtils.cs" />
     <Compile Include="Utils\SlidingWindowUtils.cs" />
+    <Compile Include="Utils\InferenceDebugLogger.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <None Include="packages.config" />
     <None Include="Properties\app.manifest" />

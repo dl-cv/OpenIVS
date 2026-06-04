@@ -167,12 +167,15 @@ namespace DlcvDemo2
             Mat rotMat = null;
             try
             {
-                rotMat = Cv2.GetRotationMatrix2D(new Point2f((float)cx, (float)cy), angleDeg, 1.0);
-                rotMat.Set(0, 2, rotMat.Get<double>(0, 2) + w / 2.0 - cx);
-                rotMat.Set(1, 2, rotMat.Get<double>(1, 2) + h / 2.0 - cy);
+                // 计算旋转后的外接矩形尺寸，避免边缘截断
+                double absCos = Math.Abs(Math.Cos(angleRad));
+                double absSin = Math.Abs(Math.Sin(angleRad));
+                int outW = Math.Max(1, (int)Math.Round(w * absCos + h * absSin));
+                int outH = Math.Max(1, (int)Math.Round(w * absSin + h * absCos));
 
-                int outW = Math.Max(1, (int)Math.Round(w));
-                int outH = Math.Max(1, (int)Math.Round(h));
+                rotMat = Cv2.GetRotationMatrix2D(new Point2f((float)cx, (float)cy), angleDeg, 1.0);
+                rotMat.Set(0, 2, rotMat.Get<double>(0, 2) + outW / 2.0 - cx);
+                rotMat.Set(1, 2, rotMat.Get<double>(1, 2) + outH / 2.0 - cy);
 
                 roi = new Mat();
                 Cv2.WarpAffine(fullImage, roi, rotMat, new Size(outW, outH));
@@ -336,6 +339,7 @@ namespace DlcvDemo2
 
             if (obj.Bbox == null || obj.Bbox.Count < 4)
             {
+                InferenceDebugLogger.Log($"TryMapObjectToFull failed: bbox null or count<4");
                 return false;
             }
 
@@ -348,6 +352,7 @@ namespace DlcvDemo2
                 double h = Math.Abs(obj.Bbox[3]);
                 if (w <= 0 || h <= 0)
                 {
+                    InferenceDebugLogger.Log($"TryMapObjectToFull failed: rotated w={w} h={h}");
                     return false;
                 }
 
@@ -386,6 +391,7 @@ namespace DlcvDemo2
                 double h = Math.Abs(obj.Bbox[3]);
                 if (w <= 0 || h <= 0)
                 {
+                    InferenceDebugLogger.Log($"TryMapObjectToFull failed: axis-aligned w={w} h={h}");
                     return false;
                 }
 
@@ -413,6 +419,7 @@ namespace DlcvDemo2
             double outH = maxY - minY;
             if (outW <= 1e-6 || outH <= 1e-6)
             {
+                InferenceDebugLogger.Log($"TryMapObjectToFull failed: mapped area too small outW={outW} outH={outH}");
                 return false;
             }
 
@@ -428,6 +435,7 @@ namespace DlcvDemo2
                 true,
                 false,
                 -100f);
+            InferenceDebugLogger.Log($"TryMapObjectToFull success: mapped to bbox=[{minX:F2},{minY:F2},{outW:F2},{outH:F2}]");
             return true;
         }
 
