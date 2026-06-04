@@ -40,7 +40,7 @@ namespace DlcvDemo2
             }
         }
 
-        private sealed class PipelineRunResult
+        public sealed class PipelineRunResult
         {
             public CSharpResult DisplayResult { get; set; }
             public int SlidingWindowCount { get; set; }
@@ -51,7 +51,7 @@ namespace DlcvDemo2
             public List<string> Logs { get; } = new List<string>();
         }
 
-        private sealed class SlidingWindowConfig
+        public sealed class SlidingWindowConfig
         {
             public int WindowWidth { get; set; }
             public int WindowHeight { get; set; }
@@ -59,7 +59,7 @@ namespace DlcvDemo2
             public int OverlapY { get; set; }
         }
 
-        private sealed class InferenceProgressInfo
+        public sealed class InferenceProgressInfo
         {
             public int Percent { get; set; }
             public string Stage { get; set; }
@@ -306,7 +306,7 @@ namespace DlcvDemo2
             }
         }
 
-        private PipelineRunResult RunPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null)
+        public PipelineRunResult RunPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null)
         {
             var runResult = new PipelineRunResult();
 
@@ -531,6 +531,18 @@ namespace DlcvDemo2
             }
         }
 
+        private static int _debugRoiIndex = 0;
+        private static readonly object _debugLogLock = new object();
+
+        private void LogDebug(string message)
+        {
+            string logPath = Path.Combine(Path.GetTempPath(), "dlcvdemo2_debug.log");
+            lock (_debugLogLock)
+            {
+                File.AppendAllText(logPath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+            }
+        }
+
         private List<CSharpObjectResult> InferDetectionModelAndMapBack(RoiProcessResult roiContext, CSharpObjectResult extractFallback, bool useIcDetectModel)
         {
             JObject inferParams = new JObject
@@ -539,13 +551,35 @@ namespace DlcvDemo2
             };
 
             Model activeModel = useIcDetectModel ? icDetectModel : componentDetectModel;
+
+            // 临时调试：保存ROI图像并打印原始检测输出
+            string debugDir = Path.Combine(Path.GetTempPath(), "dlcvdemo2_debug");
+            Directory.CreateDirectory(debugDir);
+            int roiIdx = System.Threading.Interlocked.Increment(ref _debugRoiIndex);
+            string safeName = string.Join("_", (extractFallback.CategoryName ?? "unknown").Split(Path.GetInvalidFileNameChars()));
+            string roiPath = Path.Combine(debugDir, $"roi_{roiIdx:D3}_{safeName}.png");
+            try
+            {
+                Cv2.ImWrite(roiPath, roiContext.NormalizedRoi);
+            }
+            catch { }
+
             CSharpResult roiResult = activeModel.Infer(roiContext.NormalizedRoi, inferParams);
             if (roiResult.SampleResults == null || roiResult.SampleResults.Count == 0)
             {
+                LogDebug($"[ROI {roiIdx}] {extractFallback.CategoryName}: raw=0 (no sample results), roiSize={roiContext.NormalizedRoi.Width}x{roiContext.NormalizedRoi.Height}");
                 return new List<CSharpObjectResult> { extractFallback };
             }
 
             List<CSharpObjectResult> rawObjects = roiResult.SampleResults[0].Results ?? new List<CSharpObjectResult>();
+            LogDebug($"[ROI {roiIdx}] {extractFallback.CategoryName}: raw={rawObjects.Count}, roiSize={roiContext.NormalizedRoi.Width}x{roiContext.NormalizedRoi.Height}");
+            for (int i = 0; i < rawObjects.Count; i++)
+            {
+                var r = rawObjects[i];
+                string bboxStr = r.Bbox != null ? string.Join(",", r.Bbox) : "null";
+                LogDebug($"  [{i}] {r.CategoryName} score={r.Score:F2} bbox=[{bboxStr}]");
+            }
+
             if (rawObjects.Count == 0)
             {
                 return new List<CSharpObjectResult> { extractFallback };
@@ -891,7 +925,7 @@ namespace DlcvDemo2
             return true;
         }
 
-        private static Mat PrepareImageForModelInput(Mat image)
+        public static Mat PrepareImageForModelInput(Mat image)
         {
             if (image == null || image.Empty())
             {
@@ -1014,6 +1048,35 @@ namespace DlcvDemo2
                 asDecimal = control.Maximum;
             }
             control.Value = asDecimal;
+        }
+
+        public static PipelineRunResult RunHeadless(string extractModelPath, string componentModelPath, string icModelPath, string imgPath, SlidingWindowConfig config)
+        {
+            var form = new Form1();
+            form.extractModel = new Model(extractModelPath, 0, false);
+            form.componentDetectModel = new Model(componentModelPath, 0, false);
+            form.icDetectModel = new Model(icModelPath, 0, false);
+            form.imagePath = imgPath;
+
+            Mat imageBgr = Cv2.ImRead(imgPath, ImreadModes.Unchanged);
+            if (imageBgr == null || imageBgr.Empty())
+            {
+                throw new InvalidOperationException("图片解码失败。");
+            }
+            Mat imageRgb = PrepareImageForModelInput(imageBgr);
+            try
+            {
+                PipelineRunResult result = form.RunPipeline(imageRgb, config, null);
+                return result;
+            }
+            finally
+            {
+                imageRgb.Dispose();
+                imageBgr.Dispose();
+                form.extractModel?.Dispose();
+                form.componentDetectModel?.Dispose();
+                form.icDetectModel?.Dispose();
+            }
         }
     }
 }
