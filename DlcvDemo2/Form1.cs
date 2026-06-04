@@ -29,6 +29,7 @@ namespace DlcvDemo2
             public string InvalidReason { get; set; }
             public Mat NormalizedRoi { get; set; }
             public double[] NormToFullAffine { get; set; }
+            public OpenCvSharp.Rect SourceRect { get; set; }
 
             public void Dispose()
             {
@@ -338,36 +339,66 @@ namespace DlcvDemo2
                 DetectionGeometryUtils.ParseCategoryAndAngle(target.ObjectResult.CategoryName, out baseName, out normalizeAngle);
                 bool useIcDetectModel = ShouldUseIcDetectModel(baseName);
 
+                List<CSharpObjectResult> bestMapped = null;
+                int bestRealCount = -1;
+
+                // 先尝试角度归一化（normalizeAngle）
                 using (RoiProcessResult roi = CropAndRotateRoi(fullImageRgb, target, normalizeAngle))
                 {
-                    if (!roi.IsValid)
+                    if (roi.IsValid)
                     {
-                        runResult.Logs.Add($"跳过目标[{target.ObjectResult.CategoryName}]：{roi.InvalidReason}");
-                        continue;
+                        try
+                        {
+                            bestMapped = InferDetectionModelAndMapBack(roi, target.ObjectResult, useIcDetectModel);
+                            bestRealCount = GetRealDetectionCount(bestMapped, target.ObjectResult);
+                        }
+                        catch (Exception ex)
+                        {
+                            runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]角度{normalizeAngle}检测异常：{ex.Message}");
+                        }
                     }
+                }
 
-                    try
+                // 如果角度归一化结果不理想，再尝试原始角度（0度）
+                if (normalizeAngle != 0)
+                {
+                    using (RoiProcessResult roi0 = CropAndRotateRoi(fullImageRgb, target, 0))
                     {
-                        List<CSharpObjectResult> mapped = InferDetectionModelAndMapBack(roi, target.ObjectResult, useIcDetectModel);
-                        runResult.FinalObjects.AddRange(mapped);
-                        int realResultCount = mapped.Count == 1 && ReferenceEquals(mapped[0], target.ObjectResult)
-                            ? 0
-                            : mapped.Count;
-                        if (useIcDetectModel)
+                        if (roi0.IsValid)
                         {
-                            runResult.IcModelResultCount += realResultCount;
-                        }
-                        else
-                        {
-                            runResult.ComponentModelResultCount += realResultCount;
+                            try
+                            {
+                                List<CSharpObjectResult> mapped0 = InferDetectionModelAndMapBack(roi0, target.ObjectResult, useIcDetectModel);
+                                int realCount0 = GetRealDetectionCount(mapped0, target.ObjectResult);
+                                if (realCount0 > bestRealCount)
+                                {
+                                    bestMapped = mapped0;
+                                    bestRealCount = realCount0;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]角度0检测异常：{ex.Message}");
+                            }
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        string routeName = useIcDetectModel ? "IC检测模型" : "元件检测模型";
-                        runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]{routeName}推理失败，保留元件提取结果兜底：{ex.Message}");
-                        runResult.FinalObjects.Add(target.ObjectResult);
-                    }
+                }
+
+                if (bestMapped == null)
+                {
+                    runResult.Logs.Add($"跳过目标[{target.ObjectResult.CategoryName}]：ROI裁剪无效");
+                    continue;
+                }
+
+                runResult.FinalObjects.AddRange(bestMapped);
+                int finalRealCount = GetRealDetectionCount(bestMapped, target.ObjectResult);
+                if (useIcDetectModel)
+                {
+                    runResult.IcModelResultCount += finalRealCount;
+                }
+                else
+                {
+                    runResult.ComponentModelResultCount += finalRealCount;
                 }
 
                 roiCompleted++;
@@ -379,6 +410,15 @@ namespace DlcvDemo2
             runResult.DisplayResult = BuildDisplayResult(runResult.FinalObjects);
             ReportInferenceProgress(progress, 100, "推理完成");
             return runResult;
+        }
+
+        private static int GetRealDetectionCount(List<CSharpObjectResult> mapped, CSharpObjectResult extractFallback)
+        {
+            if (mapped == null || mapped.Count == 0)
+                return 0;
+            if (mapped.Count == 1 && ReferenceEquals(mapped[0], extractFallback))
+                return 0;
+            return mapped.Count;
         }
 
         private static bool ShouldUseIcDetectModel(string baseName)
@@ -477,6 +517,7 @@ namespace DlcvDemo2
 
                     roi = new Mat(fullImageRgb, roiRect).Clone();
                     fullToCropAffine = new[] { 1.0, 0.0, -roiRect.X, 0.0, 1.0, -roiRect.Y };
+                    result.SourceRect = roiRect;
                 }
 
                 if (roi == null || roi.Empty())
@@ -531,18 +572,6 @@ namespace DlcvDemo2
             }
         }
 
-        private static int _debugRoiIndex = 0;
-        private static readonly object _debugLogLock = new object();
-
-        private void LogDebug(string message)
-        {
-            string logPath = Path.Combine(Path.GetTempPath(), "dlcvdemo2_debug.log");
-            lock (_debugLogLock)
-            {
-                File.AppendAllText(logPath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
-            }
-        }
-
         private List<CSharpObjectResult> InferDetectionModelAndMapBack(RoiProcessResult roiContext, CSharpObjectResult extractFallback, bool useIcDetectModel)
         {
             JObject inferParams = new JObject
@@ -551,35 +580,14 @@ namespace DlcvDemo2
             };
 
             Model activeModel = useIcDetectModel ? icDetectModel : componentDetectModel;
-
-            // 临时调试：保存ROI图像并打印原始检测输出
-            string debugDir = Path.Combine(Path.GetTempPath(), "dlcvdemo2_debug");
-            Directory.CreateDirectory(debugDir);
-            int roiIdx = System.Threading.Interlocked.Increment(ref _debugRoiIndex);
-            string safeName = string.Join("_", (extractFallback.CategoryName ?? "unknown").Split(Path.GetInvalidFileNameChars()));
-            string roiPath = Path.Combine(debugDir, $"roi_{roiIdx:D3}_{safeName}.png");
-            try
-            {
-                Cv2.ImWrite(roiPath, roiContext.NormalizedRoi);
-            }
-            catch { }
-
             CSharpResult roiResult = activeModel.Infer(roiContext.NormalizedRoi, inferParams);
+
             if (roiResult.SampleResults == null || roiResult.SampleResults.Count == 0)
             {
-                LogDebug($"[ROI {roiIdx}] {extractFallback.CategoryName}: raw=0 (no sample results), roiSize={roiContext.NormalizedRoi.Width}x{roiContext.NormalizedRoi.Height}");
                 return new List<CSharpObjectResult> { extractFallback };
             }
 
             List<CSharpObjectResult> rawObjects = roiResult.SampleResults[0].Results ?? new List<CSharpObjectResult>();
-            LogDebug($"[ROI {roiIdx}] {extractFallback.CategoryName}: raw={rawObjects.Count}, roiSize={roiContext.NormalizedRoi.Width}x{roiContext.NormalizedRoi.Height}");
-            for (int i = 0; i < rawObjects.Count; i++)
-            {
-                var r = rawObjects[i];
-                string bboxStr = r.Bbox != null ? string.Join(",", r.Bbox) : "null";
-                LogDebug($"  [{i}] {r.CategoryName} score={r.Score:F2} bbox=[{bboxStr}]");
-            }
-
             if (rawObjects.Count == 0)
             {
                 return new List<CSharpObjectResult> { extractFallback };
