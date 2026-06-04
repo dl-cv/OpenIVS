@@ -48,9 +48,11 @@ namespace DlcvDemo2
             var mergedAll = new List<ExtractDetection>();
             if (fullImageDetections == null || fullImageDetections.Count == 0)
             {
+                InferenceDebugLogger.Log($"MergeExtractResults: input empty");
                 return mergedAll;
             }
 
+            InferenceDebugLogger.Log($"MergeExtractResults: input={fullImageDetections.Count}");
             foreach (var group in fullImageDetections.GroupBy(x => x.ObjectResult.CategoryName ?? string.Empty))
             {
                 var clusters = new List<ExtractDetection>();
@@ -103,6 +105,7 @@ namespace DlcvDemo2
             }
 
             mergedAll.Sort((a, b) => a.Order.CompareTo(b.Order));
+            InferenceDebugLogger.Log($"MergeExtractResults: output={mergedAll.Count}");
             return mergedAll;
         }
 

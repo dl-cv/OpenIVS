@@ -22,6 +22,7 @@ namespace DlcvDemo2
         private Model icDetectModel;
         private string imagePath;
         private bool isInferenceRunning;
+        private float _inferenceThreshold = 0.3f;
 
         private sealed class RoiProcessResult : IDisposable
         {
@@ -238,6 +239,16 @@ namespace DlcvDemo2
                 string inferImagePath = imagePath;
                 SlidingWindowConfig config = CaptureSlidingWindowConfig();
 
+                // 初始化调试日志（每张图片一个日志文件）
+                try
+                {
+                    string logDir = Path.Combine(Path.GetTempPath(), "DlcvDemo2_Logs");
+                    Directory.CreateDirectory(logDir);
+                    string logPath = Path.Combine(logDir, $"infer_{DateTime.Now:yyyyMMdd_HHmmss_fff}.log");
+                    InferenceDebugLogger.Enable(logPath);
+                }
+                catch { }
+
                 isInferenceRunning = true;
                 UpdateBusyControlState();
                 SetInferenceProgress(0, "准备推理");
@@ -260,7 +271,7 @@ namespace DlcvDemo2
 
                         Stopwatch sw = Stopwatch.StartNew();
                         // 颜色约定：UI 显示使用 imageBgr；送入 dvst 的整条 pipeline 使用 imageRgb（RGB）。
-                        PipelineRunResult runResult = RunPipeline(imageRgb, config, progress);
+                        PipelineRunResult runResult = RunPipeline(imageRgb, config, progress, _inferenceThreshold);
                         sw.Stop();
 
                         return new InferenceExecutionResult
@@ -306,8 +317,11 @@ namespace DlcvDemo2
             }
         }
 
-        private PipelineRunResult RunPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null)
+        private PipelineRunResult RunPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null, float threshold = 0.3f)
         {
+            InferenceDebugLogger.Log($"\n========== RunPipeline start ==========");
+            InferenceDebugLogger.Log($"Image size={fullImageRgb?.Width}x{fullImageRgb?.Height}, threshold={threshold}");
+
             var runResult = new PipelineRunResult();
 
             ReportInferenceProgress(progress, 8, "生成滑窗");
@@ -321,10 +335,20 @@ namespace DlcvDemo2
             runResult.SlidingWindowCount = windows.Count;
 
             ReportInferenceProgress(progress, 12, $"元件提取模型滑窗推理 0/{windows.Count}");
-            List<ExtractDetection> extractDetections = InferExtractModelOnWindows(fullImageRgb, windows, progress);
+            List<ExtractDetection> extractDetections = InferExtractModelOnWindows(fullImageRgb, windows, progress, threshold);
             ReportInferenceProgress(progress, 62, "合并元件提取结果");
+            InferenceDebugLogger.Log($"Before merge: {extractDetections?.Count ?? 0} detections");
             List<ExtractDetection> mergedExtract = ExtractMergeUtils.MergeExtractResults(extractDetections);
             runResult.MergedExtractCount = mergedExtract.Count;
+            InferenceDebugLogger.Log($"After merge: {mergedExtract.Count} detections");
+            for (int mi = 0; mi < mergedExtract.Count; mi++)
+            {
+                var me = mergedExtract[mi];
+                if (me != null)
+                    InferenceDebugLogger.LogObject($"  Merge[{mi}]", me.ObjectResult);
+                else
+                    InferenceDebugLogger.Log($"  Merge[{mi}]: null");
+            }
 
             int roiTotal = mergedExtract.Count;
             int roiCompleted = 0;
@@ -348,7 +372,7 @@ namespace DlcvDemo2
 
                     try
                     {
-                        List<CSharpObjectResult> mapped = InferDetectionModelAndMapBack(roi, target.ObjectResult, useIcDetectModel);
+                        List<CSharpObjectResult> mapped = InferDetectionModelAndMapBack(roi, target.ObjectResult, useIcDetectModel, threshold);
                         runResult.FinalObjects.AddRange(mapped);
                         int realResultCount = mapped.Count == 1 && ReferenceEquals(mapped[0], target.ObjectResult)
                             ? 0
@@ -377,6 +401,9 @@ namespace DlcvDemo2
 
             ReportInferenceProgress(progress, 95, "整理结果");
             runResult.DisplayResult = BuildDisplayResult(runResult.FinalObjects);
+            InferenceDebugLogger.Log($"Final total objects={runResult.FinalObjects.Count}");
+            InferenceDebugLogger.LogObjects($"Final objects", runResult.FinalObjects);
+            InferenceDebugLogger.Log($"========== RunPipeline end ==========\n");
             ReportInferenceProgress(progress, 100, "推理完成");
             return runResult;
         }
@@ -391,14 +418,17 @@ namespace DlcvDemo2
                 || string.Equals(baseName, "晶振", StringComparison.OrdinalIgnoreCase);
         }
 
-        private List<ExtractDetection> InferExtractModelOnWindows(Mat fullImageRgb, List<Rect> windows, IProgress<InferenceProgressInfo> progress)
+        private List<ExtractDetection> InferExtractModelOnWindows(Mat fullImageRgb, List<Rect> windows, IProgress<InferenceProgressInfo> progress, float threshold = 0.3f)
         {
             var output = new List<ExtractDetection>();
             int order = 0;
             JObject inferParams = new JObject
             {
-                ["with_mask"] = false
+                ["with_mask"] = false,
+                ["threshold"] = threshold
             };
+            InferenceDebugLogger.Log($"=== InferExtractModelOnWindows start ===");
+            InferenceDebugLogger.Log($"InferExtractModelOnWindows: threshold={threshold}, windowCount={windows?.Count ?? 0}");
 
             int totalWindows = windows != null ? windows.Count : 0;
             if (totalWindows == 0)
@@ -425,9 +455,11 @@ namespace DlcvDemo2
                         Rect2d aabb = ExtractMergeUtils.GetAabbFromObject(mapped);
                         if (aabb.Width <= 0 || aabb.Height <= 0)
                         {
+                            InferenceDebugLogger.Log($"  Skip invalid aabb: w={aabb.Width}, h={aabb.Height}");
                             continue;
                         }
 
+                        InferenceDebugLogger.LogObject($"  Extract window[{i}]", mapped);
                         output.Add(new ExtractDetection
                         {
                             ObjectResult = mapped,
@@ -445,6 +477,8 @@ namespace DlcvDemo2
                 }
             }
 
+            InferenceDebugLogger.Log($"InferExtractModelOnWindows: total detections before merge={output.Count}");
+            InferenceDebugLogger.Log($"=== InferExtractModelOnWindows end ===");
             return output;
         }
 
@@ -455,6 +489,15 @@ namespace DlcvDemo2
                 IsValid = false,
                 InvalidReason = "未知错误"
             };
+            InferenceDebugLogger.Log($"=== CropAndRotateRoi start ===");
+            if (target != null)
+            {
+                InferenceDebugLogger.LogObject($"Target object", target.ObjectResult);
+            }
+            else
+            {
+                InferenceDebugLogger.Log($"Target object: null");
+            }
 
             Mat roi = null;
             Mat normalized = null;
@@ -486,6 +529,7 @@ namespace DlcvDemo2
                 }
 
                 normalized = DetectionGeometryUtils.RotateRoiByRightAngle(roi, normalizeAngle);
+                InferenceDebugLogger.Log($"Rotated ROI: {roi?.Width}x{roi?.Height} -> {normalized?.Width}x{normalized?.Height} (angle={normalizeAngle})");
                 if (normalized == null || normalized.Empty())
                 {
                     if (normalized != null)
@@ -510,11 +554,15 @@ namespace DlcvDemo2
                 result.NormalizedRoi = normalized;
                 normalized = null;
                 result.NormToFullAffine = normToFull;
+                InferenceDebugLogger.Log($"CropAndRotateRoi success: normROI={result.NormalizedRoi?.Width}x{result.NormalizedRoi?.Height}");
+                InferenceDebugLogger.Log($"=== CropAndRotateRoi end ===");
                 return result;
             }
             catch (Exception ex)
             {
                 result.InvalidReason = ex.Message;
+                InferenceDebugLogger.Log($"CropAndRotateRoi exception: {ex.Message}");
+                InferenceDebugLogger.Log($"=== CropAndRotateRoi end (exception) ===");
                 return result;
             }
             finally
@@ -531,23 +579,34 @@ namespace DlcvDemo2
             }
         }
 
-        private List<CSharpObjectResult> InferDetectionModelAndMapBack(RoiProcessResult roiContext, CSharpObjectResult extractFallback, bool useIcDetectModel)
+        private List<CSharpObjectResult> InferDetectionModelAndMapBack(RoiProcessResult roiContext, CSharpObjectResult extractFallback, bool useIcDetectModel, float threshold = 0.3f)
         {
             JObject inferParams = new JObject
             {
-                ["with_mask"] = false
+                ["with_mask"] = false,
+                ["threshold"] = threshold
             };
+
+            string modelName = useIcDetectModel ? "IC" : "Component";
+            InferenceDebugLogger.Log($"=== {modelName} detection start ===");
+            InferenceDebugLogger.Log($"ROI size={roiContext.NormalizedRoi?.Width}x{roiContext.NormalizedRoi?.Height}, threshold={threshold}");
+            InferenceDebugLogger.LogObject($"Extract fallback", extractFallback);
 
             Model activeModel = useIcDetectModel ? icDetectModel : componentDetectModel;
             CSharpResult roiResult = activeModel.Infer(roiContext.NormalizedRoi, inferParams);
             if (roiResult.SampleResults == null || roiResult.SampleResults.Count == 0)
             {
+                InferenceDebugLogger.Log($"No sample results, fallback to extract");
                 return new List<CSharpObjectResult> { extractFallback };
             }
 
             List<CSharpObjectResult> rawObjects = roiResult.SampleResults[0].Results ?? new List<CSharpObjectResult>();
+            InferenceDebugLogger.Log($"Raw detection count={rawObjects.Count}");
+            InferenceDebugLogger.LogObjects($"Raw detections", rawObjects);
+
             if (rawObjects.Count == 0)
             {
+                InferenceDebugLogger.Log($"Empty results, fallback to extract");
                 return new List<CSharpObjectResult> { extractFallback };
             }
 
@@ -559,7 +618,15 @@ namespace DlcvDemo2
                 {
                     mappedObjects.Add(ResolveFinalDetectionObject(mapped, extractFallback));
                 }
+                else
+                {
+                    InferenceDebugLogger.LogObject($"  MAP FAILED (skipped)", obj);
+                }
             }
+
+            InferenceDebugLogger.Log($"Mapped success count={mappedObjects.Count}, failed={rawObjects.Count - mappedObjects.Count}");
+            InferenceDebugLogger.LogObjects($"Mapped detections", mappedObjects);
+            InferenceDebugLogger.Log($"=== {modelName} detection end ===");
 
             if (mappedObjects.Count == 0)
             {
@@ -1014,6 +1081,48 @@ namespace DlcvDemo2
                 asDecimal = control.Maximum;
             }
             control.Value = asDecimal;
+        }
+
+        /// <summary>
+        /// 无 UI 命令行推理入口。
+        /// </summary>
+        public string RunHeadless(string extractModelPath, string componentModelPath, string icModelPath, string imgPath, float threshold)
+        {
+            // 初始化日志
+            string logDir = Path.Combine(Path.GetTempPath(), "DlcvDemo2_Logs");
+            Directory.CreateDirectory(logDir);
+            string logPath = Path.Combine(logDir, $"infer_{DateTime.Now:yyyyMMdd_HHmmss_fff}.log");
+            InferenceDebugLogger.Enable(logPath);
+            InferenceDebugLogger.Log("=== Headless mode started ===");
+            InferenceDebugLogger.Log($"Models: extract={extractModelPath}, component={componentModelPath}, ic={icModelPath}");
+            InferenceDebugLogger.Log($"Image: {imgPath}, threshold={threshold}");
+
+            // 加载模型
+            extractModel = new Model(extractModelPath, 0, false);
+            componentDetectModel = new Model(componentModelPath, 0, false);
+            icDetectModel = new Model(icModelPath, 0, false);
+            imagePath = imgPath;
+
+            // 读取图片
+            using (Mat imageBgr = Cv2.ImRead(imagePath, ImreadModes.Unchanged))
+            {
+                if (imageBgr == null || imageBgr.Empty())
+                {
+                    throw new InvalidOperationException("图片解码失败。");
+                }
+                using (Mat imageRgb = PrepareImageForModelInput(imageBgr))
+                {
+                    var config = new SlidingWindowConfig
+                    {
+                        WindowWidth = imageRgb.Width,
+                        WindowHeight = imageRgb.Height,
+                        OverlapX = 0,
+                        OverlapY = 0
+                    };
+                    var result = RunPipeline(imageRgb, config, null, threshold);
+                    return BuildInferenceText(result, 0);
+                }
+            }
         }
     }
 }
