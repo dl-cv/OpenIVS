@@ -34,10 +34,6 @@ def main():
 if __name__ == "__main__":
     import warnings
 
-    # 构建前同步 hasp 配置文件到包目录
-    if os.path.exists("hasp_26146.ini"):
-        shutil.copy("hasp_26146.ini", os.path.join(package_name, "hasp_26146.ini"))
-
     egg_info_path = f'{package_name}.egg-info'
 
     path_list = ['build', 'dist', 'whl', egg_info_path]
