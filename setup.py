@@ -4,7 +4,7 @@ import shutil
 
 from setuptools import setup
 
-version = '2026.6.3.0a0'
+version = '2026.6.8.0a0'
 
 package_name = "dlcvpro_infer_csharp"  # 包名
 packages: list = [package_name]  # 需要打包的包
@@ -33,6 +33,10 @@ def main():
 
 if __name__ == "__main__":
     import warnings
+
+    # 构建前同步 hasp 配置文件到包目录
+    if os.path.exists("hasp_26146.ini"):
+        shutil.copy("hasp_26146.ini", os.path.join(package_name, "hasp_26146.ini"))
 
     egg_info_path = f'{package_name}.egg-info'
 
