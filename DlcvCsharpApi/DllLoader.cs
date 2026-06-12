@@ -106,9 +106,9 @@ namespace dlcv_infer_csharp
             switch (provider)
             {
                 case DogProvider.Sentinel:
-                    return "深盾";
+                    return "Sentinel";
                 case DogProvider.Virbox:
-                    return "Virbox";
+                    return "Virbox（深盾）";
                 default:
                     return provider.ToString();
             }
