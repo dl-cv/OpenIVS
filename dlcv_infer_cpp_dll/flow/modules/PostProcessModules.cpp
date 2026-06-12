@@ -1,4 +1,4 @@
-#include "flow/BaseModule.h"
+﻿#include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/MaskRleUtils.h"
 
@@ -490,6 +490,313 @@ public:
         }
         this->ScalarOutputsByName["has_positive"] = hasPositive;
         return ModuleIO(std::move(mainImages), std::move(mainResults), Json::array());
+    }
+};
+
+/// post_process/multi_category_filter, features/multi_category_filter
+/// 多类别筛选：按多个类别名将结果分流到多路输出，每路对应一个类别，最后一路输出“其他”。
+/// 与 Python 侧 backend/multi_tasks/NewModules/multi_category_filter.py 行为保持一致。
+class MultiCategoryFilterModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        const Json emptyResults = Json::array();
+        const Json& inResults = resultList.is_array() ? resultList : emptyResults;
+        const auto categories = ReadCategories(Properties);
+
+        if (categories.empty()) {
+            ScalarOutputsByName["has_positive"] = false;
+            ExtraOutputs.push_back(ModuleChannel(std::vector<ModuleImage>(), Json::array()));
+            return ModuleIO(imageList, Json(inResults), Json::array());
+        }
+
+        const int imageCount = static_cast<int>(imageList.size());
+
+        // 构建图像索引映射（与 Python 侧 _pick_wrapper_index 一致）
+        std::unordered_map<int, int> indexToWrapperIndex;  // folded index -> wrapper index
+        std::unordered_map<int, int> originToWrapperIndex; // folded origin -> wrapper index
+        std::unordered_map<std::string, std::vector<int>> sigToIndices;
+        for (int i = 0; i < imageCount; i++) {
+            const auto& wrap = imageList[static_cast<size_t>(i)];
+            const int idxFolded = FoldAliasIndex(i, imageCount);
+            const int originFolded = FoldAliasIndex(wrap.OriginalIndex, imageCount);
+            indexToWrapperIndex[idxFolded] = i;
+            originToWrapperIndex[originFolded] = i;
+
+            const std::string sig = SerializeTransformKey(wrap.TransformState);
+            if (!sig.empty()) {
+                sigToIndices[sig].push_back(i);
+            }
+        }
+
+        // 为每个类别和 others 准备桶
+        std::vector<std::vector<std::pair<Json, int>>> categoryBuckets(categories.size());
+        std::vector<std::pair<Json, int>> othersBucket;
+        std::vector<Json> nonLocalOthers;
+
+        std::unordered_map<std::string, int> catLowerMap;
+        for (int i = 0; i < static_cast<int>(categories.size()); i++) {
+            std::string lower = categories[static_cast<size_t>(i)];
+            for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            catLowerMap[lower] = i;
+        }
+
+        for (const auto& entry : inResults) {
+            if (!entry.is_object()) continue;
+            if (!entry.contains("type") || !entry.at("type").is_string() ||
+                entry.at("type").get<std::string>() != "local") {
+                nonLocalOthers.push_back(entry);
+                continue;
+            }
+            if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) {
+                nonLocalOthers.push_back(entry);
+                continue;
+            }
+            const auto& sampleResults = entry.at("sample_results");
+
+            const int wrapperIndex = PickWrapperIndex(entry, imageCount, indexToWrapperIndex, originToWrapperIndex, sigToIndices);
+
+            std::unordered_map<int, std::vector<Json>> catDets;
+            std::vector<Json> uncategorizedDets;
+            for (const auto& d : sampleResults) {
+                if (!d.is_object()) continue;
+                std::string cn;
+                if (d.contains("category_name") && d.at("category_name").is_string()) {
+                    cn = d.at("category_name").get<std::string>();
+                }
+                if (cn.empty()) {
+                    uncategorizedDets.push_back(d);
+                    continue;
+                }
+                std::string cnLower = cn;
+                for (auto& c : cnLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                auto it = catLowerMap.find(cnLower);
+                if (it == catLowerMap.end()) {
+                    uncategorizedDets.push_back(d);
+                    continue;
+                }
+                catDets[it->second].push_back(d);
+            }
+
+            for (const auto& kv : catDets) {
+                Json e = entry;
+                e["sample_results"] = Json(kv.second);
+                categoryBuckets[kv.first].emplace_back(std::move(e), wrapperIndex);
+            }
+
+            if (!uncategorizedDets.empty()) {
+                Json e = entry;
+                e["sample_results"] = Json(uncategorizedDets);
+                othersBucket.emplace_back(std::move(e), wrapperIndex);
+            }
+        }
+
+        // 构建每个类别的输出
+        std::vector<std::pair<std::vector<ModuleImage>, Json>> categoryOutputs;
+        categoryOutputs.reserve(categories.size());
+        for (int i = 0; i < static_cast<int>(categories.size()); i++) {
+            categoryOutputs.push_back(BuildImagesAndResults(categoryBuckets[i], imageList, imageCount, nonLocalOthers));
+        }
+        auto othersOutput = BuildImagesAndResults(othersBucket, imageList, imageCount, nonLocalOthers);
+
+        auto& mainOutput = categoryOutputs[0];
+
+        // ExtraOutputs = 其他类别
+        for (int i = 1; i < static_cast<int>(categoryOutputs.size()); i++) {
+            ExtraOutputs.push_back(ModuleChannel(std::move(categoryOutputs[i].first), std::move(categoryOutputs[i].second)));
+        }
+        // others 放在最后一个 pair
+        ExtraOutputs.push_back(ModuleChannel(std::move(othersOutput.first), std::move(othersOutput.second)));
+
+        // 标量输出：是否存在任何匹配
+        bool hasAny = false;
+        for (const auto& out : categoryOutputs) {
+            if (out.second.is_array() && !out.second.empty()) {
+                hasAny = true;
+                break;
+            }
+        }
+        ScalarOutputsByName["has_positive"] = hasAny;
+
+        return ModuleIO(std::move(mainOutput.first), std::move(mainOutput.second), Json::array());
+    }
+
+private:
+    static std::vector<std::string> ReadCategories(const Json& props) {
+        std::vector<std::string> out;
+        if (!props.is_object() || !props.contains("categories")) return out;
+        try {
+            const Json& v = props.at("categories");
+            if (!v.is_array()) return out;
+            for (const auto& it : v) {
+                if (it.is_null()) continue;
+                std::string s;
+                if (it.is_string()) s = it.get<std::string>();
+                else s = it.dump();
+                // trim
+                size_t start = s.find_first_not_of(" \t\r\n");
+                if (start == std::string::npos) continue;
+                size_t end = s.find_last_not_of(" \t\r\n");
+                s = s.substr(start, end - start + 1);
+                if (!s.empty()) out.push_back(s);
+            }
+        } catch (...) {}
+        return out;
+    }
+
+    static int FoldAliasIndex(int rawIndex, int imageCount) {
+        if (imageCount <= 0) return rawIndex >= 0 ? rawIndex : 0;
+        if (rawIndex < 0) return 0;
+        return rawIndex % imageCount;
+    }
+
+    static int FoldIndex(const Json& value, int imageCount) {
+        if (imageCount <= 0 || value.is_boolean()) return -1;
+        try {
+            int iv = -1;
+            if (value.is_number_integer()) iv = value.get<int>();
+            else if (value.is_number()) iv = static_cast<int>(std::llround(value.get<double>()));
+            else if (value.is_string()) iv = std::stoi(value.get<std::string>());
+            else return -1;
+            if (iv < 0) return -1;
+            return iv % imageCount;
+        } catch (...) { return -1; }
+    }
+
+    static std::string SerializeTransformKey(const TransformationState& st) {
+        return SerializeTransformKey(st.ToJson());
+    }
+
+    static std::string SerializeTransformKey(const Json& tObj) {
+        if (!tObj.is_object()) return std::string();
+        try {
+            Json normalized = Json::object();
+            std::vector<std::string> keys;
+            for (auto it = tObj.begin(); it != tObj.end(); ++it) keys.push_back(it.key());
+            std::sort(keys.begin(), keys.end());
+            for (const auto& k : keys) normalized[k] = NormalizeTransformJson(tObj.at(k));
+            return normalized.dump();
+        } catch (...) {
+            return tObj.dump();
+        }
+    }
+
+    static Json NormalizeTransformJson(const Json& token) {
+        if (token.is_object()) {
+            Json normalized = Json::object();
+            std::vector<std::string> keys;
+            for (auto it = token.begin(); it != token.end(); ++it) keys.push_back(it.key());
+            std::sort(keys.begin(), keys.end());
+            for (const auto& k : keys) normalized[k] = NormalizeTransformJson(token.at(k));
+            return normalized;
+        }
+        if (token.is_array()) {
+            Json normalized = Json::array();
+            for (const auto& item : token) normalized.push_back(NormalizeTransformJson(item));
+            return normalized;
+        }
+        if (token.is_number_float()) {
+            return Json(std::round(token.get<double>() * 1e6) / 1e6);
+        }
+        return token;
+    }
+
+    static int PickWrapperIndex(
+        const Json& entry,
+        int imageCount,
+        const std::unordered_map<int, int>& indexToWrapperIndex,
+        const std::unordered_map<int, int>& originToWrapperIndex,
+        const std::unordered_map<std::string, std::vector<int>>& sigToIndices) {
+        int idx = FoldIndex(entry.value("index", Json()), imageCount);
+        if (idx >= 0 && indexToWrapperIndex.find(idx) != indexToWrapperIndex.end()) return idx;
+
+        int oidx = FoldIndex(entry.value("origin_index", Json()), imageCount);
+        if (oidx >= 0) {
+            auto it = originToWrapperIndex.find(oidx);
+            if (it != originToWrapperIndex.end()) return it->second;
+        }
+
+        if (entry.contains("transform") && entry.at("transform").is_object()) {
+            const std::string sig = SerializeTransformKey(entry.at("transform"));
+            if (!sig.empty()) {
+                auto it = sigToIndices.find(sig);
+                if (it != sigToIndices.end() && it->second.size() == 1) return it->second[0];
+            }
+        }
+        return -1;
+    }
+
+    static std::pair<std::vector<ModuleImage>, Json> BuildImagesAndResults(
+        const std::vector<std::pair<Json, int>>& bucket,
+        const std::vector<ModuleImage>& wrappers,
+        int imageCount,
+        const std::vector<Json>& nonLocalOthers) {
+
+        std::vector<bool> flags(wrappers.size(), false);
+        std::unordered_set<std::string> transFlags;
+        std::unordered_set<int> indexFlags;
+        std::unordered_set<int> originFlags;
+
+        for (const auto& t : bucket) {
+            const Json& e = t.first;
+            const int wi = t.second;
+            if (wi >= 0) {
+                flags[static_cast<size_t>(wi)] = true;
+                continue;
+            }
+
+            if (e.contains("transform") && e.at("transform").is_object()) {
+                const std::string sig = SerializeTransformKey(e.at("transform"));
+                if (!sig.empty()) {
+                    transFlags.insert(sig);
+                    continue;
+                }
+            }
+
+            const int idx = FoldIndex(e.value("index", Json()), imageCount);
+            if (idx >= 0) {
+                indexFlags.insert(idx);
+                continue;
+            }
+            const int oidx = FoldIndex(e.value("origin_index", Json()), imageCount);
+            if (oidx >= 0) originFlags.insert(oidx);
+        }
+
+        for (size_t i = 0; i < wrappers.size(); i++) {
+            if (flags[i]) continue;
+            const auto& wrap = wrappers[i];
+            const std::string sig = SerializeTransformKey(wrap.TransformState);
+            const int wrappedOrigin = FoldAliasIndex(wrap.OriginalIndex, imageCount);
+            if (!sig.empty() && transFlags.count(sig)) flags[i] = true;
+            else if (indexFlags.count(static_cast<int>(i))) flags[i] = true;
+            else if (originFlags.count(wrappedOrigin)) flags[i] = true;
+        }
+
+        std::vector<ModuleImage> outImages;
+        std::unordered_map<int, int> reindex;
+        for (size_t i = 0; i < wrappers.size(); i++) {
+            if (flags[i]) {
+                reindex[static_cast<int>(i)] = static_cast<int>(outImages.size());
+                outImages.push_back(wrappers[i]);
+            }
+        }
+
+        Json outResults = Json::array();
+        for (const auto& t : bucket) {
+            Json e = t.first;
+            const int wi = t.second;
+            if (wi >= 0) {
+                auto it = reindex.find(wi);
+                if (it != reindex.end()) e["index"] = it->second;
+            }
+            outResults.push_back(std::move(e));
+        }
+        for (const auto& e : nonLocalOthers) {
+            outResults.push_back(e);
+        }
+
+        return std::make_pair(std::move(outImages), std::move(outResults));
     }
 };
 
@@ -2025,6 +2332,8 @@ DLCV_FLOW_REGISTER_MODULE("post_process/merge_results", MergeResultsModule)
 DLCV_FLOW_REGISTER_MODULE("features/merge_results", MergeResultsModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/result_filter", ResultFilterModule)
 DLCV_FLOW_REGISTER_MODULE("features/result_filter", ResultFilterModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/multi_category_filter", MultiCategoryFilterModule)
+DLCV_FLOW_REGISTER_MODULE("features/multi_category_filter", MultiCategoryFilterModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/result_filter_advanced", ResultFilterAdvancedModule)
 DLCV_FLOW_REGISTER_MODULE("features/result_filter_advanced", ResultFilterAdvancedModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/text_replacement", TextReplacementModule)
