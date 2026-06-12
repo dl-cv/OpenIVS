@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -1107,6 +1107,369 @@ namespace DlcvModules
         }
 
     }
+    /// <summary>
+    /// 模块名称：多类别筛选
+    /// 按多个类别名将结果分流到多路输出，每路对应一个类别，最后一路输出“其他”。
+    /// 与 Python 侧 backend/multi_tasks/NewModules/multi_category_filter.py 行为保持一致。
+    /// </summary>
+    public class MultiCategoryFilter : BaseModule
+    {
+        static MultiCategoryFilter()
+        {
+            ModuleRegistry.Register("post_process/multi_category_filter", typeof(MultiCategoryFilter));
+            ModuleRegistry.Register("features/multi_category_filter", typeof(MultiCategoryFilter));
+        }
+
+        public MultiCategoryFilter(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var inImages = imageList ?? new List<ModuleImage>();
+            var inResults = resultList ?? new JArray();
+            var categories = ReadCategories();
+
+            if (categories.Count == 0)
+            {
+                // 无类别时全部走主输出，额外输出一路空结果以保持端口对对齐
+                ScalarOutputsByName["has_positive"] = false;
+                ExtraOutputs.Add(new ModuleChannel(new List<ModuleImage>(), new JArray()));
+                return new ModuleIO(inImages, inResults);
+            }
+
+            int imageCount = inImages.Count;
+
+            // 构建图像索引映射（与 Python 侧 _pick_wrapper_index 一致）
+            var indexToImage = new Dictionary<int, ModuleImage>();
+            var originToImage = new Dictionary<int, ModuleImage>();
+            var originToWrapperIndex = new Dictionary<int, int>();
+            var sigToIndices = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            for (int i = 0; i < inImages.Count; i++)
+            {
+                var wrap = inImages[i];
+                if (wrap == null) continue;
+                int idxFolded = FoldAliasIndex(i, imageCount);
+                int originFolded = FoldAliasIndex(wrap.OriginalIndex, imageCount);
+                indexToImage[idxFolded] = wrap;
+                originToImage[originFolded] = wrap;
+                originToWrapperIndex[originFolded] = i;
+
+                string sig = SerializeTransformKey(wrap.TransformState);
+                if (!string.IsNullOrEmpty(sig))
+                {
+                    if (!sigToIndices.TryGetValue(sig, out var list))
+                    {
+                        list = new List<int>();
+                        sigToIndices[sig] = list;
+                    }
+                    list.Add(i);
+                }
+            }
+
+            // 为每个类别和 others 准备桶
+            var categoryBuckets = new List<List<Tuple<JObject, int?>>>();
+            for (int i = 0; i < categories.Count; i++)
+                categoryBuckets.Add(new List<Tuple<JObject, int?>>());
+            var othersBucket = new List<Tuple<JObject, int?>>();
+            var nonLocalOthers = new List<JObject>();
+
+            var catLowerMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < categories.Count; i++)
+                catLowerMap[categories[i].ToLowerInvariant()] = i;
+
+            foreach (var entryToken in inResults)
+            {
+                if (!(entryToken is JObject entry)) continue;
+                if (!string.Equals(entry["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    nonLocalOthers.Add(entry);
+                    continue;
+                }
+                var sampleResults = entry["sample_results"] as JArray;
+                if (sampleResults == null)
+                {
+                    nonLocalOthers.Add(entry);
+                    continue;
+                }
+
+                int? wrapperIndex = PickWrapperIndex(entry, imageCount, indexToImage, originToWrapperIndex, sigToIndices);
+
+                var catDets = new Dictionary<int, List<JObject>>();
+                var uncategorizedDets = new List<JObject>();
+                foreach (var dToken in sampleResults)
+                {
+                    if (!(dToken is JObject d)) continue;
+                    var cn = d["category_name"]?.ToString();
+                    if (string.IsNullOrWhiteSpace(cn))
+                    {
+                        uncategorizedDets.Add(d);
+                        continue;
+                    }
+                    if (!catLowerMap.TryGetValue(cn, out int catIdx))
+                    {
+                        uncategorizedDets.Add(d);
+                        continue;
+                    }
+                    if (!catDets.TryGetValue(catIdx, out var list))
+                    {
+                        list = new List<JObject>();
+                        catDets[catIdx] = list;
+                    }
+                    list.Add(d);
+                }
+
+                foreach (var kv in catDets)
+                {
+                    var e = (JObject)entry.DeepClone();
+                    e["sample_results"] = new JArray(kv.Value);
+                    categoryBuckets[kv.Key].Add(Tuple.Create(e, wrapperIndex));
+                }
+
+                if (uncategorizedDets.Count > 0)
+                {
+                    var e = (JObject)entry.DeepClone();
+                    e["sample_results"] = new JArray(uncategorizedDets);
+                    othersBucket.Add(Tuple.Create(e, wrapperIndex));
+                }
+            }
+
+            // 构建每个类别的输出
+            var categoryOutputs = new List<Tuple<List<ModuleImage>, JArray>>();
+            for (int i = 0; i < categories.Count; i++)
+                categoryOutputs.Add(BuildImagesAndResults(categoryBuckets[i], inImages, imageCount, nonLocalOthers));
+
+            var othersOutput = BuildImagesAndResults(othersBucket, inImages, imageCount, nonLocalOthers);
+
+            // 主输出 = 第一个类别
+            var mainOutput = categoryOutputs[0];
+
+            // ExtraOutputs = 其他类别
+            for (int i = 1; i < categoryOutputs.Count; i++)
+                ExtraOutputs.Add(new ModuleChannel(categoryOutputs[i].Item1, categoryOutputs[i].Item2));
+
+            // others 放在最后一个 pair
+            ExtraOutputs.Add(new ModuleChannel(othersOutput.Item1, othersOutput.Item2));
+
+            // 标量输出：是否存在任何匹配
+            bool hasAny = false;
+            for (int i = 0; i < categoryOutputs.Count; i++)
+            {
+                if (categoryOutputs[i].Item2.Count > 0)
+                {
+                    hasAny = true;
+                    break;
+                }
+            }
+            ScalarOutputsByName["has_positive"] = hasAny;
+
+            return new ModuleIO(mainOutput.Item1, mainOutput.Item2);
+        }
+
+        private List<string> ReadCategories()
+        {
+            var cats = new List<string>();
+            if (Properties != null && Properties.TryGetValue("categories", out object v) && v != null)
+            {
+                JArray ja = v as JArray;
+                if (ja == null && !(v is string))
+                {
+                    try { ja = JArray.FromObject(v); } catch { }
+                }
+                if (ja != null)
+                {
+                    foreach (var o in ja)
+                    {
+                        if (o == null) continue;
+                        var s = o.ToString().Trim();
+                        if (!string.IsNullOrWhiteSpace(s)) cats.Add(s);
+                    }
+                }
+            }
+            return cats;
+        }
+
+        private static int? FoldIndex(object value, int imageCount)
+        {
+            if (imageCount <= 0 || value is bool) return null;
+            try
+            {
+                int iv = Convert.ToInt32(value);
+                if (iv < 0) return null;
+                return iv % imageCount;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string SerializeTransformKey(TransformationState st)
+        {
+            if (st == null) return null;
+            try
+            {
+                return SerializeTransformKey(JObject.FromObject(st.ToDict()));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string SerializeTransformKey(JObject stObj)
+        {
+            if (stObj == null) return null;
+            try
+            {
+                return NormalizeTransformJson(stObj).ToString(Newtonsoft.Json.Formatting.None);
+            }
+            catch
+            {
+                return stObj.ToString(Newtonsoft.Json.Formatting.None);
+            }
+        }
+
+        private static JToken NormalizeTransformJson(JToken token)
+        {
+            if (token is JObject obj)
+            {
+                var normalized = new JObject();
+                foreach (var prop in obj.Properties().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    normalized[prop.Name] = NormalizeTransformJson(prop.Value);
+                }
+                return normalized;
+            }
+            if (token is JArray arr)
+            {
+                var normalized = new JArray();
+                foreach (var item in arr)
+                {
+                    normalized.Add(NormalizeTransformJson(item));
+                }
+                return normalized;
+            }
+            if (token is JValue jv && jv.Value is double d)
+            {
+                return Math.Round(d, 6);
+            }
+            return token;
+        }
+
+        private static int FoldAliasIndex(int rawIndex, int imageCount)
+        {
+            if (imageCount <= 0) return rawIndex >= 0 ? rawIndex : 0;
+            if (rawIndex < 0) return 0;
+            return rawIndex % imageCount;
+        }
+
+        private static int? PickWrapperIndex(
+            JObject entry,
+            int imageCount,
+            Dictionary<int, ModuleImage> indexToImage,
+            Dictionary<int, int> originToWrapperIndex,
+            Dictionary<string, List<int>> sigToIndices)
+        {
+            int? idx = FoldIndex(entry["index"], imageCount);
+            if (idx.HasValue && indexToImage.ContainsKey(idx.Value))
+                return idx.Value;
+
+            int? oidx = FoldIndex(entry["origin_index"], imageCount);
+            if (oidx.HasValue && originToWrapperIndex.TryGetValue(oidx.Value, out int wi))
+                return wi;
+
+            string sig = SerializeTransformKey(entry["transform"] as JObject);
+            if (!string.IsNullOrEmpty(sig) && sigToIndices.TryGetValue(sig, out var list) && list.Count == 1)
+                return list[0];
+
+            return null;
+        }
+
+        private static Tuple<List<ModuleImage>, JArray> BuildImagesAndResults(
+            List<Tuple<JObject, int?>> bucket,
+            List<ModuleImage> wrappers,
+            int imageCount,
+            List<JObject> nonLocalOthers)
+        {
+            var flags = new bool[wrappers.Count];
+            var transFlags = new HashSet<string>(StringComparer.Ordinal);
+            var indexFlags = new HashSet<int>();
+            var originFlags = new HashSet<int>();
+
+            foreach (var t in bucket)
+            {
+                var e = t.Item1;
+                int? wi = t.Item2;
+                if (wi.HasValue && wi.Value >= 0)
+                {
+                    flags[wi.Value] = true;
+                    continue;
+                }
+
+                string sig = SerializeTransformKey(e["transform"] as JObject);
+                if (!string.IsNullOrEmpty(sig))
+                {
+                    transFlags.Add(sig);
+                    continue;
+                }
+                int? idx = FoldIndex(e["index"], imageCount);
+                if (idx.HasValue)
+                {
+                    indexFlags.Add(idx.Value);
+                    continue;
+                }
+                int? oidx = FoldIndex(e["origin_index"], imageCount);
+                if (oidx.HasValue)
+                    originFlags.Add(oidx.Value);
+            }
+
+            for (int i = 0; i < wrappers.Count; i++)
+            {
+                if (flags[i]) continue;
+                var wrap = wrappers[i];
+                string sig = SerializeTransformKey(wrap?.TransformState);
+                int wrappedOrigin = FoldAliasIndex(wrap?.OriginalIndex ?? i, imageCount);
+                if (!string.IsNullOrEmpty(sig) && transFlags.Contains(sig))
+                    flags[i] = true;
+                else if (indexFlags.Contains(i))
+                    flags[i] = true;
+                else if (originFlags.Contains(wrappedOrigin))
+                    flags[i] = true;
+            }
+
+            var outImages = new List<ModuleImage>();
+            var reindex = new Dictionary<int, int>();
+            for (int i = 0; i < wrappers.Count; i++)
+            {
+                if (flags[i])
+                {
+                    reindex[i] = outImages.Count;
+                    outImages.Add(wrappers[i]);
+                }
+            }
+
+            var outResults = new JArray();
+            foreach (var t in bucket)
+            {
+                var e = t.Item1;
+                int? wi = t.Item2;
+                if (wi.HasValue && reindex.TryGetValue(wi.Value, out int newIdx))
+                {
+                    e["index"] = newIdx;
+                }
+                outResults.Add(e);
+            }
+            foreach (var e in nonLocalOthers)
+            {
+                outResults.Add(e);
+            }
+
+            return Tuple.Create(outImages, outResults);
+        }
+    }
+
 
     /// <summary>
     /// 模块名称：结果过滤（高级）
