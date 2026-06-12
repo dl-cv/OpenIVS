@@ -90,25 +90,25 @@ namespace dlcv_infer_csharp
                 {
                     if (availableProviders.Count == 0)
                     {
-                        throw new Exception("未检测到加密狗");
+                        throw new Exception("未检测到授权");
                     }
                     string current = FormatProviderNames(availableProviders);
-                    string neededName = ProviderToChineseName(needed.Value);
-                    throw new Exception($"当前使用的是 {current} 加密狗，加载的模型是 {neededName} 格式，加密狗类型错误");
+                    string neededName = ProviderToDisplayName(needed.Value);
+                    throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
                 }
 
                 _instance = CreateLoader(needed.Value);
             }
         }
 
-        private static string ProviderToChineseName(DogProvider provider)
+        private static string ProviderToDisplayName(DogProvider provider)
         {
             switch (provider)
             {
                 case DogProvider.Sentinel:
                     return "Sentinel";
                 case DogProvider.Virbox:
-                    return "Virbox（深盾）";
+                    return "Virbox";
                 default:
                     return provider.ToString();
             }
@@ -119,13 +119,13 @@ namespace dlcv_infer_csharp
             if (providers == null || providers.Count == 0)
                 return "无";
             if (providers.Count == 1)
-                return ProviderToChineseName(providers[0]);
+                return ProviderToDisplayName(providers[0]);
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < providers.Count; i++)
             {
                 if (i > 0)
                     sb.Append("、");
-                sb.Append(ProviderToChineseName(providers[i]));
+                sb.Append(ProviderToDisplayName(providers[i]));
             }
             return sb.ToString();
         }
