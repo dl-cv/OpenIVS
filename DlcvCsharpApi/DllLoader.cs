@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -83,8 +84,50 @@ namespace dlcv_infer_csharp
             lock (_lock)
             {
                 if (_instance != null && _instance.LoadedDogProvider == needed.Value) return;
+
+                List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
+                if (!availableProviders.Contains(needed.Value))
+                {
+                    if (availableProviders.Count == 0)
+                    {
+                        throw new Exception("未检测到授权");
+                    }
+                    string current = FormatProviderNames(availableProviders);
+                    string neededName = ProviderToDisplayName(needed.Value);
+                    throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
+                }
+
                 _instance = CreateLoader(needed.Value);
             }
+        }
+
+        private static string ProviderToDisplayName(DogProvider provider)
+        {
+            switch (provider)
+            {
+                case DogProvider.Sentinel:
+                    return "Sentinel";
+                case DogProvider.Virbox:
+                    return "Virbox";
+                default:
+                    return provider.ToString();
+            }
+        }
+
+        private static string FormatProviderNames(List<DogProvider> providers)
+        {
+            if (providers == null || providers.Count == 0)
+                return "无";
+            if (providers.Count == 1)
+                return ProviderToDisplayName(providers[0]);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < providers.Count; i++)
+            {
+                if (i > 0)
+                    sb.Append("、");
+                sb.Append(ProviderToDisplayName(providers[i]));
+            }
+            return sb.ToString();
         }
 
         private static DllLoader CreateLoader(DogProvider provider)

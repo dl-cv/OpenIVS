@@ -101,18 +101,24 @@ def _sync_assembly_info(assembly_info_path: str, version: str, numeric_version: 
 def main() -> int:
     repo_root = os.path.dirname(os.path.abspath(__file__))
     setup_py = os.path.join(repo_root, "setup.py")
-    assembly_info = os.path.join(repo_root, "DlcvDemo", "Properties", "AssemblyInfo.cs")
+    assembly_infos = [
+        os.path.join(repo_root, "DlcvDemo", "Properties", "AssemblyInfo.cs"),
+        os.path.join(repo_root, "DlcvCsharpApi", "Properties", "AssemblyInfo.cs"),
+    ]
 
     version, numeric_version = _extract_version_from_setup_py(setup_py)
 
-    if not os.path.exists(assembly_info):
-        print(f"[sync_assembly_version] 未找到目标文件: {assembly_info}", file=sys.stderr)
-        return 2
+    all_changed = False
+    for assembly_info in assembly_infos:
+        if not os.path.exists(assembly_info):
+            print(f"[sync_assembly_version] 未找到目标文件: {assembly_info}", file=sys.stderr)
+            return 2
 
-    changed = _sync_assembly_info(assembly_info, version, numeric_version)
-    print(
-        f"[sync_assembly_version] DlcvDemo AssemblyInfo 版本已{'更新' if changed else '确认一致'} -> {version} (numeric: {numeric_version})"
-    )
+        changed = _sync_assembly_info(assembly_info, version, numeric_version)
+        all_changed = all_changed or changed
+        print(
+            f"[sync_assembly_version] {os.path.basename(os.path.dirname(assembly_info))} AssemblyInfo 版本已{'更新' if changed else '确认一致'} -> {version} (numeric: {numeric_version})"
+        )
     return 0
 
 
