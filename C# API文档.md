@@ -262,7 +262,7 @@ public class DllLoader
     // 全局单例
     public static DllLoader Instance { get; }
 
-    // 根据模型头中的 dog_provider 字段，确保加载正确的 DLL
+    // 根据模型头中的 dog_provider 字段，校验当前可用授权并确保加载正确的 DLL
     public static void EnsureForModel(string modelPath);
 
     // 委托类型与字段（底层 C API 代理）
@@ -289,7 +289,12 @@ public class DllLoader
 | Sentinel | `dlcv_infer.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` |
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 
-**自动检测优先级**：先检测 Sentinel，再检测 Virbox；均未检测到则回退到 Sentinel。
+**自动检测优先级**：`Instance` 初始化时先检测 Sentinel，再检测 Virbox；均未检测到则回退到 Sentinel。
+
+**Provider 一致性校验**：`EnsureForModel` 在加载模型前，先读取模型头 `dog_provider` 得到所需 provider，再调用 `DogUtils.GetAvailableProviders()` 获取当前可用授权列表。若所需 provider 不在可用列表中，抛出异常：
+- 可用列表为空时提示 `未检测到授权`。
+- 否则提示 `当前使用的是 {current}，加载的模型是 {needed} 格式，类型错误`（`current` 为当前可用 provider 显示名，`needed` 为模型所需 provider）。
+- 校验通过后再创建对应 provider 的 `DllLoader`。
 
 **模型级 Provider 解析**：
 - `.dvt`/`.dvo` 文件：读取前两行（`DV` + header_json），解析 `dog_provider` 字段。
@@ -443,7 +448,7 @@ Console.WriteLine(info.ToString());
 
 ## 13. 工程结构
 
-`DlcvCsharpApi` 是一个 .NET Framework 4.7.2 的 C# 类库工程，`OutputType` 为 `Library`，程序集名称为 `DlcvCsharpApi`，默认生成 `DlcvCsharpApi.dll`。项目定义了 `Debug|x64` 与 `Release|x64` 两个主要构建配置，`PlatformTarget` 为 `x64`，`LangVersion` 为 `7.3`。程序集版本为 `1.0.0.0`，`ComVisible` 为 `false`。
+`DlcvCsharpApi` 是一个 .NET Framework 4.7.2 的 C# 类库工程，`OutputType` 为 `Library`，程序集名称为 `DlcvCsharpApi`，默认生成 `DlcvCsharpApi.dll`。项目定义了 `Debug|x64` 与 `Release|x64` 两个主要构建配置，`PlatformTarget` 为 `x64`，`LangVersion` 为 `7.3`。程序集版本为 `2026.6.14.0`，`ComVisible` 为 `false`。
 
 发布版输出路径为 `DlcvCsharpApi\bin\x64\Release\DlcvCsharpApi.dll`。
 
