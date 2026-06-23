@@ -76,23 +76,21 @@ namespace DlcvModules
                 {
                     firstWidth = det.Width;
                     firstHeight = det.Height;
-                    firstAngle = det.Angle;
+                    firstAngle = det.AngleRad * 180.0 / Math.PI;
                     found = true;
                 }
 
-                double angleRad = det.Angle * Math.PI / 180.0;
                 var sample = new JObject
                 {
                     ["category_name"] = categoryName,
                     ["category_id"] = 0,
                     ["score"] = 1.0,
-                    ["bbox"] = new JArray(det.Bbox[0], det.Bbox[1], det.Bbox[2], det.Bbox[3]),
-                    ["rbox"] = new JArray(det.Center.X, det.Center.Y, det.Height, det.Width, angleRad),
+                    // 与 MaskToRBox 对齐：bbox 为 5 元素旋转框 [cx, cy, w, h, angle_rad]，le90
+                    ["bbox"] = new JArray(det.Center.X, det.Center.Y, det.Height, det.Width, det.AngleRad),
                     ["width"] = det.Width,
                     ["height"] = det.Height,
-                    ["angle"] = angleRad,
+                    ["angle"] = det.AngleRad,
                     ["center"] = new JArray(det.Center.X, det.Center.Y),
-                    ["polygon"] = new JArray(det.Polygon.Select(p => new JArray(p.X, p.Y))),
                     ["with_angle"] = true,
                 };
 
@@ -150,9 +148,7 @@ namespace DlcvModules
             public Point2f Center;
             public double Width;
             public double Height;
-            public double Angle; // degrees
-            public double[] Bbox; // [x1, y1, x2, y2]
-            public Point2f[] Polygon;
+            public double AngleRad; // le90 弧度
         }
 
         private Detection MeasureSingle(
@@ -191,8 +187,9 @@ namespace DlcvModules
                     {
                         double length = Math.Max(w, h);
                         double width = Math.Min(w, h);
-                        Point2f[] box = Cv2.BoxPoints(rect);
-                        return BuildDetection(rect.Center, length, width, NormalizeAngle(rect.Angle), box, categoryName);
+                        double angleDeg = NormalizeAngle(rect.Angle);
+                        double angleRad = NormalizeAngleLe90Rad(angleDeg * Math.PI / 180.0);
+                        return BuildDetection(rect.Center, length, width, angleRad, categoryName);
                     }
 
                     Rect bbox = Cv2.BoundingRect(rotContour);
@@ -272,8 +269,8 @@ namespace DlcvModules
                                 double finalLen = Math.Max(length, width);
                                 double finalWid = Math.Min(length, width);
                                 Point2f center = new Point2f((float)origCx, (float)origCy);
-                                Point2f[] box = BoxFromCenterSize(center, finalLen, finalWid, angleAdj);
-                                return BuildDetection(center, finalLen, finalWid, angleAdj, box, categoryName);
+                                double angleRad = NormalizeAngleLe90Rad(angleAdj * Math.PI / 180.0);
+                                return BuildDetection(center, finalLen, finalWid, angleRad, categoryName);
                             }
                         }
                     }
@@ -365,45 +362,23 @@ namespace DlcvModules
             return new Tuple<int, int>(start, end);
         }
 
-        private static Point2f[] BoxFromCenterSize(Point2f center, double length, double width, double angle)
+
+        private static double NormalizeAngleLe90Rad(double aRad)
         {
-            double rad = angle * Math.PI / 180.0;
-            double ca = Math.Cos(rad);
-            double sa = Math.Sin(rad);
-            double hw = length / 2.0;
-            double hh = width / 2.0;
-            Point2f[] corners = new Point2f[]
-            {
-                new Point2f((float)(-hw), (float)(-hh)),
-                new Point2f((float)(hw), (float)(-hh)),
-                new Point2f((float)(hw), (float)(hh)),
-                new Point2f((float)(-hw), (float)(hh)),
-            };
-            for (int i = 0; i < 4; i++)
-            {
-                float x = corners[i].X;
-                float y = corners[i].Y;
-                corners[i] = new Point2f(
-                    (float)(x * ca - y * sa + center.X),
-                    (float)(x * sa + y * ca + center.Y));
-            }
-            return corners;
+            // 归一化到 [-π/2, π/2)，与 MaskToRBox 保持一致
+            double x = aRad;
+            x = (x + Math.PI / 2.0) % Math.PI - Math.PI / 2.0;
+            return x;
         }
 
-        private static Detection BuildDetection(Point2f center, double length, double width, double angle, Point2f[] box, string categoryName)
+        private static Detection BuildDetection(Point2f center, double length, double width, double angleRad, string categoryName)
         {
-            double x1 = box.Min(p => p.X);
-            double y1 = box.Min(p => p.Y);
-            double x2 = box.Max(p => p.X);
-            double y2 = box.Max(p => p.Y);
             return new Detection
             {
                 Center = center,
                 Width = width,
                 Height = length,
-                Angle = angle,
-                Bbox = new[] { x1, y1, x2, y2 },
-                Polygon = box,
+                AngleRad = angleRad,
             };
         }
 
