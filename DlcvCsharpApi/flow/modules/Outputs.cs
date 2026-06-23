@@ -167,6 +167,22 @@ namespace DlcvModules
             if (Context != null)
             {
                 emitPoly = emitPoly || Context.Get<bool>("return_json_emit_poly", false);
+
+                // 即使上下文要求输出 poly，如果用户显式传了 with_mask=false，
+                // 也不应把 mask 暴露给最终 JSON（与 C++ 流程行为对齐）。
+                try
+                {
+                    var inferParams = Context.Get<JObject>("infer_params", null);
+                    if (inferParams != null && inferParams["with_mask"] != null)
+                    {
+                        bool userWithMask = inferParams["with_mask"].Value<bool>();
+                        if (!userWithMask)
+                        {
+                            emitPoly = false;
+                        }
+                    }
+                }
+                catch { }
             }
             return emitPoly;
         }

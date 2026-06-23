@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using DlcvModules;
@@ -113,6 +114,11 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bench", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunBenchmarkCommand(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "with-mask-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunWithMaskSelfTest();
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "us-lag-selftest", StringComparison.OrdinalIgnoreCase))
@@ -3414,6 +3420,147 @@ namespace DlcvCSharpTest
                 try { if (modelB != null) modelB.Dispose(); } catch { }
                 ForceGc();
             }
+        }
+
+        private static int RunWithMaskSelfTest()
+        {
+            Console.WriteLine("==== with_mask 参数透传自测 ====");
+
+            var cases = new[]
+            {
+                new { Name = "seg测试", ModelPath = @"C:\Users\Administrator\Desktop\seg.dvt", ImagePath = @"C:\Users\Administrator\Desktop\seg.jpg" },
+                new { Name = "实例分割-dvt", ModelPath = @"Y:\zxc\模块化任务测试\实例分割\实例分割.dvt", ImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png" },
+                new { Name = "实例分割-dvst", ModelPath = @"Y:\zxc\模块化任务测试\实例分割\滑窗测试_120_50.dvst", ImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png" }
+            };
+
+            int globalFail = 0;
+            foreach (var c in cases)
+            {
+                Console.WriteLine();
+                Console.WriteLine("[" + c.Name + "]");
+                Console.WriteLine("model: " + c.ModelPath);
+                Console.WriteLine("image: " + c.ImagePath);
+
+                if (!File.Exists(c.ModelPath))
+                {
+                    Console.WriteLine("模型不存在，跳过");
+                    continue;
+                }
+                if (!File.Exists(c.ImagePath))
+                {
+                    Console.WriteLine("图片不存在，跳过");
+                    continue;
+                }
+
+                Model model = null;
+                Mat bgr = null;
+                Mat rgb = null;
+                try
+                {
+                    model = new Model(c.ModelPath, GpuDeviceId, false, false);
+                    Console.WriteLine("加载成功: provider=" + model.LoadedDogProvider + ", dll=" + model.LoadedNativeDllName);
+
+                    bgr = Cv2.ImRead(c.ImagePath, ImreadModes.Color);
+                    if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                    rgb = new Mat();
+                    Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                    // 1) InferOneOutJson with_mask=true
+                    var pTrue = new JObject { ["threshold"] = 0.5, ["with_mask"] = true, ["batch_size"] = 1 };
+                    dynamic jsonResult = model.InferOneOutJson(rgb, pTrue);
+                    var arr = jsonResult as JArray ?? new JArray();
+                    int trueCount = 0;
+                    foreach (JObject o in arr)
+                    {
+                        bool wm = o["with_mask"]?.Value<bool>() ?? false;
+                        if (wm) trueCount++;
+                    }
+                    Console.WriteLine("InferOneOutJson(with_mask=true): 目标数=" + arr.Count + ", with_mask=true 数=" + trueCount);
+                    if (arr.Count > 0)
+                    {
+                        try
+                        {
+                            var rawFirst = arr[0] as JObject;
+                            Console.WriteLine("  标准化后首个对象: " + rawFirst?.ToString(Formatting.None)?.Substring(0, Math.Min(300, rawFirst?.ToString(Formatting.None)?.Length ?? 0)));
+                        }
+                        catch { }
+                    }
+
+                    // 2) Infer / InferBatch with_mask=true
+                    var batchResult = model.InferBatch(new List<Mat> { rgb }, pTrue);
+                    int batchTrueCount = 0;
+                    if (batchResult.SampleResults != null && batchResult.SampleResults.Count > 0)
+                    {
+                        foreach (var obj in batchResult.SampleResults[0].Results)
+                        {
+                            if (obj.WithMask) batchTrueCount++;
+                        }
+                        Console.WriteLine("InferBatch(with_mask=true): 目标数=" + batchResult.SampleResults[0].Results.Count + ", WithMask=true 数=" + batchTrueCount);
+                    }
+                    DisposeResultMasks(batchResult);
+
+                    // 3) InferOneOutJson with_mask=false
+                    var pFalse = new JObject { ["threshold"] = 0.5, ["with_mask"] = false, ["batch_size"] = 1 };
+                    dynamic jsonResultFalse = model.InferOneOutJson(rgb, pFalse);
+                    var arrFalse = jsonResultFalse as JArray ?? new JArray();
+                    int falseCount = 0;
+                    foreach (JObject o in arrFalse)
+                    {
+                        bool wm = o["with_mask"]?.Value<bool>() ?? false;
+                        if (!wm) falseCount++;
+                    }
+                    Console.WriteLine("InferOneOutJson(with_mask=false): 目标数=" + arrFalse.Count + ", with_mask=false 数=" + falseCount);
+
+                    // 4) InferBatch with_mask=false
+                    var batchFalseResult = model.InferBatch(new List<Mat> { rgb }, pFalse);
+                    int batchFalseCount = 0;
+                    if (batchFalseResult.SampleResults != null && batchFalseResult.SampleResults.Count > 0)
+                    {
+                        foreach (var obj in batchFalseResult.SampleResults[0].Results)
+                        {
+                            if (!obj.WithMask) batchFalseCount++;
+                        }
+                        Console.WriteLine("InferBatch(with_mask=false): 目标数=" + batchFalseResult.SampleResults[0].Results.Count + ", WithMask=false 数=" + batchFalseCount);
+                    }
+                    DisposeResultMasks(batchFalseResult);
+
+                    // 判定：如果模型是实例/语义分割模型，with_mask=true 时应当有 mask
+                    // 这里只做参数透传检查：true 请求不应被强制改为 false（除非模型本身不输出 mask）
+                    // 打印原始底层 JSON 中是否有 mask_ptr，帮助定位
+                    if (arr.Count > 0)
+                    {
+                        var first = arr[0] as JObject;
+                        var maskTok = first["mask"];
+                        if (maskTok is JObject maskObj)
+                        {
+                            long ptr = maskObj["mask_ptr"]?.Value<long>() ?? 0;
+                            Console.WriteLine("底层 mask 对象: ptr=" + ptr + ", w=" + (maskObj["width"]?.Value<int>() ?? 0) + ", h=" + (maskObj["height"]?.Value<int>() ?? 0));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("异常: " + ex.Message);
+                    Console.WriteLine(ex.StackTrace);
+                    globalFail++;
+                }
+                finally
+                {
+                    if (rgb != null) rgb.Dispose();
+                    if (bgr != null) bgr.Dispose();
+                    try { if (model != null) model.Dispose(); } catch { }
+                    ForceGc();
+                }
+            }
+
+            Console.WriteLine();
+            if (globalFail == 0)
+            {
+                Console.WriteLine("==== with_mask 参数透传自测 完成 ====");
+                return 0;
+            }
+            Console.WriteLine("==== with_mask 参数透传自测 失败数=" + globalFail + " ====");
+            return 1;
         }
 
         [DllImport("psapi.dll", SetLastError = true)]
