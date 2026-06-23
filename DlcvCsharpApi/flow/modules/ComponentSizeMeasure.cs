@@ -204,19 +204,26 @@ namespace DlcvModules
                     {
                         int cw = cropGray.Width;
                         int ch = cropGray.Height;
-                        double[] colSum = new double[cw];
-                        double[] rowSum = new double[ch];
+                        double[] colSum;
+                        double[] rowSum;
 
-                        for (int y = 0; y < ch; y++)
+                        // 向量化强度投影：先转 float，mask 缩放到 0/1 后逐点相乘，再用 Cv2.Reduce 求和
+                        using (Mat grayF = new Mat())
+                        using (Mat maskF = new Mat())
+                        using (Mat masked = new Mat())
                         {
-                            for (int x = 0; x < cw; x++)
+                            cropGray.ConvertTo(grayF, MatType.CV_32F);
+                            cropMask.ConvertTo(maskF, MatType.CV_32F);
+                            Cv2.Multiply(grayF, maskF, masked, 1.0 / 255.0);
+                            using (Mat colSumMat = new Mat())
+                            using (Mat rowSumMat = new Mat())
                             {
-                                if (cropMask.At<byte>(y, x) > 0)
-                                {
-                                    double v = cropGray.At<byte>(y, x);
-                                    colSum[x] += v;
-                                    rowSum[y] += v;
-                                }
+                                Cv2.Reduce(masked, colSumMat, ReduceDimension.Row, ReduceTypes.Sum, MatType.CV_32F);
+                                Cv2.Reduce(masked, rowSumMat, ReduceDimension.Column, ReduceTypes.Sum, MatType.CV_32F);
+                                colSumMat.GetArray(out float[] colArr);
+                                rowSumMat.GetArray(out float[] rowArr);
+                                colSum = Array.ConvertAll(colArr, v => (double)v);
+                                rowSum = Array.ConvertAll(rowArr, v => (double)v);
                             }
                         }
 
@@ -245,18 +252,15 @@ namespace DlcvModules
 
                             using (Mat cropRegion = cropMask.Clone())
                             {
-                                for (int x = 0; x < cw; x++)
-                                {
-                                    if (x < colExt.Item1 || x > colExt.Item2)
-                                        for (int y = 0; y < ch; y++)
-                                            cropRegion.Set<byte>(y, x, 0);
-                                }
-                                for (int y = 0; y < ch; y++)
-                                {
-                                    if (y < rowExt.Item1 || y > rowExt.Item2)
-                                        for (int x = 0; x < cw; x++)
-                                            cropRegion.Set<byte>(y, x, 0);
-                                }
+                                // 向量化清零：保留 [c0,c1] 列与 [r0,r1] 行，其余置 0
+                                int c0 = colExt.Item1;
+                                int c1 = colExt.Item2;
+                                int r0 = rowExt.Item1;
+                                int r1 = rowExt.Item2;
+                                if (c0 > 0) cropRegion.ColRange(0, c0).SetTo(0);
+                                if (c1 < cw - 1) cropRegion.ColRange(c1 + 1, cw).SetTo(0);
+                                if (r0 > 0) cropRegion.RowRange(0, r0).SetTo(0);
+                                if (r1 < ch - 1) cropRegion.RowRange(r1 + 1, ch).SetTo(0);
 
                                 Moments mom = Cv2.Moments(cropRegion);
                                 double angleAdj = angle;
