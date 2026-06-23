@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Newtonsoft.Json;
@@ -235,6 +235,7 @@ namespace DlcvModules
                 ctx.Set("frontend_image_path", "");
                 ctx.Set("device_id", _deviceId);
                 ctx.Set("return_json_emit_poly", emitPoly);
+                ctx.Set("infer_params", paramsJson ?? new JObject());
 
                 InferTiming.BeginFlowRequest();
                 var flowSw = System.Diagnostics.Stopwatch.StartNew();
@@ -308,12 +309,14 @@ namespace DlcvModules
 
             if (!IsLoaded) throw new InvalidOperationException("模型未加载");
 
+            bool includeMask = ReadWithMaskFlag(paramsJson);
+
             var tuple = InferInternal(imageList, paramsJson);
             try
             {
                 var resultToken = tuple.Item1["result_list"];
                 var resultList = resultToken as JArray ?? new JArray();
-                return ConvertFlowResultsToCSharp(resultList);
+                return ConvertFlowResultsToCSharp(resultList, includeMask);
             }
             finally
             {
@@ -322,6 +325,19 @@ namespace DlcvModules
                     DllLoader.Instance.dlcv_free_model_result(tuple.Item2);
                 }
             }
+        }
+
+        private static bool ReadWithMaskFlag(JObject paramsJson)
+        {
+            try
+            {
+                if (paramsJson != null && paramsJson["with_mask"] != null)
+                {
+                    return paramsJson["with_mask"].Value<bool>();
+                }
+            }
+            catch { }
+            return true;
         }
 
         /// <summary>
@@ -648,7 +664,7 @@ namespace DlcvModules
             }
         }
 
-        private Utils.CSharpResult ConvertFlowResultsToCSharp(JArray resultList)
+        private Utils.CSharpResult ConvertFlowResultsToCSharp(JArray resultList, bool includeMask = true)
         {
             var samples = new List<Utils.CSharpSampleResult>();
             if (resultList == null || resultList.Count == 0)
@@ -673,19 +689,19 @@ namespace DlcvModules
                 {
                     var container = token as JObject;
                     var list = container != null ? (container["result_list"] as JArray) : null;
-                    samples.Add(ParseSingleImageResults(list));
+                    samples.Add(ParseSingleImageResults(list, includeMask));
                 }
             }
             else
             {
                 // Batch=1，resultList 本身就是结果列表
-                samples.Add(ParseSingleImageResults(resultList));
+                samples.Add(ParseSingleImageResults(resultList, includeMask));
             }
 
             return new Utils.CSharpResult(samples);
         }
 
-        private Utils.CSharpSampleResult ParseSingleImageResults(JArray list)
+        private Utils.CSharpSampleResult ParseSingleImageResults(JArray list, bool includeMask = true)
         {
             var objects = new List<Utils.CSharpObjectResult>();
             if (list == null) return new Utils.CSharpSampleResult(objects);
@@ -698,17 +714,17 @@ namespace DlcvModules
                 // 分支 1: 旧格式 (含 sample_results)
                 if (entry.ContainsKey("sample_results"))
                 {
-                    ParseOldFormatEntry(entry, objects);
+                    ParseOldFormatEntry(entry, objects, includeMask);
                 }
                 // 分支 2: 新格式 (直接含 bbox/category_id)
                 else if (entry.ContainsKey("bbox") || entry.ContainsKey("category_id"))
                 {
-                    ParseNewFormatEntry(entry, objects);
+                    ParseNewFormatEntry(entry, objects, includeMask);
                 }
             }
             return new Utils.CSharpSampleResult(objects);
         }
-        private void ParseNewFormatEntry(JObject entry, List<Utils.CSharpObjectResult> objects)
+        private void ParseNewFormatEntry(JObject entry, List<Utils.CSharpObjectResult> objects, bool includeMask = true)
         {
             int categoryId = entry.Value<int?>("category_id") ?? 0;
             string categoryName = entry.Value<string>("category_name") ?? string.Empty;
@@ -763,20 +779,23 @@ namespace DlcvModules
             Mat mask = new Mat();
             bool withMask = false;
 
-            var maskInfo = entry["mask_rle"];
-            if (maskInfo != null)
+            if (includeMask)
             {
-                try
+                var maskInfo = entry["mask_rle"];
+                if (maskInfo != null)
                 {
-                    mask = MaskRleUtils.MaskInfoToMat(maskInfo);
-                    if (mask != null && !mask.Empty()) withMask = true;
+                    try
+                    {
+                        mask = MaskRleUtils.MaskInfoToMat(maskInfo);
+                        if (mask != null && !mask.Empty()) withMask = true;
+                    }
+                    catch { mask = new Mat(); withMask = false; }
                 }
-                catch { mask = new Mat(); withMask = false; }
             }
 
             var polyToken = entry["poly"];
 
-            if (!withMask && polyToken is JArray polyOuter && polyOuter.Count > 0 && withBbox)
+            if (includeMask && !withMask && polyToken is JArray polyOuter && polyOuter.Count > 0 && withBbox)
             {
                 // 对于 mask 绘制，需要相对于 bbox 的左上角
                 // 如果是旋转框，通常 mask 是在旋转矩形内或者全局 mask
@@ -856,7 +875,7 @@ namespace DlcvModules
             objects.Add(obj);
         }
 
-        private void ParseOldFormatEntry(JObject entry, List<Utils.CSharpObjectResult> objects)
+        private void ParseOldFormatEntry(JObject entry, List<Utils.CSharpObjectResult> objects, bool includeMask = true)
         {
             double[] invA23 = null;
             try
@@ -888,9 +907,9 @@ namespace DlcvModules
                 var bboxArr = so["bbox"] as JArray;
                 var bbox = bboxArr != null ? bboxArr.ToObject<List<double>>() : new List<double>();
                 bool withBbox = so.Value<bool?>("with_bbox") ?? (bbox != null && bbox.Count > 0);
-                bool withMask = so.Value<bool?>("with_mask") ?? false;
+                bool withMask = includeMask && (so.Value<bool?>("with_mask") ?? false);
                 var maskInfo = so["mask_rle"];
-                if (!withMask && maskInfo != null) withMask = true;
+                if (includeMask && !withMask && maskInfo != null) withMask = true;
                 bool withAngle = so.Value<bool?>("with_angle") ?? false;
                 float angle = so.Value<float?>("angle") ?? -100f;
 

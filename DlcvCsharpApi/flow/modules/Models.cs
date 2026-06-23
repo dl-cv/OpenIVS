@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using dlcv_infer_csharp;
@@ -182,6 +183,9 @@ namespace DlcvModules
 			TryAddParam(p, "return_polygon");
 			TryAddParam(p, "epsilon");
 			TryAddParam(p, "batch_size");
+			// 注意：with_mask 仅控制最终返回格式，不在这里传给子模型。
+			// 流程内部需要始终保留 mask_rle，否则 mask_to_rbox 等后处理节点会丢失结果。
+			// output/return_json 会根据 infer_params.with_mask 决定是否把 mask 暴露给前端/JSON。
 
 			int effectiveBatch = ResolveEffectiveBatchLimit();
 			p["batch_size"] = effectiveBatch;

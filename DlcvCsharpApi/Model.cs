@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
@@ -2178,8 +2178,14 @@ namespace dlcv_infer_csharp
                 try
                 {
                     var normalized = PrepareInferImages(new List<Mat> { image }, out disposables);
-                    var res = _dvsModel.InferInternal(normalized, params_json);
-                    rawResults = res.Item1["result_list"] as JArray ?? new JArray();
+                    if (normalized == null || normalized.Count == 0 || normalized[0] == null || normalized[0].Empty())
+                    {
+                        throw new ArgumentException("图像预处理失败");
+                    }
+                    // DVS 流程的 JSON 输出需要 poly，必须走 InferOneOutJson（emitPoly=true）。
+                    // InferInternal 默认 emitPoly=false，会导致 return_json 只输出 mask_rle，
+                    // 而 StandardizeJsonOutput 无法识别 mask_rle，从而 with_mask 被置为 false。
+                    rawResults = _dvsModel.InferOneOutJson(normalized[0], params_json) as JArray ?? new JArray();
 
                     // DVS 模式下不需要释放非托管资源，直接处理
                     var finalResults = new JArray();
