@@ -1,6 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -387,6 +390,105 @@ namespace dlcv_infer_csharp
         public static void FreeAllModels()
         {
             DllLoader.Instance.dlcv_free_all_models?.Invoke();
+        }
+
+        /// <summary>
+        /// 可选的错误日志回调。PrintMatch 可在启动时注入 DLCV.Logging 写入器。
+        /// 签名：callback(scene, modelPath, isDvpMode, rawJson, parsedObject, ex, fieldNotes)
+        /// </summary>
+        public static Action<string, string, bool, string, JObject, Exception, IList<string>> OnDlcvJsonErrorLog { get; set; }
+
+        /// <summary>
+        /// 将 DLCV 推理错误写入 C:\dlcv\logs 结构化 JSON 日志，并触发可选回调。
+        /// </summary>
+        public static string WriteDlcvJsonErrorLog(
+            string scene,
+            string modelPath,
+            bool isDvpMode,
+            string rawJson,
+            JObject parsedObject,
+            Exception ex,
+            IList<string> fieldNotes)
+        {
+            string filePath = null;
+            try
+            {
+                string logDir = @"C:\dlcv\logs";
+                Directory.CreateDirectory(logDir);
+
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+                int pid = 0;
+                int tid = 0;
+                try { pid = Process.GetCurrentProcess().Id; } catch { pid = 0; }
+                try { tid = System.Threading.Thread.CurrentThread.ManagedThreadId; } catch { tid = 0; }
+
+                filePath = Path.Combine(logDir, $"dlcv_{timestamp}_pid{pid}_tid{tid}.log");
+
+                var notes = new List<string>();
+                if (fieldNotes != null)
+                {
+                    notes.AddRange(fieldNotes.Where(s => !string.IsNullOrWhiteSpace(s)));
+                }
+
+                if (notes.Count == 0 && parsedObject != null)
+                {
+                    try
+                    {
+                        var targetKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            "code",
+                            "model_index",
+                            "category_id",
+                            "score",
+                            "area",
+                            "with_bbox",
+                            "with_mask"
+                        };
+                        foreach (var prop in parsedObject.Properties())
+                        {
+                            if (prop.Value == null || prop.Value.Type == JTokenType.Null)
+                            {
+                                notes.Add($"{prop.Name}: null");
+                            }
+                            else if (targetKeys.Contains(prop.Name) && prop.Value.Type == JTokenType.Undefined)
+                            {
+                                notes.Add($"{prop.Name}: undefined");
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                var logObject = new JObject
+                {
+                    ["timestamp"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                    ["scene"] = scene,
+                    ["model_path"] = modelPath,
+                    ["is_dvp_mode"] = isDvpMode,
+                    ["pid"] = pid,
+                    ["tid"] = tid,
+                    ["exception_type"] = ex?.GetType()?.FullName,
+                    ["exception_message"] = ex?.Message,
+                    ["exception_stacktrace"] = ex?.StackTrace,
+                    ["raw_json"] = rawJson,
+                    ["parsed_object"] = parsedObject,
+                    ["notes"] = JArray.FromObject(notes)
+                };
+
+                File.WriteAllText(filePath, logObject.ToString(Formatting.Indented), Encoding.UTF8);
+
+                // 触发外部注入的日志器（如 DLCV.Logging）
+                try
+                {
+                    OnDlcvJsonErrorLog?.Invoke(scene, modelPath, isDvpMode, rawJson, parsedObject, ex, notes);
+                }
+                catch { }
+            }
+            catch (Exception writeEx)
+            {
+                Console.WriteLine($"WriteDlcvJsonErrorLog 失败: {writeEx.Message}");
+            }
+            return filePath;
         }
 
         public static JObject GetDeviceInfo()
