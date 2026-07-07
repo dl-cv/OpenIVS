@@ -1077,6 +1077,16 @@ namespace dlcv_infer {
     static std::mutex g_modelIndexRefMu;
     static std::unordered_map<int, int> g_modelIndexRefCount;
 
+    // dvst（流程模型）的 modelIndex 由本层自管理，从 10000 起递增，
+    // 与底层 dvt 返回的 model_index（0 起递增）分区，避免上层按 modelIndex 索引时 dvst 与 dvt 撞键。
+    static std::mutex g_flowModelIndexMu;
+    static int g_nextFlowModelIndex = 10000;
+
+    static int AllocateFlowModelIndex() {
+        std::lock_guard<std::mutex> lk(g_flowModelIndexMu);
+        return g_nextFlowModelIndex++;
+    }
+
 #ifdef _WIN32
     std::wstring Win32MultiByteToWide(const std::string& input, uint32_t codePage) {
         int len = MultiByteToWideChar(codePage, 0, input.c_str(), -1, nullptr, 0);
@@ -1438,7 +1448,7 @@ namespace dlcv_infer {
                 if (code != 0) {
                     throw std::runtime_error(report.dump());
                 }
-                modelIndex = 1; // dvst 模式下仅作为“已加载”标记
+                modelIndex = AllocateFlowModelIndex();
                 return;
             } catch (const std::exception& ex) {
                 delete _flowModel;
@@ -1502,7 +1512,7 @@ namespace dlcv_infer {
                 if (code != 0) {
                     throw std::runtime_error(report.dump());
                 }
-                modelIndex = 1;
+                modelIndex = AllocateFlowModelIndex();
                 return;
             } catch (const std::exception& ex) {
                 delete _flowModel;
