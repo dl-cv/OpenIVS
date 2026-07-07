@@ -219,6 +219,8 @@ void FreeModel();
 - 普通模式且 `OwnModelIndex == true`：调用 `dlcv_free_model`。
 - 普通模式且 `OwnModelIndex == false`：仅标记 `modelIndex = -1`，不释放底层模型。
 
+> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回（从 `0` 起递增）；流程模型（`.dvst`/`.dvso`/`.dvsp`）的 `modelIndex` 由本层自管理（从 `10000` 起递增）。二者分区，避免上层按 `modelIndex` 索引时流程模型与普通模型撞键。流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
+
 ### 4.7 计时查询
 
 ```cpp

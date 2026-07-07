@@ -36,6 +36,19 @@ namespace dlcv_infer_csharp
         /// </summary>
         public bool OwnModelIndex { get; set; } = true;
 
+        // dvst（流程模型，DVS 模式）的 modelIndex 由本层自管理，从 10000 起递增，
+        // 与 dvt 从底层 DLL 返回的 model_index（0 起递增）分区，避免上层按 modelIndex 索引时 dvst 与 dvt 撞键。
+        private static int s_nextFlowModelIndex = 10000;
+        private static readonly object s_flowModelIndexLock = new object();
+
+        private static int AllocateFlowModelIndex()
+        {
+            lock (s_flowModelIndexLock)
+            {
+                return s_nextFlowModelIndex++;
+            }
+        }
+
         // DVP mode fields
         private bool _isDvpMode = false;
         private bool _isDvsMode = false;
@@ -265,7 +278,7 @@ namespace dlcv_infer_csharp
                     string msg = report != null ? report.ToString() : "Unknown error";
                     throw new Exception("DVS模型加载失败:\n" + msg);
                 }
-                modelIndex = 1; // 标记为已加载
+                modelIndex = AllocateFlowModelIndex();
             }
             catch (Exception ex)
             {

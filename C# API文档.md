@@ -110,7 +110,7 @@ public class Model : IDisposable
 ### 3.2 属性
 
 ```csharp
-public int modelIndex;                // 底层模型索引（普通模型），字段
+public int modelIndex;                // 模型索引：普通模型由底层 dlcv_infer 返回（0 起递增）；流程模型（DVS 模式）由本层自管理（10000 起递增），二者分区避免撞键
 public bool OwnModelIndex { get; set; } = true;  // 是否拥有释放权
 public DogProvider LoadedDogProvider { get; }      // 已加载的加密狗类型
 public string LoadedNativeDllName { get; }         // 已加载的原生 DLL 名称

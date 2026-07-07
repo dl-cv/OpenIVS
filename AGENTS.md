@@ -88,6 +88,13 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 调用端不需要为这两类模型准备两套完全不同的调用方式。传入模型路径、设备和请求参数后，入口对象会完成对应的加载与执行。
 
+**model_index 分配约定**（避免普通模型与流程模型在同一张索引表中撞键）：
+
+- **普通模型（`.dvt`/`.dvo`）**：`model_index` 由底层 `dlcv_infer` 在加载时返回，从 `0` 起递增。
+- **流程模型（`.dvst`/`.dvso`/`.dvsp`）**：`model_index` 由 `dlcv_infer_cpp_dll` / `DlcvCsharpApi` 自管理，从 `10000` 起递增，与底层索引分区。
+
+C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索引模型；两类索引分区后，流程模型不会与任何 `index < 10000` 的普通模型互相覆盖，也允许同时加载多个流程模型。
+
 ## API 速查表
 
 ### C++ API 速查表
