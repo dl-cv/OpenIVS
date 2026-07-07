@@ -45,6 +45,9 @@ const std::wstring kFlowInstanceSegFilterImagePath = L"Y:\\zxc\\模块化任务�
 const std::wstring kDvstDoubleLoadModelAPath = L"Y:\\zxc\\微组BUG测试\\pipeline.dvst";
 const std::wstring kDvstDoubleLoadModelBPath = L"Y:\\zxc\\微组BUG测试\\实例分割筛选测试_120_50.dvst";
 const std::wstring kDvstDoubleLoadImagePath = L"Y:\\zxc\\微组BUG测试\\实例分割滑窗大图.png";
+const std::wstring kDvstIndexFlowModelPath = L"Y:\\测试模型\\AOI_120_50_s.dvst";
+const std::wstring kDvstIndexDvtCatDogPath = L"Y:\\测试模型\\猫狗-分类_120_50_s.dvt";
+const std::wstring kDvstIndexDvtBalloonPath = L"Y:\\测试模型\\气球-实例分割_120_50_s.dvt";
 const std::wstring kBBoxCropFixModelAPath = L"Z:\\A-苏州三谛\\A260308-苏州三谛-AOI元器件定位-新方案\\Task01-元件提取\\现场模型\\模型1-元件提取 - 副本_120_50.dvst";
 const std::wstring kBBoxCropFixModelBPath = L"Z:\\A-苏州三谛\\A260308-苏州三谛-AOI元器件定位-新方案\\Task01-元件提取\\现场模型\\模型1-元件提取 - 裁图_120_50.dvst";
 const std::wstring kBBoxCropFixImagePath = L"Z:\\A-苏州三谛\\A260308-苏州三谛-AOI元器件定位-新方案\\Task01-元件提取\\现场模型\\PCB20047-23439-TOP_61_4092_0.jpg";
@@ -1285,6 +1288,68 @@ int RunDvstSingleLoadSelfTest() {
     }
 }
 
+int RunDvstModelIndexSelfTest() {
+    std::cout << "==== dvst modelIndex 分区自测 (C++ Model) ====\n";
+    constexpr int kFlowIndexBase = 10000;
+    std::cout << "dvst: " << WideToUtf8(kDvstIndexFlowModelPath) << "\n";
+    std::cout << "dvt1: " << WideToUtf8(kDvstIndexDvtCatDogPath) << "\n";
+    std::cout << "dvt2: " << WideToUtf8(kDvstIndexDvtBalloonPath) << "\n";
+
+    if (!FileExistsW(kDvstIndexFlowModelPath) || !FileExistsW(kDvstIndexDvtCatDogPath) || !FileExistsW(kDvstIndexDvtBalloonPath)) {
+        std::cout << "模型不存在，请检查路径\n";
+        return 2;
+    }
+
+    bool ok = true;
+    try {
+        std::cout << "[1] 加载 dvst(AOI 流程模型)...\n";
+        dlcv_infer::Model dvstModel(kDvstIndexFlowModelPath, kGpuDeviceId);
+        const int dvstIdx = dvstModel.modelIndex;
+        std::cout << "    dvst modelIndex=" << dvstIdx << "\n";
+
+        std::cout << "[2] 加载 dvt1(猫狗分类)...\n";
+        dlcv_infer::Model dvt1Model(kDvstIndexDvtCatDogPath, kGpuDeviceId);
+        const int dvt1Idx = dvt1Model.modelIndex;
+        std::cout << "    dvt1 modelIndex=" << dvt1Idx << "\n";
+
+        std::cout << "[3] 加载 dvt2(气球实例分割)...\n";
+        dlcv_infer::Model dvt2Model(kDvstIndexDvtBalloonPath, kGpuDeviceId);
+        const int dvt2Idx = dvt2Model.modelIndex;
+        std::cout << "    dvt2 modelIndex=" << dvt2Idx << "\n";
+
+        if (dvstIdx < kFlowIndexBase) {
+            std::cout << "FAIL: dvst modelIndex=" << dvstIdx << " 应 >= " << kFlowIndexBase
+                      << "（修复前写死 1，会与 dvt 撞键）\n";
+            ok = false;
+        } else {
+            std::cout << "PASS: dvst modelIndex=" << dvstIdx << " >= " << kFlowIndexBase << "\n";
+        }
+        if (dvt1Idx < 0 || dvt1Idx >= kFlowIndexBase) {
+            std::cout << "FAIL: dvt1 modelIndex=" << dvt1Idx << " 应在 [0," << kFlowIndexBase << ")\n";
+            ok = false;
+        }
+        if (dvt2Idx < 0 || dvt2Idx >= kFlowIndexBase) {
+            std::cout << "FAIL: dvt2 modelIndex=" << dvt2Idx << " 应在 [0," << kFlowIndexBase << ")\n";
+            ok = false;
+        }
+        if (dvstIdx == dvt1Idx || dvstIdx == dvt2Idx || dvt1Idx == dvt2Idx) {
+            std::cout << "FAIL: modelIndex 撞键 dvst=" << dvstIdx
+                      << " dvt1=" << dvt1Idx << " dvt2=" << dvt2Idx << "\n";
+            ok = false;
+        } else {
+            std::cout << "PASS: 三模型 modelIndex 互不相同（dvst=" << dvstIdx
+                      << ", dvt1=" << dvt1Idx << ", dvt2=" << dvt2Idx << "）\n";
+        }
+    } catch (const std::exception& e) {
+        std::cout << "异常: " << e.what() << "\n";
+        return 1;
+    }
+
+    std::cout << (ok ? "==== dvst modelIndex 分区自测 通过 ====\n"
+                     : "==== dvst modelIndex 分区自测 失败 ====\n");
+    return ok ? 0 : 1;
+}
+
 int RunImagePrepCheck() {
     auto fail = [](const std::string& message) -> int {
         std::cout << "imageprepcheck 失败: " << message << "\n";
@@ -2445,6 +2510,10 @@ int main(int argc, char* argv[]) {
 
     if (argc >= 2 && std::string(argv[1]) == "dvst-single-load-selftest") {
         return RunDvstSingleLoadSelfTest();
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "dvst-modelindex-selftest") {
+        return RunDvstModelIndexSelfTest();
     }
 
     std::cout << "==== C++ 测试程序 ====\n";
