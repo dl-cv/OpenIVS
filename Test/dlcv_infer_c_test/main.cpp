@@ -34,9 +34,9 @@ int main() {
     std::cout << "预期: dvst model_index >= " << kFlowIndexBase
               << "，dvt model_index 在 [0," << kFlowIndexBase << ")，三者互不相同\n\n";
 
-    int idx_dvst = dlcv_infer_cpp_load_model_c(dvstPath.c_str(), 0);
     int idx_dvt1 = dlcv_infer_cpp_load_model_c(dvtCatDogPath.c_str(), 0);
     int idx_dvt2 = dlcv_infer_cpp_load_model_c(dvtBalloonPath.c_str(), 0);
+    int idx_dvst = dlcv_infer_cpp_load_model_c(dvstPath.c_str(), 0);
 
     std::cout << "模型加载结果:\n";
     std::cout << "  dvst model_index = " << idx_dvst << "\n";

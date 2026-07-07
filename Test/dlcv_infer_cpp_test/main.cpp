@@ -1302,20 +1302,20 @@ int RunDvstModelIndexSelfTest() {
 
     bool ok = true;
     try {
-        std::cout << "[1] 加载 dvst(AOI 流程模型)...\n";
-        dlcv_infer::Model dvstModel(kDvstIndexFlowModelPath, kGpuDeviceId);
-        const int dvstIdx = dvstModel.modelIndex;
-        std::cout << "    dvst modelIndex=" << dvstIdx << "\n";
-
-        std::cout << "[2] 加载 dvt1(猫狗分类)...\n";
+        std::cout << "[1] 加载 dvt1(猫狗分类)...\n";
         dlcv_infer::Model dvt1Model(kDvstIndexDvtCatDogPath, kGpuDeviceId);
         const int dvt1Idx = dvt1Model.modelIndex;
         std::cout << "    dvt1 modelIndex=" << dvt1Idx << "\n";
 
-        std::cout << "[3] 加载 dvt2(气球实例分割)...\n";
+        std::cout << "[2] 加载 dvt2(气球实例分割)...\n";
         dlcv_infer::Model dvt2Model(kDvstIndexDvtBalloonPath, kGpuDeviceId);
         const int dvt2Idx = dvt2Model.modelIndex;
         std::cout << "    dvt2 modelIndex=" << dvt2Idx << "\n";
+
+        std::cout << "[3] 加载 dvst(AOI 流程模型)...\n";
+        dlcv_infer::Model dvstModel(kDvstIndexFlowModelPath, kGpuDeviceId);
+        const int dvstIdx = dvstModel.modelIndex;
+        std::cout << "    dvst modelIndex=" << dvstIdx << "\n";
 
         if (dvstIdx < kFlowIndexBase) {
             std::cout << "FAIL: dvst modelIndex=" << dvstIdx << " 应 >= " << kFlowIndexBase
