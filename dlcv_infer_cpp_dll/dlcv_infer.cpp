@@ -1305,21 +1305,19 @@ namespace dlcv_infer {
     }
 
     sntl_admin::DogProvider DllLoader::AutoDetectProvider() {
-        try {
-            auto sentinel = sntl_admin::DogUtils::GetSentinelInfo();
-            if (sentinel.provider != sntl_admin::DogProvider::Unknown) {
+        // 只做一次加密狗检测：先 Sentinel 再 Virbox；都没有则不加载任何推理 DLL
+        auto available = sntl_admin::DogUtils::GetAvailableProviders();
+        for (const auto& p : available) {
+            if (p == sntl_admin::DogProvider::Sentinel) {
                 return sntl_admin::DogProvider::Sentinel;
             }
-        } catch (...) {}
-
-        try {
-            auto virbox = sntl_admin::DogUtils::GetVirboxInfo();
-            if (virbox.provider != sntl_admin::DogProvider::Unknown) {
+        }
+        for (const auto& p : available) {
+            if (p == sntl_admin::DogProvider::Virbox) {
                 return sntl_admin::DogProvider::Virbox;
             }
-        } catch (...) {}
-
-        return sntl_admin::DogProvider::Sentinel;
+        }
+        throw std::runtime_error("未检测到授权");
     }
 
     DllLoader& DllLoader::Instance() {

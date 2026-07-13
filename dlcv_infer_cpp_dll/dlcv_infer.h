@@ -116,7 +116,7 @@ namespace dlcv_infer {
 
         /// <summary>
         /// 自动检测当前插入的加密狗，按 Sentinel 优先、Virbox 第二返回 Provider。
-        /// 若均未检测到，默认返回 Sentinel。
+        /// 若均未检测到，抛出异常，不加载任何推理 DLL。
         /// </summary>
         static sntl_admin::DogProvider AutoDetectProvider();
 

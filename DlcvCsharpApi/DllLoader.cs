@@ -154,21 +154,13 @@ namespace dlcv_infer_csharp
 
         private static DogProvider AutoDetectProvider()
         {
-            try
-            {
-                var sentinel = DogUtils.GetSentinelInfo();
-                if (sentinel != null && ((sentinel.Devices != null && sentinel.Devices.Count > 0) || (sentinel.Features != null && sentinel.Features.Count > 0)))
-                    return DogProvider.Sentinel;
-            }
-            catch { }
-            try
-            {
-                var virbox = DogUtils.GetVirboxInfo();
-                if (virbox != null && ((virbox.Devices != null && virbox.Devices.Count > 0) || (virbox.Features != null && virbox.Features.Count > 0)))
-                    return DogProvider.Virbox;
-            }
-            catch { }
-            return DogProvider.Sentinel;
+            // 只做一次加密狗检测：先 Sentinel 再 Virbox；都没有则不加载任何推理 DLL
+            List<DogProvider> available = DogUtils.GetAvailableProviders();
+            if (available.Contains(DogProvider.Sentinel))
+                return DogProvider.Sentinel;
+            if (available.Contains(DogProvider.Virbox))
+                return DogProvider.Virbox;
+            throw new Exception("未检测到授权");
         }
 
         private static DogProvider? ResolveProviderFromHeader(string modelPath)
