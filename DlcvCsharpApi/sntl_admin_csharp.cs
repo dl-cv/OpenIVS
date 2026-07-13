@@ -380,6 +380,8 @@ namespace sntl_admin_csharp
         private const string DllPath = @"C:\dlcv\bin\slm_control.dll";
         private const uint SS_OK = 0;
         private const uint INFO_FORMAT_JSON = 2;
+        // 深度视觉开发商 ID
+        private const string DlcvDeveloperId = "0800000000002866";
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate uint ClientOpenDelegate(ref IntPtr ipc);
@@ -525,21 +527,31 @@ namespace sntl_admin_csharp
             }
 
             JToken root = ParseJson(ReadAndFree(descPtr));
+            // 仅保留深度视觉开发商的锁
             if (root is JObject obj)
             {
-                result.Add(obj);
+                if (IsDlcvDeveloper(obj))
+                {
+                    result.Add(obj);
+                }
             }
             else if (root is JArray array)
             {
                 foreach (JToken item in array)
                 {
-                    if (item is JObject itemObj)
+                    if (item is JObject itemObj && IsDlcvDeveloper(itemObj))
                     {
                         result.Add(itemObj);
                     }
                 }
             }
             return result;
+        }
+
+        private static bool IsDlcvDeveloper(JObject desc)
+        {
+            string developerId = FirstStringByKeys(desc, new[] { "developer_id", "owner_developer_id" });
+            return developerId == DlcvDeveloperId;
         }
 
         private string ReadAndFree(IntPtr ptr)
