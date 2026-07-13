@@ -151,8 +151,9 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 |-----------|---------|---------|
 | Sentinel | `dlcv_infer.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` |
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
+| None / Unknown | 不加载 | — |
 
-自动检测优先级：先检测 Sentinel，再检测 Virbox；均未检测到则回退到 Sentinel。每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续所有操作都走该 loader。
+自动检测优先级：先检测 Sentinel，再检测 Virbox；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续所有操作都走该 loader。
 
 ## 输入图像处理约定
 
