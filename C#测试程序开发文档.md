@@ -396,11 +396,13 @@
 - 调用 `Utils.FreeAllModels()`
 - `richTextBox1.Text="所有模型已释放"`
 
-#### 7.12 检查加密狗（按钮：`检查加密狗`）
+#### 7.12 检查加密狗（按钮：`检查加密狗`；启动时自动执行一次）
 
-- 调用：`DogUtils.GetAllDogInfo()`
+- 调用：`DogUtils.GetAllDogInfo()`（`ShowDogInfo()`）
 - 输出到 `richTextBox1`（格式必须一致）：
   - `Sentinel加密狗ID：\n{sentinelDeviceList}\n\nSentinel加密狗特性：\n{sentinelFeatureList}\n\nVirbox加密狗ID：\n{virboxDeviceList}\n\nVirbox加密狗特性：\n{virboxFeatureList}`
+- 若 Sentinel/Virbox 的 devices 与 features 均为空：在上述内容前追加一行 `未检测到加密狗\n\n`
+- 启动时在设备列表初始化完成后自动调用一次 `ShowDogInfo()`；无加密狗时不加载推理 DLL
 
 #### 7.13 文档（按钮：`文档`）
 

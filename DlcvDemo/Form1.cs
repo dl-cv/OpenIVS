@@ -97,12 +97,70 @@ namespace DlcvDemo
                 {
                     comboBox1.SelectedIndex = 0; // 选择CPU
                 }
+
+                // 启动时只做加密狗检测并显示结果，不强制加载推理 DLL
+                ShowDogInfo();
             });
 
-            var info = Utils.GetDeviceInfo();
-            Console.WriteLine(info.ToString());
+            // 有加密狗时再加载对应推理 DLL 并保持最高时钟；无狗则跳过，避免卡死/闪退
+            if (DllLoader.Instance.LoadedDogProvider != sntl_admin_csharp.DogProvider.None)
+            {
+                try
+                {
+                    var info = Utils.GetDeviceInfo();
+                    Console.WriteLine(info.ToString());
+                    DllLoader.Instance.dlcv_keep_max_clock?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("GetDeviceInfo/keep_max_clock failed: " + ex.Message);
+                }
+            }
+        }
 
-            DllLoader.Instance.dlcv_keep_max_clock?.Invoke();
+        /// <summary>
+        /// 查询 Sentinel/Virbox 加密狗信息并显示到 richTextBox1。
+        /// 都未检测到时明确提示「未检测到加密狗」。
+        /// </summary>
+        private void ShowDogInfo()
+        {
+            JObject allInfo;
+            try
+            {
+                allInfo = sntl_admin_csharp.DogUtils.GetAllDogInfo();
+            }
+            catch
+            {
+                allInfo = new JObject
+                {
+                    ["sentinel"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() },
+                    ["virbox"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() }
+                };
+            }
+
+            JObject sentinel = allInfo["sentinel"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
+            JObject virbox = allInfo["virbox"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
+
+            JArray sentinelDevices = sentinel["devices"] as JArray ?? new JArray();
+            JArray sentinelFeatures = sentinel["features"] as JArray ?? new JArray();
+            JArray virboxDevices = virbox["devices"] as JArray ?? new JArray();
+            JArray virboxFeatures = virbox["features"] as JArray ?? new JArray();
+
+            string text =
+                "Sentinel加密狗ID：\n" + sentinelDevices.ToString() + "\n\n" +
+                "Sentinel加密狗特性：\n" + sentinelFeatures.ToString() + "\n\n" +
+                "Virbox加密狗ID：\n" + virboxDevices.ToString() + "\n\n" +
+                "Virbox加密狗特性：\n" + virboxFeatures.ToString();
+
+            bool noDog =
+                sentinelDevices.Count == 0 && sentinelFeatures.Count == 0 &&
+                virboxDevices.Count == 0 && virboxFeatures.Count == 0;
+            if (noDog)
+            {
+                text = "未检测到加密狗\n\n" + text;
+            }
+
+            richTextBox1.Text = text;
         }
 
         private dynamic model;
@@ -821,28 +879,7 @@ namespace DlcvDemo
 
         private void button1_Click(object sender, EventArgs e)
         {
-            JObject allInfo;
-            try
-            {
-                allInfo = sntl_admin_csharp.DogUtils.GetAllDogInfo();
-            }
-            catch
-            {
-                allInfo = new JObject
-                {
-                    ["sentinel"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() },
-                    ["virbox"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() }
-                };
-            }
-
-            JObject sentinel = allInfo["sentinel"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
-            JObject virbox = allInfo["virbox"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
-
-            richTextBox1.Text =
-                "Sentinel加密狗ID：\n" + (sentinel["devices"] ?? new JArray()).ToString() + "\n\n" +
-                "Sentinel加密狗特性：\n" + (sentinel["features"] ?? new JArray()).ToString() + "\n\n" +
-                "Virbox加密狗ID：\n" + (virbox["devices"] ?? new JArray()).ToString() + "\n\n" +
-                "Virbox加密狗特性：\n" + (virbox["features"] ?? new JArray()).ToString();
+            ShowDogInfo();
         }
 
         private void button_free_all_model_Click(object sender, EventArgs e)
