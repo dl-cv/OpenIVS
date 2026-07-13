@@ -288,8 +288,9 @@ public class DllLoader
 |-----------|---------|------|
 | Sentinel | `dlcv_infer.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` |
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
+| None（无狗） | 不加载 | — |
 
-**自动检测优先级**：`Instance` 初始化时先检测 Sentinel，再检测 Virbox；均未检测到则回退到 Sentinel。
+**自动检测优先级**：`Instance` 初始化时调用一次 `DogUtils.GetAvailableProviders()`，按 **Sentinel 优先、Virbox 第二** 选择 Provider；均未检测到时返回 `DogProvider.None`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
 
 **Provider 一致性校验**：`EnsureForModel` 在加载模型前，先读取模型头 `dog_provider` 得到所需 provider，再调用 `DogUtils.GetAvailableProviders()` 获取当前可用授权列表。若所需 provider 不在可用列表中，抛出异常：
 - 可用列表为空时提示 `未检测到授权`。
@@ -598,9 +599,9 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 `ForModel(string)` 的加载策略：
 - 先通过 `ModelHeaderProviderResolver.TryResolveExplicitProvider` 判断模型头是否**明确指定**了 `dog_provider`。
 - 若**明确指定**（`sentinel` 或 `virbox`），则校验对应加密狗是否存在；不存在时抛出异常，不静默 fallback。
-- 若**未指定**（旧模型或省略该字段），则调用 `AutoDetectProvider()` 自动检测当前插入的加密狗，按 **Sentinel 优先、Virbox 第二** 的顺序选择 Provider；检测不到任何狗时，默认使用 Sentinel。
+- 若**未指定**（旧模型或省略该字段），则调用 `AutoDetectProvider()` 自动检测当前插入的加密狗，按 **Sentinel 优先、Virbox 第二** 的顺序选择 Provider；检测不到任何狗时返回 `DogProvider.None`，不加载推理 DLL。
 
-`Instance`（兼容旧代码的单例）在首次创建时同样调用 `AutoDetectProvider()`，而非硬编码 Sentinel。
+`Instance`（兼容旧代码的单例）在首次创建时同样调用 `AutoDetectProvider()`；无狗时创建空 loader（函数指针均为 null），不加载 `dlcv_infer.dll` / `dlcv_infer_v.dll`。
 
 每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续 `GetModelInfoDvt`、`InferInternalDvt`、`FreeModel` 都走该 loader。`Utils` 的 `FreeAllModels`、`GetDeviceInfo`、`KeepMaxClock` 遍历所有已创建 loader 执行。
 

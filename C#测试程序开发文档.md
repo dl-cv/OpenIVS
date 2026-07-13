@@ -37,15 +37,17 @@
 
 > 这些依赖用于保证“加载模型/推理/设备枚举/加密狗检查”行为可用。若缺失，会导致对应功能失败或降级（必须与本文档描述一致）。
 
-- **DLCV 推理 DLL（必须）**
-  - `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）：必须可被进程加载（通常位于输出目录或系统 PATH，或 SDK 固定路径）
+- **DLCV 推理 DLL（按加密狗加载）**
+  - `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）：仅在检测到对应加密狗后由 `DllLoader` 加载
+  - 都未检测到加密狗时：不加载上述 DLL；启动界面提示「未检测到加密狗」
 - **OpenCvSharp 运行时（必须）**
   - `OpenCvSharpExtern.dll` + OpenCV 相关运行时 DLL（由 `OpenCvSharp4.runtime.win` 提供）
 - **GPU 枚举（可选）**
   - `nvml.dll`（NVIDIA 驱动自带）：用于枚举 GPU 名称；失败/缺失时的 UI 表现见 **6.2**
 - **加密狗检查（可选）**
-  - `sntl_adminapi_windows_x64.dll`：用于读取加密狗信息
+  - `sntl_adminapi_windows_x64.dll` / `slm_control.dll`：用于读取加密狗信息
   - 缺失时：`检查加密狗` 输出为空数组（`[]`），不应崩溃
+  - 启动时先调用一次 `GetAllDogInfo()`；仅当都未检测到时写界面并停止加载推理 DLL
 - **RPC 模式（按需）**
   - `AIModelRPC.exe`：优先从 `DlcvDemo` 输出目录启动；若不存在，可使用 SDK 固定路径（如 `C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`）
 - **DVP 模式（按需，加载 `.dvp` 时启用）**
@@ -398,9 +400,11 @@
 
 #### 7.12 检查加密狗（按钮：`检查加密狗`）
 
-- 调用：`DogUtils.GetAllDogInfo()`
+- 调用：`DogUtils.GetAllDogInfo()`（`ShowDogInfo()`）
 - 输出到 `richTextBox1`（格式必须一致）：
   - `Sentinel加密狗ID：\n{sentinelDeviceList}\n\nSentinel加密狗特性：\n{sentinelFeatureList}\n\nVirbox加密狗ID：\n{virboxDeviceList}\n\nVirbox加密狗特性：\n{virboxFeatureList}`
+- 若 Sentinel/Virbox 的 devices 与 features 均为空：在上述内容前追加一行 `未检测到加密狗\n\n`
+- 启动流程：先做一次 `GetAllDogInfo()`；**仅当都未检测到时**把结果写到界面并停止（不加载推理 DLL）；检测到加密狗时不自动写界面，继续原逻辑加载推理 DLL
 
 #### 7.13 文档（按钮：`文档`）
 

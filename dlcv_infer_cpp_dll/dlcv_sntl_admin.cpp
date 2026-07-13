@@ -149,6 +149,16 @@ namespace {
         return text;
     }
 
+    // 深度视觉开发商 ID
+    const char* kDlcvVirboxDeveloperId = "0800000000002866";
+
+    std::string FirstStringByKeys(const nlohmann::json& value, const std::vector<std::string>& keys);
+
+    bool IsDlcvDeveloper(const nlohmann::json& desc) {
+        std::string developer_id = FirstStringByKeys(desc, { "developer_id", "owner_developer_id" });
+        return developer_id == kDlcvVirboxDeveloperId;
+    }
+
     std::vector<nlohmann::json> GetVirboxDescriptions(void* ipc, VirboxControlApi& api) {
         char* desc = nullptr;
         int status = api.get_all_description(ipc, VIRBOX_JSON, &desc);
@@ -158,9 +168,14 @@ namespace {
         }
 
         nlohmann::json root = ParseJsonSafe(ReadAndFree(api, desc));
+        // 仅保留深度视觉开发商的锁
         if (root.is_object())
         {
-            return { root };
+            if (IsDlcvDeveloper(root))
+            {
+                return { root };
+            }
+            return {};
         }
         if (!root.is_array())
         {
@@ -170,7 +185,7 @@ namespace {
         std::vector<nlohmann::json> result;
         for (const auto& item : root)
         {
-            if (item.is_object())
+            if (item.is_object() && IsDlcvDeveloper(item))
             {
                 result.push_back(item);
             }

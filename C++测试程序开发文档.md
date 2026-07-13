@@ -182,9 +182,11 @@ int main(int argc, char* argv[]) {
 
 1. 点击 **检查加密狗**。
 2. 文本区显示 Sentinel 和 Virbox 的设备和特性列表。
+3. 若两者均为空，表示未检测到加密狗；此时 `DllLoader` 不加载推理 DLL。
 
 **代码路径**：`MainWindow::onCheckDog()`
 - 调用 `dlcv_infer::GetAllDogInfo()`。
+- 底层 `AutoDetectProvider()`：Sentinel 优先、Virbox 第二；都没有返回 `Unknown`，不加载 `dlcv_infer.dll` / `dlcv_infer_v.dll`。
 
 ---
 

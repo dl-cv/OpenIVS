@@ -83,8 +83,8 @@ namespace dlcv_infer_csharp
 
         }
 
-        public DogProvider LoadedDogProvider => _dllLoader?.LoadedDogProvider ?? DogProvider.Sentinel;
-        public string LoadedNativeDllName => _dllLoader?.LoadedNativeDllName ?? "dlcv_infer.dll";
+        public DogProvider LoadedDogProvider => _dllLoader?.LoadedDogProvider ?? DogProvider.None;
+        public string LoadedNativeDllName => _dllLoader?.LoadedNativeDllName;
 
         public Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false)
         {
@@ -303,6 +303,10 @@ namespace dlcv_infer_csharp
         {
             DllLoader.EnsureForModel(modelPath);
             _dllLoader = DllLoader.Instance;
+            if (_dllLoader == null || _dllLoader.dlcv_load_model == null)
+            {
+                throw new Exception("未检测到授权");
+            }
 
             var setting = new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii };
 

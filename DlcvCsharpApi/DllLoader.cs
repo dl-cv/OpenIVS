@@ -105,6 +105,8 @@ namespace dlcv_infer_csharp
         {
             switch (provider)
             {
+                case DogProvider.None:
+                    return "无";
                 case DogProvider.Sentinel:
                     return "Sentinel";
                 case DogProvider.Virbox:
@@ -136,6 +138,12 @@ namespace dlcv_infer_csharp
             loader.LoadedDogProvider = provider;
             switch (provider)
             {
+                case DogProvider.None:
+                    // 只执行加密狗检测，不加载推理 DLL
+                    loader.DllName = null;
+                    loader.DllPath = null;
+                    loader.LoadedNativeDllName = null;
+                    return loader;
                 case DogProvider.Sentinel:
                     loader.DllName = "dlcv_infer.dll";
                     loader.DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll";
@@ -154,21 +162,13 @@ namespace dlcv_infer_csharp
 
         private static DogProvider AutoDetectProvider()
         {
-            try
-            {
-                var sentinel = DogUtils.GetSentinelInfo();
-                if (sentinel != null && ((sentinel.Devices != null && sentinel.Devices.Count > 0) || (sentinel.Features != null && sentinel.Features.Count > 0)))
-                    return DogProvider.Sentinel;
-            }
-            catch { }
-            try
-            {
-                var virbox = DogUtils.GetVirboxInfo();
-                if (virbox != null && ((virbox.Devices != null && virbox.Devices.Count > 0) || (virbox.Features != null && virbox.Features.Count > 0)))
-                    return DogProvider.Virbox;
-            }
-            catch { }
-            return DogProvider.Sentinel;
+            // 只做一次加密狗检测：先 Sentinel 再 Virbox；都没有则不加载任何推理 DLL，也不抛异常
+            List<DogProvider> available = DogUtils.GetAvailableProviders();
+            if (available.Contains(DogProvider.Sentinel))
+                return DogProvider.Sentinel;
+            if (available.Contains(DogProvider.Virbox))
+                return DogProvider.Virbox;
+            return DogProvider.None;
         }
 
         private static DogProvider? ResolveProviderFromHeader(string modelPath)
