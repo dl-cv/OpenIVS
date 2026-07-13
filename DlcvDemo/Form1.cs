@@ -102,7 +102,7 @@ namespace DlcvDemo
             var info = Utils.GetDeviceInfo();
             Console.WriteLine(info.ToString());
 
-            DllLoader.Instance.dlcv_keep_max_clock();
+            DllLoader.Instance.dlcv_keep_max_clock?.Invoke();
         }
 
         private dynamic model;

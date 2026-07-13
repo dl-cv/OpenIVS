@@ -1172,6 +1172,12 @@ namespace dlcv_infer {
 
     DllLoader::DllLoader(sntl_admin::DogProvider provider) : dogProvider(provider) {
         switch (provider) {
+        case sntl_admin::DogProvider::Unknown:
+            // 只执行加密狗检测，不加载推理 DLL
+            dllName.clear();
+            dllPath.clear();
+            dllDevPath.clear();
+            return;
         case sntl_admin::DogProvider::Sentinel:
 #ifdef _WIN32
             dllName = "dlcv_infer.dll";
@@ -1305,7 +1311,7 @@ namespace dlcv_infer {
     }
 
     sntl_admin::DogProvider DllLoader::AutoDetectProvider() {
-        // 只做一次加密狗检测：先 Sentinel 再 Virbox；都没有则不加载任何推理 DLL
+        // 只做一次加密狗检测：先 Sentinel 再 Virbox；都没有则不加载任何推理 DLL，也不抛异常
         auto available = sntl_admin::DogUtils::GetAvailableProviders();
         for (const auto& p : available) {
             if (p == sntl_admin::DogProvider::Sentinel) {
@@ -1317,7 +1323,7 @@ namespace dlcv_infer {
                 return sntl_admin::DogProvider::Virbox;
             }
         }
-        throw std::runtime_error("未检测到授权");
+        return sntl_admin::DogProvider::Unknown;
     }
 
     DllLoader& DllLoader::Instance() {
@@ -1463,6 +1469,9 @@ namespace dlcv_infer {
         _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+        if (!_dllLoader->GetLoadModelFunc()) {
+            throw std::runtime_error("未检测到授权");
+        }
 
         json config;
         config["model_path"] = modelPathUtf8;
@@ -1527,6 +1536,9 @@ namespace dlcv_infer {
         _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+        if (!_dllLoader->GetLoadModelFunc()) {
+            throw std::runtime_error("未检测到授权");
+        }
 
         json config;
         config["model_path"] = modelPathUtf8;
@@ -2189,6 +2201,9 @@ namespace dlcv_infer {
         _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+        if (!_dllLoader->GetLoadModelFunc()) {
+            throw std::runtime_error("未检测到授权");
+        }
 
         json config;
         config["type"] = "sliding_window_pipeline";

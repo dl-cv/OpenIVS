@@ -690,6 +690,7 @@ namespace sntl_admin_csharp
 
     public enum DogProvider
     {
+        None,
         Sentinel,
         Virbox
     }
