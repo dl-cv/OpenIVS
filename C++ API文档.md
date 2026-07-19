@@ -102,7 +102,7 @@ struct FlowBatchResult {
 ```cpp
 class DllLoader {
 public:
-    // 获取全局单例；首次调用自动检测加密狗类型并加载对应 DLL
+    // 获取全局单例；首次调用自动检测加密狗类型，有狗时加载对应 DLL，无狗时不加载
     static DllLoader& Instance();
 
     // 根据模型头中的 dog_provider 字段，确保加载正确的 DLL
@@ -142,8 +142,9 @@ private:
 |-----------|---------|------|
 | Sentinel | `dlcv_infer.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` |
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
+| Unknown（无狗） | 不加载 | — |
 
-**自动检测优先级**：先检测 Sentinel，再检测 Virbox；均未检测到则回退到 Sentinel。
+**自动检测优先级**：先检测 Sentinel，再检测 Virbox；均未检测到则返回 `DogProvider::Unknown`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
 
 ---
 
@@ -218,6 +219,8 @@ void FreeModel();
 - Flow 模式：删除 `_flowModel`。
 - 普通模式且 `OwnModelIndex == true`：调用 `dlcv_free_model`。
 - 普通模式且 `OwnModelIndex == false`：仅标记 `modelIndex = -1`，不释放底层模型。
+
+> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回（从 `0` 起递增）；流程模型（`.dvst`/`.dvso`/`.dvsp`）的 `modelIndex` 由本层自管理（从 `10000` 起递增）。二者分区，避免上层按 `modelIndex` 索引时流程模型与普通模型撞键。流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
 
 ### 4.7 计时查询
 
@@ -448,13 +451,15 @@ dlcv_infer::Model::GetLastInferTiming(sdkMs, totalMs);
 auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 ```
 
+流程模型的 `threshold` 有明确的两层语义：流程内每个 `model/*` 节点始终使用流程文件中自身的 `threshold`；调用 `Infer` / `InferBatch` / `InferOneOutJson` 时传入的 `params["threshold"]` 只在流程执行和结果聚合完成后，对最终对外结果按 `score >= threshold` 进行筛选。该入口参数不会改写任何流程节点属性。
+
 ---
 
 ## 12. 推理参数 JSON 字段
 
 | 字段名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `threshold` | float | 0.5 | 置信度阈值 |
+| `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型中仅筛选最终对外结果，不覆盖节点自身阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
@@ -546,8 +551,9 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 | 组件 | 当前加载方式 | 缺失时行为 |
 | --- | --- | --- |
-| `dlcv_infer.dll` | Sentinel 版本；`DllLoader::ForProvider(DogProvider::Sentinel)` 加载；`Instance()` 与 `ForModel` 在未明确指定 provider 时，通过 `AutoDetectProvider()` 自动检测当前加密狗并按 Sentinel 优先、Virbox 第二选择；先按系统搜索路径查找，再回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
-| `dlcv_infer_v.dll` | Virbox 版本；`DllLoader::ForProvider(DogProvider::Virbox)` 加载；仅在模型头明确指定 `dog_provider=virbox` 或 `AutoDetectProvider()` 检测到 Virbox 且未检测到 Sentinel 时启用；查找顺序为系统搜索路径，再到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
+| `dlcv_infer.dll` | Sentinel 版本；`AutoDetectProvider()` 检测到 Sentinel 时加载；先按系统搜索路径查找，再回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
+| `dlcv_infer_v.dll` | Virbox 版本；仅在模型头明确指定 `dog_provider=virbox`，或 `AutoDetectProvider()` 检测到 Virbox 且未检测到 Sentinel 时启用；查找顺序为系统搜索路径，再到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
+| 无加密狗 | `AutoDetectProvider()` 返回 `DogProvider::Unknown`；创建空 `DllLoader`，不 `LoadLibrary` 任何推理 DLL | 不弹框、不抛异常；加载模型时再报「未检测到授权」 |
 | `sntl_adminapi_windows_x64.dll` | `SNTLDllLoader` 先按系统搜索路径查找，再回退到 `C:\dlcv\bin\sntl_adminapi_windows_x64.dll` | 切换为空代理：`context_new/get` 返回 `SNTL_ADMIN_LM_NOT_FOUND`，`context_delete` 返回成功，`free` 为空函数 |
 | `nvml.dll` | `Utils::GetGpuInfo()` 与 NVML 包装函数运行时 `LoadLibraryA("nvml.dll")` | `GetGpuInfo()` 返回错误 JSON；初始化失败时 `code=1`，取设备数失败时 `code=2` |
 

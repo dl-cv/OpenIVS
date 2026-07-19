@@ -1,193 +1,83 @@
 #include <iostream>
-#include <iomanip>
 #include <string>
-#include <vector>
-#include <cmath>
-#include <cstdio>
 
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/imgproc.hpp>
+#include <windows.h>
 
 #include "dlcv_infer_c_api.h"
 #include "dlcv_infer.h"
 
-static std::string GbkToUtf8(const char* gbk) {
-    if (!gbk) return {};
-    return dlcv_infer::convertGbkToUtf8(std::string(gbk));
-}
-
-static std::string ToFixed(double v, int precision) {
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(precision) << v;
-    return oss.str();
-}
-
-static std::vector<unsigned char> ReadAllBytesByFopen(const wchar_t* path) {
-    std::vector<unsigned char> buf;
-    FILE* fp = nullptr;
-    _wfopen_s(&fp, path, L"rb");
-    if (!fp) return buf;
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        return buf;
-    }
-    long sz = ftell(fp);
-    if (sz <= 0) {
-        fclose(fp);
-        return buf;
-    }
-    rewind(fp);
-    buf.resize(static_cast<size_t>(sz));
-    size_t n = fread(buf.data(), 1, buf.size(), fp);
-    fclose(fp);
-    if (n != buf.size()) buf.clear();
-    return buf;
-}
-
-static cv::Mat LoadImageByDecode(const wchar_t* path) {
-    auto bytes = ReadAllBytesByFopen(path);
-    if (bytes.empty()) return {};
-    cv::Mat raw(1, static_cast<int>(bytes.size()), CV_8UC1, bytes.data());
-    return cv::imdecode(raw, cv::IMREAD_COLOR);
+static std::string WideToUtf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
+    if (bytes <= 0) return {};
+    std::string out(static_cast<size_t>(bytes), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()), out.data(), bytes, nullptr, nullptr);
+    return out;
 }
 
 int main() {
-    const char* model_path = "Y:\\zxc\\模块化任务测试\\实例分割筛选测试_120_50.dvst";
-    const wchar_t* image_path_w = L"Y:\\zxc\\模块化任务测试\\实例分割\\实例分割滑窗大图.png";
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
 
-    std::cout << "图片: Y:\\zxc\\模块化任务测试\\实例分割\\实例分割滑窗大图.png\n";
-    std::cout << "batch_size: 1\n";
-    std::cout << "threshold: 0.50\n";
+    constexpr int kFlowIndexBase = 10000;
+    const std::wstring dvstPathW = L"Y:\\测试模型\\AOI_120_50_s.dvst";
+    const std::wstring dvtCatDogPathW = L"Y:\\测试模型\\猫狗-分类_120_50_s.dvt";
+    const std::wstring dvtBalloonPathW = L"Y:\\测试模型\\气球-实例分割_120_50_s.dvt";
+    const std::string dvstPath = WideToUtf8(dvstPathW);
+    const std::string dvtCatDogPath = WideToUtf8(dvtCatDogPathW);
+    const std::string dvtBalloonPath = WideToUtf8(dvtBalloonPathW);
 
-    cv::Mat bgr = LoadImageByDecode(image_path_w);
-    if (bgr.empty()) {
-        std::cerr << "Failed to load image\n";
-        return 1;
-    }
+    std::cout << "==== dvst modelIndex 撞键验证 (C API / g_models) ====\n";
+    std::cout << "dvst: " << dvstPath << "\n";
+    std::cout << "dvt1: " << dvtCatDogPath << "\n";
+    std::cout << "dvt2: " << dvtBalloonPath << "\n";
+    std::cout << "预期: dvst model_index >= " << kFlowIndexBase
+              << "，dvt model_index 在 [0," << kFlowIndexBase << ")，三者互不相同\n\n";
 
-    cv::Mat rgb;
-    cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+    int idx_dvt1 = dlcv_infer_cpp_load_model_c(dvtCatDogPath.c_str(), 0);
+    int idx_dvt2 = dlcv_infer_cpp_load_model_c(dvtBalloonPath.c_str(), 0);
+    int idx_dvst = dlcv_infer_cpp_load_model_c(dvstPath.c_str(), 0);
 
-    DlcvCImage image{};
-    image.data_ptr = static_cast<long long>(reinterpret_cast<uintptr_t>(rgb.data));
-    image.height = rgb.rows;
-    image.width = rgb.cols;
-    image.channel = rgb.channels();
-
-    DlcvCImageList image_list{};
-    image_list.images = &image;
-    image_list.n = 1;
-
-    int model_idx = dlcv_infer_cpp_load_model_c(model_path, 0);
-    if (model_idx < 0) {
-        std::cerr << "Failed to load model: " << model_path << "\n";
-        return 1;
-    }
-
-    auto t0 = std::chrono::steady_clock::now();
-    DlcvCResult result = dlcv_infer_cpp_infer_c(model_idx, &image_list);
-    auto t1 = std::chrono::steady_clock::now();
-    double elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-
-    std::cout << "推理时间: " << ToFixed(elapsed_ms, 2) << "ms\n";
-
-    if (result.code != 0) {
-        std::cerr << "Inference failed: " << (result.message ? result.message : "unknown") << "\n";
-        dlcv_infer_cpp_free_model_result_c(&result);
-        dlcv_infer_cpp_free_model_c(model_idx);
-        return 1;
-    }
-
-    int total_objects = 0;
-    if (result.sample_results && result.n > 0) {
-        for (int i = 0; i < result.n; ++i) {
-            total_objects += result.sample_results[i].n;
-        }
-    }
-
-    std::cout << "推理结果: " << total_objects << "个\n\n";
-
-    int idx = 1;
-    if (result.sample_results && result.n > 0) {
-        for (int s = 0; s < result.n; ++s) {
-            const DlcvCSampleResult& sr = result.sample_results[s];
-            if (!sr.results) continue;
-            for (int r = 0; r < sr.n; ++r) {
-                const DlcvCObjectResult& o = sr.results[r];
-                std::cout << "[" << idx << "] " << (o.category_name ? o.category_name : "?")
-                          << "            score=" << ToFixed(static_cast<double>(o.score), 2)
-                          << "  bbox=(" << ToFixed(o.x, 1) << ", " << ToFixed(o.y, 1)
-                          << ", " << ToFixed(o.w, 1) << ", " << ToFixed(o.h, 1) << ")"
-                          << "  area=" << ToFixed(static_cast<double>(o.area), 1) << "\n";
-                idx++;
-            }
-        }
-    }
+    std::cout << "模型加载结果:\n";
+    std::cout << "  dvst model_index = " << idx_dvst << "\n";
+    std::cout << "  dvt1 model_index = " << idx_dvt1 << "\n";
+    std::cout << "  dvt2 model_index = " << idx_dvt2 << "\n\n";
 
     bool ok = true;
-    if (result.n != 1) {
-        std::cerr << "ERROR: expected 1 sample, got " << result.n << "\n";
+    if (idx_dvst < 0 || idx_dvt1 < 0 || idx_dvt2 < 0) {
+        std::cerr << "FAIL: 有模型加载失败\n";
+        const char* err = dlcv_infer_cpp_get_last_error_c();
+        if (err) std::cerr << "  last_error: " << err << "\n";
         ok = false;
     }
-    if (total_objects != 2) {
-        std::cerr << "ERROR: expected exactly 2 objects, got " << total_objects << "\n";
+    if (idx_dvst >= 0 && idx_dvst < kFlowIndexBase) {
+        std::cerr << "FAIL: dvst model_index=" << idx_dvst << " 应 >= " << kFlowIndexBase
+                  << "（修复前写死 1，会与拿到 model_index=1 的 dvt 在 g_models 撞键、互相覆盖）\n";
+        ok = false;
+    } else if (idx_dvst >= kFlowIndexBase) {
+        std::cout << "PASS: dvst model_index=" << idx_dvst << " >= " << kFlowIndexBase << "\n";
+    }
+    if (idx_dvt1 >= 0 && idx_dvt1 >= kFlowIndexBase) {
+        std::cerr << "FAIL: dvt1 model_index=" << idx_dvt1 << " 应 < " << kFlowIndexBase << "\n";
         ok = false;
     }
-    if (result.sample_results && result.n > 0 && result.sample_results[0].n >= 1) {
-        const DlcvCObjectResult& o0 = result.sample_results[0].results[0];
-        std::string name0 = GbkToUtf8(o0.category_name);
-        if (name0 != "杯子") {
-            std::cerr << "ERROR: object[0] category mismatch: " << name0 << "\n";
-            ok = false;
-        }
-        if (std::abs(o0.score - 1.0f) > 0.01f) {
-            std::cerr << "ERROR: score mismatch: " << o0.score << "\n";
-            ok = false;
-        }
-        if (!o0.with_bbox) {
-            std::cerr << "ERROR: with_bbox mismatch\n";
-            ok = false;
-        }
-        if (std::abs(o0.x - 211.0f) > 1.0f || std::abs(o0.y - 221.0f) > 1.0f ||
-            std::abs(o0.w - 160.0f) > 1.0f || std::abs(o0.h - 186.0f) > 1.0f) {
-            std::cerr << "ERROR: bbox mismatch\n";
-            ok = false;
-        }
-    } else {
+    if (idx_dvt2 >= 0 && idx_dvt2 >= kFlowIndexBase) {
+        std::cerr << "FAIL: dvt2 model_index=" << idx_dvt2 << " 应 < " << kFlowIndexBase << "\n";
         ok = false;
     }
-    if (result.sample_results && result.n > 0 && result.sample_results[0].n >= 2) {
-        const DlcvCObjectResult& o1 = result.sample_results[0].results[1];
-        std::string name1 = GbkToUtf8(o1.category_name);
-        if (name1 != "杯子") {
-            std::cerr << "ERROR: object[1] category mismatch: " << name1 << "\n";
+    if (idx_dvst >= 0 && idx_dvt1 >= 0 && idx_dvt2 >= 0) {
+        if (idx_dvst == idx_dvt1 || idx_dvst == idx_dvt2 || idx_dvt1 == idx_dvt2) {
+            std::cerr << "FAIL: model_index 撞键！g_models 全局表互相覆盖，推理传 index 会路由到错误模型\n";
             ok = false;
+        } else {
+            std::cout << "PASS: 三模型 model_index 互不相同，g_models 表不撞键\n";
         }
-        if (std::abs(o1.score - 1.0f) > 0.01f) {
-            std::cerr << "ERROR: object[1] score mismatch: " << o1.score << "\n";
-            ok = false;
-        }
-        if (!o1.with_bbox) {
-            std::cerr << "ERROR: object[1] with_bbox mismatch\n";
-            ok = false;
-        }
-        if (std::abs(o1.x - 849.0f) > 1.0f || std::abs(o1.y - 220.0f) > 1.0f ||
-            std::abs(o1.w - 161.0f) > 1.0f || std::abs(o1.h - 185.0f) > 1.0f) {
-            std::cerr << "ERROR: object[1] bbox mismatch\n";
-            ok = false;
-        }
-    } else {
-        ok = false;
     }
 
-    dlcv_infer_cpp_free_model_result_c(&result);
-    dlcv_infer_cpp_free_model_c(model_idx);
+    if (idx_dvst >= 0) dlcv_infer_cpp_free_model_c(idx_dvst);
+    if (idx_dvt1 >= 0) dlcv_infer_cpp_free_model_c(idx_dvt1);
+    if (idx_dvt2 >= 0) dlcv_infer_cpp_free_model_c(idx_dvt2);
 
-    if (ok) {
-        std::cout << "\nTest PASSED\n";
-        return 0;
-    } else {
-        std::cerr << "\nTest FAILED\n";
-        return 1;
-    }
+    std::cout << (ok ? "\nTest PASSED\n" : "\nTest FAILED\n");
+    return ok ? 0 : 1;
 }

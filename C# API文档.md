@@ -110,7 +110,7 @@ public class Model : IDisposable
 ### 3.2 属性
 
 ```csharp
-public int modelIndex;                // 底层模型索引（普通模型），字段
+public int modelIndex;                // 模型索引：普通模型由底层 dlcv_infer 返回（0 起递增）；流程模型（DVS 模式）由本层自管理（10000 起递增），二者分区避免撞键
 public bool OwnModelIndex { get; set; } = true;  // 是否拥有释放权
 public DogProvider LoadedDogProvider { get; }      // 已加载的加密狗类型
 public string LoadedNativeDllName { get; }         // 已加载的原生 DLL 名称
@@ -195,9 +195,11 @@ public Utils.CSharpResult Infer(Mat image, JObject paramsJson = null);
 public Utils.CSharpResult InferBatch(List<Mat> imageList, JObject paramsJson = null);
 public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 ```
-- 接口与 `Model` 完全一致。
+- 调用形式与 `Model` 一致，流程模型的阈值职责边界如下。
 - `Infer` 内部调用 `InferBatch(new List<Mat> { image })`。
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
+- 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
+- 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
 
 ### 4.3 内部推理方法
 
@@ -206,11 +208,12 @@ public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject paramsJson
 private Tuple<JObject, IntPtr> InferInternalCore(List<Mat> images, JObject paramsJson, bool emitPoly);
 ```
 - `InferInternalCore` 是核心实现：
-  1. 将输入图像放入 `ExecutionContext`（键：`frontend_image_mat`、`frontend_image_mats`、`frontend_image_mat_list`、`frontend_image_path`、`device_id`、`return_json_emit_poly`）。
+  1. 将输入图像和入口参数放入 `ExecutionContext`（键：`frontend_image_mat`、`frontend_image_mats`、`frontend_image_mat_list`、`frontend_image_path`、`device_id`、`return_json_emit_poly`、`infer_params`）。
   2. 执行 `GraphExecutor::Run()`。
   3. 从 `frontend_json` / `frontend_json_by_node` 收集各节点输出。
   4. 按 `origin_index` 或位置索引映射回原始图像结果。
-  5. 返回 `{"result_list": [...]}` 格式 JSON。
+  5. 若入口含有限数值 `threshold`，按该值过滤每张图的最终结果。
+  6. 返回 `{"result_list": [...]}` 格式 JSON。
 
 ### 4.4 模型信息
 
@@ -246,6 +249,8 @@ public class DvsModel : FlowGraphModel
 4. 修改 `pipeline.json` 中各节点的 `model_path` 为临时目录中的实际路径，保留原始路径到 `model_path_original` 和 `model_name`。
 5. 调用 `LoadFromRoot(pipelineJson, deviceId)` 完成加载。
 6. `finally` 中清理临时目录。
+
+`DvsModel` 继承 `FlowGraphModel` 的推理语义：归档中模型节点使用 `pipeline.json` 保存的阈值，调用 `.dvst`/`.dvso`/`.dvsp` 时传入的 `threshold` 只过滤最终对外结果。
 
 **异常**：
 - 文件格式错误：`InvalidDataException`（"文件格式错误：缺少 DV 头部"）
@@ -288,8 +293,9 @@ public class DllLoader
 |-----------|---------|------|
 | Sentinel | `dlcv_infer.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` |
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
+| None（无狗） | 不加载 | — |
 
-**自动检测优先级**：`Instance` 初始化时先检测 Sentinel，再检测 Virbox；均未检测到则回退到 Sentinel。
+**自动检测优先级**：`Instance` 初始化时调用一次 `DogUtils.GetAvailableProviders()`，按 **Sentinel 优先、Virbox 第二** 选择 Provider；均未检测到时返回 `DogProvider.None`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
 
 **Provider 一致性校验**：`EnsureForModel` 在加载模型前，先读取模型头 `dog_provider` 得到所需 provider，再调用 `DogUtils.GetAvailableProviders()` 获取当前可用授权列表。若所需 provider 不在可用列表中，抛出异常：
 - 可用列表为空时提示 `未检测到授权`。
@@ -422,7 +428,7 @@ Console.WriteLine(info.ToString());
 
 | 字段名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `threshold` | float | 0.5 | 置信度阈值 |
+| `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型的最终对外结果阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
@@ -598,9 +604,9 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 `ForModel(string)` 的加载策略：
 - 先通过 `ModelHeaderProviderResolver.TryResolveExplicitProvider` 判断模型头是否**明确指定**了 `dog_provider`。
 - 若**明确指定**（`sentinel` 或 `virbox`），则校验对应加密狗是否存在；不存在时抛出异常，不静默 fallback。
-- 若**未指定**（旧模型或省略该字段），则调用 `AutoDetectProvider()` 自动检测当前插入的加密狗，按 **Sentinel 优先、Virbox 第二** 的顺序选择 Provider；检测不到任何狗时，默认使用 Sentinel。
+- 若**未指定**（旧模型或省略该字段），则调用 `AutoDetectProvider()` 自动检测当前插入的加密狗，按 **Sentinel 优先、Virbox 第二** 的顺序选择 Provider；检测不到任何狗时返回 `DogProvider.None`，不加载推理 DLL。
 
-`Instance`（兼容旧代码的单例）在首次创建时同样调用 `AutoDetectProvider()`，而非硬编码 Sentinel。
+`Instance`（兼容旧代码的单例）在首次创建时同样调用 `AutoDetectProvider()`；无狗时创建空 loader（函数指针均为 null），不加载 `dlcv_infer.dll` / `dlcv_infer_v.dll`。
 
 每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续 `GetModelInfoDvt`、`InferInternalDvt`、`FreeModel` 都走该 loader。`Utils` 的 `FreeAllModels`、`GetDeviceInfo`、`KeepMaxClock` 遍历所有已创建 loader 执行。
 
@@ -614,7 +620,7 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 
 ### 15.1 执行框架
 
-`ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、链路路由、标量注入、`NormalizeBboxProperties()` 和模型节点预加载；`LoadModels()` 仅对 `BaseModelModule` 调用 `LoadModel()`，并把加载元信息写入 `ExecutionContext.loaded_model_meta`。
+`ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、链路路由、标量注入、`NormalizeBboxProperties()` 和模型节点预加载；执行时保留流程文件中的节点属性。`LoadModels()` 仅对 `BaseModelModule` 调用 `LoadModel()`，并把加载元信息写入 `ExecutionContext.loaded_model_meta`。
 
 ### 15.2 模块实现文件
 

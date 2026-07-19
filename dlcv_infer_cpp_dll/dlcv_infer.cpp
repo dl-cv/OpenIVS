@@ -1077,6 +1077,16 @@ namespace dlcv_infer {
     static std::mutex g_modelIndexRefMu;
     static std::unordered_map<int, int> g_modelIndexRefCount;
 
+    // dvst（流程模型）的 modelIndex 由本层自管理，从 10000 起递增，
+    // 与底层 dvt 返回的 model_index（0 起递增）分区，避免上层按 modelIndex 索引时 dvst 与 dvt 撞键。
+    static std::mutex g_flowModelIndexMu;
+    static int g_nextFlowModelIndex = 10000;
+
+    static int AllocateFlowModelIndex() {
+        std::lock_guard<std::mutex> lk(g_flowModelIndexMu);
+        return g_nextFlowModelIndex++;
+    }
+
 #ifdef _WIN32
     std::wstring Win32MultiByteToWide(const std::string& input, uint32_t codePage) {
         int len = MultiByteToWideChar(codePage, 0, input.c_str(), -1, nullptr, 0);
@@ -1162,6 +1172,12 @@ namespace dlcv_infer {
 
     DllLoader::DllLoader(sntl_admin::DogProvider provider) : dogProvider(provider) {
         switch (provider) {
+        case sntl_admin::DogProvider::Unknown:
+            // 只执行加密狗检测，不加载推理 DLL
+            dllName.clear();
+            dllPath.clear();
+            dllDevPath.clear();
+            return;
         case sntl_admin::DogProvider::Sentinel:
 #ifdef _WIN32
             dllName = "dlcv_infer.dll";
@@ -1295,21 +1311,19 @@ namespace dlcv_infer {
     }
 
     sntl_admin::DogProvider DllLoader::AutoDetectProvider() {
-        try {
-            auto sentinel = sntl_admin::DogUtils::GetSentinelInfo();
-            if (sentinel.provider != sntl_admin::DogProvider::Unknown) {
+        // 只做一次加密狗检测：先 Sentinel 再 Virbox；都没有则不加载任何推理 DLL，也不抛异常
+        auto available = sntl_admin::DogUtils::GetAvailableProviders();
+        for (const auto& p : available) {
+            if (p == sntl_admin::DogProvider::Sentinel) {
                 return sntl_admin::DogProvider::Sentinel;
             }
-        } catch (...) {}
-
-        try {
-            auto virbox = sntl_admin::DogUtils::GetVirboxInfo();
-            if (virbox.provider != sntl_admin::DogProvider::Unknown) {
+        }
+        for (const auto& p : available) {
+            if (p == sntl_admin::DogProvider::Virbox) {
                 return sntl_admin::DogProvider::Virbox;
             }
-        } catch (...) {}
-
-        return sntl_admin::DogProvider::Sentinel;
+        }
+        return sntl_admin::DogProvider::Unknown;
     }
 
     DllLoader& DllLoader::Instance() {
@@ -1438,7 +1452,7 @@ namespace dlcv_infer {
                 if (code != 0) {
                     throw std::runtime_error(report.dump());
                 }
-                modelIndex = 1; // dvst 模式下仅作为“已加载”标记
+                modelIndex = AllocateFlowModelIndex();
                 return;
             } catch (const std::exception& ex) {
                 delete _flowModel;
@@ -1455,6 +1469,9 @@ namespace dlcv_infer {
         _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+        if (!_dllLoader->GetLoadModelFunc()) {
+            throw std::runtime_error("未检测到授权");
+        }
 
         json config;
         config["model_path"] = modelPathUtf8;
@@ -1502,7 +1519,7 @@ namespace dlcv_infer {
                 if (code != 0) {
                     throw std::runtime_error(report.dump());
                 }
-                modelIndex = 1;
+                modelIndex = AllocateFlowModelIndex();
                 return;
             } catch (const std::exception& ex) {
                 delete _flowModel;
@@ -1519,6 +1536,9 @@ namespace dlcv_infer {
         _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+        if (!_dllLoader->GetLoadModelFunc()) {
+            throw std::runtime_error("未检测到授权");
+        }
 
         json config;
         config["model_path"] = modelPathUtf8;
@@ -2181,6 +2201,9 @@ namespace dlcv_infer {
         _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+        if (!_dllLoader->GetLoadModelFunc()) {
+            throw std::runtime_error("未检测到授权");
+        }
 
         json config;
         config["type"] = "sliding_window_pipeline";

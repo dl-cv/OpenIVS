@@ -36,6 +36,19 @@ namespace dlcv_infer_csharp
         /// </summary>
         public bool OwnModelIndex { get; set; } = true;
 
+        // dvst（流程模型，DVS 模式）的 modelIndex 由本层自管理，从 10000 起递增，
+        // 与 dvt 从底层 DLL 返回的 model_index（0 起递增）分区，避免上层按 modelIndex 索引时 dvst 与 dvt 撞键。
+        private static int s_nextFlowModelIndex = 10000;
+        private static readonly object s_flowModelIndexLock = new object();
+
+        private static int AllocateFlowModelIndex()
+        {
+            lock (s_flowModelIndexLock)
+            {
+                return s_nextFlowModelIndex++;
+            }
+        }
+
         // DVP mode fields
         private bool _isDvpMode = false;
         private bool _isDvsMode = false;
@@ -70,8 +83,8 @@ namespace dlcv_infer_csharp
 
         }
 
-        public DogProvider LoadedDogProvider => _dllLoader?.LoadedDogProvider ?? DogProvider.Sentinel;
-        public string LoadedNativeDllName => _dllLoader?.LoadedNativeDllName ?? "dlcv_infer.dll";
+        public DogProvider LoadedDogProvider => _dllLoader?.LoadedDogProvider ?? DogProvider.None;
+        public string LoadedNativeDllName => _dllLoader?.LoadedNativeDllName;
 
         public Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false)
         {
@@ -265,7 +278,7 @@ namespace dlcv_infer_csharp
                     string msg = report != null ? report.ToString() : "Unknown error";
                     throw new Exception("DVS模型加载失败:\n" + msg);
                 }
-                modelIndex = 1; // 标记为已加载
+                modelIndex = AllocateFlowModelIndex();
             }
             catch (Exception ex)
             {
@@ -290,6 +303,10 @@ namespace dlcv_infer_csharp
         {
             DllLoader.EnsureForModel(modelPath);
             _dllLoader = DllLoader.Instance;
+            if (_dllLoader == null || _dllLoader.dlcv_load_model == null)
+            {
+                throw new Exception("未检测到授权");
+            }
 
             var setting = new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii };
 

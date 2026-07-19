@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace DlcvDemo
@@ -12,11 +9,18 @@ namespace DlcvDemo
         /// 应用程序的主入口点。
         /// </summary>
         [STAThread]
-        static void Main()
+        static int Main(string[] args)
         {
+            if (args != null && args.Length > 0)
+            {
+                CliRunner.InitializeConsole();
+                return CliRunner.Run(args);
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Form1());
+            return 0;
         }
     }
 }

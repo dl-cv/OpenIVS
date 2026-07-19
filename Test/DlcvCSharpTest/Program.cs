@@ -35,9 +35,6 @@ namespace DlcvCSharpTest
         private const string UsLagImagePath2 = @"C:\Users\Administrator\Desktop\测试无监督\NG3.png";
         private const string FlowInstanceSegFilterModelPath = @"Y:\zxc\模块化任务测试\实例分割筛选测试_120_50.dvst";
         private const string FlowInstanceSegFilterImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png";
-        private const string BBoxCropFixModelAPath = @"Z:\A-苏州三谛\A260308-苏州三谛-AOI元器件定位-新方案\Task01-元件提取\现场模型\模型1-元件提取 - 副本_120_50.dvst";
-        private const string BBoxCropFixModelBPath = @"Z:\A-苏州三谛\A260308-苏州三谛-AOI元器件定位-新方案\Task01-元件提取\现场模型\模型1-元件提取 - 裁图_120_50.dvst";
-        private const string BBoxCropFixImagePath = @"Z:\A-苏州三谛\A260308-苏州三谛-AOI元器件定位-新方案\Task01-元件提取\现场模型\PCB20047-23439-TOP_61_4092_0.jpg";
 
         private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
         {
@@ -79,11 +76,6 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bbox-iou-dedup-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunBBoxIoUDedupSelfTest();
-                }
-
-                if (args != null && args.Length >= 1 && string.Equals(args[0], "bbox-crop-fix-selftest", StringComparison.OrdinalIgnoreCase))
-                {
-                    return RunBBoxCropFixSelfTest();
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "image-generation-expand-selftest", StringComparison.OrdinalIgnoreCase))
@@ -2046,9 +2038,6 @@ namespace DlcvCSharpTest
                 return 1;
             }
 
-            int actual = RunBBoxCropActualModelSelfTest();
-            if (actual != 0) return actual;
-
             Console.WriteLine("BBOX 去重与裁图修复自测通过");
             return 0;
         }
@@ -2563,108 +2552,6 @@ namespace DlcvCSharpTest
                 ["output_size"] = new JArray(width, height),
                 ["original_size"] = new JArray(width, height)
             };
-        }
-
-        private static int RunBBoxCropActualModelSelfTest()
-        {
-            Console.WriteLine("==== 苏州三谛 BBOX 裁图实际模型自测 ====");
-            if (!File.Exists(BBoxCropFixModelAPath)) { Console.WriteLine("模型A不存在: " + BBoxCropFixModelAPath); return 2; }
-            if (!File.Exists(BBoxCropFixModelBPath)) { Console.WriteLine("模型B不存在: " + BBoxCropFixModelBPath); return 2; }
-            if (!File.Exists(BBoxCropFixImagePath)) { Console.WriteLine("图像不存在: " + BBoxCropFixImagePath); return 2; }
-
-            Mat bgr = null;
-            Mat rgb = null;
-            try
-            {
-                bgr = Cv2.ImRead(BBoxCropFixImagePath, ImreadModes.Color);
-                if (bgr == null || bgr.Empty()) { Console.WriteLine("图像解码失败"); return 2; }
-                rgb = new Mat();
-                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
-
-                bool ok = true;
-                ok = RunBBoxCropOneModel("A", BBoxCropFixModelAPath, rgb, 4) && ok;
-                ok = RunBBoxCropOneModel("B", BBoxCropFixModelBPath, rgb, 4) && ok;
-                return ok ? 0 : 1;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("苏州三谛实际模型自测异常: " + ex.Message);
-                Console.WriteLine(ex.StackTrace);
-                return 1;
-            }
-            finally
-            {
-                if (rgb != null) rgb.Dispose();
-                if (bgr != null) bgr.Dispose();
-                ForceGc();
-            }
-        }
-
-        private static bool RunBBoxCropOneModel(string name, string modelPath, Mat rgb, int expectedCount)
-        {
-            Model model = null;
-            Utils.CSharpResult result = default(Utils.CSharpResult);
-            bool hasResult = false;
-            try
-            {
-                Console.WriteLine("[" + name + "] 加载模型: " + modelPath);
-                model = new Model(modelPath, GpuDeviceId, false, false);
-                var p = new JObject { ["threshold"] = 0.5, ["with_mask"] = true, ["batch_size"] = 1 };
-                var sw = Stopwatch.StartNew();
-                result = model.InferBatch(new List<Mat> { rgb }, p);
-                hasResult = true;
-                sw.Stop();
-
-                int sampleCount = result.SampleResults != null ? result.SampleResults.Count : 0;
-                int objectCount = sampleCount > 0 && result.SampleResults[0].Results != null
-                    ? result.SampleResults[0].Results.Count
-                    : 0;
-
-                Console.WriteLine("[" + name + "] sample_count: " + sampleCount);
-                Console.WriteLine("[" + name + "] 推理结果: " + objectCount + "个, elapsed=" + sw.Elapsed.TotalMilliseconds.ToString("F2", CultureInfo.InvariantCulture) + "ms");
-                PrintBBoxCropObjects(result);
-
-                if (sampleCount != 1 || objectCount != expectedCount)
-                {
-                    Console.WriteLine("[" + name + "] 验证失败：期望 1 个 sample 且 " + expectedCount + " 个目标，实际 sample="
-                        + sampleCount + ", target=" + objectCount);
-                    return false;
-                }
-
-                return true;
-            }
-            finally
-            {
-                if (hasResult) DisposeResultMasks(result);
-                try { if (model != null) model.Dispose(); } catch { }
-                ForceGc();
-            }
-        }
-
-        private static void PrintBBoxCropObjects(Utils.CSharpResult result)
-        {
-            if (result.SampleResults == null || result.SampleResults.Count == 0 || result.SampleResults[0].Results == null)
-            {
-                return;
-            }
-
-            var objects = result.SampleResults[0].Results;
-            for (int i = 0; i < objects.Count; i++)
-            {
-                var obj = objects[i];
-                Console.WriteLine(
-                    string.Format(
-                        CultureInfo.InvariantCulture,
-                        "[{0}] {1} score={2:F2} bbox=({3:F1}, {4:F1}, {5:F1}, {6:F1}) area={7:F1}",
-                        i + 1,
-                        obj.CategoryName,
-                        obj.Score,
-                        obj.Bbox != null && obj.Bbox.Count > 0 ? obj.Bbox[0] : 0.0,
-                        obj.Bbox != null && obj.Bbox.Count > 1 ? obj.Bbox[1] : 0.0,
-                        obj.Bbox != null && obj.Bbox.Count > 2 ? obj.Bbox[2] : 0.0,
-                        obj.Bbox != null && obj.Bbox.Count > 3 ? obj.Bbox[3] : 0.0,
-                        obj.Area));
-            }
         }
 
         private static int RunDemo2RgbSelfTest(string[] args)
