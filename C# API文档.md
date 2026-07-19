@@ -195,9 +195,11 @@ public Utils.CSharpResult Infer(Mat image, JObject paramsJson = null);
 public Utils.CSharpResult InferBatch(List<Mat> imageList, JObject paramsJson = null);
 public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 ```
-- 接口与 `Model` 完全一致。
+- 调用形式与 `Model` 一致，流程模型的阈值职责边界如下。
 - `Infer` 内部调用 `InferBatch(new List<Mat> { image })`。
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
+- 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
+- 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
 
 ### 4.3 内部推理方法
 
@@ -210,7 +212,8 @@ private Tuple<JObject, IntPtr> InferInternalCore(List<Mat> images, JObject param
   2. 执行 `GraphExecutor::Run()`。
   3. 从 `frontend_json` / `frontend_json_by_node` 收集各节点输出。
   4. 按 `origin_index` 或位置索引映射回原始图像结果。
-  5. 返回 `{"result_list": [...]}` 格式 JSON。
+  5. 若入口含有限数值 `threshold`，按该值过滤每张图的最终结果。
+  6. 返回 `{"result_list": [...]}` 格式 JSON。
 
 ### 4.4 模型信息
 
@@ -246,6 +249,8 @@ public class DvsModel : FlowGraphModel
 4. 修改 `pipeline.json` 中各节点的 `model_path` 为临时目录中的实际路径，保留原始路径到 `model_path_original` 和 `model_name`。
 5. 调用 `LoadFromRoot(pipelineJson, deviceId)` 完成加载。
 6. `finally` 中清理临时目录。
+
+`DvsModel` 继承 `FlowGraphModel` 的推理语义：归档中模型节点使用 `pipeline.json` 保存的阈值，调用 `.dvst`/`.dvso`/`.dvsp` 时传入的 `threshold` 只过滤最终对外结果。
 
 **异常**：
 - 文件格式错误：`InvalidDataException`（"文件格式错误：缺少 DV 头部"）
@@ -423,7 +428,7 @@ Console.WriteLine(info.ToString());
 
 | 字段名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `threshold` | float | 0.5 | 置信度阈值 |
+| `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型的最终对外结果阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
@@ -615,7 +620,7 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 
 ### 15.1 执行框架
 
-`ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、链路路由、标量注入、入口推理参数覆盖、`NormalizeBboxProperties()` 和模型节点预加载；参数覆盖语义见 `模块、流程与模型推理标准文档.md`。`LoadModels()` 仅对 `BaseModelModule` 调用 `LoadModel()`，并把加载元信息写入 `ExecutionContext.loaded_model_meta`。
+`ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、链路路由、标量注入、`NormalizeBboxProperties()` 和模型节点预加载；执行时保留流程文件中的节点属性。`LoadModels()` 仅对 `BaseModelModule` 调用 `LoadModel()`，并把加载元信息写入 `ExecutionContext.loaded_model_meta`。
 
 ### 15.2 模块实现文件
 

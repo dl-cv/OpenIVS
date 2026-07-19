@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <stdexcept>
 #include <unordered_set>
@@ -196,6 +197,69 @@ static FlowBatchResult AggregateFrontendResults(ExecutionContext& ctx, int image
     }
 
     return batch;
+}
+
+static bool TryResolveFinalThreshold(const Json& paramsJson, double& threshold) {
+    if (!paramsJson.is_object() || !paramsJson.contains("threshold")) return false;
+    try {
+        const Json& value = paramsJson.at("threshold");
+        if (!value.is_number()) return false;
+        threshold = value.get<double>();
+        return std::isfinite(threshold);
+    } catch (...) {
+        return false;
+    }
+}
+
+static bool ShouldKeepFinalResult(const Json& result, double threshold) {
+    if (!result.is_object() || !result.contains("score")) return true;
+    try {
+        const Json& scoreValue = result.at("score");
+        if (!scoreValue.is_number()) return true;
+        const double score = scoreValue.get<double>();
+        return !std::isfinite(score) || score >= threshold;
+    } catch (...) {
+        return true;
+    }
+}
+
+static void FilterFinalResultArray(Json& results, double threshold) {
+    if (!results.is_array()) return;
+    for (auto it = results.begin(); it != results.end();) {
+        if (ShouldKeepFinalResult(*it, threshold)) {
+            ++it;
+        } else {
+            it = results.erase(it);
+        }
+    }
+}
+
+static void ApplyFinalThresholdFilter(Json& flowRoot, const Json& paramsJson) {
+    double threshold = 0.0;
+    if (!TryResolveFinalThreshold(paramsJson, threshold)) return;
+    if (!flowRoot.is_object() || !flowRoot.contains("result_list")) return;
+
+    Json& resultList = flowRoot["result_list"];
+    if (!resultList.is_array()) return;
+
+    bool isBatchContainer = false;
+    if (!resultList.empty()) {
+        const Json& first = resultList.front();
+        isBatchContainer = first.is_object() &&
+            first.contains("result_list") &&
+            first.at("result_list").is_array();
+    }
+
+    if (!isBatchContainer) {
+        FilterFinalResultArray(resultList, threshold);
+        return;
+    }
+
+    for (auto& entry : resultList) {
+        if (entry.is_object() && entry.contains("result_list") && entry["result_list"].is_array()) {
+            FilterFinalResultArray(entry["result_list"], threshold);
+        }
+    }
 }
 
 void FlowGraphModel::ReleaseOwnedModelsNoexcept() {
@@ -420,6 +484,7 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
 
     const FlowBatchResult batch = AggregateFrontendResults(ctx, static_cast<int>(images.size()));
     Json root = batch.ToFlowRootJson();
+    ApplyFinalThresholdFilter(root, paramsJson);
 
     const std::vector<GraphExecutor::UnregisteredNodeInfo> unregistered = exec.GetLastUnregisteredNodes();
     if (!unregistered.empty()) {

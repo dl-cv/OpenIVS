@@ -480,6 +480,7 @@ namespace DlcvDemo
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --help");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --version");
             Console.Out.WriteLine();
+            Console.Out.WriteLine("Flow archives: --threshold filters final output only; model-node thresholds come from the flow.");
             Console.Out.WriteLine("Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed");
         }
 

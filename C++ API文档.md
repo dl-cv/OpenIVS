@@ -451,13 +451,15 @@ dlcv_infer::Model::GetLastInferTiming(sdkMs, totalMs);
 auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 ```
 
+流程模型的 `threshold` 有明确的两层语义：流程内每个 `model/*` 节点始终使用流程文件中自身的 `threshold`；调用 `Infer` / `InferBatch` / `InferOneOutJson` 时传入的 `params["threshold"]` 只在流程执行和结果聚合完成后，对最终对外结果按 `score >= threshold` 进行筛选。该入口参数不会改写任何流程节点属性。
+
 ---
 
 ## 12. 推理参数 JSON 字段
 
 | 字段名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `threshold` | float | 0.5 | 置信度阈值 |
+| `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型中仅筛选最终对外结果，不覆盖节点自身阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |

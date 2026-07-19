@@ -258,6 +258,8 @@ namespace DlcvModules
                 }
 
                 AggregateFrontendResults(ctx, perImageResults);
+                // 入口阈值只作用于 return_json 汇总后的最终对外结果。
+                ApplyFinalThresholdFilter(perImageResults, paramsJson);
 
                 var root = new JObject();
                 if (images.Count == 1)
@@ -662,6 +664,86 @@ namespace DlcvModules
                 target.Add(token.DeepClone());
                 if (sig != null) seen.Add(sig);
             }
+        }
+
+        private static void ApplyFinalThresholdFilter(List<JArray> perImageResults, JObject paramsJson)
+        {
+            if (perImageResults == null || !TryReadFinalThreshold(paramsJson, out double threshold))
+            {
+                return;
+            }
+
+            for (int i = 0; i < perImageResults.Count; i++)
+            {
+                FilterFinalResultArray(perImageResults[i], threshold);
+            }
+        }
+
+        private static void FilterFinalResultArray(JArray results, double threshold)
+        {
+            if (results == null) return;
+
+            for (int i = results.Count - 1; i >= 0; i--)
+            {
+                var result = results[i] as JObject;
+                if (result == null) continue;
+
+                // 兼容旧格式容器：容器本身保留，只过滤其最终结果对象。
+                var nestedResults = result["sample_results"] as JArray;
+                if (nestedResults != null)
+                {
+                    FilterFinalResultArray(nestedResults, threshold);
+                    continue;
+                }
+
+                if (TryReadFiniteScore(result["score"], out double score) && score < threshold)
+                {
+                    results.RemoveAt(i);
+                }
+            }
+        }
+
+        private static bool TryReadFinalThreshold(JObject paramsJson, out double threshold)
+        {
+            threshold = 0.0;
+            if (paramsJson == null) return false;
+
+            JToken token = paramsJson["threshold"];
+            if (token == null || (token.Type != JTokenType.Integer && token.Type != JTokenType.Float))
+            {
+                return false;
+            }
+
+            try
+            {
+                threshold = token.Value<double>();
+            }
+            catch
+            {
+                return false;
+            }
+
+            return !double.IsNaN(threshold) && !double.IsInfinity(threshold);
+        }
+
+        private static bool TryReadFiniteScore(JToken token, out double score)
+        {
+            score = 0.0;
+            if (token == null || (token.Type != JTokenType.Integer && token.Type != JTokenType.Float))
+            {
+                return false;
+            }
+
+            try
+            {
+                score = token.Value<double>();
+            }
+            catch
+            {
+                return false;
+            }
+
+            return !double.IsNaN(score) && !double.IsInfinity(score);
         }
 
         private Utils.CSharpResult ConvertFlowResultsToCSharp(JArray resultList, bool includeMask = true)
