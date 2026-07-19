@@ -28,33 +28,23 @@
 |------|------|
 | Qt 5/6 | UI 框架（QApplication、QMainWindow、QTimer 等） |
 | OpenCV 4.x | 图像读取、通道转换、Mat 操作 |
-| `dlcv_infer.h` + `dlcv_infer.lib` | C++ API 头文件与导入库 |
-| `dlcv_infer.dll`（运行时） | 底层推理 DLL |
+| `dlcv_infer.h` + `dlcv_infer_cpp_dll.lib` | C++ API 头文件与导入库 |
+| `dlcv_infer_cpp_dll.dll`（运行时） | OpenIVS C++ API DLL |
 
 ### 2.2 Visual Studio 编译
 
-**前提条件**：
-1. 安装 Qt 并配置 VS Qt Tools（或手动配置 `QTDIR` 环境变量）。
-2. 确保 OpenCV 路径已添加到项目属性（包含目录 + 库目录 + 链接器输入）。
-3. 确保 `dlcv_infer_cpp_dll` 已编译，输出 `dlcv_infer.lib` 和 `dlcv_infer.h` 可用。
-
-**编译流程**：
-1. 打开 `OpenIVS.sln`，选择 `dlcv_infer_cpp_qt_demo` 项目。
-2. 平台配置：**x64 Release**（Qt 和 OpenCV 均需匹配 x64）。
-3. 链接器输入确认包含：
-   - `dlcv_infer.lib`
-   - OpenCV 核心库（`opencv_core`、`opencv_imgproc`、`opencv_imgcodecs` 等）
-   - Qt 核心库（`Qt5Core.lib`、`Qt5Gui.lib`、`Qt5Widgets.lib`）
-4. 生成解决方案（Ctrl+Shift+B）。
+- 构建统一通过 `.cursor/skills/vs-build/scripts/build.py` 执行，目标为 `dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.vcxproj`。
+- 默认配置为 `Debug`、`x64`、`Build`、`minimal`；发布构建使用 `Release`、`x64`、`Build`、`minimal`。
+- 项目通过 `ProjectReference` 构建 `dlcv_infer_cpp_dll`；直接构建项目时从 `$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\` 解析导入库，解决方案构建时从 `$(SolutionDir)$(Configuration)\` 解析。
+- Qt、OpenCV 与 DLCV SDK 依赖路径由工程属性解析；缺失时构建失败。
 
 ### 2.3 输出与部署
 
-- 编译输出：`x64\Release\dlcv_infer_cpp_qt_demo.exe`
-- 运行时需要将以下文件放在 exe 同级目录或系统 PATH 中：
-  - `dlcv_infer.dll`（或 `dlcv_infer_v.dll`，取决于加密狗类型）
-  - Qt 运行时 DLL（`Qt5Core.dll`、`Qt5Gui.dll`、`Qt5Widgets.dll` 等）
-  - OpenCV 运行时 DLL（`opencv_core4x.dll`、`opencv_imgproc4x.dll`、`opencv_imgcodecs4x.dll`）
-  - `nvml.dll`（可选，GPU 信息获取需要）
+- 直接构建项目时，Debug 输出为 `dlcv_infer_cpp_qt_demo/Debug/dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.exe`。
+- 直接构建项目时，Release 输出为 `dlcv_infer_cpp_qt_demo/Release/dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.exe`。
+- 通过 `OpenIVS.sln` 构建时，EXE 输出位于解决方案根目录的 `Debug/dlcv_infer_cpp_qt_demo/` 或 `Release/dlcv_infer_cpp_qt_demo/`。
+- 构建后事件把 `dlcv_infer_cpp_dll.dll`、Qt Core/Gui/Widgets、平台插件和样式插件复制到 EXE 输出目录。
+- 底层 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 仍按模型授权类型由 C++ API 从 SDK 路径加载。
 
 ---
 
@@ -62,25 +52,27 @@
 
 ### 3.1 程序入口（main.cpp）
 
-```cpp
-int main(int argc, char* argv[]) {
-    QApplication app(argc, argv);
-    app.setApplicationName("C++测试程序");
-    app.setOrganizationName("dlcv");
-    app.setFont(QFont("Microsoft YaHei", 9));
-    
-    // 退出时释放所有模型
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
-        dlcv_infer::Utils::FreeAllModels();
-    });
+- 无参数时初始化 `QApplication`、显示 `MainWindow`，退出前调用 `FreeAllModels()`。
+- 有参数时解析 `infer` 或 `--help`；`infer` 模式不显示窗口，完成验证后直接返回退出码。
+- Windows 控制台输入输出使用 UTF-8；模型路径通过 `std::wstring` 传给 C++ API。
 
-    MainWindow w;
-    w.show();
-    return app.exec();
-}
+### 3.2 命令行推理模式
+
+```text
+dlcv_infer_cpp_qt_demo.exe infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]
+dlcv_infer_cpp_qt_demo.exe --help
 ```
 
-### 3.2 UI 布局
+- `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`。
+- `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
+- 普通模型使用 `--threshold` 作为推理阈值；流程模型保留各模型节点自身的阈值，`--threshold` 只对最终对外结果进行筛选。
+- 图片由 `QFile` 读取字节并通过 `cv::imdecode` 解码；BGR/BGRA 转为 RGB。
+- 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，输出字段与 C# 测试程序一致。
+- C++ 结构化结果的本地 GBK 类别名在 CLI 边界转换为 UTF-8，再写入 JSON。
+- `--output` 使用 `QSaveFile` 原子写入 UTF-8 JSON；该路径不得覆盖模型或图片，父目录必须存在。
+- 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致或存在低于阈值的结果。
+
+### 3.3 UI 布局
 
 主窗口分为上下两部分：
 - **上方控制栏**：按钮 + 参数调节控件

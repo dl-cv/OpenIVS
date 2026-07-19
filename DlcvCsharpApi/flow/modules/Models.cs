@@ -175,7 +175,7 @@ namespace DlcvModules
 			var outResults = new JArray();
 			LoadModel();
 
-			// 透传推理参数
+			// 只透传流程节点自身的推理参数；入口阈值在最终结果层处理。
 			var p = new JObject();
 			TryAddParam(p, "threshold");
 			TryAddParam(p, "iou_threshold");

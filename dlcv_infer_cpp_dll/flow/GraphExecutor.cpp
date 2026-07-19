@@ -138,13 +138,13 @@ bool GraphExecutor::IsScalarPortType(const std::string& tLower) {
 static void ApplyInferParamOverrides(Json& props, const Json& inferParams) {
     if (!props.is_object() || !inferParams.is_object()) return;
     for (auto it = inferParams.begin(); it != inferParams.end(); ++it) {
-        // with_mask 仅用于控制最终返回格式，不应该全局覆盖流程节点属性。
-        // 否则会导致依赖 mask_rle 的后处理节点（如 mask_to_rbox）在流程内部被意外打断。
+        // with_mask 只控制最终返回格式；threshold 只筛选流程最终对外结果。
+        // threshold 不能覆盖节点属性，模型节点必须使用流程文件中自身的阈值。
         std::string keyLower = it.key();
         std::transform(keyLower.begin(), keyLower.end(), keyLower.begin(), [](unsigned char ch) {
             return static_cast<char>(std::tolower(ch));
         });
-        if (keyLower == "with_mask") {
+        if (keyLower == "with_mask" || keyLower == "threshold") {
             continue;
         }
 
