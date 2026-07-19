@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -22,9 +23,176 @@ namespace DlcvModules
 		protected JArray _maxShape;
 		protected int _maxBatchSize = 1;
 
-		// 按 (modelPath|deviceId|rpcMode) 缓存 Model 实例，避免 Flow 每次推理重复加载
-		private static readonly Dictionary<string, Model> _modelCache = new Dictionary<string, Model>(StringComparer.OrdinalIgnoreCase);
+		private sealed class CachedModelEntry
+		{
+			public string ModelPath;
+			public int DeviceId;
+			public bool RpcMode;
+			public Model Model;
+			public long FileLength;
+			public DateTime LastWriteTimeUtc;
+		}
+
+		private struct ModelFileVersion
+		{
+			public long FileLength;
+			public DateTime LastWriteTimeUtc;
+
+			public bool Matches(ModelFileVersion other)
+			{
+				return other.FileLength == FileLength &&
+					other.LastWriteTimeUtc == LastWriteTimeUtc;
+			}
+		}
+
+		// 按 (modelPath|deviceId|rpcMode|fileLength|lastWriteTimeUtc) 缓存 Model 实例。
+		// 同一路径热替换后，新旧版本并存，直到所有流程停止并显式调用 ReleaseAllCachedModels。
+		private static readonly Dictionary<string, CachedModelEntry> _modelCache = new Dictionary<string, CachedModelEntry>(StringComparer.OrdinalIgnoreCase);
+		// 回滚释放失败的模型只能等待后续清理重试，不参与任何缓存命中。
+		private static readonly List<CachedModelEntry> _pendingReleaseModels = new List<CachedModelEntry>();
 		private static readonly object _modelCacheLock = new object();
+
+		private static string NormalizeModelPath(string modelPath)
+		{
+			if (string.IsNullOrWhiteSpace(modelPath))
+				throw new InvalidOperationException("模型路径为空");
+			return Path.GetFullPath(modelPath).Trim();
+		}
+
+		private static string BuildModelCacheKey(
+			string modelPath,
+			int deviceId,
+			bool rpcMode,
+			ModelFileVersion fileVersion)
+		{
+			return modelPath + "|" +
+				deviceId.ToString(CultureInfo.InvariantCulture) + "|" +
+				(rpcMode ? "rpc" : "local") + "|" +
+				fileVersion.FileLength.ToString(CultureInfo.InvariantCulture) + "|" +
+				fileVersion.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture);
+		}
+
+		private static ModelFileVersion ReadModelFileVersion(string modelPath)
+		{
+			var file = new FileInfo(modelPath);
+			if (!file.Exists)
+				throw new FileNotFoundException("模型文件不存在", modelPath);
+			return new ModelFileVersion
+			{
+				FileLength = file.Length,
+				LastWriteTimeUtc = file.LastWriteTimeUtc
+			};
+		}
+
+		/// <summary>
+		/// 释放全部 Flow 模型缓存。
+		/// 调用前必须先停止所有流程执行。
+		/// </summary>
+		public static int ReleaseAllCachedModels()
+		{
+			lock (_modelCacheLock)
+			{
+				var cachedEntries = new List<KeyValuePair<string, CachedModelEntry>>(_modelCache);
+				var pendingEntries = new List<CachedModelEntry>(_pendingReleaseModels);
+				List<Exception> errors = null;
+				int disposedCount = 0;
+				foreach (var pair in cachedEntries)
+				{
+					var entry = pair.Value;
+					if (entry == null || entry.Model == null)
+					{
+						_modelCache.Remove(pair.Key);
+						continue;
+					}
+					try
+					{
+						ReleaseCachedModel(entry.Model);
+						CachedModelEntry current;
+						if (_modelCache.TryGetValue(pair.Key, out current) && object.ReferenceEquals(current, entry))
+							_modelCache.Remove(pair.Key);
+						disposedCount++;
+					}
+					catch (Exception ex)
+					{
+						if (errors == null) errors = new List<Exception>();
+						errors.Add(CreateReleaseException(entry, ex));
+					}
+				}
+				foreach (var entry in pendingEntries)
+				{
+					if (entry == null || entry.Model == null)
+					{
+						RemovePendingReleaseLocked(entry);
+						continue;
+					}
+					try
+					{
+						ReleaseCachedModel(entry.Model);
+						RemovePendingReleaseLocked(entry);
+						disposedCount++;
+					}
+					catch (Exception ex)
+					{
+						if (errors == null) errors = new List<Exception>();
+						errors.Add(CreateReleaseException(entry, ex));
+					}
+				}
+				if (errors != null)
+				{
+					throw new AggregateException(
+						"释放 Flow 模型缓存失败: total=" + (cachedEntries.Count + pendingEntries.Count).ToString(CultureInfo.InvariantCulture) +
+						", disposed=" + disposedCount.ToString(CultureInfo.InvariantCulture) +
+						", failed=" + errors.Count.ToString(CultureInfo.InvariantCulture),
+						errors);
+				}
+				return disposedCount;
+			}
+		}
+
+		private static void AddPendingReleaseLocked(CachedModelEntry entry)
+		{
+			if (entry == null || entry.Model == null) return;
+			for (int i = 0; i < _pendingReleaseModels.Count; i++)
+			{
+				var pending = _pendingReleaseModels[i];
+				if (pending != null && object.ReferenceEquals(pending.Model, entry.Model))
+					return;
+			}
+			_pendingReleaseModels.Add(entry);
+		}
+
+		private static void RemovePendingReleaseLocked(CachedModelEntry entry)
+		{
+			for (int i = _pendingReleaseModels.Count - 1; i >= 0; i--)
+			{
+				if (object.ReferenceEquals(_pendingReleaseModels[i], entry))
+					_pendingReleaseModels.RemoveAt(i);
+			}
+		}
+
+		private static void ReleaseCachedModel(Model model)
+		{
+			if (model == null) return;
+			model.FreeModel();
+			if (model.modelIndex != -1)
+			{
+				throw new InvalidOperationException(
+					"Model.FreeModel 返回后 modelIndex 仍有效: " +
+					model.modelIndex.ToString(CultureInfo.InvariantCulture));
+			}
+			model.Dispose();
+		}
+
+		private static Exception CreateReleaseException(CachedModelEntry entry, Exception error)
+		{
+			return new InvalidOperationException(
+				"释放 Flow 模型缓存条目失败: path=" + entry.ModelPath +
+				", device_id=" + entry.DeviceId.ToString(CultureInfo.InvariantCulture) +
+				", rpc_mode=" + entry.RpcMode +
+				", file_length=" + entry.FileLength.ToString(CultureInfo.InvariantCulture) +
+				", last_write_utc=" + entry.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
+				error);
+		}
 
 		protected BaseModelModule(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
 			: base(nodeId, title, properties, context)
@@ -68,15 +236,80 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				string cacheKey = (_modelPath ?? "") + "|" + deviceId + "|" + rpcMode;
-				bool cacheHit = false;
+				_modelPath = NormalizeModelPath(_modelPath);
+				var fileVersion = ReadModelFileVersion(_modelPath);
+				string cacheKey = BuildModelCacheKey(_modelPath, deviceId, rpcMode, fileVersion);
 				lock (_modelCacheLock)
 				{
-					cacheHit = _modelCache.TryGetValue(cacheKey, out _model);
-					if (!cacheHit)
+					CachedModelEntry cached;
+					if (_modelCache.TryGetValue(cacheKey, out cached) && cached != null && cached.Model != null)
 					{
-						_model = new Model(_modelPath, deviceId, rpcMode, true);
-						_modelCache[cacheKey] = _model;
+						_model = cached.Model;
+					}
+					else
+					{
+						Model loadedModel = null;
+						CachedModelEntry loadedEntry = null;
+						try
+						{
+							loadedModel = new Model(_modelPath, deviceId, rpcMode, false);
+							loadedEntry = new CachedModelEntry
+							{
+								ModelPath = _modelPath,
+								DeviceId = deviceId,
+								RpcMode = rpcMode,
+								Model = loadedModel,
+								FileLength = fileVersion.FileLength,
+								LastWriteTimeUtc = fileVersion.LastWriteTimeUtc
+							};
+							var loadedVersion = ReadModelFileVersion(_modelPath);
+							loadedEntry.FileLength = loadedVersion.FileLength;
+							loadedEntry.LastWriteTimeUtc = loadedVersion.LastWriteTimeUtc;
+							if (!fileVersion.Matches(loadedVersion))
+								throw new InvalidOperationException("模型文件在加载过程中发生变化: " + _modelPath);
+
+							_modelCache[cacheKey] = loadedEntry;
+							_model = loadedModel;
+						}
+						catch (Exception loadError)
+						{
+							_model = null;
+							if (loadedModel != null)
+							{
+								if (loadedEntry == null)
+								{
+									loadedEntry = new CachedModelEntry
+									{
+										ModelPath = _modelPath,
+										DeviceId = deviceId,
+										RpcMode = rpcMode,
+										Model = loadedModel,
+										FileLength = fileVersion.FileLength,
+										LastWriteTimeUtc = fileVersion.LastWriteTimeUtc
+									};
+								}
+								CachedModelEntry current;
+								if (_modelCache.TryGetValue(cacheKey, out current) && object.ReferenceEquals(current, loadedEntry))
+									_modelCache.Remove(cacheKey);
+								try
+								{
+									ReleaseCachedModel(loadedModel);
+								}
+								catch (Exception disposeError)
+								{
+									AddPendingReleaseLocked(loadedEntry);
+									throw new AggregateException(
+										"Flow 模型加载失败且回滚释放未完成: path=" + _modelPath +
+										", device_id=" + deviceId.ToString(CultureInfo.InvariantCulture) +
+										", rpc_mode=" + rpcMode +
+										", file_length=" + loadedEntry.FileLength.ToString(CultureInfo.InvariantCulture) +
+										", last_write_utc=" + loadedEntry.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
+										loadError,
+										CreateReleaseException(loadedEntry, disposeError));
+								}
+							}
+							throw;
+						}
 					}
 				}
 				SyncModelMeta();
