@@ -261,6 +261,32 @@ namespace DlcvModules
 
 	}
 
+
+	internal static class TemplatePathResolver
+	{
+		internal static string ResolveTemplatesDirectory(ExecutionContext context)
+		{
+			string dir = context != null ? context.Get<string>("templates_dir", null) : null;
+			if (string.IsNullOrWhiteSpace(dir))
+				throw new InvalidOperationException("templates_dir is empty");
+
+			string fullPath;
+			try
+			{
+				fullPath = Path.GetFullPath(dir);
+				Directory.CreateDirectory(fullPath);
+			}
+			catch (Exception ex)
+			{
+				throw new InvalidOperationException("templates_dir is unavailable: path=" + dir + ", " + ex.Message, ex);
+			}
+
+			if (!Directory.Exists(fullPath))
+				throw new InvalidOperationException("templates_dir was not created: path=" + fullPath);
+			return fullPath;
+		}
+	}
+
 	/// <summary>
 	/// 2) 存储模版：将 SimpleTemplate 写入 JSON 文件；如有首张图像则保存 PNG 同名文件。
 	/// type: features/template_save
@@ -282,21 +308,7 @@ namespace DlcvModules
 		{
 			var images = imageList ?? new List<ModuleImage>();
 			var results = resultList != null ? new JArray(resultList) : new JArray();
-			string dir = this.Context != null ? this.Context.Get<string>("templates_dir", null) : null;
-			string effDir = dir;
-			try
-			{
-				if (string.IsNullOrWhiteSpace(effDir))
-				{
-					effDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "模版");
-				}
-				else if (!Path.IsPathRooted(effDir))
-				{
-					effDir = Path.GetFullPath(effDir);
-				}
-			}
-			catch { }
-			try { if (!string.IsNullOrWhiteSpace(effDir)) Directory.CreateDirectory(effDir); } catch { }
+			string effDir = TemplatePathResolver.ResolveTemplatesDirectory(this.Context);
 
 			// 从模版主通道读取
 			SimpleTemplate tpl = null;
@@ -1055,8 +1067,7 @@ namespace DlcvModules
 			var images = imageList ?? new List<ModuleImage>();
 			var results = resultList ?? new JArray();
 
-			string saveDir = this.Context != null ? this.Context.Get<string>("templates_dir", null) : null;
-			if (!string.IsNullOrWhiteSpace(saveDir)) { try { Directory.CreateDirectory(saveDir); } catch { } }
+			string saveDir = TemplatePathResolver.ResolveTemplatesDirectory(this.Context);
 			string productType = ReadStringOrDefault("product_type", null);
 			productType = productType ?? string.Empty;
 
@@ -1178,7 +1189,7 @@ namespace DlcvModules
 
 			// 计算模版文件路径（固定使用执行上下文中的 templates_dir）
 			string fname = SimpleTemplateUtils.MakeSafeFileName(templateName);
-			string jsonPath = string.IsNullOrWhiteSpace(saveDir) ? (fname + ".json") : Path.Combine(saveDir, fname + ".json");
+			string jsonPath = Path.Combine(saveDir, fname + ".json");
 
 			// 分支 B：无现存模版 -> 保存模版与 PNG（PNG 使用首图 OriginalImage），随后与自身匹配
 			if (!File.Exists(jsonPath))
@@ -1201,7 +1212,18 @@ namespace DlcvModules
 					["file_name"] = fname
 				});
 				saver.MainTemplateList = new List<SimpleTemplate> { tpl };
-				try { saver.Process(imagesForSave, results); } catch { }
+				try
+				{
+					saver.Process(imagesForSave, results);
+				}
+				catch (Exception ex)
+				{
+					throw new InvalidOperationException(
+						"template save failed: template=" + templateName +
+						", face=" + (face ?? string.Empty) +
+						", path=" + jsonPath + ", " + ex.Message,
+						ex);
+				}
 
 				// 自匹配：golden 使用磁盘上已保存（已过滤）的模版文件
 				var goldenListSelf = new List<SimpleTemplate>();
@@ -1212,7 +1234,10 @@ namespace DlcvModules
 				// 保存完成后校验文件存在
 				if (!File.Exists(jsonPath))
 				{
-					throw new Exception("template save failed: file not found");
+					throw new Exception(
+						"template save failed: file not found, template=" + templateName +
+						", face=" + (face ?? string.Empty) +
+						", path=" + jsonPath);
 				}
 				var loSelf = loaderSelf.Process(images, results);
 				if (loSelf == null || loSelf.TemplateList == null || loSelf.TemplateList.Count == 0)
