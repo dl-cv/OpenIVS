@@ -28,7 +28,7 @@
 - **平台**：只提供 `x64`（Debug/Release），必须以 **x64** 方式编译与运行
 - **启动项目**：`DlcvDemo`
 - **输出**：
-  - `DlcvDemo`：WinExe（无控制台窗口）
+  - `DlcvDemo`：WinExe；无参数启动不显示控制台，命令行模式连接父控制台并输出 UTF-8 文本
   - 说明：当前源码中 **没有**为 `DlcvDemo` 配置“自动复制 `AIModelRPC.exe`”的构建步骤；若要启用 RPC 模式，请确保 `AIModelRPC.exe` 位于以下任一路径（见 `DlcvCsharpApi/Model.cs` 的查找顺序）：
     - `DlcvDemo` 的输出目录（与主 EXE 同目录）
     - SDK 固定路径：`C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`
@@ -79,6 +79,26 @@
   - **位深**：非 `CV_8U` 时转为 8 位（`ConvertMatDepthTo8U`：16U 按 `1/256`，浮点按值域映射等）。
   - **通道**：`ParseInputChFromModelInfo` 可从 `model_info.input_shapes.*.max_shape` 推断 1 或 3，并缓存到 `_expectedChCache`；调用方负责把三/四通道颜色图整理为 `RGB`，接口再按模型输入自动做最小必要的通道规整，例如把灰度图补成 `RGB`，或把三/四通道图压成灰度。
 
+#### 2.5 命令行推理模式
+
+无参数启动时进入 WinForms GUI。存在命令行参数时由 `CliRunner` 执行无界面模式。
+
+```text
+"C# 测试程序.exe" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]
+"C# 测试程序.exe" --help
+"C# 测试程序.exe" --version
+```
+
+- `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`。
+- `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
+- 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
+- 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
+- `structured` 与 `json` 均包含 `count`、`scores`、`categories` 和 `below_threshold`。
+- `--output` 写入无 BOM 的 UTF-8 JSON；该路径不得覆盖模型或图片，父目录必须存在。
+- 原生推理运行库仍可能向标准输出写入本地编码日志；机器解析使用 `--output` 文件，不把 stdout 当作单一 JSON 文档。
+- WinExe 从交互式 `cmd` 启动时由调用方使用等待方式运行；PowerShell 自动化使用 `Start-Process -Wait -PassThru` 读取退出码。
+- 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致或存在低于阈值的结果。
+
 ### 3. 功能边界（必须严格一致）
 
 - **必须具备的功能**：
@@ -98,7 +118,7 @@
 - **明确不做的功能**（避免不同人实现“加功能”导致不一致）：
   - 不提供相机/视频流推理
   - 不提供批量文件夹推理（除内部压力测试使用 batch_size 重复同一张图）
-  - 不提供结果导出/保存到文件
+  - GUI 不提供结果导出/保存到文件；命令行模式只保存推理验证摘要
   - 不提供可配置的推理参数面板（除阈值、batch_size、线程数）
   - 不提供 GPU 列表“刷新”按钮
   - 不提供流程编辑器/可视化编辑

@@ -23,17 +23,17 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - **禁止直接调用** `msbuild`、`dotnet`、`devenv` 或其他本地 shell 编译命令
 - **默认构建参数**：`Debug`、`x64`、`Build`、`minimal`
 - 用户明确指定 `Release`、`Rebuild`、`Clean` 等参数时，按指定值执行
-- .NET 项目通过 Visual Studio 或 `dotnet build` 编译
-- C++ 项目通过 Visual Studio 编译（x64 Release）
+- .NET 与 C++ 项目均通过 `.cursor/skills/vs-build/scripts/build.py` 调用 Visual Studio 工具链编译
 - Qt 项目需配置 Qt 路径和 OpenCV 路径
 - 构建前需确保深度视觉 SDK 已正确安装（`dlcv_infer.dll` 可用）
 - WPF 框架额外需要海康 MVS 安装
 
 ## 统一运行与验证输入规则
 
-- 本仓库所有程序、测试程序、自测入口、验证入口和临时排查入口均**禁止使用命令行传参**覆盖模型路径、图片路径、batch、阈值、运行次数、线程数或其他业务输入。
-- 需要切换验证输入时，只修改源码中的固定变量、常量字符串或配置对象字段。
-- 控制台测试程序也遵守该规则；验证时不通过 shell 命令行追加参数。
+- `DlcvDemo` 与 `dlcv_infer_cpp_qt_demo` 支持文档中定义的 `infer` 命令行模式，用于传入模型、图片、阈值、设备和 mask 开关并执行无界面自动验证。
+- 两个实际测试程序无命令行参数时仍启动原 GUI，不改变桌面交互行为。
+- 其他程序、自测入口和临时排查入口仅使用各自文档中已经定义的参数；未记录的业务输入通过源码固定变量或配置对象字段设置。
+- 命令行推理模式输出结构化与 JSON 两条 API 路径的结果摘要，并以退出码区分成功、运行错误、参数错误和验证失败。
 
 ## 核心模块与入口
 
@@ -340,6 +340,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 - **参数控件**：选择显卡（下拉）、batch_size（1~1024，默认1）、threshold（0.0~1.0，默认0.5）、线程数（1~32，默认1）
 - **图像预处理**：`prepareImageForInference` 将 BGR/BGRA 转为 RGB
 - **压力测试**：每 500ms 更新统计，包含运行时间、完成请求数、平均延迟、实时速率、各节点平均耗时
+- **命令行模式**：`infer --model ... --image ... --threshold ...`，无界面执行结构化与 JSON 双路径验证
 
 ### C++ Qt Demo3（`dlcv_infer_cpp_qt_demo3`）
 
@@ -364,6 +365,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
   - 多线程测试按钮为**开关**（运行中显示"停止"）
   - 一致性测试：首次推理保存基准，后续不一致时立即停止并弹 Warning
 - **关闭窗口**：停止测试 → Dispose 模型 → `Utils.FreeAllModels()`
+- **命令行模式**：`infer --model ... --image ... --threshold ...`，支持可选设备、mask 和 JSON 输出文件
 
 ### C# WinForms Demo2（`DlcvDemo2`）
 
@@ -412,9 +414,9 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 
 ## 运行验证方式
 
-- 构建完成后运行 `DlcvDemo` 或 `dlcv_infer_cpp_qt_demo` 加载模型并执行单次推理验证。
+- 构建完成后可运行 `DlcvDemo` 或 `dlcv_infer_cpp_qt_demo` GUI 加载模型并执行单次推理验证。
+- 自动验证使用两个实际测试程序的 `infer` 命令行模式；模型、图片与阈值通过已定义参数传入。
 - 使用 `Test/DlcvCSharpTest` 或 `Test/dlcv_infer_cpp_test` 执行自动化控制台测试（模型加载、推理、速度、内存）。
 - C# 测试支持 `demo2-rgb-selftest` 验证 Demo2 入口 RGB 数据流一致性。
-- 验证时禁止通过命令行传参覆盖模型路径或图片路径；需修改源码中的固定变量或配置对象字段。
 
 

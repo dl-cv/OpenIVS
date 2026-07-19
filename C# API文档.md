@@ -206,7 +206,7 @@ public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject paramsJson
 private Tuple<JObject, IntPtr> InferInternalCore(List<Mat> images, JObject paramsJson, bool emitPoly);
 ```
 - `InferInternalCore` 是核心实现：
-  1. 将输入图像放入 `ExecutionContext`（键：`frontend_image_mat`、`frontend_image_mats`、`frontend_image_mat_list`、`frontend_image_path`、`device_id`、`return_json_emit_poly`）。
+  1. 将输入图像和入口参数放入 `ExecutionContext`（键：`frontend_image_mat`、`frontend_image_mats`、`frontend_image_mat_list`、`frontend_image_path`、`device_id`、`return_json_emit_poly`、`infer_params`）。
   2. 执行 `GraphExecutor::Run()`。
   3. 从 `frontend_json` / `frontend_json_by_node` 收集各节点输出。
   4. 按 `origin_index` 或位置索引映射回原始图像结果。
@@ -615,7 +615,7 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 
 ### 15.1 执行框架
 
-`ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、链路路由、标量注入、`NormalizeBboxProperties()` 和模型节点预加载；`LoadModels()` 仅对 `BaseModelModule` 调用 `LoadModel()`，并把加载元信息写入 `ExecutionContext.loaded_model_meta`。
+`ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、链路路由、标量注入、入口推理参数覆盖、`NormalizeBboxProperties()` 和模型节点预加载；参数覆盖语义见 `模块、流程与模型推理标准文档.md`。`LoadModels()` 仅对 `BaseModelModule` 调用 `LoadModel()`，并把加载元信息写入 `ExecutionContext.loaded_model_meta`。
 
 ### 15.2 模块实现文件
 

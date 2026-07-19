@@ -80,6 +80,13 @@ namespace DlcvModules
 					}
 				}
 				if (props == null) props = new Dictionary<string, object>();
+
+				try
+				{
+					var inferParams = _context.Get<JObject>("infer_params", null);
+					ApplyInferParamOverrides(props, inferParams);
+				}
+				catch { }
 				
 				// 统一 bbox 属性：允许前端/旧配置用 XYXY 输入，C# 侧统一补齐为 XYWH（不删除原字段）
 				try { NormalizeBboxProperties(props); } catch { }
@@ -456,6 +463,34 @@ namespace DlcvModules
 				return "scalar";
 			// 其余类型均视作非标量通道
 			return "channel";
+		}
+
+		private static void ApplyInferParamOverrides(Dictionary<string, object> props, JObject inferParams)
+		{
+			if (props == null || inferParams == null) return;
+
+			foreach (var property in inferParams.Properties())
+			{
+				if (string.Equals(property.Name, "with_mask", StringComparison.OrdinalIgnoreCase))
+				{
+					continue;
+				}
+
+				JToken value = property.Value;
+				if (value == null || value.Type == JTokenType.Null)
+				{
+					props[property.Name] = null;
+					continue;
+				}
+
+				if (value.Type == JTokenType.Boolean ||
+					value.Type == JTokenType.Integer ||
+					value.Type == JTokenType.Float ||
+					value.Type == JTokenType.String)
+				{
+					props[property.Name] = ((JValue)value).Value;
+				}
+			}
 		}
 
 		/// <summary>

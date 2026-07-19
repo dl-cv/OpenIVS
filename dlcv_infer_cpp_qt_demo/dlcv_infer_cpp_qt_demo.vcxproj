@@ -84,7 +84,8 @@
     <QtIncludeDir Condition="'$(QtIncludeDir)'==''">$(QtInstallDir)\include</QtIncludeDir>
     <QtLibDir Condition="'$(QtLibDir)'==''">$(QtInstallDir)\lib</QtLibDir>
     <QtPluginsDir Condition="'$(QtPluginsDir)'==''">$(QtInstallDir)\plugins</QtPluginsDir>
-    <DlcvInferCppDllOutDir>$(SolutionDir)$(Configuration)\</DlcvInferCppDllOutDir>
+    <DlcvInferCppDllOutDir Condition="'$(BuildingSolutionFile)'=='true'">$(SolutionDir)$(Configuration)\</DlcvInferCppDllOutDir>
+    <DlcvInferCppDllOutDir Condition="'$(BuildingSolutionFile)'!='true'">$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\</DlcvInferCppDllOutDir>
     <DlcvInferCppDllPath>$(DlcvInferCppDllOutDir)dlcv_infer_cpp_dll.dll</DlcvInferCppDllPath>
   </PropertyGroup>
 
