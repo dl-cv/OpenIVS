@@ -343,8 +343,46 @@ namespace DlcvTest
                                 return;
                             }
 
-                            // 推理（显式声明类型，避免 dynamic 推断导致 lambda 表达式错误）
-                            Utils.CSharpResult result = model.Infer(mat);
+                            // 与单张推理一致：BGR/BGRA/GRAY → RGB，并传入 threshold / with_mask
+                            Utils.CSharpResult result = default(Utils.CSharpResult);
+                            Mat inferMat = null;
+                            try
+                            {
+                                var ch = mat.Channels();
+                                if (ch == 3)
+                                {
+                                    inferMat = new Mat();
+                                    Cv2.CvtColor(mat, inferMat, ColorConversionCodes.BGR2RGB);
+                                }
+                                else if (ch == 4)
+                                {
+                                    inferMat = new Mat();
+                                    Cv2.CvtColor(mat, inferMat, ColorConversionCodes.BGRA2RGB);
+                                }
+                                else if (ch == 1)
+                                {
+                                    inferMat = new Mat();
+                                    Cv2.CvtColor(mat, inferMat, ColorConversionCodes.GRAY2RGB);
+                                }
+                                else
+                                {
+                                    inferMat = mat;
+                                }
+
+                                var inferenceParams = new JObject
+                                {
+                                    ["threshold"] = (float)threshold,
+                                    ["with_mask"] = true
+                                };
+                                result = model.Infer(inferMat, inferenceParams);
+                            }
+                            finally
+                            {
+                                if (inferMat != null && !ReferenceEquals(inferMat, mat))
+                                {
+                                    try { inferMat.Dispose(); } catch { }
+                                }
+                            }
 
                             // 保存原图
                             if (saveImg)
