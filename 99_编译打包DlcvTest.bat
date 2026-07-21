@@ -44,9 +44,25 @@ if not exist "%OUT_DIR%\DlcvTest.exe" (
 
 echo.
 echo [2/2] 7z 打包到仓库根目录 DlcvTest.zip ...
+echo      排除: dll\ 目录、*.pdb、OpenCvSharpExtern.dll、opencv_videoio_ffmpeg*.dll
 if exist "%ZIP_PATH%" del /f /q "%ZIP_PATH%"
-"%SEVEN_Z%" a -tzip -mx=9 "%ZIP_PATH%" "%OUT_DIR%\*" -x!*.pdb -x!*.xml
+
+pushd "%OUT_DIR%"
 if errorlevel 1 (
+    echo [错误] 无法进入输出目录: %OUT_DIR%
+    goto :fail
+)
+
+"%SEVEN_Z%" a -tzip -mx=9 "%ZIP_PATH%" * ^
+  -x!*.pdb ^
+  -x!*.xml ^
+  -xr!dll ^
+  -x!OpenCvSharpExtern.dll ^
+  -x!opencv_videoio_ffmpeg4100_64.dll ^
+  -x!opencv_videoio_ffmpeg*.dll
+set "PACK_ERR=%ERRORLEVEL%"
+popd
+if not "%PACK_ERR%"=="0" (
     echo [错误] 打包失败
     goto :fail
 )
