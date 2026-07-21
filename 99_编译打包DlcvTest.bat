@@ -7,8 +7,14 @@ set "ROOT=%~dp0"
 set "PROJ=%ROOT%DlcvTest\DlcvTest.csproj"
 set "BUILD_PY=%ROOT%.cursor\skills\vs-build\scripts\build.py"
 set "OUT_DIR=%ROOT%DlcvTest\bin\x64\Release"
-set "ZIP_PATH=%ROOT%DlcvTest.zip"
 set "SEVEN_Z=C:\Program Files\7-Zip\7z.exe"
+
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set "DATE_TAG=%%i"
+if not defined DATE_TAG (
+    echo [错误] 无法获取日期
+    goto :fail
+)
+set "ZIP_PATH=%ROOT%DlcvTest_%DATE_TAG%.zip"
 
 echo ========================================
 echo  编译打包 DlcvTest (Release x64)
@@ -43,7 +49,7 @@ if not exist "%OUT_DIR%\DlcvTest.exe" (
 )
 
 echo.
-echo [2/2] 7z 打包到仓库根目录 DlcvTest.zip ...
+echo [2/2] 7z 打包到仓库根目录 DlcvTest_%DATE_TAG%.zip ...
 echo      排除: dll\ 目录、*.pdb、OpenCvSharpExtern.dll、opencv_videoio_ffmpeg*.dll
 if exist "%ZIP_PATH%" del /f /q "%ZIP_PATH%"
 
