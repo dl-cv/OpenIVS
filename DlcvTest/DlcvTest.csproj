@@ -124,6 +124,7 @@
       <DependentUpon>MainWindow.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="Views\MainWindow\BatchReport.cs" />
     <Compile Include="Views\MainWindow\MainWindow.Diagnostics.cs" />
     <Compile Include="Views\MainWindow\MainWindow.Events.cs" />
     <Compile Include="Views\MainWindow\MainWindow.Infer.cs" />

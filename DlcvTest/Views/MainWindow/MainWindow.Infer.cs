@@ -313,6 +313,20 @@ namespace DlcvTest
             int processedCount = 0;
             long lastProgressUpdateTicks = 0; // 用于节流进度更新
             const long ProgressUpdateIntervalTicks = 500000; // 50ms 节流间隔（1 tick = 100ns）
+            bool runEvaluation = false;
+            bool saveDetailed = false;
+            bool saveMissed = false;
+            try { runEvaluation = Settings.Default.RunEvaluation; } catch { }
+            try { saveDetailed = Settings.Default.SaveDetailedPredictData; } catch { }
+            try { saveMissed = Settings.Default.SaveMissedData; } catch { }
+            // 过漏检依赖详细结果记录；勾选过漏检时自动收集
+            bool collectRecords = runEvaluation || saveDetailed || saveMissed;
+            var batchRecords = collectRecords ? new ConcurrentDictionary<string, BatchReport.ImageRecord>(StringComparer.OrdinalIgnoreCase) : null;
+            string modelPathForReport = null;
+            try { modelPathForReport = Settings.Default.LastModelPath; } catch { }
+            var batchStartTime = DateTime.Now;
+            var batchSw = Stopwatch.StartNew();
+
             await Task.Run(() =>
             {
                 // 使用并行处理，从设置中读取最大并行度（默认 4，范围 1-16）
@@ -329,6 +343,9 @@ namespace DlcvTest
 
                     string baseName = Path.GetFileNameWithoutExtension(imgPath);
                     string ext = Path.GetExtension(imgPath);
+                    double inferMs = 0.0;
+                    bool inferOk = false;
+                    Utils.CSharpResult? resultForReport = null;
 
                     try
                     {
@@ -337,16 +354,60 @@ namespace DlcvTest
                             if (mat == null || mat.Empty())
                             {
                                 System.Diagnostics.Debug.WriteLine($"[批量推理] 无法读取图片: {imgPath}");
-                                int currentCount = Interlocked.Increment(ref processedCount);
-                                if (!batchStopFlag)
-                                    Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(progressRunId, currentCount, total)));
+                                inferOk = false;
+                                // 进度与报表记录统一在 finally / 循环尾部处理，避免重复计数
                                 return;
                             }
 
-                            // 推理（显式声明类型，避免 dynamic 推断导致 lambda 表达式错误）
-                            Utils.CSharpResult result = model.Infer(mat);
+                            Utils.CSharpResult result = default(Utils.CSharpResult);
+                            Mat inferMat = null;
 
-                            // 保存原图
+                            try
+                            {
+                                var ch = mat.Channels();
+                                if (ch == 3)
+                                {
+                                    inferMat = new Mat();
+                                    Cv2.CvtColor(mat, inferMat, ColorConversionCodes.BGR2RGB);
+                                }
+                                else if (ch == 4)
+                                {
+                                    inferMat = new Mat();
+                                    Cv2.CvtColor(mat, inferMat, ColorConversionCodes.BGRA2RGB);
+                                }
+                                else if (ch == 1)
+                                {
+                                    inferMat = new Mat();
+                                    Cv2.CvtColor(mat, inferMat, ColorConversionCodes.GRAY2RGB);
+                                }
+                                else
+                                {
+                                    inferMat = mat;
+                                }
+
+                                var inferenceParams = new JObject
+                                {
+                                    ["threshold"] = (float)threshold,
+                                    ["with_mask"] = true
+                                };
+
+                                var swInfer = Stopwatch.StartNew();
+                                result = model.Infer(inferMat, inferenceParams);
+                                swInfer.Stop();
+                                inferMs = swInfer.Elapsed.TotalMilliseconds;
+                                inferOk = true;
+                                if (batchRecords != null)
+                                {
+                                    resultForReport = result;
+                                }
+                            }
+                            finally
+                            {
+                                if (inferMat != null && !ReferenceEquals(inferMat, mat))
+                                {
+                                    try { inferMat.Dispose(); } catch { }
+                                }
+                            }
                             if (saveImg)
                             {
                                 // 提取图中所有类别名（去重）并判断是否有结果
@@ -561,19 +622,40 @@ namespace DlcvTest
                     catch (Exception ex)
                     {
                         System.Diagnostics.Debug.WriteLine($"[批量推理] 处理图片失败 {imgPath}: {ex.Message}");
+                        inferOk = false;
+                    }
+                    finally
+                    {
+                        if (batchRecords != null)
+                        {
+                            try
+                            {
+                                batchRecords[imgPath] = BatchReport.FromResult(imgPath, inferOk, inferMs, resultForReport);
+                            }
+                            catch
+                            {
+                                batchRecords[imgPath] = BatchReport.FromResult(imgPath, false, inferMs, null);
+                            }
+                        }
+
+                        // 报表已抽取轻量字段，及时释放 mask，避免大批量占内存
+                        if (resultForReport.HasValue)
+                        {
+                            DisposeCSharpResultMasks(resultForReport);
+                        }
                     }
 
                     // 线程安全更新进度（停止时不更新，添加节流减少 Dispatcher 队列压力）
                     if (!batchStopFlag)
                     {
                         int currentCount = Interlocked.Increment(ref processedCount);
-                        
+
                         // 节流：每 50ms 最多更新一次进度，或者是最后一张图片时强制更新
                         long nowTicks = DateTime.UtcNow.Ticks;
                         long lastTicks = Interlocked.Read(ref lastProgressUpdateTicks);
                         bool isLastImage = (currentCount >= total);
                         bool shouldUpdate = isLastImage || (nowTicks - lastTicks >= ProgressUpdateIntervalTicks);
-                        
+
                         if (shouldUpdate && Interlocked.CompareExchange(ref lastProgressUpdateTicks, nowTicks, lastTicks) == lastTicks)
                         {
                             Dispatcher.BeginInvoke(new Action(() => UpdateBatchProgress(progressRunId, currentCount, total)));
@@ -582,7 +664,57 @@ namespace DlcvTest
                 });
             });
 
-            // 4. 打开输出目录
+            batchSw.Stop();
+
+            // 4. 输出批量报表（汇总 / 详细统计 / 过漏检）
+            if (collectRecords && batchRecords != null && !batchStopFlag)
+            {
+                try
+                {
+                    // 按输入列表顺序整理，保证报表顺序稳定
+                    var ordered = new List<BatchReport.ImageRecord>(imageFiles.Count);
+                    foreach (var p in imageFiles)
+                    {
+                        if (batchRecords.TryGetValue(p, out var rec) && rec != null)
+                        {
+                            ordered.Add(rec);
+                        }
+                        else
+                        {
+                            ordered.Add(BatchReport.FromResult(p, false, 0.0, null));
+                        }
+                    }
+
+                    // 详细/过漏检需要结果明细；汇总简报在 runEvaluation 时写出
+                    bool writeDetailed = saveDetailed || saveMissed;
+                    bool writeMissed = saveMissed;
+                    bool writeAnything = runEvaluation || writeDetailed;
+                    if (writeAnything)
+                    {
+                        BatchReport.WriteAll(new BatchReport.SummaryInput
+                        {
+                            OutputDir = outputDir,
+                            ReportName = modelName + "_" + timestamp,
+                            SrcDir = srcDir,
+                            ModelPath = modelPathForReport,
+                            Threshold = threshold,
+                            StartTime = batchStartTime,
+                            Elapsed = batchSw.Elapsed,
+                            Records = ordered,
+                            WriteSummary = runEvaluation,
+                            WriteDetailed = writeDetailed,
+                            WriteMissed = writeMissed,
+                            IouThreshold = 0.5
+                        });
+                    }
+                }
+                catch (Exception reportEx)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[批量推理] 写报表失败: {reportEx.Message}");
+                }
+            }
+
+            // 5. 打开输出目录
             if (openDstDir)
             {
                 try

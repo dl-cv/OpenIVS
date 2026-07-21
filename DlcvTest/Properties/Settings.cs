@@ -151,6 +151,21 @@ namespace DlcvTest.Properties
         /// </summary>
         public int ThreadCount { get; set; } = 4;
 
+        /// <summary>
+        /// 批量推测：是否输出汇总简报（耗时/OK·NG/类别分布等）。
+        /// </summary>
+        public bool RunEvaluation { get; set; } = true;
+
+        /// <summary>
+        /// 批量推测：是否输出每张图的逐目标详细统计。
+        /// </summary>
+        public bool SaveDetailedPredictData { get; set; } = false;
+
+        /// <summary>
+        /// 批量推测：是否输出过漏检分析（依赖同名 LabelMe JSON；建议同时开启详细统计）。
+        /// </summary>
+        public bool SaveMissedData { get; set; } = false;
+
         public void Save()
         {
             try

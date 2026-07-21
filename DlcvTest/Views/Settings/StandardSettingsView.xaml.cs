@@ -46,6 +46,18 @@ namespace DlcvTest
                 {
                     chkSaveNg.IsChecked = Settings.Default.SaveNg;
                 }
+                if (chkRunEvaluation != null)
+                {
+                    chkRunEvaluation.IsChecked = Settings.Default.RunEvaluation;
+                }
+                if (chkSaveDetailedPredictData != null)
+                {
+                    chkSaveDetailedPredictData.IsChecked = Settings.Default.SaveDetailedPredictData;
+                }
+                if (chkSaveMissedData != null)
+                {
+                    chkSaveMissedData.IsChecked = Settings.Default.SaveMissedData;
+                }
 
                 // 加载输出目录
                 try
@@ -181,6 +193,48 @@ namespace DlcvTest
         {
             if (_isInitializing) return;
             Settings.Default.SaveNg = false;
+            Settings.Default.Save();
+        }
+
+        private void ChkRunEvaluation_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.RunEvaluation = true;
+            Settings.Default.Save();
+        }
+
+        private void ChkRunEvaluation_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.RunEvaluation = false;
+            Settings.Default.Save();
+        }
+
+        private void ChkSaveDetailedPredictData_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveDetailedPredictData = true;
+            Settings.Default.Save();
+        }
+
+        private void ChkSaveDetailedPredictData_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveDetailedPredictData = false;
+            Settings.Default.Save();
+        }
+
+        private void ChkSaveMissedData_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveMissedData = true;
+            Settings.Default.Save();
+        }
+
+        private void ChkSaveMissedData_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            Settings.Default.SaveMissedData = false;
             Settings.Default.Save();
         }
 

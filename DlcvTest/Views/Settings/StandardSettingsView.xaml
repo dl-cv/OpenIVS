@@ -131,19 +131,55 @@
                     </Grid>
                 </Grid>
 
-                <!-- 5. 运行评估流程 -->
-                <Grid Margin="0,0,0,20">
+                <!-- 5. 运行评估流程（输出汇总简报） -->
+                <Grid Margin="0,0,0,15">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
                         <TextBlock Text="运行评估流程" VerticalAlignment="Center" FontSize="15" Foreground="#555"/>
-                        <Border Margin="5,0,0,0" Width="16" Height="16" CornerRadius="8" BorderBrush="#999" BorderThickness="1" VerticalAlignment="Center" ToolTip="是否运行评估流程">
+                        <Border Margin="5,0,0,0" Width="16" Height="16" CornerRadius="8" BorderBrush="#999" BorderThickness="1" VerticalAlignment="Center" ToolTip="输出批量汇总简报：耗时、OK/NG、类别分布、推理耗时统计">
                             <TextBlock Text="?" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="#999"/>
                         </Border>
                     </StackPanel>
-                    <controls:AnimatedCheckBox Grid.Column="1" IsChecked="True" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                    <controls:AnimatedCheckBox Grid.Column="1" x:Name="chkRunEvaluation" IsChecked="True" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"
+                                              Checked="ChkRunEvaluation_Checked"
+                                              Unchecked="ChkRunEvaluation_Unchecked"/>
+                </Grid>
+
+                <!-- 5.1 输出预测统计数据 -->
+                <Grid Margin="0,0,0,15">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                        <TextBlock Text="输出预测统计数据" VerticalAlignment="Center" FontSize="15" Foreground="#555"/>
+                        <Border Margin="5,0,0,0" Width="16" Height="16" CornerRadius="8" BorderBrush="#999" BorderThickness="1" VerticalAlignment="Center" ToolTip="输出每张图片的逐目标详细统计（类别、置信度、bbox）">
+                            <TextBlock Text="?" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="#999"/>
+                        </Border>
+                    </StackPanel>
+                    <controls:AnimatedCheckBox Grid.Column="1" x:Name="chkSaveDetailedPredictData" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"
+                                              Checked="ChkSaveDetailedPredictData_Checked"
+                                              Unchecked="ChkSaveDetailedPredictData_Unchecked"/>
+                </Grid>
+
+                <!-- 5.2 输出过漏检数据 -->
+                <Grid Margin="0,0,0,20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="LabelColumn"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                        <TextBlock Text="输出过漏检数据" VerticalAlignment="Center" FontSize="15" Foreground="#555"/>
+                        <Border Margin="5,0,0,0" Width="16" Height="16" CornerRadius="8" BorderBrush="#999" BorderThickness="1" VerticalAlignment="Center" ToolTip="基于同名 LabelMe JSON 做 IoU 匹配，输出漏检/过检/误检分析（建议同时开启预测统计数据）">
+                            <TextBlock Text="?" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="#999"/>
+                        </Border>
+                    </StackPanel>
+                    <controls:AnimatedCheckBox Grid.Column="1" x:Name="chkSaveMissedData" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0"
+                                              Checked="ChkSaveMissedData_Checked"
+                                              Unchecked="ChkSaveMissedData_Unchecked"/>
                 </Grid>
 
                 <!-- 6. 保存数据路径 -->
