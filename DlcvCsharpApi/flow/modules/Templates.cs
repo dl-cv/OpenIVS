@@ -1180,6 +1180,57 @@ namespace DlcvModules
 			string fname = SimpleTemplateUtils.MakeSafeFileName(templateName);
 			string jsonPath = string.IsNullOrWhiteSpace(saveDir) ? (fname + ".json") : Path.Combine(saveDir, fname + ".json");
 
+			bool deferTemplateCreation = false;
+			try
+			{
+				deferTemplateCreation = this.Context != null &&
+					this.Context.Get<bool>("defer_template_creation", false);
+			}
+			catch { deferTemplateCreation = false; }
+			if (!File.Exists(jsonPath) && deferTemplateCreation)
+			{
+				var ocrArray = new JArray();
+				var list = tpl.OCRResults ?? new List<SimpleOcrItem>();
+				for (int i = 0; i < list.Count; i++)
+				{
+					var item = list[i];
+					if (item == null) continue;
+					ocrArray.Add(new JObject
+					{
+						["text"] = item.Text ?? string.Empty,
+						["x"] = item.X,
+						["y"] = item.Y,
+						["width"] = item.Width,
+						["height"] = item.Height,
+						["confidence"] = (double)item.Confidence,
+						["match_status"] = "Correct"
+					});
+				}
+				var candidate = new JObject
+				{
+					["template_candidate"] = true,
+					["ocr_results"] = ocrArray,
+					["missing_template_items"] = new JArray(),
+					["deviation_template_items"] = new JArray(),
+					["misjudgment_pairs"] = new JArray(),
+					["template_match_info"] = new JObject
+					{
+						["template_name"] = templateName,
+						["product_name"] = productType,
+						["is_match"] = true,
+						["match_score"] = 1.0,
+						["perfect_matches"] = ocrArray.Count,
+						["position_deviations"] = 0,
+						["over_detections"] = 0,
+						["missing_components"] = 0,
+						["misjudgments"] = 0
+					}
+				};
+				this.ScalarOutputsByName["ok"] = true;
+				this.ScalarOutputsByName["detail"] = candidate.ToString(Formatting.None);
+				return new ModuleIO(images, results, new List<SimpleTemplate>());
+			}
+
 			// 分支 B：无现存模版 -> 保存模版与 PNG（PNG 使用首图 OriginalImage），随后与自身匹配
 			if (!File.Exists(jsonPath))
 			{
