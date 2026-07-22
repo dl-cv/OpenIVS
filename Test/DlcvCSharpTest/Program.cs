@@ -3501,11 +3501,14 @@ namespace DlcvCSharpTest
                     },
                     true);
                 var distributionDetail = categoryDistributionMismatch["detail"] as JObject;
+                var distributionReason = distributionDetail?["template_match_info"]?["error_reason"]?.ToString();
                 RequireTemplateCountPriority(
                     !categoryDistributionMismatch.Value<bool>("ok") &&
                     distributionDetail?["template_match_info"]?.Value<int>("perfect_matches") == 2 &&
                     distributionDetail?["template_match_info"]?.Value<int>("over_detections") == 1 &&
-                    distributionDetail?["template_match_info"]?.Value<int>("missing_components") == 1,
+                    distributionDetail?["template_match_info"]?.Value<int>("missing_components") == 1 &&
+					distributionReason == "缺：A×1；多：B×1" &&
+                    distributionReason.IndexOf("已执行模版匹配", StringComparison.Ordinal) < 0,
                     "equal totals with different normalized category distributions should fall back and fail");
 
                 var totalMismatch = RunTemplateCountPriorityCase(
@@ -3518,7 +3521,8 @@ namespace DlcvCSharpTest
                     true);
                 RequireTemplateCountPriority(
                     !totalMismatch.Value<bool>("ok") &&
-                    totalMismatch["detail"]?["template_match_info"]?.Value<int>("missing_components") == 1,
+                    totalMismatch["detail"]?["template_match_info"]?.Value<int>("missing_components") == 1 &&
+					totalMismatch["detail"]?["template_match_info"]?["error_reason"]?.ToString() == "缺：B×1",
                     "different totals should fall back to ordinary matching and fail");
 
                 var disabled = RunTemplateCountPriorityCase(
@@ -3533,7 +3537,9 @@ namespace DlcvCSharpTest
                 RequireTemplateCountPriority(
                     !disabled.Value<bool>("ok") &&
                     disabled["detail"]?["template_match_info"]?.Value<int>("over_detections") == 3 &&
-                    disabled["detail"]?["template_match_info"]?.Value<int>("missing_components") == 3,
+                    disabled["detail"]?["template_match_info"]?.Value<int>("missing_components") == 3 &&
+                    disabled["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：A×2、B×1；多：A×2、B×1",
                     "count_priority=false should preserve ordinary position-sensitive matching");
 
                 var bGolden = new SimpleTemplate
@@ -3549,7 +3555,9 @@ namespace DlcvCSharpTest
                     new List<SimpleOcrItem> { MakeTemplateSelfTestItem("8", 0, 0) },
                     true);
                 RequireTemplateCountPriority(
-                    !bVsEight.Value<bool>("ok"),
+                    !bVsEight.Value<bool>("ok") &&
+					bVsEight["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：B×1；多：8×1；误判：模版 B→检测 8×1",
                     "count_priority fallback must keep B distinct from 8");
 
                 var okGolden = new SimpleTemplate
@@ -3566,7 +3574,9 @@ namespace DlcvCSharpTest
                     true,
                     false);
                 RequireTemplateCountPriority(
-                    !okVsZeroK.Value<bool>("ok"),
+                    !okVsZeroK.Value<bool>("ok") &&
+					okVsZeroK["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：OK×1；多：0K×1",
                     "count_priority fallback must keep OK distinct from 0K");
 
                 var legacyBVsEight = RunTemplateCountPriorityCase(
@@ -3576,6 +3586,29 @@ namespace DlcvCSharpTest
                 RequireTemplateCountPriority(
                     legacyBVsEight.Value<bool>("ok"),
                     "count_priority=false should preserve ordinary ambiguous-character normalization");
+
+                var deviationTemplateItem = MakeTemplateSelfTestItem("A", 0, 0);
+                deviationTemplateItem.Width = 100;
+                var deviationDetectionItem = MakeTemplateSelfTestItem("A", 40, 0);
+                deviationDetectionItem.Width = 100;
+                var deviationGolden = new SimpleTemplate
+                {
+                    TemplateName = "POSITION-REASON",
+                    OCRResults = new List<SimpleOcrItem>
+                    {
+                        deviationTemplateItem,
+                        MakeTemplateSelfTestItem("B", 200, 0)
+                    }
+                };
+                var deviationMismatch = RunTemplateCountPriorityCase(
+                    deviationGolden,
+                    new List<SimpleOcrItem> { deviationDetectionItem },
+                    true);
+                RequireTemplateCountPriority(
+                    !deviationMismatch.Value<bool>("ok") &&
+					deviationMismatch["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：B×1；位置偏差：A×1",
+                    "ordinary fallback should include concrete position deviation details when the result is NG");
 
                 var dGolden = new SimpleTemplate
                 {
@@ -3620,7 +3653,9 @@ namespace DlcvCSharpTest
                     !dWrongDistribution.Value<bool>("ok") &&
                     ((dWrongDistribution["detail"]?["template_match_info"]?.Value<int>("over_detections") ?? 0) +
                      (dWrongDistribution["detail"]?["template_match_info"]?.Value<int>("missing_components") ?? 0) +
-                     (dWrongDistribution["detail"]?["template_match_info"]?.Value<int>("misjudgments") ?? 0)) > 0,
+                     (dWrongDistribution["detail"]?["template_match_info"]?.Value<int>("misjudgments") ?? 0)) > 0 &&
+					dWrongDistribution["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：NG×1；多：OK×1；误判：模版 NG→检测 OK×1",
                     "D count priority must reject OK x4 when the template is OK x3 plus NG x1");
 
                 VerifyTemplateSaveNgPolicy();

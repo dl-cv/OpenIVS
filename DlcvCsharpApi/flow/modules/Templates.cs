@@ -555,8 +555,7 @@ namespace DlcvModules
 					textCountResult,
 					countPriority,
 					validDetections.Count,
-					expectedCount,
-					categoryCountsMatch);
+					expectedCount);
 				return textCountResult;
 			}
 				
@@ -774,8 +773,7 @@ namespace DlcvModules
 					root,
 					countPriority,
 					validDetections.Count,
-					expectedCount,
-					categoryCountsMatch);
+					expectedCount);
 				return root;
 			}
 
@@ -864,22 +862,102 @@ namespace DlcvModules
 			JObject detail,
 			bool countPriority,
 			int detectedCount,
-			int expectedCount,
-			bool categoryCountsMatch)
+			int expectedCount)
 		{
-			if (!countPriority || detail == null) return;
+			if (detail == null) return;
+			ApplyDetailedMismatchReason(detail);
+			if (!countPriority) return;
 			detail["detected_count"] = detectedCount;
 			detail["expected_count"] = expectedCount;
 			var info = detail["template_match_info"] as JObject;
 			var isMatch = info != null && info.Value<bool?>("is_match") == true;
 			detail["image_level_status"] = isMatch ? "OK" : "NG";
-			if (!isMatch && info != null && info["error_reason"] == null)
+		}
+
+		private static void ApplyDetailedMismatchReason(JObject detail)
+		{
+			if (detail == null) return;
+			var info = detail["template_match_info"] as JObject;
+			if (info == null || info.Value<bool?>("is_match") == true)
 			{
-				info["error_reason"] = detectedCount != expectedCount
-					? "检测数量不符：检测到 " + detectedCount +
-						"，模版 " + expectedCount + "；已执行模版匹配"
-					: "检测类别数量不符；已执行模版匹配";
+				if (info != null) info.Remove("error_reason");
+				return;
 			}
+
+			var reasons = new List<string>();
+			var missingTexts = (detail["missing_template_items"] as JArray)?.OfType<JObject>()
+				.Select(item => item["text"]?.ToString())
+				.ToList() ?? new List<string>();
+
+			var ocrItems = (detail["ocr_results"] as JArray)?.OfType<JObject>().ToList() ?? new List<JObject>();
+			var overTexts = ocrItems
+				.Where(item => string.Equals(item["match_status"]?.ToString(), "OverDetection", StringComparison.OrdinalIgnoreCase))
+				.Select(item => item["text"]?.ToString())
+				.ToList();
+
+			var misjudgmentPairs = (detail["misjudgment_pairs"] as JArray)?.OfType<JObject>().ToList() ?? new List<JObject>();
+			foreach (var pair in misjudgmentPairs)
+			{
+				missingTexts.Add(pair["t_text"]?.ToString());
+				overTexts.Add(pair["d_text"]?.ToString());
+			}
+
+			var missing = FormatReasonCounts(missingTexts);
+			if (!string.IsNullOrWhiteSpace(missing)) reasons.Add("缺：" + missing);
+			var over = FormatReasonCounts(overTexts);
+			if (!string.IsNullOrWhiteSpace(over)) reasons.Add("多：" + over);
+
+			var deviation = FormatReasonCounts(ocrItems
+				.Where(item => string.Equals(item["match_status"]?.ToString(), "PositionDeviation", StringComparison.OrdinalIgnoreCase))
+				.Select(item => item["text"]?.ToString()));
+			if (!string.IsNullOrWhiteSpace(deviation)) reasons.Add("位置偏差：" + deviation);
+
+			if ((info.Value<int?>("misjudgments") ?? 0) > 0)
+			{
+				var misjudgments = FormatMisjudgmentCounts(misjudgmentPairs);
+				if (!string.IsNullOrWhiteSpace(misjudgments)) reasons.Add("误判：" + misjudgments);
+			}
+
+			if (reasons.Count == 0)
+			{
+				var missingCount = info.Value<int?>("missing_components") ?? 0;
+				var overCount = info.Value<int?>("over_detections") ?? 0;
+				var deviationCount = info.Value<int?>("position_deviations") ?? 0;
+				var misjudgmentCount = info.Value<int?>("misjudgments") ?? 0;
+				if (missingCount > 0) reasons.Add("缺少项×" + missingCount);
+				if (overCount > 0) reasons.Add("多出项×" + overCount);
+				if (deviationCount > 0) reasons.Add("位置偏差项×" + deviationCount);
+				if (misjudgmentCount > 0) reasons.Add("误判项×" + misjudgmentCount);
+			}
+
+			info["error_reason"] = reasons.Count > 0
+				? string.Join("；", reasons)
+				: "模版匹配失败";
+		}
+
+		private static string FormatReasonCounts(IEnumerable<string> values)
+		{
+			var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+			foreach (var value in values ?? Enumerable.Empty<string>())
+			{
+				var text = string.IsNullOrWhiteSpace(value) ? "(空)" : value.Trim();
+				counts[text] = counts.TryGetValue(text, out int count) ? count + 1 : 1;
+			}
+			return string.Join("、", counts
+				.Select(pair => pair.Key + "×" + pair.Value));
+		}
+
+		private static string FormatMisjudgmentCounts(IEnumerable<JObject> pairs)
+		{
+			var values = (pairs ?? Enumerable.Empty<JObject>())
+				.Select(pair =>
+				{
+					var templateText = pair["t_text"]?.ToString();
+					var detectionText = pair["d_text"]?.ToString();
+					return "模版 " + (string.IsNullOrWhiteSpace(templateText) ? "(空)" : templateText.Trim()) +
+						"→检测 " + (string.IsNullOrWhiteSpace(detectionText) ? "(空)" : detectionText.Trim());
+				});
+			return FormatReasonCounts(values);
 		}
 
 		private static List<SimpleOcrItem> ExtractOcrFromLocal(JArray results)
@@ -1146,19 +1224,7 @@ namespace DlcvModules
 			}
 			root["missing_template_items"] = missingArr;
 			root["deviation_template_items"] = new JArray();
-			// 构造误判配对：按个数成对输出（用于“错：模型：x，模版：y”）
-			var misPairsArr = new JArray();
-			int pairCount = Math.Min(missList.Count, overList.Count);
-			for (int i = 0; i < pairCount; i++)
-			{
-				var pair = new JObject
-				{
-					["t_text"] = missList[i].Text ?? string.Empty,
-					["d_text"] = overList[i].Text ?? string.Empty
-				};
-				misPairsArr.Add(pair);
-			}
-			root["misjudgment_pairs"] = misPairsArr;
+			root["misjudgment_pairs"] = new JArray();
 			
 			root["template_match_info"] = new JObject
 			{
