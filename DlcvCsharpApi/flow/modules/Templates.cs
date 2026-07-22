@@ -440,9 +440,17 @@ namespace DlcvModules
 				double posTolY = ReadDoubleOr("position_tolerance_y", 20.0);
 				double minConf = ReadDoubleOr("min_confidence_threshold", 0.5);
 				bool checkPosition = ReadBoolOr("check_position", true);
+				bool countPriority = ReadBoolOr("count_priority", false);
 				
 				// 使用与 PrintMatch 一致的匹配逻辑与输出结构
-				var pmDetail = MatchAsPrintMatch(golden, toCheck.OCRResults ?? new List<SimpleOcrItem>(), posTolX, posTolY, minConf, checkPosition);
+				var pmDetail = MatchAsPrintMatch(
+					golden,
+					toCheck.OCRResults ?? new List<SimpleOcrItem>(),
+					posTolX,
+					posTolY,
+					minConf,
+					checkPosition,
+					countPriority);
 				bool ok = pmDetail?["template_match_info"] != null && pmDetail["template_match_info"]["is_match"] != null && pmDetail["template_match_info"]["is_match"].Value<bool>();
 				try
 				{
@@ -510,18 +518,33 @@ namespace DlcvModules
 				return !(ax2 < d.X || bx2 < t.X || ay2 < d.Y || by2 < t.Y);
 			}
 
-		private static JObject MatchAsPrintMatch(SimpleTemplate golden, List<SimpleOcrItem> det, double posTolXVal, double posTolYVal, double minConf, bool checkPosition)
+		private static JObject MatchAsPrintMatch(
+			SimpleTemplate golden,
+			List<SimpleOcrItem> det,
+			double posTolXVal,
+			double posTolYVal,
+			double minConf,
+			bool checkPosition,
+			bool countPriority)
 		{
 			if (golden == null) return new JObject();
 			var templateItems = (golden.OCRResults ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
 			var detectionItemsAll = (det ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
 			// 置信度过滤（与 PrintMatch 一致）
 			var validDetections = detectionItemsAll.Where(r => r.Confidence >= (float)minConf && r.Width > 0 && r.Height > 0).ToList();
+			var expectedCount = templateItems.Count;
+
+			if (countPriority && validDetections.Count == expectedCount)
+			{
+				return BuildCountPrioritySuccess(golden, validDetections, expectedCount);
+			}
 			
 			// 不检查位置时：只按文本内容和数量匹配
 			if (!checkPosition)
 			{
-				return MatchByTextAndCountOnly(golden, validDetections, templateItems);
+				var textCountResult = MatchByTextAndCountOnly(golden, validDetections, templateItems);
+				AppendCountPrioritySummary(textCountResult, countPriority, validDetections.Count, expectedCount);
+				return textCountResult;
 			}
 				
 				// 按规范化文本分组
@@ -734,8 +757,72 @@ namespace DlcvModules
 				["missing_components"] = missCount,
 				["misjudgments"] = misjudgeCount
 			};
+				AppendCountPrioritySummary(root, countPriority, validDetections.Count, expectedCount);
 				return root;
 			}
+
+		private static JObject BuildCountPrioritySuccess(
+			SimpleTemplate golden,
+			List<SimpleOcrItem> validDetections,
+			int expectedCount)
+		{
+			var ocrArray = new JArray();
+			foreach (var item in validDetections)
+			{
+				ocrArray.Add(new JObject
+				{
+					["text"] = item.Text ?? string.Empty,
+					["x"] = item.X,
+					["y"] = item.Y,
+					["width"] = item.Width,
+					["height"] = item.Height,
+					["confidence"] = (double)item.Confidence,
+					["match_status"] = "Correct"
+				});
+			}
+
+			return new JObject
+			{
+				["ocr_results"] = ocrArray,
+				["missing_template_items"] = new JArray(),
+				["deviation_template_items"] = new JArray(),
+				["misjudgment_pairs"] = new JArray(),
+				["detected_count"] = validDetections.Count,
+				["expected_count"] = expectedCount,
+				["image_level_status"] = "OK",
+				["template_match_info"] = new JObject
+				{
+					["template_name"] = golden.TemplateName ?? string.Empty,
+					["product_name"] = golden.ProductName ?? string.Empty,
+					["is_match"] = true,
+					["match_score"] = 1.0,
+					["perfect_matches"] = validDetections.Count,
+					["position_deviations"] = 0,
+					["over_detections"] = 0,
+					["missing_components"] = 0,
+					["misjudgments"] = 0
+				}
+			};
+		}
+
+		private static void AppendCountPrioritySummary(
+			JObject detail,
+			bool countPriority,
+			int detectedCount,
+			int expectedCount)
+		{
+			if (!countPriority || detail == null) return;
+			detail["detected_count"] = detectedCount;
+			detail["expected_count"] = expectedCount;
+			var info = detail["template_match_info"] as JObject;
+			var isMatch = info != null && info.Value<bool?>("is_match") == true;
+			detail["image_level_status"] = isMatch ? "OK" : "NG";
+			if (!isMatch && info != null && info["error_reason"] == null)
+			{
+				info["error_reason"] = "检测数量不符：检测到 " + detectedCount +
+					"，期望 " + expectedCount + "；已执行模版匹配";
+			}
+		}
 
 		private static List<SimpleOcrItem> ExtractOcrFromLocal(JArray results)
 		{
@@ -1037,7 +1124,7 @@ namespace DlcvModules
 	/// type: features/printed_template_match
 	/// properties:
 	/// - product_type(string): 产品型号
-	/// 可透传：position_tolerance_x(double), position_tolerance_y(double), min_confidence_threshold(double), check_position(bool)
+	/// 可透传：position_tolerance_x(double), position_tolerance_y(double), min_confidence_threshold(double), check_position(bool), count_priority(bool)
 	/// 输出：Scalar ok(bool), detail(string)；TemplateList 按条件返回。
 	/// </summary>
 	public class PrintedTemplateMatch : BaseModule
@@ -1203,7 +1290,7 @@ namespace DlcvModules
 						["width"] = item.Width,
 						["height"] = item.Height,
 						["confidence"] = (double)item.Confidence,
-						["match_status"] = "Correct"
+						["match_status"] = "Candidate"
 					});
 				}
 				var candidate = new JObject
@@ -1217,16 +1304,17 @@ namespace DlcvModules
 					{
 						["template_name"] = templateName,
 						["product_name"] = productType,
-						["is_match"] = true,
-						["match_score"] = 1.0,
-						["perfect_matches"] = ocrArray.Count,
+						["is_match"] = false,
+						["match_score"] = 0.0,
+						["perfect_matches"] = 0,
 						["position_deviations"] = 0,
 						["over_detections"] = 0,
 						["missing_components"] = 0,
-						["misjudgments"] = 0
+						["misjudgments"] = 0,
+						["error_reason"] = "模版待创建"
 					}
 				};
-				this.ScalarOutputsByName["ok"] = true;
+				this.ScalarOutputsByName["ok"] = false;
 				this.ScalarOutputsByName["detail"] = candidate.ToString(Formatting.None);
 				return new ModuleIO(images, results, new List<SimpleTemplate>());
 			}
@@ -1277,7 +1365,8 @@ namespace DlcvModules
 					["position_tolerance_x"] = ReadDoubleOr("position_tolerance_x", 20.0),
 					["position_tolerance_y"] = ReadDoubleOr("position_tolerance_y", 20.0),
 					["min_confidence_threshold"] = ReadDoubleOr("min_confidence_threshold", 0.5),
-					["check_position"] = checkPosSelf
+					["check_position"] = checkPosSelf,
+					["count_priority"] = ReadBoolOr("count_priority", false)
 				});
 				matcherSelf.MainTemplateList = new List<SimpleTemplate> { tpl };
 				matcherSelf.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), new JArray(), goldenListSelf));
@@ -1307,7 +1396,8 @@ namespace DlcvModules
 				["position_tolerance_x"] = ReadDoubleOr("position_tolerance_x", 20.0),
 				["position_tolerance_y"] = ReadDoubleOr("position_tolerance_y", 20.0),
 				["min_confidence_threshold"] = ReadDoubleOr("min_confidence_threshold", 0.5),
-				["check_position"] = checkPos
+				["check_position"] = checkPos,
+				["count_priority"] = ReadBoolOr("count_priority", false)
 			});
 			matcher.MainTemplateList = new List<SimpleTemplate> { tpl };
 			matcher.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), new JArray(), goldenList));
@@ -1328,6 +1418,16 @@ namespace DlcvModules
 			}
 			return dv;
 		}
+
+		private bool ReadBoolOr(string key, bool dv)
+		{
+			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+			{
+				bool x; if (bool.TryParse(v.ToString(), out x)) return x;
+			}
+			return dv;
+		}
+
 	}
 }
 

@@ -78,6 +78,11 @@ namespace DlcvCSharpTest
                     return RunBBoxIoUDedupSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "template-count-priority-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunTemplateCountPrioritySelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "image-generation-expand-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunImageGenerationExpandSelfTest();
@@ -3448,6 +3453,143 @@ namespace DlcvCSharpTest
             }
             Console.WriteLine("==== with_mask 参数透传自测 失败数=" + globalFail + " ====");
             return 1;
+        }
+
+        private static int RunTemplateCountPrioritySelfTest()
+        {
+            try
+            {
+                var golden = new SimpleTemplate
+                {
+                    TemplateName = "COUNT-PRIORITY",
+                    ProductName = "COUNT-PRIORITY",
+                    OCRResults = new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("A", 0, 0),
+                        MakeTemplateSelfTestItem("B", 20, 0),
+                        MakeTemplateSelfTestItem("C", 40, 0),
+                        MakeTemplateSelfTestItem(" ", 60, 0),
+                        null
+                    }
+                };
+
+                var equalButDifferent = RunTemplateCountPriorityCase(
+                    golden,
+                    new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("X", 100, 100),
+                        MakeTemplateSelfTestItem("Y", 120, 100),
+                        MakeTemplateSelfTestItem("Z", 140, 100)
+                    },
+                    true);
+                RequireTemplateCountPriority(
+                    equalButDifferent.Value<bool>("ok") &&
+                    equalButDifferent["detail"]?["template_match_info"]?.Value<bool>("is_match") == true &&
+                    equalButDifferent["detail"]?.Value<int>("expected_count") == 3 &&
+                    equalButDifferent["detail"]?["ocr_results"] is JArray equalItems &&
+                    equalItems.Count == 3 &&
+                    equalItems.All(item => item?["match_status"]?.ToString() == "Correct"),
+                    "count_priority=true should accept equal effective counts and mark every detection Correct");
+
+                var mismatch = RunTemplateCountPriorityCase(
+                    golden,
+                    new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("A", 0, 0),
+                        MakeTemplateSelfTestItem("X", 80, 80)
+                    },
+                    true);
+                var mismatchDetail = mismatch["detail"] as JObject;
+                var mismatchItems = mismatchDetail?["ocr_results"] as JArray;
+                RequireTemplateCountPriority(
+                    !mismatch.Value<bool>("ok") &&
+                    mismatchDetail?["template_match_info"]?.Value<int>("perfect_matches") == 1 &&
+                    mismatchDetail?["template_match_info"]?.Value<int>("over_detections") == 1 &&
+                    mismatchDetail?["template_match_info"]?.Value<int>("missing_components") == 2 &&
+                    mismatchItems != null &&
+                    mismatchItems.Any(item => item?["match_status"]?.ToString() == "Correct") &&
+                    mismatchItems.Any(item => item?["match_status"]?.ToString() == "OverDetection"),
+                    "unequal counts should fall back to ordinary matching with correct, over-detection and missing items");
+
+                var disabled = RunTemplateCountPriorityCase(
+                    golden,
+                    new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("X", 100, 100),
+                        MakeTemplateSelfTestItem("Y", 120, 100),
+                        MakeTemplateSelfTestItem("Z", 140, 100)
+                    },
+                    false);
+                RequireTemplateCountPriority(
+                    !disabled.Value<bool>("ok") &&
+                    disabled["detail"]?["template_match_info"]?.Value<int>("over_detections") == 3 &&
+                    disabled["detail"]?["template_match_info"]?.Value<int>("missing_components") == 3,
+                    "count_priority=false should preserve ordinary template matching");
+
+                Console.WriteLine("template count priority selftest passed");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("template count priority selftest failed: " + ex.Message);
+                return 1;
+            }
+        }
+
+        private static JObject RunTemplateCountPriorityCase(
+            SimpleTemplate golden,
+            List<SimpleOcrItem> detections,
+            bool countPriority)
+        {
+            var module = new TemplateMatch(
+                9001,
+                properties: new Dictionary<string, object>
+                {
+                    { "count_priority", countPriority },
+                    { "expected_count", 999 },
+                    { "check_position", false },
+                    { "min_confidence_threshold", 0.5 }
+                });
+            module.MainTemplateList = new List<SimpleTemplate>
+            {
+                new SimpleTemplate { OCRResults = detections }
+            };
+            module.ExtraInputsIn.Add(new ModuleChannel(
+                new List<ModuleImage>(),
+                new JArray(),
+                new List<SimpleTemplate> { golden }));
+            module.Process(new List<ModuleImage>(), new JArray());
+
+            var ok = module.ScalarOutputsByName.ContainsKey("ok") &&
+                Convert.ToBoolean(module.ScalarOutputsByName["ok"]);
+            var detailText = module.ScalarOutputsByName.ContainsKey("detail")
+                ? Convert.ToString(module.ScalarOutputsByName["detail"])
+                : string.Empty;
+            return new JObject
+            {
+                ["ok"] = ok,
+                ["detail"] = string.IsNullOrWhiteSpace(detailText)
+                    ? new JObject()
+                    : JObject.Parse(detailText)
+            };
+        }
+
+        private static SimpleOcrItem MakeTemplateSelfTestItem(string text, int x, int y)
+        {
+            return new SimpleOcrItem
+            {
+                Text = text,
+                X = x,
+                Y = y,
+                Width = 10,
+                Height = 10,
+                Confidence = 0.99f
+            };
+        }
+
+        private static void RequireTemplateCountPriority(bool condition, string message)
+        {
+            if (!condition) throw new InvalidOperationException(message);
         }
 
         [DllImport("psapi.dll", SetLastError = true)]
