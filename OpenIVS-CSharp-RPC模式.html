@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>OpenIVS C# API · RPC 模式</title>
+  <style>
+    :root {
+      --ink: #16233a;
+      --muted: #60708a;
+      --line: #dce5f1;
+      --panel: #ffffff;
+      --soft: #f5f8fc;
+      --blue: #2767e8;
+      --blue-dark: #164bb5;
+      --blue-soft: #eaf1ff;
+      --cyan: #0b9fb8;
+      --cyan-soft: #e7f8fb;
+      --green: #11845b;
+      --green-soft: #e9f8f1;
+      --amber: #a96708;
+      --amber-soft: #fff5df;
+      --shadow: 0 20px 55px rgba(31, 55, 92, .10);
+      --radius: 24px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 2%, rgba(39, 103, 232, .10), transparent 24rem),
+        radial-gradient(circle at 92% 14%, rgba(11, 159, 184, .09), transparent 22rem),
+        #f8fafd;
+      font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.6;
+    }
+
+    a { color: inherit; }
+
+    .page {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 26px 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 750;
+      letter-spacing: -.02em;
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      color: white;
+      border-radius: 12px;
+      background: linear-gradient(145deg, var(--blue), var(--cyan));
+      box-shadow: 0 10px 24px rgba(39, 103, 232, .24);
+    }
+
+    .brand-mark svg { width: 23px; height: 23px; }
+    .brand small { color: var(--muted); font-weight: 600; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      color: var(--blue-dark);
+      background: rgba(255, 255, 255, .76);
+      border: 1px solid rgba(39, 103, 232, .18);
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: 0 7px 20px rgba(31, 55, 92, .06);
+    }
+
+    .tag::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(17, 132, 91, .12);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.02fr .98fr;
+      gap: 54px;
+      align-items: center;
+      padding: 72px 0 86px;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 18px;
+      color: var(--blue);
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 700px;
+      margin: 0;
+      font-size: clamp(42px, 5.7vw, 72px);
+      line-height: 1.08;
+      letter-spacing: -.045em;
+    }
+
+    .gradient-text {
+      color: transparent;
+      background: linear-gradient(100deg, var(--blue-dark), var(--blue) 55%, var(--cyan));
+      -webkit-background-clip: text;
+      background-clip: text;
+    }
+
+    .hero-copy {
+      max-width: 660px;
+      margin: 24px 0 30px;
+      color: var(--muted);
+      font-size: 19px;
+    }
+
+    .hero-points {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .hero-points span {
+      padding: 9px 13px;
+      color: #31415b;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 650;
+      box-shadow: 0 8px 25px rgba(31, 55, 92, .06);
+    }
+
+    .hero-visual {
+      position: relative;
+      min-height: 420px;
+      padding: 30px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, .86);
+      border: 1px solid rgba(214, 226, 241, .92);
+      border-radius: 32px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-visual::before {
+      content: "";
+      position: absolute;
+      inset: -30% 42% 46% -22%;
+      border-radius: 50%;
+      background: rgba(39, 103, 232, .08);
+    }
+
+    .process-card {
+      position: relative;
+      z-index: 1;
+      padding: 20px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 19px;
+    }
+
+    .process-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 15px;
+    }
+
+    .process-title {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      font-weight: 800;
+    }
+
+    .process-icon {
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 36px;
+      height: 36px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      border-radius: 11px;
+    }
+
+    .process-icon.service { color: var(--cyan); background: var(--cyan-soft); }
+    .process-icon svg { width: 20px; height: 20px; }
+
+    .pid {
+      color: #7b899d;
+      font: 600 12px/1.2 Consolas, monospace;
+    }
+
+    .runtime {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .runtime > div {
+      padding: 11px 12px;
+      background: var(--soft);
+      border-radius: 11px;
+    }
+
+    .runtime small {
+      display: block;
+      margin-bottom: 2px;
+      color: #7a8799;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .runtime strong { font-size: 14px; }
+
+    .bridge {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 12px;
+      padding: 19px 5px;
+    }
+
+    .bridge-line {
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #9ab7e7);
+    }
+
+    .bridge-line.right { background: linear-gradient(90deg, #79bfd0, transparent); }
+
+    .bridge-core {
+      min-width: 148px;
+      padding: 9px 13px;
+      text-align: center;
+      color: var(--blue-dark);
+      background: linear-gradient(135deg, var(--blue-soft), var(--cyan-soft));
+      border: 1px solid #c7daf8;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .isolation-note {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 18px;
+      padding: 12px 14px;
+      color: #1f5c46;
+      background: var(--green-soft);
+      border: 1px solid #c6eadb;
+      border-radius: 13px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .check {
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 23px;
+      height: 23px;
+      color: white;
+      background: var(--green);
+      border-radius: 50%;
+    }
+
+    section { padding: 82px 0; }
+
+    .section-heading {
+      max-width: 760px;
+      margin-bottom: 38px;
+    }
+
+    .section-heading h2 {
+      margin: 0 0 13px;
+      font-size: clamp(30px, 4vw, 46px);
+      line-height: 1.17;
+      letter-spacing: -.035em;
+    }
+
+    .section-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .architecture {
+      padding: 30px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .arch-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 235px minmax(0, 1fr);
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .lane {
+      padding: 24px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+    }
+
+    .lane.client { background: linear-gradient(160deg, #f8fbff, #eef4ff); }
+    .lane.server { background: linear-gradient(160deg, #f7fdfe, #ebf8fa); }
+
+    .lane-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 22px;
+      font-weight: 800;
+    }
+
+    .lane-label span:last-child {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .stack-item {
+      padding: 14px 15px;
+      background: rgba(255, 255, 255, .9);
+      border: 1px solid rgba(210, 222, 239, .92);
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .stack-item strong {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--blue-dark);
+    }
+
+    .server .stack-item strong { color: #08788a; }
+
+    .transport {
+      display: grid;
+      align-content: center;
+      gap: 16px;
+    }
+
+    .transport-card {
+      position: relative;
+      padding: 18px 14px;
+      text-align: center;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 15px;
+    }
+
+    .transport-card::before,
+    .transport-card::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      width: 22px;
+      height: 1px;
+      background: #9eb3ce;
+    }
+
+    .transport-card::before { right: 100%; }
+    .transport-card::after { left: 100%; }
+
+    .transport-icon {
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      margin: 0 auto 9px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      border-radius: 11px;
+    }
+
+    .transport-card.data .transport-icon { color: var(--green); background: var(--green-soft); }
+    .transport-card strong { display: block; font-size: 14px; }
+    .transport-card small { color: var(--muted); font-size: 11px; }
+
+    .boundary {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 24px;
+      padding: 15px 17px;
+      color: #46546a;
+      background: var(--soft);
+      border-radius: 14px;
+      font-size: 13px;
+    }
+
+    .boundary svg { flex: 0 0 auto; color: var(--green); }
+
+    .benefit-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+
+    .benefit {
+      padding: 26px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 19px;
+      box-shadow: 0 12px 35px rgba(31, 55, 92, .07);
+    }
+
+    .benefit-number {
+      margin-bottom: 18px;
+      color: #b7c4d6;
+      font: 800 13px/1 Consolas, monospace;
+      letter-spacing: .08em;
+    }
+
+    .benefit h3 { margin: 0 0 9px; font-size: 20px; }
+    .benefit p { margin: 0; color: var(--muted); font-size: 14px; }
+
+    .flow-shell {
+      position: relative;
+      padding: 10px 0;
+    }
+
+    .flow-shell::before {
+      content: "";
+      position: absolute;
+      top: 36px;
+      bottom: 36px;
+      left: 25px;
+      width: 2px;
+      background: linear-gradient(var(--blue), var(--cyan));
+    }
+
+    .flow-step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr) minmax(250px, .62fr);
+      gap: 20px;
+      align-items: center;
+      padding: 16px 0;
+    }
+
+    .step-index {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      place-items: center;
+      width: 52px;
+      height: 52px;
+      color: white;
+      background: linear-gradient(145deg, var(--blue), var(--cyan));
+      border: 6px solid #f8fafd;
+      border-radius: 50%;
+      font: 800 14px/1 Consolas, monospace;
+      box-shadow: 0 8px 20px rgba(39, 103, 232, .20);
+    }
+
+    .step-copy h3 { margin: 0 0 5px; font-size: 19px; }
+    .step-copy p { margin: 0; color: var(--muted); font-size: 14px; }
+
+    .step-meta {
+      padding: 13px 15px;
+      color: #34445c;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      font: 600 12px/1.55 Consolas, "Microsoft YaHei UI", monospace;
+    }
+
+    .split-section {
+      display: grid;
+      grid-template-columns: .9fr 1.1fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .code-card,
+    .facts-card {
+      overflow: hidden;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 800;
+    }
+
+    .card-head span:last-child {
+      color: var(--muted);
+      font: 600 12px/1 Consolas, monospace;
+    }
+
+    pre {
+      min-height: 280px;
+      margin: 0;
+      padding: 25px;
+      overflow: auto;
+      color: #dbe9ff;
+      background: #142139;
+      font: 13px/1.75 Consolas, "Cascadia Code", monospace;
+      tab-size: 4;
+    }
+
+    .kw { color: #75c5ff; }
+    .type { color: #77e2bd; }
+    .str { color: #ffd58a; }
+    .com { color: #8192ac; }
+    .bool { color: #eea8ff; }
+
+    .facts-list { display: grid; padding: 8px 22px 22px; }
+
+    .fact-row {
+      display: grid;
+      grid-template-columns: 145px 1fr;
+      gap: 20px;
+      padding: 17px 0;
+      border-bottom: 1px solid #edf1f6;
+      font-size: 14px;
+    }
+
+    .fact-row:last-child { border-bottom: 0; }
+    .fact-row strong { color: #394960; }
+    .fact-row span { color: var(--muted); }
+    code { font-family: Consolas, "Cascadia Code", monospace; }
+
+    .note {
+      margin-top: 22px;
+      padding: 18px 20px;
+      color: #6e5218;
+      background: var(--amber-soft);
+      border: 1px solid #f0dbad;
+      border-radius: 15px;
+      font-size: 14px;
+    }
+
+    .note strong { color: var(--amber); }
+
+    footer {
+      margin-top: 40px;
+      padding: 34px 0 44px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .footer-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    @media (max-width: 960px) {
+      .hero { grid-template-columns: 1fr; padding-top: 48px; }
+      .hero-visual { max-width: 680px; }
+      .arch-grid { grid-template-columns: 1fr; }
+      .transport { grid-template-columns: 1fr 1fr; }
+      .transport-card::before, .transport-card::after { display: none; }
+      .benefit-grid { grid-template-columns: 1fr; }
+      .split-section { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 680px) {
+      .page { width: min(100% - 24px, 1180px); }
+      .topbar { align-items: flex-start; }
+      .brand small { display: block; }
+      .tag { display: none; }
+      .hero { gap: 34px; padding: 34px 0 56px; }
+      .hero-visual, .architecture { padding: 18px; border-radius: 21px; }
+      .runtime { grid-template-columns: 1fr; }
+      section { padding: 58px 0; }
+      .flow-step { grid-template-columns: 52px 1fr; }
+      .step-meta { grid-column: 2; }
+      .fact-row { grid-template-columns: 1fr; gap: 5px; }
+      .footer-row { display: block; }
+    }
+
+    @media print {
+      body { background: white; }
+      .page { width: 100%; }
+      .hero { padding: 38px 0; }
+      section { padding: 38px 0; break-inside: avoid; }
+      .hero-visual, .architecture, .benefit, .code-card, .facts-card { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="page topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/>
+          <path d="m8.4 10 3.6-2 3.6 2v4L12 16l-3.6-2z"/>
+        </svg>
+      </span>
+      <span>OpenIVS <small>· C# API</small></span>
+    </div>
+    <span class="tag">本机 RPC · 单文件说明页</span>
+  </header>
+
+  <main>
+    <div class="page hero">
+      <div>
+        <span class="eyebrow">C# API · RPC Mode</span>
+        <h1>让 CCD 软件与 DLCV<br><span class="gradient-text">各用各的 CUDA</span></h1>
+        <p class="hero-copy">
+          现场 CCD 软件只调用轻量 C# API，深度学习推理由独立的
+          <strong>AIModelRPC.exe</strong> 进程完成。两个进程拥有各自的 DLL 与 CUDA 运行环境，
+          大图数据通过共享内存传递，兼顾环境隔离与本机高速调用。
+        </p>
+        <div class="hero-points">
+          <span>进程级 DLL 隔离</span>
+          <span>命名管道控制</span>
+          <span>共享内存传图</span>
+          <span>C# 调用方式基本不变</span>
+        </div>
+      </div>
+
+      <div class="hero-visual" aria-label="双进程 CUDA 隔离示意图">
+        <div class="process-card">
+          <div class="process-head">
+            <div class="process-title">
+              <span class="process-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>
+                </svg>
+              </span>
+              现场 CCD 软件
+            </div>
+            <span class="pid">PROCESS A</span>
+          </div>
+          <div class="runtime">
+            <div><small>Runtime</small><strong>CUDA 11.8</strong></div>
+            <div><small>Role</small><strong>采图 · 业务 · UI</strong></div>
+          </div>
+        </div>
+
+        <div class="bridge">
+          <span class="bridge-line"></span>
+          <span class="bridge-core">本机高速 IPC</span>
+          <span class="bridge-line right"></span>
+        </div>
+
+        <div class="process-card">
+          <div class="process-head">
+            <div class="process-title">
+              <span class="process-icon service">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h5M12 17.5h5"/>
+                </svg>
+              </span>
+              DLCV RPC 推理服务
+            </div>
+            <span class="pid">PROCESS B</span>
+          </div>
+          <div class="runtime">
+            <div><small>Runtime</small><strong>CUDA 12.8</strong></div>
+            <div><small>Role</small><strong>模型 · GPU 推理</strong></div>
+          </div>
+        </div>
+
+        <div class="isolation-note">
+          <span class="check">✓</span>
+          DLL 分别加载到两个独立地址空间，不在同一进程内争用 CUDA 依赖。
+        </div>
+      </div>
+    </div>
+
+    <section>
+      <div class="page">
+        <div class="section-heading">
+          <span class="eyebrow">Architecture</span>
+          <h2>业务环境不动，推理环境独立升级</h2>
+          <p>RPC 模式把“谁负责现场业务”与“谁负责加载推理 DLL”明确拆开。CCD 软件无需跟随 DLCV 的 CUDA 版本迁移。</p>
+        </div>
+
+        <div class="architecture">
+          <div class="arch-grid">
+            <div class="lane client">
+              <div class="lane-label"><span>现场 CCD 软件进程</span><span>调用方</span></div>
+              <div class="stack">
+                <div class="stack-item"><strong>相机与业务逻辑</strong>采图、触发、PLC、结果判定与界面</div>
+                <div class="stack-item"><strong>OpenIVS C# API</strong><code>new Model(path, deviceId, rpc_mode: true)</code></div>
+                <div class="stack-item"><strong>现场运行环境</strong>可继续使用既有 CUDA 11.8 与业务 DLL</div>
+              </div>
+            </div>
+
+            <div class="transport">
+              <div class="transport-card">
+                <span class="transport-icon">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h10"/><path d="m17 15 3 2-3 2"/></svg>
+                </span>
+                <strong>命名管道</strong>
+                <small>JSON 控制面</small>
+              </div>
+              <div class="transport-card data">
+                <span class="transport-icon">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 15 3-3 2 2 3-4 3 5"/></svg>
+                </span>
+                <strong>共享内存</strong>
+                <small>图像 / mask 数据面</small>
+              </div>
+            </div>
+
+            <div class="lane server">
+              <div class="lane-label"><span>DLCV RPC 服务进程</span><span>执行方</span></div>
+              <div class="stack">
+                <div class="stack-item"><strong>AIModelRPC.exe</strong>响应探活、加载、推理、查询与释放指令</div>
+                <div class="stack-item"><strong>DLCV 推理 DLL</strong>模型加载、GPU 计算与结果组织</div>
+                <div class="stack-item"><strong>DLCV 运行环境</strong>独立使用 CUDA 12.8 与配套依赖</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="boundary">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 5 6v5c0 4.6 2.9 8 7 10 4.1-2 7-5.4 7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>
+            <span><strong>隔离边界：</strong>Windows 进程分别维护模块加载表、地址空间和运行时依赖；现场软件不直接加载 DLCV 推理 DLL。</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="page">
+        <div class="section-heading">
+          <span class="eyebrow">Why RPC</span>
+          <h2>解决冲突，同时保留本机调用效率</h2>
+        </div>
+        <div class="benefit-grid">
+          <article class="benefit">
+            <div class="benefit-number">01 / ISOLATION</div>
+            <h3>CUDA 与 DLL 不再撞车</h3>
+            <p>CCD 软件和 DLCV 推理服务各自在自己的进程中加载依赖。一个环境的升级，不要求另一个环境同步替换。</p>
+          </article>
+          <article class="benefit">
+            <div class="benefit-number">02 / THROUGHPUT</div>
+            <h3>大图不塞进 JSON</h3>
+            <p>命名管道只传动作、尺寸、参数和共享内存令牌；图像像素直接放入本机共享内存，避免 Base64 膨胀与网络传输。</p>
+          </article>
+          <article class="benefit">
+            <div class="benefit-number">03 / ADOPTION</div>
+            <h3>调用改动很小</h3>
+            <p>仍通过 OpenIVS 的 <code>Model</code> 类加载与推理，只需启用 <code>rpc_mode</code>，服务探活与启动由 API 处理。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="page">
+        <div class="section-heading">
+          <span class="eyebrow">Call Flow</span>
+          <h2>一次推理请求如何完成</h2>
+          <p>控制消息走命名管道，体积较大的图像与 mask 走共享内存，两类数据各走适合自己的通道。</p>
+        </div>
+
+        <div class="flow-shell">
+          <div class="flow-step">
+            <div class="step-index">01</div>
+            <div class="step-copy"><h3>CCD 软件创建模型</h3><p>以 RPC 模式构造 OpenIVS C# <code>Model</code>，传入模型路径与 GPU 设备编号。</p></div>
+            <div class="step-meta">Model(path, deviceId,<br>rpc_mode: true)</div>
+          </div>
+          <div class="flow-step">
+            <div class="step-index">02</div>
+            <div class="step-copy"><h3>检查并启动服务</h3><p>客户端向本机管道发送 <code>ping</code>。服务不可用时启动 <code>AIModelRPC.exe</code>，等待探活成功。</p></div>
+            <div class="step-meta">PIPE · DlcvModelRpcPipe<br>ACTION · ping</div>
+          </div>
+          <div class="flow-step">
+            <div class="step-index">03</div>
+            <div class="step-copy"><h3>在独立进程加载模型</h3><p>模型路径和设备编号通过 JSON 发给 RPC 服务，DLCV 推理 DLL 只在服务进程中加载。</p></div>
+            <div class="step-meta">ACTION · load_model<br>model_path + device_id</div>
+          </div>
+          <div class="flow-step">
+            <div class="step-index">04</div>
+            <div class="step-copy"><h3>图像写入共享内存</h3><p>C# API 规整图像后创建本机内存映射，将连续像素写入映射区，并生成唯一 token。</p></div>
+            <div class="step-meta">DlcvModelMmf_&lt;token&gt;<br>width × height × channels</div>
+          </div>
+          <div class="flow-step">
+            <div class="step-index">05</div>
+            <div class="step-copy"><h3>发送轻量推理指令</h3><p>管道消息只包含共享内存 token、图像尺寸、通道数与推理参数；服务据此打开同一映射区。</p></div>
+            <div class="step-meta">ACTION · infer<br>mmf_token + params_json</div>
+          </div>
+          <div class="flow-step">
+            <div class="step-index">06</div>
+            <div class="step-copy"><h3>返回结构化结果</h3><p>检测结果通过 JSON 返回；较大的 mask 可通过独立共享内存读取，再恢复为 C# 结果对象。</p></div>
+            <div class="step-meta">JSON · bbox / score / class<br>MMF · DlcvModelMask_&lt;token&gt;</div>
+          </div>
+          <div class="flow-step">
+            <div class="step-index">07</div>
+            <div class="step-copy"><h3>释放远端模型</h3><p>CCD 软件释放 <code>Model</code> 时发送 <code>free_model</code>，由 RPC 服务清理对应模型资源。</p></div>
+            <div class="step-meta">ACTION · free_model<br>model_path</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="page">
+        <div class="section-heading">
+          <span class="eyebrow">Integration</span>
+          <h2>C# 接入只需开启 RPC 模式</h2>
+        </div>
+
+        <div class="split-section">
+          <div class="code-card">
+            <div class="card-head"><span>CCD 软件调用示例</span><span>C#</span></div>
+            <pre><code><span class="kw">using</span> DlcvModules;
+<span class="kw">using</span> Newtonsoft.Json.Linq;
+
+<span class="kw">var</span> modelPath = <span class="str">@"D:\models\inspect.dvt"</span>;
+
+<span class="com">// 第三个参数开启 RPC 模式</span>
+<span class="kw">using</span> (<span class="kw">var</span> model = <span class="kw">new</span> <span class="type">Model</span>(
+    modelPath,
+    deviceId: <span class="bool">0</span>,
+    rpc_mode: <span class="bool">true</span>))
+{
+    <span class="kw">var</span> options = <span class="kw">new</span> <span class="type">JObject</span>
+    {
+        [<span class="str">"threshold"</span>] = <span class="bool">0.5</span>,
+        [<span class="str">"with_mask"</span>] = <span class="bool">true</span>
+    };
+
+    <span class="kw">var</span> result = model.Infer(rgbMat, options);
+    <span class="com">// 继续执行 CCD 软件的 OK / NG 逻辑</span>
+}</code></pre>
+          </div>
+
+          <div class="facts-card">
+            <div class="card-head"><span>当前协议事实</span><span>OpenIVS</span></div>
+            <div class="facts-list">
+              <div class="fact-row"><strong>支持的普通模型</strong><span>DVT / DVO；DVP 与 DVS 后缀按各自模式优先处理。</span></div>
+              <div class="fact-row"><strong>命名管道</strong><span><code>DlcvModelRpcPipe</code>，UTF-8 单行 JSON 请求与响应。</span></div>
+              <div class="fact-row"><strong>RPC 动作</strong><span><code>ping</code>、<code>load_model</code>、<code>get_model_info</code>、<code>infer</code>、<code>free_model</code>。</span></div>
+              <div class="fact-row"><strong>图像共享内存</strong><span><code>DlcvModelMmf_&lt;token&gt;</code>。</span></div>
+              <div class="fact-row"><strong>Mask 共享内存</strong><span><code>DlcvModelMask_&lt;token&gt;</code>。</span></div>
+              <div class="fact-row"><strong>服务程序查找</strong><span>优先调用程序目录，其次 DLCV C# SDK 固定安装目录。</span></div>
+              <div class="fact-row"><strong>当前批量行为</strong><span>RPC 批量输入由客户端逐张发送并合并结果。</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="note">
+          <strong>性能说明：</strong>共享内存避免了图像 Base64 编解码和网络传输，但客户端仍会把 Mat 像素复制到内存映射区，因此应表述为“低开销本机 IPC”，而不是严格零拷贝。最终耗时仍包含图像复制、进程调度和模型推理。
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="page footer-row">
+      <span>OpenIVS · C# API RPC 模式架构说明</span>
+      <span>现场 CCD 软件 → 本机共享内存 → DLCV RPC 推理服务</span>
+    </div>
+  </footer>
+</body>
+</html>

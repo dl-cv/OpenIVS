@@ -2,6 +2,8 @@
 
 **文档定位**：记录 `DlcvCsharpApi` 的工程结构、依赖、固定加载路径、运行模式与 C# 对外接口。所有内容以当前源码实现为准。
 
+RPC 模式的单文件架构展示页：[OpenIVS-CSharp-RPC模式.html](OpenIVS-CSharp-RPC模式.html)。页面可直接用浏览器打开或独立分享。
+
 ---
 
 ## 1. 项目结构
