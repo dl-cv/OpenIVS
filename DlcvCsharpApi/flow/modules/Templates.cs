@@ -331,7 +331,10 @@ namespace DlcvModules
 			{
 				if (original != null)
 				{
-					var filtered = original.Where(x => x == null || ((x.Text ?? string.Empty).IndexOf("NG", StringComparison.OrdinalIgnoreCase) < 0)).ToList();
+					var preserveNgCategory = tpl.CameraPosition == 3;
+					var filtered = preserveNgCategory
+						? original.ToList()
+						: original.Where(x => x == null || ((x.Text ?? string.Empty).IndexOf("NG", StringComparison.OrdinalIgnoreCase) < 0)).ToList();
 					tpl.OCRResults = filtered;
 				}
 			}
@@ -533,8 +536,9 @@ namespace DlcvModules
 			// 置信度过滤（与 PrintMatch 一致）
 			var validDetections = detectionItemsAll.Where(r => r.Confidence >= (float)minConf && r.Width > 0 && r.Height > 0).ToList();
 			var expectedCount = templateItems.Count;
+			var categoryCountsMatch = HaveSameCategoryCounts(templateItems, validDetections);
 
-			if (countPriority && validDetections.Count == expectedCount)
+			if (countPriority && categoryCountsMatch)
 			{
 				return BuildCountPrioritySuccess(golden, validDetections, expectedCount);
 			}
@@ -542,25 +546,34 @@ namespace DlcvModules
 			// 不检查位置时：只按文本内容和数量匹配
 			if (!checkPosition)
 			{
-				var textCountResult = MatchByTextAndCountOnly(golden, validDetections, templateItems);
-				AppendCountPrioritySummary(textCountResult, countPriority, validDetections.Count, expectedCount);
+				var textCountResult = MatchByTextAndCountOnly(
+					golden,
+					validDetections,
+					templateItems,
+					countPriority);
+				AppendCountPrioritySummary(
+					textCountResult,
+					countPriority,
+					validDetections.Count,
+					expectedCount,
+					categoryCountsMatch);
 				return textCountResult;
 			}
 				
-				// 按规范化文本分组
+				// 按当前匹配规则生成的类别键分组
 				var allTexts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 				var tplGroups = new Dictionary<string, List<SimpleOcrItem>>(StringComparer.OrdinalIgnoreCase);
 				var detGroups = new Dictionary<string, List<SimpleOcrItem>>(StringComparer.OrdinalIgnoreCase);
 				for (int i = 0; i < templateItems.Count; i++)
 				{
-					string key = NormalizeTextPM(templateItems[i].Text);
+					string key = GetMatchCategoryKey(templateItems[i].Text, countPriority);
 					allTexts.Add(key);
 					if (!tplGroups.ContainsKey(key)) tplGroups[key] = new List<SimpleOcrItem>();
 					tplGroups[key].Add(templateItems[i]);
 				}
 				for (int i = 0; i < validDetections.Count; i++)
 				{
-					string key = NormalizeTextPM(validDetections[i].Text);
+					string key = GetMatchCategoryKey(validDetections[i].Text, countPriority);
 					allTexts.Add(key);
 					if (!detGroups.ContainsKey(key)) detGroups[key] = new List<SimpleOcrItem>();
 					detGroups[key].Add(validDetections[i]);
@@ -757,9 +770,51 @@ namespace DlcvModules
 				["missing_components"] = missCount,
 				["misjudgments"] = misjudgeCount
 			};
-				AppendCountPrioritySummary(root, countPriority, validDetections.Count, expectedCount);
+				AppendCountPrioritySummary(
+					root,
+					countPriority,
+					validDetections.Count,
+					expectedCount,
+					categoryCountsMatch);
 				return root;
 			}
+
+		private static bool HaveSameCategoryCounts(
+			IEnumerable<SimpleOcrItem> templateItems,
+			IEnumerable<SimpleOcrItem> detectionItems)
+		{
+			var templateCounts = BuildCategoryCounts(templateItems);
+			var detectionCounts = BuildCategoryCounts(detectionItems);
+			return templateCounts.Count == detectionCounts.Count &&
+				templateCounts.All(pair => detectionCounts.TryGetValue(pair.Key, out int count) && count == pair.Value);
+		}
+
+		private static Dictionary<string, int> BuildCategoryCounts(IEnumerable<SimpleOcrItem> items)
+		{
+			var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+			foreach (var item in items ?? Enumerable.Empty<SimpleOcrItem>())
+			{
+				if (item == null) continue;
+				var category = NormalizeCategoryName(item.Text);
+				if (string.IsNullOrWhiteSpace(category)) continue;
+				counts[category] = counts.TryGetValue(category, out int count) ? count + 1 : 1;
+			}
+			return counts;
+		}
+
+		private static string NormalizeCategoryName(string category)
+		{
+			return string.IsNullOrWhiteSpace(category)
+				? string.Empty
+				: category.Trim();
+		}
+
+		private static string GetMatchCategoryKey(string category, bool useExactCategory)
+		{
+			return useExactCategory
+				? NormalizeCategoryName(category)
+				: NormalizeTextPM(category);
+		}
 
 		private static JObject BuildCountPrioritySuccess(
 			SimpleTemplate golden,
@@ -809,7 +864,8 @@ namespace DlcvModules
 			JObject detail,
 			bool countPriority,
 			int detectedCount,
-			int expectedCount)
+			int expectedCount,
+			bool categoryCountsMatch)
 		{
 			if (!countPriority || detail == null) return;
 			detail["detected_count"] = detectedCount;
@@ -819,8 +875,10 @@ namespace DlcvModules
 			detail["image_level_status"] = isMatch ? "OK" : "NG";
 			if (!isMatch && info != null && info["error_reason"] == null)
 			{
-				info["error_reason"] = "检测数量不符：检测到 " + detectedCount +
-					"，期望 " + expectedCount + "；已执行模版匹配";
+				info["error_reason"] = detectedCount != expectedCount
+					? "检测数量不符：检测到 " + detectedCount +
+						"，模版 " + expectedCount + "；已执行模版匹配"
+					: "检测类别数量不符；已执行模版匹配";
 			}
 		}
 
@@ -992,21 +1050,25 @@ namespace DlcvModules
 			return dv;
 		}
 
-		private static JObject MatchByTextAndCountOnly(SimpleTemplate golden, List<SimpleOcrItem> validDetections, List<SimpleOcrItem> templateItems)
+		private static JObject MatchByTextAndCountOnly(
+			SimpleTemplate golden,
+			List<SimpleOcrItem> validDetections,
+			List<SimpleOcrItem> templateItems,
+			bool useExactCategory)
 		{
 			var tplTextCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 			var detTextCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 			
 			foreach (var t in templateItems)
 			{
-				string key = NormalizeTextPM(t.Text);
+				string key = GetMatchCategoryKey(t.Text, useExactCategory);
 				if (!tplTextCount.ContainsKey(key)) tplTextCount[key] = 0;
 				tplTextCount[key]++;
 			}
 			
 			foreach (var d in validDetections)
 			{
-				string key = NormalizeTextPM(d.Text);
+				string key = GetMatchCategoryKey(d.Text, useExactCategory);
 				if (!detTextCount.ContainsKey(key)) detTextCount[key] = 0;
 				detTextCount[key]++;
 			}
@@ -1031,17 +1093,17 @@ namespace DlcvModules
 				if (detCount > tplCount)
 				{
 					overCount += (detCount - tplCount);
-					var items = validDetections.Where(d => string.Equals(NormalizeTextPM(d.Text), text, StringComparison.OrdinalIgnoreCase)).ToList();
+					var items = validDetections.Where(d => string.Equals(GetMatchCategoryKey(d.Text, useExactCategory), text, StringComparison.OrdinalIgnoreCase)).ToList();
 					for (int i = matched; i < items.Count; i++) overList.Add(items[i]);
 				}
 				else if (tplCount > detCount)
 				{
 					missCount += (tplCount - detCount);
-					var items = templateItems.Where(t => string.Equals(NormalizeTextPM(t.Text), text, StringComparison.OrdinalIgnoreCase)).ToList();
+					var items = templateItems.Where(t => string.Equals(GetMatchCategoryKey(t.Text, useExactCategory), text, StringComparison.OrdinalIgnoreCase)).ToList();
 					for (int i = matched; i < items.Count; i++) missList.Add(items[i]);
 				}
 				
-				var matchedDet = validDetections.Where(d => string.Equals(NormalizeTextPM(d.Text), text, StringComparison.OrdinalIgnoreCase)).Take(matched).ToList();
+				var matchedDet = validDetections.Where(d => string.Equals(GetMatchCategoryKey(d.Text, useExactCategory), text, StringComparison.OrdinalIgnoreCase)).Take(matched).ToList();
 				correctList.AddRange(matchedDet);
 			}
 			
