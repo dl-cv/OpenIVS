@@ -474,8 +474,7 @@ namespace sntl_admin_csharp
                         IntPtr infoPtr = IntPtr.Zero;
                         if (getDeviceInfo(ipc, desc.ToString(Newtonsoft.Json.Formatting.None), ref infoPtr) == SS_OK)
                         {
-                            string infoJson = Marshal.PtrToStringAnsi(infoPtr);
-                            freeBuffer(infoPtr);
+                            string infoJson = ReadAndFree(infoPtr);
                             JObject infoObj = JObject.Parse(infoJson);
                             if (infoObj["shell_num"] != null)
                             {
