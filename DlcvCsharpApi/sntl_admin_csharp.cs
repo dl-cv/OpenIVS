@@ -393,6 +393,9 @@ namespace sntl_admin_csharp
         private delegate uint GetAllDescriptionDelegate(IntPtr ipc, uint format, ref IntPtr desc);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate uint GetOfflineLocalDescriptionDelegate(IntPtr ipc, ref IntPtr desc);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate uint GetLicenseIdDelegate(IntPtr ipc, uint format, string desc, ref IntPtr result);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
@@ -405,6 +408,7 @@ namespace sntl_admin_csharp
         private readonly ClientOpenDelegate clientOpen;
         private readonly ClientCloseDelegate clientClose;
         private readonly GetAllDescriptionDelegate getAllDescription;
+        private readonly GetOfflineLocalDescriptionDelegate getOfflineLocalDescription;
         private readonly GetLicenseIdDelegate getLicenseId;
         private readonly GetDeviceInfoDelegate getDeviceInfo;
         private readonly FreeDelegate freeBuffer;
@@ -424,6 +428,7 @@ namespace sntl_admin_csharp
             clientOpen = GetDelegate<ClientOpenDelegate>("slm_ctrl_client_open");
             clientClose = GetDelegate<ClientCloseDelegate>("slm_ctrl_client_close");
             getAllDescription = GetDelegate<GetAllDescriptionDelegate>("slm_ctrl_get_all_description");
+            getOfflineLocalDescription = GetDelegate<GetOfflineLocalDescriptionDelegate>("slm_ctrl_get_offline_local_desc");
             getLicenseId = GetDelegate<GetLicenseIdDelegate>("slm_ctrl_get_license_id");
             getDeviceInfo = GetDelegate<GetDeviceInfoDelegate>("slm_ctrl_get_device_info");
             freeBuffer = GetDelegate<FreeDelegate>("slm_ctrl_free");
@@ -433,9 +438,8 @@ namespace sntl_admin_csharp
             hModule != IntPtr.Zero &&
             clientOpen != null &&
             clientClose != null &&
-            getAllDescription != null &&
+            (getAllDescription != null || getOfflineLocalDescription != null) &&
             getLicenseId != null &&
-            getDeviceInfo != null &&
             freeBuffer != null;
 
         public JArray GetDeviceList()
@@ -458,11 +462,19 @@ namespace sntl_admin_csharp
                 {
                     try
                     {
+                        if (string.Equals(desc["type"]?.ToString(), "slock", StringComparison.OrdinalIgnoreCase))
+                        {
+                            AddUnique(result, FirstStringByKeys(desc, new[] { "user_guid" }));
+                            continue;
+                        }
+                        if (getDeviceInfo == null)
+                        {
+                            continue;
+                        }
                         IntPtr infoPtr = IntPtr.Zero;
                         if (getDeviceInfo(ipc, desc.ToString(Newtonsoft.Json.Formatting.None), ref infoPtr) == SS_OK)
                         {
-                            string infoJson = Marshal.PtrToStringAnsi(infoPtr);
-                            freeBuffer(infoPtr);
+                            string infoJson = ReadAndFree(infoPtr);
                             JObject infoObj = JObject.Parse(infoJson);
                             if (infoObj["shell_num"] != null)
                             {
@@ -520,32 +532,61 @@ namespace sntl_admin_csharp
         private List<JObject> GetDescriptions(IntPtr ipc)
         {
             List<JObject> result = new List<JObject>();
-            IntPtr descPtr = IntPtr.Zero;
-            if (getAllDescription(ipc, INFO_FORMAT_JSON, ref descPtr) != SS_OK)
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            if (getAllDescription != null)
             {
-                return result;
+                IntPtr descPtr = IntPtr.Zero;
+                if (getAllDescription(ipc, INFO_FORMAT_JSON, ref descPtr) == SS_OK)
+                {
+                    AppendDescriptions(ParseJson(ReadAndFree(descPtr)), result, seen);
+                }
             }
+            if (getOfflineLocalDescription != null)
+            {
+                IntPtr descPtr = IntPtr.Zero;
+                if (getOfflineLocalDescription(ipc, ref descPtr) == SS_OK)
+                {
+                    AppendDescriptions(ParseJson(ReadAndFree(descPtr)), result, seen);
+                }
+            }
+            return result;
+        }
 
-            JToken root = ParseJson(ReadAndFree(descPtr));
-            // 仅保留深度视觉开发商的锁
+        private static void AppendDescriptions(
+            JToken root,
+            List<JObject> result,
+            HashSet<string> seen)
+        {
             if (root is JObject obj)
             {
-                if (IsDlcvDeveloper(obj))
-                {
-                    result.Add(obj);
-                }
+                AppendDescription(obj, result, seen);
             }
             else if (root is JArray array)
             {
                 foreach (JToken item in array)
                 {
-                    if (item is JObject itemObj && IsDlcvDeveloper(itemObj))
+                    if (item is JObject itemObj)
                     {
-                        result.Add(itemObj);
+                        AppendDescription(itemObj, result, seen);
                     }
                 }
             }
-            return result;
+        }
+
+        private static void AppendDescription(
+            JObject description,
+            List<JObject> result,
+            HashSet<string> seen)
+        {
+            if (!IsDlcvDeveloper(description))
+            {
+                return;
+            }
+            string key = description.ToString(Newtonsoft.Json.Formatting.None);
+            if (seen.Add(key))
+            {
+                result.Add(description);
+            }
         }
 
         private static bool IsDlcvDeveloper(JObject desc)

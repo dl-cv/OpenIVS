@@ -422,6 +422,7 @@
 #### 7.12 检查加密狗（按钮：`检查加密狗`）
 
 - 调用：`DogUtils.GetAllDogInfo()`（`ShowDogInfo()`）
+- Virbox 查询同时覆盖实体设备描述和离线本地软锁描述；授权码软锁的设备列表显示唯一锁号，特性列表显示许可 ID。
 - 输出到 `richTextBox1`（格式必须一致）：
   - `Sentinel加密狗ID：\n{sentinelDeviceList}\n\nSentinel加密狗特性：\n{sentinelFeatureList}\n\nVirbox加密狗ID：\n{virboxDeviceList}\n\nVirbox加密狗特性：\n{virboxFeatureList}`
 - 若 Sentinel/Virbox 的 devices 与 features 均为空：在上述内容前追加一行 `未检测到加密狗\n\n`

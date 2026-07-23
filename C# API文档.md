@@ -612,7 +612,7 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 
 ### 14.5 `sntl_admin_csharp`
 
-`sntl_admin_csharp` 对外提供状态枚举 `SntlAdminStatus`、原生加载器 `SNTLDllLoader`、运行时访问类 `SNTL`、工具类 `SNTLUtils`、`DogProvider` 枚举、`DogInfo` 与 `DogUtils`。`SNTL` 负责建立上下文并提供 `Get()`、`GetSntlInfo()`、`GetDeviceList()`、`GetFeatureList()`、`Dispose()`；`SNTLUtils` 提供静态的 Sentinel 设备列表与特征列表查询，不再自动回退到 Virbox。`Virbox` 提供独立的 Virbox 设备列表与特征列表查询。`DogUtils` 提供 `GetSentinelInfo()`、`GetVirboxInfo()`、`GetAvailableProviders()` 与 `GetAllDogInfo()`，用于同时查询两类加密狗信息。OpenIVS 不解密模型包内 `dlcv.json`。
+`sntl_admin_csharp` 对外提供状态枚举 `SntlAdminStatus`、原生加载器 `SNTLDllLoader`、运行时访问类 `SNTL`、工具类 `SNTLUtils`、`DogProvider` 枚举、`DogInfo` 与 `DogUtils`。`SNTL` 负责建立上下文并提供 `Get()`、`GetSntlInfo()`、`GetDeviceList()`、`GetFeatureList()`、`Dispose()`；`SNTLUtils` 提供静态的 Sentinel 设备列表与特征列表查询，不再自动回退到 Virbox。`Virbox` 合并 `slm_ctrl_get_all_description` 返回的设备描述与 `slm_ctrl_get_offline_local_desc` 返回的本地软锁描述；授权码软锁使用 `user_guid` 作为唯一锁号，特性列表通过 `slm_ctrl_get_license_id` 读取。`DogUtils` 提供 `GetSentinelInfo()`、`GetVirboxInfo()`、`GetAvailableProviders()` 与 `GetAllDogInfo()`，用于同时查询两类授权信息。OpenIVS 不解密模型包内 `dlcv.json`。
 
 ---
 

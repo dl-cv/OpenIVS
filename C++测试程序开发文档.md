@@ -174,6 +174,7 @@ dlcv_infer_cpp_qt_demo.exe --help
 
 1. 点击 **检查加密狗**。
 2. 文本区显示 Sentinel 和 Virbox 的设备和特性列表。
+   - Virbox 查询同时覆盖实体设备描述和离线本地软锁描述；授权码软锁显示唯一锁号与许可 ID。
 3. 若两者均为空，表示未检测到加密狗；此时 `DllLoader` 不加载推理 DLL。
 
 **代码路径**：`MainWindow::onCheckDog()`
