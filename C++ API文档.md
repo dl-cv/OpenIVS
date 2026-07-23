@@ -621,7 +621,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ## 22. `sntl_admin`
 
-公开类型为 `SntlAdminStatus`、`SNTLDllLoader`、`SNTL`、`SNTLUtils`、`Virbox`、`DogProvider`、`DogInfo`、`DogUtils` 和 `ParseXmlToJson()`。固定 XML 常量中，`DefaultScope` 的厂商 ID 固定为 `26146`，`HaspIdFormat` 读取 `haspid`，`FeatureIdFormat` 读取 `featureid` 与 `haspid`。`SNTL` 构造时调用 `sntl_admin_context_new`，析构时调用 `Dispose()`，`Dispose()` 再调 `sntl_admin_context_delete`；`Get()` 调 `sntl_admin_get`，成功时返回 `{ "code": 0, "message": "成功", "data": ... }`，失败时返回 `{ "code": <status>, "message": "<状态描述>" }`。`SNTLUtils::GetDeviceList()` 返回 Sentinel 加密狗 ID 数组，`GetFeatureList()` 返回 Sentinel 特性 ID 数组，任一异常都返回空数组 `[]`，不再自动回退到 Virbox。`Virbox` 提供独立的 Virbox 设备列表与特征列表查询。`DogUtils::GetAllDogInfo()` 返回同时包含 Sentinel 与 Virbox 信息的 JSON。
+公开类型为 `SntlAdminStatus`、`SNTLDllLoader`、`SNTL`、`SNTLUtils`、`Virbox`、`DogProvider`、`DogInfo`、`DogUtils` 和 `ParseXmlToJson()`。固定 XML 常量中，`DefaultScope` 的厂商 ID 固定为 `26146`，`HaspIdFormat` 读取 `haspid`，`FeatureIdFormat` 读取 `featureid` 与 `haspid`。`SNTL` 构造时调用 `sntl_admin_context_new`，析构时调用 `Dispose()`，`Dispose()` 再调 `sntl_admin_context_delete`；`Get()` 调 `sntl_admin_get`，成功时返回 `{ "code": 0, "message": "成功", "data": ... }`，失败时返回 `{ "code": <status>, "message": "<状态描述>" }`。`SNTLUtils::GetDeviceList()` 返回 Sentinel 加密狗 ID 数组，`GetFeatureList()` 返回 Sentinel 特性 ID 数组，任一异常都返回空数组 `[]`，不再自动回退到 Virbox。`Virbox` 合并 `slm_ctrl_get_all_description` 返回的设备描述与 `slm_ctrl_get_offline_local_desc` 返回的本地软锁描述；授权码软锁使用 `user_guid` 作为唯一锁号，特性列表通过 `slm_ctrl_get_license_id` 读取。`DogUtils::GetAllDogInfo()` 返回同时包含 Sentinel 与 Virbox 信息的 JSON。
 
 ---
 

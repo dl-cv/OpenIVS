@@ -1,5 +1,7 @@
 ﻿#include "dlcv_sntl_admin.h"
 
+#include <set>
+
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif
@@ -16,6 +18,7 @@ namespace {
     using VirboxClientOpenFunc = int(DLCV_STDCALL *)(void** ipc);
     using VirboxClientCloseFunc = int(DLCV_STDCALL *)(void* ipc);
     using VirboxGetAllDescriptionFunc = int(DLCV_STDCALL *)(void* ipc, int format, char** desc);
+    using VirboxGetOfflineLocalDescriptionFunc = int(DLCV_STDCALL *)(void* ipc, char** desc);
     using VirboxGetLicenseIdFunc = int(DLCV_STDCALL *)(void* ipc, int format, const char* desc, char** result);
     using VirboxGetDeviceInfoFunc = int(DLCV_STDCALL *)(void* ipc, const char* desc, char** result);
     using VirboxFreeFunc = void(DLCV_STDCALL *)(void* buffer);
@@ -61,6 +64,7 @@ namespace {
         VirboxClientOpenFunc client_open = nullptr;
         VirboxClientCloseFunc client_close = nullptr;
         VirboxGetAllDescriptionFunc get_all_description = nullptr;
+        VirboxGetOfflineLocalDescriptionFunc get_offline_local_description = nullptr;
         VirboxGetLicenseIdFunc get_license_id = nullptr;
         VirboxGetDeviceInfoFunc get_device_info = nullptr;
         VirboxFreeFunc free_buffer = nullptr;
@@ -87,11 +91,14 @@ namespace {
             client_open = reinterpret_cast<VirboxClientOpenFunc>(ResolveSymbol(module, "slm_ctrl_client_open"));
             client_close = reinterpret_cast<VirboxClientCloseFunc>(ResolveSymbol(module, "slm_ctrl_client_close"));
             get_all_description = reinterpret_cast<VirboxGetAllDescriptionFunc>(ResolveSymbol(module, "slm_ctrl_get_all_description"));
+            get_offline_local_description = reinterpret_cast<VirboxGetOfflineLocalDescriptionFunc>(ResolveSymbol(module, "slm_ctrl_get_offline_local_desc"));
             get_license_id = reinterpret_cast<VirboxGetLicenseIdFunc>(ResolveSymbol(module, "slm_ctrl_get_license_id"));
             get_device_info = reinterpret_cast<VirboxGetDeviceInfoFunc>(ResolveSymbol(module, "slm_ctrl_get_device_info"));
             free_buffer = reinterpret_cast<VirboxFreeFunc>(ResolveSymbol(module, "slm_ctrl_free"));
 
-            if (!client_open || !client_close || !get_all_description || !get_license_id || !get_device_info || !free_buffer)
+            if (!client_open || !client_close
+                || (!get_all_description && !get_offline_local_description)
+                || !get_license_id || !free_buffer)
             {
                 FreeModuleHandle(module);
 #ifdef _WIN32
@@ -102,6 +109,7 @@ namespace {
                 client_open = nullptr;
                 client_close = nullptr;
                 get_all_description = nullptr;
+                get_offline_local_description = nullptr;
                 get_license_id = nullptr;
                 get_device_info = nullptr;
                 free_buffer = nullptr;
@@ -160,34 +168,46 @@ namespace {
     }
 
     std::vector<nlohmann::json> GetVirboxDescriptions(void* ipc, VirboxControlApi& api) {
-        char* desc = nullptr;
-        int status = api.get_all_description(ipc, VIRBOX_JSON, &desc);
-        if (status != VIRBOX_OK)
-        {
-            return {};
-        }
-
-        nlohmann::json root = ParseJsonSafe(ReadAndFree(api, desc));
-        // 仅保留深度视觉开发商的锁
-        if (root.is_object())
-        {
-            if (IsDlcvDeveloper(root))
-            {
-                return { root };
-            }
-            return {};
-        }
-        if (!root.is_array())
-        {
-            return {};
-        }
-
         std::vector<nlohmann::json> result;
-        for (const auto& item : root)
-        {
-            if (item.is_object() && IsDlcvDeveloper(item))
+        std::set<std::string> seen;
+        auto append = [&](const nlohmann::json& root) {
+            auto append_one = [&](const nlohmann::json& item) {
+                if (item.is_object() && IsDlcvDeveloper(item))
+                {
+                    std::string key = item.dump();
+                    if (seen.insert(key).second)
+                    {
+                        result.push_back(item);
+                    }
+                }
+            };
+            if (root.is_object())
             {
-                result.push_back(item);
+                append_one(root);
+            }
+            else if (root.is_array())
+            {
+                for (const auto& item : root)
+                {
+                    append_one(item);
+                }
+            }
+        };
+
+        if (api.get_all_description)
+        {
+            char* desc = nullptr;
+            if (api.get_all_description(ipc, VIRBOX_JSON, &desc) == VIRBOX_OK)
+            {
+                append(ParseJsonSafe(ReadAndFree(api, desc)));
+            }
+        }
+        if (api.get_offline_local_description)
+        {
+            char* desc = nullptr;
+            if (api.get_offline_local_description(ipc, &desc) == VIRBOX_OK)
+            {
+                append(ParseJsonSafe(ReadAndFree(api, desc)));
             }
         }
         return result;
@@ -308,6 +328,15 @@ nlohmann::json sntl_admin::Virbox::GetDeviceList() {
         {
             try
             {
+                if (desc.value("type", std::string{}) == "slock")
+                {
+                    AddUnique(devices, FirstStringByKeys(desc, { "user_guid" }));
+                    continue;
+                }
+                if (!api.get_device_info)
+                {
+                    continue;
+                }
                 char* info = nullptr;
                 int status = api.get_device_info(ipc, desc.dump().c_str(), &info);
                 if (status == VIRBOX_OK)
