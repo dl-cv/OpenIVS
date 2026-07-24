@@ -330,7 +330,7 @@ nlohmann::json sntl_admin::Virbox::GetDeviceList() {
             {
                 if (desc.value("type", std::string{}) == "slock")
                 {
-                    AddUnique(devices, FirstStringByKeys(desc, { "user_guid" }));
+                    AddUnique(devices, FirstStringByKeys(desc, { "account_name", "user_guid" }));
                     continue;
                 }
                 if (!api.get_device_info)
