@@ -464,7 +464,7 @@ namespace sntl_admin_csharp
                     {
                         if (string.Equals(desc["type"]?.ToString(), "slock", StringComparison.OrdinalIgnoreCase))
                         {
-                            AddUnique(result, FirstStringByKeys(desc, new[] { "user_guid" }));
+                            AddUnique(result, FirstStringByKeys(desc, new[] { "account_name", "user_guid" }));
                             continue;
                         }
                         if (getDeviceInfo == null)
