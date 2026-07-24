@@ -635,3 +635,6 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 - 读盘和写盘遵循 OpenCV 的 BGR 语义；调用方负责把三/四通道颜色图整理为 RGB；`Model` 与 `FlowGraphModel` 入口会按模型输入自动做最小必要的通道规整，例如把灰度图补成 RGB、或把三/四通道图压成灰度，但不负责 BGR/BGRA 到 RGB 的颜色顺序转换。
 - 当前显式使用的标量键包括 `filename`、`has_positive`、`ok`、`detail`、`kept_count`、`removed_count`。
 - 模板相关类型为 `SimpleOcrItem`、`SimpleTemplate` 和 `SimpleTemplateMatchDetail`。
+- C# `features/printed_template_match` 从执行上下文读取 `defer_template_creation`。该值为 `true` 且磁盘模板不存在时，模块返回 `template_candidate=true`、`Candidate` OCR 状态、`ok=false` 和空 `TemplateList`，不直接写入模板；关闭时保持自动保存并自匹配的既有行为。
+- C# `features/template_match` 与 `features/printed_template_match` 支持节点属性 `count_priority`。启用后按类别分别比较有效项数量，各类别数量一致时直接通过，否则回到普通模板匹配；结果 `detail` 增加 `detected_count`、`expected_count` 和 `image_level_status`。
+- 数量优先的类别比较去除首尾空白并忽略大小写，不执行 OCR 易混字符替换；D 面保留 `NG` 类别，A/B/C 面保持印刷 `NG` 文本过滤。完整字段与 C++ 能力边界见共享标准文档第 7.6 节。

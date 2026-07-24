@@ -78,6 +78,11 @@ namespace DlcvCSharpTest
                     return RunBBoxIoUDedupSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "template-count-priority-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunTemplateCountPrioritySelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "image-generation-expand-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunImageGenerationExpandSelfTest();
@@ -3448,6 +3453,340 @@ namespace DlcvCSharpTest
             }
             Console.WriteLine("==== with_mask 参数透传自测 失败数=" + globalFail + " ====");
             return 1;
+        }
+
+        private static int RunTemplateCountPrioritySelfTest()
+        {
+            try
+            {
+                var golden = new SimpleTemplate
+                {
+                    TemplateName = "COUNT-PRIORITY",
+                    ProductName = "COUNT-PRIORITY",
+                    OCRResults = new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("A", 0, 0),
+                        MakeTemplateSelfTestItem("A", 20, 0),
+                        MakeTemplateSelfTestItem("B", 40, 0),
+                        MakeTemplateSelfTestItem(" ", 60, 0),
+                        null
+                    }
+                };
+
+                var equalButDifferent = RunTemplateCountPriorityCase(
+                    golden,
+                    new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem(" a ", 100, 100),
+                        MakeTemplateSelfTestItem("A", 120, 100),
+                        MakeTemplateSelfTestItem("B", 140, 100)
+                    },
+                    true);
+                RequireTemplateCountPriority(
+                    equalButDifferent.Value<bool>("ok") &&
+                    equalButDifferent["detail"]?["template_match_info"]?.Value<bool>("is_match") == true &&
+                    equalButDifferent["detail"]?.Value<int>("expected_count") == 3 &&
+                    equalButDifferent["detail"]?["ocr_results"] is JArray equalItems &&
+                    equalItems.Count == 3 &&
+                    equalItems.All(item => item?["match_status"]?.ToString() == "Correct"),
+                    "count_priority=true should accept equal normalized category counts despite position changes");
+
+                var categoryDistributionMismatch = RunTemplateCountPriorityCase(
+                    golden,
+                    new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("A", 0, 0),
+                        MakeTemplateSelfTestItem("B", 20, 0),
+                        MakeTemplateSelfTestItem("B", 40, 0)
+                    },
+                    true);
+                var distributionDetail = categoryDistributionMismatch["detail"] as JObject;
+                var distributionReason = distributionDetail?["template_match_info"]?["error_reason"]?.ToString();
+                RequireTemplateCountPriority(
+                    !categoryDistributionMismatch.Value<bool>("ok") &&
+                    distributionDetail?["template_match_info"]?.Value<int>("perfect_matches") == 2 &&
+                    distributionDetail?["template_match_info"]?.Value<int>("over_detections") == 1 &&
+                    distributionDetail?["template_match_info"]?.Value<int>("missing_components") == 1 &&
+					distributionReason == "缺：A×1；多：B×1" &&
+                    distributionReason.IndexOf("已执行模版匹配", StringComparison.Ordinal) < 0,
+                    "equal totals with different normalized category distributions should fall back and fail");
+
+                var totalMismatch = RunTemplateCountPriorityCase(
+                    golden,
+                    new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("A", 0, 0),
+                        MakeTemplateSelfTestItem("A", 20, 0)
+                    },
+                    true);
+                RequireTemplateCountPriority(
+                    !totalMismatch.Value<bool>("ok") &&
+                    totalMismatch["detail"]?["template_match_info"]?.Value<int>("missing_components") == 1 &&
+					totalMismatch["detail"]?["template_match_info"]?["error_reason"]?.ToString() == "缺：B×1",
+                    "different totals should fall back to ordinary matching and fail");
+
+                var disabled = RunTemplateCountPriorityCase(
+                    golden,
+                    new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("A", 100, 100),
+                        MakeTemplateSelfTestItem("A", 120, 100),
+                        MakeTemplateSelfTestItem("B", 140, 100)
+                    },
+                    false);
+                RequireTemplateCountPriority(
+                    !disabled.Value<bool>("ok") &&
+                    disabled["detail"]?["template_match_info"]?.Value<int>("over_detections") == 3 &&
+                    disabled["detail"]?["template_match_info"]?.Value<int>("missing_components") == 3 &&
+                    disabled["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：A×2、B×1；多：A×2、B×1",
+                    "count_priority=false should preserve ordinary position-sensitive matching");
+
+                var bGolden = new SimpleTemplate
+                {
+                    TemplateName = "EXACT-B",
+                    OCRResults = new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("B", 0, 0)
+                    }
+                };
+                var bVsEight = RunTemplateCountPriorityCase(
+                    bGolden,
+                    new List<SimpleOcrItem> { MakeTemplateSelfTestItem("8", 0, 0) },
+                    true);
+                RequireTemplateCountPriority(
+                    !bVsEight.Value<bool>("ok") &&
+					bVsEight["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：B×1；多：8×1；误判：模版 B→检测 8×1",
+                    "count_priority fallback must keep B distinct from 8");
+
+                var okGolden = new SimpleTemplate
+                {
+                    TemplateName = "EXACT-OK",
+                    OCRResults = new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("OK", 0, 0)
+                    }
+                };
+                var okVsZeroK = RunTemplateCountPriorityCase(
+                    okGolden,
+                    new List<SimpleOcrItem> { MakeTemplateSelfTestItem("0K", 0, 0) },
+                    true,
+                    false);
+                RequireTemplateCountPriority(
+                    !okVsZeroK.Value<bool>("ok") &&
+					okVsZeroK["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：OK×1；多：0K×1",
+                    "count_priority fallback must keep OK distinct from 0K");
+
+                var legacyBVsEight = RunTemplateCountPriorityCase(
+                    bGolden,
+                    new List<SimpleOcrItem> { MakeTemplateSelfTestItem("8", 0, 0) },
+                    false);
+                RequireTemplateCountPriority(
+                    legacyBVsEight.Value<bool>("ok"),
+                    "count_priority=false should preserve ordinary ambiguous-character normalization");
+
+                var deviationTemplateItem = MakeTemplateSelfTestItem("A", 0, 0);
+                deviationTemplateItem.Width = 100;
+                var deviationDetectionItem = MakeTemplateSelfTestItem("A", 40, 0);
+                deviationDetectionItem.Width = 100;
+                var deviationGolden = new SimpleTemplate
+                {
+                    TemplateName = "POSITION-REASON",
+                    OCRResults = new List<SimpleOcrItem>
+                    {
+                        deviationTemplateItem,
+                        MakeTemplateSelfTestItem("B", 200, 0)
+                    }
+                };
+                var deviationMismatch = RunTemplateCountPriorityCase(
+                    deviationGolden,
+                    new List<SimpleOcrItem> { deviationDetectionItem },
+                    true);
+                RequireTemplateCountPriority(
+                    !deviationMismatch.Value<bool>("ok") &&
+					deviationMismatch["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：B×1；位置偏差：A×1",
+                    "ordinary fallback should include concrete position deviation details when the result is NG");
+
+                var dGolden = new SimpleTemplate
+                {
+                    TemplateName = "COUNT-PRIORITY-D",
+                    ProductName = "COUNT-PRIORITY-D",
+                    CameraPosition = 3,
+                    OCRResults = new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("OK", 0, 0),
+                        MakeTemplateSelfTestItem("OK", 20, 0),
+                        MakeTemplateSelfTestItem("OK", 40, 0),
+                        MakeTemplateSelfTestItem("NG", 60, 0)
+                    }
+                };
+                var dSameDistribution = RunTemplateCountPriorityCase(
+                    dGolden,
+                    new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("OK", 100, 100),
+                        MakeTemplateSelfTestItem("OK", 120, 100),
+                        MakeTemplateSelfTestItem("OK", 140, 100),
+                        MakeTemplateSelfTestItem("NG", 160, 100)
+                    },
+                    true);
+                RequireTemplateCountPriority(
+                    dSameDistribution.Value<bool>("ok") &&
+                    dSameDistribution["detail"]?["ocr_results"] is JArray dItems &&
+                    dItems.All(item => item?["match_status"]?.ToString() == "Correct"),
+                    "D count priority should accept OK x3 plus NG x1 only when category counts match");
+
+                var dWrongDistribution = RunTemplateCountPriorityCase(
+                    dGolden,
+                    new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("OK", 0, 0),
+                        MakeTemplateSelfTestItem("OK", 20, 0),
+                        MakeTemplateSelfTestItem("OK", 40, 0),
+                        MakeTemplateSelfTestItem("OK", 60, 0)
+                    },
+                    true);
+                RequireTemplateCountPriority(
+                    !dWrongDistribution.Value<bool>("ok") &&
+                    ((dWrongDistribution["detail"]?["template_match_info"]?.Value<int>("over_detections") ?? 0) +
+                     (dWrongDistribution["detail"]?["template_match_info"]?.Value<int>("missing_components") ?? 0) +
+                     (dWrongDistribution["detail"]?["template_match_info"]?.Value<int>("misjudgments") ?? 0)) > 0 &&
+					dWrongDistribution["detail"]?["template_match_info"]?["error_reason"]?.ToString() ==
+						"缺：NG×1；多：OK×1；误判：模版 NG→检测 OK×1",
+                    "D count priority must reject OK x4 when the template is OK x3 plus NG x1");
+
+                VerifyTemplateSaveNgPolicy();
+
+                Console.WriteLine("template count priority selftest passed");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("template count priority selftest failed: " + ex.Message);
+                return 1;
+            }
+        }
+
+        private static JObject RunTemplateCountPriorityCase(
+            SimpleTemplate golden,
+            List<SimpleOcrItem> detections,
+            bool countPriority,
+            bool checkPosition = true)
+        {
+            var module = new TemplateMatch(
+                9001,
+                properties: new Dictionary<string, object>
+                {
+                    { "count_priority", countPriority },
+                    { "expected_count", 999 },
+                    { "check_position", checkPosition },
+                    { "min_confidence_threshold", 0.5 }
+                });
+            module.MainTemplateList = new List<SimpleTemplate>
+            {
+                new SimpleTemplate { OCRResults = detections }
+            };
+            module.ExtraInputsIn.Add(new ModuleChannel(
+                new List<ModuleImage>(),
+                new JArray(),
+                new List<SimpleTemplate> { golden }));
+            module.Process(new List<ModuleImage>(), new JArray());
+
+            var ok = module.ScalarOutputsByName.ContainsKey("ok") &&
+                Convert.ToBoolean(module.ScalarOutputsByName["ok"]);
+            var detailText = module.ScalarOutputsByName.ContainsKey("detail")
+                ? Convert.ToString(module.ScalarOutputsByName["detail"])
+                : string.Empty;
+            return new JObject
+            {
+                ["ok"] = ok,
+                ["detail"] = string.IsNullOrWhiteSpace(detailText)
+                    ? new JObject()
+                    : JObject.Parse(detailText)
+            };
+        }
+
+        private static SimpleOcrItem MakeTemplateSelfTestItem(string text, int x, int y)
+        {
+            return new SimpleOcrItem
+            {
+                Text = text,
+                X = x,
+                Y = y,
+                Width = 10,
+                Height = 10,
+                Confidence = 0.99f
+            };
+        }
+
+        private static void RequireTemplateCountPriority(bool condition, string message)
+        {
+            if (!condition) throw new InvalidOperationException(message);
+        }
+
+        private static void VerifyTemplateSaveNgPolicy()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "DlcvTemplateSaveNg_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var context = new DlcvModules.ExecutionContext();
+                context.Set("templates_dir", root);
+                var dTemplate = new SimpleTemplate
+                {
+                    TemplateId = "D-NG-POLICY",
+                    TemplateName = "D-NG-POLICY",
+                    CameraPosition = 3,
+                    OCRResults = new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("OK", 0, 0),
+                        MakeTemplateSelfTestItem("OK", 20, 0),
+                        MakeTemplateSelfTestItem("OK", 40, 0),
+                        MakeTemplateSelfTestItem("NG", 60, 0)
+                    }
+                };
+                var dSaver = new TemplateSave(
+                    9101,
+                    properties: new Dictionary<string, object> { { "file_name", "D-NG-POLICY" } },
+                    context: context);
+                dSaver.MainTemplateList = new List<SimpleTemplate> { dTemplate };
+                dSaver.Process(new List<ModuleImage>(), new JArray());
+                var savedD = JsonConvert.DeserializeObject<SimpleTemplate>(
+                    File.ReadAllText(Path.Combine(root, "D-NG-POLICY.json")));
+                RequireTemplateCountPriority(
+                    savedD != null && savedD.OCRResults.Count == 4 && savedD.OCRResults.Count(x => x.Text == "NG") == 1,
+                    "TemplateSave should preserve NG categories for D templates");
+
+                var aTemplate = new SimpleTemplate
+                {
+                    TemplateId = "A-NG-POLICY",
+                    TemplateName = "A-NG-POLICY",
+                    CameraPosition = 0,
+                    OCRResults = new List<SimpleOcrItem>
+                    {
+                        MakeTemplateSelfTestItem("PRINT", 0, 0),
+                        MakeTemplateSelfTestItem("NG-PRINT", 20, 0)
+                    }
+                };
+                var aSaver = new TemplateSave(
+                    9102,
+                    properties: new Dictionary<string, object> { { "file_name", "A-NG-POLICY" } },
+                    context: context);
+                aSaver.MainTemplateList = new List<SimpleTemplate> { aTemplate };
+                aSaver.Process(new List<ModuleImage>(), new JArray());
+                var savedA = JsonConvert.DeserializeObject<SimpleTemplate>(
+                    File.ReadAllText(Path.Combine(root, "A-NG-POLICY.json")));
+                RequireTemplateCountPriority(
+                    savedA != null && savedA.OCRResults.Count == 1 && savedA.OCRResults[0].Text == "PRINT",
+                    "TemplateSave should keep the existing A/B/C NG text filter");
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch { }
+            }
         }
 
         [DllImport("psapi.dll", SetLastError = true)]

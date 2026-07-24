@@ -331,7 +331,10 @@ namespace DlcvModules
 			{
 				if (original != null)
 				{
-					var filtered = original.Where(x => x == null || ((x.Text ?? string.Empty).IndexOf("NG", StringComparison.OrdinalIgnoreCase) < 0)).ToList();
+					var preserveNgCategory = tpl.CameraPosition == 3;
+					var filtered = preserveNgCategory
+						? original.ToList()
+						: original.Where(x => x == null || ((x.Text ?? string.Empty).IndexOf("NG", StringComparison.OrdinalIgnoreCase) < 0)).ToList();
 					tpl.OCRResults = filtered;
 				}
 			}
@@ -440,9 +443,17 @@ namespace DlcvModules
 				double posTolY = ReadDoubleOr("position_tolerance_y", 20.0);
 				double minConf = ReadDoubleOr("min_confidence_threshold", 0.5);
 				bool checkPosition = ReadBoolOr("check_position", true);
+				bool countPriority = ReadBoolOr("count_priority", false);
 				
 				// 使用与 PrintMatch 一致的匹配逻辑与输出结构
-				var pmDetail = MatchAsPrintMatch(golden, toCheck.OCRResults ?? new List<SimpleOcrItem>(), posTolX, posTolY, minConf, checkPosition);
+				var pmDetail = MatchAsPrintMatch(
+					golden,
+					toCheck.OCRResults ?? new List<SimpleOcrItem>(),
+					posTolX,
+					posTolY,
+					minConf,
+					checkPosition,
+					countPriority);
 				bool ok = pmDetail?["template_match_info"] != null && pmDetail["template_match_info"]["is_match"] != null && pmDetail["template_match_info"]["is_match"].Value<bool>();
 				try
 				{
@@ -510,34 +521,58 @@ namespace DlcvModules
 				return !(ax2 < d.X || bx2 < t.X || ay2 < d.Y || by2 < t.Y);
 			}
 
-		private static JObject MatchAsPrintMatch(SimpleTemplate golden, List<SimpleOcrItem> det, double posTolXVal, double posTolYVal, double minConf, bool checkPosition)
+		private static JObject MatchAsPrintMatch(
+			SimpleTemplate golden,
+			List<SimpleOcrItem> det,
+			double posTolXVal,
+			double posTolYVal,
+			double minConf,
+			bool checkPosition,
+			bool countPriority)
 		{
 			if (golden == null) return new JObject();
 			var templateItems = (golden.OCRResults ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
 			var detectionItemsAll = (det ?? new List<SimpleOcrItem>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Text)).ToList();
 			// 置信度过滤（与 PrintMatch 一致）
 			var validDetections = detectionItemsAll.Where(r => r.Confidence >= (float)minConf && r.Width > 0 && r.Height > 0).ToList();
+			var expectedCount = templateItems.Count;
+			var categoryCountsMatch = HaveSameCategoryCounts(templateItems, validDetections);
+
+			if (countPriority && categoryCountsMatch)
+			{
+				return BuildCountPrioritySuccess(golden, validDetections, expectedCount);
+			}
 			
 			// 不检查位置时：只按文本内容和数量匹配
 			if (!checkPosition)
 			{
-				return MatchByTextAndCountOnly(golden, validDetections, templateItems);
+				var textCountResult = MatchByTextAndCountOnly(
+					golden,
+					validDetections,
+					templateItems,
+					countPriority);
+				AppendCountPrioritySummary(
+					textCountResult,
+					countPriority,
+					validDetections.Count,
+					expectedCount);
+				return textCountResult;
 			}
 				
-				// 按规范化文本分组
+				// 按当前匹配规则生成的类别键分组
 				var allTexts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 				var tplGroups = new Dictionary<string, List<SimpleOcrItem>>(StringComparer.OrdinalIgnoreCase);
 				var detGroups = new Dictionary<string, List<SimpleOcrItem>>(StringComparer.OrdinalIgnoreCase);
 				for (int i = 0; i < templateItems.Count; i++)
 				{
-					string key = NormalizeTextPM(templateItems[i].Text);
+					string key = GetMatchCategoryKey(templateItems[i].Text, countPriority);
 					allTexts.Add(key);
 					if (!tplGroups.ContainsKey(key)) tplGroups[key] = new List<SimpleOcrItem>();
 					tplGroups[key].Add(templateItems[i]);
 				}
 				for (int i = 0; i < validDetections.Count; i++)
 				{
-					string key = NormalizeTextPM(validDetections[i].Text);
+					string key = GetMatchCategoryKey(validDetections[i].Text, countPriority);
 					allTexts.Add(key);
 					if (!detGroups.ContainsKey(key)) detGroups[key] = new List<SimpleOcrItem>();
 					detGroups[key].Add(validDetections[i]);
@@ -734,8 +769,196 @@ namespace DlcvModules
 				["missing_components"] = missCount,
 				["misjudgments"] = misjudgeCount
 			};
+				AppendCountPrioritySummary(
+					root,
+					countPriority,
+					validDetections.Count,
+					expectedCount);
 				return root;
 			}
+
+		private static bool HaveSameCategoryCounts(
+			IEnumerable<SimpleOcrItem> templateItems,
+			IEnumerable<SimpleOcrItem> detectionItems)
+		{
+			var templateCounts = BuildCategoryCounts(templateItems);
+			var detectionCounts = BuildCategoryCounts(detectionItems);
+			return templateCounts.Count == detectionCounts.Count &&
+				templateCounts.All(pair => detectionCounts.TryGetValue(pair.Key, out int count) && count == pair.Value);
+		}
+
+		private static Dictionary<string, int> BuildCategoryCounts(IEnumerable<SimpleOcrItem> items)
+		{
+			var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+			foreach (var item in items ?? Enumerable.Empty<SimpleOcrItem>())
+			{
+				if (item == null) continue;
+				var category = NormalizeCategoryName(item.Text);
+				if (string.IsNullOrWhiteSpace(category)) continue;
+				counts[category] = counts.TryGetValue(category, out int count) ? count + 1 : 1;
+			}
+			return counts;
+		}
+
+		private static string NormalizeCategoryName(string category)
+		{
+			return string.IsNullOrWhiteSpace(category)
+				? string.Empty
+				: category.Trim();
+		}
+
+		private static string GetMatchCategoryKey(string category, bool useExactCategory)
+		{
+			return useExactCategory
+				? NormalizeCategoryName(category)
+				: NormalizeTextPM(category);
+		}
+
+		private static JObject BuildCountPrioritySuccess(
+			SimpleTemplate golden,
+			List<SimpleOcrItem> validDetections,
+			int expectedCount)
+		{
+			var ocrArray = new JArray();
+			foreach (var item in validDetections)
+			{
+				ocrArray.Add(new JObject
+				{
+					["text"] = item.Text ?? string.Empty,
+					["x"] = item.X,
+					["y"] = item.Y,
+					["width"] = item.Width,
+					["height"] = item.Height,
+					["confidence"] = (double)item.Confidence,
+					["match_status"] = "Correct"
+				});
+			}
+
+			return new JObject
+			{
+				["ocr_results"] = ocrArray,
+				["missing_template_items"] = new JArray(),
+				["deviation_template_items"] = new JArray(),
+				["misjudgment_pairs"] = new JArray(),
+				["detected_count"] = validDetections.Count,
+				["expected_count"] = expectedCount,
+				["image_level_status"] = "OK",
+				["template_match_info"] = new JObject
+				{
+					["template_name"] = golden.TemplateName ?? string.Empty,
+					["product_name"] = golden.ProductName ?? string.Empty,
+					["is_match"] = true,
+					["match_score"] = 1.0,
+					["perfect_matches"] = validDetections.Count,
+					["position_deviations"] = 0,
+					["over_detections"] = 0,
+					["missing_components"] = 0,
+					["misjudgments"] = 0
+				}
+			};
+		}
+
+		private static void AppendCountPrioritySummary(
+			JObject detail,
+			bool countPriority,
+			int detectedCount,
+			int expectedCount)
+		{
+			if (detail == null) return;
+			ApplyDetailedMismatchReason(detail);
+			if (!countPriority) return;
+			detail["detected_count"] = detectedCount;
+			detail["expected_count"] = expectedCount;
+			var info = detail["template_match_info"] as JObject;
+			var isMatch = info != null && info.Value<bool?>("is_match") == true;
+			detail["image_level_status"] = isMatch ? "OK" : "NG";
+		}
+
+		private static void ApplyDetailedMismatchReason(JObject detail)
+		{
+			if (detail == null) return;
+			var info = detail["template_match_info"] as JObject;
+			if (info == null || info.Value<bool?>("is_match") == true)
+			{
+				if (info != null) info.Remove("error_reason");
+				return;
+			}
+
+			var reasons = new List<string>();
+			var missingTexts = (detail["missing_template_items"] as JArray)?.OfType<JObject>()
+				.Select(item => item["text"]?.ToString())
+				.ToList() ?? new List<string>();
+
+			var ocrItems = (detail["ocr_results"] as JArray)?.OfType<JObject>().ToList() ?? new List<JObject>();
+			var overTexts = ocrItems
+				.Where(item => string.Equals(item["match_status"]?.ToString(), "OverDetection", StringComparison.OrdinalIgnoreCase))
+				.Select(item => item["text"]?.ToString())
+				.ToList();
+
+			var misjudgmentPairs = (detail["misjudgment_pairs"] as JArray)?.OfType<JObject>().ToList() ?? new List<JObject>();
+			foreach (var pair in misjudgmentPairs)
+			{
+				missingTexts.Add(pair["t_text"]?.ToString());
+				overTexts.Add(pair["d_text"]?.ToString());
+			}
+
+			var missing = FormatReasonCounts(missingTexts);
+			if (!string.IsNullOrWhiteSpace(missing)) reasons.Add("缺：" + missing);
+			var over = FormatReasonCounts(overTexts);
+			if (!string.IsNullOrWhiteSpace(over)) reasons.Add("多：" + over);
+
+			var deviation = FormatReasonCounts(ocrItems
+				.Where(item => string.Equals(item["match_status"]?.ToString(), "PositionDeviation", StringComparison.OrdinalIgnoreCase))
+				.Select(item => item["text"]?.ToString()));
+			if (!string.IsNullOrWhiteSpace(deviation)) reasons.Add("位置偏差：" + deviation);
+
+			if ((info.Value<int?>("misjudgments") ?? 0) > 0)
+			{
+				var misjudgments = FormatMisjudgmentCounts(misjudgmentPairs);
+				if (!string.IsNullOrWhiteSpace(misjudgments)) reasons.Add("误判：" + misjudgments);
+			}
+
+			if (reasons.Count == 0)
+			{
+				var missingCount = info.Value<int?>("missing_components") ?? 0;
+				var overCount = info.Value<int?>("over_detections") ?? 0;
+				var deviationCount = info.Value<int?>("position_deviations") ?? 0;
+				var misjudgmentCount = info.Value<int?>("misjudgments") ?? 0;
+				if (missingCount > 0) reasons.Add("缺少项×" + missingCount);
+				if (overCount > 0) reasons.Add("多出项×" + overCount);
+				if (deviationCount > 0) reasons.Add("位置偏差项×" + deviationCount);
+				if (misjudgmentCount > 0) reasons.Add("误判项×" + misjudgmentCount);
+			}
+
+			info["error_reason"] = reasons.Count > 0
+				? string.Join("；", reasons)
+				: "模版匹配失败";
+		}
+
+		private static string FormatReasonCounts(IEnumerable<string> values)
+		{
+			var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+			foreach (var value in values ?? Enumerable.Empty<string>())
+			{
+				var text = string.IsNullOrWhiteSpace(value) ? "(空)" : value.Trim();
+				counts[text] = counts.TryGetValue(text, out int count) ? count + 1 : 1;
+			}
+			return string.Join("、", counts
+				.Select(pair => pair.Key + "×" + pair.Value));
+		}
+
+		private static string FormatMisjudgmentCounts(IEnumerable<JObject> pairs)
+		{
+			var values = (pairs ?? Enumerable.Empty<JObject>())
+				.Select(pair =>
+				{
+					var templateText = pair["t_text"]?.ToString();
+					var detectionText = pair["d_text"]?.ToString();
+					return "模版 " + (string.IsNullOrWhiteSpace(templateText) ? "(空)" : templateText.Trim()) +
+						"→检测 " + (string.IsNullOrWhiteSpace(detectionText) ? "(空)" : detectionText.Trim());
+				});
+			return FormatReasonCounts(values);
+		}
 
 		private static List<SimpleOcrItem> ExtractOcrFromLocal(JArray results)
 		{
@@ -905,21 +1128,25 @@ namespace DlcvModules
 			return dv;
 		}
 
-		private static JObject MatchByTextAndCountOnly(SimpleTemplate golden, List<SimpleOcrItem> validDetections, List<SimpleOcrItem> templateItems)
+		private static JObject MatchByTextAndCountOnly(
+			SimpleTemplate golden,
+			List<SimpleOcrItem> validDetections,
+			List<SimpleOcrItem> templateItems,
+			bool useExactCategory)
 		{
 			var tplTextCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 			var detTextCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 			
 			foreach (var t in templateItems)
 			{
-				string key = NormalizeTextPM(t.Text);
+				string key = GetMatchCategoryKey(t.Text, useExactCategory);
 				if (!tplTextCount.ContainsKey(key)) tplTextCount[key] = 0;
 				tplTextCount[key]++;
 			}
 			
 			foreach (var d in validDetections)
 			{
-				string key = NormalizeTextPM(d.Text);
+				string key = GetMatchCategoryKey(d.Text, useExactCategory);
 				if (!detTextCount.ContainsKey(key)) detTextCount[key] = 0;
 				detTextCount[key]++;
 			}
@@ -944,17 +1171,17 @@ namespace DlcvModules
 				if (detCount > tplCount)
 				{
 					overCount += (detCount - tplCount);
-					var items = validDetections.Where(d => string.Equals(NormalizeTextPM(d.Text), text, StringComparison.OrdinalIgnoreCase)).ToList();
+					var items = validDetections.Where(d => string.Equals(GetMatchCategoryKey(d.Text, useExactCategory), text, StringComparison.OrdinalIgnoreCase)).ToList();
 					for (int i = matched; i < items.Count; i++) overList.Add(items[i]);
 				}
 				else if (tplCount > detCount)
 				{
 					missCount += (tplCount - detCount);
-					var items = templateItems.Where(t => string.Equals(NormalizeTextPM(t.Text), text, StringComparison.OrdinalIgnoreCase)).ToList();
+					var items = templateItems.Where(t => string.Equals(GetMatchCategoryKey(t.Text, useExactCategory), text, StringComparison.OrdinalIgnoreCase)).ToList();
 					for (int i = matched; i < items.Count; i++) missList.Add(items[i]);
 				}
 				
-				var matchedDet = validDetections.Where(d => string.Equals(NormalizeTextPM(d.Text), text, StringComparison.OrdinalIgnoreCase)).Take(matched).ToList();
+				var matchedDet = validDetections.Where(d => string.Equals(GetMatchCategoryKey(d.Text, useExactCategory), text, StringComparison.OrdinalIgnoreCase)).Take(matched).ToList();
 				correctList.AddRange(matchedDet);
 			}
 			
@@ -997,19 +1224,7 @@ namespace DlcvModules
 			}
 			root["missing_template_items"] = missingArr;
 			root["deviation_template_items"] = new JArray();
-			// 构造误判配对：按个数成对输出（用于“错：模型：x，模版：y”）
-			var misPairsArr = new JArray();
-			int pairCount = Math.Min(missList.Count, overList.Count);
-			for (int i = 0; i < pairCount; i++)
-			{
-				var pair = new JObject
-				{
-					["t_text"] = missList[i].Text ?? string.Empty,
-					["d_text"] = overList[i].Text ?? string.Empty
-				};
-				misPairsArr.Add(pair);
-			}
-			root["misjudgment_pairs"] = misPairsArr;
+			root["misjudgment_pairs"] = new JArray();
 			
 			root["template_match_info"] = new JObject
 			{
@@ -1037,7 +1252,7 @@ namespace DlcvModules
 	/// type: features/printed_template_match
 	/// properties:
 	/// - product_type(string): 产品型号
-	/// 可透传：position_tolerance_x(double), position_tolerance_y(double), min_confidence_threshold(double), check_position(bool)
+	/// 可透传：position_tolerance_x(double), position_tolerance_y(double), min_confidence_threshold(double), check_position(bool), count_priority(bool)
 	/// 输出：Scalar ok(bool), detail(string)；TemplateList 按条件返回。
 	/// </summary>
 	public class PrintedTemplateMatch : BaseModule
@@ -1180,6 +1395,58 @@ namespace DlcvModules
 			string fname = SimpleTemplateUtils.MakeSafeFileName(templateName);
 			string jsonPath = string.IsNullOrWhiteSpace(saveDir) ? (fname + ".json") : Path.Combine(saveDir, fname + ".json");
 
+			bool deferTemplateCreation = false;
+			try
+			{
+				deferTemplateCreation = this.Context != null &&
+					this.Context.Get<bool>("defer_template_creation", false);
+			}
+			catch { deferTemplateCreation = false; }
+			if (!File.Exists(jsonPath) && deferTemplateCreation)
+			{
+				var ocrArray = new JArray();
+				var list = tpl.OCRResults ?? new List<SimpleOcrItem>();
+				for (int i = 0; i < list.Count; i++)
+				{
+					var item = list[i];
+					if (item == null) continue;
+					ocrArray.Add(new JObject
+					{
+						["text"] = item.Text ?? string.Empty,
+						["x"] = item.X,
+						["y"] = item.Y,
+						["width"] = item.Width,
+						["height"] = item.Height,
+						["confidence"] = (double)item.Confidence,
+						["match_status"] = "Candidate"
+					});
+				}
+				var candidate = new JObject
+				{
+					["template_candidate"] = true,
+					["ocr_results"] = ocrArray,
+					["missing_template_items"] = new JArray(),
+					["deviation_template_items"] = new JArray(),
+					["misjudgment_pairs"] = new JArray(),
+					["template_match_info"] = new JObject
+					{
+						["template_name"] = templateName,
+						["product_name"] = productType,
+						["is_match"] = false,
+						["match_score"] = 0.0,
+						["perfect_matches"] = 0,
+						["position_deviations"] = 0,
+						["over_detections"] = 0,
+						["missing_components"] = 0,
+						["misjudgments"] = 0,
+						["error_reason"] = "模版待创建"
+					}
+				};
+				this.ScalarOutputsByName["ok"] = false;
+				this.ScalarOutputsByName["detail"] = candidate.ToString(Formatting.None);
+				return new ModuleIO(images, results, new List<SimpleTemplate>());
+			}
+
 			// 分支 B：无现存模版 -> 保存模版与 PNG（PNG 使用首图 OriginalImage），随后与自身匹配
 			if (!File.Exists(jsonPath))
 			{
@@ -1226,7 +1493,8 @@ namespace DlcvModules
 					["position_tolerance_x"] = ReadDoubleOr("position_tolerance_x", 20.0),
 					["position_tolerance_y"] = ReadDoubleOr("position_tolerance_y", 20.0),
 					["min_confidence_threshold"] = ReadDoubleOr("min_confidence_threshold", 0.5),
-					["check_position"] = checkPosSelf
+					["check_position"] = checkPosSelf,
+					["count_priority"] = ReadBoolOr("count_priority", false)
 				});
 				matcherSelf.MainTemplateList = new List<SimpleTemplate> { tpl };
 				matcherSelf.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), new JArray(), goldenListSelf));
@@ -1256,7 +1524,8 @@ namespace DlcvModules
 				["position_tolerance_x"] = ReadDoubleOr("position_tolerance_x", 20.0),
 				["position_tolerance_y"] = ReadDoubleOr("position_tolerance_y", 20.0),
 				["min_confidence_threshold"] = ReadDoubleOr("min_confidence_threshold", 0.5),
-				["check_position"] = checkPos
+				["check_position"] = checkPos,
+				["count_priority"] = ReadBoolOr("count_priority", false)
 			});
 			matcher.MainTemplateList = new List<SimpleTemplate> { tpl };
 			matcher.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), new JArray(), goldenList));
@@ -1277,6 +1546,16 @@ namespace DlcvModules
 			}
 			return dv;
 		}
+
+		private bool ReadBoolOr(string key, bool dv)
+		{
+			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
+			{
+				bool x; if (bool.TryParse(v.ToString(), out x)) return x;
+			}
+			return dv;
+		}
+
 	}
 }
 
