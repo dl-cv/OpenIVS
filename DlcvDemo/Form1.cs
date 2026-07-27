@@ -68,9 +68,11 @@ namespace DlcvDemo
                 comboBox1.Items.Clear();
                 deviceNameToIdMap.Clear();
 
-                // 始终先添加CPU选项
+                // 始终先添加CPU和OpenVINO选项
                 comboBox1.Items.Add("CPU");
                 deviceNameToIdMap["CPU"] = -1; // CPU对应device_id = -1
+                comboBox1.Items.Add("OpenVINO");
+                deviceNameToIdMap["OpenVINO"] = -2; // OpenVINO对应device_id = -2
 
                 // 添加GPU设备
                 bool hasGpu = false;
@@ -95,7 +97,7 @@ namespace DlcvDemo
                 // 默认选择第一个显卡，如果没有显卡则选择CPU
                 if (hasGpu)
                 {
-                    comboBox1.SelectedIndex = 1; // 选择第一个GPU
+                    comboBox1.SelectedIndex = 2; // 选择第一个GPU
                 }
                 else
                 {
