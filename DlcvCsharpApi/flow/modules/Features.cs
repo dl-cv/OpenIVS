@@ -350,11 +350,6 @@ namespace DlcvModules
                     }
 
                     if (cropped == null) continue;
-                    
-                    if (GlobalDebug.PrintDebug)
-                    {
-                        GlobalDebug.Log($"[ImageGeneration] 输入图像尺寸: {tup.Item2.Width}x{tup.Item2.Height}, 裁剪后的图像尺寸: {cropped.Width}x{cropped.Height}");
-                    }
 
                     // 派生状态
                     var parentWrap = tup.Item1;
@@ -514,7 +509,6 @@ namespace DlcvModules
             return token != null ? token.DeepClone() : JValue.CreateNull();
         }
 
-        
 
         private static int ClampToInt(double v)
         {
@@ -910,22 +904,6 @@ namespace DlcvModules
             var inImages = imageList ?? new List<ModuleImage>();
             var inResults = resultList ?? new JArray();
 
-            if (GlobalDebug.PrintDebug)
-            {
-                var cats = new List<string>();
-                foreach (var t in inResults)
-                {
-                    if (t is JObject r && r["sample_results"] is JArray srs)
-                    {
-                        foreach (var s in srs)
-                        {
-                            if (s is JObject so) cats.Add(so["category_name"]?.ToString() ?? "");
-                        }
-                    }
-                }
-                GlobalDebug.Log($"[ResultFilter] 筛选前 category_name 列表: {string.Join(", ", cats)}");
-            }
-
             var categories = ReadCategories();
             var keepSet = new HashSet<string>(categories, StringComparer.OrdinalIgnoreCase);
 
@@ -1036,22 +1014,6 @@ namespace DlcvModules
                 this.ScalarOutputsByName["has_positive"] = hasPositive;
             }
             catch { }
-
-            if (GlobalDebug.PrintDebug)
-            {
-                var cats = new List<string>();
-                foreach (var t in mainResults)
-                {
-                    if (t is JObject r && r["sample_results"] is JArray srs)
-                    {
-                        foreach (var s in srs)
-                        {
-                            if (s is JObject so) cats.Add(so["category_name"]?.ToString() ?? "");
-                        }
-                    }
-                }
-                GlobalDebug.Log($"[ResultFilter] 筛选后 category_name 列表: {string.Join(", ", cats)}");
-            }
 
             return new ModuleIO(mainImages, mainResults);
         }
