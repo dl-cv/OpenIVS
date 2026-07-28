@@ -361,9 +361,9 @@ namespace DlcvDemo
                         break;
                     case "--device":
                         if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int deviceId)
-                            || deviceId < -1)
+                            || deviceId < -2)
                         {
-                            error = "--device 必须是 -1 或非负整数。";
+                            error = "--device 必须是 -2（OpenVINO）、-1（CPU）或非负整数（GPU 编号）。";
                             return false;
                         }
                         options.DeviceId = deviceId;

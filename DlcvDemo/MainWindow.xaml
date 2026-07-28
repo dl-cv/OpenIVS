@@ -1,0 +1,208 @@
+<Window x:Class="DlcvDemo.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:DlcvDemo"
+        xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration"
+        xmlns:viewer="clr-namespace:DLCV;assembly=ImageViewer"
+        Title="C# 测试程序"
+        Width="1280" Height="820"
+        MinWidth="1040" MinHeight="500"
+        WindowStartupLocation="CenterScreen"
+        Background="#F3F5F7"
+        FontFamily="Microsoft YaHei UI"
+        FontSize="13"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Loaded="Form1_Load"
+        Closing="Form1_FormClosing">
+    <Window.Resources>
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Margin" Value="6"/>
+        </Style>
+        <Style x:Key="ActionButtonStyle" TargetType="Button">
+            <Setter Property="MinWidth" Value="104"/>
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="Background" Value="#E7EBEF"/>
+            <Setter Property="Foreground" Value="#263238"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#D8DEE4"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#C7CFD7"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.45"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource ActionButtonStyle}">
+            <Setter Property="Background" Value="#1976D2"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource ActionButtonStyle}">
+            <Setter Property="Background" Value="#EF5350"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="8,0"/>
+        </Style>
+        <Style TargetType="local:NumericBox">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="local:NumericBox">
+                        <Border Background="White" BorderBrush="#C9D1D9" BorderThickness="1" CornerRadius="4">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="24"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="PART_TextBox" Grid.Column="0" BorderThickness="0" Background="Transparent"
+                                         HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Padding="4,0"/>
+                                <Grid Grid.Column="1">
+                                    <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                    <local:NumericBoxButton Grid.Row="0" Direction="1" Content="▲" FontSize="7" Padding="0" BorderThickness="0" Background="#EEF1F4"/>
+                                    <local:NumericBoxButton Grid.Row="1" Direction="-1" Content="▼" FontSize="7" Padding="0" BorderThickness="0" Background="#EEF1F4"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="#37474F"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Style="{StaticResource CardStyle}" Padding="10">
+            <Grid VerticalAlignment="Top">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*" MinWidth="360"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 左侧操作区：保持原界面的三行两列相对位置 -->
+                <Grid Grid.Column="0" VerticalAlignment="Top">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="button_load_model" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" Content="加载模型" Style="{StaticResource PrimaryButtonStyle}" Click="button_loadmodel_Click"/>
+                    <Button x:Name="button_infer" Grid.Row="1" Grid.Column="0" Content="单次推理" Style="{StaticResource PrimaryButtonStyle}" Click="button_infer_Click"/>
+                    <Button x:Name="button_infer_json" Grid.Row="1" Grid.Column="1" Content="推理 JSON" Style="{StaticResource ActionButtonStyle}" Click="button_infer_json_Click"/>
+                    <Button x:Name="button_thread_test" Grid.Row="2" Grid.Column="0" Content="多线程测试" Style="{StaticResource ActionButtonStyle}" Click="button_threadtest_Click"/>
+                    <Button x:Name="button_consistency_test" Grid.Row="2" Grid.Column="1" Content="一致性测试" Style="{StaticResource ActionButtonStyle}" Click="button_consistency_test_Click"/>
+                </Grid>
+
+                <!-- 中间参数区：三行内容从顶部开始排列 -->
+                <Grid Grid.Column="2" VerticalAlignment="Top" Margin="0,4,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="46"/>
+                        <RowDefinition Height="46"/>
+                        <RowDefinition Height="46"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="116"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="116"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="选择显卡" Margin="0,0,8,0"/>
+                    <ComboBox x:Name="comboBox1" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="4" MinWidth="260" Margin="0,3,0,3"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="batch_size" Margin="0,0,8,0"/>
+                    <local:NumericBox x:Name="numericUpDown_batch_size" Grid.Row="1" Grid.Column="1" Width="110" HorizontalAlignment="Left" Minimum="1" Maximum="1024" Value="1" Margin="0,3"/>
+                    <TextBlock Grid.Row="1" Grid.Column="2" Text="threshold" Margin="12,0,8,0"/>
+                    <local:NumericBox x:Name="numericUpDown_threshold" Grid.Row="1" Grid.Column="3" Width="110" HorizontalAlignment="Left" Minimum="0" Maximum="1" Increment="0.05" DecimalPlaces="2" Value="0.5" Margin="0,3" ValueChanged="numericUpDown_threshold_ValueChanged"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="线程数" Margin="0,0,8,0"/>
+                    <local:NumericBox x:Name="numericUpDown_num_thread" Grid.Row="2" Grid.Column="1" Width="110" HorizontalAlignment="Left" Minimum="1" Maximum="32" Value="1" Margin="0,3"/>
+                </Grid>
+
+                <!-- 右侧操作区：保持原界面的打开、保存/释放、信息三行布局 -->
+                <Grid Grid.Column="4" VerticalAlignment="Top">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="checkBox_rpc_mode" Grid.Row="0" Grid.Column="0" Content="RPC 模式" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    <Button x:Name="button_open_image" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" Content="打开图片推理" Style="{StaticResource PrimaryButtonStyle}" Click="button_openimage_Click"/>
+                    <Button x:Name="button_save_img" Grid.Row="1" Grid.Column="0" Content="保存图像" Style="{StaticResource ActionButtonStyle}" Click="button_save_img_Click"/>
+                    <Button x:Name="button_free_model" Grid.Row="1" Grid.Column="1" Content="释放模型" Style="{StaticResource DangerButtonStyle}" Click="button_freemodel_Click"/>
+                    <Button x:Name="button_free_all_model" Grid.Row="1" Grid.Column="2" Content="释放所有模型" Style="{StaticResource DangerButtonStyle}" Click="button_free_all_model_Click"/>
+                    <Button x:Name="button_check_dog" Grid.Row="2" Grid.Column="0" Content="检查加密狗" Style="{StaticResource ActionButtonStyle}" Click="button1_Click"/>
+                    <Button x:Name="button_github" Grid.Row="2" Grid.Column="1" Content="文档" Style="{StaticResource ActionButtonStyle}" Click="button_github_Click"/>
+                    <Button x:Name="button_get_model_info" Grid.Row="2" Grid.Column="2" Content="获取模型信息" Style="{StaticResource ActionButtonStyle}" Click="button_getmodelinfo_Click"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="380" MinWidth="240"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*" MinWidth="360"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="运行结果" FontSize="15" FontWeight="SemiBold" Margin="2,0,0,8"/>
+                    <TextBox x:Name="richTextBox1" Grid.Row="1" IsReadOnly="True" TextWrapping="NoWrap"
+                             AcceptsReturn="True" FontFamily="Consolas, Microsoft YaHei UI" FontSize="12"
+                             BorderThickness="0" Background="#FAFBFC"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                          ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" Background="Transparent"/>
+
+            <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="6">
+                <Grid Background="#202428" SnapsToDevicePixels="True" UseLayoutRounding="True">
+                    <wfi:WindowsFormsHost x:Name="imageHost">
+                        <viewer:ImageViewer x:Name="imagePanel1" ShowStatusText="False" ShowVisualization="True" MinScale="0.5" MaxScale="100"/>
+                    </wfi:WindowsFormsHost>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

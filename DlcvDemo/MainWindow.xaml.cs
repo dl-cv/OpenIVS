@@ -1,6 +1,9 @@
 using System;
+using System.ComponentModel;
 using System.Threading;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Threading;
+using Microsoft.Win32;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using dlcv_infer_csharp;
@@ -14,7 +17,7 @@ using Newtonsoft.Json;
 
 namespace DlcvDemo
 {
-    public partial class Form1 : Form
+    public partial class MainWindow : System.Windows.Window
     {
         // 设备映射表：设备名称 -> 设备ID
         private Dictionary<string, int> deviceNameToIdMap = new Dictionary<string, int>();
@@ -39,15 +42,17 @@ namespace DlcvDemo
             return -1; // 默认使用CPU
         }
 
-        public Form1()
+        public MainWindow()
         {
             InitializeComponent();
         }
 
-        private void Form1_Load(object sender, EventArgs e)
+        private void Form1_Load(object sender, RoutedEventArgs e)
         {
-            TopMost = false;
-            this.Text = "C# 测试程序 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+            Topmost = false;
+            MaxWidth = SystemParameters.WorkArea.Width;
+            MaxHeight = SystemParameters.WorkArea.Height;
+            this.Title = "C# 测试程序 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
             Thread thread = new Thread(GetDeviceInfo);
             thread.IsBackground = true;
             thread.Start();
@@ -62,17 +67,17 @@ namespace DlcvDemo
             JObject allDogInfo = QueryAllDogInfo();
             bool hasDog = HasAnyDog(allDogInfo);
 
-            Invoke((MethodInvoker)delegate
+            Dispatcher.Invoke(delegate
             {
                 // 清空现有项目和映射表
                 comboBox1.Items.Clear();
                 deviceNameToIdMap.Clear();
 
-                // 始终先添加CPU和OpenVINO选项
-                comboBox1.Items.Add("CPU");
-                deviceNameToIdMap["CPU"] = -1; // CPU对应device_id = -1
+                // 按设备ID从小到大排列：OpenVINO(-2)、CPU(-1)、GPU(0...)
                 comboBox1.Items.Add("OpenVINO");
-                deviceNameToIdMap["OpenVINO"] = -2; // OpenVINO对应device_id = -2
+                deviceNameToIdMap["OpenVINO"] = -2;
+                comboBox1.Items.Add("CPU");
+                deviceNameToIdMap["CPU"] = -1;
 
                 // 添加GPU设备
                 bool hasGpu = false;
@@ -101,7 +106,7 @@ namespace DlcvDemo
                 }
                 else
                 {
-                    comboBox1.SelectedIndex = 0; // 选择CPU
+                    comboBox1.SelectedIndex = 1; // 选择CPU
                 }
 
                 // 仅在检测不到加密狗时，把检测结果显示到界面提醒用户
@@ -193,7 +198,7 @@ namespace DlcvDemo
         private string image_path;
         private int batch_size = 1;
         private PressureTestRunner pressureTestRunner;
-        private System.Windows.Forms.Timer updateTimer;
+        private DispatcherTimer updateTimer;
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
@@ -216,7 +221,7 @@ namespace DlcvDemo
                 model = null;
             }
         }
-        
+
         private void button_loadmodel_Click(object sender, EventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
@@ -234,7 +239,7 @@ namespace DlcvDemo
                 Console.WriteLine(ex.Message);
             }
 
-            if (openFileDialog.ShowDialog() == DialogResult.OK)
+            if (openFileDialog.ShowDialog(this) == true)
             {
                 string selectedFilePath = openFileDialog.FileName;
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
@@ -254,7 +259,7 @@ namespace DlcvDemo
                     bool rpc_mode = false;
                     try
                     {
-                        rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked;
+                        rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.IsChecked == true;
                     }
                     catch { }
 
@@ -354,7 +359,7 @@ namespace DlcvDemo
             {
                 Console.WriteLine(ex.Message);
             }
-            if (openFileDialog.ShowDialog() == DialogResult.OK)
+            if (openFileDialog.ShowDialog(this) == true)
             {
                 image_path = openFileDialog.FileName;
                 Properties.Settings.Default.LastImagePath = image_path;
@@ -665,7 +670,7 @@ namespace DlcvDemo
                                 shouldStopPressureTest = true;
 
                                 // 发现不一致，向主线程报告
-                                Invoke((MethodInvoker)delegate
+                                Dispatcher.Invoke(delegate
                                 {
                                     // 立即停止测试
                                     StopPressureTest();
@@ -679,7 +684,7 @@ namespace DlcvDemo
                                     string s = sb.ToString();
 
                                     richTextBox1.Text = s;
-                                    MessageBox.Show("检测到推理结果不一致，测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                    MessageBox.Show(this, "检测到推理结果不一致，测试已停止！", "结果不一致", MessageBoxButton.OK, MessageBoxImage.Warning);
 
                                     baselineJsonResult = null;
                                 });
@@ -703,11 +708,11 @@ namespace DlcvDemo
                 shouldStopPressureTest = true;
 
                 // 向主线程报告错误
-                Invoke((MethodInvoker)delegate
+                Dispatcher.Invoke(delegate
                 {
                     StopPressureTest();
                     string testType = isConsistencyTestMode ? "一致性测试" : "压力测试";
-                    MessageBox.Show($"{testType}过程中发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(this, $"{testType}过程中发生错误: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     richTextBox1.Text = $"推理错误: {ex.Message}";
                 });
             }
@@ -721,7 +726,7 @@ namespace DlcvDemo
             if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
                 // 在UI上显示统计信息
-                Invoke((MethodInvoker)delegate
+                Dispatcher.Invoke(delegate
                 {
                     string stats = pressureTestRunner.GetStatistics(false);
                     if (isConsistencyTestMode && baselineJsonResult != null)
@@ -792,8 +797,8 @@ namespace DlcvDemo
                 // 创建并启动定时器更新UI
                 if (updateTimer == null)
                 {
-                    updateTimer = new System.Windows.Forms.Timer();
-                    updateTimer.Interval = 500;
+                    updateTimer = new DispatcherTimer();
+                    updateTimer.Interval = TimeSpan.FromMilliseconds(500);
                     updateTimer.Tick += UpdateStatisticsTimer_Tick;
                 }
                 updateTimer.Start();
@@ -804,17 +809,17 @@ namespace DlcvDemo
                 // 根据模式设置按钮文本
                 if (consistencyTestMode)
                 {
-                    button_consistency_test.Text = "停止";
+                    button_consistency_test.Content = "停止";
                 }
                 else
                 {
-                    button_thread_test.Text = "停止";
+                    button_thread_test.Content = "停止";
                 }
             }
             catch (Exception ex)
             {
                 string testType = consistencyTestMode ? "一致性测试" : "压力测试";
-                MessageBox.Show($"启动{testType}失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, $"启动{testType}失败: " + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -839,11 +844,11 @@ namespace DlcvDemo
                 // 根据模式重置按钮文本
                 if (isConsistencyTestMode)
                 {
-                    button_consistency_test.Text = "一致性测试";
+                    button_consistency_test.Content = "一致性测试";
                 }
                 else
                 {
-                    button_thread_test.Text = "多线程测试";
+                    button_thread_test.Content = "多线程测试";
                 }
 
                 // 重置测试模式
@@ -890,7 +895,7 @@ namespace DlcvDemo
             Process.Start("https://docs.dlcv.com.cn/deploy/sdk/csharp_sdk");
         }
 
-        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        private void Form1_FormClosing(object sender, CancelEventArgs e)
         {
             StopPressureTest();
             // 释放模型
@@ -934,7 +939,7 @@ namespace DlcvDemo
 				richTextBox1.Text = title + "\n" + ex.ToString();
 			}
 			catch { }
-			MessageBox.Show(title + ": " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+			MessageBox.Show(this, title + ": " + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
 		}
 
         private void button_save_img_Click(object sender, EventArgs e)
@@ -971,7 +976,7 @@ namespace DlcvDemo
                     Console.WriteLine(ex.Message);
                 }
 
-                if (saveFileDialog.ShowDialog() != DialogResult.OK)
+                if (saveFileDialog.ShowDialog(this) != true)
                 {
                     return;
                 }
