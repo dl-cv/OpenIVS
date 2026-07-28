@@ -6,7 +6,7 @@
         xmlns:viewer="clr-namespace:DLCV;assembly=ImageViewer"
         Title="C# 测试程序"
         Width="1280" Height="820"
-        MinWidth="860" MinHeight="500"
+        MinWidth="1040" MinHeight="500"
         WindowStartupLocation="CenterScreen"
         Background="#F3F5F7"
         FontFamily="Microsoft YaHei UI"
@@ -131,21 +131,21 @@
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="96"/>
+                        <ColumnDefinition Width="116"/>
                         <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="96"/>
+                        <ColumnDefinition Width="116"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="选择显卡" Margin="0,0,8,0"/>
                     <ComboBox x:Name="comboBox1" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="4" MinWidth="260" Margin="0,3,0,3"/>
 
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="batch_size" Margin="0,0,8,0"/>
-                    <local:NumericBox x:Name="numericUpDown_batch_size" Grid.Row="1" Grid.Column="1" Width="90" HorizontalAlignment="Left" Minimum="1" Maximum="1024" Value="1" Margin="0,3"/>
+                    <local:NumericBox x:Name="numericUpDown_batch_size" Grid.Row="1" Grid.Column="1" Width="110" HorizontalAlignment="Left" Minimum="1" Maximum="1024" Value="1" Margin="0,3"/>
                     <TextBlock Grid.Row="1" Grid.Column="2" Text="threshold" Margin="12,0,8,0"/>
-                    <local:NumericBox x:Name="numericUpDown_threshold" Grid.Row="1" Grid.Column="3" Width="90" HorizontalAlignment="Left" Minimum="0" Maximum="1" Increment="0.05" DecimalPlaces="2" Value="0.5" Margin="0,3" ValueChanged="numericUpDown_threshold_ValueChanged"/>
+                    <local:NumericBox x:Name="numericUpDown_threshold" Grid.Row="1" Grid.Column="3" Width="110" HorizontalAlignment="Left" Minimum="0" Maximum="1" Increment="0.05" DecimalPlaces="2" Value="0.5" Margin="0,3" ValueChanged="numericUpDown_threshold_ValueChanged"/>
 
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="线程数" Margin="0,0,8,0"/>
-                    <local:NumericBox x:Name="numericUpDown_num_thread" Grid.Row="2" Grid.Column="1" Width="90" HorizontalAlignment="Left" Minimum="1" Maximum="32" Value="1" Margin="0,3"/>
+                    <local:NumericBox x:Name="numericUpDown_num_thread" Grid.Row="2" Grid.Column="1" Width="110" HorizontalAlignment="Left" Minimum="1" Maximum="32" Value="1" Margin="0,3"/>
                 </Grid>
 
                 <!-- 右侧操作区：保持原界面的打开、保存/释放、信息三行布局 -->
@@ -161,7 +161,7 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <CheckBox x:Name="checkBox_rpc_mode" Grid.Row="0" Grid.Column="0" Content="RPC 模式" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                    <Button x:Name="button_open_image" Grid.Row="0" Grid.Column="2" Content="打开图片推理" Style="{StaticResource PrimaryButtonStyle}" Click="button_openimage_Click"/>
+                    <Button x:Name="button_open_image" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" Content="打开图片推理" Style="{StaticResource PrimaryButtonStyle}" Click="button_openimage_Click"/>
                     <Button x:Name="button_save_img" Grid.Row="1" Grid.Column="0" Content="保存图像" Style="{StaticResource ActionButtonStyle}" Click="button_save_img_Click"/>
                     <Button x:Name="button_free_model" Grid.Row="1" Grid.Column="1" Content="释放模型" Style="{StaticResource DangerButtonStyle}" Click="button_freemodel_Click"/>
                     <Button x:Name="button_free_all_model" Grid.Row="1" Grid.Column="2" Content="释放所有模型" Style="{StaticResource DangerButtonStyle}" Click="button_free_all_model_Click"/>
