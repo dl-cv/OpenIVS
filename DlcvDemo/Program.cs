@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Windows.Forms;
+using System.Windows;
 
 namespace DlcvDemo
 {
@@ -17,9 +17,9 @@ namespace DlcvDemo
                 return CliRunner.Run(args);
             }
 
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Form1());
+            var application = new System.Windows.Application();
+            var window = new MainWindow();
+            application.Run(window);
             return 0;
         }
     }
