@@ -47,6 +47,27 @@ namespace OpenIVS2.Acceptance
                         count + " 台相机布局");
                 }
 
+                var settingsPreview = new SettingsWindow(settings) { Owner = window };
+                try
+                {
+                    settingsPreview.Show();
+                    await Task.Delay(250);
+                    var cameraSettingsScreenshot = Path.Combine(screenshots, "settings-camera-model.png");
+                    settingsPreview.SelectTabForAcceptance(0);
+                    settingsPreview.CaptureScreenshot(cameraSettingsScreenshot);
+                    settingsPreview.SelectTabForAcceptance(1);
+                    await Task.Delay(120);
+                    var plcSettingsScreenshot = Path.Combine(screenshots, "settings-plc-save.png");
+                    settingsPreview.CaptureScreenshot(plcSettingsScreenshot);
+                    success &= Check(checks, "settings_screenshots",
+                        File.Exists(cameraSettingsScreenshot) && File.Exists(plcSettingsScreenshot),
+                        "设置窗口两个页签截图");
+                }
+                finally
+                {
+                    settingsPreview.Close();
+                }
+
                 foreach (var camera in settings.Cameras) camera.Enabled = string.CompareOrdinal(camera.Slot, "C") <= 0;
                 window.ApplySettingsForAcceptance(settings);
                 var settingsPath = Path.Combine(output, "acceptance.settings.json");
