@@ -477,6 +477,7 @@ namespace DlcvDemo
         {
             Console.Out.WriteLine("Usage:");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--interactive-dialogs <true|false>]");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --help");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --version");
             Console.Out.WriteLine();
