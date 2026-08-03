@@ -11,6 +11,28 @@ namespace DlcvDemo
         [STAThread]
         static int Main(string[] args)
         {
+            if (args != null && args.Length > 0
+                && string.Equals(args[0], "ui-test", StringComparison.OrdinalIgnoreCase))
+            {
+                CliRunner.InitializeConsole();
+                if (args.Length == 2 && (args[1] == "--help" || args[1] == "-h" || args[1] == "/?"))
+                {
+                    UiTestOptions.PrintHelp();
+                    return 0;
+                }
+                if (!UiTestOptions.TryParse(args, out UiTestOptions options, out string error))
+                {
+                    Console.Error.WriteLine("参数错误: " + error);
+                    UiTestOptions.PrintHelp();
+                    return 2;
+                }
+
+                var uiTestApplication = new System.Windows.Application();
+                var uiTestWindow = new MainWindow(options);
+                uiTestApplication.Run(uiTestWindow);
+                return uiTestWindow.UiTestExitCode;
+            }
+
             if (args != null && args.Length > 0)
             {
                 CliRunner.InitializeConsole();

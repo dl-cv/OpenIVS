@@ -14,11 +14,15 @@ using static dlcv_infer_csharp.Utils;
 using DLCV;
 using System.Text;
 using Newtonsoft.Json;
+using System.Threading.Tasks;
 
 namespace DlcvDemo
 {
     public partial class MainWindow : System.Windows.Window
     {
+        private readonly UiTestOptions uiTestOptions;
+        internal int UiTestExitCode { get; private set; }
+
         // 设备映射表：设备名称 -> 设备ID
         private Dictionary<string, int> deviceNameToIdMap = new Dictionary<string, int>();
 
@@ -42,9 +46,18 @@ namespace DlcvDemo
             return -1; // 默认使用CPU
         }
 
-        public MainWindow()
+        public MainWindow() : this(null)
         {
+        }
+
+        internal MainWindow(UiTestOptions options)
+        {
+            uiTestOptions = options;
             InitializeComponent();
+            if (uiTestOptions != null)
+            {
+                ShowActivated = uiTestOptions.InteractiveDialogs;
+            }
         }
 
         private void Form1_Load(object sender, RoutedEventArgs e)
@@ -53,9 +66,24 @@ namespace DlcvDemo
             MaxWidth = SystemParameters.WorkArea.Width;
             MaxHeight = SystemParameters.WorkArea.Height;
             this.Title = "C# 测试程序 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
-            Thread thread = new Thread(GetDeviceInfo);
+            Thread thread = new Thread(InitializeDeviceAndUiTest);
             thread.IsBackground = true;
             thread.Start();
+        }
+
+        private void InitializeDeviceAndUiTest()
+        {
+            try
+            {
+                GetDeviceInfo();
+            }
+            finally
+            {
+                if (uiTestOptions != null)
+                {
+                    Dispatcher.BeginInvoke(new Action(RunUiTest), DispatcherPriority.ApplicationIdle);
+                }
+            }
         }
 
         private void GetDeviceInfo()
@@ -195,6 +223,7 @@ namespace DlcvDemo
         }
 
         private dynamic model;
+        private string model_path;
         private string image_path;
         private int batch_size = 1;
         private PressureTestRunner pressureTestRunner;
@@ -241,37 +270,43 @@ namespace DlcvDemo
 
             if (openFileDialog.ShowDialog(this) == true)
             {
-                string selectedFilePath = openFileDialog.FileName;
-                Properties.Settings.Default.LastModelPath = selectedFilePath;
-                Properties.Settings.Default.Save();
-                string ext = Path.GetExtension(selectedFilePath) ?? "";
-                isCurrentFlowModel =
-                    ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase) ||
-                    ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase) ||
-                    ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase);
-                int device_id = GetSelectedDeviceId();
                 try
                 {
-                    if (model != null)
-                    {
-                        DisposeCurrentModel();
-                    }
-                    bool rpc_mode = false;
-                    try
-                    {
-                        rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.IsChecked == true;
-                    }
-                    catch { }
-
-                    model = new Model(selectedFilePath, device_id, rpc_mode);
-
-                    button_getmodelinfo_Click(sender, e);
+                    LoadModelFromPath(openFileDialog.FileName, null, true);
                 }
                 catch (Exception ex)
                 {
                     richTextBox1.Text = ex.Message;
                 }
             }
+        }
+
+        private void LoadModelFromPath(string selectedFilePath, int? deviceOverride, bool saveLastPath)
+        {
+            if (saveLastPath)
+            {
+                Properties.Settings.Default.LastModelPath = selectedFilePath;
+                Properties.Settings.Default.Save();
+            }
+            string ext = Path.GetExtension(selectedFilePath) ?? "";
+            isCurrentFlowModel =
+                ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase) ||
+                ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase) ||
+                ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase);
+            if (model != null)
+            {
+                DisposeCurrentModel();
+            }
+            bool rpc_mode = false;
+            try
+            {
+                rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.IsChecked == true;
+            }
+            catch { }
+
+            model = new Model(selectedFilePath, deviceOverride ?? GetSelectedDeviceId(), rpc_mode);
+            model_path = selectedFilePath;
+            button_getmodelinfo_Click(this, EventArgs.Empty);
         }
 
 		private void button_infer_json_Click(object sender, EventArgs e)
@@ -361,11 +396,117 @@ namespace DlcvDemo
             }
             if (openFileDialog.ShowDialog(this) == true)
             {
-                image_path = openFileDialog.FileName;
+                OpenImageFromPath(openFileDialog.FileName, true);
+            }
+        }
+
+        private void OpenImageFromPath(string selectedImagePath, bool saveLastPath)
+        {
+            image_path = selectedImagePath;
+            if (saveLastPath)
+            {
                 Properties.Settings.Default.LastImagePath = image_path;
                 Properties.Settings.Default.Save();
-                button_infer_Click(sender, e);
             }
+            button_infer_Click(this, EventArgs.Empty);
+        }
+
+        private async void RunUiTest()
+        {
+            try
+            {
+                numericUpDown_threshold.Value = uiTestOptions.Threshold;
+                WriteUiTestResult("started", null);
+
+                if (uiTestOptions.InteractiveDialogs)
+                {
+                    button_loadmodel_Click(this, EventArgs.Empty);
+                }
+                else
+                {
+                    LoadModelFromPath(uiTestOptions.ModelPath, uiTestOptions.DeviceId, false);
+                }
+                if (model == null)
+                {
+                    throw new InvalidOperationException("模型加载失败: " + richTextBox1.Text);
+                }
+                if (uiTestOptions.InteractiveDialogs
+                    && !PathsEqual(model_path, uiTestOptions.ModelPath))
+                {
+                    throw new InvalidOperationException("文件对话框选择的模型与预期不一致: " + model_path);
+                }
+
+                WriteUiTestResult("model_loaded", null);
+                await Task.Delay(600);
+
+                if (uiTestOptions.InteractiveDialogs)
+                {
+                    button_openimage_Click(this, EventArgs.Empty);
+                }
+                else
+                {
+                    OpenImageFromPath(uiTestOptions.ImagePath, false);
+                }
+                if (uiTestOptions.InteractiveDialogs
+                    && !PathsEqual(image_path, uiTestOptions.ImagePath))
+                {
+                    throw new InvalidOperationException("文件对话框选择的图片与预期不一致: " + image_path);
+                }
+                if (string.IsNullOrWhiteSpace(richTextBox1.Text)
+                    || !richTextBox1.Text.Contains("推理结果:"))
+                {
+                    throw new InvalidOperationException("界面未生成推理结果: " + richTextBox1.Text);
+                }
+
+                await Dispatcher.Yield(DispatcherPriority.Render);
+                UiTestExitCode = 0;
+                WriteUiTestResult("passed", null);
+            }
+            catch (Exception ex)
+            {
+                UiTestExitCode = 1;
+                richTextBox1.Text = "自动 UI 测试失败\n" + ex;
+                WriteUiTestResult("failed", ex);
+            }
+        }
+
+        private static bool PathsEqual(string left, string right)
+        {
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            {
+                return false;
+            }
+            return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void WriteUiTestResult(string status, Exception error)
+        {
+            string outputPath = Path.GetFullPath(uiTestOptions.OutputPath);
+            string outputDirectory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+            var result = new JObject
+            {
+                ["status"] = status,
+                ["ok"] = status == "passed",
+                ["model"] = model_path ?? uiTestOptions.ModelPath,
+                ["image"] = image_path ?? uiTestOptions.ImagePath,
+                ["threshold"] = uiTestOptions.Threshold,
+                ["device"] = uiTestOptions.DeviceId,
+                ["interactive_dialogs"] = uiTestOptions.InteractiveDialogs,
+                ["window_title"] = Title,
+                ["result_text"] = richTextBox1.Text ?? string.Empty,
+                ["error"] = error == null ? null : error.ToString()
+            };
+            string temporaryPath = outputPath + ".tmp";
+            File.WriteAllText(temporaryPath, result.ToString(Formatting.Indented), new UTF8Encoding(false));
+            if (File.Exists(outputPath))
+            {
+                File.Delete(outputPath);
+            }
+            File.Move(temporaryPath, outputPath);
         }
 
         private void numericUpDown_threshold_ValueChanged(object sender, EventArgs e)
@@ -939,7 +1080,10 @@ namespace DlcvDemo
 				richTextBox1.Text = title + "\n" + ex.ToString();
 			}
 			catch { }
-			MessageBox.Show(this, title + ": " + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+			if (uiTestOptions == null)
+			{
+				MessageBox.Show(this, title + ": " + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+			}
 		}
 
         private void button_save_img_Click(object sender, EventArgs e)
