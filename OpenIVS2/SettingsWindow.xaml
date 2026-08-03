@@ -1,0 +1,69 @@
+<Window x:Class="OpenIVS2.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OpenIVS2 设置" Width="1180" Height="720" MinWidth="980" MinHeight="620"
+        Background="#F5F5F5" WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
+    <Grid Margin="14">
+        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <TabControl Grid.Row="0">
+            <TabItem Header="相机与模型">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <DataGrid x:Name="CameraDataGrid" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                              SelectionMode="Single" HeadersVisibility="Column" RowHeaderWidth="0" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="启用" Binding="{Binding Enabled}" Width="55"/>
+                            <DataGridTextColumn Header="槽位" Binding="{Binding Slot}" IsReadOnly="True" Width="50"/>
+                            <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="90"/>
+                            <DataGridComboBoxColumn Header="模式" SelectedItemBinding="{Binding Mode}" Width="80">
+                                <DataGridComboBoxColumn.ItemsSource><x:Array Type="{x:Type sys:String}" xmlns:sys="clr-namespace:System;assembly=mscorlib"><sys:String>virtual</sys:String><sys:String>hik</sys:String></x:Array></DataGridComboBoxColumn.ItemsSource>
+                            </DataGridComboBoxColumn>
+                            <DataGridTextColumn Header="相机序列号/用户名称" Binding="{Binding CameraId}" Width="150"/>
+                            <DataGridTextColumn Header="虚拟图片" Binding="{Binding VirtualImagePath}" Width="220"/>
+                            <DataGridTextColumn Header="模型" Binding="{Binding ModelPath}" Width="220"/>
+                            <DataGridTextColumn Header="设备ID" Binding="{Binding DeviceId}" Width="65"/>
+                            <DataGridComboBoxColumn Header="旋转" SelectedItemBinding="{Binding Rotation}" Width="65">
+                                <DataGridComboBoxColumn.ItemsSource><x:Array Type="{x:Type sys:Int32}" xmlns:sys="clr-namespace:System;assembly=mscorlib"><sys:Int32>0</sys:Int32><sys:Int32>90</sys:Int32><sys:Int32>180</sys:Int32><sys:Int32>270</sys:Int32></x:Array></DataGridComboBoxColumn.ItemsSource>
+                            </DataGridComboBoxColumn>
+                            <DataGridCheckBoxColumn Header="软触发" Binding="{Binding SoftwareTrigger}" Width="65"/>
+                            <DataGridTextColumn Header="取图超时(ms)" Binding="{Binding FrameTimeoutMs}" Width="90"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                        <Button Content="选择虚拟图片" Style="{StaticResource ToolbarButtonStyle}" Click="BrowseImage_Click"/>
+                        <Button Content="选择模型" Style="{StaticResource ToolbarButtonStyle}" Click="BrowseModel_Click"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+            <TabItem Header="PLC 与保存">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="20" MaxWidth="800" HorizontalAlignment="Left">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="240"/><ColumnDefinition Width="150"/><ColumnDefinition Width="240"/></Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="48"/><RowDefinition Height="48"/><RowDefinition Height="48"/><RowDefinition Height="48"/><RowDefinition Height="48"/><RowDefinition Height="48"/><RowDefinition Height="48"/><RowDefinition Height="48"/>
+                        </Grid.RowDefinitions>
+                        <CheckBox x:Name="UsePlcCheck" Grid.Row="0" Grid.ColumnSpan="2" Content="启用 PLC 监听" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="PLC 模式" VerticalAlignment="Center"/><ComboBox x:Name="PlcModeCombo" Grid.Row="0" Grid.Column="3"><ComboBoxItem Content="mock"/><ComboBoxItem Content="serial"/></ComboBox>
+                        <TextBlock Grid.Row="1" Text="串口" VerticalAlignment="Center"/><TextBox x:Name="PortNameBox" Grid.Row="1" Grid.Column="1"/>
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="波特率" VerticalAlignment="Center"/><TextBox x:Name="BaudRateBox" Grid.Row="1" Grid.Column="3"/>
+                        <TextBlock Grid.Row="2" Text="数据位" VerticalAlignment="Center"/><TextBox x:Name="DataBitsBox" Grid.Row="2" Grid.Column="1"/>
+                        <TextBlock Grid.Row="2" Grid.Column="2" Text="设备 ID" VerticalAlignment="Center"/><TextBox x:Name="DeviceIdBox" Grid.Row="2" Grid.Column="3"/>
+                        <TextBlock Grid.Row="3" Text="停止位" VerticalAlignment="Center"/><ComboBox x:Name="StopBitsCombo" Grid.Row="3" Grid.Column="1"><ComboBoxItem Content="One"/><ComboBoxItem Content="Two"/></ComboBox>
+                        <TextBlock Grid.Row="3" Grid.Column="2" Text="校验" VerticalAlignment="Center"/><ComboBox x:Name="ParityCombo" Grid.Row="3" Grid.Column="3"><ComboBoxItem Content="None"/><ComboBoxItem Content="Even"/><ComboBoxItem Content="Odd"/></ComboBox>
+                        <TextBlock Grid.Row="4" Text="拍照寄存器" VerticalAlignment="Center"/><TextBox x:Name="PhotoRegisterBox" Grid.Row="4" Grid.Column="1"/>
+                        <TextBlock Grid.Row="4" Grid.Column="2" Text="触发值 / 清零值" VerticalAlignment="Center"/><StackPanel Grid.Row="4" Grid.Column="3" Orientation="Horizontal"><TextBox x:Name="TriggerValueBox" Width="105"/><TextBox x:Name="ClearValueBox" Width="105" Margin="10,0,0,0"/></StackPanel>
+                        <TextBlock Grid.Row="5" Text="轮询间隔(ms)" VerticalAlignment="Center"/><TextBox x:Name="PollIntervalBox" Grid.Row="5" Grid.Column="1"/>
+                        <TextBlock Grid.Row="5" Grid.Column="2" Text="保存目录" VerticalAlignment="Center"/><TextBox x:Name="SaveDirectoryBox" Grid.Row="5" Grid.Column="3"/>
+                        <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Orientation="Horizontal" VerticalAlignment="Center"><CheckBox x:Name="SaveOkCheck" Content="保存 OK 图片" Margin="0,0,24,0"/><CheckBox x:Name="SaveNgCheck" Content="保存 NG 图片"/></StackPanel>
+                        <TextBlock Grid.Row="6" Grid.Column="2" Text="图片格式" VerticalAlignment="Center"/><ComboBox x:Name="ImageFormatCombo" Grid.Row="6" Grid.Column="3"><ComboBoxItem Content="PNG"/><ComboBoxItem Content="JPG"/><ComboBoxItem Content="BMP"/></ComboBox>
+                        <TextBlock Grid.Row="7" Grid.Column="2" Text="JPEG 质量" VerticalAlignment="Center"/><TextBox x:Name="JpegQualityBox" Grid.Row="7" Grid.Column="3"/>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="取消" Style="{StaticResource SecondaryButtonStyle}" Click="Cancel_Click"/>
+            <Button Content="保存" Style="{StaticResource SuccessButtonStyle}" Click="Save_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
