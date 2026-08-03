@@ -44,6 +44,7 @@ namespace OpenIVS2
         private Task _plcTask;
         private bool _running;
         private bool _closing;
+        private bool _closeConfirmed;
         private int _totalCount;
         private int _okCount;
         private int _ngCount;
@@ -119,12 +120,23 @@ namespace OpenIVS2
 
         private async void Window_Closing(object sender, CancelEventArgs e)
         {
-            if (_closing) return;
+            if (_closeConfirmed) return;
             e.Cancel = true;
+            if (_closing) return;
             _closing = true;
-            await StopSystemAsync();
-            e.Cancel = false;
-            Close();
+            try
+            {
+                await StopSystemAsync();
+            }
+            catch (Exception ex)
+            {
+                Log("error", "system", "关闭软件时释放资源失败: " + ex.Message);
+            }
+            finally
+            {
+                _closeConfirmed = true;
+                await Dispatcher.BeginInvoke(new Action(Close));
+            }
         }
 
         internal void ApplySettingsForAcceptance(AppSettings settings)
@@ -185,6 +197,7 @@ namespace OpenIVS2
             try
             {
                 var graph = SequenceGraphBuilder.Build(_settings);
+                SaveRuntimeSequence(graph);
                 var deviceIds = _settings.EnabledCameras()
                     .GroupBy(x => x.ModelPath, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(x => x.Key, x => x.First().DeviceId, StringComparer.OrdinalIgnoreCase);
@@ -224,6 +237,13 @@ namespace OpenIVS2
             {
                 SetBusy(false, null);
             }
+        }
+
+        private void SaveRuntimeSequence(SequenceGraphDocument graph)
+        {
+            var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime_sequence.json");
+            File.WriteAllText(path, SequenceGraphLoader.ToJson(graph, true));
+            Log("info", "sequence", "运行时序已保存: " + path);
         }
 
         private async Task StopSystemAsync()

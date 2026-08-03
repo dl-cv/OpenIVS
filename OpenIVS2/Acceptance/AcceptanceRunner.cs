@@ -83,6 +83,16 @@ namespace OpenIVS2.Acceptance
                 await window.StartForAcceptanceAsync(flow, plc);
                 await Task.Delay(150);
 
+                var runtimeSequencePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime_sequence.json");
+                var runtimeSequenceExists = File.Exists(runtimeSequencePath);
+                var runtimeGraph = runtimeSequenceExists ? SequenceGraphLoader.FromFile(runtimeSequencePath) : null;
+                success &= Check(checks, "runtime_sequence_snapshot",
+                    runtimeGraph != null &&
+                    runtimeGraph.Nodes.Any(x => x.Id == "plc_clear") &&
+                    runtimeGraph.Nodes.Any(x => x.Id == "wait_A") &&
+                    runtimeGraph.Nodes.Any(x => x.Id == "join"),
+                    "程序目录保存实际运行时序 JSON");
+
                 plc.SetRegister(settings.PhotoRegister, settings.TriggerValue);
                 success &= Check(checks, "plc_ok_cycle", await WaitUntilAsync(() => window.TotalCount == 1, 10000), "PLC 触发首个 OK 周期");
                 success &= Check(checks, "plc_clear_ok", plc.ReadHoldingRegister(settings.PhotoRegister) == settings.ClearValue, "OK 周期 PLC 清零");
