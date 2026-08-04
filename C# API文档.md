@@ -181,7 +181,8 @@ public void FreeModel();
 public class FlowGraphModel : IDisposable
 {
     public JObject Load(string flowJsonPath, int deviceId = 0);
-    protected JObject LoadFromRoot(JObject root, int deviceId, string modelPassword = null);
+    protected JObject LoadFromRoot(JObject root, int deviceId);
+    protected JObject LoadFromRoot(JObject root, int deviceId, string modelPassword);
 }
 ```
 
@@ -241,7 +242,8 @@ public void Dispose();
 ```csharp
 public class DvsModel : FlowGraphModel
 {
-    public JObject Load(string dvsPath, int deviceId = 0, string modelPassword = null);
+    public JObject Load(string dvsPath, int deviceId = 0);
+    public JObject Load(string dvsPath, int deviceId, string modelPassword);
 }
 ```
 

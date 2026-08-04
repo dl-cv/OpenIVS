@@ -20,7 +20,12 @@ namespace DlcvModules
         // 临时文件夹路径，用于清理
         private string _tempDir = null;
 
-        public JObject Load(string dvsPath, int deviceId = 0, string modelPassword = null)
+        public new JObject Load(string dvsPath, int deviceId = 0)
+        {
+            return Load(dvsPath, deviceId, null);
+        }
+
+        public JObject Load(string dvsPath, int deviceId, string modelPassword)
         {
             if (string.IsNullOrWhiteSpace(dvsPath)) throw new ArgumentException("文件路径为空", nameof(dvsPath));
             if (!File.Exists(dvsPath)) throw new FileNotFoundException("文件不存在", dvsPath);

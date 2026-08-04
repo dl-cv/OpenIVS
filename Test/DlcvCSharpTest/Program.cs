@@ -3386,6 +3386,31 @@ namespace DlcvCSharpTest
                 ModelPasswordFlowTestModule.Reset(expectedPassword);
                 AssertDvsPasswordError(archivePath, null, "MODEL_PASSWORD_REQUIRED");
                 AssertDvsPasswordError(archivePath, "wrong-password", "MODEL_PASSWORD_INVALID");
+                if (ModelPasswordFlowTestModule.Contexts.Any(context =>
+                    context.Get<string>("model_password", null) != null))
+                {
+                    throw new InvalidOperationException("failed flow load retained the password in its execution context");
+                }
+
+                ModelPasswordFlowTestModule.Reset(expectedPassword);
+                bool legacyRequired = false;
+                try
+                {
+                    using (var legacy = new DvsModel())
+                    {
+                        legacy.Load(archivePath, 0);
+                    }
+                }
+                catch (ModelLoadException ex) when (ex.ErrorCode == "MODEL_PASSWORD_REQUIRED")
+                {
+                    legacyRequired = true;
+                }
+                if (!legacyRequired
+                    || ModelPasswordFlowTestModule.Passwords.Count != 1
+                    || ModelPasswordFlowTestModule.Passwords[0] != null)
+                {
+                    throw new InvalidOperationException("legacy DvsModel.Load overload did not use the DVS archive path");
+                }
 
                 Console.WriteLine("DVS model password selftest passed");
                 return 0;

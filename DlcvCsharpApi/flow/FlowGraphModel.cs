@@ -44,7 +44,12 @@ namespace DlcvModules
         /// <param name="root">包含 nodes 的流程配置根 JSON 对象</param>
         /// <param name="deviceId">设备 ID</param>
         /// <returns>模型加载报告</returns>
-        protected JObject LoadFromRoot(JObject root, int deviceId, string modelPassword = null)
+        protected JObject LoadFromRoot(JObject root, int deviceId)
+        {
+            return LoadFromRoot(root, deviceId, null);
+        }
+
+        protected JObject LoadFromRoot(JObject root, int deviceId, string modelPassword)
         {
             if (root == null) throw new ArgumentNullException("root");
 
