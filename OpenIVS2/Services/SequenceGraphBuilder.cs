@@ -18,7 +18,7 @@ namespace OpenIVS2.Services
             var graph = new SequenceGraphDocument
             {
                 Id = "openivs2-production",
-                Name = "OpenIVS2 生产检测时序"
+                Name = "OpenIVS 2026 生产检测时序"
             };
             var tcpPlc = settings.UsePlc && string.Equals(settings.PlcMode, "tcp", StringComparison.OrdinalIgnoreCase);
             graph.Nodes.Add(tcpPlc

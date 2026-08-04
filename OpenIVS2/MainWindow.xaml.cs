@@ -74,6 +74,7 @@ namespace OpenIVS2
         internal bool IsRunning { get { return _running; } }
         internal bool SettingsAvailable { get { return SettingsButton.IsEnabled; } }
         internal int MainToolbarButtonCount { get { return MainToolbar.Children.Count; } }
+        internal string ProductDisplayName { get { return ProductNameText.Text; } }
         internal bool IsModbusWaiting { get { return _modbusConnected == false; } }
         internal bool BrandLogoKeepsAspectRatio
         {
@@ -87,6 +88,12 @@ namespace OpenIVS2
             CameraCardControls card;
             return _cameraCards.TryGetValue(slot, out card) ? card.Viewer : null;
         }
+        internal Brush GetCameraStatusBrushForAcceptance(string slot)
+        {
+            CameraCardControls card;
+            return _cameraCards.TryGetValue(slot, out card) ? card.StatusBorder.Background : null;
+        }
+        internal Brush OverallResultBrushForAcceptance { get { return OverallResultCard.Background; } }
         internal string GetCameraTitleForAcceptance(string slot)
         {
             CameraCardControls card;
@@ -99,7 +106,7 @@ namespace OpenIVS2
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            Log("info", "system", "OpenIVS2 已启动");
+            Log("info", "system", "OpenIVS 2026 已启动");
             if (ShouldStartAutomatically(_acceptanceMode))
             {
                 SynchronizeStartupRegistration(false);
@@ -501,10 +508,11 @@ namespace OpenIVS2
             NgCountText.Text = _ngCount.ToString();
             YieldText.Text = (_totalCount == 0 ? 0 : _okCount * 100.0 / _totalCount).ToString("0.00") + "%";
             OverallResultText.Text = evaluation.Ok ? "OK" : "NG";
-            OverallResultCard.Background = evaluation.Ok ? new SolidColorBrush(Color.FromRgb(76, 175, 80)) : new SolidColorBrush(Color.FromRgb(244, 67, 54));
-            OverallIndicator.Fill = evaluation.Ok ? Brushes.Green : Brushes.Red;
+            var okBrush = (Brush)FindResource("SuccessBrush");
+            OverallResultCard.Background = evaluation.Ok ? okBrush : new SolidColorBrush(Color.FromRgb(244, 67, 54));
+            OverallIndicator.Fill = evaluation.Ok ? okBrush : Brushes.Red;
             CycleDetailText.Text = string.Join("  ", evaluation.Cameras.Select(x => x.Slot + ":" + (x.Ok ? "OK" : "NG")));
-            foreach (var item in evaluation.Cameras) SetCameraStatus(item.Slot, item.Ok ? "OK" : "NG", item.Ok ? Brushes.Green : Brushes.Red);
+            foreach (var item in evaluation.Cameras) SetCameraStatus(item.Slot, item.Ok ? "OK" : "NG", item.Ok ? okBrush : Brushes.Red);
             StatusText.Text = "周期完成：" + (evaluation.Ok ? "OK" : "NG");
             Log("info", "result", "周期总结果=" + (evaluation.Ok ? "OK" : "NG") + "，" + CycleDetailText.Text);
         }

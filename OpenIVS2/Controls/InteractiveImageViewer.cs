@@ -287,12 +287,13 @@ namespace OpenIVS2.Controls
             var screenFont = Math.Min(Math.Max(baseFont * safeZoom, baseFont), maxScreenFont) * _annotationScale;
             var fontSize = Math.Max(8.0, screenFont / safeZoom);
             var topLeftIndex = 0;
+            var okBrush = (Brush)FindResource("SuccessBrush");
 
             foreach (var item in _items)
             {
                 var color = !string.IsNullOrEmpty(item.Category) &&
                     item.Category.IndexOf("ok", StringComparison.OrdinalIgnoreCase) >= 0
-                    ? Brushes.LimeGreen
+                    ? okBrush
                     : Brushes.Red;
 
                 if (item.Polyline != null && item.Polyline.Count >= 2)

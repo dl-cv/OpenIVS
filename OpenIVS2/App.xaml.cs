@@ -19,7 +19,7 @@ namespace OpenIVS2
 
         private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
         {
-            MessageBox.Show("发生未处理错误：" + e.Exception.Message, "OpenIVS2", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show("发生未处理错误：" + e.Exception.Message, "OpenIVS 2026", MessageBoxButton.OK, MessageBoxImage.Error);
             e.Handled = true;
         }
     }

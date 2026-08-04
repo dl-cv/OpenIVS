@@ -60,6 +60,10 @@ namespace OpenIVS2.Acceptance
                     MainWindow.FormatCameraState(CameraResourceState.Opened) == "READY" &&
                     MainWindow.FormatCameraState(CameraResourceState.NotOpened) == "NOT READY",
                     "相机状态使用 READY / NOT READY");
+                success &= Check(checks, "product_display_name",
+                    window.Title == "OpenIVS 2026 - 多相机工业视觉检测" &&
+                    window.ProductDisplayName == "OpenIVS 2026",
+                    "主窗口软件名称显示为 OpenIVS 2026");
                 success &= Check(checks, "main_toolbar_settings_only",
                     window.MainToolbarButtonCount == 1,
                     "主界面操作区只保留设置按钮");
@@ -91,6 +95,9 @@ namespace OpenIVS2.Acceptance
                 {
                     settingsPreview.Show();
                     await Task.Delay(250);
+                    success &= Check(checks, "settings_product_name",
+                        settingsPreview.Title == "OpenIVS 2026 设置",
+                        "设置窗口软件名称显示为 OpenIVS 2026");
                     var cameraSettingsScreenshot = Path.Combine(screenshots, "settings-camera-model.png");
                     settingsPreview.SelectTabForAcceptance(0);
                     settingsPreview.CaptureScreenshot(cameraSettingsScreenshot);
@@ -111,13 +118,37 @@ namespace OpenIVS2.Acceptance
                         !settingsPreview.ContainsVisibleTextForAcceptance("清零值") &&
                         !settingsPreview.ContainsVisibleTextForAcceptance("轮询间隔（毫秒）"),
                         "触发与清零契约不在设置界面显示");
+                    success &= Check(checks, "plc_tab_scope",
+                        !settingsPreview.ContainsVisibleTextForAcceptance("系统启动") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("运行调试"),
+                        "PLC 与保存页签不混入系统设置和调试操作");
                     settingsPreview.SetPlcModeForAcceptance("tcp");
                     await Task.Delay(120);
                     var tcpSettingsScreenshot = Path.Combine(screenshots, "settings-plc-tcp.png");
                     settingsPreview.CaptureScreenshot(tcpSettingsScreenshot);
+                    settingsPreview.SelectTabForAcceptance(2);
+                    await Task.Delay(120);
+                    var systemSettingsScreenshot = Path.Combine(screenshots, "settings-system.png");
+                    settingsPreview.CaptureScreenshot(systemSettingsScreenshot);
+                    success &= Check(checks, "system_settings_tab",
+                        settingsPreview.ContainsVisibleTextForAcceptance("系统启动") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("运行调试") &&
+                        settingsPreview.StartWithWindowsSelected,
+                        "开机自启动位于独立系统设置页签");
+                    settingsPreview.SelectTabForAcceptance(3);
+                    await Task.Delay(120);
+                    var debugSettingsScreenshot = Path.Combine(screenshots, "settings-debug.png");
+                    settingsPreview.CaptureScreenshot(debugSettingsScreenshot);
+                    success &= Check(checks, "debug_settings_tab",
+                        settingsPreview.ContainsVisibleTextForAcceptance("运行调试") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("系统启动") &&
+                        settingsPreview.RuntimeControlsAvailable,
+                        "开始、停止和单次触发位于独立调试页签");
                     success &= Check(checks, "settings_screenshots",
-                        File.Exists(cameraSettingsScreenshot) && File.Exists(plcSettingsScreenshot) && File.Exists(tcpSettingsScreenshot),
-                        "设置窗口相机、PLC 和 TCP 配置截图");
+                        File.Exists(cameraSettingsScreenshot) && File.Exists(plcSettingsScreenshot) &&
+                        File.Exists(tcpSettingsScreenshot) && File.Exists(systemSettingsScreenshot) &&
+                        File.Exists(debugSettingsScreenshot),
+                        "设置窗口相机、PLC、系统设置和调试页签截图");
                     success &= Check(checks, "startup_setting_ui",
                         settingsPreview.StartWithWindowsSelected,
                         "设置窗口显示开机自启动选项");
@@ -211,6 +242,13 @@ namespace OpenIVS2.Acceptance
                 success &= Check(checks, "first_cycle_images",
                     window.VisibleCameraImageCount == 3 && window.BufferedCameraImageCount == 3,
                     "首个周期更新全部相机画面");
+                var overallOkBrush = window.OverallResultBrushForAcceptance as System.Windows.Media.SolidColorBrush;
+                var cameraOkBrush = window.GetCameraStatusBrushForAcceptance("A") as System.Windows.Media.SolidColorBrush;
+                success &= Check(checks, "camera_ok_color_matches_overall",
+                    overallOkBrush != null && cameraOkBrush != null &&
+                    overallOkBrush.Color == System.Windows.Media.Color.FromRgb(76, 175, 80) &&
+                    cameraOkBrush.Color == overallOkBrush.Color,
+                    "相机 OK 与总结果 OK 使用相同绿色");
 
                 flow.NgSlot = "B";
                 await WaitUntilAsync(() => plc.ReadHoldingRegister(settings.PhotoRegister) == settings.ClearValue, 3000);
@@ -325,7 +363,7 @@ namespace OpenIVS2.Acceptance
                     graphics.Clear(Color.FromArgb(31 + i * 12, 50 + i * 8, 64 + i * 10));
                     using (var brush = new SolidBrush(Color.FromArgb(33, 150, 243))) graphics.FillEllipse(brush, 80 + i * 15, 90, 260, 260);
                     graphics.DrawString(slot, font, Brushes.White, 150 + i * 15, 150);
-                    graphics.DrawString("OpenIVS2 Virtual Camera " + slot, smallFont, Brushes.White, 70, 430);
+                    graphics.DrawString("OpenIVS 2026 Virtual Camera " + slot, smallFont, Brushes.White, 70, 430);
                     bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
                 }
                 paths.Add(path);
@@ -361,11 +399,19 @@ namespace OpenIVS2.Acceptance
             try
             {
                 var executablePath = Path.Combine(output, "OpenIVS2.exe");
-                var service = new WindowsStartupService(registryPath, "OpenIVS2", executablePath);
+                using (var key = Registry.CurrentUser.CreateSubKey(registryPath))
+                {
+                    if (key == null) return false;
+                    key.SetValue("OpenIVS2", WindowsStartupService.BuildCommand(executablePath), RegistryValueKind.String);
+                }
+                var service = new WindowsStartupService(registryPath, "OpenIVS 2026", executablePath, "OpenIVS2");
                 service.SetEnabled(true);
                 var enabled = service.IsEnabled();
+                bool legacyRemoved;
+                using (var key = Registry.CurrentUser.OpenSubKey(registryPath, false))
+                    legacyRemoved = key != null && key.GetValue("OpenIVS2") == null;
                 service.SetEnabled(false);
-                return enabled && !service.IsEnabled();
+                return enabled && legacyRemoved && !service.IsEnabled();
             }
             finally
             {
