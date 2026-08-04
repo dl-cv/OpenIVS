@@ -8,7 +8,11 @@ namespace OpenIVS2.Services
 {
     public sealed class ImageSaveService
     {
-        public List<string> SaveCycle(AppSettings settings, bool ok, Dictionary<string, BitmapSource> images)
+        public List<string> SaveCycle(
+            AppSettings settings,
+            bool ok,
+            Dictionary<string, BitmapSource> images,
+            Dictionary<string, BitmapSource> visualizations)
         {
             var paths = new List<string>();
             if (settings == null || images == null) return paths;
@@ -29,6 +33,23 @@ namespace OpenIVS2.Services
                     encoder.Save(stream);
                 }
                 paths.Add(path);
+                if (settings.SaveVisualizationImages && visualizations != null)
+                {
+                    BitmapSource visualization;
+                    if (visualizations.TryGetValue(slot, out visualization) && visualization != null)
+                    {
+                        var visualizationExtension = NormalizeVisualizationExtension(settings.VisualizationImageFormat);
+                        var visualizationPath = Path.Combine(directory,
+                            stamp + "_" + slot + "_" + status + "_vis." + visualizationExtension);
+                        using (var stream = File.Create(visualizationPath))
+                        {
+                            var encoder = CreateEncoder(visualizationExtension, settings.JpegQuality);
+                            encoder.Frames.Add(BitmapFrame.Create(visualization));
+                            encoder.Save(stream);
+                        }
+                        paths.Add(visualizationPath);
+                    }
+                }
             }
             return paths;
         }
@@ -46,6 +67,12 @@ namespace OpenIVS2.Services
             if (extension == "jpg") return new JpegBitmapEncoder { QualityLevel = Math.Max(1, Math.Min(100, quality)) };
             if (extension == "bmp") return new BmpBitmapEncoder();
             return new PngBitmapEncoder();
+        }
+
+        private static string NormalizeVisualizationExtension(string format)
+        {
+            var value = (format ?? "JPG").Trim().ToUpperInvariant();
+            return value == "PNG" ? "png" : "jpg";
         }
     }
 }

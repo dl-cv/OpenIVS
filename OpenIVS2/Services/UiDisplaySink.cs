@@ -47,8 +47,7 @@ namespace OpenIVS2.Services
             Action commit = () =>
             {
                 var rawSource = FromPngBytes(rawBytes);
-                var renderedSource = FromPngBytes(renderedBytes);
-                lock (_sync) _images[windowId] = renderedSource;
+                lock (_sync) _images[windowId] = rawSource;
                 _update(windowId, rawSource, result);
             };
             if (_dispatcher.CheckAccess()) commit();

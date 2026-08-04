@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using DLCV.SequenceGraph;
@@ -24,9 +25,13 @@ namespace OpenIVS2.Acceptance
             var screenshots = Path.Combine(output, "screenshots");
             var sources = Path.Combine(output, "virtual-images");
             var savedImages = Path.Combine(output, "saved-images");
+            var runtimeLogs = Path.Combine(output, "runtime-logs");
+            var productionLogs = Path.Combine(output, "production-logs");
             Directory.CreateDirectory(screenshots);
             Directory.CreateDirectory(sources);
             Directory.CreateDirectory(savedImages);
+            Directory.CreateDirectory(runtimeLogs);
+            Directory.CreateDirectory(productionLogs);
             window.SetAcceptanceLogPath(Path.Combine(output, "application.log"));
 
             var checks = new JArray();
@@ -35,7 +40,7 @@ namespace OpenIVS2.Acceptance
             try
             {
                 var imagePaths = CreateVirtualImages(sources);
-                var settings = CreateAcceptanceSettings(imagePaths, savedImages);
+                var settings = CreateAcceptanceSettings(imagePaths, savedImages, runtimeLogs, productionLogs);
 
                 for (var count = 1; count <= 6; count++)
                 {
@@ -122,6 +127,10 @@ namespace OpenIVS2.Acceptance
                         !settingsPreview.ContainsVisibleTextForAcceptance("系统启动") &&
                         !settingsPreview.ContainsVisibleTextForAcceptance("运行调试"),
                         "PLC 与保存页签不混入系统设置和调试操作");
+                    success &= Check(checks, "visualization_save_setting_ui",
+                        settingsPreview.VisualizationSaveSelected &&
+                        settingsPreview.VisualizationSaveLabelForAcceptance == "保存可视化图片",
+                        "PLC 与保存页签显示无额外前缀的可视化图片存储选项");
                     settingsPreview.SetPlcModeForAcceptance("tcp");
                     await Task.Delay(120);
                     var tcpSettingsScreenshot = Path.Combine(screenshots, "settings-plc-tcp.png");
@@ -132,9 +141,12 @@ namespace OpenIVS2.Acceptance
                     settingsPreview.CaptureScreenshot(systemSettingsScreenshot);
                     success &= Check(checks, "system_settings_tab",
                         settingsPreview.ContainsVisibleTextForAcceptance("系统启动") &&
+                        settingsPreview.ContainsVisibleTextForAcceptance("运行时日志") &&
+                        settingsPreview.ContainsVisibleTextForAcceptance("生产日志") &&
                         !settingsPreview.ContainsVisibleTextForAcceptance("运行调试") &&
-                        settingsPreview.StartWithWindowsSelected,
-                        "开机自启动位于独立系统设置页签");
+                        settingsPreview.StartWithWindowsSelected &&
+                        settingsPreview.RuntimeLogSelected && settingsPreview.ProductionLogSelected,
+                        "开机自启动、运行日志和生产日志位于系统设置页签");
                     settingsPreview.SelectTabForAcceptance(3);
                     await Task.Delay(120);
                     var debugSettingsScreenshot = Path.Combine(screenshots, "settings-debug.png");
@@ -182,8 +194,14 @@ namespace OpenIVS2.Acceptance
                 settingsService.Save(settings);
                 var loaded = settingsService.Load();
                 success &= Check(checks, "settings_roundtrip",
-                    loaded.EnabledCameras().Count == 3 && loaded.PhotoRegister == settings.PhotoRegister && loaded.StartWithWindows,
+                    loaded.EnabledCameras().Count == 3 && loaded.PhotoRegister == settings.PhotoRegister &&
+                    loaded.StartWithWindows && loaded.EnableRuntimeLog && loaded.EnableProductionLog &&
+                    loaded.RuntimeLogDirectory == runtimeLogs && loaded.ProductionLogDirectory == productionLogs &&
+                    loaded.SaveVisualizationImages && loaded.VisualizationImageFormat == "JPG",
                     "设置保存与加载");
+                success &= Check(checks, "runtime_log_rotation",
+                    RuntimeLogRotationWorks(runtimeLogs),
+                    "运行时日志按大小轮转并限制保留数量");
                 success &= Check(checks, "startup_registry_roundtrip",
                     StartupRegistrationRoundtrip(output),
                     "开机自启动注册表写入和关闭");
@@ -223,6 +241,11 @@ namespace OpenIVS2.Acceptance
                 var plc = new MockModbusClient();
                 await window.StartForAcceptanceAsync(flow, plc);
                 await Task.Delay(150);
+                var settingsButtonBrush = window.SettingsButtonBrushForAcceptance as System.Windows.Media.SolidColorBrush;
+                success &= Check(checks, "running_settings_button_color",
+                    settingsButtonBrush != null &&
+                    settingsButtonBrush.Color == System.Windows.Media.Color.FromRgb(96, 125, 139),
+                    "运行状态下设置按钮使用 RGB(96,125,139)");
 
                 var runtimeSequencePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime_sequence.json");
                 var runtimeSequenceExists = File.Exists(runtimeSequencePath);
@@ -242,6 +265,11 @@ namespace OpenIVS2.Acceptance
                 success &= Check(checks, "first_cycle_images",
                     window.VisibleCameraImageCount == 3 && window.BufferedCameraImageCount == 3,
                     "首个周期更新全部相机画面");
+                success &= Check(checks, "no_detection_visualization_skipped",
+                    await WaitUntilAsync(() => Directory.GetFiles(savedImages, "*.png", SearchOption.AllDirectories)
+                        .Count(x => x.IndexOf("_vis.", StringComparison.OrdinalIgnoreCase) < 0) >= 3, 5000) &&
+                    ValidJpegVisualizations(savedImages) == 0,
+                    "没有检测结果的相机不保存可视化图片");
                 var overallOkBrush = window.OverallResultBrushForAcceptance as System.Windows.Media.SolidColorBrush;
                 var cameraOkBrush = window.GetCameraStatusBrushForAcceptance("A") as System.Windows.Media.SolidColorBrush;
                 success &= Check(checks, "camera_ok_color_matches_overall",
@@ -260,7 +288,16 @@ namespace OpenIVS2.Acceptance
                 success &= Check(checks, "plc_ng_cycle", await WaitUntilAsync(() => window.TotalCount == 2, 10000), "PLC 触发第二个 NG 周期");
                 success &= Check(checks, "plc_clear_ng", plc.ReadHoldingRegister(settings.PhotoRegister) == settings.ClearValue, "NG 周期 PLC 清零");
                 success &= Check(checks, "ng_aggregate", window.OkCount == 1 && window.NgCount == 1, "任一相机 NG 时总结果 NG");
-                success &= Check(checks, "image_save", await WaitUntilAsync(() => Directory.GetFiles(savedImages, "*.*", SearchOption.AllDirectories).Length >= 6, 5000), "OK/NG 图片保存");
+                success &= Check(checks, "image_save",
+                    await WaitUntilAsync(() => Directory.GetFiles(savedImages, "*.png", SearchOption.AllDirectories)
+                        .Count(x => x.IndexOf("_vis.", StringComparison.OrdinalIgnoreCase) < 0) >= 6, 5000),
+                    "OK/NG 原图保存");
+                success &= Check(checks, "visualization_jpg_save",
+                    await WaitUntilAsync(() => ValidJpegVisualizations(savedImages) == 1, 5000),
+                    "仅有检测结果的 ImageViewer 可视化以压缩 JPG 保存");
+                success &= Check(checks, "production_csv",
+                    await WaitUntilAsync(() => ProductionCsvIsValid(productionLogs), 5000),
+                    "生产 CSV 每周期记录时间、时间戳、相机结果和总结果");
 
                 var viewer = window.GetCameraViewerForAcceptance("B");
                 success &= Check(checks, "interactive_viewer_result_layer",
@@ -290,6 +327,9 @@ namespace OpenIVS2.Acceptance
                     success &= Check(checks, "interactive_viewer_zoom_reset", zoomed,
                         "滚轮缩放逻辑和右键复位逻辑可用");
                     viewer.DecreaseAnnotationScale();
+                    success &= Check(checks, "visualization_png_save",
+                        VisualizationPngSaveWorks(output, settings, viewer),
+                        "ImageViewer 可视化支持压缩 PNG 保存");
                 }
 
                 await Task.Delay(250);
@@ -323,7 +363,11 @@ namespace OpenIVS2.Acceptance
             return success;
         }
 
-        private static AppSettings CreateAcceptanceSettings(IList<string> images, string saveDirectory)
+        private static AppSettings CreateAcceptanceSettings(
+            IList<string> images,
+            string saveDirectory,
+            string runtimeLogDirectory,
+            string productionLogDirectory)
         {
             var settings = AppSettings.CreateDefault();
             settings.UsePlc = true;
@@ -336,6 +380,14 @@ namespace OpenIVS2.Acceptance
             settings.SaveOkImages = true;
             settings.SaveNgImages = true;
             settings.ImageFormat = "PNG";
+            settings.SaveVisualizationImages = true;
+            settings.VisualizationImageFormat = "JPG";
+            settings.EnableRuntimeLog = true;
+            settings.RuntimeLogDirectory = runtimeLogDirectory;
+            settings.RuntimeLogMaxFileSizeMB = 10;
+            settings.RuntimeLogMaxFileCount = 7;
+            settings.EnableProductionLog = true;
+            settings.ProductionLogDirectory = productionLogDirectory;
             for (var i = 0; i < settings.Cameras.Count; i++)
             {
                 settings.Cameras[i].Enabled = i < 3;
@@ -345,6 +397,70 @@ namespace OpenIVS2.Acceptance
                 settings.Cameras[i].Rotation = i % 2 == 0 ? 0 : 90;
             }
             return settings;
+        }
+
+        private static bool RuntimeLogRotationWorks(string directory)
+        {
+            var path = Path.Combine(directory, "rotation.log");
+            var service = new RuntimeLogService();
+            service.ConfigureFile(path, 1, 2);
+            var payload = new string('X', 600 * 1024);
+            for (var i = 0; i < 4; i++)
+            {
+                if (!service.WriteLine("rotation-" + i + " " + payload)) return false;
+            }
+            var files = Directory.GetFiles(directory, "rotation*.log");
+            return files.Length == 2 && files.Any(x => !string.Equals(x, path, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static int ValidJpegVisualizations(string directory)
+        {
+            var valid = 0;
+            foreach (var path in Directory.GetFiles(directory, "*_vis.jpg", SearchOption.AllDirectories))
+            {
+                var bytes = File.ReadAllBytes(path);
+                if (bytes.Length > 2 && bytes[0] == 0xFF && bytes[1] == 0xD8) valid++;
+            }
+            return valid;
+        }
+
+        private static bool ProductionCsvIsValid(string directory)
+        {
+            var path = Directory.GetFiles(directory, "*.csv").FirstOrDefault();
+            if (path == null) return false;
+            var lines = File.ReadAllLines(path, Encoding.GetEncoding(936));
+            if (lines.Length < 3 || lines[0] != "时间,时间戳,相机A,相机B,相机C,相机D,相机E,相机F,总结果") return false;
+            var ok = lines[1].Split(',');
+            var ng = lines[2].Split(',');
+            long okTimestamp;
+            long ngTimestamp;
+            return ok.Length == 9 && ng.Length == 9 &&
+                long.TryParse(ok[1], out okTimestamp) && long.TryParse(ng[1], out ngTimestamp) &&
+                ok[2] == "OK" && ok[3] == "OK" && ok[4] == "OK" && ok[5] == "-" && ok[8] == "OK" &&
+                ng[2] == "OK" && ng[3] == "NG" && ng[4] == "OK" && ng[5] == "-" && ng[8] == "NG";
+        }
+
+        private static bool VisualizationPngSaveWorks(
+            string output,
+            AppSettings settings,
+            OpenIVS2.Controls.InteractiveImageViewer viewer)
+        {
+            var visualization = viewer.RenderVisualization();
+            if (visualization == null) return false;
+            var pngSettings = settings.Clone();
+            pngSettings.SaveDirectory = Path.Combine(output, "visualization-png");
+            pngSettings.ImageFormat = "PNG";
+            pngSettings.VisualizationImageFormat = "PNG";
+            pngSettings.SaveVisualizationImages = true;
+            var images = new Dictionary<string, System.Windows.Media.Imaging.BitmapSource>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "B", visualization }
+            };
+            var paths = new ImageSaveService().SaveCycle(pngSettings, false, images, images);
+            var path = paths.FirstOrDefault(x => x.EndsWith("_vis.png", StringComparison.OrdinalIgnoreCase));
+            if (path == null || !File.Exists(path)) return false;
+            var bytes = File.ReadAllBytes(path);
+            return bytes.Length > 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47;
         }
 
         private static List<string> CreateVirtualImages(string directory)

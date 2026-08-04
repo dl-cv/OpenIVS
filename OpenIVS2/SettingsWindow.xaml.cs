@@ -155,12 +155,27 @@ namespace OpenIVS2
 
         private void BrowseSaveDirectory_Click(object sender, RoutedEventArgs e)
         {
+            BrowseDirectory(SaveDirectoryBox, "选择检测图片保存目录");
+        }
+
+        private void BrowseRuntimeLogDirectory_Click(object sender, RoutedEventArgs e)
+        {
+            BrowseDirectory(RuntimeLogDirectoryBox, "选择运行时日志目录");
+        }
+
+        private void BrowseProductionLogDirectory_Click(object sender, RoutedEventArgs e)
+        {
+            BrowseDirectory(ProductionLogDirectoryBox, "选择生产 CSV 日志目录");
+        }
+
+        private void BrowseDirectory(TextBox target, string description)
+        {
             using (var dialog = new System.Windows.Forms.FolderBrowserDialog())
             {
-                dialog.Description = "选择检测图片保存目录";
-                dialog.SelectedPath = Directory.Exists(SaveDirectoryBox.Text) ? SaveDirectoryBox.Text : "";
+                dialog.Description = description;
+                dialog.SelectedPath = Directory.Exists(target.Text) ? target.Text : "";
                 if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-                    SaveDirectoryBox.Text = dialog.SelectedPath;
+                    target.Text = dialog.SelectedPath;
             }
         }
 
@@ -252,7 +267,15 @@ namespace OpenIVS2
                 WorkingSettings.SaveNgImages = SaveNgCheck.IsChecked == true;
                 WorkingSettings.ImageFormat = SelectedText(ImageFormatCombo, "PNG");
                 WorkingSettings.JpegQuality = ParseInt(JpegQualityBox.Text, "JPEG 质量", 1, 100);
+                WorkingSettings.SaveVisualizationImages = SaveVisualizationCheck.IsChecked == true;
+                WorkingSettings.VisualizationImageFormat = SelectedText(VisualizationFormatCombo, "JPG");
                 WorkingSettings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;
+                WorkingSettings.EnableRuntimeLog = EnableRuntimeLogCheck.IsChecked == true;
+                WorkingSettings.RuntimeLogDirectory = RuntimeLogDirectoryBox.Text.Trim();
+                WorkingSettings.RuntimeLogMaxFileSizeMB = ParseInt(RuntimeLogMaxSizeBox.Text, "运行日志单文件上限", 1, 1024);
+                WorkingSettings.RuntimeLogMaxFileCount = ParseInt(RuntimeLogMaxCountBox.Text, "运行日志保留文件数", 1, 365);
+                WorkingSettings.EnableProductionLog = EnableProductionLogCheck.IsChecked == true;
+                WorkingSettings.ProductionLogDirectory = ProductionLogDirectoryBox.Text.Trim();
                 WorkingSettings.Normalize();
                 ValidateCameraSettings();
                 if (WorkingSettings.UsePlc &&
@@ -261,6 +284,10 @@ namespace OpenIVS2
                     throw new InvalidOperationException("TCP 地址不能为空");
                 if (string.IsNullOrWhiteSpace(WorkingSettings.SaveDirectory))
                     throw new InvalidOperationException("图片保存目录不能为空");
+                if (WorkingSettings.EnableRuntimeLog && string.IsNullOrWhiteSpace(WorkingSettings.RuntimeLogDirectory))
+                    throw new InvalidOperationException("运行时日志目录不能为空");
+                if (WorkingSettings.EnableProductionLog && string.IsNullOrWhiteSpace(WorkingSettings.ProductionLogDirectory))
+                    throw new InvalidOperationException("生产日志目录不能为空");
                 DialogResult = true;
             }
             catch (Exception ex)
@@ -289,6 +316,10 @@ namespace OpenIVS2
         }
 
         internal bool StartWithWindowsSelected { get { return StartWithWindowsCheck.IsChecked == true; } }
+        internal bool RuntimeLogSelected { get { return EnableRuntimeLogCheck.IsChecked == true; } }
+        internal bool ProductionLogSelected { get { return EnableProductionLogCheck.IsChecked == true; } }
+        internal bool VisualizationSaveSelected { get { return SaveVisualizationCheck.IsChecked == true; } }
+        internal string VisualizationSaveLabelForAcceptance { get { return SaveVisualizationCheck.Content as string; } }
         internal bool RuntimeControlsAvailable
         {
             get { return StartRunButton != null && StopRunButton != null && ManualTriggerButton != null; }
@@ -348,7 +379,15 @@ namespace OpenIVS2
             SaveNgCheck.IsChecked = WorkingSettings.SaveNgImages;
             SelectByText(ImageFormatCombo, WorkingSettings.ImageFormat);
             JpegQualityBox.Text = WorkingSettings.JpegQuality.ToString();
+            SaveVisualizationCheck.IsChecked = WorkingSettings.SaveVisualizationImages;
+            SelectByText(VisualizationFormatCombo, WorkingSettings.VisualizationImageFormat);
             StartWithWindowsCheck.IsChecked = WorkingSettings.StartWithWindows;
+            EnableRuntimeLogCheck.IsChecked = WorkingSettings.EnableRuntimeLog;
+            RuntimeLogDirectoryBox.Text = WorkingSettings.RuntimeLogDirectory;
+            RuntimeLogMaxSizeBox.Text = WorkingSettings.RuntimeLogMaxFileSizeMB.ToString();
+            RuntimeLogMaxCountBox.Text = WorkingSettings.RuntimeLogMaxFileCount.ToString();
+            EnableProductionLogCheck.IsChecked = WorkingSettings.EnableProductionLog;
+            ProductionLogDirectoryBox.Text = WorkingSettings.ProductionLogDirectory;
         }
 
         private void UpdatePlcUi()

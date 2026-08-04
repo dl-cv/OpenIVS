@@ -105,6 +105,8 @@
     <Compile Include="Services\UiDisplaySink.cs" />
     <Compile Include="Services\ResultEvaluator.cs" />
     <Compile Include="Services\ImageSaveService.cs" />
+    <Compile Include="Services\ProductionLogService.cs" />
+    <Compile Include="Services\RuntimeLogService.cs" />
     <Compile Include="Services\SerialModbusClient.cs" />
     <Compile Include="Services\TcpModbusClient.cs" />
     <Compile Include="Services\WindowsStartupService.cs" />

@@ -36,7 +36,8 @@ namespace OpenIVS2
         private readonly ObservableCollection<string> _logs = new ObservableCollection<string>();
         private readonly Dictionary<string, CameraCardControls> _cameraCards = new Dictionary<string, CameraCardControls>(StringComparer.OrdinalIgnoreCase);
         private readonly ImageSaveService _imageSaveService = new ImageSaveService();
-        private readonly object _logFileSync = new object();
+        private readonly ProductionLogService _productionLogService = new ProductionLogService();
+        private readonly RuntimeLogService _runtimeLogService = new RuntimeLogService();
         private AppSettings _settings;
         private SequenceHost _host;
         private OpenIvsCameraResourceFactory _cameraFactory;
@@ -53,14 +54,13 @@ namespace OpenIVS2
         private int _totalCount;
         private int _okCount;
         private int _ngCount;
-        private string _logFilePath;
 
         public MainWindow(bool acceptanceMode = false)
         {
             InitializeComponent();
             _acceptanceMode = acceptanceMode;
             _settings = _settingsService.Load();
-            _logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs", "OpenIVS2-" + DateTime.Now.ToString("yyyyMMdd") + ".log");
+            _runtimeLogService.Configure(_settings);
             LogList.ItemsSource = _logs;
             BuildCameraGrid();
         }
@@ -73,6 +73,7 @@ namespace OpenIVS2
         internal int CameraGridColumns { get { return CameraGrid.Columns; } }
         internal bool IsRunning { get { return _running; } }
         internal bool SettingsAvailable { get { return SettingsButton.IsEnabled; } }
+        internal Brush SettingsButtonBrushForAcceptance { get { return SettingsButton.Background; } }
         internal int MainToolbarButtonCount { get { return MainToolbar.Children.Count; } }
         internal string ProductDisplayName { get { return ProductNameText.Text; } }
         internal bool IsModbusWaiting { get { return _modbusConnected == false; } }
@@ -146,6 +147,7 @@ namespace OpenIVS2
                     if (restartAfterSave) await StopSystemAsync();
                     _settings = window.WorkingSettings;
                     _settingsService.Save(_settings);
+                    _runtimeLogService.Configure(_settings);
                     SynchronizeStartupRegistration(true);
                     BuildCameraGrid();
                     Log("info", "settings", "设置已保存");
@@ -225,7 +227,7 @@ namespace OpenIVS2
 
         internal void SetAcceptanceLogPath(string path)
         {
-            _logFilePath = path;
+            _runtimeLogService.ConfigureFile(path);
         }
 
         internal List<Dictionary<string, object>> GetLifecycleEvents()
@@ -286,6 +288,7 @@ namespace OpenIVS2
                 await Task.Run(() => _host.Start());
                 _running = true;
                 SettingsButton.IsEnabled = true;
+                SettingsButton.Background = new SolidColorBrush(Color.FromRgb(96, 125, 139));
                 CameraIndicator.Fill = Brushes.Green;
                 ModelIndicator.Fill = Brushes.Green;
                 StatusText.Text = IsTcpPlcMode() && _modbusConnected != true
@@ -425,15 +428,41 @@ namespace OpenIVS2
         private Task OnTriggerCompletedAsync()
         {
             var evaluation = ResultEvaluator.Evaluate(_settings, _host.Executor.LastResults);
-            List<string> saved = null;
+            var saved = new List<string>();
             Dispatcher.Invoke(() =>
             {
                 CommitCycle(evaluation);
-                saved = _imageSaveService.SaveCycle(_settings, evaluation.Ok, _displaySink.GetImagesSnapshot());
+                try
+                {
+                    var visualizations = _settings.SaveVisualizationImages ? GetVisualizationSnapshot(evaluation) : null;
+                    saved = _imageSaveService.SaveCycle(
+                        _settings, evaluation.Ok, _displaySink.GetImagesSnapshot(), visualizations);
+                }
+                catch (Exception ex)
+                {
+                    Log("error", "save", "保存周期图片失败: " + ex.Message);
+                }
             });
             if (saved.Count > 0) Log("info", "save", "已保存 " + saved.Count + " 张周期图片");
             ReleaseCycleObjects(_host.Executor.LastResults);
             return Task.CompletedTask;
+        }
+
+        private Dictionary<string, BitmapSource> GetVisualizationSnapshot(CycleEvaluation evaluation)
+        {
+            var images = new Dictionary<string, BitmapSource>(StringComparer.OrdinalIgnoreCase);
+            var detectedSlots = new HashSet<string>(
+                (evaluation.Cameras ?? new List<CameraCycleResult>())
+                    .Where(x => x.DetectionCount > 0)
+                    .Select(x => x.Slot),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in _cameraCards)
+            {
+                if (!detectedSlots.Contains(pair.Key)) continue;
+                var visualization = pair.Value.Viewer.RenderVisualization();
+                if (visualization != null) images[pair.Key] = visualization;
+            }
+            return images;
         }
 
         private Task OnTriggerFailedAsync(SequenceTriggerFailure failure)
@@ -515,6 +544,15 @@ namespace OpenIVS2
             foreach (var item in evaluation.Cameras) SetCameraStatus(item.Slot, item.Ok ? "OK" : "NG", item.Ok ? okBrush : Brushes.Red);
             StatusText.Text = "周期完成：" + (evaluation.Ok ? "OK" : "NG");
             Log("info", "result", "周期总结果=" + (evaluation.Ok ? "OK" : "NG") + "，" + CycleDetailText.Text);
+            try
+            {
+                var productionPath = _productionLogService.Append(_settings, DateTime.Now, evaluation);
+                if (!string.IsNullOrWhiteSpace(productionPath)) Log("debug", "production", "生产日志已追加: " + productionPath);
+            }
+            catch (Exception ex)
+            {
+                Log("error", "production", "写入生产日志失败: " + ex.Message);
+            }
         }
 
         private void UpdateCameraFrame(string windowId, BitmapSource image, object result)
@@ -671,16 +709,7 @@ namespace OpenIVS2
                 while (_logs.Count > 500) _logs.RemoveAt(0);
                 if (_logs.Count > 0) LogList.ScrollIntoView(_logs[_logs.Count - 1]);
             }));
-            try
-            {
-                lock (_logFileSync)
-                {
-                    var directory = Path.GetDirectoryName(_logFilePath);
-                    if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-                    File.AppendAllText(_logFilePath, line + Environment.NewLine);
-                }
-            }
-            catch { }
+            _runtimeLogService.WriteLine(line);
         }
 
         private void ShowError(string title, Exception ex)

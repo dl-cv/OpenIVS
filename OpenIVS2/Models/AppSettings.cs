@@ -45,7 +45,15 @@ namespace OpenIVS2.Models
         public bool SaveNgImages { get; set; }
         public string ImageFormat { get; set; }
         public int JpegQuality { get; set; }
+        public bool SaveVisualizationImages { get; set; }
+        public string VisualizationImageFormat { get; set; } = "JPG";
         public bool StartWithWindows { get; set; }
+        public bool EnableRuntimeLog { get; set; } = true;
+        public string RuntimeLogDirectory { get; set; }
+        public int RuntimeLogMaxFileSizeMB { get; set; } = 10;
+        public int RuntimeLogMaxFileCount { get; set; } = 7;
+        public bool EnableProductionLog { get; set; } = true;
+        public string ProductionLogDirectory { get; set; }
         public List<CameraSettings> Cameras { get; set; }
 
         public static AppSettings CreateDefault()
@@ -71,7 +79,15 @@ namespace OpenIVS2.Models
                 SaveNgImages = true,
                 ImageFormat = "PNG",
                 JpegQuality = 90,
+                SaveVisualizationImages = false,
+                VisualizationImageFormat = "JPG",
                 StartWithWindows = false,
+                EnableRuntimeLog = true,
+                RuntimeLogDirectory = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs"),
+                RuntimeLogMaxFileSizeMB = 10,
+                RuntimeLogMaxFileCount = 7,
+                EnableProductionLog = true,
+                ProductionLogDirectory = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProductionLogs"),
                 Cameras = new List<CameraSettings>()
             };
             for (var i = 0; i < 6; i++)
@@ -118,7 +134,15 @@ namespace OpenIVS2.Models
                 SaveNgImages = SaveNgImages,
                 ImageFormat = ImageFormat,
                 JpegQuality = JpegQuality,
+                SaveVisualizationImages = SaveVisualizationImages,
+                VisualizationImageFormat = VisualizationImageFormat,
                 StartWithWindows = StartWithWindows,
+                EnableRuntimeLog = EnableRuntimeLog,
+                RuntimeLogDirectory = RuntimeLogDirectory,
+                RuntimeLogMaxFileSizeMB = RuntimeLogMaxFileSizeMB,
+                RuntimeLogMaxFileCount = RuntimeLogMaxFileCount,
+                EnableProductionLog = EnableProductionLog,
+                ProductionLogDirectory = ProductionLogDirectory,
                 Cameras = (Cameras ?? new List<CameraSettings>()).Select(x => x.Clone()).ToList()
             };
         }
@@ -153,6 +177,16 @@ namespace OpenIVS2.Models
             if (PollIntervalMs < 20) PollIntervalMs = 20;
             if (JpegQuality < 1 || JpegQuality > 100) JpegQuality = 90;
             if (string.IsNullOrWhiteSpace(ImageFormat)) ImageFormat = "PNG";
+            if (!string.Equals(VisualizationImageFormat, "PNG", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(VisualizationImageFormat, "JPG", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(VisualizationImageFormat, "JPEG", StringComparison.OrdinalIgnoreCase))
+                VisualizationImageFormat = "JPG";
+            if (string.IsNullOrWhiteSpace(RuntimeLogDirectory))
+                RuntimeLogDirectory = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+            if (RuntimeLogMaxFileSizeMB < 1 || RuntimeLogMaxFileSizeMB > 1024) RuntimeLogMaxFileSizeMB = 10;
+            if (RuntimeLogMaxFileCount < 1 || RuntimeLogMaxFileCount > 365) RuntimeLogMaxFileCount = 7;
+            if (string.IsNullOrWhiteSpace(ProductionLogDirectory))
+                ProductionLogDirectory = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProductionLogs");
             if (string.IsNullOrWhiteSpace(PlcMode)) PlcMode = "mock";
             if (string.IsNullOrWhiteSpace(TcpHost)) TcpHost = "127.0.0.1";
             if (TcpPort < 1 || TcpPort > 65535) TcpPort = 502;

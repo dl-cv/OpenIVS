@@ -128,6 +128,38 @@ namespace OpenIVS2.Controls
             ApplyTransform();
         }
 
+        public BitmapSource RenderVisualization()
+        {
+            var source = _image.Source as BitmapSource;
+            if (source == null) return null;
+            var previousZoom = _zoom;
+            var previousOffsetX = _offsetX;
+            var previousOffsetY = _offsetY;
+            var previousVisibility = _overlaysVisible;
+            try
+            {
+                _zoom = 1.0;
+                _offsetX = _offsetY = 0;
+                _overlaysVisible = true;
+                ApplyTransform();
+                RebuildOverlay();
+                _scene.UpdateLayout();
+                var bitmap = new RenderTargetBitmap(source.PixelWidth, source.PixelHeight, 96, 96, PixelFormats.Pbgra32);
+                bitmap.Render(_scene);
+                bitmap.Freeze();
+                return bitmap;
+            }
+            finally
+            {
+                _zoom = previousZoom;
+                _offsetX = previousOffsetX;
+                _offsetY = previousOffsetY;
+                _overlaysVisible = previousVisibility;
+                ApplyTransform();
+                RebuildOverlay();
+            }
+        }
+
         public void ToggleOverlays()
         {
             _overlaysVisible = !_overlaysVisible;

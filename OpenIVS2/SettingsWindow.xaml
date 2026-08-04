@@ -323,7 +323,7 @@
 
                             <Border Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,12">
                                 <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                     <Grid Grid.Row="0" Margin="0,0,0,16">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
                                         <StackPanel><TextBlock Text="PLC 监听" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/><TextBlock Text="监听拍照寄存器并启动一个检测周期" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/></StackPanel>
@@ -354,7 +354,7 @@
 
                             <Border Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsCardStyle}">
                                 <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                     <StackPanel Grid.Row="0" Margin="0,0,0,16"><TextBlock Text="检测图片保存" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/><TextBlock Text="按日期和 OK / NG 分类保存每台相机的周期画面" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/></StackPanel>
                                     <Grid Grid.Row="1" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -362,12 +362,21 @@
                                         <TextBox x:Name="SaveDirectoryBox" Grid.Column="1" Style="{StaticResource SettingsTextBoxStyle}" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                                         <Button Grid.Column="2" Content="选择目录" Style="{StaticResource BrowseButtonStyle}" Click="BrowseSaveDirectory_Click"/>
                                     </Grid>
-                                    <Grid Grid.Row="2">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="210"/><ColumnDefinition Width="210"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><CheckBox x:Name="SaveOkCheck" Content="保存 OK 图片" Style="{StaticResource SettingsCheckBoxStyle}" Margin="0,0,24,0"/><CheckBox x:Name="SaveNgCheck" Content="保存 NG 图片" Style="{StaticResource SettingsCheckBoxStyle}"/></StackPanel>
-                                        <StackPanel Grid.Column="1" Margin="12,0"><TextBlock Text="图片格式" Style="{StaticResource FieldLabelStyle}"/><ComboBox x:Name="ImageFormatCombo" Style="{StaticResource SettingsComboBoxStyle}"><ComboBoxItem Content="PNG"/><ComboBoxItem Content="JPG"/><ComboBoxItem Content="BMP"/></ComboBox></StackPanel>
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,14">
+                                        <CheckBox x:Name="SaveOkCheck" Content="保存 OK 图片" Style="{StaticResource SettingsCheckBoxStyle}" Margin="0,0,28,0"/>
+                                        <CheckBox x:Name="SaveNgCheck" Content="保存 NG 图片" Style="{StaticResource SettingsCheckBoxStyle}" Margin="0,0,28,0"/>
+                                        <CheckBox x:Name="SaveVisualizationCheck" Content="保存可视化图片" Style="{StaticResource SettingsCheckBoxStyle}"/>
+                                    </StackPanel>
+                                    <Grid Grid.Row="3">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="220"/><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,12,0"><TextBlock Text="原图格式" Style="{StaticResource FieldLabelStyle}"/><ComboBox x:Name="ImageFormatCombo" Style="{StaticResource SettingsComboBoxStyle}"><ComboBoxItem Content="PNG"/><ComboBoxItem Content="JPG"/><ComboBoxItem Content="BMP"/></ComboBox></StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="12,0" IsEnabled="{Binding IsChecked, ElementName=SaveVisualizationCheck}">
+                                            <TextBlock Text="可视化格式" Style="{StaticResource FieldLabelStyle}"/>
+                                            <ComboBox x:Name="VisualizationFormatCombo" Style="{StaticResource SettingsComboBoxStyle}"><ComboBoxItem Content="JPG"/><ComboBoxItem Content="PNG"/></ComboBox>
+                                        </StackPanel>
                                         <StackPanel Grid.Column="2" Margin="12,0"><TextBlock Text="JPEG 质量" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="JpegQualityBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
                                     </Grid>
+                                    <TextBlock Grid.Row="4" Margin="0,10,0,0" Text="可视化图片内容与 ImageViewer 预测层一致；JPG 使用 JPEG 质量，PNG 使用压缩编码。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="11" TextWrapping="Wrap"/>
                                 </Grid>
                             </Border>
 
@@ -376,18 +385,67 @@
                 </TabItem>
 
                 <TabItem Header="系统设置">
-                    <Grid>
-                        <Border Style="{StaticResource SettingsCardStyle}" VerticalAlignment="Top">
-                            <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="系统启动" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/>
-                                    <TextBlock Text="使用当前 Windows 用户登录后自动启动 OpenIVS 2026" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/>
-                                </StackPanel>
-                                <CheckBox x:Name="StartWithWindowsCheck" Grid.Column="1" Content="开机自启动" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource SettingsCheckBoxStyle}"/>
-                            </Grid>
-                        </Border>
-                    </Grid>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                        <StackPanel>
+                            <Border Style="{StaticResource SettingsCardStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="系统启动" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/>
+                                        <TextBlock Text="使用当前 Windows 用户登录后自动启动 OpenIVS 2026" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="StartWithWindowsCheck" Grid.Column="1" Content="开机自启动" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource SettingsCheckBoxStyle}"/>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsCardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="运行时日志" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/>
+                                            <TextBlock Text="按日保存界面和系统运行日志，并按文件大小轮转、清理旧文件。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox x:Name="EnableRuntimeLogCheck" Grid.Column="1" Content="存储运行时日志" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource SettingsCheckBoxStyle}"/>
+                                    </Grid>
+                                    <Grid Grid.Row="1" Margin="0,0,0,12" IsEnabled="{Binding IsChecked, ElementName=EnableRuntimeLogCheck}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="日志目录" VerticalAlignment="Center" Foreground="{StaticResource SettingsMutedBrush}"/>
+                                        <TextBox x:Name="RuntimeLogDirectoryBox" Grid.Column="1" Style="{StaticResource SettingsTextBoxStyle}" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                                        <Button Grid.Column="2" Content="选择目录" Style="{StaticResource BrowseButtonStyle}" Click="BrowseRuntimeLogDirectory_Click"/>
+                                    </Grid>
+                                    <Grid Grid.Row="2" IsEnabled="{Binding IsChecked, ElementName=EnableRuntimeLogCheck}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,12,0"><TextBlock Text="单文件上限（MB）" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="RuntimeLogMaxSizeBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="12,0"><TextBlock Text="最多保留文件数" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="RuntimeLogMaxCountBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                        <TextBlock Grid.Column="2" Text="日志采用 UTF-8 编码；达到上限后自动创建带时间后缀的轮转文件。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsCardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="生产日志" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/>
+                                            <TextBlock Text="每个检测周期追加一行 CSV，用于生产追溯和外部统计。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox x:Name="EnableProductionLogCheck" Grid.Column="1" Content="存储生产 CSV" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource SettingsCheckBoxStyle}"/>
+                                    </Grid>
+                                    <Grid Grid.Row="1" Margin="0,0,0,12" IsEnabled="{Binding IsChecked, ElementName=EnableProductionLogCheck}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="CSV 目录" VerticalAlignment="Center" Foreground="{StaticResource SettingsMutedBrush}"/>
+                                        <TextBox x:Name="ProductionLogDirectoryBox" Grid.Column="1" Style="{StaticResource SettingsTextBoxStyle}" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                                        <Button Grid.Column="2" Content="选择目录" Style="{StaticResource BrowseButtonStyle}" Click="BrowseProductionLogDirectory_Click"/>
+                                    </Grid>
+                                    <TextBlock Grid.Row="2" Text="字段：时间、时间戳、相机 A～F 结果、总结果；未启用相机记录为 -。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="11" TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabItem>
 
                 <TabItem Header="调试">
