@@ -16,6 +16,17 @@ using sntl_admin_csharp;
 
 namespace dlcv_infer_csharp
 {
+    public sealed class ModelLoadException : Exception
+    {
+        public string ErrorCode { get; }
+
+        public ModelLoadException(string errorCode, string message)
+            : base(message)
+        {
+            ErrorCode = errorCode;
+        }
+    }
+
     public class Model : IDisposable
     {
         public static bool EnableConsoleLog { get; set; } = true;
@@ -86,7 +97,8 @@ namespace dlcv_infer_csharp
         public DogProvider LoadedDogProvider => _dllLoader?.LoadedDogProvider ?? DogProvider.None;
         public string LoadedNativeDllName => _dllLoader?.LoadedNativeDllName;
 
-        public Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false)
+        public Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false,
+            string modelPassword = null)
         {
             _modelPath = modelPath;
 
@@ -102,7 +114,8 @@ namespace dlcv_infer_csharp
             _isRpcMode = rpc_mode;
             string cacheKey = BuildModelCacheKey(modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
 
-            if (enableCache)
+            bool useCache = enableCache && string.IsNullOrEmpty(modelPassword);
+            if (useCache)
             {
                 while (true)
                 {
@@ -145,7 +158,7 @@ namespace dlcv_infer_csharp
                 else
                 {
                     // DVT 模式：使用原来的 DLL 接口
-                    InitializeDvtMode(modelPath, device_id);
+                    InitializeDvtMode(modelPath, device_id, modelPassword);
                 }
 
                 // 模型加载成功后立即读取并缓存 model_info/max_shape/max_batch_size
@@ -154,7 +167,7 @@ namespace dlcv_infer_csharp
                 // 使用 opt shape 预热一次，消除首次 JIT 延迟
                 WarmupInfer();
 
-                if (enableCache)
+                if (useCache)
                 {
                     lock (_cacheLock)
                     {
@@ -165,7 +178,7 @@ namespace dlcv_infer_csharp
             }
             catch
             {
-                if (enableCache)
+                if (useCache)
                 {
                     lock (_cacheLock)
                     {
@@ -288,13 +301,17 @@ namespace dlcv_infer_csharp
             }
         }
 
-        private void InitializeDvtMode(string modelPath, int device_id)
+        private void InitializeDvtMode(string modelPath, int device_id, string modelPassword)
         {
             var config = new JObject
             {
                 ["model_path"] = modelPath,
                 ["device_id"] = device_id
             };
+            if (!string.IsNullOrEmpty(modelPassword))
+            {
+                config["model_password"] = modelPassword;
+            }
 
             LoadDvtModel(modelPath, config, "加载模型失败");
         }
@@ -325,7 +342,13 @@ namespace dlcv_infer_csharp
                 }
                 else
                 {
-                    throw new Exception(failureMessagePrefix + "：" + resultObject.ToString());
+                    string errorCode = resultObject["error_code"]?.Value<string>();
+                    string message = resultObject["message"]?.Value<string>() ?? failureMessagePrefix;
+                    if (!string.IsNullOrEmpty(errorCode))
+                    {
+                        throw new ModelLoadException(errorCode, message);
+                    }
+                    throw new Exception(failureMessagePrefix + "：" + message);
                 }
             }
             finally

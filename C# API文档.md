@@ -97,15 +97,18 @@ public partial class Utils
 ```csharp
 public class Model : IDisposable
 {
-    public Model(string modelPath, int deviceId = 0, bool rpcMode = false, bool enableCache = false);
+    public Model(string modelPath, int deviceId = 0, bool rpcMode = false, bool enableCache = false,
+        string modelPassword = null);
 }
 ```
 
 **构造函数行为**：
 1. 若路径以 `.dvst` / `.dvso` / `.dvsp` 结尾 → 进入 Flow/DVS 模式，实例化 `FlowGraphModel` 或 `DvsModel`。
 2. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
-3. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
-4. 加载完成后可通过 `Loaded` 属性判断状态。
+3. 普通模型的 `modelPassword` 非空时，通过加载 JSON 的 `model_password` 字段瞬时传给底层；带密码加载不使用模型缓存。
+4. 缺少或错误密码、保护元数据异常、既有保护层解密失败时，抛出带 `ErrorCode` 的 `ModelLoadException`；对应值为 `MODEL_PASSWORD_REQUIRED`、`MODEL_PASSWORD_INVALID`、`MODEL_PROTECTION_METADATA_INVALID`、`MODEL_DECRYPT_FAILED`。
+5. 其他构造失败时抛出 `Exception`。
+6. 加载完成后可通过 `Loaded` 属性判断状态。
 
 ### 3.2 属性
 

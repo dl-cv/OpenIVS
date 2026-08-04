@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media.Animation;
 using Newtonsoft.Json.Linq;
 using dlcv_infer_csharp;
@@ -175,19 +176,47 @@ namespace DlcvTest
                 try { deviceId = GetSelectedDeviceId(); }
                 catch { deviceId = 0; }
 
-                await Task.Run(() =>
+                Model loadedModel = null;
+                try
                 {
-                    // 1. 释放旧模型
-                    if (model != null)
+                    await Task.Run(() =>
                     {
-                        try { ((IDisposable)model).Dispose(); } catch { }
-                        model = null;
-                    }
-                    GC.Collect();
+                        loadedModel = new Model(fullPath, deviceId, false, false);
+                    });
+                }
+                catch (ModelLoadException ex) when (ex.ErrorCode == "MODEL_PASSWORD_REQUIRED")
+                {
+                    while (true)
+                    {
+                        string modelPassword = PromptForModelPassword();
+                        if (modelPassword == null)
+                        {
+                            RefreshModelComboItems(_loadedModelPath);
+                            return false;
+                        }
 
-                    // 2. 直接使用 Model 类加载模型
-                    model = new Model(fullPath, deviceId, false, false);
-                });
+                        try
+                        {
+                            await Task.Run(() =>
+                            {
+                                loadedModel = new Model(fullPath, deviceId, false, false, modelPassword);
+                            });
+                            break;
+                        }
+                        catch (ModelLoadException passwordEx) when (passwordEx.ErrorCode == "MODEL_PASSWORD_INVALID")
+                        {
+                            MessageBox.Show("模型密码错误，请重新输入。", "模型密码", MessageBoxButton.OK,
+                                MessageBoxImage.Warning);
+                        }
+                    }
+                }
+
+                if (model != null)
+                {
+                    try { ((IDisposable)model).Dispose(); } catch { }
+                }
+                model = loadedModel;
+                GC.Collect();
 
                 // 3) 获取模型类型并更新预测参数 UI
                 string taskType = "";
@@ -269,6 +298,47 @@ namespace DlcvTest
                 // 隐藏加载遮罩层
                 HideModelLoadingOverlay();
             }
+        }
+
+        private string PromptForModelPassword()
+        {
+            var dialog = new Window
+            {
+                Title = "模型密码",
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+                SizeToContent = SizeToContent.WidthAndHeight,
+                ShowInTaskbar = false
+            };
+            var panel = new StackPanel { Margin = new Thickness(20) };
+            panel.Children.Add(new TextBlock { Text = "该模型受密码保护，请输入模型密码：" });
+            var passwordBox = new PasswordBox { Width = 280, Margin = new Thickness(0, 10, 0, 12) };
+            panel.Children.Add(passwordBox);
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var confirm = new Button { Content = "确定", Width = 72, IsDefault = true };
+            var cancel = new Button { Content = "取消", Width = 72, Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
+            buttons.Children.Add(confirm);
+            buttons.Children.Add(cancel);
+            panel.Children.Add(buttons);
+            dialog.Content = panel;
+
+            string password = null;
+            confirm.Click += (_, __) =>
+            {
+                if (string.IsNullOrEmpty(passwordBox.Password))
+                {
+                    MessageBox.Show(dialog, "请输入模型密码。", "模型密码", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                password = passwordBox.Password;
+                dialog.DialogResult = true;
+            };
+            cancel.Click += (_, __) => dialog.DialogResult = false;
+
+            bool? accepted = dialog.ShowDialog();
+            passwordBox.Clear();
+            return accepted == true ? password : null;
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
