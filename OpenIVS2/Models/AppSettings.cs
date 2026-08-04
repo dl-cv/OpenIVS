@@ -28,6 +28,8 @@ namespace OpenIVS2.Models
     {
         public bool UsePlc { get; set; }
         public string PlcMode { get; set; }
+        public string TcpHost { get; set; }
+        public int TcpPort { get; set; }
         public string PortName { get; set; }
         public int BaudRate { get; set; }
         public int DataBits { get; set; }
@@ -51,6 +53,8 @@ namespace OpenIVS2.Models
             {
                 UsePlc = false,
                 PlcMode = "mock",
+                TcpHost = "127.0.0.1",
+                TcpPort = 502,
                 PortName = "COM1",
                 BaudRate = 9600,
                 DataBits = 8,
@@ -95,6 +99,8 @@ namespace OpenIVS2.Models
             {
                 UsePlc = UsePlc,
                 PlcMode = PlcMode,
+                TcpHost = TcpHost,
+                TcpPort = TcpPort,
                 PortName = PortName,
                 BaudRate = BaudRate,
                 DataBits = DataBits,
@@ -145,6 +151,8 @@ namespace OpenIVS2.Models
             if (JpegQuality < 1 || JpegQuality > 100) JpegQuality = 90;
             if (string.IsNullOrWhiteSpace(ImageFormat)) ImageFormat = "PNG";
             if (string.IsNullOrWhiteSpace(PlcMode)) PlcMode = "mock";
+            if (string.IsNullOrWhiteSpace(TcpHost)) TcpHost = "127.0.0.1";
+            if (TcpPort < 1 || TcpPort > 65535) TcpPort = 502;
         }
     }
 }

@@ -47,7 +47,9 @@ namespace OpenIVS2.Acceptance
                         count + " 台相机布局");
                 }
 
-                var settingsPreview = new SettingsWindow(settings) { Owner = window };
+                var settingsPreviewData = settings.Clone();
+                settingsPreviewData.Cameras[0].Mode = "hik";
+                var settingsPreview = new SettingsWindow(settingsPreviewData) { Owner = window };
                 try
                 {
                     settingsPreview.Show();
@@ -59,9 +61,13 @@ namespace OpenIVS2.Acceptance
                     await Task.Delay(120);
                     var plcSettingsScreenshot = Path.Combine(screenshots, "settings-plc-save.png");
                     settingsPreview.CaptureScreenshot(plcSettingsScreenshot);
+                    settingsPreview.SetPlcModeForAcceptance("tcp");
+                    await Task.Delay(120);
+                    var tcpSettingsScreenshot = Path.Combine(screenshots, "settings-plc-tcp.png");
+                    settingsPreview.CaptureScreenshot(tcpSettingsScreenshot);
                     success &= Check(checks, "settings_screenshots",
-                        File.Exists(cameraSettingsScreenshot) && File.Exists(plcSettingsScreenshot),
-                        "设置窗口两个页签截图");
+                        File.Exists(cameraSettingsScreenshot) && File.Exists(plcSettingsScreenshot) && File.Exists(tcpSettingsScreenshot),
+                        "设置窗口相机、PLC 和 TCP 配置截图");
                 }
                 finally
                 {
@@ -75,6 +81,26 @@ namespace OpenIVS2.Acceptance
                 settingsService.Save(settings);
                 var loaded = settingsService.Load();
                 success &= Check(checks, "settings_roundtrip", loaded.EnabledCameras().Count == 3 && loaded.PhotoRegister == settings.PhotoRegister, "设置保存与加载");
+                var mockGraph = SequenceGraphBuilder.Build(loaded);
+                success &= Check(checks, "mock_trigger_unchanged",
+                    mockGraph.Nodes.Any(x => x.Id == "trigger" && x.Type == "manual_trigger"),
+                    "Mock 模式保持原有触发入口");
+
+                var tcpSettings = loaded.Clone();
+                tcpSettings.UsePlc = true;
+                tcpSettings.PlcMode = "tcp";
+                tcpSettings.TcpHost = "127.0.0.1";
+                tcpSettings.TcpPort = 502;
+                tcpSettings.PhotoRegister = 4111;
+                var tcpGraph = SequenceGraphBuilder.Build(tcpSettings);
+                var tcpTrigger = tcpGraph.Nodes.FirstOrDefault(x => x.Id == "trigger");
+                success &= Check(checks, "tcp_runtime_trigger",
+                    tcpTrigger != null &&
+                    tcpTrigger.Type == "modbus_tcp_input" &&
+                    tcpTrigger.Props.Value<string>("host") == "127.0.0.1" &&
+                    tcpTrigger.Props.Value<int>("port") == 502 &&
+                    tcpTrigger.Props.Value<int>("photo_reg") == 4111,
+                    "TCP 模式运行时图直接监听 Modbus TCP");
                 success &= Check(checks, "camera_failure", VirtualCameraFailureIsReported(output), "虚拟相机缺图失败");
                 success &= Check(checks, "model_failure", MissingModelFailureIsReported(output), "模型缺失失败");
 
@@ -88,6 +114,7 @@ namespace OpenIVS2.Acceptance
                 var runtimeGraph = runtimeSequenceExists ? SequenceGraphLoader.FromFile(runtimeSequencePath) : null;
                 success &= Check(checks, "runtime_sequence_snapshot",
                     runtimeGraph != null &&
+                    runtimeGraph.Nodes.Any(x => x.Id == "trigger" && x.Type == "manual_trigger") &&
                     runtimeGraph.Nodes.Any(x => x.Id == "plc_clear") &&
                     runtimeGraph.Nodes.Any(x => x.Id == "wait_A") &&
                     runtimeGraph.Nodes.Any(x => x.Id == "join"),

@@ -1,10 +1,12 @@
 using System;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DLCV.Camera;
 using Microsoft.Win32;
 using OpenIVS2.Models;
 
@@ -12,15 +14,85 @@ namespace OpenIVS2
 {
     public partial class SettingsWindow : Window
     {
+        public sealed class CameraDeviceOption
+        {
+            public string SerialNumber { get; set; }
+            public string DisplayName { get; set; }
+        }
+
+        private string _lastPlcMode;
+        private bool _cameraDevicesLoaded;
+
         public AppSettings WorkingSettings { get; private set; }
+        public ObservableCollection<CameraDeviceOption> AvailableCameras { get; private set; }
 
         public SettingsWindow(AppSettings settings)
         {
+            AvailableCameras = new ObservableCollection<CameraDeviceOption>();
             InitializeComponent();
             WorkingSettings = (settings ?? AppSettings.CreateDefault()).Clone();
             CameraItemsControl.ItemsSource = WorkingSettings.Cameras;
             LoadGlobalFields();
             UpdatePlcUi();
+        }
+
+        private void CameraMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var comboBox = sender as ComboBox;
+            var selectedItem = comboBox != null ? comboBox.SelectedItem as ComboBoxItem : null;
+            var mode = selectedItem != null && selectedItem.Tag != null ? selectedItem.Tag.ToString() : "";
+            if (string.Equals(mode, "hik", StringComparison.OrdinalIgnoreCase))
+                LoadCameraDevices();
+        }
+
+        private void LoadCameraDevices()
+        {
+            if (_cameraDevicesLoaded) return;
+            _cameraDevicesLoaded = true;
+            AvailableCameras.Clear();
+            try
+            {
+                foreach (var device in CameraUtils.EnumerateDevices())
+                {
+                    var name = string.IsNullOrWhiteSpace(device.UserId) ? device.ModelName : device.UserId;
+                    AvailableCameras.Add(new CameraDeviceOption
+                    {
+                        SerialNumber = device.SerialNumber,
+                        DisplayName = name + " (" + device.SerialNumber + ")"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                AvailableCameras.Add(new CameraDeviceOption
+                {
+                    SerialNumber = "",
+                    DisplayName = "相机枚举失败: " + ex.Message
+                });
+            }
+
+            foreach (var cameraId in WorkingSettings.Cameras
+                .Where(x => !string.IsNullOrWhiteSpace(x.CameraId))
+                .Select(x => x.CameraId)
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (AvailableCameras.Any(x => string.Equals(x.SerialNumber, cameraId, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                AvailableCameras.Add(new CameraDeviceOption
+                {
+                    SerialNumber = cameraId,
+                    DisplayName = "已配置但未连接 (" + cameraId + ")"
+                });
+            }
+
+            if (AvailableCameras.Count == 0)
+            {
+                AvailableCameras.Add(new CameraDeviceOption
+                {
+                    SerialNumber = "",
+                    DisplayName = "未发现可用真实相机"
+                });
+            }
         }
 
         private void BrowseImage_Click(object sender, RoutedEventArgs e)
@@ -75,6 +147,17 @@ namespace OpenIVS2
 
         private void PlcModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            var mode = SelectedText(PlcModeCombo, "mock");
+            if (string.Equals(mode, "tcp", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(_lastPlcMode, "tcp", StringComparison.OrdinalIgnoreCase) &&
+                PhotoRegisterBox != null && TriggerValueBox != null && ClearValueBox != null &&
+                PhotoRegisterBox.Text.Trim() == "500" &&
+                TriggerValueBox.Text.Trim() == "1" &&
+                ClearValueBox.Text.Trim() == "0")
+            {
+                PhotoRegisterBox.Text = "4111";
+            }
+            _lastPlcMode = mode;
             UpdatePlcUi();
         }
 
@@ -84,6 +167,8 @@ namespace OpenIVS2
             {
                 WorkingSettings.UsePlc = UsePlcCheck.IsChecked == true;
                 WorkingSettings.PlcMode = SelectedText(PlcModeCombo, "mock");
+                WorkingSettings.TcpHost = TcpHostBox.Text.Trim();
+                WorkingSettings.TcpPort = ParseInt(TcpPortBox.Text, "TCP 端口", 1, 65535);
                 WorkingSettings.PortName = PortNameBox.Text.Trim();
                 WorkingSettings.BaudRate = ParseInt(BaudRateBox.Text, "波特率", 1, int.MaxValue);
                 WorkingSettings.DataBits = ParseInt(DataBitsBox.Text, "数据位", 5, 8);
@@ -101,6 +186,10 @@ namespace OpenIVS2
                 WorkingSettings.JpegQuality = ParseInt(JpegQualityBox.Text, "JPEG 质量", 1, 100);
                 WorkingSettings.Normalize();
                 ValidateCameraSettings();
+                if (WorkingSettings.UsePlc &&
+                    string.Equals(WorkingSettings.PlcMode, "tcp", StringComparison.OrdinalIgnoreCase) &&
+                    string.IsNullOrWhiteSpace(WorkingSettings.TcpHost))
+                    throw new InvalidOperationException("TCP 地址不能为空");
                 if (string.IsNullOrWhiteSpace(WorkingSettings.SaveDirectory))
                     throw new InvalidOperationException("图片保存目录不能为空");
                 DialogResult = true;
@@ -119,6 +208,14 @@ namespace OpenIVS2
         internal void SelectTabForAcceptance(int index)
         {
             SettingsTabs.SelectedIndex = index;
+            UpdateLayout();
+        }
+
+        internal void SetPlcModeForAcceptance(string mode)
+        {
+            UsePlcCheck.IsChecked = true;
+            SelectByText(PlcModeCombo, mode);
+            UpdatePlcUi();
             UpdateLayout();
         }
 
@@ -143,6 +240,8 @@ namespace OpenIVS2
         {
             UsePlcCheck.IsChecked = WorkingSettings.UsePlc;
             SelectByText(PlcModeCombo, WorkingSettings.PlcMode);
+            TcpHostBox.Text = WorkingSettings.TcpHost;
+            TcpPortBox.Text = WorkingSettings.TcpPort.ToString();
             PortNameBox.Text = WorkingSettings.PortName;
             BaudRateBox.Text = WorkingSettings.BaudRate.ToString();
             DataBitsBox.Text = WorkingSettings.DataBits.ToString();
@@ -162,12 +261,17 @@ namespace OpenIVS2
 
         private void UpdatePlcUi()
         {
-            if (SerialSettingsPanel == null || PlcModeCombo == null || UsePlcCheck == null) return;
-            var serialEnabled = UsePlcCheck.IsChecked == true &&
-                string.Equals(SelectedText(PlcModeCombo, "mock"), "serial", StringComparison.OrdinalIgnoreCase);
+            if (SerialSettingsPanel == null || TcpSettingsPanel == null || PlcModeCombo == null || UsePlcCheck == null) return;
+            var plcEnabled = UsePlcCheck.IsChecked == true;
+            var mode = SelectedText(PlcModeCombo, "mock");
+            var tcpSelected = string.Equals(mode, "tcp", StringComparison.OrdinalIgnoreCase);
+            var serialEnabled = plcEnabled && string.Equals(mode, "serial", StringComparison.OrdinalIgnoreCase);
+            SerialSettingsPanel.Visibility = tcpSelected ? Visibility.Collapsed : Visibility.Visible;
             SerialSettingsPanel.IsEnabled = serialEnabled;
-            DeviceIdBox.IsEnabled = UsePlcCheck.IsChecked == true;
-            PlcModeCombo.IsEnabled = UsePlcCheck.IsChecked == true;
+            TcpSettingsPanel.Visibility = tcpSelected ? Visibility.Visible : Visibility.Collapsed;
+            TcpSettingsPanel.IsEnabled = plcEnabled && tcpSelected;
+            DeviceIdBox.IsEnabled = plcEnabled;
+            PlcModeCombo.IsEnabled = plcEnabled;
         }
 
         private void ValidateCameraSettings()
@@ -183,6 +287,8 @@ namespace OpenIVS2
                     throw new InvalidOperationException(camera.Name + " 的取图超时必须大于 0");
                 if (string.Equals(camera.Mode, "virtual", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(camera.VirtualImagePath))
                     throw new InvalidOperationException(camera.Name + " 尚未选择虚拟图片");
+                if (string.Equals(camera.Mode, "hik", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(camera.CameraId))
+                    throw new InvalidOperationException(camera.Name + " 尚未选择真实相机");
                 if (string.IsNullOrWhiteSpace(camera.ModelPath))
                     throw new InvalidOperationException(camera.Name + " 尚未选择模型");
             }

@@ -11,10 +11,6 @@
         <SolidColorBrush x:Key="SettingsMutedBrush" Color="#5F6B73"/>
         <SolidColorBrush x:Key="SettingsBorderBrush" Color="#C9D0D5"/>
 
-        <x:Array x:Key="CameraModeItems" Type="{x:Type sys:String}">
-            <sys:String>virtual</sys:String>
-            <sys:String>hik</sys:String>
-        </x:Array>
         <x:Array x:Key="RotationItems" Type="{x:Type sys:Int32}">
             <sys:Int32>0</sys:Int32>
             <sys:Int32>90</sys:Int32>
@@ -264,12 +260,32 @@
                                                     <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SettingsTextBoxStyle}"/>
                                                 </StackPanel>
                                                 <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,14,0">
-                                                    <TextBlock Text="相机模式" Style="{StaticResource FieldLabelStyle}"/>
-                                                    <ComboBox ItemsSource="{StaticResource CameraModeItems}" SelectedItem="{Binding Mode, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SettingsComboBoxStyle}"/>
+                                                    <TextBlock Text="相机类型" Style="{StaticResource FieldLabelStyle}"/>
+                                                    <ComboBox x:Name="CameraModeCombo" SelectedValuePath="Tag"
+                                                              SelectedValue="{Binding Mode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Style="{StaticResource SettingsComboBoxStyle}"
+                                                              SelectionChanged="CameraMode_SelectionChanged">
+                                                        <ComboBoxItem Content="virtual" Tag="virtual"/>
+                                                        <ComboBoxItem Content="real cam" Tag="hik"/>
+                                                    </ComboBox>
                                                 </StackPanel>
                                                 <StackPanel Grid.Row="0" Grid.Column="3">
-                                                    <TextBlock Text="海康序列号或用户名称" Style="{StaticResource FieldLabelStyle}"/>
-                                                    <TextBox Text="{Binding CameraId, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SettingsTextBoxStyle}" ToolTip="虚拟相机模式下可留空"/>
+                                                    <TextBlock Text="真实相机（名称 / 序列号）" Style="{StaticResource FieldLabelStyle}"/>
+                                                    <ComboBox ItemsSource="{Binding AvailableCameras, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                              DisplayMemberPath="DisplayName" SelectedValuePath="SerialNumber"
+                                                              SelectedValue="{Binding CameraId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              ToolTip="{Binding SelectedItem.DisplayName, RelativeSource={RelativeSource Self}}">
+                                                        <ComboBox.Style>
+                                                            <Style TargetType="ComboBox" BasedOn="{StaticResource SettingsComboBoxStyle}">
+                                                                <Setter Property="IsEnabled" Value="False"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=CameraModeCombo}" Value="hik">
+                                                                        <Setter Property="IsEnabled" Value="True"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </ComboBox.Style>
+                                                    </ComboBox>
                                                 </StackPanel>
 
                                                 <Grid Grid.Row="1" Grid.ColumnSpan="4" Margin="0,15,0,0">
@@ -316,16 +332,23 @@
                                     </Grid>
                                     <Grid Grid.Row="1" Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                        <StackPanel Margin="0,0,8,0"><TextBlock Text="PLC 模式" Style="{StaticResource FieldLabelStyle}"/><ComboBox x:Name="PlcModeCombo" Style="{StaticResource SettingsComboBoxStyle}" SelectionChanged="PlcModeCombo_SelectionChanged"><ComboBoxItem Content="mock"/><ComboBoxItem Content="serial"/></ComboBox></StackPanel>
+                                        <StackPanel Margin="0,0,8,0"><TextBlock Text="PLC 模式" Style="{StaticResource FieldLabelStyle}"/><ComboBox x:Name="PlcModeCombo" Style="{StaticResource SettingsComboBoxStyle}" SelectionChanged="PlcModeCombo_SelectionChanged"><ComboBoxItem Content="mock"/><ComboBoxItem Content="tcp"/><ComboBoxItem Content="serial"/></ComboBox></StackPanel>
                                         <StackPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="设备 ID" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="DeviceIdBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
                                     </Grid>
-                                    <Grid x:Name="SerialSettingsPanel" Grid.Row="2">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                        <StackPanel Margin="0,0,8,12"><TextBlock Text="串口" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="PortNameBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
-                                        <StackPanel Grid.Column="1" Margin="8,0,0,12"><TextBlock Text="波特率" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="BaudRateBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
-                                        <StackPanel Grid.Row="1" Margin="0,0,8,0"><TextBlock Text="数据位 / 停止位" Style="{StaticResource FieldLabelStyle}"/><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBox x:Name="DataBitsBox" Style="{StaticResource SettingsTextBoxStyle}" Margin="0,0,5,0"/><ComboBox x:Name="StopBitsCombo" Grid.Column="1" Style="{StaticResource SettingsComboBoxStyle}" Margin="5,0,0,0"><ComboBoxItem Content="One"/><ComboBoxItem Content="Two"/></ComboBox></Grid></StackPanel>
-                                        <StackPanel Grid.Row="1" Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="校验" Style="{StaticResource FieldLabelStyle}"/><ComboBox x:Name="ParityCombo" Style="{StaticResource SettingsComboBoxStyle}"><ComboBoxItem Content="None"/><ComboBoxItem Content="Even"/><ComboBoxItem Content="Odd"/></ComboBox></StackPanel>
+                                    <Grid Grid.Row="2">
+                                        <Grid x:Name="SerialSettingsPanel">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,8,12"><TextBlock Text="串口" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="PortNameBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="8,0,0,12"><TextBlock Text="波特率" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="BaudRateBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                            <StackPanel Grid.Row="1" Margin="0,0,8,0"><TextBlock Text="数据位 / 停止位" Style="{StaticResource FieldLabelStyle}"/><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBox x:Name="DataBitsBox" Style="{StaticResource SettingsTextBoxStyle}" Margin="0,0,5,0"/><ComboBox x:Name="StopBitsCombo" Grid.Column="1" Style="{StaticResource SettingsComboBoxStyle}" Margin="5,0,0,0"><ComboBoxItem Content="One"/><ComboBoxItem Content="Two"/></ComboBox></Grid></StackPanel>
+                                            <StackPanel Grid.Row="1" Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="校验" Style="{StaticResource FieldLabelStyle}"/><ComboBox x:Name="ParityCombo" Style="{StaticResource SettingsComboBoxStyle}"><ComboBoxItem Content="None"/><ComboBoxItem Content="Even"/><ComboBoxItem Content="Odd"/></ComboBox></StackPanel>
+                                        </Grid>
+                                        <Grid x:Name="TcpSettingsPanel" Visibility="Collapsed">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,8,0"><TextBlock Text="TCP 地址" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="TcpHostBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="TCP 端口" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="TcpPortBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                        </Grid>
                                     </Grid>
                                 </Grid>
                             </Border>

@@ -21,6 +21,7 @@ namespace DlcvSequenceTest
             Run(TestCycleIsRejected);
             Run(TestOneToSixCameraGraphsValidate);
             Run(TestCSharpResultDrivesNgOverlay);
+            RunAsync(TestModbusTcpInputTriggersPipelineAsync);
             RunAsync(TestPipelineOverlapsCaptureAndInferenceAsync);
             RunAsync(TestConcurrentTriggerIsRejectedAsync);
             Run(TestHardwareCameraNeedsInjectedFactory);
@@ -104,6 +105,51 @@ namespace DlcvSequenceTest
             }
             finally
             {
+                host.Stop();
+            }
+        }
+
+        private static async Task TestModbusTcpInputTriggersPipelineAsync()
+        {
+            var graph = BuildPipelineGraph(1);
+            var trigger = graph.Nodes.First(x => x.Id == "trigger");
+            trigger.Type = "modbus_tcp_input";
+            trigger.Props = new JObject
+            {
+                { "host", "127.0.0.1" },
+                { "port", 502 },
+                { "device_id", 1 },
+                { "photo_reg", 4111 },
+                { "photo_value", 1 },
+                { "barcode_count", 0 },
+                { "poll_interval_ms", 20 }
+            };
+
+            var cameraFactory = new TrackingCameraFactory();
+            var display = new LockedDisplaySink();
+            var modbus = new MockModbusClient();
+            var completed = new TaskCompletionSource<bool>();
+            var host = new SequenceHost();
+            host.LoadWithoutStart(graph, new MockAiFlowRunner(), display, modbus, path => path);
+            host.Executor.CameraFactory = cameraFactory;
+            host.Executor.TriggerCompleted = () =>
+            {
+                completed.TrySetResult(true);
+                return Task.CompletedTask;
+            };
+            host.Start();
+            try
+            {
+                await Task.Delay(80);
+                modbus.SetRegister(4111, 1);
+                var finished = await Task.WhenAny(completed.Task, Task.Delay(3000));
+                Assert(finished == completed.Task && display.UpdateCount == 1 &&
+                    modbus.ReadHoldingRegister(4111) == 0,
+                    "Modbus TCP 输入触发后进入流程并清零");
+            }
+            finally
+            {
+                await host.WaitForIdleAsync();
                 host.Stop();
             }
         }

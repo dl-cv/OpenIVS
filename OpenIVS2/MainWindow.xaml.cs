@@ -202,9 +202,7 @@ namespace OpenIVS2
                     .GroupBy(x => x.ModelPath, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(x => x.Key, x => x.First().DeviceId, StringComparer.OrdinalIgnoreCase);
                 _flowRunner = flowRunnerOverride ?? new DlcvFlowRunner(deviceIds);
-                _modbus = modbusOverride ?? (_settings.UsePlc && string.Equals(_settings.PlcMode, "serial", StringComparison.OrdinalIgnoreCase)
-                    ? (IModbusClient)new SerialModbusClient(_settings)
-                    : new MockModbusClient());
+                _modbus = modbusOverride ?? CreateModbusClient();
                 _cameraFactory = new OpenIvsCameraResourceFactory();
                 _displaySink = new UiDisplaySink(Dispatcher, UpdateCameraFrame);
                 _host = new SequenceHost();
@@ -219,13 +217,19 @@ namespace OpenIVS2
                 _running = true;
                 StartButton.IsEnabled = false;
                 StopButton.IsEnabled = true;
-                TriggerButton.IsEnabled = true;
+                TriggerButton.IsEnabled = !IsTcpPlcMode();
                 SettingsButton.IsEnabled = false;
                 CameraIndicator.Fill = Brushes.Green;
                 ModelIndicator.Fill = Brushes.Green;
                 StatusText.Text = "系统运行中";
                 Log("info", "system", "相机与模型加载完成，系统进入运行状态");
-                if (_settings.UsePlc) StartPlcPolling();
+                if (IsTcpPlcMode())
+                {
+                    PlcIndicator.Fill = Brushes.Green;
+                    Log("info", "plc", "运行时序正在监听 Modbus TCP " + _settings.TcpHost + ":" + _settings.TcpPort +
+                        "，拍照寄存器=" + _settings.PhotoRegister);
+                }
+                else if (_settings.UsePlc) StartPlcPolling();
                 else PlcIndicator.Fill = Brushes.Gray;
             }
             catch
@@ -244,6 +248,20 @@ namespace OpenIVS2
             var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime_sequence.json");
             File.WriteAllText(path, SequenceGraphLoader.ToJson(graph, true));
             Log("info", "sequence", "运行时序已保存: " + path);
+        }
+
+        private IModbusClient CreateModbusClient()
+        {
+            if (_settings.UsePlc && string.Equals(_settings.PlcMode, "tcp", StringComparison.OrdinalIgnoreCase))
+                return new TcpModbusClient();
+            if (_settings.UsePlc && string.Equals(_settings.PlcMode, "serial", StringComparison.OrdinalIgnoreCase))
+                return new SerialModbusClient(_settings);
+            return new MockModbusClient();
+        }
+
+        private bool IsTcpPlcMode()
+        {
+            return _settings.UsePlc && string.Equals(_settings.PlcMode, "tcp", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task StopSystemAsync()

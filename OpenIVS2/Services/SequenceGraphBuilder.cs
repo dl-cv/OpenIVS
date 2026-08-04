@@ -20,7 +20,19 @@ namespace OpenIVS2.Services
                 Id = "openivs2-production",
                 Name = "OpenIVS2 生产检测时序"
             };
-            graph.Nodes.Add(Node("trigger", "manual_trigger"));
+            var tcpPlc = settings.UsePlc && string.Equals(settings.PlcMode, "tcp", StringComparison.OrdinalIgnoreCase);
+            graph.Nodes.Add(tcpPlc
+                ? Node("trigger", "modbus_tcp_input", new JObject
+                {
+                    { "host", settings.TcpHost },
+                    { "port", settings.TcpPort },
+                    { "device_id", settings.DeviceId },
+                    { "photo_reg", settings.PhotoRegister },
+                    { "photo_value", settings.TriggerValue },
+                    { "barcode_count", 0 },
+                    { "poll_interval_ms", settings.PollIntervalMs }
+                })
+                : Node("trigger", "manual_trigger"));
 
             foreach (var camera in cameras)
             {
@@ -83,6 +95,8 @@ namespace OpenIVS2.Services
                 { "address_from_trigger_info", true },
                 { "address_key", "photo_reg" },
                 { "value", settings.ClearValue },
+                { "host", settings.TcpHost },
+                { "port", settings.TcpPort },
                 { "device_id", settings.DeviceId }
             }));
             graph.Nodes.Add(Node("join", "wait_all"));

@@ -105,6 +105,7 @@
     <Compile Include="Services\ResultEvaluator.cs" />
     <Compile Include="Services\ImageSaveService.cs" />
     <Compile Include="Services\SerialModbusClient.cs" />
+    <Compile Include="Services\TcpModbusClient.cs" />
     <Compile Include="Acceptance\AcceptanceRunner.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
