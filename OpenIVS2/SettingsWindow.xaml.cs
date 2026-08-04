@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -22,18 +23,41 @@ namespace OpenIVS2
 
         private string _lastPlcMode;
         private bool _cameraDevicesLoaded;
+        private bool _runtimeActionInProgress;
+        private readonly Func<Task> _startSystem;
+        private readonly Func<Task> _stopSystem;
+        private readonly Func<Task> _triggerCycle;
+        private readonly Func<bool> _isSystemRunning;
+        private readonly Func<bool> _canManualTrigger;
 
         public AppSettings WorkingSettings { get; private set; }
         public ObservableCollection<CameraDeviceOption> AvailableCameras { get; private set; }
 
         public SettingsWindow(AppSettings settings)
+            : this(settings, null, null, null, null, null)
         {
+        }
+
+        public SettingsWindow(
+            AppSettings settings,
+            Func<Task> startSystem,
+            Func<Task> stopSystem,
+            Func<Task> triggerCycle,
+            Func<bool> isSystemRunning,
+            Func<bool> canManualTrigger)
+        {
+            _startSystem = startSystem;
+            _stopSystem = stopSystem;
+            _triggerCycle = triggerCycle;
+            _isSystemRunning = isSystemRunning;
+            _canManualTrigger = canManualTrigger;
             AvailableCameras = new ObservableCollection<CameraDeviceOption>();
             InitializeComponent();
             WorkingSettings = (settings ?? AppSettings.CreateDefault()).Clone();
             CameraItemsControl.ItemsSource = WorkingSettings.Cameras;
             LoadGlobalFields();
             UpdatePlcUi();
+            RefreshRuntimeControls();
         }
 
         private void CameraMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -150,15 +174,63 @@ namespace OpenIVS2
             var mode = SelectedText(PlcModeCombo, "mock");
             if (string.Equals(mode, "tcp", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(_lastPlcMode, "tcp", StringComparison.OrdinalIgnoreCase) &&
-                PhotoRegisterBox != null && TriggerValueBox != null && ClearValueBox != null &&
-                PhotoRegisterBox.Text.Trim() == "500" &&
-                TriggerValueBox.Text.Trim() == "1" &&
-                ClearValueBox.Text.Trim() == "0")
+                WorkingSettings != null &&
+                WorkingSettings.PhotoRegister == 500 &&
+                WorkingSettings.TriggerValue == 1 &&
+                WorkingSettings.ClearValue == 0)
             {
-                PhotoRegisterBox.Text = "4111";
+                WorkingSettings.PhotoRegister = 4111;
             }
             _lastPlcMode = mode;
             UpdatePlcUi();
+        }
+
+        private async void StartRun_Click(object sender, RoutedEventArgs e)
+        {
+            await ExecuteRuntimeActionAsync(_startSystem, "启动失败");
+        }
+
+        private async void StopRun_Click(object sender, RoutedEventArgs e)
+        {
+            await ExecuteRuntimeActionAsync(_stopSystem, "停止失败");
+        }
+
+        private async void ManualTrigger_Click(object sender, RoutedEventArgs e)
+        {
+            await ExecuteRuntimeActionAsync(_triggerCycle, "单次触发失败");
+        }
+
+        private async Task ExecuteRuntimeActionAsync(Func<Task> action, string errorTitle)
+        {
+            if (action == null || _runtimeActionInProgress) return;
+            _runtimeActionInProgress = true;
+            RefreshRuntimeControls();
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, errorTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            finally
+            {
+                _runtimeActionInProgress = false;
+                RefreshRuntimeControls();
+            }
+        }
+
+        private void RefreshRuntimeControls()
+        {
+            if (StartRunButton == null || StopRunButton == null || ManualTriggerButton == null || RuntimeStatusText == null) return;
+            var running = _isSystemRunning != null && _isSystemRunning();
+            StartRunButton.IsEnabled = !_runtimeActionInProgress && !running && _startSystem != null;
+            StopRunButton.IsEnabled = !_runtimeActionInProgress && running && _stopSystem != null;
+            ManualTriggerButton.IsEnabled = !_runtimeActionInProgress && running && _triggerCycle != null &&
+                (_canManualTrigger == null || _canManualTrigger());
+            SaveSettingsButton.IsEnabled = !_runtimeActionInProgress;
+            CancelSettingsButton.IsEnabled = !_runtimeActionInProgress;
+            RuntimeStatusText.Text = running ? "当前状态：运行中" : "当前状态：已停止";
         }
 
         private void Save_Click(object sender, RoutedEventArgs e)
@@ -175,15 +247,12 @@ namespace OpenIVS2
                 WorkingSettings.DeviceId = ParseInt(DeviceIdBox.Text, "设备 ID", 0, 255);
                 WorkingSettings.StopBits = SelectedText(StopBitsCombo, "One");
                 WorkingSettings.Parity = SelectedText(ParityCombo, "None");
-                WorkingSettings.PhotoRegister = ParseUShort(PhotoRegisterBox.Text, "拍照寄存器");
-                WorkingSettings.TriggerValue = ParseUShort(TriggerValueBox.Text, "触发值");
-                WorkingSettings.ClearValue = ParseUShort(ClearValueBox.Text, "清零值");
-                WorkingSettings.PollIntervalMs = ParseInt(PollIntervalBox.Text, "轮询间隔", 20, 60000);
                 WorkingSettings.SaveDirectory = SaveDirectoryBox.Text.Trim();
                 WorkingSettings.SaveOkImages = SaveOkCheck.IsChecked == true;
                 WorkingSettings.SaveNgImages = SaveNgCheck.IsChecked == true;
                 WorkingSettings.ImageFormat = SelectedText(ImageFormatCombo, "PNG");
                 WorkingSettings.JpegQuality = ParseInt(JpegQualityBox.Text, "JPEG 质量", 1, 100);
+                WorkingSettings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;
                 WorkingSettings.Normalize();
                 ValidateCameraSettings();
                 if (WorkingSettings.UsePlc &&
@@ -219,6 +288,32 @@ namespace OpenIVS2
             UpdateLayout();
         }
 
+        internal bool StartWithWindowsSelected { get { return StartWithWindowsCheck.IsChecked == true; } }
+        internal bool RuntimeControlsAvailable
+        {
+            get { return StartRunButton != null && StopRunButton != null && ManualTriggerButton != null; }
+        }
+
+        internal Task StartRuntimeForAcceptanceAsync()
+        {
+            return ExecuteRuntimeActionAsync(_startSystem, "启动失败");
+        }
+
+        internal Task StopRuntimeForAcceptanceAsync()
+        {
+            return ExecuteRuntimeActionAsync(_stopSystem, "停止失败");
+        }
+
+        internal Task TriggerRuntimeForAcceptanceAsync()
+        {
+            return ExecuteRuntimeActionAsync(_triggerCycle, "单次触发失败");
+        }
+
+        internal bool ContainsVisibleTextForAcceptance(string text)
+        {
+            return ContainsText(this, text);
+        }
+
         internal void CaptureScreenshot(string path)
         {
             UpdateLayout();
@@ -248,15 +343,12 @@ namespace OpenIVS2
             DeviceIdBox.Text = WorkingSettings.DeviceId.ToString();
             SelectByText(StopBitsCombo, WorkingSettings.StopBits);
             SelectByText(ParityCombo, WorkingSettings.Parity);
-            PhotoRegisterBox.Text = WorkingSettings.PhotoRegister.ToString();
-            TriggerValueBox.Text = WorkingSettings.TriggerValue.ToString();
-            ClearValueBox.Text = WorkingSettings.ClearValue.ToString();
-            PollIntervalBox.Text = WorkingSettings.PollIntervalMs.ToString();
             SaveDirectoryBox.Text = WorkingSettings.SaveDirectory;
             SaveOkCheck.IsChecked = WorkingSettings.SaveOkImages;
             SaveNgCheck.IsChecked = WorkingSettings.SaveNgImages;
             SelectByText(ImageFormatCombo, WorkingSettings.ImageFormat);
             JpegQualityBox.Text = WorkingSettings.JpegQuality.ToString();
+            StartWithWindowsCheck.IsChecked = WorkingSettings.StartWithWindows;
         }
 
         private void UpdatePlcUi()
@@ -313,6 +405,17 @@ namespace OpenIVS2
             return item != null && item.Content != null ? item.Content.ToString() : fallback;
         }
 
+        private static bool ContainsText(DependencyObject parent, string text)
+        {
+            var textBlock = parent as TextBlock;
+            if (textBlock != null && string.Equals(textBlock.Text, text, StringComparison.Ordinal)) return true;
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                if (ContainsText(VisualTreeHelper.GetChild(parent, i), text)) return true;
+            }
+            return false;
+        }
+
         private static int ParseInt(string text, string name, int min, int max)
         {
             int value;
@@ -321,12 +424,5 @@ namespace OpenIVS2
             return value;
         }
 
-        private static ushort ParseUShort(string text, string name)
-        {
-            ushort value;
-            if (!ushort.TryParse(text, out value))
-                throw new InvalidOperationException(name + "必须是 0 到 65535 的整数");
-            return value;
-        }
     }
 }

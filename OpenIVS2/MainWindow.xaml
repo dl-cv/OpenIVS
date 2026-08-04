@@ -25,12 +25,8 @@
                         <TextBlock Text="多相机工业视觉检测" FontSize="12" Foreground="#607D8B"/>
                     </StackPanel>
                 </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="StartButton" Content="开始运行" Style="{StaticResource SuccessButtonStyle}" Click="StartButton_Click"/>
-                    <Button x:Name="StopButton" Content="停止" Style="{StaticResource DangerButtonStyle}" Click="StopButton_Click" IsEnabled="False"/>
-                    <Button x:Name="TriggerButton" Content="单次触发" Style="{StaticResource ToolbarButtonStyle}" Click="TriggerButton_Click" IsEnabled="False"/>
+                <StackPanel x:Name="MainToolbar" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="SettingsButton" Content="设置" Style="{StaticResource SecondaryButtonStyle}" Click="SettingsButton_Click"/>
-                    <Button x:Name="ResetButton" Content="计数清零" Style="{StaticResource SecondaryButtonStyle}" Click="ResetButton_Click"/>
                 </StackPanel>
             </Grid>
         </Border>

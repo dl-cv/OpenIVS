@@ -45,6 +45,7 @@ namespace OpenIVS2.Models
         public bool SaveNgImages { get; set; }
         public string ImageFormat { get; set; }
         public int JpegQuality { get; set; }
+        public bool StartWithWindows { get; set; }
         public List<CameraSettings> Cameras { get; set; }
 
         public static AppSettings CreateDefault()
@@ -70,6 +71,7 @@ namespace OpenIVS2.Models
                 SaveNgImages = true,
                 ImageFormat = "PNG",
                 JpegQuality = 90,
+                StartWithWindows = false,
                 Cameras = new List<CameraSettings>()
             };
             for (var i = 0; i < 6; i++)
@@ -116,6 +118,7 @@ namespace OpenIVS2.Models
                 SaveNgImages = SaveNgImages,
                 ImageFormat = ImageFormat,
                 JpegQuality = JpegQuality,
+                StartWithWindows = StartWithWindows,
                 Cameras = (Cameras ?? new List<CameraSettings>()).Select(x => x.Clone()).ToList()
             };
         }

@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DLCV.SequenceGraph;
+using Microsoft.Win32;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenIVS2.Models;
@@ -59,10 +60,33 @@ namespace OpenIVS2.Acceptance
                     MainWindow.FormatCameraState(CameraResourceState.Opened) == "READY" &&
                     MainWindow.FormatCameraState(CameraResourceState.NotOpened) == "NOT READY",
                     "相机状态使用 READY / NOT READY");
+                success &= Check(checks, "main_toolbar_settings_only",
+                    window.MainToolbarButtonCount == 1,
+                    "主界面操作区只保留设置按钮");
+                success &= Check(checks, "automatic_start_policy",
+                    MainWindow.ShouldStartAutomatically(false) && !MainWindow.ShouldStartAutomatically(true),
+                    "正常启动自动运行，验收模式保持受控启动");
 
                 var settingsPreviewData = settings.Clone();
                 settingsPreviewData.Cameras[0].Mode = "hik";
-                var settingsPreview = new SettingsWindow(settingsPreviewData) { Owner = window };
+                settingsPreviewData.Cameras[0].DeviceId = 3;
+                settingsPreviewData.Cameras[0].Rotation = 270;
+                settingsPreviewData.Cameras[0].SoftwareTrigger = false;
+                settingsPreviewData.Cameras[0].FrameTimeoutMs = 4321;
+                settingsPreviewData.PhotoRegister = 620;
+                settingsPreviewData.TriggerValue = 7;
+                settingsPreviewData.ClearValue = 2;
+                settingsPreviewData.PollIntervalMs = 45;
+                settingsPreviewData.StartWithWindows = true;
+                var previewRunning = false;
+                var previewTriggerCount = 0;
+                var settingsPreview = new SettingsWindow(
+                    settingsPreviewData,
+                    () => { previewRunning = true; return Task.CompletedTask; },
+                    () => { previewRunning = false; return Task.CompletedTask; },
+                    () => { previewTriggerCount++; return Task.CompletedTask; },
+                    () => previewRunning,
+                    () => previewRunning) { Owner = window };
                 try
                 {
                     settingsPreview.Show();
@@ -70,10 +94,23 @@ namespace OpenIVS2.Acceptance
                     var cameraSettingsScreenshot = Path.Combine(screenshots, "settings-camera-model.png");
                     settingsPreview.SelectTabForAcceptance(0);
                     settingsPreview.CaptureScreenshot(cameraSettingsScreenshot);
+                    success &= Check(checks, "camera_advanced_settings_hidden",
+                        !settingsPreview.ContainsVisibleTextForAcceptance("设备 ID") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("旋转角度") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("触发方式") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("取图超时（毫秒）"),
+                        "相机设备 ID、旋转角度、触发方式和取图超时不在设置界面显示");
                     settingsPreview.SelectTabForAcceptance(1);
                     await Task.Delay(120);
                     var plcSettingsScreenshot = Path.Combine(screenshots, "settings-plc-save.png");
                     settingsPreview.CaptureScreenshot(plcSettingsScreenshot);
+                    success &= Check(checks, "plc_clear_contract_hidden",
+                        !settingsPreview.ContainsVisibleTextForAcceptance("触发与清零契约") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("拍照寄存器") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("触发值") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("清零值") &&
+                        !settingsPreview.ContainsVisibleTextForAcceptance("轮询间隔（毫秒）"),
+                        "触发与清零契约不在设置界面显示");
                     settingsPreview.SetPlcModeForAcceptance("tcp");
                     await Task.Delay(120);
                     var tcpSettingsScreenshot = Path.Combine(screenshots, "settings-plc-tcp.png");
@@ -81,6 +118,25 @@ namespace OpenIVS2.Acceptance
                     success &= Check(checks, "settings_screenshots",
                         File.Exists(cameraSettingsScreenshot) && File.Exists(plcSettingsScreenshot) && File.Exists(tcpSettingsScreenshot),
                         "设置窗口相机、PLC 和 TCP 配置截图");
+                    success &= Check(checks, "startup_setting_ui",
+                        settingsPreview.StartWithWindowsSelected,
+                        "设置窗口显示开机自启动选项");
+                    success &= Check(checks, "hidden_settings_preserved",
+                        settingsPreview.WorkingSettings.Cameras[0].DeviceId == 3 &&
+                        settingsPreview.WorkingSettings.Cameras[0].Rotation == 270 &&
+                        !settingsPreview.WorkingSettings.Cameras[0].SoftwareTrigger &&
+                        settingsPreview.WorkingSettings.Cameras[0].FrameTimeoutMs == 4321 &&
+                        settingsPreview.WorkingSettings.PhotoRegister == 620 &&
+                        settingsPreview.WorkingSettings.TriggerValue == 7 &&
+                        settingsPreview.WorkingSettings.ClearValue == 2 &&
+                        settingsPreview.WorkingSettings.PollIntervalMs == 45,
+                        "隐藏选项的原有参数保持不变");
+                    await settingsPreview.StartRuntimeForAcceptanceAsync();
+                    await settingsPreview.TriggerRuntimeForAcceptanceAsync();
+                    await settingsPreview.StopRuntimeForAcceptanceAsync();
+                    success &= Check(checks, "settings_runtime_controls",
+                        settingsPreview.RuntimeControlsAvailable && !previewRunning && previewTriggerCount == 1,
+                        "设置窗口开始、停止和单次触发控制可用");
                 }
                 finally
                 {
@@ -88,12 +144,18 @@ namespace OpenIVS2.Acceptance
                 }
 
                 foreach (var camera in settings.Cameras) camera.Enabled = string.CompareOrdinal(camera.Slot, "C") <= 0;
+                settings.StartWithWindows = true;
                 window.ApplySettingsForAcceptance(settings);
                 var settingsPath = Path.Combine(output, "acceptance.settings.json");
                 var settingsService = new SettingsService(settingsPath);
                 settingsService.Save(settings);
                 var loaded = settingsService.Load();
-                success &= Check(checks, "settings_roundtrip", loaded.EnabledCameras().Count == 3 && loaded.PhotoRegister == settings.PhotoRegister, "设置保存与加载");
+                success &= Check(checks, "settings_roundtrip",
+                    loaded.EnabledCameras().Count == 3 && loaded.PhotoRegister == settings.PhotoRegister && loaded.StartWithWindows,
+                    "设置保存与加载");
+                success &= Check(checks, "startup_registry_roundtrip",
+                    StartupRegistrationRoundtrip(output),
+                    "开机自启动注册表写入和关闭");
                 var mockGraph = SequenceGraphBuilder.Build(loaded);
                 success &= Check(checks, "mock_trigger_unchanged",
                     mockGraph.Nodes.Any(x => x.Id == "trigger" && x.Type == "manual_trigger"),
@@ -197,8 +259,6 @@ namespace OpenIVS2.Acceptance
                 lifecycle = window.GetLifecycleEvents();
                 File.WriteAllLines(Path.Combine(output, "lifecycle.log"), lifecycle.Select(JsonConvert.SerializeObject));
 
-                window.ResetCountsForAcceptance();
-                success &= Check(checks, "counter_reset", window.TotalCount == 0 && window.OkCount == 0 && window.NgCount == 0, "计数清零");
                 await window.StopForAcceptanceAsync();
                 success &= Check(checks, "resource_release", !window.IsRunning, "停止并释放资源");
             }
@@ -293,6 +353,24 @@ namespace OpenIVS2.Acceptance
                 return false;
             }
             catch (FileNotFoundException) { return true; }
+        }
+
+        private static bool StartupRegistrationRoundtrip(string output)
+        {
+            var registryPath = @"Software\OpenIVS2-Acceptance-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                var executablePath = Path.Combine(output, "OpenIVS2.exe");
+                var service = new WindowsStartupService(registryPath, "OpenIVS2", executablePath);
+                service.SetEnabled(true);
+                var enabled = service.IsEnabled();
+                service.SetEnabled(false);
+                return enabled && !service.IsEnabled();
+            }
+            finally
+            {
+                try { Registry.CurrentUser.DeleteSubKeyTree(registryPath, false); } catch { }
+            }
         }
 
         private static bool Check(JArray checks, string id, bool passed, string message)

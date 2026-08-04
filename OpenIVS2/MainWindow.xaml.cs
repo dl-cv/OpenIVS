@@ -32,6 +32,7 @@ namespace OpenIVS2
 
         private readonly bool _acceptanceMode;
         private readonly SettingsService _settingsService = new SettingsService();
+        private readonly WindowsStartupService _startupService = new WindowsStartupService();
         private readonly ObservableCollection<string> _logs = new ObservableCollection<string>();
         private readonly Dictionary<string, CameraCardControls> _cameraCards = new Dictionary<string, CameraCardControls>(StringComparer.OrdinalIgnoreCase);
         private readonly ImageSaveService _imageSaveService = new ImageSaveService();
@@ -72,6 +73,7 @@ namespace OpenIVS2
         internal int CameraGridColumns { get { return CameraGrid.Columns; } }
         internal bool IsRunning { get { return _running; } }
         internal bool SettingsAvailable { get { return SettingsButton.IsEnabled; } }
+        internal int MainToolbarButtonCount { get { return MainToolbar.Children.Count; } }
         internal bool IsModbusWaiting { get { return _modbusConnected == false; } }
         internal bool BrandLogoKeepsAspectRatio
         {
@@ -98,7 +100,13 @@ namespace OpenIVS2
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
             Log("info", "system", "OpenIVS2 已启动");
-            if (!_acceptanceMode) return;
+            if (ShouldStartAutomatically(_acceptanceMode))
+            {
+                SynchronizeStartupRegistration(false);
+                try { await StartSystemAsync(); }
+                catch (Exception ex) { ShowError("启动失败", ex); }
+                return;
+            }
             try
             {
                 var success = await AcceptanceRunner.RunAsync(this);
@@ -111,22 +119,6 @@ namespace OpenIVS2
             }
         }
 
-        private async void StartButton_Click(object sender, RoutedEventArgs e)
-        {
-            try { await StartSystemAsync(); }
-            catch (Exception ex) { ShowError("启动失败", ex); }
-        }
-
-        private async void StopButton_Click(object sender, RoutedEventArgs e)
-        {
-            await StopSystemAsync();
-        }
-
-        private async void TriggerButton_Click(object sender, RoutedEventArgs e)
-        {
-            await TriggerCycleAsync("manual");
-        }
-
         private async void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
             if (_openingSettings) return;
@@ -134,16 +126,28 @@ namespace OpenIVS2
             SettingsButton.IsEnabled = false;
             try
             {
-                if (_running) await StopSystemAsync();
-                SettingsButton.IsEnabled = false;
-                var window = new SettingsWindow(_settings) { Owner = this };
+                var window = new SettingsWindow(
+                    _settings,
+                    () => StartSystemAsync(),
+                    () => StopSystemAsync(),
+                    () => TriggerCycleAsync("manual"),
+                    () => _running,
+                    () => _running && !IsTcpPlcMode()) { Owner = this };
                 if (window.ShowDialog() == true)
                 {
+                    var restartAfterSave = _running;
+                    if (restartAfterSave) await StopSystemAsync();
                     _settings = window.WorkingSettings;
                     _settingsService.Save(_settings);
+                    SynchronizeStartupRegistration(true);
                     BuildCameraGrid();
                     Log("info", "settings", "设置已保存");
+                    if (restartAfterSave) await StartSystemAsync();
                 }
+            }
+            catch (Exception ex)
+            {
+                ShowError("应用设置失败", ex);
             }
             finally
             {
@@ -152,9 +156,27 @@ namespace OpenIVS2
             }
         }
 
-        private void ResetButton_Click(object sender, RoutedEventArgs e)
+        internal static bool ShouldStartAutomatically(bool acceptanceMode)
         {
-            ResetCounts();
+            return !acceptanceMode;
+        }
+
+        private void SynchronizeStartupRegistration(bool showError)
+        {
+            try
+            {
+                _startupService.SetEnabled(_settings.StartWithWindows);
+                Log("info", "startup", _settings.StartWithWindows ? "已启用开机自启动" : "已关闭开机自启动");
+            }
+            catch (Exception ex)
+            {
+                Log("error", "startup", "更新开机自启动失败: " + ex.Message);
+                if (showError)
+                {
+                    MessageBox.Show("设置已保存，但更新 Windows 开机自启动失败：" + ex.Message,
+                        "开机自启动", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
         }
 
         private async void Window_Closing(object sender, CancelEventArgs e)
@@ -192,11 +214,6 @@ namespace OpenIVS2
         internal Task StopForAcceptanceAsync()
         {
             return StopSystemAsync();
-        }
-
-        internal void ResetCountsForAcceptance()
-        {
-            ResetCounts();
         }
 
         internal void SetAcceptanceLogPath(string path)
@@ -261,9 +278,6 @@ namespace OpenIVS2
                 }
                 await Task.Run(() => _host.Start());
                 _running = true;
-                StartButton.IsEnabled = false;
-                StopButton.IsEnabled = true;
-                TriggerButton.IsEnabled = !IsTcpPlcMode();
                 SettingsButton.IsEnabled = true;
                 CameraIndicator.Fill = Brushes.Green;
                 ModelIndicator.Fill = Brushes.Green;
@@ -348,9 +362,6 @@ namespace OpenIVS2
             _displaySink = null;
             _modbusConnected = null;
             _running = false;
-            StartButton.IsEnabled = true;
-            StopButton.IsEnabled = false;
-            TriggerButton.IsEnabled = false;
             SettingsButton.IsEnabled = true;
             PlcIndicator.Fill = Brushes.Gray;
             CameraIndicator.Fill = Brushes.Gray;
@@ -627,21 +638,8 @@ namespace OpenIVS2
             if (string.IsNullOrWhiteSpace(_settings.SaveDirectory)) throw new InvalidOperationException("图片保存目录不能为空");
         }
 
-        private void ResetCounts()
-        {
-            _totalCount = _okCount = _ngCount = 0;
-            TotalCountText.Text = OkCountText.Text = NgCountText.Text = "0";
-            YieldText.Text = "0.00%";
-            OverallResultText.Text = "待机";
-            CycleDetailText.Text = "等待触发";
-            OverallResultCard.Background = new SolidColorBrush(Color.FromRgb(144, 164, 174));
-            OverallIndicator.Fill = Brushes.Gray;
-            Log("info", "counter", "生产计数已清零");
-        }
-
         private void SetBusy(bool busy, string status)
         {
-            StartButton.IsEnabled = !busy && !_running;
             SettingsButton.IsEnabled = !busy;
             if (!string.IsNullOrWhiteSpace(status)) StatusText.Text = status;
         }
