@@ -44,7 +44,7 @@ namespace DlcvModules
         /// <param name="root">包含 nodes 的流程配置根 JSON 对象</param>
         /// <param name="deviceId">设备 ID</param>
         /// <returns>模型加载报告</returns>
-        protected JObject LoadFromRoot(JObject root, int deviceId)
+        protected JObject LoadFromRoot(JObject root, int deviceId, string modelPassword = null)
         {
             if (root == null) throw new ArgumentNullException("root");
 
@@ -57,80 +57,91 @@ namespace DlcvModules
 
             var ctx = new ExecutionContext();
             ctx.Set("device_id", deviceId);
-            var exec = new GraphExecutor(_nodes, ctx);
-            var report = exec.LoadModels();
+            if (!string.IsNullOrEmpty(modelPassword))
+            {
+                ctx.Set("model_password", modelPassword);
+            }
             try
             {
-                var loadedMeta = ctx.Get<List<Dictionary<string, object>>>("loaded_model_meta", null);
-                if (loadedMeta != null && loadedMeta.Count > 0)
+                var exec = new GraphExecutor(_nodes, ctx);
+                var report = exec.LoadModels();
+                try
                 {
-                    _loadedModelMeta = JArray.FromObject(loadedMeta);
+                    var loadedMeta = ctx.Get<List<Dictionary<string, object>>>("loaded_model_meta", null);
+                    if (loadedMeta != null && loadedMeta.Count > 0)
+                    {
+                        _loadedModelMeta = JArray.FromObject(loadedMeta);
+                    }
+                    else
+                    {
+                        _loadedModelMeta = new JArray();
+                    }
                 }
-                else
+                catch
                 {
                     _loadedModelMeta = new JArray();
                 }
-            }
-            catch
-            {
-                _loadedModelMeta = new JArray();
-            }
-            int code = report != null && report["code"] != null ? (int)report["code"] : 1;
-            if (code != 0)
-            {
-                string simpleMessage = null;
-                JToken modelsToken = report != null ? report["models"] : null;
-                var models = modelsToken as JArray;
-                if (models != null)
+                int code = report != null && report["code"] != null ? (int)report["code"] : 1;
+                if (code != 0)
                 {
-                    for (int mi = 0; mi < models.Count; mi++)
+                    string simpleMessage = null;
+                    JToken modelsToken = report != null ? report["models"] : null;
+                    var models = modelsToken as JArray;
+                    if (models != null)
                     {
-                        var m = models[mi] as JObject;
-                        if (m == null) continue;
-                        int sc = m["status_code"] != null ? (int)m["status_code"] : 0;
-                        if (sc != 0)
+                        for (int mi = 0; mi < models.Count; mi++)
                         {
-                            string statusMsg = m["status_message"] != null ? m["status_message"].ToString() : null;
-                            if (!string.IsNullOrEmpty(statusMsg))
+                            var m = models[mi] as JObject;
+                            if (m == null) continue;
+                            int sc = m["status_code"] != null ? (int)m["status_code"] : 0;
+                            if (sc != 0)
                             {
-                                int jsonStart = statusMsg.IndexOf('{');
-                                if (jsonStart >= 0)
+                                string statusMsg = m["status_message"] != null ? m["status_message"].ToString() : null;
+                                if (!string.IsNullOrEmpty(statusMsg))
                                 {
-                                    string innerJson = statusMsg.Substring(jsonStart);
-                                    try
+                                    int jsonStart = statusMsg.IndexOf('{');
+                                    if (jsonStart >= 0)
                                     {
-                                        var innerObj = JObject.Parse(innerJson);
-                                        string innerMsg = innerObj["message"] != null ? innerObj["message"].ToString() : null;
-                                        if (!string.IsNullOrEmpty(innerMsg))
+                                        string innerJson = statusMsg.Substring(jsonStart);
+                                        try
                                         {
-                                            simpleMessage = innerMsg;
-                                            break;
+                                            var innerObj = JObject.Parse(innerJson);
+                                            string innerMsg = innerObj["message"] != null ? innerObj["message"].ToString() : null;
+                                            if (!string.IsNullOrEmpty(innerMsg))
+                                            {
+                                                simpleMessage = innerMsg;
+                                                break;
+                                            }
                                         }
+                                        catch { }
                                     }
-                                    catch { }
-                                }
-                                else
-                                {
-                                    simpleMessage = statusMsg;
-                                    break;
+                                    else
+                                    {
+                                        simpleMessage = statusMsg;
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                if (string.IsNullOrEmpty(simpleMessage))
-                {
-                    simpleMessage = report != null && report["message"] != null ? report["message"].ToString() : "unknown error";
-                }
+                    if (string.IsNullOrEmpty(simpleMessage))
+                    {
+                        simpleMessage = report != null && report["message"] != null ? report["message"].ToString() : "unknown error";
+                    }
 
-                var simpleObj = new JObject();
-                simpleObj["code"] = 1;
-                simpleObj["message"] = simpleMessage;
-                report = simpleObj;
+                    var simpleObj = new JObject();
+                    simpleObj["code"] = 1;
+                    simpleObj["message"] = simpleMessage;
+                    report = simpleObj;
+                }
+                _loaded = true;
+                return report;
             }
-            _loaded = true;
-            return report;
+            finally
+            {
+                ctx.Set("model_password", null);
+            }
         }
 
         public JArray GetLoadedModelMeta()

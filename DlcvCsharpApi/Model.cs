@@ -148,7 +148,7 @@ namespace dlcv_infer_csharp
                 }
                 else if (_isDvsMode)
                 {
-                    InitializeDvsMode(modelPath, device_id);
+                    InitializeDvsMode(modelPath, device_id, modelPassword);
                 }
                 else if (_isRpcMode)
                 {
@@ -279,12 +279,12 @@ namespace dlcv_infer_csharp
             }
         }
 
-        private void InitializeDvsMode(string modelPath, int device_id)
+        private void InitializeDvsMode(string modelPath, int device_id, string modelPassword)
         {
             _dvsModel = new DlcvModules.DvsModel();
             try
             {
-                var report = _dvsModel.Load(modelPath, device_id);
+                var report = _dvsModel.Load(modelPath, device_id, modelPassword);
                 int code = report != null && report["code"] != null ? (int)report["code"] : 1;
                 if (code != 0)
                 {
@@ -292,6 +292,12 @@ namespace dlcv_infer_csharp
                     throw new Exception("DVS模型加载失败:\n" + msg);
                 }
                 modelIndex = AllocateFlowModelIndex();
+            }
+            catch (ModelLoadException)
+            {
+                _dvsModel.Dispose();
+                _dvsModel = null;
+                throw;
             }
             catch (Exception ex)
             {

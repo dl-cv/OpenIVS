@@ -82,6 +82,7 @@
   - `Release\dlcv_infer_cpp_test.exe`
 - `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
   - `model-channel-order-selftest`
+  - `dvs-model-password-selftest`
   - `dvs-rgb-selftest <modelPath> <imagePath>`
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
 
@@ -92,6 +93,7 @@
 - 为避免日志打断阅读：表格在所有测试执行完成后一次性输出（总表）；并在表格末尾追加“汇总”一行。
 - 内存泄露专项在表格输出后自动执行并单独输出结果；专项仅对 1 个实例分割模型执行。
 - `demo2-rgb-selftest` 会输出 `entry_rgb_signature`、`manual_rgb_signature` 与 `raw_bgr_signature`；当 `entry_rgb_signature == manual_rgb_signature` 且与 `raw_bgr_signature` 不同时，判定 Demo2 当前入口保持 RGB 数据流。
+- `dvs-model-password-selftest` 使用系统临时目录中的最小 `.dvsp` fixture，不加载原生推理 DLL；验证流程成员密码透传、带密码流程禁用缓存、加载后上下文清理和缺失/错误密码错误码。
 
 ## 6. 文档表述规则
 

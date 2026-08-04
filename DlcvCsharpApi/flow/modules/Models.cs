@@ -68,16 +68,33 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				string cacheKey = (_modelPath ?? "") + "|" + deviceId + "|" + rpcMode;
-				bool cacheHit = false;
-				lock (_modelCacheLock)
+				string modelPassword = null;
+				try
 				{
-					cacheHit = _modelCache.TryGetValue(cacheKey, out _model);
-					if (!cacheHit)
+					if (Context != null)
 					{
-						_model = new Model(_modelPath, deviceId, rpcMode, true);
-						_modelCache[cacheKey] = _model;
+						modelPassword = Context.Get<string>("model_password", null);
 					}
+				}
+				catch { }
+
+				string cacheKey = (_modelPath ?? "") + "|" + deviceId + "|" + rpcMode;
+				bool useCache = string.IsNullOrEmpty(modelPassword);
+				if (useCache)
+				{
+					lock (_modelCacheLock)
+					{
+						bool cacheHit = _modelCache.TryGetValue(cacheKey, out _model);
+						if (!cacheHit)
+						{
+							_model = CreateModel(_modelPath, deviceId, rpcMode, true, null);
+							_modelCache[cacheKey] = _model;
+						}
+					}
+				}
+				else
+				{
+					_model = CreateModel(_modelPath, deviceId, rpcMode, false, modelPassword);
 				}
 				SyncModelMeta();
 			}
@@ -85,6 +102,12 @@ namespace DlcvModules
 			{
 				SyncModelMeta();
 			}
+		}
+
+		protected virtual Model CreateModel(string modelPath, int deviceId, bool rpcMode,
+			bool enableCache, string modelPassword)
+		{
+			return new Model(modelPath, deviceId, rpcMode, enableCache, modelPassword);
 		}
 
 		protected void SyncModelMeta()

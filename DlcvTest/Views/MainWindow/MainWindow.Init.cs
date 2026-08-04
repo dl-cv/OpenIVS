@@ -326,12 +326,14 @@ namespace DlcvTest
             string password = null;
             confirm.Click += (_, __) =>
             {
-                if (string.IsNullOrEmpty(passwordBox.Password))
+                string candidate = passwordBox.Password;
+                if (string.IsNullOrEmpty(candidate)
+                    || System.Text.Encoding.UTF8.GetByteCount(candidate) > 32)
                 {
-                    MessageBox.Show(dialog, "请输入模型密码。", "模型密码", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(dialog, "模型密码必须为非空 UTF-8 文本，且不超过 32 字节。", "模型密码", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
-                password = passwordBox.Password;
+                password = candidate;
                 dialog.DialogResult = true;
             };
             cancel.Click += (_, __) => dialog.DialogResult = false;

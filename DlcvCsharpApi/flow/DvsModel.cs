@@ -20,7 +20,7 @@ namespace DlcvModules
         // 临时文件夹路径，用于清理
         private string _tempDir = null;
 
-        public new JObject Load(string dvsPath, int deviceId = 0)
+        public JObject Load(string dvsPath, int deviceId = 0, string modelPassword = null)
         {
             if (string.IsNullOrWhiteSpace(dvsPath)) throw new ArgumentException("文件路径为空", nameof(dvsPath));
             if (!File.Exists(dvsPath)) throw new FileNotFoundException("文件不存在", dvsPath);
@@ -159,7 +159,7 @@ namespace DlcvModules
                 }
 
                 // 6. 复用 FlowGraphModel 的核心加载逻辑（从已经修改好的 pipelineJson 中加载）
-                var report = LoadFromRoot(pipelineJson, deviceId);
+                var report = LoadFromRoot(pipelineJson, deviceId, modelPassword);
                 return report;
             }
             catch (Exception)
