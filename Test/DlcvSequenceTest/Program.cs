@@ -21,7 +21,9 @@ namespace DlcvSequenceTest
             Run(TestCycleIsRejected);
             Run(TestOneToSixCameraGraphsValidate);
             Run(TestCSharpResultDrivesNgOverlay);
+            RunAsync(TestInteractiveDisplayReceivesRawImageAsync);
             RunAsync(TestModbusTcpInputTriggersPipelineAsync);
+            RunAsync(TestModbusTcpInputRecoversAfterInitialConnectFailuresAsync);
             RunAsync(TestPipelineOverlapsCaptureAndInferenceAsync);
             RunAsync(TestConcurrentTriggerIsRejectedAsync);
             Run(TestHardwareCameraNeedsInjectedFactory);
@@ -109,6 +111,30 @@ namespace DlcvSequenceTest
             }
         }
 
+        private static async Task TestInteractiveDisplayReceivesRawImageAsync()
+        {
+            var cameraFactory = new TrackingCameraFactory();
+            var display = new InteractiveDisplaySink();
+            var host = new SequenceHost();
+            host.LoadWithoutStart(BuildPipelineGraph(1), new MockAiFlowRunner(), display, new MockModbusClient(), path => path);
+            host.Executor.CameraFactory = cameraFactory;
+            host.Start();
+            try
+            {
+                await host.TriggerAsync("trigger", new Dictionary<string, object>
+                {
+                    { "source", "simulation" },
+                    { "photo_reg", 500 }
+                });
+                Assert(display.InteractiveUpdateCount == 1 && Equals(display.LastRawImage, "Frame-A"),
+                    "交互式显示接收原图和结构化结果");
+            }
+            finally
+            {
+                host.Stop();
+            }
+        }
+
         private static async Task TestModbusTcpInputTriggersPipelineAsync()
         {
             var graph = BuildPipelineGraph(1);
@@ -146,6 +172,59 @@ namespace DlcvSequenceTest
                 Assert(finished == completed.Task && display.UpdateCount == 1 &&
                     modbus.ReadHoldingRegister(4111) == 0,
                     "Modbus TCP 输入触发后进入流程并清零");
+            }
+            finally
+            {
+                await host.WaitForIdleAsync();
+                host.Stop();
+            }
+        }
+
+        private static async Task TestModbusTcpInputRecoversAfterInitialConnectFailuresAsync()
+        {
+            var graph = BuildPipelineGraph(1);
+            var trigger = graph.Nodes.First(x => x.Id == "trigger");
+            trigger.Type = "modbus_tcp_input";
+            trigger.Props = new JObject
+            {
+                { "host", "127.0.0.1" },
+                { "port", 502 },
+                { "device_id", 1 },
+                { "photo_reg", 4111 },
+                { "photo_value", 1 },
+                { "barcode_count", 0 },
+                { "poll_interval_ms", 20 }
+            };
+
+            var cameraFactory = new TrackingCameraFactory();
+            var display = new LockedDisplaySink();
+            var modbus = new RecoveringModbusClient(2);
+            var completed = new TaskCompletionSource<bool>();
+            var disconnectedStateCount = 0;
+            var connectedStateCount = 0;
+            var host = new SequenceHost();
+            host.LoadWithoutStart(graph, new MockAiFlowRunner(), display, modbus, path => path);
+            host.Executor.CameraFactory = cameraFactory;
+            host.Executor.ModbusStateChanged = (connectedState, message) =>
+            {
+                if (connectedState) Interlocked.Increment(ref connectedStateCount);
+                else Interlocked.Increment(ref disconnectedStateCount);
+            };
+            host.Executor.TriggerCompleted = () =>
+            {
+                completed.TrySetResult(true);
+                return Task.CompletedTask;
+            };
+
+            host.Start();
+            try
+            {
+                var connected = await WaitUntilAsync(() => modbus.SuccessfulConnectCount > 0, 4000);
+                modbus.SetRegister(4111, 1);
+                var finished = await Task.WhenAny(completed.Task, Task.Delay(3000));
+                Assert(connected && finished == completed.Task && display.UpdateCount == 1 &&
+                    disconnectedStateCount == 1 && connectedStateCount == 1,
+                    "Modbus TCP 初始连接失败不阻止启动，恢复后继续触发");
             }
             finally
             {
@@ -353,6 +432,17 @@ namespace DlcvSequenceTest
             }
         }
 
+        private static async Task<bool> WaitUntilAsync(Func<bool> predicate, int timeoutMs)
+        {
+            var start = Environment.TickCount;
+            while (Environment.TickCount - start < timeoutMs)
+            {
+                if (predicate()) return true;
+                await Task.Delay(20);
+            }
+            return predicate();
+        }
+
         private sealed class TrackingCameraFactory : ICameraResourceFactory
         {
             public ManualResetEventSlim BWaitStarted { get; } = new ManualResetEventSlim(false);
@@ -459,6 +549,53 @@ namespace DlcvSequenceTest
             public void Update(string windowId, object image, object result)
             {
                 Interlocked.Increment(ref _updateCount);
+            }
+        }
+
+        private sealed class RecoveringModbusClient : IModbusClient
+        {
+            private readonly MockModbusClient _inner = new MockModbusClient();
+            private int _remainingFailures;
+            private int _successfulConnectCount;
+
+            public RecoveringModbusClient(int failureCount)
+            {
+                _remainingFailures = failureCount;
+            }
+
+            public int SuccessfulConnectCount { get { return Volatile.Read(ref _successfulConnectCount); } }
+
+            public bool Connect(string host, int port, byte deviceId)
+            {
+                if (Interlocked.Decrement(ref _remainingFailures) >= 0)
+                    throw new InvalidOperationException("模拟 Modbus TCP 服务器未启动");
+                Interlocked.Increment(ref _successfulConnectCount);
+                return _inner.Connect(host, port, deviceId);
+            }
+
+            public void Close() { _inner.Close(); }
+            public ushort ReadHoldingRegister(ushort address) { return _inner.ReadHoldingRegister(address); }
+            public ushort[] ReadHoldingRegisters(ushort address, ushort count) { return _inner.ReadHoldingRegisters(address, count); }
+            public void WriteSingleRegister(ushort address, ushort value) { _inner.WriteSingleRegister(address, value); }
+            public void SetRegister(ushort address, ushort value) { _inner.SetRegister(address, value); }
+        }
+
+        private sealed class InteractiveDisplaySink : IInteractiveDisplaySink
+        {
+            public int InteractiveUpdateCount { get; private set; }
+            public object LastRawImage { get; private set; }
+
+            public void Update(string windowId, object image, object result)
+            {
+                throw new InvalidOperationException("交互式显示不应退回已渲染图片路径");
+            }
+
+            public void UpdateInteractive(string windowId, object rawImage, object renderedImage, object result)
+            {
+                InteractiveUpdateCount++;
+                LastRawImage = rawImage;
+                var ownedMat = renderedImage as Mat;
+                if (ownedMat != null) ownedMat.Dispose();
             }
         }
     }

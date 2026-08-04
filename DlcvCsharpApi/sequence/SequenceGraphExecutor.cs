@@ -61,6 +61,7 @@ namespace DLCV.SequenceGraph
         public SequenceTriggerFailure LastFailure { get; private set; }
         public Action<string, string, string, string> ProgressSink { get; set; }
         public Action<ResourceItem, CameraResourceState> CameraStateChanged { get; set; }
+        public Action<bool, string> ModbusStateChanged { get; set; }
         public List<Dictionary<string, object>> Events { get; private set; }
         public List<string> TriggerNodeIds { get; private set; }
 

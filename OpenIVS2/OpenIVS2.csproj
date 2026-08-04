@@ -95,6 +95,7 @@
     <Compile Include="SettingsWindow.xaml.cs">
       <DependentUpon>SettingsWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Controls\InteractiveImageViewer.cs" />
     <Compile Include="Models\AppSettings.cs" />
     <Compile Include="Services\SettingsService.cs" />
     <Compile Include="Services\SequenceGraphBuilder.cs" />

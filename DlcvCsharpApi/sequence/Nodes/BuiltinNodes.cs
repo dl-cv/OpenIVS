@@ -187,7 +187,13 @@ namespace DLCV.SequenceGraph.Nodes
             Dictionary<string, object> okInfo;
             var vis = ResultOverlayDrawer.Draw(image, result, node.Props, out okInfo);
             if (executor.DisplaySink != null)
-                executor.DisplaySink.Update(windowId, vis, result);
+            {
+                var interactive = executor.DisplaySink as IInteractiveDisplaySink;
+                if (interactive != null)
+                    interactive.UpdateInteractive(windowId, image, vis, result);
+                else
+                    executor.DisplaySink.Update(windowId, vis, result);
+            }
             var payload = new JObject();
             payload["ok"] = okInfo != null && okInfo.ContainsKey("ok") && Convert.ToBoolean(okInfo["ok"]);
             payload["reason"] = okInfo != null && okInfo.ContainsKey("reason") ? (okInfo["reason"] ?? "").ToString() : "";
@@ -317,17 +323,14 @@ namespace DLCV.SequenceGraph.Nodes
 
             var host = GetString(node, "host", "127.0.0.1");
             var port = GetInt(node, "port", 502);
-            var deviceId = (byte)GetInt(node, "device_id", 1);
             var photoReg = GetInt(node, "photo_reg", 4111);
             if (executor.ModbusClient == null)
                 throw new InvalidOperationException("IModbusClient not injected");
-            if (!executor.ModbusClient.Connect(host, port, deviceId))
-                throw new InvalidOperationException("modbus connect failed: " + host + ":" + port);
             var cts = new CancellationTokenSource();
             var task = Task.Run(() => PollLoop(executor, nodeId, node, cts.Token));
             executor.RegisterTriggerSource(nodeId, new ModbusPollHandle(cts, task));
             executor.EmitLog("info", nodeId,
-                "start polling Modbus photo " + host + ":" + port + " reg=" + photoReg);
+                "start Modbus background polling " + host + ":" + port + " reg=" + photoReg);
             return Task.CompletedTask;
         }
 
@@ -374,17 +377,22 @@ namespace DLCV.SequenceGraph.Nodes
             var barcodeCount = (ushort)GetInt(node, "barcode_count", 10);
             var pollMs = GetInt(node, "poll_interval_ms", 200);
             if (pollMs < 10) pollMs = 10;
+            const int reconnectDelayMs = 1000;
             var edgeTracker = new RisingEdgeTracker();
+            bool? connectedState = null;
 
             while (!token.IsCancellationRequested)
             {
+                var delayMs = pollMs;
                 try
                 {
                     if (!client.Connect(host, port, deviceId))
+                        throw new InvalidOperationException("modbus connect failed: " + host + ":" + port);
+                    if (connectedState != true)
                     {
-                        if (token.WaitHandle.WaitOne(pollMs))
-                            break;
-                        continue;
+                        connectedState = true;
+                        executor.EmitLog("info", nodeId, "Modbus connected: " + host + ":" + port);
+                        NotifyModbusState(executor, true, "Modbus TCP 已连接");
                     }
                     var photo = client.ReadHoldingRegister(photoReg);
                     if (edgeTracker.Sample(photo, photoValue))
@@ -420,8 +428,14 @@ namespace DLCV.SequenceGraph.Nodes
                 catch (Exception ex)
                 {
                     edgeTracker.Reset();
-                    executor.EmitLog(token.IsCancellationRequested ? "warn" : "error", nodeId,
-                        "Modbus poll failed: " + ex.Message);
+                    delayMs = reconnectDelayMs;
+                    if (connectedState != false)
+                    {
+                        connectedState = false;
+                        executor.EmitLog(token.IsCancellationRequested ? "warn" : "error", nodeId,
+                            "Modbus unavailable; retrying in background: " + ex.Message);
+                        NotifyModbusState(executor, false, "等待 Modbus TCP 连接");
+                    }
                     try
                     {
                         client.Close();
@@ -433,8 +447,19 @@ namespace DLCV.SequenceGraph.Nodes
                     }
                 }
                 if (token.IsCancellationRequested) break;
-                if (token.WaitHandle.WaitOne(pollMs))
+                if (token.WaitHandle.WaitOne(delayMs))
                     break;
+            }
+        }
+
+        private static void NotifyModbusState(SequenceGraphExecutor executor, bool connected, string message)
+        {
+            var callback = executor != null ? executor.ModbusStateChanged : null;
+            if (callback == null) return;
+            try { callback(connected, message); }
+            catch (Exception ex)
+            {
+                executor.EmitLog("warn", "modbus_state", "Modbus state callback failed: " + ex.Message);
             }
         }
 
@@ -522,7 +547,7 @@ namespace DLCV.SequenceGraph.Nodes
                     var completed = false;
                     try
                     {
-                        completed = _task.Wait(2000);
+                        completed = _task.Wait(3000);
                     }
                     catch (AggregateException ex)
                     {
@@ -536,7 +561,7 @@ namespace DLCV.SequenceGraph.Nodes
                     }
 
                     if (!completed)
-                        throw new TimeoutException("Modbus poll task did not exit within 2 seconds");
+                        throw new TimeoutException("Modbus poll task did not exit within 3 seconds");
                     if (_task.IsFaulted)
                     {
                         throw new AggregateException(

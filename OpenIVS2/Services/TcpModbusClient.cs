@@ -26,11 +26,11 @@ namespace OpenIVS2.Services
                     return true;
 
                 CloseInternal();
-                var client = new TcpClient { NoDelay = true, ReceiveTimeout = 2000, SendTimeout = 2000 };
+                var client = new TcpClient { NoDelay = true, ReceiveTimeout = 1000, SendTimeout = 1000 };
                 var connect = client.BeginConnect(host, port, null, null);
                 try
                 {
-                    if (!connect.AsyncWaitHandle.WaitOne(3000))
+                    if (!connect.AsyncWaitHandle.WaitOne(1000))
                         throw new TimeoutException("Modbus TCP 连接超时: " + host + ":" + port);
                     client.EndConnect(connect);
                 }

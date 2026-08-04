@@ -46,6 +46,19 @@ namespace OpenIVS2.Acceptance
                         window.CameraCardCount == count && window.CameraGridRows == expectedRows && window.CameraGridColumns == expectedColumns,
                         count + " 台相机布局");
                 }
+                success &= Check(checks, "camera_title_without_slot",
+                    window.GetCameraTitleForAcceptance("A") == settings.Cameras[0].Name,
+                    "相机标题只显示相机名称，不显示 [A] 等槽位");
+                success &= Check(checks, "brand_logo_aspect_ratio",
+                    window.BrandLogoKeepsAspectRatio,
+                    "顶部 Logo 固定高度并按原始宽高比缩放");
+                success &= Check(checks, "overall_result_header",
+                    window.OverallResultHeader == "总结果",
+                    "结果标题只显示总结果");
+                success &= Check(checks, "camera_state_text",
+                    MainWindow.FormatCameraState(CameraResourceState.Opened) == "READY" &&
+                    MainWindow.FormatCameraState(CameraResourceState.NotOpened) == "NOT READY",
+                    "相机状态使用 READY / NOT READY");
 
                 var settingsPreviewData = settings.Clone();
                 settingsPreviewData.Cameras[0].Mode = "hik";
@@ -101,6 +114,15 @@ namespace OpenIVS2.Acceptance
                     tcpTrigger.Props.Value<int>("port") == 502 &&
                     tcpTrigger.Props.Value<int>("photo_reg") == 4111,
                     "TCP 模式运行时图直接监听 Modbus TCP");
+
+                window.ApplySettingsForAcceptance(tcpSettings);
+                await window.StartForAcceptanceAsync(new AcceptanceFlowRunner(), new UnavailableModbusClient());
+                success &= Check(checks, "tcp_unavailable_runtime",
+                    await WaitUntilAsync(() => window.IsRunning && window.IsModbusWaiting, 2000) && window.SettingsAvailable,
+                    "TCP 服务器未连接时系统继续运行且设置可用");
+                await window.StopForAcceptanceAsync();
+                window.ApplySettingsForAcceptance(settings);
+
                 success &= Check(checks, "camera_failure", VirtualCameraFailureIsReported(output), "虚拟相机缺图失败");
                 success &= Check(checks, "model_failure", MissingModelFailureIsReported(output), "模型缺失失败");
 
@@ -124,15 +146,51 @@ namespace OpenIVS2.Acceptance
                 success &= Check(checks, "plc_ok_cycle", await WaitUntilAsync(() => window.TotalCount == 1, 10000), "PLC 触发首个 OK 周期");
                 success &= Check(checks, "plc_clear_ok", plc.ReadHoldingRegister(settings.PhotoRegister) == settings.ClearValue, "OK 周期 PLC 清零");
                 success &= Check(checks, "ok_aggregate", window.OkCount == 1 && window.NgCount == 0, "全部相机 OK 时总结果 OK");
+                success &= Check(checks, "first_cycle_images",
+                    window.VisibleCameraImageCount == 3 && window.BufferedCameraImageCount == 3,
+                    "首个周期更新全部相机画面");
 
                 flow.NgSlot = "B";
                 await WaitUntilAsync(() => plc.ReadHoldingRegister(settings.PhotoRegister) == settings.ClearValue, 3000);
                 await Task.Delay(120);
                 plc.SetRegister(settings.PhotoRegister, settings.TriggerValue);
+                success &= Check(checks, "cycle_start_clears_images",
+                    await WaitUntilAsync(() => window.VisibleCameraImageCount == 0 && window.BufferedCameraImageCount == 0, 3000),
+                    "新周期开始时清空上次画面和显示缓存");
                 success &= Check(checks, "plc_ng_cycle", await WaitUntilAsync(() => window.TotalCount == 2, 10000), "PLC 触发第二个 NG 周期");
                 success &= Check(checks, "plc_clear_ng", plc.ReadHoldingRegister(settings.PhotoRegister) == settings.ClearValue, "NG 周期 PLC 清零");
                 success &= Check(checks, "ng_aggregate", window.OkCount == 1 && window.NgCount == 1, "任一相机 NG 时总结果 NG");
                 success &= Check(checks, "image_save", await WaitUntilAsync(() => Directory.GetFiles(savedImages, "*.*", SearchOption.AllDirectories).Length >= 6, 5000), "OK/NG 图片保存");
+
+                var viewer = window.GetCameraViewerForAcceptance("B");
+                success &= Check(checks, "interactive_viewer_result_layer",
+                    viewer != null && viewer.HasImage && viewer.OverlayCount > 0,
+                    "WPF 查看器接收原图和独立预测层");
+                if (viewer != null)
+                {
+                    var geometry = viewer.OverlayGeometrySignature;
+                    var initialScale = viewer.AnnotationScale;
+                    var initialLineWidth = viewer.EffectiveScreenLineWidth;
+                    viewer.ToggleOverlays();
+                    var hidden = !viewer.OverlaysVisible && viewer.HasImage;
+                    viewer.ToggleOverlays();
+                    viewer.IncreaseAnnotationScale();
+                    success &= Check(checks, "interactive_viewer_toggle",
+                        hidden && viewer.OverlaysVisible,
+                        "V 逻辑只切换预测层，原图保持显示");
+                    success &= Check(checks, "interactive_viewer_annotation_scale",
+                        viewer.AnnotationScale > initialScale &&
+                        viewer.EffectiveScreenLineWidth > initialLineWidth &&
+                        viewer.OverlayGeometrySignature == geometry,
+                        "+/- 同步调整字号和框线宽且不改变框坐标");
+                    var zoomBefore = viewer.Zoom;
+                    viewer.ZoomAt(new System.Windows.Point(viewer.ActualWidth / 2.0, viewer.ActualHeight / 2.0), 1.1);
+                    var zoomed = viewer.Zoom > zoomBefore;
+                    viewer.FitToView();
+                    success &= Check(checks, "interactive_viewer_zoom_reset", zoomed,
+                        "滚轮缩放逻辑和右键复位逻辑可用");
+                    viewer.DecreaseAnnotationScale();
+                }
 
                 await Task.Delay(250);
                 window.CaptureScreenshot(Path.Combine(screenshots, "openivs2-3-camera-ng.png"));
@@ -302,6 +360,19 @@ namespace OpenIVS2.Acceptance
 
             public IFlowHandle AcquireFlow(string flowPath) { return AcquireFlow(flowPath, null); }
             public IFlowHandle AcquireFlow(string flowPath, string face) { return new FlowHandle(flowPath, null); }
+        }
+
+        private sealed class UnavailableModbusClient : IModbusClient
+        {
+            public bool Connect(string host, int port, byte deviceId)
+            {
+                throw new InvalidOperationException("模拟 Modbus TCP 服务器未启动");
+            }
+
+            public void Close() { }
+            public ushort ReadHoldingRegister(ushort address) { throw new InvalidOperationException("Modbus TCP 未连接"); }
+            public ushort[] ReadHoldingRegisters(ushort address, ushort count) { throw new InvalidOperationException("Modbus TCP 未连接"); }
+            public void WriteSingleRegister(ushort address, ushort value) { throw new InvalidOperationException("Modbus TCP 未连接"); }
         }
     }
 }

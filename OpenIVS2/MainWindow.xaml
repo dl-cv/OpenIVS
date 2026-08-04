@@ -19,7 +19,7 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Image Source="logo.ico" Width="44" Height="44" Stretch="Uniform" Margin="0,0,12,0"/>
+                    <Image x:Name="BrandLogo" Source="logo.ico" Height="44" Stretch="Uniform" Margin="0,0,12,0"/>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="OpenIVS2" FontSize="23" FontWeight="Bold" Foreground="#263238"/>
                         <TextBlock Text="多相机工业视觉检测" FontSize="12" Foreground="#607D8B"/>
@@ -51,7 +51,7 @@
                 </Grid.RowDefinitions>
                 <Border Grid.Row="0" x:Name="OverallResultCard" Style="{StaticResource CardStyle}" Background="#90A4AE">
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="本周期总结果" Foreground="White" FontSize="16" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="OverallResultHeaderText" Text="总结果" Foreground="White" FontSize="16" HorizontalAlignment="Center"/>
                         <TextBlock x:Name="OverallResultText" Text="待机" Foreground="White" FontSize="64" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,4"/>
                         <TextBlock x:Name="CycleDetailText" Text="等待触发" Foreground="White" FontSize="13" HorizontalAlignment="Center" TextWrapping="Wrap"/>
                     </StackPanel>

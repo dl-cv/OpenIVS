@@ -11,7 +11,7 @@ using OpenCvSharp.Extensions;
 
 namespace OpenIVS2.Services
 {
-    public sealed class UiDisplaySink : IDisplaySink
+    public sealed class UiDisplaySink : IInteractiveDisplaySink
     {
         private readonly object _sync = new object();
         private readonly Dispatcher _dispatcher;
@@ -26,7 +26,7 @@ namespace OpenIVS2.Services
 
         public void Update(string windowId, object image, object result)
         {
-            var bytes = ToPngBytes(image);
+            var bytes = ToPngBytes(image, true);
             if (bytes == null) return;
             Action commit = () =>
             {
@@ -38,12 +38,34 @@ namespace OpenIVS2.Services
             else _dispatcher.Invoke(commit);
         }
 
+        public void UpdateInteractive(string windowId, object rawImage, object renderedImage, object result)
+        {
+            var rawBytes = ToPngBytes(rawImage, false);
+            var renderedBytes = ToPngBytes(renderedImage, true);
+            if (rawBytes == null) rawBytes = renderedBytes;
+            if (rawBytes == null || renderedBytes == null) return;
+            Action commit = () =>
+            {
+                var rawSource = FromPngBytes(rawBytes);
+                var renderedSource = FromPngBytes(renderedBytes);
+                lock (_sync) _images[windowId] = renderedSource;
+                _update(windowId, rawSource, result);
+            };
+            if (_dispatcher.CheckAccess()) commit();
+            else _dispatcher.Invoke(commit);
+        }
+
         public Dictionary<string, BitmapSource> GetImagesSnapshot()
         {
             lock (_sync) return new Dictionary<string, BitmapSource>(_images, StringComparer.OrdinalIgnoreCase);
         }
 
-        private static byte[] ToPngBytes(object image)
+        public void Clear()
+        {
+            lock (_sync) _images.Clear();
+        }
+
+        private static byte[] ToPngBytes(object image, bool disposeOwnedMat)
         {
             try
             {
@@ -72,7 +94,7 @@ namespace OpenIVS2.Services
             finally
             {
                 var ownedMat = image as Mat;
-                if (ownedMat != null) ownedMat.Dispose();
+                if (disposeOwnedMat && ownedMat != null) ownedMat.Dispose();
             }
         }
 

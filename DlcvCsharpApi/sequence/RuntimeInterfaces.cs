@@ -46,6 +46,11 @@ namespace DLCV.SequenceGraph
         void Update(string windowId, object image, object result);
     }
 
+    public interface IInteractiveDisplaySink : IDisplaySink
+    {
+        void UpdateInteractive(string windowId, object rawImage, object renderedImage, object result);
+    }
+
     public interface IFaceResultSink
     {
         void Publish(string windowId, object image, object faceResult);

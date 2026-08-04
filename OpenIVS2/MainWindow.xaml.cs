@@ -14,6 +14,7 @@ using System.Windows.Media.Imaging;
 using DLCV.SequenceGraph;
 using OpenCvSharp;
 using OpenIVS2.Acceptance;
+using OpenIVS2.Controls;
 using OpenIVS2.Models;
 using OpenIVS2.Services;
 
@@ -23,7 +24,8 @@ namespace OpenIVS2
     {
         private sealed class CameraCardControls
         {
-            public Image Image;
+            public InteractiveImageViewer Viewer;
+            public TextBlock TitleText;
             public Border StatusBorder;
             public TextBlock StatusText;
         }
@@ -43,8 +45,10 @@ namespace OpenIVS2
         private CancellationTokenSource _plcCancellation;
         private Task _plcTask;
         private bool _running;
+        private bool _openingSettings;
         private bool _closing;
         private bool _closeConfirmed;
+        private bool? _modbusConnected;
         private int _totalCount;
         private int _okCount;
         private int _ngCount;
@@ -67,6 +71,29 @@ namespace OpenIVS2
         internal int CameraGridRows { get { return CameraGrid.Rows; } }
         internal int CameraGridColumns { get { return CameraGrid.Columns; } }
         internal bool IsRunning { get { return _running; } }
+        internal bool SettingsAvailable { get { return SettingsButton.IsEnabled; } }
+        internal bool IsModbusWaiting { get { return _modbusConnected == false; } }
+        internal bool BrandLogoKeepsAspectRatio
+        {
+            get { return double.IsNaN(BrandLogo.Width) && BrandLogo.Height == 44 && BrandLogo.Stretch == Stretch.Uniform; }
+        }
+        internal string OverallResultHeader { get { return OverallResultHeaderText.Text; } }
+        internal int VisibleCameraImageCount { get { return _cameraCards.Values.Count(x => x.Viewer.HasImage); } }
+        internal int BufferedCameraImageCount { get { return _displaySink != null ? _displaySink.GetImagesSnapshot().Count : 0; } }
+        internal InteractiveImageViewer GetCameraViewerForAcceptance(string slot)
+        {
+            CameraCardControls card;
+            return _cameraCards.TryGetValue(slot, out card) ? card.Viewer : null;
+        }
+        internal string GetCameraTitleForAcceptance(string slot)
+        {
+            CameraCardControls card;
+            return _cameraCards.TryGetValue(slot, out card) ? card.TitleText.Text : null;
+        }
+        internal static string FormatCameraState(CameraResourceState state)
+        {
+            return state == CameraResourceState.Opened ? "READY" : "NOT READY";
+        }
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
@@ -102,14 +129,26 @@ namespace OpenIVS2
 
         private async void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_running) await StopSystemAsync();
-            var window = new SettingsWindow(_settings) { Owner = this };
-            if (window.ShowDialog() == true)
+            if (_openingSettings) return;
+            _openingSettings = true;
+            SettingsButton.IsEnabled = false;
+            try
             {
-                _settings = window.WorkingSettings;
-                _settingsService.Save(_settings);
-                BuildCameraGrid();
-                Log("info", "settings", "设置已保存");
+                if (_running) await StopSystemAsync();
+                SettingsButton.IsEnabled = false;
+                var window = new SettingsWindow(_settings) { Owner = this };
+                if (window.ShowDialog() == true)
+                {
+                    _settings = window.WorkingSettings;
+                    _settingsService.Save(_settings);
+                    BuildCameraGrid();
+                    Log("info", "settings", "设置已保存");
+                }
+            }
+            finally
+            {
+                _openingSettings = false;
+                SettingsButton.IsEnabled = true;
             }
         }
 
@@ -213,20 +252,29 @@ namespace OpenIVS2
                 _host.Executor.TriggerFailed = OnTriggerFailedAsync;
                 _host.Executor.ProgressSink = OnProgress;
                 _host.Executor.CameraStateChanged = OnCameraStateChanged;
+                _host.Executor.ModbusStateChanged = OnModbusStateChanged;
+                _modbusConnected = null;
+                if (IsTcpPlcMode())
+                {
+                    PlcIndicator.Fill = Brushes.DarkOrange;
+                    StatusText.Text = "正在连接 Modbus TCP";
+                }
                 await Task.Run(() => _host.Start());
                 _running = true;
                 StartButton.IsEnabled = false;
                 StopButton.IsEnabled = true;
                 TriggerButton.IsEnabled = !IsTcpPlcMode();
-                SettingsButton.IsEnabled = false;
+                SettingsButton.IsEnabled = true;
                 CameraIndicator.Fill = Brushes.Green;
                 ModelIndicator.Fill = Brushes.Green;
-                StatusText.Text = "系统运行中";
+                StatusText.Text = IsTcpPlcMode() && _modbusConnected != true
+                    ? "等待 Modbus TCP 连接"
+                    : "系统运行中";
                 Log("info", "system", "相机与模型加载完成，系统进入运行状态");
                 if (IsTcpPlcMode())
                 {
-                    PlcIndicator.Fill = Brushes.Green;
-                    Log("info", "plc", "运行时序正在监听 Modbus TCP " + _settings.TcpHost + ":" + _settings.TcpPort +
+                    PlcIndicator.Fill = _modbusConnected == true ? Brushes.Green : Brushes.DarkOrange;
+                    Log("info", "plc", "运行时序已启动 Modbus TCP 后台监听 " + _settings.TcpHost + ":" + _settings.TcpPort +
                         "，拍照寄存器=" + _settings.PhotoRegister);
                 }
                 else if (_settings.UsePlc) StartPlcPolling();
@@ -298,6 +346,7 @@ namespace OpenIVS2
             }
             _cameraFactory = null;
             _displaySink = null;
+            _modbusConnected = null;
             _running = false;
             StartButton.IsEnabled = true;
             StopButton.IsEnabled = false;
@@ -455,22 +504,57 @@ namespace OpenIVS2
             CameraCardControls card;
             if (slot != null && _cameraCards.TryGetValue(slot, out card))
             {
-                card.Image.Source = image;
+                card.Viewer.SetFrame(image, result);
                 SetCameraStatus(slot, "已更新", Brushes.DodgerBlue);
             }
         }
 
         private void OnProgress(string type, string evt, string nodeId, string nodeType)
         {
+            if (evt == "trigger_started")
+            {
+                if (Dispatcher.CheckAccess()) ClearCycleDisplay();
+                else Dispatcher.Invoke(new Action(ClearCycleDisplay));
+            }
             if (evt == "node_started" || evt == "node_failed" || type == "completed")
                 Log(evt == "node_failed" ? "error" : "debug", nodeId, evt ?? type);
+        }
+
+        private void ClearCycleDisplay()
+        {
+            if (_displaySink != null) _displaySink.Clear();
+            foreach (var card in _cameraCards.Values)
+            {
+                card.Viewer.ClearFrame();
+                card.StatusText.Text = "等待画面";
+                card.StatusBorder.Background = Brushes.Gray;
+            }
+            OverallResultText.Text = "检测中";
+            OverallResultCard.Background = new SolidColorBrush(Color.FromRgb(84, 110, 122));
+            OverallIndicator.Fill = Brushes.DodgerBlue;
+            CycleDetailText.Text = "等待本周期画面";
+            StatusText.Text = "检测周期执行中";
         }
 
         private void OnCameraStateChanged(ResourceItem resource, CameraResourceState state)
         {
             var slot = resource.Id.StartsWith("CAM_", StringComparison.OrdinalIgnoreCase) ? resource.Id.Substring(4) : resource.Id;
             var brush = state == CameraResourceState.Opened ? Brushes.Green : state == CameraResourceState.Failed ? Brushes.Red : Brushes.Orange;
-            Dispatcher.BeginInvoke(new Action(() => SetCameraStatus(slot, state.ToString(), brush)));
+            Dispatcher.BeginInvoke(new Action(() => SetCameraStatus(slot, FormatCameraState(state), brush)));
+        }
+
+        private void OnModbusStateChanged(bool connected, string message)
+        {
+            _modbusConnected = connected;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!_running && _host == null) return;
+                PlcIndicator.Fill = connected ? Brushes.Green : Brushes.DarkOrange;
+                if (!connected)
+                    StatusText.Text = string.IsNullOrWhiteSpace(message) ? "等待 Modbus TCP 连接" : message;
+                else if (StatusText.Text.IndexOf("Modbus TCP", StringComparison.OrdinalIgnoreCase) >= 0)
+                    StatusText.Text = "系统运行中";
+            }));
         }
 
         private object LoadImage(string path)
@@ -499,17 +583,17 @@ namespace OpenIVS2
 
         private UIElement CreateCameraCard(CameraSettings camera)
         {
-            var image = new Image { Stretch = Stretch.Uniform, SnapsToDevicePixels = true };
-            RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
+            var viewer = new InteractiveImageViewer();
             var statusText = new TextBlock { Text = "待机", Foreground = Brushes.White, FontSize = 11, FontWeight = FontWeights.SemiBold };
             var statusBorder = new Border { Background = Brushes.Gray, CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 3, 10, 3), Child = statusText };
             var header = new Grid { Margin = new Thickness(4, 2, 4, 8) };
             header.ColumnDefinitions.Add(new ColumnDefinition());
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            header.Children.Add(new TextBlock { Text = camera.Name + "  [" + camera.Slot + "]", FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(38, 50, 56)), VerticalAlignment = VerticalAlignment.Center });
+            var titleText = new TextBlock { Text = camera.Name, FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(38, 50, 56)), VerticalAlignment = VerticalAlignment.Center };
+            header.Children.Add(titleText);
             Grid.SetColumn(statusBorder, 1);
             header.Children.Add(statusBorder);
-            var imageBorder = new Border { Background = new SolidColorBrush(Color.FromRgb(25, 31, 35)), CornerRadius = new CornerRadius(5), Child = image };
+            var imageBorder = new Border { Background = new SolidColorBrush(Color.FromRgb(25, 31, 35)), CornerRadius = new CornerRadius(5), Child = viewer };
             var grid = new Grid();
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -517,7 +601,7 @@ namespace OpenIVS2
             Grid.SetRow(imageBorder, 1);
             grid.Children.Add(imageBorder);
             var border = new Border { Background = Brushes.White, CornerRadius = new CornerRadius(7), Margin = new Thickness(5), Padding = new Thickness(8), BorderBrush = new SolidColorBrush(Color.FromRgb(224, 230, 233)), BorderThickness = new Thickness(1), Child = grid };
-            _cameraCards[camera.Slot] = new CameraCardControls { Image = image, StatusBorder = statusBorder, StatusText = statusText };
+            _cameraCards[camera.Slot] = new CameraCardControls { Viewer = viewer, TitleText = titleText, StatusBorder = statusBorder, StatusText = statusText };
             return border;
         }
 
@@ -558,7 +642,7 @@ namespace OpenIVS2
         private void SetBusy(bool busy, string status)
         {
             StartButton.IsEnabled = !busy && !_running;
-            SettingsButton.IsEnabled = !busy && !_running;
+            SettingsButton.IsEnabled = !busy;
             if (!string.IsNullOrWhiteSpace(status)) StatusText.Text = status;
         }
 
