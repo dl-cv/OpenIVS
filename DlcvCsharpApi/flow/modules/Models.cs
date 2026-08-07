@@ -68,22 +68,44 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				string cacheKey = (_modelPath ?? "") + "|" + deviceId + "|" + rpcMode;
-				bool cacheHit = false;
+				string normalizedPath = NormalizeModelPath(_modelPath);
+				string cacheKey = (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
 				lock (_modelCacheLock)
 				{
-					cacheHit = _modelCache.TryGetValue(cacheKey, out _model);
-					if (!cacheHit)
+					if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
 					{
-						_model = new Model(_modelPath, deviceId, rpcMode, true);
+						_model = new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
 						_modelCache[cacheKey] = _model;
 					}
 				}
+				// 多个模块/面可共享同一路径模型实例；不在模块侧单独 Dispose。
 				SyncModelMeta();
 			}
 			else
 			{
 				SyncModelMeta();
+			}
+		}
+
+		public static void ClearModelCache()
+		{
+			lock (_modelCacheLock)
+			{
+				_modelCache.Clear();
+			}
+		}
+
+		private static string NormalizeModelPath(string modelPath)
+		{
+			if (string.IsNullOrWhiteSpace(modelPath))
+				return modelPath;
+			try
+			{
+				return Path.GetFullPath(modelPath.Trim());
+			}
+			catch
+			{
+				return modelPath.Trim();
 			}
 		}
 

@@ -387,6 +387,9 @@ namespace dlcv_infer_csharp
         public static void FreeAllModels()
         {
             DllLoader.Instance.dlcv_free_all_models?.Invoke();
+            // 底层模型已全部释放，同步清空路径缓存，避免同路径再次命中失效 index。
+            Model.ClearModelCache();
+            DlcvModules.BaseModelModule.ClearModelCache();
         }
 
         public static JObject GetDeviceInfo()

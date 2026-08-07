@@ -69,6 +69,9 @@ namespace dlcv_infer_csharp
         private static readonly Dictionary<string, int> _modelCache = new Dictionary<string, int>();
         private static readonly HashSet<string> _loadingModels = new HashSet<string>();
         private static readonly object _cacheLock = new object();
+        // 当前实例对应的缓存键；仅用于 owner 释放时移除缓存条目。
+        private string _cacheKey;
+        private bool _cacheEnabled;
 
         // 缓存模型信息（加载后即读取一次）
         private JObject _cachedModelInfo = null;
@@ -112,6 +115,10 @@ namespace dlcv_infer_csharp
                         if (_modelCache.TryGetValue(cacheKey, out cachedIndex))
                         {
                             modelIndex = cachedIndex;
+                            _cacheKey = cacheKey;
+                            _cacheEnabled = true;
+                            // 缓存命中只借用已加载底层模型，不能再拥有释放权。
+                            OwnModelIndex = false;
                             _dllLoader = DllLoader.Instance;
                             TryCacheModelInfo();
                             return;
@@ -161,6 +168,10 @@ namespace dlcv_infer_csharp
                         _modelCache[cacheKey] = modelIndex;
                         _loadingModels.Remove(cacheKey);
                     }
+                    _cacheKey = cacheKey;
+                    _cacheEnabled = true;
+                    // 首个加载者拥有释放权；后续同键实例仅借用。
+                    OwnModelIndex = true;
                 }
             }
             catch
@@ -581,6 +592,9 @@ namespace dlcv_infer_csharp
                 modelIndex = -1;
                 return;
             }
+
+            // owner 释放前先摘掉缓存，避免后续同路径命中已释放的 model_index。
+            RemoveFromModelCache();
 
             if (_isDvpMode)
             {
@@ -2468,6 +2482,22 @@ namespace dlcv_infer_csharp
             {
                 _modelCache.Clear();
                 _loadingModels.Clear();
+            }
+        }
+
+        private void RemoveFromModelCache()
+        {
+            if (!_cacheEnabled || string.IsNullOrEmpty(_cacheKey))
+                return;
+            lock (_cacheLock)
+            {
+                int cachedIndex;
+                if (_modelCache.TryGetValue(_cacheKey, out cachedIndex) &&
+                    cachedIndex == modelIndex)
+                {
+                    _modelCache.Remove(_cacheKey);
+                }
+                _loadingModels.Remove(_cacheKey);
             }
         }
     }
