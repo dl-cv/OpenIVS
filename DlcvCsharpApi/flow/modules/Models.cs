@@ -20,7 +20,7 @@ namespace DlcvModules
 		protected Model _model;
 		protected JObject _modelInfo;
 		protected JArray _maxShape;
-		protected int _maxBatchSize = 1;
+		protected int _maxBatchSize = 0;
 
 		// 按 (modelPath|deviceId|rpcMode) 缓存 Model 实例，避免 Flow 每次推理重复加载
 		private static readonly Dictionary<string, Model> _modelCache = new Dictionary<string, Model>(StringComparer.OrdinalIgnoreCase);
@@ -218,6 +218,8 @@ namespace DlcvModules
 			var sourceIndices = new List<int>();
 			var buckets = new Dictionary<string, List<int>>();
 			var bucketAreas = new Dictionary<string, int>();
+			int inferCallCount = 0;
+			int maxActualBatch = 0;
 
 			try
 			{
@@ -270,6 +272,8 @@ namespace DlcvModules
 						{
 							chunkMats.Add(rgbInputs[chunkLocals[k]]);
 						}
+						inferCallCount += 1;
+						maxActualBatch = Math.Max(maxActualBatch, chunkMats.Count);
 
                         var inferSw = Stopwatch.StartNew();
                         Utils.CSharpResult res = p.Count > 0 ? _model.InferBatch(chunkMats, p) : _model.InferBatch(chunkMats, null);
@@ -310,6 +314,14 @@ namespace DlcvModules
 					outResults.Add(entry);
 					outIndex += 1;
 				}
+
+				InferTiming.AddFlowModelBatchInfo(
+					NodeId,
+					ReadStringOrDefault("model_path_original", _modelPath),
+					rgbInputs.Count,
+					effectiveBatch,
+					inferCallCount,
+					maxActualBatch);
 
 				return new ModuleIO(outImages, outResults);
 			}

@@ -98,6 +98,37 @@ namespace DlcvModules
         }
     }
 
+    public sealed class FlowModelBatchInfo
+    {
+        public int NodeId { get; private set; }
+        public string ModelPath { get; private set; }
+        public int InputCount { get; private set; }
+        public int BatchLimit { get; private set; }
+        public int InferCallCount { get; private set; }
+        public int MaxActualBatch { get; private set; }
+
+        public FlowModelBatchInfo(
+            int nodeId,
+            string modelPath,
+            int inputCount,
+            int batchLimit,
+            int inferCallCount,
+            int maxActualBatch)
+        {
+            NodeId = nodeId;
+            ModelPath = modelPath ?? string.Empty;
+            InputCount = Math.Max(0, inputCount);
+            BatchLimit = Math.Max(1, batchLimit);
+            InferCallCount = Math.Max(0, inferCallCount);
+            MaxActualBatch = Math.Max(0, maxActualBatch);
+        }
+
+        public FlowModelBatchInfo Clone()
+        {
+            return new FlowModelBatchInfo(NodeId, ModelPath, InputCount, BatchLimit, InferCallCount, MaxActualBatch);
+        }
+    }
+
     /// <summary>
     /// 线程内推理计时：用于区分 dlcv_infer 耗时与流程总耗时。
     /// 同时记录每个流程节点的耗时，便于定位 batch 退化点。
@@ -109,12 +140,16 @@ namespace DlcvModules
         [ThreadStatic] private static double _lastFlowInferMs;
         [ThreadStatic] private static List<FlowNodeTiming> _currentFlowNodeTimings;
         [ThreadStatic] private static List<FlowNodeTiming> _lastFlowNodeTimings;
+        [ThreadStatic] private static List<FlowModelBatchInfo> _currentFlowModelBatchInfos;
+        [ThreadStatic] private static List<FlowModelBatchInfo> _lastFlowModelBatchInfos;
 
         public static void BeginFlowRequest()
         {
             _currentDlcvInferMs = 0.0;
             if (_currentFlowNodeTimings == null) _currentFlowNodeTimings = new List<FlowNodeTiming>();
             _currentFlowNodeTimings.Clear();
+            if (_currentFlowModelBatchInfos == null) _currentFlowModelBatchInfos = new List<FlowModelBatchInfo>();
+            _currentFlowModelBatchInfos.Clear();
         }
 
         public static void AddDlcvInferMs(double costMs)
@@ -128,6 +163,24 @@ namespace DlcvModules
             if (costMs < 0) costMs = 0.0;
             if (_currentFlowNodeTimings == null) _currentFlowNodeTimings = new List<FlowNodeTiming>();
             _currentFlowNodeTimings.Add(new FlowNodeTiming(nodeId, nodeType, nodeTitle, costMs));
+        }
+
+        public static void AddFlowModelBatchInfo(
+            int nodeId,
+            string modelPath,
+            int inputCount,
+            int batchLimit,
+            int inferCallCount,
+            int maxActualBatch)
+        {
+            if (_currentFlowModelBatchInfos == null) _currentFlowModelBatchInfos = new List<FlowModelBatchInfo>();
+            _currentFlowModelBatchInfos.Add(new FlowModelBatchInfo(
+                nodeId,
+                modelPath,
+                inputCount,
+                batchLimit,
+                inferCallCount,
+                maxActualBatch));
         }
 
         public static void EndFlowRequest(double flowInferMs)
@@ -146,6 +199,17 @@ namespace DlcvModules
             {
                 var item = _currentFlowNodeTimings[i];
                 if (item != null) _lastFlowNodeTimings.Add(item.Clone());
+            }
+
+            if (_lastFlowModelBatchInfos == null) _lastFlowModelBatchInfos = new List<FlowModelBatchInfo>();
+            _lastFlowModelBatchInfos.Clear();
+            if (_currentFlowModelBatchInfos != null)
+            {
+                for (int i = 0; i < _currentFlowModelBatchInfos.Count; i++)
+                {
+                    var item = _currentFlowModelBatchInfos[i];
+                    if (item != null) _lastFlowModelBatchInfos.Add(item.Clone());
+                }
             }
         }
 
@@ -169,6 +233,18 @@ namespace DlcvModules
             for (int i = 0; i < _lastFlowNodeTimings.Count; i++)
             {
                 var item = _lastFlowNodeTimings[i];
+                if (item != null) result.Add(item.Clone());
+            }
+            return result;
+        }
+
+        public static List<FlowModelBatchInfo> GetLastFlowModelBatchInfos()
+        {
+            var result = new List<FlowModelBatchInfo>();
+            if (_lastFlowModelBatchInfos == null) return result;
+            for (int i = 0; i < _lastFlowModelBatchInfos.Count; i++)
+            {
+                var item = _lastFlowModelBatchInfos[i];
                 if (item != null) result.Add(item.Clone());
             }
             return result;
