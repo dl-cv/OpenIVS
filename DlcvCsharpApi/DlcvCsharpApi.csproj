@@ -93,6 +93,19 @@
     <Compile Include="flow\modules\ComponentSizeMeasure.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="sntl_admin_csharp.cs" />
+    <Compile Include="sequence\Schemas.cs" />
+    <Compile Include="sequence\SequenceContext.cs" />
+    <Compile Include="sequence\ValidationIssue.cs" />
+    <Compile Include="sequence\GraphValidator.cs" />
+    <Compile Include="sequence\SequenceGraphLoader.cs" />
+    <Compile Include="sequence\NodeRegistry.cs" />
+    <Compile Include="sequence\ISequenceNode.cs" />
+    <Compile Include="sequence\RuntimeInterfaces.cs" />
+    <Compile Include="sequence\RuntimeHelpers.cs" />
+    <Compile Include="sequence\ResultOverlayDrawer.cs" />
+    <Compile Include="sequence\SequenceGraphExecutor.cs" />
+    <Compile Include="sequence\SequenceHost.cs" />
+    <Compile Include="sequence\Nodes\BuiltinNodes.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
