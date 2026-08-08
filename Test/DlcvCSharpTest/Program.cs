@@ -113,6 +113,11 @@ namespace DlcvCSharpTest
                     return RunBenchmarkCommand(args);
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "flow-batch-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunFlowBatchSelfTest(args);
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "with-mask-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunWithMaskSelfTest();
@@ -562,6 +567,84 @@ namespace DlcvCSharpTest
             catch (Exception ex)
             {
                 Console.WriteLine("基准异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
+        }
+
+        private static int RunFlowBatchSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 3)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest flow-batch-selftest <modelPath> <imagePath> [batch]");
+                return 2;
+            }
+
+            string modelPath = args[1];
+            string imagePath = args[2];
+            int batch = ParsePositiveIntArg(args, 3, 1);
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                var p = new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = false,
+                    ["batch_size"] = 1
+                };
+                var images = new List<Mat>(batch);
+                for (int i = 0; i < batch; i++) images.Add(rgb);
+                p["batch_size"] = batch;
+                var result = model.InferBatch(images, p);
+                DisposeResultMasks(result);
+
+                var infos = InferTiming.GetLastFlowModelBatchInfos();
+                foreach (var info in infos.OrderBy(x => x.NodeId))
+                {
+                    Console.WriteLine(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "node={0}, model={1}, inputs={2}, limit={3}, calls={4}, max_actual_batch={5}",
+                            info.NodeId,
+                            Path.GetFileName(info.ModelPath),
+                            info.InputCount,
+                            info.BatchLimit,
+                            info.InferCallCount,
+                            info.MaxActualBatch));
+                }
+
+                var candidate = infos.OrderByDescending(x => x.InputCount).FirstOrDefault();
+                if (candidate == null || candidate.InputCount <= 1)
+                {
+                    Console.WriteLine("SELFTEST FAILED: 流程没有生成多个二阶段输入，无法验证内部 batch");
+                    return 1;
+                }
+                if (candidate.BatchLimit <= 1 || candidate.MaxActualBatch <= 1)
+                {
+                    Console.WriteLine("SELFTEST FAILED: 二阶段输入已聚合，但实际仍按 batch=1 推理");
+                    return 1;
+                }
+
+                Console.WriteLine("SELFTEST PASSED");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("SELFTEST ERROR: " + ex.Message);
                 return 1;
             }
             finally

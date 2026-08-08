@@ -84,6 +84,7 @@
   - `model-channel-order-selftest`
   - `dvs-rgb-selftest <modelPath> <imagePath>`
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
+  - `flow-batch-selftest <modelPath> <imagePath> [batch]`
 
 说明：
 
@@ -92,6 +93,7 @@
 - 为避免日志打断阅读：表格在所有测试执行完成后一次性输出（总表）；并在表格末尾追加“汇总”一行。
 - 内存泄露专项在表格输出后自动执行并单独输出结果；专项仅对 1 个实例分割模型执行。
 - `demo2-rgb-selftest` 会输出 `entry_rgb_signature`、`manual_rgb_signature` 与 `raw_bgr_signature`；当 `entry_rgb_signature == manual_rgb_signature` 且与 `raw_bgr_signature` 不同时，判定 Demo2 当前入口保持 RGB 数据流。
+- `flow-batch-selftest` 输出每个模型节点的输入数、batch 上限、底层调用次数与最大实际子批；存在多张二阶段输入且最大实际子批大于 1 时通过。
 
 ## 6. 文档表述规则
 
