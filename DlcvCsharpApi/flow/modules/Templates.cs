@@ -64,10 +64,8 @@ namespace DlcvModules
 		public static string NormalizeText(string text)
 		{
 			if (string.IsNullOrWhiteSpace(text)) return string.Empty;
-			string s = text.Trim();
-			s = s.Replace(" ", "");
-			s = s.Replace('l', 'I').Replace('O', '0').Replace('o', '0').Replace('1', 'I');
-			return s.ToUpperInvariant();
+			string s = text.Trim().Replace(" ", "").ToUpperInvariant();
+			return s.Replace('L', 'I').Replace('O', '0').Replace('1', 'I');
 		}
 
 		public static double Distance(int x1, int y1, int x2, int y2)
@@ -467,14 +465,11 @@ namespace DlcvModules
 			private static string NormalizeTextPM(string text)
 			{
 				if (string.IsNullOrWhiteSpace(text)) return string.Empty;
-				string s = text.Replace("\t", "").Replace("\r", "").Replace("\n", "");
-				// 去空白
-				s = s.Replace(" ", "");
-				// PrintMatch 对易混字符与符号的归一
-				s = s
-					.Replace('l', 'I')
+				string s = text.Replace("\t", "").Replace("\r", "").Replace("\n", "").Replace(" ", "");
+				s = s.ToUpperInvariant();
+				return s
+					.Replace('L', 'I')
 					.Replace('O', '0')
-					.Replace('o', '0')
 					.Replace('1', 'I')
 					.Replace('S', '5')
 					.Replace('Z', '2')
@@ -495,7 +490,6 @@ namespace DlcvModules
 					.Replace('\'', '"')
 					.Replace("—", "-")
 					.Replace("--", "-");
-				return s.ToUpperInvariant();
 			}
 
 			private static double CalculatePositionError(SimpleOcrItem a, SimpleOcrItem b)
