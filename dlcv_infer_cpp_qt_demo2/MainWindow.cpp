@@ -12,6 +12,7 @@
 #include <QDialog>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGridLayout>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -763,33 +764,33 @@ void MainWindow::setupUi() {
     spinOverlapX_->setMinimumHeight(kControlHeight);
     spinOverlapY_->setMinimumHeight(kControlHeight);
 
-    auto* row1 = new QHBoxLayout();
-    row1->setSpacing(8);
-    row1->addWidget(new QLabel("元件提取模型", this));
-    row1->addWidget(editExtractModelPath_, 1);
-    row1->addWidget(buttonBrowseExtractModel_);
-    row1->addWidget(buttonLoadExtractModel_);
+    auto makeRowLabel = [this](const QString& text) {
+        auto* label = new QLabel(text, this);
+        label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        return label;
+    };
 
-    auto* row2 = new QHBoxLayout();
-    row2->setSpacing(8);
-    row2->addWidget(new QLabel("元件检测模型", this));
-    row2->addWidget(editComponentModelPath_, 1);
-    row2->addWidget(buttonBrowseComponentModel_);
-    row2->addWidget(buttonLoadComponentModel_);
-
-    auto* row3 = new QHBoxLayout();
-    row3->setSpacing(8);
-    row3->addWidget(new QLabel("IC检测模型", this));
-    row3->addWidget(editIcModelPath_, 1);
-    row3->addWidget(buttonBrowseIcModel_);
-    row3->addWidget(buttonLoadIcModel_);
-
-    auto* row4 = new QHBoxLayout();
-    row4->setSpacing(8);
-    row4->addWidget(new QLabel("图片路径", this));
-    row4->addWidget(editImagePath_, 1);
-    row4->addWidget(buttonBrowseImage_);
-    row4->addWidget(buttonInfer_);
+    auto* pathGrid = new QGridLayout();
+    pathGrid->setContentsMargins(0, 0, 0, 0);
+    pathGrid->setHorizontalSpacing(8);
+    pathGrid->setVerticalSpacing(8);
+    pathGrid->setColumnStretch(1, 1);
+    pathGrid->addWidget(makeRowLabel("元件提取模型"), 0, 0);
+    pathGrid->addWidget(editExtractModelPath_, 0, 1);
+    pathGrid->addWidget(buttonBrowseExtractModel_, 0, 2);
+    pathGrid->addWidget(buttonLoadExtractModel_, 0, 3);
+    pathGrid->addWidget(makeRowLabel("元件检测模型"), 1, 0);
+    pathGrid->addWidget(editComponentModelPath_, 1, 1);
+    pathGrid->addWidget(buttonBrowseComponentModel_, 1, 2);
+    pathGrid->addWidget(buttonLoadComponentModel_, 1, 3);
+    pathGrid->addWidget(makeRowLabel("IC检测模型"), 2, 0);
+    pathGrid->addWidget(editIcModelPath_, 2, 1);
+    pathGrid->addWidget(buttonBrowseIcModel_, 2, 2);
+    pathGrid->addWidget(buttonLoadIcModel_, 2, 3);
+    pathGrid->addWidget(makeRowLabel("图片路径"), 3, 0);
+    pathGrid->addWidget(editImagePath_, 3, 1);
+    pathGrid->addWidget(buttonBrowseImage_, 3, 2);
+    pathGrid->addWidget(buttonInfer_, 3, 3);
 
     auto* row5 = new QHBoxLayout();
     row5->setSpacing(8);
@@ -824,10 +825,7 @@ void MainWindow::setupUi() {
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
 
-    rootLayout->addLayout(row1);
-    rootLayout->addLayout(row2);
-    rootLayout->addLayout(row3);
-    rootLayout->addLayout(row4);
+    rootLayout->addLayout(pathGrid);
     rootLayout->addLayout(row5);
     rootLayout->addLayout(row6);
     rootLayout->addWidget(splitter, 1);
