@@ -13,7 +13,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
   - C API：`dlcv_infer_c_dll`（头文件 `dlcv_infer_c_api.h`，通过 `dlcv_infer_cpp_dll.lib` 依赖 C++ API）
   - C# API：`DlcvCsharpApi`（`Model.cs`、`Utils.cs`、`FlowGraphModel.cs`、`DvsModel.cs`、`DllLoader.cs`）
 - **测试程序**：
-  - C++：`dlcv_infer_cpp_qt_demo`（Qt 桌面应用）
+  - C++：`dlcv_infer_cpp_qt_demo` / `dlcv_infer_cpp_qt_demo2` / `dlcv_infer_cpp_qt_demo3`（Qt 桌面应用）
   - C#：`DlcvDemo` / `DlcvDemo2` / `DlcvDemo3`（WinForms 桌面应用）
 - **控制台测试**：`Test/DlcvCSharpTest`、`Test/dlcv_infer_cpp_test`、`Test/dlcv_infer_c_test`
 
@@ -350,6 +350,15 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 - **压力测试**：每 500ms 更新统计，包含运行时间、完成请求数、平均延迟、实时速率、各节点平均耗时
 - **命令行模式**：`infer --model ... --image ... --threshold ... --calc-mean ...`，无界面执行结构化与 JSON 双路径验证
 
+### C++ Qt Demo2（`dlcv_infer_cpp_qt_demo2`）
+
+- **工程**：`dlcv_infer_cpp_qt_demo2/dlcv_infer_cpp_qt_demo2.vcxproj`
+- **业务**：三模型固定推理流程——元件提取模型整板滑窗检测 → 全图合并 → 类别名拆分与角度解析 → ROI 裁剪与逆时针归一 → 按类别分流到元件检测模型 / IC 检测模型 → 二级检测结果映射回元件提取类别 → 坐标回写 → 最终结果合并展示
+- **界面**：与 `DlcvDemo2` 一致，无 GPU 选择、JSON 输出、一致性测试、测速入口
+- **滑窗参数**：窗口宽 2560、窗口高 2560、水平重叠 1024、垂直重叠 1024
+- **设备策略**：固定 `device_id = 0`，无 GPU 时不回退 CPU
+- **命令行**：`--load-three-models <元件提取模型> <元件检测模型> <IC检测模型>`，不启动窗体
+
 ### C++ Qt Demo3（`dlcv_infer_cpp_qt_demo3`）
 
 - **工程**：`dlcv_infer_cpp_qt_demo3/dlcv_infer_cpp_qt_demo3.vcxproj`
@@ -381,7 +390,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 - **业务**：三模型固定推理流程——元件提取模型整板滑窗检测 → 全图合并 → 类别名拆分与角度解析 → ROI 裁剪与逆时针归一 → 按类别分流到元件检测模型 / IC 检测模型 → 二级检测结果映射回元件提取类别 → 坐标回写 → 最终结果合并展示
 - **界面**：去掉 GPU 选择、JSON 输出、一致性测试、测速入口
 - **滑窗参数**：窗口宽 2560、窗口高 2560、水平重叠 1024、垂直重叠 1024
-- **IC 分流规则**：`base_name` 为 `IC`、`BGA`、`座子`、`开关`、`晶振` 时走 IC 检测模型，其余走元件检测模型
+- **IC 分流规则**：`base_name` 为 `IC`、`IC-BGA`、`IC-排阻`、`座子`、`开关`、`晶振` 时走 IC 检测模型，其余走元件检测模型
 - **二级映射规则**：主体类别 `元件` 或兼容老版本的 `IC` 映射回元件提取模型的原始 `category_name`；细分类别（`焊点`、`引脚`、`文字`）保持原结果不变
 
 ### C# WinForms Demo3（`DlcvDemo3`）
