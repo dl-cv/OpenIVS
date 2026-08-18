@@ -80,7 +80,7 @@
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
   - `Release\dlcv_infer_cpp_test.exe`
-- `dlcv_infer_cpp_dll` 与 `dlcv_infer_cpp_test` 的 x64 产物统一输出到仓库根目录的 `Debug` 或 `Release`，测试程序从同目录加载本次构建的 C++ 封装 DLL。
+- 通过 `OpenIVS.sln` 构建时，`dlcv_infer_cpp_dll` 与 `dlcv_infer_cpp_test` 的 x64 产物输出到解决方案目录下的 `Debug` 或 `Release`。
 - `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
   - `model-channel-order-selftest`
   - `dvs-rgb-selftest <modelPath> <imagePath>`
