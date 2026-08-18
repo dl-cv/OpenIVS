@@ -199,6 +199,7 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 - `Infer` 内部调用 `InferBatch(new List<Mat> { image })`。
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
 - 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
+- `model/det` 与 `model/instance_seg` 节点会把 `rotate_inference`、`rotate_angle`、`dual_fill_value` 传给底层模型推理接口。
 - 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
 
 ### 4.3 内部推理方法
