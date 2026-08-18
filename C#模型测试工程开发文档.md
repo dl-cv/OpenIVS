@@ -76,21 +76,28 @@
 
 ## 5. 构建与运行
 
-- 解决方案级构建、项目级构建与发布前构建验证统一通过 MCP 构建工具执行，入口见 `开发文档.md` 的“统一编译说明”
+- 解决方案级构建、项目级构建与发布前构建验证统一通过 `.cursor/skills/vs-build/scripts/build.py` 执行，入口见 `开发文档.md` 的“统一编译说明”
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
   - `Release\dlcv_infer_cpp_test.exe`
+- 通过 `OpenIVS.sln` 构建时，`dlcv_infer_cpp_dll` 与 `dlcv_infer_cpp_test` 的 x64 产物输出到解决方案目录下的 `Debug` 或 `Release`。
 - `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
   - `model-channel-order-selftest`
   - `dvs-rgb-selftest <modelPath> <imagePath>`
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
   - `calc-mean-selftest`
+- `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
+  - `load-three-models <extractModelPath> <componentModelPath> <icModelPath>`
+  - 三个模型按参数顺序串行加载，实时输出各模型加载耗时，完成后输出三次耗时之和。
+  - 命令行使用宽字符参数接收中文路径，固定使用 `device_id=0`，不加载单独的预热模型，也不执行额外推理。
+  - 流程模型加载期间保留已经加载成功的模型模块，流程对象取得模型池引用后再释放临时模块；每个不同的子模型只执行一次原生加载。
+  - 成功返回 `0`，模型加载异常返回 `1`，参数数量错误返回 `2`。
 
 说明：
 
 - 固定使用 GPU 设备（`device_id=0`）。
-- 模型目录固定为 `Y:\测试模型`，不支持运行参数/环境变量覆盖（规则：目录/行为如需变更，请改代码与提交）。
+- 默认批量测试的模型目录固定为 `Y:\测试模型`；`load-three-models` 的三个模型路径由命令行参数提供。
 - 为避免日志打断阅读：表格在所有测试执行完成后一次性输出（总表）；并在表格末尾追加“汇总”一行。
 - 内存泄露专项在表格输出后自动执行并单独输出结果；专项仅对 1 个实例分割模型执行。
 - `demo2-rgb-selftest` 会输出 `entry_rgb_signature`、`manual_rgb_signature` 与 `raw_bgr_signature`；当 `entry_rgb_signature == manual_rgb_signature` 且与 `raw_bgr_signature` 不同时，判定 Demo2 当前入口保持 RGB 数据流。

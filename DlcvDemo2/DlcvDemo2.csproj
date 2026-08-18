@@ -6,7 +6,7 @@
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{6A6E287C-573B-4C0D-9FB4-88CDE8F6E3B2}</ProjectGuid>
-    <OutputType>WinExe</OutputType>
+    <OutputType>Exe</OutputType>
     <RootNamespace>DlcvDemo2</RootNamespace>
     <AssemblyName>C# 测试程序2</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
@@ -136,6 +136,7 @@
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
     <Compile Include="Program.cs" />
+    <Compile Include="ThreeModelLoadTimer.cs" />
     <Compile Include="Utils\DetectionGeometryUtils.cs" />
     <Compile Include="Utils\ExtractMergeUtils.cs" />
     <Compile Include="Utils\SlidingWindowUtils.cs" />
