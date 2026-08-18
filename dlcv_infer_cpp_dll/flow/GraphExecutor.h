@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <map>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -21,8 +22,8 @@ struct NodePublicOutput final {
 
 /// <summary>
 /// GraphExecutor：按 nodes[*].inputs/outputs 的 link 进行最小路由，
-/// 将多路输入聚合为主对+额外对（ExtraInputsIn），并将模块的 ExtraOutputs 与 outputs[*] 对齐。
-/// 对齐 OpenIVS/DlcvCsharpApi/MainProcess.cs 的 GraphExecutor。
+/// 将多路输入聚合为主对和额外对（ExtraInputsIn），并将模块的 ExtraOutputs 对应到 outputs[*]。
+/// 实现参考 OpenIVS/DlcvCsharpApi/MainProcess.cs 的 GraphExecutor。
 /// </summary>
 class GraphExecutor final {
 public:
@@ -64,6 +65,7 @@ private:
     std::unordered_map<int, NodePublicOutput> _publicOutputs; // nodeId -> image/result/template/scalars
     std::vector<NodeTiming> _lastNodeTimings;
     std::vector<UnregisteredNodeInfo> _lastUnregisteredNodes;
+    std::vector<std::unique_ptr<BaseModule>> _modelLoadHolds;
 
     static int SafeToInt(const Json& v, int dv);
     static std::string SafeToString(const Json& v, const std::string& dv);

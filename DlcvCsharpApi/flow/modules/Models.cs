@@ -20,7 +20,7 @@ namespace DlcvModules
 		protected Model _model;
 		protected JObject _modelInfo;
 		protected JArray _maxShape;
-		protected int _maxBatchSize = 1;
+		protected int _maxBatchSize = 0;
 
 		// 按 (modelPath|deviceId|rpcMode) 缓存 Model 实例，避免 Flow 每次推理重复加载
 		private static readonly Dictionary<string, Model> _modelCache = new Dictionary<string, Model>(StringComparer.OrdinalIgnoreCase);
@@ -78,29 +78,53 @@ namespace DlcvModules
 				}
 				catch { }
 
-				string cacheKey = (_modelPath ?? "") + "|" + deviceId + "|" + rpcMode;
+				string normalizedPath = NormalizeModelPath(_modelPath);
+				string resolvedPath = normalizedPath ?? _modelPath;
+				string cacheKey = (resolvedPath ?? "") + "|" + deviceId + "|" + rpcMode;
 				bool useCache = string.IsNullOrEmpty(modelPassword);
 				if (useCache)
 				{
 					lock (_modelCacheLock)
 					{
-						bool cacheHit = _modelCache.TryGetValue(cacheKey, out _model);
-						if (!cacheHit)
+						if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
 						{
-							_model = CreateModel(_modelPath, deviceId, rpcMode, true, null);
+							_model = CreateModel(resolvedPath, deviceId, rpcMode, true, null);
 							_modelCache[cacheKey] = _model;
 						}
 					}
+					// 多个模块可共享同一路径模型实例；模块不单独释放缓存实例。
 				}
 				else
 				{
-					_model = CreateModel(_modelPath, deviceId, rpcMode, false, modelPassword);
+					_model = CreateModel(resolvedPath, deviceId, rpcMode, false, modelPassword);
 				}
 				SyncModelMeta();
 			}
 			else
 			{
 				SyncModelMeta();
+			}
+		}
+
+		public static void ClearModelCache()
+		{
+			lock (_modelCacheLock)
+			{
+				_modelCache.Clear();
+			}
+		}
+
+		private static string NormalizeModelPath(string modelPath)
+		{
+			if (string.IsNullOrWhiteSpace(modelPath))
+				return modelPath;
+			try
+			{
+				return Path.GetFullPath(modelPath.Trim());
+			}
+			catch
+			{
+				return modelPath.Trim();
 			}
 		}
 
@@ -219,6 +243,8 @@ namespace DlcvModules
 			var sourceIndices = new List<int>();
 			var buckets = new Dictionary<string, List<int>>();
 			var bucketAreas = new Dictionary<string, int>();
+			int inferCallCount = 0;
+			int maxActualBatch = 0;
 
 			try
 			{
@@ -271,6 +297,8 @@ namespace DlcvModules
 						{
 							chunkMats.Add(rgbInputs[chunkLocals[k]]);
 						}
+						inferCallCount += 1;
+						maxActualBatch = Math.Max(maxActualBatch, chunkMats.Count);
 
                         var inferSw = Stopwatch.StartNew();
                         Utils.CSharpResult res = p.Count > 0 ? _model.InferBatch(chunkMats, p) : _model.InferBatch(chunkMats, null);
@@ -311,6 +339,14 @@ namespace DlcvModules
 					outResults.Add(entry);
 					outIndex += 1;
 				}
+
+				InferTiming.AddFlowModelBatchInfo(
+					NodeId,
+					ReadStringOrDefault("model_path_original", _modelPath),
+					rgbInputs.Count,
+					effectiveBatch,
+					inferCallCount,
+					maxActualBatch);
 
 				return new ModuleIO(outImages, outResults);
 			}

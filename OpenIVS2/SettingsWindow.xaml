@@ -1,0 +1,495 @@
+<Window x:Class="OpenIVS2.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OpenIVS 2026 设置" Width="1240" Height="820" MinWidth="1040" MinHeight="680"
+        Background="#F1F2F3" WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
+        FontFamily="Microsoft YaHei UI" FontSize="13" UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Window.Resources>
+        <SolidColorBrush x:Key="SettingsPrimaryBrush" Color="#2F5F7A"/>
+        <SolidColorBrush x:Key="SettingsTextBrush" Color="#20262B"/>
+        <SolidColorBrush x:Key="SettingsMutedBrush" Color="#5F6B73"/>
+        <SolidColorBrush x:Key="SettingsBorderBrush" Color="#C9D0D5"/>
+
+        <Style x:Key="SettingsCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SettingsBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="16"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
+
+        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource SettingsMutedBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
+
+        <Style x:Key="SettingsTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Padding" Value="9,0"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="{StaticResource SettingsTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SettingsBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+        </Style>
+
+        <Style x:Key="SettingsComboBoxItemStyle" TargetType="ComboBoxItem">
+            <Setter Property="Padding" Value="11,8"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBorder" Background="Transparent" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#E8ECEF"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#DDE4E8"/><Setter Property="Foreground" Value="{StaticResource SettingsTextBrush}"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="{StaticResource SettingsTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SettingsBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="ItemContainerStyle" Value="{StaticResource SettingsComboBoxItemStyle}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="DropDownToggle" Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="ComboBorder" Background="{Binding Background, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                BorderBrush="{Binding BorderBrush, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                BorderThickness="{Binding BorderThickness, RelativeSource={RelativeSource AncestorType=ComboBox}}" CornerRadius="2"/>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ComboBorder" Property="BorderBrush" Value="#7F929D"/></Trigger>
+                                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="ComboBorder" Property="BorderBrush" Value="{StaticResource SettingsPrimaryBrush}"/><Setter TargetName="ComboBorder" Property="BorderThickness" Value="2"/></Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter Margin="11,0,34,0" VerticalAlignment="Center" HorizontalAlignment="Left"
+                                              Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+                            <Path Data="M 0 0 L 5 5 L 10 0" Stroke="#607D8B" StrokeThickness="1.6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" IsHitTestVisible="False"/>
+                            <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+                                <Border Background="White" BorderBrush="{StaticResource SettingsBorderBrush}" BorderThickness="1" CornerRadius="2" MinWidth="160" MaxHeight="260">
+                                    <ScrollViewer><ItemsPresenter/></ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsCheckBoxStyle" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource SettingsTextBrush}"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border x:Name="CheckBorder" Width="19" Height="19" Background="White" BorderBrush="#B0BEC5" BorderThickness="1.5" CornerRadius="3" VerticalAlignment="Center">
+                                <Path x:Name="CheckMark" Data="M 3 9 L 7 13 L 15 5" Stroke="White" StrokeThickness="2.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed"/>
+                            </Border>
+                            <ContentPresenter Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="CheckBorder" Property="Background" Value="{StaticResource SettingsPrimaryBrush}"/><Setter TargetName="CheckBorder" Property="BorderBrush" Value="{StaticResource SettingsPrimaryBrush}"/><Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="CheckBorder" Property="BorderBrush" Value="{StaticResource SettingsPrimaryBrush}"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="44"/>
+            <Setter Property="MinWidth" Value="104"/>
+            <Setter Property="Padding" Value="18,0"/>
+            <Setter Property="Margin" Value="6,0,0,0"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{StaticResource SettingsPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SettingsPrimaryBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" CornerRadius="2" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonBorder" Property="Opacity" Value="0.88"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonBorder" Property="Opacity" Value="0.72"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#173B4F"/><Setter TargetName="ButtonBorder" Property="BorderThickness" Value="2"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="ButtonBorder" Property="Background" Value="#B0BEC5"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="BrowseButtonStyle" TargetType="Button" BasedOn="{StaticResource SettingsButtonStyle}">
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="MinWidth" Value="74"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Background" Value="#425563"/>
+            <Setter Property="BorderBrush" Value="#425563"/>
+        </Style>
+        <Style x:Key="CancelButtonStyle" TargetType="Button" BasedOn="{StaticResource SettingsButtonStyle}">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="{StaticResource SettingsTextBrush}"/>
+            <Setter Property="BorderBrush" Value="#9DA8AE"/>
+        </Style>
+        <Style x:Key="SaveButtonStyle" TargetType="Button" BasedOn="{StaticResource SettingsButtonStyle}">
+            <Setter Property="Background" Value="{StaticResource SettingsPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SettingsPrimaryBrush}"/>
+        </Style>
+        <Style x:Key="RuntimeButtonStyle" TargetType="Button" BasedOn="{StaticResource SettingsButtonStyle}">
+            <Setter Property="Height" Value="44"/>
+            <Setter Property="MinWidth" Value="96"/>
+            <Setter Property="Padding" Value="14,0"/>
+        </Style>
+        <Style x:Key="RuntimeStopButtonStyle" TargetType="Button" BasedOn="{StaticResource RuntimeButtonStyle}">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="{StaticResource SettingsTextBrush}"/>
+            <Setter Property="BorderBrush" Value="#9DA8AE"/>
+        </Style>
+        <Style x:Key="RuntimeTriggerButtonStyle" TargetType="Button" BasedOn="{StaticResource RuntimeButtonStyle}">
+            <Setter Property="Background" Value="#425563"/>
+            <Setter Property="BorderBrush" Value="#425563"/>
+        </Style>
+
+        <Style x:Key="SettingsTabItemStyle" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource SettingsMutedBrush}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder" Background="Transparent" Padding="16,10" BorderBrush="Transparent" BorderThickness="0,0,0,2">
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{StaticResource SettingsTextBrush}"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource SettingsPrimaryBrush}"/><Setter Property="Foreground" Value="{StaticResource SettingsPrimaryBrush}"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource SettingsPrimaryBrush}"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsTabControlStyle" TargetType="TabControl">
+            <Setter Property="ItemContainerStyle" Value="{StaticResource SettingsTabItemStyle}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <TabPanel IsItemsHost="True" Margin="0,0,0,14"/>
+                            <Border Grid.Row="1" Background="Transparent">
+                                <ContentPresenter ContentSource="SelectedContent"/>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="64"/><RowDefinition Height="*"/><RowDefinition Height="72"/></Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="White" BorderBrush="#E6ECEF" BorderThickness="0,0,0,1">
+            <Grid Margin="20,9">
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="系统设置" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/>
+                    <TextBlock Text="配置相机、模型、PLC、图片保存、系统启动和调试操作" FontSize="12" Foreground="{StaticResource SettingsMutedBrush}" Margin="0,3,0,0"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="20,16,20,12">
+            <TabControl x:Name="SettingsTabs" Style="{StaticResource SettingsTabControlStyle}">
+                <TabItem Header="相机与模型">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,0,0,10"
+                                   Text="每台相机独立绑定图像源和模型；启用顺序按 A → F 执行，最多支持 6 台相机。"/>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                            <ItemsControl x:Name="CameraItemsControl">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border>
+                                            <Border.Style>
+                                                <Style TargetType="Border" BasedOn="{StaticResource SettingsCardStyle}">
+                                                    <Style.Triggers><DataTrigger Binding="{Binding Enabled}" Value="False"><Setter Property="Opacity" Value="0.66"/></DataTrigger></Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <Grid>
+                                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="104"/><ColumnDefinition Width="180"/><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+
+                                                <StackPanel Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">
+                                                    <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}">
+                                                        <Run Text="相机 "/><Run Text="{Binding Slot}"/>
+                                                    </TextBlock>
+                                                    <CheckBox Content="启用" IsChecked="{Binding Enabled}" Style="{StaticResource SettingsCheckBoxStyle}" Margin="0,8,0,0"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,14,0">
+                                                    <TextBlock Text="显示名称" Style="{StaticResource FieldLabelStyle}"/>
+                                                    <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SettingsTextBoxStyle}"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,14,0">
+                                                    <TextBlock Text="相机类型" Style="{StaticResource FieldLabelStyle}"/>
+                                                    <ComboBox x:Name="CameraModeCombo" SelectedValuePath="Tag"
+                                                              SelectedValue="{Binding Mode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Style="{StaticResource SettingsComboBoxStyle}"
+                                                              SelectionChanged="CameraMode_SelectionChanged">
+                                                        <ComboBoxItem Content="virtual" Tag="virtual"/>
+                                                        <ComboBoxItem Content="real cam" Tag="hik"/>
+                                                    </ComboBox>
+                                                </StackPanel>
+                                                <StackPanel Grid.Row="0" Grid.Column="3">
+                                                    <TextBlock Text="真实相机（名称 / 序列号）" Style="{StaticResource FieldLabelStyle}"/>
+                                                    <ComboBox ItemsSource="{Binding AvailableCameras, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                              DisplayMemberPath="DisplayName" SelectedValuePath="SerialNumber"
+                                                              SelectedValue="{Binding CameraId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              ToolTip="{Binding SelectedItem.DisplayName, RelativeSource={RelativeSource Self}}">
+                                                        <ComboBox.Style>
+                                                            <Style TargetType="ComboBox" BasedOn="{StaticResource SettingsComboBoxStyle}">
+                                                                <Setter Property="IsEnabled" Value="False"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=CameraModeCombo}" Value="hik">
+                                                                        <Setter Property="IsEnabled" Value="True"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </ComboBox.Style>
+                                                    </ComboBox>
+                                                </StackPanel>
+
+                                                <Grid Grid.Row="1" Grid.ColumnSpan="4" Margin="0,15,0,0">
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <TextBlock Text="虚拟图片" VerticalAlignment="Center" Foreground="{StaticResource SettingsMutedBrush}"/>
+                                                    <TextBox Grid.Column="1" Text="{Binding VirtualImagePath, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SettingsTextBoxStyle}" ToolTip="{Binding VirtualImagePath}"/>
+                                                    <Button Grid.Column="2" Content="浏览" Style="{StaticResource BrowseButtonStyle}" Click="BrowseImage_Click"/>
+                                                </Grid>
+                                                <Grid Grid.Row="2" Grid.ColumnSpan="4" Margin="0,10,0,0">
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <TextBlock Text="模型文件" VerticalAlignment="Center" Foreground="{StaticResource SettingsMutedBrush}"/>
+                                                    <TextBox Grid.Column="1" Text="{Binding ModelPath, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SettingsTextBoxStyle}" ToolTip="{Binding ModelPath}"/>
+                                                    <Button Grid.Column="2" Content="浏览" Style="{StaticResource BrowseButtonStyle}" Click="BrowseModel_Click"/>
+                                                </Grid>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="PLC 与保存">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+
+                            <Border Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,12">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="0,0,0,16">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="PLC 监听" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/><TextBlock Text="监听拍照寄存器并启动一个检测周期" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/></StackPanel>
+                                        <CheckBox x:Name="UsePlcCheck" Grid.Column="1" Content="启用监听" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource SettingsCheckBoxStyle}" Checked="UsePlcCheck_Changed" Unchecked="UsePlcCheck_Changed"/>
+                                    </Grid>
+                                    <Grid Grid.Row="1" Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,8,0"><TextBlock Text="PLC 模式" Style="{StaticResource FieldLabelStyle}"/><ComboBox x:Name="PlcModeCombo" Style="{StaticResource SettingsComboBoxStyle}" SelectionChanged="PlcModeCombo_SelectionChanged"><ComboBoxItem Content="mock"/><ComboBoxItem Content="tcp"/><ComboBoxItem Content="serial"/></ComboBox></StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="PLC 设备 ID" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="DeviceIdBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                    </Grid>
+                                    <Grid Grid.Row="2">
+                                        <Grid x:Name="SerialSettingsPanel">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,8,12"><TextBlock Text="串口" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="PortNameBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="8,0,0,12"><TextBlock Text="波特率" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="BaudRateBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                            <StackPanel Grid.Row="1" Margin="0,0,8,0"><TextBlock Text="数据位 / 停止位" Style="{StaticResource FieldLabelStyle}"/><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBox x:Name="DataBitsBox" Style="{StaticResource SettingsTextBoxStyle}" Margin="0,0,5,0"/><ComboBox x:Name="StopBitsCombo" Grid.Column="1" Style="{StaticResource SettingsComboBoxStyle}" Margin="5,0,0,0"><ComboBoxItem Content="One"/><ComboBoxItem Content="Two"/></ComboBox></Grid></StackPanel>
+                                            <StackPanel Grid.Row="1" Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="校验" Style="{StaticResource FieldLabelStyle}"/><ComboBox x:Name="ParityCombo" Style="{StaticResource SettingsComboBoxStyle}"><ComboBoxItem Content="None"/><ComboBoxItem Content="Even"/><ComboBoxItem Content="Odd"/></ComboBox></StackPanel>
+                                        </Grid>
+                                        <Grid x:Name="TcpSettingsPanel" Visibility="Collapsed">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,8,0"><TextBlock Text="TCP 地址" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="TcpHostBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="TCP 端口" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="TcpPortBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                        </Grid>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsCardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <StackPanel Grid.Row="0" Margin="0,0,0,16"><TextBlock Text="检测图片保存" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/><TextBlock Text="按日期和 OK / NG 分类保存每台相机的周期画面" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/></StackPanel>
+                                    <Grid Grid.Row="1" Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="保存目录" VerticalAlignment="Center" Foreground="{StaticResource SettingsMutedBrush}"/>
+                                        <TextBox x:Name="SaveDirectoryBox" Grid.Column="1" Style="{StaticResource SettingsTextBoxStyle}" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                                        <Button Grid.Column="2" Content="选择目录" Style="{StaticResource BrowseButtonStyle}" Click="BrowseSaveDirectory_Click"/>
+                                    </Grid>
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,14">
+                                        <CheckBox x:Name="SaveOkCheck" Content="保存 OK 图片" Style="{StaticResource SettingsCheckBoxStyle}" Margin="0,0,28,0"/>
+                                        <CheckBox x:Name="SaveNgCheck" Content="保存 NG 图片" Style="{StaticResource SettingsCheckBoxStyle}" Margin="0,0,28,0"/>
+                                        <CheckBox x:Name="SaveVisualizationCheck" Content="保存可视化图片" Style="{StaticResource SettingsCheckBoxStyle}"/>
+                                    </StackPanel>
+                                    <Grid Grid.Row="3">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="220"/><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,12,0"><TextBlock Text="原图格式" Style="{StaticResource FieldLabelStyle}"/><ComboBox x:Name="ImageFormatCombo" Style="{StaticResource SettingsComboBoxStyle}"><ComboBoxItem Content="PNG"/><ComboBoxItem Content="JPG"/><ComboBoxItem Content="BMP"/></ComboBox></StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="12,0" IsEnabled="{Binding IsChecked, ElementName=SaveVisualizationCheck}">
+                                            <TextBlock Text="可视化格式" Style="{StaticResource FieldLabelStyle}"/>
+                                            <ComboBox x:Name="VisualizationFormatCombo" Style="{StaticResource SettingsComboBoxStyle}"><ComboBoxItem Content="JPG"/><ComboBoxItem Content="PNG"/></ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Margin="12,0"><TextBlock Text="JPEG 质量" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="JpegQualityBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                    </Grid>
+                                    <TextBlock Grid.Row="4" Margin="0,10,0,0" Text="可视化图片内容与 ImageViewer 预测层一致；JPG 使用 JPEG 质量，PNG 使用压缩编码。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="11" TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
+
+                        </Grid>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem Header="系统设置">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                        <StackPanel>
+                            <Border Style="{StaticResource SettingsCardStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="系统启动" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/>
+                                        <TextBlock Text="使用当前 Windows 用户登录后自动启动 OpenIVS 2026" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="StartWithWindowsCheck" Grid.Column="1" Content="开机自启动" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource SettingsCheckBoxStyle}"/>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsCardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="运行时日志" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/>
+                                            <TextBlock Text="按日保存界面和系统运行日志，并按文件大小轮转、清理旧文件。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox x:Name="EnableRuntimeLogCheck" Grid.Column="1" Content="存储运行时日志" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource SettingsCheckBoxStyle}"/>
+                                    </Grid>
+                                    <Grid Grid.Row="1" Margin="0,0,0,12" IsEnabled="{Binding IsChecked, ElementName=EnableRuntimeLogCheck}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="日志目录" VerticalAlignment="Center" Foreground="{StaticResource SettingsMutedBrush}"/>
+                                        <TextBox x:Name="RuntimeLogDirectoryBox" Grid.Column="1" Style="{StaticResource SettingsTextBoxStyle}" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                                        <Button Grid.Column="2" Content="选择目录" Style="{StaticResource BrowseButtonStyle}" Click="BrowseRuntimeLogDirectory_Click"/>
+                                    </Grid>
+                                    <Grid Grid.Row="2" IsEnabled="{Binding IsChecked, ElementName=EnableRuntimeLogCheck}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,12,0"><TextBlock Text="单文件上限（MB）" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="RuntimeLogMaxSizeBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="12,0"><TextBlock Text="最多保留文件数" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="RuntimeLogMaxCountBox" Style="{StaticResource SettingsTextBoxStyle}"/></StackPanel>
+                                        <TextBlock Grid.Column="2" Text="日志采用 UTF-8 编码；达到上限后自动创建带时间后缀的轮转文件。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsCardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="生产日志" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/>
+                                            <TextBlock Text="每个检测周期追加一行 CSV，用于生产追溯和外部统计。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox x:Name="EnableProductionLogCheck" Grid.Column="1" Content="存储生产 CSV" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource SettingsCheckBoxStyle}"/>
+                                    </Grid>
+                                    <Grid Grid.Row="1" Margin="0,0,0,12" IsEnabled="{Binding IsChecked, ElementName=EnableProductionLogCheck}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="CSV 目录" VerticalAlignment="Center" Foreground="{StaticResource SettingsMutedBrush}"/>
+                                        <TextBox x:Name="ProductionLogDirectoryBox" Grid.Column="1" Style="{StaticResource SettingsTextBoxStyle}" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                                        <Button Grid.Column="2" Content="选择目录" Style="{StaticResource BrowseButtonStyle}" Click="BrowseProductionLogDirectory_Click"/>
+                                    </Grid>
+                                    <TextBlock Grid.Row="2" Text="字段：时间、时间戳、相机 A～F 结果、总结果；未启用相机记录为 -。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="11" TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem Header="调试">
+                    <Grid>
+                        <Border Style="{StaticResource SettingsCardStyle}" VerticalAlignment="Top">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <StackPanel Grid.Row="0">
+                                    <TextBlock Text="运行调试" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource SettingsTextBrush}"/>
+                                    <TextBlock Text="使用当前已保存配置控制检测系统，适用于安装、调试和维护。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <Border Grid.Row="1" BorderBrush="{StaticResource SettingsBorderBrush}" BorderThickness="0,1,0,0" Margin="0,16,0,0" Padding="0,16,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button x:Name="StartRunButton" Content="开始运行" Style="{StaticResource RuntimeButtonStyle}" Click="StartRun_Click"/>
+                                            <Button x:Name="StopRunButton" Content="停止" Style="{StaticResource RuntimeStopButtonStyle}" Click="StopRun_Click"/>
+                                            <Button x:Name="ManualTriggerButton" Content="单次触发" Style="{StaticResource RuntimeTriggerButtonStyle}" Click="ManualTrigger_Click"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="22,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock x:Name="RuntimeStatusText" Text="当前状态：已停止" Foreground="{StaticResource SettingsTextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Modbus TCP 监听模式下，单次触发不可用。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                                <TextBlock Grid.Row="2" Text="提示：调试操作不会自动保存当前编辑内容；保存设置时，运行中的系统会安全重载。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="12" Margin="0,16,0,0" TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </TabItem>
+            </TabControl>
+        </Grid>
+
+        <Border Grid.Row="2" Background="White" BorderBrush="#E6ECEF" BorderThickness="0,1,0,0">
+            <Grid Margin="20,13">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="保存时运行中的系统会安全重载；已停止则保持停止。" Foreground="{StaticResource SettingsMutedBrush}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="CancelSettingsButton" Content="取消" Style="{StaticResource CancelButtonStyle}" Click="Cancel_Click"/>
+                    <Button x:Name="SaveSettingsButton" Content="保存设置" Style="{StaticResource SaveButtonStyle}" Click="Save_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

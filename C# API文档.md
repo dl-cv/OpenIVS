@@ -323,6 +323,7 @@ public static class InferTiming
     public static void SetDirectRequest(double inferMs);
     public static void GetLast(out double dlcvInferMs, out double flowInferMs);
     public static List<FlowNodeTiming> GetLastFlowNodeTimings();
+    public static List<FlowModelBatchInfo> GetLastFlowModelBatchInfos();
 }
 ```
 
@@ -334,6 +335,19 @@ public class FlowNodeTiming
     public string NodeType;   // 节点类型
     public string NodeTitle;  // 节点标题
     public double ElapsedMs;  // 耗时（毫秒）
+}
+```
+
+**`FlowModelBatchInfo` 结构**：
+```csharp
+public class FlowModelBatchInfo
+{
+    public int NodeId;          // 节点 ID
+    public string ModelPath;    // 当前模型路径
+    public int InputCount;      // 当前节点收到的图像数量
+    public int BatchLimit;      // 当前节点采用的 batch 上限
+    public int InferCallCount;  // 当前节点执行底层推理的次数
+    public int MaxActualBatch;  // 当前请求实际使用的最大子批大小
 }
 ```
 
