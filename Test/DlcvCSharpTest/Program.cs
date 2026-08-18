@@ -138,6 +138,11 @@ namespace DlcvCSharpTest
                     return RunDvstDoubleLoadSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvs-model-password-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDvsModelPasswordSelfTest();
+                }
+
                 if (args != null && args.Length >= 2)
                 {
                     string modelPath = args[0];
@@ -3397,6 +3402,128 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static int RunDvsModelPasswordSelfTest()
+        {
+            const string moduleType = "test/model_password_flow";
+            const string expectedPassword = "fixture-password";
+            string tempRoot = Path.Combine(Path.GetTempPath(), "DlcvDvsPassword_" + Guid.NewGuid().ToString("N"));
+
+            try
+            {
+                Directory.CreateDirectory(tempRoot);
+                string archivePath = Path.Combine(tempRoot, "flow.dvsp");
+                ModuleRegistry.Register(moduleType, typeof(ModelPasswordFlowTestModule));
+
+                var pipeline = new JObject
+                {
+                    ["nodes"] = new JArray
+                    {
+                        new JObject
+                        {
+                            ["id"] = 1,
+                            ["type"] = moduleType,
+                            ["properties"] = new JObject { ["model_path"] = "first.dvo" }
+                        },
+                        new JObject
+                        {
+                            ["id"] = 2,
+                            ["type"] = moduleType,
+                            ["properties"] = new JObject { ["model_path"] = "second.dvo" }
+                        }
+                    }
+                };
+                byte[] pipelineBytes = Encoding.UTF8.GetBytes(pipeline.ToString(Formatting.None));
+                var header = new JObject
+                {
+                    ["file_list"] = new JArray("pipeline.json"),
+                    ["file_size"] = new JArray(pipelineBytes.Length)
+                };
+                using (var stream = new FileStream(archivePath, FileMode.Create, FileAccess.Write))
+                using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
+                {
+                    writer.Write(Encoding.UTF8.GetBytes("DV\n"));
+                    writer.Write(Encoding.UTF8.GetBytes(header.ToString(Formatting.None) + "\n"));
+                    writer.Write(pipelineBytes);
+                }
+
+                ModelPasswordFlowTestModule.Reset(expectedPassword);
+                using (var model = new Model(archivePath, 0, false, false, expectedPassword))
+                {
+                    if (model.modelIndex < 10000)
+                    {
+                        throw new InvalidOperationException("flow model index was not assigned");
+                    }
+                }
+                if (ModelPasswordFlowTestModule.Passwords.Count != 2
+                    || ModelPasswordFlowTestModule.Passwords.Any(value => value != expectedPassword)
+                    || ModelPasswordFlowTestModule.CacheFlags.Any(value => value))
+                {
+                    throw new InvalidOperationException("protected flow models did not receive the transient password without caching");
+                }
+                if (ModelPasswordFlowTestModule.Contexts.Any(context =>
+                    context.Get<string>("model_password", null) != null))
+                {
+                    throw new InvalidOperationException("flow password remained in the execution context after loading");
+                }
+
+                ModelPasswordFlowTestModule.Reset(expectedPassword);
+                AssertDvsPasswordError(archivePath, null, "MODEL_PASSWORD_REQUIRED");
+                AssertDvsPasswordError(archivePath, "wrong-password", "MODEL_PASSWORD_INVALID");
+                if (ModelPasswordFlowTestModule.Contexts.Any(context =>
+                    context.Get<string>("model_password", null) != null))
+                {
+                    throw new InvalidOperationException("failed flow load retained the password in its execution context");
+                }
+
+                ModelPasswordFlowTestModule.Reset(expectedPassword);
+                bool legacyRequired = false;
+                try
+                {
+                    using (var legacy = new DvsModel())
+                    {
+                        legacy.Load(archivePath, 0);
+                    }
+                }
+                catch (ModelLoadException ex) when (ex.ErrorCode == "MODEL_PASSWORD_REQUIRED")
+                {
+                    legacyRequired = true;
+                }
+                if (!legacyRequired
+                    || ModelPasswordFlowTestModule.Passwords.Count != 1
+                    || ModelPasswordFlowTestModule.Passwords[0] != null)
+                {
+                    throw new InvalidOperationException("legacy DvsModel.Load overload did not use the DVS archive path");
+                }
+
+                Console.WriteLine("DVS model password selftest passed");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("DVS model password selftest failed: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
+        }
+
+        private static void AssertDvsPasswordError(string archivePath, string password, string expectedCode)
+        {
+            try
+            {
+                using (var unused = new Model(archivePath, 0, false, false, password))
+                {
+                }
+            }
+            catch (ModelLoadException ex) when (ex.ErrorCode == expectedCode)
+            {
+                return;
+            }
+            throw new InvalidOperationException("unexpected DVS model password result");
+        }
+
         private static int RunWithMaskSelfTest()
         {
             Console.WriteLine("==== with_mask 参数透传自测 ====");
@@ -3874,5 +4001,44 @@ namespace DlcvCSharpTest
 
         [DllImport("psapi.dll", SetLastError = true)]
         private static extern bool GetProcessMemoryInfo(IntPtr hProcess, out PROCESS_MEMORY_COUNTERS_EX counters, uint size);
+    }
+
+    public sealed class ModelPasswordFlowTestModule : BaseModelModule
+    {
+        public static readonly List<string> Passwords = new List<string>();
+        public static readonly List<bool> CacheFlags = new List<bool>();
+        public static readonly List<DlcvModules.ExecutionContext> Contexts = new List<DlcvModules.ExecutionContext>();
+        public static string ExpectedPassword { get; private set; }
+
+        public ModelPasswordFlowTestModule(int nodeId, string title = null,
+            Dictionary<string, object> properties = null, DlcvModules.ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public static void Reset(string expectedPassword)
+        {
+            Passwords.Clear();
+            CacheFlags.Clear();
+            Contexts.Clear();
+            ExpectedPassword = expectedPassword;
+        }
+
+        protected override Model CreateModel(string modelPath, int deviceId, bool rpcMode,
+            bool enableCache, string modelPassword)
+        {
+            Passwords.Add(modelPassword);
+            CacheFlags.Add(enableCache);
+            Contexts.Add(Context);
+            if (string.IsNullOrEmpty(modelPassword))
+            {
+                throw new ModelLoadException("MODEL_PASSWORD_REQUIRED", "password required");
+            }
+            if (!string.Equals(modelPassword, ExpectedPassword, StringComparison.Ordinal))
+            {
+                throw new ModelLoadException("MODEL_PASSWORD_INVALID", "password invalid");
+            }
+            return new Model();
+        }
     }
 }

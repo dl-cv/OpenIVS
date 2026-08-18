@@ -22,6 +22,11 @@ namespace DlcvModules
 
         public new JObject Load(string dvsPath, int deviceId = 0)
         {
+            return Load(dvsPath, deviceId, null);
+        }
+
+        public JObject Load(string dvsPath, int deviceId, string modelPassword)
+        {
             if (string.IsNullOrWhiteSpace(dvsPath)) throw new ArgumentException("文件路径为空", nameof(dvsPath));
             if (!File.Exists(dvsPath)) throw new FileNotFoundException("文件不存在", dvsPath);
 
@@ -159,7 +164,7 @@ namespace DlcvModules
                 }
 
                 // 6. 复用 FlowGraphModel 的核心加载逻辑（从已经修改好的 pipelineJson 中加载）
-                var report = LoadFromRoot(pipelineJson, deviceId);
+                var report = LoadFromRoot(pipelineJson, deviceId, modelPassword);
                 return report;
             }
             catch (Exception)

@@ -68,17 +68,36 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				string normalizedPath = NormalizeModelPath(_modelPath);
-				string cacheKey = (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
-				lock (_modelCacheLock)
+				string modelPassword = null;
+				try
 				{
-					if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
+					if (Context != null)
 					{
-						_model = new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
-						_modelCache[cacheKey] = _model;
+						modelPassword = Context.Get<string>("model_password", null);
 					}
 				}
-				// 多个模块/面可共享同一路径模型实例；不在模块侧单独 Dispose。
+				catch { }
+
+				string normalizedPath = NormalizeModelPath(_modelPath);
+				string resolvedPath = normalizedPath ?? _modelPath;
+				string cacheKey = (resolvedPath ?? "") + "|" + deviceId + "|" + rpcMode;
+				bool useCache = string.IsNullOrEmpty(modelPassword);
+				if (useCache)
+				{
+					lock (_modelCacheLock)
+					{
+						if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
+						{
+							_model = CreateModel(resolvedPath, deviceId, rpcMode, true, null);
+							_modelCache[cacheKey] = _model;
+						}
+					}
+					// 多个模块可共享同一路径模型实例；模块不单独释放缓存实例。
+				}
+				else
+				{
+					_model = CreateModel(resolvedPath, deviceId, rpcMode, false, modelPassword);
+				}
 				SyncModelMeta();
 			}
 			else
@@ -107,6 +126,12 @@ namespace DlcvModules
 			{
 				return modelPath.Trim();
 			}
+		}
+
+		protected virtual Model CreateModel(string modelPath, int deviceId, bool rpcMode,
+			bool enableCache, string modelPassword)
+		{
+			return new Model(modelPath, deviceId, rpcMode, enableCache, modelPassword);
 		}
 
 		protected void SyncModelMeta()

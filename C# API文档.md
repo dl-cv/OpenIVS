@@ -97,15 +97,18 @@ public partial class Utils
 ```csharp
 public class Model : IDisposable
 {
-    public Model(string modelPath, int deviceId = 0, bool rpcMode = false, bool enableCache = false);
+    public Model(string modelPath, int deviceId = 0, bool rpcMode = false, bool enableCache = false,
+        string modelPassword = null);
 }
 ```
 
 **构造函数行为**：
 1. 若路径以 `.dvst` / `.dvso` / `.dvsp` 结尾 → 进入 Flow/DVS 模式，实例化 `FlowGraphModel` 或 `DvsModel`。
 2. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
-3. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
-4. 加载完成后可通过 `Loaded` 属性判断状态。
+3. `modelPassword` 非空时，普通模型通过加载 JSON 的 `model_password` 字段瞬时传给底层；DVS 归档在加载期向每个模型节点透传该字段，加载结束后清理流程上下文；带密码加载不使用模型缓存。
+4. 缺少或错误密码、保护元数据异常、既有保护层解密失败时，抛出带 `ErrorCode` 的 `ModelLoadException`；对应值为 `MODEL_PASSWORD_REQUIRED`、`MODEL_PASSWORD_INVALID`、`MODEL_PROTECTION_METADATA_INVALID`、`MODEL_DECRYPT_FAILED`。
+5. 其他构造失败时抛出 `Exception`。
+6. 加载完成后可通过 `Loaded` 属性判断状态。
 
 ### 3.2 属性
 
@@ -179,6 +182,7 @@ public class FlowGraphModel : IDisposable
 {
     public JObject Load(string flowJsonPath, int deviceId = 0);
     protected JObject LoadFromRoot(JObject root, int deviceId);
+    protected JObject LoadFromRoot(JObject root, int deviceId, string modelPassword);
 }
 ```
 
@@ -238,7 +242,8 @@ public void Dispose();
 ```csharp
 public class DvsModel : FlowGraphModel
 {
-    public new JObject Load(string dvsPath, int deviceId = 0);
+    public JObject Load(string dvsPath, int deviceId = 0);
+    public JObject Load(string dvsPath, int deviceId, string modelPassword);
 }
 ```
 
@@ -247,7 +252,7 @@ public class DvsModel : FlowGraphModel
 2. 读取 JSON 头行，解析 `file_list` 和 `file_size` 数组。
 3. 将 `pipeline.json` 读入内存，其他文件解包到临时目录（临时文件名使用 `Guid.NewGuid().ToString("N")` + 原扩展名，避免中文路径问题）。
 4. 修改 `pipeline.json` 中各节点的 `model_path` 为临时目录中的实际路径，保留原始路径到 `model_path_original` 和 `model_name`。
-5. 调用 `LoadFromRoot(pipelineJson, deviceId)` 完成加载。
+5. 调用 `LoadFromRoot(pipelineJson, deviceId, modelPassword)` 完成加载；非空密码仅在加载期向归档内模型节点透传。
 6. `finally` 中清理临时目录。
 
 `DvsModel` 继承 `FlowGraphModel` 的推理语义：归档中模型节点使用 `pipeline.json` 保存的阈值，调用 `.dvst`/`.dvso`/`.dvsp` 时传入的 `threshold` 只过滤最终对外结果。
@@ -468,7 +473,7 @@ Console.WriteLine(info.ToString());
 
 ## 13. 工程结构
 
-`DlcvCsharpApi` 是一个 .NET Framework 4.7.2 的 C# 类库工程，`OutputType` 为 `Library`，程序集名称为 `DlcvCsharpApi`，默认生成 `DlcvCsharpApi.dll`。项目定义了 `Debug|x64` 与 `Release|x64` 两个主要构建配置，`PlatformTarget` 为 `x64`，`LangVersion` 为 `7.3`。程序集版本为 `2026.6.14.0`，`ComVisible` 为 `false`。
+`DlcvCsharpApi` 是一个 .NET Framework 4.7.2 的 C# 类库工程，`OutputType` 为 `Library`，程序集名称为 `DlcvCsharpApi`，默认生成 `DlcvCsharpApi.dll`。项目定义了 `Debug|x64` 与 `Release|x64` 两个主要构建配置，`PlatformTarget` 为 `x64`，`LangVersion` 为 `7.3`。程序集版本为 `2026.8.4.0`，`ComVisible` 为 `false`。
 
 发布版输出路径为 `DlcvCsharpApi\bin\x64\Release\DlcvCsharpApi.dll`。
 

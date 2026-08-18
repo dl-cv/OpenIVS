@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json.Linq;
+using dlcv_infer_csharp;
 
 namespace DlcvModules
 {
@@ -282,7 +283,11 @@ namespace DlcvModules
 						item["status_code"] = 0;
 						item["status_message"] = "ok";
 					}
-					catch (Exception ex)
+                    catch (ModelLoadException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
 					{
 						failCount++;
 						item["status_code"] = 1;
