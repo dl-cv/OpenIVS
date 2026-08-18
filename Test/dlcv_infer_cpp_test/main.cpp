@@ -1053,38 +1053,83 @@ int RunCrossModelLabelMergeSelfTest() {
     std::cout << "cross_model_label_merge selftest passed\n";
     return 0;
 }
+
+int RunThreeModelLoadTiming(int argc, wchar_t* argv[]) {
+    if (argc != 5) {
+        std::cout << "用法: dlcv_infer_cpp_test.exe load-three-models <元件提取模型> <元件检测模型> <IC检测模型>\n";
+        return 2;
+    }
+
+    struct ModelSpec {
+        const char* name;
+        std::wstring path;
+    };
+
+    const std::vector<ModelSpec> specs = {
+        {"元件提取模型", argv[2]},
+        {"元件检测模型", argv[3]},
+        {"IC检测模型", argv[4]},
+    };
+
+    std::vector<std::unique_ptr<dlcv_infer::Model>> models;
+    models.reserve(specs.size());
+    double totalSeconds = 0.0;
+
+    try {
+        for (const auto& spec : specs) {
+            std::cout << "开始加载" << spec.name << ": " << WideToUtf8(spec.path) << "\n" << std::flush;
+            const auto start = Clock::now();
+            auto model = std::make_unique<dlcv_infer::Model>(spec.path, 0);
+            const double elapsedSeconds = std::chrono::duration<double>(Clock::now() - start).count();
+            totalSeconds += elapsedSeconds;
+            std::cout << spec.name << "加载完成，耗时 " << ToFixed(elapsedSeconds, 2) << " 秒\n" << std::flush;
+            models.push_back(std::move(model));
+        }
+
+        std::cout << "三个模型加载完成，总耗时 " << ToFixed(totalSeconds, 2) << " 秒\n" << std::flush;
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cout << "模型加载失败: " << ex.what() << "\n" << std::flush;
+        return 1;
+    }
+}
 }  // namespace
 
-int main(int argc, char* argv[]) {
+int wmain(int argc, wchar_t* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
-    if (argc >= 2 && std::string(argv[1]) == "imageprepcheck") {
+    if (argc >= 2 && std::wstring(argv[1]) == L"imageprepcheck") {
         return RunImagePrepCheck();
     }
 
-    if (argc >= 2 && std::string(argv[1]) == "rect-image-correction-selftest") {
+    if (argc >= 2 && std::wstring(argv[1]) == L"rect-image-correction-selftest") {
         return RunRectImageCorrectionSelfTest();
     }
 
-    if (argc >= 2 && std::string(argv[1]) == "bbox-iou-dedup-selftest") {
+    if (argc >= 2 && std::wstring(argv[1]) == L"bbox-iou-dedup-selftest") {
         return RunBBoxIoUDedupSelfTest();
     }
 
-    if (argc >= 2 && std::string(argv[1]) == "image-generation-expand-selftest") {
+    if (argc >= 2 && std::wstring(argv[1]) == L"image-generation-expand-selftest") {
         return RunImageGenerationExpandSelfTest();
     }
 
-    if (argc >= 2 && std::string(argv[1]) == "cross-model-label-merge-selftest") {
+    if (argc >= 2 && std::wstring(argv[1]) == L"cross-model-label-merge-selftest") {
         return RunCrossModelLabelMergeSelfTest();
     }
 
-    std::cout << "Usage: " << (argc >= 1 ? argv[0] : "dlcv_infer_cpp_test") << " <subcommand>\n";
+    if (argc >= 2 && std::wstring(argv[1]) == L"load-three-models") {
+        return RunThreeModelLoadTiming(argc, argv);
+    }
+
+    std::cout << "Usage: " << (argc >= 1 ? WideToUtf8(argv[0]) : "dlcv_infer_cpp_test") << " <subcommand>\n";
     std::cout << "Available subcommands:\n";
     std::cout << "  imageprepcheck\n";
     std::cout << "  rect-image-correction-selftest\n";
     std::cout << "  bbox-iou-dedup-selftest\n";
     std::cout << "  image-generation-expand-selftest\n";
     std::cout << "  cross-model-label-merge-selftest\n";
+    std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
     return 2;
 }

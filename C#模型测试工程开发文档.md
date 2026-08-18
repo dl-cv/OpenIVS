@@ -85,11 +85,16 @@
   - `dvs-rgb-selftest <modelPath> <imagePath>`
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
+- `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
+  - `load-three-models <extractModelPath> <componentModelPath> <icModelPath>`
+  - 三个模型按参数顺序串行加载，实时输出各模型加载耗时，完成后输出三次耗时之和。
+  - 命令行使用宽字符参数接收中文路径，固定使用 `device_id=0`，不加载单独的预热模型，也不执行额外推理。
+  - 成功返回 `0`，模型加载异常返回 `1`，参数数量错误返回 `2`。
 
 说明：
 
 - 固定使用 GPU 设备（`device_id=0`）。
-- 模型目录固定为 `Y:\测试模型`，不支持运行参数/环境变量覆盖（规则：目录/行为如需变更，请改代码与提交）。
+- 默认批量测试的模型目录固定为 `Y:\测试模型`；`load-three-models` 的三个模型路径由命令行参数提供。
 - 为避免日志打断阅读：表格在所有测试执行完成后一次性输出（总表）；并在表格末尾追加“汇总”一行。
 - 内存泄露专项在表格输出后自动执行并单独输出结果；专项仅对 1 个实例分割模型执行。
 - `demo2-rgb-selftest` 会输出 `entry_rgb_signature`、`manual_rgb_signature` 与 `raw_bgr_signature`；当 `entry_rgb_signature == manual_rgb_signature` 且与 `raw_bgr_signature` 不同时，判定 Demo2 当前入口保持 RGB 数据流。
