@@ -42,6 +42,7 @@
             this.labelOverlapY = new System.Windows.Forms.Label();
             this.numOverlapY = new System.Windows.Forms.NumericUpDown();
             this.btnReleaseModels = new System.Windows.Forms.Button();
+            this.btnLoadAllModels = new System.Windows.Forms.Button();
             this.progressBarInference = new System.Windows.Forms.ProgressBar();
             this.lblInferenceProgress = new System.Windows.Forms.Label();
             this.richTextBox1 = new System.Windows.Forms.RichTextBox();
@@ -335,6 +336,16 @@
             this.btnReleaseModels.Text = "释放模型";
             this.btnReleaseModels.UseVisualStyleBackColor = true;
             this.btnReleaseModels.Click += new System.EventHandler(this.btnReleaseModels_Click);
+            //
+            // btnLoadAllModels
+            //
+            this.btnLoadAllModels.Location = new System.Drawing.Point(858, 164);
+            this.btnLoadAllModels.Name = "btnLoadAllModels";
+            this.btnLoadAllModels.Size = new System.Drawing.Size(180, 34);
+            this.btnLoadAllModels.TabIndex = 24;
+            this.btnLoadAllModels.Text = "一键加载三个模型";
+            this.btnLoadAllModels.UseVisualStyleBackColor = true;
+            this.btnLoadAllModels.Click += new System.EventHandler(this.btnLoadAllModels_Click);
             // 
             // progressBarInference
             // 
@@ -398,6 +409,7 @@
             this.Controls.Add(this.richTextBox1);
             this.Controls.Add(this.lblInferenceProgress);
             this.Controls.Add(this.progressBarInference);
+            this.Controls.Add(this.btnLoadAllModels);
             this.Controls.Add(this.btnReleaseModels);
             this.Controls.Add(this.numOverlapY);
             this.Controls.Add(this.labelOverlapY);
@@ -466,6 +478,7 @@
         private System.Windows.Forms.Label labelOverlapY;
         private System.Windows.Forms.NumericUpDown numOverlapY;
         private System.Windows.Forms.Button btnReleaseModels;
+        private System.Windows.Forms.Button btnLoadAllModels;
         private System.Windows.Forms.ProgressBar progressBarInference;
         private System.Windows.Forms.Label lblInferenceProgress;
         private System.Windows.Forms.RichTextBox richTextBox1;
