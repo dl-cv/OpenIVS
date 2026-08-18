@@ -512,7 +512,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
   - Win32 Release：`WIN32;NDEBUG;_WINDOWS;_USRDLL;DLCV_INFER_CPP_DLL_EXPORTS`
   - x64 Debug：`_DEBUG;_WINDOWS;_USRDLL;DLCV_INFER_CPP_DLL_EXPORTS`
   - x64 Release：`NDEBUG;_WINDOWS;_USRDLL;DLCV_INFER_CPP_DLL_EXPORTS`
-- 输出目录仅在 `x64` 配置中显式设置为 `$(SolutionDir)$(Configuration)\`。
+- 输出目录仅在 `x64` 配置中显式设置为 `$(ProjectDir)..\$(Configuration)\`，实际位置为仓库根目录的 `Debug` 或 `Release`。
 - Debug x64 链接库：`opencv_world4100d.lib`
 - Release x64 链接库：`opencv_world4100.lib`
 - `dlcv_infer_c_dll` 工程配置为 `Debug|x64` 和 `Release|x64`，输出目录为 `$(SolutionDir)$(Configuration)\`。

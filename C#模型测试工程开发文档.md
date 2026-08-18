@@ -76,10 +76,11 @@
 
 ## 5. 构建与运行
 
-- 解决方案级构建、项目级构建与发布前构建验证统一通过 MCP 构建工具执行，入口见 `开发文档.md` 的“统一编译说明”
+- 解决方案级构建、项目级构建与发布前构建验证统一通过 `.cursor/skills/vs-build/scripts/build.py` 执行，入口见 `开发文档.md` 的“统一编译说明”
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
   - `Release\dlcv_infer_cpp_test.exe`
+- `dlcv_infer_cpp_dll` 与 `dlcv_infer_cpp_test` 的 x64 产物统一输出到仓库根目录的 `Debug` 或 `Release`，测试程序从同目录加载本次构建的 C++ 封装 DLL。
 - `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
   - `model-channel-order-selftest`
   - `dvs-rgb-selftest <modelPath> <imagePath>`
@@ -89,6 +90,7 @@
   - `load-three-models <extractModelPath> <componentModelPath> <icModelPath>`
   - 三个模型按参数顺序串行加载，实时输出各模型加载耗时，完成后输出三次耗时之和。
   - 命令行使用宽字符参数接收中文路径，固定使用 `device_id=0`，不加载单独的预热模型，也不执行额外推理。
+  - 流程模型加载期间保留已经加载成功的模型模块，流程对象取得模型池引用后再释放临时模块；每个不同的子模型只执行一次原生加载。
   - 成功返回 `0`，模型加载异常返回 `1`，参数数量错误返回 `2`。
 
 说明：
