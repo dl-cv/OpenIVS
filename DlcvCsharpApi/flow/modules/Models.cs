@@ -201,6 +201,7 @@ namespace DlcvModules
 			var p = new JObject();
 			TryAddParam(p, "threshold");
 			TryAddParam(p, "iou_threshold");
+			TryAddParam(p, "calc_mean");
 			TryAddParam(p, "top_k");
 			TryAddParam(p, "return_polygon");
 			TryAddParam(p, "epsilon");
@@ -349,6 +350,9 @@ namespace DlcvModules
 					["bbox"] = obj.Bbox != null ? JArray.FromObject(obj.Bbox) : null,
 					["with_bbox"] = obj.WithBbox,
 					["with_mask"] = obj.WithMask,
+					["with_mean"] = obj.WithMean,
+					["foreground_mean"] = obj.ForegroundMean,
+					["background_mean"] = obj.BackgroundMean,
 					["with_angle"] = obj.WithAngle,
 					["angle"] = obj.Angle
 				};

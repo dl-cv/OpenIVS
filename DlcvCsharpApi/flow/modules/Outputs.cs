@@ -375,6 +375,9 @@ namespace DlcvModules
             {
                 item["area"] = detObj["area"];
             }
+            item["with_mean"] = detObj["with_mean"]?.Value<bool>() ?? false;
+            item["foreground_mean"] = detObj["foreground_mean"]?.Value<double>() ?? 0.0;
+            item["background_mean"] = detObj["background_mean"]?.Value<double>() ?? 0.0;
 
             var bboxLocal = detObj["bbox"] as JArray;
             bool isRot = bboxLocal != null && bboxLocal.Count == 5;

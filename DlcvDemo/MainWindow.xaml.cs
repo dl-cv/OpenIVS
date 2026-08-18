@@ -333,6 +333,7 @@ namespace DlcvDemo
 				JObject data = new JObject();
 				data["threshold"] = (float)numericUpDown_threshold.Value;
 				data["with_mask"] = true;
+				data["calc_mean"] = checkBox_calc_mean.IsChecked == true;
 
 				Mat inferImage = PrepareImageForModelInput(image);
 				try
@@ -416,6 +417,7 @@ namespace DlcvDemo
             try
             {
                 numericUpDown_threshold.Value = uiTestOptions.Threshold;
+                checkBox_calc_mean.IsChecked = uiTestOptions.CalcMean;
                 WriteUiTestResult("started", null);
 
                 if (uiTestOptions.InteractiveDialogs)
@@ -494,6 +496,7 @@ namespace DlcvDemo
                 ["model"] = model_path ?? uiTestOptions.ModelPath,
                 ["image"] = image_path ?? uiTestOptions.ImagePath,
                 ["threshold"] = uiTestOptions.Threshold,
+                ["calc_mean"] = uiTestOptions.CalcMean,
                 ["device"] = uiTestOptions.DeviceId,
                 ["interactive_dialogs"] = uiTestOptions.InteractiveDialogs,
                 ["window_title"] = Title,
@@ -547,6 +550,7 @@ namespace DlcvDemo
                 JObject data = new JObject();
                 data["threshold"] = (float)numericUpDown_threshold.Value;
                 data["with_mask"] = true;
+                data["calc_mean"] = checkBox_calc_mean.IsChecked == true;
 
                 Stopwatch stopwatch = new Stopwatch();
                 stopwatch.Start();
@@ -621,6 +625,11 @@ namespace DlcvDemo
             line.Append("  ");
             line.Append(BuildResultLocationText(obj));
             line.AppendFormat("  area={0:F1}", obj.Area);
+            if (obj.WithMean)
+            {
+                line.AppendFormat("  foreground_mean={0:F4}", obj.ForegroundMean);
+                line.AppendFormat("  background_mean={0:F4}", obj.BackgroundMean);
+            }
             string angleText = BuildResultAngleText(obj);
             if (!string.IsNullOrWhiteSpace(angleText))
             {

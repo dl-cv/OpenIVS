@@ -123,6 +123,11 @@ namespace DlcvCSharpTest
                     return RunWithMaskSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "calc-mean-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunCalcMeanSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "us-lag-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunUsLagSelfTest();
@@ -3394,6 +3399,45 @@ namespace DlcvCSharpTest
                 try { if (modelA != null) modelA.Dispose(); } catch { }
                 try { if (modelB != null) modelB.Dispose(); } catch { }
                 ForceGc();
+            }
+        }
+
+        private static int RunCalcMeanSelfTest()
+        {
+            try
+            {
+                var defaultResult = new Utils.CSharpObjectResult(
+                    1, "默认均值", 0.9f, 1.0f,
+                    new List<double> { 1.0, 2.0, 3.0, 4.0 }, false, null);
+                if (defaultResult.WithMean || defaultResult.ForegroundMean != 0.0 || defaultResult.BackgroundMean != 0.0)
+                {
+                    throw new InvalidOperationException("默认均值字段不符合 false/0.0 语义。");
+                }
+
+                var resultWithMean = new Utils.CSharpObjectResult(
+                    2, "显式均值", 0.8f, 2.0f,
+                    new List<double> { 5.0, 6.0, 7.0, 8.0 }, false, null,
+                    false, false, -100f, null, true, 12.5, 34.75);
+                if (!resultWithMean.WithMean
+                    || Math.Abs(resultWithMean.ForegroundMean - 12.5) > 1e-12
+                    || Math.Abs(resultWithMean.BackgroundMean - 34.75) > 1e-12)
+                {
+                    throw new InvalidOperationException("显式均值字段映射错误。");
+                }
+
+                var inferParams = new JObject { ["calc_mean"] = true };
+                if (inferParams.Value<bool?>("calc_mean") != true)
+                {
+                    throw new InvalidOperationException("calc_mean=true 参数构造失败。");
+                }
+
+                Console.WriteLine("calc_mean 自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("calc_mean 自测失败: " + ex.Message);
+                return 1;
             }
         }
 

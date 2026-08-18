@@ -84,14 +84,15 @@
 无参数启动时进入 WinForms GUI。存在命令行参数时由 `CliRunner` 执行无界面模式。
 
 ```text
-"C# 测试程序.exe" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]
+"C# 测试程序.exe" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
 "C# 测试程序.exe" --help
 "C# 测试程序.exe" --version
 ```
 
-- `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`。
+- `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`，`--calc-mean` 默认 `false`。
 - `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
 - 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso`/`.dvsp` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
+- `--calc-mean=true` 时，结构化与 JSON 摘要包含 `with_mean`、`foreground_mean`、`background_mean`，并通过 `mean_check_passed` 检查均值字段及两种结果的一致性。
 - 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
 - `structured` 与 `json` 均包含 `count`、`scores`、`categories` 和 `below_threshold`。
@@ -143,6 +144,7 @@
 - **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`推理JSON`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`文档`、`获取模型信息`。
 - **下拉框**：设备选择。
 - **Label**：`选择显卡`、`线程数`、`batch_size`、`threshold`。
+- **复选框**：`计算均值`，默认未选中；选中后，结构化结果与 JSON 结果均请求 `calc_mean=true`。
 - **数值输入**：
   - 线程数（1-32，默认1）。
   - Batch Size（1-1024，默认1）。
@@ -303,7 +305,7 @@
   - 已选择图片。
 - **输入**：
   - 图片：当前选择的图片（`ImreadModes.Unchanged` 读取，原样送入 `Model.InferBatch`，见 2.4）。
-  - 参数：UI设置的 Batch Size, Threshold，强制 `with_mask=true`。
+  - 参数：UI 设置的 Batch Size、Threshold、计算均值状态，强制 `with_mask=true`；计算均值状态写入 `calc_mean`。
   - Threshold 变化：在模型与图片均已就绪且没有测试运行时，调整 Threshold 控件应等价触发本功能。
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
@@ -320,8 +322,9 @@
   - 若 `image.Empty()==true`：输出控制台 `图像解码失败！` 并直接返回（不弹窗、不更新 UI）
   - 将解码后的 `Mat` 原样传入 `InferOneOutJson`（规整见 2.4）
   - 参数 JSON：
-    - `threshold = numericUpDown_threshold`
-    - `with_mask = true`
+  - `threshold = numericUpDown_threshold`
+  - `with_mask = true`
+  - `calc_mean = checkBox_calc_mean.IsChecked == true`
   - 调用：`model.InferOneOutJson(image_rgb, params)`
 - 输出到 `richTextBox1`：`JsonConvert.SerializeObject(json, Formatting.Indented)`（输出内容根节点必须为 JSON 数组 `[]`，即使为空）
 - **说明**：该功能只输出 JSON 文本，不更新 `imagePanel1` 的图像与可视化结果

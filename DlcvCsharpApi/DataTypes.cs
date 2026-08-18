@@ -74,9 +74,25 @@ namespace dlcv_infer_csharp
             /// </summary>
             public float Angle { get; set; }
 
+            /// <summary>
+            /// 是否包含前景与背景均值
+            /// </summary>
+            public bool WithMean { get; set; }
+
+            /// <summary>
+            /// mask 前景区域的像素均值
+            /// </summary>
+            public double ForegroundMean { get; set; }
+
+            /// <summary>
+            /// mask 背景区域的像素均值
+            /// </summary>
+            public double BackgroundMean { get; set; }
+
             public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
                 List<double> bbox, bool withMask, Mat mask,
-                bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null)
+                bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null,
+                bool withMean = false, double foregroundMean = 0.0, double backgroundMean = 0.0)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;
@@ -89,6 +105,9 @@ namespace dlcv_infer_csharp
                 Angle = angle;
                 WithBbox = withBbox;
                 WithAngle = withAngle;
+                WithMean = withMean;
+                ForegroundMean = foregroundMean;
+                BackgroundMean = backgroundMean;
             }
 
             public override String ToString()
@@ -113,6 +132,11 @@ namespace dlcv_infer_csharp
                 if (WithMask)
                 {
                     sb.Append($"Mask size: {Mask.Width}x{Mask.Height}, ");
+                }
+                if (WithMean)
+                {
+                    sb.Append($"ForegroundMean: {ForegroundMean:F4}, ");
+                    sb.Append($"BackgroundMean: {BackgroundMean:F4}, ");
                 }
                 string extraInfoText = FormatExtraInfoForDisplay(ExtraInfo);
                 if (!string.IsNullOrWhiteSpace(extraInfoText))

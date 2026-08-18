@@ -812,6 +812,9 @@ namespace DlcvModules
             string categoryName = entry.Value<string>("category_name") ?? string.Empty;
             float score = entry.Value<float?>("score") ?? 0f;
             float area = entry.Value<float?>("area") ?? 0f;
+            bool withMean = entry.Value<bool?>("with_mean") ?? false;
+            double foregroundMean = entry.Value<double?>("foreground_mean") ?? 0.0;
+            double backgroundMean = entry.Value<double?>("background_mean") ?? 0.0;
 
             var bboxArr = entry["bbox"] as JArray;
             var bboxRaw = bboxArr != null ? bboxArr.ToObject<List<double>>() : new List<double>();
@@ -953,7 +956,8 @@ namespace DlcvModules
 
             var obj = new Utils.CSharpObjectResult(
                 categoryId, categoryName, score, area, bbox,
-                withMask, mask, withBbox, withAngle, angle, extraInfo);
+                withMask, mask, withBbox, withAngle, angle, extraInfo,
+                withMean, foregroundMean, backgroundMean);
             objects.Add(obj);
         }
 
@@ -986,6 +990,9 @@ namespace DlcvModules
                 string categoryName = so.Value<string>("category_name") ?? string.Empty;
                 float score = so.Value<float?>("score") ?? 0f;
                 float area = so.Value<float?>("area") ?? 0f;
+                bool withMean = so.Value<bool?>("with_mean") ?? false;
+                double foregroundMean = so.Value<double?>("foreground_mean") ?? 0.0;
+                double backgroundMean = so.Value<double?>("background_mean") ?? 0.0;
                 var bboxArr = so["bbox"] as JArray;
                 var bbox = bboxArr != null ? bboxArr.ToObject<List<double>>() : new List<double>();
                 bool withBbox = so.Value<bool?>("with_bbox") ?? (bbox != null && bbox.Count > 0);
@@ -1098,7 +1105,8 @@ namespace DlcvModules
 
                 var obj = new Utils.CSharpObjectResult(
                     categoryId, categoryName, score, area, bbox,
-                    withMask, mask, withBbox, withAngle, angle, extraInfo);
+                    withMask, mask, withBbox, withAngle, angle, extraInfo,
+                    withMean, foregroundMean, backgroundMean);
                 objects.Add(obj);
             }
         }

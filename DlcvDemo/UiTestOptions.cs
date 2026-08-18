@@ -12,6 +12,7 @@ namespace DlcvDemo
         internal string OutputPath { get; private set; }
         internal decimal Threshold { get; private set; } = 0.5m;
         internal int DeviceId { get; private set; } = 0;
+        internal bool CalcMean { get; private set; }
         internal bool InteractiveDialogs { get; private set; }
 
         internal static bool TryParse(string[] args, out UiTestOptions options, out string error)
@@ -68,6 +69,14 @@ namespace DlcvDemo
                         }
                         options.DeviceId = deviceId;
                         break;
+                    case "--calc-mean":
+                        if (!bool.TryParse(value, out bool calcMean))
+                        {
+                            error = "--calc-mean 必须是 true 或 false。";
+                            return false;
+                        }
+                        options.CalcMean = calcMean;
+                        break;
                     case "--interactive-dialogs":
                         if (!bool.TryParse(value, out bool interactiveDialogs))
                         {
@@ -113,7 +122,7 @@ namespace DlcvDemo
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--interactive-dialogs <true|false>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test starts the real WPF window and writes its progress/result to --output.");
             Console.Out.WriteLine("interactive-dialogs=false loads inputs without opening file dialogs and does not activate the window.");
