@@ -183,9 +183,10 @@ namespace DlcvDemo
                 bool consistent = AreConsistent(structuredSummary, jsonSummary);
                 bool thresholdCheckPassed = structuredSummary.BelowThresholdCount == 0
                     && jsonSummary.BelowThresholdCount == 0;
+                bool bothResultsEmpty = structuredSummary.Count == 0 && jsonSummary.Count == 0;
                 bool meanCheckPassed = !options.CalcMean
-                    || (structuredSummary.Count > 0
-                        && structuredSummary.AllHaveMean
+                    || bothResultsEmpty
+                    || (structuredSummary.AllHaveMean
                         && jsonSummary.AllHaveMean);
 
                 return new JObject

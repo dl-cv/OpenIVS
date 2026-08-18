@@ -3406,6 +3406,30 @@ namespace DlcvCSharpTest
         {
             try
             {
+                Type resultType = typeof(Utils.CSharpObjectResult);
+                Type[] legacyConstructorTypes =
+                {
+                    typeof(int), typeof(string), typeof(float), typeof(float),
+                    typeof(List<double>), typeof(bool), typeof(Mat), typeof(bool),
+                    typeof(bool), typeof(float), typeof(JObject)
+                };
+                if (resultType.GetConstructor(legacyConstructorTypes) == null)
+                {
+                    throw new InvalidOperationException("未保留原有 CSharpObjectResult 构造函数签名。");
+                }
+
+                Type[] completeConstructorTypes =
+                {
+                    typeof(int), typeof(string), typeof(float), typeof(float),
+                    typeof(List<double>), typeof(bool), typeof(Mat), typeof(bool),
+                    typeof(bool), typeof(float), typeof(JObject), typeof(bool),
+                    typeof(double), typeof(double)
+                };
+                if (resultType.GetConstructor(completeConstructorTypes) == null)
+                {
+                    throw new InvalidOperationException("缺少包含均值字段的完整构造函数签名。");
+                }
+
                 var defaultResult = new Utils.CSharpObjectResult(
                     1, "默认均值", 0.9f, 1.0f,
                     new List<double> { 1.0, 2.0, 3.0, 4.0 }, false, null);

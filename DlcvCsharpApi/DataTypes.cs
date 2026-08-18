@@ -91,8 +91,16 @@ namespace dlcv_infer_csharp
 
             public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
                 List<double> bbox, bool withMask, Mat mask,
-                bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null,
-                bool withMean = false, double foregroundMean = 0.0, double backgroundMean = 0.0)
+                bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null)
+                : this(categoryId, categoryName, score, area, bbox, withMask, mask,
+                    withBbox, withAngle, angle, extraInfo, false, 0.0, 0.0)
+            {
+            }
+
+            public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
+                List<double> bbox, bool withMask, Mat mask,
+                bool withBbox, bool withAngle, float angle, JObject extraInfo,
+                bool withMean, double foregroundMean, double backgroundMean)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;

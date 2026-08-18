@@ -50,8 +50,13 @@ public partial class Utils
         public CSharpObjectResult(
             int categoryId, string categoryName, float score, float area,
             List<double> bbox, bool withMask, Mat mask,
-            bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null,
-            bool withMean = false, double foregroundMean = 0.0, double backgroundMean = 0.0);
+            bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null);
+
+        public CSharpObjectResult(
+            int categoryId, string categoryName, float score, float area,
+            List<double> bbox, bool withMask, Mat mask,
+            bool withBbox, bool withAngle, float angle, JObject extraInfo,
+            bool withMean, double foregroundMean, double backgroundMean);
     }
 }
 ```
@@ -61,6 +66,7 @@ public partial class Utils
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
 - `WithMean=false` 时，`ForegroundMean` 与 `BackgroundMean` 均为 `0.0`；`WithMean=true` 时，两个值分别表示 mask 前景区域和背景区域的像素均值。
+- 原有 11 参数构造函数保持不变；需要设置均值字段时使用 14 参数构造函数。
 - `ExtraInfo` 可包含 `polyline`（通过 `Utils.GetExtraInfoPolyline` / `Utils.SetExtraInfoPolyline` 读写）。
 
 ### 2.2 CSharpSampleResult

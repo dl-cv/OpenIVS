@@ -85,6 +85,7 @@
   - `dvs-rgb-selftest <modelPath> <imagePath>`
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
+  - `calc-mean-selftest`
 
 说明：
 
