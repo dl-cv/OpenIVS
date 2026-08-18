@@ -1977,6 +1977,114 @@ namespace DlcvModules
     }
 
     /// <summary>
+    /// 统计结果个数，并将完整输入分别输出到全部、通过、排除三组端口。
+    /// 新配置使用 min_count/max_count 闭区间；旧配置存在 count_type/only_count 时保留原逻辑。
+    /// </summary>
+    public class CountResults : BaseModule
+    {
+        static CountResults()
+        {
+            ModuleRegistry.Register("post_process/count_results", typeof(CountResults));
+            ModuleRegistry.Register("features/count_results", typeof(CountResults));
+        }
+
+        public CountResults(int nodeId, string title = null, Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context)
+        {
+        }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            var images = imageList ?? new List<ModuleImage>();
+            var results = resultList ?? new JArray();
+            bool onlyLocal = ReadBoolValue("only_local", true);
+            bool legacyConfig = Properties.ContainsKey("count_type") || Properties.ContainsKey("only_count");
+            int defaultCount = legacyConfig ? 0 : 1;
+            int minCount = ReadNonNegativeInt("min_count", defaultCount);
+            int maxCount = ReadNonNegativeInt("max_count", defaultCount);
+
+            if (!legacyConfig && minCount > maxCount)
+            {
+                throw new ArgumentException("min_count 必须小于等于 max_count");
+            }
+
+            int total = 0;
+            foreach (JToken token in results)
+            {
+                var entry = token as JObject;
+                if (entry == null) continue;
+                bool isLocal = string.Equals((string)entry["type"], "local", StringComparison.Ordinal);
+                if (onlyLocal && !isLocal) continue;
+
+                if (isLocal)
+                {
+                    var detections = entry["sample_results"] as JArray;
+                    if (detections != null)
+                    {
+                        total += detections.OfType<JObject>().Count();
+                    }
+                }
+                else
+                {
+                    total++;
+                }
+            }
+
+            bool ok;
+            if (legacyConfig)
+            {
+                string countType = ReadText("count_type", "greater").Trim().ToLowerInvariant();
+                int onlyCount = ReadNonNegativeInt("only_count", 0);
+                if (countType == "equal") ok = total == onlyCount;
+                else if (countType == "greater") ok = total > minCount;
+                else if (countType == "less") ok = total < maxCount;
+                else ok = total >= minCount;
+            }
+            else
+            {
+                ok = minCount <= total && total <= maxCount;
+            }
+
+            ScalarOutputsByName["count"] = total;
+            ScalarOutputsByName["ok"] = ok;
+            ExtraOutputs.Add(new ModuleChannel(
+                ok ? images : new List<ModuleImage>(),
+                ok ? results : new JArray()));
+            ExtraOutputs.Add(new ModuleChannel(
+                ok ? new List<ModuleImage>() : images,
+                ok ? new JArray() : results));
+            return new ModuleIO(images, results);
+        }
+
+        private bool ReadBoolValue(string key, bool defaultValue)
+        {
+            if (Properties.TryGetValue(key, out object value) && value != null)
+            {
+                try { return Convert.ToBoolean(value); } catch { }
+            }
+            return defaultValue;
+        }
+
+        private int ReadNonNegativeInt(string key, int defaultValue)
+        {
+            if (Properties.TryGetValue(key, out object value) && value != null)
+            {
+                try { return Math.Max(0, (int)Convert.ToDouble(value)); } catch { }
+            }
+            return Math.Max(0, defaultValue);
+        }
+
+        private string ReadText(string key, string defaultValue)
+        {
+            if (Properties.TryGetValue(key, out object value) && value != null)
+            {
+                return value.ToString();
+            }
+            return defaultValue;
+        }
+    }
+
+    /// <summary>
     /// 模块名称：固定裁剪
     /// 固定坐标裁剪：按 x,y,w,h 从每张输入图像裁剪，结果透传。
     /// 注册名：features/coordinate_crop

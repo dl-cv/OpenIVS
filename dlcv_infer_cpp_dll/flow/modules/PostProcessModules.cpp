@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -2327,6 +2328,91 @@ private:
     }
 };
 
+/// post_process/count_results, features/count_results
+class CountResultsModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        const Json emptyResults = Json::array();
+        const Json& results = resultList.is_array() ? resultList : emptyResults;
+        const bool onlyLocal = ReadBool("only_local", true);
+        const bool legacyConfig = Properties.is_object() &&
+            (Properties.contains("count_type") || Properties.contains("only_count"));
+        const int defaultCount = legacyConfig ? 0 : 1;
+        const int minCount = ReadNonNegativeInt("min_count", defaultCount);
+        const int maxCount = ReadNonNegativeInt("max_count", defaultCount);
+
+        if (!legacyConfig && minCount > maxCount) {
+            throw std::invalid_argument("min_count must be less than or equal to max_count");
+        }
+
+        int total = 0;
+        for (const auto& token : results) {
+            if (!token.is_object()) continue;
+            const bool isLocal = token.value("type", "") == "local";
+            if (onlyLocal && !isLocal) continue;
+
+            if (isLocal) {
+                if (!token.contains("sample_results") || !token.at("sample_results").is_array()) continue;
+                for (const auto& detection : token.at("sample_results")) {
+                    if (detection.is_object() && total < std::numeric_limits<int>::max()) total++;
+                }
+            } else if (total < std::numeric_limits<int>::max()) {
+                total++;
+            }
+        }
+
+        bool ok = false;
+        if (legacyConfig) {
+            std::string countType = ReadString("count_type", "greater");
+            countType.erase(countType.begin(), std::find_if(countType.begin(), countType.end(),
+                [](unsigned char ch) { return !std::isspace(ch); }));
+            countType.erase(std::find_if(countType.rbegin(), countType.rend(),
+                [](unsigned char ch) { return !std::isspace(ch); }).base(), countType.end());
+            std::transform(countType.begin(), countType.end(), countType.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            const int onlyCount = ReadNonNegativeInt("only_count", 0);
+            if (countType == "equal") ok = total == onlyCount;
+            else if (countType == "greater") ok = total > minCount;
+            else if (countType == "less") ok = total < maxCount;
+            else ok = total >= minCount;
+        } else {
+            ok = minCount <= total && total <= maxCount;
+        }
+
+        ScalarOutputsByName["count"] = total;
+        ScalarOutputsByName["ok"] = ok;
+        ExtraOutputs.emplace_back(
+            ok ? imageList : std::vector<ModuleImage>(),
+            ok ? results : Json::array());
+        ExtraOutputs.emplace_back(
+            ok ? std::vector<ModuleImage>() : imageList,
+            ok ? Json::array() : results);
+        return ModuleIO(imageList, results, Json::array());
+    }
+
+private:
+    int ReadNonNegativeInt(const std::string& key, int defaultValue) const {
+        try {
+            if (!Properties.is_object() || !Properties.contains(key)) return std::max(0, defaultValue);
+            const Json& value = Properties.at(key);
+            double number = 0.0;
+            if (value.is_number()) number = value.get<double>();
+            else if (value.is_string()) number = std::stod(value.get<std::string>());
+            else return std::max(0, defaultValue);
+            if (!std::isfinite(number)) return std::max(0, defaultValue);
+            if (number <= 0.0) return 0;
+            if (number >= static_cast<double>(std::numeric_limits<int>::max())) {
+                return std::numeric_limits<int>::max();
+            }
+            return static_cast<int>(number);
+        } catch (...) {
+            return std::max(0, defaultValue);
+        }
+    }
+};
+
 // 注册
 DLCV_FLOW_REGISTER_MODULE("post_process/merge_results", MergeResultsModule)
 DLCV_FLOW_REGISTER_MODULE("features/merge_results", MergeResultsModule)
@@ -2336,6 +2422,8 @@ DLCV_FLOW_REGISTER_MODULE("post_process/multi_category_filter", MultiCategoryFil
 DLCV_FLOW_REGISTER_MODULE("features/multi_category_filter", MultiCategoryFilterModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/result_filter_advanced", ResultFilterAdvancedModule)
 DLCV_FLOW_REGISTER_MODULE("features/result_filter_advanced", ResultFilterAdvancedModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/count_results", CountResultsModule)
+DLCV_FLOW_REGISTER_MODULE("features/count_results", CountResultsModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/text_replacement", TextReplacementModule)
 DLCV_FLOW_REGISTER_MODULE("features/text_replacement", TextReplacementModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/result_category_override", ResultCategoryOverrideModule)

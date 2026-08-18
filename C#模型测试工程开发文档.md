@@ -82,9 +82,11 @@
   - `Release\dlcv_infer_cpp_test.exe`
 - `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
   - `model-channel-order-selftest`
+  - `count-results-selftest`
   - `dvs-rgb-selftest <modelPath> <imagePath>`
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
+- `dlcv_infer_cpp_test.exe` 支持 `count-results-selftest`，验证新配置闭区间、非法范围与旧配置兼容逻辑。
 
 说明：
 

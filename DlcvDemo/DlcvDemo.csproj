@@ -244,10 +244,10 @@
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Target Name="RenameOutputArtifacts" AfterTargets="Build">
-    <Move SourceFiles="$(TargetPath)" DestinationFiles="$(TargetDir)C# 测试程序.exe" />
-    <Move SourceFiles="$(TargetPath).config" DestinationFiles="$(TargetDir)C# 测试程序.exe.config" Condition="Exists('$(TargetPath).config')" />
-    <Move SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFiles="$(TargetDir)C# 测试程序.pdb" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+  <Target Name="CopyOutputArtifacts" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(TargetDir)C# 测试程序.exe" />
+    <Copy SourceFiles="$(TargetPath).config" DestinationFiles="$(TargetDir)C# 测试程序.exe.config" Condition="Exists('$(TargetPath).config')" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFiles="$(TargetDir)C# 测试程序.pdb" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
   </Target>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>

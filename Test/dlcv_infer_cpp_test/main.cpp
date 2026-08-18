@@ -12,6 +12,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -613,6 +614,234 @@ int RunBBoxIoUDedupSelfTest() {
     return 0;
 }
 
+json BuildCountResultsFlow(const json& properties, int total, bool usePassBranch) {
+    const int imageOutputIndex = usePassBranch ? 2 : 4;
+    const int resultOutputIndex = imageOutputIndex + 1;
+    json countOutputs = json::array();
+    for (int i = 0; i < 8; i++) {
+        json output = json::object();
+        if (i == imageOutputIndex) {
+            output["type"] = "image_chan";
+            output["links"] = json::array({301});
+        } else if (i == resultOutputIndex) {
+            output["type"] = "result_chan";
+            output["links"] = json::array({302});
+        } else if (i == 6) {
+            output["name"] = "count";
+            output["type"] = "int";
+            output["links"] = json::array();
+        } else if (i == 7) {
+            output["name"] = "ok";
+            output["type"] = "bool";
+            output["links"] = json::array();
+        } else {
+            output["type"] = (i % 2 == 0) ? "image_chan" : "result_chan";
+            output["links"] = json::array();
+        }
+        countOutputs.push_back(std::move(output));
+    }
+
+    json nodes = json::array({
+        json::object({
+            {"id", 1},
+            {"order", 1},
+            {"type", "input/frontend_image"},
+            {"outputs", json::array({
+                json::object({{"type", "image_chan"}, {"links", json::array()}}),
+                json::object({{"type", "result_chan"}, {"links", json::array()}})
+            })}
+        })
+    });
+
+    json mergeInputs = json::array();
+    for (int i = 0; i < total; i++) {
+        const int imageInputLink = 100 + i * 2;
+        const int resultInputLink = imageInputLink + 1;
+        const int imageOutputLink = 200 + i * 2;
+        const int resultOutputLink = imageOutputLink + 1;
+        nodes[0]["outputs"][0]["links"].push_back(imageInputLink);
+        nodes[0]["outputs"][1]["links"].push_back(resultInputLink);
+        nodes.push_back(json::object({
+            {"id", 2 + i},
+            {"order", 2 + i},
+            {"type", "input/build_results"},
+            {"properties", json::object({
+                {"category_id", 1},
+                {"category_name", "target"},
+                {"score", 0.99},
+                {"bbox_x", 10.0 + i},
+                {"bbox_y", 10.0 + i},
+                {"bbox_w", 20.0},
+                {"bbox_h", 20.0}
+            })},
+            {"inputs", json::array({
+                json::object({{"type", "image_chan"}, {"link", imageInputLink}}),
+                json::object({{"type", "result_chan"}, {"link", resultInputLink}})
+            })},
+            {"outputs", json::array({
+                json::object({{"type", "image_chan"}, {"links", json::array({imageOutputLink})}}),
+                json::object({{"type", "result_chan"}, {"links", json::array({resultOutputLink})}})
+            })}
+        }));
+        mergeInputs.push_back(json::object({{"type", "image_chan"}, {"link", imageOutputLink}}));
+        mergeInputs.push_back(json::object({{"type", "result_chan"}, {"link", resultOutputLink}}));
+    }
+
+    nodes.push_back(json::object({
+        {"id", 100},
+        {"order", 100},
+        {"type", "post_process/merge_results"},
+        {"inputs", std::move(mergeInputs)},
+        {"outputs", json::array({
+            json::object({{"type", "image_chan"}, {"links", json::array({901})}}),
+            json::object({{"type", "result_chan"}, {"links", json::array({902})}})
+        })}
+    }));
+    nodes.push_back(json::object({
+        {"id", 101},
+        {"order", 101},
+        {"type", "post_process/count_results"},
+        {"properties", properties},
+        {"inputs", json::array({
+            json::object({{"type", "image_chan"}, {"link", 901}}),
+            json::object({{"type", "result_chan"}, {"link", 902}})
+        })},
+        {"outputs", std::move(countOutputs)}
+    }));
+    nodes.push_back(json::object({
+        {"id", 102},
+        {"order", 102},
+        {"type", "output/return_json"},
+        {"inputs", json::array({
+            json::object({{"type", "image_chan"}, {"link", 301}}),
+            json::object({{"type", "result_chan"}, {"link", 302}})
+        })},
+        {"outputs", json::array()}
+    }));
+    return json::object({{"nodes", std::move(nodes)}});
+}
+
+bool RunCountResultsFlowCase(const json& properties, int total, bool expectedOk, std::string& error) {
+    const std::string tempDir = BuildTempRectCorrectionDir();
+    const std::string flowPath = JoinPathA(tempDir, "count_results.json");
+    {
+        std::ofstream ofs(flowPath, std::ios::binary);
+        if (!ofs) {
+            error = "cannot write temp flow file";
+            return false;
+        }
+        ofs << BuildCountResultsFlow(properties, total, expectedOk).dump(2);
+    }
+
+    try {
+        dlcv_infer::flow::FlowGraphModel model;
+        const json loadReport = model.Load(flowPath, 0);
+        if (!loadReport.is_object() || loadReport.value("code", 1) != 0) {
+            error = std::string("flow load failed: ") + loadReport.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        cv::Mat image(64, 64, CV_8UC3, cv::Scalar(0, 255, 0));
+        const json inferRoot = model.InferInternal(std::vector<cv::Mat>{image}, json::object());
+        if (!inferRoot.is_object() || inferRoot.value("code", 1) != 0) {
+            error = std::string("flow infer failed: ") + inferRoot.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        const json results = inferRoot.contains("result_list") ? inferRoot.at("result_list") : json::array();
+        const int branchCount = CountBBoxDedupDetections(results);
+        if (branchCount != total) {
+            error = "count_results branch mismatch, actual=" + std::to_string(branchCount) +
+                ", expected=" + std::to_string(total) + ", root=" + inferRoot.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+    } catch (const std::exception& ex) {
+        error = std::string("exception: ") + ex.what();
+        DeleteFileA(flowPath.c_str());
+        return false;
+    }
+
+    DeleteFileA(flowPath.c_str());
+    return true;
+}
+
+bool RunCountResultsInvalidRangeCase(std::string& error) {
+    const std::string tempDir = BuildTempRectCorrectionDir();
+    const std::string flowPath = JoinPathA(tempDir, "count_results_invalid.json");
+    {
+        std::ofstream ofs(flowPath, std::ios::binary);
+        if (!ofs) {
+            error = "cannot write temp flow file";
+            return false;
+        }
+        ofs << BuildCountResultsFlow(
+            json::object({{"only_local", true}, {"min_count", 3}, {"max_count", 2}}),
+            2,
+            true).dump(2);
+    }
+
+    try {
+        dlcv_infer::flow::FlowGraphModel model;
+        const json loadReport = model.Load(flowPath, 0);
+        if (!loadReport.is_object() || loadReport.value("code", 1) != 0) {
+            error = std::string("flow load failed: ") + loadReport.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+        cv::Mat image(64, 64, CV_8UC3, cv::Scalar(0, 255, 0));
+        const json inferRoot = model.InferInternal(std::vector<cv::Mat>{image, image}, json::object());
+        if (inferRoot.is_object() && inferRoot.value("code", 0) == 0) {
+            error = "min_count > max_count did not fail: " + inferRoot.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+    } catch (...) {
+    }
+
+    DeleteFileA(flowPath.c_str());
+    return true;
+}
+
+int RunCountResultsSelfTest() {
+    auto fail = [](const std::string& message) -> int {
+        std::cout << "count_results selftest failed: " << message << "\n";
+        return 1;
+    };
+
+    const std::vector<std::tuple<json, int, bool>> cases = {
+        {json::object(), 1, true},
+        {json::object({{"only_local", true}, {"min_count", 2}, {"max_count", 4}}), 2, true},
+        {json::object({{"only_local", true}, {"min_count", 2}, {"max_count", 4}}), 4, true},
+        {json::object({{"only_local", true}, {"min_count", 2}, {"max_count", 2}}), 2, true},
+        {json::object({{"only_local", true}, {"min_count", 2}, {"max_count", 4}}), 1, false},
+        {json::object({{"only_local", true}, {"count_type", "equal"}, {"only_count", 2}}), 2, true},
+        {json::object({{"only_local", true}, {"count_type", "greater"}, {"min_count", 2}}), 2, false},
+        {json::object({{"only_local", true}, {"count_type", "greater"}, {"min_count", 2}}), 3, true},
+        {json::object({{"only_local", true}, {"count_type", "less"}, {"max_count", 2}}), 2, false},
+        {json::object({{"only_local", true}, {"count_type", "less"}, {"max_count", 2}}), 1, true},
+        {json::object({{"only_local", true}, {"count_type", "legacy_unknown"}, {"min_count", 2}}), 2, true},
+        {json::object({{"only_local", true}, {"only_count", 99}, {"min_count", 2}}), 3, true}
+    };
+
+    std::string error;
+    for (const auto& testCase : cases) {
+        if (!RunCountResultsFlowCase(
+                std::get<0>(testCase),
+                std::get<1>(testCase),
+                std::get<2>(testCase),
+                error)) {
+            return fail(error);
+        }
+    }
+    if (!RunCountResultsInvalidRangeCase(error)) return fail(error);
+
+    std::cout << "count_results selftest passed\n";
+    return 0;
+}
+
 json BuildImageGenerationExpandFlow(const std::string& saveDir,
                                     const std::string& suffix,
                                     const json& cropProperties,
@@ -1071,6 +1300,10 @@ int main(int argc, char* argv[]) {
         return RunBBoxIoUDedupSelfTest();
     }
 
+    if (argc >= 2 && std::string(argv[1]) == "count-results-selftest") {
+        return RunCountResultsSelfTest();
+    }
+
     if (argc >= 2 && std::string(argv[1]) == "image-generation-expand-selftest") {
         return RunImageGenerationExpandSelfTest();
     }
@@ -1084,6 +1317,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  imageprepcheck\n";
     std::cout << "  rect-image-correction-selftest\n";
     std::cout << "  bbox-iou-dedup-selftest\n";
+    std::cout << "  count-results-selftest\n";
     std::cout << "  image-generation-expand-selftest\n";
     std::cout << "  cross-model-label-merge-selftest\n";
     return 2;
