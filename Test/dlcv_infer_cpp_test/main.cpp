@@ -1093,6 +1093,83 @@ int RunThreeModelLoadTiming(int argc, wchar_t* argv[]) {
         return 1;
     }
 }
+
+int RunCalcMeanSelfTest() {
+    auto fail = [](const std::string& message) -> int {
+        std::cout << "calc_mean 自测失败：" << message << "\n";
+        return 1;
+    };
+
+    const dlcv_infer::ObjectResult defaultResult(
+        1, "default", 0.9f, 1.0f,
+        std::vector<double>{1.0, 2.0, 3.0, 4.0}, false, cv::Mat());
+    if (defaultResult.withMean || defaultResult.foregroundMean != 0.0 || defaultResult.backgroundMean != 0.0) {
+        return fail("默认均值不符合 false/0.0 语义");
+    }
+
+    const dlcv_infer::ObjectResult resultWithMean(
+        2, "explicit", 0.8f, 2.0f,
+        std::vector<double>{5.0, 6.0, 7.0, 8.0}, false, cv::Mat(),
+        false, false, -100.0f, true, 12.5, 34.75);
+    if (!resultWithMean.withMean
+        || resultWithMean.foregroundMean != 12.5
+        || resultWithMean.backgroundMean != 34.75) {
+        return fail("显式均值字段映射错误");
+    }
+
+    class ParseProbe final : public dlcv_infer::Model {
+    public:
+        using dlcv_infer::Model::ParseToStructResult;
+    };
+
+    const json resultJson = {
+        {"sample_results", json::array({
+            {
+                {"results", json::array({
+                    {
+                        {"category_id", 3},
+                        {"category_name", "mean"},
+                        {"score", 0.7},
+                        {"area", 4.0},
+                        {"bbox", json::array({0.0, 0.0, 2.0, 2.0})},
+                        {"with_mask", false},
+                        {"mask", {{"width", 0}, {"height", 0}, {"mask_ptr", 0}}},
+                        {"with_mean", true},
+                        {"foreground_mean", 56.25},
+                        {"background_mean", 78.5}
+                    }
+                })}
+            }
+        })}
+    };
+    ParseProbe probe;
+    const dlcv_infer::Result parsed = probe.ParseToStructResult(resultJson);
+    if (parsed.sampleResults.size() != 1 || parsed.sampleResults[0].results.size() != 1) {
+        return fail("结构化结果数量错误");
+    }
+    const auto& parsedObject = parsed.sampleResults[0].results[0];
+    if (!parsedObject.withMean
+        || parsedObject.foregroundMean != 56.25
+        || parsedObject.backgroundMean != 78.5) {
+        return fail("结构化均值解析错误");
+    }
+
+    json missingMeanJson = resultJson;
+    json& missingMeanObject = missingMeanJson["sample_results"][0]["results"][0];
+    missingMeanObject.erase("with_mean");
+    missingMeanObject.erase("foreground_mean");
+    missingMeanObject.erase("background_mean");
+    const dlcv_infer::Result parsedWithoutMean = probe.ParseToStructResult(missingMeanJson);
+    const auto& objectWithoutMean = parsedWithoutMean.sampleResults[0].results[0];
+    if (objectWithoutMean.withMean
+        || objectWithoutMean.foregroundMean != 0.0
+        || objectWithoutMean.backgroundMean != 0.0) {
+        return fail("缺少均值字段时的默认值错误");
+    }
+
+    std::cout << "calc_mean 自测通过\n";
+    return 0;
+}
 }  // namespace
 
 int wmain(int argc, wchar_t* argv[]) {
@@ -1123,6 +1200,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunThreeModelLoadTiming(argc, argv);
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"calc-mean-selftest") {
+        return RunCalcMeanSelfTest();
+    }
+
     std::cout << "Usage: " << (argc >= 1 ? WideToUtf8(argv[0]) : "dlcv_infer_cpp_test") << " <subcommand>\n";
     std::cout << "Available subcommands:\n";
     std::cout << "  imageprepcheck\n";
@@ -1131,5 +1212,6 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  image-generation-expand-selftest\n";
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
+    std::cout << "  calc-mean-selftest\n";
     return 2;
 }

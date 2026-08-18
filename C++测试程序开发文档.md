@@ -59,18 +59,18 @@
 ### 3.2 命令行推理模式
 
 ```text
-dlcv_infer_cpp_qt_demo.exe infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]
+dlcv_infer_cpp_qt_demo.exe infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
 dlcv_infer_cpp_qt_demo.exe --help
 ```
 
-- `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`。
+- `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`，`--calc-mean` 默认 `false`。
 - `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
 - 普通模型使用 `--threshold` 作为推理阈值；流程模型保留各模型节点自身的阈值，`--threshold` 只对最终对外结果进行筛选。
 - 图片由 `QFile` 读取字节并通过 `cv::imdecode` 解码；BGR/BGRA 转为 RGB。
-- 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，输出字段与 C# 测试程序一致。
+- 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，输出字段与 C# 测试程序一致；开启均值计算时同时检查两种结果的均值字段。
 - C++ 结构化结果的本地 GBK 类别名在 CLI 边界转换为 UTF-8，再写入 JSON。
 - `--output` 使用 `QSaveFile` 原子写入 UTF-8 JSON；该路径不得覆盖模型或图片，父目录必须存在。
-- 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致或存在低于阈值的结果。
+- 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致、存在低于阈值的结果或均值检查失败。
 
 ### 3.3 UI 布局
 
@@ -98,6 +98,7 @@ dlcv_infer_cpp_qt_demo.exe --help
 | 选择显卡（下拉框） | CPU + 检测到的 GPU | GPU 0 | 设备选择 |
 | batch_size（整数框） | 1~1024 | 1 | 批量推理大小 |
 | threshold（浮点框） | 0.0~1.0 | 0.5 | 置信度阈值 |
+| 计算均值（复选框） | 开启或关闭 | 关闭 | 是否计算实例分割目标的前景与背景均值 |
 | 线程数（整数框） | 1~32 | 1 | 压力测试线程数 |
 
 ---
@@ -120,13 +121,13 @@ dlcv_infer_cpp_qt_demo.exe --help
 1. 点击 **打开图片推理**，选择图片（`jpg/jpeg/png/bmp/gif/tiff/tif`）。
 2. 图像经过 `prepareImageForInference` 转换为 RGB。
 3. 调用 `model->InferBatch()` 执行推理。
-4. 结果在文本区显示（数量、每个目标的类别、score、bbox、area、angle）。
+4. 结果在文本区显示（数量、每个目标的类别、score、bbox、area、angle，以及可用的前景与背景均值）。
 5. 图像区显示可视化结果（bbox 框 + mask 叠加）。
 
 **代码路径**：`MainWindow::onInfer()`
 - `prepareImageForInference`：将 OpenCV 读到的 BGR/BGRA 转换为 RGB。
 - 若 `batchSize > 1`，将同一张图片复制为 batch。
-- 参数 JSON：`{"threshold": ..., "with_mask": true, "batch_size": ...}`。
+- 参数 JSON：`{"threshold": ..., "with_mask": true, "calc_mean": ..., "batch_size": ...}`。
 
 ### 4.3 JSON 输出测试
 
@@ -135,7 +136,7 @@ dlcv_infer_cpp_qt_demo.exe --help
 3. 文本区显示格式化的 JSON（缩进 4）。
 
 **代码路径**：`MainWindow::onInferJson()`
-- 返回字段：`category_id`、`category_name`、`score`、`bbox`、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`。
+- 返回字段：`category_id`、`category_name`、`score`、`bbox`、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
 
 ### 4.4 批量推理测试
 
@@ -241,6 +242,7 @@ cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
 json params;
 params["threshold"] = spinThreshold_->value();
 params["with_mask"] = true;
+params["calc_mean"] = checkCalcMean_->isChecked();
 params["batch_size"] = batchSize;
 
 dlcv_infer::Result output = model_->InferBatch(imageList, params);

@@ -30,7 +30,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ## 统一运行与验证输入规则
 
-- `DlcvDemo` 与 `dlcv_infer_cpp_qt_demo` 支持文档中定义的 `infer` 命令行模式，用于传入模型、图片、阈值、设备和 mask 开关并执行无界面自动验证。
+- `DlcvDemo` 与 `dlcv_infer_cpp_qt_demo` 支持文档中定义的 `infer` 命令行模式，用于传入模型、图片、阈值、设备、mask 开关和均值计算开关并执行无界面自动验证。
 - 两个实际测试程序无命令行参数时仍启动原 GUI，不改变桌面交互行为。
 - 其他程序、自测入口和临时排查入口仅使用各自文档中已经定义的参数；未记录的业务输入通过源码固定变量或配置对象字段设置。
 - 命令行推理模式输出结构化与 JSON 两条 API 路径的结果摘要，并以退出码区分成功、运行错误、参数错误和验证失败。
@@ -116,6 +116,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 | 加载模型 | `dlcv_infer_cpp_load_model_c` | `const char* model_path, int device_id` → 返回 `model_index` |
 | 释放模型 | `dlcv_infer_cpp_free_model_c` | `int model_index` → 返回 `0`/` -1` |
 | 推理 | `dlcv_infer_cpp_infer_c` | `int model_index, const DlcvCImageList* image_list` → 返回 `DlcvCResult` |
+| 带参数推理 | `dlcv_infer_cpp_infer_with_params_c` | 在图像列表之外接收 JSON 参数，可传 `threshold`、`calc_mean` 等字段 |
 | 释放结果 | `dlcv_infer_cpp_free_model_result_c` | `DlcvCResult* result` |
 
 **数据结构**：复用底层 `dlcv_infer/dlcv_data_type_c.h` 中的 `DlcvCImage`、`DlcvCImageList`、`DlcvCObjectResult`、`DlcvCSampleResult`、`DlcvCResult`。
@@ -142,6 +143,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 |--------|------|--------|------|
 | `threshold` | float | 0.5 | 置信度阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
+| `calc_mean` | bool | false | 是否计算实例分割目标的前景与背景均值 |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
 
@@ -203,6 +205,9 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 | `angle` | 旋转角度 | 绘制旋转框、旋转裁剪、回正 |
 | `with_mask` | 是否有 mask | 区分检测结果和分割结果 |
 | `mask` | 结构化结果中的局部 mask 图像 | 做进一步图像计算 |
+| `with_mean` | 是否有均值 | 区分已计算均值与默认值 |
+| `foreground_mean` | 前景均值 | mask 前景区域的像素均值 |
+| `background_mean` | 背景均值 | mask 背景区域的像素均值 |
 | `extra_info` | 扩展信息对象 | 放置折线、业务附加信息 |
 | `metadata` | 元信息对象 | 放置流程来源、模块附加信息 |
 
@@ -219,6 +224,9 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 | `with_angle` | 是否有角度 | 与结构化结果一致 |
 | `angle` | 旋转角度 | 无角度时固定为 `-100` |
 | `with_mask` | 是否有区域结果 | 与结构化结果一致 |
+| `with_mean` | 是否有均值 | 与结构化结果一致 |
+| `foreground_mean` | 前景均值 | 与结构化结果一致 |
+| `background_mean` | 背景均值 | 与结构化结果一致 |
 | `mask_rle` | RLE 编码区域 | 面向 JSON 传输和跨语言交换 |
 | `poly` | 多边形轮廓数组 | 用于前端绘制、边界分析、折线提取 |
 | `extra_info` | 扩展信息 | 例如 `extra_info.polyline` |
@@ -337,10 +345,10 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 - **功能**：模型加载、单图/批量推理、JSON 输出、多线程压力测试、加密狗检测
 - **UI**：主窗口分为上方控制栏（按钮 + 参数调节）+ 下方输出区（左侧文本 + 右侧图像可视化）
 - **按钮**：加载模型、获取模型信息、打开图片推理、单次推理、推理JSON、多线程测试、释放模型、释放所有模型、文档、检查加密狗
-- **参数控件**：选择显卡（下拉）、batch_size（1~1024，默认1）、threshold（0.0~1.0，默认0.5）、线程数（1~32，默认1）
+- **参数控件**：选择显卡（下拉）、batch_size（1~1024，默认1）、threshold（0.0~1.0，默认0.5）、计算均值（默认关闭）、线程数（1~32，默认1）
 - **图像预处理**：`prepareImageForInference` 将 BGR/BGRA 转为 RGB
 - **压力测试**：每 500ms 更新统计，包含运行时间、完成请求数、平均延迟、实时速率、各节点平均耗时
-- **命令行模式**：`infer --model ... --image ... --threshold ...`，无界面执行结构化与 JSON 双路径验证
+- **命令行模式**：`infer --model ... --image ... --threshold ... --calc-mean ...`，无界面执行结构化与 JSON 双路径验证
 
 ### C++ Qt Demo3（`dlcv_infer_cpp_qt_demo3`）
 

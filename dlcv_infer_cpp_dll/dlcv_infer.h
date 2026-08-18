@@ -164,13 +164,23 @@ namespace dlcv_infer {
         bool withBbox;
         bool withAngle;
         float angle;
+        bool withMean;
+        double foregroundMean;
+        double backgroundMean;
 
         ObjectResult(int id, const std::string& name, float s, float a,
             const std::vector<double>& b, bool wm, const cv::Mat& m,
             bool wb = true, bool wa = false, float ang = -100.0f)
+            : ObjectResult(id, name, s, a, b, wm, m, wb, wa, ang, false, 0.0, 0.0) {}
+
+        ObjectResult(int id, const std::string& name, float s, float a,
+            const std::vector<double>& b, bool wm, const cv::Mat& m,
+            bool wb, bool wa, float ang,
+            bool wmean, double fgMean, double bgMean)
             : categoryId(id), categoryName(name), score(s), area(a),
             bbox(b), withMask(wm), mask(m),
-            withBbox(wb), withAngle(wa), angle(ang) {}
+            withBbox(wb), withAngle(wa), angle(ang),
+            withMean(wmean), foregroundMean(fgMean), backgroundMean(bgMean) {}
     };
 
     struct SampleResult {

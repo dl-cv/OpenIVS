@@ -144,6 +144,13 @@ int dlcv_infer_cpp_free_model_c(int model_index) {
 }
 
 DlcvCResult dlcv_infer_cpp_infer_c(int model_index, const DlcvCImageList* image_list) {
+    return dlcv_infer_cpp_infer_with_params_c(model_index, image_list, nullptr);
+}
+
+DlcvCResult dlcv_infer_cpp_infer_with_params_c(
+    int model_index,
+    const DlcvCImageList* image_list,
+    const char* params_json) {
     DlcvCResult result{};
     result.code = -1;
 
@@ -177,7 +184,15 @@ DlcvCResult dlcv_infer_cpp_infer_c(int model_index, const DlcvCImageList* image_
             mats.push_back(mat);
         }
 
-        dlcv_infer::Result cppResult = model->InferBatch(mats);
+        dlcv_infer::json params = dlcv_infer::json::object();
+        if (params_json != nullptr && params_json[0] != '\0') {
+            params = dlcv_infer::json::parse(params_json);
+            if (!params.is_object()) {
+                throw std::invalid_argument("params_json 必须是 JSON 对象");
+            }
+        }
+
+        dlcv_infer::Result cppResult = model->InferBatch(mats, params);
 
         result.code = 0;
         result.message = _strdup("success");
@@ -222,6 +237,9 @@ DlcvCResult dlcv_infer_cpp_infer_c(int model_index, const DlcvCImageList* image_
                         }
                         o.with_angle = obj.withAngle;
                         o.angle = obj.angle;
+                        o.with_mean = obj.withMean;
+                        o.foreground_mean = obj.foregroundMean;
+                        o.background_mean = obj.backgroundMean;
                     }
                 } else {
                     sr.results = nullptr;
