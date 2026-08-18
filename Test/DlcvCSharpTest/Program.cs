@@ -3449,10 +3449,37 @@ namespace DlcvCSharpTest
                     throw new InvalidOperationException("显式均值字段映射错误。");
                 }
 
-                var inferParams = new JObject { ["calc_mean"] = true };
-                if (inferParams.Value<bool?>("calc_mean") != true)
+                MethodInfo buildParamsMethod = typeof(DetModel).GetMethod(
+                    "BuildInferParams", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (buildParamsMethod == null)
                 {
-                    throw new InvalidOperationException("calc_mean=true 参数构造失败。");
+                    throw new InvalidOperationException("未找到 Flow 均值参数处理方法。");
+                }
+
+                var context = new DlcvModules.ExecutionContext();
+                var model = new DetModel(
+                    1, "均值参数测试",
+                    new Dictionary<string, object> { ["calc_mean"] = true },
+                    context);
+
+                var nodeParams = (JObject)buildParamsMethod.Invoke(model, null);
+                if (nodeParams.Value<bool?>("calc_mean") != true)
+                {
+                    throw new InvalidOperationException("Flow 节点均值参数未生效。");
+                }
+
+                context.Set("infer_params", new JObject { ["calc_mean"] = false });
+                var overriddenParams = (JObject)buildParamsMethod.Invoke(model, null);
+                if (overriddenParams.Value<bool?>("calc_mean") != false)
+                {
+                    throw new InvalidOperationException("Flow 入口均值参数未覆盖节点值。");
+                }
+
+                context.Set("infer_params", new JObject());
+                var restoredParams = (JObject)buildParamsMethod.Invoke(model, null);
+                if (restoredParams.Value<bool?>("calc_mean") != true)
+                {
+                    throw new InvalidOperationException("Flow 节点均值参数未恢复。");
                 }
 
                 Console.WriteLine("calc_mean 自测通过");

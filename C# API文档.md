@@ -210,7 +210,7 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 - `Infer` 内部调用 `InferBatch(new List<Mat> { image })`。
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
 - 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
-- 流程中的 `model/*` 节点从自身 `properties.calc_mean` 读取均值计算开关；流程文件已保存 `calc_mean=true` 时，入口参数可省略该字段。
+- 流程中的 `model/*` 节点默认从自身 `properties.calc_mean` 读取均值计算开关；入口 `paramsJson.calc_mean` 显式传入时仅覆盖本次推理，省略时继续使用节点属性。
 - 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
 
 ### 4.3 内部推理方法
