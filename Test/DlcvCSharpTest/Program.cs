@@ -68,6 +68,11 @@ namespace DlcvCSharpTest
                     return RunDvsRgbSelfTest(args);
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-parity-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDvspParitySelfTest(args);
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "maskrbox-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunMaskToRBoxSelfTest();
@@ -1853,6 +1858,99 @@ namespace DlcvCSharpTest
                         try { disposables[i]?.Dispose(); } catch { }
                     }
                 }
+            }
+        }
+
+        private static int RunDvspParitySelfTest(string[] args)
+        {
+            if (args == null || args.Length < 4)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest dvsp-parity-selftest <modelPath> <imagePath> <expectedJson>");
+                return 2;
+            }
+
+            string modelPath = args[1];
+            string imagePath = args[2];
+            string expectedPath = args[3];
+            if (!File.Exists(modelPath) || !File.Exists(imagePath) || !File.Exists(expectedPath))
+            {
+                Console.WriteLine("模型、图片或基线 JSON 不存在");
+                return 2;
+            }
+
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            Utils.CSharpResult result = default(Utils.CSharpResult);
+            try
+            {
+                var expectedRoot = JObject.Parse(File.ReadAllText(expectedPath, Encoding.UTF8));
+                var expected = expectedRoot["results"] as JArray ?? new JArray();
+
+                model = new Model(modelPath, GpuDeviceId, false, false);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+
+                var inferParams = new JObject
+                {
+                    ["threshold"] = 0.0,
+                    ["with_mask"] = false,
+                    ["batch_size"] = 1
+                };
+                result = model.InferBatch(new List<Mat> { rgb }, inferParams);
+                var actual = result.SampleResults != null && result.SampleResults.Count > 0
+                    ? result.SampleResults[0].Results ?? new List<Utils.CSharpObjectResult>()
+                    : new List<Utils.CSharpObjectResult>();
+
+                Console.WriteLine("expected_count=" + expected.Count + ", actual_count=" + actual.Count);
+                bool ok = expected.Count == actual.Count;
+                int count = Math.Min(expected.Count, actual.Count);
+                for (int i = 0; i < count; i++)
+                {
+                    var exp = expected[i] as JObject ?? new JObject();
+                    var expBox = exp["bbox"] as JArray ?? new JArray();
+                    var act = actual[i];
+                    var actBox = act.Bbox ?? new List<double>();
+                    double ax1 = actBox.Count > 0 ? actBox[0] : double.NaN;
+                    double ay1 = actBox.Count > 1 ? actBox[1] : double.NaN;
+                    double ax2 = actBox.Count > 2 ? ax1 + actBox[2] : double.NaN;
+                    double ay2 = actBox.Count > 3 ? ay1 + actBox[3] : double.NaN;
+                    double ex1 = expBox.Count > 0 ? expBox[0].Value<double>() : double.NaN;
+                    double ey1 = expBox.Count > 1 ? expBox[1].Value<double>() : double.NaN;
+                    double ex2 = expBox.Count > 2 ? expBox[2].Value<double>() : double.NaN;
+                    double ey2 = expBox.Count > 3 ? expBox[3].Value<double>() : double.NaN;
+                    double expectedScore = exp.Value<double?>("score") ?? double.NaN;
+                    string expectedCategory = exp.Value<string>("category_name") ?? "";
+
+                    bool itemOk = string.Equals(expectedCategory, act.CategoryName ?? "", StringComparison.Ordinal)
+                        && Math.Abs(expectedScore - act.Score) <= 1e-6
+                        && Math.Abs(ex1 - ax1) <= 1e-6
+                        && Math.Abs(ey1 - ay1) <= 1e-6
+                        && Math.Abs(ex2 - ax2) <= 1e-6
+                        && Math.Abs(ey2 - ay2) <= 1e-6;
+                    ok &= itemOk;
+                    Console.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                        "[{0}] {1} score expected={2:R} actual={3:R}; bbox expected=[{4:R},{5:R},{6:R},{7:R}] actual=[{8:R},{9:R},{10:R},{11:R}] {12}",
+                        i, act.CategoryName, expectedScore, (double)act.Score, ex1, ey1, ex2, ey2, ax1, ay1, ax2, ay2, itemOk ? "OK" : "MISMATCH"));
+                }
+
+                Console.WriteLine(ok ? "SELFTEST PASSED" : "SELFTEST FAILED");
+                return ok ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("SELFTEST ERROR: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                DisposeResultMasks(result);
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
             }
         }
 
