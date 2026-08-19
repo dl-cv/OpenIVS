@@ -190,7 +190,28 @@
                     <TextBox x:Name="richTextBox1" Grid.Row="1" IsReadOnly="True" TextWrapping="NoWrap"
                              AcceptsReturn="True" FontFamily="Consolas, Microsoft YaHei UI" FontSize="12"
                              BorderThickness="0" Background="#FAFBFC"
-                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <TextBox.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="撤销" Command="ApplicationCommands.Undo"
+                                          CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"/>
+                                <Separator/>
+                                <MenuItem Header="剪切" Command="ApplicationCommands.Cut"
+                                          CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"/>
+                                <MenuItem Header="复制" Command="ApplicationCommands.Copy"
+                                          CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"/>
+                                <MenuItem Header="粘贴" Command="ApplicationCommands.Paste"
+                                          CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"/>
+                                <MenuItem Header="删除" Command="ApplicationCommands.Delete"
+                                          CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"/>
+                                <Separator/>
+                                <MenuItem Header="全选" Command="ApplicationCommands.SelectAll"
+                                          CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"/>
+                                <Separator/>
+                                <MenuItem Header="自动换行" IsCheckable="True" Click="resultTextWordWrapMenuItem_Click"/>
+                            </ContextMenu>
+                        </TextBox.ContextMenu>
+                    </TextBox>
                 </Grid>
             </Border>
 

@@ -550,6 +550,21 @@ namespace DlcvDemo
             checkBox_calc_mean.Content = $"计算均值：{stateText}";
         }
 
+        private void resultTextWordWrapMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            var menuItem = sender as System.Windows.Controls.MenuItem;
+            if (menuItem == null)
+            {
+                return;
+            }
+
+            bool wordWrapEnabled = menuItem.IsChecked;
+            richTextBox1.TextWrapping = wordWrapEnabled ? TextWrapping.Wrap : TextWrapping.NoWrap;
+            richTextBox1.HorizontalScrollBarVisibility = wordWrapEnabled
+                ? System.Windows.Controls.ScrollBarVisibility.Disabled
+                : System.Windows.Controls.ScrollBarVisibility.Auto;
+        }
+
         private void button_infer_Click(object sender, EventArgs e)
         {
             try
