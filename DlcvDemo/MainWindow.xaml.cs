@@ -417,7 +417,7 @@ namespace DlcvDemo
             try
             {
                 numericUpDown_threshold.Value = uiTestOptions.Threshold;
-                checkBox_calc_mean.IsChecked = uiTestOptions.CalcMean;
+                SetCalcMeanSelection(uiTestOptions.CalcMean);
                 WriteUiTestResult("started", null);
 
                 if (uiTestOptions.InteractiveDialogs)
@@ -530,11 +530,31 @@ namespace DlcvDemo
 
         private void AddCalcMeanOverride(JObject data)
         {
-            bool? calcMean = checkBox_calc_mean.IsChecked;
+            bool? calcMean = GetCalcMeanSelection();
             if (calcMean.HasValue)
             {
                 data["calc_mean"] = calcMean.Value;
             }
+        }
+
+        private bool? GetCalcMeanSelection()
+        {
+            if (comboBox_calc_mean.SelectedIndex == 1)
+            {
+                return true;
+            }
+            if (comboBox_calc_mean.SelectedIndex == 2)
+            {
+                return false;
+            }
+            return null;
+        }
+
+        private void SetCalcMeanSelection(bool? calcMean)
+        {
+            comboBox_calc_mean.SelectedIndex = !calcMean.HasValue
+                ? 0
+                : (calcMean.Value ? 1 : 2);
         }
 
         private void button_infer_Click(object sender, EventArgs e)
