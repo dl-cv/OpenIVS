@@ -522,6 +522,7 @@ namespace DlcvModules
 			var imagesOut = baseIo != null ? (baseIo.ImageList ?? new List<ModuleImage>()) : new List<ModuleImage>();
 			var resultsOut = baseIo != null ? (baseIo.ResultList ?? new JArray()) : new JArray();
 			int topK = Math.Max(0, ReadInt("top_k", 1));
+			var categoryByIndex = new Dictionary<int, string>();
 
 			int n = Math.Min(resultsOut.Count, imagesOut.Count);
 			for (int i = 0; i < n; i++)
@@ -535,11 +536,20 @@ namespace DlcvModules
 				var imgMat = imagesOut[i] != null ? imagesOut[i].ImageObject : null;
 				int iw = imgMat != null ? Math.Max(1, imgMat.Width) : 1;
 				int ih = imgMat != null ? Math.Max(1, imgMat.Height) : 1;
+				JObject top1 = null;
+				double top1Score = double.MinValue;
 
 				foreach (var s in samples)
 				{
 					var so = s as JObject;
 					if (so == null) continue;
+					double score = so.Value<double?>("score") ?? 0.0;
+					if (top1 == null || score > top1Score)
+					{
+						top1 = so;
+						top1Score = score;
+					}
+
 					var bboxArr = so["bbox"] as JArray;
 					bool withBbox = so.Value<bool?>("with_bbox") ?? false;
 					bool validDims = false;
@@ -561,6 +571,37 @@ namespace DlcvModules
 						so["angle"] = -100.0;
 					}
 				}
+
+				int index = entry.Value<int?>("index") ?? i;
+				string categoryName = top1 != null ? top1.Value<string>("category_name") : null;
+				if (categoryName != null) categoryByIndex[index] = categoryName;
+			}
+
+			if (resultList != null && resultList.Count > 0)
+			{
+				var overlaidResults = new JArray();
+				foreach (var token in resultList)
+				{
+					var sourceEntry = token as JObject;
+					var overlaidEntry = sourceEntry != null ? (JObject)sourceEntry.DeepClone() : null;
+					int index = sourceEntry != null ? (sourceEntry.Value<int?>("index") ?? -1) : -1;
+					if (overlaidEntry != null
+						&& string.Equals(sourceEntry.Value<string>("type"), "local", StringComparison.Ordinal)
+						&& categoryByIndex.TryGetValue(index, out string categoryName))
+					{
+						var samples = overlaidEntry["sample_results"] as JArray;
+						if (samples != null)
+						{
+							foreach (var sample in samples)
+							{
+								var sampleObject = sample as JObject;
+								if (sampleObject != null) sampleObject["category_name"] = categoryName;
+							}
+						}
+					}
+					overlaidResults.Add(overlaidEntry != null ? (JToken)overlaidEntry : token.DeepClone());
+				}
+				return new ModuleIO(imagesOut, overlaidResults);
 			}
 
 			return new ModuleIO(imagesOut, resultsOut);

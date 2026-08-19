@@ -93,15 +93,15 @@ namespace dlcv_infer_csharp
         {
             _modelPath = modelPath;
 
-            // 根据模型文件后缀判断是否使用 DVP 模式
+            // 根据模型文件后缀判断是否使用 HTTP 模式
             if (string.IsNullOrEmpty(modelPath))
             {
                 throw new ArgumentException("模型路径不能为空", nameof(modelPath));
             }
 
             string extension = Path.GetExtension(modelPath).ToLower();
-            _isDvpMode = extension == ".dvp";
-            _isDvsMode = extension == ".dvst" || extension == ".dvso" || extension == ".dvsp";
+            _isDvpMode = extension == ".dvp" || extension == ".dvsp";
+            _isDvsMode = extension == ".dvst" || extension == ".dvso";
             _isRpcMode = rpc_mode;
             string cacheKey = BuildModelCacheKey(modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
 
