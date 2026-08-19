@@ -544,9 +544,10 @@ namespace DlcvDemo
                 return;
             }
 
-            checkBox_calc_mean.Content = !checkBox_calc_mean.IsChecked.HasValue
+            string stateText = !checkBox_calc_mean.IsChecked.HasValue
                 ? "默认"
                 : (checkBox_calc_mean.IsChecked.Value ? "是" : "否");
+            checkBox_calc_mean.Content = $"计算均值：{stateText}";
         }
 
         private void button_infer_Click(object sender, EventArgs e)
