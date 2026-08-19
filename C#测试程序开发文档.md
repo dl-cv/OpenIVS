@@ -144,7 +144,7 @@
 - **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`推理JSON`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`文档`、`获取模型信息`。
 - **下拉框**：设备选择。
 - **Label**：`选择显卡`、`线程数`、`batch_size`、`threshold`。
-- **三态复选框**：`计算均值（半选：跟随模型）`，默认半选。半选时不发送 `calc_mean`，选中时发送 `true`，未选中时发送 `false`。
+- **三态复选框**：右侧文字按状态显示 `默认`、`是`、`否`。`默认` 时不发送 `calc_mean`，`是` 时发送 `true`，`否` 时发送 `false`。
 - **数值输入**：
   - 线程数（1-32，默认1）。
   - Batch Size（1-1024，默认1）。
@@ -308,7 +308,7 @@
   - 已选择图片。
 - **输入**：
   - 图片：当前选择的图片（`ImreadModes.Unchanged` 读取，原样送入 `Model.InferBatch`，见 2.4）。
-  - 参数：UI 设置的 Batch Size、Threshold、计算均值状态，强制 `with_mask=true`；计算均值为半选时省略 `calc_mean`，其余两种状态写入对应布尔值。
+  - 参数：UI 设置的 Batch Size、Threshold、计算均值状态，强制 `with_mask=true`；计算均值为 `默认` 时省略 `calc_mean`，其余两种状态写入对应布尔值。
   - Threshold 变化：在模型与图片均已就绪且没有测试运行时，调整 Threshold 控件应等价触发本功能。
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
@@ -327,7 +327,7 @@
   - 参数 JSON：
   - `threshold = numericUpDown_threshold`
   - `with_mask = true`
-  - `checkBox_calc_mean.IsChecked=null` 时省略 `calc_mean`；`true` 与 `false` 分别显式覆盖本次推理。
+  - `checkBox_calc_mean.IsChecked=null` 对应 `默认`，此时省略 `calc_mean`；`true` 与 `false` 分别对应 `是` 与 `否`。
   - 调用：`model.InferOneOutJson(image_rgb, params)`
 - 输出到 `richTextBox1`：`JsonConvert.SerializeObject(json, Formatting.Indented)`（输出内容根节点必须为 JSON 数组 `[]`，即使为空）
 - **说明**：该功能只输出 JSON 文本，不更新 `imagePanel1` 的图像与可视化结果

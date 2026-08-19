@@ -537,6 +537,18 @@ namespace DlcvDemo
             }
         }
 
+        private void checkBox_calc_mean_StateChanged(object sender, RoutedEventArgs e)
+        {
+            if (checkBox_calc_mean == null)
+            {
+                return;
+            }
+
+            checkBox_calc_mean.Content = !checkBox_calc_mean.IsChecked.HasValue
+                ? "默认"
+                : (checkBox_calc_mean.IsChecked.Value ? "是" : "否");
+        }
+
         private void button_infer_Click(object sender, EventArgs e)
         {
             try

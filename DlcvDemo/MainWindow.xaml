@@ -146,7 +146,7 @@
 
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="线程数" Margin="0,0,8,0"/>
                     <local:NumericBox x:Name="numericUpDown_num_thread" Grid.Row="2" Grid.Column="1" Width="110" HorizontalAlignment="Left" Minimum="1" Maximum="32" Value="1" Margin="0,3"/>
-                    <CheckBox x:Name="checkBox_calc_mean" Grid.Row="2" Grid.Column="2" Grid.ColumnSpan="2" Content="计算均值（半选：跟随模型）" IsThreeState="True" IsChecked="{x:Null}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                    <CheckBox x:Name="checkBox_calc_mean" Grid.Row="2" Grid.Column="2" Grid.ColumnSpan="2" Content="默认" IsThreeState="True" IsChecked="{x:Null}" Checked="checkBox_calc_mean_StateChanged" Unchecked="checkBox_calc_mean_StateChanged" Indeterminate="checkBox_calc_mean_StateChanged" ToolTip="计算均值" VerticalAlignment="Center" Margin="12,0,0,0"/>
                 </Grid>
 
                 <!-- 右侧操作区：保持原界面的打开、保存/释放、信息三行布局 -->
