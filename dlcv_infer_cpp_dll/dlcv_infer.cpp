@@ -652,6 +652,12 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
         }
         const bool withMask = emitMaskOutput && !mask.empty();
         const float area = static_cast<float>(ComputeFlowArea(entry, mask, bbox, emitMaskOutput));
+        const bool withMean = ReadJsonBool(
+            entry.contains("with_mean") ? entry.at("with_mean") : Json(), false);
+        const double foregroundMean = ReadJsonNumber(
+            entry.contains("foreground_mean") ? entry.at("foreground_mean") : Json(), 0.0);
+        const double backgroundMean = ReadJsonNumber(
+            entry.contains("background_mean") ? entry.at("background_mean") : Json(), 0.0);
 
         out.emplace_back(
             categoryId,
@@ -663,7 +669,10 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
             mask,
             withBbox,
             withAngle,
-            angle
+            angle,
+            withMean,
+            foregroundMean,
+            backgroundMean
         );
     }
     return out;
@@ -727,6 +736,12 @@ Json NormalizeFlowOneOutJson(const Json& flowResultList, bool emitMaskOutput) {
         }
 
         out["area"] = ComputeFlowArea(entry, mask, bbox, emitMaskOutput);
+        out["with_mean"] = ReadJsonBool(
+            entry.contains("with_mean") ? entry.at("with_mean") : Json(), false);
+        out["foreground_mean"] = ReadJsonNumber(
+            entry.contains("foreground_mean") ? entry.at("foreground_mean") : Json(), 0.0);
+        out["background_mean"] = ReadJsonNumber(
+            entry.contains("background_mean") ? entry.at("background_mean") : Json(), 0.0);
         normalized.push_back(out);
     }
     return normalized;
@@ -1829,6 +1844,9 @@ namespace dlcv_infer {
                 bool withBbox = false;
                 bool withAngle = false;
                 float angle = -100.0f;
+                bool withMean = false;
+                double foregroundMean = 0.0;
+                double backgroundMean = 0.0;
 
                 try
                 {
@@ -1867,6 +1885,40 @@ namespace dlcv_infer {
                 catch (...)
                 {
                     angle = -100.0f;
+                }
+
+                try
+                {
+                    if (result.contains("with_mean"))
+                    {
+                        withMean = result["with_mean"].get<bool>();
+                    }
+                }
+                catch (...)
+                {
+                    withMean = false;
+                }
+                try
+                {
+                    if (result.contains("foreground_mean"))
+                    {
+                        foregroundMean = result["foreground_mean"].get<double>();
+                    }
+                }
+                catch (...)
+                {
+                    foregroundMean = 0.0;
+                }
+                try
+                {
+                    if (result.contains("background_mean"))
+                    {
+                        backgroundMean = result["background_mean"].get<double>();
+                    }
+                }
+                catch (...)
+                {
+                    backgroundMean = 0.0;
                 }
 
                 // 兼容某些输出直接将 angle 放入 bbox[4]
@@ -1925,7 +1977,8 @@ namespace dlcv_infer {
                     }
                 }
 
-                results.emplace_back(categoryId, categoryName, score, area, bbox, withMask, mask_img, withBbox, withAngle, angle);
+                results.emplace_back(categoryId, categoryName, score, area, bbox, withMask, mask_img,
+                    withBbox, withAngle, angle, withMean, foregroundMean, backgroundMean);
             }
 
             sampleResults.emplace_back(results);

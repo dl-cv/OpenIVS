@@ -42,12 +42,21 @@ public partial class Utils
         public bool WithBbox { get; set; }            // 是否含 bbox
         public bool WithAngle { get; set; }           // 是否含旋转角度
         public float Angle { get; set; }              // 旋转角度（弧度），-100 表示无效
+        public bool WithMean { get; set; }            // 是否含前景与背景均值
+        public double ForegroundMean { get; set; }    // mask 前景区域像素均值
+        public double BackgroundMean { get; set; }    // mask 背景区域像素均值
         public JObject ExtraInfo { get; set; }        // 额外信息（polyline 等）
 
         public CSharpObjectResult(
             int categoryId, string categoryName, float score, float area,
             List<double> bbox, bool withMask, Mat mask,
             bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null);
+
+        public CSharpObjectResult(
+            int categoryId, string categoryName, float score, float area,
+            List<double> bbox, bool withMask, Mat mask,
+            bool withBbox, bool withAngle, float angle, JObject extraInfo,
+            bool withMean, double foregroundMean, double backgroundMean);
     }
 }
 ```
@@ -56,6 +65,8 @@ public partial class Utils
 - `Bbox` 长度约定：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
+- `WithMean=false` 时，`ForegroundMean` 与 `BackgroundMean` 均为 `0.0`；`WithMean=true` 时，两个值分别表示 mask 前景区域和背景区域的像素均值。
+- 原有 11 参数构造函数保持不变；需要设置均值字段时使用 14 参数构造函数。
 - `ExtraInfo` 可包含 `polyline`（通过 `Utils.GetExtraInfoPolyline` / `Utils.SetExtraInfoPolyline` 读写）。
 
 ### 2.2 CSharpSampleResult
@@ -199,6 +210,7 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 - `Infer` 内部调用 `InferBatch(new List<Mat> { image })`。
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
 - 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
+- 流程中的 `model/*` 节点默认从自身 `properties.calc_mean` 读取均值计算开关；入口 `paramsJson.calc_mean` 显式传入时仅覆盖本次推理，省略时继续使用节点属性。
 - 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
 
 ### 4.3 内部推理方法
@@ -404,6 +416,7 @@ Cv2.CvtColor(image, rgb, ColorConversionCodes.BGR2RGB);
 var paramsJson = new JObject();
 paramsJson["threshold"] = 0.5;
 paramsJson["with_mask"] = true;
+paramsJson["calc_mean"] = true;
 paramsJson["batch_size"] = 1;
 
 CSharpResult result = model.Infer(rgb, paramsJson);
@@ -444,6 +457,7 @@ Console.WriteLine(info.ToString());
 |--------|------|--------|------|
 | `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型的最终对外结果阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
+| `calc_mean` | bool | false | 是否计算 mask 前景区域与背景区域的像素均值 |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
 

@@ -333,6 +333,7 @@ namespace DlcvDemo
 				JObject data = new JObject();
 				data["threshold"] = (float)numericUpDown_threshold.Value;
 				data["with_mask"] = true;
+				AddCalcMeanOverride(data);
 
 				Mat inferImage = PrepareImageForModelInput(image);
 				try
@@ -416,6 +417,7 @@ namespace DlcvDemo
             try
             {
                 numericUpDown_threshold.Value = uiTestOptions.Threshold;
+                checkBox_calc_mean.IsChecked = uiTestOptions.CalcMean;
                 WriteUiTestResult("started", null);
 
                 if (uiTestOptions.InteractiveDialogs)
@@ -494,6 +496,9 @@ namespace DlcvDemo
                 ["model"] = model_path ?? uiTestOptions.ModelPath,
                 ["image"] = image_path ?? uiTestOptions.ImagePath,
                 ["threshold"] = uiTestOptions.Threshold,
+                ["calc_mean"] = uiTestOptions.CalcMean.HasValue
+                    ? new JValue(uiTestOptions.CalcMean.Value)
+                    : JValue.CreateNull(),
                 ["device"] = uiTestOptions.DeviceId,
                 ["interactive_dialogs"] = uiTestOptions.InteractiveDialogs,
                 ["window_title"] = Title,
@@ -523,6 +528,43 @@ namespace DlcvDemo
             button_infer_Click(sender, e);
         }
 
+        private void AddCalcMeanOverride(JObject data)
+        {
+            bool? calcMean = checkBox_calc_mean.IsChecked;
+            if (calcMean.HasValue)
+            {
+                data["calc_mean"] = calcMean.Value;
+            }
+        }
+
+        private void checkBox_calc_mean_StateChanged(object sender, RoutedEventArgs e)
+        {
+            if (checkBox_calc_mean == null)
+            {
+                return;
+            }
+
+            string stateText = !checkBox_calc_mean.IsChecked.HasValue
+                ? "默认"
+                : (checkBox_calc_mean.IsChecked.Value ? "是" : "否");
+            checkBox_calc_mean.Content = $"计算均值：{stateText}";
+        }
+
+        private void resultTextWordWrapMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            var menuItem = sender as System.Windows.Controls.MenuItem;
+            if (menuItem == null)
+            {
+                return;
+            }
+
+            bool wordWrapEnabled = menuItem.IsChecked;
+            richTextBox1.TextWrapping = wordWrapEnabled ? TextWrapping.Wrap : TextWrapping.NoWrap;
+            richTextBox1.HorizontalScrollBarVisibility = wordWrapEnabled
+                ? System.Windows.Controls.ScrollBarVisibility.Disabled
+                : System.Windows.Controls.ScrollBarVisibility.Auto;
+        }
+
         private void button_infer_Click(object sender, EventArgs e)
         {
             try
@@ -547,6 +589,7 @@ namespace DlcvDemo
                 JObject data = new JObject();
                 data["threshold"] = (float)numericUpDown_threshold.Value;
                 data["with_mask"] = true;
+                AddCalcMeanOverride(data);
 
                 Stopwatch stopwatch = new Stopwatch();
                 stopwatch.Start();
@@ -621,6 +664,11 @@ namespace DlcvDemo
             line.Append("  ");
             line.Append(BuildResultLocationText(obj));
             line.AppendFormat("  area={0:F1}", obj.Area);
+            if (obj.WithMean)
+            {
+                line.AppendFormat("  foreground_mean={0:F4}", obj.ForegroundMean);
+                line.AppendFormat("  background_mean={0:F4}", obj.BackgroundMean);
+            }
             string angleText = BuildResultAngleText(obj);
             if (!string.IsNullOrWhiteSpace(angleText))
             {

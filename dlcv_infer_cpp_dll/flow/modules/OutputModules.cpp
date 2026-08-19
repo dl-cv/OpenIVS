@@ -360,6 +360,9 @@ static void AppendOutResultItemTyped(
     if (d.contains("area")) {
         item.Extra["area"] = d.at("area");
     }
+    item.Extra["with_mean"] = d.value("with_mean", false);
+    item.Extra["foreground_mean"] = d.value("foreground_mean", 0.0);
+    item.Extra["background_mean"] = d.value("background_mean", 0.0);
 
     outResults.push_back(std::move(item));
 }

@@ -35,11 +35,13 @@ struct InferOptions {
     double threshold = 0.0;
     int device = 0;
     bool withMask = true;
+    bool calcMean = false;
     bool hasModel = false;
     bool hasImage = false;
     bool hasThreshold = false;
     bool hasDevice = false;
     bool hasWithMask = false;
+    bool hasCalcMean = false;
     bool hasOutput = false;
 };
 
@@ -48,8 +50,14 @@ struct PathSummary {
     json scores = json::array();
     json categories = json::array();
     json belowThreshold = json::array();
+    json withMeans = json::array();
+    json foregroundMeans = json::array();
+    json backgroundMeans = json::array();
     std::vector<double> comparableScores;
     std::vector<std::string> comparableCategories;
+    std::vector<bool> comparableWithMeans;
+    std::vector<double> comparableForegroundMeans;
+    std::vector<double> comparableBackgroundMeans;
 };
 
 class FreeAllModelsGuard {
@@ -102,7 +110,7 @@ void PrintHelp(const QString& programPath) {
         << "  " << program << "\n"
         << "  " << program
         << " infer --model <path> --image <path> --threshold <0..1>"
-           " [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]\n"
+           " [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
 }
@@ -180,6 +188,18 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             }
             options.withMask = parsed;
             options.hasWithMask = true;
+        } else if (option == QStringLiteral("--calc-mean")) {
+            if (options.hasCalcMean) {
+                error = QStringLiteral("参数重复：--calc-mean");
+                return false;
+            }
+            bool parsed = false;
+            if (!ParseBool(value, parsed)) {
+                error = QStringLiteral("--calc-mean 必须是 true 或 false");
+                return false;
+            }
+            options.calcMean = parsed;
+            options.hasCalcMean = true;
         } else if (option == QStringLiteral("--output")) {
             if (options.hasOutput) {
                 error = QStringLiteral("duplicate option: --output");
@@ -298,12 +318,30 @@ cv::Mat PrepareImageForInference(const cv::Mat& decodedImage) {
     return decodedImage.clone();
 }
 
-void AddSummaryItem(PathSummary& summary, double score, const std::string& category, double threshold) {
+void AddSummaryItem(
+    PathSummary& summary,
+    double score,
+    const std::string& category,
+    bool withMean,
+    double foregroundMean,
+    double backgroundMean,
+    double threshold) {
     const int index = summary.count;
     summary.count += 1;
     summary.categories.push_back(category);
     summary.comparableCategories.push_back(category);
     summary.comparableScores.push_back(score);
+    summary.withMeans.push_back(withMean);
+    summary.comparableWithMeans.push_back(withMean);
+    summary.comparableForegroundMeans.push_back(foregroundMean);
+    summary.comparableBackgroundMeans.push_back(backgroundMean);
+    if (std::isfinite(foregroundMean) && std::isfinite(backgroundMean)) {
+        summary.foregroundMeans.push_back(foregroundMean);
+        summary.backgroundMeans.push_back(backgroundMean);
+    } else {
+        summary.foregroundMeans.push_back(nullptr);
+        summary.backgroundMeans.push_back(nullptr);
+    }
 
     if (!std::isfinite(score)) {
         summary.scores.push_back(nullptr);
@@ -333,10 +371,45 @@ PathSummary SummarizeStructured(const dlcv_infer::Result& result, double thresho
                 summary,
                 static_cast<double>(object.score),
                 dlcv_infer::convertGbkToUtf8(object.categoryName),
+                object.withMean,
+                static_cast<double>(object.foregroundMean),
+                static_cast<double>(object.backgroundMean),
                 threshold);
         }
     }
     return summary;
+}
+
+bool TryReadJsonBool(const json& token, const char* key, bool& value) {
+    try {
+        if (token.is_object() && token.contains(key) && token.at(key).is_boolean()) {
+            value = token.at(key).get<bool>();
+            return true;
+        }
+    } catch (...) {
+    }
+    return false;
+}
+
+bool TryReadJsonNumber(const json& token, const char* key, double& value) {
+    try {
+        if (!token.is_object() || !token.contains(key)) {
+            return false;
+        }
+        const json& jsonValue = token.at(key);
+        if (jsonValue.is_number()) {
+            value = jsonValue.get<double>();
+            return std::isfinite(value);
+        }
+        if (jsonValue.is_string()) {
+            size_t consumed = 0;
+            const std::string text = jsonValue.get<std::string>();
+            value = std::stod(text, &consumed);
+            return consumed == text.size() && std::isfinite(value);
+        }
+    } catch (...) {
+    }
+    return false;
 }
 
 bool TryReadJsonScore(const json& token, double& score) {
@@ -368,7 +441,14 @@ PathSummary SummarizeJson(const json& result, double threshold) {
     PathSummary summary;
     for (const auto& token : result) {
         if (!token.is_object()) {
-            AddSummaryItem(summary, std::numeric_limits<double>::quiet_NaN(), std::string(), threshold);
+            AddSummaryItem(
+                summary,
+                std::numeric_limits<double>::quiet_NaN(),
+                std::string(),
+                false,
+                std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::quiet_NaN(),
+                threshold);
             continue;
         }
 
@@ -382,7 +462,17 @@ PathSummary SummarizeJson(const json& result, double threshold) {
 
         double score = std::numeric_limits<double>::quiet_NaN();
         (void)TryReadJsonScore(token, score);
-        AddSummaryItem(summary, score, category, threshold);
+        bool withMean = false;
+        double foregroundMean = 0.0;
+        double backgroundMean = 0.0;
+        (void)TryReadJsonBool(token, "with_mean", withMean);
+        if (withMean) {
+            foregroundMean = std::numeric_limits<double>::quiet_NaN();
+            backgroundMean = std::numeric_limits<double>::quiet_NaN();
+            (void)TryReadJsonNumber(token, "foreground_mean", foregroundMean);
+            (void)TryReadJsonNumber(token, "background_mean", backgroundMean);
+        }
+        AddSummaryItem(summary, score, category, withMean, foregroundMean, backgroundMean, threshold);
     }
     return summary;
 }
@@ -392,7 +482,10 @@ json PathSummaryToJson(const PathSummary& summary) {
         {"count", summary.count},
         {"scores", summary.scores},
         {"categories", summary.categories},
-        {"below_threshold", summary.belowThreshold}
+        {"below_threshold", summary.belowThreshold},
+        {"with_mean", summary.withMeans},
+        {"foreground_mean", summary.foregroundMeans},
+        {"background_mean", summary.backgroundMeans}
     };
 }
 
@@ -401,7 +494,8 @@ bool AreConsistent(const PathSummary& left, const PathSummary& right) {
         return false;
     }
     if (left.comparableScores.size() != right.comparableScores.size() ||
-        left.comparableCategories != right.comparableCategories) {
+        left.comparableCategories != right.comparableCategories ||
+        left.comparableWithMeans != right.comparableWithMeans) {
         return false;
     }
     for (size_t i = 0; i < left.comparableScores.size(); i++) {
@@ -409,6 +503,27 @@ bool AreConsistent(const PathSummary& left, const PathSummary& right) {
             return false;
         }
         if (std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) {
+            return false;
+        }
+        if (left.comparableWithMeans[i]) {
+            if (!std::isfinite(left.comparableForegroundMeans[i]) ||
+                !std::isfinite(right.comparableForegroundMeans[i]) ||
+                !std::isfinite(left.comparableBackgroundMeans[i]) ||
+                !std::isfinite(right.comparableBackgroundMeans[i]) ||
+                std::abs(left.comparableForegroundMeans[i] - right.comparableForegroundMeans[i]) > 1e-6 ||
+                std::abs(left.comparableBackgroundMeans[i] - right.comparableBackgroundMeans[i]) > 1e-6) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool HasCompleteMeans(const PathSummary& summary) {
+    for (size_t i = 0; i < summary.comparableWithMeans.size(); ++i) {
+        if (!summary.comparableWithMeans[i] ||
+            !std::isfinite(summary.comparableForegroundMeans[i]) ||
+            !std::isfinite(summary.comparableBackgroundMeans[i])) {
             return false;
         }
     }
@@ -448,7 +563,8 @@ int RunInferCommand(const InferOptions& options) {
 
     json params = {
         {"threshold", options.threshold},
-        {"with_mask", options.withMask}
+        {"with_mask", options.withMask},
+        {"calc_mean", options.calcMean}
     };
 
         const dlcv_infer::Result structuredResult = model.Infer(inferImage, params);
@@ -460,6 +576,8 @@ int RunInferCommand(const InferOptions& options) {
     const bool consistent = AreConsistent(structuredSummary, jsonSummary);
     const bool thresholdCheckPassed =
         structuredSummary.belowThreshold.empty() && jsonSummary.belowThreshold.empty();
+    const bool meanCheckPassed =
+        !options.calcMean || (HasCompleteMeans(structuredSummary) && HasCompleteMeans(jsonSummary));
 
     const json summary = {
         {"language", "cpp"},
@@ -468,10 +586,12 @@ int RunInferCommand(const InferOptions& options) {
         {"threshold", options.threshold},
         {"device", options.device},
         {"with_mask", options.withMask},
+        {"calc_mean", options.calcMean},
         {"structured", PathSummaryToJson(structuredSummary)},
         {"json", PathSummaryToJson(jsonSummary)},
         {"consistent", consistent},
-        {"threshold_check_passed", thresholdCheckPassed}
+        {"threshold_check_passed", thresholdCheckPassed},
+        {"mean_check_passed", meanCheckPassed}
     };
 
     const std::string output = summary.dump(2) + "\n";
@@ -480,7 +600,7 @@ int RunInferCommand(const InferOptions& options) {
     if (options.hasOutput) {
         WriteJsonFile(options.outputPath, output);
     }
-    return consistent && thresholdCheckPassed ? 0 : 3;
+    return consistent && thresholdCheckPassed && meanCheckPassed ? 0 : 3;
 }
 
 std::string GetCppDllPath() {
@@ -544,6 +664,7 @@ int main(int argc, char* argv[]) {
                 {"model", ToUtf8(options.modelPath)},
                 {"image", ToUtf8(options.imagePath)},
                 {"threshold", options.threshold},
+                {"calc_mean", options.calcMean},
                 {"error", ToUtf8(FromExceptionMessage(ex.what()))}
             };
             std::cerr << errorJson.dump(2) << "\n";
@@ -554,6 +675,7 @@ int main(int argc, char* argv[]) {
                 {"model", ToUtf8(options.modelPath)},
                 {"image", ToUtf8(options.imagePath)},
                 {"threshold", options.threshold},
+                {"calc_mean", options.calcMean},
                 {"error", "unknown error"}
             };
             std::cerr << errorJson.dump(2) << "\n";

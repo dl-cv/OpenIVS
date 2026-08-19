@@ -336,6 +336,9 @@ namespace dlcv_infer_csharp
                             ["with_angle"] = obj.WithAngle,
                             ["angle"] = obj.Angle,
                             ["with_mask"] = obj.WithMask,
+                            ["with_mean"] = obj.WithMean,
+                            ["foreground_mean"] = obj.ForegroundMean,
+                            ["background_mean"] = obj.BackgroundMean,
                             ["extra_info"] = obj.ExtraInfo ?? new JObject()
                         };
                         // 将 mask 以 RLE 的形式存储到 JSON（mask_rle）
@@ -480,7 +483,10 @@ namespace dlcv_infer_csharp
                                 detection.WithBbox,
                                 detection.WithAngle,
                                 detection.Angle,
-                                detection.ExtraInfo
+                                detection.ExtraInfo,
+                                detection.WithMean,
+                                detection.ForegroundMean,
+                                detection.BackgroundMean
                             );
 
                             // 替换原始检测结果

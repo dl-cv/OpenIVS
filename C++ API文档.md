@@ -37,10 +37,17 @@ struct ObjectResult {
     bool withBbox;                // 是否含 bbox
     bool withAngle;               // 是否含旋转角度
     float angle;                  // 旋转角度（弧度），-100 表示无效
+    bool withMean;                // 是否含前景与背景均值
+    double foregroundMean;        // mask 前景区域的像素均值
+    double backgroundMean;        // mask 背景区域的像素均值
 
     ObjectResult(int categoryId, const std::string& categoryName, float score,
                  float area, const std::vector<double>& bbox, bool withMask,
                  const cv::Mat& mask, bool withBbox, bool withAngle, float angle);
+    ObjectResult(int categoryId, const std::string& categoryName, float score,
+                 float area, const std::vector<double>& bbox, bool withMask,
+                 const cv::Mat& mask, bool withBbox, bool withAngle, float angle,
+                 bool withMean, double foregroundMean, double backgroundMean);
 };
 
 struct SampleResult {
@@ -208,7 +215,7 @@ Result InferBatch(const std::vector<cv::Mat>& image_list, const json& params_jso
 json InferOneOutJson(const cv::Mat& image, const json& params_json = json::object());
 ```
 - 返回 JSON 数组，每个元素为单个检测结果对象。
-- 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`。
+- 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
 - 普通模式下将底层返回的 `mask_ptr` mask 转换为点数组形式。
 
 ### 4.6 释放模型
@@ -420,6 +427,7 @@ cv::cvtColor(image, rgb, cv::COLOR_BGR2RGB);
 nlohmann::json params;
 params["threshold"] = 0.5;
 params["with_mask"] = true;
+params["calc_mean"] = false;
 params["batch_size"] = 1;
 
 dlcv_infer::Result result = model.Infer(rgb, params);
@@ -461,6 +469,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 |--------|------|--------|------|
 | `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型中仅筛选最终对外结果，不覆盖节点自身阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
+| `calc_mean` | bool | false | 是否计算实例分割目标的前景与背景均值 |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
 
@@ -493,6 +502,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 - C API 工程文件：`dlcv_infer_c_dll/dlcv_infer_c_dll.vcxproj`
 - C API 对外头文件：`dlcv_infer_c_dll/dlcv_infer_c_api.h`
 - C API 工程通过 `dlcv_infer_cpp_dll.lib` 显式依赖 C++ API 工程。
+- C API 保留 `dlcv_infer_cpp_infer_c` 默认参数入口，并提供 `dlcv_infer_cpp_infer_with_params_c` 接收 JSON 参数；调用端可传入 `threshold`、`calc_mean` 等字段覆盖本次推理参数。
 
 ---
 
@@ -580,7 +590,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 | 类型 | 当前字段 |
 | --- | --- |
-| `ObjectResult` | `categoryId`、`categoryName`、`score`、`area`、`bbox`、`withMask`、`mask`、`withBbox`、`withAngle`、`angle` |
+| `ObjectResult` | `categoryId`、`categoryName`、`score`、`area`、`bbox`、`withMask`、`mask`、`withBbox`、`withAngle`、`angle`、`withMean`、`foregroundMean`、`backgroundMean` |
 | `SampleResult` | `results` |
 | `Result` | `sampleResults` |
 | `FlowNodeTiming` | `nodeId`、`nodeType`、`nodeTitle`、`elapsedMs` |
@@ -609,7 +619,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 20.4 推理、结果与计时
 
-普通模型请求固定组装 `model_index + image_list` 后调用底层推理，`code!=0` 时抛异常。结构化包装阶段会自动补推断 `with_bbox`、`with_angle`，并对 `mask` 做 `clone()`、必要时缩放或反推框。`InferOneOutJson()` 只返回首张图结果；最近一次计时保存在线程局部变量中，FlowGraph 模式优先使用流程返回的 `timing`。
+普通模型请求固定组装 `model_index + image_list` 后调用底层推理，`code!=0` 时抛异常。结构化包装阶段会自动补推断 `with_bbox`、`with_angle`，读取 `with_mean`、`foreground_mean`、`background_mean`，并对 `mask` 做 `clone()`、必要时缩放或反推框。`InferOneOutJson()` 只返回首张图结果；最近一次计时保存在线程局部变量中，FlowGraph 模式优先使用流程返回的 `timing`。
 
 ---
 

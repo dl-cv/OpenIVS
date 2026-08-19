@@ -128,6 +128,11 @@ namespace DlcvCSharpTest
                     return RunWithMaskSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "calc-mean-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunCalcMeanSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "us-lag-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunUsLagSelfTest();
@@ -3492,6 +3497,96 @@ namespace DlcvCSharpTest
                 try { if (modelA != null) modelA.Dispose(); } catch { }
                 try { if (modelB != null) modelB.Dispose(); } catch { }
                 ForceGc();
+            }
+        }
+
+        private static int RunCalcMeanSelfTest()
+        {
+            try
+            {
+                Type resultType = typeof(Utils.CSharpObjectResult);
+                Type[] legacyConstructorTypes =
+                {
+                    typeof(int), typeof(string), typeof(float), typeof(float),
+                    typeof(List<double>), typeof(bool), typeof(Mat), typeof(bool),
+                    typeof(bool), typeof(float), typeof(JObject)
+                };
+                if (resultType.GetConstructor(legacyConstructorTypes) == null)
+                {
+                    throw new InvalidOperationException("未保留原有 CSharpObjectResult 构造函数签名。");
+                }
+
+                Type[] completeConstructorTypes =
+                {
+                    typeof(int), typeof(string), typeof(float), typeof(float),
+                    typeof(List<double>), typeof(bool), typeof(Mat), typeof(bool),
+                    typeof(bool), typeof(float), typeof(JObject), typeof(bool),
+                    typeof(double), typeof(double)
+                };
+                if (resultType.GetConstructor(completeConstructorTypes) == null)
+                {
+                    throw new InvalidOperationException("缺少包含均值字段的完整构造函数签名。");
+                }
+
+                var defaultResult = new Utils.CSharpObjectResult(
+                    1, "默认均值", 0.9f, 1.0f,
+                    new List<double> { 1.0, 2.0, 3.0, 4.0 }, false, null);
+                if (defaultResult.WithMean || defaultResult.ForegroundMean != 0.0 || defaultResult.BackgroundMean != 0.0)
+                {
+                    throw new InvalidOperationException("默认均值字段不符合 false/0.0 语义。");
+                }
+
+                var resultWithMean = new Utils.CSharpObjectResult(
+                    2, "显式均值", 0.8f, 2.0f,
+                    new List<double> { 5.0, 6.0, 7.0, 8.0 }, false, null,
+                    false, false, -100f, null, true, 12.5, 34.75);
+                if (!resultWithMean.WithMean
+                    || Math.Abs(resultWithMean.ForegroundMean - 12.5) > 1e-12
+                    || Math.Abs(resultWithMean.BackgroundMean - 34.75) > 1e-12)
+                {
+                    throw new InvalidOperationException("显式均值字段映射错误。");
+                }
+
+                MethodInfo buildParamsMethod = typeof(DetModel).GetMethod(
+                    "BuildInferParams", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (buildParamsMethod == null)
+                {
+                    throw new InvalidOperationException("未找到 Flow 均值参数处理方法。");
+                }
+
+                var context = new DlcvModules.ExecutionContext();
+                var model = new DetModel(
+                    1, "均值参数测试",
+                    new Dictionary<string, object> { ["calc_mean"] = true },
+                    context);
+
+                var nodeParams = (JObject)buildParamsMethod.Invoke(model, null);
+                if (nodeParams.Value<bool?>("calc_mean") != true)
+                {
+                    throw new InvalidOperationException("Flow 节点均值参数未生效。");
+                }
+
+                context.Set("infer_params", new JObject { ["calc_mean"] = false });
+                var overriddenParams = (JObject)buildParamsMethod.Invoke(model, null);
+                if (overriddenParams.Value<bool?>("calc_mean") != false)
+                {
+                    throw new InvalidOperationException("Flow 入口均值参数未覆盖节点值。");
+                }
+
+                context.Set("infer_params", new JObject());
+                var restoredParams = (JObject)buildParamsMethod.Invoke(model, null);
+                if (restoredParams.Value<bool?>("calc_mean") != true)
+                {
+                    throw new InvalidOperationException("Flow 节点均值参数未恢复。");
+                }
+
+                Console.WriteLine("calc_mean 自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("calc_mean 自测失败: " + ex.Message);
+                return 1;
             }
         }
 
