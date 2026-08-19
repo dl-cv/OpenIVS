@@ -12,7 +12,7 @@ namespace DlcvDemo
         internal string OutputPath { get; private set; }
         internal decimal Threshold { get; private set; } = 0.5m;
         internal int DeviceId { get; private set; } = 0;
-        internal bool CalcMean { get; private set; }
+        internal bool? CalcMean { get; private set; }
         internal bool InteractiveDialogs { get; private set; }
 
         internal static bool TryParse(string[] args, out UiTestOptions options, out string error)

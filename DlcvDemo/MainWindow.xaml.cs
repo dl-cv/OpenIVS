@@ -333,7 +333,7 @@ namespace DlcvDemo
 				JObject data = new JObject();
 				data["threshold"] = (float)numericUpDown_threshold.Value;
 				data["with_mask"] = true;
-				data["calc_mean"] = checkBox_calc_mean.IsChecked == true;
+				AddCalcMeanOverride(data);
 
 				Mat inferImage = PrepareImageForModelInput(image);
 				try
@@ -496,7 +496,9 @@ namespace DlcvDemo
                 ["model"] = model_path ?? uiTestOptions.ModelPath,
                 ["image"] = image_path ?? uiTestOptions.ImagePath,
                 ["threshold"] = uiTestOptions.Threshold,
-                ["calc_mean"] = uiTestOptions.CalcMean,
+                ["calc_mean"] = uiTestOptions.CalcMean.HasValue
+                    ? new JValue(uiTestOptions.CalcMean.Value)
+                    : JValue.CreateNull(),
                 ["device"] = uiTestOptions.DeviceId,
                 ["interactive_dialogs"] = uiTestOptions.InteractiveDialogs,
                 ["window_title"] = Title,
@@ -526,6 +528,15 @@ namespace DlcvDemo
             button_infer_Click(sender, e);
         }
 
+        private void AddCalcMeanOverride(JObject data)
+        {
+            bool? calcMean = checkBox_calc_mean.IsChecked;
+            if (calcMean.HasValue)
+            {
+                data["calc_mean"] = calcMean.Value;
+            }
+        }
+
         private void button_infer_Click(object sender, EventArgs e)
         {
             try
@@ -550,7 +561,7 @@ namespace DlcvDemo
                 JObject data = new JObject();
                 data["threshold"] = (float)numericUpDown_threshold.Value;
                 data["with_mask"] = true;
-                data["calc_mean"] = checkBox_calc_mean.IsChecked == true;
+                AddCalcMeanOverride(data);
 
                 Stopwatch stopwatch = new Stopwatch();
                 stopwatch.Start();

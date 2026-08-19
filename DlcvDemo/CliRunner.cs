@@ -151,9 +151,12 @@ namespace DlcvDemo
                 JObject inferParams = new JObject
                 {
                     ["threshold"] = (float)options.Threshold,
-                    ["with_mask"] = options.WithMask,
-                    ["calc_mean"] = options.CalcMean
+                    ["with_mask"] = options.WithMask
                 };
+                if (options.CalcMean.HasValue)
+                {
+                    inferParams["calc_mean"] = options.CalcMean.Value;
+                }
 
                 PathSummary structuredSummary;
                 Utils.CSharpResult structuredResult = default(Utils.CSharpResult);
@@ -184,10 +187,11 @@ namespace DlcvDemo
                 bool thresholdCheckPassed = structuredSummary.BelowThresholdCount == 0
                     && jsonSummary.BelowThresholdCount == 0;
                 bool bothResultsEmpty = structuredSummary.Count == 0 && jsonSummary.Count == 0;
-                bool meanCheckPassed = !options.CalcMean
+                bool meanCheckPassed = !options.CalcMean.HasValue
                     || bothResultsEmpty
-                    || (structuredSummary.AllHaveMean
-                        && jsonSummary.AllHaveMean);
+                    || (options.CalcMean.Value
+                        ? structuredSummary.AllMaskResultsHaveMean && jsonSummary.AllMaskResultsHaveMean
+                        : !structuredSummary.AnyHaveMean && !jsonSummary.AnyHaveMean);
 
                 return new JObject
                 {
@@ -197,7 +201,9 @@ namespace DlcvDemo
                     ["device"] = options.DeviceId,
                     ["threshold"] = options.Threshold,
                     ["with_mask"] = options.WithMask,
-                    ["calc_mean"] = options.CalcMean,
+                    ["calc_mean"] = options.CalcMean.HasValue
+                        ? new JValue(options.CalcMean.Value)
+                        : JValue.CreateNull(),
                     ["structured"] = structuredSummary.ToJson(),
                     ["json"] = jsonSummary.ToJson(),
                     ["consistent"] = consistent,
@@ -257,6 +263,7 @@ namespace DlcvDemo
                     summary.Add(
                         item.Score,
                         item.CategoryName,
+                        item.WithMask,
                         item.WithMean,
                         item.ForegroundMean,
                         item.BackgroundMean,
@@ -274,6 +281,7 @@ namespace DlcvDemo
                 var item = resultArray[i] as JObject;
                 double score = double.NaN;
                 string category = string.Empty;
+                bool withMask = false;
                 bool withMean = false;
                 double foregroundMean = 0.0;
                 double backgroundMean = 0.0;
@@ -281,11 +289,12 @@ namespace DlcvDemo
                 {
                     TryReadScore(item["score"], out score);
                     category = item["category_name"] != null ? item["category_name"].ToString() : string.Empty;
+                    withMask = item.Value<bool?>("with_mask") ?? false;
                     withMean = item.Value<bool?>("with_mean") ?? false;
                     foregroundMean = item.Value<double?>("foreground_mean") ?? 0.0;
                     backgroundMean = item.Value<double?>("background_mean") ?? 0.0;
                 }
-                summary.Add(score, category, withMean, foregroundMean, backgroundMean, threshold);
+                summary.Add(score, category, withMask, withMean, foregroundMean, backgroundMean, threshold);
             }
             return summary;
         }
@@ -554,7 +563,7 @@ namespace DlcvDemo
             public bool HasThreshold { get; set; }
             public int DeviceId { get; set; }
             public bool WithMask { get; set; }
-            public bool CalcMean { get; set; }
+            public bool? CalcMean { get; set; }
             public string OutputPath { get; set; }
         }
 
@@ -564,16 +573,27 @@ namespace DlcvDemo
 
             public List<double> Scores { get; } = new List<double>();
             public List<string> Categories { get; } = new List<string>();
+            public List<bool> WithMasks { get; } = new List<bool>();
             public List<bool> WithMeans { get; } = new List<bool>();
             public List<double> ForegroundMeans { get; } = new List<double>();
             public List<double> BackgroundMeans { get; } = new List<double>();
             public int Count { get { return Scores.Count; } }
             public int BelowThresholdCount { get { return _belowThreshold.Count; } }
-            public bool AllHaveMean { get { return WithMeans.All(value => value); } }
+            public bool AllMaskResultsHaveMean
+            {
+                get
+                {
+                    return WithMasks
+                        .Select((withMask, index) => !withMask || WithMeans[index])
+                        .All(value => value);
+                }
+            }
+            public bool AnyHaveMean { get { return WithMeans.Any(value => value); } }
 
             public void Add(
                 double score,
                 string category,
+                bool withMask,
                 bool withMean,
                 double foregroundMean,
                 double backgroundMean,
@@ -583,6 +603,7 @@ namespace DlcvDemo
                 string normalizedCategory = category ?? string.Empty;
                 Scores.Add(score);
                 Categories.Add(normalizedCategory);
+                WithMasks.Add(withMask);
                 WithMeans.Add(withMean);
                 ForegroundMeans.Add(foregroundMean);
                 BackgroundMeans.Add(backgroundMean);
@@ -621,6 +642,7 @@ namespace DlcvDemo
                     ["count"] = Count,
                     ["scores"] = scores,
                     ["categories"] = new JArray(Categories),
+                    ["with_mask"] = new JArray(WithMasks),
                     ["with_mean"] = new JArray(WithMeans),
                     ["foreground_mean"] = foregroundMeans,
                     ["background_mean"] = backgroundMeans,
