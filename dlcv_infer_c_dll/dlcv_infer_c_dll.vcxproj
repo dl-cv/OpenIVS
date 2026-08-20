@@ -74,13 +74,13 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>$(ProjectDir);$(SolutionDir)dlcv_infer_cpp_dll;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp_dll;$(SolutionDir)dlcv_infer_cpp_dll;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
     <LibraryPath>$(OpenCvLibDir);$(LibraryPath)</LibraryPath>
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(ProjectDir);$(SolutionDir)dlcv_infer_cpp_dll;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp_dll;$(SolutionDir)dlcv_infer_cpp_dll;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
     <LibraryPath>$(OpenCvLibDir);$(LibraryPath)</LibraryPath>
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
@@ -98,7 +98,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)$(Configuration)\;$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100d.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>dlcv_infer_cpp_dll.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
@@ -119,7 +119,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)$(Configuration)\;$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>dlcv_infer_cpp_dll.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>

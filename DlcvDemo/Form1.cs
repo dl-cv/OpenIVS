@@ -42,6 +42,100 @@ namespace DlcvDemo
         public Form1()
         {
             InitializeComponent();
+            InitializeResultTextContextMenu();
+        }
+
+        /// <summary>
+        /// 为左侧文本结果区配置常用编辑菜单。
+        /// </summary>
+        private void InitializeResultTextContextMenu()
+        {
+            var contextMenu = new ContextMenuStrip(components);
+            var undoItem = new ToolStripMenuItem("撤销")
+            {
+                ShortcutKeys = Keys.Control | Keys.Z
+            };
+            var cutItem = new ToolStripMenuItem("剪切")
+            {
+                ShortcutKeys = Keys.Control | Keys.X
+            };
+            var copyItem = new ToolStripMenuItem("复制")
+            {
+                ShortcutKeys = Keys.Control | Keys.C
+            };
+            var pasteItem = new ToolStripMenuItem("粘贴")
+            {
+                ShortcutKeys = Keys.Control | Keys.V
+            };
+            var deleteItem = new ToolStripMenuItem("删除")
+            {
+                ShortcutKeys = Keys.Delete
+            };
+            var selectAllItem = new ToolStripMenuItem("全选")
+            {
+                ShortcutKeys = Keys.Control | Keys.A
+            };
+            var wordWrapItem = new ToolStripMenuItem("自动换行")
+            {
+                CheckOnClick = true,
+                Checked = richTextBox1.WordWrap
+            };
+
+            undoItem.Click += (sender, args) =>
+            {
+                if (richTextBox1.CanUndo)
+                {
+                    richTextBox1.Undo();
+                }
+            };
+            cutItem.Click += (sender, args) => richTextBox1.Cut();
+            copyItem.Click += (sender, args) => richTextBox1.Copy();
+            pasteItem.Click += (sender, args) => richTextBox1.Paste();
+            deleteItem.Click += (sender, args) => richTextBox1.SelectedText = string.Empty;
+            selectAllItem.Click += (sender, args) => richTextBox1.SelectAll();
+            wordWrapItem.CheckedChanged += (sender, args) => richTextBox1.WordWrap = wordWrapItem.Checked;
+
+            contextMenu.Items.AddRange(new ToolStripItem[]
+            {
+                undoItem,
+                new ToolStripSeparator(),
+                cutItem,
+                copyItem,
+                pasteItem,
+                deleteItem,
+                new ToolStripSeparator(),
+                selectAllItem,
+                new ToolStripSeparator(),
+                wordWrapItem
+            });
+
+            contextMenu.Opening += (sender, args) =>
+            {
+                bool hasSelection = richTextBox1.SelectionLength > 0;
+                bool canEdit = !richTextBox1.ReadOnly;
+
+                undoItem.Enabled = canEdit && richTextBox1.CanUndo;
+                cutItem.Enabled = canEdit && hasSelection;
+                copyItem.Enabled = hasSelection;
+                pasteItem.Enabled = canEdit && ClipboardContainsText();
+                deleteItem.Enabled = canEdit && hasSelection;
+                selectAllItem.Enabled = richTextBox1.TextLength > 0;
+                wordWrapItem.Checked = richTextBox1.WordWrap;
+            };
+
+            richTextBox1.ContextMenuStrip = contextMenu;
+        }
+
+        private static bool ClipboardContainsText()
+        {
+            try
+            {
+                return Clipboard.ContainsText() || Clipboard.ContainsData(DataFormats.Rtf);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void Form1_Load(object sender, EventArgs e)

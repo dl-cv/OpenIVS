@@ -17,6 +17,7 @@
 #include "dlcv_infer.h"
 
 class QCloseEvent;
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -100,6 +101,7 @@ private:
     QSpinBox* spinBatchSize_ = nullptr;
     QSpinBox* spinThreadCount_ = nullptr;
     QDoubleSpinBox* spinThreshold_ = nullptr;
+    QCheckBox* checkCalcMean_ = nullptr;
 
     QPlainTextEdit* outputText_ = nullptr;
     ImageViewerWidget* imageViewer_ = nullptr;
@@ -115,6 +117,7 @@ private:
     int pressureThreadCount_ = 1;
     int pressureBatchSize_ = 1;
     double pressureThreshold_ = 0.5;
+    bool pressureCalcMean_ = false;
     int pressureModelIndex_ = -1;
     cv::Mat pressureBaseImage_;
     QTimer* pressureTimer_ = nullptr;

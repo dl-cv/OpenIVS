@@ -558,6 +558,7 @@ std::vector<GraphExecutor::UnregisteredNodeInfo> GraphExecutor::GetLastUnregiste
 
 Json GraphExecutor::LoadModels() {
     _lastUnregisteredNodes.clear();
+    _modelLoadHolds.clear();
 
     // 排序与 Run 一致
     std::vector<Json> ordered = _nodes;
@@ -643,6 +644,8 @@ Json GraphExecutor::LoadModels() {
             std::unique_ptr<BaseModule> module = factory(nodeId, title, props, _context);
             if (!module) throw std::runtime_error("module_factory_returned_null");
             module->LoadModel();
+            // 保持加载成功的模块存活，等待 FlowGraphModel 接收模型池引用后再统一释放。
+            _modelLoadHolds.push_back(std::move(module));
             item["status_code"] = 0;
             item["status_message"] = "ok";
         } catch (const std::exception& ex) {

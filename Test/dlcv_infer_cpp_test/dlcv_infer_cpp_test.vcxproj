@@ -26,6 +26,9 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'"><Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" /></ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'"><Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" /></ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <DlcvInferCppDllPath>$(ProjectDir)..\..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll</DlcvInferCppDllPath>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <IncludePath>$(ProjectDir);$(ProjectDir)..\..\dlcv_infer_cpp_dll;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(IncludePath)</IncludePath>
     <LibraryPath>C:\OpenCV\build\x64\vc16\lib;$(LibraryPath)</LibraryPath>
@@ -59,5 +62,9 @@
   <ItemGroup><ClCompile Include="main.cpp" /></ItemGroup>
   <ItemGroup><ProjectReference Include="..\..\dlcv_infer_cpp_dll\dlcv_infer_cpp_dll.vcxproj"><Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project><LinkLibraryDependencies>true</LinkLibraryDependencies></ProjectReference></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="CopyDlcvInferCppDll" AfterTargets="Build" Condition="'$(BuildingSolutionFile)'!='true'">
+    <Error Condition="!Exists('$(DlcvInferCppDllPath)')" Text="未找到 C++ 推理 DLL：$(DlcvInferCppDllPath)" />
+    <Copy SourceFiles="$(DlcvInferCppDllPath)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
   <ImportGroup Label="ExtensionTargets" />
 </Project>

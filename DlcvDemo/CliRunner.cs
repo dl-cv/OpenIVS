@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -18,6 +19,7 @@ namespace DlcvDemo
         private const uint AttachParentProcess = 0xFFFFFFFF;
         private const int ErrorAccessDenied = 5;
         private const double ScoreConsistencyTolerance = 1e-6;
+        private const double MeanConsistencyTolerance = 1e-6;
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool AttachConsole(uint processId);
@@ -112,7 +114,8 @@ namespace DlcvDemo
 
                 bool consistent = summary.Value<bool>("consistent");
                 bool thresholdCheckPassed = summary.Value<bool>("threshold_check_passed");
-                return consistent && thresholdCheckPassed ? 0 : 3;
+                bool meanCheckPassed = summary.Value<bool>("mean_check_passed");
+                return consistent && thresholdCheckPassed && meanCheckPassed ? 0 : 3;
             }
             catch (Exception ex)
             {
@@ -150,6 +153,10 @@ namespace DlcvDemo
                     ["threshold"] = (float)options.Threshold,
                     ["with_mask"] = options.WithMask
                 };
+                if (options.CalcMean.HasValue)
+                {
+                    inferParams["calc_mean"] = options.CalcMean.Value;
+                }
 
                 PathSummary structuredSummary;
                 Utils.CSharpResult structuredResult = default(Utils.CSharpResult);
@@ -179,6 +186,12 @@ namespace DlcvDemo
                 bool consistent = AreConsistent(structuredSummary, jsonSummary);
                 bool thresholdCheckPassed = structuredSummary.BelowThresholdCount == 0
                     && jsonSummary.BelowThresholdCount == 0;
+                bool bothResultsEmpty = structuredSummary.Count == 0 && jsonSummary.Count == 0;
+                bool meanCheckPassed = !options.CalcMean.HasValue
+                    || bothResultsEmpty
+                    || (options.CalcMean.Value
+                        ? structuredSummary.AllMaskResultsHaveMean && jsonSummary.AllMaskResultsHaveMean
+                        : !structuredSummary.AnyHaveMean && !jsonSummary.AnyHaveMean);
 
                 return new JObject
                 {
@@ -188,10 +201,14 @@ namespace DlcvDemo
                     ["device"] = options.DeviceId,
                     ["threshold"] = options.Threshold,
                     ["with_mask"] = options.WithMask,
+                    ["calc_mean"] = options.CalcMean.HasValue
+                        ? new JValue(options.CalcMean.Value)
+                        : JValue.CreateNull(),
                     ["structured"] = structuredSummary.ToJson(),
                     ["json"] = jsonSummary.ToJson(),
                     ["consistent"] = consistent,
-                    ["threshold_check_passed"] = thresholdCheckPassed
+                    ["threshold_check_passed"] = thresholdCheckPassed,
+                    ["mean_check_passed"] = meanCheckPassed
                 };
             }
             finally
@@ -243,7 +260,14 @@ namespace DlcvDemo
                 if (sample.Results == null) continue;
                 foreach (var item in sample.Results)
                 {
-                    summary.Add(item.Score, item.CategoryName, threshold);
+                    summary.Add(
+                        item.Score,
+                        item.CategoryName,
+                        item.WithMask,
+                        item.WithMean,
+                        item.ForegroundMean,
+                        item.BackgroundMean,
+                        threshold);
                 }
             }
             return summary;
@@ -257,12 +281,20 @@ namespace DlcvDemo
                 var item = resultArray[i] as JObject;
                 double score = double.NaN;
                 string category = string.Empty;
+                bool withMask = false;
+                bool withMean = false;
+                double foregroundMean = 0.0;
+                double backgroundMean = 0.0;
                 if (item != null)
                 {
                     TryReadScore(item["score"], out score);
                     category = item["category_name"] != null ? item["category_name"].ToString() : string.Empty;
+                    withMask = item.Value<bool?>("with_mask") ?? false;
+                    withMean = item.Value<bool?>("with_mean") ?? false;
+                    foregroundMean = item.Value<double?>("foreground_mean") ?? 0.0;
+                    backgroundMean = item.Value<double?>("background_mean") ?? 0.0;
                 }
-                summary.Add(score, category, threshold);
+                summary.Add(score, category, withMask, withMean, foregroundMean, backgroundMean, threshold);
             }
             return summary;
         }
@@ -289,6 +321,14 @@ namespace DlcvDemo
                 if (!IsFinite(leftScore) || !IsFinite(rightScore)) return false;
                 if (Math.Abs(leftScore - rightScore) > ScoreConsistencyTolerance) return false;
                 if (!string.Equals(left.Categories[i], right.Categories[i], StringComparison.Ordinal)) return false;
+                if (left.WithMeans[i] != right.WithMeans[i]) return false;
+                if (left.WithMeans[i])
+                {
+                    if (!IsFinite(left.ForegroundMeans[i]) || !IsFinite(right.ForegroundMeans[i])) return false;
+                    if (!IsFinite(left.BackgroundMeans[i]) || !IsFinite(right.BackgroundMeans[i])) return false;
+                    if (Math.Abs(left.ForegroundMeans[i] - right.ForegroundMeans[i]) > MeanConsistencyTolerance) return false;
+                    if (Math.Abs(left.BackgroundMeans[i] - right.BackgroundMeans[i]) > MeanConsistencyTolerance) return false;
+                }
             }
             return true;
         }
@@ -375,6 +415,14 @@ namespace DlcvDemo
                             return false;
                         }
                         options.WithMask = withMask;
+                        break;
+                    case "--calc-mean":
+                        if (!bool.TryParse(value, out bool calcMean))
+                        {
+                            error = "--calc-mean 必须是 true 或 false。";
+                            return false;
+                        }
+                        options.CalcMean = calcMean;
                         break;
                     case "--output":
                         options.OutputPath = value;
@@ -476,8 +524,8 @@ namespace DlcvDemo
         private static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--interactive-dialogs <true|false>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>]");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --help");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --version");
             Console.Out.WriteLine();
@@ -515,6 +563,7 @@ namespace DlcvDemo
             public bool HasThreshold { get; set; }
             public int DeviceId { get; set; }
             public bool WithMask { get; set; }
+            public bool? CalcMean { get; set; }
             public string OutputPath { get; set; }
         }
 
@@ -524,15 +573,40 @@ namespace DlcvDemo
 
             public List<double> Scores { get; } = new List<double>();
             public List<string> Categories { get; } = new List<string>();
+            public List<bool> WithMasks { get; } = new List<bool>();
+            public List<bool> WithMeans { get; } = new List<bool>();
+            public List<double> ForegroundMeans { get; } = new List<double>();
+            public List<double> BackgroundMeans { get; } = new List<double>();
             public int Count { get { return Scores.Count; } }
             public int BelowThresholdCount { get { return _belowThreshold.Count; } }
+            public bool AllMaskResultsHaveMean
+            {
+                get
+                {
+                    return WithMasks
+                        .Select((withMask, index) => !withMask || WithMeans[index])
+                        .All(value => value);
+                }
+            }
+            public bool AnyHaveMean { get { return WithMeans.Any(value => value); } }
 
-            public void Add(double score, string category, double threshold)
+            public void Add(
+                double score,
+                string category,
+                bool withMask,
+                bool withMean,
+                double foregroundMean,
+                double backgroundMean,
+                double threshold)
             {
                 int index = Scores.Count;
                 string normalizedCategory = category ?? string.Empty;
                 Scores.Add(score);
                 Categories.Add(normalizedCategory);
+                WithMasks.Add(withMask);
+                WithMeans.Add(withMean);
+                ForegroundMeans.Add(foregroundMean);
+                BackgroundMeans.Add(backgroundMean);
 
                 if (!IsFinite(score) || score < threshold)
                 {
@@ -548,9 +622,19 @@ namespace DlcvDemo
             public JObject ToJson()
             {
                 var scores = new JArray();
+                var foregroundMeans = new JArray();
+                var backgroundMeans = new JArray();
                 foreach (double score in Scores)
                 {
                     scores.Add(IsFinite(score) ? new JValue(score) : JValue.CreateNull());
+                }
+                foreach (double foregroundMean in ForegroundMeans)
+                {
+                    foregroundMeans.Add(IsFinite(foregroundMean) ? new JValue(foregroundMean) : JValue.CreateNull());
+                }
+                foreach (double backgroundMean in BackgroundMeans)
+                {
+                    backgroundMeans.Add(IsFinite(backgroundMean) ? new JValue(backgroundMean) : JValue.CreateNull());
                 }
 
                 return new JObject
@@ -558,6 +642,10 @@ namespace DlcvDemo
                     ["count"] = Count,
                     ["scores"] = scores,
                     ["categories"] = new JArray(Categories),
+                    ["with_mask"] = new JArray(WithMasks),
+                    ["with_mean"] = new JArray(WithMeans),
+                    ["foreground_mean"] = foregroundMeans,
+                    ["background_mean"] = backgroundMeans,
                     ["below_threshold"] = _belowThreshold.DeepClone()
                 };
             }

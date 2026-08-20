@@ -197,14 +197,8 @@ namespace DlcvModules
 			var outResults = new JArray();
 			LoadModel();
 
-			// 只透传流程节点自身的推理参数；入口阈值在最终结果层处理。
-			var p = new JObject();
-			TryAddParam(p, "threshold");
-			TryAddParam(p, "iou_threshold");
-			TryAddParam(p, "top_k");
-			TryAddParam(p, "return_polygon");
-			TryAddParam(p, "epsilon");
-			TryAddParam(p, "batch_size");
+			// 入口阈值在最终结果层处理；calc_mean 显式传入时只影响本次推理。
+			var p = BuildInferParams();
 			// 注意：with_mask 仅控制最终返回格式，不在这里传给子模型。
 			// 流程内部需要始终保留 mask_rle，否则 mask_to_rbox 等后处理节点会丢失结果。
 			// output/return_json 会根据 infer_params.with_mask 决定是否把 mask 暴露给前端/JSON。
@@ -349,6 +343,9 @@ namespace DlcvModules
 					["bbox"] = obj.Bbox != null ? JArray.FromObject(obj.Bbox) : null,
 					["with_bbox"] = obj.WithBbox,
 					["with_mask"] = obj.WithMask,
+					["with_mean"] = obj.WithMean,
+					["foreground_mean"] = obj.ForegroundMean,
+					["background_mean"] = obj.BackgroundMean,
 					["with_angle"] = obj.WithAngle,
 					["angle"] = obj.Angle
 				};
@@ -408,6 +405,20 @@ namespace DlcvModules
 			}
 		}
 
+		private JObject BuildInferParams()
+		{
+			var p = new JObject();
+			TryAddParam(p, "threshold");
+			TryAddParam(p, "iou_threshold");
+			TryAddParam(p, "calc_mean");
+			TryOverrideInferParam(p, "calc_mean");
+			TryAddParam(p, "top_k");
+			TryAddParam(p, "return_polygon");
+			TryAddParam(p, "epsilon");
+			TryAddParam(p, "batch_size");
+			return p;
+		}
+
 		private void TryAddParam(JObject p, string key)
 		{
 			if (Properties != null && Properties.TryGetValue(key, out object v) && v != null)
@@ -445,6 +456,21 @@ namespace DlcvModules
 				}
 				catch { }
 			}
+		}
+
+		private void TryOverrideInferParam(JObject p, string key)
+		{
+			if (Context == null) return;
+			try
+			{
+				var inferParams = Context.Get<JObject>("infer_params", null);
+				var value = inferParams != null ? inferParams[key] : null;
+				if (value != null && value.Type != JTokenType.Null)
+				{
+					p[key] = value.DeepClone();
+				}
+			}
+			catch { }
 		}
 	}
 
@@ -496,6 +522,7 @@ namespace DlcvModules
 			var imagesOut = baseIo != null ? (baseIo.ImageList ?? new List<ModuleImage>()) : new List<ModuleImage>();
 			var resultsOut = baseIo != null ? (baseIo.ResultList ?? new JArray()) : new JArray();
 			int topK = Math.Max(0, ReadInt("top_k", 1));
+			var categoryByIndex = new Dictionary<int, string>();
 
 			int n = Math.Min(resultsOut.Count, imagesOut.Count);
 			for (int i = 0; i < n; i++)
@@ -509,11 +536,20 @@ namespace DlcvModules
 				var imgMat = imagesOut[i] != null ? imagesOut[i].ImageObject : null;
 				int iw = imgMat != null ? Math.Max(1, imgMat.Width) : 1;
 				int ih = imgMat != null ? Math.Max(1, imgMat.Height) : 1;
+				JObject top1 = null;
+				double top1Score = double.MinValue;
 
 				foreach (var s in samples)
 				{
 					var so = s as JObject;
 					if (so == null) continue;
+					double score = so.Value<double?>("score") ?? 0.0;
+					if (top1 == null || score > top1Score)
+					{
+						top1 = so;
+						top1Score = score;
+					}
+
 					var bboxArr = so["bbox"] as JArray;
 					bool withBbox = so.Value<bool?>("with_bbox") ?? false;
 					bool validDims = false;
@@ -535,6 +571,37 @@ namespace DlcvModules
 						so["angle"] = -100.0;
 					}
 				}
+
+				int index = entry.Value<int?>("index") ?? i;
+				string categoryName = top1 != null ? top1.Value<string>("category_name") : null;
+				if (categoryName != null) categoryByIndex[index] = categoryName;
+			}
+
+			if (resultList != null && resultList.Count > 0)
+			{
+				var overlaidResults = new JArray();
+				foreach (var token in resultList)
+				{
+					var sourceEntry = token as JObject;
+					var overlaidEntry = sourceEntry != null ? (JObject)sourceEntry.DeepClone() : null;
+					int index = sourceEntry != null ? (sourceEntry.Value<int?>("index") ?? -1) : -1;
+					if (overlaidEntry != null
+						&& string.Equals(sourceEntry.Value<string>("type"), "local", StringComparison.Ordinal)
+						&& categoryByIndex.TryGetValue(index, out string categoryName))
+					{
+						var samples = overlaidEntry["sample_results"] as JArray;
+						if (samples != null)
+						{
+							foreach (var sample in samples)
+							{
+								var sampleObject = sample as JObject;
+								if (sampleObject != null) sampleObject["category_name"] = categoryName;
+							}
+						}
+					}
+					overlaidResults.Add(overlaidEntry != null ? (JToken)overlaidEntry : token.DeepClone());
+				}
+				return new ModuleIO(imagesOut, overlaidResults);
 			}
 
 			return new ModuleIO(imagesOut, resultsOut);

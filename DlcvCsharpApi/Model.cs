@@ -93,15 +93,15 @@ namespace dlcv_infer_csharp
         {
             _modelPath = modelPath;
 
-            // 根据模型文件后缀判断是否使用 DVP 模式
+            // 根据模型文件后缀判断是否使用 HTTP 模式
             if (string.IsNullOrEmpty(modelPath))
             {
                 throw new ArgumentException("模型路径不能为空", nameof(modelPath));
             }
 
             string extension = Path.GetExtension(modelPath).ToLower();
-            _isDvpMode = extension == ".dvp";
-            _isDvsMode = extension == ".dvst" || extension == ".dvso" || extension == ".dvsp";
+            _isDvpMode = extension == ".dvp" || extension == ".dvsp";
+            _isDvsMode = extension == ".dvst" || extension == ".dvso";
             _isRpcMode = rpc_mode;
             string cacheKey = BuildModelCacheKey(modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
 
@@ -2018,9 +2018,13 @@ namespace dlcv_infer_csharp
                     }
 
                     var extraInfo = result["extra_info"] as JObject ?? new JObject();
+                    bool withMean = result["with_mean"]?.Value<bool>() ?? false;
+                    double foregroundMean = result["foreground_mean"]?.Value<double>() ?? 0.0;
+                    double backgroundMean = result["background_mean"]?.Value<double>() ?? 0.0;
 
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
-                        withMask, mask_img, withBbox, withAngle, angle, extraInfo);
+                        withMask, mask_img, withBbox, withAngle, angle, extraInfo,
+                        withMean, foregroundMean, backgroundMean);
                     results.Add(objectResult);
                 }
 
@@ -2273,6 +2277,9 @@ namespace dlcv_infer_csharp
             result["category_id"] = item["category_id"] ?? 0;
             result["category_name"] = item["category_name"] ?? "";
             result["score"] = item["score"] ?? 0.0;
+            result["with_mean"] = item["with_mean"] ?? false;
+            result["foreground_mean"] = item["foreground_mean"] ?? 0.0;
+            result["background_mean"] = item["background_mean"] ?? 0.0;
 
             // 2. Handle BBox
             var bbox = item["bbox"]?.ToObject<List<double>>() ?? new List<double>();

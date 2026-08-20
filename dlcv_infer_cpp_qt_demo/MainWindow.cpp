@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <QComboBox>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QDebug>
 #include <QDesktopServices>
@@ -169,6 +170,9 @@ void MainWindow::setupUi() {
     spinThreshold_->setMaximum(1.0);
     spinThreshold_->setValue(0.5);
 
+    checkCalcMean_ = new QCheckBox("计算均值", this);
+    checkCalcMean_->setChecked(false);
+
     constexpr int kControlHeight = 36;
     constexpr int kButtonMinWidth = 120;
     const std::vector<QPushButton*> buttons = {
@@ -200,6 +204,7 @@ void MainWindow::setupUi() {
     spinBatchSize_->setFixedHeight(kControlHeight);
     spinThreshold_->setFixedHeight(kControlHeight);
     spinThreadCount_->setFixedHeight(kControlHeight);
+    checkCalcMean_->setFixedHeight(kControlHeight);
 
     auto* topControlsLayout = new QVBoxLayout();
     topControlsLayout->setContentsMargins(0, 0, 0, 0);
@@ -222,6 +227,7 @@ void MainWindow::setupUi() {
     row2Layout->addWidget(spinBatchSize_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(labelThreshold_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(spinThreshold_, 0, Qt::AlignVCenter);
+    row2Layout->addWidget(checkCalcMean_, 0, Qt::AlignVCenter);
     row2Layout->addStretch(1);
     row2Layout->addWidget(buttonFreeModel_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(buttonFreeAllModels_, 0, Qt::AlignVCenter);
@@ -463,6 +469,11 @@ QString MainWindow::formatResultText(const dlcv_infer::Result& output) const {
                 .arg(angle, 0, 'f', 3)
                 .arg(degrees, 0, 'f', 1);
         }
+        if (obj.withMean) {
+            text += QString("  前景均值=%1  背景均值=%2")
+                .arg(obj.foregroundMean, 0, 'f', 4)
+                .arg(obj.backgroundMean, 0, 'f', 4);
+        }
         text += "\n";
     }
     return text;
@@ -571,6 +582,7 @@ void MainWindow::onInfer() {
         params["threshold"] = spinThreshold_->value();
         params["with_mask"] = true;
         params["batch_size"] = batchSize;
+        params["calc_mean"] = checkCalcMean_->isChecked();
 
         const auto start = std::chrono::steady_clock::now();
         output = model_->InferBatch(imageList, params);
@@ -629,6 +641,7 @@ void MainWindow::onInferJson() {
         params["threshold"] = spinThreshold_->value();
         params["with_mask"] = true;
         params["batch_size"] = 1;
+        params["calc_mean"] = checkCalcMean_->isChecked();
 
         const json resultArray = model_->InferOneOutJson(inferImage, params);
         if (resultArray.empty()) {
@@ -678,6 +691,7 @@ void MainWindow::startPressureTest() {
     pressureThreadCount_ = spinThreadCount_->value();
     pressureBatchSize_ = spinBatchSize_->value();
     pressureThreshold_ = spinThreshold_->value();
+    pressureCalcMean_ = checkCalcMean_->isChecked();
     pressureBaseImage_ = inferBaseImage;
 
     pressureStopRequested_.store(false, std::memory_order_relaxed);
@@ -716,12 +730,13 @@ void MainWindow::startPressureTest() {
 
     const int batchSize = pressureBatchSize_;
     const double threshold = pressureThreshold_;
+    const bool calcMean = pressureCalcMean_;
     const cv::Mat baseImage = pressureBaseImage_;
     const QString pressureInputDesc = describeOpenCvImageForUi(baseImage, true);
     dlcv_infer::Model* const modelPtr = model_.get();
 
     for (int t = 0; t < pressureThreadCount_; ++t) {
-        pressureThreads_.emplace_back([this, modelPtr, batchSize, threshold, baseImage, pressureInputDesc]() {
+        pressureThreads_.emplace_back([this, modelPtr, batchSize, threshold, calcMean, baseImage, pressureInputDesc]() {
             if (baseImage.empty()) {
                 const QString detail = "输入图像为空。";
                 if (!pressureError_.exchange(true)) {
@@ -780,6 +795,7 @@ void MainWindow::startPressureTest() {
             params["threshold"] = threshold;
             params["with_mask"] = false;
             params["batch_size"] = batchSize;
+            params["calc_mean"] = calcMean;
 
             std::vector<cv::Mat> images;
             images.reserve(batchSize);
@@ -969,6 +985,7 @@ void MainWindow::setUiEnabledForPressureTest(bool enabled) {
     spinBatchSize_->setEnabled(enabled);
     spinThreshold_->setEnabled(enabled);
     spinThreadCount_->setEnabled(enabled);
+    checkCalcMean_->setEnabled(enabled);
 }
 
 void MainWindow::onGetModelInfo() {

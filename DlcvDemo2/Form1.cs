@@ -22,6 +22,7 @@ namespace DlcvDemo2
         private Model icDetectModel;
         private string imagePath;
         private bool isInferenceRunning;
+        private bool isModelLoading;
 
         private sealed class RoiProcessResult : IDisposable
         {
@@ -96,9 +97,9 @@ namespace DlcvDemo2
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            if (isInferenceRunning)
+            if (isInferenceRunning || isModelLoading)
             {
-                MessageBox.Show("当前正在执行推理，请等待完成后再关闭。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("当前正在执行推理或加载模型，请等待完成后再关闭。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 e.Cancel = true;
                 return;
             }
@@ -217,8 +218,99 @@ namespace DlcvDemo2
             richTextBox1.Text = "模型已释放";
         }
 
+        private async void btnLoadAllModels_Click(object sender, EventArgs e)
+        {
+            if (!TryEnsureIdle("当前正在执行推理，暂不能加载三个模型。"))
+            {
+                return;
+            }
+
+            string extractModelPath = (txtExtractModelPath.Text ?? string.Empty).Trim();
+            string componentModelPath = (txtComponentModelPath.Text ?? string.Empty).Trim();
+            string icModelPath = (txtIcModelPath.Text ?? string.Empty).Trim();
+
+            if (!TryValidateModelPath(extractModelPath, "元件提取模型")
+                || !TryValidateModelPath(componentModelPath, "元件检测模型")
+                || !TryValidateModelPath(icModelPath, "IC检测模型"))
+            {
+                return;
+            }
+
+            SaveUiSettings();
+            isModelLoading = true;
+            UpdateBusyControlState();
+            richTextBox1.Clear();
+
+            var progress = new Progress<string>(AppendModelLoadLog);
+            try
+            {
+                await Task.Run(() => LoadAllModelsSequentially(
+                    extractModelPath,
+                    componentModelPath,
+                    icModelPath,
+                    progress));
+            }
+            catch (Exception ex)
+            {
+                AppendModelLoadLog($"加载失败: {ex.Message}");
+            }
+            finally
+            {
+                isModelLoading = false;
+                UpdateBusyControlState();
+            }
+        }
+
+        private void LoadAllModelsSequentially(
+            string extractModelPath,
+            string componentModelPath,
+            string icModelPath,
+            IProgress<string> progress)
+        {
+            ReleaseModels();
+
+            TimeSpan extractElapsed;
+            TimeSpan componentElapsed;
+            TimeSpan icElapsed;
+            extractModel = ThreeModelLoadTimer.Load("元件提取模型", extractModelPath, progress.Report, out extractElapsed);
+            componentDetectModel = ThreeModelLoadTimer.Load("元件检测模型", componentModelPath, progress.Report, out componentElapsed);
+            icDetectModel = ThreeModelLoadTimer.Load("IC检测模型", icModelPath, progress.Report, out icElapsed);
+
+            TimeSpan totalElapsed = extractElapsed + componentElapsed + icElapsed;
+            progress.Report($"三个模型加载完成，总耗时 {totalElapsed.TotalSeconds:F2} 秒");
+        }
+
+        private static bool TryValidateModelPath(string modelPath, string modelDisplayName)
+        {
+            if (!string.IsNullOrWhiteSpace(modelPath) && File.Exists(modelPath))
+            {
+                return true;
+            }
+
+            MessageBox.Show($"请先选择有效的{modelDisplayName}文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
+
+        private void AppendModelLoadLog(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            richTextBox1.AppendText(message + Environment.NewLine);
+            richTextBox1.SelectionStart = richTextBox1.TextLength;
+            richTextBox1.ScrollToCaret();
+        }
+
         private async Task RunInferenceAsync(bool triggeredByImageSelection)
         {
+            if (isModelLoading)
+            {
+                richTextBox1.Text = "当前正在加载模型，请等待完成后再执行推理。";
+                return;
+            }
+
             if (isInferenceRunning)
             {
                 richTextBox1.Text = triggeredByImageSelection
@@ -259,7 +351,7 @@ namespace DlcvDemo2
                         imageRgb = PrepareImageForModelInput(imageBgr);
 
                         Stopwatch sw = Stopwatch.StartNew();
-                        // 颜色约定：UI 显示使用 imageBgr；送入 dvst 的整条 pipeline 使用 imageRgb（RGB）。
+                        // 颜色规则：UI 显示使用 imageBgr；送入 dvst 的整条 pipeline 使用 imageRgb（RGB）。
                         PipelineRunResult runResult = RunPipeline(imageRgb, config, progress);
                         sw.Stop();
 
@@ -365,7 +457,7 @@ namespace DlcvDemo2
                     catch (Exception ex)
                     {
                         string routeName = useIcDetectModel ? "IC检测模型" : "元件检测模型";
-                        runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]{routeName}推理失败，保留元件提取结果兜底：{ex.Message}");
+                        runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]{routeName}推理失败，保留元件提取结果：{ex.Message}");
                         runResult.FinalObjects.Add(target.ObjectResult);
                     }
                 }
@@ -767,6 +859,12 @@ namespace DlcvDemo2
 
         private bool TryEnsureIdle(string busyMessage)
         {
+            if (isModelLoading)
+            {
+                richTextBox1.Text = "当前正在加载模型，请稍后再试。";
+                return false;
+            }
+
             if (isInferenceRunning)
             {
                 richTextBox1.Text = busyMessage;
@@ -777,7 +875,7 @@ namespace DlcvDemo2
 
         private void UpdateBusyControlState()
         {
-            bool isBusy = isInferenceRunning;
+            bool isBusy = isInferenceRunning || isModelLoading;
             btnBrowseExtractModel.Enabled = !isBusy;
             btnLoadExtractModel.Enabled = !isBusy;
             btnBrowseComponentModel.Enabled = !isBusy;
@@ -787,6 +885,7 @@ namespace DlcvDemo2
             btnBrowseImage.Enabled = !isBusy;
             btnInfer.Enabled = !isBusy;
             btnReleaseModels.Enabled = !isBusy;
+            btnLoadAllModels.Enabled = !isBusy;
 
             txtExtractModelPath.Enabled = !isBusy;
             txtComponentModelPath.Enabled = !isBusy;
@@ -898,7 +997,7 @@ namespace DlcvDemo2
                 return image;
             }
 
-            // 调用侧颜色约定：OpenCV 解码语义为 BGR/BGRA，进入 dvst 推理前统一转换为 RGB；
+            // 调用侧颜色规则：OpenCV 解码语义为 BGR/BGRA，进入 dvst 推理前统一转换为 RGB；
             // 灰度图保持单通道直送。
             int channels = image.Channels();
             if (channels == 1)
