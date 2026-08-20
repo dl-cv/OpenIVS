@@ -531,10 +531,12 @@ namespace DlcvDemo
                 sb.AppendLine($"推理时间: {delay_ms:F2}ms");
 
                 List<CSharpObjectResult> objects = null;
+                bool? inspectionOk = null;
                 string reason = null;
                 if (result.SampleResults != null && result.SampleResults.Count > 0)
                 {
                     objects = result.SampleResults[0].Results;
+                    inspectionOk = result.SampleResults[0].Ok;
                     reason = result.SampleResults[0].Reason;
                 }
                 if (objects == null)
@@ -543,9 +545,13 @@ namespace DlcvDemo
                 }
 
                 sb.AppendLine($"推理结果: {objects.Count}个");
+                if (inspectionOk.HasValue)
+                {
+                    sb.AppendLine(inspectionOk.Value ? "流程输出结果：OK" : "流程输出结果：NG");
+                }
                 if (!string.IsNullOrWhiteSpace(reason))
                 {
-                    sb.AppendLine("原因: " + reason);
+                    sb.AppendLine("流程输出原因：" + reason);
                 }
                 if (objects.Count == 0)
                 {

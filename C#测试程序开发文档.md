@@ -210,7 +210,7 @@
   - **颜色**：根据类别（OK/NG）区分颜色（如绿/红）。
   - **无结果状态**：当 `SampleResults.Count==0` 时，自动显示左上角状态文本 `No Result`（控件会将 `ShowStatusText` 置为 `true`）。
   - **流程判定状态**：`CSharpSampleResult.Ok` 有值时优先在图像左上角显示带阴影的灰色半透明方块，方块内为绿色 `OK` 或红色 `NG`，不再根据类别名推测状态；`Ok` 无值时保留原有 `ShowStatusText` 行为。
-  - **失败原因**：`CSharpSampleResult.Reason` 非空时，显示在左侧预测结果文本下方。
+  - **流程输出文本**：`CSharpSampleResult.Ok` 有值时，在左侧预测结果中显示 `流程输出结果：OK` 或 `流程输出结果：NG`；`CSharpSampleResult.Reason` 非空时，紧接下一行显示 `流程输出原因：{reason}`。
 
 ### 6. 主流程与状态（必须一致）
 
