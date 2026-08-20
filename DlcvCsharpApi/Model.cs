@@ -2220,7 +2220,11 @@ namespace dlcv_infer_csharp
                     // DVS 流程的 JSON 输出需要 poly，必须走 InferOneOutJson（emitPoly=true）。
                     // InferInternal 默认 emitPoly=false，会导致 return_json 只输出 mask_rle，
                     // 而 StandardizeJsonOutput 无法识别 mask_rle，从而 with_mask 被置为 false。
-                    rawResults = _dvsModel.InferOneOutJson(normalized[0], params_json) as JArray ?? new JArray();
+                    JToken dvsJson = _dvsModel.InferOneOutJson(normalized[0], params_json) as JToken;
+                    var dvsContainer = dvsJson as JObject;
+                    rawResults = dvsJson as JArray
+                        ?? (dvsContainer != null ? dvsContainer["result_list"] as JArray : null)
+                        ?? new JArray();
 
                     // DVS 模式下不需要释放非托管资源，直接处理
                     var finalResults = new JArray();
@@ -2231,6 +2235,29 @@ namespace dlcv_infer_csharp
                             finalResults.Add(StandardizeJsonOutput(obj, false));
                         }
                     }
+
+                    if (dvsContainer != null &&
+                        (dvsContainer.ContainsKey("ok") || dvsContainer.ContainsKey("reason")))
+                    {
+                        var payload = new JObject
+                        {
+                            ["result_list"] = finalResults
+                        };
+                        if (dvsContainer.ContainsKey("ok"))
+                        {
+                            payload["ok"] = dvsContainer["ok"] != null
+                                ? dvsContainer["ok"].DeepClone()
+                                : JValue.CreateNull();
+                        }
+                        if (dvsContainer.ContainsKey("reason"))
+                        {
+                            payload["reason"] = dvsContainer["reason"] != null
+                                ? dvsContainer["reason"].DeepClone()
+                                : JValue.CreateNull();
+                        }
+                        return payload;
+                    }
+
                     return finalResults;
                 }
                 finally

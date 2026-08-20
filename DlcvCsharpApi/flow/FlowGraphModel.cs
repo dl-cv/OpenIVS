@@ -252,12 +252,14 @@ namespace DlcvModules
 
                 // 从 output/return_json 读取每张图结果
                 var perImageResults = new List<JArray>();
+                var perImageStatus = new List<JObject>();
                 for (int i = 0; i < images.Count; i++)
                 {
                     perImageResults.Add(new JArray());
+                    perImageStatus.Add(new JObject());
                 }
 
-                AggregateFrontendResults(ctx, perImageResults);
+                AggregateFrontendResults(ctx, perImageResults, perImageStatus);
                 // 入口阈值只作用于 return_json 汇总后的最终对外结果。
                 ApplyFinalThresholdFilter(perImageResults, paramsJson);
 
@@ -265,16 +267,19 @@ namespace DlcvModules
                 if (images.Count == 1)
                 {
                     root["result_list"] = perImageResults.Count > 0 ? perImageResults[0] : new JArray();
+                    if (perImageStatus.Count > 0) CopyStatusFields(root, perImageStatus[0]);
                 }
                 else
                 {
                     var batchContainer = new JArray();
                     for (int i = 0; i < perImageResults.Count; i++)
                     {
-                        batchContainer.Add(new JObject
+                        var container = new JObject
                         {
                             ["result_list"] = perImageResults[i] ?? new JArray()
-                        });
+                        };
+                        if (i < perImageStatus.Count) CopyStatusFields(container, perImageStatus[i]);
+                        batchContainer.Add(container);
                     }
                     root["result_list"] = batchContainer;
                 }
@@ -318,7 +323,7 @@ namespace DlcvModules
             {
                 var resultToken = tuple.Item1["result_list"];
                 var resultList = resultToken as JArray ?? new JArray();
-                return ConvertFlowResultsToCSharp(resultList, includeMask);
+                return ConvertFlowResultsToCSharp(resultList, includeMask, tuple.Item1);
             }
             finally
             {
@@ -382,6 +387,16 @@ namespace DlcvModules
                 else
                 {
                     resultArray = new JArray();
+                }
+
+                if (resultTuple.Item1.ContainsKey("ok") || resultTuple.Item1.ContainsKey("reason"))
+                {
+                    var payload = new JObject
+                    {
+                        ["result_list"] = resultArray
+                    };
+                    CopyStatusFields(payload, resultTuple.Item1);
+                    return payload;
                 }
 
                 return resultArray;
@@ -455,7 +470,10 @@ namespace DlcvModules
             public Dictionary<string, object> Payload { get; set; }
         }
 
-        private static void AggregateFrontendResults(ExecutionContext ctx, List<JArray> perImageResults)
+        private static void AggregateFrontendResults(
+            ExecutionContext ctx,
+            List<JArray> perImageResults,
+            List<JObject> perImageStatus)
         {
             if (ctx == null || perImageResults == null || perImageResults.Count == 0)
             {
@@ -491,6 +509,10 @@ namespace DlcvModules
                     }
 
                     AppendResultsArray(perImageResults[targetIndex], ExtractResultsArray(item));
+                    if (perImageStatus != null && targetIndex < perImageStatus.Count)
+                    {
+                        MergeStatusFields(perImageStatus[targetIndex], item);
+                    }
                 }
             }
         }
@@ -606,6 +628,90 @@ namespace DlcvModules
 
             // 没有合法 origin_index 时，回退到 by_image 的位置索引并折回。
             return position >= 0 ? (position % imageCount) : -1;
+        }
+
+        private static void CopyStatusFields(JObject target, JObject source)
+        {
+            if (target == null || source == null) return;
+            if (source.ContainsKey("ok"))
+            {
+                target["ok"] = source["ok"] != null ? source["ok"].DeepClone() : JValue.CreateNull();
+            }
+            if (source.ContainsKey("reason"))
+            {
+                target["reason"] = source["reason"] != null ? source["reason"].DeepClone() : JValue.CreateNull();
+            }
+        }
+
+        private static void MergeStatusFields(JObject target, Dictionary<string, object> source)
+        {
+            if (target == null || source == null) return;
+
+            if (source.TryGetValue("ok", out object okValue))
+            {
+                bool? incomingOk = ReadStatusOk(ToStatusToken(okValue));
+                bool? existingOk = ReadStatusOk(target["ok"]);
+                if (incomingOk.HasValue)
+                {
+                    target["ok"] = existingOk.HasValue
+                        ? existingOk.Value && incomingOk.Value
+                        : incomingOk.Value;
+                }
+            }
+
+            if (source.TryGetValue("reason", out object reasonValue))
+            {
+                var reasons = ReadStatusReasons(target["reason"]);
+                var incomingReasons = ReadStatusReasons(ToStatusToken(reasonValue));
+                for (int i = 0; i < incomingReasons.Count; i++)
+                {
+                    if (!reasons.Contains(incomingReasons[i])) reasons.Add(incomingReasons[i]);
+                }
+                target["reason"] = reasons.Count > 0
+                    ? (JToken)new JArray(reasons)
+                    : JValue.CreateNull();
+            }
+        }
+
+        private static JToken ToStatusToken(object value)
+        {
+            if (value == null) return JValue.CreateNull();
+            if (value is JToken token) return token;
+            try { return JToken.FromObject(value); } catch { return new JValue(value.ToString()); }
+        }
+
+        private static bool? ReadStatusOk(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null) return null;
+            try { return token.Value<bool>(); } catch { return null; }
+        }
+
+        private static List<string> ReadStatusReasons(JToken token)
+        {
+            var reasons = new List<string>();
+            if (token == null || token.Type == JTokenType.Null) return reasons;
+
+            var array = token as JArray;
+            if (array == null)
+            {
+                string value = token.ToString();
+                if (!string.IsNullOrWhiteSpace(value)) reasons.Add(value);
+                return reasons;
+            }
+
+            for (int i = 0; i < array.Count; i++)
+            {
+                if (array[i] == null || array[i].Type == JTokenType.Null) continue;
+                string value = array[i].ToString();
+                if (!string.IsNullOrWhiteSpace(value) && !reasons.Contains(value)) reasons.Add(value);
+            }
+            return reasons;
+        }
+
+        private static string ReadStatusReason(JToken token)
+        {
+            var reasons = ReadStatusReasons(token);
+            return reasons.Count > 0 ? string.Join("; ", reasons) : null;
         }
 
         private static JArray ExtractResultsArray(Dictionary<string, object> item)
@@ -746,14 +852,18 @@ namespace DlcvModules
             return !double.IsNaN(score) && !double.IsInfinity(score);
         }
 
-        private Utils.CSharpResult ConvertFlowResultsToCSharp(JArray resultList, bool includeMask = true)
+        private Utils.CSharpResult ConvertFlowResultsToCSharp(
+            JArray resultList,
+            bool includeMask = true,
+            JObject rootStatus = null)
         {
             var samples = new List<Utils.CSharpSampleResult>();
             if (resultList == null || resultList.Count == 0)
             {
-                var sample_result = new Utils.CSharpSampleResult();
-                sample_result.Results = new List<Utils.CSharpObjectResult>();
-                samples.Add(sample_result);
+                samples.Add(new Utils.CSharpSampleResult(
+                    new List<Utils.CSharpObjectResult>(),
+                    ReadStatusOk(rootStatus != null ? rootStatus["ok"] : null),
+                    ReadStatusReason(rootStatus != null ? rootStatus["reason"] : null)));
                 return new Utils.CSharpResult(samples);
             }
 
@@ -771,22 +881,31 @@ namespace DlcvModules
                 {
                     var container = token as JObject;
                     var list = container != null ? (container["result_list"] as JArray) : null;
-                    samples.Add(ParseSingleImageResults(list, includeMask));
+                    samples.Add(ParseSingleImageResults(list, includeMask, container));
                 }
             }
             else
             {
                 // Batch=1，resultList 本身就是结果列表
-                samples.Add(ParseSingleImageResults(resultList, includeMask));
+                samples.Add(ParseSingleImageResults(resultList, includeMask, rootStatus));
             }
 
             return new Utils.CSharpResult(samples);
         }
 
-        private Utils.CSharpSampleResult ParseSingleImageResults(JArray list, bool includeMask = true)
+        private Utils.CSharpSampleResult ParseSingleImageResults(
+            JArray list,
+            bool includeMask = true,
+            JObject status = null)
         {
             var objects = new List<Utils.CSharpObjectResult>();
-            if (list == null) return new Utils.CSharpSampleResult(objects);
+            if (list == null)
+            {
+                return new Utils.CSharpSampleResult(
+                    objects,
+                    ReadStatusOk(status != null ? status["ok"] : null),
+                    ReadStatusReason(status != null ? status["reason"] : null));
+            }
 
             foreach (var token in list)
             {
@@ -804,7 +923,10 @@ namespace DlcvModules
                     ParseNewFormatEntry(entry, objects, includeMask);
                 }
             }
-            return new Utils.CSharpSampleResult(objects);
+            return new Utils.CSharpSampleResult(
+                objects,
+                ReadStatusOk(status != null ? status["ok"] : null),
+                ReadStatusReason(status != null ? status["reason"] : null));
         }
         private void ParseNewFormatEntry(JObject entry, List<Utils.CSharpObjectResult> objects, bool includeMask = true)
         {

@@ -607,7 +607,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 20.1 公开面
 
-`Model` 暴露字段 `modelIndex`、`OwnModelIndex`；公开构造为默认构造、`Model(const std::string&, int)`、`Model(const std::wstring&, int)`；禁用拷贝、支持移动；公开成员函数为 `FreeModel()`、`GetModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetLastInferTiming()`、`GetLastFlowNodeTimings()`。
+`Model` 暴露字段 `modelIndex`、`OwnModelIndex`；公开构造为默认构造、`Model(const std::string&, int)`、`Model(const std::wstring&, int)`；禁用拷贝、支持移动；公开成员函数为 `FreeModel()`、`GetModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetLastInferTiming()`、`GetLastFlowNodeTimings()`、`GetLastInspectionStatus()`。
 
 ### 20.2 加载、释放与信息查询
 
@@ -619,7 +619,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 20.4 推理、结果与计时
 
-普通模型请求固定组装 `model_index + image_list` 后调用底层推理，`code!=0` 时抛异常。结构化包装阶段会自动补推断 `with_bbox`、`with_angle`，读取 `with_mean`、`foreground_mean`、`background_mean`，并对 `mask` 做 `clone()`、必要时缩放或反推框。`InferOneOutJson()` 只返回首张图结果；最近一次计时保存在线程局部变量中，FlowGraph 模式优先使用流程返回的 `timing`。
+普通模型请求固定组装 `model_index + image_list` 后调用底层推理，`code!=0` 时抛异常。结构化包装阶段会自动补推断 `with_bbox`、`with_angle`，读取 `with_mean`、`foreground_mean`、`background_mean`，并对 `mask` 做 `clone()`、必要时缩放或反推框。`InferOneOutJson()` 只返回首张图结果；未产生流程判定时返回原结果数组，产生判定时返回 `{"result_list":[...],"ok":true|false,"reason":null|[...]}`。最近一次计时和流程判定状态保存在当前线程；`GetLastInspectionStatus(bool&, std::vector<std::string>&, size_t)` 按图片索引读取最近一次 `Infer`、`InferBatch` 或 `InferOneOutJson` 的状态，未产生状态时返回 `false`。FlowGraph 模式的计时优先使用流程返回的 `timing`。
 
 ---
 
@@ -643,7 +643,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 23.2 `FlowGraphModel`
 
-`FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并只预加载 `model/*` 节点；`InferInternal()` 在上下文中写入前端图像、设备和参数后返回 `result_list` 与 `timing`；清理阶段只清 `ModelPool`，不调用 `Utils::FreeAllModels()`。
+`FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并只预加载 `model/*` 节点；`InferInternal()` 在上下文中写入前端图像、设备和参数后返回 `result_list` 与 `timing`，并保留按图 `ok/reason`；清理阶段只清 `ModelPool`，不调用 `Utils::FreeAllModels()`。
 
 ### 23.3 `ExecutionContext`
 
@@ -655,7 +655,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 23.5 Flow 结果聚合
 
-聚合读取优先级为 `frontend_payloads_by_node -> frontend_json.by_node -> frontend_json_by_node -> frontend_json.last -> frontend_payload_last`。单图时 `result_list` 直接是结果数组，多图时为 `[{ "result_list": [...] }, ...]`。
+聚合读取优先级为 `frontend_payloads_by_node -> frontend_json.by_node -> frontend_json_by_node -> frontend_json.last -> frontend_payload_last`。单图时 `result_list` 直接是结果数组，存在流程判定时根对象同时包含 `ok/reason`；多图时为 `[{ "result_list": [...], "ok": ..., "reason": ... }, ...]`，未产生判定状态的图片不增加这些字段。
 
 ### 23.6 已注册 Flow 节点
 

@@ -531,9 +531,11 @@ namespace DlcvDemo
                 sb.AppendLine($"推理时间: {delay_ms:F2}ms");
 
                 List<CSharpObjectResult> objects = null;
+                string reason = null;
                 if (result.SampleResults != null && result.SampleResults.Count > 0)
                 {
                     objects = result.SampleResults[0].Results;
+                    reason = result.SampleResults[0].Reason;
                 }
                 if (objects == null)
                 {
@@ -541,6 +543,10 @@ namespace DlcvDemo
                 }
 
                 sb.AppendLine($"推理结果: {objects.Count}个");
+                if (!string.IsNullOrWhiteSpace(reason))
+                {
+                    sb.AppendLine("原因: " + reason);
+                }
                 if (objects.Count == 0)
                 {
                     sb.AppendLine("未检测到目标。");

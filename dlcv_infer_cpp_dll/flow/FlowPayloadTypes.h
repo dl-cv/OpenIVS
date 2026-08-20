@@ -90,12 +90,20 @@ struct FlowByImageEntry final {
     int OriginalWidth = 0;
     int OriginalHeight = 0;
     std::vector<FlowResultItem> Results;
+    bool HasOk = false;
+    bool Ok = false;
+    Json Reason;
 
     Json ToJson() const {
         Json out = Json::object();
         out["origin_index"] = OriginIndex;
         out["original_size"] = Json::array({ OriginalWidth, OriginalHeight });
         out["results"] = FlowResultItemsToJsonArray(Results);
+        if (HasOk) {
+            out["ok"] = Ok;
+            out["reason"] = Reason.is_null() || (Reason.is_array() && Reason.empty())
+                ? Json() : Reason;
+        }
         return out;
     }
 
@@ -117,6 +125,13 @@ struct FlowByImageEntry final {
                 for (const auto& one : src.at("results")) {
                     out.Results.push_back(FlowResultItem::FromJson(one));
                 }
+            }
+        } catch (...) {}
+        try {
+            if (src.contains("ok") && src.at("ok").is_boolean()) {
+                out.HasOk = true;
+                out.Ok = src.at("ok").get<bool>();
+                out.Reason = src.contains("reason") ? src.at("reason") : Json();
             }
         } catch (...) {}
         return out;
@@ -154,23 +169,39 @@ struct FlowFrontendByNodePayload final {
     FlowFrontendPayload Payload;
 };
 
+struct FlowInspectionStatus final {
+    bool HasOk = false;
+    bool Ok = false;
+    Json Reason;
+};
+
 struct FlowBatchResult final {
     std::vector<std::vector<FlowResultItem>> PerImageResults;
+    std::vector<FlowInspectionStatus> PerImageStatuses;
 
     Json ToFlowRootJson() const {
         Json out = Json::object();
         if (PerImageResults.size() <= 1) {
-            if (PerImageResults.empty()) {
-                out["result_list"] = Json::array();
-            } else {
-                out["result_list"] = FlowResultItemsToJsonArray(PerImageResults[0]);
+            out["result_list"] = PerImageResults.empty()
+                ? Json::array() : FlowResultItemsToJsonArray(PerImageResults[0]);
+            if (!PerImageStatuses.empty() && PerImageStatuses[0].HasOk) {
+                out["ok"] = PerImageStatuses[0].Ok;
+                const Json& reason = PerImageStatuses[0].Reason;
+                out["reason"] = reason.is_null() || (reason.is_array() && reason.empty())
+                    ? Json() : reason;
             }
             return out;
         }
 
         Json batch = Json::array();
-        for (const auto& one : PerImageResults) {
-            batch.push_back(Json::object({ {"result_list", FlowResultItemsToJsonArray(one)} }));
+        for (size_t i = 0; i < PerImageResults.size(); ++i) {
+            Json one = Json::object({ {"result_list", FlowResultItemsToJsonArray(PerImageResults[i])} });
+            if (i < PerImageStatuses.size() && PerImageStatuses[i].HasOk) {
+                one["ok"] = PerImageStatuses[i].Ok;
+                one["reason"] = PerImageStatuses[i].Reason.is_array() && !PerImageStatuses[i].Reason.empty()
+                    ? PerImageStatuses[i].Reason : Json();
+            }
+            batch.push_back(std::move(one));
         }
         out["result_list"] = batch;
         return out;

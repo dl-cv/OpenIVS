@@ -95,6 +95,7 @@
 - `--calc-mean=true` 时，结构化与 JSON 摘要包含 `with_mean`、`foreground_mean`、`background_mean`，并通过 `mean_check_passed` 检查带掩码结果是否包含均值及两种结果的一致性；普通检测结果不参与均值检查，两条结果均为空时该检查通过。
 - 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
+- `InferOneOutJson` 返回带 `result_list` 的流程判定包装对象时，命令行模式从包装对象中读取结果数组后继续执行双路径一致性检查。
 - `structured` 与 `json` 均包含 `count`、`scores`、`categories` 和 `below_threshold`。
 - `--output` 写入无 BOM 的 UTF-8 JSON；该路径不得覆盖模型或图片，父目录必须存在。
 - 原生推理运行库仍可能向标准输出写入本地编码日志；机器解析使用 `--output` 文件，不把 stdout 当作单一 JSON 文档。
@@ -208,6 +209,8 @@
     - 无框结果（`with_bbox = false`，如分类、OCR）：标签绘制在图像内部左上角，多个结果时自上而下堆叠，与 C++ 测试程序行为一致。
   - **颜色**：根据类别（OK/NG）区分颜色（如绿/红）。
   - **无结果状态**：当 `SampleResults.Count==0` 时，自动显示左上角状态文本 `No Result`（控件会将 `ShowStatusText` 置为 `true`）。
+  - **流程判定状态**：`CSharpSampleResult.Ok` 有值时优先在图像左上角显示带阴影的灰色半透明方块，方块内为绿色 `OK` 或红色 `NG`，不再根据类别名推测状态；`Ok` 无值时保留原有 `ShowStatusText` 行为。
+  - **失败原因**：`CSharpSampleResult.Reason` 非空时，显示在左侧预测结果文本下方。
 
 ### 6. 主流程与状态（必须一致）
 

@@ -50,6 +50,17 @@ void ImageViewerWidget::setShowStatusText(bool enabled) {
     update();
 }
 
+void ImageViewerWidget::setInspectionStatus(bool ok) {
+    hasInspectionStatus_ = true;
+    inspectionOk_ = ok;
+    update();
+}
+
+void ImageViewerWidget::clearInspectionStatus() {
+    hasInspectionStatus_ = false;
+    update();
+}
+
 void ImageViewerWidget::setShowVisualization(bool enabled) {
     showVisualization_ = enabled;
     update();
@@ -96,12 +107,24 @@ void ImageViewerWidget::paintEvent(QPaintEvent* event) {
         shouldDrawStatus = true;
     }
 
+    if (hasInspectionStatus_) {
+        statusText = inspectionOk_ ? "OK" : "NG";
+        shouldDrawStatus = true;
+    }
+
     if (shouldDrawStatus) {
         painter.save();
-        QFont font("Microsoft YaHei", 24);
+        QFont font("Microsoft YaHei", 22, QFont::Bold);
         painter.setFont(font);
-        painter.setPen(statusText == "OK" ? Qt::green : Qt::red);
-        painter.drawText(QPointF(10, 42), statusText);
+        if (hasInspectionStatus_) {
+            const QRectF badgeRect(12.0, 12.0, 78.0, 50.0);
+            painter.fillRect(badgeRect, QColor(96, 96, 96, 230));
+            painter.setPen(inspectionOk_ ? QColor(0, 220, 0) : QColor(255, 45, 45));
+            painter.drawText(badgeRect, Qt::AlignCenter, statusText);
+        } else {
+            painter.setPen(statusText == "OK" ? Qt::green : Qt::red);
+            painter.drawText(QPointF(10, 42), statusText);
+        }
         painter.restore();
     }
 }

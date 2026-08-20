@@ -166,9 +166,28 @@ namespace dlcv_infer_csharp
             /// </summary>
             public List<CSharpObjectResult> Results { get; set; }
 
+            /// <summary>
+            /// 流程判定状态；未配置判定模块时为 null。
+            /// </summary>
+            public bool? Ok { get; set; }
+
+            /// <summary>
+            /// 流程判定原因；没有原因时为 null。
+            /// </summary>
+            public string Reason { get; set; }
+
             public CSharpSampleResult(List<CSharpObjectResult> results)
             {
                 Results = results;
+                Ok = null;
+                Reason = null;
+            }
+
+            public CSharpSampleResult(List<CSharpObjectResult> results, bool? ok, string reason)
+            {
+                Results = results;
+                Ok = ok;
+                Reason = reason;
             }
 
             public override String ToString()

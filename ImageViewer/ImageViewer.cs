@@ -426,7 +426,25 @@ namespace DLCV
 
         public void DrawResults(PaintEventArgs e)
         {
-            if (currentResults == null || !ShowVisualization) return;
+            if (currentResults == null) return;
+
+            var sampleResults = currentResults.Value.SampleResults;
+            bool? statusOk = sampleResults != null && sampleResults.Count > 0
+                ? sampleResults[0].Ok
+                : null;
+            string legacyStatusText = "OK";
+            bool drawLegacyStatus = ShowStatusText;
+            if (!statusOk.HasValue && (sampleResults == null || sampleResults.Count == 0))
+            {
+                legacyStatusText = "No Result";
+                drawLegacyStatus = true;
+            }
+
+            if (!ShowVisualization)
+            {
+                if (statusOk.HasValue) DrawStatusBadge(e.Graphics, statusOk.Value);
+                return;
+            }
 
             float borderWidth = Math.Max(1, 2 / _scale); // 更细的边框
 
@@ -435,17 +453,11 @@ namespace DLCV
             float baseFontPx = VisualizationBaseFontSize;
             float screenFontPx = Math.Min(Math.Max(baseFontPx * _scale, baseFontPx), MaxFontPx) * _labelFontScale;
             float fontSize = Math.Max(VisualizationMinFontSize, screenFontPx / _scale);
-            string _statusText = "OK";
 
             // 遍历结构体的嵌套结构
-            if (currentResults.Value.SampleResults.Count == 0)
+            if (sampleResults != null && sampleResults.Count > 0)
             {
-                _statusText = "No Result";
-                ShowStatusText = true;
-            }
-            else
-            {
-                var sampleResult = currentResults.Value.SampleResults[0];
+                var sampleResult = sampleResults[0];
                 int topLeftLabelIndex = 0;
                 float safeScale = Math.Max(_scale, 1e-6f);
                 float topLeftPadding = Math.Max(2f, 10f / safeScale);
@@ -473,9 +485,10 @@ namespace DLCV
                     }
                     // 其他情况保持默认红色
 
-                    // 判断是否显示NG状态
-                    if (!categoryNameLower.Contains("ok"))
-                        _statusText = "NG";
+                    if (!statusOk.HasValue && !categoryNameLower.Contains("ok"))
+                    {
+                        legacyStatusText = "NG";
+                    }
 
                     if (!hasBbox)
                     {
@@ -649,17 +662,64 @@ namespace DLCV
 
             }
 
-            // 绘制状态文本
-            if (ShowStatusText)
+            if (statusOk.HasValue)
             {
-                var originalTransform = e.Graphics.Transform;
-                e.Graphics.ResetTransform();
-                using (Font font = new Font("微软雅黑", 24))
-                using (SolidBrush brush = new SolidBrush(_statusText == "OK" ? Color.Green : Color.Red))
+                DrawStatusBadge(e.Graphics, statusOk.Value);
+            }
+            else if (drawLegacyStatus)
+            {
+                DrawLegacyStatusText(e.Graphics, legacyStatusText);
+            }
+        }
+
+        private static void DrawLegacyStatusText(Graphics graphics, string statusText)
+        {
+            var state = graphics.Save();
+            try
+            {
+                graphics.ResetTransform();
+                using (var font = new Font("微软雅黑", 24))
+                using (var brush = new SolidBrush(statusText == "OK" ? Color.Green : Color.Red))
                 {
-                    e.Graphics.DrawString(_statusText, font, brush, 10, 10);
+                    graphics.DrawString(statusText, font, brush, 10, 10);
                 }
-                e.Graphics.Transform = originalTransform;
+            }
+            finally
+            {
+                graphics.Restore(state);
+            }
+        }
+
+        private static void DrawStatusBadge(Graphics graphics, bool ok)
+        {
+            var state = graphics.Save();
+            try
+            {
+                graphics.ResetTransform();
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+                const float left = 10f;
+                const float top = 10f;
+                const float width = 128f;
+                const float height = 80f;
+                var badgeRect = new RectangleF(left, top, width, height);
+
+                using (var backgroundBrush = new SolidBrush(Color.FromArgb(230, 72, 72, 72)))
+                using (var font = new Font("Microsoft YaHei", 32f, FontStyle.Bold, GraphicsUnit.Pixel))
+                using (var textBrush = new SolidBrush(ok ? Color.Green : Color.Red))
+                using (var format = new StringFormat
+                {
+                    Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center
+                })
+                {
+                    graphics.FillRectangle(backgroundBrush, badgeRect);
+                    graphics.DrawString(ok ? "OK" : "NG", font, textBrush, badgeRect, format);
+                }
+            }
+            finally
+            {
+                graphics.Restore(state);
             }
         }
 

@@ -37,6 +37,9 @@ public:
     void setShowStatusText(bool enabled);
     bool showStatusText() const { return showStatusText_; }
 
+    void setInspectionStatus(bool ok);
+    void clearInspectionStatus();
+
     void setShowVisualization(bool enabled);
     bool showVisualization() const { return showVisualization_; }
 
@@ -85,6 +88,8 @@ private:
     QPoint lastMousePosition_;
 
     bool showStatusText_ = false;
+    bool hasInspectionStatus_ = false;
+    bool inspectionOk_ = false;
     bool showVisualization_ = true;
     LabelTextMode labelDisplayMode_ = LabelTextMode::CategoryAndScore;
 

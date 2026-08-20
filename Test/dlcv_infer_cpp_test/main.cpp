@@ -842,6 +842,282 @@ int RunCountResultsSelfTest() {
     return 0;
 }
 
+
+json BuildCategoryCountCheckFlow(const json& rules, int total) {
+    json nodes = json::array({
+        json::object({
+            {"id", 1},
+            {"order", 1},
+            {"type", "input/frontend_image"},
+            {"outputs", json::array({
+                json::object({{"type", "image_chan"}, {"links", json::array()}}),
+                json::object({{"type", "result_chan"}, {"links", json::array()}})
+            })}
+        })
+    });
+
+    json mergeInputs = json::array();
+    for (int i = 0; i < total; ++i) {
+        const int imageInputLink = 100 + i * 2;
+        const int resultInputLink = imageInputLink + 1;
+        const int imageOutputLink = 200 + i * 2;
+        const int resultOutputLink = imageOutputLink + 1;
+        nodes[0]["outputs"][0]["links"].push_back(imageInputLink);
+        nodes[0]["outputs"][1]["links"].push_back(resultInputLink);
+        nodes.push_back(json::object({
+            {"id", 2 + i},
+            {"order", 2 + i},
+            {"type", "input/build_results"},
+            {"properties", json::object({
+                {"category_id", 1},
+                {"category_name", "黑块"},
+                {"score", 0.99},
+                {"bbox_x", 10.0 + i * 30.0},
+                {"bbox_y", 10.0},
+                {"bbox_w", 20.0},
+                {"bbox_h", 20.0}
+            })},
+            {"inputs", json::array({
+                json::object({{"type", "image_chan"}, {"link", imageInputLink}}),
+                json::object({{"type", "result_chan"}, {"link", resultInputLink}})
+            })},
+            {"outputs", json::array({
+                json::object({{"type", "image_chan"}, {"links", json::array({imageOutputLink})}}),
+                json::object({{"type", "result_chan"}, {"links", json::array({resultOutputLink})}})
+            })}
+        }));
+        mergeInputs.push_back(json::object({{"type", "image_chan"}, {"link", imageOutputLink}}));
+        mergeInputs.push_back(json::object({{"type", "result_chan"}, {"link", resultOutputLink}}));
+    }
+
+    nodes.push_back(json::object({
+        {"id", 100},
+        {"order", 100},
+        {"type", "post_process/merge_results"},
+        {"inputs", std::move(mergeInputs)},
+        {"outputs", json::array({
+            json::object({{"type", "image_chan"}, {"links", json::array({901})}}),
+            json::object({{"type", "result_chan"}, {"links", json::array({902})}})
+        })}
+    }));
+    nodes.push_back(json::object({
+        {"id", 101},
+        {"order", 101},
+        {"type", "post_process/category_count_check"},
+        {"properties", json::object({{"rules", rules}})},
+        {"inputs", json::array({
+            json::object({{"type", "image_chan"}, {"link", 901}}),
+            json::object({{"type", "result_chan"}, {"link", 902}})
+        })},
+        {"outputs", json::array({
+            json::object({{"type", "image_chan"}, {"links", json::array({301})}}),
+            json::object({{"type", "result_chan"}, {"links", json::array({302})}}),
+            json::object({{"name", "ok"}, {"type", "bool"}, {"links", json::array()}}),
+            json::object({{"name", "reason"}, {"type", "string"}, {"links", json::array()}})
+        })}
+    }));
+    nodes.push_back(json::object({
+        {"id", 102},
+        {"order", 102},
+        {"type", "output/return_json"},
+        {"inputs", json::array({
+            json::object({{"type", "image_chan"}, {"link", 301}}),
+            json::object({{"type", "result_chan"}, {"link", 302}})
+        })},
+        {"outputs", json::array()}
+    }));
+    return json::object({{"nodes", std::move(nodes)}});
+}
+
+bool ReadCategoryCheckStatus(
+    const json& root,
+    size_t sampleIndex,
+    bool& ok,
+    std::vector<std::string>& reasons) {
+    const json* statusToken = &root;
+    try {
+        if (!(root.contains("ok") && root.at("ok").is_boolean())) {
+            if (!root.contains("result_list") || !root.at("result_list").is_array() ||
+                sampleIndex >= root.at("result_list").size()) return false;
+            statusToken = &root.at("result_list").at(sampleIndex);
+        }
+        if (!statusToken->is_object() || !statusToken->contains("ok") ||
+            !statusToken->at("ok").is_boolean()) return false;
+        ok = statusToken->at("ok").get<bool>();
+        reasons.clear();
+        if (statusToken->contains("reason") && statusToken->at("reason").is_array()) {
+            for (const auto& reason : statusToken->at("reason")) {
+                if (reason.is_string()) reasons.push_back(reason.get<std::string>());
+            }
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool RunCategoryCountCheckFlowCase(
+    const json& rules,
+    int total,
+    int imageCount,
+    bool expectedOk,
+    const std::string& expectedReason,
+    std::string& error) {
+    const std::string tempDir = BuildTempRectCorrectionDir();
+    const std::string flowPath = JoinPathA(tempDir, "category_count_check.json");
+    {
+        std::ofstream ofs(flowPath, std::ios::binary);
+        if (!ofs) {
+            error = "cannot write temp flow file";
+            return false;
+        }
+        ofs << BuildCategoryCountCheckFlow(rules, total).dump(2);
+    }
+
+    try {
+        dlcv_infer::flow::FlowGraphModel model;
+        const json loadReport = model.Load(flowPath, 0);
+        if (!loadReport.is_object() || loadReport.value("code", 1) != 0) {
+            error = std::string("flow load failed: ") + loadReport.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        const cv::Mat image(64, 320, CV_8UC3, cv::Scalar(0, 255, 0));
+        std::vector<cv::Mat> images(static_cast<size_t>(imageCount), image);
+        const json root = model.InferInternal(images, json::object());
+        if (!root.is_object() || root.value("code", 1) != 0) {
+            error = std::string("flow infer failed: ") + root.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+
+        for (int i = 0; i < imageCount; ++i) {
+            bool ok = false;
+            std::vector<std::string> reasons;
+            if (!ReadCategoryCheckStatus(root, static_cast<size_t>(i), ok, reasons)) {
+                error = "missing inspection status: " + root.dump();
+                DeleteFileA(flowPath.c_str());
+                return false;
+            }
+            if (ok != expectedOk) {
+                error = "inspection ok mismatch: " + root.dump();
+                DeleteFileA(flowPath.c_str());
+                return false;
+            }
+            if (expectedReason.empty()) {
+                if (!reasons.empty()) {
+                    error = "unexpected inspection reason: " + root.dump();
+                    DeleteFileA(flowPath.c_str());
+                    return false;
+                }
+            } else if (reasons.size() != 1 || reasons.front() != expectedReason) {
+                error = "inspection reason mismatch: " + root.dump();
+                DeleteFileA(flowPath.c_str());
+                return false;
+            }
+        }
+
+        if (imageCount == 1) {
+            const json oneOut = model.InferOneOutJson(image, json::object());
+            if (!oneOut.is_object() || oneOut.value("ok", !expectedOk) != expectedOk ||
+                !oneOut.contains("result_list") || !oneOut.at("result_list").is_array()) {
+                error = "InferOneOutJson wrapper mismatch: " + oneOut.dump();
+                DeleteFileA(flowPath.c_str());
+                return false;
+            }
+        }
+    } catch (const std::exception& ex) {
+        error = std::string("exception: ") + ex.what();
+        DeleteFileA(flowPath.c_str());
+        return false;
+    }
+
+    DeleteFileA(flowPath.c_str());
+    return true;
+}
+
+bool RunCategoryCountCheckLegacyCompatibilityCase(std::string& error) {
+    const std::string tempDir = BuildTempRectCorrectionDir();
+    const std::string flowPath = JoinPathA(tempDir, "category_count_check_legacy.json");
+    {
+        std::ofstream ofs(flowPath, std::ios::binary);
+        if (!ofs) {
+            error = "cannot write legacy temp flow file";
+            return false;
+        }
+        ofs << BuildCountResultsFlow(json::object(), 1, true).dump(2);
+    }
+
+    try {
+        dlcv_infer::flow::FlowGraphModel model;
+        const json loadReport = model.Load(flowPath, 0);
+        if (!loadReport.is_object() || loadReport.value("code", 1) != 0) {
+            error = std::string("legacy flow load failed: ") + loadReport.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+        const cv::Mat image(64, 64, CV_8UC3, cv::Scalar(0, 255, 0));
+        const json root = model.InferInternal(std::vector<cv::Mat>{image}, json::object());
+        if (root.contains("ok") || root.contains("reason")) {
+            error = "legacy root unexpectedly contains inspection status: " + root.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+        const json oneOut = model.InferOneOutJson(image, json::object());
+        if (!oneOut.is_array()) {
+            error = "legacy InferOneOutJson is not array: " + oneOut.dump();
+            DeleteFileA(flowPath.c_str());
+            return false;
+        }
+    } catch (const std::exception& ex) {
+        error = std::string("legacy exception: ") + ex.what();
+        DeleteFileA(flowPath.c_str());
+        return false;
+    }
+
+    DeleteFileA(flowPath.c_str());
+    return true;
+}
+
+int RunCategoryCountCheckSelfTest() {
+    auto fail = [](const std::string& message) -> int {
+        std::cout << "category_count_check selftest failed: " << message << "\n";
+        return 1;
+    };
+
+    const json equalOne = json::array({
+        json::object({{"category", "黑块"}, {"operator", "equal"}, {"expect", 1}})
+    });
+    const json equalEight = json::array({
+        json::object({{"category", "黑块"}, {"operator", "equal"}, {"expect", 8}})
+    });
+    const std::string countOneReason = "类别黑块期望=8,实际1";
+    std::string error;
+    if (!RunCategoryCountCheckFlowCase(equalOne, 1, 1, true, std::string(), error)) return fail(error);
+    if (!RunCategoryCountCheckFlowCase(equalEight, 7, 1, false, countOneReason, error)) return fail(error);
+    if (!RunCategoryCountCheckFlowCase(
+            json::array({json::object({{"category", "黑块"}, {"operator", "gt"}, {"expect", 0}})}),
+            2, 1, true, std::string(), error)) return fail(error);
+    if (!RunCategoryCountCheckFlowCase(
+            json::array({json::object({{"category", "黑块"}, {"operator", "lt"}, {"expect", 2}})}),
+            1, 1, true, std::string(), error)) return fail(error);
+    if (!RunCategoryCountCheckFlowCase(
+            json::array({json::object({{"category", ""}, {"operator", "equal"}, {"expect", 1}})}),
+            2, 1, true, std::string(), error)) return fail(error);
+    if (!RunCategoryCountCheckFlowCase(equalOne.dump(), 1, 1, true, std::string(), error)) return fail(error);
+    if (!RunCategoryCountCheckFlowCase(
+            json::array({json::object({{"category", "黑块"}, {"operator", "invalid"}, {"expect", 1}})}),
+            1, 1, true, std::string(), error)) return fail(error);
+    if (!RunCategoryCountCheckFlowCase(
+            json::array({json::object({{"category", "黑块"}, {"operator", "equal"}, {"expect", "bad"}})}),
+            1, 1, true, std::string(), error)) return fail(error);
+    if (!RunCategoryCountCheckLegacyCompatibilityCase(error)) return fail(error);
+
+    std::cout << "category_count_check selftest passed\n";
+    return 0;
+}
+
 json BuildImageGenerationExpandFlow(const std::string& saveDir,
                                     const std::string& suffix,
                                     const json& cropProperties,
@@ -1417,8 +1693,14 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunBBoxIoUDedupSelfTest();
     }
 
+
     if (argc >= 2 && std::wstring(argv[1]) == L"count-results-selftest") {
         return RunCountResultsSelfTest();
+    }
+
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"category-count-check-selftest") {
+        return RunCategoryCountCheckSelfTest();
     }
 
     if (argc >= 2 && std::wstring(argv[1]) == L"image-generation-expand-selftest") {
@@ -1443,6 +1725,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  rect-image-correction-selftest\n";
     std::cout << "  bbox-iou-dedup-selftest\n";
     std::cout << "  count-results-selftest\n";
+    std::cout << "  category-count-check-selftest\n";
     std::cout << "  image-generation-expand-selftest\n";
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";

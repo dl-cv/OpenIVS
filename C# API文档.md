@@ -77,11 +77,18 @@ public partial class Utils
     public struct CSharpSampleResult
     {
         public List<CSharpObjectResult> Results { get; set; }
+        public bool? Ok { get; set; }
+        public string Reason { get; set; }
 
         public CSharpSampleResult(List<CSharpObjectResult> results);
+        public CSharpSampleResult(List<CSharpObjectResult> results, bool? ok, string reason);
     }
 }
 ```
+
+- `Ok` 为流程对当前图片的显式判定状态；流程未产生判定状态时为 `null`。
+- `Reason` 为失败原因文本；没有原因时为 `null`。
+- 普通模型和未使用判定模块的旧流程保持 `Ok=null`、`Reason=null`。
 
 ### 2.3 CSharpResult
 
@@ -151,7 +158,8 @@ public CSharpResult InferBatch(List<Mat> imageList, JObject paramsJson = null);
 ```csharp
 public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 ```
-- 返回 `JArray`，每个元素为单个检测结果对象。
+- 普通模型和未产生判定状态的流程返回 `JArray`，每个元素为单个检测结果对象。
+- 流程产生 `ok/reason` 时返回 `JObject`：`{"result_list": [...], "ok": true|false, "reason": null|[...]}`。
 - 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`poly`（多边形点数组）、`mask_rle`（RLE 编码 mask）、`area`。
 
 ### 3.6 测速
@@ -209,6 +217,7 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 - 调用形式与 `Model` 一致，流程模型的阈值职责边界如下。
 - `Infer` 内部调用 `InferBatch(new List<Mat> { image })`。
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
+- `output/return_json` 产生按图 `ok/reason` 时，`Infer` / `InferBatch` 将其写入对应 `CSharpSampleResult.Ok/Reason`，`InferOneOutJson` 将其写入单图包装对象。
 - 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
 - 流程中的 `model/*` 节点默认从自身 `properties.calc_mean` 读取均值计算开关；入口 `paramsJson.calc_mean` 显式传入时仅覆盖本次推理，省略时继续使用节点属性。
 - 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
@@ -225,7 +234,7 @@ private Tuple<JObject, IntPtr> InferInternalCore(List<Mat> images, JObject param
   3. 从 `frontend_json` / `frontend_json_by_node` 收集各节点输出。
   4. 按 `origin_index` 或位置索引映射回原始图像结果。
   5. 若入口含有限数值 `threshold`，按该值过滤每张图的最终结果。
-  6. 返回 `{"result_list": [...]}` 格式 JSON。
+  6. 返回 `{"result_list": [...]}` 格式 JSON；每张图存在流程判定时，对应项同时包含 `ok/reason`。
 
 ### 4.4 模型信息
 
