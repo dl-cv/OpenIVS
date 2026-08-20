@@ -83,10 +83,12 @@
 - 通过 `OpenIVS.sln` 构建时，`dlcv_infer_cpp_dll` 与 `dlcv_infer_cpp_test` 的 x64 产物输出到解决方案目录下的 `Debug` 或 `Release`。
 - `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
   - `model-channel-order-selftest`
+  - `count-results-selftest`
   - `dvs-rgb-selftest <modelPath> <imagePath>`
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
   - `calc-mean-selftest`
+- `dlcv_infer_cpp_test.exe` 支持 `count-results-selftest`，验证新配置闭区间、非法范围与旧配置兼容逻辑。
 - `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
   - `load-three-models <extractModelPath> <componentModelPath> <icModelPath>`
   - 三个模型按参数顺序串行加载，实时输出各模型加载耗时，完成后输出三次耗时之和。

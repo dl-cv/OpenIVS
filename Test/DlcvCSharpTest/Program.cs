@@ -83,6 +83,11 @@ namespace DlcvCSharpTest
                     return RunBBoxIoUDedupSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "count-results-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunCountResultsSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "template-count-priority-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunTemplateCountPrioritySelfTest();
@@ -2175,6 +2180,129 @@ namespace DlcvCSharpTest
 
             Console.WriteLine("BBOX IoU 去重自测通过");
             return 0;
+        }
+
+        private static int RunCountResultsSelfTest()
+        {
+            Console.WriteLine("==== 统计结果个数自测 ====");
+
+            _ = new GraphExecutor(new List<Dictionary<string, object>>());
+            Type moduleType = ModuleRegistry.Get("post_process/count_results");
+            if (moduleType == null)
+            {
+                Console.WriteLine("post_process/count_results 未注册");
+                return 1;
+            }
+
+            var cases = new[]
+            {
+                Tuple.Create(new Dictionary<string, object>(), 1, true),
+                Tuple.Create(new Dictionary<string, object> { ["min_count"] = 2, ["max_count"] = 4 }, 2, true),
+                Tuple.Create(new Dictionary<string, object> { ["min_count"] = 2, ["max_count"] = 4 }, 4, true),
+                Tuple.Create(new Dictionary<string, object> { ["min_count"] = 2, ["max_count"] = 2 }, 2, true),
+                Tuple.Create(new Dictionary<string, object> { ["min_count"] = 2, ["max_count"] = 4 }, 1, false),
+                Tuple.Create(new Dictionary<string, object> { ["count_type"] = "equal", ["only_count"] = 2 }, 2, true),
+                Tuple.Create(new Dictionary<string, object> { ["count_type"] = "greater", ["min_count"] = 2 }, 2, false),
+                Tuple.Create(new Dictionary<string, object> { ["count_type"] = "greater", ["min_count"] = 2 }, 3, true),
+                Tuple.Create(new Dictionary<string, object> { ["count_type"] = "less", ["max_count"] = 2 }, 2, false),
+                Tuple.Create(new Dictionary<string, object> { ["count_type"] = "less", ["max_count"] = 2 }, 1, true),
+                Tuple.Create(new Dictionary<string, object> { ["count_type"] = "legacy_unknown", ["min_count"] = 2 }, 2, true),
+                Tuple.Create(new Dictionary<string, object> { ["only_count"] = 99, ["min_count"] = 2 }, 3, true)
+            };
+
+            foreach (var testCase in cases)
+            {
+                var properties = new Dictionary<string, object>(testCase.Item1)
+                {
+                    ["only_local"] = true
+                };
+                var module = (BaseModule)Activator.CreateInstance(
+                    moduleType,
+                    new object[] { 200, null, properties, null });
+                ModuleIO output = module.Process(new List<ModuleImage>(), BuildCountResults(testCase.Item2));
+                int actualCount = Convert.ToInt32(module.ScalarOutputsByName["count"]);
+                bool actualOk = Convert.ToBoolean(module.ScalarOutputsByName["ok"]);
+                if (actualCount != testCase.Item2 || actualOk != testCase.Item3)
+                {
+                    Console.WriteLine(
+                        "计数结果不一致: count=" + actualCount +
+                        ", ok=" + actualOk +
+                        ", expected_count=" + testCase.Item2 +
+                        ", expected_ok=" + testCase.Item3);
+                    return 1;
+                }
+                if (output.ResultList.Count != 1 || module.ExtraOutputs.Count != 2)
+                {
+                    Console.WriteLine("主路或额外输出数量不正确");
+                    return 1;
+                }
+                int passCount = CountCountResultsDetections(module.ExtraOutputs[0].ResultList);
+                int failCount = CountCountResultsDetections(module.ExtraOutputs[1].ResultList);
+                if ((actualOk && (passCount != testCase.Item2 || failCount != 0)) ||
+                    (!actualOk && (passCount != 0 || failCount != testCase.Item2)))
+                {
+                    Console.WriteLine("通过/排除分流不正确");
+                    return 1;
+                }
+            }
+
+            try
+            {
+                var invalid = (BaseModule)Activator.CreateInstance(
+                    moduleType,
+                    new object[]
+                    {
+                        201,
+                        null,
+                        new Dictionary<string, object>
+                        {
+                            ["only_local"] = true,
+                            ["min_count"] = 3,
+                            ["max_count"] = 2
+                        },
+                        null
+                    });
+                invalid.Process(new List<ModuleImage>(), BuildCountResults(2));
+                Console.WriteLine("min_count > max_count 未报错");
+                return 1;
+            }
+            catch (ArgumentException)
+            {
+            }
+
+            Console.WriteLine("统计结果个数自测通过");
+            return 0;
+        }
+
+        private static JArray BuildCountResults(int count)
+        {
+            var detections = new JArray();
+            for (int i = 0; i < count; i++)
+            {
+                detections.Add(new JObject { ["category_name"] = "target" });
+            }
+            return new JArray
+            {
+                new JObject
+                {
+                    ["type"] = "local",
+                    ["index"] = 0,
+                    ["origin_index"] = 0,
+                    ["sample_results"] = detections
+                }
+            };
+        }
+
+        private static int CountCountResultsDetections(JArray results)
+        {
+            int count = 0;
+            if (results == null) return count;
+            foreach (JToken token in results)
+            {
+                var detections = (token as JObject)?["sample_results"] as JArray;
+                if (detections != null) count += detections.Count;
+            }
+            return count;
         }
 
         private static JArray BuildBBoxDedupResults()
