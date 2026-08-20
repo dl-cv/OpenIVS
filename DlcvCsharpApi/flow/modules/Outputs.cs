@@ -140,6 +140,18 @@ namespace DlcvModules
                 : BuildByImageMapped(images, results, emitPoly);
 
             var payload = new Dictionary<string, object> { { "by_image", byImage } };
+            var okValues = new List<bool>();
+            for (int i = 0; i < byImage.Count; i++)
+            {
+                if (byImage[i] != null && byImage[i].TryGetValue("ok", out object okValue) && okValue != null)
+                {
+                    try { okValues.Add(Convert.ToBoolean(okValue)); } catch { }
+                }
+            }
+            if (okValues.Count > 0)
+            {
+                payload["okng"] = okValues.TrueForAll(x => x) ? "OK" : "NG";
+            }
 
             // 写入 Context
             if (Context != null)
@@ -235,7 +247,7 @@ namespace DlcvModules
                 var entry = results[i] as JObject;
                 var dets = entry != null ? entry["sample_results"] as JArray : null;
                 var outResults = BuildOutResults(wrap, dets, emitPoly);
-                byImage.Add(BuildImageEntry(wrap, outResults));
+                byImage.Add(BuildImageEntry(wrap, outResults, entry));
             }
             return byImage;
         }
@@ -252,18 +264,23 @@ namespace DlcvModules
             var transToDets = new Dictionary<string, List<JObject>>(Math.Max(1, results.Count));
             var indexToDets = new Dictionary<int, List<JObject>>(Math.Max(1, results.Count));
             var originToDets = new Dictionary<int, List<JObject>>(Math.Max(1, results.Count));
+            var indexToMeta = new Dictionary<int, JObject>(Math.Max(1, results.Count));
+            var originToMeta = new Dictionary<int, JObject>(Math.Max(1, results.Count));
+            var transToMeta = new Dictionary<string, JObject>(Math.Max(1, results.Count));
 
             foreach (var entryToken in results)
             {
                 var entry = entryToken as JObject;
                 if (entry == null || !string.Equals(entry["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase)) continue;
 
-                var dets = entry["sample_results"] as JArray;
-                if (dets == null || dets.Count == 0) continue;
-
+                var dets = entry["sample_results"] as JArray ?? new JArray();
                 int idx = entry["index"]?.Value<int?>() ?? -1;
                 int oidx = entry["origin_index"]?.Value<int?>() ?? -1;
                 string tSig = SerializeTransformKey(entry["transform"] as JObject);
+                if (idx >= 0) indexToMeta[idx] = entry;
+                if (oidx >= 0) originToMeta[oidx] = entry;
+                if (!string.IsNullOrEmpty(tSig)) MergeTransformMetadata(transToMeta, tSig, entry);
+                if (dets.Count == 0) continue;
 
                 List<JObject> idxBucket = idx >= 0 ? GetOrCreateDetBucket(indexToDets, idx) : null;
                 List<JObject> orgBucket = oidx >= 0 ? GetOrCreateDetBucket(originToDets, oidx) : null;
@@ -285,6 +302,7 @@ namespace DlcvModules
                 if (wrap == null) continue;
 
                 List<JObject> dets = null;
+                JObject metadata = null;
                 if (!indexToDets.TryGetValue(i, out dets))
                 {
                     if (!originToDets.TryGetValue(wrap.OriginalIndex, out dets))
@@ -293,9 +311,17 @@ namespace DlcvModules
                         if (sig != null) transToDets.TryGetValue(sig, out dets);
                     }
                 }
+                if (!indexToMeta.TryGetValue(i, out metadata))
+                {
+                    if (!originToMeta.TryGetValue(wrap.OriginalIndex, out metadata))
+                    {
+                        string sig = SerializeTransformKey(wrap.TransformState);
+                        if (sig != null) transToMeta.TryGetValue(sig, out metadata);
+                    }
+                }
 
                 var outResults = BuildOutResults(wrap, dets, emitPoly);
-                byImage.Add(BuildImageEntry(wrap, outResults));
+                byImage.Add(BuildImageEntry(wrap, outResults, metadata));
             }
 
             return byImage;
@@ -311,17 +337,82 @@ namespace DlcvModules
             return list;
         }
 
-        private static Dictionary<string, object> BuildImageEntry(ModuleImage wrap, List<Dictionary<string, object>> outResults)
+        private static void MergeTransformMetadata(Dictionary<string, JObject> map, string key, JObject source)
+        {
+            if (map == null || string.IsNullOrEmpty(key) || source == null ||
+                (!source.ContainsKey("ok") && !source.ContainsKey("reason")))
+            {
+                return;
+            }
+
+            if (!map.TryGetValue(key, out JObject target))
+            {
+                target = new JObject();
+                map[key] = target;
+            }
+
+            if (source.ContainsKey("ok") && bool.TryParse(source["ok"]?.ToString(), out bool incomingOk))
+            {
+                target["ok"] = bool.TryParse(target["ok"]?.ToString(), out bool existingOk)
+                    ? existingOk && incomingOk
+                    : incomingOk;
+            }
+
+            if (source.ContainsKey("reason"))
+            {
+                var reasons = new JArray();
+                AppendUniqueReasons(reasons, target["reason"]);
+                AppendUniqueReasons(reasons, source["reason"]);
+                target["reason"] = reasons.Count > 0 ? (JToken)reasons : JValue.CreateNull();
+            }
+        }
+
+        private static void AppendUniqueReasons(JArray target, JToken value)
+        {
+            if (target == null || value == null || value.Type == JTokenType.Null) return;
+            var values = value as JArray ?? new JArray(value);
+            foreach (var item in values)
+            {
+                string reason = item?.ToString();
+                if (string.IsNullOrWhiteSpace(reason)) continue;
+                bool exists = false;
+                foreach (var existing in target)
+                {
+                    if (string.Equals(existing?.ToString(), reason, StringComparison.Ordinal))
+                    {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) target.Add(reason);
+            }
+        }
+
+        private static Dictionary<string, object> BuildImageEntry(
+            ModuleImage wrap,
+            List<Dictionary<string, object>> outResults,
+            JObject metadata)
         {
             var ori = wrap.OriginalImage ?? wrap.ImageObject;
             int w0 = ori != null ? ori.Width : 0;
             int h0 = ori != null ? ori.Height : 0;
-            return new Dictionary<string, object>
+            var item = new Dictionary<string, object>
             {
                 ["origin_index"] = wrap.OriginalIndex,
                 ["original_size"] = new int[] { w0, h0 },
                 ["results"] = outResults ?? new List<Dictionary<string, object>>()
             };
+            if (metadata != null && metadata.ContainsKey("ok"))
+            {
+                item["ok"] = metadata["ok"] != null ? metadata["ok"].ToObject<object>() : null;
+            }
+            if (metadata != null && metadata.ContainsKey("reason"))
+            {
+                item["reason"] = metadata["reason"] != null
+                    ? metadata["reason"].DeepClone()
+                    : JValue.CreateNull();
+            }
+            return item;
         }
 
         private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, JArray dets, bool emitPoly)

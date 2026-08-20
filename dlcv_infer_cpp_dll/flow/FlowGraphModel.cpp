@@ -184,6 +184,7 @@ static FlowBatchResult AggregateFrontendResults(ExecutionContext& ctx, int image
     FlowBatchResult batch;
     if (imageCount <= 0) return batch;
     batch.PerImageResults.assign(static_cast<size_t>(imageCount), std::vector<FlowResultItem>());
+    batch.PerImageStatuses.assign(static_cast<size_t>(imageCount), FlowInspectionStatus());
 
     const std::vector<FlowFrontendByNodePayload> payloads = CollectFrontendPayloads(ctx);
     for (const auto& payload : payloads) {
@@ -193,6 +194,30 @@ static FlowBatchResult AggregateFrontendResults(ExecutionContext& ctx, int image
             const int targetIndex = ResolvePerImageTargetIndex(item, i, imageCount);
             if (targetIndex < 0 || targetIndex >= imageCount) continue;
             AppendResultsDedup(batch.PerImageResults[static_cast<size_t>(targetIndex)], item.Results);
+            if (item.HasOk) {
+                FlowInspectionStatus& status = batch.PerImageStatuses[static_cast<size_t>(targetIndex)];
+                if (!status.HasOk) {
+                    status.HasOk = true;
+                    status.Ok = item.Ok;
+                    status.Reason = item.Reason;
+                } else {
+                    status.Ok = status.Ok && item.Ok;
+                    Json merged = Json::array();
+                    const auto appendReasons = [&merged](const Json& reasons) {
+                        if (reasons.is_array()) {
+                            for (const auto& reason : reasons) {
+                                if (std::find(merged.begin(), merged.end(), reason) == merged.end()) merged.push_back(reason);
+                            }
+                        } else if (!reasons.is_null() &&
+                                   std::find(merged.begin(), merged.end(), reasons) == merged.end()) {
+                            merged.push_back(reasons);
+                        }
+                    };
+                    appendReasons(status.Reason);
+                    appendReasons(item.Reason);
+                    status.Reason = merged.empty() ? Json() : std::move(merged);
+                }
+            }
         }
     }
 
@@ -541,9 +566,15 @@ Json FlowGraphModel::InferOneOutJson(const cv::Mat& image, const Json& paramsJso
     if (image.empty()) throw std::invalid_argument("image is empty");
     Json root = InferInternal(std::vector<cv::Mat>{ image }, paramsJson);
     try {
-        if (root.is_object() && root.contains("result_list")) {
-            const auto& rl = root.at("result_list");
-            if (rl.is_array()) return rl;
+        if (root.is_object() && root.contains("result_list") && root.at("result_list").is_array()) {
+            if (root.contains("ok") && root.at("ok").is_boolean()) {
+                Json out = Json::object();
+                out["result_list"] = root.at("result_list");
+                out["ok"] = root.at("ok");
+                if (root.contains("reason")) out["reason"] = root.at("reason");
+                return out;
+            }
+            return root.at("result_list");
         }
     } catch (...) {}
     return Json::array();

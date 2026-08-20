@@ -88,7 +88,9 @@
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
   - `calc-mean-selftest`
+  - `category-count-check-selftest`
 - `dlcv_infer_cpp_test.exe` 支持 `count-results-selftest`，验证新配置闭区间、非法范围与旧配置兼容逻辑。
+- `DlcvCSharpTest.exe category-count-check-selftest` 与 `dlcv_infer_cpp_test.exe category-count-check-selftest` 验证类型数量规则、同一原图局部结果聚合、粘性 `ok=false`、字符串或数组 `reason`、Flow 输出包装及旧流程兼容行为。
 - `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
   - `load-three-models <extractModelPath> <componentModelPath> <icModelPath>`
   - 三个模型按参数顺序串行加载，实时输出各模型加载耗时，完成后输出三次耗时之和。

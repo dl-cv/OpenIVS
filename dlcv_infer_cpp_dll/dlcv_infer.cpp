@@ -40,10 +40,87 @@ thread_local double g_lastDlcvInferMs = 0.0;
 thread_local double g_lastTotalInferMs = 0.0;
 thread_local std::vector<dlcv_infer::FlowNodeTiming> g_lastFlowNodeTimings;
 
+struct InspectionStatusSnapshot final {
+    bool HasOk = false;
+    bool Ok = false;
+    std::vector<std::string> Reasons;
+};
+
+thread_local std::vector<InspectionStatusSnapshot> g_lastInspectionStatuses;
+
 void SetLastInferTiming(double dlcvInferMs, double totalInferMs, std::vector<dlcv_infer::FlowNodeTiming> nodeTimings = {}) {
     g_lastDlcvInferMs = std::max(0.0, dlcvInferMs);
     g_lastTotalInferMs = std::max(0.0, totalInferMs);
     g_lastFlowNodeTimings = std::move(nodeTimings);
+}
+
+InspectionStatusSnapshot ParseInspectionStatus(const Json& token) {
+    InspectionStatusSnapshot status;
+    try {
+        if (!token.is_object() || !token.contains("ok") || !token.at("ok").is_boolean()) {
+            return status;
+        }
+        status.HasOk = true;
+        status.Ok = token.at("ok").get<bool>();
+        if (!token.contains("reason") || token.at("reason").is_null()) return status;
+
+        const Json& reason = token.at("reason");
+        if (reason.is_array()) {
+            for (const auto& item : reason) {
+                if (item.is_string()) status.Reasons.push_back(item.get<std::string>());
+            }
+        } else if (reason.is_string()) {
+            status.Reasons.push_back(reason.get<std::string>());
+        }
+    } catch (...) {
+        return InspectionStatusSnapshot();
+    }
+    return status;
+}
+
+void ClearLastInspectionStatuses() {
+    g_lastInspectionStatuses.clear();
+}
+
+void SetLastInspectionStatusesFromFlowRoot(const Json& flowRoot, size_t expectedImageCount) {
+    g_lastInspectionStatuses.clear();
+    if (expectedImageCount > 0) g_lastInspectionStatuses.resize(expectedImageCount);
+
+    try {
+        const InspectionStatusSnapshot rootStatus = ParseInspectionStatus(flowRoot);
+        if (rootStatus.HasOk) {
+            if (g_lastInspectionStatuses.empty()) g_lastInspectionStatuses.resize(1);
+            g_lastInspectionStatuses[0] = rootStatus;
+            return;
+        }
+
+        if (!flowRoot.is_object() || !flowRoot.contains("result_list") ||
+            !flowRoot.at("result_list").is_array()) return;
+
+        const Json& resultList = flowRoot.at("result_list");
+        for (size_t i = 0; i < resultList.size(); ++i) {
+            const InspectionStatusSnapshot status = ParseInspectionStatus(resultList.at(i));
+            if (!status.HasOk) continue;
+            if (i >= g_lastInspectionStatuses.size()) g_lastInspectionStatuses.resize(i + 1);
+            g_lastInspectionStatuses[i] = status;
+        }
+    } catch (...) {
+        g_lastInspectionStatuses.clear();
+    }
+}
+
+Json WrapNormalizedFlowJsonWithInspectionStatus(
+    Json normalized,
+    const InspectionStatusSnapshot& status) {
+    if (!status.HasOk) return normalized;
+
+    Json reason = Json();
+    if (!status.Reasons.empty()) reason = status.Reasons;
+    return Json::object({
+        {"result_list", std::move(normalized)},
+        {"ok", status.Ok},
+        {"reason", std::move(reason)}
+    });
 }
 
 #ifndef _WIN32
@@ -1988,6 +2065,7 @@ namespace dlcv_infer {
     }
 
     Result Model::Infer(const cv::Mat& image, const json& params_json) {
+        ClearLastInspectionStatuses();
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
@@ -1999,6 +2077,7 @@ namespace dlcv_infer {
 
             const auto begin = std::chrono::steady_clock::now();
             json flowRoot = _flowModel->InferInternal(prepared, params_json);
+            SetLastInspectionStatusesFromFlowRoot(flowRoot, prepared.size());
             const auto end = std::chrono::steady_clock::now();
 
             double dlcvInferMs = 0.0;
@@ -2047,6 +2126,7 @@ namespace dlcv_infer {
     }
 
     Result Model::InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json) {
+        ClearLastInspectionStatuses();
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image_list.empty()) {
@@ -2066,6 +2146,7 @@ namespace dlcv_infer {
 
             const auto begin = std::chrono::steady_clock::now();
             json flowRoot = _flowModel->InferInternal(prepared, params_json);
+            SetLastInspectionStatusesFromFlowRoot(flowRoot, prepared.size());
             const auto end = std::chrono::steady_clock::now();
 
             double dlcvInferMs = 0.0;
@@ -2119,6 +2200,7 @@ namespace dlcv_infer {
     }
 
     json Model::InferOneOutJson(const cv::Mat& image, const json& params_json) {
+        ClearLastInspectionStatuses();
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
             if (image.empty()) throw std::invalid_argument("image is empty");
@@ -2130,6 +2212,7 @@ namespace dlcv_infer {
 
             const auto begin = std::chrono::steady_clock::now();
             json flowRoot = _flowModel->InferInternal(prepared, params_json);
+            SetLastInspectionStatusesFromFlowRoot(flowRoot, prepared.size());
             const auto end = std::chrono::steady_clock::now();
 
             double dlcvInferMs = 0.0;
@@ -2161,7 +2244,10 @@ namespace dlcv_infer {
             } catch (...) {
                 flowResults = json::array();
             }
-            return NormalizeFlowOneOutJson(flowResults, emitMaskOutput);
+            Json normalized = NormalizeFlowOneOutJson(flowResults, emitMaskOutput);
+            const InspectionStatusSnapshot status = g_lastInspectionStatuses.empty()
+                ? InspectionStatusSnapshot() : g_lastInspectionStatuses.front();
+            return WrapNormalizedFlowJsonWithInspectionStatus(std::move(normalized), status);
         }
 
         const std::vector<cv::Mat> prepared = prepareInferInputBatch({ image });
@@ -2237,6 +2323,21 @@ namespace dlcv_infer {
 
     std::vector<FlowNodeTiming> Model::GetLastFlowNodeTimings() {
         return g_lastFlowNodeTimings;
+    }
+
+    bool Model::GetLastInspectionStatus(
+        bool& ok,
+        std::vector<std::string>& reasons,
+        size_t sampleIndex) {
+        ok = false;
+        reasons.clear();
+        if (sampleIndex >= g_lastInspectionStatuses.size()) return false;
+
+        const InspectionStatusSnapshot& status = g_lastInspectionStatuses[sampleIndex];
+        if (!status.HasOk) return false;
+        ok = status.Ok;
+        reasons = status.Reasons;
+        return true;
     }
 
     // SlidingWindowModel类实现

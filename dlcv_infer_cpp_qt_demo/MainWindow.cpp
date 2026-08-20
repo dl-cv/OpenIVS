@@ -551,6 +551,7 @@ void MainWindow::onInfer() {
     if (pressureTestRunning_) {
         return;
     }
+    imageViewer_->clearInspectionStatus();
 
     if (!ensureModelLoaded() || !ensureImageSelected()) {
         return;
@@ -576,6 +577,9 @@ void MainWindow::onInfer() {
 
     dlcv_infer::Result output({}); // placeholder
     double elapsedMs = 0.0;
+    bool hasInspectionStatus = false;
+    bool inspectionOk = false;
+    std::vector<std::string> inspectionReasons;
     try
     {
         json params;
@@ -586,6 +590,8 @@ void MainWindow::onInfer() {
 
         const auto start = std::chrono::steady_clock::now();
         output = model_->InferBatch(imageList, params);
+        hasInspectionStatus = dlcv_infer::Model::GetLastInspectionStatus(
+            inspectionOk, inspectionReasons, 0);
         const auto end = std::chrono::steady_clock::now();
         elapsedMs = std::chrono::duration<double, std::milli>(end - start).count();
     }
@@ -599,6 +605,7 @@ void MainWindow::onInfer() {
     const std::vector<dlcv_infer::ObjectResult> firstResults =
         output.sampleResults.empty() ? std::vector<dlcv_infer::ObjectResult>{} : output.sampleResults.front().results;
     imageViewer_->setImageAndResults(currentBgrImage_, firstResults);
+    if (hasInspectionStatus) imageViewer_->setInspectionStatus(inspectionOk);
 
     QString text;
     text += QString("图片: %1\n").arg(imagePath_);
@@ -606,6 +613,12 @@ void MainWindow::onInfer() {
     text += QString("threshold: %1\n").arg(spinThreshold_->value(), 0, 'f', 2);
     text += QString("推理时间: %1ms\n").arg(elapsedMs, 0, 'f', 2);
     text += QString("推理结果: %1个\n").arg(static_cast<int>(firstResults.size()));
+    if (!inspectionReasons.empty()) {
+        text += QStringLiteral("原因: %1\n").arg(QString::fromUtf8(inspectionReasons.front().c_str()));
+        for (size_t i = 1; i < inspectionReasons.size(); ++i) {
+            text += QStringLiteral("      %1\n").arg(QString::fromUtf8(inspectionReasons[i].c_str()));
+        }
+    }
     if (firstResults.empty()) {
         text += "未检测到目标。\n";
     } else {
@@ -619,6 +632,7 @@ void MainWindow::onInferJson() {
     if (pressureTestRunning_) {
         return;
     }
+    imageViewer_->clearInspectionStatus();
 
     if (!ensureModelLoaded() || !ensureImageSelected()) {
         return;
@@ -644,6 +658,11 @@ void MainWindow::onInferJson() {
         params["calc_mean"] = checkCalcMean_->isChecked();
 
         const json resultArray = model_->InferOneOutJson(inferImage, params);
+        bool inspectionOk = false;
+        std::vector<std::string> inspectionReasons;
+        if (dlcv_infer::Model::GetLastInspectionStatus(inspectionOk, inspectionReasons, 0)) {
+            imageViewer_->setInspectionStatus(inspectionOk);
+        }
         if (resultArray.empty()) {
             json debugObj;
             debugObj["input"] = describeOpenCvImageForUi(inferImage, true).toUtf8().toStdString();

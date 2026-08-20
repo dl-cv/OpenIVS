@@ -434,12 +434,16 @@ bool TryReadJsonScore(const json& token, double& score) {
 }
 
 PathSummary SummarizeJson(const json& result, double threshold) {
-    if (!result.is_array()) {
-        throw std::runtime_error("InferOneOutJson did not return a JSON array");
+    const json* resultList = &result;
+    if (result.is_object() && result.contains("result_list") && result.at("result_list").is_array()) {
+        resultList = &result.at("result_list");
+    }
+    if (!resultList->is_array()) {
+        throw std::runtime_error("InferOneOutJson did not return a JSON array or result_list wrapper");
     }
 
     PathSummary summary;
-    for (const auto& token : result) {
+    for (const auto& token : *resultList) {
         if (!token.is_object()) {
             AddSummaryItem(
                 summary,
@@ -552,6 +556,12 @@ int RunInferCommand(const InferOptions& options) {
     FreeAllModelsGuard cleanup;
     PathSummary structuredSummary;
     PathSummary jsonSummary;
+    bool structuredHasInspection = false;
+    bool structuredOk = false;
+    std::vector<std::string> structuredReasons;
+    bool jsonHasInspection = false;
+    bool jsonOk = false;
+    std::vector<std::string> jsonReasons;
     {
         CoutSilencer silenceApiLogs;
         dlcv_infer::Model model(options.modelPath.toStdWString(), options.device);
@@ -568,7 +578,10 @@ int RunInferCommand(const InferOptions& options) {
     };
 
         const dlcv_infer::Result structuredResult = model.Infer(inferImage, params);
+        structuredHasInspection = dlcv_infer::Model::GetLastInspectionStatus(
+            structuredOk, structuredReasons, 0);
         const json jsonResult = model.InferOneOutJson(inferImage, params);
+        jsonHasInspection = dlcv_infer::Model::GetLastInspectionStatus(jsonOk, jsonReasons, 0);
         structuredSummary = SummarizeStructured(structuredResult, options.threshold);
         jsonSummary = SummarizeJson(jsonResult, options.threshold);
     }
@@ -578,6 +591,10 @@ int RunInferCommand(const InferOptions& options) {
         structuredSummary.belowThreshold.empty() && jsonSummary.belowThreshold.empty();
     const bool meanCheckPassed =
         !options.calcMean || (HasCompleteMeans(structuredSummary) && HasCompleteMeans(jsonSummary));
+    const bool inspectionConsistent =
+        structuredHasInspection == jsonHasInspection &&
+        (!structuredHasInspection ||
+         (structuredOk == jsonOk && structuredReasons == jsonReasons));
 
     const json summary = {
         {"language", "cpp"},
@@ -589,7 +606,13 @@ int RunInferCommand(const InferOptions& options) {
         {"calc_mean", options.calcMean},
         {"structured", PathSummaryToJson(structuredSummary)},
         {"json", PathSummaryToJson(jsonSummary)},
+        {"inspection", json::object({
+            {"present", jsonHasInspection},
+            {"ok", jsonHasInspection ? json(jsonOk) : json()},
+            {"reason", jsonHasInspection && !jsonReasons.empty() ? json(jsonReasons) : json()}
+        })},
         {"consistent", consistent},
+        {"inspection_consistent", inspectionConsistent},
         {"threshold_check_passed", thresholdCheckPassed},
         {"mean_check_passed", meanCheckPassed}
     };
@@ -600,7 +623,7 @@ int RunInferCommand(const InferOptions& options) {
     if (options.hasOutput) {
         WriteJsonFile(options.outputPath, output);
     }
-    return consistent && thresholdCheckPassed && meanCheckPassed ? 0 : 3;
+    return consistent && inspectionConsistent && thresholdCheckPassed && meanCheckPassed ? 0 : 3;
 }
 
 std::string GetCppDllPath() {

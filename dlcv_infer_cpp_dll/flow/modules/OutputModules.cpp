@@ -394,6 +394,48 @@ static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& w
     return outResults;
 }
 
+static FlowInspectionStatus ReadInspectionStatus(const Json& entry) {
+    FlowInspectionStatus status;
+    try {
+        if (entry.is_object() && entry.contains("ok") && entry.at("ok").is_boolean()) {
+            status.HasOk = true;
+            status.Ok = entry.at("ok").get<bool>();
+            status.Reason = entry.contains("reason") ? entry.at("reason") : Json();
+        }
+    } catch (...) {}
+    return status;
+}
+
+static void MergeInspectionStatus(FlowInspectionStatus& target, const FlowInspectionStatus& source) {
+    if (!source.HasOk) return;
+    if (!target.HasOk) {
+        target = source;
+        return;
+    }
+    target.Ok = target.Ok && source.Ok;
+    Json merged = Json::array();
+    const auto appendReasons = [&merged](const Json& reasons) {
+        if (reasons.is_array()) {
+            for (const auto& reason : reasons) {
+                if (std::find(merged.begin(), merged.end(), reason) == merged.end()) merged.push_back(reason);
+            }
+        } else if (!reasons.is_null() &&
+                   std::find(merged.begin(), merged.end(), reasons) == merged.end()) {
+            merged.push_back(reasons);
+        }
+    };
+    appendReasons(target.Reason);
+    appendReasons(source.Reason);
+    target.Reason = merged.empty() ? Json() : std::move(merged);
+}
+
+static void ApplyInspectionStatus(const FlowInspectionStatus& status, FlowByImageEntry& entry) {
+    if (!status.HasOk) return;
+    entry.HasOk = true;
+    entry.Ok = status.Ok;
+    entry.Reason = status.Reason;
+}
+
 class ReturnJsonModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
@@ -424,8 +466,11 @@ private:
                 InitializeByImageEntry(wrap, byImageEntry);
                 try {
                     const auto& entry = results.at(i);
-                    if (entry.is_object() && entry.contains("sample_results") && entry.at("sample_results").is_array()) {
-                        byImageEntry.Results = BuildOutResultItemsTyped(wrap, entry.at("sample_results"));
+                    if (entry.is_object()) {
+                        ApplyInspectionStatus(ReadInspectionStatus(entry), byImageEntry);
+                        if (entry.contains("sample_results") && entry.at("sample_results").is_array()) {
+                            byImageEntry.Results = BuildOutResultItemsTyped(wrap, entry.at("sample_results"));
+                        }
                     }
                 } catch (...) {}
                 payload.ByImage.push_back(std::move(byImageEntry));
@@ -435,12 +480,30 @@ private:
             std::unordered_map<std::string, std::vector<const Json*>> transToDets;
             std::unordered_map<int, std::vector<const Json*>> indexToDets;
             std::unordered_map<int, std::vector<const Json*>> originToDets;
+            std::unordered_map<std::string, FlowInspectionStatus> transToStatus;
+            std::unordered_map<int, FlowInspectionStatus> indexToStatus;
+            std::unordered_map<int, FlowInspectionStatus> originToStatus;
 
             for (const auto& entryToken : results) {
                 if (!entryToken.is_object()) continue;
                 const Json& entry = entryToken;
                 if (!entry.contains("type") || !entry.at("type").is_string()) continue;
                 if (entry.at("type").get<std::string>() != "local") continue;
+
+                const FlowInspectionStatus status = ReadInspectionStatus(entry);
+                int statusIndex = -1;
+                int statusOriginIndex = -1;
+                try { statusIndex = entry.contains("index") ? entry.at("index").get<int>() : -1; } catch (...) {}
+                try { statusOriginIndex = entry.contains("origin_index") ? entry.at("origin_index").get<int>() : -1; } catch (...) {}
+                if (statusIndex >= 0) MergeInspectionStatus(indexToStatus[statusIndex], status);
+                if (statusOriginIndex >= 0) MergeInspectionStatus(originToStatus[statusOriginIndex], status);
+                try {
+                    if (entry.contains("transform") && entry.at("transform").is_object()) {
+                        const std::string statusSig = SerializeTransformKey(TransformationState::FromJson(entry.at("transform")));
+                        if (!statusSig.empty()) MergeInspectionStatus(transToStatus[statusSig], status);
+                    }
+                } catch (...) {}
+
                 if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) continue;
 
                 std::vector<const Json*> detList;
@@ -496,6 +559,19 @@ private:
                 if (dets != nullptr) {
                     byImageEntry.Results = BuildOutResultItemsTyped(wrap, *dets);
                 }
+
+                const FlowInspectionStatus* status = nullptr;
+                auto itStatusIdx = indexToStatus.find(static_cast<int>(i));
+                if (itStatusIdx != indexToStatus.end()) status = &itStatusIdx->second;
+                if (status == nullptr) {
+                    auto itStatusOrg = originToStatus.find(wrap.OriginalIndex);
+                    if (itStatusOrg != originToStatus.end()) status = &itStatusOrg->second;
+                }
+                if (status == nullptr && !sig.empty()) {
+                    auto itStatusTransform = transToStatus.find(sig);
+                    if (itStatusTransform != transToStatus.end()) status = &itStatusTransform->second;
+                }
+                if (status != nullptr) ApplyInspectionStatus(*status, byImageEntry);
                 payload.ByImage.push_back(std::move(byImageEntry));
             }
         }

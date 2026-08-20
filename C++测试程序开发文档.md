@@ -68,6 +68,7 @@ dlcv_infer_cpp_qt_demo.exe --help
 - 普通模型使用 `--threshold` 作为推理阈值；流程模型保留各模型节点自身的阈值，`--threshold` 只对最终对外结果进行筛选。
 - 图片由 `QFile` 读取字节并通过 `cv::imdecode` 解码；BGR/BGRA 转为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，输出字段与 C# 测试程序一致；开启均值计算时同时检查两种结果的均值字段。
+- 输出中的 `inspection` 包含最近一次流程判定的 `present`、`ok`、`reason`，`inspection_consistent` 检查结构化与 JSON 两条路径的判定一致性。
 - C++ 结构化结果的本地 GBK 类别名在 CLI 边界转换为 UTF-8，再写入 JSON。
 - `--output` 使用 `QSaveFile` 原子写入 UTF-8 JSON；该路径不得覆盖模型或图片，父目录必须存在。
 - 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致、存在低于阈值的结果或均值检查失败。
@@ -121,8 +122,8 @@ dlcv_infer_cpp_qt_demo.exe --help
 1. 点击 **打开图片推理**，选择图片（`jpg/jpeg/png/bmp/gif/tiff/tif`）。
 2. 图像经过 `prepareImageForInference` 转换为 RGB。
 3. 调用 `model->InferBatch()` 执行推理。
-4. 结果在文本区显示（数量、每个目标的类别、score、bbox、area、angle，以及可用的前景与背景均值）。
-5. 图像区显示可视化结果（bbox 框 + mask 叠加）。
+4. 结果在文本区显示（数量、每个目标的类别、score、bbox、area、angle，以及可用的前景与背景均值）；流程失败原因存在时显示在预测结果下方。
+5. 图像区显示可视化结果（bbox 框 + mask 叠加）；流程判定存在时左上角显示带阴影方块的绿色 `OK` 或红色 `NG`。
 
 **代码路径**：`MainWindow::onInfer()`
 - `prepareImageForInference`：将 OpenCV 读到的 BGR/BGRA 转换为 RGB。
@@ -132,7 +133,7 @@ dlcv_infer_cpp_qt_demo.exe --help
 ### 4.3 JSON 输出测试
 
 1. 点击 **推理JSON**。
-2. 调用 `model->InferOneOutJson()` 获取 JSON 数组结果。
+2. 调用 `model->InferOneOutJson()` 获取 JSON；未产生流程判定时为结果数组，产生判定时为包含 `result_list/ok/reason` 的包装对象。
 3. 文本区显示格式化的 JSON（缩进 4）。
 
 **代码路径**：`MainWindow::onInferJson()`

@@ -250,6 +250,12 @@ namespace dlcv_infer {
 
         static void GetLastInferTiming(double& dlcvInferMs, double& totalInferMs);
         static std::vector<FlowNodeTiming> GetLastFlowNodeTimings();
+        // 读取当前线程最近一次推理的流程判定状态；必须与 Infer/InferBatch/
+        // InferOneOutJson 在同一线程调用。未产生判定状态时返回 false。
+        static bool GetLastInspectionStatus(
+            bool& ok,
+            std::vector<std::string>& reasons,
+            size_t sampleIndex = 0);
 
     private:
         bool _isFlowGraphMode = false;

@@ -2328,6 +2328,187 @@ private:
     }
 };
 
+/// post_process/category_count_check
+class CategoryCountCheckModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        Json results = resultList.is_array() ? resultList : Json::array();
+        return ProcessCore(imageList, std::move(results));
+    }
+
+    ModuleIO ProcessOwned(const std::vector<ModuleImage>& imageList, Json&& resultList) override {
+        Json results = resultList.is_array() ? std::move(resultList) : Json::array();
+        return ProcessCore(imageList, std::move(results));
+    }
+
+private:
+    struct Rule final {
+        std::string Category;
+        std::string Operator;
+        int Expect = 0;
+    };
+
+    static int ParseExpect(const Json& value) {
+        try {
+            double number = 0.0;
+            if (value.is_number()) number = value.get<double>();
+            else if (value.is_string()) number = std::stod(value.get<std::string>());
+            else return 1;
+            if (!std::isfinite(number)) return 1;
+            if (number <= 0.0) return 0;
+            if (number >= static_cast<double>(std::numeric_limits<int>::max())) {
+                return std::numeric_limits<int>::max();
+            }
+            return static_cast<int>(number);
+        } catch (...) {
+            return 1;
+        }
+    }
+
+    std::vector<Rule> ParseRules() const {
+        Json raw = Json::array();
+        try {
+            if (Properties.is_object() && Properties.contains("rules")) raw = Properties.at("rules");
+            if (raw.is_string()) raw = Json::parse(raw.get<std::string>());
+        } catch (...) {
+            return {};
+        }
+        if (!raw.is_array()) return {};
+
+        std::vector<Rule> rules;
+        for (const auto& item : raw) {
+            if (!item.is_object()) continue;
+            Rule rule;
+            try {
+                if (item.contains("category")) {
+                    const Json& value = item.at("category");
+                    rule.Category = value.is_string() ? value.get<std::string>() : value.dump();
+                }
+            } catch (...) {}
+            try {
+                if (item.contains("operator")) {
+                    const Json& value = item.at("operator");
+                    rule.Operator = value.is_string() ? value.get<std::string>() : value.dump();
+                }
+            } catch (...) {}
+            if (rule.Operator != "gt" && rule.Operator != "lt" && rule.Operator != "equal") {
+                rule.Operator = "equal";
+            }
+            rule.Expect = item.contains("expect") ? ParseExpect(item.at("expect")) : 0;
+            rules.push_back(std::move(rule));
+        }
+        return rules;
+    }
+
+    static int CountMatching(const Json& detections, const std::string& category) {
+        if (!detections.is_array()) return 0;
+        int count = 0;
+        for (const auto& detection : detections) {
+            if (!detection.is_object()) continue;
+            if (category.empty() || detection.value("category_name", std::string()) == category) {
+                if (count < std::numeric_limits<int>::max()) count++;
+            }
+        }
+        return count;
+    }
+
+    static bool Evaluate(int count, const Rule& rule) {
+        if (rule.Operator == "gt") return count > rule.Expect;
+        if (rule.Operator == "lt") return count < rule.Expect;
+        return count == rule.Expect;
+    }
+
+    static std::string FormatReason(const Rule& rule, int actual) {
+        const std::string category = rule.Category.empty() ? "全部类别" : rule.Category;
+        const char* op = rule.Operator == "gt" ? ">" : (rule.Operator == "lt" ? "<" : "=");
+        return "类别" + category + "期望" + op + std::to_string(rule.Expect) + ",实际" + std::to_string(actual);
+    }
+
+    ModuleIO ProcessCore(const std::vector<ModuleImage>& imageList, Json&& results) {
+        const std::vector<Rule> rules = ParseRules();
+        bool allOk = true;
+        std::vector<std::string> allReasons;
+        std::unordered_map<int, std::vector<size_t>> groups;
+
+        for (size_t i = 0; i < results.size(); ++i) {
+            const Json& entry = results.at(i);
+            if (!entry.is_object() || entry.value("type", std::string()) != "local") continue;
+            int key = -1;
+            try {
+                const int originIndex = entry.value("origin_index", -1);
+                const int index = entry.value("index", -1);
+                key = originIndex >= 0 ? originIndex : (index >= 0 ? index : -1);
+            } catch (...) {}
+            groups[key].push_back(i);
+        }
+
+        for (const auto& group : groups) {
+            Json detections = Json::array();
+            for (size_t index : group.second) {
+                const Json& entry = results.at(index);
+                if (!entry.contains("sample_results") || !entry.at("sample_results").is_array()) continue;
+                for (const auto& detection : entry.at("sample_results")) detections.push_back(detection);
+            }
+
+            bool moduleOk = true;
+            std::vector<std::string> groupReasons;
+            for (const Rule& rule : rules) {
+                const int count = CountMatching(detections, rule.Category);
+                if (!Evaluate(count, rule)) {
+                    moduleOk = false;
+                    groupReasons.push_back(FormatReason(rule, count));
+                }
+            }
+
+            for (size_t index : group.second) {
+                Json& entry = results.at(index);
+                Json reasons = Json::array();
+                if (entry.contains("reason")) {
+                    const Json& existingReason = entry.at("reason");
+                    if (existingReason.is_array()) reasons = existingReason;
+                    else if (!existingReason.is_null()) {
+                        reasons.push_back(existingReason.is_string() ? existingReason : Json(existingReason.dump()));
+                    }
+                }
+
+                const bool hasExistingOk = entry.contains("ok") && !entry.at("ok").is_null();
+                bool entryOk = moduleOk;
+                if (hasExistingOk && moduleOk) {
+                    entryOk = entry.at("ok").is_boolean() ? entry.at("ok").get<bool>() : true;
+                }
+                if (!moduleOk) {
+                    entryOk = false;
+                    for (const std::string& reason : groupReasons) {
+                        if (std::find(reasons.begin(), reasons.end(), Json(reason)) == reasons.end()) reasons.push_back(reason);
+                    }
+                }
+
+                entry["ok"] = entryOk;
+                entry["reason"] = reasons.empty() ? Json() : reasons;
+                if (!entryOk) {
+                    allOk = false;
+                    for (const auto& reason : reasons) {
+                        if (!reason.is_string()) continue;
+                        const std::string text = reason.get<std::string>();
+                        if (std::find(allReasons.begin(), allReasons.end(), text) == allReasons.end()) allReasons.push_back(text);
+                    }
+                }
+            }
+        }
+
+        ScalarOutputsByName["ok"] = allOk;
+        std::string reasonText;
+        for (size_t i = 0; i < allReasons.size(); ++i) {
+            if (i > 0) reasonText += "; ";
+            reasonText += allReasons[i];
+        }
+        ScalarOutputsByName["reason"] = reasonText;
+        return ModuleIO(imageList, std::move(results), Json::array());
+    }
+};
+
 /// post_process/count_results, features/count_results
 class CountResultsModule final : public BaseModule {
 public:
@@ -2422,6 +2603,7 @@ DLCV_FLOW_REGISTER_MODULE("post_process/multi_category_filter", MultiCategoryFil
 DLCV_FLOW_REGISTER_MODULE("features/multi_category_filter", MultiCategoryFilterModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/result_filter_advanced", ResultFilterAdvancedModule)
 DLCV_FLOW_REGISTER_MODULE("features/result_filter_advanced", ResultFilterAdvancedModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/category_count_check", CategoryCountCheckModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/count_results", CountResultsModule)
 DLCV_FLOW_REGISTER_MODULE("features/count_results", CountResultsModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/text_replacement", TextReplacementModule)

@@ -176,10 +176,12 @@ namespace DlcvDemo
                 }
 
                 object rawJsonResult = model.InferOneOutJson(inferImage, (JObject)inferParams.DeepClone());
-                var jsonResults = rawJsonResult as JArray;
+                var jsonContainer = rawJsonResult as JObject;
+                var jsonResults = rawJsonResult as JArray
+                    ?? (jsonContainer != null ? jsonContainer["result_list"] as JArray : null);
                 if (jsonResults == null)
                 {
-                    throw new InvalidOperationException("InferOneOutJson 未返回 JSON 数组。");
+                    throw new InvalidOperationException("InferOneOutJson 未返回有效的结果数组。");
                 }
 
                 PathSummary jsonSummary = BuildJsonSummary(jsonResults, options.Threshold);

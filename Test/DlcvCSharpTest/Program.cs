@@ -88,6 +88,11 @@ namespace DlcvCSharpTest
                     return RunCountResultsSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "category-count-check-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunCategoryCountCheckSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "template-count-priority-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunTemplateCountPrioritySelfTest();
@@ -2180,6 +2185,368 @@ namespace DlcvCSharpTest
 
             Console.WriteLine("BBOX IoU 去重自测通过");
             return 0;
+        }
+
+        private static int RunCategoryCountCheckSelfTest()
+        {
+            Console.WriteLine("==== 类型数量校验自测 ====");
+
+            _ = new GraphExecutor(new List<Dictionary<string, object>>());
+            Type moduleType = ModuleRegistry.Get("post_process/category_count_check");
+            if (moduleType == null)
+            {
+                Console.WriteLine("post_process/category_count_check 未注册");
+                return 1;
+            }
+
+            using (var image = new Mat(100, 120, MatType.CV_8UC3, Scalar.Black))
+            {
+                var images = new List<ModuleImage>
+                {
+                    new ModuleImage(image, image, new TransformationState(120, 100), 0)
+                };
+
+                if (!VerifyCategoryCountCase(
+                    moduleType,
+                    new JArray
+                    {
+                        new JObject
+                        {
+                            ["category"] = "黑块",
+                            ["operator"] = "equal",
+                            ["expect"] = 2
+                        }
+                    },
+                    BuildCategoryCountResults("local", "黑块", "黑块", "其他"),
+                    true,
+                    null))
+                {
+                    return 1;
+                }
+
+                if (!VerifyCategoryCountCase(
+                    moduleType,
+                    "[{\"category\":\"黑块\",\"operator\":\"equal\",\"expect\":2}]",
+                    BuildCategoryCountResults("local", "黑块"),
+                    false,
+                    "类别黑块期望=2,实际1"))
+                {
+                    return 1;
+                }
+
+                if (!VerifyCategoryCountCase(
+                    moduleType,
+                    new JArray
+                    {
+                        new JObject
+                        {
+                            ["category"] = "",
+                            ["operator"] = "gt",
+                            ["expect"] = 2
+                        },
+                        new JObject
+                        {
+                            ["category"] = "黑块",
+                            ["operator"] = "lt",
+                            ["expect"] = 3
+                        }
+                    },
+                    BuildCategoryCountResults("local", "黑块", "黑块", "其他"),
+                    true,
+                    null))
+                {
+                    return 1;
+                }
+
+                var groupedResults = new JArray
+                {
+                    BuildCategoryCountEntry(0, 0, "黑块", "黑块", "黑块", "黑块"),
+                    BuildCategoryCountEntry(1, 0, "黑块", "黑块", "黑块", "黑块")
+                };
+                var groupedModule = (BaseModule)Activator.CreateInstance(
+                    moduleType,
+                    new object[]
+                    {
+                        209,
+                        null,
+                        new Dictionary<string, object>
+                        {
+                            ["rules"] = new JArray
+                            {
+                                new JObject
+                                {
+                                    ["category"] = "黑块",
+                                    ["operator"] = "equal",
+                                    ["expect"] = 8
+                                }
+                            }
+                        },
+                        null
+                    });
+                ModuleIO groupedOutput = groupedModule.Process(images, groupedResults);
+                if (!Convert.ToBoolean(groupedModule.ScalarOutputsByName["ok"]) ||
+                    groupedOutput.ResultList.Any(x => x["ok"] == null || !x["ok"].Value<bool>()))
+                {
+                    Console.WriteLine("同一 origin_index 的多个 local entry 未先汇总计数");
+                    return 1;
+                }
+
+                var stickyResults = BuildCategoryCountResults("local", "黑块");
+                var stickyEntry = (JObject)stickyResults[0];
+                stickyEntry["ok"] = false;
+                stickyEntry["reason"] = new JArray("上游失败");
+                if (!VerifyCategoryCountCase(
+                    moduleType,
+                    new JArray
+                    {
+                        new JObject
+                        {
+                            ["category"] = "黑块",
+                            ["operator"] = "equal",
+                            ["expect"] = 1
+                        }
+                    },
+                    stickyResults,
+                    false,
+                    "上游失败"))
+                {
+                    return 1;
+                }
+
+                var nonLocalResults = BuildCategoryCountResults("global", "黑块");
+                var nonLocalModule = (BaseModule)Activator.CreateInstance(
+                    moduleType,
+                    new object[]
+                    {
+                        205,
+                        null,
+                        new Dictionary<string, object>
+                        {
+                            ["rules"] = new JArray
+                            {
+                                new JObject
+                                {
+                                    ["category"] = "黑块",
+                                    ["operator"] = "equal",
+                                    ["expect"] = 1
+                                }
+                            }
+                        },
+                        null
+                    });
+                ModuleIO nonLocalOutput = nonLocalModule.Process(images, nonLocalResults);
+                var nonLocalEntry = nonLocalOutput.ResultList[0] as JObject;
+                if (nonLocalEntry == null || nonLocalEntry.ContainsKey("ok") || nonLocalEntry.ContainsKey("reason"))
+                {
+                    Console.WriteLine("非 local 结果不应注入 ok/reason");
+                    return 1;
+                }
+
+                var context = new DlcvModules.ExecutionContext();
+                var ngModule = (BaseModule)Activator.CreateInstance(
+                    moduleType,
+                    new object[]
+                    {
+                        206,
+                        null,
+                        new Dictionary<string, object>
+                        {
+                            ["rules"] = new JArray
+                            {
+                                new JObject
+                                {
+                                    ["category"] = "黑块",
+                                    ["operator"] = "equal",
+                                    ["expect"] = 2
+                                }
+                            }
+                        },
+                        context
+                    });
+                ModuleIO checkedOutput = ngModule.Process(images, BuildCategoryCountResults("local", "黑块"));
+                var returnJson = new ReturnJson(207, properties: new Dictionary<string, object>(), context: context);
+                returnJson.Process(images, checkedOutput.ResultList);
+
+                var frontendJson = context.Get<Dictionary<string, object>>("frontend_json", null);
+                var last = frontendJson != null && frontendJson.ContainsKey("last")
+                    ? frontendJson["last"] as Dictionary<string, object>
+                    : null;
+                var byImage = last != null && last.ContainsKey("by_image")
+                    ? last["by_image"] as List<Dictionary<string, object>>
+                    : null;
+                if (byImage == null || byImage.Count != 1 ||
+                    !byImage[0].ContainsKey("ok") || Convert.ToBoolean(byImage[0]["ok"]) ||
+                    !byImage[0].ContainsKey("reason"))
+                {
+                    Console.WriteLine("ReturnJson 未透传 ok/reason");
+                    return 1;
+                }
+
+                var legacyContext = new DlcvModules.ExecutionContext();
+                var legacyReturnJson = new ReturnJson(208, properties: new Dictionary<string, object>(), context: legacyContext);
+                legacyReturnJson.Process(images, BuildCategoryCountResults("local", "黑块"));
+                var legacyFrontendJson = legacyContext.Get<Dictionary<string, object>>("frontend_json", null);
+                var legacyLast = legacyFrontendJson != null && legacyFrontendJson.ContainsKey("last")
+                    ? legacyFrontendJson["last"] as Dictionary<string, object>
+                    : null;
+                var legacyByImage = legacyLast != null && legacyLast.ContainsKey("by_image")
+                    ? legacyLast["by_image"] as List<Dictionary<string, object>>
+                    : null;
+                if (legacyByImage == null || legacyByImage.Count != 1 ||
+                    legacyByImage[0].ContainsKey("ok") || legacyByImage[0].ContainsKey("reason"))
+                {
+                    Console.WriteLine("旧结果不应凭空增加 ok/reason");
+                    return 1;
+                }
+
+                var transformOnlyContext = new DlcvModules.ExecutionContext();
+                var transformOnlyReturnJson = new ReturnJson(210, properties: new Dictionary<string, object>(), context: transformOnlyContext);
+                var transformState = new TransformationState(
+                    120,
+                    100,
+                    null,
+                    new double[] { 1, 0, 0, 0, 1, 0 },
+                    new int[] { 120, 100 });
+                var transformOnlyImages = new List<ModuleImage>
+                {
+                    new ModuleImage(image, image, transformState, 0)
+                };
+                var transform = JObject.FromObject(transformState.ToDict());
+                var transformOnlyResults = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = -1,
+                        ["origin_index"] = -1,
+                        ["transform"] = transform.DeepClone(),
+                        ["sample_results"] = BuildCategoryCountEntry(0, 0, "黑块")["sample_results"].DeepClone(),
+                        ["ok"] = false,
+                        ["reason"] = new JArray("旧流程失败")
+                    },
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = -1,
+                        ["origin_index"] = -1,
+                        ["transform"] = transform.DeepClone(),
+                        ["sample_results"] = new JArray(),
+                        ["ok"] = true
+                    }
+                };
+                transformOnlyReturnJson.Process(transformOnlyImages, transformOnlyResults);
+                var transformOnlyFrontendJson = transformOnlyContext.Get<Dictionary<string, object>>("frontend_json", null);
+                var transformOnlyLast = transformOnlyFrontendJson != null && transformOnlyFrontendJson.ContainsKey("last")
+                    ? transformOnlyFrontendJson["last"] as Dictionary<string, object>
+                    : null;
+                var transformOnlyByImage = transformOnlyLast != null && transformOnlyLast.ContainsKey("by_image")
+                    ? transformOnlyLast["by_image"] as List<Dictionary<string, object>>
+                    : null;
+                var transformOnlyReasons = transformOnlyByImage != null && transformOnlyByImage.Count == 1 &&
+                    transformOnlyByImage[0].ContainsKey("reason")
+                    ? transformOnlyByImage[0]["reason"] as JArray
+                    : null;
+                if (transformOnlyByImage == null || transformOnlyByImage.Count != 1 ||
+                    !transformOnlyByImage[0].ContainsKey("ok") || Convert.ToBoolean(transformOnlyByImage[0]["ok"]) ||
+                    transformOnlyReasons == null || !transformOnlyReasons.Any(x => x.ToString() == "旧流程失败"))
+                {
+                    Console.WriteLine("旧流程通过 transform 对齐时丢失或覆盖 ok/reason");
+                    return 1;
+                }
+            }
+
+            Console.WriteLine("类型数量校验自测通过");
+            return 0;
+        }
+
+        private static bool VerifyCategoryCountCase(
+            Type moduleType,
+            object rules,
+            JArray results,
+            bool expectedOk,
+            string expectedReason)
+        {
+            var module = (BaseModule)Activator.CreateInstance(
+                moduleType,
+                new object[]
+                {
+                    204,
+                    null,
+                    new Dictionary<string, object> { ["rules"] = rules },
+                    null
+                });
+            ModuleIO output = module.Process(new List<ModuleImage>(), results);
+            var entry = output.ResultList.Count > 0 ? output.ResultList[0] as JObject : null;
+            bool scalarOk = module.ScalarOutputsByName.ContainsKey("ok") &&
+                Convert.ToBoolean(module.ScalarOutputsByName["ok"]);
+            string scalarReason = module.ScalarOutputsByName.ContainsKey("reason")
+                ? Convert.ToString(module.ScalarOutputsByName["reason"])
+                : null;
+            bool entryOk = entry != null && entry["ok"] != null && entry["ok"].Value<bool>();
+            var reasons = entry != null ? entry["reason"] as JArray : null;
+
+            bool reasonMatches = expectedReason == null
+                ? reasons == null && string.IsNullOrEmpty(scalarReason)
+                : reasons != null && reasons.Any(x => string.Equals(x.ToString(), expectedReason, StringComparison.Ordinal)) &&
+                  scalarReason != null && scalarReason.Contains(expectedReason);
+
+            if (entry == null || entryOk != expectedOk || scalarOk != expectedOk || !reasonMatches)
+            {
+                Console.WriteLine(
+                    "类型数量校验结果不一致: entry_ok=" + entryOk +
+                    ", scalar_ok=" + scalarOk +
+                    ", reason=" + scalarReason);
+                return false;
+            }
+            return true;
+        }
+
+        private static JObject BuildCategoryCountEntry(int index, int originIndex, params string[] categories)
+        {
+            var detections = new JArray();
+            for (int i = 0; i < categories.Length; i++)
+            {
+                detections.Add(new JObject
+                {
+                    ["category_id"] = i,
+                    ["category_name"] = categories[i],
+                    ["score"] = 0.9,
+                    ["bbox"] = new JArray(10 + i, 10, 20 + i, 20)
+                });
+            }
+            return new JObject
+            {
+                ["type"] = "local",
+                ["index"] = index,
+                ["origin_index"] = originIndex,
+                ["sample_results"] = detections
+            };
+        }
+
+        private static JArray BuildCategoryCountResults(string type, params string[] categories)
+        {
+            var detections = new JArray();
+            for (int i = 0; i < categories.Length; i++)
+            {
+                detections.Add(new JObject
+                {
+                    ["category_id"] = i,
+                    ["category_name"] = categories[i],
+                    ["score"] = 0.9,
+                    ["bbox"] = new JArray(10 + i, 10, 20 + i, 20)
+                });
+            }
+
+            return new JArray
+            {
+                new JObject
+                {
+                    ["type"] = type,
+                    ["index"] = 0,
+                    ["origin_index"] = 0,
+                    ["sample_results"] = detections
+                }
+            };
         }
 
         private static int RunCountResultsSelfTest()
