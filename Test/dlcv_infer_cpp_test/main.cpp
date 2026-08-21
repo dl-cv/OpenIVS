@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -110,7 +111,7 @@ std::string BuildResultSignature(const dlcv_infer::Result& result) {
 
 int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
     if (argc < 4) {
-        std::cout << "Usage: dlcv_infer_cpp_test dvs-rgb-selftest <modelPath> <imagePath>\n";
+        std::cout << "Usage: dlcv_infer_cpp_test dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
         return 2;
     }
 
@@ -138,6 +139,63 @@ int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
         if (result.sampleResults.empty() || result.sampleResults.front().results.empty()) {
             std::cout << "selftest failed: DVS flow returned an empty result\n";
             return 1;
+        }
+        const bool requirePreservedMask = argc >= 5 &&
+            (std::wstring(argv[4]) == L"require-preserved-mask" ||
+             std::wstring(argv[4]) == L"require-original-mask");
+        if (requirePreservedMask) {
+            const auto& object = result.sampleResults.front().results.front();
+            if (!object.withMask || object.mask.empty()) {
+                std::cout << "selftest failed: segmentation mask was not preserved after OCR\n";
+                DisposeResultMasks(result);
+                return 1;
+            }
+            if (!object.withBbox || object.bbox.size() < 4) {
+                std::cout << "selftest failed: segmentation bbox was not preserved after OCR\n";
+                DisposeResultMasks(result);
+                return 1;
+            }
+
+            const double x = object.bbox[0];
+            const double y = object.bbox[1];
+            const double width = object.bbox[2];
+            const double height = object.bbox[3];
+            constexpr double tolerance = 1.0;
+            if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) || !std::isfinite(height) ||
+                width <= 0.0 || height <= 100.0 ||
+                x < -tolerance || y < -tolerance ||
+                x + width > rgb.cols + tolerance || y + height > rgb.rows + tolerance) {
+                std::cout << "selftest failed: segmentation bbox is not in original-image coordinates, image="
+                    << rgb.cols << "x" << rgb.rows << ", bbox=";
+                for (size_t i = 0; i < object.bbox.size(); i++) {
+                    if (i > 0) std::cout << ",";
+                    std::cout << object.bbox[i];
+                }
+                std::cout << "\n";
+                DisposeResultMasks(result);
+                return 1;
+            }
+            if (object.categoryName.empty()) {
+                std::cout << "selftest failed: OCR text was not merged into the segmentation result\n";
+                DisposeResultMasks(result);
+                return 1;
+            }
+            if (!std::isfinite(object.score)) {
+                std::cout << "selftest failed: preserved segmentation score is not finite\n";
+                DisposeResultMasks(result);
+                return 1;
+            }
+
+            const bool fullImageMask = object.mask.cols == rgb.cols && object.mask.rows == rgb.rows;
+            std::cout << "preserved_result: image=" << rgb.cols << "x" << rgb.rows << ", bbox=";
+            for (size_t i = 0; i < object.bbox.size(); i++) {
+                if (i > 0) std::cout << ",";
+                std::cout << object.bbox[i];
+            }
+            std::cout << ", mask=" << object.mask.cols << "x" << object.mask.rows
+                << ", mask_space=" << (fullImageMask ? "full-image" : "roi")
+                << ", category_name=" << Safe(object.categoryName)
+                << ", score=" << ToFixed(object.score, 4) << "\n";
         }
         DisposeResultMasks(result);
         std::cout << "C++ DVS RGB selftest passed\n";
@@ -1877,7 +1935,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
     std::cout << "Usage: " << (argc >= 1 ? WideToUtf8(argv[0]) : "dlcv_infer_cpp_test") << " <subcommand>\n";
     std::cout << "Available subcommands:\n";
-    std::cout << "  dvs-rgb-selftest <modelPath> <imagePath>\n";
+    std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
     std::cout << "  curve-text-affine-selftest\n";
     std::cout << "  imageprepcheck\n";
     std::cout << "  rect-image-correction-selftest\n";

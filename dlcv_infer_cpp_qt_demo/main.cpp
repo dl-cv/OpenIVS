@@ -1,9 +1,12 @@
 ﻿#include <QApplication>
 #include <QByteArray>
+#include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QImage>
+#include <QPixmap>
 #include <QSaveFile>
 #include <QStringList>
 
@@ -15,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "ImageViewerWidget.h"
 #include "MainWindow.h"
 #include "dlcv_infer.h"
 
@@ -111,6 +115,10 @@ void PrintHelp(const QString& programPath) {
         << "  " << program
         << " infer --model <path> --image <path> --threshold <0..1>"
            " [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]\n"
+        << "  " << program
+        << " render --model <path> --image <path> --threshold <0..1> --output <pngPath>"
+           " [--device <int>] [--with-mask <true|false>]\n"
+        << "  " << program << " mask-visualization-selftest\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
 }
@@ -626,6 +634,123 @@ int RunInferCommand(const InferOptions& options) {
     return consistent && inspectionConsistent && thresholdCheckPassed && meanCheckPassed ? 0 : 3;
 }
 
+int RunRenderCommand(const InferOptions& options) {
+    if (!options.hasOutput) {
+        std::cerr << "render failed: --output is required\n";
+        return 2;
+    }
+
+    FreeAllModelsGuard cleanup;
+    dlcv_infer::Model model(options.modelPath.toStdWString(), options.device);
+    const cv::Mat decoded = LoadImageUnicode(options.imagePath);
+    const cv::Mat inferImage = PrepareImageForInference(decoded);
+    if (inferImage.empty()) {
+        throw std::runtime_error("input image channel conversion failed");
+    }
+
+    const json params = {
+        {"threshold", options.threshold},
+        {"with_mask", options.withMask},
+        {"batch_size", 1}
+    };
+    const dlcv_infer::Result result = model.InferBatch({inferImage}, params);
+    if (result.sampleResults.empty() || result.sampleResults.front().results.empty()) {
+        std::cerr << "render failed: DVS flow returned an empty result\n";
+        return 3;
+    }
+
+    const auto& results = result.sampleResults.front().results;
+    ImageViewerWidget viewer;
+    viewer.resize(decoded.cols, decoded.rows);
+    viewer.setShowStatusText(false);
+    viewer.setImageAndResults(decoded, results);
+    viewer.show();
+    QApplication::processEvents();
+
+    QImage rendered = viewer.grab().toImage();
+    if (rendered.width() != decoded.cols || rendered.height() != decoded.rows) {
+        rendered = rendered.scaled(decoded.cols, decoded.rows, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+    if (rendered.isNull() || !rendered.save(options.outputPath)) {
+        std::cerr << "render failed: could not save output image\n";
+        return 1;
+    }
+
+    std::cout << "rendered: " << ToUtf8(options.outputPath)
+        << ", source=" << decoded.cols << "x" << decoded.rows
+        << ", output=" << rendered.width() << "x" << rendered.height()
+        << ", objects=" << results.size() << "\n";
+    for (size_t i = 0; i < results.size(); ++i) {
+        const auto& object = results[i];
+        std::cout << "object[" << i << "]: category_name=" << dlcv_infer::convertGbkToUtf8(object.categoryName)
+            << ", score=" << object.score << ", bbox=";
+        for (size_t j = 0; j < object.bbox.size(); ++j) {
+            if (j > 0) std::cout << ",";
+            std::cout << object.bbox[j];
+        }
+        if (object.withMask && !object.mask.empty()) {
+            const bool fullImageMask = object.mask.cols == decoded.cols && object.mask.rows == decoded.rows;
+            std::cout << ", mask=" << object.mask.cols << "x" << object.mask.rows
+                << ", mask_space=" << (fullImageMask ? "full-image" : "roi");
+        } else {
+            std::cout << ", mask=none";
+        }
+        std::cout << "\n";
+    }
+    return 0;
+}
+
+int RunMaskVisualizationSelfTest() {
+    cv::Mat image(80, 100, CV_8UC3, cv::Scalar(0, 0, 0));
+    cv::Mat mask(80, 100, CV_8UC1, cv::Scalar(0));
+    mask(cv::Rect(10, 15, 12, 8)).setTo(cv::Scalar(255));
+
+    dlcv_infer::ObjectResult object(
+        0,
+        "",
+        0.99f,
+        0.0f,
+        {10.0, 15.0, 12.0, 8.0},
+        true,
+        mask,
+        true,
+        false,
+        -100.0f);
+
+    ImageViewerWidget viewer;
+    viewer.resize(500, 400);
+    viewer.setLabelDisplayMode(ImageViewerWidget::LabelTextMode::None);
+    viewer.setImageAndResults(image, {object});
+    viewer.show();
+    QApplication::processEvents();
+
+    const QImage rendered = viewer.grab().toImage().convertToFormat(QImage::Format_RGB32);
+    const QString outputPath = QDir(QDir::tempPath()).filePath(QStringLiteral("dlcv_mask_visualization_selftest.png"));
+    if (rendered.isNull() || !rendered.save(outputPath)) {
+        std::cerr << "mask visualization selftest failed: could not save rendered image\n";
+        return 1;
+    }
+
+    const qreal devicePixelRatio = rendered.devicePixelRatio();
+    const int expectedX = static_cast<int>(std::lround(72.0 * devicePixelRatio));
+    const int expectedY = static_cast<int>(std::lround(92.0 * devicePixelRatio));
+    const int doubleOffsetX = static_cast<int>(std::lround(122.0 * devicePixelRatio));
+    const int doubleOffsetY = static_cast<int>(std::lround(167.0 * devicePixelRatio));
+    const QColor expected(rendered.pixel(expectedX, expectedY));
+    const QColor doubleOffset(rendered.pixel(doubleOffsetX, doubleOffsetY));
+    if (expected.green() <= expected.red() || expected.green() <= expected.blue()) {
+        std::cerr << "mask visualization selftest failed: full-image mask was not drawn at original coordinates\n";
+        return 1;
+    }
+    if (doubleOffset.green() != 0 || doubleOffset.red() != 0 || doubleOffset.blue() != 0) {
+        std::cerr << "mask visualization selftest failed: full-image mask received bbox offset\n";
+        return 1;
+    }
+
+    std::cout << "mask visualization selftest passed: " << ToUtf8(outputPath) << "\n";
+    return 0;
+}
+
 std::string GetCppDllPath() {
 #ifdef _WIN32
     char path[MAX_PATH];
@@ -661,12 +786,18 @@ int main(int argc, char* argv[]) {
     const QStringList args = app.arguments();
     if (args.size() > 1) {
         if (args.at(1) == QStringLiteral("--help") ||
-            (args.at(1) == QStringLiteral("infer") && args.contains(QStringLiteral("--help")))) {
+            ((args.at(1) == QStringLiteral("infer") || args.at(1) == QStringLiteral("render"))
+             && args.contains(QStringLiteral("--help")))) {
             PrintHelp(args.at(0));
             return 0;
         }
-        if (args.at(1) != QStringLiteral("infer")) {
-            std::cerr << "error: expected 'infer' or '--help'\n";
+        if (args.at(1) == QStringLiteral("mask-visualization-selftest")) {
+            return RunMaskVisualizationSelfTest();
+        }
+        const bool isInferCommand = args.at(1) == QStringLiteral("infer");
+        const bool isRenderCommand = args.at(1) == QStringLiteral("render");
+        if (!isInferCommand && !isRenderCommand) {
+            std::cerr << "error: expected 'infer', 'render', 'mask-visualization-selftest', or '--help'\n";
             PrintHelp(args.at(0));
             return 2;
         }
@@ -680,7 +811,7 @@ int main(int argc, char* argv[]) {
         }
 
         try {
-            return RunInferCommand(options);
+            return isRenderCommand ? RunRenderCommand(options) : RunInferCommand(options);
         } catch (const std::exception& ex) {
             const json errorJson = {
                 {"language", "cpp"},

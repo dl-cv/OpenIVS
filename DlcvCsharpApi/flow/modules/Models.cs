@@ -692,6 +692,35 @@ namespace DlcvModules
                 }
             }
 
+            var ocrTextByIndex = new Dictionary<int, string>();
+            foreach (var token in resultsOut)
+            {
+                var entry = token as JObject;
+                var samples = entry != null ? entry["sample_results"] as JArray : null;
+                if (entry == null || samples == null) continue;
+
+                JObject best = null;
+                double bestScore = double.MinValue;
+                foreach (var sample in samples)
+                {
+                    var sampleObject = sample as JObject;
+                    string text = sampleObject != null ? sampleObject.Value<string>("category_name") : null;
+                    if (string.IsNullOrEmpty(text)) continue;
+                    double score = sampleObject.Value<double?>("score") ?? 0.0;
+                    if (best == null || score > bestScore)
+                    {
+                        best = sampleObject;
+                        bestScore = score;
+                    }
+                }
+
+                if (best != null)
+                {
+                    int index = entry.Value<int?>("index") ?? -1;
+                    ocrTextByIndex[index] = best.Value<string>("category_name");
+                }
+            }
+
             if (sourceByInferImage != null)
             {
                 for (int i = 0; i < imagesOut.Count; i++)
@@ -702,6 +731,33 @@ namespace DlcvModules
                         imagesOut[i] = sourceImage;
                     }
                 }
+            }
+
+            if (resultList != null && resultList.Count > 0)
+            {
+                var overlaidResults = new JArray();
+                foreach (var token in resultList)
+                {
+                    var sourceEntry = token as JObject;
+                    var overlaidEntry = sourceEntry != null ? (JObject)sourceEntry.DeepClone() : null;
+                    int index = sourceEntry != null ? (sourceEntry.Value<int?>("index") ?? -1) : -1;
+                    if (overlaidEntry != null
+                        && string.Equals(sourceEntry.Value<string>("type"), "local", StringComparison.Ordinal)
+                        && ocrTextByIndex.TryGetValue(index, out string ocrText))
+                    {
+                        var samples = overlaidEntry["sample_results"] as JArray;
+                        if (samples != null)
+                        {
+                            foreach (var sample in samples)
+                            {
+                                var sampleObject = sample as JObject;
+                                if (sampleObject != null) sampleObject["category_name"] = ocrText;
+                            }
+                        }
+                    }
+                    overlaidResults.Add(overlaidEntry != null ? (JToken)overlaidEntry : token.DeepClone());
+                }
+                return new ModuleIO(imagesOut, overlaidResults);
             }
 
             return new ModuleIO(imagesOut, resultsOut);

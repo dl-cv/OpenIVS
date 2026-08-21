@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -558,20 +559,64 @@ ModuleIO ClsModelModule::Process(const std::vector<ModuleImage>& imageList, cons
 
 ModuleIO OcrModelModule::Process(const std::vector<ModuleImage>& imageList, const Json& resultList) {
     const bool useAffineImage = ReadBool("use_affine_img", true);
-    if (!useAffineImage) {
-        ModuleIO baseIo = DetModelModule::Process(imageList, resultList);
-        EnsureBboxForAllSamples(baseIo.ImageList, baseIo.ResultList);
-        return baseIo;
+    std::vector<ModuleImage> inferImages = imageList;
+    if (useAffineImage) {
+        for (auto& image : inferImages) {
+            if (!image.AffineImage.empty()) image.ImageObject = image.AffineImage;
+        }
     }
 
-    std::vector<ModuleImage> inferImages = imageList;
-    for (auto& image : inferImages) {
-        if (!image.AffineImage.empty()) image.ImageObject = image.AffineImage;
-    }
     ModuleIO baseIo = DetModelModule::Process(inferImages, resultList);
     EnsureBboxForAllSamples(baseIo.ImageList, baseIo.ResultList);
-    const size_t count = std::min(baseIo.ImageList.size(), imageList.size());
-    for (size_t i = 0; i < count; i++) baseIo.ImageList[i] = imageList[i];
+
+    std::unordered_map<int, std::string> ocrTextByIndex;
+    if (baseIo.ResultList.is_array()) {
+        for (const auto& token : baseIo.ResultList) {
+            if (!token.is_object() || !token.contains("sample_results") || !token.at("sample_results").is_array()) continue;
+
+            std::string bestText;
+            double bestScore = -std::numeric_limits<double>::infinity();
+            for (const auto& sample : token.at("sample_results")) {
+                if (!sample.is_object()) continue;
+                const std::string text = sample.value("category_name", std::string());
+                if (text.empty()) continue;
+                const double score = ReadScoreForSort(sample);
+                if (bestText.empty() || score > bestScore) {
+                    bestText = text;
+                    bestScore = score;
+                }
+            }
+            if (!bestText.empty()) {
+                ocrTextByIndex[token.value("index", -1)] = bestText;
+            }
+        }
+    }
+
+    if (useAffineImage) {
+        const size_t count = std::min(baseIo.ImageList.size(), imageList.size());
+        for (size_t i = 0; i < count; i++) baseIo.ImageList[i] = imageList[i];
+    }
+
+    if (resultList.is_array() && !resultList.empty()) {
+        Json overlaidResults = Json::array();
+        for (const auto& token : resultList) {
+            Json overlaid = token;
+            if (overlaid.is_object() && overlaid.value("type", std::string()) == "local") {
+                const int index = overlaid.value("index", -1);
+                const auto textIt = ocrTextByIndex.find(index);
+                if (textIt != ocrTextByIndex.end()
+                    && overlaid.contains("sample_results")
+                    && overlaid["sample_results"].is_array()) {
+                    for (auto& sample : overlaid["sample_results"]) {
+                        if (sample.is_object()) sample["category_name"] = textIt->second;
+                    }
+                }
+            }
+            overlaidResults.push_back(std::move(overlaid));
+        }
+        baseIo.ResultList = std::move(overlaidResults);
+    }
+
     return baseIo;
 }
 

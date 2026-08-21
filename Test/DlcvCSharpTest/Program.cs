@@ -1974,11 +1974,59 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static bool ValidatePreservedSegmentationResult(Utils.CSharpObjectResult obj, Mat image, string pathName)
+        {
+            if (!obj.WithMask || obj.Mask == null || obj.Mask.Empty())
+            {
+                Console.WriteLine($"自测失败：{pathName} 路径在 OCR 后没有保留分割 mask");
+                return false;
+            }
+            if (!obj.WithBbox || obj.Bbox == null || obj.Bbox.Count < 4)
+            {
+                Console.WriteLine($"自测失败：{pathName} 路径在 OCR 后没有保留分割 bbox");
+                return false;
+            }
+
+            double x = obj.Bbox[0];
+            double y = obj.Bbox[1];
+            double width = obj.Bbox[2];
+            double height = obj.Bbox[3];
+            const double tolerance = 1.0;
+            if (double.IsNaN(x) || double.IsInfinity(x)
+                || double.IsNaN(y) || double.IsInfinity(y)
+                || double.IsNaN(width) || double.IsInfinity(width)
+                || double.IsNaN(height) || double.IsInfinity(height)
+                || width <= 0.0 || height <= 100.0
+                || x < -tolerance || y < -tolerance
+                || x + width > image.Width + tolerance
+                || y + height > image.Height + tolerance)
+            {
+                Console.WriteLine($"自测失败：{pathName} 路径 bbox 不在原图坐标系，image={image.Width}x{image.Height}, bbox={string.Join(",", obj.Bbox)}");
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(obj.CategoryName))
+            {
+                Console.WriteLine($"自测失败：{pathName} 路径没有合并 OCR 文字");
+                return false;
+            }
+            if (float.IsNaN(obj.Score) || float.IsInfinity(obj.Score))
+            {
+                Console.WriteLine($"自测失败：{pathName} 路径分割 score 非有限值");
+                return false;
+            }
+
+            string maskSpace = obj.Mask.Width == image.Width && obj.Mask.Height == image.Height
+                ? "full-image"
+                : "roi";
+            Console.WriteLine($"{pathName}: image={image.Width}x{image.Height}, bbox={string.Join(",", obj.Bbox)}, mask={obj.Mask.Width}x{obj.Mask.Height}, mask_space={maskSpace}, category_name={obj.CategoryName}, score={obj.Score:F4}");
+            return true;
+        }
+
         private static int RunDvsRgbSelfTest(string[] args)
         {
             if (args == null || args.Length < 3)
             {
-                Console.WriteLine("用法: DlcvCSharpTest dvs-rgb-selftest <modelPath> <imagePath>");
+                Console.WriteLine("用法: DlcvCSharpTest dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]");
                 return 2;
             }
 
@@ -2050,6 +2098,20 @@ namespace DlcvCSharpTest
                 {
                     Console.WriteLine("自测失败：Model(.dvst) 与 DvsModel 直连 flow 的 RGB 结果不一致");
                     return 1;
+                }
+
+                bool requirePreservedMask = args.Length >= 4
+                    && (string.Equals(args[3], "require-preserved-mask", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(args[3], "require-original-mask", StringComparison.OrdinalIgnoreCase));
+                if (requirePreservedMask)
+                {
+                    var wrappedObject = wrappedResult.SampleResults[0].Results[0];
+                    var directObject = directResult.SampleResults[0].Results[0];
+                    if (!ValidatePreservedSegmentationResult(wrappedObject, rgb, "wrapped")
+                        || !ValidatePreservedSegmentationResult(directObject, rgb, "direct"))
+                    {
+                        return 1;
+                    }
                 }
 
                 Console.WriteLine("DVS RGB 自测通过");
@@ -2212,6 +2274,79 @@ namespace DlcvCSharpTest
                 {
                     try { if (Directory.Exists(saveDir)) Directory.Delete(saveDir, true); } catch { }
                 }
+            }
+
+            Type visualizeType = ModuleRegistry.Get("output/visualize");
+            if (visualizeType == null)
+            {
+                Console.WriteLine("output/visualize 未注册");
+                return 1;
+            }
+            using (var original = new Mat(80, 100, MatType.CV_8UC3, Scalar.Black))
+            using (var fullImageMask = new Mat(80, 100, MatType.CV_8UC1, Scalar.Black))
+            {
+                Cv2.Rectangle(fullImageMask, new Rect(10, 15, 12, 8), Scalar.White, -1);
+                var state = new TransformationState(original.Width, original.Height);
+                var visualizeImages = new List<ModuleImage> { new ModuleImage(original, original, state, 0) };
+                var visualizeResults = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = 0,
+                        ["origin_index"] = 0,
+                        ["transform"] = JObject.FromObject(state.ToDict()),
+                        ["sample_results"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["bbox"] = new JArray(10, 15, 12, 8),
+                                ["mask_rle"] = MaskRleUtils.MatToMaskInfo(fullImageMask),
+                                ["with_mask"] = true,
+                                ["category_name"] = "ocr-text",
+                                ["score"] = 0.99
+                            }
+                        }
+                    }
+                };
+                var visualize = (BaseModule)Activator.CreateInstance(
+                    visualizeType,
+                    new object[]
+                    {
+                        404,
+                        null,
+                        new Dictionary<string, object>
+                        {
+                            ["black_background"] = true,
+                            ["display_mask"] = true,
+                            ["display_contours"] = false,
+                            ["display_bbox"] = false,
+                            ["display_text"] = false
+                        },
+                        null
+                    });
+                ModuleIO visualizeOutput = visualize.Process(visualizeImages, visualizeResults);
+                if (visualizeOutput.ImageList.Count != 1 || visualizeOutput.ImageList[0].ImageObject.Empty())
+                {
+                    Console.WriteLine("原图 mask 可视化没有输出图像");
+                    return 1;
+                }
+                Mat visualized = visualizeOutput.ImageList[0].ImageObject;
+                Vec3b expectedPixel = visualized.At<Vec3b>(18, 14);
+                Vec3b doubleOffsetPixel = visualized.At<Vec3b>(33, 24);
+                if (expectedPixel.Item0 == 0 && expectedPixel.Item1 == 0 && expectedPixel.Item2 == 0)
+                {
+                    Console.WriteLine("完整原图尺寸 mask 未绘制在原始坐标");
+                    visualized.Dispose();
+                    return 1;
+                }
+                if (doubleOffsetPixel.Item0 != 0 || doubleOffsetPixel.Item1 != 0 || doubleOffsetPixel.Item2 != 0)
+                {
+                    Console.WriteLine("完整原图尺寸 mask 被重复叠加 bbox 偏移");
+                    visualized.Dispose();
+                    return 1;
+                }
+                visualized.Dispose();
             }
 
             Console.WriteLine("curve_text_affine 自测通过");

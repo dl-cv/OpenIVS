@@ -53,7 +53,7 @@ namespace dlcv_infer_csharp
             /// <summary>
             /// 实例分割或语义分割的mask
             /// 0表示非目标像素，255表示目标像素
-            /// 尺寸与Bbox中的宽高一致
+            /// 可以是 ROI Mask 或完整图 Mask；ROI Mask 可由可视化层缩放到 Bbox 后绘制到原图坐标系
             /// </summary>
             public Mat Mask { get; set; }
 
