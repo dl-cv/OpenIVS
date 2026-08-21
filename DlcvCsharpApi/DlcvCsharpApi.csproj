@@ -92,6 +92,7 @@
     <Compile Include="flow\modules\MaskRleUtils.cs" />
     <Compile Include="flow\modules\ComponentSizeMeasure.cs" />
     <Compile Include="flow\modules\CategoryCountCheck.cs" />
+    <Compile Include="flow\modules\RegionCategoryCheck.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="sntl_admin_csharp.cs" />
     <Compile Include="sequence\Schemas.cs" />
