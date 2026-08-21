@@ -619,7 +619,37 @@ namespace DlcvModules
 
         public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
-            var baseIo = base.Process(imageList, resultList);
+            var sourceImages = imageList ?? new List<ModuleImage>();
+            var inferImages = sourceImages;
+            Dictionary<ModuleImage, ModuleImage> sourceByInferImage = null;
+            if (ReadBoolProperty("use_affine_img", true))
+            {
+                inferImages = new List<ModuleImage>(sourceImages.Count);
+                sourceByInferImage = new Dictionary<ModuleImage, ModuleImage>();
+                foreach (var sourceImage in sourceImages)
+                {
+                    if (sourceImage == null || sourceImage.AffineImage == null || sourceImage.AffineImage.Empty())
+                    {
+                        inferImages.Add(sourceImage);
+                        continue;
+                    }
+
+                    var inferImage = new ModuleImage(
+                        sourceImage.AffineImage,
+                        sourceImage.OriginalImage,
+                        sourceImage.TransformState,
+                        sourceImage.OriginalIndex)
+                    {
+                        AffineImage = sourceImage.AffineImage,
+                        UniqueId = sourceImage.UniqueId,
+                        SlidingMeta = sourceImage.SlidingMeta != null ? (JObject)sourceImage.SlidingMeta.DeepClone() : null
+                    };
+                    inferImages.Add(inferImage);
+                    sourceByInferImage[inferImage] = sourceImage;
+                }
+            }
+
+            var baseIo = base.Process(inferImages, resultList);
             var imagesOut = baseIo != null ? (baseIo.ImageList ?? new List<ModuleImage>()) : new List<ModuleImage>();
             var resultsOut = baseIo != null ? (baseIo.ResultList ?? new JArray()) : new JArray();
 
@@ -662,7 +692,38 @@ namespace DlcvModules
                 }
             }
 
+            if (sourceByInferImage != null)
+            {
+                for (int i = 0; i < imagesOut.Count; i++)
+                {
+                    ModuleImage sourceImage;
+                    if (imagesOut[i] != null && sourceByInferImage.TryGetValue(imagesOut[i], out sourceImage))
+                    {
+                        imagesOut[i] = sourceImage;
+                    }
+                }
+            }
+
             return new ModuleIO(imagesOut, resultsOut);
+        }
+
+        private bool ReadBoolProperty(string key, bool defaultValue)
+        {
+            if (Properties == null || !Properties.TryGetValue(key, out object raw) || raw == null) return defaultValue;
+            try
+            {
+                if (raw is bool value) return value;
+                if (raw is string text)
+                {
+                    if (bool.TryParse(text, out bool parsedBool)) return parsedBool;
+                    if (int.TryParse(text, out int parsedInt)) return parsedInt != 0;
+                }
+                return Convert.ToBoolean(raw);
+            }
+            catch
+            {
+                return defaultValue;
+            }
         }
 	}
 }

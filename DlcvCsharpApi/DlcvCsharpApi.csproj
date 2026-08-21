@@ -79,6 +79,7 @@
     <Compile Include="flow\GraphExecutor.cs" />
     <Compile Include="flow\modules\Inputs.cs" />
     <Compile Include="flow\modules\Models.cs" />
+    <Compile Include="flow\modules\CurveTextAffine.cs" />
     <Compile Include="flow\modules\Outputs.cs" />
     <Compile Include="flow\modules\Features.cs" />
     <Compile Include="flow\modules\SlidingWindow.cs" />

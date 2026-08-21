@@ -22,6 +22,8 @@
 
 #include "../../dlcv_infer_cpp_dll/ImageInputUtils.h"
 #include "../../dlcv_infer_cpp_dll/flow/FlowGraphModel.h"
+#include "../../dlcv_infer_cpp_dll/flow/ModuleRegistry.h"
+#include "../../dlcv_infer_cpp_dll/flow/utils/MaskRleUtils.h"
 #include "dlcv_infer.h"
 
 namespace {
@@ -66,6 +68,83 @@ void DisposeResultMasks(dlcv_infer::Result& out) {
         for (auto& o : sr.results) {
             if (!o.mask.empty()) o.mask.release();
         }
+    }
+}
+
+cv::Mat ReadImageRgb(const std::wstring& imagePath) {
+    FILE* file = nullptr;
+    if (_wfopen_s(&file, imagePath.c_str(), L"rb") != 0 || file == nullptr) return {};
+    std::unique_ptr<FILE, decltype(&fclose)> holder(file, &fclose);
+    if (fseek(file, 0, SEEK_END) != 0) return {};
+    const long size = ftell(file);
+    if (size <= 0 || fseek(file, 0, SEEK_SET) != 0) return {};
+    std::vector<unsigned char> data(static_cast<size_t>(size));
+    if (fread(data.data(), 1, data.size(), file) != data.size()) return {};
+
+    cv::Mat decoded = cv::imdecode(data, cv::IMREAD_COLOR);
+    if (decoded.empty()) return {};
+    cv::Mat rgb;
+    cv::cvtColor(decoded, rgb, cv::COLOR_BGR2RGB);
+    return rgb;
+}
+
+std::string BuildResultSignature(const dlcv_infer::Result& result) {
+    std::ostringstream oss;
+    for (size_t sampleIndex = 0; sampleIndex < result.sampleResults.size(); sampleIndex++) {
+        if (sampleIndex > 0) oss << " || ";
+        oss << "sample" << sampleIndex << ":";
+        const auto& objects = result.sampleResults[sampleIndex].results;
+        for (size_t objectIndex = 0; objectIndex < objects.size(); objectIndex++) {
+            if (objectIndex > 0) oss << ";";
+            const auto& object = objects[objectIndex];
+            oss << object.categoryId << "|" << ToFixed(object.score, 4) << "|" << Safe(object.categoryName) << "|";
+            for (size_t bboxIndex = 0; bboxIndex < object.bbox.size(); bboxIndex++) {
+                if (bboxIndex > 0) oss << ",";
+                oss << ToFixed(object.bbox[bboxIndex], 3);
+            }
+            oss << "|" << ToFixed(object.withAngle ? object.angle : -100.0, 4);
+        }
+    }
+    return oss.str();
+}
+
+int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
+    if (argc < 4) {
+        std::cout << "Usage: dlcv_infer_cpp_test dvs-rgb-selftest <modelPath> <imagePath>\n";
+        return 2;
+    }
+
+    const std::wstring modelPath = argv[2];
+    const std::wstring imagePath = argv[3];
+    std::cout << "==== C++ DVS RGB selftest ====\n";
+    std::cout << "model: " << WideToUtf8(modelPath) << "\n";
+    std::cout << "image: " << WideToUtf8(imagePath) << "\n";
+
+    try {
+        cv::Mat rgb = ReadImageRgb(imagePath);
+        if (rgb.empty()) {
+            std::cout << "selftest failed: image decode failed\n";
+            return 1;
+        }
+
+        dlcv_infer::Model model(modelPath, 0);
+        json params = {
+            {"threshold", 0.5},
+            {"with_mask", true},
+            {"batch_size", 1}
+        };
+        dlcv_infer::Result result = model.InferBatch({ rgb }, params);
+        std::cout << "signature: " << BuildResultSignature(result) << "\n";
+        if (result.sampleResults.empty() || result.sampleResults.front().results.empty()) {
+            std::cout << "selftest failed: DVS flow returned an empty result\n";
+            return 1;
+        }
+        DisposeResultMasks(result);
+        std::cout << "C++ DVS RGB selftest passed\n";
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cout << "selftest exception: " << ex.what() << "\n";
+        return 1;
     }
 }
 
@@ -121,6 +200,75 @@ cv::Mat LoadSingleFileWithSuffix(const std::string& dir, const std::string& suff
     } while (FindNextFileA(h, &data));
     FindClose(h);
     return matchCount == 1 ? loaded : cv::Mat();
+}
+
+int RunCurveTextAffineSelfTest() {
+    auto fail = [](const std::string& message) -> int {
+        std::cout << "curve_text_affine selftest failed: " << message << "\n";
+        return 1;
+    };
+
+    cv::Mat probabilityMask(20, 30, CV_32FC1, cv::Scalar(0.01f));
+    cv::rectangle(probabilityMask, cv::Rect(6, 4, 18, 12), cv::Scalar(0.9f), cv::FILLED);
+    probabilityMask.at<float>(0, 0) = 0.5f;
+    const json maskInfo = dlcv_infer::flow::MatToMaskInfo(probabilityMask);
+    const cv::Mat decoded = dlcv_infer::flow::MaskInfoToMat(maskInfo);
+    if (decoded.empty() || cv::countNonZero(decoded) != 217) {
+        return fail("probability mask foreground count mismatch");
+    }
+    if (decoded.at<std::uint8_t>(0, 0) == 0
+        || decoded.at<std::uint8_t>(3, 6) != 0
+        || decoded.at<std::uint8_t>(4, 6) == 0) {
+        return fail("probability mask threshold or boundary mismatch");
+    }
+
+    if (!dlcv_infer::flow::ModuleRegistry::Has("pre_process/curve_text_affine")) {
+        return fail("pre_process/curve_text_affine is not registered");
+    }
+
+    cv::Mat image(180, 360, CV_8UC3, cv::Scalar::all(0));
+    cv::Mat mask(180, 360, CV_8UC1, cv::Scalar::all(0));
+    const std::vector<cv::Point> polygon = {
+        {20,72}, {80,48}, {150,38}, {230,48}, {340,78},
+        {340,126}, {230,96}, {150,86}, {80,96}, {20,120}
+    };
+    cv::fillPoly(mask, std::vector<std::vector<cv::Point>>{polygon}, cv::Scalar::all(255));
+    image.setTo(cv::Scalar(240, 240, 240), mask);
+    for (int x = 45; x < 330; x += 28) {
+        cv::line(image, cv::Point(x, 45), cv::Point(x, 125), cv::Scalar(20, 20, 20), 4);
+    }
+
+    dlcv_infer::flow::TransformationState state(image.cols, image.rows);
+    std::vector<dlcv_infer::flow::ModuleImage> images = {
+        dlcv_infer::flow::ModuleImage(image, image, state, 0)
+    };
+    json results = json::array({
+        json::object({
+            {"type", "local"}, {"index", 0}, {"origin_index", 0}, {"transform", state.ToJson()},
+            {"sample_results", json::array({
+                json::object({
+                    {"bbox", json::array({0, 0, image.cols, image.rows})},
+                    {"mask_rle", dlcv_infer::flow::MatToMaskInfo(mask)},
+                    {"score", 0.99}, {"category_name", "text"}
+                })
+            })}
+        })
+    });
+    const auto factory = dlcv_infer::flow::ModuleRegistry::Get("pre_process/curve_text_affine");
+    auto module = factory(401, std::string(), json::object({
+        {"out_height", 80}, {"sample_step", 10.0}, {"shrink_inside", 1.5}, {"method", "auto"}
+    }), nullptr);
+    const dlcv_infer::flow::ModuleIO output = module->Process(images, results);
+    if (output.ImageList.size() != 1 || !output.ResultList.is_array() || output.ResultList.size() != 1) {
+        return fail("curve output count mismatch");
+    }
+    const cv::Mat& affine = output.ImageList[0].AffineImage;
+    if (affine.empty() || affine.rows != 80 || affine.cols < 250) {
+        return fail("curve affine image is invalid");
+    }
+
+    std::cout << "curve_text_affine selftest passed\n";
+    return 0;
 }
 
 int RunImagePrepCheck() {
@@ -1681,6 +1829,14 @@ int wmain(int argc, wchar_t* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"dvs-rgb-selftest") {
+        return RunDvsRgbSelfTest(argc, argv);
+    }
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"curve-text-affine-selftest") {
+        return RunCurveTextAffineSelfTest();
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"imageprepcheck") {
         return RunImagePrepCheck();
     }
@@ -1721,6 +1877,8 @@ int wmain(int argc, wchar_t* argv[]) {
 
     std::cout << "Usage: " << (argc >= 1 ? WideToUtf8(argv[0]) : "dlcv_infer_cpp_test") << " <subcommand>\n";
     std::cout << "Available subcommands:\n";
+    std::cout << "  dvs-rgb-selftest <modelPath> <imagePath>\n";
+    std::cout << "  curve-text-affine-selftest\n";
     std::cout << "  imageprepcheck\n";
     std::cout << "  rect-image-correction-selftest\n";
     std::cout << "  bbox-iou-dedup-selftest\n";

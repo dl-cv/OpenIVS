@@ -557,8 +557,21 @@ ModuleIO ClsModelModule::Process(const std::vector<ModuleImage>& imageList, cons
 }
 
 ModuleIO OcrModelModule::Process(const std::vector<ModuleImage>& imageList, const Json& resultList) {
-    ModuleIO baseIo = DetModelModule::Process(imageList, resultList);
+    const bool useAffineImage = ReadBool("use_affine_img", true);
+    if (!useAffineImage) {
+        ModuleIO baseIo = DetModelModule::Process(imageList, resultList);
+        EnsureBboxForAllSamples(baseIo.ImageList, baseIo.ResultList);
+        return baseIo;
+    }
+
+    std::vector<ModuleImage> inferImages = imageList;
+    for (auto& image : inferImages) {
+        if (!image.AffineImage.empty()) image.ImageObject = image.AffineImage;
+    }
+    ModuleIO baseIo = DetModelModule::Process(inferImages, resultList);
     EnsureBboxForAllSamples(baseIo.ImageList, baseIo.ResultList);
+    const size_t count = std::min(baseIo.ImageList.size(), imageList.size());
+    for (size_t i = 0; i < count; i++) baseIo.ImageList[i] = imageList[i];
     return baseIo;
 }
 

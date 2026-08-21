@@ -181,6 +181,7 @@
     <ClCompile Include="flow\GraphExecutor.cpp" />
     <ClCompile Include="flow\FlowGraphModel.cpp" />
     <ClCompile Include="flow\modules\ModelModules.cpp" />
+    <ClCompile Include="flow\modules\CurveTextAffineModule.cpp" />
     <ClCompile Include="flow\modules\InputModules.cpp" />
     <ClCompile Include="flow\modules\OutputModules.cpp" />
     <ClCompile Include="flow\modules\SlidingModules.cpp" />

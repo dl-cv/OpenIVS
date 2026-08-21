@@ -59,7 +59,10 @@
     <ClCompile><WarningLevel>Level3</WarningLevel><FunctionLevelLinking>true</FunctionLevelLinking><IntrinsicFunctions>true</IntrinsicFunctions><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions><LanguageStandard>stdcpp17</LanguageStandard><AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>$(ProjectDir)..\..\dlcv_infer_cpp_dll;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
     <Link><SubSystem>Console</SubSystem><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\..\dlcv_infer_cpp_dll\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="main.cpp" /></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="..\..\dlcv_infer_cpp_dll\flow\modules\CurveTextAffineModule.cpp" />
+  </ItemGroup>
   <ItemGroup><ProjectReference Include="..\..\dlcv_infer_cpp_dll\dlcv_infer_cpp_dll.vcxproj"><Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project><LinkLibraryDependencies>true</LinkLibraryDependencies></ProjectReference></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyDlcvInferCppDll" AfterTargets="Build" Condition="'$(BuildingSolutionFile)'!='true'">

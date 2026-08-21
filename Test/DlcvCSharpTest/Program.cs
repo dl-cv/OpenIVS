@@ -78,6 +78,11 @@ namespace DlcvCSharpTest
                     return RunMaskToRBoxSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "curve-text-affine-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunCurveTextAffineSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bbox-iou-dedup-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunBBoxIoUDedupSelfTest();
@@ -2028,6 +2033,19 @@ namespace DlcvCSharpTest
                 Console.WriteLine("wrapped_signature: " + wrappedSig);
                 Console.WriteLine("direct_signature: " + directSig);
 
+                if (wrappedResult.SampleResults == null
+                    || wrappedResult.SampleResults.Count == 0
+                    || wrappedResult.SampleResults[0].Results == null
+                    || wrappedResult.SampleResults[0].Results.Count == 0
+                    || directResult.SampleResults == null
+                    || directResult.SampleResults.Count == 0
+                    || directResult.SampleResults[0].Results == null
+                    || directResult.SampleResults[0].Results.Count == 0)
+                {
+                    Console.WriteLine("自测失败：DVS 流程返回空结果，不能仅凭两条路径相等判定通过");
+                    return 1;
+                }
+
                 if (!string.Equals(wrappedSig, directSig, StringComparison.Ordinal))
                 {
                     Console.WriteLine("自测失败：Model(.dvst) 与 DvsModel 直连 flow 的 RGB 结果不一致");
@@ -2052,6 +2070,152 @@ namespace DlcvCSharpTest
                 try { if (model != null) model.Dispose(); } catch { }
                 ForceGc();
             }
+        }
+
+        private static int RunCurveTextAffineSelfTest()
+        {
+            Console.WriteLine("==== curve_text_affine 自测 ====");
+
+            using (var probabilityMask = new Mat(20, 30, MatType.CV_32FC1, Scalar.All(0.01)))
+            {
+                Cv2.Rectangle(probabilityMask, new Rect(6, 4, 18, 12), Scalar.All(0.9), -1);
+                probabilityMask.Set(0, 0, 0.5f);
+                JObject maskInfo = MaskRleUtils.MatToMaskInfo(probabilityMask);
+                using (Mat decoded = MaskRleUtils.MaskInfoToMat(maskInfo))
+                {
+                    if (decoded.Empty() || Cv2.CountNonZero(decoded) != 217)
+                    {
+                        Console.WriteLine("概率 mask 二值化错误，前景像素数: " + (decoded.Empty() ? -1 : Cv2.CountNonZero(decoded)));
+                        return 1;
+                    }
+                    if (decoded.At<byte>(0, 0) == 0 || decoded.At<byte>(3, 6) != 0 || decoded.At<byte>(4, 6) == 0)
+                    {
+                        Console.WriteLine("概率 mask 的 0.5 阈值或区域边界错误");
+                        return 1;
+                    }
+                }
+            }
+
+            _ = new GraphExecutor(new List<Dictionary<string, object>>());
+            Type moduleType = ModuleRegistry.Get("pre_process/curve_text_affine");
+            if (moduleType == null)
+            {
+                Console.WriteLine("pre_process/curve_text_affine 未注册");
+                return 1;
+            }
+
+            using (var image = new Mat(180, 360, MatType.CV_8UC3, Scalar.Black))
+            using (var mask = new Mat(180, 360, MatType.CV_8UC1, Scalar.Black))
+            {
+                var polygon = new Point[]
+                {
+                    new Point(20, 72), new Point(80, 48), new Point(150, 38), new Point(230, 48), new Point(340, 78),
+                    new Point(340, 126), new Point(230, 96), new Point(150, 86), new Point(80, 96), new Point(20, 120)
+                };
+                Cv2.FillPoly(mask, new[] { polygon }, Scalar.White);
+                image.SetTo(new Scalar(240, 240, 240), mask);
+                for (int x = 45; x < 330; x += 28)
+                    Cv2.Line(image, new Point(x, 45), new Point(x, 125), new Scalar(20, 20, 20), 4);
+
+                var state = new TransformationState(image.Width, image.Height);
+                var images = new List<ModuleImage> { new ModuleImage(image, image, state, 0) };
+                var results = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = 0,
+                        ["origin_index"] = 0,
+                        ["transform"] = JObject.FromObject(state.ToDict()),
+                        ["sample_results"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["bbox"] = new JArray(0, 0, image.Width, image.Height),
+                                ["mask_rle"] = MaskRleUtils.MatToMaskInfo(mask),
+                                ["score"] = 0.99,
+                                ["category_name"] = "text"
+                            }
+                        }
+                    }
+                };
+                var module = (BaseModule)Activator.CreateInstance(
+                    moduleType,
+                    new object[]
+                    {
+                        401,
+                        null,
+                        new Dictionary<string, object>
+                        {
+                            ["out_height"] = 80,
+                            ["sample_step"] = 10.0,
+                            ["shrink_inside"] = 1.5,
+                            ["method"] = "auto"
+                        },
+                        null
+                    });
+                ModuleIO output = module.Process(images, results);
+                if (output.ImageList.Count != 1 || output.ResultList.Count != 1)
+                {
+                    Console.WriteLine("曲线拉直输出数量错误");
+                    return 1;
+                }
+                var affineProperty = typeof(ModuleImage).GetProperty("AffineImage");
+                var affine = affineProperty != null ? affineProperty.GetValue(output.ImageList[0]) as Mat : null;
+                if (affine == null || affine.Empty() || affine.Height != 80 || affine.Width < 250)
+                {
+                    Console.WriteLine("曲线拉直图像无效");
+                    return 1;
+                }
+
+                var preview = new Preview(
+                    402,
+                    null,
+                    new Dictionary<string, object>(),
+                    null);
+                ModuleIO previewOutput = preview.Process(output.ImageList, output.ResultList);
+                if (previewOutput.ImageList.Count != 1
+                    || ReferenceEquals(previewOutput.ImageList[0], output.ImageList[0])
+                    || !ReferenceEquals(previewOutput.ImageList[0].ImageObject, affine)
+                    || !ReferenceEquals(output.ImageList[0].ImageObject, image))
+                {
+                    Console.WriteLine("preview 未正确使用拉直图，或修改了原始 wrapper");
+                    return 1;
+                }
+
+                string saveDir = Path.Combine(Path.GetTempPath(), "dlcv_curve_affine_" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    var saveImage = new SaveImage(
+                        403,
+                        null,
+                        new Dictionary<string, object>
+                        {
+                            ["save_path"] = saveDir,
+                            ["suffix"] = "_affine",
+                            ["format"] = "png"
+                        },
+                        null);
+                    var saveResults = new JArray(new JObject { ["filename"] = "curve.png" });
+                    saveImage.Process(output.ImageList, saveResults);
+                    string savedPath = Path.Combine(saveDir, "curve_affine.png");
+                    using (Mat saved = Cv2.ImRead(savedPath, ImreadModes.Unchanged))
+                    {
+                        if (saved.Empty() || saved.Width != affine.Width || saved.Height != affine.Height)
+                        {
+                            Console.WriteLine("save_image 未默认保存拉直图");
+                            return 1;
+                        }
+                    }
+                }
+                finally
+                {
+                    try { if (Directory.Exists(saveDir)) Directory.Delete(saveDir, true); } catch { }
+                }
+            }
+
+            Console.WriteLine("curve_text_affine 自测通过");
+            return 0;
         }
 
         private static int RunMaskToRBoxSelfTest()
