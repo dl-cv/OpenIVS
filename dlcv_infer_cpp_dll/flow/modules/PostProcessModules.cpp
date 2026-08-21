@@ -2328,6 +2328,245 @@ private:
     }
 };
 
+/// post_process/region_category_check
+class RegionCategoryCheckModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        Json results = resultList.is_array() ? resultList : Json::array();
+        return ProcessCore(imageList, std::move(results));
+    }
+
+    ModuleIO ProcessOwned(const std::vector<ModuleImage>& imageList, Json&& resultList) override {
+        Json results = resultList.is_array() ? std::move(resultList) : Json::array();
+        return ProcessCore(imageList, std::move(results));
+    }
+
+private:
+    struct Rule final {
+        double X = 0.0;
+        double Y = 0.0;
+        double Width = 0.0;
+        double Height = 0.0;
+        std::string Category;
+        int Expect = 0;
+    };
+
+    static double ParseNumber(const Json& value, double defaultValue) {
+        try {
+            if (value.is_number()) return value.get<double>();
+            if (value.is_string()) return std::stod(value.get<std::string>());
+        } catch (...) {}
+        return defaultValue;
+    }
+
+    static int ParseExpect(const Json& value) {
+        const double number = ParseNumber(value, 0.0);
+        if (!std::isfinite(number)) return 0;
+        if (number >= static_cast<double>(std::numeric_limits<int>::max())) {
+            return std::numeric_limits<int>::max();
+        }
+        if (number <= static_cast<double>(std::numeric_limits<int>::min())) {
+            return std::numeric_limits<int>::min();
+        }
+        return static_cast<int>(number);
+    }
+
+    std::vector<Rule> ParseRules() const {
+        Json raw = Json::array();
+        try {
+            if (Properties.is_object() && Properties.contains("rules")) raw = Properties.at("rules");
+            if (raw.is_string()) raw = Json::parse(raw.get<std::string>());
+        } catch (...) {
+            return {};
+        }
+
+        if (raw.is_object()) raw = Json::array({ raw });
+        if (!raw.is_array()) return {};
+
+        std::vector<Rule> rules;
+        for (const auto& item : raw) {
+            if (!item.is_object()) continue;
+            Rule rule;
+            if (item.contains("x")) rule.X = ParseNumber(item.at("x"), 0.0);
+            if (item.contains("y")) rule.Y = ParseNumber(item.at("y"), 0.0);
+            if (item.contains("w")) rule.Width = ParseNumber(item.at("w"), 0.0);
+            if (item.contains("h")) rule.Height = ParseNumber(item.at("h"), 0.0);
+            if (item.contains("category") && !item.at("category").is_null()) {
+                rule.Category = item.at("category").is_string()
+                    ? item.at("category").get<std::string>()
+                    : item.at("category").dump();
+            }
+            if (item.contains("expect")) rule.Expect = ParseExpect(item.at("expect"));
+            rules.push_back(std::move(rule));
+        }
+        return rules;
+    }
+
+    static bool IsInRegion(
+        const Json& detection,
+        const Rule& rule,
+        const std::string& mode,
+        double iouThreshold
+    ) {
+        if (!detection.is_object() || !detection.contains("bbox")) return false;
+        const Json& bbox = detection.at("bbox");
+        if (!bbox.is_array() || bbox.size() != 4) return false;
+
+        const double x = ParseNumber(bbox.at(0), std::numeric_limits<double>::quiet_NaN());
+        const double y = ParseNumber(bbox.at(1), std::numeric_limits<double>::quiet_NaN());
+        const double width = ParseNumber(bbox.at(2), std::numeric_limits<double>::quiet_NaN());
+        const double height = ParseNumber(bbox.at(3), std::numeric_limits<double>::quiet_NaN());
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) || !std::isfinite(height)) {
+            return false;
+        }
+
+        const double x2 = x + width;
+        const double y2 = y + height;
+        const double regionX2 = rule.X + rule.Width;
+        const double regionY2 = rule.Y + rule.Height;
+
+        if (mode == "center_in_region") {
+            const double centerX = x + width / 2.0;
+            const double centerY = y + height / 2.0;
+            return rule.X <= centerX && centerX <= regionX2 &&
+                rule.Y <= centerY && centerY <= regionY2;
+        }
+
+        if (mode == "iou") {
+            const double intersectionWidth = std::max(0.0, std::min(x2, regionX2) - std::max(x, rule.X));
+            const double intersectionHeight = std::max(0.0, std::min(y2, regionY2) - std::max(y, rule.Y));
+            const double intersectionArea = intersectionWidth * intersectionHeight;
+            const double boxArea = std::max(1e-8, width * height);
+            return intersectionArea / boxArea >= iouThreshold;
+        }
+
+        return !(x2 <= rule.X || x >= regionX2 || y2 <= rule.Y || y >= regionY2);
+    }
+
+    static std::string ReadCategoryName(const Json& detection) {
+        try {
+            if (!detection.is_object() || !detection.contains("category_name")) return std::string();
+            const Json& value = detection.at("category_name");
+            if (value.is_string()) return value.get<std::string>();
+            if (!value.is_null()) return value.dump();
+        } catch (...) {}
+        return std::string();
+    }
+
+    ModuleIO ProcessCore(const std::vector<ModuleImage>& imageList, Json&& results) {
+        const std::vector<Rule> rules = ParseRules();
+        const std::string matchMode = ReadString("match_mode", "center_in_region");
+        const double iouThreshold = ReadDouble("iou_threshold", 0.3);
+        const bool generateVirtual = ReadBool("generate_virtual_box", true);
+        const bool markOutside = ReadBool("mark_outside_as_excess", true);
+        bool allOk = true;
+        std::vector<std::string> allReasons;
+
+        for (auto& entry : results) {
+            if (!entry.is_object() || entry.value("type", std::string()) != "local") continue;
+
+            Json detections = entry.contains("sample_results") && entry.at("sample_results").is_array()
+                ? entry.at("sample_results")
+                : Json::array();
+            const size_t sourceCount = detections.size();
+            std::vector<std::string> violations;
+
+            for (const auto& rule : rules) {
+                std::vector<size_t> inRegion;
+                std::vector<size_t> outside;
+
+                for (size_t detectionIndex = 0; detectionIndex < sourceCount; detectionIndex++) {
+                    const Json& detection = detections.at(detectionIndex);
+                    if (!detection.is_object() || ReadCategoryName(detection) != rule.Category) continue;
+                    if (IsInRegion(detection, rule, matchMode, iouThreshold)) {
+                        inRegion.push_back(detectionIndex);
+                    } else {
+                        outside.push_back(detectionIndex);
+                    }
+                }
+
+                if (static_cast<int>(inRegion.size()) < rule.Expect) {
+                    const int shortCount = rule.Expect - static_cast<int>(inRegion.size());
+                    for (int i = 0; i < shortCount; i++) {
+                        const std::string reason = rule.Category + " 缺失";
+                        if (generateVirtual) {
+                            Json virtualDetection = Json::object();
+                            virtualDetection["category_name"] = rule.Category;
+                            virtualDetection["score"] = 0;
+                            virtualDetection["bbox"] = Json::array({ rule.X, rule.Y, rule.Width, rule.Height });
+                            virtualDetection["reason"] = reason;
+                            virtualDetection["is_virtual"] = true;
+                            detections.push_back(std::move(virtualDetection));
+                        }
+                        violations.push_back(reason);
+                    }
+                }
+
+                if (static_cast<int>(inRegion.size()) > rule.Expect) {
+                    const std::string reason = rule.Category + " 区域内超量";
+                    const size_t firstExcess = rule.Expect > 0 ? static_cast<size_t>(rule.Expect) : 0;
+                    for (size_t i = firstExcess; i < inRegion.size(); i++) {
+                        Json& detection = detections.at(inRegion[i]);
+                        detection["reason"] = reason;
+                        detection["is_virtual"] = false;
+                    }
+                    violations.push_back(reason);
+                }
+
+                if (markOutside && !outside.empty()) {
+                    const std::string reason = rule.Category + " 区域外检出";
+                    for (size_t detectionIndex : outside) {
+                        Json& detection = detections.at(detectionIndex);
+                        detection["reason"] = reason;
+                        detection["is_virtual"] = false;
+                    }
+                    violations.push_back(reason);
+                }
+            }
+
+            const bool moduleOk = violations.empty();
+            bool entryOk = moduleOk;
+            if (entry.contains("ok") && entry.at("ok").is_boolean()) {
+                const bool existingOk = entry.at("ok").get<bool>();
+                entryOk = moduleOk ? existingOk : false;
+            }
+
+            Json entryReasons = Json::array();
+            if (entry.contains("reason") && entry.at("reason").is_array()) {
+                entryReasons = entry.at("reason");
+            }
+            for (const auto& reason : violations) entryReasons.push_back(reason);
+
+            entry["ok"] = entryOk;
+            entry["reason"] = entryReasons.empty() ? Json(nullptr) : std::move(entryReasons);
+            entry["sample_results"] = std::move(detections);
+
+            if (!entryOk) {
+                allOk = false;
+                const Json& reasons = entry.at("reason");
+                if (reasons.is_array()) {
+                    for (const auto& reason : reasons) {
+                        if (reason.is_null()) continue;
+                        allReasons.push_back(reason.is_string() ? reason.get<std::string>() : reason.dump());
+                    }
+                }
+            }
+        }
+
+        ScalarOutputsByName["ok"] = allOk;
+        std::string reasonText;
+        for (size_t i = 0; i < allReasons.size(); i++) {
+            if (i > 0) reasonText += "; ";
+            reasonText += allReasons[i];
+        }
+        ScalarOutputsByName["reason"] = reasonText;
+
+        return ModuleIO(imageList, results, Json::array());
+    }
+};
+
 /// post_process/category_count_check
 class CategoryCountCheckModule final : public BaseModule {
 public:
@@ -2603,6 +2842,7 @@ DLCV_FLOW_REGISTER_MODULE("post_process/multi_category_filter", MultiCategoryFil
 DLCV_FLOW_REGISTER_MODULE("features/multi_category_filter", MultiCategoryFilterModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/result_filter_advanced", ResultFilterAdvancedModule)
 DLCV_FLOW_REGISTER_MODULE("features/result_filter_advanced", ResultFilterAdvancedModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/region_category_check", RegionCategoryCheckModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/category_count_check", CategoryCountCheckModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/count_results", CountResultsModule)
 DLCV_FLOW_REGISTER_MODULE("features/count_results", CountResultsModule)
