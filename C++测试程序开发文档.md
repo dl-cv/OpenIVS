@@ -53,13 +53,15 @@
 ### 3.1 程序入口（main.cpp）
 
 - 无参数时初始化 `QApplication`、显示 `MainWindow`，退出前调用 `FreeAllModels()`。
-- 有参数时解析 `infer` 或 `--help`；`infer` 模式不显示窗口，完成验证后直接返回退出码。
+- 有参数时解析 `infer`、`render`、`mask-visualization-selftest` 或 `--help`；命令行模式不进入主窗口事件循环，完成验证后直接返回退出码。
 - Windows 控制台输入输出使用 UTF-8；模型路径通过 `std::wstring` 传给 C++ API。
 
 ### 3.2 命令行推理模式
 
 ```text
 dlcv_infer_cpp_qt_demo.exe infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
+dlcv_infer_cpp_qt_demo.exe render --model <path> --image <path> --threshold <0..1> --output <pngPath> [--device <int>] [--with-mask <true|false>]
+dlcv_infer_cpp_qt_demo.exe mask-visualization-selftest
 dlcv_infer_cpp_qt_demo.exe --help
 ```
 
@@ -70,8 +72,10 @@ dlcv_infer_cpp_qt_demo.exe --help
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，输出字段与 C# 测试程序一致；开启均值计算时同时检查两种结果的均值字段。
 - 输出中的 `inspection` 包含最近一次流程判定的 `present`、`ok`、`reason`，`inspection_consistent` 检查结构化与 JSON 两条路径的判定一致性。
 - C++ 结构化结果的本地 GBK 类别名在 CLI 边界转换为 UTF-8，再写入 JSON。
-- `--output` 使用 `QSaveFile` 原子写入 UTF-8 JSON；该路径不得覆盖模型或图片，父目录必须存在。
+- `infer --output` 使用 `QSaveFile` 原子写入 UTF-8 JSON；`render --output` 保存 `ImageViewerWidget` 的真实绘制结果，输出逻辑尺寸与原图一致。输出路径不得覆盖模型或图片，父目录必须存在。
 - 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致、存在低于阈值的结果或均值检查失败。
+- `render` 使用原图作为底图，并把最终结果中的 ROI Mask 缩放到 bbox 后回贴到原图坐标；完整图 Mask 则从 `(0,0)` 绘制。
+- `mask-visualization-selftest` 使用一个完整图 Mask 合成用例，检查其未被重复叠加 bbox 偏移；渲染结果写入系统临时目录的 `dlcv_mask_visualization_selftest.png`。
 
 ### 3.3 UI 布局
 

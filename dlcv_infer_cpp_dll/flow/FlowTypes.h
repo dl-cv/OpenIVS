@@ -146,6 +146,7 @@ struct TransformationState final {
 /// </summary>
 struct ModuleImage final {
     cv::Mat ImageObject;          // 当前图（可能是裁剪/旋转后的）
+    cv::Mat AffineImage;          // 曲线拉直后的附加视图，不改变 TransformState
     cv::Mat OriginalImage;        // 原图（用于回写到原图坐标）
     TransformationState TransformState;
     int OriginalIndex = 0;

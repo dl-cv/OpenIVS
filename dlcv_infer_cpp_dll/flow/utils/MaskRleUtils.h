@@ -27,17 +27,27 @@ inline Json MatToMaskInfo(const cv::Mat& mask) {
         width = std::max(0, mask.cols);
         if (width > 0 && height > 0) {
             cv::Mat src = mask;
-            if (!src.isContinuous()) src = src.clone();
-            cv::Mat u8;
-            if (src.type() != CV_8UC1) {
-                if (src.channels() == 1) {
-                    src.convertTo(u8, CV_8U);
-                } else {
-                    cv::cvtColor(src, u8, cv::COLOR_BGR2GRAY);
-                }
+            cv::Mat single;
+            if (src.channels() == 1) {
+                single = src;
+            } else if (src.channels() == 3) {
+                cv::cvtColor(src, single, cv::COLOR_BGR2GRAY);
+            } else if (src.channels() == 4) {
+                cv::cvtColor(src, single, cv::COLOR_BGRA2GRAY);
             } else {
-                u8 = src;
+                cv::extractChannel(src, single, 0);
             }
+
+            double minValue = 0.0;
+            double maxValue = 0.0;
+            cv::minMaxLoc(single, &minValue, &maxValue);
+            cv::Mat u8;
+            if (minValue >= 0.0 && maxValue <= 1.0) {
+                cv::compare(single, cv::Scalar(0.5), u8, cv::CMP_GE);
+            } else {
+                cv::compare(single, cv::Scalar(127.0), u8, cv::CMP_GT);
+            }
+            if (!u8.isContinuous()) u8 = u8.clone();
 
             const int total = width * height;
             const uint8_t* buf = reinterpret_cast<const uint8_t*>(u8.data);

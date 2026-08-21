@@ -186,6 +186,7 @@ namespace DlcvModules
     public class ModuleImage
     {
         public Mat ImageObject { get; private set; }
+        public Mat AffineImage { get; set; }
         public Mat OriginalImage { get; private set; }
         public TransformationState TransformState { get; private set; }
         public int OriginalIndex { get; private set; }

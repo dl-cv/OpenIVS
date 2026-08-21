@@ -445,6 +445,12 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
             return;
         }
 
+        const bool fullImageMask = overlay.width() == image_.width() && overlay.height() == image_.height();
+        if (fullImageMask) {
+            painter.drawImage(QRectF(0.0, 0.0, image_.width(), image_.height()), overlay);
+            return;
+        }
+
         if (rotateWithBbox) {
             constexpr qreal radiansToDegrees = 180.0 / 3.14159265358979323846;
             painter.save();

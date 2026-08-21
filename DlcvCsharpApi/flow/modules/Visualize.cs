@@ -153,7 +153,8 @@ namespace DlcvModules
                     // 绘制 mask/contours
                     if (vis.DisplayMask || vis.DisplayContours)
                     {
-                        var contours = ReadMaskContours(so, lx, ly);
+                        bool maskInTargetSpace;
+                        var contours = ReadMaskContours(so, lx, ly, lw, lh, target.Width, target.Height, out maskInTargetSpace);
                         foreach (var poly in contours)
                         {
                             if (poly == null || poly.Count < 3) continue;
@@ -162,7 +163,7 @@ namespace DlcvModules
                             foreach (var p in poly)
                             {
                                 double x = p.X, y = p.Y;
-                                if (inv2x3 != null)
+                                if (inv2x3 != null && !maskInTargetSpace)
                                 {
                                     double gx = inv2x3[0] * x + inv2x3[1] * y + inv2x3[2];
                                     double gy = inv2x3[3] * x + inv2x3[4] * y + inv2x3[5];
@@ -277,9 +278,12 @@ namespace DlcvModules
 			return true;
 		}
 
-        private static List<List<Point2d>> ReadMaskContours(JObject s, double bx, double by)
+        private static List<List<Point2d>> ReadMaskContours(
+            JObject s, double bx, double by, double bw, double bh,
+            int targetWidth, int targetHeight, out bool maskInTargetSpace)
         {
             var result = new List<List<Point2d>>();
+            maskInTargetSpace = false;
 
             var maskRle = s["mask_rle"];
             if (maskRle != null)
@@ -290,6 +294,12 @@ namespace DlcvModules
                     {
                         if (maskMat != null && !maskMat.Empty())
                         {
+                            maskInTargetSpace = maskMat.Width == targetWidth && maskMat.Height == targetHeight;
+                            double sx = maskInTargetSpace ? 1.0 : Math.Max(1.0, bw) / Math.Max(1, maskMat.Width);
+                            double sy = maskInTargetSpace ? 1.0 : Math.Max(1.0, bh) / Math.Max(1, maskMat.Height);
+                            double ox = maskInTargetSpace ? 0.0 : bx;
+                            double oy = maskInTargetSpace ? 0.0 : by;
+
                             OpenCvSharp.Point[][] contours;
                             HierarchyIndex[] hierarchy;
                             Cv2.FindContours(maskMat, out contours, out hierarchy, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
@@ -300,7 +310,7 @@ namespace DlcvModules
                                     var list = new List<Point2d>();
                                     foreach (var p in c)
                                     {
-                                        list.Add(new Point2d(p.X + bx, p.Y + by));
+                                        list.Add(new Point2d(ox + p.X * sx, oy + p.Y * sy));
                                     }
                                     result.Add(list);
                                 }

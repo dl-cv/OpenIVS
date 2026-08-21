@@ -24,29 +24,74 @@ namespace DlcvModules
 				width = Math.Max(0, mask.Cols);
 				if (width > 0 && height > 0)
 				{
-					Mat src = mask;
-					try { if (!mask.IsContinuous()) src = mask.Clone(); } catch { }
-					int total = width * height;
-					var buf = new byte[total];
-					try { Marshal.Copy(src.Data, buf, 0, total); } catch { }
-
-					int currentValue = 0; // 首段固定为 0
-					int count = 0;
-					for (int i = 0; i < total; i++)
+					Mat single = null;
+					Mat binary = null;
+					try
 					{
-						int bit = buf[i] != 0 ? 1 : 0;
-						if (bit == currentValue)
+						if (mask.Channels() == 1)
 						{
-							count += 1;
+							single = mask;
 						}
 						else
 						{
+							single = new Mat();
+							if (mask.Channels() == 3)
+								Cv2.CvtColor(mask, single, ColorConversionCodes.BGR2GRAY);
+							else if (mask.Channels() == 4)
+								Cv2.CvtColor(mask, single, ColorConversionCodes.BGRA2GRAY);
+							else
+								Cv2.ExtractChannel(mask, single, 0);
+						}
+
+						Cv2.MinMaxLoc(single, out double minValue, out double maxValue);
+						binary = new Mat();
+						if (minValue >= 0.0 && maxValue <= 1.0)
+							Cv2.Compare(single, Scalar.All(0.5), binary, CmpType.GE);
+						else
+							Cv2.Compare(single, Scalar.All(127.0), binary, CmpType.GT);
+
+						Mat src = binary;
+						Mat continuous = null;
+						try
+						{
+							if (!binary.IsContinuous())
+							{
+								continuous = binary.Clone();
+								src = continuous;
+							}
+
+							int total = width * height;
+							var buf = new byte[total];
+							Marshal.Copy(src.Data, buf, 0, total);
+
+							int currentValue = 0; // 首段固定为 0
+							int count = 0;
+							for (int i = 0; i < total; i++)
+							{
+								int bit = buf[i] != 0 ? 1 : 0;
+								if (bit == currentValue)
+								{
+									count += 1;
+								}
+								else
+								{
+									runs.Add(count);
+									currentValue = bit;
+									count = 1;
+								}
+							}
 							runs.Add(count);
-							currentValue = bit;
-							count = 1;
+						}
+						finally
+						{
+							continuous?.Dispose();
 						}
 					}
-					runs.Add(count);
+					finally
+					{
+						binary?.Dispose();
+						if (!ReferenceEquals(single, mask)) single?.Dispose();
+					}
 				}
 			}
 

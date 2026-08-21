@@ -619,7 +619,37 @@ namespace DlcvModules
 
         public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
-            var baseIo = base.Process(imageList, resultList);
+            var sourceImages = imageList ?? new List<ModuleImage>();
+            var inferImages = sourceImages;
+            Dictionary<ModuleImage, ModuleImage> sourceByInferImage = null;
+            if (ReadBoolProperty("use_affine_img", true))
+            {
+                inferImages = new List<ModuleImage>(sourceImages.Count);
+                sourceByInferImage = new Dictionary<ModuleImage, ModuleImage>();
+                foreach (var sourceImage in sourceImages)
+                {
+                    if (sourceImage == null || sourceImage.AffineImage == null || sourceImage.AffineImage.Empty())
+                    {
+                        inferImages.Add(sourceImage);
+                        continue;
+                    }
+
+                    var inferImage = new ModuleImage(
+                        sourceImage.AffineImage,
+                        sourceImage.OriginalImage,
+                        sourceImage.TransformState,
+                        sourceImage.OriginalIndex)
+                    {
+                        AffineImage = sourceImage.AffineImage,
+                        UniqueId = sourceImage.UniqueId,
+                        SlidingMeta = sourceImage.SlidingMeta != null ? (JObject)sourceImage.SlidingMeta.DeepClone() : null
+                    };
+                    inferImages.Add(inferImage);
+                    sourceByInferImage[inferImage] = sourceImage;
+                }
+            }
+
+            var baseIo = base.Process(inferImages, resultList);
             var imagesOut = baseIo != null ? (baseIo.ImageList ?? new List<ModuleImage>()) : new List<ModuleImage>();
             var resultsOut = baseIo != null ? (baseIo.ResultList ?? new JArray()) : new JArray();
 
@@ -662,7 +692,94 @@ namespace DlcvModules
                 }
             }
 
+            var ocrTextByIndex = new Dictionary<int, string>();
+            foreach (var token in resultsOut)
+            {
+                var entry = token as JObject;
+                var samples = entry != null ? entry["sample_results"] as JArray : null;
+                if (entry == null || samples == null) continue;
+
+                JObject best = null;
+                double bestScore = double.MinValue;
+                foreach (var sample in samples)
+                {
+                    var sampleObject = sample as JObject;
+                    string text = sampleObject != null ? sampleObject.Value<string>("category_name") : null;
+                    if (string.IsNullOrEmpty(text)) continue;
+                    double score = sampleObject.Value<double?>("score") ?? 0.0;
+                    if (best == null || score > bestScore)
+                    {
+                        best = sampleObject;
+                        bestScore = score;
+                    }
+                }
+
+                if (best != null)
+                {
+                    int index = entry.Value<int?>("index") ?? -1;
+                    ocrTextByIndex[index] = best.Value<string>("category_name");
+                }
+            }
+
+            if (sourceByInferImage != null)
+            {
+                for (int i = 0; i < imagesOut.Count; i++)
+                {
+                    ModuleImage sourceImage;
+                    if (imagesOut[i] != null && sourceByInferImage.TryGetValue(imagesOut[i], out sourceImage))
+                    {
+                        imagesOut[i] = sourceImage;
+                    }
+                }
+            }
+
+            if (resultList != null && resultList.Count > 0)
+            {
+                var overlaidResults = new JArray();
+                foreach (var token in resultList)
+                {
+                    var sourceEntry = token as JObject;
+                    var overlaidEntry = sourceEntry != null ? (JObject)sourceEntry.DeepClone() : null;
+                    int index = sourceEntry != null ? (sourceEntry.Value<int?>("index") ?? -1) : -1;
+                    if (overlaidEntry != null
+                        && string.Equals(sourceEntry.Value<string>("type"), "local", StringComparison.Ordinal)
+                        && ocrTextByIndex.TryGetValue(index, out string ocrText))
+                    {
+                        var samples = overlaidEntry["sample_results"] as JArray;
+                        if (samples != null)
+                        {
+                            foreach (var sample in samples)
+                            {
+                                var sampleObject = sample as JObject;
+                                if (sampleObject != null) sampleObject["category_name"] = ocrText;
+                            }
+                        }
+                    }
+                    overlaidResults.Add(overlaidEntry != null ? (JToken)overlaidEntry : token.DeepClone());
+                }
+                return new ModuleIO(imagesOut, overlaidResults);
+            }
+
             return new ModuleIO(imagesOut, resultsOut);
+        }
+
+        private bool ReadBoolProperty(string key, bool defaultValue)
+        {
+            if (Properties == null || !Properties.TryGetValue(key, out object raw) || raw == null) return defaultValue;
+            try
+            {
+                if (raw is bool value) return value;
+                if (raw is string text)
+                {
+                    if (bool.TryParse(text, out bool parsedBool)) return parsedBool;
+                    if (int.TryParse(text, out int parsedInt)) return parsedInt != 0;
+                }
+                return Convert.ToBoolean(raw);
+            }
+            catch
+            {
+                return defaultValue;
+            }
         }
 	}
 }

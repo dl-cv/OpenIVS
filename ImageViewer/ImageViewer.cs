@@ -618,12 +618,22 @@ namespace DLCV
                         float w = (float)bbox[2];
                         float h = (float)bbox[3];
 
-                        // 处理Mask
-                        if (objResult.WithMask && objResult.Mask != null)
+                        // 完整原图尺寸 Mask 已在原图坐标系；只有 ROI Mask 才映射到 bbox。
+                        if (objResult.WithMask && objResult.Mask != null && !objResult.Mask.Empty())
                         {
                             using (var maskBitmap = CreateTransparentMaskDirect(objResult.Mask))
                             {
-                                e.Graphics.DrawImage(maskBitmap, x, y, w, h);
+                                bool fullImageMask = _image != null
+                                    && objResult.Mask.Width == _image.Width
+                                    && objResult.Mask.Height == _image.Height;
+                                if (fullImageMask)
+                                {
+                                    e.Graphics.DrawImage(maskBitmap, 0, 0, _image.Width, _image.Height);
+                                }
+                                else
+                                {
+                                    e.Graphics.DrawImage(maskBitmap, x, y, w, h);
+                                }
                             }
                         }
 

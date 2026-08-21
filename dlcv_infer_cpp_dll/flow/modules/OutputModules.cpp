@@ -181,12 +181,15 @@ public:
         std::string saveDir = ReadString("save_path", std::string());
         std::string suffix = ReadString("suffix", std::string("_out"));
         std::string fmt = ReadString("format", std::string("png"));
+        const bool saveAffineImage = ReadBool("save_affine_img", true);
         if (!saveDir.empty()) {
             try { EnsureDirExists(saveDir); } catch (...) {}
         }
 
         for (size_t i = 0; i < images.size(); i++) {
-            const cv::Mat& mat = images[i].ImageObject;
+            const cv::Mat& mat = saveAffineImage && !images[i].AffineImage.empty()
+                ? images[i].AffineImage
+                : images[i].ImageObject;
             if (mat.empty()) continue;
 
             std::string baseName;
@@ -232,7 +235,14 @@ class PreviewModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
     ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
-        return ModuleIO(imageList, resultList.is_array() ? resultList : Json::array(), Json::array());
+        if (!ReadBool("show_affine_img", true)) {
+            return ModuleIO(imageList, resultList.is_array() ? resultList : Json::array(), Json::array());
+        }
+        std::vector<ModuleImage> previewImages = imageList;
+        for (auto& image : previewImages) {
+            if (!image.AffineImage.empty()) image.ImageObject = image.AffineImage;
+        }
+        return ModuleIO(std::move(previewImages), resultList.is_array() ? resultList : Json::array(), Json::array());
     }
 };
 

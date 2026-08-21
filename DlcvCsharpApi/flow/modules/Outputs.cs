@@ -13,6 +13,7 @@ namespace DlcvModules
 	/// - save_path(string)
 	/// - suffix(string, default "_out")
 	/// - format(string, default "png")
+	/// - save_affine_img(bool, default true)
 	/// </summary>
 	public class SaveImage : BaseModule
 	{
@@ -32,6 +33,7 @@ namespace DlcvModules
 			string saveDir = ReadStringOrDefault("save_path", null);
 			string suffix = ReadStringOrDefault("suffix", "_out");
 			string fmt = ReadStringOrDefault("format", "png");
+			bool saveAffineImage = ReadBoolProperty("save_affine_img", true);
 			if (!string.IsNullOrWhiteSpace(saveDir))
 			{
 				try { Directory.CreateDirectory(saveDir); } catch { }
@@ -39,7 +41,7 @@ namespace DlcvModules
 
             for (int i = 0; i < images.Count; i++)
 			{
-				var (wrap, matRgb) = Unwrap(images[i]);
+				var (wrap, matRgb) = Unwrap(images[i], saveAffineImage);
                 if (matRgb == null || matRgb.Empty()) continue;
 				string baseName = null;
 				if (i < results.Count && results[i] != null && ((JObject)results[i])["filename"] != null && !string.IsNullOrWhiteSpace(((JObject)results[i])["filename"].ToString()))
@@ -88,15 +90,37 @@ namespace DlcvModules
 			return new ModuleIO(images, results);
 		}
 
-        private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj)
+        private static Tuple<ModuleImage, Mat> Unwrap(ModuleImage obj, bool saveAffineImage)
 		{
 			if (obj == null) return Tuple.Create<ModuleImage, Mat>(null, null);
-			return Tuple.Create(obj, obj.ImageObject);
+			Mat image = saveAffineImage && obj.AffineImage != null && !obj.AffineImage.Empty()
+				? obj.AffineImage
+				: obj.ImageObject;
+			return Tuple.Create(obj, image);
+		}
+
+		private bool ReadBoolProperty(string key, bool defaultValue)
+		{
+			if (Properties == null || !Properties.TryGetValue(key, out object raw) || raw == null) return defaultValue;
+			try
+			{
+				if (raw is bool value) return value;
+				if (raw is string text)
+				{
+					if (bool.TryParse(text, out bool parsedBool)) return parsedBool;
+					if (int.TryParse(text, out int parsedInt)) return parsedInt != 0;
+				}
+				return Convert.ToBoolean(raw);
+			}
+			catch
+			{
+				return defaultValue;
+			}
 		}
 	}
 
 	/// <summary>
-	/// output/preview：透传。
+	/// output/preview：按配置预览拉直图，否则透传。
 	/// </summary>
 	public class Preview : BaseModule
 	{
@@ -109,8 +133,47 @@ namespace DlcvModules
 
 		public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
 		{
-			// 预览节点仅透传，不做额外绘制。前端直接显示该 image_list
-			return new ModuleIO(imageList ?? new List<ModuleImage>(), resultList ?? new JArray());
+			var images = imageList ?? new List<ModuleImage>();
+			if (!ReadBoolProperty("show_affine_img", true))
+			{
+				return new ModuleIO(images, resultList ?? new JArray());
+			}
+
+			var previewImages = new List<ModuleImage>(images.Count);
+			foreach (var image in images)
+			{
+				if (image == null || image.AffineImage == null || image.AffineImage.Empty())
+				{
+					previewImages.Add(image);
+					continue;
+				}
+				previewImages.Add(new ModuleImage(image.AffineImage, image.OriginalImage, image.TransformState, image.OriginalIndex)
+				{
+					AffineImage = image.AffineImage,
+					UniqueId = image.UniqueId,
+					SlidingMeta = image.SlidingMeta != null ? (JObject)image.SlidingMeta.DeepClone() : null
+				});
+			}
+			return new ModuleIO(previewImages, resultList ?? new JArray());
+		}
+
+		private bool ReadBoolProperty(string key, bool defaultValue)
+		{
+			if (Properties == null || !Properties.TryGetValue(key, out object raw) || raw == null) return defaultValue;
+			try
+			{
+				if (raw is bool value) return value;
+				if (raw is string text)
+				{
+					if (bool.TryParse(text, out bool parsedBool)) return parsedBool;
+					if (int.TryParse(text, out int parsedInt)) return parsedInt != 0;
+				}
+				return Convert.ToBoolean(raw);
+			}
+			catch
+			{
+				return defaultValue;
+			}
 		}
 	}
 
