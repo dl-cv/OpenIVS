@@ -2381,12 +2381,13 @@ namespace DlcvModules
     /// - 额外输入对0（ExtraInputsIn[0]）：result_list 作为分类结果，只用于决定旋转角度，不会在输出中透传；
     /// - 逐对匹配优先级：transform 完全匹配 > index 匹配 > origin_index 匹配；均无则视为 0°；
     /// - 每张图最多匹配一个结果，且仅进行一种变换；
-    /// - 若判定应旋转 0°，图像本身不旋转，但仍会统一更新 transform 与检测框坐标格式。
+    /// - 若判定应旋转 0°，图像、transform 与检测结果均保持不变。
     ///
     /// properties:
     /// - rotate90_labels: List&lt;string&gt; 对应逆时针旋转 90 度的分类标签集合
     /// - rotate180_labels: List&lt;string&gt; 对应逆时针旋转 180 度的分类标签集合
     /// - rotate270_labels: List&lt;string&gt; 对应逆时针旋转 270 度的分类标签集合
+    /// - rotate_affine_img: 存在 AffineImage 时只旋转拉直图，不修改原图、transform 和检测结果
     /// </summary>
     public class ImageRotateByClassification : BaseModule
     {
@@ -2416,6 +2417,7 @@ namespace DlcvModules
             var set90 = ToLabelSet(ReadProperty("rotate90_labels"));
             var set180 = ToLabelSet(ReadProperty("rotate180_labels"));
             var set270 = ToLabelSet(ReadProperty("rotate270_labels"));
+            bool rotateAffineImage = ReadBoolProperty("rotate_affine_img", true);
 
             // 从额外输入对0中读取分类结果
             JArray clsResults = new JArray();
@@ -2434,7 +2436,7 @@ namespace DlcvModules
             BuildLabelMaps(allClsSources, out tmap, out imap, out omap);
 
             var outImages = new List<ModuleImage>();
-            // 记录每张图像在本模块输出时的 TransformationState（包括 0° 情况），用于后续更新检测结果
+            // 仅记录实际旋转 ImageObject 的新 TransformationState，用于后续更新检测结果
             var imgNewStates = new Dictionary<int, TransformationState>();
 
             for (int i = 0; i < images.Count; i++)
@@ -2491,10 +2493,35 @@ namespace DlcvModules
 
                 if (angleCcw % 360 == 0)
                 {
-                    // 角度为 0：图像不做旋转，但仍记录当前 TransformationState，
-                    // 以便后续对检测结果做统一的 transform 与坐标格式更新
+                    // 角度为 0：图像、transform 与检测结果全部保持不变
                     outImages.Add(wrap);
-                    imgNewStates[i] = wrap.TransformState != null ? wrap.TransformState.Clone() : new TransformationState(w, h);
+                    continue;
+                }
+
+                if (rotateAffineImage && wrap.AffineImage != null && !wrap.AffineImage.Empty())
+                {
+                    Mat rotatedAffine = RotateRightAngleCcw(wrap.AffineImage, angleCcw);
+                    if (rotatedAffine == null || rotatedAffine.Empty())
+                    {
+                        outImages.Add(wrap);
+                        continue;
+                    }
+
+                    var affineState = wrap.TransformState != null
+                        ? wrap.TransformState.Clone()
+                        : new TransformationState(w, h);
+                    var affineChild = new ModuleImage(
+                        baseImg,
+                        wrap.OriginalImage ?? baseImg,
+                        affineState,
+                        wrap.OriginalIndex)
+                    {
+                        AffineImage = rotatedAffine,
+                        UniqueId = wrap.UniqueId,
+                        SlidingMeta = wrap.SlidingMeta != null ? (JObject)wrap.SlidingMeta.DeepClone() : null
+                    };
+                    outImages.Add(affineChild);
+                    // 只旋转 AffineImage，不记录新几何状态，确保原检测结果原样透传
                     continue;
                 }
 
@@ -2551,7 +2578,7 @@ namespace DlcvModules
             // 若没有任何有效图像，直接透传检测结果
             if (imgNewStates.Count == 0)
             {
-                return new ModuleIO(outImages, new JArray(resultsDet));
+                return new ModuleIO(outImages, resultsDet);
             }
 
             // 根据旋转后的 TransformationState 更新检测/旋转框结果
@@ -2745,6 +2772,60 @@ namespace DlcvModules
 
             // 输出：矫正后的图像与更新后的检测/旋转框结果；分类结果仅作为输入参与计算，不会出现在输出中
             return new ModuleIO(outImages, outResults);
+        }
+
+        private static Mat RotateRightAngleCcw(Mat source, int angleCcw)
+        {
+            if (source == null || source.Empty()) return null;
+
+            var rotated = new Mat();
+            try
+            {
+                int angle = ((angleCcw % 360) + 360) % 360;
+                if (angle == 90)
+                {
+                    Cv2.Rotate(source, rotated, RotateFlags.Rotate90Counterclockwise);
+                }
+                else if (angle == 180)
+                {
+                    Cv2.Rotate(source, rotated, RotateFlags.Rotate180);
+                }
+                else if (angle == 270)
+                {
+                    Cv2.Rotate(source, rotated, RotateFlags.Rotate90Clockwise);
+                }
+                else
+                {
+                    rotated.Dispose();
+                    return null;
+                }
+                return rotated;
+            }
+            catch
+            {
+                rotated.Dispose();
+                return null;
+            }
+        }
+
+        private bool ReadBoolProperty(string key, bool defaultValue)
+        {
+            object raw = ReadProperty(key);
+            if (raw == null) return defaultValue;
+            try
+            {
+                if (raw is bool value) return value;
+                if (raw is string text)
+                {
+                    if (bool.TryParse(text, out bool parsedBool)) return parsedBool;
+                    if (int.TryParse(text, out int parsedInt)) return parsedInt != 0;
+                }
+                return Convert.ToBoolean(raw);
+            }
+            catch
+            {
+                return defaultValue;
+            }
         }
 
         private object ReadProperty(string key)

@@ -871,6 +871,7 @@ public:
         const auto set90 = ToLabelSet(Properties.value("rotate90_labels", Json::array()));
         const auto set180 = ToLabelSet(Properties.value("rotate180_labels", Json::array()));
         const auto set270 = ToLabelSet(Properties.value("rotate270_labels", Json::array()));
+        const bool rotateAffineImage = ReadBool("rotate_affine_img", true);
 
         Json clsResults = Json::array();
         if (!ExtraInputsIn.empty()) {
@@ -927,10 +928,6 @@ public:
 
         for (int i = 0; i < static_cast<int>(images.size()); i++) {
             const ModuleImage& wrap = images[static_cast<size_t>(i)];
-            if (wrap.ImageObject.empty()) continue;
-            const cv::Mat baseImg = wrap.ImageObject;
-            const int w = baseImg.cols;
-            const int h = baseImg.rows;
 
             std::string sig = FormatAffineKey(wrap.TransformState.AffineMatrix2x3);
             std::string label;
@@ -946,21 +943,48 @@ public:
                 else if (set270.count(key)) angleCcw = 270;
             }
 
+            if (angleCcw % 360 == 0) {
+                outImages.push_back(wrap);
+                continue;
+            }
+
+            if (rotateAffineImage && !wrap.AffineImage.empty()) {
+                const cv::Mat& affineImg = wrap.AffineImage;
+                std::vector<double> affineA;
+                int affineW = affineImg.cols;
+                int affineH = affineImg.rows;
+                int newAffineW = affineW;
+                int newAffineH = affineH;
+                GetRotationAffineCcwDeg(angleCcw, affineW, affineH, affineA, newAffineW, newAffineH);
+
+                cv::Mat matA(2, 3, CV_64FC1);
+                matA.at<double>(0,0)=affineA[0]; matA.at<double>(0,1)=affineA[1]; matA.at<double>(0,2)=affineA[2];
+                matA.at<double>(1,0)=affineA[3]; matA.at<double>(1,1)=affineA[4]; matA.at<double>(1,2)=affineA[5];
+                cv::Mat rotatedAffine;
+                cv::warpAffine(affineImg, rotatedAffine, matA, cv::Size(newAffineW, newAffineH));
+
+                ModuleImage child = wrap;
+                child.AffineImage = rotatedAffine;
+                outImages.push_back(child);
+                continue;
+            }
+
+            if (wrap.ImageObject.empty()) continue;
+            const cv::Mat baseImg = wrap.ImageObject;
+            const int w = baseImg.cols;
+            const int h = baseImg.rows;
+
             std::vector<double> A;
             int newW = w, newH = h;
             GetRotationAffineCcwDeg(angleCcw, w, h, A, newW, newH);
             imgAffine[i] = A;
             imgAngleDeg[i] = angleCcw;
 
+            cv::Mat matA(2, 3, CV_64FC1);
+            matA.at<double>(0,0)=A[0]; matA.at<double>(0,1)=A[1]; matA.at<double>(0,2)=A[2];
+            matA.at<double>(1,0)=A[3]; matA.at<double>(1,1)=A[4]; matA.at<double>(1,2)=A[5];
             cv::Mat rotated;
-            if (angleCcw % 360 == 0) {
-                rotated = baseImg;
-            } else {
-                cv::Mat matA(2, 3, CV_64FC1);
-                matA.at<double>(0,0)=A[0]; matA.at<double>(0,1)=A[1]; matA.at<double>(0,2)=A[2];
-                matA.at<double>(1,0)=A[3]; matA.at<double>(1,1)=A[4]; matA.at<double>(1,2)=A[5];
-                cv::warpAffine(baseImg, rotated, matA, cv::Size(newW, newH));
-            }
+            cv::warpAffine(baseImg, rotated, matA, cv::Size(newW, newH));
 
             const TransformationState parentState = (wrap.TransformState.OriginalWidth > 0 && wrap.TransformState.OriginalHeight > 0)
                 ? wrap.TransformState

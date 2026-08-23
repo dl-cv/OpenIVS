@@ -62,6 +62,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp_dll\flow\modules\CurveTextAffineModule.cpp" />
+    <ClCompile Include="..\..\dlcv_infer_cpp_dll\flow\modules\FeatureModules.cpp" />
   </ItemGroup>
   <ItemGroup><ProjectReference Include="..\..\dlcv_infer_cpp_dll\dlcv_infer_cpp_dll.vcxproj"><Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project><LinkLibraryDependencies>true</LinkLibraryDependencies></ProjectReference></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
