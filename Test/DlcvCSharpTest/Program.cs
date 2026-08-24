@@ -36,6 +36,22 @@ namespace DlcvCSharpTest
         private const string FlowInstanceSegFilterModelPath = @"Y:\zxc\模块化任务测试\实例分割筛选测试_120_50.dvst";
         private const string FlowInstanceSegFilterImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png";
 
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl,
+            CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_load_c")]
+        private static extern int CppSharedIndexTestLoad(string modelPath, int deviceId);
+
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl,
+            CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_infer_c")]
+        private static extern IntPtr CppSharedIndexTestInfer(int index, string imagePath);
+
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl,
+            ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_free_c")]
+        private static extern int CppSharedIndexTestFree(int index);
+
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl,
+            ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_free_string_c")]
+        private static extern void CppSharedIndexTestFreeString(IntPtr result);
+
         private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
         {
             new ModelCase("AOI-旋转框检测_120_50.dvt", "AOI-1.jpg"),
@@ -168,6 +184,11 @@ namespace DlcvCSharpTest
                     return RunDvstDoubleLoadSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-csharp-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexCSharpSelfTest(args);
+                }
+
                 if (args != null && args.Length >= 2)
                 {
                     string modelPath = args[0];
@@ -188,6 +209,515 @@ namespace DlcvCSharpTest
                 try { Utils.FreeAllModels(); } catch { }
                 ForceGc();
             }
+        }
+
+        private static int RunSharedIndexCSharpSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 4)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest shared-index-csharp-selftest <model.dvo> <flow.dvst> <image> [deviceId]");
+                return 2;
+            }
+
+            string dvoPath = args[1];
+            string dvstPath = args[2];
+            string imagePath = args[3];
+            int deviceId = GpuDeviceId;
+            if (args.Length >= 5 && !int.TryParse(args[4], out deviceId))
+            {
+                Console.WriteLine("deviceId 必须是整数");
+                return 2;
+            }
+            if (!File.Exists(dvoPath) || !File.Exists(dvstPath) || !File.Exists(imagePath))
+            {
+                Console.WriteLine("模型或图片不存在");
+                return 2;
+            }
+
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图片解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+                var inferParams = new JObject
+                {
+                    ["threshold"] = 0.05,
+                    ["with_mask"] = true
+                };
+
+                RunCSharpOwnerCppBorrowerCase(dvoPath, imagePath, rgb, inferParams, deviceId, "model", "C# owner DVO→C++");
+                RunCppOwnerCSharpBorrowerCase(dvoPath, imagePath, rgb, inferParams, deviceId, "model", "C++ owner DVO→C#");
+                RunCSharpOwnerCppBorrowerCase(dvstPath, imagePath, rgb, inferParams, deviceId, "flow", "C# owner DVST→C++");
+                RunCppOwnerCSharpBorrowerCase(dvstPath, imagePath, rgb, inferParams, deviceId, "flow", "C++ owner DVST→C#");
+
+                Console.WriteLine("shared-index-csharp-selftest 通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-csharp-selftest 失败: " + ex);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+            }
+        }
+
+        private static void RunCSharpOwnerCppBorrowerCase(
+            string modelPath,
+            string imagePath,
+            Mat image,
+            JObject inferParams,
+            int deviceId,
+            string expectedIndexType,
+            string label)
+        {
+            int index = -1;
+            DllLoader loader = null;
+            Model owner = null;
+            Model keeper = null;
+            try
+            {
+                owner = new Model(modelPath, deviceId);
+                index = owner.modelIndex;
+                loader = ResolveAndValidateSharedIndex(index, expectedIndexType, label);
+                if (string.Equals(expectedIndexType, "model", StringComparison.Ordinal))
+                    RunRetryableBorrowedIndexCase(index, image, inferParams);
+                JObject ownerInfo = owner.GetModelInfo();
+                ValidateFlowInfoWhenNeeded(ownerInfo, loader, index, expectedIndexType, label);
+                JObject ownerSummary = InferAndSummarize(owner, image, inferParams);
+
+                JObject cppResponse = CallCppSharedIndexInfer(index, imagePath, label + " 首次 C++ 推理");
+                CompareCppResponse(cppResponse, ownerInfo, ownerSummary, label + " 首次 C++ 推理");
+
+                keeper = CreateBoundCSharpBorrower(index, out JObject keeperInfo);
+                EnsureModelInfosMatch(ownerInfo, keeperInfo, label + " C# 持续借用信息");
+                JObject keeperBeforeFree = InferAndSummarize(keeper, image, inferParams);
+                EnsureResultsMatch(ownerSummary, keeperBeforeFree, label + " C# 持续借用结果");
+
+                owner.Dispose();
+                owner = null;
+                JObject keeperAfterFree = InferAndSummarize(keeper, image, inferParams);
+                EnsureResultsMatch(ownerSummary, keeperAfterFree, label + " 持有方释放后 C# 借用结果");
+                JObject cppAfterOwnerFree = CallCppSharedIndexInfer(index, imagePath, label + " 持有方释放后 C++ 推理");
+                CompareCppResponse(cppAfterOwnerFree, keeperInfo, ownerSummary, label + " 持有方释放后 C++ 推理");
+
+                keeper.Dispose();
+                keeper = null;
+                EnsureIndexRemoved(loader, index, label);
+            }
+            finally
+            {
+                try { keeper?.Dispose(); } catch { }
+                try { owner?.Dispose(); } catch { }
+            }
+        }
+
+        private static void RunCppOwnerCSharpBorrowerCase(
+            string modelPath,
+            string imagePath,
+            Mat image,
+            JObject inferParams,
+            int deviceId,
+            string expectedIndexType,
+            string label)
+        {
+            int index = CppSharedIndexTestLoad(modelPath, deviceId);
+            if (index < 0) throw new Exception(label + " C++ 加载失败");
+
+            bool ownerActive = true;
+            DllLoader loader = null;
+            Model borrowed = null;
+            try
+            {
+                loader = ResolveAndValidateSharedIndex(index, expectedIndexType, label);
+                JObject cppResponse = CallCppSharedIndexInfer(index, imagePath, label + " C++ 持有方推理");
+                JObject cppInfo = cppResponse["model_info"] as JObject;
+                JObject cppSummary = NormalizeCppStructuredSummary(cppResponse["structured"] as JObject);
+                if (cppInfo == null || cppSummary == null)
+                    throw new Exception(label + " C++ 返回信息不完整");
+
+                borrowed = CreateBoundCSharpBorrower(index, out JObject borrowedInfo);
+                ValidateFlowInfoWhenNeeded(borrowedInfo, loader, index, expectedIndexType, label);
+                EnsureModelInfosMatch(cppInfo, borrowedInfo, label + " 模型信息");
+                JObject borrowedBeforeFree = InferAndSummarize(borrowed, image, inferParams);
+                EnsureResultsMatch(cppSummary, borrowedBeforeFree, label + " 首次 C# 推理");
+
+                if (CppSharedIndexTestFree(index) != 0)
+                    throw new Exception(label + " C++ 持有方释放失败");
+                ownerActive = false;
+
+                JObject borrowedAfterFree = InferAndSummarize(borrowed, image, inferParams);
+                EnsureResultsMatch(cppSummary, borrowedAfterFree, label + " 持有方释放后 C# 推理");
+                JObject cppAfterOwnerFree = CallCppSharedIndexInfer(index, imagePath, label + " 持有方释放后 C++ 推理");
+                CompareCppResponse(cppAfterOwnerFree, borrowedInfo, cppSummary, label + " 持有方释放后 C++ 推理");
+
+                borrowed.Dispose();
+                borrowed = null;
+                EnsureIndexRemoved(loader, index, label);
+            }
+            finally
+            {
+                try { borrowed?.Dispose(); } catch { }
+                if (ownerActive)
+                {
+                    try { CppSharedIndexTestFree(index); } catch { }
+                }
+            }
+        }
+
+        private static DllLoader ResolveAndValidateSharedIndex(int index, string expectedIndexType, string label)
+        {
+            string indexType;
+            DllLoader loader = DllLoader.ResolveForIndex(index, out indexType);
+            if (!string.Equals(indexType, expectedIndexType, StringComparison.Ordinal))
+                throw new Exception(label + " index 类型错误: " + indexType);
+            return loader;
+        }
+
+        private static void ValidateFlowInfoWhenNeeded(
+            JObject modelInfo,
+            DllLoader loader,
+            int index,
+            string indexType,
+            string label)
+        {
+            if (modelInfo == null) throw new Exception(label + " 模型信息为空");
+            if (!string.Equals(indexType, "flow", StringComparison.Ordinal)) return;
+
+            JObject flowInfo = loader.GetFlowInfo(index);
+            EnsureNativeJsonSuccess(flowInfo, label + " 读取流程信息");
+            if (flowInfo["source_path"] == null || flowInfo["flow_type"] == null || flowInfo["device_id"] == null ||
+                flowInfo["provider"] == null || flowInfo["pipeline"] == null ||
+                !(flowInfo["model_bindings"] is JArray bindings) || bindings.Count == 0)
+            {
+                throw new Exception(label + " 流程信息不完整");
+            }
+            if (!Path.IsPathRooted(flowInfo["source_path"].ToString()))
+                throw new Exception(label + " source_path 不是绝对路径");
+        }
+
+        private static Model CreateBoundCSharpBorrower(int index, out JObject modelInfo)
+        {
+            var borrowed = new Model
+            {
+                modelIndex = index,
+                OwnModelIndex = false
+            };
+            try
+            {
+                modelInfo = borrowed.GetModelInfo();
+                if (modelInfo == null) throw new Exception("C# 借用模型信息为空");
+                return borrowed;
+            }
+            catch
+            {
+                borrowed.Dispose();
+                throw;
+            }
+        }
+
+        private static JObject CallCppSharedIndexInfer(int index, string imagePath, string operation)
+        {
+            IntPtr resultPtr = CppSharedIndexTestInfer(index, imagePath);
+            if (resultPtr == IntPtr.Zero)
+                throw new Exception(operation + "失败：C++ 返回空指针");
+            try
+            {
+                string json = ReadUtf8String(resultPtr);
+                JObject response = JObject.Parse(json);
+                int code = response["code"] != null ? response["code"].Value<int>() : 1;
+                if (code != 0)
+                    throw new Exception(operation + "失败: " + (response["message"]?.ToString() ?? "未知错误"));
+                return response;
+            }
+            finally
+            {
+                CppSharedIndexTestFreeString(resultPtr);
+            }
+        }
+
+        private static string ReadUtf8String(IntPtr value)
+        {
+            int length = 0;
+            while (Marshal.ReadByte(value, length) != 0) length++;
+            byte[] bytes = new byte[length];
+            Marshal.Copy(value, bytes, 0, length);
+            return Encoding.UTF8.GetString(bytes);
+        }
+
+        private static void CompareCppResponse(
+            JObject response,
+            JObject expectedModelInfo,
+            JObject expectedSummary,
+            string operation)
+        {
+            JObject cppModelInfo = response?["model_info"] as JObject;
+            JObject cppSummary = NormalizeCppStructuredSummary(response?["structured"] as JObject);
+            if (cppModelInfo == null || cppSummary == null)
+                throw new Exception(operation + "失败：C++ 结果不完整");
+            EnsureModelInfosMatch(expectedModelInfo, cppModelInfo, operation + " 模型信息");
+            EnsureResultsMatch(expectedSummary, cppSummary, operation + " 推理结果");
+            Console.WriteLine(operation + ": " + cppSummary.ToString(Formatting.None));
+        }
+
+        private static JObject NormalizeCppStructuredSummary(JObject structured)
+        {
+            if (structured == null) return null;
+            var result = (JObject)structured.DeepClone();
+            int objectCount = 0;
+            var samples = result["samples"] as JArray;
+            if (samples != null)
+            {
+                foreach (var sample in samples.OfType<JObject>())
+                {
+                    objectCount += sample["object_count"] != null
+                        ? sample["object_count"].Value<int>()
+                        : ((sample["objects"] as JArray)?.Count ?? 0);
+                }
+            }
+            result["object_count"] = objectCount;
+            return result;
+        }
+
+        private static void EnsureModelInfosMatch(JObject left, JObject right, string operation)
+        {
+            JToken leftCore = CanonicalizeModelInfo(left);
+            JToken rightCore = CanonicalizeModelInfo(right);
+            if (!JToken.DeepEquals(leftCore, rightCore))
+            {
+                throw new Exception(operation + "不一致\nleft=" +
+                    leftCore.ToString(Formatting.None) + "\nright=" + rightCore.ToString(Formatting.None));
+            }
+        }
+
+        private static JToken CanonicalizeModelInfo(JObject source)
+        {
+            if (source == null) return JValue.CreateNull();
+            bool isFlow = source["pipeline"] is JObject || source["nodes"] is JArray;
+            JToken core = source["pipeline"] is JObject pipeline
+                ? pipeline.DeepClone()
+                : (!isFlow && source["model_info"] is JObject modelInfo
+                    ? modelInfo.DeepClone()
+                    : source.DeepClone());
+            if (isFlow && core is JObject flowRoot)
+            {
+                flowRoot.Remove("loaded_model_meta");
+                flowRoot.Remove("model_info");
+            }
+            RemoveVolatileModelInfoFields(core, isFlow);
+            return core;
+        }
+
+        private static void RemoveVolatileModelInfoFields(JToken token, bool isFlow)
+        {
+            if (token is JObject obj)
+            {
+                string[] names = isFlow
+                    ? new[] { "code", "message", "model_index", "flow_index", "source_path", "device_id", "provider",
+                        "model_bindings", "model_path", "model_path_original", "model_name" }
+                    : new[] { "code", "message", "model_index" };
+                for (int i = 0; i < names.Length; i++) obj.Remove(names[i]);
+                foreach (var property in obj.Properties().ToList())
+                {
+                    if (property.Value == null || property.Value.Type == JTokenType.Null)
+                    {
+                        property.Remove();
+                        continue;
+                    }
+                    RemoveVolatileModelInfoFields(property.Value, isFlow);
+                }
+            }
+            else if (token is JArray array)
+            {
+                foreach (var item in array) RemoveVolatileModelInfoFields(item, isFlow);
+            }
+        }
+
+        private static void EnsureResultsMatch(JObject expected, JObject actual, string operation)
+        {
+            if (!ResultSummariesMatch(expected, actual))
+            {
+                throw new Exception(operation + "不一致\nexpected=" +
+                    expected.ToString(Formatting.None) + "\nactual=" + actual.ToString(Formatting.None));
+            }
+        }
+
+        private static void RunRetryableBorrowedIndexCase(int validIndex, Mat image, JObject inferParams)
+        {
+            using (var borrowed = new Model())
+            {
+                borrowed.modelIndex = int.MaxValue;
+                borrowed.OwnModelIndex = false;
+                bool failedAsExpected = false;
+                try
+                {
+                    borrowed.GetModelInfo();
+                }
+                catch
+                {
+                    failedAsExpected = true;
+                }
+                if (!failedAsExpected)
+                    throw new Exception("无效 index 未按预期失败");
+
+                borrowed.modelIndex = validIndex;
+                JObject info = borrowed.GetModelInfo();
+                if (info == null) throw new Exception("index 恢复重试后模型信息为空");
+                Utils.CSharpResult result = borrowed.Infer(image, inferParams);
+                try
+                {
+                    SummarizeResult(result);
+                }
+                finally
+                {
+                    DisposeResultMasks(result);
+                }
+            }
+        }
+
+        private static JObject InferAndSummarize(Model model, Mat image, JObject inferParams)
+        {
+            Utils.CSharpResult result = model.Infer(image, inferParams);
+            try
+            {
+                return SummarizeResult(result);
+            }
+            finally
+            {
+                DisposeResultMasks(result);
+            }
+        }
+
+        private static JObject SummarizeResult(Utils.CSharpResult result)
+        {
+            int sampleCount = result.SampleResults != null ? result.SampleResults.Count : 0;
+            if (sampleCount <= 0)
+                throw new Exception("推理结果为空");
+
+            int objectCount = 0;
+            var samples = new JArray();
+            for (int sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+            {
+                var objects = new JArray();
+                List<Utils.CSharpObjectResult> sampleObjects = result.SampleResults[sampleIndex].Results;
+                if (sampleObjects != null)
+                {
+                    objectCount += sampleObjects.Count;
+                    for (int objectIndex = 0; objectIndex < sampleObjects.Count; objectIndex++)
+                    {
+                        Utils.CSharpObjectResult item = sampleObjects[objectIndex];
+                        bool hasMaskData = item.Mask != null && !item.Mask.Empty();
+                        objects.Add(new JObject
+                        {
+                            ["category_id"] = item.CategoryId,
+                            ["category_name"] = item.CategoryName,
+                            ["score"] = item.Score,
+                            ["bbox"] = item.Bbox != null ? JArray.FromObject(item.Bbox) : new JArray(),
+                            ["with_bbox"] = item.WithBbox,
+                            ["with_mask"] = item.WithMask,
+                            ["mask_width"] = hasMaskData ? item.Mask.Width : 0,
+                            ["mask_height"] = hasMaskData ? item.Mask.Height : 0
+                        });
+                    }
+                }
+                samples.Add(new JObject
+                {
+                    ["object_count"] = objects.Count,
+                    ["objects"] = objects
+                });
+            }
+            if (objectCount <= 0)
+                throw new Exception("推理结果为空");
+
+            return new JObject
+            {
+                ["sample_count"] = sampleCount,
+                ["object_count"] = objectCount,
+                ["samples"] = samples
+            };
+        }
+
+        private static bool ResultSummariesMatch(JObject left, JObject right)
+        {
+            if (left == null || right == null) return false;
+            if ((int)left["sample_count"] != (int)right["sample_count"])
+                return false;
+            if ((int)left["object_count"] != (int)right["object_count"])
+                return false;
+
+            var leftSamples = left["samples"] as JArray;
+            var rightSamples = right["samples"] as JArray;
+            if (leftSamples == null || rightSamples == null || leftSamples.Count != rightSamples.Count)
+                return false;
+            for (int sampleIndex = 0; sampleIndex < leftSamples.Count; sampleIndex++)
+            {
+                var leftSample = leftSamples[sampleIndex] as JObject;
+                var rightSample = rightSamples[sampleIndex] as JObject;
+                if (leftSample == null || rightSample == null)
+                    return false;
+                if (leftSample["object_count"].Value<int>() != rightSample["object_count"].Value<int>())
+                    return false;
+                var leftObjects = leftSample["objects"] as JArray;
+                var rightObjects = rightSample["objects"] as JArray;
+                if (leftObjects == null || rightObjects == null || leftObjects.Count != rightObjects.Count)
+                    return false;
+                for (int objectIndex = 0; objectIndex < leftObjects.Count; objectIndex++)
+                {
+                    var leftObject = leftObjects[objectIndex] as JObject;
+                    var rightObject = rightObjects[objectIndex] as JObject;
+                    if (leftObject == null || rightObject == null)
+                        return false;
+                    if ((int)leftObject["category_id"] != (int)rightObject["category_id"])
+                        return false;
+                    if (!string.Equals((string)leftObject["category_name"], (string)rightObject["category_name"], StringComparison.Ordinal))
+                        return false;
+                    if (Math.Abs((double)leftObject["score"] - (double)rightObject["score"]) > 1e-4)
+                        return false;
+
+                    var leftBbox = leftObject["bbox"] as JArray;
+                    var rightBbox = rightObject["bbox"] as JArray;
+                    if (leftBbox == null || rightBbox == null || leftBbox.Count != rightBbox.Count)
+                        return false;
+                    for (int bboxIndex = 0; bboxIndex < leftBbox.Count; bboxIndex++)
+                    {
+                        if (Math.Abs(leftBbox[bboxIndex].Value<double>() - rightBbox[bboxIndex].Value<double>()) > 1e-3)
+                            return false;
+                    }
+                    if ((bool)leftObject["with_bbox"] != (bool)rightObject["with_bbox"] ||
+                        (bool)leftObject["with_mask"] != (bool)rightObject["with_mask"] ||
+                        (int)leftObject["mask_width"] != (int)rightObject["mask_width"] ||
+                        (int)leftObject["mask_height"] != (int)rightObject["mask_height"])
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private static void EnsureNativeJsonSuccess(JObject result, string operation)
+        {
+            int code = result != null && result["code"] != null ? result["code"].Value<int>() : 1;
+            if (code != 0)
+            {
+                string message = result != null && result["message"] != null
+                    ? result["message"].ToString()
+                    : "未知错误";
+                throw new Exception(operation + "失败: " + message);
+            }
+        }
+
+        private static void EnsureIndexRemoved(DllLoader loader, int index, string label)
+        {
+            if (loader == null || index < 0) return;
+            if (loader.GetIndexType(index) != 0)
+                throw new Exception(label + "释放后 index 仍然存在: " + index);
         }
 
         private static int RunDefaultCases()
