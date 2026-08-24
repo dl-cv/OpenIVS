@@ -112,6 +112,9 @@ public:
     // 获取全局单例；首次调用自动检测加密狗类型，有狗时加载对应 DLL，无狗时不加载
     static DllLoader& Instance();
 
+    // 根据共享 index 返回所属 DLL，不修改全局单例
+    static DllLoader& ResolveForIndex(int index, int& indexType);
+
     // 根据模型头中的 dog_provider 字段，确保加载正确的 DLL
     static void EnsureForModel(const std::string& modelPath);
     static void EnsureForModel(const std::wstring& modelPath);
@@ -191,7 +194,8 @@ json GetModelInfo();
 - 返回模型元信息 JSON（包含 `model_info`、`input_shapes`、`dog_provider`、`loaded_model_meta` 等）。
 - Flow 模式下调用 `_flowModel->GetModelInfo()`。
 - 普通模式下通过 `dlcv_get_model_info` 获取。
-- 空对象设置有效的 `modelIndex` 后，首次调用会查询索引类型并增加外部使用计数。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `source_path` 解包归档资源，再按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`。查询会检查索引所属 provider。
+- 空对象设置有效的 `modelIndex` 后，首次调用会查询索引类型并增加外部使用计数。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `source_path` 解包归档资源，再按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`。查询会检查索引所属 provider，返回对应 loader，但不修改 `DllLoader::Instance()`。
+- 共享流程加载时为每个不同的子模型 index 创建一次借用 `Model` 并保存在 `FlowGraphModel`；后续推理中的模型节点直接复用这些已绑定对象，流程释放时统一解绑。
 
 ### 4.3 单图推理
 

@@ -346,7 +346,7 @@ public class DllLoader
 - `.dvsp`：不支持推理，不解析 provider。
 
 **共享 index 接口**：
-- `ResolveForIndex` 查询可用 provider 的共享索引表，根据唯一 index 返回实际 loader。
+- `ResolveForIndex` 查询可用 provider 的共享索引表，根据唯一 index 返回实际 loader；该查询不修改 `Instance` 当前保存的默认 loader。
 - `GetIndexType`、`RegisterFlow`、`FreeFlow`、`BindIndex`、`UnbindIndex` 返回整数状态或 index；`GetModelInfoByIndex` 与 `GetFlowInfo` 返回 `JObject`。
 - `RegisterFlow` 按 UTF-8 传入流程 JSON；仅模型信息与流程信息返回 UTF-8 JSON，解析后调用 `dlcv_free_result` 释放。
 - 流程注册 JSON 包含 `schema_version`、`flow_type`、`source_path`、`device_id`、`provider`、`pipeline`、`model_bindings`；`source_path` 使用绝对路径，`model_bindings` 中每项包含 `node_id` 与 `model_index`。
@@ -645,7 +645,7 @@ using (var model = new Model())
 
 #### 模型缓存
 
-当 `enableCache=true` 且不是 DVS 流程模型时，缓存键由模型绝对路径的小写规范化值、`device_id` 和运行模式标识 `dvp` / `rpc` / `dvt` 组成；命中后直接复用 `modelIndex`，`ClearModelCache()` 会清空静态模型缓存与加载中集合。DVS 实例还持有执行图和子模型对象，因此忽略 `enableCache`，不仅缓存整体 index。
+当 `enableCache=true` 且不是 DVS 流程模型时，缓存键由模型绝对路径的小写规范化值、`device_id` 和运行模式标识 `dvp` / `rpc` / `dvt` 组成；缓存内容同时保存 `modelIndex` 与模型加载时使用的 loader，命中后继续使用该 loader，不读取当前默认 provider。`ClearModelCache()` 会清空静态模型缓存与加载中集合。DVS 实例还持有执行图和子模型对象，因此忽略 `enableCache`，不仅缓存整体 index。
 
 #### 当前实现中的模式差异
 
@@ -685,7 +685,7 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、子模型加载、模
 
 `DllLoader` 是 provider-aware 原生入口分发器。`EnsureForModel` 根据普通模型文件头中的 `dog_provider` 选择 `dlcv_infer.dll` 或 `dlcv_infer_v.dll`；`Instance` 在首次创建时按 Sentinel、Virbox 顺序选择当前可用 provider。
 
-`ResolveForIndex` 逐个检查当前可用 provider 的共享索引表，用于空构造 `Model` 恢复普通模型或流程模型。四段 index 范围使 Sentinel、Virbox、普通模型和流程互不重复。每个 `Model` 实例保存实际使用的 `_dllLoader`，后续查询、推理、绑定和解绑均使用该实例 loader。
+`ResolveForIndex` 逐个检查当前可用 provider 的共享索引表，用于空构造 `Model` 恢复普通模型或流程模型。该方法返回 index 所属 loader，不修改 `Instance`。四段 index 范围使 Sentinel、Virbox、普通模型和流程互不重复。每个 `Model` 实例及普通模型缓存均保存实际使用的 loader，后续查询、推理、绑定和解绑不受其他 provider 的索引解析影响。
 
 ### 14.5 `sntl_admin_csharp`
 
