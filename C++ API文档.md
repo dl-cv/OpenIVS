@@ -190,7 +190,7 @@ json GetModelInfo();
 - 返回模型元信息 JSON（包含 `model_info`、`input_shapes`、`dog_provider`、`loaded_model_meta` 等）。
 - Flow 模式下调用 `_flowModel->GetModelInfo()`。
 - 普通模式下通过 `dlcv_get_model_info` 获取。
-- 空对象设置有效的 `modelIndex` 后，首次调用会查询索引类型并增加外部使用计数。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `source_path` 解包归档资源，再按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`。查询会检查索引所属 provider；多个 provider 同时存在同一索引时返回错误。
+- 空对象设置有效的 `modelIndex` 后，首次调用会查询索引类型并增加外部使用计数。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `source_path` 解包归档资源，再按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`。查询会检查索引所属 provider。
 
 ### 4.3 单图推理
 
@@ -229,7 +229,14 @@ void FreeModel();
 - 普通模型且由当前对象加载：按现有 `dlcv_free_model` 释放规则处理。
 - 通过共享 `modelIndex` 恢复的普通模型或流程模型：无论 `OwnModelIndex` 是否为 `false`，只减少当前对象增加的使用计数，不直接释放共享资源。
 
-> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回。流程模型（`.dvst`/`.dvso`）先加载其中的子模型，再向 `dlcv_infer` 注册包含 `schema_version`、`flow_type`、`provider`、`source_path`、`device_id`、`pipeline`、`model_bindings` 的流程 JSON，注册结果即流程模型的 `modelIndex`。普通模型和流程模型使用底层统一索引分配器。
+> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回。流程模型（`.dvst`/`.dvso`）先加载其中的子模型，再向 `dlcv_infer` 注册包含 `schema_version`、`flow_type`、`provider`、`source_path`、`device_id`、`pipeline`、`model_bindings` 的流程 JSON，注册结果即流程模型的 `modelIndex`。
+
+| provider | 类型 | index 范围 |
+|---|---|---|
+| Sentinel | 普通模型 | `0～9999` |
+| Sentinel | 流程 | `10000～19999` |
+| Virbox | 普通模型 | `20000～29999` |
+| Virbox | 流程 | `30000～39999` |
 
 ### 4.7 计时查询
 

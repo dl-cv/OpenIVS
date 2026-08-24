@@ -344,10 +344,17 @@ public class DllLoader
 - `.dvp`/`.dvst`/`.dvso`/`.dvsp`：不支持通过 header 解析（DVP 由底层处理，DVS 由子模型加载时解析）。
 
 **共享 index 接口**：
-- `ResolveForIndex` 查询全部可用 provider；同号 index 只在一个 provider 中存在时才返回 loader，如果多个 provider 同时命中则抛出异常。
+- `ResolveForIndex` 查询可用 provider 的共享索引表，根据唯一 index 返回实际 loader。
 - `GetIndexType`、`RegisterFlow`、`FreeFlow`、`BindIndex`、`UnbindIndex` 返回整数状态或 index；`GetModelInfoByIndex` 与 `GetFlowInfo` 返回 `JObject`。
 - `RegisterFlow` 按 UTF-8 传入流程 JSON；仅模型信息与流程信息返回 UTF-8 JSON，解析后调用 `dlcv_free_result` 释放。
 - 流程注册 JSON 包含 `schema_version`、`flow_type`、`source_path`、`device_id`、`provider`、`pipeline`、`model_bindings`；`source_path` 使用绝对路径，`model_bindings` 中每项包含 `node_id` 与 `model_index`。
+
+| provider | 类型 | index 范围 |
+|---|---|---|
+| Sentinel | 普通模型 | `0～9999` |
+| Sentinel | 流程 | `10000～19999` |
+| Virbox | 普通模型 | `20000～29999` |
+| Virbox | 流程 | `30000～39999` |
 
 ---
 
@@ -675,7 +682,7 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、子模型加载、模
 
 `DllLoader` 是 provider-aware 原生入口分发器。`EnsureForModel` 根据普通模型文件头中的 `dog_provider` 选择 `dlcv_infer.dll` 或 `dlcv_infer_v.dll`；`Instance` 在首次创建时按 Sentinel、Virbox 顺序选择当前可用 provider。
 
-`ResolveForIndex` 逐个检查当前可用 provider 的共享索引表，用于空构造 `Model` 恢复普通模型或流程模型。每个 `Model` 实例保存实际使用的 `_dllLoader`，后续查询、推理、绑定和解绑均使用该实例 loader。
+`ResolveForIndex` 逐个检查当前可用 provider 的共享索引表，用于空构造 `Model` 恢复普通模型或流程模型。四段 index 范围使 Sentinel、Virbox、普通模型和流程互不重复。每个 `Model` 实例保存实际使用的 `_dllLoader`，后续查询、推理、绑定和解绑均使用该实例 loader。
 
 ### 14.5 `sntl_admin_csharp`
 
