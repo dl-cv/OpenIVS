@@ -3031,32 +3031,11 @@ namespace {
     std::mutex g_sharedIndexTestOwnersMu;
     std::map<int, std::shared_ptr<dlcv_infer::Model>> g_sharedIndexTestOwners;
 
-    std::string NormalizeTestUtf8(const std::string& value) {
-        try {
-            const std::wstring wide = dlcv_infer::convertUtf8ToWstring(value);
-            if (dlcv_infer::convertWstringToUtf8(wide) == value) return value;
-        } catch (...) {
-        }
+    std::string ConvertTestCategoryNameToUtf8(const std::string& value) {
         try {
             return dlcv_infer::convertGbkToUtf8(value);
         } catch (...) {
             return value;
-        }
-    }
-
-    void NormalizeTestJsonUtf8(dlcv_infer::json& value) {
-        if (value.is_string()) {
-            value = NormalizeTestUtf8(value.get<std::string>());
-            return;
-        }
-        if (value.is_array()) {
-            for (auto& item : value) NormalizeTestJsonUtf8(item);
-            return;
-        }
-        if (value.is_object()) {
-            for (auto it = value.begin(); it != value.end(); ++it) {
-                NormalizeTestJsonUtf8(it.value());
-            }
         }
     }
 
@@ -3087,7 +3066,7 @@ namespace {
             for (const auto& object : sample.results) {
                 objects.push_back({
                     {"category_id", object.categoryId},
-                    {"category_name", NormalizeTestUtf8(object.categoryName)},
+                    {"category_name", ConvertTestCategoryNameToUtf8(object.categoryName)},
                     {"score", object.score},
                     {"bbox", object.bbox},
                     {"with_bbox", object.withBbox},
@@ -3158,10 +3137,9 @@ extern "C" DLCV_INFER_CPP_DLL_API const char* dlcv_shared_index_test_infer_c(
         response["model_info"] = modelInfo;
         response["structured"] = BuildSharedIndexStructuredResult(structured);
         response["infer_json"] = std::move(inferJson);
-        NormalizeTestJsonUtf8(response);
     } catch (const std::exception& ex) {
         response["code"] = 1;
-        response["message"] = NormalizeTestUtf8(ex.what());
+        response["message"] = ex.what();
     } catch (...) {
         response["code"] = 1;
         response["message"] = "shared index test failed";
