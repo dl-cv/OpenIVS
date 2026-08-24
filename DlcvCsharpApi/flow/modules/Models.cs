@@ -21,6 +21,9 @@ namespace DlcvModules
 		protected JObject _modelInfo;
 		protected JArray _maxShape;
 		protected int _maxBatchSize = 0;
+		protected int _modelIndex = -1;
+
+		public int LoadedModelIndex { get { return _model != null ? _model.modelIndex : _modelIndex; } }
 
 		// 按 (modelPath|deviceId|rpcMode) 缓存 Model 实例，避免 Flow 每次推理重复加载
 		private static readonly Dictionary<string, Model> _modelCache = new Dictionary<string, Model>(StringComparer.OrdinalIgnoreCase);
@@ -31,6 +34,7 @@ namespace DlcvModules
 		{
 			_modelPath = ReadStringOrDefault("model_path", null);
 			_deviceId = ReadInt("device_id", 0);
+			_modelIndex = ReadInt("model_index", -1);
 			// 简化：初始化在首次推理时完成
 		}
 
@@ -68,14 +72,27 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				string normalizedPath = NormalizeModelPath(_modelPath);
-				string cacheKey = (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
-				lock (_modelCacheLock)
+				if (_modelIndex >= 0)
 				{
-					if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
+					Dictionary<int, Model> flowModels = null;
+					try { flowModels = Context != null ? Context.Get<Dictionary<int, Model>>("flow_models", null) : null; } catch { }
+					if (flowModels == null || !flowModels.ContainsKey(_modelIndex))
 					{
-						_model = new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
-						_modelCache[cacheKey] = _model;
+						throw new InvalidOperationException("流程模型索引未加载: " + _modelIndex);
+					}
+					_model = flowModels[_modelIndex];
+				}
+				else
+				{
+					string normalizedPath = NormalizeModelPath(_modelPath);
+					string cacheKey = (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
+					lock (_modelCacheLock)
+					{
+						if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
+						{
+							_model = new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
+							_modelCache[cacheKey] = _model;
+						}
 					}
 				}
 				// 多个模块/面可共享同一路径模型实例；不在模块侧单独 Dispose。

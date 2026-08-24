@@ -21,6 +21,9 @@ namespace DlcvModules
         private int _deviceId = 0;
         private string _flowJsonPath;
         private JArray _loadedModelMeta = new JArray();
+        private Dictionary<int, Model> _modelsByIndex = new Dictionary<int, Model>();
+        private JArray _modelBindings = new JArray();
+        private JObject _registrationPipeline = new JObject();
 
         public bool IsLoaded { get { return _loaded; } }
 
@@ -44,7 +47,11 @@ namespace DlcvModules
         /// <param name="root">包含 nodes 的流程配置根 JSON 对象</param>
         /// <param name="deviceId">设备 ID</param>
         /// <returns>模型加载报告</returns>
-        protected JObject LoadFromRoot(JObject root, int deviceId)
+        protected JObject LoadFromRoot(
+            JObject root,
+            int deviceId,
+            Dictionary<int, Model> modelsByIndex = null,
+            JObject registrationPipeline = null)
         {
             if (root == null) throw new ArgumentNullException("root");
 
@@ -53,12 +60,18 @@ namespace DlcvModules
 
             _nodes = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(nodesToken.ToString());
             _root = root;
+            _registrationPipeline = registrationPipeline != null
+                ? (JObject)registrationPipeline.DeepClone()
+                : (JObject)root.DeepClone();
             _deviceId = deviceId;
+            ReplaceOwnedModels(modelsByIndex);
+            RefreshModelBindings();
 
-            var ctx = new ExecutionContext();
+            var ctx = CreateExecutionContext();
             ctx.Set("device_id", deviceId);
             var exec = new GraphExecutor(_nodes, ctx);
             var report = exec.LoadModels();
+            RefreshModelBindings();
             try
             {
                 var loadedMeta = ctx.Get<List<Dictionary<string, object>>>("loaded_model_meta", null);
@@ -136,6 +149,23 @@ namespace DlcvModules
         public JArray GetLoadedModelMeta()
         {
             return _loadedModelMeta != null ? (JArray)_loadedModelMeta.DeepClone() : new JArray();
+        }
+
+        public JObject GetRegistrationPipeline()
+        {
+            return _registrationPipeline != null ? (JObject)_registrationPipeline.DeepClone() : new JObject();
+        }
+
+        public JArray GetModelBindings()
+        {
+            return _modelBindings != null ? (JArray)_modelBindings.DeepClone() : new JArray();
+        }
+
+        protected void SetModelBindings(JArray modelBindings)
+        {
+            _modelBindings = modelBindings != null
+                ? (JArray)modelBindings.DeepClone()
+                : new JArray();
         }
 
         private static string ResolveModelInfoKey(JObject item)
@@ -228,7 +258,7 @@ namespace DlcvModules
                     flowInputBatch.Add(img);
                 }
 
-                var ctx = new ExecutionContext();
+                var ctx = CreateExecutionContext();
                 ctx.Set("frontend_image_mat", flowInputBatch.Count > 0 ? flowInputBatch[0] : null); // 兼容旧单图入口
                 ctx.Set("frontend_image_mats", flowInputBatch);
                 ctx.Set("frontend_image_mat_list", flowInputBatch);
@@ -432,7 +462,96 @@ namespace DlcvModules
         {
             if (!_disposed)
             {
+                if (disposing)
+                {
+                    DisposeOwnedModels();
+                }
+                else
+                {
+                    try { DisposeOwnedModels(); } catch { }
+                }
                 _disposed = true;
+            }
+        }
+
+        private ExecutionContext CreateExecutionContext()
+        {
+            var ctx = new ExecutionContext();
+            ctx.Set("flow_models", _modelsByIndex);
+            return ctx;
+        }
+
+        private void ReplaceOwnedModels(Dictionary<int, Model> modelsByIndex)
+        {
+            DisposeOwnedModels();
+            _modelsByIndex = modelsByIndex != null
+                ? new Dictionary<int, Model>(modelsByIndex)
+                : new Dictionary<int, Model>();
+        }
+
+        private void DisposeOwnedModels()
+        {
+            if (_modelsByIndex == null) return;
+            var disposedModels = new HashSet<Model>();
+            Exception firstError = null;
+            foreach (var item in _modelsByIndex)
+            {
+                if (item.Value == null || !disposedModels.Add(item.Value)) continue;
+                try
+                {
+                    item.Value.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    if (firstError == null) firstError = ex;
+                }
+            }
+            if (firstError != null)
+                throw new Exception("释放流程子模型失败", firstError);
+            _modelsByIndex.Clear();
+        }
+
+        private void RefreshModelBindings()
+        {
+            var bindings = new JArray();
+            if (_nodes != null)
+            {
+                for (int i = 0; i < _nodes.Count; i++)
+                {
+                    var node = _nodes[i];
+                    if (node == null) continue;
+                    string type = node.TryGetValue("type", out object typeValue) && typeValue != null
+                        ? typeValue.ToString() : null;
+                    if (string.IsNullOrEmpty(type) || !type.StartsWith("model/", StringComparison.Ordinal)) continue;
+
+                    int nodeId;
+                    if (!node.TryGetValue("id", out object nodeValue) || !TryGetInt(nodeValue, out nodeId)) continue;
+                    if (!node.TryGetValue("properties", out object propertiesValue)) continue;
+                    var properties = propertiesValue as Dictionary<string, object>;
+                    if (properties == null || !properties.TryGetValue("model_index", out object indexValue)) continue;
+                    int modelIndex;
+                    if (!TryGetInt(indexValue, out modelIndex) || modelIndex < 0) continue;
+                    bindings.Add(new JObject
+                    {
+                        ["node_id"] = nodeId,
+                        ["model_index"] = modelIndex
+                    });
+                }
+            }
+            _modelBindings = bindings;
+        }
+
+        private static bool TryGetInt(object value, out int result)
+        {
+            try
+            {
+                result = Convert.ToInt32(value);
+                return true;
+            }
+            catch
+            {
+                result = -1;
+                return false;
             }
         }
 

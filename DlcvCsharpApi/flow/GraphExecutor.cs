@@ -279,6 +279,7 @@ namespace DlcvModules
 					try
 					{
 						modelModule.LoadModel();
+						item["model_index"] = modelModule.LoadedModelIndex;
 						item["status_code"] = 0;
 						item["status_message"] = "ok";
 					}

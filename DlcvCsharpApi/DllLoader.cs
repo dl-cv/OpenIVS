@@ -43,6 +43,34 @@ namespace dlcv_infer_csharp
         public FreeAllModelsDelegate dlcv_free_all_models;
 
         [UnmanagedFunctionPointer(calling_method)]
+        public delegate int GetIndexTypeDelegate(int index);
+        public GetIndexTypeDelegate dlcv_get_index_type_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate IntPtr GetModelInfoByIndexDelegate(int index);
+        public GetModelInfoByIndexDelegate dlcv_get_model_info_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate int RegisterFlowDelegate(IntPtr flowJsonUtf8);
+        public RegisterFlowDelegate dlcv_register_flow_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate IntPtr GetFlowInfoDelegate(int index);
+        public GetFlowInfoDelegate dlcv_get_flow_info_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate int FreeFlowDelegate(int index);
+        public FreeFlowDelegate dlcv_free_flow_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate int BindIndexDelegate(int index);
+        public BindIndexDelegate dlcv_bind_index_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate int UnbindIndexDelegate(int index);
+        public UnbindIndexDelegate dlcv_unbind_index_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
         public delegate IntPtr GetDeviceInfo();
         public GetDeviceInfo dlcv_get_device_info;
 
@@ -99,6 +127,156 @@ namespace dlcv_infer_csharp
 
                 _instance = CreateLoader(needed.Value);
             }
+        }
+
+        public static DllLoader ResolveForIndex(int index, out string indexType)
+        {
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 不能为负数");
+
+            indexType = null;
+            List<DogProvider> providers = DogUtils.GetAvailableProviders();
+            var matches = new List<KeyValuePair<DllLoader, string>>();
+            DllLoader current = _instance;
+            for (int i = 0; i < providers.Count; i++)
+            {
+                DogProvider provider = providers[i];
+                DllLoader loader = current != null && current.LoadedDogProvider == provider
+                    ? current
+                    : CreateLoader(provider);
+                if (TryResolveIndexType(loader, index, out indexType))
+                {
+                    matches.Add(new KeyValuePair<DllLoader, string>(loader, indexType));
+                }
+            }
+
+            if (matches.Count > 1)
+                throw new InvalidOperationException("index 同时存在于多个 provider: " + index);
+            if (matches.Count == 1)
+            {
+                _instance = matches[0].Key;
+                indexType = matches[0].Value;
+                return matches[0].Key;
+            }
+
+            throw new KeyNotFoundException("未找到 index 对应的推理 DLL");
+        }
+
+        private static bool TryResolveIndexType(DllLoader loader, int index, out string indexType)
+        {
+            indexType = null;
+            if (loader == null || loader.dlcv_get_index_type_c == null)
+                return false;
+
+            int nativeType;
+            try { nativeType = loader.GetIndexType(index); }
+            catch { return false; }
+            if (nativeType == 1) indexType = "model";
+            else if (nativeType == 2) indexType = "flow";
+            return indexType != null;
+        }
+
+        public int GetIndexType(int index)
+        {
+            EnsureDelegate(dlcv_get_index_type_c, "dlcv_get_index_type_c");
+            return dlcv_get_index_type_c(index);
+        }
+
+        public JObject GetModelInfoByIndex(int index)
+        {
+            return InvokeJson(() =>
+            {
+                EnsureDelegate(dlcv_get_model_info_c, "dlcv_get_model_info_c");
+                return dlcv_get_model_info_c(index);
+            }, "获取模型信息");
+        }
+
+        public int RegisterFlow(string flowJson)
+        {
+            if (flowJson == null)
+                throw new ArgumentNullException(nameof(flowJson));
+            EnsureDelegate(dlcv_register_flow_c, "dlcv_register_flow_c");
+            return InvokeUtf8(flowJson, dlcv_register_flow_c);
+        }
+
+        public JObject GetFlowInfo(int index)
+        {
+            return InvokeJson(() =>
+            {
+                EnsureDelegate(dlcv_get_flow_info_c, "dlcv_get_flow_info_c");
+                return dlcv_get_flow_info_c(index);
+            }, "获取流程信息");
+        }
+
+        public int FreeFlow(int index)
+        {
+            EnsureDelegate(dlcv_free_flow_c, "dlcv_free_flow_c");
+            return dlcv_free_flow_c(index);
+        }
+
+        public int BindIndex(int index)
+        {
+            EnsureDelegate(dlcv_bind_index_c, "dlcv_bind_index_c");
+            return dlcv_bind_index_c(index);
+        }
+
+        public int UnbindIndex(int index)
+        {
+            EnsureDelegate(dlcv_unbind_index_c, "dlcv_unbind_index_c");
+            return dlcv_unbind_index_c(index);
+        }
+
+        private delegate IntPtr JsonCall();
+
+        private JObject InvokeJson(JsonCall call, string operation)
+        {
+            IntPtr resultPtr = call();
+            if (resultPtr == IntPtr.Zero)
+                throw new Exception(operation + "失败：返回结果为空");
+
+            try
+            {
+                string json = ReadUtf8String(resultPtr);
+                if (string.IsNullOrWhiteSpace(json))
+                    throw new Exception(operation + "失败：返回 JSON 为空");
+                return JObject.Parse(json);
+            }
+            finally
+            {
+                if (dlcv_free_result == null)
+                    throw new MissingMethodException("未找到 dlcv_free_result");
+                dlcv_free_result(resultPtr);
+            }
+        }
+
+        private static int InvokeUtf8(string value, RegisterFlowDelegate call)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value + "\0");
+            GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+            try
+            {
+                return call(handle.AddrOfPinnedObject());
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
+        private static string ReadUtf8String(IntPtr value)
+        {
+            int length = 0;
+            while (Marshal.ReadByte(value, length) != 0)
+                length++;
+            byte[] bytes = new byte[length];
+            Marshal.Copy(value, bytes, 0, length);
+            return Encoding.UTF8.GetString(bytes);
+        }
+
+        private static void EnsureDelegate(Delegate value, string name)
+        {
+            if (value == null)
+                throw new MissingMethodException("未找到 " + name);
         }
 
         private static string ProviderToDisplayName(DogProvider provider)
@@ -227,6 +405,13 @@ namespace dlcv_infer_csharp
             dlcv_free_model_result = GetDelegate<FreeModelResultDelegate>(hModule, "dlcv_free_model_result");
             dlcv_free_result = GetDelegate<FreeResultDelegate>(hModule, "dlcv_free_result");
             dlcv_free_all_models = GetDelegate<FreeAllModelsDelegate>(hModule, "dlcv_free_all_models");
+            dlcv_get_index_type_c = GetDelegate<GetIndexTypeDelegate>(hModule, "dlcv_get_index_type_c");
+            dlcv_get_model_info_c = GetDelegate<GetModelInfoByIndexDelegate>(hModule, "dlcv_get_model_info_c");
+            dlcv_register_flow_c = GetDelegate<RegisterFlowDelegate>(hModule, "dlcv_register_flow_c");
+            dlcv_get_flow_info_c = GetDelegate<GetFlowInfoDelegate>(hModule, "dlcv_get_flow_info_c");
+            dlcv_free_flow_c = GetDelegate<FreeFlowDelegate>(hModule, "dlcv_free_flow_c");
+            dlcv_bind_index_c = GetDelegate<BindIndexDelegate>(hModule, "dlcv_bind_index_c");
+            dlcv_unbind_index_c = GetDelegate<UnbindIndexDelegate>(hModule, "dlcv_unbind_index_c");
             IntPtr gpuInfoPtr = GetProcAddress(hModule, "dlcv_get_gpu_info");
             dlcv_get_gpu_info = gpuInfoPtr != IntPtr.Zero ? (GetGpuInfo)Marshal.GetDelegateForFunctionPointer(gpuInfoPtr, typeof(GetGpuInfo)) : null;
             IntPtr devInfoPtr = GetProcAddress(hModule, "dlcv_get_device_info");
