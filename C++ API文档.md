@@ -190,6 +190,7 @@ json GetModelInfo();
 - 返回模型元信息 JSON（包含 `model_info`、`input_shapes`、`dog_provider`、`loaded_model_meta` 等）。
 - Flow 模式下调用 `_flowModel->GetModelInfo()`。
 - 普通模式下通过 `dlcv_get_model_info` 获取。
+- 空对象设置有效的 `modelIndex` 后，首次调用会查询索引类型并增加外部使用计数。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `source_path` 解包归档资源，再按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`。查询会检查索引所属 provider；多个 provider 同时存在同一索引时返回错误。
 
 ### 4.3 单图推理
 
@@ -223,11 +224,12 @@ json InferOneOutJson(const cv::Mat& image, const json& params_json = json::objec
 ```cpp
 void FreeModel();
 ```
-- Flow 模式：删除 `_flowModel`。
-- 普通模式且 `OwnModelIndex == true`：调用 `dlcv_free_model`。
-- 普通模式且 `OwnModelIndex == false`：仅标记 `modelIndex = -1`，不释放底层模型。
+- Flow 模式且由当前对象注册：删除 `_flowModel` 后调用 `dlcv_free_flow_c`。
+- Flow 模式且通过共享索引恢复：删除 `_flowModel` 后调用 `dlcv_unbind_index_c`。
+- 普通模型且由当前对象加载：按现有 `dlcv_free_model` 释放规则处理。
+- 通过共享 `modelIndex` 恢复的普通模型或流程模型：无论 `OwnModelIndex` 是否为 `false`，只减少当前对象增加的使用计数，不直接释放共享资源。
 
-> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回（从 `0` 起递增）；流程模型（`.dvst`/`.dvso`/`.dvsp`）的 `modelIndex` 由本层自管理（从 `10000` 起递增）。二者分区，避免上层按 `modelIndex` 索引时流程模型与普通模型撞键。流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
+> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回。流程模型（`.dvst`/`.dvso`）先加载其中的子模型，再向 `dlcv_infer` 注册包含 `schema_version`、`flow_type`、`provider`、`source_path`、`device_id`、`pipeline`、`model_bindings` 的流程 JSON，注册结果即流程模型的 `modelIndex`。普通模型和流程模型使用底层统一索引分配器。
 
 ### 4.7 计时查询
 
@@ -697,3 +699,21 @@ SlidingWindowModel(
 - `threshold`
 - `iou_threshold`
 - `combine_ios_threshold`
+
+---
+
+## 25. 同进程共享索引测试导出
+
+以下函数由 `dlcv_infer_cpp_dll.dll` 导出，仅用于控制台测试工程中的跨语言共享索引验证，不属于生产调用入口：
+
+```cpp
+int dlcv_shared_index_test_load_c(const wchar_t* model_path, int device_id);
+const char* dlcv_shared_index_test_infer_c(int index, const wchar_t* image_path);
+int dlcv_shared_index_test_free_c(int index);
+void dlcv_shared_index_test_free_string_c(const char* result);
+```
+
+- `dlcv_shared_index_test_load_c` 使用 C++ `Model` 加载模型并在 DLL 内保存所有者，成功返回 `modelIndex`，失败返回 `-1`。
+- `dlcv_shared_index_test_infer_c` 在单次调用内构造空 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，依次执行 `GetModelInfo()`、`Infer()`、`InferOneOutJson()`；返回 UTF-8 JSON，包含 `code`、`index`、`model_info`、`structured` 和 `infer_json`。`structured` 只保留样本数量、目标数量、类别、分数、bbox、mask 标志及 mask 尺寸。
+- `dlcv_shared_index_test_free_c` 释放 DLL 内保存的 C++ 所有者，成功返回 `0`，失败返回 `-1`。
+- `dlcv_shared_index_test_free_string_c` 释放 `dlcv_shared_index_test_infer_c` 返回的字符串。

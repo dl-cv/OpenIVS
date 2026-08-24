@@ -77,7 +77,16 @@ dlcv_infer_cpp_qt_demo.exe --help
 - `render` 使用原图作为底图，并把最终结果中的 ROI Mask 缩放到 bbox 后回贴到原图坐标；完整图 Mask 则从 `(0,0)` 绘制。
 - `mask-visualization-selftest` 使用一个完整图 Mask 合成用例，检查其未被重复叠加 bbox 偏移；渲染结果写入系统临时目录的 `dlcv_mask_visualization_selftest.png`。
 
-### 3.3 UI 布局
+### 3.3 C++ DLL 控制台示例
+
+- 工程：`dlcv_infer_cpp_dll_demo`。
+- 无参数时，程序从可执行文件目录逐级查找 `旋转测试`，只加载 `螺丝头部外观_120_50_s.dvst` 并对 `test.bmp` 推理。
+- 图片按 BGR 转 RGB 后传入 `Model::InferBatch()`；阈值为 `0.05`，输出结构化结果摘要。
+- 默认运行校验一张样本、一个“开裂”目标、分数接近 `0.9717`、有效 bbox 与非空 mask；任一检查失败时以非零退出码结束。
+- `--case` 与 `--pressure` 参数模式仍可用于指定模型和图片。
+- `dlcv_infer_cpp_dll.dll` 另有同进程共享索引测试导出，供 `Test/DlcvCSharpTest` 验证 C++ 加载模型后由另一端按索引执行模型信息、结构化推理和 JSON 推理。
+
+### 3.4 UI 布局
 
 主窗口分为上下两部分：
 - **上方控制栏**：按钮 + 参数调节控件

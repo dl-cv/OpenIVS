@@ -14,6 +14,7 @@
 - 推理结果类别列表输出（按出现次数展开）
 - 3 秒平均推理速度
 - Batch 推理速度（单独字段）
+- 普通模型与流程模型的共享 index 查询、恢复推理和绑定生命周期
 - 内存泄露专项：仅对 1 个实例分割模型执行
   - 加载/释放循环 10 次的内存增量
   - 推理 3 秒内存增量
@@ -33,6 +34,7 @@
   - 结果中的 `Mask` 显式 `Dispose`
   - 内存采样使用 `GetProcessMemoryInfo`
   - 支持 `demo2-rgb-selftest` 子命令：反射驱动 `DlcvDemo2.Form1` 的私有图片加载与 `RunPipeline`，对同一张图分别执行“Demo2 实际入口 RGB”“手工 RGB”“原始 BGR”三条路径并输出签名比对结果
+  - 支持 `shared-index-csharp-selftest` 子命令：验证 C# 加载普通模型后底层 index 查询、底层 C 接口加载普通模型后 C# 恢复、C# 加载 DVST 后流程注册信息读取与 C# 恢复，并检查借用实例释放后持有方仍可推理、持有方释放后 index 被清理
 
 ### 2.2 C++ 工程
 
@@ -89,6 +91,7 @@
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
   - `calc-mean-selftest`
   - `category-count-check-selftest`
+  - `shared-index-csharp-selftest <model.dvo> <flow.dvst> <image> [deviceId]`
 - `dlcv_infer_cpp_test.exe` 支持 `count-results-selftest`，验证新配置闭区间、非法范围与旧配置兼容逻辑。
 - `DlcvCSharpTest.exe category-count-check-selftest` 与 `dlcv_infer_cpp_test.exe category-count-check-selftest` 验证类型数量规则、同一原图局部结果聚合、粘性 `ok=false`、字符串或数组 `reason`、Flow 输出包装及旧流程兼容行为。
 - `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
@@ -98,6 +101,12 @@
   - 流程模型加载期间保留已经加载成功的模型模块，流程对象取得模型池引用后再释放临时模块；每个不同的子模型只执行一次原生加载。
   - 成功返回 `0`，模型加载异常返回 `1`，参数数量错误返回 `2`。
 - `DlcvCSharpTest.exe calc-mean-selftest` 检查结果构造函数、均值字段，以及 Flow 节点默认值、入口显式覆盖和后续恢复。
+- `DlcvCSharpTest.exe shared-index-csharp-selftest` 依次执行以下检查：
+  - C# `Model(modelPath)` 加载普通模型，底层 `dlcv_get_model_info_c` 可按同一 index 查询；空构造 `Model` 借用后完成推理，借用实例释放后持有方继续推理。
+  - 同一空构造实例先使用不存在的 index 触发失败，再改为有效 index，确认恢复状态可重试并完成推理。
+  - 底层 `dlcv_load_model_c` 加载普通模型，C# 空构造 `Model` 按 index 查询和推理；C# 借用实例释放后底层模型仍可查询。
+  - C# `Model(flowPath)` 加载 DVST 后，`dlcv_get_flow_info_c` 返回绝对 `source_path`、`device_id`、`provider`、`pipeline` 与非空 `model_bindings`；空构造 `Model` 使用保存的 `pipeline` 恢复流程，归档只用于读取必需资源。
+  - 每种情况在最终持有方释放后检查 index 已从共享表移除；借用结果与持有方结果按类别、目标数量、分数和 bbox 容差比较。
 - `dlcv_infer_cpp_test.exe calc-mean-selftest` 检查旧版 `ObjectResult` 构造函数的默认均值、新版构造函数的显式均值字段，以及结构化 JSON 结果的均值解析和缺失字段默认值。
 
 说明：

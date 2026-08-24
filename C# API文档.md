@@ -115,6 +115,7 @@ public partial class Utils
 ```csharp
 public class Model : IDisposable
 {
+    public Model();
     public Model(string modelPath, int deviceId = 0, bool rpcMode = false, bool enableCache = false);
 }
 ```
@@ -124,11 +125,12 @@ public class Model : IDisposable
 2. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
 3. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
 4. 加载完成后可通过 `Loaded` 属性判断状态。
+5. 空构造实例可在设置 `modelIndex` 且设置 `OwnModelIndex=false` 后使用；首次 `GetModelInfo` 或推理时查询 index 类型、增加当前实例的使用记录。流程 index 优先使用共享信息中保存的 `pipeline`，按 `model_bindings` 恢复子模型引用，`source_path` 仅用于读取必需的归档资源。
 
 ### 3.2 属性
 
 ```csharp
-public int modelIndex;                // 模型索引：普通模型由底层 dlcv_infer 返回（0 起递增）；流程模型（DVS 模式）由本层自管理（10000 起递增），二者分区避免撞键
+public int modelIndex;                // 普通模型与流程模型的共享索引；普通模型由 dlcv_infer 加载接口返回，流程模型由 dlcv_register_flow_c 返回
 public bool OwnModelIndex { get; set; } = true;  // 是否拥有释放权
 public DogProvider LoadedDogProvider { get; }      // 已加载的加密狗类型
 public string LoadedNativeDllName { get; }         // 已加载的原生 DLL 名称
@@ -143,6 +145,7 @@ public CSharpResult Infer(Mat image, JObject paramsJson = null);
 - `paramsJson`：可选推理参数，常见字段见第 10 节。
 - 内部调用 `prepareInferInput` 对图像做通道/位深归一化。
 - 返回 `CSharpResult`，`SampleResults` 长度恒为 1。
+- 空构造借用实例会在图像处理前完成 index 类型识别与绑定；普通模型继续调用当前 provider 的 `dlcv_infer`，流程模型调用恢复后的 `DvsModel`。
 
 ### 3.4 批量推理
 
@@ -176,6 +179,7 @@ public double Benchmark(Mat image, int warmup = 1, int runs = 10);
 public JObject GetModelInfo();
 ```
 - 返回模型元信息 JSON（包含 `model_info`、`input_shapes`、`dog_provider`、`loaded_model_meta` 等）。
+- 借用普通模型 index 时调用 `dlcv_get_model_info_c`；借用流程 index 时返回恢复后流程对象的模型信息。
 
 ### 3.8 释放
 
@@ -183,8 +187,9 @@ public JObject GetModelInfo();
 public void Dispose();
 public void FreeModel();
 ```
-- Flow 模式：释放 `FlowGraphModel`。
+- Flow 模式：持有方调用 `dlcv_free_flow_c` 释放流程注册，借用方调用 `dlcv_unbind_index_c`，同时释放本地 `FlowGraphModel`。
 - 普通模式：调用 `dlcv_free_model` 释放底层模型。
+- `OwnModelIndex=false` 的共享 index 实例不会释放持有方资源；若该实例已经绑定，则调用 `dlcv_unbind_index_c` 撤销当前使用记录。
 - 析构函数自动调用 `Dispose()`。
 
 ---
@@ -250,7 +255,7 @@ public JArray GetLoadedModelMeta();
 ```csharp
 public void Dispose();
 ```
-- 标记 `_disposed = true`，不主动释放底层模型（由 `GraphExecutor` 生命周期管理）。
+- 释放当前流程持有的 index 模型对象，并标记 `_disposed = true`。借用模型对象会撤销各自增加的使用记录。
 
 ---
 
@@ -260,6 +265,7 @@ public void Dispose();
 public class DvsModel : FlowGraphModel
 {
     public new JObject Load(string dvsPath, int deviceId = 0);
+    public JObject LoadFromModelBindings(string sourcePath, JObject savedPipeline, JArray modelBindings, int deviceId);
 }
 ```
 
@@ -267,9 +273,11 @@ public class DvsModel : FlowGraphModel
 1. 打开 `.dvst`/`.dvso`/`.dvsp` 文件，校验头部 `DV\n`。
 2. 读取 JSON 头行，解析 `file_list` 和 `file_size` 数组。
 3. 将 `pipeline.json` 读入内存，其他文件解包到临时目录（临时文件名使用 `Guid.NewGuid().ToString("N")` + 原扩展名，避免中文路径问题）。
-4. 修改 `pipeline.json` 中各节点的 `model_path` 为临时目录中的实际路径，保留原始路径到 `model_path_original` 和 `model_name`。
-5. 调用 `LoadFromRoot(pipelineJson, deviceId)` 完成加载。
+4. 根据临时模型路径加载每个唯一子模型，将模型节点改为 `model_index`，同时保留 `model_path_original` 和 `model_name`。
+5. 调用 `LoadFromRoot` 完成加载；`FlowGraphModel` 持有节点对应的模型对象，推理期间按 index 复用。
 6. `finally` 中清理临时目录。
+
+`LoadFromModelBindings` 用于恢复共享流程：使用 `savedPipeline` 作为流程定义，按 `node_id` 把 `modelBindings` 写入模型节点的 `model_index`，不再按子模型路径加载。`sourcePath` 只读取非 pipeline 且非子模型的必需归档资源。`GetRegistrationPipeline()` 返回注册时使用的原始流程 JSON，`GetModelBindings()` 返回 `[{node_id, model_index}]`。
 
 `DvsModel` 继承 `FlowGraphModel` 的推理语义：归档中模型节点使用 `pipeline.json` 保存的阈值，调用 `.dvst`/`.dvso`/`.dvsp` 时传入的 `threshold` 只过滤最终对外结果。
 
@@ -290,6 +298,7 @@ public class DllLoader
 
     // 根据模型头中的 dog_provider 字段，校验当前可用授权并确保加载正确的 DLL
     public static void EnsureForModel(string modelPath);
+    public static DllLoader ResolveForIndex(int index, out string indexType);
 
     // 委托类型与字段（底层 C API 代理）
     public LoadModelDelegate      dlcv_load_model;
@@ -299,6 +308,13 @@ public class DllLoader
     public FreeModelResultDelegate dlcv_free_model_result;
     public FreeResultDelegate     dlcv_free_result;
     public FreeAllModelsDelegate  dlcv_free_all_models;
+    public GetIndexTypeDelegate   dlcv_get_index_type_c;
+    public GetModelInfoByIndexDelegate dlcv_get_model_info_c;
+    public RegisterFlowDelegate   dlcv_register_flow_c;
+    public GetFlowInfoDelegate    dlcv_get_flow_info_c;
+    public FreeFlowDelegate       dlcv_free_flow_c;
+    public BindIndexDelegate      dlcv_bind_index_c;
+    public UnbindIndexDelegate    dlcv_unbind_index_c;
     public GetDeviceInfoDelegate  dlcv_get_device_info;
     public GetGpuInfoDelegate     dlcv_get_gpu_info;
     public KeepMaxClockDelegate   dlcv_keep_max_clock;
@@ -326,6 +342,12 @@ public class DllLoader
 **模型级 Provider 解析**：
 - `.dvt`/`.dvo` 文件：读取前两行（`DV` + header_json），解析 `dog_provider` 字段。
 - `.dvp`/`.dvst`/`.dvso`/`.dvsp`：不支持通过 header 解析（DVP 由底层处理，DVS 由子模型加载时解析）。
+
+**共享 index 接口**：
+- `ResolveForIndex` 查询全部可用 provider；同号 index 只在一个 provider 中存在时才返回 loader，如果多个 provider 同时命中则抛出异常。
+- `GetIndexType`、`RegisterFlow`、`FreeFlow`、`BindIndex`、`UnbindIndex` 返回整数状态或 index；`GetModelInfoByIndex` 与 `GetFlowInfo` 返回 `JObject`。
+- `RegisterFlow` 按 UTF-8 传入流程 JSON；仅模型信息与流程信息返回 UTF-8 JSON，解析后调用 `dlcv_free_result` 释放。
+- 流程注册 JSON 包含 `schema_version`、`flow_type`、`source_path`、`device_id`、`provider`、`pipeline`、`model_bindings`；`source_path` 使用绝对路径，`model_bindings` 中每项包含 `node_id` 与 `model_index`。
 
 ---
 
@@ -457,6 +479,21 @@ CSharpResult result = model.Infer(rgb, paramsJson);
 JObject info = model.GetModelInfo();
 Console.WriteLine(info.ToString());
 ```
+
+### 9.3 借用已有 index
+
+```csharp
+using (var model = new Model())
+{
+    model.modelIndex = existingIndex;
+    model.OwnModelIndex = false;
+
+    JObject info = model.GetModelInfo();
+    CSharpResult result = model.Infer(rgb, paramsJson);
+}
+```
+
+首次查询或推理会识别普通模型或流程模型并调用 `dlcv_bind_index_c`。`Dispose` 只调用 `dlcv_unbind_index_c` 撤销该实例增加的使用记录，原持有方可继续查询与推理。
 
 ---
 
@@ -598,7 +635,7 @@ Console.WriteLine(info.ToString());
 
 #### 模型缓存
 
-当 `enableCache=true` 时，缓存键由模型绝对路径的小写规范化值、`device_id` 和运行模式标识 `dvp` / `dvs` / `rpc` / `dvt` 组成；命中后直接复用 `modelIndex`，`ClearModelCache()` 会清空静态模型缓存与加载中集合。
+当 `enableCache=true` 且不是 DVS 流程模型时，缓存键由模型绝对路径的小写规范化值、`device_id` 和运行模式标识 `dvp` / `rpc` / `dvt` 组成；命中后直接复用 `modelIndex`，`ClearModelCache()` 会清空静态模型缓存与加载中集合。DVS 实例还持有执行图和子模型对象，因此忽略 `enableCache`，不仅缓存整体 index。
 
 #### 当前实现中的模式差异
 
@@ -606,7 +643,7 @@ Console.WriteLine(info.ToString());
 | --- | --- |
 | DVT | 通过 `dlcv_load_model`、`dlcv_get_model_info`、`dlcv_infer`、`dlcv_free_model_result`、`dlcv_free_model` 工作 |
 | DVP | 自动检查后端服务；服务不可用时启动 `DLCV Test.exe --keep_alive`；推理请求固定附带 `return_polygon=true` |
-| DVS | 内部创建 `DlcvModules.DvsModel`；`GetModelInfo()` 返回流程 JSON，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info` |
+| DVS | 内部创建 `DlcvModules.DvsModel`；子模型节点使用共享 `model_index`；流程通过 `dlcv_register_flow_c` 注册并取得整体 index；`GetModelInfo()` 返回流程 JSON，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info` |
 | RPC | 自动启动 `AIModelRPC.exe`；图像通过共享内存传输；结果中的 mask 可通过共享内存回读 |
 
 #### 输入与输出
@@ -626,26 +663,19 @@ Console.WriteLine(info.ToString());
 
 共享的 Flow 节点分类、统一输入输出字段、模板对象与计时口径见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
-C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`Benchmark()`、`Dispose()`；执行时会把前端图像、`device_id` 和 `return_json_emit_poly` 写入 `ExecutionContext`，并把 `result_list` 转为结构化结果或 JSON 输出。
+C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`GetRegistrationPipeline()`、`GetModelBindings()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`Benchmark()`、`Dispose()`；执行时会把前端图像、`device_id`、`return_json_emit_poly` 和当前流程的 index 模型表写入 `ExecutionContext`，并把 `result_list` 转为结构化结果或 JSON 输出。
 
 ### 14.3 `DvsModel`
 
 `DvsModel` 继承 `FlowGraphModel`，用于加载 `.dvst`、`.dvso`、`.dvsp` 文件。当前实现文件为 `DlcvCsharpApi\flow\DvsModel.cs`。
 
-C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `model_path` 重写，以及临时目录清理。
+C# 侧额外处理 `DV\n` 文件头校验、归档解包、子模型加载、模型节点 `model_index` 写入、共享绑定恢复以及临时目录清理。
 
 ### 14.4 `DllLoader`
 
-`DllLoader` 是 provider-aware 原生入口分发器。`ForProvider(DogProvider)` 按 provider 返回对应 loader：`sentinel` 加载 `dlcv_infer.dll`，`virbox` 加载 `dlcv_infer_v.dll`。
+`DllLoader` 是 provider-aware 原生入口分发器。`EnsureForModel` 根据普通模型文件头中的 `dog_provider` 选择 `dlcv_infer.dll` 或 `dlcv_infer_v.dll`；`Instance` 在首次创建时按 Sentinel、Virbox 顺序选择当前可用 provider。
 
-`ForModel(string)` 的加载策略：
-- 先通过 `ModelHeaderProviderResolver.TryResolveExplicitProvider` 判断模型头是否**明确指定**了 `dog_provider`。
-- 若**明确指定**（`sentinel` 或 `virbox`），则校验对应加密狗是否存在；不存在时抛出异常，不静默 fallback。
-- 若**未指定**（旧模型或省略该字段），则调用 `AutoDetectProvider()` 自动检测当前插入的加密狗，按 **Sentinel 优先、Virbox 第二** 的顺序选择 Provider；检测不到任何狗时返回 `DogProvider.None`，不加载推理 DLL。
-
-`Instance`（兼容旧代码的单例）在首次创建时同样调用 `AutoDetectProvider()`；无狗时创建空 loader（函数指针均为 null），不加载 `dlcv_infer.dll` / `dlcv_infer_v.dll`。
-
-每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续 `GetModelInfoDvt`、`InferInternalDvt`、`FreeModel` 都走该 loader。`Utils` 的 `FreeAllModels`、`GetDeviceInfo`、`KeepMaxClock` 遍历所有已创建 loader 执行。
+`ResolveForIndex` 逐个检查当前可用 provider 的共享索引表，用于空构造 `Model` 恢复普通模型或流程模型。每个 `Model` 实例保存实际使用的 `_dllLoader`，后续查询、推理、绑定和解绑均使用该实例 loader。
 
 ### 14.5 `sntl_admin_csharp`
 
@@ -657,7 +687,7 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、`pipeline.json` 中 `
 
 ### 15.1 执行框架
 
-`ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、链路路由、标量注入、`NormalizeBboxProperties()` 和模型节点预加载；执行时保留流程文件中的节点属性。`LoadModels()` 仅对 `BaseModelModule` 调用 `LoadModel()`，并把加载元信息写入 `ExecutionContext.loaded_model_meta`。
+`ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、连接路由、标量写入、`NormalizeBboxProperties()` 和模型节点预加载；执行时保留流程文件中的节点属性。`LoadModels()` 对 `BaseModelModule` 调用 `LoadModel()`，加载报告记录 `model_index`。模型节点存在 `model_index` 时复用 `ExecutionContext.flow_models` 中由当前 `FlowGraphModel` 持有的模型对象，不再按 `model_path` 重复加载。
 
 ### 15.2 模块实现文件
 
