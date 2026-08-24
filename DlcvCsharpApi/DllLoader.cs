@@ -154,7 +154,6 @@ namespace dlcv_infer_csharp
                 throw new InvalidOperationException("index 同时存在于多个 provider: " + index);
             if (matches.Count == 1)
             {
-                _instance = matches[0].Key;
                 indexType = matches[0].Value;
                 return matches[0].Key;
             }

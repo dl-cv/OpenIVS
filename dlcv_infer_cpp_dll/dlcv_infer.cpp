@@ -1525,7 +1525,6 @@ namespace dlcv_infer {
             throw std::runtime_error("多个 provider 存在相同 index，无法确定推理 DLL");
         }
 
-        instance = matches.front().Loader;
         indexType = matches.front().Type;
         return *matches.front().Loader;
     }

@@ -53,7 +53,13 @@ namespace dlcv_infer_csharp
         };
 
         // 模型缓存（按模型路径+设备+模式区分）
-        private static readonly Dictionary<string, int> _modelCache = new Dictionary<string, int>();
+        private sealed class ModelCacheEntry
+        {
+            public int ModelIndex;
+            public DllLoader Loader;
+        }
+
+        private static readonly Dictionary<string, ModelCacheEntry> _modelCache = new Dictionary<string, ModelCacheEntry>();
         private static readonly HashSet<string> _loadingModels = new HashSet<string>();
         private static readonly object _cacheLock = new object();
         // 当前实例对应的缓存键；仅用于 owner 释放时移除缓存条目。
@@ -117,15 +123,15 @@ namespace dlcv_infer_csharp
                 {
                     lock (_cacheLock)
                     {
-                        int cachedIndex;
-                        if (_modelCache.TryGetValue(cacheKey, out cachedIndex))
+                        ModelCacheEntry cachedEntry;
+                        if (_modelCache.TryGetValue(cacheKey, out cachedEntry))
                         {
-                            modelIndex = cachedIndex;
+                            modelIndex = cachedEntry.ModelIndex;
                             _cacheKey = cacheKey;
                             _cacheEnabled = true;
                             // 缓存命中只借用已加载底层模型，不能再拥有释放权。
                             OwnModelIndex = false;
-                            _dllLoader = DllLoader.Instance;
+                            _dllLoader = cachedEntry.Loader;
                             TryCacheModelInfo();
                             return;
                         }
@@ -171,7 +177,11 @@ namespace dlcv_infer_csharp
                 {
                     lock (_cacheLock)
                     {
-                        _modelCache[cacheKey] = modelIndex;
+                        _modelCache[cacheKey] = new ModelCacheEntry
+                        {
+                            ModelIndex = modelIndex,
+                            Loader = _dllLoader
+                        };
                         _loadingModels.Remove(cacheKey);
                     }
                     _cacheKey = cacheKey;
@@ -2778,9 +2788,9 @@ namespace dlcv_infer_csharp
                 return;
             lock (_cacheLock)
             {
-                int cachedIndex;
-                if (_modelCache.TryGetValue(_cacheKey, out cachedIndex) &&
-                    cachedIndex == modelIndex)
+                ModelCacheEntry cachedEntry;
+                if (_modelCache.TryGetValue(_cacheKey, out cachedEntry) &&
+                    cachedEntry.ModelIndex == modelIndex)
                 {
                     _modelCache.Remove(_cacheKey);
                 }

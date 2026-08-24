@@ -2573,6 +2573,8 @@ namespace DlcvCSharpTest
             int sentinelModel = -1;
             int sentinelFlow = -1;
             int virboxFlow = -1;
+            Model cachedOwner = null;
+            Model cachedBorrower = null;
             try
             {
                 sentinelModel = CppSharedIndexTestLoad(args[1], GpuDeviceId);
@@ -2582,13 +2584,29 @@ namespace DlcvCSharpTest
                 virboxFlow = RegisterVirboxEmptyFlow();
                 if (virboxFlow < 30000 || virboxFlow > 39999)
                     throw new Exception("Virbox 空流程 index 超出范围: " + virboxFlow);
+
+                cachedOwner = new Model(args[1], GpuDeviceId, false, true);
+                sntl_admin_csharp.DogProvider defaultProvider = DllLoader.Instance.LoadedDogProvider;
+                string virboxIndexType;
+                DllLoader virboxLoader = DllLoader.ResolveForIndex(virboxFlow, out virboxIndexType);
+                if (!string.Equals(virboxIndexType, "flow", StringComparison.Ordinal) ||
+                    virboxLoader.LoadedDogProvider != sntl_admin_csharp.DogProvider.Virbox)
+                    throw new Exception("C# Virbox 流程 index 解析失败");
+                if (DllLoader.Instance.LoadedDogProvider != defaultProvider)
+                    throw new Exception("共享 index 解析改写了默认 provider");
+
+                cachedBorrower = new Model(args[1], GpuDeviceId, false, true);
+                if (cachedBorrower.LoadedDogProvider != cachedOwner.LoadedDogProvider)
+                    throw new Exception("缓存模型使用了错误的 provider");
+                cachedBorrower.GetModelInfo();
+
                 if (CppSharedIndexTestResolve(virboxFlow) != 2)
-                    throw new Exception("C++ loader 切换 Virbox 失败");
+                    throw new Exception("C++ Virbox 流程 index 解析失败");
 
                 sentinelFlow = CppSharedIndexTestRegisterFlow(sentinelModel);
                 if (sentinelFlow < 0)
                     throw new Exception("provider 切换后的 Sentinel 流程登记失败");
-                ResolveAndValidateSharedIndex(sentinelFlow, "flow", "切换后的 Sentinel 流程");
+                ResolveAndValidateSharedIndex(sentinelFlow, "flow", "双 provider 下的 Sentinel 流程");
 
                 Console.WriteLine("provider 切换流程自测通过");
                 return 0;
@@ -2600,6 +2618,8 @@ namespace DlcvCSharpTest
             }
             finally
             {
+                try { cachedBorrower?.Dispose(); } catch { }
+                try { cachedOwner?.Dispose(); } catch { }
                 try
                 {
                     if (sentinelFlow >= 0)
