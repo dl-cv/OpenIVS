@@ -81,6 +81,44 @@ namespace dlcv_infer_csharp
         private readonly object _batchMetaLock = new object();
         private List<JObject> _cachedSubModelBatchItems = new List<JObject>();
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ModelIndexBridgeImage
+        {
+            public long DataPtr;
+            public int Height;
+            public int Width;
+            public int Channel;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ModelIndexBridgeImageList
+        {
+            public IntPtr Images;
+            public int Count;
+        }
+
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr dlcv_infer_cpp_model_index_get_info(int modelIndex);
+
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr dlcv_infer_cpp_model_index_infer(
+            int modelIndex,
+            ref ModelIndexBridgeImageList imageList,
+            IntPtr paramsJsonUtf8);
+
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr dlcv_infer_cpp_model_index_result_json(IntPtr resultHandle);
+
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl)]
+        private static extern void dlcv_infer_cpp_model_index_free_result(IntPtr resultHandle);
+
+        private bool UsesExternalModelIndexBridge =>
+            _dllLoader == null &&
+            _dvsModel == null &&
+            !_isDvpMode &&
+            !_isDvsMode &&
+            !_isRpcMode;
+
         public Model()
         {
 
@@ -584,6 +622,13 @@ namespace dlcv_infer_csharp
         public void FreeModel()
         {
             _expectedChCache = -2;
+
+            // 空构造后手动设置的 index 绑定到独立 C++ Model，C# 始终只借用。
+            if (UsesExternalModelIndexBridge)
+            {
+                modelIndex = -1;
+                return;
+            }
 
             // 仅借用/共享模式，不释放底层模型，只标记无效
             if (!OwnModelIndex)
@@ -1435,7 +1480,11 @@ namespace dlcv_infer_csharp
         public JObject GetModelInfo()
         {
             JObject modelInfo = null;
-            if (_isDvpMode)
+            if (UsesExternalModelIndexBridge)
+            {
+                modelInfo = GetModelInfoByExternalIndex();
+            }
+            else if (_isDvpMode)
             {
                 modelInfo = GetModelInfoDvp();
             }
@@ -1490,6 +1539,57 @@ namespace dlcv_infer_csharp
             }
             UpdateModelMetaCache(modelInfo);
             return modelInfo;
+        }
+
+        private static string PtrToUtf8String(IntPtr value)
+        {
+            if (value == IntPtr.Zero) return null;
+            int length = 0;
+            while (Marshal.ReadByte(value, length) != 0) length++;
+            var bytes = new byte[length];
+            Marshal.Copy(value, bytes, 0, length);
+            return Encoding.UTF8.GetString(bytes);
+        }
+
+        private static JObject ReadModelIndexBridgeResult(IntPtr resultHandle)
+        {
+            if (resultHandle == IntPtr.Zero)
+                throw new Exception("model index bridge returned null result");
+
+            IntPtr jsonPtr = dlcv_infer_cpp_model_index_result_json(resultHandle);
+            string json = PtrToUtf8String(jsonPtr);
+            if (string.IsNullOrWhiteSpace(json))
+                throw new Exception("model index bridge returned empty result");
+            return JObject.Parse(json);
+        }
+
+        private JObject GetModelInfoByExternalIndex()
+        {
+            if (modelIndex < 0)
+                throw new InvalidOperationException("modelIndex 未设置或对应 C++ Model 已释放");
+
+            IntPtr resultHandle = dlcv_infer_cpp_model_index_get_info(modelIndex);
+            try
+            {
+                JObject result = ReadModelIndexBridgeResult(resultHandle);
+                if ((result["code"]?.Value<int>() ?? 0) != 0)
+                    throw new Exception("获取模型信息失败: " + result["message"]);
+                return result;
+            }
+            finally
+            {
+                if (resultHandle != IntPtr.Zero)
+                    dlcv_infer_cpp_model_index_free_result(resultHandle);
+            }
+        }
+
+        private void FreeInferResult(IntPtr resultHandle)
+        {
+            if (resultHandle == IntPtr.Zero) return;
+            if (UsesExternalModelIndexBridge)
+                dlcv_infer_cpp_model_index_free_result(resultHandle);
+            else
+                _dllLoader?.dlcv_free_model_result(resultHandle);
         }
 
         private JObject GetModelInfoDvp()
@@ -1560,6 +1660,10 @@ namespace dlcv_infer_csharp
 
             try
             {
+                if (UsesExternalModelIndexBridge)
+                {
+                    return InferInternalByExternalIndex(normalized, params_json);
+                }
                 if (_isDvpMode)
                 {
                     return InferInternalDvp(normalized, params_json);
@@ -1749,6 +1853,83 @@ namespace dlcv_infer_csharp
             catch (Exception ex)
             {
                 throw new Exception($"DVP 推理失败: {ex.Message}", ex);
+            }
+        }
+
+        private Tuple<JObject, IntPtr> InferInternalByExternalIndex(List<Mat> images, JObject params_json)
+        {
+            if (modelIndex < 0)
+                throw new InvalidOperationException("modelIndex 未设置或对应 C++ Model 已释放");
+            if (images == null || images.Count == 0)
+                throw new ArgumentException("图像列表不能为空", nameof(images));
+
+            var processImages = new List<Tuple<Mat, bool>>();
+            GCHandle imageHandle = default(GCHandle);
+            GCHandle paramsHandle = default(GCHandle);
+            IntPtr resultHandle = IntPtr.Zero;
+            try
+            {
+                var nativeImages = new ModelIndexBridgeImage[images.Count];
+                for (int i = 0; i < images.Count; i++)
+                {
+                    Mat processImage = images[i];
+                    bool needDispose = false;
+                    if (processImage == null || processImage.Empty())
+                        throw new ArgumentException("输入图像不能为空", nameof(images));
+                    if (!processImage.IsContinuous())
+                    {
+                        processImage = processImage.Clone();
+                        needDispose = true;
+                    }
+                    processImages.Add(Tuple.Create(processImage, needDispose));
+                    nativeImages[i] = new ModelIndexBridgeImage
+                    {
+                        DataPtr = processImage.Data.ToInt64(),
+                        Height = processImage.Height,
+                        Width = processImage.Width,
+                        Channel = processImage.Channels()
+                    };
+                }
+
+                imageHandle = GCHandle.Alloc(nativeImages, GCHandleType.Pinned);
+                var imageList = new ModelIndexBridgeImageList
+                {
+                    Images = imageHandle.AddrOfPinnedObject(),
+                    Count = nativeImages.Length
+                };
+
+                string paramsText = (params_json ?? new JObject()).ToString(Formatting.None);
+                byte[] paramsBytes = Encoding.UTF8.GetBytes(paramsText + "\0");
+                paramsHandle = GCHandle.Alloc(paramsBytes, GCHandleType.Pinned);
+
+                resultHandle = dlcv_infer_cpp_model_index_infer(
+                    modelIndex,
+                    ref imageList,
+                    paramsHandle.AddrOfPinnedObject());
+                JObject resultObject = ReadModelIndexBridgeResult(resultHandle);
+                if ((resultObject["code"]?.Value<int>() ?? 0) != 0)
+                {
+                    string message = resultObject["message"]?.ToString() ?? "unknown error";
+                    dlcv_infer_cpp_model_index_free_result(resultHandle);
+                    resultHandle = IntPtr.Zero;
+                    throw new Exception("Inference failed: " + message);
+                }
+                return Tuple.Create(resultObject, resultHandle);
+            }
+            catch
+            {
+                if (resultHandle != IntPtr.Zero)
+                    dlcv_infer_cpp_model_index_free_result(resultHandle);
+                throw;
+            }
+            finally
+            {
+                if (paramsHandle.IsAllocated) paramsHandle.Free();
+                if (imageHandle.IsAllocated) imageHandle.Free();
+                foreach (var pair in processImages)
+                {
+                    if (pair.Item2) pair.Item1.Dispose();
+                }
             }
         }
 
@@ -2126,7 +2307,7 @@ namespace dlcv_infer_csharp
                     // 处理完后释放结果，DVP模式下指针为空，不需要释放
                     if (resultTuple.Item2 != IntPtr.Zero)
                     {
-                        _dllLoader?.dlcv_free_model_result(resultTuple.Item2);
+                        FreeInferResult(resultTuple.Item2);
                     }
                 }
             }
@@ -2176,7 +2357,7 @@ namespace dlcv_infer_csharp
                 // 处理完后释放结果，DVP模式下指针为空，不需要释放
                 if (resultTuple.Item2 != IntPtr.Zero)
                 {
-                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                    FreeInferResult(resultTuple.Item2);
                 }
             }
         }
@@ -2291,7 +2472,7 @@ namespace dlcv_infer_csharp
                 // 处理完后释放结果
                 if (resultTuple.Item2 != IntPtr.Zero)
                 {
-                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                    FreeInferResult(resultTuple.Item2);
                 }
             }
         }
