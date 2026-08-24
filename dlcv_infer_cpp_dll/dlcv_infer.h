@@ -326,29 +326,4 @@ namespace dlcv_infer {
         static int nvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length);
         static int nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device);
     };
-
-}
-
-// 供 C# 在同一进程内按 modelIndex 借用独立 C++ Model 的内部桥接接口。
-// Model 的所有权仍属于原 C++ 调用方；释放原 Model 后，该 index 立即失效。
-extern "C" {
-    struct DlcvModelIndexBridgeImage {
-        long long data_ptr;
-        int height;
-        int width;
-        int channel;
-    };
-
-    struct DlcvModelIndexBridgeImageList {
-        DlcvModelIndexBridgeImage* images;
-        int n;
-    };
-
-    DLCV_INFER_CPP_DLL_API void* dlcv_infer_cpp_model_index_get_info(int model_index);
-    DLCV_INFER_CPP_DLL_API void* dlcv_infer_cpp_model_index_infer(
-        int model_index,
-        const DlcvModelIndexBridgeImageList* image_list,
-        const char* params_json_utf8);
-    DLCV_INFER_CPP_DLL_API const char* dlcv_infer_cpp_model_index_result_json(void* result_handle);
-    DLCV_INFER_CPP_DLL_API void dlcv_infer_cpp_model_index_free_result(void* result_handle);
 }

@@ -1169,43 +1169,6 @@ namespace dlcv_infer {
     static std::mutex g_modelIndexRefMu;
     static std::unordered_map<int, int> g_modelIndexRefCount;
 
-    // 同进程内已加载 C++ Model 的非拥有注册表，供 C# 空构造后按 index 借用。
-    // 同一个底层 index 可能因 content-hash 去重被多个 Model 共享，因此保留全部活跃实例。
-    static std::mutex g_registeredModelMu;
-    static std::unordered_map<int, std::vector<Model*>> g_registeredModels;
-
-    static void RegisterModelForIndexBridge(Model* model) {
-        if (!model || model->modelIndex < 0) return;
-        std::lock_guard<std::mutex> lk(g_registeredModelMu);
-        auto& models = g_registeredModels[model->modelIndex];
-        if (std::find(models.begin(), models.end(), model) == models.end()) {
-            models.push_back(model);
-        }
-    }
-
-    static void ReplaceModelForIndexBridge(int modelIndex, Model* oldModel, Model* newModel) {
-        if (modelIndex < 0 || !oldModel || !newModel) return;
-        std::lock_guard<std::mutex> lk(g_registeredModelMu);
-        auto it = g_registeredModels.find(modelIndex);
-        if (it == g_registeredModels.end()) return;
-        auto modelIt = std::find(it->second.begin(), it->second.end(), oldModel);
-        if (modelIt != it->second.end()) {
-            *modelIt = newModel;
-        }
-    }
-
-    static void UnregisterModelForIndexBridge(int modelIndex, Model* model) {
-        if (modelIndex < 0 || !model) return;
-        std::lock_guard<std::mutex> lk(g_registeredModelMu);
-        auto it = g_registeredModels.find(modelIndex);
-        if (it == g_registeredModels.end()) return;
-        auto& models = it->second;
-        models.erase(std::remove(models.begin(), models.end(), model), models.end());
-        if (models.empty()) {
-            g_registeredModels.erase(it);
-        }
-    }
-
     // dvst（流程模型）的 modelIndex 由本层自管理，从 10000 起递增，
     // 与底层 dvt 返回的 model_index（0 起递增）分区，避免上层按 modelIndex 索引时 dvst 与 dvt 撞键。
     static std::mutex g_flowModelIndexMu;
@@ -1582,7 +1545,6 @@ namespace dlcv_infer {
                     throw std::runtime_error(report.dump());
                 }
                 modelIndex = AllocateFlowModelIndex();
-                RegisterModelForIndexBridge(this);
                 return;
             } catch (const std::exception& ex) {
                 delete _flowModel;
@@ -1627,7 +1589,6 @@ namespace dlcv_infer {
             std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
             g_modelIndexRefCount[modelIndex]++;
         }
-        RegisterModelForIndexBridge(this);
     }
 
     Model::Model(const std::wstring& modelPath, int device_id)
@@ -1651,7 +1612,6 @@ namespace dlcv_infer {
                     throw std::runtime_error(report.dump());
                 }
                 modelIndex = AllocateFlowModelIndex();
-                RegisterModelForIndexBridge(this);
                 return;
             } catch (const std::exception& ex) {
                 delete _flowModel;
@@ -1696,7 +1656,6 @@ namespace dlcv_infer {
             std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
             g_modelIndexRefCount[modelIndex]++;
         }
-        RegisterModelForIndexBridge(this);
     }
 
     Model::Model(Model&& other) noexcept
@@ -1710,7 +1669,6 @@ namespace dlcv_infer {
         _dllLoader(other._dllLoader),
         _loadedDogProvider(other._loadedDogProvider),
         _loadedNativeDllName(std::move(other._loadedNativeDllName)) {
-        ReplaceModelForIndexBridge(modelIndex, &other, this);
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
@@ -1740,7 +1698,6 @@ namespace dlcv_infer {
         _dllLoader = other._dllLoader;
         _loadedDogProvider = other._loadedDogProvider;
         _loadedNativeDllName = std::move(other._loadedNativeDllName);
-        ReplaceModelForIndexBridge(modelIndex, &other, this);
 
         other.modelIndex = -1;
         other.OwnModelIndex = true;
@@ -1761,9 +1718,6 @@ namespace dlcv_infer {
 
     void Model::FreeModel() {
         _expectedChCache = -2;
-        if (modelIndex != -1) {
-            UnregisterModelForIndexBridge(modelIndex, this);
-        }
         if (_isFlowGraphMode) {
             delete _flowModel;
             _flowModel = nullptr;
@@ -2615,159 +2569,3 @@ namespace dlcv_infer {
     }
 
 }
-
-namespace {
-
-struct ModelIndexBridgeResult {
-    std::string jsonText;
-    std::vector<cv::Mat> masks;
-};
-
-ModelIndexBridgeResult* MakeModelIndexBridgeError(const std::string& message) {
-    auto* result = new ModelIndexBridgeResult();
-    Json root;
-    root["code"] = -1;
-    root["message"] = message;
-    result->jsonText = root.dump();
-    return result;
-}
-
-std::string ModelIndexBridgeCategoryNameToUtf8(const std::string& categoryName) {
-    try {
-        return dlcv_infer::convertGbkToUtf8(categoryName);
-    } catch (...) {
-        return categoryName;
-    }
-}
-
-} // namespace
-
-extern "C" {
-
-void* dlcv_infer_cpp_model_index_get_info(int model_index) {
-    try {
-        std::lock_guard<std::mutex> lk(dlcv_infer::g_registeredModelMu);
-        const auto it = dlcv_infer::g_registeredModels.find(model_index);
-        if (it == dlcv_infer::g_registeredModels.end() || it->second.empty()) {
-            return MakeModelIndexBridgeError("model index is not registered or has been released");
-        }
-
-        auto result = std::make_unique<ModelIndexBridgeResult>();
-        result->jsonText = it->second.back()->GetModelInfo().dump();
-        return result.release();
-    } catch (const std::exception& ex) {
-        return MakeModelIndexBridgeError(ex.what());
-    } catch (...) {
-        return MakeModelIndexBridgeError("unknown error while getting model info");
-    }
-}
-
-void* dlcv_infer_cpp_model_index_infer(
-    int model_index,
-    const DlcvModelIndexBridgeImageList* image_list,
-    const char* params_json_utf8) {
-    if (!image_list || image_list->n <= 0 || !image_list->images) {
-        return MakeModelIndexBridgeError("invalid image list");
-    }
-
-    try {
-        std::lock_guard<std::mutex> lk(dlcv_infer::g_registeredModelMu);
-        const auto it = dlcv_infer::g_registeredModels.find(model_index);
-        if (it == dlcv_infer::g_registeredModels.end() || it->second.empty()) {
-            return MakeModelIndexBridgeError("model index is not registered or has been released");
-        }
-
-        std::vector<cv::Mat> images;
-        images.reserve(image_list->n);
-        for (int i = 0; i < image_list->n; ++i) {
-            const DlcvModelIndexBridgeImage& image = image_list->images[i];
-            if (image.data_ptr == 0 || image.height <= 0 || image.width <= 0 || image.channel <= 0) {
-                return MakeModelIndexBridgeError("invalid image data");
-            }
-            images.emplace_back(
-                image.height,
-                image.width,
-                CV_8UC(image.channel),
-                reinterpret_cast<void*>(static_cast<uintptr_t>(image.data_ptr)));
-        }
-
-        dlcv_infer::json params = dlcv_infer::json::object();
-        if (params_json_utf8 && params_json_utf8[0] != '\0') {
-            params = dlcv_infer::json::parse(params_json_utf8);
-            if (!params.is_object()) {
-                return MakeModelIndexBridgeError("params_json must be a JSON object");
-            }
-        }
-
-        dlcv_infer::Result inferResult = it->second.back()->InferBatch(images, params);
-        auto result = std::make_unique<ModelIndexBridgeResult>();
-        size_t maskCount = 0;
-        for (const auto& sample : inferResult.sampleResults) {
-            for (const auto& item : sample.results) {
-                if (item.withMask && !item.mask.empty()) ++maskCount;
-            }
-        }
-        result->masks.reserve(maskCount);
-
-        Json root;
-        root["code"] = 0;
-        root["message"] = "success";
-        root["sample_results"] = Json::array();
-        for (const auto& sample : inferResult.sampleResults) {
-            Json sampleJson;
-            sampleJson["results"] = Json::array();
-            for (const auto& item : sample.results) {
-                Json itemJson;
-                itemJson["category_id"] = item.categoryId;
-                itemJson["category_name"] = ModelIndexBridgeCategoryNameToUtf8(item.categoryName);
-                itemJson["score"] = item.score;
-                itemJson["area"] = item.area;
-                itemJson["bbox"] = item.bbox;
-                itemJson["with_bbox"] = item.withBbox;
-                itemJson["with_angle"] = item.withAngle;
-                itemJson["angle"] = item.angle;
-                itemJson["with_mean"] = item.withMean;
-                itemJson["foreground_mean"] = item.foregroundMean;
-                itemJson["background_mean"] = item.backgroundMean;
-
-                if (item.withMask && !item.mask.empty()) {
-                    result->masks.push_back(item.mask.clone());
-                    const cv::Mat& mask = result->masks.back();
-                    itemJson["with_mask"] = true;
-                    itemJson["mask"] = Json::object({
-                        {"mask_ptr", static_cast<uint64_t>(reinterpret_cast<uintptr_t>(mask.data))},
-                        {"height", mask.rows},
-                        {"width", mask.cols}
-                    });
-                } else {
-                    itemJson["with_mask"] = false;
-                    itemJson["mask"] = Json::object({
-                        {"mask_ptr", 0},
-                        {"height", -1},
-                        {"width", -1}
-                    });
-                }
-                sampleJson["results"].push_back(std::move(itemJson));
-            }
-            root["sample_results"].push_back(std::move(sampleJson));
-        }
-
-        result->jsonText = root.dump();
-        return result.release();
-    } catch (const std::exception& ex) {
-        return MakeModelIndexBridgeError(ex.what());
-    } catch (...) {
-        return MakeModelIndexBridgeError("unknown error while running inference");
-    }
-}
-
-const char* dlcv_infer_cpp_model_index_result_json(void* result_handle) {
-    if (!result_handle) return nullptr;
-    return static_cast<ModelIndexBridgeResult*>(result_handle)->jsonText.c_str();
-}
-
-void dlcv_infer_cpp_model_index_free_result(void* result_handle) {
-    delete static_cast<ModelIndexBridgeResult*>(result_handle);
-}
-
-} // extern "C"
