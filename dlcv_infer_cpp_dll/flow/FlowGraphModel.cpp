@@ -433,17 +433,20 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
         if (type.rfind("model/", 0) != 0) continue;
 
         std::string modelPath;
+        int modelIndex = -1;
         int nodeDeviceId = deviceId;
         try {
             if (n.contains("properties") && n.at("properties").is_object()) {
                 const auto& props = n.at("properties");
                 if (props.contains("model_path") && props.at("model_path").is_string())
                     modelPath = props.at("model_path");
+                if (props.contains("model_index"))
+                    modelIndex = props.at("model_index").get<int>();
                 if (props.contains("device_id"))
                     nodeDeviceId = props.at("device_id").get<int>();
             }
         } catch (...) {}
-        if (modelPath.empty()) continue;
+        if (modelIndex >= 0 || modelPath.empty()) continue;
 
         const std::string key = ModelPool::MakeKey(modelPath, nodeDeviceId);
         // 去重：同一流程可能多个节点引用同一模型

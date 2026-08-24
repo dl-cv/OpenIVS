@@ -56,6 +56,8 @@ private:
 class BaseModelModule : public BaseModule {
 protected:
     std::string _modelPathUtf8;
+    int _modelIndex = -1;
+    bool _usesModelIndex = false;
     int _deviceId = 0;
     int _resolvedDeviceId = 0;
     std::shared_ptr<dlcv_infer::Model> _model;
@@ -67,17 +69,22 @@ public:
                     ExecutionContext* context = nullptr)
         : BaseModule(nodeId, title, properties, context) {
         _modelPathUtf8 = ReadString("model_path", std::string());
+        _modelIndex = ReadInt("model_index", -1);
+        _usesModelIndex = _modelIndex >= 0;
         _deviceId = ReadInt("device_id", 0);
         _resolvedDeviceId = _deviceId;
     }
 
     ~BaseModelModule() {
-        if (!_modelPathUtf8.empty() && _model) {
+        if (_usesModelIndex && _model) {
+            try { _model->FreeModel(); } catch (...) {}
+        } else if (!_modelPathUtf8.empty() && _model) {
             try { ModelPool::Instance().Release(_modelPathUtf8, _resolvedDeviceId); } catch (...) {}
         }
     }
 
     void LoadModel() override;
+    int GetLoadedModelIndex() const { return _model ? _model->modelIndex : -1; }
 };
 
 /// <summary>

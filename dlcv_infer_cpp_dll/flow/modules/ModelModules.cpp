@@ -87,6 +87,13 @@ void BaseModelModule::LoadModel() {
     } catch (...) {}
 
     _resolvedDeviceId = deviceId;
+    if (_usesModelIndex) {
+        _model = std::make_shared<dlcv_infer::Model>();
+        _model->modelIndex = _modelIndex;
+        _model->OwnModelIndex = false;
+        (void)_model->GetModelInfo();
+        return;
+    }
     _model = ModelPool::Instance().Acquire(_modelPathUtf8, deviceId);
 }
 

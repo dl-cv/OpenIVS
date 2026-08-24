@@ -9,6 +9,7 @@
 #include <memory>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <fstream>
 #include <iostream>
 #include <algorithm>
@@ -78,6 +79,14 @@ namespace dlcv_infer {
     typedef void (*FreeAllModelsFuncType)();
     typedef void* (*GetDeviceInfoFuncType)();
     typedef void* (*KeepMaxClockFuncType)();
+    typedef int (*GetIndexTypeFuncType)(int index);
+    typedef const char* (*GetModelInfoByIndexFuncType)(int modelIndex);
+    typedef int (*RegisterFlowFuncType)(const char* flowJson);
+    typedef const char* (*GetFlowInfoFuncType)(int flowIndex);
+    typedef int (*FreeFlowFuncType)(int flowIndex);
+    typedef int (*BindIndexFuncType)(int index);
+    typedef int (*UnbindIndexFuncType)(int index);
+    typedef void (*FreeStringFuncType)(const char* result);
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS
     // DLL 加载器（内部使用）
@@ -99,6 +108,14 @@ namespace dlcv_infer {
         FreeAllModelsFuncType dlcv_free_all_models = nullptr;
         GetDeviceInfoFuncType dlcv_get_device_info = nullptr;
         KeepMaxClockFuncType dlcv_keep_max_clock = nullptr;
+        GetIndexTypeFuncType dlcv_get_index_type_c = nullptr;
+        GetModelInfoByIndexFuncType dlcv_get_model_info_c = nullptr;
+        RegisterFlowFuncType dlcv_register_flow_c = nullptr;
+        GetFlowInfoFuncType dlcv_get_flow_info_c = nullptr;
+        FreeFlowFuncType dlcv_free_flow_c = nullptr;
+        BindIndexFuncType dlcv_bind_index_c = nullptr;
+        UnbindIndexFuncType dlcv_unbind_index_c = nullptr;
+        FreeStringFuncType dlcv_free_string = nullptr;
 
         // 加载 DLL
         void LoadDll();
@@ -111,6 +128,7 @@ namespace dlcv_infer {
         std::string GetLoadedNativeDllName() const { return dllName; }
 
         static DllLoader& Instance();
+        static DllLoader& ResolveForIndex(int index, int& indexType);
         static void EnsureForModel(const std::string& modelPath);
         static void EnsureForModel(const std::wstring& modelPath);
 
@@ -147,6 +165,14 @@ namespace dlcv_infer {
         KeepMaxClockFuncType GetKeepMaxClockFunc() const {
             return dlcv_keep_max_clock;
         }
+        GetIndexTypeFuncType GetIndexTypeFunc() const { return dlcv_get_index_type_c; }
+        GetModelInfoByIndexFuncType GetModelInfoByIndexFunc() const { return dlcv_get_model_info_c; }
+        RegisterFlowFuncType GetRegisterFlowFunc() const { return dlcv_register_flow_c; }
+        GetFlowInfoFuncType GetFlowInfoFunc() const { return dlcv_get_flow_info_c; }
+        FreeFlowFuncType GetFreeFlowFunc() const { return dlcv_free_flow_c; }
+        BindIndexFuncType GetBindIndexFunc() const { return dlcv_bind_index_c; }
+        UnbindIndexFuncType GetUnbindIndexFunc() const { return dlcv_unbind_index_c; }
+        FreeStringFuncType GetFreeStringFunc() const { return dlcv_free_string; }
     };
 #endif
 
@@ -218,7 +244,7 @@ namespace dlcv_infer {
         /// <summary>
         /// 是否拥有 modelIndex 对应底层模型的释放权。
         /// - true（默认）：析构/FreeModel 时会释放底层模型
-        /// - false：析构/FreeModel 时不会释放底层模型（用于“共享/借用 modelIndex”的场景）
+        /// - false：不直接调用底层模型释放接口；共享索引对象释放时减少自身增加的使用计数
         /// </summary>
         bool OwnModelIndex = true;
 
@@ -264,9 +290,18 @@ namespace dlcv_infer {
         int _expectedChCache = -2;
         bool _hasCachedModelInfo = false;
         json _cachedModelInfo;
+        bool _indexBound = false;
+        bool _indexReady = false;
+        bool _ownsNativeModelIndex = false;
+        bool _ownsRegisteredFlowIndex = false;
+        std::mutex _indexStateMu;
         // DVS 模式：持有临时目录路径，确保在 Model 对象存活期间文件不被删除
         std::string _tempDir;
 
+        void EnsureBoundIndexReady();
+        void LoadFlowArchiveAndRegister(const std::wstring& modelPath, int deviceId);
+        void RestoreFlowFromSharedInfo(const json& flowInfo);
+        bool UnbindCurrentIndexNoexcept();
         int resolveEffectiveInputCh();
         std::vector<cv::Mat> prepareInferInputBatch(const std::vector<cv::Mat>& images);
     protected:
@@ -326,4 +361,11 @@ namespace dlcv_infer {
         static int nvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length);
         static int nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device);
     };
+}
+
+extern "C" {
+    DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_load_c(const wchar_t* model_path, int device_id);
+    DLCV_INFER_CPP_DLL_API const char* dlcv_shared_index_test_infer_c(int index, const wchar_t* image_path);
+    DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_free_c(int index);
+    DLCV_INFER_CPP_DLL_API void dlcv_shared_index_test_free_string_c(const char* result);
 }
