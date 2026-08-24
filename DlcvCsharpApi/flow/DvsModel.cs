@@ -11,7 +11,7 @@ using dlcv_infer_csharp;
 namespace DlcvModules
 {
     /// <summary>
-    /// 支持加载 .dvst/dvso/dvsp 格式（包含 pipeline.json + 多个 .dvt/.dvs/.dvp 模型）
+    /// 支持加载 .dvst/.dvso 格式（包含 pipeline.json + 多个 .dvt/.dvs/.dvp 模型）
     /// 解包 -> 临时存储 -> 加载 -> 清理
     /// </summary>
     public class DvsModel : FlowGraphModel
@@ -55,7 +55,6 @@ namespace DlcvModules
                 if (nodeId < 0 || modelIndex < 0) throw new InvalidDataException("流程模型绑定索引无效");
                 bindings[nodeId] = modelIndex;
             }
-            if (bindings.Count == 0) throw new InvalidDataException("流程模型绑定为空");
             return LoadCore(sourcePath, savedPipeline, bindings, deviceId);
         }
 
@@ -66,6 +65,8 @@ namespace DlcvModules
             int deviceId)
         {
             if (string.IsNullOrWhiteSpace(dvsPath)) throw new ArgumentException("文件路径为空", nameof(dvsPath));
+            if (string.Equals(Path.GetExtension(dvsPath), ".dvsp", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException("不支持 .dvsp 模型推理");
             if (!File.Exists(dvsPath)) throw new FileNotFoundException("文件不存在", dvsPath);
 
             _dvsPath = dvsPath;
@@ -365,8 +366,6 @@ namespace DlcvModules
                     ["model_index"] = modelIndex
                 });
             }
-            if (bindings.Count == 0)
-                throw new InvalidDataException("流程未包含模型节点");
             return bindings;
         }
 

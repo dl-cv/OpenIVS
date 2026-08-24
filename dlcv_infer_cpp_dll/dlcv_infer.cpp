@@ -323,8 +323,11 @@ bool EndsWithIgnoreCase(const std::string& text, const std::string& suffix) {
 
 bool IsFlowArchivePath(const std::string& pathUtf8) {
     return EndsWithIgnoreCase(pathUtf8, ".dvst") ||
-           EndsWithIgnoreCase(pathUtf8, ".dvso") ||
-           EndsWithIgnoreCase(pathUtf8, ".dvsp");
+           EndsWithIgnoreCase(pathUtf8, ".dvso");
+}
+
+bool IsUnsupportedDvspPath(const std::string& pathUtf8) {
+    return EndsWithIgnoreCase(pathUtf8, ".dvsp");
 }
 
 std::string JoinPath(const std::string& a, const std::string& b) {
@@ -1650,6 +1653,28 @@ namespace dlcv_infer {
         throw std::runtime_error("无法确定流程 provider");
     }
 
+    static DllLoader* ResolveFlowRegistrationLoader(const json& modelBindings) {
+        DllLoader* selectedLoader = nullptr;
+        for (const auto& binding : modelBindings) {
+            if (!binding.is_object() || !binding.contains("model_index") ||
+                !binding.at("model_index").is_number_integer()) {
+                throw std::runtime_error("流程模型绑定格式无效");
+            }
+            const int childModelIndex = binding.at("model_index").get<int>();
+            int childIndexType = 0;
+            DllLoader& childLoader = DllLoader::ResolveForIndex(childModelIndex, childIndexType);
+            if (childIndexType != 1) {
+                throw std::runtime_error("流程模型节点 index 类型无效");
+            }
+            if (selectedLoader != nullptr &&
+                selectedLoader->GetDogProvider() != childLoader.GetDogProvider()) {
+                throw std::runtime_error("流程中的模型节点不能混用 provider");
+            }
+            selectedLoader = &childLoader;
+        }
+        return selectedLoader != nullptr ? selectedLoader : &DllLoader::Instance();
+    }
+
     static std::string FlowTypeFromPath(const std::wstring& modelPath) {
         std::string extension = GetExtensionWithDot(convertWstringToUtf8(modelPath));
         if (!extension.empty() && extension.front() == '.') extension.erase(extension.begin());
@@ -1727,24 +1752,12 @@ namespace dlcv_infer {
             throw std::runtime_error(report.dump());
         }
 
-        _dllLoader = &DllLoader::Instance();
-        _loadedDogProvider = _dllLoader->GetDogProvider();
-        _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
-        EnsureSharedIndexFunctions(_dllLoader);
-
         const std::set<int> expectedNodeIds = CollectFlowModelNodeIds(unpack.originalPipelineRoot);
         if (!report.contains("models") || !report.at("models").is_array()) {
             throw std::runtime_error("流程模型加载结果缺少模型节点信息");
         }
 
-        json flowRegistration = json::object();
-        flowRegistration["schema_version"] = 1;
-        flowRegistration["flow_type"] = FlowTypeFromPath(modelPath);
-        flowRegistration["provider"] = ProviderToRegistryName(_loadedDogProvider);
-        flowRegistration["source_path"] = AbsolutePathUtf8(modelPath);
-        flowRegistration["device_id"] = deviceId;
-        flowRegistration["pipeline"] = unpack.originalPipelineRoot;
-        flowRegistration["model_bindings"] = json::array();
+        json modelBindings = json::array();
         std::set<int> boundNodeIds;
         for (const auto& item : report.at("models")) {
             if (!item.is_object() || item.value("status_code", 1) != 0) {
@@ -1757,7 +1770,8 @@ namespace dlcv_infer {
                 !boundNodeIds.insert(nodeId).second) {
                 throw std::runtime_error("流程模型绑定无效");
             }
-            flowRegistration["model_bindings"].push_back({
+
+            modelBindings.push_back({
                 {"node_id", nodeId},
                 {"model_index", childModelIndex}
             });
@@ -1765,6 +1779,20 @@ namespace dlcv_infer {
         if (boundNodeIds != expectedNodeIds) {
             throw std::runtime_error("流程模型绑定不完整");
         }
+
+        _dllLoader = ResolveFlowRegistrationLoader(modelBindings);
+        _loadedDogProvider = _dllLoader->GetDogProvider();
+        _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+        EnsureSharedIndexFunctions(_dllLoader);
+
+        json flowRegistration = json::object();
+        flowRegistration["schema_version"] = 1;
+        flowRegistration["flow_type"] = FlowTypeFromPath(modelPath);
+        flowRegistration["provider"] = ProviderToRegistryName(_loadedDogProvider);
+        flowRegistration["source_path"] = AbsolutePathUtf8(modelPath);
+        flowRegistration["device_id"] = deviceId;
+        flowRegistration["pipeline"] = unpack.originalPipelineRoot;
+        flowRegistration["model_bindings"] = std::move(modelBindings);
 
         const std::string registrationText = flowRegistration.dump();
         const int flowIndex = _dllLoader->GetRegisterFlowFunc()(registrationText.c_str());
@@ -1900,6 +1928,9 @@ namespace dlcv_infer {
         const std::wstring modelPathW = DecodeModelPathString(modelPath);
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPathW);
 
+        if (IsUnsupportedDvspPath(modelPathUtf8)) {
+            throw std::invalid_argument("不支持 .dvsp 模型推理");
+        }
         if (IsFlowArchivePath(modelPathUtf8)) {
             try {
                 LoadFlowArchiveAndRegister(modelPathW, device_id);
@@ -1955,6 +1986,9 @@ namespace dlcv_infer {
         : _deviceId(device_id) {
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPath);
 
+        if (IsUnsupportedDvspPath(modelPathUtf8)) {
+            throw std::invalid_argument("不支持 .dvsp 模型推理");
+        }
         if (IsFlowArchivePath(modelPathUtf8)) {
             try {
                 LoadFlowArchiveAndRegister(modelPath, device_id);
@@ -3157,6 +3191,39 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_free_c(int index) {
         }
     }
     return 0;
+}
+
+extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_resolve_c(int index) {
+    try {
+        int indexType = 0;
+        dlcv_infer::DllLoader::ResolveForIndex(index, indexType);
+        return indexType;
+    } catch (...) {
+        return 0;
+    }
+}
+
+extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_register_flow_c(int model_index) {
+    try {
+        dlcv_infer::json modelBindings = dlcv_infer::json::array({
+            {{"node_id", 1}, {"model_index", model_index}}
+        });
+        dlcv_infer::DllLoader* loader = dlcv_infer::ResolveFlowRegistrationLoader(modelBindings);
+        dlcv_infer::EnsureSharedIndexFunctions(loader);
+        dlcv_infer::json flowRegistration = {
+            {"schema_version", 1},
+            {"flow_type", "dvst"},
+            {"provider", dlcv_infer::ProviderToRegistryName(loader->GetDogProvider())},
+            {"source_path", "shared_index_test.dvst"},
+            {"device_id", 0},
+            {"pipeline", dlcv_infer::json::object()},
+            {"model_bindings", std::move(modelBindings)}
+        };
+        const std::string registrationText = flowRegistration.dump();
+        return loader->GetRegisterFlowFunc()(registrationText.c_str());
+    } catch (...) {
+        return -1;
+    }
 }
 
 extern "C" DLCV_INFER_CPP_DLL_API void dlcv_shared_index_test_free_string_c(const char* result) {

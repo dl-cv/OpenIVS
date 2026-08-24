@@ -99,7 +99,9 @@ namespace dlcv_infer_csharp
             }
 
             string extension = Path.GetExtension(modelPath).ToLower();
-            _isDvpMode = extension == ".dvp" || extension == ".dvsp";
+            if (extension == ".dvsp")
+                throw new NotSupportedException("不支持 .dvsp 模型推理");
+            _isDvpMode = extension == ".dvp";
             _isDvsMode = extension == ".dvst" || extension == ".dvso";
             _isRpcMode = rpc_mode;
             // 流程对象还持有执行图和子模型，不能只缓存整体 index。
@@ -458,16 +460,16 @@ namespace dlcv_infer_csharp
                     throw new Exception("DVS模型加载失败:\n" + msg);
                 }
 
-                _dllLoader = DllLoader.Instance;
-                if (_dllLoader == null || _dllLoader.dlcv_register_flow_c == null)
-                    throw new Exception("当前 dlcv_infer 未提供流程 index 注册接口");
-
                 string sourcePath = Path.GetFullPath(modelPath);
                 string extension = Path.GetExtension(sourcePath).ToLowerInvariant();
                 JObject registrationPipeline = _dvsModel.GetRegistrationPipeline();
                 JArray modelBindings = _dvsModel.GetModelBindings();
-                if (modelBindings == null || modelBindings.Count == 0)
-                    throw new Exception("注册流程 index 失败：模型绑定为空");
+                if (modelBindings == null)
+                    throw new Exception("注册流程 index 失败：缺少模型绑定数组");
+
+                _dllLoader = ResolveFlowRegistrationLoader(modelBindings);
+                if (_dllLoader == null || _dllLoader.dlcv_register_flow_c == null)
+                    throw new Exception("当前 dlcv_infer 未提供流程 index 注册接口");
 
                 var flowJson = new JObject
                 {
@@ -496,6 +498,27 @@ namespace dlcv_infer_csharp
                 _dvsModel = null;
                 throw new Exception($"加载 DVS 模型失败: {ex.Message}", ex);
             }
+        }
+
+        private static DllLoader ResolveFlowRegistrationLoader(JArray modelBindings)
+        {
+            DllLoader selectedLoader = null;
+            foreach (JToken token in modelBindings)
+            {
+                JObject binding = token as JObject;
+                if (binding == null || binding["model_index"] == null)
+                    throw new InvalidDataException("流程模型绑定格式无效");
+
+                int childModelIndex = binding["model_index"].Value<int>();
+                string indexType;
+                DllLoader childLoader = DllLoader.ResolveForIndex(childModelIndex, out indexType);
+                if (!string.Equals(indexType, "model", StringComparison.Ordinal))
+                    throw new InvalidDataException("流程模型节点 index 类型无效");
+                if (selectedLoader != null && selectedLoader.LoadedDogProvider != childLoader.LoadedDogProvider)
+                    throw new InvalidDataException("流程中的模型节点不能混用 provider");
+                selectedLoader = childLoader;
+            }
+            return selectedLoader ?? DllLoader.Instance;
         }
 
         private void InitializeDvtMode(string modelPath, int device_id)
