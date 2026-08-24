@@ -2042,6 +2042,20 @@ int RunCalcMeanSelfTest() {
     std::cout << "calc_mean 自测通过\n";
     return 0;
 }
+
+int RunDvspDisabledSelfTest() {
+    try {
+        dlcv_infer::Model model(L"unsupported_model.dvsp", 0);
+        std::cout << "DVSP 禁用自测失败：接口未拒绝 .dvsp\n";
+        return 1;
+    } catch (const std::invalid_argument& ex) {
+        std::cout << "DVSP 禁用自测通过：" << ex.what() << "\n";
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cout << "DVSP 禁用自测失败：异常类型错误，" << ex.what() << "\n";
+        return 1;
+    }
+}
 }  // namespace
 
 int wmain(int argc, wchar_t* argv[]) {
@@ -2098,6 +2112,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunCalcMeanSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"dvsp-disabled-selftest") {
+        return RunDvspDisabledSelfTest();
+    }
+
     std::cout << "Usage: " << (argc >= 1 ? WideToUtf8(argv[0]) : "dlcv_infer_cpp_test") << " <subcommand>\n";
     std::cout << "Available subcommands:\n";
     std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
@@ -2112,5 +2130,6 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
     std::cout << "  calc-mean-selftest\n";
+    std::cout << "  dvsp-disabled-selftest\n";
     return 2;
 }

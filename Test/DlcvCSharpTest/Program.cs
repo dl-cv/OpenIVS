@@ -49,8 +49,24 @@ namespace DlcvCSharpTest
         private static extern int CppSharedIndexTestFree(int index);
 
         [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl,
+            ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_resolve_c")]
+        private static extern int CppSharedIndexTestResolve(int index);
+
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl,
+            ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_register_flow_c")]
+        private static extern int CppSharedIndexTestRegisterFlow(int modelIndex);
+
+        [DllImport("dlcv_infer_cpp_dll.dll", CallingConvention = CallingConvention.Cdecl,
             ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_free_string_c")]
         private static extern void CppSharedIndexTestFreeString(IntPtr result);
+
+        [DllImport("dlcv_infer_v.dll", CallingConvention = CallingConvention.Cdecl,
+            ExactSpelling = true, EntryPoint = "dlcv_register_flow_c")]
+        private static extern int VirboxRegisterFlow(IntPtr flowJsonUtf8);
+
+        [DllImport("dlcv_infer_v.dll", CallingConvention = CallingConvention.Cdecl,
+            ExactSpelling = true, EntryPoint = "dlcv_free_flow_c")]
+        private static extern int VirboxFreeFlow(int flowIndex);
 
         private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
         {
@@ -84,9 +100,19 @@ namespace DlcvCSharpTest
                     return RunDvsRgbSelfTest(args);
                 }
 
-                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-parity-selftest", StringComparison.OrdinalIgnoreCase))
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-disabled-selftest", StringComparison.OrdinalIgnoreCase))
                 {
-                    return RunDvspParitySelfTest(args);
+                    return RunDvspDisabledSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "empty-flow-index-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunEmptyFlowIndexSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "provider-switch-flow-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunProviderSwitchFlowSelfTest(args);
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "maskrbox-selftest", StringComparison.OrdinalIgnoreCase))
@@ -1879,8 +1905,7 @@ namespace DlcvCSharpTest
         {
             string ext = Path.GetExtension(modelPath) ?? string.Empty;
             return ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase)
-                || ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase)
-                || ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase);
+                || ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase);
         }
 
         private static int ParsePositiveIntArg(string[] args, int index, int defaultValue)
@@ -2446,96 +2471,171 @@ namespace DlcvCSharpTest
             }
         }
 
-        private static int RunDvspParitySelfTest(string[] args)
+        private static int RunDvspDisabledSelfTest()
         {
-            if (args == null || args.Length < 4)
-            {
-                Console.WriteLine("用法: DlcvCSharpTest dvsp-parity-selftest <modelPath> <imagePath> <expectedJson>");
-                return 2;
-            }
-
-            string modelPath = args[1];
-            string imagePath = args[2];
-            string expectedPath = args[3];
-            if (!File.Exists(modelPath) || !File.Exists(imagePath) || !File.Exists(expectedPath))
-            {
-                Console.WriteLine("模型、图片或基线 JSON 不存在");
-                return 2;
-            }
-
-            Model model = null;
-            Mat bgr = null;
-            Mat rgb = null;
-            Utils.CSharpResult result = default(Utils.CSharpResult);
+            string modelPath = Path.Combine(Path.GetTempPath(), "unsupported_model.dvsp");
             try
             {
-                var expectedRoot = JObject.Parse(File.ReadAllText(expectedPath, Encoding.UTF8));
-                var expected = expectedRoot["results"] as JArray ?? new JArray();
-
-                model = new Model(modelPath, GpuDeviceId, false, false);
-                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
-                if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
-                rgb = new Mat();
-                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
-
-                var inferParams = new JObject
+                using (var model = new Model(modelPath, GpuDeviceId, false, false))
                 {
-                    ["threshold"] = 0.0,
-                    ["with_mask"] = false,
-                    ["batch_size"] = 1
-                };
-                result = model.InferBatch(new List<Mat> { rgb }, inferParams);
-                var actual = result.SampleResults != null && result.SampleResults.Count > 0
-                    ? result.SampleResults[0].Results ?? new List<Utils.CSharpObjectResult>()
-                    : new List<Utils.CSharpObjectResult>();
-
-                Console.WriteLine("expected_count=" + expected.Count + ", actual_count=" + actual.Count);
-                bool ok = expected.Count == actual.Count;
-                int count = Math.Min(expected.Count, actual.Count);
-                for (int i = 0; i < count; i++)
-                {
-                    var exp = expected[i] as JObject ?? new JObject();
-                    var expBox = exp["bbox"] as JArray ?? new JArray();
-                    var act = actual[i];
-                    var actBox = act.Bbox ?? new List<double>();
-                    double ax1 = actBox.Count > 0 ? actBox[0] : double.NaN;
-                    double ay1 = actBox.Count > 1 ? actBox[1] : double.NaN;
-                    double ax2 = actBox.Count > 2 ? ax1 + actBox[2] : double.NaN;
-                    double ay2 = actBox.Count > 3 ? ay1 + actBox[3] : double.NaN;
-                    double ex1 = expBox.Count > 0 ? expBox[0].Value<double>() : double.NaN;
-                    double ey1 = expBox.Count > 1 ? expBox[1].Value<double>() : double.NaN;
-                    double ex2 = expBox.Count > 2 ? expBox[2].Value<double>() : double.NaN;
-                    double ey2 = expBox.Count > 3 ? expBox[3].Value<double>() : double.NaN;
-                    double expectedScore = exp.Value<double?>("score") ?? double.NaN;
-                    string expectedCategory = exp.Value<string>("category_name") ?? "";
-
-                    bool itemOk = string.Equals(expectedCategory, act.CategoryName ?? "", StringComparison.Ordinal)
-                        && Math.Abs(expectedScore - act.Score) <= 1e-6
-                        && Math.Abs(ex1 - ax1) <= 1e-6
-                        && Math.Abs(ey1 - ay1) <= 1e-6
-                        && Math.Abs(ex2 - ax2) <= 1e-6
-                        && Math.Abs(ey2 - ay2) <= 1e-6;
-                    ok &= itemOk;
-                    Console.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                        "[{0}] {1} score expected={2:R} actual={3:R}; bbox expected=[{4:R},{5:R},{6:R},{7:R}] actual=[{8:R},{9:R},{10:R},{11:R}] {12}",
-                        i, act.CategoryName, expectedScore, (double)act.Score, ex1, ey1, ex2, ey2, ax1, ay1, ax2, ay2, itemOk ? "OK" : "MISMATCH"));
                 }
-
-                Console.WriteLine(ok ? "SELFTEST PASSED" : "SELFTEST FAILED");
-                return ok ? 0 : 1;
+                Console.WriteLine("DVSP 禁用自测失败：接口未拒绝 .dvsp");
+                return 1;
+            }
+            catch (NotSupportedException ex)
+            {
+                Console.WriteLine("DVSP 禁用自测通过：" + ex.Message);
+                return 0;
             }
             catch (Exception ex)
             {
-                Console.WriteLine("SELFTEST ERROR: " + ex.Message);
+                Console.WriteLine("DVSP 禁用自测失败：异常类型错误，" + ex.Message);
+                return 1;
+            }
+        }
+
+        private static int RunEmptyFlowIndexSelfTest()
+        {
+            string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_empty_flow_" + Guid.NewGuid().ToString("N") + ".dvst");
+            Model csharpOwner = null;
+            Model csharpBorrower = null;
+            int cppIndex = -1;
+            try
+            {
+                WriteEmptyFlowArchive(flowPath);
+
+                csharpOwner = new Model(flowPath, GpuDeviceId, false, false);
+                ResolveAndValidateSharedIndex(csharpOwner.modelIndex, "flow", "C# 空模型流程");
+                JObject csharpInfo = csharpOwner.GetModelInfo();
+                if (csharpInfo == null) throw new Exception("C# 空模型流程信息为空");
+                csharpOwner.Dispose();
+                csharpOwner = null;
+
+                cppIndex = CppSharedIndexTestLoad(flowPath, GpuDeviceId);
+                if (cppIndex < 0) throw new Exception("C++ 空模型流程加载失败");
+                ResolveAndValidateSharedIndex(cppIndex, "flow", "C++ 空模型流程");
+
+                csharpBorrower = new Model { modelIndex = cppIndex, OwnModelIndex = false };
+                JObject restoredInfo = csharpBorrower.GetModelInfo();
+                if (restoredInfo == null) throw new Exception("C# 恢复空模型流程信息为空");
+                csharpBorrower.Dispose();
+                csharpBorrower = null;
+
+                if (CppSharedIndexTestFree(cppIndex) != 0)
+                    throw new Exception("C++ 空模型流程释放失败");
+                cppIndex = -1;
+
+                Console.WriteLine("空模型流程索引自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("空模型流程索引自测失败：" + ex.Message);
                 return 1;
             }
             finally
             {
-                DisposeResultMasks(result);
-                if (rgb != null) rgb.Dispose();
-                if (bgr != null) bgr.Dispose();
-                try { if (model != null) model.Dispose(); } catch { }
-                ForceGc();
+                try { if (csharpBorrower != null) csharpBorrower.Dispose(); } catch { }
+                try { if (cppIndex >= 0) CppSharedIndexTestFree(cppIndex); } catch { }
+                try { if (csharpOwner != null) csharpOwner.Dispose(); } catch { }
+                try { if (File.Exists(flowPath)) File.Delete(flowPath); } catch { }
+            }
+        }
+
+        private static void WriteEmptyFlowArchive(string path)
+        {
+            byte[] pipelineBytes = Encoding.UTF8.GetBytes(new JObject
+            {
+                ["nodes"] = new JArray()
+            }.ToString(Formatting.None));
+            string header = new JObject
+            {
+                ["file_list"] = new JArray("pipeline.json"),
+                ["file_size"] = new JArray(pipelineBytes.Length)
+            }.ToString(Formatting.None);
+            byte[] prefix = Encoding.UTF8.GetBytes("DV\n" + header + "\n");
+
+            using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(prefix, 0, prefix.Length);
+                stream.Write(pipelineBytes, 0, pipelineBytes.Length);
+            }
+        }
+
+        private static int RunProviderSwitchFlowSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 2)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest provider-switch-flow-selftest <model.dvo>");
+                return 2;
+            }
+
+            int sentinelModel = -1;
+            int sentinelFlow = -1;
+            int virboxFlow = -1;
+            try
+            {
+                sentinelModel = CppSharedIndexTestLoad(args[1], GpuDeviceId);
+                if (sentinelModel < 0) throw new Exception("Sentinel 模型加载失败");
+                ResolveAndValidateSharedIndex(sentinelModel, "model", "Sentinel 模型");
+
+                virboxFlow = RegisterVirboxEmptyFlow();
+                if (virboxFlow < 30000 || virboxFlow > 39999)
+                    throw new Exception("Virbox 空流程 index 超出范围: " + virboxFlow);
+                if (CppSharedIndexTestResolve(virboxFlow) != 2)
+                    throw new Exception("C++ loader 切换 Virbox 失败");
+
+                sentinelFlow = CppSharedIndexTestRegisterFlow(sentinelModel);
+                if (sentinelFlow < 0)
+                    throw new Exception("provider 切换后的 Sentinel 流程登记失败");
+                ResolveAndValidateSharedIndex(sentinelFlow, "flow", "切换后的 Sentinel 流程");
+
+                Console.WriteLine("provider 切换流程自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("provider 切换流程自测失败：" + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                try
+                {
+                    if (sentinelFlow >= 0)
+                    {
+                        string indexType;
+                        DllLoader.ResolveForIndex(sentinelFlow, out indexType).FreeFlow(sentinelFlow);
+                    }
+                }
+                catch { }
+                try { if (virboxFlow >= 0) VirboxFreeFlow(virboxFlow); } catch { }
+                try { if (sentinelModel >= 0) CppSharedIndexTestFree(sentinelModel); } catch { }
+            }
+        }
+
+        private static int RegisterVirboxEmptyFlow()
+        {
+            string sourcePath = Path.Combine(Path.GetTempPath(), "virbox_empty_flow.dvst");
+            string flowJson = new JObject
+            {
+                ["schema_version"] = 1,
+                ["flow_type"] = "dvst",
+                ["provider"] = "virbox",
+                ["source_path"] = sourcePath,
+                ["device_id"] = GpuDeviceId,
+                ["pipeline"] = new JObject { ["nodes"] = new JArray() },
+                ["model_bindings"] = new JArray()
+            }.ToString(Formatting.None);
+            byte[] bytes = Encoding.UTF8.GetBytes(flowJson + "\0");
+            GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+            try
+            {
+                return VirboxRegisterFlow(handle.AddrOfPinnedObject());
+            }
+            finally
+            {
+                handle.Free();
             }
         }
 
