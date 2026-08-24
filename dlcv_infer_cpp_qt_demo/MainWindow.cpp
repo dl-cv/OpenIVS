@@ -499,6 +499,10 @@ void MainWindow::onLoadModel() {
     }
 
     const QString selectedModelPath = dialog.selectedFiles().front();
+    if (selectedModelPath.endsWith(".dvsp", Qt::CaseInsensitive)) {
+        outputText_->setPlainText("不支持 .dvsp 模型推理");
+        return;
+    }
 
     settings_.setValue("LastModelPath", selectedModelPath);
 
