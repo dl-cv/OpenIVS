@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -7,6 +8,7 @@
 #include "flow/ExecutionContext.h"
 #include "flow/FlowTypes.h"
 #include "flow/GraphExecutor.h"
+#include "flow/modules/ModelModules.h"
 
 namespace dlcv_infer {
 namespace flow {
@@ -67,6 +69,7 @@ private:
     int _deviceId = 0;
     std::string _flowJsonPath;
     std::vector<std::string> _acquiredModelKeys;
+    std::shared_ptr<BoundModelMap> _boundModelsByIndex;
 
     void ReleaseOwnedModelsNoexcept();
     Json LoadFromRoot(const Json& root, int deviceId);

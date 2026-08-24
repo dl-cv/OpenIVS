@@ -88,6 +88,18 @@ void BaseModelModule::LoadModel() {
 
     _resolvedDeviceId = deviceId;
     if (_usesModelIndex) {
+        if (Context != nullptr) {
+            const auto boundModels = Context->Get<std::shared_ptr<const BoundModelMap>>(
+                "bound_models_by_index", std::shared_ptr<const BoundModelMap>());
+            if (boundModels) {
+                const auto it = boundModels->find(_modelIndex);
+                if (it != boundModels->end() && it->second) {
+                    _model = it->second;
+                    return;
+                }
+            }
+        }
+
         _model = std::make_shared<dlcv_infer::Model>();
         _model->modelIndex = _modelIndex;
         _model->OwnModelIndex = false;

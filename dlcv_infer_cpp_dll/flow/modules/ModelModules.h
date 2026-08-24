@@ -13,6 +13,8 @@
 namespace dlcv_infer {
 namespace flow {
 
+using BoundModelMap = std::unordered_map<int, std::shared_ptr<dlcv_infer::Model>>;
+
 /// <summary>
 /// 模型池：按 model_path+device_id 缓存 dlcv_infer::Model，避免重复加载。
 /// 约定：FlowGraph 内部字符串使用 UTF-8；创建 Model 时会转换为 GBK 以兼容现有 Model 构造。
@@ -76,9 +78,7 @@ public:
     }
 
     ~BaseModelModule() {
-        if (_usesModelIndex && _model) {
-            try { _model->FreeModel(); } catch (...) {}
-        } else if (!_modelPathUtf8.empty() && _model) {
+        if (!_usesModelIndex && !_modelPathUtf8.empty() && _model) {
             try { ModelPool::Instance().Release(_modelPathUtf8, _resolvedDeviceId); } catch (...) {}
         }
     }
