@@ -543,17 +543,69 @@ static void EnsureBboxForAllSamples(std::vector<ModuleImage>& imagesOut, Json& r
 }
 
 ModuleIO ClsModelModule::Process(const std::vector<ModuleImage>& imageList, const Json& resultList) {
-    ModuleIO baseIo = DetModelModule::Process(imageList, resultList);
+    const bool useAffineImage = ReadBool("use_affine_img", true);
+    std::vector<ModuleImage> inferImages = imageList;
+    if (useAffineImage) {
+        for (auto& image : inferImages) {
+            if (!image.AffineImage.empty()) image.ImageObject = image.AffineImage;
+        }
+    }
+
+    ModuleIO baseIo = DetModelModule::Process(inferImages, resultList);
     const int topK = std::max(0, ReadInt("top_k", 1));
-    if (topK > 0 && baseIo.ResultList.is_array()) {
+    std::unordered_map<int, std::string> categoryByIndex;
+    if (baseIo.ResultList.is_array()) {
         for (auto& token : baseIo.ResultList) {
             if (!token.is_object()) continue;
             Json& entry = token;
             if (!entry.contains("sample_results") || !entry["sample_results"].is_array()) continue;
-            KeepTopKByScore(entry["sample_results"], topK);
+            Json& samples = entry["sample_results"];
+            if (topK > 0) KeepTopKByScore(samples, topK);
+
+            std::string categoryName;
+            double bestScore = -std::numeric_limits<double>::infinity();
+            for (const auto& sample : samples) {
+                if (!sample.is_object()) continue;
+                const std::string name = sample.value("category_name", std::string());
+                if (name.empty()) continue;
+                const double score = ReadScoreForSort(sample);
+                if (categoryName.empty() || score > bestScore) {
+                    categoryName = name;
+                    bestScore = score;
+                }
+            }
+            if (!categoryName.empty()) {
+                categoryByIndex[entry.value("index", -1)] = categoryName;
+            }
         }
     }
+
+    if (useAffineImage) {
+        const size_t count = std::min(baseIo.ImageList.size(), imageList.size());
+        for (size_t i = 0; i < count; i++) baseIo.ImageList[i] = imageList[i];
+    }
     EnsureBboxForAllSamples(baseIo.ImageList, baseIo.ResultList);
+
+    if (resultList.is_array() && !resultList.empty()) {
+        Json overlaidResults = Json::array();
+        for (const auto& token : resultList) {
+            Json overlaid = token;
+            if (overlaid.is_object() && overlaid.value("type", std::string()) == "local") {
+                const int index = overlaid.value("index", -1);
+                const auto categoryIt = categoryByIndex.find(index);
+                if (categoryIt != categoryByIndex.end()
+                    && overlaid.contains("sample_results")
+                    && overlaid["sample_results"].is_array()) {
+                    for (auto& sample : overlaid["sample_results"]) {
+                        if (sample.is_object()) sample["category_name"] = categoryIt->second;
+                    }
+                }
+            }
+            overlaidResults.push_back(std::move(overlaid));
+        }
+        baseIo.ResultList = std::move(overlaidResults);
+    }
+
     return baseIo;
 }
 

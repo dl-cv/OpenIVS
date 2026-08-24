@@ -329,6 +329,167 @@ int RunCurveTextAffineSelfTest() {
     return 0;
 }
 
+bool MatsExactlyEqual(const cv::Mat& left, const cv::Mat& right) {
+    if (left.empty() || right.empty()) return left.empty() && right.empty();
+    if (left.size() != right.size() || left.type() != right.type()) return false;
+    return cv::norm(left, right, cv::NORM_INF) == 0.0;
+}
+
+int RunAiOrientationAffineSelfTest() {
+    auto fail = [](const std::string& message) -> int {
+        std::cout << "ai_orientation_affine selftest failed: " << message << "\n";
+        return 1;
+    };
+
+    if (!dlcv_infer::flow::ModuleRegistry::Has("pre_process/image_rotate_by_cls")) {
+        return fail("pre_process/image_rotate_by_cls is not registered");
+    }
+
+    const auto factory = dlcv_infer::flow::ModuleRegistry::Get("pre_process/image_rotate_by_cls");
+    const cv::Mat base = (cv::Mat_<std::uint8_t>(2, 3) << 1, 2, 3, 4, 5, 6);
+    const cv::Mat affine = (cv::Mat_<std::uint8_t>(2, 3) << 11, 12, 13, 14, 15, 16);
+
+    dlcv_infer::flow::TransformationState state(100, 80);
+    state.CropBox = { 7, 9, 30, 20 };
+    state.AffineMatrix2x3 = { 1, 0, 7, 0, 1, 9 };
+    state.OutputSize = { base.cols, base.rows };
+
+    const std::vector<std::pair<std::string, int>> cases = {
+        { "0", 0 }, { "90", 90 }, { "180", 180 }, { "270", 270 }
+    };
+    for (const auto& testCase : cases) {
+        dlcv_infer::flow::ModuleImage image(base.clone(), base.clone(), state, 3);
+        image.AffineImage = affine.clone();
+        image.UniqueId = "orientation-affine-test";
+        image.SlidingMeta.Valid = true;
+        image.SlidingMeta.GridX = 2;
+
+        json results = json::array({
+            json::object({
+                {"type", "local"},
+                {"index", 0},
+                {"origin_index", 3},
+                {"transform", state.ToJson()},
+                {"sample_results", json::array({
+                    json::object({
+                        {"bbox", json::array({ 1, 0, 2, 2 })},
+                        {"with_bbox", true},
+                        {"with_mask", true},
+                        {"mask_rle", json::object({ {"size", json::array({ 2, 3 })}, {"counts", "test"} })},
+                        {"score", 0.98},
+                        {"category_name", testCase.first}
+                    })
+                })}
+            })
+        });
+
+        auto module = factory(402, std::string(), json::object({
+            {"rotate90_labels", json::array({ "90" })},
+            {"rotate180_labels", json::array({ "180" })},
+            {"rotate270_labels", json::array({ "270" })},
+            {"rotate_affine_img", true}
+        }), nullptr);
+        const dlcv_infer::flow::ModuleIO output = module->Process({ image }, results);
+        if (output.ImageList.size() != 1) {
+            return fail("affine mode image count mismatch for angle " + testCase.first);
+        }
+        const auto& outputImage = output.ImageList.front();
+        if (!MatsExactlyEqual(outputImage.ImageObject, base)) {
+            return fail("ImageObject changed in affine mode for angle " + testCase.first);
+        }
+        if (outputImage.TransformState.ToJson() != state.ToJson()) {
+            return fail("TransformState changed in affine mode for angle " + testCase.first);
+        }
+        if (output.ResultList != results) {
+            return fail("result list changed in affine mode for angle " + testCase.first);
+        }
+        if (outputImage.UniqueId != image.UniqueId
+            || outputImage.SlidingMeta.Valid != image.SlidingMeta.Valid
+            || outputImage.SlidingMeta.GridX != image.SlidingMeta.GridX) {
+            return fail("ModuleImage metadata changed in affine mode for angle " + testCase.first);
+        }
+
+        cv::Mat expectedAffine;
+        if (testCase.second == 90) cv::rotate(affine, expectedAffine, cv::ROTATE_90_COUNTERCLOCKWISE);
+        else if (testCase.second == 180) cv::rotate(affine, expectedAffine, cv::ROTATE_180);
+        else if (testCase.second == 270) cv::rotate(affine, expectedAffine, cv::ROTATE_90_CLOCKWISE);
+        else expectedAffine = affine;
+        if (!MatsExactlyEqual(outputImage.AffineImage, expectedAffine)) {
+            return fail("AffineImage rotation mismatch for angle " + testCase.first);
+        }
+    }
+
+    dlcv_infer::flow::ModuleImage affineOnlyImage;
+    affineOnlyImage.AffineImage = affine.clone();
+    affineOnlyImage.TransformState = state;
+    affineOnlyImage.OriginalIndex = 3;
+    auto affineOnlyModule = factory(403, std::string(), json::object({
+        {"rotate90_labels", json::array({ "90" })},
+        {"rotate180_labels", json::array({ "180" })},
+        {"rotate270_labels", json::array({ "270" })},
+        {"rotate_affine_img", true}
+    }), nullptr);
+    const json affineOnlyResults = json::array({
+        json::object({
+            {"type", "local"}, {"index", 0}, {"origin_index", 3}, {"transform", state.ToJson()},
+            {"sample_results", json::array({
+                json::object({
+                    {"bbox", json::array({ 1, 0, 2, 2 })},
+                    {"with_bbox", true},
+                    {"with_mask", true},
+                    {"mask_rle", json::object({ {"size", json::array({ 2, 3 })}, {"counts", "test"} })},
+                    {"score", 0.98},
+                    {"category_name", "90"}
+                })
+            })}
+        })
+    });
+    const dlcv_infer::flow::ModuleIO affineOnlyOutput = affineOnlyModule->Process({ affineOnlyImage }, affineOnlyResults);
+    cv::Mat expectedAffineOnly;
+    cv::rotate(affine, expectedAffineOnly, cv::ROTATE_90_COUNTERCLOCKWISE);
+    if (affineOnlyOutput.ImageList.size() != 1
+        || !affineOnlyOutput.ImageList.front().ImageObject.empty()
+        || !MatsExactlyEqual(affineOnlyOutput.ImageList.front().AffineImage, expectedAffineOnly)
+        || affineOnlyOutput.ResultList != affineOnlyResults) {
+        return fail("valid AffineImage was skipped when ImageObject was empty");
+    }
+
+    dlcv_infer::flow::ModuleImage fallbackImage(base.clone(), base.clone(), state, 3);
+    const json fallbackResults = json::array({
+        json::object({
+            {"type", "local"}, {"index", 0}, {"origin_index", 3}, {"transform", state.ToJson()},
+            {"sample_results", json::array({
+                json::object({
+                    {"bbox", json::array({ 1, 0, 2, 2 })},
+                    {"with_bbox", true},
+                    {"score", 0.98},
+                    {"category_name", "90"}
+                })
+            })}
+        })
+    });
+    auto fallbackModule = factory(403, std::string(), json::object({
+        {"rotate90_labels", json::array({ "90" })},
+        {"rotate180_labels", json::array({ "180" })},
+        {"rotate270_labels", json::array({ "270" })},
+        {"rotate_affine_img", true}
+    }), nullptr);
+    const dlcv_infer::flow::ModuleIO fallbackOutput = fallbackModule->Process({ fallbackImage }, fallbackResults);
+    cv::Mat expectedFallback;
+    cv::rotate(base, expectedFallback, cv::ROTATE_90_COUNTERCLOCKWISE);
+    if (fallbackOutput.ImageList.size() != 1
+        || !MatsExactlyEqual(fallbackOutput.ImageList.front().ImageObject, expectedFallback)) {
+        return fail("missing AffineImage did not preserve ImageObject rotation fallback");
+    }
+    if (fallbackOutput.ImageList.front().TransformState.ToJson() == state.ToJson()
+        || fallbackOutput.ResultList == fallbackResults) {
+        return fail("missing AffineImage did not preserve transform/result fallback");
+    }
+
+    std::cout << "ai_orientation_affine selftest passed\n";
+    return 0;
+}
+
 int RunImagePrepCheck() {
     auto fail = [](const std::string& message) -> int {
         std::cout << "imageprepcheck failed: " << message << "\n";
@@ -1895,6 +2056,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunCurveTextAffineSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"ai-orientation-affine-selftest") {
+        return RunAiOrientationAffineSelfTest();
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"imageprepcheck") {
         return RunImagePrepCheck();
     }
@@ -1937,6 +2102,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "Available subcommands:\n";
     std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
     std::cout << "  curve-text-affine-selftest\n";
+    std::cout << "  ai-orientation-affine-selftest\n";
     std::cout << "  imageprepcheck\n";
     std::cout << "  rect-image-correction-selftest\n";
     std::cout << "  bbox-iou-dedup-selftest\n";

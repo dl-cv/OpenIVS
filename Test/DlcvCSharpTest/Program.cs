@@ -83,6 +83,11 @@ namespace DlcvCSharpTest
                     return RunCurveTextAffineSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "ai-orientation-affine-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunAiOrientationAffineSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bbox-iou-dedup-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunBBoxIoUDedupSelfTest();
@@ -2351,6 +2356,222 @@ namespace DlcvCSharpTest
 
             Console.WriteLine("curve_text_affine 自测通过");
             return 0;
+        }
+
+        private static int RunAiOrientationAffineSelfTest()
+        {
+            Console.WriteLine("==== AI 方向矫正 AffineImage 自测 ====");
+
+            MethodInfo prepareMethod = typeof(ClsModel).GetMethod(
+                "PrepareInferenceImages",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            if (prepareMethod == null)
+            {
+                Console.WriteLine("ClsModel 未提供 AffineImage 推理输入准备逻辑");
+                return 1;
+            }
+
+            using (var sourceImage = new Mat(4, 6, MatType.CV_8UC1, Scalar.All(10)))
+            using (var affineImage = new Mat(2, 3, MatType.CV_8UC1))
+            {
+                affineImage.Set(0, 0, (byte)1);
+                affineImage.Set(0, 1, (byte)2);
+                affineImage.Set(0, 2, (byte)3);
+                affineImage.Set(1, 0, (byte)4);
+                affineImage.Set(1, 1, (byte)5);
+                affineImage.Set(1, 2, (byte)6);
+
+                var state = new TransformationState(
+                    20,
+                    10,
+                    new[] { 3, 2, sourceImage.Width, sourceImage.Height },
+                    new[] { 1.0, 0.0, -3.0, 0.0, 1.0, -2.0 },
+                    new[] { sourceImage.Width, sourceImage.Height });
+                var source = new ModuleImage(sourceImage, sourceImage, state, 7)
+                {
+                    AffineImage = affineImage,
+                    UniqueId = "orientation-affine-test",
+                    SlidingMeta = new JObject { ["tile"] = 1 }
+                };
+                var sourceImages = new List<ModuleImage> { source };
+
+                object[] prepareArgs = { sourceImages, true, null };
+                var inferImages = prepareMethod.Invoke(null, prepareArgs) as List<ModuleImage>;
+                var sourceByInferImage = prepareArgs[2] as Dictionary<ModuleImage, ModuleImage>;
+                if (inferImages == null
+                    || inferImages.Count != 1
+                    || inferImages[0] == null
+                    || !ReferenceEquals(inferImages[0].ImageObject, affineImage)
+                    || sourceByInferImage == null
+                    || !sourceByInferImage.TryGetValue(inferImages[0], out ModuleImage mappedSource)
+                    || !ReferenceEquals(mappedSource, source))
+                {
+                    Console.WriteLine("ClsModel 未使用 AffineImage 作为推理输入，或未保留原 ModuleImage 映射");
+                    return 1;
+                }
+
+                object[] disabledPrepareArgs = { sourceImages, false, null };
+                var disabledInferImages = prepareMethod.Invoke(null, disabledPrepareArgs) as List<ModuleImage>;
+                if (!ReferenceEquals(disabledInferImages, sourceImages) || disabledPrepareArgs[2] != null)
+                {
+                    Console.WriteLine("use_affine_img=false 时未保持原推理输入");
+                    return 1;
+                }
+
+                var originalResults = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = 0,
+                        ["origin_index"] = source.OriginalIndex,
+                        ["transform"] = JObject.FromObject(state.ToDict()),
+                        ["sample_results"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["bbox"] = new JArray(1, 1, 2, 2),
+                                ["category_name"] = "text",
+                                ["score"] = 0.99
+                            }
+                        }
+                    }
+                };
+                var resultsSnapshot = (JArray)originalResults.DeepClone();
+                var clsResults = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "local",
+                        ["index"] = 0,
+                        ["origin_index"] = source.OriginalIndex,
+                        ["transform"] = JObject.FromObject(state.ToDict()),
+                        ["sample_results"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["category_name"] = "90",
+                                ["score"] = 1.0
+                            }
+                        }
+                    }
+                };
+
+                var rotateModule = new ImageRotateByClassification(
+                    501,
+                    null,
+                    new Dictionary<string, object>
+                    {
+                        ["rotate90_labels"] = new[] { "90" },
+                        ["rotate180_labels"] = new[] { "180" },
+                        ["rotate270_labels"] = new[] { "270" },
+                        ["rotate_affine_img"] = true
+                    },
+                    null);
+                rotateModule.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), clsResults));
+
+                ModuleIO output = rotateModule.Process(sourceImages, originalResults);
+                if (output.ImageList.Count != 1 || output.ImageList[0] == null)
+                {
+                    Console.WriteLine("方向矫正没有输出图像");
+                    return 1;
+                }
+
+                ModuleImage rotatedWrap = output.ImageList[0];
+                if (!ReferenceEquals(rotatedWrap.ImageObject, sourceImage))
+                {
+                    Console.WriteLine("rotate_affine_img=true 时错误旋转了 ImageObject");
+                    return 1;
+                }
+                if (!JToken.DeepEquals(
+                    JObject.FromObject(rotatedWrap.TransformState.ToDict()),
+                    JObject.FromObject(state.ToDict())))
+                {
+                    Console.WriteLine("rotate_affine_img=true 时错误修改了 TransformationState");
+                    return 1;
+                }
+                if (!JToken.DeepEquals(output.ResultList, resultsSnapshot))
+                {
+                    Console.WriteLine("rotate_affine_img=true 时错误修改了原分割结果");
+                    return 1;
+                }
+
+                using (var expectedAffine = new Mat())
+                {
+                    Cv2.Rotate(affineImage, expectedAffine, RotateFlags.Rotate90Counterclockwise);
+                    if (!MatContentEquals(rotatedWrap.AffineImage, expectedAffine))
+                    {
+                        Console.WriteLine("AffineImage 未按分类结果逆时针旋转 90 度");
+                        return 1;
+                    }
+                }
+
+                var zeroClsResults = (JArray)clsResults.DeepClone();
+                zeroClsResults[0]["sample_results"][0]["category_name"] = "0";
+                var zeroModule = new ImageRotateByClassification(
+                    502,
+                    null,
+                    new Dictionary<string, object>
+                    {
+                        ["rotate90_labels"] = new[] { "90" },
+                        ["rotate180_labels"] = new[] { "180" },
+                        ["rotate270_labels"] = new[] { "270" },
+                        ["rotate_affine_img"] = true
+                    },
+                    null);
+                zeroModule.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), zeroClsResults));
+                ModuleIO zeroOutput = zeroModule.Process(sourceImages, originalResults);
+                if (zeroOutput.ImageList.Count != 1
+                    || !ReferenceEquals(zeroOutput.ImageList[0], source)
+                    || !ReferenceEquals(zeroOutput.ImageList[0].AffineImage, affineImage)
+                    || !JToken.DeepEquals(zeroOutput.ResultList, resultsSnapshot))
+                {
+                    Console.WriteLine("0 度方向矫正未保持 ImageObject、AffineImage 或原结果");
+                    return 1;
+                }
+
+                var fallback = new ModuleImage(sourceImage, sourceImage, state.Clone(), source.OriginalIndex);
+                var fallbackModule = new ImageRotateByClassification(
+                    503,
+                    null,
+                    new Dictionary<string, object>
+                    {
+                        ["rotate90_labels"] = new[] { "90" },
+                        ["rotate180_labels"] = new[] { "180" },
+                        ["rotate270_labels"] = new[] { "270" },
+                        ["rotate_affine_img"] = true
+                    },
+                    null);
+                fallbackModule.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage>(), clsResults));
+                ModuleIO fallbackOutput = fallbackModule.Process(new List<ModuleImage> { fallback }, originalResults);
+                if (fallbackOutput.ImageList.Count != 1
+                    || fallbackOutput.ImageList[0].ImageObject.Width != sourceImage.Height
+                    || fallbackOutput.ImageList[0].ImageObject.Height != sourceImage.Width
+                    || JToken.DeepEquals(
+                        JObject.FromObject(fallbackOutput.ImageList[0].TransformState.ToDict()),
+                        JObject.FromObject(state.ToDict()))
+                    || JToken.DeepEquals(fallbackOutput.ResultList, resultsSnapshot))
+                {
+                    Console.WriteLine("缺少 AffineImage 时未保持原 ImageObject 旋转回退逻辑");
+                    fallbackOutput.ImageList[0].ImageObject.Dispose();
+                    return 1;
+                }
+                fallbackOutput.ImageList[0].ImageObject.Dispose();
+            }
+
+            Console.WriteLine("AI 方向矫正 AffineImage 自测通过");
+            return 0;
+        }
+
+        private static bool MatContentEquals(Mat left, Mat right)
+        {
+            if (left == null || right == null || left.Empty() || right.Empty()) return false;
+            if (left.Width != right.Width || left.Height != right.Height || left.Type() != right.Type()) return false;
+            using (var diff = new Mat())
+            {
+                Cv2.Absdiff(left, right, diff);
+                return Cv2.CountNonZero(diff.Reshape(1)) == 0;
+            }
         }
 
         private static int RunMaskToRBoxSelfTest()
