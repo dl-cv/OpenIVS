@@ -377,7 +377,37 @@ namespace DlcvCSharpTest
             DllLoader loader = DllLoader.ResolveForIndex(index, out indexType);
             if (!string.Equals(indexType, expectedIndexType, StringComparison.Ordinal))
                 throw new Exception(label + " index 类型错误: " + indexType);
+            ValidateSharedIndexRange(index, indexType, loader.LoadedDogProvider, label);
+            Console.WriteLine(label + " index=" + index + ", type=" + indexType +
+                ", provider=" + loader.LoadedDogProvider);
             return loader;
+        }
+
+        private static void ValidateSharedIndexRange(
+            int index,
+            string indexType,
+            sntl_admin_csharp.DogProvider provider,
+            string label)
+        {
+            int minimum;
+            int maximum;
+            if (provider == sntl_admin_csharp.DogProvider.Sentinel)
+            {
+                minimum = string.Equals(indexType, "flow", StringComparison.Ordinal) ? 10000 : 0;
+                maximum = string.Equals(indexType, "flow", StringComparison.Ordinal) ? 19999 : 9999;
+            }
+            else if (provider == sntl_admin_csharp.DogProvider.Virbox)
+            {
+                minimum = string.Equals(indexType, "flow", StringComparison.Ordinal) ? 30000 : 20000;
+                maximum = string.Equals(indexType, "flow", StringComparison.Ordinal) ? 39999 : 29999;
+            }
+            else
+            {
+                throw new Exception(label + " provider 无效");
+            }
+
+            if (index < minimum || index > maximum)
+                throw new Exception(label + " index 超出 provider 类型范围: " + index);
         }
 
         private static void ValidateFlowInfoWhenNeeded(
