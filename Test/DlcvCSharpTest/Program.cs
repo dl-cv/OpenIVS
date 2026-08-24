@@ -36,6 +36,15 @@ namespace DlcvCSharpTest
         private const string FlowInstanceSegFilterModelPath = @"Y:\zxc\模块化任务测试\实例分割筛选测试_120_50.dvst";
         private const string FlowInstanceSegFilterImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png";
 
+        [DllImport("dlcv_infer_c_dll.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern int dlcv_infer_cpp_load_model_c(string modelPath, int deviceId);
+
+        [DllImport("dlcv_infer_c_dll.dll", CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr dlcv_infer_cpp_get_last_error_c();
+
+        [DllImport("dlcv_infer_c_dll.dll", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int dlcv_infer_cpp_free_model_c(int modelIndex);
+
         private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
         {
             new ModelCase("AOI-旋转框检测_120_50.dvt", "AOI-1.jpg"),
@@ -166,6 +175,11 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvst-double-load-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunDvstDoubleLoadSelfTest();
+                }
+
+                if (args != null && args.Length >= 5 && string.Equals(args[0], "external-index-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunExternalIndexSelfTest(args);
                 }
 
                 if (args != null && args.Length >= 2)
@@ -4395,6 +4409,151 @@ namespace DlcvCSharpTest
             public IntPtr PagefileUsage;
             public IntPtr PeakPagefileUsage;
             public IntPtr PrivateUsage;
+        }
+
+        private static int RunExternalIndexSelfTest(string[] args)
+        {
+            Console.WriteLine("==== 独立 C++ Model -> C# 空构造 index 专项测试 ====");
+            bool dvtOk = RunExternalIndexCase("DVT", args[1], args[2]);
+            bool dvstOk = RunExternalIndexCase("DVST", args[3], args[4]);
+            bool ok = dvtOk && dvstOk;
+            Console.WriteLine(ok ? "External index test PASSED" : "External index test FAILED");
+            return ok ? 0 : 1;
+        }
+
+        private static bool RunExternalIndexCase(string name, string modelPath, string imagePath)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"[{name}] model={modelPath}");
+            Console.WriteLine($"[{name}] image={imagePath}");
+            if (!File.Exists(modelPath) || !File.Exists(imagePath))
+            {
+                Console.WriteLine($"[{name}] FAIL: 模型或图片不存在");
+                return false;
+            }
+
+            int modelIndex = -1;
+            try
+            {
+                modelIndex = dlcv_infer_cpp_load_model_c(modelPath, GpuDeviceId);
+                if (modelIndex < 0)
+                {
+                    string error = Marshal.PtrToStringAnsi(dlcv_infer_cpp_get_last_error_c());
+                    Console.WriteLine($"[{name}] FAIL: C++ Model 加载失败: {error}");
+                    return false;
+                }
+
+                using (var borrowedModel = new Model())
+                using (var source = Cv2.ImRead(imagePath, ImreadModes.Unchanged))
+                using (var input = PrepareRgbInput(source))
+                {
+                    borrowedModel.modelIndex = modelIndex;
+                    borrowedModel.OwnModelIndex = false;
+
+                    JObject info = borrowedModel.GetModelInfo();
+                    if (info == null || !info.HasValues)
+                    {
+                        Console.WriteLine($"[{name}] FAIL: GetModelInfo 返回空对象");
+                        return false;
+                    }
+
+                    var result = borrowedModel.Infer(input, new JObject
+                    {
+                        ["threshold"] = 0.5,
+                        ["with_mask"] = true,
+                        ["calc_mean"] = false
+                    });
+                    if (result.SampleResults == null || result.SampleResults.Count != 1)
+                    {
+                        Console.WriteLine($"[{name}] FAIL: 推理没有返回单图结果");
+                        return false;
+                    }
+
+                    int objectCount = result.SampleResults[0].Results != null
+                        ? result.SampleResults[0].Results.Count
+                        : 0;
+                    Console.WriteLine($"[{name}] PASS: index={modelIndex}, info字段={info.Count}, 目标数={objectCount}");
+                    foreach (var sample in result.SampleResults)
+                    {
+                        if (sample.Results == null) continue;
+                        foreach (var item in sample.Results)
+                        {
+                            item.Mask?.Dispose();
+                        }
+                    }
+                }
+
+                using (var stillAliveModel = new Model())
+                {
+                    stillAliveModel.modelIndex = modelIndex;
+                    stillAliveModel.OwnModelIndex = false;
+                    JObject stillAliveInfo = stillAliveModel.GetModelInfo();
+                    if (stillAliveInfo == null || !stillAliveInfo.HasValues)
+                    {
+                        Console.WriteLine($"[{name}] FAIL: C# 借用对象释放后 C++ 模型不可访问");
+                        return false;
+                    }
+                }
+                Console.WriteLine($"[{name}] PASS: C# Dispose 未释放独立 C++ 模型");
+
+                int releasedIndex = modelIndex;
+                if (dlcv_infer_cpp_free_model_c(releasedIndex) != 0)
+                {
+                    Console.WriteLine($"[{name}] FAIL: C++ 模型释放失败");
+                    return false;
+                }
+                modelIndex = -1;
+
+                try
+                {
+                    using (var staleModel = new Model())
+                    {
+                        staleModel.modelIndex = releasedIndex;
+                        staleModel.OwnModelIndex = false;
+                        staleModel.GetModelInfo();
+                    }
+                    Console.WriteLine($"[{name}] FAIL: C++ 模型释放后旧 index 仍可访问");
+                    return false;
+                }
+                catch
+                {
+                    Console.WriteLine($"[{name}] PASS: C++ 模型释放后旧 index 已失效");
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{name}] FAIL: {ex}");
+                return false;
+            }
+            finally
+            {
+                if (modelIndex >= 0)
+                {
+                    dlcv_infer_cpp_free_model_c(modelIndex);
+                }
+            }
+        }
+
+        private static Mat PrepareRgbInput(Mat source)
+        {
+            if (source == null || source.Empty())
+            {
+                throw new InvalidOperationException("图片读取失败");
+            }
+            if (source.Channels() == 3)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(source, rgb, ColorConversionCodes.BGR2RGB);
+                return rgb;
+            }
+            if (source.Channels() == 4)
+            {
+                var rgb = new Mat();
+                Cv2.CvtColor(source, rgb, ColorConversionCodes.BGRA2RGB);
+                return rgb;
+            }
+            return source.Clone();
         }
 
         private static int RunDvstDoubleLoadSelfTest()
