@@ -47,7 +47,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | C# 工具类 | `DlcvCsharpApi/Utils.cs` | 结果类型、编码转换、DLL 释放 |
 | C# DLL 加载器 | `DlcvCsharpApi/DllLoader.cs` | 加密狗自动检测、DLL 路径解析、函数代理 |
 | C# 流程图 | `DlcvCsharpApi/flow/FlowGraphModel.cs` | `FlowGraphModel`：加载、推理、JSON 输出 |
-| C# DVS 模型 | `DlcvCsharpApi/flow/DvsModel.cs` | `.dvst/.dvso/.dvsp` 归档解包与加载 |
+| C# DVS 模型 | `DlcvCsharpApi/flow/DvsModel.cs` | `.dvst/.dvso` 归档解包与加载 |
 | C# 结果类型 | `DlcvCsharpApi/DataTypes.cs` | `CSharpObjectResult`、`CSharpSampleResult`、`CSharpResult` |
 | C# 加密狗工具 | `DlcvCsharpApi/sntl_admin_csharp.cs` | `DogUtils`、`DogProvider` |
 | C++ 图像输入 | `dlcv_infer_cpp_dll/ImageInputUtils.h` | 图像预处理与格式转换 |
@@ -86,6 +86,8 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 1. **普通模型文件**：`.dvt`、`.dvo`。由 `Model` 直接加载，适合单模型推理。
 2. **流程模型文件**：`.dvst`、`.dvso`。由 `FlowGraphModel` 或 `DvsModel` 加载，适合把多步处理组织成一条完整流程。
 
+`.dvsp` 不进入 C# 或 C++ 推理模式，模型接口直接返回不支持错误，测试程序的模型选择窗口不显示该后缀。
+
 调用端不需要为这两类模型准备两套完全不同的调用方式。传入模型路径、设备和请求参数后，入口对象会完成对应的加载与执行。
 
 **model_index 分配规则**：
@@ -106,7 +108,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | 能力 | 类/函数 | 关键接口 |
 |------|---------|----------|
 | 普通模型 | `dlcv_infer::Model` | 构造（`std::string`/`std::wstring` + `device_id`）、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetModelInfo()`、`FreeModel()` |
-| 滑动窗口模型 | `dlcv_infer::SlidingWindowModel` | 继承 `Model`，构造参数含 `small_img_width/height`、`horizontal/vertical_overlap`、`threshold`、`iou_threshold`、`combine_ios_threshold` |
+| 旧滑动窗口模型 | `dlcv_infer::SlidingWindowModel` | 保留旧接口，新增滑窗流程使用 DVST 模型 |
 | 工具类 | `dlcv_infer::Utils` | `FreeAllModels()`、`GetDeviceInfo()`、`GetGpuInfo()`、`KeepMaxClock()`、`OcrInfer()`、`JsonToString()` |
 | DLL 加载器 | `dlcv_infer::DllLoader` | `Instance()`、`EnsureForModel()`、`GetDogProvider()` |
 | 流程图模型 | `dlcv_infer::flow::FlowGraphModel` | `Load()`、`InferInternal()`、`GetModelInfo()` |
@@ -279,7 +281,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ### `DvsModel`
 
-`DvsModel` 负责把 `.dvst`、`.dvso`、`.dvsp` 归档文件变成可直接执行的流程对象。对调用方来说，它的外部行为与 `FlowGraphModel` 一样，区别只在于加载入口是一个归档文件。
+`DvsModel` 负责把 `.dvst`、`.dvso` 归档文件变成可直接执行的流程对象。对调用方来说，它的外部行为与 `FlowGraphModel` 一样，区别只在于加载入口是一个归档文件。
 
 归档加载过程：
 1. 检查文件头是否为 `DV\n`。

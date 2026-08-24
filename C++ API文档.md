@@ -178,9 +178,10 @@ public:
 ```
 
 **构造函数行为**：
-1. 若路径以 `.dvst` / `.dvso` / `.dvsp` 结尾 → 进入 Flow/DVS 模式，解包归档并加载流程图。
-2. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 `dlcv_load_model`。
-3. 构造失败时抛出 `std::runtime_error`，错误信息包含底层返回的 JSON。
+1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，解包归档并加载流程图。
+2. 若路径以 `.dvsp` 结尾 → 抛出 `std::invalid_argument`，不加载文件。
+3. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 `dlcv_load_model`。
+4. 构造失败时抛出 `std::runtime_error`，错误信息包含底层返回的 JSON。
 
 ### 4.2 模型信息
 
@@ -252,6 +253,8 @@ static std::vector<FlowNodeTiming> GetLastFlowNodeTimings();
 ---
 
 ## 5. SlidingWindowModel（滑动窗口模型）
+
+该类为旧接口，新增滑窗流程使用 DVST 模型；共享流程 index 功能不扩展该类。
 
 ```cpp
 class SlidingWindowModel : public Model {
@@ -456,7 +459,7 @@ dlcv_infer::Utils::FreeAllModels();  // 释放所有模型
 ### 11.2 流程图/DVS 模型
 
 ```cpp
-// 1. 加载（.dvst / .dvso / .dvsp）
+// 1. 加载（.dvst / .dvso）
 dlcv_infer::Model model("C:/models/pipeline.dvst", 0);
 
 // 2. 推理（与普通模型接口完全一致）
@@ -620,7 +623,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 20.2 加载、释放与信息查询
 
-`.dvst/.dvso/.dvsp` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载，加载前由 `DllLoader::ForModel` 解析模型头并绑定对应 provider 的 loader：若模型头明确指定 `dog_provider`，则校验对应加密狗；若未指定，则通过 `AutoDetectProvider()` 按 Sentinel 优先、Virbox 第二自动检测。FlowGraph 模式创建 `flow::FlowGraphModel` 并完成归档解包后再加载，解包流程不得修改模型二进制数据。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引；`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回流程根对象，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`。
+`.dvst/.dvso` 进入 FlowGraph 模式，`.dvsp` 直接返回不支持错误，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载，加载前由 `DllLoader::ForModel` 解析模型头并绑定对应 provider 的 loader：若模型头明确指定 `dog_provider`，则校验对应加密狗；若未指定，则通过 `AutoDetectProvider()` 按 Sentinel 优先、Virbox 第二自动检测。FlowGraph 模式创建 `flow::FlowGraphModel` 并完成归档解包后再加载，解包流程不得修改模型二进制数据。流程含模型节点时，根据子模型 index 选择登记流程的 provider DLL；无模型节点时使用当前可用 provider。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引；`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回流程根对象，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`。
 
 ### 20.3 推理前图像规整
 

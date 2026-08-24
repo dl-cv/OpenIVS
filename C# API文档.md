@@ -121,11 +121,12 @@ public class Model : IDisposable
 ```
 
 **构造函数行为**：
-1. 若路径以 `.dvst` / `.dvso` / `.dvsp` 结尾 → 进入 Flow/DVS 模式，实例化 `FlowGraphModel` 或 `DvsModel`。
-2. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
-3. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
-4. 加载完成后可通过 `Loaded` 属性判断状态。
-5. 空构造实例可在设置 `modelIndex` 且设置 `OwnModelIndex=false` 后使用；首次 `GetModelInfo` 或推理时查询 index 类型、增加当前实例的使用记录。流程 index 优先使用共享信息中保存的 `pipeline`，按 `model_bindings` 恢复子模型引用，`source_path` 仅用于读取必需的归档资源。
+1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，实例化 `FlowGraphModel` 或 `DvsModel`。
+2. 若路径以 `.dvsp` 结尾 → 抛出 `NotSupportedException`，不加载文件。
+3. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
+4. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
+5. 加载完成后可通过 `Loaded` 属性判断状态。
+6. 空构造实例可在设置 `modelIndex` 且设置 `OwnModelIndex=false` 后使用；首次 `GetModelInfo` 或推理时查询 index 类型、增加当前实例的使用记录。流程 index 优先使用共享信息中保存的 `pipeline`，按 `model_bindings` 恢复子模型引用，`source_path` 仅用于读取必需的归档资源。
 
 ### 3.2 属性
 
@@ -270,7 +271,7 @@ public class DvsModel : FlowGraphModel
 ```
 
 **`Load` 行为**：
-1. 打开 `.dvst`/`.dvso`/`.dvsp` 文件，校验头部 `DV\n`。
+1. 打开 `.dvst`/`.dvso` 文件，校验头部 `DV\n`。
 2. 读取 JSON 头行，解析 `file_list` 和 `file_size` 数组。
 3. 将 `pipeline.json` 读入内存，其他文件解包到临时目录（临时文件名使用 `Guid.NewGuid().ToString("N")` + 原扩展名，避免中文路径问题）。
 4. 根据临时模型路径加载每个唯一子模型，将模型节点改为 `model_index`，同时保留 `model_path_original` 和 `model_name`。
@@ -279,7 +280,7 @@ public class DvsModel : FlowGraphModel
 
 `LoadFromModelBindings` 用于恢复共享流程：使用 `savedPipeline` 作为流程定义，按 `node_id` 把 `modelBindings` 写入模型节点的 `model_index`，不再按子模型路径加载。`sourcePath` 只读取非 pipeline 且非子模型的必需归档资源。`GetRegistrationPipeline()` 返回注册时使用的原始流程 JSON，`GetModelBindings()` 返回 `[{node_id, model_index}]`。
 
-`DvsModel` 继承 `FlowGraphModel` 的推理语义：归档中模型节点使用 `pipeline.json` 保存的阈值，调用 `.dvst`/`.dvso`/`.dvsp` 时传入的 `threshold` 只过滤最终对外结果。
+`DvsModel` 继承 `FlowGraphModel` 的推理语义：归档中模型节点使用 `pipeline.json` 保存的阈值，调用 `.dvst`/`.dvso` 时传入的 `threshold` 只过滤最终对外结果。
 
 **异常**：
 - 文件格式错误：`InvalidDataException`（"文件格式错误：缺少 DV 头部"）
@@ -341,7 +342,8 @@ public class DllLoader
 
 **模型级 Provider 解析**：
 - `.dvt`/`.dvo` 文件：读取前两行（`DV` + header_json），解析 `dog_provider` 字段。
-- `.dvp`/`.dvst`/`.dvso`/`.dvsp`：不支持通过 header 解析（DVP 由底层处理，DVS 由子模型加载时解析）。
+- `.dvp`/`.dvst`/`.dvso`：不支持通过 header 解析（DVP 由底层处理，DVS 由子模型加载时解析）。
+- `.dvsp`：不支持推理，不解析 provider。
 
 **共享 index 接口**：
 - `ResolveForIndex` 查询可用 provider 的共享索引表，根据唯一 index 返回实际 loader。
@@ -593,9 +595,10 @@ using (var model = new Model())
 
 | 模式 | 触发条件 | 当前实现中的通信方式 |
 | --- | --- | --- |
-| DVT | 文件后缀既不是 `.dvp`，也不是 `.dvst`/`.dvso`/`.dvsp`，且 `rpc_mode=false` | `dlcv_infer.dll` / `dlcv_infer_v.dll` 导出的 C 接口 |
+| DVT | 文件后缀既不是 `.dvp`，也不是 `.dvst`/`.dvso`，且 `rpc_mode=false` | `dlcv_infer.dll` / `dlcv_infer_v.dll` 导出的 C 接口 |
 | DVP | 模型路径后缀为 `.dvp` | HTTP，固定服务地址 `http://127.0.0.1:9890` |
-| DVS | 模型路径后缀为 `.dvst`、`.dvso` 或 `.dvsp` | `DvsModel` + `FlowGraphModel` |
+| DVS | 模型路径后缀为 `.dvst` 或 `.dvso` | `DvsModel` + `FlowGraphModel` |
+| 不支持 | 模型路径后缀为 `.dvsp` | 抛出 `NotSupportedException` |
 | RPC | `rpc_mode=true` 且不属于 DVP/DVS 后缀 | 命名管道 `DlcvModelRpcPipe` + 共享内存 |
 
 #### DVP 固定接口
@@ -636,7 +639,7 @@ using (var model = new Model())
 #### 模型加载规则
 
 - `.dvp` 后缀进入 DVP 模式。
-- `.dvst`、`.dvso`、`.dvsp` 后缀进入 DVS 模式。
+- `.dvst`、`.dvso` 后缀进入 DVS 模式，`.dvsp` 后缀直接返回不支持错误。
 - 其余后缀在 `rpc_mode=true` 时进入 RPC 模式。
 - 其余情况进入 DVT 模式。
 
@@ -674,7 +677,7 @@ C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`Ge
 
 ### 14.3 `DvsModel`
 
-`DvsModel` 继承 `FlowGraphModel`，用于加载 `.dvst`、`.dvso`、`.dvsp` 文件。当前实现文件为 `DlcvCsharpApi\flow\DvsModel.cs`。
+`DvsModel` 继承 `FlowGraphModel`，用于加载 `.dvst`、`.dvso` 文件。当前实现文件为 `DlcvCsharpApi\flow\DvsModel.cs`。
 
 C# 侧额外处理 `DV\n` 文件头校验、归档解包、子模型加载、模型节点 `model_index` 写入、共享绑定恢复以及临时目录清理。
 

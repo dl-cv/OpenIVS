@@ -107,6 +107,9 @@
   - 底层 `dlcv_load_model_c` 加载普通模型，C# 空构造 `Model` 按 index 查询和推理；C# 借用实例释放后底层模型仍可查询。
   - C# `Model(flowPath)` 加载 DVST 后，`dlcv_get_flow_info_c` 返回绝对 `source_path`、`device_id`、`provider`、`pipeline` 与非空 `model_bindings`；空构造 `Model` 使用保存的 `pipeline` 恢复流程，归档只用于读取必需资源。
   - 每次恢复时检查 index 所属范围：Sentinel 普通模型 `0～9999`、Sentinel 流程 `10000～19999`、Virbox 普通模型 `20000～29999`、Virbox 流程 `30000～39999`。
+  - `dvsp-disabled-selftest` 检查 C# API 对 `.dvsp` 直接返回不支持错误。
+  - `empty-flow-index-selftest` 检查无模型节点 DVST 可由 C#、C++ 分别登记，并检查 C# 可按 C++ flow index 恢复空绑定流程。
+  - `provider-switch-flow-selftest` 检查 C++ loader 切到 Virbox 后，绑定 Sentinel 模型 index 的流程仍使用 Sentinel DLL 登记。
   - 每种情况在最终持有方释放后检查 index 已从共享表移除；借用结果与持有方结果按类别、目标数量、分数和 bbox 容差比较。
 - `dlcv_infer_cpp_test.exe calc-mean-selftest` 检查旧版 `ObjectResult` 构造函数的默认均值、新版构造函数的显式均值字段，以及结构化 JSON 结果的均值解析和缺失字段默认值。
 
