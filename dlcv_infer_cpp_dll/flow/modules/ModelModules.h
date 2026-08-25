@@ -85,6 +85,10 @@ public:
 
     void LoadModel() override;
     int GetLoadedModelIndex() const { return _model ? _model->modelIndex : -1; }
+
+    const std::string& ModelPathUtf8() const { return _modelPathUtf8; }
+    int ResolvedDeviceId() const { return _resolvedDeviceId; }
+    const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _model; }
 };
 
 /// <summary>

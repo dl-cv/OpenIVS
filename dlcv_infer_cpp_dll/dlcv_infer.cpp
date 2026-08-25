@@ -1926,7 +1926,6 @@ namespace dlcv_infer {
         : _deviceId(device_id) {
         const std::wstring modelPathW = DecodeModelPathString(modelPath);
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPathW);
-
         if (IsUnsupportedDvspPath(modelPathUtf8)) {
             throw std::invalid_argument("不支持 .dvsp 模型推理");
         }
@@ -1984,7 +1983,6 @@ namespace dlcv_infer {
     Model::Model(const std::wstring& modelPath, int device_id)
         : _deviceId(device_id) {
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPath);
-
         if (IsUnsupportedDvspPath(modelPathUtf8)) {
             throw std::invalid_argument("不支持 .dvsp 模型推理");
         }
@@ -2204,13 +2202,46 @@ namespace dlcv_infer {
             }
         }
 
-        if (shouldFreeUnderlying && _dllLoader) {
+        if (shouldFreeUnderlying) {
+            if (!_dllLoader) {
+                throw std::runtime_error("DVT模型释放失败：未加载推理DLL");
+            }
             json config;
             config["model_index"] = modelIndex;
             std::string jsonStr = config.dump();
             void* resultPtr = _dllLoader->GetFreeModelFunc()(jsonStr.c_str());
-            std::string resultJson = std::string(static_cast<const char*>(resultPtr));
-            _dllLoader->GetFreeResultFunc()(resultPtr);
+            if (resultPtr == nullptr) {
+                throw std::runtime_error("DVT模型释放未返回结果");
+            }
+
+            const auto freeResult = _dllLoader->GetFreeResultFunc();
+            try {
+                const std::string resultJson(static_cast<const char*>(resultPtr));
+                const json resultObject = json::parse(resultJson);
+                std::string message = "底层未返回错误说明";
+                if (resultObject.is_object() && resultObject.contains("message")) {
+                    const json& messageToken = resultObject.at("message");
+                    message = messageToken.is_string() ? messageToken.get<std::string>() : messageToken.dump();
+                }
+
+                if (!resultObject.is_object() || !resultObject.contains("code")) {
+                    throw std::runtime_error("DVT模型释放失败：" + message);
+                }
+
+                int code = 0;
+                try {
+                    code = resultObject.at("code").get<int>();
+                } catch (...) {
+                    throw std::runtime_error("DVT模型释放失败：" + message);
+                }
+                if (code != 0) {
+                    throw std::runtime_error("DVT模型释放失败：" + message);
+                }
+            } catch (...) {
+                freeResult(resultPtr);
+                throw;
+            }
+            freeResult(resultPtr);
         }
         _ownsNativeModelIndex = false;
         _indexReady = false;
@@ -2241,6 +2272,16 @@ namespace dlcv_infer {
         _cachedModelInfo = resultObject;
         _hasCachedModelInfo = true;
         return resultObject;
+    }
+
+    json Model::GetDvsModelInfo() {
+        if (!_isFlowGraphMode) {
+            throw std::runtime_error("GetDvsModelInfo 仅支持流程模型");
+        }
+        if (!_flowModel) {
+            throw std::runtime_error("DVS 模型尚未加载");
+        }
+        return _flowModel->GetDvsModelInfo();
     }
 
     int Model::resolveEffectiveInputCh() {

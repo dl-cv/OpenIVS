@@ -268,6 +268,9 @@ namespace dlcv_infer {
 
         json GetModelInfo();
 
+        // 获取流程模型的完整信息。
+        json GetDvsModelInfo();
+
         Result Infer(const cv::Mat& image, const json& params_json = nullptr);
 
         Result InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json = nullptr);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -148,7 +149,9 @@ namespace DlcvModules
 
         public JArray GetLoadedModelMeta()
         {
-            return _loadedModelMeta != null ? (JArray)_loadedModelMeta.DeepClone() : new JArray();
+            var result = _loadedModelMeta != null ? (JArray)_loadedModelMeta.DeepClone() : new JArray();
+            RestoreOriginalModelPaths(result);
+            return result;
         }
 
         public JObject GetRegistrationPipeline()
@@ -204,6 +207,18 @@ namespace DlcvModules
                 string key = ResolveModelInfoKey(item);
                 if (string.IsNullOrWhiteSpace(key)) continue;
 
+                if (modelInfo.ContainsKey(key))
+                {
+                    string baseKey = key;
+                    int nodeId = item.Value<int?>("node_id") ?? -1;
+                    key = nodeId >= 0 ? baseKey + "#" + nodeId : baseKey + "#2";
+                    int suffix = 2;
+                    while (modelInfo.ContainsKey(key))
+                    {
+                        key = baseKey + "#" + suffix++;
+                    }
+                }
+
                 JToken info = item["model_info"];
                 if (info != null)
                 {
@@ -214,13 +229,17 @@ namespace DlcvModules
             return modelInfo;
         }
 
-        public JObject GetModelInfo()
+        /// <summary>
+        /// 返回流程 JSON、加载期模型信息及按原始模型名组织的完整模型信息。
+        /// </summary>
+        public JObject GetDvsModelInfo()
         {
             if (!_loaded) throw new InvalidOperationException("模型未加载");
             var root = _root != null ? (JObject)_root.DeepClone() : new JObject();
+            RestoreOriginalModelPaths(root);
             if (_loadedModelMeta != null && _loadedModelMeta.Count > 0)
             {
-                root["loaded_model_meta"] = (JArray)_loadedModelMeta.DeepClone();
+                root["loaded_model_meta"] = GetLoadedModelMeta();
             }
 
             JObject modelInfo = BuildModelInfoMap();
@@ -229,7 +248,294 @@ namespace DlcvModules
                 root["model_info"] = modelInfo;
             }
 
+            var successful = GetSuccessfulModelMeta();
+            if (successful.Count > 0)
+            {
+                root["input_model_node_id"] = successful[0].Value<int?>("node_id") ?? -1;
+                var output = SelectOutputModelMeta(successful);
+                root["output_model_node_id"] = output != null ? (output.Value<int?>("node_id") ?? -1) : -1;
+            }
+
             return root;
+        }
+
+        private static void RestoreOriginalModelPaths(JObject root)
+        {
+            var nodes = root != null ? root["nodes"] as JArray : null;
+            RestoreOriginalModelPaths(nodes);
+        }
+
+        private static void RestoreOriginalModelPaths(JArray items)
+        {
+            if (items == null) return;
+            foreach (var token in items)
+            {
+                var item = token as JObject;
+                if (item == null) continue;
+                var properties = item["properties"] as JObject;
+                var target = properties ?? item;
+                var original = target["model_path_original"];
+                if (original != null && original.Type != JTokenType.Null)
+                {
+                    target["model_path"] = original.DeepClone();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 按普通模型接口的结构汇总流程模型信息。
+        /// 输入形状和通道信息取第一个成功加载的模型，任务类型及类别信息取输出侧选中的模型。
+        /// </summary>
+        public JObject GetCompatibleModelInfo()
+        {
+            if (!_loaded) throw new InvalidOperationException("模型未加载");
+
+            var loaded = GetSuccessfulModelMeta();
+            if (loaded.Count == 0)
+            {
+                return GetDvsModelInfo();
+            }
+
+            var firstInfo = loaded[0]["model_info"] as JObject;
+            if (firstInfo == null)
+            {
+                throw new InvalidOperationException("流程首个模型缺少普通模型信息");
+            }
+
+            var outputMeta = SelectOutputModelMeta(loaded);
+            var outputInfo = outputMeta != null ? outputMeta["model_info"] as JObject : null;
+            if (outputInfo == null) outputInfo = firstInfo;
+
+            var result = (JObject)firstInfo.DeepClone();
+            var resultInner = result["model_info"] as JObject;
+            var outputInner = outputInfo["model_info"] as JObject;
+            if (resultInner == null)
+            {
+                resultInner = result;
+            }
+            if (outputInner == null)
+            {
+                outputInner = outputInfo;
+            }
+
+            // 只替换输出模型负责的字段；其余基础信息、输入形状和通道信息保留首个模型内容。
+            CopyInfoField(outputInner, resultInner, "task_type");
+            CopyInfoField(outputInner, resultInner, "classes");
+            CopyInfoField(outputInner, resultInner, "num_classes");
+            return result;
+        }
+
+        public JObject GetModelInfo()
+        {
+            return GetCompatibleModelInfo();
+        }
+
+        private List<JObject> GetSuccessfulModelMeta()
+        {
+            var result = new List<JObject>();
+            if (_loadedModelMeta == null) return result;
+            foreach (var token in _loadedModelMeta)
+            {
+                var item = token as JObject;
+                if (item == null) continue;
+                if ((item.Value<int?>("status_code") ?? 1) != 0) continue;
+                if (item["model_info"] is JObject) result.Add(item);
+            }
+            result.Sort(CompareModelMetaOrder);
+            return result;
+        }
+
+        private static int CompareModelMetaOrder(JObject left, JObject right)
+        {
+            int lo = left != null ? (left.Value<int?>("order") ?? int.MaxValue) : int.MaxValue;
+            int ro = right != null ? (right.Value<int?>("order") ?? int.MaxValue) : int.MaxValue;
+            if (lo != ro) return lo.CompareTo(ro);
+            int li = left != null ? (left.Value<int?>("node_id") ?? int.MaxValue) : int.MaxValue;
+            int ri = right != null ? (right.Value<int?>("node_id") ?? int.MaxValue) : int.MaxValue;
+            return li.CompareTo(ri);
+        }
+
+        private static void CopyInfoField(JObject source, JObject target, string name)
+        {
+            if (source == null || target == null) return;
+            var value = source[name];
+            if (value != null) target[name] = value.DeepClone();
+        }
+
+        private JObject SelectOutputModelMeta(List<JObject> successful)
+        {
+            if (successful == null || successful.Count == 0) return null;
+
+            var metaByNodeId = new Dictionary<int, JObject>();
+            foreach (var item in successful)
+            {
+                int nodeId = item.Value<int?>("node_id") ?? -1;
+                if (nodeId >= 0) metaByNodeId[nodeId] = item;
+            }
+
+            var linkToSource = new Dictionary<int, int>();
+            var nodeById = new Dictionary<int, Dictionary<string, object>>();
+            foreach (var node in _nodes ?? new List<Dictionary<string, object>>())
+            {
+                if (node == null) continue;
+                int nodeId = node.TryGetValue("id", out object idValue) ? SafeToInt(idValue, -1) : -1;
+                if (nodeId < 0) continue;
+                nodeById[nodeId] = node;
+                if (!node.TryGetValue("outputs", out object outputsValue)) continue;
+                var outputs = AsListOfDict(outputsValue);
+                for (int outputIndex = 0; outputIndex < outputs.Count; outputIndex++)
+                {
+                    var output = outputs[outputIndex];
+                    if (output == null || !output.TryGetValue("links", out object linksValue)) continue;
+                    foreach (int linkId in ReadLinkIds(linksValue))
+                    {
+                        if (linkId >= 0 && !linkToSource.ContainsKey(linkId)) linkToSource[linkId] = nodeId;
+                    }
+                }
+            }
+
+            var allOutputs = nodeById.Values
+                .Where(IsOutputNode)
+                .OrderByDescending(ReadNodeOrder)
+                .ThenByDescending(ReadNodeId)
+                .ToList();
+            var returnOutputs = allOutputs
+                .Where(n => string.Equals(ReadNodeType(n), "output/return_json", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var selected = FindNearestModelFromOutputs(returnOutputs, nodeById, linkToSource, metaByNodeId);
+            if (selected != null) return selected;
+            selected = FindNearestModelFromOutputs(allOutputs, nodeById, linkToSource, metaByNodeId);
+            if (selected != null) return selected;
+
+            return successful[successful.Count - 1];
+        }
+
+        private static JObject FindNearestModelFromOutputs(
+            List<Dictionary<string, object>> outputs,
+            Dictionary<int, Dictionary<string, object>> nodeById,
+            Dictionary<int, int> linkToSource,
+            Dictionary<int, JObject> metaByNodeId)
+        {
+            if (outputs == null) return null;
+            foreach (var output in outputs)
+            {
+                var queue = new Queue<int>();
+                var visited = new HashSet<int>();
+                if (output.TryGetValue("inputs", out object inputsValue))
+                {
+                    foreach (var input in AsListOfDict(inputsValue))
+                    {
+                        if (input == null || !input.TryGetValue("link", out object linkValue)) continue;
+                        int linkId = SafeToInt(linkValue, -1);
+                        if (linkId >= 0 && linkToSource.TryGetValue(linkId, out int sourceNodeId))
+                            queue.Enqueue(sourceNodeId);
+                    }
+                }
+
+                var candidates = new List<int>();
+                while (queue.Count > 0)
+                {
+                    var current = queue.Dequeue();
+                    if (!visited.Add(current)) continue;
+                    if (!nodeById.TryGetValue(current, out Dictionary<string, object> node)) continue;
+
+                    string type = ReadNodeType(node);
+                    if (type.StartsWith("model/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (metaByNodeId.ContainsKey(current)) candidates.Add(current);
+                    }
+
+                    if (!node.TryGetValue("inputs", out object upstreamInputsValue)) continue;
+                    foreach (var input in AsListOfDict(upstreamInputsValue))
+                    {
+                        if (input == null || !input.TryGetValue("link", out object upstreamLinkValue)) continue;
+                        int upstreamLinkId = SafeToInt(upstreamLinkValue, -1);
+                        if (upstreamLinkId >= 0 && linkToSource.TryGetValue(upstreamLinkId, out int upstreamSourceNodeId))
+                            queue.Enqueue(upstreamSourceNodeId);
+                    }
+                }
+
+                if (candidates.Count > 0)
+                {
+                    var selected = candidates
+                        .OrderByDescending(x => ReadNodeOrder(nodeById[x]))
+                        .ThenByDescending(x => x)
+                        .First();
+                    return metaByNodeId[selected];
+                }
+            }
+            return null;
+        }
+
+        private static IEnumerable<int> ReadLinkIds(object value)
+        {
+            if (value is JArray array)
+            {
+                for (int i = 0; i < array.Count; i++) yield return SafeToInt(array[i], -1);
+                yield break;
+            }
+            if (value is IEnumerable<object> list)
+            {
+                foreach (var item in list) yield return SafeToInt(item, -1);
+                yield break;
+            }
+            yield return SafeToInt(value, -1);
+        }
+
+        private static List<Dictionary<string, object>> AsListOfDict(object value)
+        {
+            var result = new List<Dictionary<string, object>>();
+            if (value is JArray array)
+            {
+                for (int i = 0; i < array.Count; i++)
+                {
+                    var item = array[i] as JObject;
+                    if (item == null) continue;
+                    try { result.Add(item.ToObject<Dictionary<string, object>>()); } catch { }
+                }
+                return result;
+            }
+            if (value is IEnumerable<object> list)
+            {
+                foreach (var item in list)
+                {
+                    if (item is Dictionary<string, object> dictionary)
+                    {
+                        result.Add(dictionary);
+                        continue;
+                    }
+                    var itemObject = item as JObject;
+                    if (itemObject == null) continue;
+                    try { result.Add(itemObject.ToObject<Dictionary<string, object>>()); } catch { }
+                }
+            }
+            return result;
+        }
+
+        private static bool IsOutputNode(Dictionary<string, object> node)
+        {
+            return ReadNodeType(node).StartsWith("output/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ReadNodeType(Dictionary<string, object> node)
+        {
+            return node != null && node.TryGetValue("type", out object value) && value != null ? value.ToString() : string.Empty;
+        }
+
+        private static int ReadNodeOrder(Dictionary<string, object> node)
+        {
+            return node != null && node.TryGetValue("order", out object value) ? SafeToInt(value, int.MaxValue) : int.MaxValue;
+        }
+
+        private static int ReadNodeId(Dictionary<string, object> node)
+        {
+            return node != null && node.TryGetValue("id", out object value) ? SafeToInt(value, int.MaxValue) : int.MaxValue;
+        }
+
+        private static int SafeToInt(object value, int defaultValue)
+        {
+            try { return Convert.ToInt32(value); } catch { return defaultValue; }
         }
 
         public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject paramsJson)

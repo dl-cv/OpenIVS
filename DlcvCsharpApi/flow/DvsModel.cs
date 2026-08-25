@@ -473,7 +473,7 @@ namespace DlcvModules
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[DvsModel] Warning: Failed to cleanup temp dir {_tempDir}: {ex.Message}");
+                    Console.Error.WriteLine($"[DvsModel] Warning: Failed to cleanup temp dir {_tempDir}: {ex.Message}");
                 }
                 _tempDir = null;
             }

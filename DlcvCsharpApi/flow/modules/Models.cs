@@ -156,6 +156,15 @@ namespace DlcvModules
 			// 跳过此处可避免每次推理创建 Dictionary/JObject 的开销，同时消除 OCR 大 model_info 的引用压力
 		}
 
+		/// <summary>
+		/// 返回加载期保存的普通模型信息副本，供流程模型记录每个模型节点的详细信息。
+		/// </summary>
+		public JObject GetLoadedModelInfo()
+		{
+			LoadModel();
+			return _modelInfo != null ? (JObject)_modelInfo.DeepClone() : null;
+		}
+
 		protected int ResolveEffectiveBatchLimit()
 		{
 			int modelLimit = Math.Max(1, _maxBatchSize);

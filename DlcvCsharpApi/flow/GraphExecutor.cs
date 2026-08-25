@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json.Linq;
@@ -228,6 +229,7 @@ namespace DlcvModules
 		{
 			var report = new JObject();
 			var items = new JArray();
+			var loadedMeta = new List<Dictionary<string, object>>();
 			int failCount = 0;
 
 			var ordered = new List<Dictionary<string, object>>(_nodes);
@@ -271,28 +273,68 @@ namespace DlcvModules
 				{
 					string modelPath = null;
 					try { if (props != null && props.ContainsKey("model_path") && props["model_path"] != null) modelPath = props["model_path"].ToString(); } catch { }
-					var item = new JObject();
-					item["node_id"] = nodeId;
-					item["type"] = type ?? string.Empty;
-					item["title"] = title ?? string.Empty;
-					item["model_path"] = modelPath ?? string.Empty;
-					try
+				var item = new JObject();
+				item["node_id"] = nodeId;
+				item["type"] = type ?? string.Empty;
+				item["title"] = title ?? string.Empty;
+				item["order"] = node != null && node.TryGetValue("order", out object orderValue)
+					? SafeToInt(orderValue, int.MaxValue - 1) : int.MaxValue - 1;
+				item["model_path"] = modelPath ?? string.Empty;
+
+				string modelPathOriginal = null;
+				string modelName = null;
+				try
+				{
+					if (props.TryGetValue("model_path_original", out object originalValue) && originalValue != null)
+						modelPathOriginal = originalValue.ToString();
+					if (props.TryGetValue("model_name", out object nameValue) && nameValue != null)
+						modelName = nameValue.ToString();
+				}
+				catch { }
+				if (string.IsNullOrWhiteSpace(modelPathOriginal)) modelPathOriginal = modelPath;
+				if (string.IsNullOrWhiteSpace(modelName) && !string.IsNullOrWhiteSpace(modelPathOriginal))
+				{
+					try { modelName = Path.GetFileName(modelPathOriginal); } catch { }
+				}
+				item["model_path_original"] = modelPathOriginal ?? string.Empty;
+				item["model_name"] = modelName ?? string.Empty;
+				try
+				{
+					modelModule.LoadModel();
+					item["model_index"] = modelModule.LoadedModelIndex;
+					var modelInfo = modelModule.GetLoadedModelInfo();
+					if (modelInfo != null)
 					{
-						modelModule.LoadModel();
-						item["model_index"] = modelModule.LoadedModelIndex;
-						item["status_code"] = 0;
-						item["status_message"] = "ok";
+						item["model_info"] = modelInfo;
+						var maxShape = FindMaxShape(modelInfo);
+						if (maxShape != null)
+						{
+							item["max_shape"] = maxShape.DeepClone();
+							int maxBatchSize = maxShape.Count > 0 ? SafeToInt(maxShape[0], 1) : 1;
+							item["max_batch_size"] = Math.Max(1, maxBatchSize);
+						}
 					}
+					item["status_code"] = 0;
+					item["status_message"] = "ok";
+				}
 					catch (Exception ex)
 					{
 						failCount++;
 						item["status_code"] = 1;
 						item["status_message"] = ex.Message ?? string.Empty;
 						try { item["exception"] = ex.ToString(); } catch { }
-					}
-					items.Add(item);
+				}
+				items.Add(item);
+				try
+				{
+					var metaItem = item.ToObject<Dictionary<string, object>>();
+					if (metaItem != null) loadedMeta.Add(metaItem);
+				}
+				catch { }
 				}
 			}
+
+			_context.Set("loaded_model_meta", loadedMeta);
 
 			report["code"] = failCount == 0 ? 0 : 1;
 			report["message"] = failCount == 0 ? "all models loaded" : ("models loaded with " + failCount + " error(s)");
@@ -303,6 +345,27 @@ namespace DlcvModules
 		private static int SafeToInt(object v, int dv)
 		{
 			try { return Convert.ToInt32(v); } catch { return dv; }
+		}
+
+		private static JArray FindMaxShape(JObject root)
+		{
+			if (root == null) return null;
+			var candidates = new List<JObject>();
+			if (root["input_shapes"] is JObject rootShapes) candidates.Add(rootShapes);
+			if (root["model_info"] is JObject modelInfo && modelInfo["input_shapes"] is JObject modelShapes)
+				candidates.Add(modelShapes);
+			foreach (var shapes in candidates)
+			{
+				if (shapes["max_shape"] is JArray direct && direct.Count > 0) return direct;
+				if (shapes["input"] is JObject input && input["max_shape"] is JArray preferred && preferred.Count > 0)
+					return preferred;
+				foreach (var property in shapes.Properties())
+				{
+					if (property.Value is JObject value && value["max_shape"] is JArray fallback && fallback.Count > 0)
+						return fallback;
+				}
+			}
+			return null;
 		}
 
 		private static List<Dictionary<string, object>> AsListOfDict(object obj)
