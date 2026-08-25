@@ -1,9 +1,12 @@
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -12,11 +15,19 @@
 #include <vector>
 
 #include <windows.h>
+#include <psapi.h>
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#define DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
+#define dlcv_infer dlcv_infer_json_impl
 #include "dlcv_infer_cpp/dlcv_infer_c_api.h"
+#undef dlcv_infer
+#undef DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
+#include "dlcv_infer_cpp/flow/modules/ModelModules.h"
+
+#pragma comment(lib, "psapi.lib")
 
 extern "C" int dlcv_infer_pure_c_header_test(void);
 
@@ -625,7 +636,462 @@ static int LoadModel(const std::wstring& path) {
     return modelIndex;
 }
 
-int main() {
+struct ProcessMemorySnapshot {
+    unsigned long long privateBytes = 0;
+    unsigned long long workingSetBytes = 0;
+};
+
+static ProcessMemorySnapshot ReadProcessMemory() {
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    counters.cb = sizeof(counters);
+    if (!GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+            sizeof(counters))) {
+        return {};
+    }
+    ProcessMemorySnapshot snapshot;
+    snapshot.privateBytes = static_cast<unsigned long long>(counters.PrivateUsage);
+    snapshot.workingSetBytes = static_cast<unsigned long long>(counters.WorkingSetSize);
+    return snapshot;
+}
+
+static double BytesToMiB(unsigned long long bytes) {
+    return static_cast<double>(bytes) / (1024.0 * 1024.0);
+}
+
+static double MemoryDeltaMiB(unsigned long long current, unsigned long long baseline) {
+    const long long delta = static_cast<long long>(current) - static_cast<long long>(baseline);
+    return static_cast<double>(delta) / (1024.0 * 1024.0);
+}
+
+static void PrintMemorySnapshot(
+    const std::string& label,
+    const ProcessMemorySnapshot& current,
+    const ProcessMemorySnapshot& baseline) {
+    std::cout << label
+              << ": private=" << BytesToMiB(current.privateBytes) << " MiB"
+              << ", private_delta=" << MemoryDeltaMiB(current.privateBytes, baseline.privateBytes) << " MiB"
+              << ", working_set=" << BytesToMiB(current.workingSetBytes) << " MiB"
+              << ", working_set_delta=" << MemoryDeltaMiB(current.workingSetBytes, baseline.workingSetBytes) << " MiB\n";
+}
+
+static bool RunModelMemoryGrowthCheck(
+    const std::string& label,
+    const std::wstring& modelPath,
+    const cv::Mat& image,
+    int warmupRounds,
+    int measuredRounds,
+    double maxSameModelPrivateDeltaMiB,
+    double maxRecreatePrivateDeltaMiB) {
+    std::string baselineFingerprint;
+    std::string error;
+
+    int stableIndex = LoadModel(modelPath);
+    if (stableIndex < 0) return false;
+    if (!InferFingerprint(stableIndex, image, baselineFingerprint, error)) {
+        std::cerr << "FAIL: " << label << " 内存测试基准推理失败: " << error << "\n";
+        dlcv_infer_cpp_free_model_c(stableIndex);
+        return false;
+    }
+
+    const ProcessMemorySnapshot sameModelBaseline = ReadProcessMemory();
+    ProcessMemorySnapshot sameModelFinal = sameModelBaseline;
+    PrintMemorySnapshot(label + " 同一实例起点", sameModelBaseline, sameModelBaseline);
+    for (int round = 1; round <= measuredRounds; ++round) {
+        std::string fingerprint;
+        error.clear();
+        if (!InferFingerprint(stableIndex, image, fingerprint, error) || fingerprint != baselineFingerprint) {
+            std::cerr << "FAIL: " << label << " 同一实例第 " << round << " 轮失败: "
+                      << (error.empty() ? "结果摘要不一致" : error) << "\n";
+            dlcv_infer_cpp_free_model_c(stableIndex);
+            return false;
+        }
+        sameModelFinal = ReadProcessMemory();
+        PrintMemorySnapshot(
+            label + " 同一实例第 " + std::to_string(round) + " 轮",
+            sameModelFinal,
+            sameModelBaseline);
+    }
+    if (dlcv_infer_cpp_free_model_c(stableIndex) != 0) {
+        std::cerr << "FAIL: " << label << " 同一实例释放失败\n";
+        return false;
+    }
+    const double sameModelPrivateDeltaMiB = MemoryDeltaMiB(
+        sameModelFinal.privateBytes,
+        sameModelBaseline.privateBytes);
+    if (sameModelPrivateDeltaMiB > maxSameModelPrivateDeltaMiB) {
+        std::cerr << "FAIL: " << label << " 同一实例私有内存增量 "
+                  << sameModelPrivateDeltaMiB << " MiB，超过上限 "
+                  << maxSameModelPrivateDeltaMiB << " MiB\n";
+        return false;
+    }
+
+    for (int round = 1; round <= warmupRounds; ++round) {
+        const int modelIndex = LoadModel(modelPath);
+        if (modelIndex < 0) return false;
+        std::string fingerprint;
+        error.clear();
+        const bool inferOk = InferFingerprint(modelIndex, image, fingerprint, error)
+            && fingerprint == baselineFingerprint;
+        const bool freeOk = dlcv_infer_cpp_free_model_c(modelIndex) == 0;
+        if (!inferOk || !freeOk) {
+            std::cerr << "FAIL: " << label << " 新建实例预热第 " << round << " 轮失败: "
+                      << (error.empty() ? "结果摘要不一致或释放失败" : error) << "\n";
+            return false;
+        }
+    }
+
+    const ProcessMemorySnapshot recreateBaseline = ReadProcessMemory();
+    ProcessMemorySnapshot recreateFinal = recreateBaseline;
+    PrintMemorySnapshot(label + " 新建实例测量起点", recreateBaseline, recreateBaseline);
+    for (int round = 1; round <= measuredRounds; ++round) {
+        const int modelIndex = LoadModel(modelPath);
+        if (modelIndex < 0) return false;
+        std::string fingerprint;
+        error.clear();
+        const bool inferOk = InferFingerprint(modelIndex, image, fingerprint, error)
+            && fingerprint == baselineFingerprint;
+        const bool freeOk = dlcv_infer_cpp_free_model_c(modelIndex) == 0;
+        if (!inferOk || !freeOk) {
+            std::cerr << "FAIL: " << label << " 新建实例第 " << round << " 轮失败: "
+                      << (error.empty() ? "结果摘要不一致或释放失败" : error) << "\n";
+            return false;
+        }
+        recreateFinal = ReadProcessMemory();
+        PrintMemorySnapshot(
+            label + " 新建实例第 " + std::to_string(round) + " 轮",
+            recreateFinal,
+            recreateBaseline);
+    }
+    const double recreatePrivateDeltaMiB = MemoryDeltaMiB(
+        recreateFinal.privateBytes,
+        recreateBaseline.privateBytes);
+    if (recreatePrivateDeltaMiB > maxRecreatePrivateDeltaMiB) {
+        std::cerr << "FAIL: " << label << " 新建实例私有内存增量 "
+                  << recreatePrivateDeltaMiB << " MiB，超过上限 "
+                  << maxRecreatePrivateDeltaMiB << " MiB\n";
+        return false;
+    }
+    std::cout << "PASS: " << label << " 内存增量未超过上限\n";
+    return true;
+}
+
+static bool RunDvstIdleCacheClearCheck(const std::wstring& modelPath, const cv::Mat& image) {
+    std::string baselineFingerprint;
+    std::string error;
+
+    const int firstIndex = LoadModel(modelPath);
+    if (firstIndex < 0) return false;
+    const bool firstInferOk = InferFingerprint(firstIndex, image, baselineFingerprint, error);
+    const bool firstFreeOk = dlcv_infer_cpp_free_model_c(firstIndex) == 0;
+    if (!firstInferOk || !firstFreeOk) {
+        std::cerr << "FAIL: dvst 空闲缓存清理前推理或释放失败: "
+                  << (error.empty() ? "结果摘要不一致或释放失败" : error) << "\n";
+        dlcv_infer_cpp_free_all_models_c();
+        return false;
+    }
+
+    const dlcv_infer::flow::ModelPoolStats beforeClear = dlcv_infer::flow::GetModelPoolStats();
+    if (beforeClear.totalEntries == 0 || beforeClear.activeEntries != 0 ||
+        beforeClear.idleEntries != beforeClear.totalEntries) {
+        std::cerr << "FAIL: dvst 清理前池统计不符合预期"
+                  << " total=" << beforeClear.totalEntries
+                  << " active=" << beforeClear.activeEntries
+                  << " idle=" << beforeClear.idleEntries << "\n";
+        dlcv_infer_cpp_free_all_models_c();
+        return false;
+    }
+
+    dlcv_infer_cpp_free_all_models_c();
+
+    const dlcv_infer::flow::ModelPoolStats afterClear = dlcv_infer::flow::GetModelPoolStats();
+    if (afterClear.totalEntries != 0 || afterClear.activeEntries != 0 || afterClear.idleEntries != 0) {
+        std::cerr << "FAIL: dvst 清理后池中仍有模型"
+                  << " total=" << afterClear.totalEntries
+                  << " active=" << afterClear.activeEntries
+                  << " idle=" << afterClear.idleEntries << "\n";
+        return false;
+    }
+
+    const int secondIndex = LoadModel(modelPath);
+    if (secondIndex < 0) return false;
+    std::string secondFingerprint;
+    error.clear();
+    const bool secondInferOk = InferFingerprint(secondIndex, image, secondFingerprint, error)
+        && secondFingerprint == baselineFingerprint;
+    const bool secondFreeOk = dlcv_infer_cpp_free_model_c(secondIndex) == 0;
+    const dlcv_infer::flow::ModelPoolStats afterReload = dlcv_infer::flow::GetModelPoolStats();
+    dlcv_infer_cpp_free_all_models_c();
+    if (!secondInferOk || !secondFreeOk || afterReload.totalEntries == 0 ||
+        afterReload.activeEntries != 0 || afterReload.idleEntries != afterReload.totalEntries) {
+        std::cerr << "FAIL: dvst 空闲缓存清理后重新加载失败: "
+                  << (error.empty() ? "结果摘要不一致或释放失败" : error) << "\n";
+        return false;
+    }
+
+    std::cout << "PASS: dvst 空闲缓存清理后重新加载成功\n";
+    return true;
+}
+
+static bool RunDvstContentUpdateCheck(const std::wstring& sourcePath, const cv::Mat& image) {
+    dlcv_infer_cpp_free_all_models_c();
+    wchar_t tempDir[MAX_PATH]{};
+    const DWORD tempDirLength = GetTempPathW(MAX_PATH, tempDir);
+    if (tempDirLength == 0 || tempDirLength >= MAX_PATH) {
+        std::cerr << "FAIL: 无法获取 dvst 内容更新测试临时目录\n";
+        return false;
+    }
+
+    const std::wstring tempPath = std::wstring(tempDir)
+        + L"dlcv_dvst_content_"
+        + std::to_wstring(GetCurrentProcessId())
+        + L"_"
+        + std::to_wstring(GetTickCount64())
+        + L".dvst";
+    if (!CopyFileW(sourcePath.c_str(), tempPath.c_str(), FALSE)) {
+        std::cerr << "FAIL: 无法复制 dvst 内容更新测试文件，错误码=" << GetLastError() << "\n";
+        return false;
+    }
+
+    const auto cleanup = [&tempPath]() {
+        dlcv_infer_cpp_free_all_models_c();
+        DeleteFileW(tempPath.c_str());
+    };
+
+    FILE* markerFile = nullptr;
+    if (_wfopen_s(&markerFile, tempPath.c_str(), L"ab") != 0 || markerFile == nullptr) {
+        std::cerr << "FAIL: 无法打开 dvst 内容更新测试文件\n";
+        cleanup();
+        return false;
+    }
+    static constexpr unsigned char kFirstMarker[] = { 0x44, 0x4c, 0x43, 0x56 };
+    const size_t firstMarkerWritten = std::fwrite(kFirstMarker, 1, sizeof(kFirstMarker), markerFile);
+    std::fclose(markerFile);
+    if (firstMarkerWritten != sizeof(kFirstMarker)) {
+        std::cerr << "FAIL: 无法写入 dvst 初始内容标记\n";
+        cleanup();
+        return false;
+    }
+
+    WIN32_FILE_ATTRIBUTE_DATA stableAttributes{};
+    if (!GetFileAttributesExW(tempPath.c_str(), GetFileExInfoStandard, &stableAttributes)) {
+        std::cerr << "FAIL: 无法读取 dvst 内容更新测试文件属性\n";
+        cleanup();
+        return false;
+    }
+
+    std::string firstFingerprint;
+    std::string error;
+    const int firstIndex = LoadModel(tempPath);
+    if (firstIndex < 0) {
+        cleanup();
+        return false;
+    }
+    const bool firstOk = InferFingerprint(firstIndex, image, firstFingerprint, error)
+        && dlcv_infer_cpp_free_model_c(firstIndex) == 0;
+    const dlcv_infer::flow::ModelPoolStats firstStats = dlcv_infer::flow::GetModelPoolStats();
+    if (!firstOk || firstStats.idleEntries == 0 || firstStats.activeEntries != 0 ||
+        firstStats.totalEntries != firstStats.idleEntries) {
+        std::cerr << "FAIL: dvst 内容更新前加载状态异常\n";
+        cleanup();
+        return false;
+    }
+
+    FILE* updateFile = nullptr;
+    if (_wfopen_s(&updateFile, tempPath.c_str(), L"r+b") != 0 || updateFile == nullptr) {
+        std::cerr << "FAIL: 无法更新 dvst 内容测试文件\n";
+        cleanup();
+        return false;
+    }
+    const int seekResult = _fseeki64(updateFile, -static_cast<__int64>(sizeof(kFirstMarker)), SEEK_END);
+    static constexpr unsigned char kSecondMarker[] = { 0x44, 0x4c, 0x43, 0x57 };
+    const size_t secondMarkerWritten = seekResult == 0
+        ? std::fwrite(kSecondMarker, 1, sizeof(kSecondMarker), updateFile)
+        : 0;
+    std::fclose(updateFile);
+    if (secondMarkerWritten != sizeof(kSecondMarker)) {
+        std::cerr << "FAIL: 无法写入 dvst 内容更新标记\n";
+        cleanup();
+        return false;
+    }
+
+    const HANDLE attributeHandle = CreateFileW(
+        tempPath.c_str(),
+        FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (attributeHandle == INVALID_HANDLE_VALUE ||
+        !SetFileTime(attributeHandle, nullptr, nullptr, &stableAttributes.ftLastWriteTime)) {
+        if (attributeHandle != INVALID_HANDLE_VALUE) CloseHandle(attributeHandle);
+        std::cerr << "FAIL: 无法恢复 dvst 内容更新测试文件时间\n";
+        cleanup();
+        return false;
+    }
+    CloseHandle(attributeHandle);
+
+    WIN32_FILE_ATTRIBUTE_DATA updatedAttributes{};
+    const bool attributesStable = GetFileAttributesExW(
+        tempPath.c_str(),
+        GetFileExInfoStandard,
+        &updatedAttributes)
+        && updatedAttributes.nFileSizeHigh == stableAttributes.nFileSizeHigh
+        && updatedAttributes.nFileSizeLow == stableAttributes.nFileSizeLow
+        && updatedAttributes.ftLastWriteTime.dwHighDateTime == stableAttributes.ftLastWriteTime.dwHighDateTime
+        && updatedAttributes.ftLastWriteTime.dwLowDateTime == stableAttributes.ftLastWriteTime.dwLowDateTime;
+    if (!attributesStable) {
+        std::cerr << "FAIL: dvst 内容更新测试未保持文件大小和修改时间\n";
+        cleanup();
+        return false;
+    }
+
+    const int secondIndex = LoadModel(tempPath);
+    if (secondIndex < 0) {
+        cleanup();
+        return false;
+    }
+    std::string secondFingerprint;
+    error.clear();
+    const bool secondOk = InferFingerprint(secondIndex, image, secondFingerprint, error)
+        && secondFingerprint == firstFingerprint
+        && dlcv_infer_cpp_free_model_c(secondIndex) == 0;
+    const dlcv_infer::flow::ModelPoolStats secondStats = dlcv_infer::flow::GetModelPoolStats();
+    const bool identityChanged = secondStats.activeEntries == 0
+        && secondStats.totalEntries == secondStats.idleEntries
+        && secondStats.idleEntries > firstStats.idleEntries;
+    cleanup();
+    if (!secondOk || !identityChanged) {
+        std::cerr << "FAIL: 同路径 dvst 内容更新后未创建新的池项"
+                  << " before=" << firstStats.idleEntries
+                  << " after=" << secondStats.idleEntries << "\n";
+        return false;
+    }
+
+    std::cout << "PASS: 同路径 dvst 内容更新后使用新的模型标识\n";
+    return true;
+}
+
+static bool RunModelPoolGenerationCheck(const std::wstring& modelPath, const cv::Mat& image) {
+    dlcv_infer_cpp_free_all_models_c();
+    std::string firstFingerprint;
+    std::string error;
+    const int oldIndex = LoadModel(modelPath);
+    if (oldIndex < 0 || !InferFingerprint(oldIndex, image, firstFingerprint, error)) {
+        dlcv_infer_cpp_free_all_models_c();
+        return false;
+    }
+
+    dlcv_infer::NativeApi::FreeAllModels();
+    const dlcv_infer::flow::ModelPoolStats afterNativeClear = dlcv_infer::flow::GetModelPoolStats();
+    if (afterNativeClear.totalEntries != 0) {
+        std::cerr << "FAIL: NativeApi::FreeAllModels 未清空流程模型池\n";
+        dlcv_infer_cpp_free_all_models_c();
+        return false;
+    }
+
+    const int newIndex = LoadModel(modelPath);
+    if (newIndex < 0) {
+        dlcv_infer_cpp_free_all_models_c();
+        return false;
+    }
+    const dlcv_infer::flow::ModelPoolStats beforeOldRelease = dlcv_infer::flow::GetModelPoolStats();
+    const bool oldReleaseOk = dlcv_infer_cpp_free_model_c(oldIndex) == 0;
+    const dlcv_infer::flow::ModelPoolStats afterOldRelease = dlcv_infer::flow::GetModelPoolStats();
+    const bool generationOk = oldReleaseOk
+        && beforeOldRelease.totalEntries > 0
+        && beforeOldRelease.activeEntries == beforeOldRelease.totalEntries
+        && afterOldRelease.totalEntries == beforeOldRelease.totalEntries
+        && afterOldRelease.activeEntries == beforeOldRelease.activeEntries
+        && afterOldRelease.idleEntries == beforeOldRelease.idleEntries;
+
+    std::string secondFingerprint;
+    error.clear();
+    const bool inferOk = InferFingerprint(newIndex, image, secondFingerprint, error)
+        && secondFingerprint == firstFingerprint;
+    const bool newReleaseOk = dlcv_infer_cpp_free_model_c(newIndex) == 0;
+    dlcv_infer_cpp_free_all_models_c();
+    if (!generationOk || !inferOk || !newReleaseOk) {
+        std::cerr << "FAIL: Clear 前的租用释放影响了 Clear 后的同键模型\n";
+        return false;
+    }
+
+    std::cout << "PASS: Clear 前后的同键模型身份互不影响\n";
+    return true;
+}
+
+static bool RunFreeAllDuringInferenceCheck(const std::wstring& modelPath, const cv::Mat& image) {
+    dlcv_infer_cpp_free_all_models_c();
+    const int modelIndex = LoadModel(modelPath);
+    if (modelIndex < 0) return false;
+
+    std::mutex stateMutex;
+    std::condition_variable stateChanged;
+    bool readGuardHeld = false;
+    bool releaseReadGuard = false;
+    bool freeAllStarted = false;
+    bool freeAllCompleted = false;
+    bool inferOk = false;
+    std::string inferError;
+    std::thread worker([&]() {
+        dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::string fingerprint;
+        inferOk = InferFingerprint(modelIndex, image, fingerprint, inferError);
+        std::unique_lock<std::mutex> stateLock(stateMutex);
+        readGuardHeld = true;
+        stateChanged.notify_all();
+        stateChanged.wait(stateLock, [&]() { return releaseReadGuard; });
+    });
+
+    {
+        std::unique_lock<std::mutex> stateLock(stateMutex);
+        stateChanged.wait(stateLock, [&]() { return readGuardHeld; });
+    }
+
+    std::thread freeAllWorker([&]() {
+        {
+            std::lock_guard<std::mutex> stateLock(stateMutex);
+            freeAllStarted = true;
+            stateChanged.notify_all();
+        }
+        dlcv_infer_cpp_free_all_models_c();
+        {
+            std::lock_guard<std::mutex> stateLock(stateMutex);
+            freeAllCompleted = true;
+            stateChanged.notify_all();
+        }
+    });
+
+    bool completedWhileReadHeld = false;
+    {
+        std::unique_lock<std::mutex> stateLock(stateMutex);
+        stateChanged.wait(stateLock, [&]() { return freeAllStarted; });
+        completedWhileReadHeld = stateChanged.wait_for(
+            stateLock,
+            std::chrono::milliseconds(200),
+            [&]() { return freeAllCompleted; });
+        releaseReadGuard = true;
+        stateChanged.notify_all();
+    }
+    worker.join();
+    freeAllWorker.join();
+
+    const dlcv_infer::flow::ModelPoolStats afterFreeAll = dlcv_infer::flow::GetModelPoolStats();
+    if (!inferOk || completedWhileReadHeld || !freeAllCompleted || afterFreeAll.totalEntries != 0) {
+        std::cerr << "FAIL: 活动推理与 FreeAllModels 同步失败: "
+                  << (!inferError.empty() ? inferError
+                      : (completedWhileReadHeld ? "共享锁释放前 FreeAllModels 已完成" : "模型池未清空"))
+                  << "\n";
+        return false;
+    }
+
+    std::cout << "PASS: FreeAllModels 等待活动推理完成后释放模型\n";
+    return true;
+}
+
+int main(int argc, char** argv) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
@@ -647,10 +1113,29 @@ int main() {
         return 1;
     }
 
+    if (argc == 2 && std::strcmp(argv[1], "--memory-growth") == 0) {
+        const bool memoryOk = RunModelMemoryGrowthCheck("dvst", dvstPath, dvstImage, 10, 10, 64.0, 64.0);
+        dlcv_infer_cpp_free_all_models_c();
+        std::cout << (memoryOk ? "\n内存测试通过\n" : "\n内存测试失败\n");
+        return memoryOk ? 0 : 1;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--memory-growth-dvt") == 0) {
+        const bool memoryOk = RunModelMemoryGrowthCheck("dvt", dvtPath, dvtImage, 10, 10, 64.0, 64.0);
+        dlcv_infer_cpp_free_all_models_c();
+        std::cout << (memoryOk ? "\n内存测试通过\n" : "\n内存测试失败\n");
+        return memoryOk ? 0 : 1;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--idle-cache-clear") == 0) {
+        return RunDvstIdleCacheClearCheck(dvstPath, dvstImage) ? 0 : 1;
+    }
+
     bool ok = true;
     ok = RunCapiExportCompletenessCheck() && ok;
     ok = RunNativeCompatibilityCheck(dvtPath, dvtImage) && ok;
     ok = RunCompatibilityFlowCheck(dvstPath, dvstImage) && ok;
+    ok = RunDvstContentUpdateCheck(dvstPath, dvstImage) && ok;
+    ok = RunModelPoolGenerationCheck(dvstPath, dvstImage) && ok;
+    ok = RunFreeAllDuringInferenceCheck(dvstPath, dvstImage) && ok;
 
     int dvtIndex = LoadModel(dvtPath);
     if (dvtIndex < 0) return 1;
@@ -682,6 +1167,7 @@ int main() {
         "dvst 全新实例首次并发", freshDvstIndex, dvstImage, dvstBaseline, 4, 10) && ok;
     ok = (dlcv_infer_cpp_free_model_c(freshDvstIndex) == 0) && ok;
 
+    dlcv_infer_cpp_free_all_models_c();
     std::cout << (ok ? "\nTest PASSED\n" : "\nTest FAILED\n");
     return ok ? 0 : 1;
 }
