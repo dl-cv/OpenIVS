@@ -129,13 +129,15 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 | 字符串释放 | `dlcv_infer_cpp_free_string_c` | 释放扩展 C 接口返回的字符串 |
 | 全部模型释放 | `dlcv_infer_cpp_free_all_models_c` | 清空扩展模型表并释放底层模型 |
 
-**数据结构**：复用底层 `dlcv_infer/dlcv_data_type_c.h` 中的 `DlcvCImage`、`DlcvCImageList`、`DlcvCObjectResult`、`DlcvCSampleResult`、`DlcvCResult`。
+**数据结构**：六个 C 数据结构 `DlcvCImage`、`DlcvCImageList`、`DlcvCMask`、`DlcvCObjectResult`、`DlcvCSampleResult`、`DlcvCResult` 已直接定义在 `dlcv_infer_c_api.h` 中，调用端不再需要额外包含 `dlcv_data_type_c.h`。
 
 **内存管理**：`DlcvCResult` 内部所有动态内存（`message`、`category_name`、`mask_ptr`、`results` 数组、`sample_results` 数组）由 DLL 分配，调用方必须通过 `dlcv_infer_cpp_free_model_result_c` 释放。
 
 **实现位置**：`dlcv_infer_cpp/dlcv_infer_c_api.h` + `dlcv_infer_cpp/dlcv_infer_c_api.cpp`，基于 `dlcv_infer::Model` 封装，与 C++ API 共同生成 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 
 **C 编译支持**：C 调用端只包含 `dlcv_infer_cpp/dlcv_infer_c_api.h`，该头文件可由 C 或 C++ 编译器包含。结构化入口使用 `DlcvCImageList*` 和 `DlcvCResult*` 参数，共享数据结构使用 `typedef struct`。
+
+**单头文件交付**：`dlcvpro_infer` wheel `2026.8.26.1a0` 包含 `dlcv_infer_cpp.dll` 和 `include/dlcv_infer_c_api.h`。调用端仍需既有 OpenCV、Visual C++、底层推理 DLL 与模型授权环境。
 
 ### C# API 速查表
 

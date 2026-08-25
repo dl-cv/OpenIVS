@@ -2623,7 +2623,7 @@ bool RunBenchmark(
     std::mutex errorMutex;
     std::atomic<bool> cancelRequested{false};
     WorkerStartGate startGate(options.threads);
-    // 一个已加载模型没有并发调用保证，线程复用该模型时按次序进入推理。
+    // 此测速入口按次序复用模型，避免将等待时间混入单次推理记录；并发能力由专用测试覆盖。
     std::mutex modelInferMutex;
     std::vector<std::thread> workers;
     workers.reserve(static_cast<size_t>(options.threads));

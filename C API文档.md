@@ -82,7 +82,7 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 
 ## 4. 结构化 C 数据类型
 
-这些结构定义来自共享头文件 `dlcv_data_type_c.h`：
+这些结构已直接定义在统一公开头文件 `dlcv_infer_c_api.h` 中，调用端不再需要额外包含 `dlcv_data_type_c.h`：
 
 | 结构 | 字段 | 内存所有权 |
 | --- | --- | --- |
@@ -146,6 +146,15 @@ C 调用端只需包含 `dlcv_infer_c_api.h`，不需要链接 `dlcv_infer_cpp.l
 5. 进程结束前调用 `dlcv_infer_cpp_free_all_models_c`，再调用 `FreeLibrary`。
 
 `dlcv_infer_cpp.dll` 内部按模型授权类型加载 `dlcv_infer.dll` 或 `dlcv_infer_v.dll`。调用端仍需准备 DLCV SDK、OpenCV、Visual C++ 运行库和对应授权组件；动态加载只取消了对 C 导入库的静态链接，不会取消这些运行依赖。
+
+### 6.2 单头文件交付
+
+`dlcvpro_infer` wheel `2026.8.26.1a0` 包含：
+
+- `dlcv_infer_cpp.dll`
+- `include/dlcv_infer_c_api.h`
+
+调用端复制或安装这两个交付文件即可使用 C 接口声明和统一动态库；OpenCV、Visual C++ 运行库、底层推理 DLL 及模型授权环境仍按既有 SDK 环境提供。
 
 ## 7. 验证范围
 

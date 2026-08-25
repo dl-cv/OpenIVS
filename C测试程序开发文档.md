@@ -26,7 +26,7 @@
 | --- | --- |
 | Qt 6 | 窗口、控件、文件选择和定时刷新 |
 | OpenCV 4.10 | 图片读取、BGR/BGRA 转 RGB、mask 复制 |
-| `dlcv_infer_c_api.h` | 全部 C 接口声明与数据结构 |
+| `dlcv_infer_c_api.h` | 全部 C 接口声明与六个 C 数据结构；不再需要额外的 `dlcv_data_type_c.h` |
 | `dlcv_infer_cpp.dll` | C API 与 C++ API 共用的运行库，通过 `LoadLibraryW` 加载 |
 
 `Test/dlcv_infer_c_test/pure_c_header_test.c` 使用 C 编译模式包含 `dlcv_infer_c_api.h`，检查结构声明、函数指针类型和 Windows x64 结构大小。
@@ -158,6 +158,10 @@ dlcv_infer_c_demo.exe load-model <名称> <模型路径> --then benchmark <名�
 - 流程模型还需要归档中引用的模型文件能够被流程加载器读取。
 
 `dlcv_infer_c_demo` 不启动 Qt 窗口，可用于验证纯 C 头文件、动态加载、模型信息、结构化推理、流程模型和多线程结果一致性。
+
+### 6.4 单头文件交付
+
+`dlcvpro_infer` wheel `2026.8.26.1a0` 提供 `dlcv_infer_cpp.dll` 和 `include/dlcv_infer_c_api.h`。C 调用端不需要另行获取 `dlcv_data_type_c.h`，但运行时仍需要既有 OpenCV、Visual C++、底层推理 DLL 和模型授权环境。
 
 ## 7. Qt C Demo 导出检查
 
