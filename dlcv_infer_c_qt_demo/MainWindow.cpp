@@ -33,7 +33,6 @@
 #include <opencv2/imgproc.hpp>
 
 #include "ImageViewerWidget.h"
-#include "dlcv_infer_native_c_api.h"
 #include "json/json.hpp"
 
 namespace {
@@ -41,8 +40,8 @@ using json = nlohmann::json;
 
 class CResultGuard {
 public:
-    explicit CResultGuard(DlcvCResult value) : value_(value) {}
-    ~CResultGuard() { dlcv_infer_cpp_free_model_result_c(&value_); }
+    CResultGuard(DlcvInferApi& api, DlcvCResult value) : api_(api), value_(value) {}
+    ~CResultGuard() { api_.freeModelResult(&value_); }
 
     CResultGuard(const CResultGuard&) = delete;
     CResultGuard& operator=(const CResultGuard&) = delete;
@@ -51,13 +50,14 @@ public:
     const DlcvCResult& get() const { return value_; }
 
 private:
+    DlcvInferApi& api_;
     DlcvCResult value_{};
 };
 
 class CStringGuard {
 public:
-    explicit CStringGuard(const char* value) : value_(value) {}
-    ~CStringGuard() { dlcv_infer_cpp_free_string_c(value_); }
+    CStringGuard(DlcvInferApi& api, const char* value) : api_(api), value_(value) {}
+    ~CStringGuard() { api_.freeString(value_); }
 
     CStringGuard(const CStringGuard&) = delete;
     CStringGuard& operator=(const CStringGuard&) = delete;
@@ -65,6 +65,7 @@ public:
     const char* get() const { return value_; }
 
 private:
+    DlcvInferApi& api_;
     const char* value_ = nullptr;
 };
 
@@ -162,6 +163,10 @@ std::string resultMessage(const DlcvCResult& result) {
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUi();
     bindSignals();
+    if (!api_.load()) {
+        reportError("加载推理库失败", QString::fromStdWString(api_.lastError()));
+        return;
+    }
     initializeDevicesAsync();
 }
 
@@ -169,7 +174,13 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     settings_.setValue("Geometry", saveGeometry());
     settings_.setValue("WindowState", saveState());
     stopPressureTest();
-    dlcv_infer_cpp_free_all_models_c();
+    if (deviceInitializationThread_.joinable()) {
+        deviceInitializationThread_.join();
+    }
+    if (api_.isLoaded()) {
+        api_.freeAllModels();
+        api_.unload();
+    }
     modelIndex_ = -1;
     QMainWindow::closeEvent(event);
 }
@@ -361,7 +372,7 @@ void MainWindow::bindSignals() {
 
 void MainWindow::initializeDevicesAsync() {
     const QPointer<MainWindow> self(this);
-    std::thread([self]() {
+    deviceInitializationThread_ = std::thread([this, self]() {
         struct GpuDeviceItem {
             QString name;
             int id = -1;
@@ -369,12 +380,12 @@ void MainWindow::initializeDevicesAsync() {
 
         std::vector<GpuDeviceItem> devices;
         QString warning;
-        dlcv_keep_max_clock();
+        api_.keepMaxClock();
 
-        const char* raw = dlcv_get_gpu_info();
+        const char* raw = api_.getGpuInfo();
         std::string rawCopy = raw == nullptr ? std::string{} : std::string(raw);
         if (raw != nullptr) {
-            dlcv_free_result(raw);
+            api_.freeSystemString(raw);
         }
 
         try {
@@ -416,7 +427,7 @@ void MainWindow::initializeDevicesAsync() {
                 }
             },
             Qt::QueuedConnection);
-    }).detach();
+    });
 }
 
 int MainWindow::selectedDeviceId() const {
@@ -454,10 +465,10 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
 }
 
 void MainWindow::freeCurrentModel() {
-    if (modelIndex_ >= 0) {
-        dlcv_infer_cpp_free_model_c(modelIndex_);
-        modelIndex_ = -1;
+    if (modelIndex_ >= 0 && api_.isLoaded()) {
+        api_.freeModel(modelIndex_);
     }
+    modelIndex_ = -1;
 }
 
 void MainWindow::reportError(const QString& title, const QString& detail) {
@@ -466,7 +477,7 @@ void MainWindow::reportError(const QString& title, const QString& detail) {
 }
 
 QString MainWindow::lastCError() const {
-    const char* error = dlcv_infer_cpp_get_last_error_c();
+    const char* error = api_.getLastError();
     return error == nullptr ? QString{} : QString::fromLocal8Bit(error);
 }
 
@@ -562,6 +573,10 @@ std::vector<DisplayObjectResult> MainWindow::copyFirstSample(const DlcvCResult& 
 
 void MainWindow::onLoadModel() {
     stopPressureTest();
+    if (!api_.isLoaded()) {
+        reportError("加载模型失败", QString::fromStdWString(api_.lastError()));
+        return;
+    }
 
     QFileDialog dialog(this, "选择模型");
     dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvr *.dvst);;所有文件 (*.*)");
@@ -583,7 +598,7 @@ void MainWindow::onLoadModel() {
     freeCurrentModel();
 
     const QByteArray pathBytes = selectedPath.toLocal8Bit();
-    const int modelIndex = dlcv_infer_cpp_load_model_c(pathBytes.constData(), selectedDeviceId());
+    const int modelIndex = api_.loadModel(pathBytes.constData(), selectedDeviceId());
     if (modelIndex < 0) {
         outputText_->setPlainText(lastCError());
         return;
@@ -659,7 +674,7 @@ void MainWindow::onInfer() {
     const std::string paramsText = params.dump();
 
     const auto start = std::chrono::steady_clock::now();
-    CResultGuard result(dlcv_infer_cpp_infer_with_params_c(modelIndex_, &imageList, paramsText.c_str()));
+    CResultGuard result(api_, api_.inferWithParams(modelIndex_, &imageList, paramsText.c_str()));
     const auto end = std::chrono::steady_clock::now();
 
     if (result.get().code != 0) {
@@ -715,7 +730,7 @@ void MainWindow::onInferJson() {
     const std::string paramsText = params.dump();
     DlcvCImage image = makeCImage(inferImage);
 
-    CStringGuard result(dlcv_infer_cpp_infer_json_c(modelIndex_, &image, paramsText.c_str()));
+    CStringGuard result(api_, api_.inferJson(modelIndex_, &image, paramsText.c_str()));
     if (result.get() == nullptr) {
         reportError("推理JSON失败", lastCError());
         return;
@@ -796,7 +811,8 @@ void MainWindow::startPressureTest() {
             while (!pressureStopRequested_.load(std::memory_order_relaxed)) {
                 const auto start = std::chrono::steady_clock::now();
                 CResultGuard result(
-                    dlcv_infer_cpp_infer_with_params_c(pressureModelIndex_, &imageList, paramsText.c_str()));
+                    api_,
+                    api_.inferWithParams(pressureModelIndex_, &imageList, paramsText.c_str()));
                 const auto end = std::chrono::steady_clock::now();
 
                 if (result.get().code != 0) {
@@ -911,7 +927,7 @@ void MainWindow::onGetModelInfo() {
         return;
     }
 
-    CStringGuard modelInfo(dlcv_infer_cpp_get_model_info_c(modelIndex_));
+    CStringGuard modelInfo(api_, api_.getModelInfo(modelIndex_));
     if (modelInfo.get() == nullptr) {
         outputText_->setPlainText(lastCError());
         return;
@@ -937,7 +953,11 @@ void MainWindow::onFreeModel() {
 
 void MainWindow::onFreeAllModels() {
     stopPressureTest();
-    dlcv_infer_cpp_free_all_models_c();
+    if (!api_.isLoaded()) {
+        reportError("释放模型失败", QString::fromStdWString(api_.lastError()));
+        return;
+    }
+    api_.freeAllModels();
     modelIndex_ = -1;
     outputText_->setPlainText("所有模型已释放");
 }
@@ -947,7 +967,11 @@ void MainWindow::onOpenDoc() {
 }
 
 void MainWindow::onCheckDog() {
-    CStringGuard allInfo(dlcv_infer_cpp_get_all_dog_info_c());
+    if (!api_.isLoaded()) {
+        reportError("检查加密狗失败", QString::fromStdWString(api_.lastError()));
+        return;
+    }
+    CStringGuard allInfo(api_, api_.getAllDogInfo());
     if (allInfo.get() == nullptr) {
         reportError("检查加密狗失败", lastCError());
         return;
@@ -977,4 +1001,3 @@ void MainWindow::onCheckDog() {
         reportError("检查加密狗失败", QString::fromLocal8Bit(ex.what()));
     }
 }
-

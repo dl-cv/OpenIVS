@@ -25,6 +25,9 @@
     <ClCompile Include="MainWindow.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="DlcvInferApi.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
     <ClCompile Include="ImageViewerWidget.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
@@ -39,6 +42,9 @@
     <ClInclude Include="ImageViewerWidget.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="DlcvInferApi.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="app_icon.rc">
@@ -46,5 +52,4 @@
     </ResourceCompile>
   </ItemGroup>
 </Project>
-
 

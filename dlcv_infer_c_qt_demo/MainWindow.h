@@ -12,8 +12,8 @@
 
 #include <opencv2/core.hpp>
 
+#include "DlcvInferApi.h"
 #include "DisplayResult.h"
-#include "dlcv_infer_c_api.h"
 
 class QCheckBox;
 class QCloseEvent;
@@ -68,6 +68,7 @@ private:
     void setUiEnabledForPressureTest(bool enabled);
 
     int modelIndex_ = -1;
+    DlcvInferApi api_;
     QSettings settings_{"dlcv", "DlcvDemoCQt"};
     QHash<QString, int> deviceNameToId_;
 
@@ -112,6 +113,7 @@ private:
     int pressureModelIndex_ = -1;
     cv::Mat pressureBaseImage_;
     QTimer* pressureTimer_ = nullptr;
+    std::thread deviceInitializationThread_;
     std::vector<std::thread> pressureThreads_;
     std::mutex pressureErrorMutex_;
     QString pressureErrorDetail_;
@@ -119,4 +121,3 @@ private:
     std::chrono::steady_clock::time_point pressureLastTickTime_{};
     long long pressureLastCompletedRequests_ = 0;
 };
-
