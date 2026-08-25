@@ -496,6 +496,8 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 - C API 对外头文件：`dlcv_infer_c_dll/dlcv_infer_c_api.h`
 - C API 工程通过 `dlcv_infer_cpp_dll.lib` 显式依赖 C++ API 工程。
 - C API 保留 `dlcv_infer_cpp_infer_c` 默认参数入口，并提供 `dlcv_infer_cpp_infer_with_params_c` 接收 JSON 参数；调用端可传入 `threshold`、`calc_mean` 等字段覆盖本次推理参数。
+- C API 为每个 `.dvst`、`.dvso` 模型句柄保存独立推理互斥量；同一句柄的多线程请求依次执行，保护首次模型信息读取、流程推理、结构化结果复制和结果释放。不同流程句柄仍可同时执行。
+- `.dvt`、`.dvo` 普通模型不使用上述流程互斥量，保持原有并发调用方式。
 
 ---
 
