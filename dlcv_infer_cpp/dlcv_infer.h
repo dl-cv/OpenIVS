@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <functional>
 #include <map>
 #include <fstream>
@@ -325,9 +327,13 @@ namespace dlcv_infer {
         int _expectedChCache = -2;
         bool _hasCachedModelInfo = false;
         json _cachedModelInfo;
+        mutable std::shared_mutex _stateMutex;
+        std::mutex _modelInfoMutex;
         // DVS 模式：持有临时目录路径，确保在 Model 对象存活期间文件不被删除
         std::string _tempDir;
 
+        void freeModelLocked();
+        json getModelInfoLocked();
         int resolveEffectiveInputCh();
         std::vector<cv::Mat> prepareInferInputBatch(const std::vector<cv::Mat>& images);
     protected:

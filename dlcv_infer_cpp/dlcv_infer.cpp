@@ -7,6 +7,7 @@
 #include "flow/utils/MaskRleUtils.h"
 #ifdef _WIN32
 #include <Windows.h>
+#include <share.h>
 #else
 #include <dlfcn.h>
 #include <filesystem>
@@ -27,7 +28,7 @@
 #include <cwctype>
 #include <fstream>
 #include <locale>
-#include <random>
+#include <mutex>
 #include <stdexcept>
 #include <system_error>
 #include <unordered_map>
@@ -250,6 +251,14 @@ struct DvsUnpackResult {
     std::string tempDir;
 };
 
+struct DvsTempCacheEntry {
+    Json pipelineRoot = Json::object();
+    size_t refCount = 0;
+};
+
+std::mutex g_dvsTempCacheMutex;
+std::unordered_map<std::string, DvsTempCacheEntry> g_dvsTempCache;
+
 static bool DeleteDirectoryRecursive(const std::string& dir) {
     if (dir.empty()) return true;
 #ifdef _WIN32
@@ -348,18 +357,6 @@ std::string GetExtensionWithDot(const std::string& path) {
     const size_t pos = name.find_last_of('.');
     if (pos == std::string::npos) return std::string();
     return name.substr(pos);
-}
-
-std::string RandomHex(size_t len) {
-    static std::mt19937_64 rng{ std::random_device{}() };
-    static const char* kHex = "0123456789abcdef";
-
-    std::string out;
-    out.reserve(len);
-    for (size_t i = 0; i < len; i++) {
-        out.push_back(kHex[static_cast<size_t>(rng() & 0xF)]);
-    }
-    return out;
 }
 
 class Sha256Digest final {
@@ -496,6 +493,17 @@ private:
     std::uint64_t _totalBytes = 0;
 };
 
+std::string Sha256Hex(const void* data, size_t len) {
+    Sha256Digest digest;
+    digest.Update(data, len);
+    return digest.FinalHex();
+}
+
+std::string ShortHash(const std::string& fullHash) {
+    static constexpr size_t kShortHashLength = 16;
+    return fullHash.substr(0, std::min(kShortHashLength, fullHash.size()));
+}
+
 std::string GetNormalizedDvsPathUtf8(const std::wstring& archivePathW) {
 #ifdef _WIN32
     const DWORD required = GetFullPathNameW(archivePathW.c_str(), 0, nullptr, nullptr);
@@ -515,55 +523,90 @@ std::string GetNormalizedDvsPathUtf8(const std::wstring& archivePathW) {
 #endif
 }
 
-std::string CreateTempDir() {
+std::string GetDvsTempDir(const std::string& archiveIdentity) {
 #ifdef _WIN32
     char tmpPath[MAX_PATH] = { 0 };
     DWORD n = GetTempPathA(MAX_PATH, tmpPath);
     if (n == 0 || n >= MAX_PATH) {
         throw std::runtime_error("failed to get temp directory");
     }
-    for (int retry = 0; retry < 8; retry++) {
-        const std::string dir = JoinPath(std::string(tmpPath), "DlcvDvs_" + RandomHex(24));
-        if (CreateDirectoryA(dir.c_str(), nullptr) != 0) return dir;
-    }
+    const std::string processId = std::to_string(GetCurrentProcessId());
+    return JoinPath(
+        std::string(tmpPath),
+        "DlcvDvs_" + archiveIdentity + "_" + processId);
 #else
     std::error_code ec;
     const fs::path base = fs::temp_directory_path(ec);
     if (ec) {
         throw std::runtime_error("failed to get temp directory");
     }
-    for (int retry = 0; retry < 8; retry++) {
-        const fs::path dirPath = base / ("DlcvDvs_" + RandomHex(24));
-        if (fs::create_directory(dirPath, ec)) {
-            return dirPath.string();
-        }
-        if (ec) ec.clear();
+    return (base / (
+        "DlcvDvs_" + archiveIdentity
+        + "_" + std::to_string(static_cast<long long>(getpid())))).string();
+#endif
+}
+
+void CreateCleanDvsTempDir(const std::string& dir) {
+    (void)DeleteDirectoryRecursive(dir);
+#ifdef _WIN32
+    if (CreateDirectoryA(dir.c_str(), nullptr) == 0) {
+        throw std::runtime_error("failed to create temp directory");
+    }
+#else
+    std::error_code ec;
+    if (!fs::create_directory(fs::path(dir), ec) || ec) {
+        throw std::runtime_error("failed to create temp directory");
     }
 #endif
-    throw std::runtime_error("failed to create temp directory");
+}
+
+void ReleaseDvsTempDir(const std::string& dir) {
+    if (dir.empty()) return;
+    std::lock_guard<std::mutex> lock(g_dvsTempCacheMutex);
+    const auto it = g_dvsTempCache.find(dir);
+    if (it == g_dvsTempCache.end()) return;
+    if (it->second.refCount > 0) --it->second.refCount;
+    if (it->second.refCount == 0) {
+        g_dvsTempCache.erase(it);
+        (void)DeleteDirectoryRecursive(dir);
+    }
+}
+
+std::string HashOpenFileAndRewind(FILE* fp) {
+    if (fp == nullptr) throw std::runtime_error("file handle is null");
+    Sha256Digest digest;
+    std::vector<char> buffer(1024 * 1024);
+    for (;;) {
+        const size_t n = std::fread(buffer.data(), 1, buffer.size(), fp);
+        if (n > 0) digest.Update(buffer.data(), n);
+        if (n < buffer.size()) {
+            if (std::ferror(fp)) throw std::runtime_error("failed to read dvst file content");
+            break;
+        }
+    }
+    if (std::fseek(fp, 0, SEEK_SET) != 0) {
+        throw std::runtime_error("failed to rewind dvst file");
+    }
+    return digest.FinalHex();
 }
 
 void ReadExactOrThrow(
     FILE* fp,
     char* dst,
     size_t len,
-    const std::string& errMsg,
-    Sha256Digest& digest) {
+    const std::string& errMsg) {
     if (len == 0) return;
     if (fp == nullptr || dst == nullptr) throw std::runtime_error(errMsg);
     const size_t n = std::fread(dst, 1, len, fp);
     if (n != len) throw std::runtime_error(errMsg);
-    digest.Update(dst, len);
 }
 
-std::string ReadLineOrThrow(FILE* fp, Sha256Digest& digest) {
+std::string ReadLineOrThrow(FILE* fp) {
     if (fp == nullptr) throw std::runtime_error("file handle is null");
     std::string line;
     for (;;) {
         const int c = std::fgetc(fp);
         if (c == EOF) break;
-        const unsigned char byte = static_cast<unsigned char>(c);
-        digest.Update(&byte, 1);
         if (c == '\n') break;
         line.push_back(static_cast<char>(c));
     }
@@ -580,7 +623,7 @@ long long ReadFileSizeFromJson(const Json& v) {
     return -1;
 }
 
-void CopyStreamToFile(FILE* fp, const std::string& outPath, long long bytes, Sha256Digest& digest) {
+void CopyStreamToFile(FILE* fp, const std::string& outPath, long long bytes) {
     if (bytes < 0) throw std::runtime_error("invalid file size in dvst archive");
     std::ofstream ofs(outPath, std::ios::binary);
     if (!ofs) throw std::runtime_error("failed to write temp model file: " + outPath);
@@ -591,22 +634,9 @@ void CopyStreamToFile(FILE* fp, const std::string& outPath, long long bytes, Sha
         const size_t chunk = static_cast<size_t>(std::min<long long>(remaining, static_cast<long long>(buffer.size())));
         const size_t n = std::fread(buffer.data(), 1, chunk, fp);
         if (n != chunk) throw std::runtime_error("failed to read dvst file content");
-        digest.Update(buffer.data(), chunk);
         ofs.write(buffer.data(), static_cast<std::streamsize>(chunk));
         if (!ofs) throw std::runtime_error("failed to write temp model file: " + outPath);
         remaining -= static_cast<long long>(chunk);
-    }
-}
-
-void ReadRemainingArchiveBytes(FILE* fp, Sha256Digest& digest) {
-    std::array<char, 64 * 1024> buffer{};
-    for (;;) {
-        const size_t n = std::fread(buffer.data(), 1, buffer.size(), fp);
-        if (n > 0) digest.Update(buffer.data(), n);
-        if (n < buffer.size()) {
-            if (std::ferror(fp)) throw std::runtime_error("failed to read dvst trailing content");
-            return;
-        }
     }
 }
 
@@ -653,16 +683,11 @@ void WriteUtf8Text(const std::string& path, const std::string& content) {
 }
 
 DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
-    Sha256Digest archiveDigest;
     const std::string normalizedPath = GetNormalizedDvsPathUtf8(archivePathW);
-    static constexpr char kIdentityPrefix[] = "DLCV-DVS-CONTENT";
-    archiveDigest.Update(kIdentityPrefix, sizeof(kIdentityPrefix));
-    archiveDigest.Update(normalizedPath.data(), normalizedPath.size());
-    const unsigned char separator = 0;
-    archiveDigest.Update(&separator, 1);
 #ifdef _WIN32
     FILE* fp = nullptr;
-    if (_wfopen_s(&fp, archivePathW.c_str(), L"rb") != 0 || fp == nullptr) {
+    fp = _wfsopen(archivePathW.c_str(), L"rb", _SH_DENYWR);
+    if (fp == nullptr) {
 #else
     FILE* fp = std::fopen(WideToUtf8Portable(archivePathW).c_str(), "rb");
     if (fp == nullptr) {
@@ -672,13 +697,33 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
 
     DvsUnpackResult out;
     try {
+        const std::string contentHash = HashOpenFileAndRewind(fp);
+        const std::string pathHash = Sha256Hex(normalizedPath.data(), normalizedPath.size());
+        std::string identitySource = pathHash;
+        identitySource.push_back('\0');
+        identitySource += contentHash;
+        const std::string archiveIdentity = Sha256Hex(identitySource.data(), identitySource.size());
+        out.tempDir = GetDvsTempDir(archiveIdentity);
+
+        std::lock_guard<std::mutex> cacheLock(g_dvsTempCacheMutex);
+        const auto cached = g_dvsTempCache.find(out.tempDir);
+        if (cached != g_dvsTempCache.end()) {
+            out.pipelineRoot = cached->second.pipelineRoot;
+            ++cached->second.refCount;
+            std::fclose(fp);
+            return out;
+        }
+
+        CreateCleanDvsTempDir(out.tempDir);
+        TempDirGuard unpackGuard(out.tempDir);
+
         char magic[3] = { 0 };
-        ReadExactOrThrow(fp, magic, 3, "failed to read dvst magic", archiveDigest);
+        ReadExactOrThrow(fp, magic, 3, "failed to read dvst magic");
         if (!(magic[0] == 'D' && magic[1] == 'V' && magic[2] == '\n')) {
             throw std::runtime_error("invalid dvst format: missing DV header");
         }
 
-        const std::string headerLine = ReadLineOrThrow(fp, archiveDigest);
+        const std::string headerLine = ReadLineOrThrow(fp);
         const Json header = Json::parse(headerLine);
         if (!header.is_object() ||
             !header.contains("file_list") || !header.at("file_list").is_array() ||
@@ -687,8 +732,6 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
             throw std::runtime_error("invalid dvst header: file_list/file_size mismatch");
         }
 
-        out.tempDir = CreateTempDir();
-        TempDirGuard unpackGuard(out.tempDir);
         std::unordered_map<std::string, std::string> fileNameToTemp;
         bool gotPipeline = false;
 
@@ -708,27 +751,32 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
                         fp,
                         &text[0],
                         static_cast<size_t>(size),
-                        "failed to read pipeline.json",
-                        archiveDigest);
+                        "failed to read pipeline.json");
                 }
                 out.pipelineRoot = Json::parse(text);
                 gotPipeline = true;
             } else {
                 std::string ext = GetExtensionWithDot(fileName);
                 if (ext.empty()) ext = ".tmp";
-                const std::string safeName = RandomHex(32) + ext;
+                const std::string normalizedFileName = ToLowerAscii(fileName);
+                const std::string fileHash = Sha256Hex(normalizedFileName.data(), normalizedFileName.size());
+                const std::string safeName = "file_" + std::to_string(i) + "_" + ShortHash(fileHash) + ext;
                 const std::string fullPath = JoinPath(out.tempDir, safeName);
 
-                CopyStreamToFile(fp, fullPath, size, archiveDigest);
+                CopyStreamToFile(fp, fullPath, size);
                 fileNameToTemp[ToLowerAscii(fileName)] = fullPath;
                 fileNameToTemp[ToLowerAscii(GetFileNameOnly(fileName))] = fullPath;
             }
         }
 
         if (!gotPipeline) throw std::runtime_error("pipeline.json not found in dvst archive");
-        ReadRemainingArchiveBytes(fp, archiveDigest);
-        const std::string modelPoolPrefix = "dvs:" + archiveDigest.FinalHex();
+        const std::string modelPoolPrefix = "dvs:" + archiveIdentity;
         RewritePipelineModelPath(out.pipelineRoot, fileNameToTemp, modelPoolPrefix);
+        WriteUtf8Text(JoinPath(out.tempDir, "pipeline.json"), out.pipelineRoot.dump());
+        DvsTempCacheEntry cacheEntry;
+        cacheEntry.pipelineRoot = out.pipelineRoot;
+        cacheEntry.refCount = 1;
+        g_dvsTempCache.emplace(out.tempDir, std::move(cacheEntry));
         unpackGuard.Release();
     } catch (...) {
         std::fclose(fp);
@@ -1754,8 +1802,6 @@ namespace dlcv_infer {
                 _tempDir = unpack.tempDir;
 
                 const std::string pipelinePath = JoinPath(unpack.tempDir, "pipeline.json");
-                WriteUtf8Text(pipelinePath, unpack.pipelineRoot.dump());
-
                 json report = _flowModel->Load(pipelinePath, device_id);
                 int code = 1;
                 try { code = report.contains("code") ? report.at("code").get<int>() : 1; } catch (...) { code = 1; }
@@ -1768,7 +1814,7 @@ namespace dlcv_infer {
                 delete _flowModel;
                 _flowModel = nullptr;
                 if (!_tempDir.empty()) {
-                    DeleteDirectoryRecursive(_tempDir);
+                    ReleaseDvsTempDir(_tempDir);
                     _tempDir.clear();
                 }
                 throw std::runtime_error(std::string("failed to load dvs model: ") + ex.what());
@@ -1821,8 +1867,6 @@ namespace dlcv_infer {
                 _tempDir = unpack.tempDir;
 
                 const std::string pipelinePath = JoinPath(unpack.tempDir, "pipeline.json");
-                WriteUtf8Text(pipelinePath, unpack.pipelineRoot.dump());
-
                 json report = _flowModel->Load(pipelinePath, device_id);
                 int code = 1;
                 try { code = report.contains("code") ? report.at("code").get<int>() : 1; } catch (...) { code = 1; }
@@ -1835,7 +1879,7 @@ namespace dlcv_infer {
                 delete _flowModel;
                 _flowModel = nullptr;
                 if (!_tempDir.empty()) {
-                    DeleteDirectoryRecursive(_tempDir);
+                    ReleaseDvsTempDir(_tempDir);
                     _tempDir.clear();
                 }
                 throw std::runtime_error(std::string("failed to load dvs model: ") + ex.what());
@@ -1876,19 +1920,22 @@ namespace dlcv_infer {
         }
     }
 
-    Model::Model(Model&& other) noexcept
-        : modelIndex(other.modelIndex),
-        OwnModelIndex(other.OwnModelIndex),
-        _isFlowGraphMode(other._isFlowGraphMode),
-        _deviceId(other._deviceId),
-        _flowModel(other._flowModel),
-        _expectedChCache(other._expectedChCache),
-        _hasCachedModelInfo(other._hasCachedModelInfo),
-        _cachedModelInfo(std::move(other._cachedModelInfo)),
-        _tempDir(std::move(other._tempDir)),
-        _dllLoader(other._dllLoader),
-        _loadedDogProvider(other._loadedDogProvider),
-        _loadedNativeDllName(std::move(other._loadedNativeDllName)) {
+    Model::Model(Model&& other) noexcept {
+        std::unique_lock<std::shared_mutex> otherStateLock(other._stateMutex);
+        std::lock_guard<std::mutex> otherModelInfoLock(other._modelInfoMutex);
+        modelIndex = other.modelIndex;
+        OwnModelIndex = other.OwnModelIndex;
+        _isFlowGraphMode = other._isFlowGraphMode;
+        _deviceId = other._deviceId;
+        _flowModel = other._flowModel;
+        _expectedChCache = other._expectedChCache;
+        _hasCachedModelInfo = other._hasCachedModelInfo;
+        _cachedModelInfo = std::move(other._cachedModelInfo);
+        _tempDir = std::move(other._tempDir);
+        _dllLoader = other._dllLoader;
+        _loadedDogProvider = other._loadedDogProvider;
+        _loadedNativeDllName = std::move(other._loadedNativeDllName);
+
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
@@ -1908,8 +1955,14 @@ namespace dlcv_infer {
             return *this;
         }
 
-        try { FreeModel(); } catch (...) {}
-
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::unique_lock<std::shared_mutex> stateLock(_stateMutex, std::defer_lock);
+        std::unique_lock<std::shared_mutex> otherStateLock(other._stateMutex, std::defer_lock);
+        std::lock(stateLock, otherStateLock);
+        try { freeModelLocked(); } catch (...) {}
+        std::unique_lock<std::mutex> modelInfoLock(_modelInfoMutex, std::defer_lock);
+        std::unique_lock<std::mutex> otherModelInfoLock(other._modelInfoMutex, std::defer_lock);
+        std::lock(modelInfoLock, otherModelInfoLock);
         modelIndex = other.modelIndex;
         OwnModelIndex = other.OwnModelIndex;
         _isFlowGraphMode = other._isFlowGraphMode;
@@ -1944,24 +1997,37 @@ namespace dlcv_infer {
 
     void Model::FreeModel() {
         flow::ModelLifecycleReadGuard lifecycleGuard;
-        _expectedChCache = -2;
+        std::unique_lock<std::shared_mutex> stateLock(_stateMutex);
+        freeModelLocked();
+    }
+
+    void Model::freeModelLocked() {
+        {
+            std::lock_guard<std::mutex> modelInfoLock(_modelInfoMutex);
+            _expectedChCache = -2;
+            _hasCachedModelInfo = false;
+            _cachedModelInfo = json();
+        }
         if (_isFlowGraphMode) {
             delete _flowModel;
             _flowModel = nullptr;
             if (!_tempDir.empty()) {
-                DeleteDirectoryRecursive(_tempDir);
+                ReleaseDvsTempDir(_tempDir);
                 _tempDir.clear();
             }
             modelIndex = -1;
+            _isFlowGraphMode = false;
             return;
         }
 
         if (modelIndex == -1) {
+            _isFlowGraphMode = false;
             return;
         }
         // 仅“借用”modelIndex 时，不释放底层模型；只把本对象标记为无效。
         if (!OwnModelIndex) {
             modelIndex = -1;
+            _isFlowGraphMode = false;
             return;
         }
 
@@ -2023,12 +2089,16 @@ namespace dlcv_infer {
             freeResult(resultPtr);
         }
         modelIndex = -1;
+        _isFlowGraphMode = false;
     }
 
-    json Model::GetModelInfo() {
-        flow::ModelLifecycleReadGuard lifecycleGuard;
+    json Model::getModelInfoLocked() {
         if (_hasCachedModelInfo) {
             return _cachedModelInfo;
+        }
+
+        if (!_isFlowGraphMode && modelIndex < 0) {
+            throw std::runtime_error("模型尚未加载");
         }
 
         if (_isFlowGraphMode) {
@@ -2051,7 +2121,16 @@ namespace dlcv_infer {
         return resultObject;
     }
 
+    json Model::GetModelInfo() {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
+        std::lock_guard<std::mutex> lock(_modelInfoMutex);
+        return getModelInfoLocked();
+    }
+
     json Model::GetDvsModelInfo() {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
         if (!_isFlowGraphMode) {
             throw std::runtime_error("GetDvsModelInfo 仅支持流程模型");
         }
@@ -2062,6 +2141,7 @@ namespace dlcv_infer {
     }
 
     int Model::resolveEffectiveInputCh() {
+        std::lock_guard<std::mutex> lock(_modelInfoMutex);
         if (_expectedChCache != -2) {
             return (_expectedChCache == -1) ? 3 : _expectedChCache;
         }
@@ -2070,7 +2150,7 @@ namespace dlcv_infer {
                 _expectedChCache = -1;
                 return 3;
             }
-            const json info = GetModelInfo();
+            const json info = getModelInfoLocked();
             const int p = ParseInputChFromModelInfo(info);
             if (p == 1 || p == 3) {
                 _expectedChCache = p;
@@ -2337,6 +2417,7 @@ namespace dlcv_infer {
 
     Result Model::Infer(const cv::Mat& image, const json& params_json) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
         ClearLastInspectionStatuses();
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
@@ -2399,6 +2480,7 @@ namespace dlcv_infer {
 
     Result Model::InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
         ClearLastInspectionStatuses();
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
@@ -2474,6 +2556,7 @@ namespace dlcv_infer {
 
     json Model::InferOneOutJson(const cv::Mat& image, const json& params_json) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
         ClearLastInspectionStatuses();
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");

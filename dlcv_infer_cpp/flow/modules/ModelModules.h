@@ -42,20 +42,20 @@ class ModelPool;
 class ModelPoolLease final {
 public:
     ModelPoolLease() = default;
-    ~ModelPoolLease();
-    ModelPoolLease(ModelPoolLease&& other) noexcept;
-    ModelPoolLease& operator=(ModelPoolLease&& other) noexcept;
+    DLCV_INFER_CPP_API ~ModelPoolLease();
+    DLCV_INFER_CPP_API ModelPoolLease(ModelPoolLease&& other) noexcept;
+    DLCV_INFER_CPP_API ModelPoolLease& operator=(ModelPoolLease&& other) noexcept;
     ModelPoolLease(const ModelPoolLease&) = delete;
     ModelPoolLease& operator=(const ModelPoolLease&) = delete;
 
-    void Reset() noexcept;
+    DLCV_INFER_CPP_API void Reset() noexcept;
     const std::shared_ptr<dlcv_infer::Model>& Model() const { return _model; }
     const std::string& Key() const { return _key; }
     explicit operator bool() const { return _model != nullptr; }
 
 private:
     friend class ModelPool;
-    ModelPoolLease(
+    DLCV_INFER_CPP_API ModelPoolLease(
         std::shared_ptr<dlcv_infer::Model> model,
         std::string key,
         std::uint64_t entryIdentity);
