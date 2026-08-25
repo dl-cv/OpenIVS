@@ -1608,14 +1608,6 @@ namespace dlcv_infer {
         if (instance && instance->dogProvider == needed) {
             return;
         }
-        auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
-            ? sntl_admin::DogUtils::GetSentinelInfo()
-            : sntl_admin::DogUtils::GetVirboxInfo();
-        if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
-            throw std::runtime_error(std::string("模型要求 provider ")
-                + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
-                + "，但未检测到对应的加密狗设备或特性");
-        }
         instance = new DllLoader(needed);
     }
 
@@ -1639,14 +1631,6 @@ namespace dlcv_infer {
         }
         if (instance && instance->dogProvider == needed) {
             return;
-        }
-        auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
-            ? sntl_admin::DogUtils::GetSentinelInfo()
-            : sntl_admin::DogUtils::GetVirboxInfo();
-        if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
-            throw std::runtime_error(std::string("模型要求 provider ")
-                + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
-                + "，但未检测到对应的加密狗设备或特性");
         }
         instance = new DllLoader(needed);
     }
@@ -1912,7 +1896,7 @@ namespace dlcv_infer {
         if (report.value("code", 1) != 0) {
             throw std::runtime_error("恢复流程失败: " + report.dump());
         }
-        _cachedModelInfo = flowInfo;
+        _cachedModelInfo = _flowModel->GetModelInfo();
         _hasCachedModelInfo = true;
     }
 

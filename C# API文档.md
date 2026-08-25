@@ -302,7 +302,7 @@ public class DllLoader
     // 全局单例
     public static DllLoader Instance { get; }
 
-    // 根据模型头中的 dog_provider 字段，校验当前可用授权并确保加载正确的 DLL
+    // 根据模型头中的 dog_provider 字段加载对应 DLL
     public static void EnsureForModel(string modelPath);
     public static DllLoader ResolveForIndex(int index, out string indexType);
 
@@ -340,10 +340,7 @@ public class DllLoader
 
 **自动检测优先级**：`Instance` 初始化时调用一次 `DogUtils.GetAvailableProviders()`，按 **Sentinel 优先、Virbox 第二** 选择 Provider；均未检测到时返回 `DogProvider.None`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
 
-**Provider 一致性校验**：`EnsureForModel` 在加载模型前，先读取模型头 `dog_provider` 得到所需 provider，再调用 `DogUtils.GetAvailableProviders()` 获取当前可用授权列表。若所需 provider 不在可用列表中，抛出异常：
-- 可用列表为空时提示 `未检测到授权`。
-- 否则提示 `当前使用的是 {current}，加载的模型是 {needed} 格式，类型错误`（`current` 为当前可用 provider 显示名，`needed` 为模型所需 provider）。
-- 校验通过后再创建对应 provider 的 `DllLoader`。
+**模型 provider 选择**：`EnsureForModel` 读取模型头 `dog_provider` 后直接创建对应 provider 的 `DllLoader`，不调用 `DogUtils.GetAvailableProviders()`，也不检查另一种 provider。模型头没有 `dog_provider` 时保留原有自动检测。
 
 **模型级 Provider 解析**：
 - `.dvt`/`.dvo` 文件：读取前两行（`DV` + header_json），解析 `dog_provider` 字段。

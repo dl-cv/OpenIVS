@@ -164,7 +164,7 @@ C# 与 C++ API 不提供 `SlidingWindowModel`。需要滑窗处理时，使用 `
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | None / Unknown | 不加载 | — |
 
-自动检测优先级：先检测 Sentinel，再检测 Virbox；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。每个 `Model` 实例在加载时保存自己的 loader，后续所有操作都走该 loader。共享 index 解析只返回 index 所属 loader，不修改默认 loader；C# 普通模型缓存同时保存 index 和加载时 loader。
+模型头包含 `dog_provider` 时直接加载对应 DLL，不查询加密狗，也不检查另一种 provider。模型头没有 `dog_provider` 时，自动检测优先级为 Sentinel、Virbox；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。每个 `Model` 实例在加载时保存自己的 loader，后续所有操作都走该 loader。共享 index 解析只返回 index 所属 loader，不修改默认 loader；C# 普通模型缓存同时保存 index 和加载时 loader。
 
 ## 输入图像处理约定
 
