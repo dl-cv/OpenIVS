@@ -3,7 +3,6 @@
 
 #include <opencv2/core.hpp>
 
-#include <cctype>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -18,13 +17,7 @@
 #include <unordered_map>
 #include <vector>
 
-struct CApiModelEntry {
-    std::shared_ptr<dlcv_infer::Model> model;
-    bool serializeInfer = false;
-    std::mutex inferMutex;
-};
-
-static std::unordered_map<int, std::shared_ptr<CApiModelEntry>> g_models;
+static std::unordered_map<int, std::shared_ptr<dlcv_infer::Model>> g_models;
 static std::mutex g_modelsMutex;
 static thread_local std::string g_lastError;
 static const char* kDlcvCapiDebugLogPath = "C:\\ProgramData\\dlcvInfer_c_api_debug.log";
@@ -35,21 +28,6 @@ static void SetLastErrorMessage(const std::string& message) {
 
 static void ClearLastErrorMessage() {
     g_lastError.clear();
-}
-
-static bool IsFlowModelPath(const std::string& modelPath) {
-    const auto endsWithIgnoreCase = [&modelPath](const char* suffix) {
-        const size_t suffixLength = std::strlen(suffix);
-        if (modelPath.size() < suffixLength) return false;
-        const size_t offset = modelPath.size() - suffixLength;
-        for (size_t i = 0; i < suffixLength; ++i) {
-            const unsigned char left = static_cast<unsigned char>(modelPath[offset + i]);
-            const unsigned char right = static_cast<unsigned char>(suffix[i]);
-            if (std::tolower(left) != std::tolower(right)) return false;
-        }
-        return true;
-    };
-    return endsWithIgnoreCase(".dvst") || endsWithIgnoreCase(".dvso");
 }
 
 static void AppendCapiDebugLog(const char* format, ...) {
@@ -137,11 +115,8 @@ int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
             AppendCapiDebugLog("load_model failed: %s", g_lastError.c_str());
             return -1;
         }
-        auto entry = std::make_shared<CApiModelEntry>();
-        entry->model = std::move(model);
-        entry->serializeInfer = IsFlowModelPath(modelPath);
         std::lock_guard<std::mutex> lock(g_modelsMutex);
-        g_models[idx] = std::move(entry);
+        g_models[idx] = model;
         ClearLastErrorMessage();
         AppendCapiDebugLog("load_model success: modelIndex=%d", idx);
         return idx;
@@ -184,7 +159,7 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
         return result;
     }
 
-    std::shared_ptr<CApiModelEntry> entry;
+    std::shared_ptr<dlcv_infer::Model> model;
     {
         std::lock_guard<std::mutex> lock(g_modelsMutex);
         auto it = g_models.find(model_index);
@@ -192,12 +167,7 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
             result.message = _strdup("model not found");
             return result;
         }
-        entry = it->second;
-    }
-
-    std::unique_lock<std::mutex> inferLock(entry->inferMutex, std::defer_lock);
-    if (entry->serializeInfer) {
-        inferLock.lock();
+        model = it->second;
     }
 
     try {
@@ -222,7 +192,7 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
             }
         }
 
-        dlcv_infer::Result cppResult = entry->model->InferBatch(mats, params);
+        dlcv_infer::Result cppResult = model->InferBatch(mats, params);
 
         result.code = 0;
         result.message = _strdup("success");
