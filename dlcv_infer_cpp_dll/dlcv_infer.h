@@ -15,6 +15,7 @@
 #include "json/json.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
+#include "dlcv_infer/dlcv_data_type_c.h"
 #include "dlcv_sntl_admin.h"
 
 // DLL 导出/导入宏（用于本项目生成的 dlcv_infer_cpp_dll）
@@ -26,6 +27,12 @@
 #  endif
 #else
 #  define DLCV_INFER_CPP_DLL_API
+#endif
+
+#if defined(_WIN32) || defined(__CYGWIN__)
+#  define DLCV_INFER_NATIVE_CALL __stdcall
+#else
+#  define DLCV_INFER_NATIVE_CALL
 #endif
 
 namespace dlcv_infer {
@@ -69,15 +76,34 @@ namespace dlcv_infer {
 #endif // NVML_TYPES_H 
 
     // 外部 DLL 接口函数类型定义
-    typedef void* (*LoadModelFuncType)(const char* config_str);
-    typedef void* (*FreeModelFuncType)(const char* config_str);
-    typedef void* (*GetModelInfoFuncType)(const char* config_str);
-    typedef void* (*InferFuncType)(const char* config_str);
-    typedef void (*FreeModelResultFuncType)(void* result_ptr);
-    typedef void (*FreeResultFuncType)(void* result_ptr);
-    typedef void (*FreeAllModelsFuncType)();
-    typedef void* (*GetDeviceInfoFuncType)();
-    typedef void* (*KeepMaxClockFuncType)();
+    typedef void* (DLCV_INFER_NATIVE_CALL *LoadModelFuncType)(const char* config_str);
+    typedef void* (DLCV_INFER_NATIVE_CALL *FreeModelFuncType)(const char* config_str);
+    typedef void* (DLCV_INFER_NATIVE_CALL *GetModelInfoFuncType)(const char* config_str);
+    typedef void* (DLCV_INFER_NATIVE_CALL *InferFuncType)(const char* config_str);
+    typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultFuncType)(void* result_ptr);
+    typedef void (DLCV_INFER_NATIVE_CALL *FreeResultFuncType)(void* result_ptr);
+    typedef void (DLCV_INFER_NATIVE_CALL *FreeAllModelsFuncType)();
+    typedef void* (DLCV_INFER_NATIVE_CALL *GetDeviceInfoFuncType)();
+    typedef void (DLCV_INFER_NATIVE_CALL *KeepMaxClockFuncType)();
+    typedef const char* (DLCV_INFER_NATIVE_CALL *GetGpuInfoFuncType)();
+    typedef void (DLCV_INFER_NATIVE_CALL *ResetMaxClockFuncType)();
+    typedef void (DLCV_INFER_NATIVE_CALL *SetGpuMaxClockFuncType)(bool verbose);
+    typedef void (DLCV_INFER_NATIVE_CALL *ResetGpuMaxClockFuncType)(bool verbose);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *GetPowerSchemeGuidFuncType)(int verbose);
+    typedef int (DLCV_INFER_NATIVE_CALL *SetPowerSchemeGuidFuncType)(const char* schemeGuid, int verbose);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *GetPowerSchemeFuncType)(int verbose);
+    typedef int (DLCV_INFER_NATIVE_CALL *SetPowerSchemeFuncType)(const char* schemeName, int verbose);
+    typedef int (DLCV_INFER_NATIVE_CALL *SetCurrentProcessAffinityToBigCoresFuncType)(int verbose);
+    typedef int (DLCV_INFER_NATIVE_CALL *SetCurrentProcessPriorityHighestFuncType)(
+        int preferRealtime,
+        int verbose,
+        int bindBigCores);
+    typedef int (DLCV_INFER_NATIVE_CALL *LoadModelCFuncType)(const char* modelPath, int deviceId);
+    typedef int (DLCV_INFER_NATIVE_CALL *FreeModelCFuncType)(int modelIndex);
+    typedef DlcvCResult (DLCV_INFER_NATIVE_CALL *InferCFuncType)(
+        int modelIndex,
+        const DlcvCImageList& imageList);
+    typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultCFuncType)(DlcvCResult& result);
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS
     // DLL 加载器（内部使用）
@@ -99,6 +125,20 @@ namespace dlcv_infer {
         FreeAllModelsFuncType dlcv_free_all_models = nullptr;
         GetDeviceInfoFuncType dlcv_get_device_info = nullptr;
         KeepMaxClockFuncType dlcv_keep_max_clock = nullptr;
+        GetGpuInfoFuncType dlcv_get_gpu_info = nullptr;
+        ResetMaxClockFuncType dlcv_reset_max_clock = nullptr;
+        SetGpuMaxClockFuncType dlcv_set_gpu_max_clock = nullptr;
+        ResetGpuMaxClockFuncType dlcv_reset_gpu_max_clock = nullptr;
+        GetPowerSchemeGuidFuncType dlcv_get_power_scheme_guid = nullptr;
+        SetPowerSchemeGuidFuncType dlcv_set_power_scheme_guid = nullptr;
+        GetPowerSchemeFuncType dlcv_get_power_scheme = nullptr;
+        SetPowerSchemeFuncType dlcv_set_power_scheme = nullptr;
+        SetCurrentProcessAffinityToBigCoresFuncType dlcv_set_current_process_affinity_to_big_cores = nullptr;
+        SetCurrentProcessPriorityHighestFuncType dlcv_set_current_process_priority_highest = nullptr;
+        LoadModelCFuncType dlcv_load_model_c = nullptr;
+        FreeModelCFuncType dlcv_free_model_c = nullptr;
+        InferCFuncType dlcv_infer_c = nullptr;
+        FreeModelResultCFuncType dlcv_free_model_result_c = nullptr;
 
         // 加载 DLL
         void LoadDll();
@@ -147,6 +187,24 @@ namespace dlcv_infer {
         KeepMaxClockFuncType GetKeepMaxClockFunc() const {
             return dlcv_keep_max_clock;
         }
+        GetGpuInfoFuncType GetGpuInfoFunc() const { return dlcv_get_gpu_info; }
+        ResetMaxClockFuncType GetResetMaxClockFunc() const { return dlcv_reset_max_clock; }
+        SetGpuMaxClockFuncType GetSetGpuMaxClockFunc() const { return dlcv_set_gpu_max_clock; }
+        ResetGpuMaxClockFuncType GetResetGpuMaxClockFunc() const { return dlcv_reset_gpu_max_clock; }
+        GetPowerSchemeGuidFuncType GetPowerSchemeGuidFunc() const { return dlcv_get_power_scheme_guid; }
+        SetPowerSchemeGuidFuncType GetSetPowerSchemeGuidFunc() const { return dlcv_set_power_scheme_guid; }
+        GetPowerSchemeFuncType GetPowerSchemeFunc() const { return dlcv_get_power_scheme; }
+        SetPowerSchemeFuncType GetSetPowerSchemeFunc() const { return dlcv_set_power_scheme; }
+        SetCurrentProcessAffinityToBigCoresFuncType GetSetCurrentProcessAffinityToBigCoresFunc() const {
+            return dlcv_set_current_process_affinity_to_big_cores;
+        }
+        SetCurrentProcessPriorityHighestFuncType GetSetCurrentProcessPriorityHighestFunc() const {
+            return dlcv_set_current_process_priority_highest;
+        }
+        LoadModelCFuncType GetLoadModelCFunc() const { return dlcv_load_model_c; }
+        FreeModelCFuncType GetFreeModelCFunc() const { return dlcv_free_model_c; }
+        InferCFuncType GetInferCFunc() const { return dlcv_infer_c; }
+        FreeModelResultCFuncType GetFreeModelResultCFunc() const { return dlcv_free_model_result_c; }
     };
 #endif
 
@@ -328,5 +386,39 @@ namespace dlcv_infer {
         static int nvmlDeviceGetCount(unsigned int* deviceCount);
         static int nvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length);
         static int nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device);
+    };
+
+    class DLCV_INFER_CPP_DLL_API NativeApi {
+    public:
+        static const char* LoadModel(const char* configStr);
+        static const char* FreeModel(const char* configStr);
+        static const char* GetModelInfo(const char* configStr);
+        static const char* Infer(const char* configStr);
+        static void FreeModelResult(const char* configStr);
+        static void FreeResult(const char* resultPtr);
+        static void FreeAllModels();
+
+        static const char* GetDeviceInfo();
+        static const char* GetGpuInfo();
+
+        static void KeepMaxClock();
+        static void ResetMaxClock();
+        static void SetGpuMaxClock(bool verbose);
+        static void ResetGpuMaxClock(bool verbose);
+
+        static const char* GetPowerSchemeGuid(int verbose);
+        static int SetPowerSchemeGuid(const char* schemeGuid, int verbose);
+        static const char* GetPowerScheme(int verbose);
+        static int SetPowerScheme(const char* schemeName, int verbose);
+        static int SetCurrentProcessAffinityToBigCores(int verbose);
+        static int SetCurrentProcessPriorityHighest(
+            int preferRealtime,
+            int verbose,
+            int bindBigCores);
+
+        static int LoadModelC(const char* modelPath, int deviceId);
+        static int FreeModelC(int modelIndex);
+        static DlcvCResult InferC(int modelIndex, const DlcvCImageList& imageList);
+        static void FreeModelResultC(DlcvCResult& result);
     };
 }
