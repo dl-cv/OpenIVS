@@ -112,6 +112,50 @@ static std::string DescribeModelPathBytes(const std::string& modelPath) {
     return oss.str();
 }
 
+static void ReplaceResultMessage(DlcvCResult& result, const char* message) {
+    if (result.message != nullptr) {
+        std::free(result.message);
+        result.message = nullptr;
+    }
+    result.message = _strdup(message);
+}
+
+static void NormalizeNativeCompatibleResult(DlcvCResult& result) {
+    if (result.code == 0) {
+        ReplaceResultMessage(result, "Success");
+        if (result.sample_results == nullptr || result.n <= 0) return;
+        for (int i = 0; i < result.n; ++i) {
+            DlcvCSampleResult& sample = result.sample_results[i];
+            if (sample.results == nullptr || sample.n <= 0) continue;
+            for (int j = 0; j < sample.n; ++j) {
+                DlcvCObjectResult& object = sample.results[j];
+                if (!object.with_bbox) {
+                    object.x = -1.0f;
+                    object.y = -1.0f;
+                    object.w = -1.0f;
+                    object.h = -1.0f;
+                }
+                if (!object.with_mask) {
+                    object.mask.mask_ptr = 0;
+                    object.mask.height = -1;
+                    object.mask.width = -1;
+                }
+                if (!object.with_angle) {
+                    object.angle = -100.0f;
+                }
+            }
+        }
+        return;
+    }
+
+    if (result.message != nullptr && std::strcmp(result.message, "model not found") == 0) {
+        result.code = 2;
+        ReplaceResultMessage(result, "Model not found.");
+    } else {
+        result.code = 1;
+    }
+}
+
 extern "C" {
 
 int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
@@ -319,6 +363,28 @@ void dlcv_infer_cpp_free_model_result_c(DlcvCResult* result) {
     }
     result->n = 0;
     result->code = 0;
+}
+
+int DLCV_C_NATIVE_CALL dlcv_load_model_c(const char* model_path, int device_id) {
+    return dlcv_infer_cpp_load_model_c(model_path, device_id);
+}
+
+int DLCV_C_NATIVE_CALL dlcv_free_model_c(int model_index) {
+    return dlcv_infer_cpp_free_model_c(model_index);
+}
+
+DlcvCResult DLCV_C_NATIVE_CALL dlcv_infer_c(
+    int model_index,
+    const DlcvCImageList& image_list) {
+    DlcvCResult result = dlcv_infer_cpp_infer_c(model_index, &image_list);
+    NormalizeNativeCompatibleResult(result);
+    return result;
+}
+
+void DLCV_C_NATIVE_CALL dlcv_free_model_result_c(DlcvCResult& result) {
+    const int originalCode = result.code;
+    dlcv_infer_cpp_free_model_result_c(&result);
+    result.code = originalCode;
 }
 
 }

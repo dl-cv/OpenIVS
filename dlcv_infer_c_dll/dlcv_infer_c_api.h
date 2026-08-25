@@ -17,6 +17,12 @@ extern "C" {
 #  define DLCV_C_API
 #endif
 
+#if defined(_WIN32) || defined(__CYGWIN__)
+#  define DLCV_C_NATIVE_CALL __stdcall
+#else
+#  define DLCV_C_NATIVE_CALL
+#endif
+
 DLCV_C_API int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id);
 DLCV_C_API const char* dlcv_infer_cpp_get_last_error_c();
 DLCV_C_API int dlcv_infer_cpp_free_model_c(int model_index);
@@ -26,6 +32,14 @@ DLCV_C_API DlcvCResult dlcv_infer_cpp_infer_with_params_c(
     const DlcvCImageList* image_list,
     const char* params_json);
 DLCV_C_API void dlcv_infer_cpp_free_model_result_c(DlcvCResult* result);
+
+// 与 dlcv_infer 结构化 C API 同名、同参数和同结果语义的兼容入口。
+DLCV_C_API int DLCV_C_NATIVE_CALL dlcv_load_model_c(const char* model_path, int device_id);
+DLCV_C_API int DLCV_C_NATIVE_CALL dlcv_free_model_c(int model_index);
+DLCV_C_API DlcvCResult DLCV_C_NATIVE_CALL dlcv_infer_c(
+    int model_index,
+    const DlcvCImageList& image_list);
+DLCV_C_API void DLCV_C_NATIVE_CALL dlcv_free_model_result_c(DlcvCResult& result);
 
 #ifdef __cplusplus
 }
