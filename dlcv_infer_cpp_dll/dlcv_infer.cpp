@@ -1478,6 +1478,27 @@ namespace dlcv_infer {
         dlcv_free_all_models = (FreeAllModelsFuncType)ResolveSymbol(hModule, "dlcv_free_all_models");
         dlcv_get_device_info = (GetDeviceInfoFuncType)ResolveSymbol(hModule, "dlcv_get_device_info");
         dlcv_keep_max_clock = (KeepMaxClockFuncType)ResolveSymbol(hModule, "dlcv_keep_max_clock");
+        dlcv_get_gpu_info = (GetGpuInfoFuncType)ResolveSymbol(hModule, "dlcv_get_gpu_info");
+        dlcv_reset_max_clock = (ResetMaxClockFuncType)ResolveSymbol(hModule, "dlcv_reset_max_clock");
+        dlcv_set_gpu_max_clock = (SetGpuMaxClockFuncType)ResolveSymbol(hModule, "dlcv_set_gpu_max_clock");
+        dlcv_reset_gpu_max_clock = (ResetGpuMaxClockFuncType)ResolveSymbol(hModule, "dlcv_reset_gpu_max_clock");
+        dlcv_get_power_scheme_guid = (GetPowerSchemeGuidFuncType)ResolveSymbol(hModule, "dlcv_get_power_scheme_guid");
+        dlcv_set_power_scheme_guid = (SetPowerSchemeGuidFuncType)ResolveSymbol(hModule, "dlcv_set_power_scheme_guid");
+        dlcv_get_power_scheme = (GetPowerSchemeFuncType)ResolveSymbol(hModule, "dlcv_get_power_scheme");
+        dlcv_set_power_scheme = (SetPowerSchemeFuncType)ResolveSymbol(hModule, "dlcv_set_power_scheme");
+        dlcv_set_current_process_affinity_to_big_cores =
+            (SetCurrentProcessAffinityToBigCoresFuncType)ResolveSymbol(
+                hModule,
+                "dlcv_set_current_process_affinity_to_big_cores");
+        dlcv_set_current_process_priority_highest =
+            (SetCurrentProcessPriorityHighestFuncType)ResolveSymbol(
+                hModule,
+                "dlcv_set_current_process_priority_highest");
+        dlcv_load_model_c = (LoadModelCFuncType)ResolveSymbol(hModule, "dlcv_load_model_c");
+        dlcv_free_model_c = (FreeModelCFuncType)ResolveSymbol(hModule, "dlcv_free_model_c");
+        dlcv_infer_c = (InferCFuncType)ResolveSymbol(hModule, "dlcv_infer_c");
+        dlcv_free_model_result_c =
+            (FreeModelResultCFuncType)ResolveSymbol(hModule, "dlcv_free_model_result_c");
         dlcv_get_index_type_c = (GetIndexTypeFuncType)ResolveSymbol(hModule, "dlcv_get_index_type_c");
         dlcv_get_model_info_c = (GetModelInfoByIndexFuncType)ResolveSymbol(hModule, "dlcv_get_model_info_c");
         dlcv_register_flow_c = (RegisterFlowFuncType)ResolveSymbol(hModule, "dlcv_register_flow_c");
@@ -3057,6 +3078,153 @@ namespace dlcv_infer {
 
     int Utils::nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device) {
         return NvmlLibrary::Get().DeviceGetHandleByIndex(index, device);
+    }
+
+    namespace {
+        template <typename FunctionType>
+        FunctionType RequireNativeApiFunction(FunctionType function, const char* functionName) {
+            if (function == nullptr) {
+                throw std::runtime_error(std::string(functionName) + " 不可用");
+            }
+            return function;
+        }
+    }
+
+    const char* NativeApi::LoadModel(const char* configStr) {
+        auto& loader = DllLoader::Instance();
+        return static_cast<const char*>(
+            RequireNativeApiFunction(loader.GetLoadModelFunc(), "dlcv_load_model")(configStr));
+    }
+
+    const char* NativeApi::FreeModel(const char* configStr) {
+        auto& loader = DllLoader::Instance();
+        return static_cast<const char*>(
+            RequireNativeApiFunction(loader.GetFreeModelFunc(), "dlcv_free_model")(configStr));
+    }
+
+    const char* NativeApi::GetModelInfo(const char* configStr) {
+        auto& loader = DllLoader::Instance();
+        return static_cast<const char*>(
+            RequireNativeApiFunction(loader.GetModelInfoFunc(), "dlcv_get_model_info")(configStr));
+    }
+
+    const char* NativeApi::Infer(const char* configStr) {
+        auto& loader = DllLoader::Instance();
+        return static_cast<const char*>(
+            RequireNativeApiFunction(loader.GetInferFunc(), "dlcv_infer")(configStr));
+    }
+
+    void NativeApi::FreeModelResult(const char* configStr) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetFreeModelResultFunc(), "dlcv_free_model_result")(
+            const_cast<char*>(configStr));
+    }
+
+    void NativeApi::FreeResult(const char* resultPtr) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetFreeResultFunc(), "dlcv_free_result")(
+            const_cast<char*>(resultPtr));
+    }
+
+    void NativeApi::FreeAllModels() {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetFreeAllModelsFunc(), "dlcv_free_all_models")();
+    }
+
+    const char* NativeApi::GetDeviceInfo() {
+        auto& loader = DllLoader::Instance();
+        return static_cast<const char*>(
+            RequireNativeApiFunction(loader.GetDeviceInfoFunc(), "dlcv_get_device_info")());
+    }
+
+    const char* NativeApi::GetGpuInfo() {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetGpuInfoFunc(), "dlcv_get_gpu_info")();
+    }
+
+    void NativeApi::KeepMaxClock() {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetKeepMaxClockFunc(), "dlcv_keep_max_clock")();
+    }
+
+    void NativeApi::ResetMaxClock() {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetResetMaxClockFunc(), "dlcv_reset_max_clock")();
+    }
+
+    void NativeApi::SetGpuMaxClock(bool verbose) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetSetGpuMaxClockFunc(), "dlcv_set_gpu_max_clock")(verbose);
+    }
+
+    void NativeApi::ResetGpuMaxClock(bool verbose) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetResetGpuMaxClockFunc(), "dlcv_reset_gpu_max_clock")(verbose);
+    }
+
+    const char* NativeApi::GetPowerSchemeGuid(int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetPowerSchemeGuidFunc(),
+            "dlcv_get_power_scheme_guid")(verbose);
+    }
+
+    int NativeApi::SetPowerSchemeGuid(const char* schemeGuid, int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetSetPowerSchemeGuidFunc(),
+            "dlcv_set_power_scheme_guid")(schemeGuid, verbose);
+    }
+
+    const char* NativeApi::GetPowerScheme(int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetPowerSchemeFunc(), "dlcv_get_power_scheme")(verbose);
+    }
+
+    int NativeApi::SetPowerScheme(const char* schemeName, int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetSetPowerSchemeFunc(),
+            "dlcv_set_power_scheme")(schemeName, verbose);
+    }
+
+    int NativeApi::SetCurrentProcessAffinityToBigCores(int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetSetCurrentProcessAffinityToBigCoresFunc(),
+            "dlcv_set_current_process_affinity_to_big_cores")(verbose);
+    }
+
+    int NativeApi::SetCurrentProcessPriorityHighest(
+        int preferRealtime,
+        int verbose,
+        int bindBigCores) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetSetCurrentProcessPriorityHighestFunc(),
+            "dlcv_set_current_process_priority_highest")(preferRealtime, verbose, bindBigCores);
+    }
+
+    int NativeApi::LoadModelC(const char* modelPath, int deviceId) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetLoadModelCFunc(), "dlcv_load_model_c")(
+            modelPath,
+            deviceId);
+    }
+
+    int NativeApi::FreeModelC(int modelIndex) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetFreeModelCFunc(), "dlcv_free_model_c")(modelIndex);
+    }
+
+    DlcvCResult NativeApi::InferC(int modelIndex, const DlcvCImageList& imageList) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetInferCFunc(), "dlcv_infer_c")(modelIndex, imageList);
+    }
+
+    void NativeApi::FreeModelResultC(DlcvCResult& result) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetFreeModelResultCFunc(), "dlcv_free_model_result_c")(result);
     }
 
 }

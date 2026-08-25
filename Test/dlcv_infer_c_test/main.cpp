@@ -108,6 +108,248 @@ static bool LoadNativeCapi(NativeCapi& api, std::string& error) {
     return true;
 }
 
+static bool CompareForwardedJsonCall(
+    const char* name,
+    const char* (DLCV_C_NATIVE_CALL* nativeCall)(const char*),
+    const char* (DLCV_C_NATIVE_CALL* cCall)(const char*),
+    void (DLCV_C_NATIVE_CALL* nativeFree)(const char*),
+    void (DLCV_C_NATIVE_CALL* cFree)(const char*)) {
+    const char* nativeResult = nativeCall("{}");
+    const char* cResult = cCall("{}");
+    const bool same = (nativeResult == nullptr && cResult == nullptr) ||
+        (nativeResult != nullptr && cResult != nullptr && std::strcmp(nativeResult, cResult) == 0);
+    if (!same) {
+        std::cerr << "FAIL: " << name << " 透传失败输入返回不一致\n";
+        std::cerr << "  原生 DLL: " << (nativeResult == nullptr ? "<null>" : nativeResult) << "\n";
+        std::cerr << "  C DLL: " << (cResult == nullptr ? "<null>" : cResult) << "\n";
+    }
+    if (nativeResult != nullptr) nativeFree(nativeResult);
+    if (cResult != nullptr) cFree(cResult);
+    return same;
+}
+
+static bool RunCapiForwardingCheck(HMODULE cModule) {
+    HMODULE nativeModule = GetModuleHandleW(L"dlcv_infer.dll");
+    bool ownsNativeModule = false;
+    if (nativeModule == nullptr) {
+        nativeModule = LoadLibraryW(L"C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll");
+        ownsNativeModule = true;
+    }
+    if (nativeModule == nullptr) {
+        std::cerr << "FAIL: 原生 dlcv_infer.dll 加载失败: " << GetLastError() << "\n";
+        return false;
+    }
+
+    using NativeJsonCall = const char* (DLCV_C_NATIVE_CALL*)(const char*);
+    using CJsonCall = const char* (DLCV_C_NATIVE_CALL*)(const char*);
+    using NativeFreeResult = void (DLCV_C_NATIVE_CALL*)(const char*);
+    using CFreeResult = void (DLCV_C_NATIVE_CALL*)(const char*);
+
+    const auto nativeFreeResult = reinterpret_cast<NativeFreeResult>(
+        GetProcAddress(nativeModule, "dlcv_free_result"));
+    const auto cFreeResult = reinterpret_cast<CFreeResult>(
+        GetProcAddress(cModule, "dlcv_free_result"));
+    const char* jsonNames[] = {
+        "dlcv_load_model",
+        "dlcv_free_model",
+        "dlcv_get_model_info",
+        "dlcv_infer",
+    };
+    NativeJsonCall nativeCalls[] = {
+        reinterpret_cast<NativeJsonCall>(GetProcAddress(nativeModule, "dlcv_load_model")),
+        reinterpret_cast<NativeJsonCall>(GetProcAddress(nativeModule, "dlcv_free_model")),
+        reinterpret_cast<NativeJsonCall>(GetProcAddress(nativeModule, "dlcv_get_model_info")),
+        reinterpret_cast<NativeJsonCall>(GetProcAddress(nativeModule, "dlcv_infer")),
+    };
+    CJsonCall cCalls[] = {
+        reinterpret_cast<CJsonCall>(GetProcAddress(cModule, "dlcv_load_model")),
+        reinterpret_cast<CJsonCall>(GetProcAddress(cModule, "dlcv_free_model")),
+        reinterpret_cast<CJsonCall>(GetProcAddress(cModule, "dlcv_get_model_info")),
+        reinterpret_cast<CJsonCall>(GetProcAddress(cModule, "dlcv_infer")),
+    };
+
+    bool ok = nativeFreeResult != nullptr && cFreeResult != nullptr;
+    if (!ok) {
+        std::cerr << "FAIL: JSON 接口释放函数缺失\n";
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        if (nativeCalls[i] == nullptr || cCalls[i] == nullptr) {
+            std::cerr << "FAIL: JSON 接口动态函数缺失 " << jsonNames[i] << "\n";
+            ok = false;
+            continue;
+        }
+        if (ok && !CompareForwardedJsonCall(
+                jsonNames[i], nativeCalls[i], cCalls[i], nativeFreeResult, cFreeResult)) {
+            ok = false;
+        }
+    }
+
+    using NativeReadCall = const char* (DLCV_C_NATIVE_CALL*)();
+    using CReadCall = const char* (DLCV_C_NATIVE_CALL*)();
+    using NativePowerReadCall = const char* (DLCV_C_NATIVE_CALL*)(int);
+    using CPowerReadCall = const char* (DLCV_C_NATIVE_CALL*)(int);
+    const auto nativeGetDeviceInfo = reinterpret_cast<NativeReadCall>(
+        GetProcAddress(nativeModule, "dlcv_get_device_info"));
+    const auto cGetDeviceInfo = reinterpret_cast<CReadCall>(
+        GetProcAddress(cModule, "dlcv_get_device_info"));
+    const auto nativeGetGpuInfo = reinterpret_cast<NativeReadCall>(
+        GetProcAddress(nativeModule, "dlcv_get_gpu_info"));
+    const auto cGetGpuInfo = reinterpret_cast<CReadCall>(
+        GetProcAddress(cModule, "dlcv_get_gpu_info"));
+    const auto nativeGetPowerGuid = reinterpret_cast<NativePowerReadCall>(
+        GetProcAddress(nativeModule, "dlcv_get_power_scheme_guid"));
+    const auto cGetPowerGuid = reinterpret_cast<CPowerReadCall>(
+        GetProcAddress(cModule, "dlcv_get_power_scheme_guid"));
+    const auto nativeGetPowerScheme = reinterpret_cast<NativePowerReadCall>(
+        GetProcAddress(nativeModule, "dlcv_get_power_scheme"));
+    const auto cGetPowerScheme = reinterpret_cast<CPowerReadCall>(
+        GetProcAddress(cModule, "dlcv_get_power_scheme"));
+
+    if (nativeGetDeviceInfo == nullptr || cGetDeviceInfo == nullptr ||
+        nativeGetGpuInfo == nullptr || cGetGpuInfo == nullptr ||
+        nativeGetPowerGuid == nullptr || cGetPowerGuid == nullptr ||
+        nativeGetPowerScheme == nullptr || cGetPowerScheme == nullptr) {
+        std::cerr << "FAIL: 设备、GPU或电源读取接口动态函数缺失\n";
+        ok = false;
+    } else {
+        const char* nativeDeviceInfo = nativeGetDeviceInfo();
+        const char* cDeviceInfo = cGetDeviceInfo();
+        const char* nativeGpuInfo = nativeGetGpuInfo();
+        const char* cGpuInfo = cGetGpuInfo();
+        const char* nativePowerGuid = nativeGetPowerGuid(0);
+        const char* cPowerGuid = cGetPowerGuid(0);
+        const char* nativePowerScheme = nativeGetPowerScheme(0);
+        const char* cPowerScheme = cGetPowerScheme(0);
+
+        const bool deviceInfoOk = nativeDeviceInfo != nullptr && nativeDeviceInfo[0] != '\0' &&
+            cDeviceInfo != nullptr && cDeviceInfo[0] != '\0';
+        const bool gpuInfoOk = nativeGpuInfo != nullptr && nativeGpuInfo[0] != '\0' &&
+            cGpuInfo != nullptr && cGpuInfo[0] != '\0';
+        const bool powerGuidOk = nativePowerGuid != nullptr && cPowerGuid != nullptr;
+        const bool powerSchemeOk = nativePowerScheme != nullptr && cPowerScheme != nullptr;
+        if (!deviceInfoOk || !gpuInfoOk || !powerGuidOk || !powerSchemeOk) {
+            std::cerr << "FAIL: 设备、GPU或电源读取接口返回空结果\n";
+            ok = false;
+        }
+
+        if (nativeDeviceInfo != nullptr) nativeFreeResult(nativeDeviceInfo);
+        if (cDeviceInfo != nullptr) cFreeResult(cDeviceInfo);
+        if (nativeGpuInfo != nullptr) nativeFreeResult(nativeGpuInfo);
+        if (cGpuInfo != nullptr) cFreeResult(cGpuInfo);
+        if (nativePowerGuid != nullptr) nativeFreeResult(nativePowerGuid);
+        if (cPowerGuid != nullptr) cFreeResult(cPowerGuid);
+        if (nativePowerScheme != nullptr) nativeFreeResult(nativePowerScheme);
+        if (cPowerScheme != nullptr) cFreeResult(cPowerScheme);
+    }
+
+    if (ownsNativeModule) FreeLibrary(nativeModule);
+    if (ok) {
+        std::cout << "PASS: JSON 透传失败输入一致，设备/GPU/电源读取接口返回有效结果\n";
+    }
+    return ok;
+}
+
+static bool RunCapiExportCompletenessCheck() {
+    HMODULE module = GetModuleHandleW(L"dlcv_infer_c_dll.dll");
+    bool ownsModule = false;
+    if (module == nullptr) {
+        module = LoadLibraryW(L"dlcv_infer_c_dll.dll");
+        ownsModule = true;
+    }
+    if (module == nullptr) {
+        std::cerr << "FAIL: dlcv_infer_c_dll.dll 加载失败: " << GetLastError() << "\n";
+        return false;
+    }
+
+    static const char* expectedExports[] = {
+        "dlcv_infer_cpp_load_model_c",
+        "dlcv_infer_cpp_get_last_error_c",
+        "dlcv_infer_cpp_free_model_c",
+        "dlcv_infer_cpp_infer_c",
+        "dlcv_infer_cpp_infer_with_params_c",
+        "dlcv_infer_cpp_free_model_result_c",
+        "dlcv_load_model_c",
+        "dlcv_free_model_c",
+        "dlcv_infer_c",
+        "dlcv_free_model_result_c",
+        "dlcv_load_model",
+        "dlcv_free_model",
+        "dlcv_get_model_info",
+        "dlcv_infer",
+        "dlcv_free_model_result",
+        "dlcv_free_result",
+        "dlcv_free_all_models",
+        "dlcv_get_device_info",
+        "dlcv_get_gpu_info",
+        "dlcv_keep_max_clock",
+        "dlcv_reset_max_clock",
+        "dlcv_set_gpu_max_clock",
+        "dlcv_reset_gpu_max_clock",
+        "dlcv_get_power_scheme_guid",
+        "dlcv_set_power_scheme_guid",
+        "dlcv_get_power_scheme",
+        "dlcv_set_power_scheme",
+        "dlcv_set_current_process_affinity_to_big_cores",
+        "dlcv_set_current_process_priority_highest",
+    };
+
+    bool ok = true;
+    bool exportsPresent = true;
+    for (const char* name : expectedExports) {
+        if (GetProcAddress(module, name) == nullptr) {
+            std::cerr << "FAIL: C DLL 缺少导出函数 " << name << "\n";
+            ok = false;
+            exportsPresent = false;
+        }
+    }
+
+    using GetLastErrorFunc = const char* (*)();
+    using GetJsonFunc = const char* (DLCV_C_NATIVE_CALL*)();
+    using GetPowerSchemeFunc = const char* (DLCV_C_NATIVE_CALL*)(int);
+    using FreeResultFunc = void (DLCV_C_NATIVE_CALL*)(const char*);
+
+    if (ok) {
+        const auto getLastError = reinterpret_cast<GetLastErrorFunc>(
+            GetProcAddress(module, "dlcv_infer_cpp_get_last_error_c"));
+        const auto getDeviceInfo = reinterpret_cast<GetJsonFunc>(
+            GetProcAddress(module, "dlcv_get_device_info"));
+        const auto getGpuInfo = reinterpret_cast<GetJsonFunc>(
+            GetProcAddress(module, "dlcv_get_gpu_info"));
+        const auto getPowerSchemeGuid = reinterpret_cast<GetPowerSchemeFunc>(
+            GetProcAddress(module, "dlcv_get_power_scheme_guid"));
+        const auto getPowerScheme = reinterpret_cast<GetPowerSchemeFunc>(
+            GetProcAddress(module, "dlcv_get_power_scheme"));
+        const auto freeResult = reinterpret_cast<FreeResultFunc>(
+            GetProcAddress(module, "dlcv_free_result"));
+
+        const char* lastError = getLastError();
+        if (lastError == nullptr) {
+            std::cerr << "FAIL: dlcv_infer_cpp_get_last_error_c 基础调用返回空指针\n";
+            ok = false;
+        }
+
+        const char* deviceInfo = getDeviceInfo();
+        const char* gpuInfo = getGpuInfo();
+        const char* powerSchemeGuid = getPowerSchemeGuid(0);
+        const char* powerScheme = getPowerScheme(0);
+        if (deviceInfo == nullptr || gpuInfo == nullptr || powerSchemeGuid == nullptr || powerScheme == nullptr) {
+            std::cerr << "FAIL: C DLL 只读信息接口基础调用返回空指针\n";
+            ok = false;
+        }
+        if (deviceInfo != nullptr) freeResult(deviceInfo);
+        if (gpuInfo != nullptr) freeResult(gpuInfo);
+        if (powerSchemeGuid != nullptr) freeResult(powerSchemeGuid);
+        if (powerScheme != nullptr) freeResult(powerScheme);
+    }
+
+    if (exportsPresent) ok = RunCapiForwardingCheck(module) && ok;
+    if (ownsModule) FreeLibrary(module);
+    if (ok) {
+        std::cout << "PASS: C DLL 29 个导出函数均存在，安全只读接口调用成功\n";
+    }
+    return ok;
+}
+
 static std::string BuildCompleteFingerprint(const DlcvCResult& result) {
     std::ostringstream out;
     out << result.code << '|'
@@ -393,6 +635,7 @@ int main() {
     }
 
     bool ok = true;
+    ok = RunCapiExportCompletenessCheck() && ok;
     ok = RunNativeCompatibilityCheck(dvtPath, dvtImage) && ok;
     ok = RunCompatibilityFlowCheck(dvstPath, dvstImage) && ok;
 
