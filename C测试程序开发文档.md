@@ -32,6 +32,8 @@
 | `dlcv_infer_c_dll.dll` | C API 运行库 |
 | `dlcv_infer_cpp_dll.dll` | C DLL 的运行依赖，由构建后事件复制 |
 
+`Test/dlcv_infer_c_test/pure_c_header_test.c` 使用 C 编译模式包含两个公开头文件，检查结构声明、函数指针类型和 Windows x64 结构大小。
+
 主要功能映射：
 
 | 界面功能 | C 接口 |
@@ -109,4 +111,4 @@ dlcv_infer_c_qt_demo/Debug/dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.exe
 | GPU 查询 | 返回 `code=0` 和 1 个 GPU |
 | 授权设备查询 | 返回 `sentinel` 与 `virbox` |
 | C API 控制台测试 | JSON、结构化结果、普通模型、流程模型和三组并发检查通过 |
-
+| 纯 C 头文件编译 | `pure_c_header_test.c` 由 C 编译器处理，六个结构大小与 C++ 构建一致 |

@@ -132,6 +132,8 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 
 **实现位置**：`dlcv_infer_c_dll/dlcv_infer_c_api.h` + `dlcv_infer_c_api.cpp`，基于 `dlcv_infer::Model` 封装，显式依赖 `dlcv_infer_cpp_dll.lib`。
 
+**C 编译支持**：`dlcv_infer_c_api.h` 与 `dlcv_infer_native_c_api.h` 均可由 C 或 C++ 编译器包含。结构化兼容入口使用 `DlcvCImageList*` 和 `DlcvCResult*` 参数，共享数据结构使用 `typedef struct`。
+
 ### C# API 速查表
 
 | 能力 | 类/函数 | 关键接口 |

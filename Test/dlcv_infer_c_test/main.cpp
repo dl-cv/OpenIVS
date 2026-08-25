@@ -18,11 +18,13 @@
 
 #include "dlcv_infer_c_api.h"
 
+extern "C" int dlcv_infer_pure_c_header_test(void);
+
 struct NativeCapi {
     using LoadModel = int(__stdcall*)(const char*, int);
     using FreeModel = int(__stdcall*)(int);
-    using Infer = DlcvCResult(__stdcall*)(int, const DlcvCImageList&);
-    using FreeResult = void(__stdcall*)(DlcvCResult&);
+    using Infer = DlcvCResult(__stdcall*)(int, const DlcvCImageList*);
+    using FreeResult = void(__stdcall*)(DlcvCResult*);
 
     HMODULE module = nullptr;
     LoadModel loadModel = nullptr;
@@ -417,24 +419,24 @@ static bool RunNativeCompatibilityCheck(
     imageList.images = &cImage;
     imageList.n = 1;
 
-    DlcvCResult wrapperResult = dlcv_infer_c(wrapperIndex, imageList);
-    DlcvCResult nativeResult = native.infer(nativeIndex, imageList);
+    DlcvCResult wrapperResult = dlcv_infer_c(wrapperIndex, &imageList);
+    DlcvCResult nativeResult = native.infer(nativeIndex, &imageList);
     const std::string wrapperSuccessFingerprint = BuildCompleteFingerprint(wrapperResult);
     const std::string nativeSuccessFingerprint = BuildCompleteFingerprint(nativeResult);
     const bool sameSuccessResult = wrapperSuccessFingerprint == nativeSuccessFingerprint;
-    dlcv_free_model_result_c(wrapperResult);
-    native.freeResult(nativeResult);
+    dlcv_free_model_result_c(&wrapperResult);
+    native.freeResult(&nativeResult);
     const bool sameSuccessRelease = IsReleasedResult(wrapperResult, 0) && IsReleasedResult(nativeResult, 0);
 
-    DlcvCResult wrapperMissing = dlcv_infer_c(-1, imageList);
-    DlcvCResult nativeMissing = native.infer(-1, imageList);
+    DlcvCResult wrapperMissing = dlcv_infer_c(-1, &imageList);
+    DlcvCResult nativeMissing = native.infer(-1, &imageList);
     const std::string wrapperFailureFingerprint = BuildCompleteFingerprint(wrapperMissing);
     const std::string nativeFailureFingerprint = BuildCompleteFingerprint(nativeMissing);
     const bool sameFailureResult = wrapperFailureFingerprint == nativeFailureFingerprint &&
         wrapperMissing.sample_results == nullptr && nativeMissing.sample_results == nullptr &&
         wrapperMissing.n == 0 && nativeMissing.n == 0;
-    dlcv_free_model_result_c(wrapperMissing);
-    native.freeResult(nativeMissing);
+    dlcv_free_model_result_c(&wrapperMissing);
+    native.freeResult(&nativeMissing);
     const bool sameFailureRelease = IsReleasedResult(wrapperMissing, 2) && IsReleasedResult(nativeMissing, 2);
 
     const int wrapperFirstFree = dlcv_free_model_c(wrapperIndex);
@@ -486,10 +488,10 @@ static bool RunCompatibilityFlowCheck(
     imageList.images = &cImage;
     imageList.n = 1;
 
-    DlcvCResult result = dlcv_infer_c(modelIndex, imageList);
+    DlcvCResult result = dlcv_infer_c(modelIndex, &imageList);
     const bool inferOk = result.code == 0 && result.message != nullptr &&
         std::strcmp(result.message, "Success") == 0 && result.n == 1 && result.sample_results != nullptr;
-    dlcv_free_model_result_c(result);
+    dlcv_free_model_result_c(&result);
     const bool resultFreeOk = IsReleasedResult(result, 0);
     const bool modelFreeOk = dlcv_free_model_c(modelIndex) == 0 && dlcv_free_model_c(modelIndex) == -1;
     if (!inferOk || !resultFreeOk || !modelFreeOk) {
@@ -626,6 +628,12 @@ static int LoadModel(const std::wstring& path) {
 int main() {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+
+    if (dlcv_infer_pure_c_header_test() != 2) {
+        std::cerr << "FAIL: 纯 C 结构化接口调用失败\n";
+        return 1;
+    }
+    std::cout << "PASS: 纯 C 结构化接口编译和调用成功\n";
 
     const std::wstring dvtPath = L"Y:\\测试模型\\猫狗-分类_120_50_s.dvt";
     const std::wstring dvtImagePath = L"Y:\\测试模型\\猫狗-狗.jpg";

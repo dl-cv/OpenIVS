@@ -46,8 +46,8 @@ DLCV_C_API int DLCV_C_NATIVE_CALL dlcv_load_model_c(const char* model_path, int 
 DLCV_C_API int DLCV_C_NATIVE_CALL dlcv_free_model_c(int model_index);
 DLCV_C_API DlcvCResult DLCV_C_NATIVE_CALL dlcv_infer_c(
     int model_index,
-    const DlcvCImageList& image_list);
-DLCV_C_API void DLCV_C_NATIVE_CALL dlcv_free_model_result_c(DlcvCResult& result);
+    const DlcvCImageList* image_list);
+DLCV_C_API void DLCV_C_NATIVE_CALL dlcv_free_model_result_c(DlcvCResult* result);
 
 #ifdef __cplusplus
 }

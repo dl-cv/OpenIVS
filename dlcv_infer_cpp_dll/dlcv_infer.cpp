@@ -1591,8 +1591,8 @@ namespace dlcv_infer {
 
         std::string jsonStr = config.dump();
 
-        void* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+        const char* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
+        std::string resultJson = std::string(resultPtr);
         json resultObject = json::parse(resultJson);
         if (resultObject.contains("model_index"))
         {
@@ -1657,8 +1657,8 @@ namespace dlcv_infer {
 
         std::string jsonStr = config.dump();
 
-        void* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+        const char* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
+        std::string resultJson = std::string(resultPtr);
         json resultObject = json::parse(resultJson);
         if (resultObject.contains("model_index"))
         {
@@ -1788,14 +1788,14 @@ namespace dlcv_infer {
             json config;
             config["model_index"] = modelIndex;
             std::string jsonStr = config.dump();
-            void* resultPtr = _dllLoader->GetFreeModelFunc()(jsonStr.c_str());
+            const char* resultPtr = _dllLoader->GetFreeModelFunc()(jsonStr.c_str());
             if (resultPtr == nullptr) {
                 throw std::runtime_error("DVT模型释放未返回结果");
             }
 
             const auto freeResult = _dllLoader->GetFreeResultFunc();
             try {
-                const std::string resultJson(static_cast<const char*>(resultPtr));
+                const std::string resultJson(resultPtr);
                 const json resultObject = json::parse(resultJson);
                 std::string message = "底层未返回错误说明";
                 if (resultObject.is_object() && resultObject.contains("message")) {
@@ -1841,8 +1841,8 @@ namespace dlcv_infer {
         config["model_index"] = modelIndex;
 
         std::string jsonStr = config.dump();
-        void* resultPtr = _dllLoader->GetModelInfoFunc()(jsonStr.c_str());
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+        const char* resultPtr = _dllLoader->GetModelInfoFunc()(jsonStr.c_str());
+        std::string resultJson = std::string(resultPtr);
         json resultObject = json::parse(resultJson);
         _dllLoader->GetFreeResultFunc()(resultPtr);
         _cachedModelInfo = resultObject;
@@ -1897,7 +1897,7 @@ namespace dlcv_infer {
         return out;
     }
 
-    std::pair<json, void*> Model::InferInternal(const std::vector<cv::Mat>& images, const json& params_json) {
+    std::pair<json, const char*> Model::InferInternal(const std::vector<cv::Mat>& images, const json& params_json) {
         json imageInfoList = json::array();
         std::vector<std::pair<cv::Mat, bool>> processImages;
 
@@ -1942,8 +1942,8 @@ namespace dlcv_infer {
 
             // 执行推理
             std::string jsonStr = inferRequest.dump();
-            void* resultPtr = _dllLoader->GetInferFunc()(jsonStr.c_str());
-            std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+            const char* resultPtr = _dllLoader->GetInferFunc()(jsonStr.c_str());
+            std::string resultJson = std::string(resultPtr);
             json resultObject = json::parse(resultJson);
 
             // 检查是否返回错误
@@ -2443,8 +2443,8 @@ namespace dlcv_infer {
 
         std::string jsonStr = config.dump();
 
-        void* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+        const char* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
+        std::string resultJson = std::string(resultPtr);
         json resultObject = json::parse(resultJson);
         if (resultObject.contains("model_index"))
         {
@@ -2473,7 +2473,7 @@ namespace dlcv_infer {
 
     json Utils::GetDeviceInfo() {
         auto& loader = DllLoader::Instance();
-        void* resultPtr = nullptr;
+        const char* resultPtr = nullptr;
         if (loader.GetDeviceInfoFunc())
         {
             resultPtr = loader.GetDeviceInfoFunc()();
@@ -2485,7 +2485,7 @@ namespace dlcv_infer {
             ret["message"] = "dlcv_get_device_info 不可用";
             return ret;
         }
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+        std::string resultJson = std::string(resultPtr);
         json resultObject = json::parse(resultJson);
         loader.GetFreeResultFunc()(resultPtr);
         return resultObject;
@@ -2650,38 +2650,32 @@ namespace dlcv_infer {
 
     const char* NativeApi::LoadModel(const char* configStr) {
         auto& loader = DllLoader::Instance();
-        return static_cast<const char*>(
-            RequireNativeApiFunction(loader.GetLoadModelFunc(), "dlcv_load_model")(configStr));
+        return RequireNativeApiFunction(loader.GetLoadModelFunc(), "dlcv_load_model")(configStr);
     }
 
     const char* NativeApi::FreeModel(const char* configStr) {
         auto& loader = DllLoader::Instance();
-        return static_cast<const char*>(
-            RequireNativeApiFunction(loader.GetFreeModelFunc(), "dlcv_free_model")(configStr));
+        return RequireNativeApiFunction(loader.GetFreeModelFunc(), "dlcv_free_model")(configStr);
     }
 
     const char* NativeApi::GetModelInfo(const char* configStr) {
         auto& loader = DllLoader::Instance();
-        return static_cast<const char*>(
-            RequireNativeApiFunction(loader.GetModelInfoFunc(), "dlcv_get_model_info")(configStr));
+        return RequireNativeApiFunction(loader.GetModelInfoFunc(), "dlcv_get_model_info")(configStr);
     }
 
     const char* NativeApi::Infer(const char* configStr) {
         auto& loader = DllLoader::Instance();
-        return static_cast<const char*>(
-            RequireNativeApiFunction(loader.GetInferFunc(), "dlcv_infer")(configStr));
+        return RequireNativeApiFunction(loader.GetInferFunc(), "dlcv_infer")(configStr);
     }
 
     void NativeApi::FreeModelResult(const char* configStr) {
         auto& loader = DllLoader::Instance();
-        RequireNativeApiFunction(loader.GetFreeModelResultFunc(), "dlcv_free_model_result")(
-            const_cast<char*>(configStr));
+        RequireNativeApiFunction(loader.GetFreeModelResultFunc(), "dlcv_free_model_result")(configStr);
     }
 
     void NativeApi::FreeResult(const char* resultPtr) {
         auto& loader = DllLoader::Instance();
-        RequireNativeApiFunction(loader.GetFreeResultFunc(), "dlcv_free_result")(
-            const_cast<char*>(resultPtr));
+        RequireNativeApiFunction(loader.GetFreeResultFunc(), "dlcv_free_result")(resultPtr);
     }
 
     void NativeApi::FreeAllModels() {
@@ -2691,8 +2685,7 @@ namespace dlcv_infer {
 
     const char* NativeApi::GetDeviceInfo() {
         auto& loader = DllLoader::Instance();
-        return static_cast<const char*>(
-            RequireNativeApiFunction(loader.GetDeviceInfoFunc(), "dlcv_get_device_info")());
+        return RequireNativeApiFunction(loader.GetDeviceInfoFunc(), "dlcv_get_device_info")();
     }
 
     const char* NativeApi::GetGpuInfo() {
@@ -2777,12 +2770,12 @@ namespace dlcv_infer {
 
     DlcvCResult NativeApi::InferC(int modelIndex, const DlcvCImageList& imageList) {
         auto& loader = DllLoader::Instance();
-        return RequireNativeApiFunction(loader.GetInferCFunc(), "dlcv_infer_c")(modelIndex, imageList);
+        return RequireNativeApiFunction(loader.GetInferCFunc(), "dlcv_infer_c")(modelIndex, &imageList);
     }
 
     void NativeApi::FreeModelResultC(DlcvCResult& result) {
         auto& loader = DllLoader::Instance();
-        RequireNativeApiFunction(loader.GetFreeModelResultCFunc(), "dlcv_free_model_result_c")(result);
+        RequireNativeApiFunction(loader.GetFreeModelResultCFunc(), "dlcv_free_model_result_c")(&result);
     }
 
 }

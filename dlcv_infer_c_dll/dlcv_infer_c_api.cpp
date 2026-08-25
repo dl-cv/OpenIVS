@@ -540,16 +540,17 @@ int DLCV_C_NATIVE_CALL dlcv_free_model_c(int model_index) {
 
 DlcvCResult DLCV_C_NATIVE_CALL dlcv_infer_c(
     int model_index,
-    const DlcvCImageList& image_list) {
-    DlcvCResult result = dlcv_infer_cpp_infer_c(model_index, &image_list);
+    const DlcvCImageList* image_list) {
+    DlcvCResult result = dlcv_infer_cpp_infer_c(model_index, image_list);
     NormalizeNativeCompatibleResult(result);
     return result;
 }
 
-void DLCV_C_NATIVE_CALL dlcv_free_model_result_c(DlcvCResult& result) {
-    const int originalCode = result.code;
-    dlcv_infer_cpp_free_model_result_c(&result);
-    result.code = originalCode;
+void DLCV_C_NATIVE_CALL dlcv_free_model_result_c(DlcvCResult* result) {
+    if (result == nullptr) return;
+    const int originalCode = result->code;
+    dlcv_infer_cpp_free_model_result_c(result);
+    result->code = originalCode;
 }
 
 const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str) {

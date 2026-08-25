@@ -76,14 +76,14 @@ namespace dlcv_infer {
 #endif // NVML_TYPES_H 
 
     // 外部 DLL 接口函数类型定义
-    typedef void* (DLCV_INFER_NATIVE_CALL *LoadModelFuncType)(const char* config_str);
-    typedef void* (DLCV_INFER_NATIVE_CALL *FreeModelFuncType)(const char* config_str);
-    typedef void* (DLCV_INFER_NATIVE_CALL *GetModelInfoFuncType)(const char* config_str);
-    typedef void* (DLCV_INFER_NATIVE_CALL *InferFuncType)(const char* config_str);
-    typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultFuncType)(void* result_ptr);
-    typedef void (DLCV_INFER_NATIVE_CALL *FreeResultFuncType)(void* result_ptr);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *LoadModelFuncType)(const char* config_str);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *FreeModelFuncType)(const char* config_str);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *GetModelInfoFuncType)(const char* config_str);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *InferFuncType)(const char* config_str);
+    typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultFuncType)(const char* result_ptr);
+    typedef void (DLCV_INFER_NATIVE_CALL *FreeResultFuncType)(const char* result_ptr);
     typedef void (DLCV_INFER_NATIVE_CALL *FreeAllModelsFuncType)();
-    typedef void* (DLCV_INFER_NATIVE_CALL *GetDeviceInfoFuncType)();
+    typedef const char* (DLCV_INFER_NATIVE_CALL *GetDeviceInfoFuncType)();
     typedef void (DLCV_INFER_NATIVE_CALL *KeepMaxClockFuncType)();
     typedef const char* (DLCV_INFER_NATIVE_CALL *GetGpuInfoFuncType)();
     typedef void (DLCV_INFER_NATIVE_CALL *ResetMaxClockFuncType)();
@@ -102,8 +102,8 @@ namespace dlcv_infer {
     typedef int (DLCV_INFER_NATIVE_CALL *FreeModelCFuncType)(int modelIndex);
     typedef DlcvCResult (DLCV_INFER_NATIVE_CALL *InferCFuncType)(
         int modelIndex,
-        const DlcvCImageList& imageList);
-    typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultCFuncType)(DlcvCResult& result);
+        const DlcvCImageList* imageList);
+    typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultCFuncType)(DlcvCResult* result);
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS
     // DLL 加载器（内部使用）
@@ -266,7 +266,7 @@ namespace dlcv_infer {
     class DLCV_INFER_CPP_DLL_API Model {
     protected:
         // 内部推理
-        std::pair<json, void*> InferInternal(const std::vector<cv::Mat>& images, const json& params_json);
+        std::pair<json, const char*> InferInternal(const std::vector<cv::Mat>& images, const json& params_json);
 
         // 解析推理结果
         Result ParseToStructResult(const json& resultObject);

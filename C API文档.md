@@ -25,7 +25,7 @@
 | `dlcv_bind_index_c` |
 | `dlcv_unbind_index_c` |
 
-19 个 JSON、设备和系统控制接口声明在 `dlcv_infer_native_c_api.h`，该头文件可由 C 或 C++ 编译器使用。11 个扩展入口和 4 个结构化兼容入口声明在 `dlcv_infer_c_api.h`；其中公共结构包含 `bool`，结构化兼容入口还使用引用参数，因此该头文件需要由 C++ 编译器或具备对应 ABI 的外部语言绑定使用。
+19 个 JSON、设备和系统控制接口声明在 `dlcv_infer_native_c_api.h`。11 个扩展入口和 4 个结构化兼容入口声明在 `dlcv_infer_c_api.h`。共享数据结构使用 `typedef struct`，C 模式下由共享头文件引入 `<stdbool.h>`，结构化兼容入口使用指针参数，两个头文件均可由 C 或 C++ 编译器使用。
 
 ## 2. 两层封装关系
 
@@ -77,8 +77,8 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 | ---: | --- | --- | --- | --- | --- | --- | --- |
 | 20 | `int dlcv_load_model_c(const char* model_path, int device_id)` | `NativeApi::LoadModelC(const char*, int)` | `dlcv_load_model_c(const char*, int)` | 当前路径规则支持的模型路径、设备编号 | 成功返回非负模型索引，失败返回 `-1` | 无返回字符串 | C++ 方法严格调用底层；C DLL 兼容入口继续通过 `Model` 加载并增加 `.dvst/.dvso` 支持 |
 | 21 | `int dlcv_free_model_c(int model_index)` | `NativeApi::FreeModelC(int)` | `dlcv_free_model_c(int)` | 模型索引 | 成功返回 `0`，失败返回负值 | 无 | C++ 方法严格调用底层；C DLL 释放自身模型表中的对象 |
-| 22 | `DlcvCResult dlcv_infer_c(int, const DlcvCImageList&)` | `NativeApi::InferC(int, const DlcvCImageList&)` | `dlcv_infer_c(int, const DlcvCImageList&)` | 模型索引、图像列表；输入图像内存由调用方持有 | `DlcvCResult`，包含状态、消息、样本结果、目标、框、mask、角度和均值 | 用 `dlcv_free_model_result_c` 释放返回结构中的字符串、数组和 mask | C++ 方法严格调用底层；C DLL 通过 `Model::InferBatch` 生成结果并转换为底层结果语义 |
-| 23 | `void dlcv_free_model_result_c(DlcvCResult&)` | `NativeApi::FreeModelResultC(DlcvCResult&)` | `dlcv_free_model_result_c(DlcvCResult&)` | 当前 DLL 返回的 `DlcvCResult` | 无；释放后指针字段为空、数量为 `0`，兼容入口保留原 `code` | 只能使用生成结果的同一 DLL 释放 | C++ 方法释放底层结果；C DLL 释放自身生成的结果，释放后字段一致 |
+| 22 | `DlcvCResult dlcv_infer_c(int, const DlcvCImageList*)` | `NativeApi::InferC(int, const DlcvCImageList&)` | `dlcv_infer_c(int, const DlcvCImageList*)` | 模型索引、图像列表指针；输入图像内存由调用方持有 | `DlcvCResult`，包含状态、消息、样本结果、目标、框、mask、角度和均值 | 用 `dlcv_free_model_result_c` 释放返回结构中的字符串、数组和 mask | C++ 方法通过地址调用底层；C DLL 通过 `Model::InferBatch` 生成结果并转换为底层结果语义 |
+| 23 | `void dlcv_free_model_result_c(DlcvCResult*)` | `NativeApi::FreeModelResultC(DlcvCResult&)` | `dlcv_free_model_result_c(DlcvCResult*)` | 当前 DLL 返回的 `DlcvCResult` 地址 | 无；释放后指针字段为空、数量为 `0`，兼容入口保留原 `code` | 只能使用生成结果的同一 DLL 释放 | C++ 方法通过地址释放底层结果；C DLL 释放自身生成的结果，释放后字段一致 |
 
 ## 4. 结构化 C 数据类型
 
@@ -92,6 +92,8 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 | `DlcvCObjectResult` | `category_id`、`category_name`、`score`、框、mask、角度和均值字段 | 结果字段由结果释放函数释放 |
 | `DlcvCSampleResult` | `results`、`n` | 结果数组由结果释放函数释放 |
 | `DlcvCResult` | `code`、`message`、`sample_results`、`n` | 结果消息、样本数组及其嵌套数据由结果释放函数释放 |
+
+共享头文件在 C 和 C++ 中使用相同字段顺序。`Test/dlcv_infer_c_test/pure_c_header_test.c` 强制按 C 编译，并检查 Windows x64 下六个结构的大小。
 
 输入图像要求：
 
