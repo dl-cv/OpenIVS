@@ -135,6 +135,18 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 
 公共索引接口另行记录在“双语言 model index 互通”任务文档中。
 
+### 6.1 动态调用方式
+
+C 调用端只需包含 `dlcv_infer_c_api.h`，不需要链接 `dlcv_infer_cpp.lib`。Windows 调用端可按以下顺序加载和解析接口：
+
+1. 使用 `LoadLibraryW(L"dlcv_infer_cpp.dll")` 加载统一动态库。
+2. 使用 `GetProcAddress` 获取所需 C 名称函数地址。
+3. 调用模型加载、模型信息、推理和释放函数。
+4. 使用同一动态库导出的释放函数释放字符串和结构化结果。
+5. 进程结束前调用 `dlcv_infer_cpp_free_all_models_c`，再调用 `FreeLibrary`。
+
+`dlcv_infer_cpp.dll` 内部按模型授权类型加载 `dlcv_infer.dll` 或 `dlcv_infer_v.dll`。调用端仍需准备 DLCV SDK、OpenCV、Visual C++ 运行库和对应授权组件；动态加载只取消了对 C 导入库的静态链接，不会取消这些运行依赖。
+
 ## 7. 验证范围
 
 | 检查项 | 结果 |
@@ -148,5 +160,7 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 | `.dvst` 结构化兼容入口 | 加载、推理和释放通过 |
 | `.dvt/.dvst` 并发 | 三组 4 线程各 40 次检查通过 |
 | `dlcv_infer_c_qt_demo` | Debug x64 构建和启动通过，窗口标题及控件完整；新增字符串与设备查询接口调用通过 |
+| `dlcv_infer_c_demo` | Debug / Release x64 构建通过；普通模型与流程模型的加载、模型信息、推理、释放和多线程结果比较通过 |
+| `dlcv_infer_c_qt_demo --check-c-api-exports` | 34 个 C 导出函数均可由 `LoadLibraryW` 和 `GetProcAddress` 解析，退出码为 0 |
 
 当前构建工程只验证 Windows x64，不将 Win32 写为已验证能力。GPU 时钟设置、电源方案设置、进程亲和性和优先级接口会改变系统状态，测试只检查导出存在和参数转发代码，不执行设置操作。

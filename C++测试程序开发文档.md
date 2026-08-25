@@ -189,42 +189,59 @@ dlcv_infer_cpp_qt_demo.exe --help
 - 调用 `dlcv_infer::GetAllDogInfo()`。
 - 底层 `AutoDetectProvider()`：Sentinel 优先、Virbox 第二；都没有返回 `Unknown`，不加载 `dlcv_infer.dll` / `dlcv_infer_v.dll`。
 
+## 5. C++ 控制台 Demo 组合命令
+
+`dlcv_infer_cpp_dll_demo` 是与 C++ API 对应的控制台程序，默认模式、`--case`、`--model` 和 `--pressure` 入口保持可用。新增组合命令通过 `--then` 在同一进程内保留已加载模型：
+
+```text
+dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> [--device N] --then model-info <名称> --then infer <名称> <图片路径>
+dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> --then benchmark <名称> <图片路径> [--threads N] [--runs N]
+```
+
+组合命令包括 `load-model`、`list-models`、`model-info`、`dvs-model-info`、`infer`、`benchmark`、`free-model` 和 `free-all-models`。`benchmark` 使用同一模型和图片建立基准结果，再由多个线程重复推理并比较批量数量、目标数量、类别、框、分数、角度、面积、mask 和均值；线程数范围为 1～32。流程模型使用从 10000 开始的模型索引，普通模型使用底层索引。
+
+程序退出时释放当前模型和全部模型。运行目录需要 `dlcv_infer_cpp.dll`、OpenCV、Visual C++ 运行库及模型对应的底层 provider DLL。
+
+## 6. C API 动态导出检查
+
+`dlcv_infer_c_qt_demo.exe --check-c-api-exports` 在 Qt 应用初始化前执行动态库检查，不启动窗口。程序通过 `LoadLibraryW` 加载 `dlcv_infer_cpp.dll`，通过 `GetProcAddress` 解析全部 34 个 C 导出函数，检查通过时退出码为 0。
+
 ---
 
-## 5. 调试技巧
+## 7. 调试技巧
 
-### 5.1 图像解码问题
+### 7.1 图像解码问题
 
 - 若图像显示为"图像解码失败"，检查：
   - 文件路径是否包含非 ASCII 字符（Qt 使用 `toLocal8Bit` 传给 OpenCV）。
   - OpenCV 运行时 DLL 是否缺失。
 
-### 5.2 模型加载失败
+### 7.2 模型加载失败
 
 - 检查加密狗是否插入并匹配模型要求的 provider。
 - 检查 `dlcv_infer.dll` / `dlcv_infer_v.dll` 是否在 PATH 中。
 - 查看文本区的异常堆栈，通常包含底层 C API 返回的错误 JSON。
 
-### 5.3 推理结果为空
+### 7.3 推理结果为空
 
 - 调低 **threshold**（如 0.1）再试。
 - 检查输入图像通道：必须是 RGB（8UC3），程序内部已通过 `prepareImageForInference` 转换。
 
-### 5.4 压力测试崩溃
+### 7.4 压力测试崩溃
 
 - 检查 GPU 显存是否足够（batch_size × 线程数 × 单图显存）。
 - 若使用 Flow 模式，检查各节点模型是否支持并发。
 
-### 5.5 窗口位置异常
+### 7.5 窗口位置异常
 
 - 程序启动时检测窗口是否在所有屏幕外，若是则自动居中。
 - 窗口几何状态保存在 `QSettings`（注册表），更换显示器后可能需手动调整。
 
 ---
 
-## 6. 关键代码片段
+## 8. 关键代码片段
 
-### 6.1 图像预处理
+### 8.1 图像预处理
 
 ```cpp
 cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
@@ -243,7 +260,7 @@ cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
 }
 ```
 
-### 6.2 推理调用
+### 8.2 推理调用
 
 ```cpp
 json params;
@@ -255,7 +272,7 @@ params["batch_size"] = batchSize;
 dlcv_infer::Result output = model_->InferBatch(imageList, params);
 ```
 
-### 6.3 GPU 设备初始化
+### 8.3 GPU 设备初始化
 
 ```cpp
 // 在后台线程中调用，通过 QMetaObject::invokeMethod 回传结果到 UI 线程

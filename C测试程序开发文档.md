@@ -109,3 +109,56 @@ dlcv_infer_c_qt_demo/Debug/dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.exe
 | 授权设备查询 | 返回 `sentinel` 与 `virbox` |
 | C API 控制台测试 | JSON、结构化结果、普通模型、流程模型和三组并发检查通过 |
 | 纯 C 头文件编译 | `pure_c_header_test.c` 由 C 编译器处理，六个结构大小与 C++ 构建一致 |
+
+## 6. 纯 C 命令行 Demo
+
+### 6.1 工程与调用方式
+
+| 项目 | 内容 |
+| --- | --- |
+| 工程名称 | `dlcv_infer_c_demo` |
+| 工程路径 | `dlcv_infer_c_demo/` |
+| 类型 | Windows x64 控制台程序 |
+| 头文件 | 只包含 `dlcv_infer_c_api.h` |
+| DLL 加载 | `LoadLibraryW(L"dlcv_infer_cpp.dll")` |
+| 函数解析 | `GetProcAddress`，解析 C 名称导出 |
+| 导入库 | 不链接 `dlcv_infer_cpp.lib` |
+
+程序不依赖 C++ API 头文件，也不直接创建 `dlcv_infer::Model`。运行目录需要放置 `dlcv_infer_cpp.dll` 及其运行依赖；普通模型和流程模型的底层 provider DLL 由该 DLL 按模型授权类型加载。
+
+### 6.2 命令串联
+
+命令使用 `--then` 在同一进程内依次执行，模型名称只在本次进程内有效：
+
+```text
+dlcv_infer_c_demo.exe load-model <名称> <模型路径> [--device N] --then list-models
+dlcv_infer_c_demo.exe load-model <名称> <模型路径> --then model-info <名称> --then infer <名称> <图片路径>
+dlcv_infer_c_demo.exe load-model <名称> <模型路径> --then benchmark <名称> <图片路径> [--threads N] [--runs N]
+```
+
+可用命令：
+
+| 命令 | 作用 |
+| --- | --- |
+| `load-model` | 加载 `.dvt`、`.dvo`、`.dvst` 或 `.dvso` 模型 |
+| `list-models` | 列出当前进程已加载模型 |
+| `model-info` | 获取普通模型或流程模型信息 |
+| `infer` | 执行一次 C 结构化推理 |
+| `benchmark` | 多线程重复推理，并比较结果数量、类别、框、分数、mask 和均值 |
+| `free-model` | 释放指定模型 |
+| `free-all-models` | 释放当前进程中的全部模型 |
+
+`benchmark` 的线程数范围为 1～32；每次推理使用同一模型索引和同一输入图片，基准结果与后续结果逐项比较，发现差异时返回失败状态。普通模型使用从 0 开始的索引，流程模型使用从 10000 开始的索引。
+
+### 6.3 运行依赖
+
+- `dlcv_infer_cpp.dll`：统一提供 C++ 与 C 导出接口。
+- `dlcv_infer.dll` 或 `dlcv_infer_v.dll`：由模型授权类型选择加载。
+- OpenCV、Visual C++ 运行库及模型对应的授权组件：按 SDK 安装环境提供。
+- 流程模型还需要归档中引用的模型文件能够被流程加载器读取。
+
+`dlcv_infer_c_demo` 不启动 Qt 窗口，可用于验证纯 C 头文件、动态加载、模型信息、结构化推理、流程模型和多线程结果一致性。
+
+## 7. Qt C Demo 导出检查
+
+`dlcv_infer_c_qt_demo.exe --check-c-api-exports` 不启动窗口，使用 `LoadLibraryW` 和 `GetProcAddress` 检查 `dlcv_infer_cpp.dll` 的全部 34 个 C 导出函数。检查通过时返回退出码 0，并输出 `C API 导出检查通过`。该检查覆盖 11 个扩展结构化接口、4 个兼容结构化接口和 19 个底层 C 导出接口。

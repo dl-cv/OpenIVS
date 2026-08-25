@@ -13,9 +13,10 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
   - C# API：`DlcvCsharpApi`（`Model.cs`、`Utils.cs`、`FlowGraphModel.cs`、`DvsModel.cs`、`DllLoader.cs`）
 - **测试程序**：
   - C++：`dlcv_infer_cpp_qt_demo` / `dlcv_infer_cpp_qt_demo2` / `dlcv_infer_cpp_qt_demo3`（Qt 桌面应用）
-  - C：`dlcv_infer_c_qt_demo`（Qt 桌面应用，推理功能只调用 C ABI）
+  - C：`dlcv_infer_c_qt_demo`（Qt 桌面应用，推理功能只调用 C ABI）与 `dlcv_infer_c_demo`（纯 C API 控制台动态调用）
   - C#：`DlcvDemo` / `DlcvDemo2` / `DlcvDemo3`（WinForms 桌面应用）
 - **控制台测试**：`Test/DlcvCSharpTest`、`Test/dlcv_infer_cpp_test`、`Test/dlcv_infer_c_test`
+- **控制台 Demo**：`dlcv_infer_cpp_dll_demo` 支持 C++ API 组合命令；`dlcv_infer_c_demo` 只包含 C 头文件并通过 `LoadLibraryW`、`GetProcAddress` 调用 `dlcv_infer_cpp.dll`
 
 ## 构建方式
 
@@ -55,6 +56,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | C++ 图像输入 | `dlcv_infer_cpp/ImageInputUtils.h` | 图像预处理与格式转换 |
 | C++ 测试程序 | `dlcv_infer_cpp_qt_demo/MainWindow.cpp` | 模型加载、推理、压力测试、加密狗检测 |
 | C 测试程序 | `dlcv_infer_c_qt_demo/MainWindow.cpp` | 通过 C ABI 执行模型加载、推理、压力测试和加密狗检测 |
+| 纯 C 控制台 Demo | `dlcv_infer_c_demo/main.cpp` | 动态解析 34 个 C 导出中的所需函数，执行普通模型、流程模型和多线程结果比较 |
 | C# 测试程序 | `DlcvDemo/Form1.cs` | WinForms 测试程序主窗口 |
 | C# 压力测试 | `PressureTestRunner/PressureTestRunner.cs` | 多线程/一致性测试框架 |
 
