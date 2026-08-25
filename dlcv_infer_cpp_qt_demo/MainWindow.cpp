@@ -509,6 +509,7 @@ void MainWindow::onLoadModel() {
     {
         const std::string modelPathLocal8 = selectedModelPath.toLocal8Bit().toStdString();
         model_ = std::make_unique<dlcv_infer::Model>(modelPathLocal8, selectedDeviceId());
+        modelPath_ = selectedModelPath;
     }
     catch (const std::exception& e)
     {
@@ -608,6 +609,7 @@ void MainWindow::onInfer() {
     if (hasInspectionStatus) imageViewer_->setInspectionStatus(inspectionOk);
 
     QString text;
+    text += QString("模型: %1\n").arg(modelPath_);
     text += QString("图片: %1\n").arg(imagePath_);
     text += QString("batch_size: %1\n").arg(batchSize);
     text += QString("threshold: %1\n").arg(spinThreshold_->value(), 0, 'f', 2);

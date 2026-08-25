@@ -97,6 +97,8 @@ dlcv_infer_cpp_qt_demo.exe --help
 | 文档 | 打开浏览器访问 `https://docs.dlcv.com.cn/deploy/sdk/csharp_sdk` |
 | 检查加密狗 | 显示 Sentinel/Virbox 加密狗信息 |
 
+单次结构化推理摘要按以下顺序显示模型路径、图片路径、`batch_size`、`threshold`、推理时间和推理结果数量。
+
 参数控件：
 | 控件 | 范围 | 默认值 | 说明 |
 |------|------|--------|------|

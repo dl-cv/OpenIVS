@@ -89,7 +89,10 @@
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
   - `calc-mean-selftest`
   - `category-count-check-selftest`
-- C# 与 C++ 控制台测试均支持 `model-info-selftest <dvst> <dvt>`，检查 DVST 兼容模型信息、完整流程信息以及普通 DVT 信息。
+- C# 与 C++ 控制台测试均支持 `get-model-info <model>`，构造指定模型并把 `GetModelInfo` 返回的完整 JSON 写入标准输出。
+- C# 与 C++ 控制台测试均支持 `get-dvs-model-info <model>`，构造指定模型并把 `GetDvsModelInfo` 返回的完整 JSON 写入标准输出；普通模型不支持该接口时，异常写入标准错误并返回非零状态。
+- `get-model-info` 接收单个普通模型或流程模型路径；`get-dvs-model-info` 按 C# 公共接口支持范围接收 `.dvst`、`.dvso` 流程模型路径。两个命令不包含针对指定模型内容的预期值，也不组合验证多个接口。
+- 两个命令成功返回 `0`，模型加载或接口调用异常返回 `1`，参数数量错误返回 `2`。
 - `dlcv_infer_cpp_test.exe` 支持 `count-results-selftest`，验证新配置闭区间、非法范围与旧配置兼容逻辑。
 - `DlcvCSharpTest.exe category-count-check-selftest` 与 `dlcv_infer_cpp_test.exe category-count-check-selftest` 验证类型数量规则、同一原图局部结果聚合、粘性 `ok=false`、字符串或数组 `reason`、Flow 输出包装及旧流程兼容行为。
 - `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
