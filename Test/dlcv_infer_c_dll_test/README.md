@@ -1,8 +1,8 @@
-# dlcv_infer_c_dll Python 测试
+# dlcv_infer_cpp C API Python 测试
 
 ## 测试范围
 
-`test_all_models.py` 通过 Python `ctypes` 调用 `dlcv_infer_c_dll.dll` 的 C 接口。
+`test_all_models.py` 通过 Python `ctypes` 直接调用 `dlcv_infer_cpp.dll` 的 C 接口。
 
 测试格式：
 
@@ -27,9 +27,9 @@
 - Windows x64
 - `C:\dlcv\python.exe`
 - Python 环境包含 `numpy` 和 `cv2`
-- 已构建 `dlcv_infer_c_dll.dll` 与 `dlcv_infer_cpp_dll.dll`
+- 已构建 `dlcv_infer_cpp.dll`
 
-程序会先加载 `dlcv_infer_cpp_dll.dll`，再加载 C DLL，确保 Windows 能够解析运行依赖。
+程序只加载 `dlcv_infer_cpp.dll`，该 DLL 包含 C API 实现及其 C++ API 依赖。
 
 ## 基本运行
 
@@ -39,7 +39,7 @@
 C:\dlcv\python.exe Test\dlcv_infer_c_dll_test\test_all_models.py
 ```
 
-直接运行时会在脚本目录生成 `dlcv_infer_c_dll_test_result.json`，可从该文件查看汇总和逐模型结果。该结果文件已加入当前测试目录的忽略清单。
+直接运行时会在脚本目录生成 `dlcv_infer_c_api_test_result.json`，可从该文件查看汇总和逐模型结果。该结果文件已加入当前测试目录的忽略清单。
 
 默认参数：
 
@@ -49,22 +49,21 @@ C:\dlcv\python.exe Test\dlcv_infer_c_dll_test\test_all_models.py
 - 阈值：`0.5`
 - `with_mask=false`
 - `calc_mean=false`
-- 结果文件：`Test/dlcv_infer_c_dll_test/dlcv_infer_c_dll_test_result.json`
+- 结果文件：`Test/dlcv_infer_c_dll_test/dlcv_infer_c_api_test_result.json`
 
-程序自动查找以下 C DLL：
+程序自动查找以下核心 DLL：
 
-1. `dlcv_infer_c_dll/<配置>/dlcv_infer_c_dll.dll`
-2. `<配置>/dlcv_infer_c_dll.dll`
-3. `dlcv_infer_c_qt_demo/<配置>/dlcv_infer_c_qt_demo/dlcv_infer_c_dll.dll`
+1. `dlcv_infer_cpp/<配置>/dlcv_infer_cpp.dll`
+2. `<配置>/dlcv_infer_cpp.dll`
 
 ## 指定 DLL 和结果文件
 
 ```powershell
 C:\dlcv\python.exe Test\dlcv_infer_c_dll_test\test_all_models.py `
   --model-root "Y:\测试模型" `
-  --dll "C:\path\to\dlcv_infer_c_dll.dll" `
+  --dll "C:\path\to\dlcv_infer_cpp.dll" `
   --device 0 `
-  --output "$env:TEMP\dlcv_c_model_results.json"
+  --output "$env:TEMP\dlcv_c_api_model_results.json"
 ```
 
 结果文件使用 UTF-8 JSON，包含每个模型的图片、各阶段状态、目标数、耗时和错误信息。

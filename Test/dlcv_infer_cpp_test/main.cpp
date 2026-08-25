@@ -31,10 +31,10 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
-#include "../../dlcv_infer_cpp_dll/ImageInputUtils.h"
-#include "../../dlcv_infer_cpp_dll/flow/FlowGraphModel.h"
-#include "../../dlcv_infer_cpp_dll/flow/ModuleRegistry.h"
-#include "../../dlcv_infer_cpp_dll/flow/utils/MaskRleUtils.h"
+#include "../../dlcv_infer_cpp/ImageInputUtils.h"
+#include "../../dlcv_infer_cpp/flow/FlowGraphModel.h"
+#include "../../dlcv_infer_cpp/flow/ModuleRegistry.h"
+#include "../../dlcv_infer_cpp/flow/utils/MaskRleUtils.h"
 #include "dlcv_infer.h"
 
 namespace {

@@ -17,7 +17,7 @@ DEFAULT_CONFIGURATION = "Debug"
 DEFAULT_DEVICE = 0
 DEFAULT_THRESHOLD = 0.5
 DEFAULT_OUTPUT = Path(__file__).resolve().with_name(
-    "dlcv_infer_c_dll_test_result.json"
+    "dlcv_infer_c_api_test_result.json"
 )
 
 DEFAULT_IMAGE_RULES = (
@@ -132,45 +132,26 @@ def resolve_dll_path(explicit_path, configuration):
     if explicit_path:
         path = Path(explicit_path).resolve()
         if not path.is_file():
-            raise FileNotFoundError(f"C DLL 不存在: {path}")
+            raise FileNotFoundError(f"dlcv_infer_cpp.dll 不存在: {path}")
         return path
 
     root = repository_root()
     candidates = (
-        root / "dlcv_infer_c_dll" / configuration / "dlcv_infer_c_dll.dll",
-        root / configuration / "dlcv_infer_c_dll.dll",
-        root
-        / "dlcv_infer_c_qt_demo"
-        / configuration
-        / "dlcv_infer_c_qt_demo"
-        / "dlcv_infer_c_dll.dll",
+        root / "dlcv_infer_cpp" / configuration / "dlcv_infer_cpp.dll",
+        root / configuration / "dlcv_infer_cpp.dll",
     )
     for path in candidates:
         if path.is_file():
             return path.resolve()
     searched = "\n".join(str(path) for path in candidates)
-    raise FileNotFoundError(f"未找到 dlcv_infer_c_dll.dll，已检查:\n{searched}")
-
-
-def resolve_cpp_dll_path(c_dll_path, configuration):
-    root = repository_root()
-    candidates = (
-        c_dll_path.parent / "dlcv_infer_cpp_dll.dll",
-        root / "dlcv_infer_cpp_dll" / configuration / "dlcv_infer_cpp_dll.dll",
-        root / configuration / "dlcv_infer_cpp_dll.dll",
-    )
-    for path in candidates:
-        if path.is_file():
-            return path.resolve()
-    searched = "\n".join(str(path) for path in candidates)
-    raise FileNotFoundError(f"未找到 dlcv_infer_cpp_dll.dll，已检查:\n{searched}")
+    raise FileNotFoundError(f"未找到 dlcv_infer_cpp.dll，已检查:\n{searched}")
 
 
 def add_runtime_directories(dll_path, configuration):
     root = repository_root()
     candidates = (
         dll_path.parent,
-        root / "dlcv_infer_cpp_dll" / configuration,
+        root / "dlcv_infer_cpp" / configuration,
         root / configuration,
         Path(r"C:\dlcv\bin"),
         Path(r"C:\dlcv\Lib\site-packages\dlcvpro_infer"),
@@ -382,7 +363,7 @@ def run_model(api, model_path, image_path, device_id, params):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="使用 dlcv_infer_c_dll C 接口验证目录中的支持格式模型"
+        description="使用 dlcv_infer_cpp.dll 的 C 接口验证目录中的支持格式模型"
     )
     parser.add_argument(
         "--model-root",
@@ -391,7 +372,7 @@ def build_parser():
     )
     parser.add_argument(
         "--dll",
-        help="dlcv_infer_c_dll.dll 路径；未指定时按构建目录查找",
+        help="dlcv_infer_cpp.dll 路径；未指定时按构建目录查找",
     )
     parser.add_argument(
         "--configuration",
@@ -440,9 +421,7 @@ def main():
 
     try:
         dll_path = resolve_dll_path(args.dll, args.configuration)
-        cpp_dll_path = resolve_cpp_dll_path(dll_path, args.configuration)
         runtime_handles = add_runtime_directories(dll_path, args.configuration)
-        cpp_library = ctypes.CDLL(str(cpp_dll_path))
         api = DlcvCApi(dll_path)
         image_map = load_image_map(args.image_map, model_root)
     except Exception as exc:
@@ -471,8 +450,7 @@ def main():
         ensure_ascii=False,
     ).encode("utf-8")
 
-    print(f"C DLL: {dll_path}")
-    print(f"C++ DLL: {cpp_dll_path}")
+    print(f"DLL: {dll_path}")
     print(f"模型目录: {model_root}")
     print(f"模型数量: {len(models)}")
     print("支持格式: .dvt、.dvo、.dvst、.dvso")
@@ -539,8 +517,7 @@ def main():
     passed = sum(1 for row in rows if row["通过"])
     extension_counts = Counter(row["扩展名"] for row in rows)
     summary = {
-        "C DLL": str(dll_path),
-        "C++ DLL": str(cpp_dll_path),
+        "DLL": str(dll_path),
         "模型目录": str(model_root),
         "文件数": len(rows),
         "扩展名统计": dict(sorted(extension_counts.items())),
@@ -565,7 +542,6 @@ def main():
         f"汇总: 总数={len(rows)} 通过={passed} "
         f"失败={len(rows) - passed} 耗时={duration:.3f}s"
     )
-    del cpp_library
     del runtime_handles
     return 0 if passed == len(rows) and not free_all_error else 1
 

@@ -16,7 +16,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
-#include "dlcv_infer_c_api.h"
+#include "dlcv_infer_cpp/dlcv_infer_c_api.h"
 
 extern "C" int dlcv_infer_pure_c_header_test(void);
 
@@ -123,7 +123,7 @@ static bool CompareForwardedJsonCall(
     if (!same) {
         std::cerr << "FAIL: " << name << " 透传失败输入返回不一致\n";
         std::cerr << "  原生 DLL: " << (nativeResult == nullptr ? "<null>" : nativeResult) << "\n";
-        std::cerr << "  C DLL: " << (cResult == nullptr ? "<null>" : cResult) << "\n";
+        std::cerr << "  C API: " << (cResult == nullptr ? "<null>" : cResult) << "\n";
     }
     if (nativeResult != nullptr) nativeFree(nativeResult);
     if (cResult != nullptr) cFree(cResult);
@@ -252,14 +252,14 @@ static bool RunCapiForwardingCheck(HMODULE cModule) {
 }
 
 static bool RunCapiExportCompletenessCheck() {
-    HMODULE module = GetModuleHandleW(L"dlcv_infer_c_dll.dll");
+    HMODULE module = GetModuleHandleW(L"dlcv_infer_cpp.dll");
     bool ownsModule = false;
     if (module == nullptr) {
-        module = LoadLibraryW(L"dlcv_infer_c_dll.dll");
+        module = LoadLibraryW(L"dlcv_infer_cpp.dll");
         ownsModule = true;
     }
     if (module == nullptr) {
-        std::cerr << "FAIL: dlcv_infer_c_dll.dll 加载失败: " << GetLastError() << "\n";
+        std::cerr << "FAIL: dlcv_infer_cpp.dll 加载失败: " << GetLastError() << "\n";
         return false;
     }
 
@@ -304,7 +304,7 @@ static bool RunCapiExportCompletenessCheck() {
     bool exportsPresent = true;
     for (const char* name : expectedExports) {
         if (GetProcAddress(module, name) == nullptr) {
-            std::cerr << "FAIL: C DLL 缺少导出函数 " << name << "\n";
+            std::cerr << "FAIL: dlcv_infer_cpp.dll 缺少 C 接口导出函数 " << name << "\n";
             ok = false;
             exportsPresent = false;
         }
@@ -340,7 +340,7 @@ static bool RunCapiExportCompletenessCheck() {
         const char* powerSchemeGuid = getPowerSchemeGuid(0);
         const char* powerScheme = getPowerScheme(0);
         if (deviceInfo == nullptr || gpuInfo == nullptr || powerSchemeGuid == nullptr || powerScheme == nullptr) {
-            std::cerr << "FAIL: C DLL 只读信息接口基础调用返回空指针\n";
+            std::cerr << "FAIL: dlcv_infer_cpp.dll 只读信息接口基础调用返回空指针\n";
             ok = false;
         }
         if (deviceInfo != nullptr) freeResult(deviceInfo);
@@ -352,7 +352,7 @@ static bool RunCapiExportCompletenessCheck() {
     if (exportsPresent) ok = RunCapiForwardingCheck(module) && ok;
     if (ownsModule) FreeLibrary(module);
     if (ok) {
-        std::cout << "PASS: C DLL 34 个导出函数均存在，安全只读接口调用成功\n";
+        std::cout << "PASS: dlcv_infer_cpp.dll 的 C 接口导出函数均存在，安全只读接口调用成功\n";
     }
     return ok;
 }
@@ -449,18 +449,18 @@ static bool RunNativeCompatibilityCheck(
         !wrapperFreeOk || !nativeFreeOk) {
         std::cerr << "FAIL: 两套结构化 C API 输入输出不一致\n";
         if (!sameSuccessResult) {
-            std::cerr << "  C DLL 成功结果: " << wrapperSuccessFingerprint << "\n";
+            std::cerr << "  C API 成功结果: " << wrapperSuccessFingerprint << "\n";
             std::cerr << "  dlcv_infer 成功结果: " << nativeSuccessFingerprint << "\n";
         }
         if (!sameFailureResult) {
-            std::cerr << "  C DLL 失败结果: " << wrapperFailureFingerprint << "\n";
+            std::cerr << "  C API 失败结果: " << wrapperFailureFingerprint << "\n";
             std::cerr << "  dlcv_infer 失败结果: " << nativeFailureFingerprint << "\n";
         }
         if (!sameSuccessRelease || !sameFailureRelease) {
             std::cerr << "  结果释放状态不一致\n";
         }
         if (!wrapperFreeOk || !nativeFreeOk) {
-            std::cerr << "  C DLL 模型释放返回值: " << wrapperFirstFree << ", " << wrapperSecondFree << "\n";
+            std::cerr << "  C API 模型释放返回值: " << wrapperFirstFree << ", " << wrapperSecondFree << "\n";
             std::cerr << "  dlcv_infer 模型释放返回值: " << nativeFirstFree << ", " << nativeSecondFree << "\n";
         }
         return false;

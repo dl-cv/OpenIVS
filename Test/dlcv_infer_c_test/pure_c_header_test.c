@@ -1,7 +1,6 @@
 #include <stddef.h>
 
-#include "dlcv_infer_c_api.h"
-#include "dlcv_infer_native_c_api.h"
+#include "dlcv_infer_cpp/dlcv_infer_c_api.h"
 
 #if defined(_WIN64)
 typedef char DlcvCImageSizeCheck[(sizeof(DlcvCImage) == 24) ? 1 : -1];
