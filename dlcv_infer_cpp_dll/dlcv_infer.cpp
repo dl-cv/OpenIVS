@@ -1222,6 +1222,41 @@ namespace dlcv_infer {
     static std::mutex g_modelIndexRefMu;
     static std::unordered_map<int, int> g_modelIndexRefCount;
 
+    static std::mutex g_flowModelIndexMu;
+    static int g_nextFlowModelIndex = 10000;
+
+    static int AllocateFlowModelIndex() {
+        std::lock_guard<std::mutex> lock(g_flowModelIndexMu);
+        return g_nextFlowModelIndex++;
+    }
+
+    static bool ClassifySharedIndex(
+        int index,
+        sntl_admin::DogProvider& provider,
+        int& indexType) {
+        if (index >= 0 && index < 10000) {
+            provider = sntl_admin::DogProvider::Sentinel;
+            indexType = 1;
+            return true;
+        }
+        if (index >= 10000 && index < 20000) {
+            provider = sntl_admin::DogProvider::Sentinel;
+            indexType = 2;
+            return true;
+        }
+        if (index >= 20000 && index < 30000) {
+            provider = sntl_admin::DogProvider::Virbox;
+            indexType = 1;
+            return true;
+        }
+        if (index >= 30000 && index < 40000) {
+            provider = sntl_admin::DogProvider::Virbox;
+            indexType = 2;
+            return true;
+        }
+        return false;
+    }
+
 #ifdef _WIN32
     std::wstring Win32MultiByteToWide(const std::string& input, uint32_t codePage) {
         int len = MultiByteToWideChar(codePage, 0, input.c_str(), -1, nullptr, 0);
@@ -1478,55 +1513,41 @@ namespace dlcv_infer {
     }
 
     DllLoader& DllLoader::ResolveForIndex(int index, int& indexType) {
-        if (index < 0) {
-            throw std::invalid_argument("index 不能为负数");
+        sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
+        int expectedIndexType = 0;
+        if (!ClassifySharedIndex(index, provider, expectedIndexType)) {
+            throw std::invalid_argument("共享 index 不在支持的分段范围内");
         }
 
         static std::mutex resolveMu;
         static std::vector<std::unique_ptr<DllLoader>> resolvedLoaders;
         std::lock_guard<std::mutex> lock(resolveMu);
 
-        struct Candidate final {
-            DllLoader* Loader = nullptr;
-            int Type = 0;
-        };
-        std::vector<Candidate> matches;
-        auto tryAdd = [&matches, index](DllLoader* loader) {
-            if (loader == nullptr || loader->GetIndexTypeFunc() == nullptr) return;
-            const int type = loader->GetIndexTypeFunc()(index);
-            if (type == 1 || type == 2) {
-                matches.push_back({ loader, type });
-            }
-        };
-
-        tryAdd(instance);
-        const auto availableProviders = sntl_admin::DogUtils::GetAvailableProviders();
-        for (const auto provider : availableProviders) {
-            if (instance != nullptr && instance->GetDogProvider() == provider) continue;
-
-            DllLoader* loader = nullptr;
+        DllLoader* loader = nullptr;
+        if (instance != nullptr && instance->GetDogProvider() == provider) {
+            loader = instance;
+        }
+        if (loader == nullptr) {
             for (const auto& item : resolvedLoaders) {
                 if (item && item->GetDogProvider() == provider) {
                     loader = item.get();
                     break;
                 }
             }
-            if (loader == nullptr) {
-                resolvedLoaders.emplace_back(new DllLoader(provider));
-                loader = resolvedLoaders.back().get();
-            }
-            tryAdd(loader);
+        }
+        if (loader == nullptr) {
+            resolvedLoaders.emplace_back(new DllLoader(provider));
+            loader = resolvedLoaders.back().get();
+        }
+        if (loader->GetIndexTypeFunc() == nullptr) {
+            throw std::runtime_error("dlcv_infer 不支持共享模型索引接口；仅可使用加载时返回的本地模型 index");
         }
 
-        if (matches.empty()) {
-            throw std::runtime_error("未找到 index 对应的推理 DLL");
+        indexType = loader->GetIndexTypeFunc()(index);
+        if (indexType != expectedIndexType) {
+            throw std::runtime_error("共享 index 类型与分段规则不一致或索引不可用");
         }
-        if (matches.size() != 1) {
-            throw std::runtime_error("多个 provider 存在相同 index，无法确定推理 DLL");
-        }
-
-        indexType = matches.front().Type;
-        return *matches.front().Loader;
+        return *loader;
     }
 
     namespace {
@@ -1632,16 +1653,20 @@ namespace dlcv_infer {
         return json::parse(text);
     }
 
+    static bool HasSharedIndexFunctions(const DllLoader* loader) {
+        return loader != nullptr &&
+            loader->GetIndexTypeFunc() != nullptr &&
+            loader->GetModelInfoByIndexFunc() != nullptr &&
+            loader->GetRegisterFlowFunc() != nullptr &&
+            loader->GetFlowInfoFunc() != nullptr &&
+            loader->GetFreeFlowFunc() != nullptr &&
+            loader->GetBindIndexFunc() != nullptr &&
+            loader->GetUnbindIndexFunc() != nullptr &&
+            loader->GetFreeStringFunc() != nullptr;
+    }
+
     static void EnsureSharedIndexFunctions(DllLoader* loader) {
-        if (loader == nullptr ||
-            loader->GetIndexTypeFunc() == nullptr ||
-            loader->GetModelInfoByIndexFunc() == nullptr ||
-            loader->GetRegisterFlowFunc() == nullptr ||
-            loader->GetFlowInfoFunc() == nullptr ||
-            loader->GetFreeFlowFunc() == nullptr ||
-            loader->GetBindIndexFunc() == nullptr ||
-            loader->GetUnbindIndexFunc() == nullptr ||
-            loader->GetFreeStringFunc() == nullptr) {
+        if (!HasSharedIndexFunctions(loader)) {
             throw std::runtime_error("dlcv_infer 不支持共享模型索引接口");
         }
     }
@@ -1652,26 +1677,36 @@ namespace dlcv_infer {
         throw std::runtime_error("无法确定流程 provider");
     }
 
-    static DllLoader* ResolveFlowRegistrationLoader(const json& modelBindings) {
+    static DllLoader* ResolveFlowRegistrationLoader(
+        const std::vector<std::shared_ptr<dlcv_infer::Model>>& childModels) {
         DllLoader* selectedLoader = nullptr;
-        for (const auto& binding : modelBindings) {
-            if (!binding.is_object() || !binding.contains("model_index") ||
-                !binding.at("model_index").is_number_integer()) {
+        for (const auto& childModel : childModels) {
+            if (!childModel || childModel->modelIndex < 0) {
                 throw std::runtime_error("流程模型绑定格式无效");
             }
-            const int childModelIndex = binding.at("model_index").get<int>();
-            int childIndexType = 0;
-            DllLoader& childLoader = DllLoader::ResolveForIndex(childModelIndex, childIndexType);
-            if (childIndexType != 1) {
-                throw std::runtime_error("流程模型节点 index 类型无效");
+            DllLoader* childLoader = childModel->LoadedDllLoader();
+            if (childLoader == nullptr) {
+                throw std::runtime_error("流程子模型没有关联推理 DLL");
             }
-            if (selectedLoader != nullptr &&
-                selectedLoader->GetDogProvider() != childLoader.GetDogProvider()) {
-                throw std::runtime_error("流程中的模型节点不能混用 provider");
-            }
-            selectedLoader = &childLoader;
+            if (selectedLoader == nullptr) selectedLoader = childLoader;
         }
-        return selectedLoader != nullptr ? selectedLoader : &DllLoader::Instance();
+        return selectedLoader;
+    }
+
+    static bool CanRegisterSharedFlow(
+        DllLoader* registrationLoader,
+        const std::vector<std::shared_ptr<dlcv_infer::Model>>& childModels) {
+        if (!HasSharedIndexFunctions(registrationLoader)) return false;
+        for (const auto& childModel : childModels) {
+            if (!childModel) return false;
+            DllLoader* childLoader = childModel->LoadedDllLoader();
+            if (childLoader == nullptr ||
+                childLoader != registrationLoader ||
+                !HasSharedIndexFunctions(childLoader)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     static std::string FlowTypeFromPath(const std::wstring& modelPath) {
@@ -1757,6 +1792,7 @@ namespace dlcv_infer {
         }
 
         json modelBindings = json::array();
+        std::vector<std::shared_ptr<dlcv_infer::Model>> childModels;
         std::set<int> boundNodeIds;
         for (const auto& item : report.at("models")) {
             if (!item.is_object() || item.value("status_code", 1) != 0) {
@@ -1770,6 +1806,12 @@ namespace dlcv_infer {
                 throw std::runtime_error("流程模型绑定无效");
             }
 
+            const std::shared_ptr<dlcv_infer::Model> childModel =
+                _flowModel->GetLoadedModelByIndex(childModelIndex);
+            if (!childModel) {
+                throw std::runtime_error("流程模型没有保留加载实例");
+            }
+            childModels.push_back(childModel);
             modelBindings.push_back({
                 {"node_id", nodeId},
                 {"model_index", childModelIndex}
@@ -1779,10 +1821,16 @@ namespace dlcv_infer {
             throw std::runtime_error("流程模型绑定不完整");
         }
 
-        _dllLoader = ResolveFlowRegistrationLoader(modelBindings);
-        _loadedDogProvider = _dllLoader->GetDogProvider();
-        _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
-        EnsureSharedIndexFunctions(_dllLoader);
+        _dllLoader = ResolveFlowRegistrationLoader(childModels);
+        if (_dllLoader != nullptr) {
+            _loadedDogProvider = _dllLoader->GetDogProvider();
+            _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+        }
+        if (!CanRegisterSharedFlow(_dllLoader, childModels)) {
+            modelIndex = AllocateFlowModelIndex();
+            _indexReady = true;
+            return;
+        }
 
         json flowRegistration = json::object();
         flowRegistration["schema_version"] = 1;
@@ -3226,7 +3274,9 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_register_flow_c(int
         dlcv_infer::json modelBindings = dlcv_infer::json::array({
             {{"node_id", 1}, {"model_index", model_index}}
         });
-        dlcv_infer::DllLoader* loader = dlcv_infer::ResolveFlowRegistrationLoader(modelBindings);
+        int indexType = 0;
+        dlcv_infer::DllLoader* loader = &dlcv_infer::DllLoader::ResolveForIndex(model_index, indexType);
+        if (indexType != 1) return -1;
         dlcv_infer::EnsureSharedIndexFunctions(loader);
         dlcv_infer::json flowRegistration = {
             {"schema_version", 1},
@@ -3242,6 +3292,37 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_register_flow_c(int
     } catch (...) {
         return -1;
     }
+}
+
+extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_index_rules_c() {
+    struct Case final {
+        int Index;
+        sntl_admin::DogProvider Provider;
+        int IndexType;
+    };
+    const Case cases[] = {
+        {0, sntl_admin::DogProvider::Sentinel, 1},
+        {9999, sntl_admin::DogProvider::Sentinel, 1},
+        {10000, sntl_admin::DogProvider::Sentinel, 2},
+        {19999, sntl_admin::DogProvider::Sentinel, 2},
+        {20000, sntl_admin::DogProvider::Virbox, 1},
+        {29999, sntl_admin::DogProvider::Virbox, 1},
+        {30000, sntl_admin::DogProvider::Virbox, 2},
+        {39999, sntl_admin::DogProvider::Virbox, 2}
+    };
+    for (const auto& item : cases) {
+        sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
+        int indexType = 0;
+        if (!dlcv_infer::ClassifySharedIndex(item.Index, provider, indexType) ||
+            provider != item.Provider || indexType != item.IndexType) {
+            return -1;
+        }
+    }
+
+    sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
+    int indexType = 0;
+    return (!dlcv_infer::ClassifySharedIndex(-1, provider, indexType) &&
+            !dlcv_infer::ClassifySharedIndex(40000, provider, indexType)) ? 0 : -1;
 }
 
 extern "C" DLCV_INFER_CPP_DLL_API void dlcv_shared_index_test_free_string_c(const char* result) {

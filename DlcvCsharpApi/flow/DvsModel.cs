@@ -19,6 +19,7 @@ namespace DlcvModules
         private string _dvsPath;
         // 临时文件夹路径，用于清理
         private string _tempDir = null;
+        private readonly Dictionary<int, DllLoader> _loadedModelLoaders = new Dictionary<int, DllLoader>();
 
         public new JObject Load(string dvsPath, int deviceId = 0)
         {
@@ -58,6 +59,12 @@ namespace DlcvModules
             return LoadCore(sourcePath, savedPipeline, bindings, deviceId);
         }
 
+        internal DllLoader GetLoadedModelLoader(int modelIndex)
+        {
+            DllLoader loader;
+            return _loadedModelLoaders.TryGetValue(modelIndex, out loader) ? loader : null;
+        }
+
         private JObject LoadCore(
             string dvsPath,
             JObject savedPipeline,
@@ -70,6 +77,7 @@ namespace DlcvModules
             if (!File.Exists(dvsPath)) throw new FileNotFoundException("文件不存在", dvsPath);
 
             _dvsPath = dvsPath;
+            _loadedModelLoaders.Clear();
 
             // 1. 准备临时目录
             _tempDir = Path.Combine(Path.GetTempPath(), "DlcvDvs_" + Guid.NewGuid().ToString("N"));
@@ -187,6 +195,10 @@ namespace DlcvModules
                 // 6. 复用 FlowGraphModel 的核心加载逻辑（从已经修改好的 pipelineJson 中加载）
                 var report = LoadFromRoot(pipelineJson, deviceId, modelsByIndex, registrationPipeline);
                 SetModelBindings(resolvedBindings);
+                if (modelBindings == null)
+                {
+                    CaptureLoadedModelLoaders(modelsByIndex);
+                }
                 modelsByIndex = null;
                 return report;
             }
@@ -330,6 +342,18 @@ namespace DlcvModules
                 models.Add(binding.Value, new Model { modelIndex = binding.Value, OwnModelIndex = false });
             }
             return models;
+        }
+
+        private void CaptureLoadedModelLoaders(Dictionary<int, Model> modelsByIndex)
+        {
+            if (modelsByIndex == null) return;
+            foreach (var item in modelsByIndex)
+            {
+                DllLoader loader = item.Value != null ? item.Value.Loader : null;
+                if (loader == null)
+                    throw new InvalidDataException("流程模型未保存加载 DLL: " + item.Key);
+                _loadedModelLoaders[item.Key] = loader;
+            }
         }
 
         private static JArray BuildResolvedModelBindings(JArray nodes, Dictionary<int, Model> modelsByIndex)

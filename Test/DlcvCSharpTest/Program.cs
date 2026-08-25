@@ -13,6 +13,7 @@ using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using DlcvModules;
 using dlcv_infer_csharp;
+using sntl_admin_csharp;
 
 namespace DlcvCSharpTest
 {
@@ -230,6 +231,11 @@ namespace DlcvCSharpTest
                     return RunSharedIndexCSharpSelfTest(args);
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-route-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexRouteSelfTest();
+                }
+
                 if (args != null && args.Length >= 2)
                 {
                     string modelPath = args[0];
@@ -306,6 +312,52 @@ namespace DlcvCSharpTest
             {
                 if (rgb != null) rgb.Dispose();
                 if (bgr != null) bgr.Dispose();
+            }
+        }
+
+        private static int RunSharedIndexRouteSelfTest()
+        {
+            var cases = new[]
+            {
+                new { Index = 0, Provider = DogProvider.Sentinel, Type = "model" },
+                new { Index = 9999, Provider = DogProvider.Sentinel, Type = "model" },
+                new { Index = 10000, Provider = DogProvider.Sentinel, Type = "flow" },
+                new { Index = 19999, Provider = DogProvider.Sentinel, Type = "flow" },
+                new { Index = 20000, Provider = DogProvider.Virbox, Type = "model" },
+                new { Index = 29999, Provider = DogProvider.Virbox, Type = "model" },
+                new { Index = 30000, Provider = DogProvider.Virbox, Type = "flow" },
+                new { Index = 39999, Provider = DogProvider.Virbox, Type = "flow" }
+            };
+
+            try
+            {
+                foreach (var item in cases)
+                {
+                    string indexType;
+                    DogProvider provider = DllLoader.GetSharedIndexRoute(item.Index, out indexType);
+                    if (provider != item.Provider || !string.Equals(indexType, item.Type, StringComparison.Ordinal))
+                    {
+                        throw new Exception("index 分段解析错误: " + item.Index);
+                    }
+                }
+
+                try
+                {
+                    string indexType;
+                    DllLoader.GetSharedIndexRoute(40000, out indexType);
+                    throw new Exception("未拒绝超出范围的 index");
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                }
+
+                Console.WriteLine("shared-index-route-selftest 通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-route-selftest 失败: " + ex.Message);
+                return 1;
             }
         }
 

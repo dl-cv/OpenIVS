@@ -351,7 +351,8 @@ public class DllLoader
 - `.dvsp`：不支持推理，不解析 provider。
 
 **共享 index 接口**：
-- `ResolveForIndex` 查询可用 provider 的共享索引表，根据唯一 index 返回实际 loader；该查询不修改 `Instance` 当前保存的默认 loader。
+- `ResolveForIndex` 仅按新版四段 index 规则选择对应 provider 的 loader，不查询加密狗，也不访问另一 provider 的 DLL；该方法不修改 `Instance` 当前保存的默认 loader。
+- 外部共享 index 只用于提供共享接口的新版推理 DLL。缺少共享接口时返回不支持错误，不影响普通模型和 DVS 模型加载。
 - `GetIndexType`、`RegisterFlow`、`FreeFlow`、`BindIndex`、`UnbindIndex` 返回整数状态或 index；`GetModelInfoByIndex` 与 `GetFlowInfo` 返回 `JObject`。
 - `RegisterFlow` 按 UTF-8 传入流程 JSON；仅模型信息与流程信息返回 UTF-8 JSON，解析后调用 `dlcv_free_result` 释放。
 - 流程注册 JSON 包含 `schema_version`、`flow_type`、`source_path`、`device_id`、`provider`、`pipeline`、`model_bindings`；`source_path` 使用绝对路径，`model_bindings` 中每项包含 `node_id` 与 `model_index`。
@@ -658,7 +659,7 @@ using (var model = new Model())
 | --- | --- |
 | DVT | 通过 `dlcv_load_model`、`dlcv_get_model_info`、`dlcv_infer`、`dlcv_free_model_result`、`dlcv_free_model` 工作 |
 | DVP | 自动检查后端服务；服务不可用时启动 `DLCV Test.exe --keep_alive`；推理请求固定附带 `return_polygon=true` |
-| DVS | 内部创建 `DlcvModules.DvsModel`；子模型节点使用共享 `model_index`；流程通过 `dlcv_register_flow_c` 注册并取得整体 index。`GetModelInfo()` 返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息 |
+| DVS | 内部创建 `DlcvModules.DvsModel`；子模型加载时保存实际 loader。推理 DLL提供完整共享接口时，流程通过 `dlcv_register_flow_c` 注册并取得整体 index；旧 DLL缺少共享接口时继续使用本地流程 index。`GetModelInfo()` 返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息 |
 | RPC | 自动启动 `AIModelRPC.exe`；图像通过共享内存传输；结果中的 mask 可通过共享内存回读 |
 
 #### 输入与输出
@@ -690,7 +691,7 @@ C# 侧额外处理 `DV\n` 文件头校验、归档解包、子模型加载、模
 
 `DllLoader` 是 provider-aware 原生入口分发器。`EnsureForModel` 根据普通模型文件头中的 `dog_provider` 选择 `dlcv_infer.dll` 或 `dlcv_infer_v.dll`；`Instance` 在首次创建时按 Sentinel、Virbox 顺序选择当前可用 provider。
 
-`ResolveForIndex` 逐个检查当前可用 provider 的共享索引表，用于空构造 `Model` 恢复普通模型或流程模型。该方法返回 index 所属 loader，不修改 `Instance`。四段 index 范围使 Sentinel、Virbox、普通模型和流程互不重复。每个 `Model` 实例及普通模型缓存均保存实际使用的 loader，后续查询、推理、绑定和解绑不受其他 provider 的索引解析影响。
+`ResolveForIndex` 按新版四段 index 规则选择 loader，用于空构造 `Model` 恢复普通模型或流程模型。旧版 Virbox 小 index 不进入外部共享模式。每个 `Model` 实例及普通模型缓存均保存实际使用的 loader，后续查询、推理、绑定和解绑不访问其他 provider。普通 DVS 加载直接复用子模型保存的 loader，不调用 `ResolveForIndex`。
 
 ### 14.5 `sntl_admin_csharp`
 

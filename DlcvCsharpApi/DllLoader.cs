@@ -87,6 +87,18 @@ namespace dlcv_infer_csharp
 
         public DogProvider LoadedDogProvider { get; private set; }
         public string LoadedNativeDllName { get; private set; }
+        internal bool SupportsSharedFlowIndex
+        {
+            get
+            {
+                return dlcv_get_index_type_c != null &&
+                       dlcv_register_flow_c != null &&
+                       dlcv_get_flow_info_c != null &&
+                       dlcv_free_flow_c != null &&
+                       dlcv_bind_index_c != null &&
+                       dlcv_unbind_index_c != null;
+            }
+        }
 
         public static DllLoader Instance
         {
@@ -131,48 +143,56 @@ namespace dlcv_infer_csharp
 
         public static DllLoader ResolveForIndex(int index, out string indexType)
         {
-            if (index < 0)
-                throw new ArgumentOutOfRangeException(nameof(index), "index 不能为负数");
-
-            indexType = null;
-            List<DogProvider> providers = DogUtils.GetAvailableProviders();
-            var matches = new List<KeyValuePair<DllLoader, string>>();
+            DogProvider provider = GetSharedIndexRoute(index, out indexType);
             DllLoader current = _instance;
-            for (int i = 0; i < providers.Count; i++)
-            {
-                DogProvider provider = providers[i];
-                DllLoader loader = current != null && current.LoadedDogProvider == provider
-                    ? current
-                    : CreateLoader(provider);
-                if (TryResolveIndexType(loader, index, out indexType))
-                {
-                    matches.Add(new KeyValuePair<DllLoader, string>(loader, indexType));
-                }
-            }
-
-            if (matches.Count > 1)
-                throw new InvalidOperationException("index 同时存在于多个 provider: " + index);
-            if (matches.Count == 1)
-            {
-                indexType = matches[0].Value;
-                return matches[0].Key;
-            }
-
-            throw new KeyNotFoundException("未找到 index 对应的推理 DLL");
+            DllLoader loader = current != null && current.LoadedDogProvider == provider
+                ? current
+                : CreateLoader(provider);
+            loader.EnsureSharedIndexSupport(indexType);
+            return loader;
         }
 
-        private static bool TryResolveIndexType(DllLoader loader, int index, out string indexType)
+        public static DogProvider GetSharedIndexRoute(int index, out string indexType)
         {
-            indexType = null;
-            if (loader == null || loader.dlcv_get_index_type_c == null)
-                return false;
+            if (index >= 0 && index < 10000)
+            {
+                indexType = "model";
+                return DogProvider.Sentinel;
+            }
+            if (index >= 10000 && index < 20000)
+            {
+                indexType = "flow";
+                return DogProvider.Sentinel;
+            }
+            if (index >= 20000 && index < 30000)
+            {
+                indexType = "model";
+                return DogProvider.Virbox;
+            }
+            if (index >= 30000 && index < 40000)
+            {
+                indexType = "flow";
+                return DogProvider.Virbox;
+            }
 
-            int nativeType;
-            try { nativeType = loader.GetIndexType(index); }
-            catch { return false; }
-            if (nativeType == 1) indexType = "model";
-            else if (nativeType == 2) indexType = "flow";
-            return indexType != null;
+            throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 不在支持范围内: " + index);
+        }
+
+        private void EnsureSharedIndexSupport(string indexType)
+        {
+            var missing = new List<string>();
+            if (dlcv_get_index_type_c == null) missing.Add("dlcv_get_index_type_c");
+            if (dlcv_bind_index_c == null) missing.Add("dlcv_bind_index_c");
+            if (dlcv_unbind_index_c == null) missing.Add("dlcv_unbind_index_c");
+            if (string.Equals(indexType, "model", StringComparison.Ordinal) && dlcv_get_model_info_c == null)
+                missing.Add("dlcv_get_model_info_c");
+            if (string.Equals(indexType, "flow", StringComparison.Ordinal) && dlcv_get_flow_info_c == null)
+                missing.Add("dlcv_get_flow_info_c");
+            if (missing.Count > 0)
+            {
+                throw new NotSupportedException(
+                    "当前 dlcv_infer 不支持外部共享 index，缺少接口: " + string.Join(", ", missing));
+            }
         }
 
         public int GetIndexType(int index)

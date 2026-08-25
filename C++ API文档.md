@@ -195,7 +195,7 @@ json GetDvsModelInfo();
 - `GetModelInfo()` 对普通模型和流程模型返回相同层级。流程模型的输入通道和输入形状取首个模型，任务类型、类别列表和类别数量取最终输出可达的模型。
 - `GetDvsModelInfo()` 支持流程模型，返回完整流程 JSON、`loaded_model_meta`、按模型文件名组织的 `model_info`，以及首模型和最终输出模型的节点编号。
 - 普通模式下通过 `dlcv_get_model_info` 获取。
-- 空对象设置有效的 `modelIndex` 后，首次调用会查询索引类型并增加外部使用计数。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `source_path` 解包归档资源，再按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`。查询会检查索引所属 provider，返回对应 loader，但不修改 `DllLoader::Instance()`。
+- 空对象设置有效的 `modelIndex` 后，首次调用按新版四段 index 规则选择对应 loader，并增加外部使用计数。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `source_path` 解包归档资源，再按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`。该过程不查询加密狗，不访问另一 provider，也不修改 `DllLoader::Instance()`。
 - 共享流程加载时为每个不同的子模型 index 创建一次借用 `Model` 并保存在 `FlowGraphModel`；后续推理中的模型节点直接复用这些已绑定对象，流程释放时统一解绑。
 
 ### 4.3 单图推理
@@ -235,7 +235,7 @@ void FreeModel();
 - 普通模型且由当前对象加载：按现有 `dlcv_free_model` 释放规则处理。
 - 通过共享 `modelIndex` 恢复的普通模型或流程模型：无论 `OwnModelIndex` 是否为 `false`，只减少当前对象增加的使用计数，不直接释放共享资源。
 
-> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回。流程模型（`.dvst`/`.dvso`）先加载其中的子模型，再向 `dlcv_infer` 注册包含 `schema_version`、`flow_type`、`provider`、`source_path`、`device_id`、`pipeline`、`model_bindings` 的流程 JSON，注册结果即流程模型的 `modelIndex`。
+> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回。流程模型（`.dvst`/`.dvso`）先加载其中的子模型；推理 DLL提供完整共享接口时，再注册包含 `schema_version`、`flow_type`、`provider`、`source_path`、`device_id`、`pipeline`、`model_bindings` 的流程 JSON。旧 DLL缺少共享接口时使用本地流程 index，原有加载和推理行为保持不变。
 
 | provider | 类型 | index 范围 |
 |---|---|---|
@@ -628,7 +628,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 20.2 加载、释放与信息查询
 
-`.dvst/.dvso` 进入 FlowGraph 模式，`.dvsp` 当前直接返回不支持错误，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载，加载前由 `DllLoader::ForModel` 解析模型头并绑定对应 provider 的 loader：若模型头明确指定 `dog_provider`，则校验对应加密狗；若未指定，则通过 `AutoDetectProvider()` 按 Sentinel 优先、Virbox 第二自动检测。FlowGraph 模式创建 `flow::FlowGraphModel`，完成归档解包后加载全部模型节点，解包流程不得修改模型二进制数据。流程含模型节点时，根据子模型 index 选择登记流程的 provider DLL；无模型节点时使用当前可用 provider。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
+`.dvst/.dvso` 进入 FlowGraph 模式，`.dvsp` 当前直接返回不支持错误，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载，加载前由 `DllLoader::ForModel` 解析模型头并绑定对应 provider 的 loader：若模型头明确指定 `dog_provider`，则校验对应加密狗；若未指定，则通过 `AutoDetectProvider()` 按 Sentinel 优先、Virbox 第二自动检测。FlowGraph 模式创建 `flow::FlowGraphModel`，完成归档解包后加载全部模型节点，解包过程不得修改模型二进制数据。流程直接复用子模型实际使用的 loader；共享接口完整时登记共享流程，旧 DLL缺少共享接口或流程没有子模型时使用本地流程 index。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
 
 ### 20.3 推理前图像规整
 

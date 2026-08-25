@@ -36,6 +36,17 @@ namespace dlcv_infer_csharp
         /// </summary>
         public bool OwnModelIndex { get; set; } = true;
 
+        private static int s_nextFlowModelIndex = 10000;
+        private static readonly object s_flowModelIndexLock = new object();
+
+        private static int AllocateFlowModelIndex()
+        {
+            lock (s_flowModelIndexLock)
+            {
+                return s_nextFlowModelIndex++;
+            }
+        }
+
         // DVP mode fields
         private bool _isDvpMode = false;
         private bool _isDvsMode = false;
@@ -93,6 +104,7 @@ namespace dlcv_infer_csharp
 
         public DogProvider LoadedDogProvider => _dllLoader?.LoadedDogProvider ?? DogProvider.None;
         public string LoadedNativeDllName => _dllLoader?.LoadedNativeDllName;
+        internal DllLoader Loader => _dllLoader;
 
         public Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false)
         {
@@ -477,24 +489,28 @@ namespace dlcv_infer_csharp
                 if (modelBindings == null)
                     throw new Exception("注册流程 index 失败：缺少模型绑定数组");
 
-                _dllLoader = ResolveFlowRegistrationLoader(modelBindings);
-                if (_dllLoader == null || _dllLoader.dlcv_register_flow_c == null)
-                    throw new Exception("当前 dlcv_infer 未提供流程 index 注册接口");
-
-                var flowJson = new JObject
+                _dllLoader = ResolveFlowRegistrationLoader(_dvsModel, modelBindings);
+                if (_dllLoader != null && _dllLoader.SupportsSharedFlowIndex)
                 {
-                    ["schema_version"] = 1,
-                    ["flow_type"] = extension.StartsWith(".") ? extension.Substring(1) : extension,
-                    ["source_path"] = sourcePath,
-                    ["device_id"] = device_id,
-                    ["provider"] = GetProviderName(_dllLoader.LoadedDogProvider),
-                    ["pipeline"] = registrationPipeline,
-                    ["model_bindings"] = modelBindings
-                };
-                modelIndex = _dllLoader.RegisterFlow(flowJson.ToString(Formatting.None));
-                if (modelIndex < 0)
-                    throw new Exception("注册流程 index 失败");
-                _ownsRegisteredFlowIndex = true;
+                    var flowJson = new JObject
+                    {
+                        ["schema_version"] = 1,
+                        ["flow_type"] = extension.StartsWith(".") ? extension.Substring(1) : extension,
+                        ["source_path"] = sourcePath,
+                        ["device_id"] = device_id,
+                        ["provider"] = GetProviderName(_dllLoader.LoadedDogProvider),
+                        ["pipeline"] = registrationPipeline,
+                        ["model_bindings"] = modelBindings
+                    };
+                    modelIndex = _dllLoader.RegisterFlow(flowJson.ToString(Formatting.None));
+                    if (modelIndex < 0)
+                        throw new Exception("注册流程 index 失败");
+                    _ownsRegisteredFlowIndex = true;
+                }
+                else
+                {
+                    modelIndex = AllocateFlowModelIndex();
+                }
             }
             catch (Exception ex)
             {
@@ -510,8 +526,9 @@ namespace dlcv_infer_csharp
             }
         }
 
-        private static DllLoader ResolveFlowRegistrationLoader(JArray modelBindings)
+        private static DllLoader ResolveFlowRegistrationLoader(DlcvModules.DvsModel dvsModel, JArray modelBindings)
         {
+            if (dvsModel == null) throw new ArgumentNullException(nameof(dvsModel));
             DllLoader selectedLoader = null;
             foreach (JToken token in modelBindings)
             {
@@ -520,15 +537,14 @@ namespace dlcv_infer_csharp
                     throw new InvalidDataException("流程模型绑定格式无效");
 
                 int childModelIndex = binding["model_index"].Value<int>();
-                string indexType;
-                DllLoader childLoader = DllLoader.ResolveForIndex(childModelIndex, out indexType);
-                if (!string.Equals(indexType, "model", StringComparison.Ordinal))
-                    throw new InvalidDataException("流程模型节点 index 类型无效");
+                DllLoader childLoader = dvsModel.GetLoadedModelLoader(childModelIndex);
+                if (childLoader == null)
+                    throw new InvalidDataException("流程模型节点缺少加载 DLL: " + childModelIndex);
                 if (selectedLoader != null && selectedLoader.LoadedDogProvider != childLoader.LoadedDogProvider)
                     throw new InvalidDataException("流程中的模型节点不能混用 provider");
                 selectedLoader = childLoader;
             }
-            return selectedLoader ?? DllLoader.Instance;
+            return selectedLoader;
         }
 
         private void InitializeDvtMode(string modelPath, int device_id)

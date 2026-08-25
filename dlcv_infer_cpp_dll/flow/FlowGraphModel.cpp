@@ -675,19 +675,35 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
             if (item.contains("model_index"))
                 modelIndex = ReadIntField(item, "model_index", -1);
         } catch (...) {}
-        if (modelIndex >= 0 || modelPath.empty()) continue;
+        if (modelIndex < 0 || modelPath.empty()) continue;
+
+        const auto existing = _boundModelsByIndex->find(modelIndex);
+        if (existing != _boundModelsByIndex->end() && existing->second) continue;
 
         const std::string key = ModelPool::MakeKey(modelPath, nodeDeviceId);
         // 去重：同一流程可能多个节点引用同一模型
+        std::shared_ptr<dlcv_infer::Model> model;
         if (std::find(_acquiredModelKeys.begin(), _acquiredModelKeys.end(), key)
             == _acquiredModelKeys.end()) {
-            ModelPool::Instance().Acquire(modelPath, nodeDeviceId);
+            model = ModelPool::Instance().Acquire(modelPath, nodeDeviceId);
             _acquiredModelKeys.push_back(key);
+        } else {
+            model = ModelPool::Instance().Acquire(modelPath, nodeDeviceId);
+            ModelPool::Instance().Release(modelPath, nodeDeviceId);
+        }
+        if (model) {
+            _boundModelsByIndex->emplace(modelIndex, std::move(model));
         }
     }
 
     _loaded = true;
     return report;
+}
+
+std::shared_ptr<dlcv_infer::Model> FlowGraphModel::GetLoadedModelByIndex(int modelIndex) const {
+    if (!_boundModelsByIndex) return nullptr;
+    const auto it = _boundModelsByIndex->find(modelIndex);
+    return it == _boundModelsByIndex->end() ? nullptr : it->second;
 }
 
 Json FlowGraphModel::GetModelInfo() const {

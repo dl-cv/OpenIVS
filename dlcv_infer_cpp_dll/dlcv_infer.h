@@ -315,6 +315,9 @@ namespace dlcv_infer {
     public:
         sntl_admin::DogProvider LoadedDogProvider() const { return _loadedDogProvider; }
         std::string LoadedNativeDllName() const { return _loadedNativeDllName; }
+#ifdef DLCV_INFER_CPP_DLL_EXPORTS
+        DllLoader* LoadedDllLoader() const { return _dllLoader; }
+#endif
     };
 #pragma warning(pop)
 
@@ -372,5 +375,6 @@ extern "C" {
     DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_free_c(int index);
     DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_resolve_c(int index);
     DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_register_flow_c(int model_index);
+    DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_index_rules_c();
     DLCV_INFER_CPP_DLL_API void dlcv_shared_index_test_free_string_c(const char* result);
 }
