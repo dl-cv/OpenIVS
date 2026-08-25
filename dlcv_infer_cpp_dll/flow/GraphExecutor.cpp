@@ -1,5 +1,6 @@
 ﻿#include "flow/GraphExecutor.h"
 #include "dlcv_infer.h"
+#include "flow/modules/ModelModules.h"
 
 #include <algorithm>
 #include <cctype>
@@ -83,6 +84,12 @@ static int ReadNodeOrder(const Json& node) {
         }
     } catch (...) {}
     return INT32_MAX - 1;
+}
+
+static std::string GetFileNameOnlyForModelMeta(const std::string& path) {
+    if (path.empty()) return std::string();
+    const size_t pos = path.find_last_of("/\\");
+    return pos == std::string::npos ? path : path.substr(pos + 1);
 }
 
 GraphExecutor::GraphExecutor(std::vector<Json> nodes, ExecutionContext* context)
@@ -559,6 +566,7 @@ std::vector<GraphExecutor::UnregisteredNodeInfo> GraphExecutor::GetLastUnregiste
 Json GraphExecutor::LoadModels() {
     _lastUnregisteredNodes.clear();
     _modelLoadHolds.clear();
+    Json loadedModelMeta = Json::array();
 
     // 排序与 Run 一致
     std::vector<Json> ordered = _nodes;
@@ -622,6 +630,22 @@ Json GraphExecutor::LoadModels() {
         item["type"] = type;
         item["title"] = title;
         item["model_path"] = modelPath;
+        item["order"] = ReadNodeOrder(node);
+        try {
+            if (props.contains("model_path_original") && props.at("model_path_original").is_string()) {
+                item["model_path_original"] = props.at("model_path_original");
+            }
+            if (props.contains("model_name") && props.at("model_name").is_string()) {
+                item["model_name"] = props.at("model_name");
+            }
+        } catch (...) {}
+        if (!item.contains("model_path_original")) item["model_path_original"] = modelPath;
+        if (!item.contains("model_name")) {
+            const std::string name = GetFileNameOnlyForModelMeta(item.at("model_path_original").get<std::string>());
+            item["model_name"] = name.empty()
+                ? item.at("model_path_original").get<std::string>()
+                : name;
+        }
 
         auto factory = ModuleRegistry::Get(type);
         if (!factory) {
@@ -644,10 +668,17 @@ Json GraphExecutor::LoadModels() {
             std::unique_ptr<BaseModule> module = factory(nodeId, title, props, _context);
             if (!module) throw std::runtime_error("module_factory_returned_null");
             module->LoadModel();
-            // 保持加载成功的模块存活，等待 FlowGraphModel 接收模型池引用后再统一释放。
-            _modelLoadHolds.push_back(std::move(module));
+            const auto* modelModule = dynamic_cast<const BaseModelModule*>(module.get());
+            if (modelModule == nullptr || !modelModule->LoadedModel()) {
+                throw std::runtime_error("model_module_did_not_expose_loaded_model");
+            }
+            item["model_info"] = modelModule->LoadedModel()->GetModelInfo();
+            item["device_id"] = modelModule->ResolvedDeviceId();
             item["status_code"] = 0;
             item["status_message"] = "ok";
+            if (item.contains("model_info")) loadedModelMeta.push_back(item);
+            // 保持加载成功的模块存活，等待 FlowGraphModel 接收模型池引用后再统一释放。
+            _modelLoadHolds.push_back(std::move(module));
         } catch (const std::exception& ex) {
             failCount++;
             item["status_code"] = 1;
@@ -677,6 +708,7 @@ Json GraphExecutor::LoadModels() {
     report["code"] = (failCount == 0) ? 0 : 1;
     report["message"] = (failCount == 0) ? "all models loaded" : ("models loaded with " + std::to_string(failCount) + " error(s)");
     report["models"] = items;
+    if (_context != nullptr) _context->Set<Json>("loaded_model_meta", std::move(loadedModelMeta));
     return report;
 }
 

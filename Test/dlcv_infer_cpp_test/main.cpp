@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -2042,6 +2043,122 @@ int RunCalcMeanSelfTest() {
     std::cout << "calc_mean 自测通过\n";
     return 0;
 }
+
+int RunModelInfoSelfTest(int argc, wchar_t* argv[]) {
+    if (argc < 4) {
+        std::cout << "用法: dlcv_infer_cpp_test.exe model-info-selftest <dvst> <dvt>\n";
+        return 2;
+    }
+
+    auto fail = [](const std::string& message) -> int {
+        std::cout << "模型信息自测失败: " << message << "\n";
+        return 1;
+    };
+
+    try {
+        dlcv_infer::Model dvsModel(argv[2], 0);
+        dlcv_infer::Model dvtModel(argv[3], 0);
+        const json dvsInfo = dvsModel.GetModelInfo();
+        const json dvsDetail = dvsModel.GetDvsModelInfo();
+        const json dvtInfo = dvtModel.GetModelInfo();
+
+        if (!dvtInfo.is_object() || !dvtInfo.contains("model_info") || !dvtInfo.at("model_info").is_object()) {
+            return fail("普通模型信息缺少 model_info");
+        }
+        if (!dvsInfo.is_object() || !dvsInfo.contains("model_info") || !dvsInfo.at("model_info").is_object()) {
+            return fail("流程模型兼容信息缺少 model_info");
+        }
+        if (dvsInfo.contains("loaded_model_meta") ||
+            (dvsInfo.at("model_info").is_object() && !dvsInfo.at("model_info").contains("task_type"))) {
+            return fail("流程模型兼容信息结构不完整");
+        }
+        if (!dvsDetail.is_object() || !dvsDetail.contains("nodes") || !dvsDetail.at("nodes").is_array()) {
+            return fail("详细流程信息缺少 nodes");
+        }
+        if (!dvsDetail.contains("loaded_model_meta") ||
+            !dvsDetail.at("loaded_model_meta").is_array() ||
+            dvsDetail.at("loaded_model_meta").empty()) {
+            return fail("详细流程信息缺少 loaded_model_meta");
+        }
+        if (!dvsDetail.contains("model_info") || !dvsDetail.at("model_info").is_object() ||
+            dvsDetail.at("model_info").empty()) {
+            return fail("详细流程信息缺少按模型名组织的 model_info");
+        }
+        for (const auto& node : dvsDetail.at("nodes")) {
+            if (!node.is_object() || !node.contains("properties") || !node.at("properties").is_object()) continue;
+            const auto& properties = node.at("properties");
+            if (!properties.contains("model_path_original")) continue;
+            if (!properties.contains("model_path") || properties.at("model_path") != properties.at("model_path_original")) {
+                return fail("详细流程仍包含临时模型路径");
+            }
+        }
+
+        const auto& meta = dvsDetail.at("loaded_model_meta");
+        const auto& first = meta.front();
+        if (!first.is_object() || !first.contains("model_info") || !first.at("model_info").is_object() ||
+            !first.contains("order") || !first.contains("model_name") || !first.contains("model_path_original")) {
+            return fail("模型节点信息缺少普通模型信息或原始名称");
+        }
+        if (!first.contains("model_path") || first.at("model_path") != first.at("model_path_original")) {
+            return fail("模型节点信息仍包含临时模型路径");
+        }
+        const auto& firstInfo = first.at("model_info");
+        if (firstInfo.contains("model_info") && firstInfo.at("model_info").is_object() &&
+            firstInfo.at("model_info").contains("in_channels") && dvsInfo.at("model_info").contains("in_channels") &&
+            firstInfo.at("model_info").at("in_channels") != dvsInfo.at("model_info").at("in_channels")) {
+            return fail("兼容信息的 in_channels 不是首模型值");
+        }
+        if (firstInfo.contains("input_shapes") && dvsInfo.contains("input_shapes") &&
+            firstInfo.at("input_shapes") != dvsInfo.at("input_shapes")) {
+            return fail("兼容信息的 input_shapes 不是首模型值");
+        }
+
+        const int outputNodeId = dvsDetail.value("output_model_node_id", -1);
+        const json* last = nullptr;
+        for (const auto& item : meta) {
+            if (!item.is_object() || !item.contains("model_info") || !item.at("model_info").is_object()) continue;
+            if (item.value("node_id", -1) == outputNodeId) {
+                last = &item;
+                break;
+            }
+        }
+        if (last == nullptr) return fail("无法确定最终模型节点");
+        const auto& lastInfoRoot = last->at("model_info");
+        const auto& lastInfo = lastInfoRoot.contains("model_info") && lastInfoRoot.at("model_info").is_object()
+            ? lastInfoRoot.at("model_info") : lastInfoRoot;
+        for (const char* key : {"task_type", "classes", "num_classes"}) {
+            if (lastInfo.contains(key) && (!dvsInfo.at("model_info").contains(key) ||
+                lastInfo.at(key) != dvsInfo.at("model_info").at(key))) {
+                return fail(std::string("兼容信息的最终模型字段不一致: ") + key);
+            }
+        }
+
+        bool ordinaryDvsRejected = false;
+        try {
+            (void)dvtModel.GetDvsModelInfo();
+        } catch (const std::exception&) {
+            ordinaryDvsRejected = true;
+        }
+        if (!ordinaryDvsRejected) return fail("普通模型未拒绝 GetDvsModelInfo");
+
+        dlcv_infer::Model moveTarget(argv[3], 0);
+        (void)moveTarget.GetModelInfo();
+        moveTarget = std::move(dvsModel);
+        if (moveTarget.GetModelInfo() != dvsInfo) {
+            return fail("移动赋值后返回了旧模型信息");
+        }
+
+        std::cout << "兼容字段: in_channels=" << dvsInfo.at("model_info").value("in_channels", 0)
+                  << ", input_shapes=" << dvsInfo.value("input_shapes", json())
+                  << ", task_type=" << dvsInfo.at("model_info").value("task_type", std::string())
+                  << ", num_classes=" << dvsInfo.at("model_info").value("num_classes", 0)
+                  << ", classes=" << dvsInfo.at("model_info").value("classes", json::array()) << "\n";
+        std::cout << "模型信息自测通过\n";
+        return 0;
+    } catch (const std::exception& ex) {
+        return fail(std::string("加载或读取模型信息异常: ") + ex.what());
+    }
+}
 }  // namespace
 
 int wmain(int argc, wchar_t* argv[]) {
@@ -2098,6 +2215,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunCalcMeanSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"model-info-selftest") {
+        return RunModelInfoSelfTest(argc, argv);
+    }
+
     std::cout << "Usage: " << (argc >= 1 ? WideToUtf8(argv[0]) : "dlcv_infer_cpp_test") << " <subcommand>\n";
     std::cout << "Available subcommands:\n";
     std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
@@ -2112,5 +2233,6 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
     std::cout << "  calc-mean-selftest\n";
+    std::cout << "  model-info-selftest <dvst> <dvt>\n";
     return 2;
 }

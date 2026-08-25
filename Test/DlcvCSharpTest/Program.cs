@@ -61,6 +61,11 @@ namespace DlcvCSharpTest
                     return RunModelChannelOrderSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "model-info-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunModelInfoSelfTest(args);
+                }
+
                 if (args != null && args.Length >= 1 &&
                     (string.Equals(args[0], "dvs-rgb-selftest", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(args[0], "dvs-bgr-selftest", StringComparison.OrdinalIgnoreCase)))
@@ -1883,6 +1888,175 @@ namespace DlcvCSharpTest
                         try { disposables[i]?.Dispose(); } catch { }
                     }
                 }
+            }
+        }
+
+        private static int RunModelInfoSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 3)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest model-info-selftest <dvst> <dvt>");
+                return 2;
+            }
+
+            string dvstPath = args[1];
+            string dvtPath = args[2];
+            if (!File.Exists(dvstPath) || !File.Exists(dvtPath))
+            {
+                Console.WriteLine("DVST 或 DVT 文件不存在");
+                return 2;
+            }
+
+            Model dvsModel = null;
+            Model dvtModel = null;
+            try
+            {
+                dvtModel = new Model(dvtPath, GpuDeviceId, false, false);
+                var dvtInfo = dvtModel.GetModelInfo();
+                var dvtInner = dvtInfo != null ? dvtInfo["model_info"] as JObject : null;
+                if (dvtInner == null)
+                {
+                    Console.WriteLine("自测失败：普通 DVT 缺少 model_info");
+                    return 1;
+                }
+                bool ordinaryDvsRejected = false;
+                try
+                {
+                    dvtModel.GetDvsModelInfo();
+                }
+                catch (InvalidOperationException)
+                {
+                    ordinaryDvsRejected = true;
+                }
+                if (!ordinaryDvsRejected)
+                {
+                    Console.WriteLine("自测失败：普通 DVT 未拒绝 GetDvsModelInfo");
+                    return 1;
+                }
+
+                dvsModel = new Model(dvstPath, GpuDeviceId, false, false);
+                var compatibleInfo = dvsModel.GetModelInfo();
+                var detailedInfo = dvsModel.GetDvsModelInfo();
+                var compatibleInner = compatibleInfo != null ? compatibleInfo["model_info"] as JObject : null;
+                var loadedMeta = detailedInfo != null ? detailedInfo["loaded_model_meta"] as JArray : null;
+                var detailedModels = detailedInfo != null ? detailedInfo["model_info"] as JObject : null;
+                var nodes = detailedInfo != null ? detailedInfo["nodes"] as JArray : null;
+
+                if (compatibleInner == null || loadedMeta == null || loadedMeta.Count == 0
+                    || detailedModels == null || detailedModels.Count == 0 || nodes == null)
+                {
+                    Console.WriteLine("自测失败：流程模型信息缺少兼容结构或详细流程字段");
+                    return 1;
+                }
+
+                foreach (var token in nodes)
+                {
+                    var properties = (token as JObject)?["properties"] as JObject;
+                    if (properties == null || properties["model_path_original"] == null) continue;
+                    if (!JToken.DeepEquals(properties["model_path"], properties["model_path_original"]))
+                    {
+                        Console.WriteLine("自测失败：详细流程仍包含临时模型路径");
+                        return 1;
+                    }
+                }
+
+                var successful = new List<JObject>();
+                foreach (var token in loadedMeta)
+                {
+                    var item = token as JObject;
+                    if (item == null || (item.Value<int?>("status_code") ?? 1) != 0) continue;
+                    if (!(item["model_info"] is JObject))
+                    {
+                        Console.WriteLine("自测失败：模型节点缺少完整普通模型信息");
+                        return 1;
+                    }
+                    if (item["order"] == null || item["model_name"] == null || item["model_path_original"] == null)
+                    {
+                        Console.WriteLine("自测失败：模型节点缺少 order 或原始名称字段");
+                        return 1;
+                    }
+                    if (!JToken.DeepEquals(item["model_path"], item["model_path_original"]))
+                    {
+                        Console.WriteLine("自测失败：模型节点信息仍包含临时模型路径");
+                        return 1;
+                    }
+                    successful.Add(item);
+                }
+                if (successful.Count == 0)
+                {
+                    Console.WriteLine("自测失败：没有成功加载的流程模型节点");
+                    return 1;
+                }
+
+                successful.Sort((left, right) =>
+                {
+                    int lo = left.Value<int?>("order") ?? int.MaxValue;
+                    int ro = right.Value<int?>("order") ?? int.MaxValue;
+                    if (lo != ro) return lo.CompareTo(ro);
+                    return (left.Value<int?>("node_id") ?? int.MaxValue).CompareTo(right.Value<int?>("node_id") ?? int.MaxValue);
+                });
+
+                var firstInfoRoot = successful[0]["model_info"] as JObject;
+                int outputNodeId = detailedInfo.Value<int?>("output_model_node_id") ?? -1;
+                var outputMeta = successful.FirstOrDefault(item => (item.Value<int?>("node_id") ?? -1) == outputNodeId);
+                if (outputMeta == null)
+                {
+                    Console.WriteLine("自测失败：详细流程缺少有效的 output_model_node_id");
+                    return 1;
+                }
+                var lastInfoRoot = outputMeta["model_info"] as JObject;
+                var firstInner = firstInfoRoot != null ? firstInfoRoot["model_info"] as JObject : null;
+                if (firstInner == null) firstInner = firstInfoRoot;
+                var lastInner = lastInfoRoot != null ? lastInfoRoot["model_info"] as JObject : null;
+                if (lastInner == null) lastInner = lastInfoRoot;
+                if (firstInner == null || lastInner == null)
+                {
+                    Console.WriteLine("自测失败：无法读取首尾模型的普通模型信息");
+                    return 1;
+                }
+
+                if (firstInner["in_channels"] != null
+                    && !JToken.DeepEquals(firstInner["in_channels"], compatibleInner["in_channels"]))
+                {
+                    Console.WriteLine("自测失败：兼容模型信息的首模型字段不一致：in_channels");
+                    return 1;
+                }
+                if (firstInfoRoot["input_shapes"] != null
+                    && !JToken.DeepEquals(firstInfoRoot["input_shapes"], compatibleInfo["input_shapes"]))
+                {
+                    Console.WriteLine("自测失败：兼容模型信息的首模型字段不一致：input_shapes");
+                    return 1;
+                }
+                string[] lastFields = { "task_type", "classes", "num_classes" };
+                foreach (string field in lastFields)
+                {
+                    if (lastInner[field] != null && !JToken.DeepEquals(lastInner[field], compatibleInner[field]))
+                    {
+                        Console.WriteLine("自测失败：兼容模型信息的末模型字段不一致：" + field);
+                        return 1;
+                    }
+                }
+
+                Console.WriteLine("DVT model_info: " + dvtInner.Count + " fields");
+                Console.WriteLine("DVST nodes: " + nodes.Count + ", loaded_model_meta: " + loadedMeta.Count + ", model_info: " + detailedModels.Count);
+                Console.WriteLine("兼容字段: in_channels=" + (compatibleInner["in_channels"] ?? "")
+                    + ", input_shapes=" + (compatibleInfo["input_shapes"] ?? "")
+                    + ", task_type=" + (compatibleInner["task_type"] ?? "")
+                    + ", num_classes=" + (compatibleInner["num_classes"] ?? "")
+                    + ", classes=" + (compatibleInner["classes"] ?? ""));
+                Console.WriteLine("模型信息自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("模型信息自测异常: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                try { if (dvsModel != null) dvsModel.Dispose(); } catch { }
+                try { if (dvtModel != null) dvtModel.Dispose(); } catch { }
+                ForceGc();
             }
         }
 

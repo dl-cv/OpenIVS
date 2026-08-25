@@ -675,24 +675,8 @@ namespace dlcv_infer_csharp
                 }
                 else if (_isDvsMode)
                 {
-                    modelInfo = _dvsModel != null ? _dvsModel.GetModelInfo() : null;
-                    if (modelInfo != null && _dvsModel != null)
-                    {
-                        JArray loadedMeta = null;
-                        try
-                        {
-                            loadedMeta = _dvsModel.GetLoadedModelMeta();
-                        }
-                        catch
-                        {
-                            loadedMeta = null;
-                        }
-
-                        if (loadedMeta != null && loadedMeta.Count > 0)
-                        {
-                            modelInfo["loaded_model_meta"] = loadedMeta;
-                        }
-                    }
+                    modelInfo = _dvsModel != null ? _dvsModel.GetCompatibleModelInfo() : null;
+                    modelInfo = PrepareDvsCacheInfo(modelInfo);
                 }
                 else if (_isRpcMode)
                 {
@@ -1441,21 +1425,7 @@ namespace dlcv_infer_csharp
             }
             else if (_isDvsMode)
             {
-                modelInfo = _dvsModel.GetModelInfo();
-                if (modelInfo != null && _dvsModel != null)
-                {
-                    try
-                    {
-                        JArray loadedMeta = _dvsModel.GetLoadedModelMeta();
-                        if (loadedMeta != null && loadedMeta.Count > 0)
-                        {
-                            modelInfo["loaded_model_meta"] = loadedMeta;
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
+                modelInfo = _dvsModel.GetCompatibleModelInfo();
             }
             else if (_isRpcMode)
             {
@@ -1488,8 +1458,42 @@ namespace dlcv_infer_csharp
                     modelInfo["model_info"] = real_model_info;
                 }
             }
-            UpdateModelMetaCache(modelInfo);
+            UpdateModelMetaCache(_isDvsMode ? PrepareDvsCacheInfo(modelInfo) : modelInfo);
             return modelInfo;
+        }
+
+        private JObject PrepareDvsCacheInfo(JObject modelInfo)
+        {
+            if (modelInfo == null || _dvsModel == null) return modelInfo;
+            var cacheInfo = (JObject)modelInfo.DeepClone();
+            try
+            {
+                var loadedMeta = _dvsModel.GetLoadedModelMeta();
+                if (loadedMeta != null && loadedMeta.Count > 0)
+                {
+                    cacheInfo["loaded_model_meta"] = loadedMeta;
+                }
+            }
+            catch
+            {
+            }
+            return cacheInfo;
+        }
+
+        /// <summary>
+        /// 返回 DVST/DVSO 的完整流程信息及所有子模型信息。
+        /// </summary>
+        public JObject GetDvsModelInfo()
+        {
+            if (!_isDvsMode)
+            {
+                throw new InvalidOperationException("GetDvsModelInfo 仅支持 DVST 或 DVSO 模型");
+            }
+            if (_dvsModel == null)
+            {
+                throw new InvalidOperationException("DVS 模型尚未加载");
+            }
+            return _dvsModel.GetDvsModelInfo();
         }
 
         private JObject GetModelInfoDvp()

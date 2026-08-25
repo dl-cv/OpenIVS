@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <climits>
 #include <fstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 
 #if defined(_MSC_VER) && defined(_DEBUG)
@@ -81,6 +83,198 @@ static std::string ResolveModelInfoKey(const Json& item) {
 
     const std::string fileName = GetFileNameOnlyLocal(name);
     return fileName.empty() ? name : fileName;
+}
+
+static int ReadIntField(const Json& object, const char* key, int defaultValue) {
+    try {
+        if (!object.is_object() || !object.contains(key)) return defaultValue;
+        const Json& value = object.at(key);
+        if (value.is_number_integer()) return value.get<int>();
+        if (value.is_number()) return static_cast<int>(value.get<double>());
+        if (value.is_string()) return std::stoi(value.get<std::string>());
+    } catch (...) {}
+    return defaultValue;
+}
+
+static int ReadIntValue(const Json& value, int defaultValue) {
+    try {
+        if (value.is_number_integer()) return value.get<int>();
+        if (value.is_number()) return static_cast<int>(value.get<double>());
+        if (value.is_string()) return std::stoi(value.get<std::string>());
+    } catch (...) {}
+    return defaultValue;
+}
+
+static std::string ReadStringFieldOrEmpty(const Json& object, const char* key) {
+    return ReadStringField(object, key);
+}
+
+static bool IsModelMeta(const Json& item) {
+    return item.is_object() && item.contains("model_info") && item.at("model_info").is_object();
+}
+
+static bool IsBeforeByOrderAndId(const Json& left, const Json& right) {
+    const int leftOrder = ReadIntField(left, "order", INT_MAX);
+    const int rightOrder = ReadIntField(right, "order", INT_MAX);
+    if (leftOrder != rightOrder) return leftOrder < rightOrder;
+    const int leftId = left.contains("node_id")
+        ? ReadIntField(left, "node_id", INT_MAX)
+        : ReadIntField(left, "id", INT_MAX);
+    const int rightId = right.contains("node_id")
+        ? ReadIntField(right, "node_id", INT_MAX)
+        : ReadIntField(right, "id", INT_MAX);
+    return leftId < rightId;
+}
+
+static std::vector<Json> ReadObjectArray(const Json& value) {
+    std::vector<Json> result;
+    if (value.is_array()) {
+        for (const auto& item : value) {
+            if (item.is_object()) result.push_back(item);
+        }
+    }
+    return result;
+}
+
+static int SelectResultModelNodeId(
+    const std::vector<Json>& nodes,
+    const Json& loadedModelMeta) {
+    if (!loadedModelMeta.is_array() || loadedModelMeta.empty()) return -1;
+
+    std::unordered_map<int, Json> nodesById;
+    std::unordered_map<int, std::pair<int, int>> linkSources;
+    for (const auto& node : nodes) {
+        if (!node.is_object()) continue;
+        const int nodeId = ReadIntField(node, "id", -1);
+        if (nodeId < 0) continue;
+        nodesById[nodeId] = node;
+        const auto outputs = ReadObjectArray(node.value("outputs", Json::array()));
+        for (int outputIndex = 0; outputIndex < static_cast<int>(outputs.size()); ++outputIndex) {
+            const Json& output = outputs[static_cast<size_t>(outputIndex)];
+            if (!output.contains("links") || !output.at("links").is_array()) continue;
+            for (const auto& link : output.at("links")) {
+                const int linkId = ReadIntValue(link, -1);
+                if (linkId >= 0) linkSources[linkId] = std::make_pair(nodeId, outputIndex);
+            }
+        }
+    }
+
+    std::vector<Json> returnOutputs;
+    std::vector<Json> otherOutputs;
+    for (const auto& node : nodes) {
+        if (!node.is_object()) continue;
+        const std::string type = ReadStringFieldOrEmpty(node, "type");
+        if (type == "output/return_json") returnOutputs.push_back(node);
+        else if (type.rfind("output/", 0) == 0) otherOutputs.push_back(node);
+    }
+    std::unordered_map<int, std::vector<int>> upstream;
+    for (const auto& node : nodes) {
+        if (!node.is_object()) continue;
+        const int nodeId = ReadIntField(node, "id", -1);
+        if (nodeId < 0) continue;
+        const auto inputs = ReadObjectArray(node.value("inputs", Json::array()));
+        for (const auto& input : inputs) {
+            const int linkId = input.contains("link") ? ReadIntValue(input.at("link"), -1) : -1;
+            auto source = linkSources.find(linkId);
+            if (source != linkSources.end()) upstream[nodeId].push_back(source->second.first);
+        }
+    }
+
+    auto findModelForOutput = [&](const Json& output) -> int {
+        if (!output.is_object()) return -1;
+        std::vector<int> reachableModels;
+        std::unordered_set<int> visited;
+        std::vector<int> stack;
+        const auto inputs = ReadObjectArray(output.value("inputs", Json::array()));
+        for (const auto& input : inputs) {
+            const int linkId = input.contains("link") ? ReadIntValue(input.at("link"), -1) : -1;
+            auto source = linkSources.find(linkId);
+            if (source != linkSources.end()) stack.push_back(source->second.first);
+        }
+        while (!stack.empty()) {
+            const int nodeId = stack.back();
+            stack.pop_back();
+            if (nodeId < 0 || !visited.insert(nodeId).second) continue;
+            auto nodeIt = nodesById.find(nodeId);
+            if (nodeIt == nodesById.end()) continue;
+            const std::string type = ReadStringFieldOrEmpty(nodeIt->second, "type");
+            if (type.rfind("model/", 0) == 0) {
+                reachableModels.push_back(nodeId);
+            }
+            auto upstreamIt = upstream.find(nodeId);
+            if (upstreamIt != upstream.end()) {
+                stack.insert(stack.end(), upstreamIt->second.begin(), upstreamIt->second.end());
+            }
+        }
+        if (reachableModels.empty()) return -1;
+
+        Json selectedMeta;
+        for (const auto& item : loadedModelMeta) {
+            if (!IsModelMeta(item)) continue;
+            const int nodeId = ReadIntField(item, "node_id", -1);
+            if (std::find(reachableModels.begin(), reachableModels.end(), nodeId) == reachableModels.end()) continue;
+            if (!selectedMeta.is_object() || IsBeforeByOrderAndId(selectedMeta, item)) selectedMeta = item;
+        }
+        return selectedMeta.is_object() ? ReadIntField(selectedMeta, "node_id", -1) : -1;
+    };
+
+    std::sort(returnOutputs.begin(), returnOutputs.end(), IsBeforeByOrderAndId);
+    std::sort(otherOutputs.begin(), otherOutputs.end(), IsBeforeByOrderAndId);
+    for (auto it = returnOutputs.rbegin(); it != returnOutputs.rend(); ++it) {
+        const int selected = findModelForOutput(*it);
+        if (selected >= 0) return selected;
+    }
+    for (auto it = otherOutputs.rbegin(); it != otherOutputs.rend(); ++it) {
+        const int selected = findModelForOutput(*it);
+        if (selected >= 0) return selected;
+    }
+    return -1;
+}
+
+static Json BuildCompatibleModelInfo(
+    const std::vector<Json>& nodes,
+    const Json& loadedModelMeta) {
+    Json first;
+    Json last;
+    const int selectedResultNodeId = SelectResultModelNodeId(nodes, loadedModelMeta);
+    if (loadedModelMeta.is_array()) {
+        for (const auto& item : loadedModelMeta) {
+            if (!IsModelMeta(item)) continue;
+            if (!first.is_object()) first = item;
+            if (selectedResultNodeId < 0 || ReadIntField(item, "node_id", -1) == selectedResultNodeId) {
+                last = item;
+            }
+        }
+    }
+    if (!last.is_object() && loadedModelMeta.is_array()) {
+        for (const auto& item : loadedModelMeta) {
+            if (IsModelMeta(item)) last = item;
+        }
+    }
+    if (!first.is_object()) {
+        return Json();
+    }
+
+    Json firstInfo = first.at("model_info");
+    Json result = firstInfo;
+    Json mergedInfo = firstInfo.contains("model_info") && firstInfo.at("model_info").is_object()
+        ? firstInfo.at("model_info") : Json::object();
+    if (last.is_object() && last.contains("model_info") && last.at("model_info").is_object()) {
+        const Json& lastInfo = last.at("model_info");
+        const Json& lastInner = lastInfo.contains("model_info") && lastInfo.at("model_info").is_object()
+            ? lastInfo.at("model_info") : lastInfo;
+        for (const char* key : {"task_type", "classes", "num_classes"}) {
+            if (lastInner.contains(key)) mergedInfo[key] = lastInner.at(key);
+        }
+    }
+    if (firstInfo.contains("model_info") && firstInfo.at("model_info").is_object() &&
+        firstInfo.at("model_info").contains("in_channels")) {
+        mergedInfo["in_channels"] = firstInfo.at("model_info").at("in_channels");
+    }
+    result["model_info"] = std::move(mergedInfo);
+
+    if (firstInfo.contains("input_shapes")) result["input_shapes"] = firstInfo.at("input_shapes");
+    return result;
 }
 
 static void AppendResultsDedup(std::vector<FlowResultItem>& target, const std::vector<FlowResultItem>& source) {
@@ -365,6 +559,8 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
         throw std::runtime_error("flow json missing nodes array");
     }
 
+    ReleaseOwnedModelsNoexcept();
+    _loaded = false;
     _nodes.clear();
     for (const auto& n : root.at("nodes")) {
         if (n.is_object()) _nodes.push_back(n);
@@ -424,24 +620,16 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
         report = Json::object({ {"code", 1}, {"message", simpleMessage} });
     }
 
-    // 收集本流程涉及的所有模型 key，并增加引用
-    _acquiredModelKeys.clear();
-    for (const auto& n : _nodes) {
-        if (!n.is_object()) continue;
-        std::string type;
-        try { if (n.contains("type") && n.at("type").is_string()) type = n.at("type"); } catch (...) {}
-        if (type.rfind("model/", 0) != 0) continue;
-
+    // 使用实际加载时保存的路径和设备保留模型引用。
+    for (const auto& item : _loadedModelMeta) {
+        if (!IsModelMeta(item)) continue;
         std::string modelPath;
         int nodeDeviceId = deviceId;
         try {
-            if (n.contains("properties") && n.at("properties").is_object()) {
-                const auto& props = n.at("properties");
-                if (props.contains("model_path") && props.at("model_path").is_string())
-                    modelPath = props.at("model_path");
-                if (props.contains("device_id"))
-                    nodeDeviceId = props.at("device_id").get<int>();
-            }
+            if (item.contains("model_path") && item.at("model_path").is_string())
+                modelPath = item.at("model_path").get<std::string>();
+            if (item.contains("device_id"))
+                nodeDeviceId = ReadIntField(item, "device_id", deviceId);
         } catch (...) {}
         if (modelPath.empty()) continue;
 
@@ -460,22 +648,62 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
 
 Json FlowGraphModel::GetModelInfo() const {
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
+    Json compatible = BuildCompatibleModelInfo(_nodes, _loadedModelMeta);
+    return compatible.is_null() ? GetDvsModelInfo() : compatible;
+}
+
+Json FlowGraphModel::GetDvsModelInfo() const {
+    if (!_loaded) throw std::runtime_error("flow graph not loaded");
     Json root = _root.is_object() ? _root : Json::object();
+    try {
+        if (root.contains("nodes") && root.at("nodes").is_array()) {
+            for (auto& node : root["nodes"]) {
+                if (!node.is_object() || !node.contains("properties") || !node["properties"].is_object()) continue;
+                auto& properties = node["properties"];
+                if (properties.contains("model_path_original") && properties.at("model_path_original").is_string()) {
+                    properties["model_path"] = properties.at("model_path_original");
+                }
+            }
+        }
+    } catch (...) {}
     if (_loadedModelMeta.is_array() && !_loadedModelMeta.empty()) {
-        root["loaded_model_meta"] = _loadedModelMeta;
+        Json publicMeta = _loadedModelMeta;
+        for (auto& item : publicMeta) {
+            if (!item.is_object() || !item.contains("model_path_original") || !item.at("model_path_original").is_string()) continue;
+            item["model_path"] = item.at("model_path_original");
+        }
+        root["loaded_model_meta"] = std::move(publicMeta);
     }
 
     Json modelInfo = Json::object();
     if (_loadedModelMeta.is_array()) {
         for (const auto& item : _loadedModelMeta) {
             if (!item.is_object() || !item.contains("model_info")) continue;
-            const std::string key = ResolveModelInfoKey(item);
+            std::string key = ResolveModelInfoKey(item);
             if (key.empty()) continue;
+            if (modelInfo.contains(key)) {
+                const std::string baseKey = key;
+                const int nodeId = ReadIntField(item, "node_id", -1);
+                key = nodeId >= 0 ? baseKey + "#" + std::to_string(nodeId) : baseKey + "#2";
+                int suffix = 2;
+                while (modelInfo.contains(key)) {
+                    key = baseKey + "#" + std::to_string(suffix++);
+                }
+            }
             modelInfo[key] = item.at("model_info");
         }
     }
     if (!modelInfo.empty()) {
         root["model_info"] = std::move(modelInfo);
+    }
+
+    if (_loadedModelMeta.is_array() && !_loadedModelMeta.empty()) {
+        for (const auto& item : _loadedModelMeta) {
+            if (!IsModelMeta(item)) continue;
+            root["input_model_node_id"] = ReadIntField(item, "node_id", -1);
+            break;
+        }
+        root["output_model_node_id"] = SelectResultModelNodeId(_nodes, _loadedModelMeta);
     }
 
     return root;

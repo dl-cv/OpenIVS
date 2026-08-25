@@ -1527,7 +1527,6 @@ namespace dlcv_infer {
         : _deviceId(device_id) {
         const std::wstring modelPathW = DecodeModelPathString(modelPath);
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPathW);
-
         if (IsFlowArchivePath(modelPathUtf8)) {
             _isFlowGraphMode = true;
             _flowModel = new flow::FlowGraphModel();
@@ -1594,7 +1593,6 @@ namespace dlcv_infer {
     Model::Model(const std::wstring& modelPath, int device_id)
         : _deviceId(device_id) {
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPath);
-
         if (IsFlowArchivePath(modelPathUtf8)) {
             _isFlowGraphMode = true;
             _flowModel = new flow::FlowGraphModel();
@@ -1665,6 +1663,8 @@ namespace dlcv_infer {
         _deviceId(other._deviceId),
         _flowModel(other._flowModel),
         _expectedChCache(other._expectedChCache),
+        _hasCachedModelInfo(other._hasCachedModelInfo),
+        _cachedModelInfo(std::move(other._cachedModelInfo)),
         _tempDir(std::move(other._tempDir)),
         _dllLoader(other._dllLoader),
         _loadedDogProvider(other._loadedDogProvider),
@@ -1675,6 +1675,8 @@ namespace dlcv_infer {
         other._deviceId = 0;
         other._flowModel = nullptr;
         other._expectedChCache = -2;
+        other._hasCachedModelInfo = false;
+        other._cachedModelInfo = json();
         other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
@@ -1694,6 +1696,8 @@ namespace dlcv_infer {
         _deviceId = other._deviceId;
         _flowModel = other._flowModel;
         _expectedChCache = other._expectedChCache;
+        _hasCachedModelInfo = other._hasCachedModelInfo;
+        _cachedModelInfo = std::move(other._cachedModelInfo);
         _tempDir = std::move(other._tempDir);
         _dllLoader = other._dllLoader;
         _loadedDogProvider = other._loadedDogProvider;
@@ -1705,6 +1709,8 @@ namespace dlcv_infer {
         other._deviceId = 0;
         other._flowModel = nullptr;
         other._expectedChCache = -2;
+        other._hasCachedModelInfo = false;
+        other._cachedModelInfo = json();
         other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
@@ -1788,6 +1794,16 @@ namespace dlcv_infer {
         _cachedModelInfo = resultObject;
         _hasCachedModelInfo = true;
         return resultObject;
+    }
+
+    json Model::GetDvsModelInfo() {
+        if (!_isFlowGraphMode) {
+            throw std::runtime_error("GetDvsModelInfo 仅支持流程模型");
+        }
+        if (!_flowModel) {
+            throw std::runtime_error("DVS 模型尚未加载");
+        }
+        return _flowModel->GetDvsModelInfo();
     }
 
     int Model::resolveEffectiveInputCh() {

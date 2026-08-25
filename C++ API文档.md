@@ -186,9 +186,10 @@ public:
 
 ```cpp
 json GetModelInfo();
+json GetDvsModelInfo();
 ```
-- 返回模型元信息 JSON（包含 `model_info`、`input_shapes`、`dog_provider`、`loaded_model_meta` 等）。
-- Flow 模式下调用 `_flowModel->GetModelInfo()`。
+- `GetModelInfo()` 对普通模型和流程模型返回相同层级。流程模型的输入通道和输入形状取首个模型，任务类型、类别列表和类别数量取最终输出可达的模型。
+- `GetDvsModelInfo()` 支持流程模型，返回完整流程 JSON、`loaded_model_meta`、按模型文件名组织的 `model_info`，以及首模型和最终输出模型的节点编号。
 - 普通模式下通过 `dlcv_get_model_info` 获取。
 
 ### 4.3 单图推理
@@ -328,14 +329,14 @@ public:
     // 从 JSON 文件加载流程图
     json Load(const std::string& flowJsonPath, int deviceId = 0);
 
-    // 内部推理，返回 JSON 根对象和结果指针
-    std::pair<json, void*> InferInternal(const std::vector<cv::Mat>& images, const json& params_json);
+    // 内部推理，返回 JSON 根对象
+    json InferInternal(const std::vector<cv::Mat>& images, const json& params_json);
 
-    // 获取模型信息（含 nodes、loaded_model_meta、model_info 等）
-    json GetModelInfo();
+    // 获取与普通模型相同结构的兼容模型信息
+    json GetModelInfo() const;
 
-    // 获取已加载模型的元信息
-    json GetLoadedModelMeta();
+    // 获取完整流程及全部子模型信息
+    json GetDvsModelInfo() const;
 };
 
 } // namespace dlcv_infer::flow
@@ -607,11 +608,11 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 20.1 公开面
 
-`Model` 暴露字段 `modelIndex`、`OwnModelIndex`；公开构造为默认构造、`Model(const std::string&, int)`、`Model(const std::wstring&, int)`；禁用拷贝、支持移动；公开成员函数为 `FreeModel()`、`GetModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetLastInferTiming()`、`GetLastFlowNodeTimings()`、`GetLastInspectionStatus()`。
+`Model` 暴露字段 `modelIndex`、`OwnModelIndex`；公开构造为默认构造、`Model(const std::string&, int)`、`Model(const std::wstring&, int)`；禁用拷贝、支持移动；公开成员函数为 `FreeModel()`、`GetModelInfo()`、`GetDvsModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetLastInferTiming()`、`GetLastFlowNodeTimings()`、`GetLastInspectionStatus()`。
 
 ### 20.2 加载、释放与信息查询
 
-`.dvst/.dvso/.dvsp` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载，加载前由 `DllLoader::ForModel` 解析模型头并绑定对应 provider 的 loader：若模型头明确指定 `dog_provider`，则校验对应加密狗；若未指定，则通过 `AutoDetectProvider()` 按 Sentinel 优先、Virbox 第二自动检测。FlowGraph 模式创建 `flow::FlowGraphModel` 并完成归档解包后再加载，解包流程不得修改模型二进制数据。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引；`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回流程根对象，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`。
+`.dvst/.dvso/.dvsp` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载。FlowGraph 模式完成归档解包后加载全部模型节点。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
 
 ### 20.3 推理前图像规整
 
@@ -643,7 +644,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 23.2 `FlowGraphModel`
 
-`FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并只预加载 `model/*` 节点；`InferInternal()` 在上下文中写入前端图像、设备和参数后返回 `result_list` 与 `timing`，并保留按图 `ok/reason`；清理阶段只清 `ModelPool`，不调用 `Utils::FreeAllModels()`。
+`FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`GetDvsModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并预加载 `model/*` 节点，同时保存每个模型节点的普通模型信息。
 
 ### 23.3 `ExecutionContext`
 

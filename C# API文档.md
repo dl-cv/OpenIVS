@@ -174,8 +174,10 @@ public double Benchmark(Mat image, int warmup = 1, int runs = 10);
 
 ```csharp
 public JObject GetModelInfo();
+public JObject GetDvsModelInfo();
 ```
-- 返回模型元信息 JSON（包含 `model_info`、`input_shapes`、`dog_provider`、`loaded_model_meta` 等）。
+- `GetModelInfo()` 对 DVT 与 DVST/DVSO 返回相同层级。DVST/DVSO 的输入通道和输入形状取首个模型，任务类型、类别列表和类别数量取最终输出可达的模型。
+- `GetDvsModelInfo()` 仅支持 DVST/DVSO，返回完整流程 JSON、`loaded_model_meta`、按模型文件名组织的 `model_info`，以及首模型和最终输出模型的节点编号；其他模型调用时抛出 `InvalidOperationException`。
 
 ### 3.8 释放
 
@@ -240,9 +242,11 @@ private Tuple<JObject, IntPtr> InferInternalCore(List<Mat> images, JObject param
 
 ```csharp
 public JObject GetModelInfo();
+public JObject GetDvsModelInfo();
 public JArray GetLoadedModelMeta();
 ```
-- `GetModelInfo` 返回包含 `nodes`、`loaded_model_meta`、`model_info` 的完整 JSON。
+- `GetModelInfo` 返回与普通模型相同结构的兼容模型信息。
+- `GetDvsModelInfo` 返回包含 `nodes`、`loaded_model_meta`、`model_info` 的完整 JSON。
 - `GetLoadedModelMeta` 返回已加载模型的元信息数组。
 
 ### 4.5 释放
@@ -587,7 +591,7 @@ Console.WriteLine(info.ToString());
 
 #### 公开面
 
-`Model` 的公开面围绕四类能力组织：生命周期与状态包括空构造、带参构造、`EnableConsoleLog`、`modelIndex`、`OwnModelIndex`、`IsDvpMode`、`FreeModel()`、`Dispose()`；缓存与批量元信息包括 `GetCachedModelInfo()`、`GetCachedMaxShape()`、`GetMaxBatchSize()`、`GetResolvedSubModelBatchItems()`、`ClearModelCache()`；模型信息查询使用 `GetModelInfo()`；推理入口使用 `Infer()`、`InferBatch()` 与 `InferOneOutJson()`。
+`Model` 的公开面围绕四类能力组织：生命周期与状态包括空构造、带参构造、`EnableConsoleLog`、`modelIndex`、`OwnModelIndex`、`IsDvpMode`、`FreeModel()`、`Dispose()`；缓存与批量元信息包括 `GetCachedModelInfo()`、`GetCachedMaxShape()`、`GetMaxBatchSize()`、`GetResolvedSubModelBatchItems()`、`ClearModelCache()`；模型信息查询使用 `GetModelInfo()` 和 `GetDvsModelInfo()`；推理入口使用 `Infer()`、`InferBatch()` 与 `InferOneOutJson()`。
 
 #### 模型加载规则
 
@@ -606,7 +610,7 @@ Console.WriteLine(info.ToString());
 | --- | --- |
 | DVT | 通过 `dlcv_load_model`、`dlcv_get_model_info`、`dlcv_infer`、`dlcv_free_model_result`、`dlcv_free_model` 工作 |
 | DVP | 自动检查后端服务；服务不可用时启动 `DLCV Test.exe --keep_alive`；推理请求固定附带 `return_polygon=true` |
-| DVS | 内部创建 `DlcvModules.DvsModel`；`GetModelInfo()` 返回流程 JSON，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info` |
+| DVS | 内部创建 `DlcvModules.DvsModel`；`GetModelInfo()` 返回普通模型兼容结构，`GetDvsModelInfo()` 返回完整流程及全部子模型信息 |
 | RPC | 自动启动 `AIModelRPC.exe`；图像通过共享内存传输；结果中的 mask 可通过共享内存回读 |
 
 #### 输入与输出
@@ -626,7 +630,7 @@ Console.WriteLine(info.ToString());
 
 共享的 Flow 节点分类、统一输入输出字段、模板对象与计时口径见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
-C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`Benchmark()`、`Dispose()`；执行时会把前端图像、`device_id` 和 `return_json_emit_poly` 写入 `ExecutionContext`，并把 `result_list` 转为结构化结果或 JSON 输出。
+C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`GetDvsModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`Benchmark()`、`Dispose()`。模型加载阶段记录每个模型节点的执行顺序、原始模型名和普通模型信息。
 
 ### 14.3 `DvsModel`
 
