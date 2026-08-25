@@ -29,7 +29,7 @@
 | `dlcv_infer_c_api.h` | 全部 C 接口声明与六个 C 数据结构；不再需要额外的 `dlcv_data_type_c.h` |
 | `dlcv_infer_cpp.dll` | C API 与 C++ API 共用的运行库，通过 `LoadLibraryW` 加载 |
 
-`Test/dlcv_infer_c_test/pure_c_header_test.c` 使用 C 编译模式包含 `dlcv_infer_c_api.h`，检查结构声明、函数指针类型和 Windows x64 结构大小。
+`Test/dlcv_infer_c_test/pure_c_header_test.c` 使用 C 编译模式，只包含 `dlcv_infer_c_api.h`，通过 `LoadLibraryW/GetProcAddress` 解析并调用统一 DLL，同时检查结构声明、函数指针类型和 Windows x64 结构大小。
 
 主要功能映射：
 

@@ -93,7 +93,7 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 | `DlcvCSampleResult` | `results`、`n` | 结果数组由结果释放函数释放 |
 | `DlcvCResult` | `code`、`message`、`sample_results`、`n` | 结果消息、样本数组及其嵌套数据由结果释放函数释放 |
 
-共享头文件在 C 和 C++ 中使用相同字段顺序。`Test/dlcv_infer_c_test/pure_c_header_test.c` 强制按 C 编译，并检查 Windows x64 下六个结构的大小。
+共享头文件在 C 和 C++ 中使用相同字段顺序。`Test/dlcv_infer_c_test/pure_c_header_test.c` 强制按 C 编译，只包含公开头，并通过 `LoadLibraryW/GetProcAddress` 调用统一 DLL，同时检查 Windows x64 下六个结构的大小。
 
 输入图像要求：
 
