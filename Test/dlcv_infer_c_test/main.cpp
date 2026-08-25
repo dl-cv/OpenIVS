@@ -268,6 +268,11 @@ static bool RunCapiExportCompletenessCheck() {
         "dlcv_infer_cpp_infer_c",
         "dlcv_infer_cpp_infer_with_params_c",
         "dlcv_infer_cpp_free_model_result_c",
+        "dlcv_infer_cpp_get_model_info_c",
+        "dlcv_infer_cpp_infer_json_c",
+        "dlcv_infer_cpp_get_all_dog_info_c",
+        "dlcv_infer_cpp_free_string_c",
+        "dlcv_infer_cpp_free_all_models_c",
         "dlcv_load_model_c",
         "dlcv_free_model_c",
         "dlcv_infer_c",
@@ -345,7 +350,7 @@ static bool RunCapiExportCompletenessCheck() {
     if (exportsPresent) ok = RunCapiForwardingCheck(module) && ok;
     if (ownsModule) FreeLibrary(module);
     if (ok) {
-        std::cout << "PASS: C DLL 29 个导出函数均存在，安全只读接口调用成功\n";
+        std::cout << "PASS: C DLL 34 个导出函数均存在，安全只读接口调用成功\n";
     }
     return ok;
 }

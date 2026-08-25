@@ -14,6 +14,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
   - C# API：`DlcvCsharpApi`（`Model.cs`、`Utils.cs`、`FlowGraphModel.cs`、`DvsModel.cs`、`DllLoader.cs`）
 - **测试程序**：
   - C++：`dlcv_infer_cpp_qt_demo` / `dlcv_infer_cpp_qt_demo2` / `dlcv_infer_cpp_qt_demo3`（Qt 桌面应用）
+  - C：`dlcv_infer_c_qt_demo`（Qt 桌面应用，推理功能只调用 C ABI）
   - C#：`DlcvDemo` / `DlcvDemo2` / `DlcvDemo3`（WinForms 桌面应用）
 - **控制台测试**：`Test/DlcvCSharpTest`、`Test/dlcv_infer_cpp_test`、`Test/dlcv_infer_c_test`
 
@@ -52,6 +53,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | C# 加密狗工具 | `DlcvCsharpApi/sntl_admin_csharp.cs` | `DogUtils`、`DogProvider` |
 | C++ 图像输入 | `dlcv_infer_cpp_dll/ImageInputUtils.h` | 图像预处理与格式转换 |
 | C++ 测试程序 | `dlcv_infer_cpp_qt_demo/MainWindow.cpp` | 模型加载、推理、压力测试、加密狗检测 |
+| C 测试程序 | `dlcv_infer_c_qt_demo/MainWindow.cpp` | 通过 C ABI 执行模型加载、推理、压力测试和加密狗检测 |
 | C# 测试程序 | `DlcvDemo/Form1.cs` | WinForms 测试程序主窗口 |
 | C# 压力测试 | `PressureTestRunner/PressureTestRunner.cs` | 多线程/一致性测试框架 |
 
@@ -118,6 +120,11 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 | 推理 | `dlcv_infer_cpp_infer_c` | `int model_index, const DlcvCImageList* image_list` → 返回 `DlcvCResult` |
 | 带参数推理 | `dlcv_infer_cpp_infer_with_params_c` | 在图像列表之外接收 JSON 参数，可传 `threshold`、`calc_mean` 等字段 |
 | 释放结果 | `dlcv_infer_cpp_free_model_result_c` | `DlcvCResult* result` |
+| 模型信息 | `dlcv_infer_cpp_get_model_info_c` | 模型索引 → UTF-8 JSON 字符串 |
+| JSON 推理 | `dlcv_infer_cpp_infer_json_c` | 模型索引、单张图像和参数 JSON → UTF-8 JSON 字符串 |
+| 加密狗查询 | `dlcv_infer_cpp_get_all_dog_info_c` | 返回 Sentinel 与 Virbox 信息 JSON |
+| 字符串释放 | `dlcv_infer_cpp_free_string_c` | 释放扩展 C 接口返回的字符串 |
+| 全部模型释放 | `dlcv_infer_cpp_free_all_models_c` | 清空扩展模型表并释放底层模型 |
 
 **数据结构**：复用底层 `dlcv_infer/dlcv_data_type_c.h` 中的 `DlcvCImage`、`DlcvCImageList`、`DlcvCObjectResult`、`DlcvCSampleResult`、`DlcvCResult`。
 
@@ -350,6 +357,16 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 - **压力测试**：每 500ms 更新统计，包含运行时间、完成请求数、平均延迟、实时速率、各节点平均耗时
 - **命令行模式**：`infer --model ... --image ... --threshold ... --calc-mean ...`，无界面执行结构化与 JSON 双路径验证
 
+### C Qt Demo（`dlcv_infer_c_qt_demo`）
+
+- **工程**：`dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.vcxproj`
+- **窗口标题**：`C测试程序`
+- **技术栈**：Qt 6 + OpenCV 4.x + `dlcv_infer_c_dll`
+- **界面**：控件布局与 `dlcv_infer_cpp_qt_demo` 一致
+- **功能**：模型加载、模型信息、结构化推理、JSON 推理、多线程测试、结果显示、全部模型释放和加密狗查询
+- **接口限制**：Demo 源码不包含 `dlcv_infer.h`，不使用 `dlcv_infer::Model`，DLCV 功能只调用 C 名称函数
+- **结果显示**：C 结果在调用释放函数前复制到程序内部显示类型，mask 同步复制到独立 `cv::Mat`
+
 ### C++ Qt Demo2（`dlcv_infer_cpp_qt_demo2`）
 
 - **工程**：`dlcv_infer_cpp_qt_demo2/dlcv_infer_cpp_qt_demo2.vcxproj`
@@ -431,7 +448,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 
 ## 运行验证方式
 
-- 构建完成后可运行 `DlcvDemo` 或 `dlcv_infer_cpp_qt_demo` GUI 加载模型并执行单次推理验证。
+- 构建完成后可运行 `DlcvDemo`、`dlcv_infer_cpp_qt_demo` 或 `dlcv_infer_c_qt_demo` GUI 加载模型并执行单次推理验证。
 - 自动验证使用两个实际测试程序的 `infer` 命令行模式；模型、图片与阈值通过已定义参数传入。
 - 使用 `Test/DlcvCSharpTest` 或 `Test/dlcv_infer_cpp_test` 执行自动化控制台测试（模型加载、推理、速度、内存）。
 - C# 测试支持 `demo2-rgb-selftest` 验证 Demo2 入口 RGB 数据流一致性。

@@ -427,6 +427,109 @@ void dlcv_infer_cpp_free_model_result_c(DlcvCResult* result) {
     result->code = 0;
 }
 
+const char* dlcv_infer_cpp_get_model_info_c(int model_index) {
+    ClearLastErrorMessage();
+    std::shared_ptr<CApiModelEntry> entry;
+    {
+        std::lock_guard<std::mutex> lock(g_modelsMutex);
+        const auto it = g_models.find(model_index);
+        if (it == g_models.end()) {
+            SetLastErrorMessage("model not found");
+            return nullptr;
+        }
+        entry = it->second;
+    }
+
+    try {
+        const std::string value = entry->model->GetModelInfo().dump();
+        return _strdup(value.c_str());
+    } catch (const std::exception& ex) {
+        SetLastErrorMessage(ex.what());
+    } catch (...) {
+        SetLastErrorMessage("unknown error");
+    }
+    return nullptr;
+}
+
+const char* dlcv_infer_cpp_infer_json_c(
+    int model_index,
+    const DlcvCImage* image,
+    const char* params_json) {
+    ClearLastErrorMessage();
+    if (image == nullptr || image->data_ptr == 0 || image->height <= 0 || image->width <= 0 || image->channel <= 0) {
+        SetLastErrorMessage("invalid image data");
+        return nullptr;
+    }
+
+    std::shared_ptr<CApiModelEntry> entry;
+    {
+        std::lock_guard<std::mutex> lock(g_modelsMutex);
+        const auto it = g_models.find(model_index);
+        if (it == g_models.end()) {
+            SetLastErrorMessage("model not found");
+            return nullptr;
+        }
+        entry = it->second;
+    }
+
+    std::unique_lock<std::mutex> inferLock(entry->inferMutex, std::defer_lock);
+    if (entry->serializeInfer) {
+        inferLock.lock();
+    }
+
+    try {
+        const int type = CV_8UC(image->channel);
+        cv::Mat mat(
+            image->height,
+            image->width,
+            type,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(image->data_ptr)));
+        dlcv_infer::json params = dlcv_infer::json::object();
+        if (params_json != nullptr && params_json[0] != '\0') {
+            params = dlcv_infer::json::parse(params_json);
+            if (!params.is_object()) {
+                throw std::invalid_argument("params_json 必须是 JSON 对象");
+            }
+        }
+        const std::string value = entry->model->InferOneOutJson(mat, params).dump();
+        return _strdup(value.c_str());
+    } catch (const std::exception& ex) {
+        SetLastErrorMessage(ex.what());
+    } catch (...) {
+        SetLastErrorMessage("unknown error");
+    }
+    return nullptr;
+}
+
+const char* dlcv_infer_cpp_get_all_dog_info_c() {
+    ClearLastErrorMessage();
+    try {
+        const std::string value = dlcv_infer::GetAllDogInfo().dump();
+        return _strdup(value.c_str());
+    } catch (const std::exception& ex) {
+        SetLastErrorMessage(ex.what());
+    } catch (...) {
+        SetLastErrorMessage("unknown error");
+    }
+    return nullptr;
+}
+
+void dlcv_infer_cpp_free_string_c(const char* value) {
+    std::free(const_cast<char*>(value));
+}
+
+void dlcv_infer_cpp_free_all_models_c() {
+    std::unordered_map<int, std::shared_ptr<CApiModelEntry>> models;
+    {
+        std::lock_guard<std::mutex> lock(g_modelsMutex);
+        models.swap(g_models);
+    }
+    models.clear();
+    CallNativeVoid("dlcv_free_all_models", []() {
+        dlcv_infer::NativeApi::FreeAllModels();
+    });
+}
+
 int DLCV_C_NATIVE_CALL dlcv_load_model_c(const char* model_path, int device_id) {
     return dlcv_infer_cpp_load_model_c(model_path, device_id);
 }
