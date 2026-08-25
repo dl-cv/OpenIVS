@@ -5,7 +5,60 @@
 #include <stdbool.h>
 #endif
 
-#include "dlcv_infer/dlcv_data_type_c.h"
+#ifndef DLCV_DATA_TYPE_C_H
+#define DLCV_DATA_TYPE_C_H
+
+typedef struct DlcvCImage {
+    long long data_ptr;
+    int height;
+    int width;
+    int channel;
+} DlcvCImage;
+
+typedef struct DlcvCImageList {
+    DlcvCImage* images;
+    int n;
+} DlcvCImageList;
+
+typedef struct DlcvCMask {
+    long long mask_ptr;
+    int height;
+    int width;
+} DlcvCMask;
+
+typedef struct DlcvCObjectResult {
+    int category_id;
+    char* category_name;
+    float score;
+
+    bool with_bbox;
+    float area;
+    float x, y, w, h;
+
+    bool with_mask;
+    DlcvCMask mask;
+
+    bool with_angle;
+    float angle;
+
+    bool with_mean;
+    double foreground_mean;
+    double background_mean;
+} DlcvCObjectResult;
+
+typedef struct DlcvCSampleResult {
+    DlcvCObjectResult* results;
+    int n;
+} DlcvCSampleResult;
+
+typedef struct DlcvCResult {
+    int code;
+    char* message;
+    DlcvCSampleResult* sample_results;
+    int n;
+} DlcvCResult;
+
+#endif
 
 #if defined(_WIN32) || defined(__CYGWIN__)
 #  ifdef DLCV_INFER_CPP_EXPORTS

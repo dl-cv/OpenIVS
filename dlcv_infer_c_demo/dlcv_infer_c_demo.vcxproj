@@ -53,9 +53,6 @@
     <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\x64\vc16\lib\opencv_world4100.lib')">$(OpenCV_DIR)\x64\vc16\lib</OpenCvLibDir>
     <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and Exists('$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib\opencv_world4100.lib')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib'))</OpenCvLibDir>
     <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and Exists('C:\OpenCV\build\x64\vc16\lib\opencv_world4100.lib')">C:\OpenCV\build\x64\vc16\lib</OpenCvLibDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DLCVPRO_INFER_INCLUDE)'!=''">$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\dlcvpro_infer\include')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\dlcvpro_infer\include'))</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('C:\dlcv\Lib\site-packages\dlcvpro_infer\include')">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(ProjectDir)..\$(Configuration)\dlcv_infer_c_demo\</OutDir>
@@ -68,13 +65,14 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
+      <DisableSpecificWarnings>4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -86,6 +84,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
+      <DisableSpecificWarnings>4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
@@ -94,7 +93,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -121,7 +120,6 @@
   </ItemGroup>
   <Target Name="ValidateDependencies" BeforeTargets="ClCompile">
     <Error Condition="!Exists('$(OpenCvIncludeDir)\opencv2\core.hpp')" Text="未找到 OpenCV 头文件。" />
-    <Error Condition="!Exists('$(DlcvProInferIncludeDir)\dlcv_infer\dlcv_data_type_c.h')" Text="未找到 dlcvpro_infer C 数据类型头文件。" />
     <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100d.lib') and '$(Configuration)'=='Debug'" Text="未找到 OpenCV Debug 库 opencv_world4100d.lib。" />
     <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100.lib') and '$(Configuration)'!='Debug'" Text="未找到 OpenCV Release 库 opencv_world4100.lib。" />
   </Target>
