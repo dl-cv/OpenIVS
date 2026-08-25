@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <windows.h>
 
 #include "dlcv_infer_c_api.h"
 
@@ -17,15 +18,27 @@ typedef DlcvCResult (DLCV_C_NATIVE_CALL *DlcvInferCFunction)(
 typedef void (DLCV_C_NATIVE_CALL *DlcvFreeResultCFunction)(DlcvCResult* result);
 
 int dlcv_infer_pure_c_header_test(void) {
+    HMODULE module = LoadLibraryW(L"dlcv_infer_cpp.dll");
     DlcvCImage image = {0};
     DlcvCImageList image_list = {0};
     DlcvCResult result = {0};
-    DlcvInferCFunction infer_function = dlcv_infer_c;
-    DlcvFreeResultCFunction free_function = dlcv_free_model_result_c;
+    DlcvInferCFunction infer_function;
+    DlcvFreeResultCFunction free_function;
+    int result_code;
+
+    if (module == NULL) return -1;
+    infer_function = (DlcvInferCFunction)GetProcAddress(module, "dlcv_infer_c");
+    free_function = (DlcvFreeResultCFunction)GetProcAddress(module, "dlcv_free_model_result_c");
+    if (infer_function == NULL || free_function == NULL) {
+        FreeLibrary(module);
+        return -2;
+    }
 
     image_list.images = &image;
     image_list.n = 1;
     result = infer_function(-1, &image_list);
+    result_code = result.code;
     free_function(&result);
-    return result.code;
+    FreeLibrary(module);
+    return result_code;
 }
