@@ -41,6 +41,15 @@ namespace {
 using json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
 
+struct ProcessModelCleanup {
+    ~ProcessModelCleanup() noexcept {
+        try {
+            dlcv_infer::Utils::FreeAllModels();
+        } catch (...) {
+        }
+    }
+};
+
 std::string Safe(const std::string& s) {
     std::string out = s.empty() ? "-" : s;
     for (auto& ch : out) {
@@ -3068,6 +3077,8 @@ int RunGetModelInfoCommand(int argc, wchar_t* argv[], bool dvsInfo) {
 }  // namespace
 
 int wmain(int argc, wchar_t* argv[]) {
+    const ProcessModelCleanup processModelCleanup;
+
     if (argc >= 2 && IsWorkflowCommand(std::wstring(argv[1]))) {
         return RunWorkflow(argc, argv);
     }
