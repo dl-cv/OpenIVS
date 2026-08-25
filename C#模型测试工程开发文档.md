@@ -38,7 +38,7 @@
 
 - 工程名：`Test/dlcv_infer_cpp_test`
 - 入口文件：`Test/dlcv_infer_cpp_test/main.cpp`
-- 依赖项目：`dlcv_infer_cpp_dll`
+- 依赖项目：`dlcv_infer_cpp`
 - 关键点：
   - 头文件通过工程依赖配置（`AdditionalIncludeDirectories`）引入，代码中使用 `#include "dlcv_infer.h"`，不使用相对路径包含
   - 使用 `GetProcessMemoryInfo` 采样私有内存与工作集
@@ -154,7 +154,7 @@
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
   - `Release\dlcv_infer_cpp_test.exe`
-- 通过 `OpenIVS.sln` 构建时，`dlcv_infer_cpp_dll` 与 `dlcv_infer_cpp_test` 的 x64 产物输出到解决方案目录下的 `Debug` 或 `Release`。
+- 通过 `OpenIVS.sln` 构建时，`dlcv_infer_cpp` 与 `dlcv_infer_cpp_test` 的 x64 产物输出到解决方案目录下的 `Debug` 或 `Release`。
 - `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
   - `model-channel-order-selftest`
   - `count-results-selftest`

@@ -4,13 +4,12 @@
 
 ## 项目概览
 
-OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层（C++ DLL + C# 封装层）与测试程序**，不展开 WPF 框架本身（相机/PLC/主循环）。WPF 主框架构建在 API 层之上。
+OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层（C++/C 动态库 + C# 封装层）与测试程序**，不展开 WPF 框架本身（相机/PLC/主循环）。WPF 主框架构建在 API 层之上。
 
 - **技术栈**：C# .NET Framework 4.7.2 + C++17 + Qt + WPF
 - **平台**：Windows 10+，x64
 - **API 层**：
-  - C++ API：`dlcv_infer_cpp_dll`（头文件 `dlcv_infer.h`、`dlcv_sntl_admin.h`、`flow/FlowGraphModel.h`）
-  - C API：`dlcv_infer_c_dll`（头文件 `dlcv_infer_c_api.h`，通过 `dlcv_infer_cpp_dll.lib` 依赖 C++ API）
+  - C++/C API：`dlcv_infer_cpp`，统一生成 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`（C++ 头文件为 `dlcv_infer.h`、`dlcv_sntl_admin.h`、`flow/FlowGraphModel.h`；C 公开头文件为 `dlcv_infer_cpp/dlcv_infer_c_api.h`）
   - C# API：`DlcvCsharpApi`（`Model.cs`、`Utils.cs`、`FlowGraphModel.cs`、`DvsModel.cs`、`DllLoader.cs`）
 - **测试程序**：
   - C++：`dlcv_infer_cpp_qt_demo` / `dlcv_infer_cpp_qt_demo2` / `dlcv_infer_cpp_qt_demo3`（Qt 桌面应用）
@@ -40,10 +39,12 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 | 关注点 | 文件 | 说明 |
 |--------|------|------|
-| C++ API 头文件 | `dlcv_infer_cpp_dll/dlcv_infer.h` | `Model`、`SlidingWindowModel`、`Utils`、`DllLoader`、`GetAllDogInfo` |
-| C++ API 实现 | `dlcv_infer_cpp_dll/dlcv_infer.cpp` | 模型加载、推理、DVS 解包、结果解析 |
-| C++ 加密狗 | `dlcv_infer_cpp_dll/dlcv_sntl_admin.cpp` | Sentinel/Virbox 设备与 feature 查询 |
-| C++ 流程图 | `dlcv_infer_cpp_dll/flow/FlowGraphModel.h` | `FlowGraphModel` 类 |
+| C++ API 头文件 | `dlcv_infer_cpp/dlcv_infer.h` | `Model`、`SlidingWindowModel`、`Utils`、`DllLoader`、`GetAllDogInfo` |
+| C API 头文件 | `dlcv_infer_cpp/dlcv_infer_c_api.h` | C 名称函数、C 数据结构和结果释放接口 |
+| C++ API 实现 | `dlcv_infer_cpp/dlcv_infer.cpp` | 模型加载、推理、DVS 解包、结果解析 |
+| C API 实现 | `dlcv_infer_cpp/dlcv_infer_c_api.cpp` | C 接口导出、模型表管理、结果转换与释放 |
+| C++ 加密狗 | `dlcv_infer_cpp/dlcv_sntl_admin.cpp` | Sentinel/Virbox 设备与 feature 查询 |
+| C++ 流程图 | `dlcv_infer_cpp/flow/FlowGraphModel.h` | `FlowGraphModel` 类 |
 | C# 封装层 | `DlcvCsharpApi/Model.cs` | `Model`：构造、加载、推理、释放 |
 | C# 工具类 | `DlcvCsharpApi/Utils.cs` | 结果类型、编码转换、DLL 释放 |
 | C# DLL 加载器 | `DlcvCsharpApi/DllLoader.cs` | 加密狗自动检测、DLL 路径解析、函数代理 |
@@ -51,7 +52,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | C# DVS 模型 | `DlcvCsharpApi/flow/DvsModel.cs` | `.dvst/.dvso/.dvsp` 归档解包与加载 |
 | C# 结果类型 | `DlcvCsharpApi/DataTypes.cs` | `CSharpObjectResult`、`CSharpSampleResult`、`CSharpResult` |
 | C# 加密狗工具 | `DlcvCsharpApi/sntl_admin_csharp.cs` | `DogUtils`、`DogProvider` |
-| C++ 图像输入 | `dlcv_infer_cpp_dll/ImageInputUtils.h` | 图像预处理与格式转换 |
+| C++ 图像输入 | `dlcv_infer_cpp/ImageInputUtils.h` | 图像预处理与格式转换 |
 | C++ 测试程序 | `dlcv_infer_cpp_qt_demo/MainWindow.cpp` | 模型加载、推理、压力测试、加密狗检测 |
 | C 测试程序 | `dlcv_infer_c_qt_demo/MainWindow.cpp` | 通过 C ABI 执行模型加载、推理、压力测试和加密狗检测 |
 | C# 测试程序 | `DlcvDemo/Form1.cs` | WinForms 测试程序主窗口 |
@@ -77,7 +78,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
   - `C:\Program Files (x86)\MVS\Development\DotNet\win64\MvCameraControl.Net.dll`
   - 未安装 MVS 会出现找不到 `MvCameraControl` 的问题
 - **Sentinel Admin API 库（Linux）**
-  - `dlcv_infer_cpp_dll` 的加密狗检测依赖 `libsntl_adminapi.so`
+  - `dlcv_infer_cpp` 的加密狗检测依赖 `libsntl_adminapi.so`
   - 固定查找路径：`/usr/local/dlcv/lib/libsntl_adminapi.so`
   - 该路径不存在时，Sentinel 加密狗检测返回空列表
 
@@ -93,9 +94,9 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 **model_index 分配约定**（避免普通模型与流程模型在同一张索引表中撞键）：
 
 - **普通模型（`.dvt`/`.dvo`）**：`model_index` 由底层 `dlcv_infer` 在加载时返回，从 `0` 起递增。
-- **流程模型（`.dvst`/`.dvso`/`.dvsp`）**：`model_index` 由 `dlcv_infer_cpp_dll` / `DlcvCsharpApi` 自管理，从 `10000` 起递增，与底层索引分区。
+- **流程模型（`.dvst`/`.dvso`/`.dvsp`）**：`model_index` 由 `dlcv_infer_cpp` / `DlcvCsharpApi` 自管理，从 `10000` 起递增，与底层索引分区。
 
-C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索引模型；两类索引分区后，流程模型不会与任何 `index < 10000` 的普通模型互相覆盖，也允许同时加载多个流程模型。
+C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索引模型；两类索引分区后，流程模型不会与任何 `index < 10000` 的普通模型互相覆盖，也允许同时加载多个流程模型。
 
 ## API 速查表
 
@@ -130,9 +131,9 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 
 **内存管理**：`DlcvCResult` 内部所有动态内存（`message`、`category_name`、`mask_ptr`、`results` 数组、`sample_results` 数组）由 DLL 分配，调用方必须通过 `dlcv_infer_cpp_free_model_result_c` 释放。
 
-**实现位置**：`dlcv_infer_c_dll/dlcv_infer_c_api.h` + `dlcv_infer_c_api.cpp`，基于 `dlcv_infer::Model` 封装，显式依赖 `dlcv_infer_cpp_dll.lib`。
+**实现位置**：`dlcv_infer_cpp/dlcv_infer_c_api.h` + `dlcv_infer_cpp/dlcv_infer_c_api.cpp`，基于 `dlcv_infer::Model` 封装，与 C++ API 共同生成 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 
-**C 编译支持**：`dlcv_infer_c_api.h` 与 `dlcv_infer_native_c_api.h` 均可由 C 或 C++ 编译器包含。结构化兼容入口使用 `DlcvCImageList*` 和 `DlcvCResult*` 参数，共享数据结构使用 `typedef struct`。
+**C 编译支持**：C 调用端只包含 `dlcv_infer_cpp/dlcv_infer_c_api.h`，该头文件可由 C 或 C++ 编译器包含。结构化入口使用 `DlcvCImageList*` 和 `DlcvCResult*` 参数，共享数据结构使用 `typedef struct`。
 
 ### C# API 速查表
 
@@ -350,7 +351,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 ### C++ Qt Demo（`dlcv_infer_cpp_qt_demo`）
 
 - **工程**：`dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.vcxproj`
-- **技术栈**：Qt5/6 + OpenCV 4.x + `dlcv_infer_cpp_dll`
+- **技术栈**：Qt5/6 + OpenCV 4.x + `dlcv_infer_cpp.dll` / `dlcv_infer_cpp.lib`
 - **功能**：模型加载、单图/批量推理、JSON 输出、多线程压力测试、加密狗检测
 - **UI**：主窗口分为上方控制栏（按钮 + 参数调节）+ 下方输出区（左侧文本 + 右侧图像可视化）
 - **按钮**：加载模型、获取模型信息、打开图片推理、单次推理、推理JSON、多线程测试、释放模型、释放所有模型、文档、检查加密狗
@@ -363,10 +364,10 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 
 - **工程**：`dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.vcxproj`
 - **窗口标题**：`C测试程序`
-- **技术栈**：Qt 6 + OpenCV 4.x + `dlcv_infer_c_dll`
+- **技术栈**：Qt 6 + OpenCV 4.x + `dlcv_infer_cpp.dll`，C 调用只包含 `dlcv_infer_c_api.h`
 - **界面**：控件布局与 `dlcv_infer_cpp_qt_demo` 一致
 - **功能**：模型加载、模型信息、结构化推理、JSON 推理、多线程测试、结果显示、全部模型释放和加密狗查询
-- **接口限制**：Demo 源码不包含 `dlcv_infer.h`，不使用 `dlcv_infer::Model`，DLCV 功能只调用 C 名称函数
+- **接口限制**：Demo 源码只包含 `dlcv_infer_c_api.h`，不包含 `dlcv_infer.h`，不使用 `dlcv_infer::Model`，通过 `LoadLibraryW` 和 `GetProcAddress` 调用 `dlcv_infer_cpp.dll` 导出的 C 名称函数
 - **结果显示**：C 结果在调用释放函数前复制到程序内部显示类型，mask 同步复制到独立 `cv::Mat`
 
 ### C++ Qt Demo2（`dlcv_infer_cpp_qt_demo2`）
@@ -444,7 +445,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 
 ## 项目间依赖
 
-- **底层推理引擎**：`dlcv_infer` 是 OpenIVS API 层的底层依赖。OpenIVS 的 C++ API（`dlcv_infer_cpp_dll`）和 C# API（`DlcvCsharpApi`）均通过加载 `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）调用推理能力。
+- **底层推理引擎**：`dlcv_infer` 是 OpenIVS API 层的底层依赖。OpenIVS 的 C++/C API（`dlcv_infer_cpp`）和 C# API（`DlcvCsharpApi`）均通过加载 `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）调用推理能力；C++/C API 对外产物为 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 - **加密模型文件**：`dlcv_deploy` 产出的 `.dvt`/`.dvo`/`.dvst`/`.dvso` 等文件是 OpenIVS 测试程序与 WPF 框架的输入。
 - **接口边界**：OpenIVS 不解密模型包内 `dlcv.json` 来选择 provider；`DllLoader` 只读取模型包 `header_json.dog_provider`，Sentinel 使用 `dlcv_infer.dll`，Virbox 使用 `dlcv_infer_v.dll`。
 

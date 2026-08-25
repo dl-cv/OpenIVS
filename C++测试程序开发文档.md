@@ -28,14 +28,14 @@
 |------|------|
 | Qt 5/6 | UI 框架（QApplication、QMainWindow、QTimer 等） |
 | OpenCV 4.x | 图像读取、通道转换、Mat 操作 |
-| `dlcv_infer.h` + `dlcv_infer_cpp_dll.lib` | C++ API 头文件与导入库 |
-| `dlcv_infer_cpp_dll.dll`（运行时） | OpenIVS C++ API DLL |
+| `dlcv_infer.h` + `dlcv_infer_cpp.lib` | C++ API 头文件与导入库 |
+| `dlcv_infer_cpp.dll`（运行时） | OpenIVS C++ 与 C API 共用动态库 |
 
 ### 2.2 Visual Studio 编译
 
 - 构建统一通过 `.cursor/skills/vs-build/scripts/build.py` 执行，目标为 `dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.vcxproj`。
 - 默认配置为 `Debug`、`x64`、`Build`、`minimal`；发布构建使用 `Release`、`x64`、`Build`、`minimal`。
-- 项目通过 `ProjectReference` 构建 `dlcv_infer_cpp_dll`；直接构建项目时从 `$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\` 解析导入库，解决方案构建时从 `$(SolutionDir)$(Configuration)\` 解析。
+- 项目通过 `ProjectReference` 构建 `dlcv_infer_cpp`；直接构建项目时从 `$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\` 解析导入库，解决方案构建时从 `$(SolutionDir)$(Configuration)\` 解析。
 - Qt、OpenCV 与 DLCV SDK 依赖路径由工程属性解析；缺失时构建失败。
 
 ### 2.3 输出与部署
@@ -43,7 +43,7 @@
 - 直接构建项目时，Debug 输出为 `dlcv_infer_cpp_qt_demo/Debug/dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.exe`。
 - 直接构建项目时，Release 输出为 `dlcv_infer_cpp_qt_demo/Release/dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.exe`。
 - 通过 `OpenIVS.sln` 构建时，EXE 输出位于解决方案根目录的 `Debug/dlcv_infer_cpp_qt_demo/` 或 `Release/dlcv_infer_cpp_qt_demo/`。
-- 构建后事件把 `dlcv_infer_cpp_dll.dll`、Qt Core/Gui/Widgets、平台插件和样式插件复制到 EXE 输出目录。
+- 构建后事件把 `dlcv_infer_cpp.dll`、Qt Core/Gui/Widgets、平台插件和样式插件复制到 EXE 输出目录。
 - 底层 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 仍按模型授权类型由 C++ API 从 SDK 路径加载。
 
 ---

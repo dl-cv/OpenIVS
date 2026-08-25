@@ -1,6 +1,6 @@
 # C++ API 文档
 
-**文档定位**：记录 `dlcv_infer_cpp_dll` 的精确函数签名、数据结构、工程结构、构建配置、依赖、编码路径规则与 C++ 对外接口。所有内容以当前源码实现为准。
+**文档定位**：记录 `dlcv_infer_cpp` 的精确函数签名、数据结构、工程结构、构建配置、依赖、编码路径规则与 C++、C 对外接口。所有内容以当前源码实现为准。
 
 ---
 
@@ -487,8 +487,8 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ## 14. 项目范围
 
-- 项目目录：`dlcv_infer_cpp_dll`
-- 工程文件：`dlcv_infer_cpp_dll/dlcv_infer_cpp_dll.vcxproj`
+- 项目目录：`dlcv_infer_cpp`
+- 工程文件：`dlcv_infer_cpp/dlcv_infer_cpp.vcxproj`
 - 工程类型：Windows 动态库
 - 根命名空间：`dlcvinfercppdll`
 - 主要命名空间：
@@ -496,9 +496,10 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
   - `dlcv_infer::flow`
   - `sntl_admin`
 - 对外头文件：
-  - `dlcv_infer_cpp_dll/dlcv_infer.h`
-  - `dlcv_infer_cpp_dll/flow/FlowGraphModel.h`
-  - `dlcv_infer_cpp_dll/dlcv_sntl_admin.h`
+  - `dlcv_infer_cpp/dlcv_infer.h`
+  - `dlcv_infer_cpp/flow/FlowGraphModel.h`
+  - `dlcv_infer_cpp/dlcv_sntl_admin.h`
+  - `dlcv_infer_cpp/dlcv_infer_c_api.h`
 - C API 的导出函数、结构定义和逐项对照统一写在 `C API文档.md`。
 
 ---
@@ -522,14 +523,14 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 - 输出目录仅在 `x64` 配置中显式设置为 `$(SolutionDir)$(Configuration)\`。
 - Debug x64 链接库：`opencv_world4100d.lib`
 - Release x64 链接库：`opencv_world4100.lib`
-- `dlcv_infer_c_dll` 工程配置为 `Debug|x64` 和 `Release|x64`，输出目录为 `$(SolutionDir)$(Configuration)\`。
-- `dlcv_infer_c_dll` 编译时定义 `DLCV_INFER_C_DLL_EXPORTS`，链接 `dlcv_infer_cpp_dll.lib` 与对应配置的 OpenCV 库。
+- C API 源码与 C++ API 源码使用同一工程配置，统一输出 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 
 当前工程的编译单元按“入口绑定 -> Flow 执行框架 -> 节点实现”三层拆分：
 
 | 分组 | 文件 | 当前职责 |
 | --- | --- | --- |
 | 入口与外部绑定 | `dlcv_infer.cpp` | `Model`、`Utils`、底层 `dlcv_infer.dll` 绑定、DVS 归档解包、普通模型与 Flow 结果转换 |
+| 入口与外部绑定 | `dlcv_infer_c_api.cpp` | C 接口导出、C 结构转换、模型表管理与结果释放 |
 | 入口与外部绑定 | `dlcv_sntl_admin.cpp` | 加密狗管理 DLL 绑定、XML 转 JSON、设备与特性查询 |
 | Flow 执行框架 | `flow/GraphExecutor.cpp` | 节点排序、链路路由、属性覆盖、标量端口注入、节点计时 |
 | Flow 执行框架 | `flow/FlowGraphModel.cpp` | Flow JSON 加载、`model/*` 预加载、执行上下文初始化、前端结果聚合 |

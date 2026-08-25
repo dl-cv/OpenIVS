@@ -8,9 +8,9 @@
 | 工程路径 | `dlcv_infer_c_qt_demo/` |
 | 窗口标题 | `C测试程序` |
 | 类型 | Qt Widgets x64 桌面应用 |
-| 用途 | 使用 `dlcv_infer_c_dll` 的 C ABI 验证模型加载、结构化推理、JSON 推理、模型信息、设备信息、多线程调用和结果释放 |
+| 用途 | 使用 `dlcv_infer_cpp.dll` 导出的 C ABI 验证模型加载、结构化推理、JSON 推理、模型信息、设备信息、多线程调用和结果释放 |
 
-程序界面与 `dlcv_infer_cpp_qt_demo` 保持一致。Qt 界面源码使用 C++17，推理相关代码不包含 `dlcv_infer.h`，不使用 `dlcv_infer::Model` 或其他 C++ API 类型。
+程序界面与 `dlcv_infer_cpp_qt_demo` 保持一致。Qt 界面源码使用 C++17，推理相关代码只包含 `dlcv_infer_c_api.h`，不包含 `dlcv_infer.h`，不使用 `dlcv_infer::Model` 或其他 C++ API 类型。程序通过 `LoadLibraryW` 加载 `dlcv_infer_cpp.dll`，通过 `GetProcAddress` 获取 C 接口函数地址。
 
 核心文件：
 
@@ -26,13 +26,10 @@
 | --- | --- |
 | Qt 6 | 窗口、控件、文件选择和定时刷新 |
 | OpenCV 4.10 | 图片读取、BGR/BGRA 转 RGB、mask 复制 |
-| `dlcv_infer_c_api.h` | 结构化推理和扩展 C 接口 |
-| `dlcv_infer_native_c_api.h` | GPU 信息和时钟接口 |
-| `dlcv_infer_c_dll.lib` | 程序唯一直接链接的 DLCV 导入库 |
-| `dlcv_infer_c_dll.dll` | C API 运行库 |
-| `dlcv_infer_cpp_dll.dll` | C DLL 的运行依赖，由构建后事件复制 |
+| `dlcv_infer_c_api.h` | 全部 C 接口声明与数据结构 |
+| `dlcv_infer_cpp.dll` | C API 与 C++ API 共用的运行库，通过 `LoadLibraryW` 加载 |
 
-`Test/dlcv_infer_c_test/pure_c_header_test.c` 使用 C 编译模式包含两个公开头文件，检查结构声明、函数指针类型和 Windows x64 结构大小。
+`Test/dlcv_infer_c_test/pure_c_header_test.c` 使用 C 编译模式包含 `dlcv_infer_c_api.h`，检查结构声明、函数指针类型和 Windows x64 结构大小。
 
 主要功能映射：
 
@@ -64,7 +61,7 @@
 | 推理JSON | 调用 JSON C 接口并格式化显示返回内容 |
 | 多线程测试 | 按线程数持续调用结构化 C 接口，每 500ms 更新请求数、平均延迟和实时速率 |
 | 释放模型 | 释放当前模型索引 |
-| 释放所有模型 | 清空 C DLL 保存的全部普通模型和流程模型 |
+| 释放所有模型 | 清空 `dlcv_infer_cpp.dll` 保存的全部普通模型和流程模型 |
 | 文档 | 打开 SDK 文档地址 |
 | 检查加密狗 | 显示 Sentinel 与 Virbox 的设备和特性信息 |
 | 获取模型信息 | 显示当前模型信息 JSON |
@@ -97,7 +94,7 @@ python ".cursor/skills/vs-build/scripts/build.py" "dlcv_infer_c_qt_demo/dlcv_inf
 dlcv_infer_c_qt_demo/Debug/dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.exe
 ```
 
-工程通过 `ProjectReference` 构建 `dlcv_infer_c_dll`。构建后事件复制 C DLL、其 C++ 运行依赖、Qt Core/Gui/Widgets 运行库以及平台和样式插件。
+工程不链接 C API 导入库。运行时通过 `LoadLibraryW` 加载 `dlcv_infer_cpp.dll`，通过 `GetProcAddress` 解析 C 接口；构建后事件复制 `dlcv_infer_cpp.dll`、Qt Core/Gui/Widgets 运行库以及平台和样式插件。
 
 ## 5. 已验证能力
 
@@ -107,7 +104,7 @@ dlcv_infer_c_qt_demo/Debug/dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.exe
 | 程序启动 | 通过 |
 | 窗口标题 | `C测试程序` |
 | 控件读取 | 19 个控件完整，顺序与 C++ Qt Demo 一致 |
-| C DLL 导出 | 34 个函数存在 |
+| C API 导出 | `dlcv_infer_cpp.dll` 导出的 34 个函数存在 |
 | GPU 查询 | 返回 `code=0` 和 1 个 GPU |
 | 授权设备查询 | 返回 `sentinel` 与 `virbox` |
 | C API 控制台测试 | JSON、结构化结果、普通模型、流程模型和三组并发检查通过 |

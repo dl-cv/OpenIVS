@@ -2,15 +2,15 @@
 
 ## 1. 文档范围
 
-本文件记录以下两层接口的逐项对应关系：
+本文件记录同一动态库中 C++ 与 C 接口的逐项对应关系：
 
-1. `dlcv_infer_cpp_dll` 提供的 `dlcv_infer::NativeApi` C++ 静态方法。
-2. `dlcv_infer_c_dll` 对外导出的 C 名称函数。
+1. `dlcv_infer_cpp` 提供的 `dlcv_infer::NativeApi` C++ 静态方法。
+2. `dlcv_infer_cpp` 对外导出的 C 名称函数。
 
 本任务包含：
 
 - `dlcv_infer` 的 23 个非公共索引接口；
-- `dlcv_infer_c_dll` 的 11 个 `dlcv_infer_cpp_*_c` 扩展入口；
+- `dlcv_infer_cpp` 的 11 个 `dlcv_infer_cpp_*_c` 扩展入口；
 - 当前导出总数为 34 个。
 
 以下 7 个公共索引接口归入“双语言 model index 互通”任务，本文件不把它们写成当前任务的缺失接口：
@@ -25,18 +25,18 @@
 | `dlcv_bind_index_c` |
 | `dlcv_unbind_index_c` |
 
-19 个 JSON、设备和系统控制接口声明在 `dlcv_infer_native_c_api.h`。11 个扩展入口和 4 个结构化兼容入口声明在 `dlcv_infer_c_api.h`。共享数据结构使用 `typedef struct`，C 模式下由共享头文件引入 `<stdbool.h>`，结构化兼容入口使用指针参数，两个头文件均可由 C 或 C++ 编译器使用。
+全部 C 接口声明在 `dlcv_infer_c_api.h`。共享数据结构使用 `typedef struct`，C 模式下由该头文件引入 `<stdbool.h>`，结构化接口使用指针参数，头文件可由 C 或 C++ 编译器使用。
 
 ## 2. 两层封装关系
 
 | 层级 | 所在工程 | 职责 |
 | --- | --- | --- |
 | 底层接口 | `dlcv_infer` | 提供 JSON、设备控制、系统设置和结构化 C 接口 |
-| C++ 封装 | `dlcv_infer_cpp_dll` | 通过 `NativeApi` 解析并调用底层接口，统一 DLL 选择和返回处理 |
-| C 导出 | `dlcv_infer_c_dll` | 将 19 个 JSON、设备和系统控制方法导出为 C 名称函数，并保留 4 个结构化兼容入口 |
-| 扩展接口 | `dlcv_infer_c_dll` | 提供基于 C++ `Model` 的 11 个 `dlcv_infer_cpp_*_c` 入口 |
+| C++ 封装 | `dlcv_infer_cpp` | 通过 `NativeApi` 解析并调用底层接口，统一 DLL 选择和返回处理 |
+| C 导出 | `dlcv_infer_cpp` | 将 19 个 JSON、设备和系统控制方法导出为 C 名称函数，并保留 4 个结构化兼容入口 |
+| 扩展接口 | `dlcv_infer_cpp` | 提供基于 C++ `Model` 的 11 个 `dlcv_infer_cpp_*_c` 入口 |
 
-23 个非公共索引接口均已增加 `NativeApi` 方法。第 1～19 项由 `dlcv_infer_c_dll` 直接转发 `NativeApi`；第 20～23 项在 C++ 层提供底层直调方法，C DLL 继续使用现有 `Model` 封装，以保持 `.dvst/.dvso` 支持和既有调用行为。11 个扩展入口由同一模型表提供加载、推理、查询和释放能力。
+23 个非公共索引接口均已增加 `NativeApi` 方法。第 1～19 项由 `dlcv_infer_cpp` 直接转发 `NativeApi`；第 20～23 项在同一工程中提供 C 接口实现，并使用 `Model` 封装保持 `.dvst/.dvso` 支持。11 个扩展入口由同一模型表提供加载、推理、查询和释放能力。
 
 ## 3. 23 个非公共索引接口逐项对照
 
@@ -75,10 +75,10 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 
 | # | 底层 `dlcv_infer` 接口 | C++ 封装方法 | C 导出 | 输入 | 输出 | 释放方式 | 一致性 |
 | ---: | --- | --- | --- | --- | --- | --- | --- |
-| 20 | `int dlcv_load_model_c(const char* model_path, int device_id)` | `NativeApi::LoadModelC(const char*, int)` | `dlcv_load_model_c(const char*, int)` | 当前路径规则支持的模型路径、设备编号 | 成功返回非负模型索引，失败返回 `-1` | 无返回字符串 | C++ 方法严格调用底层；C DLL 兼容入口继续通过 `Model` 加载并增加 `.dvst/.dvso` 支持 |
-| 21 | `int dlcv_free_model_c(int model_index)` | `NativeApi::FreeModelC(int)` | `dlcv_free_model_c(int)` | 模型索引 | 成功返回 `0`，失败返回负值 | 无 | C++ 方法严格调用底层；C DLL 释放自身模型表中的对象 |
-| 22 | `DlcvCResult dlcv_infer_c(int, const DlcvCImageList*)` | `NativeApi::InferC(int, const DlcvCImageList&)` | `dlcv_infer_c(int, const DlcvCImageList*)` | 模型索引、图像列表指针；输入图像内存由调用方持有 | `DlcvCResult`，包含状态、消息、样本结果、目标、框、mask、角度和均值 | 用 `dlcv_free_model_result_c` 释放返回结构中的字符串、数组和 mask | C++ 方法通过地址调用底层；C DLL 通过 `Model::InferBatch` 生成结果并转换为底层结果语义 |
-| 23 | `void dlcv_free_model_result_c(DlcvCResult*)` | `NativeApi::FreeModelResultC(DlcvCResult&)` | `dlcv_free_model_result_c(DlcvCResult*)` | 当前 DLL 返回的 `DlcvCResult` 地址 | 无；释放后指针字段为空、数量为 `0`，兼容入口保留原 `code` | 只能使用生成结果的同一 DLL 释放 | C++ 方法通过地址释放底层结果；C DLL 释放自身生成的结果，释放后字段一致 |
+| 20 | `int dlcv_load_model_c(const char* model_path, int device_id)` | `NativeApi::LoadModelC(const char*, int)` | `dlcv_load_model_c(const char*, int)` | 当前路径规则支持的模型路径、设备编号 | 成功返回非负模型索引，失败返回 `-1` | 无返回字符串 | C++ 方法严格调用底层；同一工程中的 C 接口使用 `Model` 加载并支持 `.dvst/.dvso` |
+| 21 | `int dlcv_free_model_c(int model_index)` | `NativeApi::FreeModelC(int)` | `dlcv_free_model_c(int)` | 模型索引 | 成功返回 `0`，失败返回负值 | 无 | C++ 方法严格调用底层；C 接口释放同一工程模型表中的对象 |
+| 22 | `DlcvCResult dlcv_infer_c(int, const DlcvCImageList*)` | `NativeApi::InferC(int, const DlcvCImageList&)` | `dlcv_infer_c(int, const DlcvCImageList*)` | 模型索引、图像列表指针；输入图像内存由调用方持有 | `DlcvCResult`，包含状态、消息、样本结果、目标、框、mask、角度和均值 | 用 `dlcv_free_model_result_c` 释放返回结构中的字符串、数组和 mask | C++ 方法通过地址调用底层；同一工程中的 C 接口通过 `Model::InferBatch` 生成结果并转换为底层结果语义 |
+| 23 | `void dlcv_free_model_result_c(DlcvCResult*)` | `NativeApi::FreeModelResultC(DlcvCResult&)` | `dlcv_free_model_result_c(DlcvCResult*)` | 当前 DLL 返回的 `DlcvCResult` 地址 | 无；释放后指针字段为空、数量为 `0`，兼容入口保留原 `code` | 只能使用生成结果的同一 DLL 释放 | C++ 方法通过地址释放底层结果；C 接口释放同一工程生成的结果，释放后字段一致 |
 
 ## 4. 结构化 C 数据类型
 
@@ -104,7 +104,7 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 
 ## 5. 11 个扩展入口
 
-这些函数不经过 `NativeApi`，使用 `dlcv_infer_cpp_dll` 的 C++ `Model` 对象管理模型。前 6 个入口保留原有名称和调用方式，后 5 个入口为 Qt C 测试程序提供模型信息、JSON 推理、授权设备查询、字符串释放和全部模型释放能力。
+这些函数不经过 `NativeApi`，使用 `dlcv_infer_cpp` 工程中的 C++ `Model` 对象管理模型。前 6 个入口用于结构化 C 推理，后 5 个入口为 Qt C 测试程序提供模型信息、JSON 推理、授权设备查询、字符串释放和全部模型释放能力。
 
 | # | 扩展入口 | C++ 封装方法 | 输入 | 输出 | 释放方式 | 与 23 个接口的关系 |
 | ---: | --- | --- | --- | --- | --- | --- |
@@ -117,14 +117,14 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 | 7 | `dlcv_infer_cpp_get_model_info_c(int)` | 无；调用保存的 `Model::GetModelInfo` | 模型索引 | UTF-8 JSON 字符串；失败返回空指针 | 用 `dlcv_infer_cpp_free_string_c` 释放 | 支持普通模型和流程模型 |
 | 8 | `dlcv_infer_cpp_infer_json_c(int, const DlcvCImage*, const char*)` | 无；调用保存的 `Model::InferOneOutJson` | 模型索引、单张连续图像、参数 JSON | UTF-8 JSON 字符串；失败返回空指针 | 用 `dlcv_infer_cpp_free_string_c` 释放 | 与结构化扩展入口共用模型表和流程模型并发保护 |
 | 9 | `dlcv_infer_cpp_get_all_dog_info_c()` | 无；调用 `GetAllDogInfo` | 无 | Sentinel 与 Virbox 信息 JSON 字符串 | 用 `dlcv_infer_cpp_free_string_c` 释放 | 供 C 调用端查询授权设备 |
-| 10 | `dlcv_infer_cpp_free_string_c(const char*)` | 无；释放扩展接口字符串 | 扩展接口返回的字符串 | 无 | 仅用于第 7～9 项返回值 | 字符串由 C DLL 分配和释放 |
+| 10 | `dlcv_infer_cpp_free_string_c(const char*)` | 无；释放扩展接口字符串 | 扩展接口返回的字符串 | 无 | 仅用于第 7～9 项返回值 | 字符串由 `dlcv_infer_cpp.dll` 分配和释放 |
 | 11 | `dlcv_infer_cpp_free_all_models_c()` | 无；清空扩展模型表并调用全部模型释放接口 | 无 | 无 | 无 | 释放普通模型和流程模型实例 |
 
-前 6 个扩展入口和四项结构化兼容入口都由 `dlcv_infer_c_dll` 分配结果内存，内部字段使用同一分配方式。为保持释放后的 `code` 行为，调用方应按入口名称配套使用结果释放函数。`dlcv_infer.dll` 直接生成的结构化结果使用另一套分配方式，不能交给 `dlcv_infer_c_dll` 释放。
+前 6 个扩展入口和四项结构化兼容入口都由 `dlcv_infer_cpp.dll` 分配结果内存，内部字段使用同一分配方式。为保持释放后的 `code` 行为，调用方应按入口名称配套使用结果释放函数。`dlcv_infer.dll` 直接生成的结构化结果使用另一套分配方式，不能交给 `dlcv_infer_cpp.dll` 释放。
 
 ## 6. 导出清单
 
-按当前任务范围，`dlcv_infer_c_dll` 的导出分组如下：
+`dlcv_infer_cpp.dll` 的导出分组如下：
 
 | 分组 | 数量 | 接口范围 |
 | --- | ---: | --- |
@@ -141,7 +141,7 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 | --- | --- |
 | Windows x64 Debug 构建与测试 | 通过 |
 | Windows x64 Release 构建与测试 | 既有 29 个接口已通过；本次新增 5 个扩展未执行 Release 构建 |
-| C DLL 导出检查 | Debug 下 34 个函数均存在，包含 `dlcv_infer` 和 5 个 Qt Demo 扩展函数 |
+| C API 导出检查 | Debug 下 `dlcv_infer_cpp.dll` 的 34 个函数均存在，包含 `dlcv_infer` 和 5 个 Qt Demo 扩展函数 |
 | JSON 接口安全失败输入比较 | 两层返回字符串一致 |
 | 设备、GPU、电源方案读取 | 返回有效字符串并由所属 DLL 释放 |
 | `.dvt` 结构化结果比较 | 输入相同，结果逐字段一致 |
