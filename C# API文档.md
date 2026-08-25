@@ -349,6 +349,7 @@ public class DllLoader
 - `.dvt`/`.dvo` 文件：读取前两行（`DV` + header_json），解析 `dog_provider` 字段。
 - `.dvp`/`.dvst`/`.dvso`：不支持通过 header 解析（DVP 由底层处理，DVS 由子模型加载时解析）。
 - `.dvsp`：不支持推理，不解析 provider。
+- C# API 不提供 `SlidingWindowModel`；滑窗处理使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 
 **共享 index 接口**：
 - `ResolveForIndex` 仅按新版四段 index 规则选择对应 provider 的 loader，不查询加密狗，也不访问另一 provider 的 DLL；该方法不修改 `Instance` 当前保存的默认 loader。
@@ -356,6 +357,8 @@ public class DllLoader
 - `GetIndexType`、`RegisterFlow`、`FreeFlow`、`BindIndex`、`UnbindIndex` 返回整数状态或 index；`GetModelInfoByIndex` 与 `GetFlowInfo` 返回 `JObject`。
 - `RegisterFlow` 按 UTF-8 传入流程 JSON；仅模型信息与流程信息返回 UTF-8 JSON，解析后调用 `dlcv_free_result` 释放。
 - 流程注册 JSON 包含 `schema_version`、`flow_type`、`source_path`、`device_id`、`provider`、`pipeline`、`model_bindings`；`source_path` 使用绝对路径，`model_bindings` 中每项包含 `node_id` 与 `model_index`。
+- 同一个 `.dvst/.dvso` 的全部模型节点必须属于同一 provider，不支持在一个流程内混用 Sentinel 与 Virbox。
+- 无模型节点流程优先复用当前 loader；没有当前 loader 时直接使用 Sentinel，不执行双 provider 探测。推理 DLL 缺少共享接口时使用本地流程 index。
 
 | provider | 类型 | index 范围 |
 |---|---|---|

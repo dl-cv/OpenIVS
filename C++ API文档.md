@@ -235,7 +235,11 @@ void FreeModel();
 - 普通模型且由当前对象加载：按现有 `dlcv_free_model` 释放规则处理。
 - 通过共享 `modelIndex` 恢复的普通模型或流程模型：无论 `OwnModelIndex` 是否为 `false`，只减少当前对象增加的使用计数，不直接释放共享资源。
 
-> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回。流程模型（`.dvst`/`.dvso`）先加载其中的子模型；推理 DLL提供完整共享接口时，再注册包含 `schema_version`、`flow_type`、`provider`、`source_path`、`device_id`、`pipeline`、`model_bindings` 的流程 JSON。旧 DLL缺少共享接口时使用本地流程 index，原有加载和推理行为保持不变。
+> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回。流程模型（`.dvst`/`.dvso`）先加载其中的子模型；推理 DLL 提供完整共享接口时，再注册包含 `schema_version`、`flow_type`、`provider`、`source_path`、`device_id`、`pipeline`、`model_bindings` 的流程 JSON。旧 DLL 缺少共享接口时使用本地流程 index，原有加载和推理行为保持不变。
+>
+> 同一个 `.dvst/.dvso` 的全部模型节点必须属于同一 provider，不支持在一个流程内混用 Sentinel 与 Virbox。无模型节点流程优先复用当前 loader；没有当前 loader 时直接使用 Sentinel，不执行双 provider 探测。
+>
+> `.dvsp` 不支持推理。C++ API 不提供 `SlidingWindowModel`；滑窗处理使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 
 | provider | 类型 | index 范围 |
 |---|---|---|
