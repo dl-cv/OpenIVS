@@ -500,7 +500,6 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 - C API 对外头文件：`dlcv_infer_c_dll/dlcv_infer_c_api.h`
 - C API 工程通过 `dlcv_infer_cpp_dll.lib` 显式依赖 C++ API 工程。
 - C API 保留 `dlcv_infer_cpp_infer_c` 默认参数入口，并提供 `dlcv_infer_cpp_infer_with_params_c` 接收 JSON 参数；调用端可传入 `threshold`、`calc_mean` 等字段覆盖本次推理参数。
-- C API 额外导出 `dlcv_load_model_c`、`dlcv_free_model_c`、`dlcv_infer_c`、`dlcv_free_model_result_c`，行为与底层结构化 C API 一致；原有 `dlcv_infer_cpp_*_c` 接口保持不变。
 - C API 为每个 `.dvst`、`.dvso` 模型句柄保存独立推理互斥量；同一句柄的多线程请求依次执行，保护首次模型信息读取、流程推理和结构化结果复制。不同流程句柄仍可同时执行。
 - `.dvt`、`.dvo` 普通模型不使用上述流程互斥量，保持原有并发调用方式。
 
@@ -508,9 +507,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 #### 全部导出能力
 
-`dlcv_infer_c_dll` 保留原有 6 个 `dlcv_infer_cpp_*_c` 导出函数，并新增 4 个与 `dlcv_infer` 同名的结构化兼容入口。新增入口不改变原有函数的名称、参数和行为。
-
-本次兼容处理没有修改模型路径参数及其现有解析方式。
+`dlcv_infer` 当前公开头文件声明 23 个导出函数，`dlcv_infer_c_dll` 声明 6 个导出函数。两者不是整套接口的一一替代关系。
 
 | 能力分组 | `dlcv_infer` C API | `dlcv_infer_c_dll` | 完整性结论 |
 | --- | --- | --- | --- |
@@ -520,7 +517,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 | 设备与 GPU 信息 | `dlcv_get_device_info`、`dlcv_get_gpu_info` | 无对应入口 | 未覆盖 |
 | GPU 时钟设置 | `dlcv_keep_max_clock`、`dlcv_reset_max_clock`、`dlcv_set_gpu_max_clock`、`dlcv_reset_gpu_max_clock` | 无对应入口 | 未覆盖 |
 | 电源与进程设置 | `dlcv_get_power_scheme_guid`、`dlcv_set_power_scheme_guid`、`dlcv_get_power_scheme`、`dlcv_set_power_scheme`、`dlcv_set_current_process_affinity_to_big_cores`、`dlcv_set_current_process_priority_highest` | 无对应入口 | 未覆盖 |
-| 结构化模型接口 | `dlcv_load_model_c`、`dlcv_free_model_c`、`dlcv_infer_c`、`dlcv_free_model_result_c` | 新增同名入口 | 完整覆盖，输入输出语义一致 |
+| 结构化模型接口 | `dlcv_load_model_c`、`dlcv_free_model_c`、`dlcv_infer_c`、`dlcv_free_model_result_c` | 四项均有对应入口 | 完整覆盖 |
 | 带参数结构化推理 | 无独立入口 | `dlcv_infer_cpp_infer_with_params_c` | `dlcv_infer_c_dll` 扩展 |
 | 读取加载错误 | 无独立入口 | `dlcv_infer_cpp_get_last_error_c` | `dlcv_infer_c_dll` 扩展 |
 | 流程归档模型 | 结构化接口不提供 `.dvst/.dvso` 流程执行能力 | 与普通模型共用加载、推理和释放入口 | `dlcv_infer_c_dll` 扩展 |
@@ -531,10 +528,10 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 | 能力 | `dlcv_infer` C API | `dlcv_infer_c_dll` | 输入 | 输出 | 结论 |
 | --- | --- | --- | --- | --- | --- |
-| 加载模型 | `dlcv_load_model_c(const char*, int)` | `dlcv_load_model_c(const char*, int)` | 模型路径、设备 ID | 成功返回非负模型句柄，失败返回 `-1` | 一致；兼容入口同时支持 `.dvst/.dvso` |
-| 释放模型 | `dlcv_free_model_c(int)` | `dlcv_free_model_c(int)` | 当前 DLL 返回的模型句柄 | 成功返回 `0`，未找到返回 `-1` | 一致 |
-| 结构化推理 | `dlcv_infer_c(int, const DlcvCImageList&)` | `dlcv_infer_c(int, const DlcvCImageList&)` | 模型句柄、图像列表 | `DlcvCResult` | 一致 |
-| 释放结构化结果 | `dlcv_free_model_result_c(DlcvCResult&)` | `dlcv_free_model_result_c(DlcvCResult&)` | 当前 DLL 返回的结果 | 无 | 一致；只能释放所属 DLL 生成的结果 |
+| 加载模型 | `dlcv_load_model_c(const char*, int)` | `dlcv_infer_cpp_load_model_c(const char*, int)` | 模型路径、设备 ID | 成功返回非负模型句柄，失败返回 `-1` | 能力一致；后者增加 `.dvst/.dvso` |
+| 释放模型 | `dlcv_free_model_c(int)` | `dlcv_infer_cpp_free_model_c(int)` | 当前 DLL 返回的模型句柄 | 成功返回 `0`，句柄不存在返回 `-1` | 一致 |
+| 结构化推理 | `dlcv_infer_c(int, const DlcvCImageList&)` | `dlcv_infer_cpp_infer_c(int, const DlcvCImageList*)` | 模型句柄、图像列表 | `DlcvCResult` | 能力一致；引用与指针写法不同 |
+| 释放结构化结果 | `dlcv_free_model_result_c(DlcvCResult&)` | `dlcv_infer_cpp_free_model_result_c(DlcvCResult*)` | 当前 DLL 返回的结果 | 无 | 能力一致；只能释放所属 DLL 生成的结果 |
 
 #### 输入结构
 
@@ -557,31 +554,33 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 | 结构 | 字段 | 两侧含义 | 一致性 |
 | --- | --- | --- | --- |
-| `DlcvCResult` | `code`、`message`、`sample_results`、`n` | 调用状态、消息、样本结果数组、样本数量 | 兼容入口一致 |
+| `DlcvCResult` | `code`、`message`、`sample_results`、`n` | 调用状态、消息、样本结果数组、样本数量 | 字段一致，状态值和消息文本有差异 |
 | `DlcvCSampleResult` | `results`、`n` | 单张图像的目标数组与目标数量 | 一致 |
 | `DlcvCObjectResult` | `category_id`、`category_name`、`score` | 类别编号、类别名称、分数 | 一致 |
-| `DlcvCObjectResult` | `with_bbox`、`area`、`x/y/w/h` | 框是否有效、面积及框参数 | 兼容入口一致 |
-| `DlcvCObjectResult` | `with_mask`、`mask` | mask 是否有效及单通道 mask 数据 | 兼容入口一致 |
-| `DlcvCObjectResult` | `with_angle`、`angle` | 角度是否有效及角度值 | 兼容入口一致 |
+| `DlcvCObjectResult` | `with_bbox`、`area`、`x/y/w/h` | 框是否有效、面积及框参数 | 有效框一致，无框时默认值不同 |
+| `DlcvCObjectResult` | `with_mask`、`mask` | mask 是否有效及单通道 mask 数据 | 有效 mask 一致，无 mask 时尺寸默认值不同 |
+| `DlcvCObjectResult` | `with_angle`、`angle` | 角度是否有效及角度值 | 有效角度一致，无框时默认值不同 |
 | `DlcvCObjectResult` | `with_mean`、`foreground_mean`、`background_mean` | 均值是否有效及前景、背景均值 | 一致 |
 
 流程内部状态、节点计时、JSON 层的 `mask_rle`、`poly`、`extra_info` 和 `metadata` 不在 `dlcv_infer_c_dll` 的结构化结果中返回。
 
-#### 原有扩展入口与兼容入口
+#### 当前差异与使用要求
 
-| 检查项 | 原有 `dlcv_infer_cpp_*_c` | 新增同名兼容入口 | 说明 |
+| 检查项 | `dlcv_infer` C API | `dlcv_infer_c_dll` | 结论 |
 | --- | --- | --- | --- |
-| 函数名称 | `dlcv_infer_cpp_*_c` | `dlcv_*_c` | 原有名称保持不变，兼容入口与底层同名 |
-| 成功消息 | `"success"` | `"Success"` | 兼容入口与底层一致 |
-| 模型不存在 | `code=-1`、`message="model not found"` | `code=2`、`message="Model not found."` | 兼容入口与底层一致 |
-| 无框默认值 | 数值为 `0` | `x/y/w/h=-1` | 兼容入口与底层一致 |
-| 无 mask 默认值 | 尺寸为 `0` | `height/width=-1` | 兼容入口与底层一致 |
-| 无角度默认值 | 保留 C++ 结果值 | `angle=-100` | 兼容入口与底层一致 |
-| 释放后状态 | `code=0` | 保留释放前 `code` | 兼容入口与底层一致 |
-| 参数 JSON | 支持 `dlcv_infer_cpp_infer_with_params_c` | 不增加参数 | 参数能力继续由原有扩展入口提供 |
-| 结果内存 | 由 `dlcv_infer_c_dll` 分配 | 由 `dlcv_infer_c_dll` 分配 | 两类入口均调用所属 DLL 的结果释放函数 |
+| 成功消息 | `"Success"` | `"success"` | 文本大小写不同 |
+| 推理失败状态 | 模型不存在时 `code=2`，推理异常时 `code=1` | 推理失败统一为 `code=-1` | 错误码不同，通用判断应使用 `code!=0` |
+| 无框默认值 | `x/y/w/h=-1`，同时把 `angle` 设为 `-1` | `x/y/w/h=0`，`angle` 保留 C++ 结果值 | 缺省值不同，应先检查 `with_bbox`、`with_angle` |
+| 无 mask 默认值 | `mask.width=-1`、`mask.height=-1` | `mask.width=0`、`mask.height=0` | 缺省值不同，应先检查 `with_mask` |
+| 结果内存 | 内部使用 `new[]` | 内部使用 `malloc/_strdup` | 不能跨 DLL 释放，必须调用各自的结果释放函数 |
+| 释放后状态 | 清空主要指针和数量，保留 `code` | 清空主要指针和数量，同时把 `code` 设为 `0` | 释放后的顶层状态不同 |
+| 函数参数形式 | 图像列表与结果使用 C++ 引用 | 图像列表与结果使用指针 | 函数 ABI 不可直接互换 |
+| Windows 调用方式 | 显式 `__stdcall` | 未显式指定调用方式 | 当前 x64 构建可用；Win32 下不兼容 |
+| 纯 C 编译 | 公共结构头使用 C++ `bool` 和结构类型名，函数还使用 C++ 引用 | 导出函数使用指针，但仍包含同一公共结构头 | 当前头文件面向 C++ 编译器或外部语言绑定，不能直接由标准 C 编译器包含 |
+| 无效输入检查 | 未统一检查空图像列表、非法尺寸和通道数 | 推理前检查列表、地址、尺寸和通道数 | 失败行为不同 |
+| 无效模型结果初始化 | 模型不存在时没有初始化 `sample_results` 与 `n` | 返回结构先清零 | 原接口存在待修复问题；失败结果不应在修复前交给原接口释放函数处理 |
 
-最终结论：`dlcv_infer_c_dll` 的四个同名兼容入口与 `dlcv_infer` 结构化 C API 在函数参数、返回码、消息、结果字段和释放后状态上保持一致；原有 6 个扩展入口没有修改，现有调用无需调整。
+最终结论：四项结构化模型核心能力完整，数据结构 ABI、有效输入含义和有效结果字段一致；整套导出能力、错误值、缺省值、内存释放和函数 ABI 并不完全一致。因此当前不能写成“两套 C API 全部完备且输入输出完全一致”，只能确认“结构化核心能力完整，有效数据一致，并存在已列明的差异”。
 
 ---
 
