@@ -4,6 +4,7 @@
 #undef dlcv_infer
 #undef DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
 #include "dlcv_infer.h"
+#include "flow/modules/ModelModules.h"
 
 #if defined(_WIN32)
 #pragma comment(linker, "/export:dlcv_infer=dlcv_infer_json_impl")
@@ -220,6 +221,7 @@ static void CallNativeVoid(const char* apiName, Invoke&& invoke) noexcept {
 extern "C" {
 
 int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
+    dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
     ClearLastErrorMessage();
     if (!model_path) {
         SetLastErrorMessage("model_path is null");
@@ -266,6 +268,7 @@ const char* dlcv_infer_cpp_get_last_error_c() {
 }
 
 int dlcv_infer_cpp_free_model_c(int model_index) {
+    dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
     std::lock_guard<std::mutex> lock(g_modelsMutex);
     auto it = g_models.find(model_index);
     if (it == g_models.end()) return -1;
@@ -281,6 +284,7 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
     int model_index,
     const DlcvCImageList* image_list,
     const char* params_json) {
+    dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
     DlcvCResult result{};
     result.code = -1;
 
@@ -427,6 +431,7 @@ void dlcv_infer_cpp_free_model_result_c(DlcvCResult* result) {
 }
 
 const char* dlcv_infer_cpp_get_model_info_c(int model_index) {
+    dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
     ClearLastErrorMessage();
     std::shared_ptr<CApiModelEntry> entry;
     {
@@ -454,6 +459,7 @@ const char* dlcv_infer_cpp_infer_json_c(
     int model_index,
     const DlcvCImage* image,
     const char* params_json) {
+    dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
     ClearLastErrorMessage();
     if (image == nullptr || image->data_ptr == 0 || image->height <= 0 || image->width <= 0 || image->channel <= 0) {
         SetLastErrorMessage("invalid image data");
@@ -518,13 +524,14 @@ void dlcv_infer_cpp_free_string_c(const char* value) {
 }
 
 void dlcv_infer_cpp_free_all_models_c() {
-    std::unordered_map<int, std::shared_ptr<CApiModelEntry>> models;
-    {
-        std::lock_guard<std::mutex> lock(g_modelsMutex);
-        models.swap(g_models);
-    }
-    models.clear();
     CallNativeVoid("dlcv_free_all_models", []() {
+        dlcv_infer::flow::ModelLifecycleWriteGuard lifecycleGuard;
+        std::unordered_map<int, std::shared_ptr<CApiModelEntry>> models;
+        {
+            std::lock_guard<std::mutex> lock(g_modelsMutex);
+            models.swap(g_models);
+        }
+        models.clear();
         dlcv_infer::NativeApi::FreeAllModels();
     });
 }
@@ -590,6 +597,7 @@ void DLCV_NATIVE_C_CALL dlcv_free_result(const char* config_str) {
 
 void DLCV_NATIVE_C_CALL dlcv_free_all_models() {
     CallNativeVoid("dlcv_free_all_models", []() {
+        dlcv_infer::flow::ModelLifecycleWriteGuard lifecycleGuard;
         {
             std::lock_guard<std::mutex> lock(g_modelsMutex);
             g_models.clear();

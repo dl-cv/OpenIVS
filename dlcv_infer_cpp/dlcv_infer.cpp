@@ -3,6 +3,7 @@
 #include "ImageInputUtils.h"
 #include "flow/FlowGraphModel.h"
 #include "flow/FlowPayloadTypes.h"
+#include "flow/modules/ModelModules.h"
 #include "flow/utils/MaskRleUtils.h"
 #ifdef _WIN32
 #include <Windows.h>
@@ -13,13 +14,17 @@
 #include <link.h>
 #include <unistd.h>
 #endif
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <codecvt>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwctype>
 #include <fstream>
 #include <locale>
 #include <random>
@@ -357,6 +362,159 @@ std::string RandomHex(size_t len) {
     return out;
 }
 
+class Sha256Digest final {
+public:
+    void Update(const void* data, size_t len) {
+        if (data == nullptr || len == 0) return;
+        const auto* bytes = static_cast<const unsigned char*>(data);
+        _totalBytes += static_cast<std::uint64_t>(len);
+        while (len > 0) {
+            const size_t copySize = std::min(len, _buffer.size() - _bufferSize);
+            std::memcpy(_buffer.data() + _bufferSize, bytes, copySize);
+            _bufferSize += copySize;
+            bytes += copySize;
+            len -= copySize;
+            if (_bufferSize == _buffer.size()) {
+                Transform(_buffer.data());
+                _bufferSize = 0;
+            }
+        }
+    }
+
+    std::string FinalHex() {
+        const std::uint64_t bitLength = _totalBytes * 8ULL;
+        _buffer[_bufferSize++] = 0x80;
+        if (_bufferSize > 56) {
+            while (_bufferSize < 64) _buffer[_bufferSize++] = 0;
+            Transform(_buffer.data());
+            _bufferSize = 0;
+        }
+        while (_bufferSize < 56) _buffer[_bufferSize++] = 0;
+        for (int i = 7; i >= 0; --i) {
+            _buffer[_bufferSize++] = static_cast<unsigned char>((bitLength >> (i * 8)) & 0xFFU);
+        }
+        Transform(_buffer.data());
+        _bufferSize = 0;
+
+        static const char* kHex = "0123456789abcdef";
+        std::string out;
+        out.reserve(64);
+        for (const std::uint32_t value : _state) {
+            for (int shift = 28; shift >= 0; shift -= 4) {
+                out.push_back(kHex[(value >> shift) & 0x0FU]);
+            }
+        }
+        return out;
+    }
+
+private:
+    static std::uint32_t RotateRight(std::uint32_t value, unsigned int bits) {
+        return (value >> bits) | (value << (32U - bits));
+    }
+
+    void Transform(const unsigned char* block) {
+        static constexpr std::array<std::uint32_t, 64> kRoundConstants = {
+            0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U,
+            0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U,
+            0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U,
+            0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U,
+            0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU,
+            0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU,
+            0x983e5152U, 0xa831c66dU, 0xb00327c8U, 0xbf597fc7U,
+            0xc6e00bf3U, 0xd5a79147U, 0x06ca6351U, 0x14292967U,
+            0x27b70a85U, 0x2e1b2138U, 0x4d2c6dfcU, 0x53380d13U,
+            0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U,
+            0xa2bfe8a1U, 0xa81a664bU, 0xc24b8b70U, 0xc76c51a3U,
+            0xd192e819U, 0xd6990624U, 0xf40e3585U, 0x106aa070U,
+            0x19a4c116U, 0x1e376c08U, 0x2748774cU, 0x34b0bcb5U,
+            0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU, 0x682e6ff3U,
+            0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U,
+            0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U
+        };
+
+        std::array<std::uint32_t, 64> words{};
+        for (size_t i = 0; i < 16; ++i) {
+            const size_t offset = i * 4;
+            words[i] = (static_cast<std::uint32_t>(block[offset]) << 24)
+                | (static_cast<std::uint32_t>(block[offset + 1]) << 16)
+                | (static_cast<std::uint32_t>(block[offset + 2]) << 8)
+                | static_cast<std::uint32_t>(block[offset + 3]);
+        }
+        for (size_t i = 16; i < words.size(); ++i) {
+            const std::uint32_t s0 = RotateRight(words[i - 15], 7)
+                ^ RotateRight(words[i - 15], 18)
+                ^ (words[i - 15] >> 3);
+            const std::uint32_t s1 = RotateRight(words[i - 2], 17)
+                ^ RotateRight(words[i - 2], 19)
+                ^ (words[i - 2] >> 10);
+            words[i] = words[i - 16] + s0 + words[i - 7] + s1;
+        }
+
+        std::uint32_t a = _state[0];
+        std::uint32_t b = _state[1];
+        std::uint32_t c = _state[2];
+        std::uint32_t d = _state[3];
+        std::uint32_t e = _state[4];
+        std::uint32_t f = _state[5];
+        std::uint32_t g = _state[6];
+        std::uint32_t h = _state[7];
+
+        for (size_t i = 0; i < words.size(); ++i) {
+            const std::uint32_t sum1 = RotateRight(e, 6) ^ RotateRight(e, 11) ^ RotateRight(e, 25);
+            const std::uint32_t choose = (e & f) ^ ((~e) & g);
+            const std::uint32_t temp1 = h + sum1 + choose + kRoundConstants[i] + words[i];
+            const std::uint32_t sum0 = RotateRight(a, 2) ^ RotateRight(a, 13) ^ RotateRight(a, 22);
+            const std::uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+            const std::uint32_t temp2 = sum0 + majority;
+
+            h = g;
+            g = f;
+            f = e;
+            e = d + temp1;
+            d = c;
+            c = b;
+            b = a;
+            a = temp1 + temp2;
+        }
+
+        _state[0] += a;
+        _state[1] += b;
+        _state[2] += c;
+        _state[3] += d;
+        _state[4] += e;
+        _state[5] += f;
+        _state[6] += g;
+        _state[7] += h;
+    }
+
+    std::array<std::uint32_t, 8> _state = {
+        0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
+        0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U
+    };
+    std::array<unsigned char, 64> _buffer{};
+    size_t _bufferSize = 0;
+    std::uint64_t _totalBytes = 0;
+};
+
+std::string GetNormalizedDvsPathUtf8(const std::wstring& archivePathW) {
+#ifdef _WIN32
+    const DWORD required = GetFullPathNameW(archivePathW.c_str(), 0, nullptr, nullptr);
+    if (required == 0) throw std::runtime_error("无法解析 DVS 完整路径");
+    std::vector<wchar_t> buffer(static_cast<size_t>(required));
+    if (GetFullPathNameW(archivePathW.c_str(), required, buffer.data(), nullptr) == 0) {
+        throw std::runtime_error("无法解析 DVS 完整路径");
+    }
+    std::wstring normalizedPath(buffer.data());
+    for (wchar_t& ch : normalizedPath) ch = static_cast<wchar_t>(std::towlower(ch));
+    return dlcv_infer::convertWstringToUtf8(normalizedPath);
+#else
+    std::error_code ec;
+    const fs::path fullPath = fs::absolute(fs::path(WideToUtf8Portable(archivePathW)), ec);
+    if (ec) throw std::runtime_error("无法解析 DVS 完整路径");
+    return fullPath.lexically_normal().string();
+#endif
+}
+
 std::string CreateTempDir() {
 #ifdef _WIN32
     char tmpPath[MAX_PATH] = { 0 };
@@ -385,19 +543,27 @@ std::string CreateTempDir() {
     throw std::runtime_error("failed to create temp directory");
 }
 
-void ReadExactOrThrow(FILE* fp, char* dst, size_t len, const std::string& errMsg) {
+void ReadExactOrThrow(
+    FILE* fp,
+    char* dst,
+    size_t len,
+    const std::string& errMsg,
+    Sha256Digest& digest) {
     if (len == 0) return;
     if (fp == nullptr || dst == nullptr) throw std::runtime_error(errMsg);
     const size_t n = std::fread(dst, 1, len, fp);
     if (n != len) throw std::runtime_error(errMsg);
+    digest.Update(dst, len);
 }
 
-std::string ReadLineOrThrow(FILE* fp) {
+std::string ReadLineOrThrow(FILE* fp, Sha256Digest& digest) {
     if (fp == nullptr) throw std::runtime_error("file handle is null");
     std::string line;
     for (;;) {
         const int c = std::fgetc(fp);
         if (c == EOF) break;
+        const unsigned char byte = static_cast<unsigned char>(c);
+        digest.Update(&byte, 1);
         if (c == '\n') break;
         line.push_back(static_cast<char>(c));
     }
@@ -414,7 +580,7 @@ long long ReadFileSizeFromJson(const Json& v) {
     return -1;
 }
 
-void CopyStreamToFile(FILE* fp, const std::string& outPath, long long bytes) {
+void CopyStreamToFile(FILE* fp, const std::string& outPath, long long bytes, Sha256Digest& digest) {
     if (bytes < 0) throw std::runtime_error("invalid file size in dvst archive");
     std::ofstream ofs(outPath, std::ios::binary);
     if (!ofs) throw std::runtime_error("failed to write temp model file: " + outPath);
@@ -425,13 +591,29 @@ void CopyStreamToFile(FILE* fp, const std::string& outPath, long long bytes) {
         const size_t chunk = static_cast<size_t>(std::min<long long>(remaining, static_cast<long long>(buffer.size())));
         const size_t n = std::fread(buffer.data(), 1, chunk, fp);
         if (n != chunk) throw std::runtime_error("failed to read dvst file content");
+        digest.Update(buffer.data(), chunk);
         ofs.write(buffer.data(), static_cast<std::streamsize>(chunk));
         if (!ofs) throw std::runtime_error("failed to write temp model file: " + outPath);
         remaining -= static_cast<long long>(chunk);
     }
 }
 
-void RewritePipelineModelPath(Json& pipelineRoot, const std::unordered_map<std::string, std::string>& fileMap) {
+void ReadRemainingArchiveBytes(FILE* fp, Sha256Digest& digest) {
+    std::array<char, 64 * 1024> buffer{};
+    for (;;) {
+        const size_t n = std::fread(buffer.data(), 1, buffer.size(), fp);
+        if (n > 0) digest.Update(buffer.data(), n);
+        if (n < buffer.size()) {
+            if (std::ferror(fp)) throw std::runtime_error("failed to read dvst trailing content");
+            return;
+        }
+    }
+}
+
+void RewritePipelineModelPath(
+    Json& pipelineRoot,
+    const std::unordered_map<std::string, std::string>& fileMap,
+    const std::string& modelPoolPrefix) {
     if (!pipelineRoot.is_object() || !pipelineRoot.contains("nodes") || !pipelineRoot.at("nodes").is_array()) {
         throw std::runtime_error("pipeline.json missing nodes");
     }
@@ -447,6 +629,7 @@ void RewritePipelineModelPath(Json& pipelineRoot, const std::unordered_map<std::
         props["model_path_original"] = originalPath;
         const std::string originalName = GetFileNameOnly(originalPath);
         props["model_name"] = originalName.empty() ? originalPath : originalName;
+        props["model_pool_key"] = modelPoolPrefix + "|model:" + ToLowerAscii(originalPath);
 
         auto it = fileMap.find(ToLowerAscii(originalPath));
         if (it != fileMap.end()) {
@@ -470,6 +653,13 @@ void WriteUtf8Text(const std::string& path, const std::string& content) {
 }
 
 DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
+    Sha256Digest archiveDigest;
+    const std::string normalizedPath = GetNormalizedDvsPathUtf8(archivePathW);
+    static constexpr char kIdentityPrefix[] = "DLCV-DVS-CONTENT";
+    archiveDigest.Update(kIdentityPrefix, sizeof(kIdentityPrefix));
+    archiveDigest.Update(normalizedPath.data(), normalizedPath.size());
+    const unsigned char separator = 0;
+    archiveDigest.Update(&separator, 1);
 #ifdef _WIN32
     FILE* fp = nullptr;
     if (_wfopen_s(&fp, archivePathW.c_str(), L"rb") != 0 || fp == nullptr) {
@@ -483,12 +673,12 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
     DvsUnpackResult out;
     try {
         char magic[3] = { 0 };
-        ReadExactOrThrow(fp, magic, 3, "failed to read dvst magic");
+        ReadExactOrThrow(fp, magic, 3, "failed to read dvst magic", archiveDigest);
         if (!(magic[0] == 'D' && magic[1] == 'V' && magic[2] == '\n')) {
             throw std::runtime_error("invalid dvst format: missing DV header");
         }
 
-        const std::string headerLine = ReadLineOrThrow(fp);
+        const std::string headerLine = ReadLineOrThrow(fp, archiveDigest);
         const Json header = Json::parse(headerLine);
         if (!header.is_object() ||
             !header.contains("file_list") || !header.at("file_list").is_array() ||
@@ -514,7 +704,12 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
             if (ToLowerAscii(fileName) == "pipeline.json") {
                 std::string text(static_cast<size_t>(size), '\0');
                 if (size > 0) {
-                    ReadExactOrThrow(fp, &text[0], static_cast<size_t>(size), "failed to read pipeline.json");
+                    ReadExactOrThrow(
+                        fp,
+                        &text[0],
+                        static_cast<size_t>(size),
+                        "failed to read pipeline.json",
+                        archiveDigest);
                 }
                 out.pipelineRoot = Json::parse(text);
                 gotPipeline = true;
@@ -524,14 +719,16 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
                 const std::string safeName = RandomHex(32) + ext;
                 const std::string fullPath = JoinPath(out.tempDir, safeName);
 
-                CopyStreamToFile(fp, fullPath, size);
+                CopyStreamToFile(fp, fullPath, size, archiveDigest);
                 fileNameToTemp[ToLowerAscii(fileName)] = fullPath;
                 fileNameToTemp[ToLowerAscii(GetFileNameOnly(fileName))] = fullPath;
             }
         }
 
         if (!gotPipeline) throw std::runtime_error("pipeline.json not found in dvst archive");
-        RewritePipelineModelPath(out.pipelineRoot, fileNameToTemp);
+        ReadRemainingArchiveBytes(fp, archiveDigest);
+        const std::string modelPoolPrefix = "dvs:" + archiveDigest.FinalHex();
+        RewritePipelineModelPath(out.pipelineRoot, fileNameToTemp, modelPoolPrefix);
         unpackGuard.Release();
     } catch (...) {
         std::fclose(fp);
@@ -1546,6 +1743,7 @@ namespace dlcv_infer {
 
     Model::Model(const std::string& modelPath, int device_id)
         : _deviceId(device_id) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         const std::wstring modelPathW = DecodeModelPathString(modelPath);
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPathW);
         if (IsFlowArchivePath(modelPathUtf8)) {
@@ -1613,6 +1811,7 @@ namespace dlcv_infer {
 
     Model::Model(const std::wstring& modelPath, int device_id)
         : _deviceId(device_id) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPath);
         if (IsFlowArchivePath(modelPathUtf8)) {
             _isFlowGraphMode = true;
@@ -1744,6 +1943,7 @@ namespace dlcv_infer {
     }
 
     void Model::FreeModel() {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         _expectedChCache = -2;
         if (_isFlowGraphMode) {
             delete _flowModel;
@@ -1826,6 +2026,7 @@ namespace dlcv_infer {
     }
 
     json Model::GetModelInfo() {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         if (_hasCachedModelInfo) {
             return _cachedModelInfo;
         }
@@ -2135,6 +2336,7 @@ namespace dlcv_infer {
     }
 
     Result Model::Infer(const cv::Mat& image, const json& params_json) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         ClearLastInspectionStatuses();
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
@@ -2196,6 +2398,7 @@ namespace dlcv_infer {
     }
 
     Result Model::InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         ClearLastInspectionStatuses();
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
@@ -2270,6 +2473,7 @@ namespace dlcv_infer {
     }
 
     json Model::InferOneOutJson(const cv::Mat& image, const json& params_json) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         ClearLastInspectionStatuses();
         if (_isFlowGraphMode) {
             if (!_flowModel) throw std::runtime_error("dvs model not loaded");
@@ -2464,6 +2668,8 @@ namespace dlcv_infer {
     }
 
     void Utils::FreeAllModels() {
+        flow::ModelLifecycleWriteGuard lifecycleGuard;
+        flow::ModelPool::Instance().Clear();
         auto& loader = DllLoader::Instance();
         if (loader.GetFreeAllModelsFunc())
         {
@@ -2649,21 +2855,25 @@ namespace dlcv_infer {
     }
 
     const char* NativeApi::LoadModel(const char* configStr) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         auto& loader = DllLoader::Instance();
         return RequireNativeApiFunction(loader.GetLoadModelFunc(), "dlcv_load_model")(configStr);
     }
 
     const char* NativeApi::FreeModel(const char* configStr) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         auto& loader = DllLoader::Instance();
         return RequireNativeApiFunction(loader.GetFreeModelFunc(), "dlcv_free_model")(configStr);
     }
 
     const char* NativeApi::GetModelInfo(const char* configStr) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         auto& loader = DllLoader::Instance();
         return RequireNativeApiFunction(loader.GetModelInfoFunc(), "dlcv_get_model_info")(configStr);
     }
 
     const char* NativeApi::Infer(const char* configStr) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         auto& loader = DllLoader::Instance();
         return RequireNativeApiFunction(loader.GetInferFunc(), "dlcv_infer")(configStr);
     }
@@ -2679,6 +2889,8 @@ namespace dlcv_infer {
     }
 
     void NativeApi::FreeAllModels() {
+        flow::ModelLifecycleWriteGuard lifecycleGuard;
+        flow::ModelPool::Instance().Clear();
         auto& loader = DllLoader::Instance();
         RequireNativeApiFunction(loader.GetFreeAllModelsFunc(), "dlcv_free_all_models")();
     }

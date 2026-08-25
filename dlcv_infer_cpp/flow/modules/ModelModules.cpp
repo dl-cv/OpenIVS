@@ -4,8 +4,10 @@
 #include <cmath>
 #include <limits>
 #include <mutex>
+#include <shared_mutex>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 #include "opencv2/imgproc.hpp"
 
@@ -16,8 +18,100 @@
 namespace dlcv_infer {
 namespace flow {
 
-std::string ModelPool::MakeKey(const std::string& modelPathUtf8, int deviceId) {
-    return modelPathUtf8 + "|dev:" + std::to_string(deviceId);
+namespace {
+
+std::shared_mutex g_modelLifecycleMutex;
+thread_local unsigned int g_modelLifecycleReadDepth = 0;
+thread_local unsigned int g_modelLifecycleWriteDepth = 0;
+
+} // namespace
+
+ModelLifecycleReadGuard::ModelLifecycleReadGuard() {
+    if (g_modelLifecycleWriteDepth > 0) {
+        ++g_modelLifecycleReadDepth;
+        return;
+    }
+    if (g_modelLifecycleReadDepth == 0) {
+        g_modelLifecycleMutex.lock_shared();
+        _ownsSharedLock = true;
+    }
+    ++g_modelLifecycleReadDepth;
+}
+
+ModelLifecycleReadGuard::~ModelLifecycleReadGuard() {
+    if (g_modelLifecycleReadDepth == 0) return;
+    --g_modelLifecycleReadDepth;
+    if (_ownsSharedLock) g_modelLifecycleMutex.unlock_shared();
+}
+
+ModelLifecycleWriteGuard::ModelLifecycleWriteGuard() {
+    if (g_modelLifecycleWriteDepth > 0) {
+        ++g_modelLifecycleWriteDepth;
+        return;
+    }
+    if (g_modelLifecycleReadDepth > 0) {
+        throw std::logic_error("FreeAllModels cannot run during a model operation on the same thread");
+    }
+    g_modelLifecycleMutex.lock();
+    g_modelLifecycleWriteDepth = 1;
+    _ownsExclusiveLock = true;
+}
+
+ModelLifecycleWriteGuard::~ModelLifecycleWriteGuard() {
+    if (g_modelLifecycleWriteDepth == 0) return;
+    --g_modelLifecycleWriteDepth;
+    if (_ownsExclusiveLock) g_modelLifecycleMutex.unlock();
+}
+
+ModelPoolLease::ModelPoolLease(
+    std::shared_ptr<dlcv_infer::Model> model,
+    std::string key,
+    std::uint64_t entryIdentity)
+    : _model(std::move(model)),
+      _key(std::move(key)),
+      _entryIdentity(entryIdentity) {}
+
+ModelPoolLease::~ModelPoolLease() {
+    Reset();
+}
+
+ModelPoolLease::ModelPoolLease(ModelPoolLease&& other) noexcept
+    : _model(std::move(other._model)),
+      _key(std::move(other._key)),
+      _entryIdentity(other._entryIdentity) {
+    other._entryIdentity = 0;
+    other._key.clear();
+}
+
+ModelPoolLease& ModelPoolLease::operator=(ModelPoolLease&& other) noexcept {
+    if (this == &other) return *this;
+    Reset();
+    _model = std::move(other._model);
+    _key = std::move(other._key);
+    _entryIdentity = other._entryIdentity;
+    other._entryIdentity = 0;
+    other._key.clear();
+    return *this;
+}
+
+void ModelPoolLease::Reset() noexcept {
+    try {
+        ModelLifecycleReadGuard lifecycleGuard;
+        if (!_key.empty() && _entryIdentity != 0) {
+            ModelPool::Instance().ReleaseByKey(_key, _entryIdentity);
+        }
+        _entryIdentity = 0;
+        _key.clear();
+        _model.reset();
+    } catch (...) {
+        _entryIdentity = 0;
+        _key.clear();
+        _model.reset();
+    }
+}
+
+std::string ModelPool::MakeKey(const std::string& modelIdentityUtf8, int deviceId) {
+    return modelIdentityUtf8 + "|dev:" + std::to_string(deviceId);
 }
 
 ModelPool& ModelPool::Instance() {
@@ -25,16 +119,22 @@ ModelPool& ModelPool::Instance() {
     return s;
 }
 
-std::shared_ptr<dlcv_infer::Model> ModelPool::Acquire(const std::string& modelPathUtf8, int deviceId) {
+ModelPoolLease ModelPool::Acquire(
+    const std::string& modelPathUtf8,
+    int deviceId,
+    const std::string& modelIdentityUtf8) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (modelPathUtf8.empty()) {
         throw std::invalid_argument("model_path is empty");
     }
-    const std::string key = ModelPool::MakeKey(modelPathUtf8, deviceId);
+    const std::string identity = modelIdentityUtf8.empty() ? modelPathUtf8 : modelIdentityUtf8;
+    const std::string key = ModelPool::MakeKey(identity, deviceId);
     std::lock_guard<std::mutex> lk(_mu);
     auto it = _cache.find(key);
     if (it != _cache.end() && it->second.model) {
         it->second.refCount++;
-        return it->second.model;
+        it->second.lastUse = ++_useSequence;
+        return ModelPoolLease(it->second.model, key, it->second.identity);
     }
 
     // FlowGraph 内部按 UTF-8 存储；现有 dlcv_infer::Model 构造函数按“输入为 GBK”处理
@@ -43,30 +143,75 @@ std::shared_ptr<dlcv_infer::Model> ModelPool::Acquire(const std::string& modelPa
     Entry entry;
     entry.model = model;
     entry.refCount = 1;
+    entry.lastUse = ++_useSequence;
+    entry.identity = ++_entrySequence;
+    if (entry.identity == 0) entry.identity = ++_entrySequence;
+    entry.retainWhenIdle = modelIdentityUtf8.rfind("dvs:", 0) == 0;
+    const std::uint64_t entryIdentity = entry.identity;
     _cache[key] = std::move(entry);
-    return model;
+    return ModelPoolLease(std::move(model), key, entryIdentity);
 }
 
-void ModelPool::Release(const std::string& modelPathUtf8, int deviceId) {
-    if (modelPathUtf8.empty()) return;
-    const std::string key = ModelPool::MakeKey(modelPathUtf8, deviceId);
-    ReleaseByKey(key);
-}
-
-void ModelPool::ReleaseByKey(const std::string& key) {
-    if (key.empty()) return;
+void ModelPool::ReleaseByKey(const std::string& key, std::uint64_t entryIdentity) {
+    if (key.empty() || entryIdentity == 0) return;
     std::lock_guard<std::mutex> lk(_mu);
     auto it = _cache.find(key);
     if (it == _cache.end()) return;
-    it->second.refCount--;
+    if (it->second.identity != entryIdentity) return;
+    if (it->second.refCount > 0) it->second.refCount--;
     if (it->second.refCount <= 0) {
-        _cache.erase(it);
+        if (!it->second.retainWhenIdle) {
+            _cache.erase(it);
+            return;
+        }
+        it->second.refCount = 0;
+        it->second.lastUse = ++_useSequence;
+        EvictIdleLocked();
+    }
+}
+
+void ModelPool::EvictIdleLocked() {
+    size_t idleCount = 0;
+    for (const auto& item : _cache) {
+        if (item.second.refCount == 0) idleCount++;
+    }
+
+    while (idleCount > MaxIdleEntries) {
+        auto oldest = _cache.end();
+        for (auto it = _cache.begin(); it != _cache.end(); ++it) {
+            if (it->second.refCount != 0) continue;
+            if (oldest == _cache.end() || it->second.lastUse < oldest->second.lastUse) {
+                oldest = it;
+            }
+        }
+        if (oldest == _cache.end()) break;
+        _cache.erase(oldest);
+        idleCount--;
     }
 }
 
 void ModelPool::Clear() {
     std::lock_guard<std::mutex> lk(_mu);
     _cache.clear();
+    _useSequence = 0;
+}
+
+ModelPoolStats ModelPool::GetStats() {
+    std::lock_guard<std::mutex> lk(_mu);
+    ModelPoolStats stats;
+    stats.totalEntries = _cache.size();
+    for (const auto& item : _cache) {
+        if (item.second.refCount > 0) {
+            ++stats.activeEntries;
+        } else {
+            ++stats.idleEntries;
+        }
+    }
+    return stats;
+}
+
+ModelPoolStats GetModelPoolStats() {
+    return ModelPool::Instance().GetStats();
 }
 
 static std::string GetFileNameOnlyLocal(const std::string& path) {
@@ -77,7 +222,7 @@ static std::string GetFileNameOnlyLocal(const std::string& path) {
 }
 
 void BaseModelModule::LoadModel() {
-    if (_model) return;
+    if (_modelLease) return;
 
     int deviceId = _deviceId;
     try {
@@ -87,7 +232,7 @@ void BaseModelModule::LoadModel() {
     } catch (...) {}
 
     _resolvedDeviceId = deviceId;
-    _model = ModelPool::Instance().Acquire(_modelPathUtf8, deviceId);
+    _modelLease = ModelPool::Instance().Acquire(_modelPathUtf8, deviceId, _modelIdentityUtf8);
 }
 
 static void TryAddParam(Json& p, const Json& props, const std::string& key) {
@@ -392,7 +537,7 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     const bool emitMaskRle = includeMask;
     const bool emitMaskDerivedMeta = false;
 
-    const int effectiveBatch = ResolveEffectiveBatchLimit(_model, this->Properties);
+    const int effectiveBatch = ResolveEffectiveBatchLimit(_modelLease.Model(), this->Properties);
     p["batch_size"] = effectiveBatch;
 
     std::vector<cv::Mat> rgbInputs;
@@ -455,7 +600,7 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
                 chunkMats.push_back(rgbInputs[static_cast<size_t>(localIdx)]);
             }
 
-            dlcv_infer::Result res = _model->InferBatch(chunkMats, paramsToPass);
+            dlcv_infer::Result res = _modelLease.Model()->InferBatch(chunkMats, paramsToPass);
             try {
                 if (Context != nullptr) {
                     double prev = Context->Get<double>("flow_dlcv_infer_ms_acc", 0.0);

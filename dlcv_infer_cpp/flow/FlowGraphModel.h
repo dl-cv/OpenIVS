@@ -7,6 +7,7 @@
 #include "flow/ExecutionContext.h"
 #include "flow/FlowTypes.h"
 #include "flow/GraphExecutor.h"
+#include "flow/modules/ModelModules.h"
 
 namespace dlcv_infer {
 namespace flow {
@@ -71,7 +72,7 @@ private:
     bool _loaded = false;
     int _deviceId = 0;
     std::string _flowJsonPath;
-    std::vector<std::string> _acquiredModelKeys;
+    std::vector<ModelPoolLease> _acquiredModelLeases;
 
     void ReleaseOwnedModelsNoexcept();
     Json LoadFromRoot(const Json& root, int deviceId);

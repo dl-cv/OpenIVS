@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -13,6 +15,64 @@
 namespace dlcv_infer {
 namespace flow {
 
+class DLCV_INFER_CPP_API ModelLifecycleReadGuard final {
+public:
+    ModelLifecycleReadGuard();
+    ~ModelLifecycleReadGuard();
+    ModelLifecycleReadGuard(const ModelLifecycleReadGuard&) = delete;
+    ModelLifecycleReadGuard& operator=(const ModelLifecycleReadGuard&) = delete;
+
+private:
+    bool _ownsSharedLock = false;
+};
+
+class DLCV_INFER_CPP_API ModelLifecycleWriteGuard final {
+public:
+    ModelLifecycleWriteGuard();
+    ~ModelLifecycleWriteGuard();
+    ModelLifecycleWriteGuard(const ModelLifecycleWriteGuard&) = delete;
+    ModelLifecycleWriteGuard& operator=(const ModelLifecycleWriteGuard&) = delete;
+
+private:
+    bool _ownsExclusiveLock = false;
+};
+
+class ModelPool;
+
+class ModelPoolLease final {
+public:
+    ModelPoolLease() = default;
+    ~ModelPoolLease();
+    ModelPoolLease(ModelPoolLease&& other) noexcept;
+    ModelPoolLease& operator=(ModelPoolLease&& other) noexcept;
+    ModelPoolLease(const ModelPoolLease&) = delete;
+    ModelPoolLease& operator=(const ModelPoolLease&) = delete;
+
+    void Reset() noexcept;
+    const std::shared_ptr<dlcv_infer::Model>& Model() const { return _model; }
+    const std::string& Key() const { return _key; }
+    explicit operator bool() const { return _model != nullptr; }
+
+private:
+    friend class ModelPool;
+    ModelPoolLease(
+        std::shared_ptr<dlcv_infer::Model> model,
+        std::string key,
+        std::uint64_t entryIdentity);
+
+    std::shared_ptr<dlcv_infer::Model> _model;
+    std::string _key;
+    std::uint64_t _entryIdentity = 0;
+};
+
+struct ModelPoolStats {
+    size_t totalEntries = 0;
+    size_t activeEntries = 0;
+    size_t idleEntries = 0;
+};
+
+DLCV_INFER_CPP_API ModelPoolStats GetModelPoolStats();
+
 /// <summary>
 /// 模型池：按 model_path+device_id 缓存 dlcv_infer::Model，避免重复加载。
 /// 约定：FlowGraph 内部字符串使用 UTF-8；创建 Model 时会转换为 GBK 以兼容现有 Model 构造。
@@ -24,30 +84,35 @@ public:
     /// 获取模型，增加该 key 的引用计数。
     /// 若缓存中已存在且有效，直接返回并 +1。
     /// 若不存在，创建新的 Model 对象，refCount = 1。
-    std::shared_ptr<dlcv_infer::Model> Acquire(
-        const std::string& modelPathUtf8, int deviceId);
+    ModelPoolLease Acquire(
+        const std::string& modelPathUtf8,
+        int deviceId,
+        const std::string& modelIdentityUtf8 = std::string());
 
-    /// 释放一个引用。refCount 减 1；归零时从缓存移除。
-    /// 若 key 不存在，无操作。
-    void Release(const std::string& modelPathUtf8, int deviceId);
-
-    /// 通过 key 释放引用（避免调用方重复拼接/解析）。
-    void ReleaseByKey(const std::string& key);
-
-    [[deprecated("Use Acquire/Release instead")]]
     void Clear();
+    ModelPoolStats GetStats();
 
-    static std::string MakeKey(const std::string& modelPathUtf8, int deviceId);
+    static std::string MakeKey(const std::string& modelIdentityUtf8, int deviceId);
 
 private:
     struct Entry {
         std::shared_ptr<dlcv_infer::Model> model;
         int refCount = 0;
+        std::uint64_t lastUse = 0;
+        std::uint64_t identity = 0;
+        bool retainWhenIdle = false;
     };
 
     ModelPool() = default;
+    friend class ModelPoolLease;
+    void ReleaseByKey(const std::string& key, std::uint64_t entryIdentity);
+    void EvictIdleLocked();
+
+    static constexpr size_t MaxIdleEntries = 8;
     std::mutex _mu;
     std::unordered_map<std::string, Entry> _cache;
+    std::uint64_t _useSequence = 0;
+    std::uint64_t _entrySequence = 0;
 };
 
 /// <summary>
@@ -58,7 +123,8 @@ protected:
     std::string _modelPathUtf8;
     int _deviceId = 0;
     int _resolvedDeviceId = 0;
-    std::shared_ptr<dlcv_infer::Model> _model;
+    std::string _modelIdentityUtf8;
+    ModelPoolLease _modelLease;
 
 public:
     BaseModelModule(int nodeId,
@@ -67,21 +133,19 @@ public:
                     ExecutionContext* context = nullptr)
         : BaseModule(nodeId, title, properties, context) {
         _modelPathUtf8 = ReadString("model_path", std::string());
+        _modelIdentityUtf8 = ReadString("model_pool_key", _modelPathUtf8);
         _deviceId = ReadInt("device_id", 0);
         _resolvedDeviceId = _deviceId;
     }
 
-    ~BaseModelModule() {
-        if (!_modelPathUtf8.empty() && _model) {
-            try { ModelPool::Instance().Release(_modelPathUtf8, _resolvedDeviceId); } catch (...) {}
-        }
-    }
+    ~BaseModelModule() = default;
 
     void LoadModel() override;
 
     const std::string& ModelPathUtf8() const { return _modelPathUtf8; }
+    const std::string& ModelIdentityUtf8() const { return _modelIdentityUtf8; }
     int ResolvedDeviceId() const { return _resolvedDeviceId; }
-    const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _model; }
+    const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _modelLease.Model(); }
 };
 
 /// <summary>

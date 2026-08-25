@@ -638,6 +638,9 @@ Json GraphExecutor::LoadModels() {
             if (props.contains("model_name") && props.at("model_name").is_string()) {
                 item["model_name"] = props.at("model_name");
             }
+            if (props.contains("model_pool_key") && props.at("model_pool_key").is_string()) {
+                item["model_pool_key"] = props.at("model_pool_key");
+            }
         } catch (...) {}
         if (!item.contains("model_path_original")) item["model_path_original"] = modelPath;
         if (!item.contains("model_name")) {
@@ -659,6 +662,7 @@ Json GraphExecutor::LoadModels() {
             failCount++;
             item["status_code"] = 1;
             item["status_message"] = "module_not_registered";
+            item.erase("model_pool_key");
             items.push_back(item);
             continue;
         }
@@ -689,7 +693,9 @@ Json GraphExecutor::LoadModels() {
             item["status_message"] = "unknown_exception";
         }
 
-        items.push_back(item);
+        Json publicItem = item;
+        publicItem.erase("model_pool_key");
+        items.push_back(std::move(publicItem));
     }
 
     // 合并非 model/* 未注册节点到 report

@@ -482,12 +482,7 @@ static void ApplyFinalThresholdFilter(Json& flowRoot, const Json& paramsJson) {
 }
 
 void FlowGraphModel::ReleaseOwnedModelsNoexcept() {
-    try {
-        for (const auto& key : _acquiredModelKeys) {
-            ModelPool::Instance().ReleaseByKey(key);
-        }
-    } catch (...) {}
-    _acquiredModelKeys.clear();
+    try { _acquiredModelLeases.clear(); } catch (...) {}
 }
 
 FlowGraphModel::~FlowGraphModel() {
@@ -498,7 +493,7 @@ FlowGraphModel::~FlowGraphModel() {
     _loaded = false;
     _deviceId = 0;
     _flowJsonPath.clear();
-    _acquiredModelKeys.clear();
+    _acquiredModelLeases.clear();
 }
 
 FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
@@ -508,7 +503,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     _loaded = other._loaded;
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
-    _acquiredModelKeys = std::move(other._acquiredModelKeys);
+    _acquiredModelLeases = std::move(other._acquiredModelLeases);
 
     // moved-from：不再负责释放
     other._nodes.clear();
@@ -517,7 +512,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     other._loaded = false;
     other._deviceId = 0;
     other._flowJsonPath.clear();
-    other._acquiredModelKeys.clear();
+    other._acquiredModelLeases.clear();
 }
 
 FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
@@ -532,7 +527,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     _loaded = other._loaded;
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
-    _acquiredModelKeys = std::move(other._acquiredModelKeys);
+    _acquiredModelLeases = std::move(other._acquiredModelLeases);
 
     other._nodes.clear();
     other._root = Json::object();
@@ -540,12 +535,13 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     other._loaded = false;
     other._deviceId = 0;
     other._flowJsonPath.clear();
-    other._acquiredModelKeys.clear();
+    other._acquiredModelLeases.clear();
 
     return *this;
 }
 
 Json FlowGraphModel::Load(const std::string& flowJsonPath, int deviceId) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (flowJsonPath.empty()) throw std::invalid_argument("flowJsonPath is empty");
     const std::string text = ReadAllTextUtf8(flowJsonPath);
     Json root = Json::parse(text);
@@ -554,6 +550,7 @@ Json FlowGraphModel::Load(const std::string& flowJsonPath, int deviceId) {
 }
 
 Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (!root.is_object()) throw std::invalid_argument("flow root is not object");
     if (!root.contains("nodes") || !root.at("nodes").is_array()) {
         throw std::runtime_error("flow json missing nodes array");
@@ -624,21 +621,28 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
     for (const auto& item : _loadedModelMeta) {
         if (!IsModelMeta(item)) continue;
         std::string modelPath;
+        std::string modelIdentity;
         int nodeDeviceId = deviceId;
         try {
             if (item.contains("model_path") && item.at("model_path").is_string())
                 modelPath = item.at("model_path").get<std::string>();
+            if (item.contains("model_pool_key") && item.at("model_pool_key").is_string())
+                modelIdentity = item.at("model_pool_key").get<std::string>();
             if (item.contains("device_id"))
                 nodeDeviceId = ReadIntField(item, "device_id", deviceId);
         } catch (...) {}
         if (modelPath.empty()) continue;
+        if (modelIdentity.empty()) modelIdentity = modelPath;
 
-        const std::string key = ModelPool::MakeKey(modelPath, nodeDeviceId);
+        const std::string key = ModelPool::MakeKey(modelIdentity, nodeDeviceId);
         // 去重：同一流程可能多个节点引用同一模型
-        if (std::find(_acquiredModelKeys.begin(), _acquiredModelKeys.end(), key)
-            == _acquiredModelKeys.end()) {
-            ModelPool::Instance().Acquire(modelPath, nodeDeviceId);
-            _acquiredModelKeys.push_back(key);
+        const auto existing = std::find_if(
+            _acquiredModelLeases.begin(),
+            _acquiredModelLeases.end(),
+            [&key](const ModelPoolLease& lease) { return lease.Key() == key; });
+        if (existing == _acquiredModelLeases.end()) {
+            _acquiredModelLeases.push_back(
+                ModelPool::Instance().Acquire(modelPath, nodeDeviceId, modelIdentity));
         }
     }
 
@@ -647,12 +651,14 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
 }
 
 Json FlowGraphModel::GetModelInfo() const {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
     Json compatible = BuildCompatibleModelInfo(_nodes, _loadedModelMeta);
     return compatible.is_null() ? GetDvsModelInfo() : compatible;
 }
 
 Json FlowGraphModel::GetDvsModelInfo() const {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
     Json root = _root.is_object() ? _root : Json::object();
     try {
@@ -663,14 +669,18 @@ Json FlowGraphModel::GetDvsModelInfo() const {
                 if (properties.contains("model_path_original") && properties.at("model_path_original").is_string()) {
                     properties["model_path"] = properties.at("model_path_original");
                 }
+                properties.erase("model_pool_key");
             }
         }
     } catch (...) {}
     if (_loadedModelMeta.is_array() && !_loadedModelMeta.empty()) {
         Json publicMeta = _loadedModelMeta;
         for (auto& item : publicMeta) {
-            if (!item.is_object() || !item.contains("model_path_original") || !item.at("model_path_original").is_string()) continue;
-            item["model_path"] = item.at("model_path_original");
+            if (!item.is_object()) continue;
+            if (item.contains("model_path_original") && item.at("model_path_original").is_string()) {
+                item["model_path"] = item.at("model_path_original");
+            }
+            item.erase("model_pool_key");
         }
         root["loaded_model_meta"] = std::move(publicMeta);
     }
@@ -710,6 +720,7 @@ Json FlowGraphModel::GetDvsModelInfo() const {
 }
 
 Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Json& paramsJson) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
     if (images.empty()) throw std::invalid_argument("images is empty");
 
@@ -791,6 +802,7 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
 }
 
 Json FlowGraphModel::InferOneOutJson(const cv::Mat& image, const Json& paramsJson) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (image.empty()) throw std::invalid_argument("image is empty");
     Json root = InferInternal(std::vector<cv::Mat>{ image }, paramsJson);
     try {
@@ -809,6 +821,7 @@ Json FlowGraphModel::InferOneOutJson(const cv::Mat& image, const Json& paramsJso
 }
 
 double FlowGraphModel::Benchmark(const cv::Mat& image, int warmup, int runs) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (image.empty()) throw std::invalid_argument("image is empty");
     if (warmup < 0) warmup = 0;
     if (runs < 1) runs = 1;
