@@ -1,144 +1,178 @@
-# C API 文档
+# dlcv_infer_c_dll 与 dlcv_infer C API 对照
 
 ## 1. 文档范围
 
-本文件记录以下两层接口的逐项对应关系：
-
-1. `dlcv_infer_cpp_dll` 提供的 `dlcv_infer::NativeApi` C++ 静态方法。
-2. `dlcv_infer_c_dll` 对外导出的 C 名称函数。
-
-本任务包含：
-
-- `dlcv_infer` 的 23 个非公共索引接口；
-- `dlcv_infer_c_dll` 原有 6 个 `dlcv_infer_cpp_*_c` 扩展入口；
-- 当前导出总数为 29 个。
-
-以下 7 个公共索引接口归入“双语言 model index 互通”任务，本文件不把它们写成当前任务的缺失接口：
-
-| 接口 |
-| --- |
-| `dlcv_get_index_type_c` |
-| `dlcv_get_model_info_c` |
-| `dlcv_register_flow_c` |
-| `dlcv_get_flow_info_c` |
-| `dlcv_free_flow_c` |
-| `dlcv_bind_index_c` |
-| `dlcv_unbind_index_c` |
-
-19 个 JSON、设备和系统控制接口声明在 `dlcv_infer_native_c_api.h`，该头文件可由 C 或 C++ 编译器使用。原有 6 个扩展入口和 4 个结构化兼容入口声明在 `dlcv_infer_c_api.h`；其中公共结构包含 `bool`，结构化兼容入口还使用引用参数，因此该头文件需要由 C++ 编译器或具备对应 ABI 的外部语言绑定使用。
-
-## 2. 两层封装关系
-
-| 层级 | 所在工程 | 职责 |
-| --- | --- | --- |
-| 底层接口 | `dlcv_infer` | 提供 JSON、设备控制、系统设置和结构化 C 接口 |
-| C++ 封装 | `dlcv_infer_cpp_dll` | 通过 `NativeApi` 解析并调用底层接口，统一 DLL 选择和返回处理 |
-| C 导出 | `dlcv_infer_c_dll` | 将 19 个 JSON、设备和系统控制方法导出为 C 名称函数，并保留 4 个结构化兼容入口 |
-| 原有扩展 | `dlcv_infer_c_dll` | 保留基于 C++ `Model` 的 6 个 `dlcv_infer_cpp_*_c` 入口 |
-
-23 个非公共索引接口均已增加 `NativeApi` 方法。第 1～19 项由 `dlcv_infer_c_dll` 直接转发 `NativeApi`；第 20～23 项在 C++ 层提供底层直调方法，C DLL 继续使用现有 `Model` 封装，以保持 `.dvst/.dvso` 支持和既有调用行为。6 个原有扩展入口仍按原有实现工作。
-
-## 3. 23 个非公共索引接口逐项对照
-
-### 3.1 JSON 模型与结果接口
-
-| # | 底层 `dlcv_infer` 接口 | C++ 封装方法 | C 导出 | 输入 | 输出 | 释放方式 | 一致性 |
-| ---: | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `const char* dlcv_load_model(const char* config_str)` | `NativeApi::LoadModel(const char*)` | `dlcv_load_model(const char*)` | JSON 字符串：`model_path`，可选 `device_id`、`type`、`warm_up` | 新分配的 JSON 字符串，包含 `code`、`message` 和模型索引 | 用 `dlcv_free_result` 释放返回字符串 | 参数、返回 JSON 和底层模型生命周期保持一致 |
-| 2 | `const char* dlcv_free_model(const char* config_str)` | `NativeApi::FreeModel(const char*)` | `dlcv_free_model(const char*)` | JSON 字符串：`model_index` | 新分配的状态 JSON 字符串 | 用 `dlcv_free_result` 释放返回字符串 | 释放结果码和消息保持一致 |
-| 3 | `const char* dlcv_get_model_info(const char* config_str)` | `NativeApi::GetModelInfo(const char*)` | `dlcv_get_model_info(const char*)` | JSON 字符串：`model_index` 或 `model_path` | 新分配的模型信息 JSON 字符串 | 用 `dlcv_free_result` 释放返回字符串 | 两种查询方式和返回结构保持一致 |
-| 4 | `const char* dlcv_infer(const char* config_str)` | `NativeApi::Infer(const char*)` | `dlcv_infer(const char*)` | JSON 字符串：`model_index`、`image_list` 和推理参数 | 新分配的推理结果 JSON 字符串 | 只调用 `dlcv_free_model_result`；该函数同时释放 mask 和外层字符串 | 输入字段、结果字段和错误码保持一致 |
-| 5 | `void dlcv_free_model_result(const char* config_str)` | `NativeApi::FreeModelResult(const char*)` | `dlcv_free_model_result(const char*)` | `dlcv_infer` 返回的结果字符串 | 无 | 解析结果，释放 JSON 中记录的 mask 地址，最后释放外层字符串 | 释放范围和底层接口保持一致 |
-| 6 | `void dlcv_free_result(const char* config_str)` | `NativeApi::FreeResult(const char*)` | `dlcv_free_result(const char*)` | 由接口返回的字符串地址 | 无 | 释放外层字符串 | 只释放字符串，不处理推理结果内部资源 |
-| 7 | `void dlcv_free_all_models()` | `NativeApi::FreeAllModels()` | `dlcv_free_all_models()` | 无 | 无 | 无返回内存；清理全部模型和流程状态 | 全局模型清理行为保持一致 |
-
-JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL 提供的释放函数。推理结果字符串不能直接交给只释放外层字符串的 `dlcv_free_result`。
-
-### 3.2 设备与系统控制接口
-
-| # | 底层 `dlcv_infer` 接口 | C++ 封装方法 | C 导出 | 输入 | 输出 | 释放方式 | 一致性 |
-| ---: | --- | --- | --- | --- | --- | --- | --- |
-| 8 | `const char* dlcv_get_device_info()` | `NativeApi::GetDeviceInfo()` | `dlcv_get_device_info()` | 无 | 新分配的设备信息 JSON 字符串 | 用 `dlcv_free_result` 释放 | 返回结构和底层设备查询保持一致 |
-| 9 | `const char* dlcv_get_gpu_info()` | `NativeApi::GetGpuInfo()` | `dlcv_get_gpu_info()` | 无 | 新分配的 GPU 信息 JSON 字符串 | 用 `dlcv_free_result` 释放 | 返回结构和底层 GPU 查询保持一致 |
-| 10 | `void dlcv_keep_max_clock()` | `NativeApi::KeepMaxClock()` | `dlcv_keep_max_clock()` | 无 | 无 | 无 | 调用行为保持一致 |
-| 11 | `void dlcv_reset_max_clock()` | `NativeApi::ResetMaxClock()` | `dlcv_reset_max_clock()` | 无 | 无 | 无 | 调用行为保持一致 |
-| 12 | `void dlcv_set_gpu_max_clock(bool verbose)` | `NativeApi::SetGpuMaxClock(bool)` | `dlcv_set_gpu_max_clock(bool)` | `verbose`：是否输出详细信息 | 无 | 无 | 参数和执行行为保持一致 |
-| 13 | `void dlcv_reset_gpu_max_clock(bool verbose)` | `NativeApi::ResetGpuMaxClock(bool)` | `dlcv_reset_gpu_max_clock(bool)` | `verbose`：是否输出详细信息 | 无 | 无 | 参数和执行行为保持一致 |
-| 14 | `const char* dlcv_get_power_scheme_guid(int verbose)` | `NativeApi::GetPowerSchemeGuid(int)` | `dlcv_get_power_scheme_guid(int)` | `verbose`：是否输出详细信息 | 新分配的电源方案 GUID 字符串 | 用 `dlcv_free_result` 释放 | 参数、字符串编码和返回内容保持一致 |
-| 15 | `int dlcv_set_power_scheme_guid(const char* scheme_guid, int verbose)` | `NativeApi::SetPowerSchemeGuid(const char*, int)` | `dlcv_set_power_scheme_guid(const char*, int)` | GUID 字符串、`verbose` | `int` 状态码 | 无 | 参数和状态码保持一致 |
-| 16 | `const char* dlcv_get_power_scheme(int verbose)` | `NativeApi::GetPowerScheme(int)` | `dlcv_get_power_scheme(int)` | `verbose`：是否输出详细信息 | 新分配的电源方案名称字符串 | 用 `dlcv_free_result` 释放 | 参数、字符串编码和返回内容保持一致 |
-| 17 | `int dlcv_set_power_scheme(const char* scheme_name, int verbose)` | `NativeApi::SetPowerScheme(const char*, int)` | `dlcv_set_power_scheme(const char*, int)` | 电源方案名称、`verbose` | `int` 状态码 | 无 | 参数和状态码保持一致 |
-| 18 | `int dlcv_set_current_process_affinity_to_big_cores(int verbose)` | `NativeApi::SetCurrentProcessAffinityToBigCores(int)` | `dlcv_set_current_process_affinity_to_big_cores(int)` | `verbose`：是否输出详细信息 | `int` 状态码 | 无 | 参数和状态码保持一致 |
-| 19 | `int dlcv_set_current_process_priority_highest(int prefer_realtime, int verbose, int bind_big_cores)` | `NativeApi::SetCurrentProcessPriorityHighest(int, int, int)` | `dlcv_set_current_process_priority_highest(int, int, int)` | 实时优先级开关、详细信息开关、大核绑定开关 | `int` 状态码 | 无 | 参数顺序、行为和状态码保持一致 |
-
-### 3.3 结构化 C 接口
-
-| # | 底层 `dlcv_infer` 接口 | C++ 封装方法 | C 导出 | 输入 | 输出 | 释放方式 | 一致性 |
-| ---: | --- | --- | --- | --- | --- | --- | --- |
-| 20 | `int dlcv_load_model_c(const char* model_path, int device_id)` | `NativeApi::LoadModelC(const char*, int)` | `dlcv_load_model_c(const char*, int)` | 当前路径规则支持的模型路径、设备编号 | 成功返回非负模型索引，失败返回 `-1` | 无返回字符串 | C++ 方法严格调用底层；C DLL 兼容入口继续通过 `Model` 加载并增加 `.dvst/.dvso` 支持 |
-| 21 | `int dlcv_free_model_c(int model_index)` | `NativeApi::FreeModelC(int)` | `dlcv_free_model_c(int)` | 模型索引 | 成功返回 `0`，失败返回负值 | 无 | C++ 方法严格调用底层；C DLL 释放自身模型表中的对象 |
-| 22 | `DlcvCResult dlcv_infer_c(int, const DlcvCImageList&)` | `NativeApi::InferC(int, const DlcvCImageList&)` | `dlcv_infer_c(int, const DlcvCImageList&)` | 模型索引、图像列表；输入图像内存由调用方持有 | `DlcvCResult`，包含状态、消息、样本结果、目标、框、mask、角度和均值 | 用 `dlcv_free_model_result_c` 释放返回结构中的字符串、数组和 mask | C++ 方法严格调用底层；C DLL 通过 `Model::InferBatch` 生成结果并转换为底层结果语义 |
-| 23 | `void dlcv_free_model_result_c(DlcvCResult&)` | `NativeApi::FreeModelResultC(DlcvCResult&)` | `dlcv_free_model_result_c(DlcvCResult&)` | 当前 DLL 返回的 `DlcvCResult` | 无；释放后指针字段为空、数量为 `0`，兼容入口保留原 `code` | 只能使用生成结果的同一 DLL 释放 | C++ 方法释放底层结果；C DLL 释放自身生成的结果，释放后字段一致 |
-
-## 4. 结构化 C 数据类型
-
-这些结构定义来自共享头文件 `dlcv_data_type_c.h`：
-
-| 结构 | 字段 | 内存所有权 |
-| --- | --- | --- |
-| `DlcvCImage` | `data_ptr`、`height`、`width`、`channel` | 输入图像由调用方持有，接口不释放 |
-| `DlcvCImageList` | `images`、`n` | 输入数组由调用方持有，接口不释放 |
-| `DlcvCMask` | `mask_ptr`、`height`、`width` | 推理结果中的 mask 由结果释放函数释放 |
-| `DlcvCObjectResult` | `category_id`、`category_name`、`score`、框、mask、角度和均值字段 | 结果字段由结果释放函数释放 |
-| `DlcvCSampleResult` | `results`、`n` | 结果数组由结果释放函数释放 |
-| `DlcvCResult` | `code`、`message`、`sample_results`、`n` | 结果消息、样本数组及其嵌套数据由结果释放函数释放 |
-
-输入图像要求：
-
-- `data_ptr` 指向连续图像内存；
-- `height`、`width`、`channel` 与实际内存一致；
-- 当前结构没有数据类型和行跨度字段，调用方需先完成必要转换；
-- 调用方不能在推理完成前释放或修改输入图像内存。
-
-## 5. 原有 6 个扩展入口
-
-这些函数保留原有名称和调用方式，不经过 `NativeApi`。它们使用 `dlcv_infer_cpp_dll` 的 C++ `Model` 对象管理模型。
-
-| # | 扩展入口 | C++ 封装方法 | 输入 | 输出 | 释放方式 | 与 23 个接口的关系 |
-| ---: | --- | --- | --- | --- | --- | --- |
-| 1 | `dlcv_infer_cpp_load_model_c(const char*, int)` | 无；直接创建 `Model` | 模型路径、设备编号 | 成功返回模型索引，失败返回 `-1` | 无返回字符串 | 独立扩展；支持 C++ DLL 当前支持的普通模型和流程模型 |
-| 2 | `dlcv_infer_cpp_get_last_error_c()` | 无；读取当前线程错误 | 无 | 当前线程最近一次加载错误字符串 | 不由调用方释放；指针由当前线程错误存储维护 | 独立扩展 |
-| 3 | `dlcv_infer_cpp_free_model_c(int)` | 无；释放扩展入口保存的 `Model` | 模型索引 | 成功返回 `0`，未找到返回 `-1` | 无 | 独立扩展 |
-| 4 | `dlcv_infer_cpp_infer_c(int, const DlcvCImageList*)` | 无；调用保存的 `Model::InferBatch` | 模型索引、图像列表指针 | `DlcvCResult` | 用 `dlcv_infer_cpp_free_model_result_c` 释放 | 独立扩展；缺省推理参数 |
-| 5 | `dlcv_infer_cpp_infer_with_params_c(int, const DlcvCImageList*, const char*)` | 无；调用保存的 `Model::InferBatch` | 模型索引、图像列表指针、参数 JSON | `DlcvCResult` | 用 `dlcv_infer_cpp_free_model_result_c` 释放 | 独立扩展；支持本次推理参数 |
-| 6 | `dlcv_infer_cpp_free_model_result_c(DlcvCResult*)` | 无；释放扩展入口生成的结构化结果 | 结果指针 | 无；释放后指针字段为空、数量为 `0`，`code` 置为 `0` | 建议用于扩展入口生成的结果 | 与兼容释放函数的内存处理相同，释放后的 `code` 行为不同 |
-
-原有扩展入口和四项结构化兼容入口都由 `dlcv_infer_c_dll` 分配结果内存，内部字段使用同一分配方式。为保持释放后的 `code` 行为，调用方应按入口名称配套使用结果释放函数。`dlcv_infer.dll` 直接生成的结构化结果使用另一套分配方式，不能交给 `dlcv_infer_c_dll` 释放。
-
-## 6. 导出清单
-
-按当前任务范围，`dlcv_infer_c_dll` 的导出分组如下：
-
-| 分组 | 数量 | 接口范围 |
-| --- | ---: | --- |
-| NativeApi 转出的 JSON、设备和系统控制接口 | 19 | 第 1～19 项 |
-| 结构化兼容接口 | 4 | 第 20～23 项；C++ 层同时提供对应 `NativeApi` 方法 |
-| 原有 C++ 扩展入口 | 6 | 第 5 节 |
-| 合计 | 29 | 已通过导出检查，不含公共索引接口 |
-
-公共索引接口另行记录在“双语言 model index 互通”任务文档中。
-
-## 7. 验证范围
-
-| 检查项 | 结果 |
+| 项目 | 内容 |
 | --- | --- |
-| Windows x64 Debug 构建与测试 | 通过 |
-| Windows x64 Release 构建与测试 | 通过 |
-| C DLL 导出检查 | 29 个函数均存在，包含 `dlcv_infer` |
-| JSON 接口安全失败输入比较 | 两层返回字符串一致 |
-| 设备、GPU、电源方案读取 | 返回有效字符串并由所属 DLL 释放 |
-| `.dvt` 结构化结果比较 | 输入相同，结果逐字段一致 |
-| `.dvst` 结构化兼容入口 | 加载、推理和释放通过 |
-| `.dvt/.dvst` 并发 | 三组 4 线程各 40 次检查通过 |
+| 日期 | 2026-08-25 |
+| 平台 | Windows x64，MSVC v143 |
+| `dlcv_infer` 头文件 | `dlcv_infer/dlcv_infer.h` |
+| `dlcv_infer_c_dll` 头文件 | `dlcv_infer_c_dll/dlcv_infer_c_api.h` |
+| 公共结构头 | `dlcv_infer/dlcv_data_type_c.h` |
+| 验证模型 | `.dvt`、`.dvst` |
 
-当前构建工程只验证 Windows x64，不将 Win32 写为已验证能力。GPU 时钟设置、电源方案设置、进程亲和性和优先级接口会改变系统状态，测试只检查导出存在和参数转发代码，不执行设置操作。
+当前 `dlcv_infer` 头文件声明 30 个导出函数。`dlcv_infer_c_dll` 导出 10 个函数，其中 6 个是原有 `dlcv_infer_cpp_*_c` 扩展入口，4 个是与 `dlcv_infer` 同名的结构化兼容入口。
+
+这些函数使用 C 导出名称，但公共结构包含 C++ `bool`，四项同名结构化接口还使用 C++ 引用参数，因此公共头文件需要由 C++ 编译器或具备对应 ABI 的外部语言绑定使用。
+
+结论如下：
+
+- 模型加载、模型释放、结构化推理、结构化结果释放四项接口完整，函数名称、参数、调用方式和结果语义一致。
+- 原有 6 个 `dlcv_infer_cpp_*_c` 扩展入口保持不变。
+- `dlcv_infer` 的 JSON、设备、GPU、电源、进程和公共 index 接口没有全部复制到 `dlcv_infer_c_dll`，完整情况在下表逐项记录。
+- 本次兼容处理没有修改模型路径参数及其现有解析方式。
+
+## 2. dlcv_infer 接口逐项对照
+
+| # | `dlcv_infer` 接口 | 输入 | 输出 | `dlcv_infer_c_dll` 对应接口 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `dlcv_load_model(const char*)` | JSON：模型路径、设备 ID、预热参数 | JSON 字符串：状态、消息、模型 index | 无 JSON 同名入口 | 未覆盖；结构化加载由第 20 项覆盖 |
+| 2 | `dlcv_free_model(const char*)` | JSON：模型 index | JSON 字符串：状态和消息 | 无 JSON 同名入口 | 未覆盖；结构化释放由第 21 项覆盖 |
+| 3 | `dlcv_get_model_info(const char*)` | JSON：模型路径或模型 index | JSON 字符串：模型信息 | 无 | 未覆盖 |
+| 4 | `dlcv_infer(const char*)` | JSON：模型 index、图像列表和推理参数 | JSON 字符串：结构化推理结果 | 无 JSON 同名入口 | 未覆盖；结构化推理由第 22 项覆盖 |
+| 5 | `dlcv_free_model_result(const char*)` | `dlcv_infer` 返回的 JSON 结果地址 | 无 | 无 | 未覆盖 |
+| 6 | `dlcv_free_result(const char*)` | DLL 返回的字符串地址 | 无 | 无 | 未覆盖 |
+| 7 | `dlcv_free_all_models()` | 无 | 无 | 无 | 未覆盖 |
+| 8 | `dlcv_get_device_info()` | 无 | JSON 字符串：设备信息 | 无 | 未覆盖 |
+| 9 | `dlcv_get_gpu_info()` | 无 | JSON 字符串：GPU 信息 | 无 | 未覆盖 |
+| 10 | `dlcv_keep_max_clock()` | 无 | 无 | 无 | 未覆盖 |
+| 11 | `dlcv_reset_max_clock()` | 无 | 无 | 无 | 未覆盖 |
+| 12 | `dlcv_set_gpu_max_clock(bool)` | 是否输出详细信息 | 无 | 无 | 未覆盖 |
+| 13 | `dlcv_reset_gpu_max_clock(bool)` | 是否输出详细信息 | 无 | 无 | 未覆盖 |
+| 14 | `dlcv_get_power_scheme_guid(int)` | 详细信息开关 | 字符串：电源方案 GUID | 无 | 未覆盖 |
+| 15 | `dlcv_set_power_scheme_guid(const char*, int)` | GUID、详细信息开关 | `int` 状态 | 无 | 未覆盖 |
+| 16 | `dlcv_get_power_scheme(int)` | 详细信息开关 | 字符串：电源方案名称 | 无 | 未覆盖 |
+| 17 | `dlcv_set_power_scheme(const char*, int)` | 电源方案名称、详细信息开关 | `int` 状态 | 无 | 未覆盖 |
+| 18 | `dlcv_set_current_process_affinity_to_big_cores(int)` | 详细信息开关 | `int` 状态 | 无 | 未覆盖 |
+| 19 | `dlcv_set_current_process_priority_highest(int, int, int)` | 实时优先级、详细信息、大核绑定开关 | `int` 状态 | 无 | 未覆盖 |
+| 20 | `dlcv_load_model_c(const char*, int)` | 模型路径、设备 ID | 成功返回非负模型 index，失败返回 `-1` | `dlcv_load_model_c(const char*, int)` | 完整，输入输出一致；C DLL 额外支持 `.dvst/.dvso` |
+| 21 | `dlcv_free_model_c(int)` | 当前 DLL 返回的模型 index | 成功返回 `0`，未找到返回 `-1` | `dlcv_free_model_c(int)` | 完整，普通调用输入输出一致 |
+| 22 | `dlcv_infer_c(int, const DlcvCImageList&)` | 模型 index、图像列表 | `DlcvCResult` | `dlcv_infer_c(int, const DlcvCImageList&)` | 完整，输入输出逐字段一致 |
+| 23 | `dlcv_free_model_result_c(DlcvCResult&)` | 当前 DLL 返回的结构化结果 | 无；清空结果内存字段 | `dlcv_free_model_result_c(DlcvCResult&)` | 完整，释放后状态一致 |
+| 24 | `dlcv_get_index_type_c(int)` | 模型或流程 index | `int` 类型值 | 无 | 未覆盖 |
+| 25 | `dlcv_get_model_info_c(int)` | 模型 index | JSON 字符串：状态和模型信息 | 无 | 未覆盖 |
+| 26 | `dlcv_register_flow_c(const char*)` | 流程 JSON | 成功返回流程 index，失败返回负值 | 无 | 未覆盖 |
+| 27 | `dlcv_get_flow_info_c(int)` | 流程 index | JSON 字符串：状态和流程信息 | 无 | 未覆盖 |
+| 28 | `dlcv_free_flow_c(int)` | 流程 index | `int` 状态 | 无 | 未覆盖 |
+| 29 | `dlcv_bind_index_c(int)` | 模型或流程 index | `int` 状态 | 无 | 未覆盖 |
+| 30 | `dlcv_unbind_index_c(int)` | 模型或流程 index | `int` 状态 | 无 | 未覆盖 |
+
+## 3. dlcv_infer_c_dll 导出接口逐项对照
+
+| # | `dlcv_infer_c_dll` 接口 | 输入 | 输出 | 与 `dlcv_infer` 的关系 |
+| --- | --- | --- | --- | --- |
+| 1 | `dlcv_infer_cpp_load_model_c(const char*, int)` | 模型路径、设备 ID | 非负模型 index 或 `-1` | 原有扩展入口，能力对应 `dlcv_load_model_c` |
+| 2 | `dlcv_infer_cpp_get_last_error_c()` | 无 | 当前线程最近一次加载错误字符串 | C DLL 扩展，`dlcv_infer` 无独立入口 |
+| 3 | `dlcv_infer_cpp_free_model_c(int)` | 模型 index | 成功 `0`，未找到 `-1` | 原有扩展入口，能力对应 `dlcv_free_model_c` |
+| 4 | `dlcv_infer_cpp_infer_c(int, const DlcvCImageList*)` | 模型 index、图像列表指针 | `DlcvCResult` | 原有扩展入口，参数形式和部分缺省值与底层不同 |
+| 5 | `dlcv_infer_cpp_infer_with_params_c(int, const DlcvCImageList*, const char*)` | 模型 index、图像列表指针、参数 JSON | `DlcvCResult` | C DLL 扩展，支持本次推理参数 |
+| 6 | `dlcv_infer_cpp_free_model_result_c(DlcvCResult*)` | 结果指针 | 无；释放并清空结果 | 原有扩展入口，释放后把 `code` 设为 `0` |
+| 7 | `dlcv_load_model_c(const char*, int)` | 模型路径、设备 ID | 非负模型 index 或 `-1` | 与底层同名、同参数、同返回语义 |
+| 8 | `dlcv_free_model_c(int)` | 模型 index | 成功 `0`，未找到 `-1` | 与底层同名、同参数、同返回语义 |
+| 9 | `dlcv_infer_c(int, const DlcvCImageList&)` | 模型 index、图像列表 | `DlcvCResult` | 与底层同名、同参数，结果语义一致 |
+| 10 | `dlcv_free_model_result_c(DlcvCResult&)` | 结构化结果 | 无；释放结果并保留原 `code` | 与底层同名、同参数，释放后状态一致 |
+
+## 4. 输入结构对照
+
+两侧当前使用内容相同的 `dlcv_data_type_c.h`。以下大小来自 MSVC v143、Windows x64、默认 packing。
+
+| 结构 | 字段 | 大小 | 一致性 |
+| --- | --- | --- | --- |
+| `DlcvCImage` | `data_ptr`、`height`、`width`、`channel` | 24 字节 | 一致 |
+| `DlcvCImageList` | `images`、`n` | 16 字节 | 一致 |
+| `DlcvCMask` | `mask_ptr`、`height`、`width` | 16 字节 | 一致 |
+| `DlcvCObjectResult` | 类别、分数、框、mask、角度和均值字段 | 96 字节 | 一致 |
+| `DlcvCSampleResult` | `results`、`n` | 16 字节 | 一致 |
+| `DlcvCResult` | `code`、`message`、`sample_results`、`n` | 32 字节 | 一致 |
+
+图像数据要求如下：
+
+- `data_ptr` 指向连续、紧密排列的 8 位交错通道图像数据。
+- `height`、`width`、`channel` 必须与实际内存一致。
+- 接口不接管输入图像内存。
+- 结构中没有数据类型和行跨度字段，其他数据类型或带行填充的数据需要先转换。
+- 颜色次序按模型预处理要求提供，当前验证使用 RGB 数据。
+
+## 5. 四项同名接口输入输出对照
+
+### 5.1 加载模型
+
+| 检查项 | `dlcv_infer` | `dlcv_infer_c_dll` | 结论 |
+| --- | --- | --- | --- |
+| 函数签名 | `int dlcv_load_model_c(const char*, int)` | 相同 | 一致 |
+| 模型路径 | `const char*` | `const char*` | 一致，现有路径处理未修改 |
+| 设备 ID | `int` | `int` | 一致 |
+| 成功返回 | 非负模型 index | 非负模型 index | 一致 |
+| 失败返回 | `-1` | `-1` | 一致 |
+| 模型范围 | `.dvt/.dvo` | `.dvt/.dvo/.dvst/.dvso` | C DLL 增加流程模型能力 |
+
+### 5.2 释放模型
+
+| 检查项 | `dlcv_infer` | `dlcv_infer_c_dll` | 结论 |
+| --- | --- | --- | --- |
+| 函数签名 | `int dlcv_free_model_c(int)` | 相同 | 一致 |
+| 成功返回 | `0` | `0` | 一致 |
+| 普通重复释放 | `-1` | `-1` | 一致 |
+
+### 5.3 结构化推理
+
+| 检查项 | `dlcv_infer` | `dlcv_infer_c_dll` | 结论 |
+| --- | --- | --- | --- |
+| 函数签名 | `DlcvCResult dlcv_infer_c(int, const DlcvCImageList&)` | 相同 | 一致 |
+| 成功状态 | `code=0`、`message="Success"` | 相同 | 一致 |
+| 模型不存在 | `code=2`、`message="Model not found."` | 相同 | 一致 |
+| 失败样本 | `sample_results=nullptr`、`n=0` | 相同 | 一致 |
+| 无框 | `area=-1`、`x/y/w/h=-1` | 相同 | 一致 |
+| 无 mask | `mask_ptr=0`、`height/width=-1` | 相同 | 一致 |
+| 无角度 | `angle=-100` | 相同 | 一致 |
+| 其他推理失败 | `code=1` | 相同 | 一致 |
+| 有效结果 | 类别、分数、框、mask、角度和均值 | 逐字段相同 | 一致 |
+
+### 5.4 释放结构化结果
+
+| 检查项 | `dlcv_infer` | `dlcv_infer_c_dll` | 结论 |
+| --- | --- | --- | --- |
+| 函数签名 | `void dlcv_free_model_result_c(DlcvCResult&)` | 相同 | 一致 |
+| `message` | 释放后为 `nullptr` | 相同 | 一致 |
+| `sample_results` | 释放后为 `nullptr` | 相同 | 一致 |
+| `n` | 释放后为 `0` | 相同 | 一致 |
+| `code` | 保留释放前数值 | 相同 | 一致 |
+
+结果必须调用生成该结果的 DLL 所提供的释放函数，不能交给另一个 DLL 释放。
+
+## 6. 原有扩展入口说明
+
+| 检查项 | `dlcv_infer_cpp_*_c` 原有入口 | 四项同名兼容入口 |
+| --- | --- | --- |
+| 成功消息 | `"success"` | `"Success"` |
+| 模型不存在 | `code=-1`、`message="model not found"` | `code=2`、`message="Model not found."` |
+| 无框缺省值 | 数值为 `0` | `x/y/w/h=-1` |
+| 无 mask 缺省值 | 尺寸为 `0` | `height/width=-1` |
+| 无角度缺省值 | 保留 C++ 结果值 | `angle=-100` |
+| 释放后 `code` | 设为 `0` | 保留释放前数值 |
+| 参数 JSON | `dlcv_infer_cpp_infer_with_params_c` 支持 | 同名推理入口不增加参数 |
+
+两类入口同时保留。现有 `dlcv_infer_cpp_*_c` 调用无需修改，新调用可选用四项同名兼容入口。
+
+## 7. 验证结果
+
+| 测试项 | 结果 |
+| --- | --- |
+| Debug x64 构建 | 通过 |
+| Debug x64 C API 测试 | `Test PASSED`，退出码 0 |
+| Release x64 构建 | 通过 |
+| Release x64 C API 测试 | `Test PASSED`，退出码 0 |
+| Release DLL 导出检查 | 原有 6 个与新增 4 个均存在，共 10 个 |
+| `.dvt` 成功结果逐字段比较 | 一致 |
+| `.dvt` 模型不存在结果比较 | 一致 |
+| `.dvt` 结果释放状态比较 | 一致 |
+| `.dvst` 同名入口加载、推理和释放 | 通过 |
+| `.dvt` 同一实例 4 线程共 40 次 | 一致 |
+| `.dvst` 同一实例 4 线程共 40 次 | 一致 |
+| 全新 `.dvst` 实例首次 4 线程共 40 次 | 一致 |
+
+## 8. 最终结论
+
+`dlcv_infer_c_dll` 与 `dlcv_infer` 的四项结构化模型接口已经完整对应，输入结构、函数参数、返回码、消息、结果字段和释放后状态一致。原有 6 个扩展入口保持不变。
+
+若检查 `dlcv_infer` 当前全部 30 个导出函数，`dlcv_infer_c_dll` 没有覆盖 JSON、设备、GPU、电源、进程和公共 index 接口，不能将这 30 个函数写成全部对应。第 2 节已经逐项记录每个函数的当前情况。

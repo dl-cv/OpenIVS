@@ -130,7 +130,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dlcv_infer_c_api.h" />
-    <ClInclude Include="dlcv_infer_native_c_api.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\dlcv_infer_cpp_dll\dlcv_infer_cpp_dll.vcxproj">
