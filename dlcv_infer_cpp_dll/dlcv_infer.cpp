@@ -1760,13 +1760,46 @@ namespace dlcv_infer {
             }
         }
 
-        if (shouldFreeUnderlying && _dllLoader) {
+        if (shouldFreeUnderlying) {
+            if (!_dllLoader) {
+                throw std::runtime_error("DVT模型释放失败：未加载推理DLL");
+            }
             json config;
             config["model_index"] = modelIndex;
             std::string jsonStr = config.dump();
             void* resultPtr = _dllLoader->GetFreeModelFunc()(jsonStr.c_str());
-            std::string resultJson = std::string(static_cast<const char*>(resultPtr));
-            _dllLoader->GetFreeResultFunc()(resultPtr);
+            if (resultPtr == nullptr) {
+                throw std::runtime_error("DVT模型释放未返回结果");
+            }
+
+            const auto freeResult = _dllLoader->GetFreeResultFunc();
+            try {
+                const std::string resultJson(static_cast<const char*>(resultPtr));
+                const json resultObject = json::parse(resultJson);
+                std::string message = "底层未返回错误说明";
+                if (resultObject.is_object() && resultObject.contains("message")) {
+                    const json& messageToken = resultObject.at("message");
+                    message = messageToken.is_string() ? messageToken.get<std::string>() : messageToken.dump();
+                }
+
+                if (!resultObject.is_object() || !resultObject.contains("code")) {
+                    throw std::runtime_error("DVT模型释放失败：" + message);
+                }
+
+                int code = 0;
+                try {
+                    code = resultObject.at("code").get<int>();
+                } catch (...) {
+                    throw std::runtime_error("DVT模型释放失败：" + message);
+                }
+                if (code != 0) {
+                    throw std::runtime_error("DVT模型释放失败：" + message);
+                }
+            } catch (...) {
+                freeResult(resultPtr);
+                throw;
+            }
+            freeResult(resultPtr);
         }
         modelIndex = -1;
     }

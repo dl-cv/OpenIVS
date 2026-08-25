@@ -46,7 +46,7 @@
   - **模型路径编码（非常关键）**：
     - 若调用 `dlcv_infer::Model(const std::string& modelPath, ...)`：`modelPath` 必须是 **GBK(936)/本地 ANSI** 字符串，不要传 UTF-8；否则路径会被二次转换，常见报错为 `load model failed: {"code":1,"message":"[ModelInternal::decode_file] Failed to open file"}`
     - 若调用 `dlcv_infer::Model(const std::wstring& modelPath, ...)`（推荐）：可直接传 Windows UTF-16 路径，内部处理转码，避免测试代码到处写转换函数
-  - 控制台输出 UTF-8（便于显示中文日志/表格）
+  - Windows 控制台保持 GBK。程序内部生成的 UTF-8 文本在输出前转换为 GBK，再通过 `cout` 或 `cerr` 输出，不设置控制台代码页；模型结果中已经是本地编码的类别名不重复转换。
 
 ## 3. 默认测试用例映射
 
@@ -74,7 +74,81 @@
 - 加载/释放循环10次内存增量
 - 推理3秒内存增量
 
-## 5. 构建与运行
+## 5. 可组合命令行
+
+### 5.1 产物与调用方式
+
+两套测试程序提供相同的工作流命令，命令在同一个进程内按顺序执行。`--then` 用于连接多个命令；模型名称只在当前进程内有效，模型释放或进程结束后失效。标准生命周期为“加载 → 信息 → 推理 → 释放”。
+
+- C#：`Test\DlcvCSharpTest\bin\x64\Debug\DlcvCSharpTest.exe`
+- C++：`Test\dlcv_infer_cpp_test\Debug\dlcv_infer_cpp_test.exe`
+
+两套程序均提供以下命令：
+
+- `help`
+- `load-model`
+- `list-models`
+- `model-info`
+- `dvs-model-info`
+- `infer`
+- `infer-json`
+- `infer-batch`
+- `benchmark`
+- `consistency-test`
+- `free-model`
+- `free-all-models`
+- `device-info`
+- `gpu-info`
+- `dog-info`
+- `keep-max-clock`
+
+### 5.2 命令参数
+
+通用参数如下，参数名和取值格式以程序帮助输出为准：
+
+| 命令 | 参数 |
+| --- | --- |
+| `help` | 无位置参数、无可选参数 |
+| `load-model` | `<名称> <模型路径>`；C# 支持 `--device N`、`--rpc true\|false`、`--replace true\|false`；C++ 支持 `--device N`、`--replace true\|false` |
+| `list-models` | 无参数 |
+| `model-info` | `<名称>` |
+| `dvs-model-info` | `<名称>` |
+| `infer` | `<名称> <图片>`；支持 `--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
+| `infer-json` | `<名称> <图片>`；支持 `--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
+| `infer-batch` | `<名称> <图片>`；支持 `--batch-size N`、`--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
+| `benchmark` | `<名称> <图片>`；支持 `--batch-size N`、`--warmup N`、`--runs N`、`--threads N`、`--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
+| `consistency-test`（C#） | `<名称> <图片>`；支持 `--batch-size N`、`--warmup N`、`--runs N`、`--threads N`、`--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
+| `consistency-test`（C++） | `<名称> <图片>`；支持 `--runs N`、`--threads N`、`--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
+| `free-model` | `<名称>` |
+| `free-all-models` | 无参数 |
+| `device-info`、`gpu-info`、`dog-info`、`keep-max-clock` | 无参数 |
+
+其中 `N` 为整数，`F` 为 0 到 1 之间的数值。`--then` 本身不属于任何单独命令的可选参数。
+
+### 5.3 返回状态
+
+- `0`：命令或完整命令串执行成功。
+- `1`：模型加载、接口调用、图片读取、推理或模型释放失败。
+- `2`：命令不存在、位置参数数量错误、参数值错误或命令不支持指定可选参数。
+- `3`：保留给程序启动阶段的未处理状态。
+
+工作流结束时，进程会释放仍在当前上下文中的模型。
+
+### 5.4 DVST 完整示例
+
+以下示例在一个 C++ 进程内完成加载、信息查询、流程信息查询、结构化推理、释放：
+
+```powershell
+.\Test\dlcv_infer_cpp_test\Debug\dlcv_infer_cpp_test.exe load-model m1 "C:\Users\Administrator\Desktop\旋转测试\螺丝头部外观_120_50_s.dvst" --device 0 --then model-info m1 --then dvs-model-info m1 --then infer m1 "C:\Users\Administrator\Desktop\旋转测试\CCD2.2026-07-22 10-07-16-2240.bmp" --threshold 0.5 --then free-model m1
+```
+
+以下示例使用 C# 程序执行相同生命周期：
+
+```powershell
+.\Test\DlcvCSharpTest\bin\x64\Debug\DlcvCSharpTest.exe load-model m1 "C:\Users\Administrator\Desktop\旋转测试\螺丝头部外观_120_50_s.dvst" --device 0 --then model-info m1 --then dvs-model-info m1 --then infer m1 "C:\Users\Administrator\Desktop\旋转测试\CCD2.2026-07-22 10-07-16-2240.bmp" --threshold 0.5 --then free-model m1
+```
+
+## 6. 构建与运行
 
 - 解决方案级构建、项目级构建与发布前构建验证统一通过 `.cursor/skills/vs-build/scripts/build.py` 执行，入口见 `开发文档.md` 的“统一编译说明”
 - 运行文件：
@@ -114,7 +188,7 @@
 - `demo2-rgb-selftest` 会输出 `entry_rgb_signature`、`manual_rgb_signature` 与 `raw_bgr_signature`；当 `entry_rgb_signature == manual_rgb_signature` 且与 `raw_bgr_signature` 不同时，判定 Demo2 当前入口保持 RGB 数据流。
 - `flow-batch-selftest` 输出每个模型节点的输入数、batch 上限、底层调用次数与最大实际子批；存在多张二阶段输入且最大实际子批大于 1 时通过。
 
-## 6. 文档表述规则
+## 7. 文档表述规则
 
 - 本文档仅陈述已实现的行为与可复现的结果
 - 本文档不包含面向读者的操作指导、偏好表达或推断性表述
