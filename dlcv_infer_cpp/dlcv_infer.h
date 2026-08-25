@@ -18,15 +18,15 @@
 #include "dlcv_infer/dlcv_data_type_c.h"
 #include "dlcv_sntl_admin.h"
 
-// DLL 导出/导入宏（用于本项目生成的 dlcv_infer_cpp_dll）
+// DLL 导出/导入宏（用于本项目生成的 dlcv_infer_cpp）
 #if defined(_WIN32) || defined(__CYGWIN__)
-#  ifdef DLCV_INFER_CPP_DLL_EXPORTS
-#    define DLCV_INFER_CPP_DLL_API __declspec(dllexport)
+#  ifdef DLCV_INFER_CPP_EXPORTS
+#    define DLCV_INFER_CPP_API __declspec(dllexport)
 #  else
-#    define DLCV_INFER_CPP_DLL_API __declspec(dllimport)
+#    define DLCV_INFER_CPP_API __declspec(dllimport)
 #  endif
 #else
-#  define DLCV_INFER_CPP_DLL_API
+#  define DLCV_INFER_CPP_API
 #endif
 
 #if defined(_WIN32) || defined(__CYGWIN__)
@@ -43,20 +43,20 @@ namespace dlcv_infer {
         class FlowGraphModel;
     }
 
-    DLCV_INFER_CPP_DLL_API std::wstring convertStringToWstring(const std::string& inputString);
-    DLCV_INFER_CPP_DLL_API std::string convertWstringToString(const std::wstring& inputWstring);
-    DLCV_INFER_CPP_DLL_API std::string convertWstringToUtf8(const std::wstring& inputWstring);
-    DLCV_INFER_CPP_DLL_API std::wstring convertUtf8ToWstring(const std::string& inputUtf8);
-    DLCV_INFER_CPP_DLL_API std::string convertWstringToGbk(const std::wstring& inputWstring);
-    DLCV_INFER_CPP_DLL_API std::wstring convertGbkToWstring(const std::string& inputGbk);
+    DLCV_INFER_CPP_API std::wstring convertStringToWstring(const std::string& inputString);
+    DLCV_INFER_CPP_API std::string convertWstringToString(const std::wstring& inputWstring);
+    DLCV_INFER_CPP_API std::string convertWstringToUtf8(const std::wstring& inputWstring);
+    DLCV_INFER_CPP_API std::wstring convertUtf8ToWstring(const std::string& inputUtf8);
+    DLCV_INFER_CPP_API std::string convertWstringToGbk(const std::wstring& inputWstring);
+    DLCV_INFER_CPP_API std::wstring convertGbkToWstring(const std::string& inputGbk);
 
-    DLCV_INFER_CPP_DLL_API std::string convertUtf8ToGbk(const std::string& inputUtf8);
-    DLCV_INFER_CPP_DLL_API std::string convertGbkToUtf8(const std::string& inputGbk);
+    DLCV_INFER_CPP_API std::string convertUtf8ToGbk(const std::string& inputUtf8);
+    DLCV_INFER_CPP_API std::string convertGbkToUtf8(const std::string& inputGbk);
 
     // 使用 nlohmann/json
     using json = nlohmann::json;
 
-    DLCV_INFER_CPP_DLL_API json GetAllDogInfo();
+    DLCV_INFER_CPP_API json GetAllDogInfo();
 
 #ifndef NVML_TYPES_H
 #define NVML_TYPES_H
@@ -105,7 +105,7 @@ namespace dlcv_infer {
         const DlcvCImageList* imageList);
     typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultCFuncType)(DlcvCResult* result);
 
-#ifdef DLCV_INFER_CPP_DLL_EXPORTS
+#ifdef DLCV_INFER_CPP_EXPORTS
     // DLL 加载器（内部使用）
     class DllLoader {
     private:
@@ -263,7 +263,7 @@ namespace dlcv_infer {
     // 模型封装
 #pragma warning(push)
 #pragma warning(disable: 4251)
-    class DLCV_INFER_CPP_DLL_API Model {
+    class DLCV_INFER_CPP_API Model {
     protected:
         // 内部推理
         std::pair<json, const char*> InferInternal(const std::vector<cv::Mat>& images, const json& params_json);
@@ -341,7 +341,7 @@ namespace dlcv_infer {
     };
 #pragma warning(pop)
 
-#ifdef DLCV_INFER_CPP_DLL_EXPORTS
+#ifdef DLCV_INFER_CPP_EXPORTS
     // 滑动窗口模型（内部使用，如需对外可再单独开放）
     class SlidingWindowModel : public Model {
     public:
@@ -362,7 +362,7 @@ namespace dlcv_infer {
     /// 工具类：静态方法集合。
     /// 注意：FreeAllModels 会释放底层 dlcv_infer.dll 中的所有已加载模型，属于全局操作。
     /// </summary>
-    class DLCV_INFER_CPP_DLL_API Utils {
+    class DLCV_INFER_CPP_API Utils {
     public:
         static std::string JsonToString(const json& j);
 
@@ -388,7 +388,7 @@ namespace dlcv_infer {
         static int nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device);
     };
 
-    class DLCV_INFER_CPP_DLL_API NativeApi {
+    class DLCV_INFER_CPP_API NativeApi {
     public:
         static const char* LoadModel(const char* configStr);
         static const char* FreeModel(const char* configStr);

@@ -1,6 +1,5 @@
 #define DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
 #define dlcv_infer dlcv_infer_json_impl
-#include "dlcv_infer_native_c_api.h"
 #include "dlcv_infer_c_api.h"
 #undef dlcv_infer
 #undef DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
