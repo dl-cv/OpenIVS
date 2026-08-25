@@ -620,6 +620,7 @@ namespace DlcvDemo
                 imagePanel1.UpdateImageAndResult(image, result);
 
                 StringBuilder sb = new StringBuilder();
+                sb.AppendLine("模型: " + model_path);
                 sb.AppendLine("图片: " + image_path);
                 sb.AppendLine($"batch_size: {batch_size}");
                 sb.AppendLine($"threshold: {(float)numericUpDown_threshold.Value:F2}");

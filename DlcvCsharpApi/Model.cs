@@ -609,12 +609,14 @@ namespace dlcv_infer_csharp
                     var request = new { model_index = modelIndex };
                     var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
                     var response = _httpClient.PostAsync($"{_serverUrl}/free_model", content).Result;
+                    response.EnsureSuccessStatusCode();
                     Log($"[FreeModel][DVP] HTTP释放，状态: {response.StatusCode}");
                     modelIndex = -1;
                 }
                 catch (Exception ex)
                 {
                     Log($"[FreeModel][DVP] 释放失败: {ex.Message}");
+                    throw;
                 }
             }
             else if (_isDvsMode)
@@ -639,13 +641,19 @@ namespace dlcv_infer_csharp
                 try
                 {
                     var req = new JObject { ["action"] = "free_model", ["model_path"] = _modelPath };
-                    SendRpc(req);
+                    var response = SendRpc(req);
+                    if (response == null || !(response["ok"]?.Value<bool>() ?? false))
+                    {
+                        string error = response != null ? response["error"]?.ToString() : "rpc_no_response";
+                        throw new Exception("RPC模型释放失败: " + error);
+                    }
                     modelIndex = -1;
                     Log("[FreeModel][RPC] RPC模型已释放");
                 }
                 catch (Exception ex)
                 {
                     Log($"[FreeModel][RPC] 释放失败: {ex.Message}");
+                    throw;
                 }
             }
             else
@@ -657,8 +665,25 @@ namespace dlcv_infer_csharp
                 }
                 var config = new JObject { ["model_index"] = modelIndex };
                 IntPtr resultPtr = _dllLoader.dlcv_free_model(config.ToString());
-                string resultText = Marshal.PtrToStringAnsi(resultPtr);
-                _dllLoader.dlcv_free_result(resultPtr);
+                if (resultPtr == IntPtr.Zero)
+                {
+                    throw new Exception("DVT模型释放未返回结果");
+                }
+                string resultText;
+                try
+                {
+                    resultText = Marshal.PtrToStringAnsi(resultPtr);
+                    var result = JObject.Parse(resultText);
+                    if (result["code"] == null || result["code"].Value<int>() != 0)
+                    {
+                        string message = result["message"]?.ToString() ?? "底层未返回错误说明";
+                        throw new Exception("DVT模型释放失败: " + message);
+                    }
+                }
+                finally
+                {
+                    _dllLoader.dlcv_free_result(resultPtr);
+                }
                 Log($"[FreeModel][DVT] DVT模型释放结果: {resultText}");
                 modelIndex = -1;
             }
@@ -675,24 +700,8 @@ namespace dlcv_infer_csharp
                 }
                 else if (_isDvsMode)
                 {
-                    modelInfo = _dvsModel != null ? _dvsModel.GetModelInfo() : null;
-                    if (modelInfo != null && _dvsModel != null)
-                    {
-                        JArray loadedMeta = null;
-                        try
-                        {
-                            loadedMeta = _dvsModel.GetLoadedModelMeta();
-                        }
-                        catch
-                        {
-                            loadedMeta = null;
-                        }
-
-                        if (loadedMeta != null && loadedMeta.Count > 0)
-                        {
-                            modelInfo["loaded_model_meta"] = loadedMeta;
-                        }
-                    }
+                    modelInfo = _dvsModel != null ? _dvsModel.GetCompatibleModelInfo() : null;
+                    modelInfo = PrepareDvsCacheInfo(modelInfo);
                 }
                 else if (_isRpcMode)
                 {
@@ -1441,21 +1450,7 @@ namespace dlcv_infer_csharp
             }
             else if (_isDvsMode)
             {
-                modelInfo = _dvsModel.GetModelInfo();
-                if (modelInfo != null && _dvsModel != null)
-                {
-                    try
-                    {
-                        JArray loadedMeta = _dvsModel.GetLoadedModelMeta();
-                        if (loadedMeta != null && loadedMeta.Count > 0)
-                        {
-                            modelInfo["loaded_model_meta"] = loadedMeta;
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
+                modelInfo = _dvsModel.GetCompatibleModelInfo();
             }
             else if (_isRpcMode)
             {
@@ -1488,8 +1483,42 @@ namespace dlcv_infer_csharp
                     modelInfo["model_info"] = real_model_info;
                 }
             }
-            UpdateModelMetaCache(modelInfo);
+            UpdateModelMetaCache(_isDvsMode ? PrepareDvsCacheInfo(modelInfo) : modelInfo);
             return modelInfo;
+        }
+
+        private JObject PrepareDvsCacheInfo(JObject modelInfo)
+        {
+            if (modelInfo == null || _dvsModel == null) return modelInfo;
+            var cacheInfo = (JObject)modelInfo.DeepClone();
+            try
+            {
+                var loadedMeta = _dvsModel.GetLoadedModelMeta();
+                if (loadedMeta != null && loadedMeta.Count > 0)
+                {
+                    cacheInfo["loaded_model_meta"] = loadedMeta;
+                }
+            }
+            catch
+            {
+            }
+            return cacheInfo;
+        }
+
+        /// <summary>
+        /// 返回 DVST/DVSO 的完整流程信息及所有子模型信息。
+        /// </summary>
+        public JObject GetDvsModelInfo()
+        {
+            if (!_isDvsMode)
+            {
+                throw new InvalidOperationException("GetDvsModelInfo 仅支持 DVST 或 DVSO 模型");
+            }
+            if (_dvsModel == null)
+            {
+                throw new InvalidOperationException("DVS 模型尚未加载");
+            }
+            return _dvsModel.GetDvsModelInfo();
         }
 
         private JObject GetModelInfoDvp()
@@ -1532,12 +1561,21 @@ namespace dlcv_infer_csharp
 
             string jsonStr = config.ToString();
             IntPtr resultPtr = _dllLoader.dlcv_get_model_info(jsonStr);
-            var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-            var resultObject = JObject.Parse(resultJson);
+            try
+            {
+                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                var resultObject = JObject.Parse(resultJson);
 
-            //Log("Model info: " + resultObject.ToString());
-            _dllLoader.dlcv_free_result(resultPtr);
-            return resultObject;
+                //Log("Model info: " + resultObject.ToString());
+                return resultObject;
+            }
+            finally
+            {
+                if (resultPtr != IntPtr.Zero)
+                {
+                    _dllLoader.dlcv_free_result(resultPtr);
+                }
+            }
         }
 
         // 内部通用推理方法，处理单张或多张图像
@@ -1809,20 +1847,31 @@ namespace dlcv_infer_csharp
 
                 // C API 调用
                 IntPtr resultPtr = _dllLoader.dlcv_infer(jsonStr);
-
-                // 结果反序列化
-                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-                JObject resultObject = JObject.Parse(resultJson);
-
-                // 检查是否返回错误
-                if (resultObject["code"] != null && resultObject["code"].Value<int>() != 0)
+                try
                 {
-                    _dllLoader.dlcv_free_model_result(resultPtr);
-                    throw new Exception("Inference failed: " + resultObject["message"]);
-                }
+                    // 结果反序列化
+                    var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                    JObject resultObject = JObject.Parse(resultJson);
 
-                // 不在这里释放结果，而是返回结果对象和指针
-                return new Tuple<JObject, IntPtr>(resultObject, resultPtr);
+                    // 检查是否返回错误
+                    if (resultObject["code"] != null && resultObject["code"].Value<int>() != 0)
+                    {
+                        throw new Exception("Inference failed: " + resultObject["message"]);
+                    }
+
+                    // 成功时将结果指针交由调用方释放
+                    var ownedResultPtr = resultPtr;
+                    resultPtr = IntPtr.Zero;
+                    return new Tuple<JObject, IntPtr>(resultObject, ownedResultPtr);
+                }
+                finally
+                {
+                    // 反序列化或错误检查异常时仍需释放原生结果
+                    if (resultPtr != IntPtr.Zero)
+                    {
+                        _dllLoader.dlcv_free_model_result(resultPtr);
+                    }
+                }
             }
             finally
             {
@@ -2176,7 +2225,7 @@ namespace dlcv_infer_csharp
                 // 处理完后释放结果，DVP模式下指针为空，不需要释放
                 if (resultTuple.Item2 != IntPtr.Zero)
                 {
-                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                    _dllLoader.dlcv_free_model_result(resultTuple.Item2);
                 }
             }
         }
@@ -2291,7 +2340,7 @@ namespace dlcv_infer_csharp
                 // 处理完后释放结果
                 if (resultTuple.Item2 != IntPtr.Zero)
                 {
-                    DllLoader.Instance.dlcv_free_model_result(resultTuple.Item2);
+                    _dllLoader.dlcv_free_model_result(resultTuple.Item2);
                 }
             }
         }

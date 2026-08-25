@@ -34,9 +34,14 @@ public:
     DLCV_INFER_CPP_DLL_API Json Load(const std::string& flowJsonPath, int deviceId = 0);
 
     /// <summary>
-    /// 获取加载时保存的流程 JSON 根对象
+    /// 获取与普通模型一致的兼容信息。
     /// </summary>
     DLCV_INFER_CPP_DLL_API Json GetModelInfo() const;
+
+    /// <summary>
+    /// 获取完整流程信息，包括流程节点、已加载模型信息和按模型名组织的信息。
+    /// </summary>
+    DLCV_INFER_CPP_DLL_API Json GetDvsModelInfo() const;
 
     /// <summary>
     /// 对单张图片进行推理，返回 JSON 格式的结果数组：

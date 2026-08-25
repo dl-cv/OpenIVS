@@ -79,6 +79,7 @@ private:
     QHash<QString, int> deviceNameToId_;
 
     QString imagePath_;
+    QString modelPath_;
     cv::Mat currentBgrImage_;
 
     QPushButton* buttonLoadModel_ = nullptr;

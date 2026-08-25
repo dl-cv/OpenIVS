@@ -61,6 +61,21 @@ namespace DlcvCSharpTest
                     return RunModelChannelOrderSelfTest();
                 }
 
+                if (IsWorkflowCommand(args))
+                {
+                    return RunWorkflowCommands(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "get-model-info", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunGetModelInfoCommand(args, false);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "get-dvs-model-info", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunGetModelInfoCommand(args, true);
+                }
+
                 if (args != null && args.Length >= 1 &&
                     (string.Equals(args[0], "dvs-rgb-selftest", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(args[0], "dvs-bgr-selftest", StringComparison.OrdinalIgnoreCase)))
@@ -187,6 +202,1025 @@ namespace DlcvCSharpTest
             {
                 try { Utils.FreeAllModels(); } catch { }
                 ForceGc();
+            }
+        }
+
+        private static readonly HashSet<string> WorkflowCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "help", "load-model", "list-models", "model-info", "dvs-model-info", "infer", "infer-json",
+            "infer-batch", "benchmark", "consistency-test", "free-model", "free-all-models", "device-info",
+            "gpu-info", "dog-info", "keep-max-clock"
+        };
+
+        private static bool IsWorkflowCommand(string[] args)
+        {
+            return args != null && args.Length > 0 && WorkflowCommands.Contains(args[0]);
+        }
+
+        private static int RunWorkflowCommands(string[] args)
+        {
+            // 标准生命周期：加载 → 信息 → 推理 → 释放。
+            var context = new WorkflowContext();
+            int exitCode = 0;
+            try
+            {
+                var segments = SplitWorkflowSegments(args);
+                foreach (var segment in segments)
+                {
+                    ExecuteWorkflowCommand(context, segment);
+                }
+            }
+            catch (WorkflowParameterException ex)
+            {
+                Console.Error.WriteLine("参数错误: " + ex.Message);
+                exitCode = 2;
+            }
+            catch (WorkflowExecutionException ex)
+            {
+                Console.Error.WriteLine("执行失败: " + ex.Message);
+                exitCode = 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("执行失败: " + ex.Message);
+                exitCode = 1;
+            }
+            var cleanupFailures = context.DisposeAll();
+            foreach (string failure in cleanupFailures)
+            {
+                Console.Error.WriteLine("自动清理失败: " + failure);
+            }
+            if (exitCode == 0 && cleanupFailures.Count > 0) exitCode = 1;
+            return exitCode;
+        }
+
+        private static List<string[]> SplitWorkflowSegments(string[] args)
+        {
+            var segments = new List<string[]>();
+            var current = new List<string>();
+            foreach (string arg in args)
+            {
+                if (string.Equals(arg, "--then", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (current.Count == 0) throw new WorkflowParameterException("--then 前缺少命令");
+                    segments.Add(current.ToArray());
+                    current.Clear();
+                    continue;
+                }
+                current.Add(arg);
+            }
+            if (current.Count == 0) throw new WorkflowParameterException("--then 后缺少命令");
+            segments.Add(current.ToArray());
+            return segments;
+        }
+
+        private static void ExecuteWorkflowCommand(WorkflowContext context, string[] args)
+        {
+            if (args == null || args.Length == 0) throw new WorkflowParameterException("缺少命令");
+            string command = args[0].ToLowerInvariant();
+            WorkflowArguments parsed = WorkflowArguments.Parse(args);
+            switch (command)
+            {
+                case "help":
+                    RequireNoArguments(parsed, command);
+                    PrintWorkflowHelp();
+                    return;
+                case "load-model":
+                    RunWorkflowLoadModel(context, parsed);
+                    return;
+                case "list-models":
+                    RequireNoArguments(parsed, command);
+                    RunWorkflowListModels(context);
+                    return;
+                case "model-info":
+                    RunWorkflowModelInfo(context, parsed, false);
+                    return;
+                case "dvs-model-info":
+                    RunWorkflowModelInfo(context, parsed, true);
+                    return;
+                case "infer":
+                    RunWorkflowInfer(context, parsed, WorkflowInferKind.Structured);
+                    return;
+                case "infer-json":
+                    RunWorkflowInfer(context, parsed, WorkflowInferKind.Json);
+                    return;
+                case "infer-batch":
+                    RunWorkflowInfer(context, parsed, WorkflowInferKind.Batch);
+                    return;
+                case "benchmark":
+                    RunWorkflowBenchmark(context, parsed);
+                    return;
+                case "consistency-test":
+                    RunWorkflowConsistencyTest(context, parsed);
+                    return;
+                case "free-model":
+                    RunWorkflowFreeModel(context, parsed);
+                    return;
+                case "free-all-models":
+                    {
+                        RequireNoArguments(parsed, command);
+                        var freeFailures = context.FreeAll();
+                        if (freeFailures.Count == 0)
+                        {
+                            Console.WriteLine("已释放全部已加载模型");
+                        }
+                        else
+                        {
+                            foreach (string failure in freeFailures) Console.WriteLine("释放失败: " + failure);
+                            throw new InvalidOperationException("存在模型释放失败");
+                        }
+                        return;
+                    }
+                case "device-info":
+                    RequireNoArguments(parsed, command);
+                    PrintDeviceInfo(Utils.GetDeviceInfo());
+                    return;
+                case "gpu-info":
+                    RequireNoArguments(parsed, command);
+                    PrintDeviceInfo(Utils.GetGpuInfo());
+                    return;
+                case "dog-info":
+                    RequireNoArguments(parsed, command);
+                    Console.WriteLine(sntl_admin_csharp.DogUtils.GetAllDogInfo().ToString(Formatting.Indented));
+                    return;
+                case "keep-max-clock":
+                    RequireNoArguments(parsed, command);
+                    RunWorkflowKeepMaxClock();
+                    return;
+                default:
+                    throw new WorkflowParameterException("不支持的命令: " + args[0]);
+            }
+        }
+
+        private static void PrintWorkflowHelp()
+        {
+            Console.WriteLine("标准生命周期：加载 → 信息 → 推理 → 释放。");
+            Console.WriteLine("示例: load-model m1 <path> --device 0 --then model-info m1 --then infer m1 <image> --threshold 0.5 --then free-model m1");
+            Console.WriteLine("名称 m1 仅在本次进程中有效，直到 free-model、free-all-models 或进程结束。");
+            Console.WriteLine("以下命令可用 --then 串联，模型名称在本进程内有效：");
+            Console.WriteLine("  load-model <名称> <模型路径> [--device N] [--rpc true|false] [--replace true|false]");
+            Console.WriteLine("  list-models | model-info <名称> | dvs-model-info <名称>");
+            Console.WriteLine("  infer <名称> <图片> [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
+            Console.WriteLine("  infer-json <名称> <图片> [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
+            Console.WriteLine("  infer-batch <名称> <图片> [--batch-size N] [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
+            Console.WriteLine("  benchmark <名称> <图片> [--batch-size N] [--warmup N] [--runs N] [--threads N] [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
+            Console.WriteLine("  consistency-test <名称> <图片> [--batch-size N] [--warmup N] [--runs N] [--threads N] [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
+            Console.WriteLine("  free-model <名称> | free-all-models | device-info | gpu-info | dog-info | keep-max-clock | help");
+        }
+
+        private static void RunWorkflowLoadModel(WorkflowContext context, WorkflowArguments args)
+        {
+            RequirePositionCount(args, "load-model", 2);
+            ValidateOptions(args, "device", "rpc", "replace");
+            string name = args.Positionals[0];
+            string path = args.Positionals[1];
+            int deviceId = args.GetAnyInt("device", 0);
+            bool rpcMode = args.GetBool("rpc", false);
+            bool replace = args.GetBool("replace", false);
+            if (!File.Exists(path)) throw new WorkflowParameterException("模型文件不存在: " + path);
+            WorkflowModelEntry oldEntry = null;
+            if (context.Models.TryGetValue(name, out oldEntry))
+            {
+                if (!replace) throw new WorkflowParameterException("模型名称已存在: " + name);
+            }
+
+            var timer = Stopwatch.StartNew();
+            Model model = null;
+            try
+            {
+                model = new Model(path, deviceId, rpcMode, false);
+                timer.Stop();
+                var entry = new WorkflowModelEntry(name, path, deviceId, rpcMode, model, timer.Elapsed.TotalMilliseconds);
+                if (oldEntry != null) context.Free(oldEntry.Name);
+                context.Models.Add(name, entry);
+                PrintModelHeader(entry);
+                Console.WriteLine("名称: " + name);
+                Console.WriteLine("设备: " + deviceId.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("model_index: " + model.modelIndex.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("加载耗时: " + FormatMs(entry.LoadMs));
+                Console.WriteLine("provider: " + model.LoadedDogProvider);
+                Console.WriteLine("DLL: " + (model.LoadedNativeDllName ?? string.Empty));
+            }
+            catch
+            {
+                try { model?.Dispose(); } catch { }
+                throw;
+            }
+        }
+
+        private static void RunWorkflowListModels(WorkflowContext context)
+        {
+            if (context.Models.Count == 0)
+            {
+                Console.WriteLine("当前没有已加载模型");
+                return;
+            }
+            foreach (var entry in context.Models.Values.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                PrintModelHeader(entry);
+                Console.WriteLine("名称: " + entry.Name);
+                Console.WriteLine("设备: " + entry.DeviceId.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("model_index: " + entry.Model.modelIndex.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("provider: " + entry.Model.LoadedDogProvider);
+                Console.WriteLine("DLL: " + (entry.Model.LoadedNativeDllName ?? string.Empty));
+            }
+        }
+
+        private static void RunWorkflowModelInfo(WorkflowContext context, WorkflowArguments args, bool dvsInfo)
+        {
+            RequirePositionCount(args, dvsInfo ? "dvs-model-info" : "model-info", 1);
+            RequireNoOptions(args);
+            WorkflowModelEntry entry = context.Get(args.Positionals[0]);
+            PrintModelHeader(entry);
+            Console.WriteLine((dvsInfo ? entry.Model.GetDvsModelInfo() : entry.Model.GetModelInfo()).ToString(Formatting.Indented));
+        }
+
+        private static void RunWorkflowInfer(WorkflowContext context, WorkflowArguments args, WorkflowInferKind kind)
+        {
+            string command = kind == WorkflowInferKind.Structured ? "infer" : kind == WorkflowInferKind.Json ? "infer-json" : "infer-batch";
+            RequirePositionCount(args, command, 2);
+            ValidateOptions(args, kind == WorkflowInferKind.Batch
+                ? new[] { "batch-size", "threshold", "with-mask", "calc-mean" }
+                : new[] { "threshold", "with-mask", "calc-mean" });
+            WorkflowModelEntry entry = context.Get(args.Positionals[0]);
+            int batchSize = kind == WorkflowInferKind.Batch ? args.GetInt("batch-size", 1, true) : 1;
+            JObject parameters = args.CreateInferParameters(batchSize);
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                LoadRgbImage(args.Positionals[1], out bgr, out rgb);
+                PrintModelHeader(entry);
+                Console.WriteLine("图片: " + args.Positionals[1]);
+                Console.WriteLine("batch_size: " + batchSize.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("threshold: " + args.GetDouble("threshold", 0.5).ToString("F4", CultureInfo.InvariantCulture));
+                if (kind == WorkflowInferKind.Json)
+                {
+                    var timer = Stopwatch.StartNew();
+                    object jsonOutput = entry.Model.InferOneOutJson(rgb, parameters);
+                    timer.Stop();
+                    PrintInferTiming(timer.Elapsed.TotalMilliseconds);
+                    JToken jsonResult = jsonOutput as JToken;
+                    Console.WriteLine((jsonResult ?? JToken.FromObject(jsonOutput)).ToString(Formatting.Indented));
+                    return;
+                }
+
+                Utils.CSharpResult result;
+                var stopwatch = Stopwatch.StartNew();
+                if (kind == WorkflowInferKind.Structured)
+                {
+                    result = entry.Model.Infer(rgb, parameters);
+                }
+                else
+                {
+                    var images = new List<Mat>(batchSize);
+                    for (int i = 0; i < batchSize; i++) images.Add(rgb);
+                    result = entry.Model.InferBatch(images, parameters);
+                }
+                stopwatch.Stop();
+                try
+                {
+                    PrintInferTiming(stopwatch.Elapsed.TotalMilliseconds);
+                    PrintStructuredResult(result);
+                    PrintFlowDetails();
+                }
+                finally
+                {
+                    DisposeResultMasks(result);
+                }
+            }
+            finally
+            {
+                try { rgb?.Dispose(); } catch { }
+                try { bgr?.Dispose(); } catch { }
+            }
+        }
+
+        private static void RunWorkflowBenchmark(WorkflowContext context, WorkflowArguments args)
+        {
+            RequirePositionCount(args, "benchmark", 2);
+            ValidateOptions(args, "batch-size", "warmup", "runs", "threads", "threshold", "with-mask", "calc-mean");
+            WorkflowModelEntry entry = context.Get(args.Positionals[0]);
+            int batchSize = args.GetInt("batch-size", 1, true);
+            int warmup = args.GetInt("warmup", 1, false);
+            int runs = args.GetInt("runs", 10, true);
+            int threads = args.GetInt("threads", 1, true);
+            JObject parameters = args.CreateInferParameters(batchSize);
+            string imagePath = args.Positionals[1];
+            if (!File.Exists(imagePath)) throw new WorkflowParameterException("图片文件不存在: " + imagePath);
+
+            var latencies = new List<double>();
+            var sdkTimes = new List<double>();
+            var flowTimes = new List<double>();
+            var nodeStats = new Dictionary<string, NodeTimingAggregate>(StringComparer.Ordinal);
+            Exception workerError = null;
+            object sync = new object();
+            int readyCount = 0;
+            long totalSamples = 0;
+            using (var ready = new ManualResetEvent(false))
+            using (var start = new ManualResetEvent(false))
+            {
+                var workers = new List<Thread>(threads);
+                for (int workerIndex = 0; workerIndex < threads; workerIndex++)
+                {
+                    var thread = new Thread(() =>
+                    {
+                        Model workerModel = entry.Model;
+                        JObject workerParameters = null;
+                        Mat bgr = null;
+                        Mat rgb = null;
+                        try
+                        {
+                            workerParameters = (JObject)parameters.DeepClone();
+                            LoadRgbImage(imagePath, out bgr, out rgb);
+                            var images = new List<Mat>(batchSize);
+                            for (int i = 0; i < batchSize; i++) images.Add(rgb);
+                            for (int i = 0; i < warmup; i++)
+                            {
+                                var warmResult = workerModel.InferBatch(images, workerParameters);
+                                DisposeResultMasks(warmResult);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            lock (sync)
+                            {
+                                if (workerError == null) workerError = ex;
+                            }
+                        }
+                        finally
+                        {
+                            lock (sync)
+                            {
+                                readyCount++;
+                                if (readyCount == threads) ready.Set();
+                            }
+                        }
+
+                        start.WaitOne();
+                        try
+                        {
+                            if (workerError == null)
+                            {
+                                var images = new List<Mat>(batchSize);
+                                for (int i = 0; i < batchSize; i++) images.Add(rgb);
+                                for (int i = 0; i < runs; i++)
+                                {
+                                    var timer = Stopwatch.StartNew();
+                                    var result = workerModel.InferBatch(images, workerParameters);
+                                    timer.Stop();
+                                    try
+                                    {
+                                        double sdkMs = 0.0;
+                                        double flowMs = 0.0;
+                                        InferTiming.GetLast(out sdkMs, out flowMs);
+                                        lock (sync)
+                                        {
+                                            latencies.Add(timer.Elapsed.TotalMilliseconds);
+                                            sdkTimes.Add(sdkMs > 0.0 ? sdkMs : timer.Elapsed.TotalMilliseconds);
+                                            flowTimes.Add(flowMs > 0.0 ? flowMs : timer.Elapsed.TotalMilliseconds);
+                                            totalSamples += batchSize;
+                                            AddCurrentFlowNodeTimings(nodeStats);
+                                        }
+                                    }
+                                    finally
+                                    {
+                                        DisposeResultMasks(result);
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            lock (sync)
+                            {
+                                if (workerError == null) workerError = ex;
+                            }
+                        }
+                        finally
+                        {
+                            try { rgb?.Dispose(); } catch { }
+                            try { bgr?.Dispose(); } catch { }
+                        }
+                    });
+                    thread.IsBackground = false;
+                    workers.Add(thread);
+                    thread.Start();
+                }
+
+                ready.WaitOne();
+                var totalTimer = Stopwatch.StartNew();
+                start.Set();
+                foreach (var worker in workers) worker.Join();
+                totalTimer.Stop();
+                if (workerError != null) throw new InvalidOperationException(workerError.Message, workerError);
+
+                PrintModelHeader(entry);
+                Console.WriteLine("图片: " + imagePath);
+                Console.WriteLine("线程数: " + threads.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("batch_size: " + batchSize.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("预热次数: " + warmup.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("运行次数: " + runs.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("完成样本数: " + totalSamples.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("总耗时: " + FormatMs(totalTimer.Elapsed.TotalMilliseconds));
+                PrintLatencyStatistics("外部耗时", latencies);
+                PrintLatencyStatistics("底层推理耗时", sdkTimes);
+                PrintLatencyStatistics("流程耗时", flowTimes);
+                double seconds = totalTimer.Elapsed.TotalSeconds;
+                double throughput = seconds > 0.0 ? totalSamples / seconds : 0.0;
+                Console.WriteLine("吞吐量: " + throughput.ToString("F2", CultureInfo.InvariantCulture) + " 张/秒");
+                PrintNodeAverages(nodeStats);
+            }
+        }
+
+        private static void RunWorkflowConsistencyTest(WorkflowContext context, WorkflowArguments args)
+        {
+            RequirePositionCount(args, "consistency-test", 2);
+            ValidateOptions(args, "batch-size", "warmup", "runs", "threads", "threshold", "with-mask", "calc-mean");
+            WorkflowModelEntry entry = context.Get(args.Positionals[0]);
+            int batchSize = args.GetInt("batch-size", 1, true);
+            int warmup = args.GetInt("warmup", 1, false);
+            int runs = args.GetInt("runs", 10, true);
+            int threads = args.GetInt("threads", 1, true);
+            JObject parameters = args.CreateInferParameters(batchSize);
+            string imagePath = args.Positionals[1];
+            if (!File.Exists(imagePath)) throw new WorkflowParameterException("图片文件不存在: " + imagePath);
+
+            string structuredBaseline = null;
+            string jsonBaseline = null;
+            string structuredDifference = null;
+            string jsonDifference = null;
+            int structuredDifferenceRun = 0;
+            int jsonDifferenceRun = 0;
+            int structuredCompleted = 0;
+            int jsonCompleted = 0;
+            Exception workerError = null;
+            object sync = new object();
+            using (var ready = new ManualResetEvent(false))
+            using (var start = new ManualResetEvent(false))
+            {
+                int readyCount = 0;
+                var workers = new List<Thread>(threads);
+                for (int workerIndex = 0; workerIndex < threads; workerIndex++)
+                {
+                    var thread = new Thread(() =>
+                    {
+                        Model workerModel = entry.Model;
+                        JObject workerParameters = null;
+                        Mat bgr = null;
+                        Mat rgb = null;
+                        try
+                        {
+                            workerParameters = (JObject)parameters.DeepClone();
+                            LoadRgbImage(imagePath, out bgr, out rgb);
+                            for (int i = 0; i < warmup; i++)
+                            {
+                                var warmResult = workerModel.Infer(rgb, workerParameters);
+                                DisposeResultMasks(warmResult);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            lock (sync)
+                            {
+                                if (workerError == null) workerError = ex;
+                            }
+                        }
+                        finally
+                        {
+                            lock (sync)
+                            {
+                                readyCount++;
+                                if (readyCount == threads) ready.Set();
+                            }
+                        }
+
+                        start.WaitOne();
+                        try
+                        {
+                            if (workerError == null)
+                            {
+                                var images = new List<Mat>(batchSize);
+                                for (int imageIndex = 0; imageIndex < batchSize; imageIndex++) images.Add(rgb);
+                                for (int i = 0; i < runs; i++)
+                                {
+                                    var structuredResult = workerModel.InferBatch(images, workerParameters);
+                                    try
+                                    {
+                                        string structuredSignature = BuildStructuredResultSignature(structuredResult);
+                                        lock (sync)
+                                        {
+                                            UpdateConsistencySignature(ref structuredBaseline, ref structuredDifference, ref structuredDifferenceRun, structuredSignature, i + 1);
+                                            structuredCompleted++;
+                                        }
+                                    }
+                                    finally
+                                    {
+                                        DisposeResultMasks(structuredResult);
+                                    }
+
+                                    var jsonParameters = (JObject)workerParameters.DeepClone();
+                                    jsonParameters["batch_size"] = 1;
+                                    var jsonBatch = new JArray();
+                                    for (int imageIndex = 0; imageIndex < batchSize; imageIndex++)
+                                    {
+                                        object jsonResult = workerModel.InferOneOutJson(rgb, jsonParameters);
+                                        JToken jsonToken = jsonResult as JToken ?? JToken.FromObject(jsonResult);
+                                        jsonBatch.Add(NormalizeWorkflowJson(jsonToken));
+                                    }
+                                    string jsonSignature = CanonicalizeSignatureToken(jsonBatch).ToString(Formatting.None);
+                                    lock (sync)
+                                    {
+                                        UpdateConsistencySignature(ref jsonBaseline, ref jsonDifference, ref jsonDifferenceRun, jsonSignature, i + 1);
+                                        jsonCompleted++;
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            lock (sync)
+                            {
+                                if (workerError == null) workerError = ex;
+                            }
+                        }
+                        finally
+                        {
+                            try { rgb?.Dispose(); } catch { }
+                            try { bgr?.Dispose(); } catch { }
+                        }
+                    });
+                    thread.IsBackground = false;
+                    workers.Add(thread);
+                    thread.Start();
+                }
+                ready.WaitOne();
+                var totalTimer = Stopwatch.StartNew();
+                start.Set();
+                foreach (var worker in workers) worker.Join();
+                totalTimer.Stop();
+                if (workerError != null) throw new InvalidOperationException(workerError.Message, workerError);
+
+                PrintModelHeader(entry);
+                Console.WriteLine("图片: " + imagePath);
+                Console.WriteLine("线程数: " + threads.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("batch_size: " + batchSize.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("结构化比较次数: " + structuredCompleted.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("JSON 比较次数: " + jsonCompleted.ToString(CultureInfo.InvariantCulture));
+                Console.WriteLine("总耗时: " + FormatMs(totalTimer.Elapsed.TotalMilliseconds));
+                Console.WriteLine("结构化结果一致: " + (structuredDifference == null ? "是" : "否"));
+                Console.WriteLine("JSON 结果一致: " + (jsonDifference == null ? "是" : "否"));
+                if (structuredDifference != null)
+                {
+                    Console.WriteLine("结构化结果不一致: run=" + structuredDifferenceRun.ToString(CultureInfo.InvariantCulture) +
+                        " baseline_hash=" + ComputeTextHash(structuredBaseline) +
+                        " actual_hash=" + ComputeTextHash(structuredDifference));
+                }
+                if (jsonDifference != null)
+                {
+                    Console.WriteLine("JSON结果不一致: run=" + jsonDifferenceRun.ToString(CultureInfo.InvariantCulture) +
+                        " baseline_hash=" + ComputeTextHash(jsonBaseline) +
+                        " actual_hash=" + ComputeTextHash(jsonDifference));
+                }
+                if (structuredDifference != null || jsonDifference != null)
+                {
+                    throw new InvalidOperationException("一致性检查失败");
+                }
+            }
+        }
+
+        private static void RunWorkflowFreeModel(WorkflowContext context, WorkflowArguments args)
+        {
+            RequirePositionCount(args, "free-model", 1);
+            RequireNoOptions(args);
+            WorkflowModelEntry entry = context.Get(args.Positionals[0]);
+            PrintModelHeader(entry);
+            context.Free(entry.Name);
+            Console.WriteLine("已释放模型: " + entry.Name);
+        }
+
+        private static void RunWorkflowKeepMaxClock()
+        {
+            JObject info = Utils.GetDeviceInfo();
+            IntPtr result = IntPtr.Zero;
+            var keepMaxClock = DllLoader.Instance.dlcv_keep_max_clock;
+            if (keepMaxClock == null)
+            {
+                throw new InvalidOperationException("保持最高时钟接口不可用");
+            }
+            try
+            {
+                result = keepMaxClock.Invoke();
+                Console.WriteLine("设备信息:");
+                Console.WriteLine(info.ToString(Formatting.Indented));
+                Console.WriteLine("保持最高时钟请求已发送");
+                if (result != IntPtr.Zero)
+                {
+                    string text = Marshal.PtrToStringAnsi(result);
+                    if (!string.IsNullOrWhiteSpace(text)) Console.WriteLine("返回信息: " + text);
+                }
+            }
+            finally
+            {
+                if (result != IntPtr.Zero)
+                {
+                    var freeResult = DllLoader.Instance.dlcv_free_result;
+                    if (freeResult == null) throw new InvalidOperationException("返回指针释放接口不可用");
+                    freeResult(result);
+                }
+            }
+        }
+
+        private static void PrintDeviceInfo(JObject info)
+        {
+            Console.WriteLine(info.ToString(Formatting.Indented));
+            int code = info["code"] != null ? info["code"].Value<int>() : 0;
+            if (code != 0)
+            {
+                string message = info["message"]?.Value<string>() ?? "设备接口返回失败状态";
+                throw new InvalidOperationException(message);
+            }
+        }
+
+        private static void LoadRgbImage(string imagePath, out Mat bgr, out Mat rgb)
+        {
+            if (!File.Exists(imagePath)) throw new WorkflowParameterException("图片文件不存在: " + imagePath);
+            bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+            if (bgr == null || bgr.Empty()) throw new InvalidOperationException("图片解码失败: " + imagePath);
+            rgb = new Mat();
+            Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+        }
+
+        private static void PrintModelHeader(WorkflowModelEntry entry)
+        {
+            Console.WriteLine("模型: " + entry.Path);
+        }
+
+        private static void PrintInferTiming(double outerMs)
+        {
+            double sdkMs = 0.0;
+            double flowMs = 0.0;
+            InferTiming.GetLast(out sdkMs, out flowMs);
+            Console.WriteLine("外部耗时: " + FormatMs(outerMs));
+            Console.WriteLine("底层推理耗时: " + FormatMs(sdkMs));
+            Console.WriteLine("流程耗时: " + FormatMs(flowMs));
+        }
+
+        private static void PrintStructuredResult(Utils.CSharpResult result)
+        {
+            int sampleCount = result.SampleResults != null ? result.SampleResults.Count : 0;
+            Console.WriteLine("样本数量: " + sampleCount.ToString(CultureInfo.InvariantCulture));
+            if (result.SampleResults == null) return;
+            for (int sampleIndex = 0; sampleIndex < result.SampleResults.Count; sampleIndex++)
+            {
+                var sample = result.SampleResults[sampleIndex];
+                int count = sample.Results != null ? sample.Results.Count : 0;
+                Console.WriteLine("样本 " + sampleIndex.ToString(CultureInfo.InvariantCulture) + " 目标数量: " + count.ToString(CultureInfo.InvariantCulture));
+                if (sample.Ok.HasValue) Console.WriteLine("样本 " + sampleIndex.ToString(CultureInfo.InvariantCulture) + " 检查状态: " + (sample.Ok.Value ? "通过" : "未通过"));
+                if (!string.IsNullOrWhiteSpace(sample.Reason)) Console.WriteLine("样本 " + sampleIndex.ToString(CultureInfo.InvariantCulture) + " 检查说明: " + sample.Reason);
+                if (sample.Results == null) continue;
+                for (int objectIndex = 0; objectIndex < sample.Results.Count; objectIndex++)
+                {
+                    var item = sample.Results[objectIndex];
+                    string bbox = item.Bbox == null ? string.Empty : string.Join(", ", item.Bbox.Select(x => x.ToString("F3", CultureInfo.InvariantCulture)));
+                    Console.WriteLine(string.Format(
+                        CultureInfo.InvariantCulture,
+                        "  目标 {0}: category_id={1}, category_name={2}, score={3:F4}, area={4:F3}, bbox=[{5}], with_bbox={6}, with_angle={7}, angle={8:F4}, with_mask={9}, with_mean={10}",
+                        objectIndex,
+                        item.CategoryId,
+                        item.CategoryName ?? string.Empty,
+                        item.Score,
+                        item.Area,
+                        bbox,
+                        item.WithBbox,
+                        item.WithAngle,
+                        item.Angle,
+                        item.WithMask,
+                        item.WithMean));
+                }
+            }
+        }
+
+        private static void PrintFlowDetails()
+        {
+            var timings = InferTiming.GetLastFlowNodeTimings();
+            if (timings != null && timings.Count > 0)
+            {
+                Console.WriteLine("流程节点耗时:");
+                foreach (var timing in timings)
+                {
+                    Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "  #{0} [{1}] {2}: {3:F2}ms", timing.NodeId, timing.NodeType, timing.NodeTitle, timing.ElapsedMs));
+                }
+            }
+            var batchInfos = InferTiming.GetLastFlowModelBatchInfos();
+            if (batchInfos != null && batchInfos.Count > 0)
+            {
+                Console.WriteLine("流程模型 batch 信息:");
+                foreach (var info in batchInfos)
+                {
+                    Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "  #{0}: 输入={1}, 上限={2}, 调用={3}, 最大实际 batch={4}", info.NodeId, info.InputCount, info.BatchLimit, info.InferCallCount, info.MaxActualBatch));
+                }
+            }
+        }
+
+        private static void AddCurrentFlowNodeTimings(Dictionary<string, NodeTimingAggregate> nodeStats)
+        {
+            var timings = InferTiming.GetLastFlowNodeTimings();
+            if (timings == null) return;
+            foreach (var timing in timings)
+            {
+                if (timing == null) continue;
+                string key = timing.NodeId.ToString(CultureInfo.InvariantCulture) + "|" + timing.NodeType + "|" + timing.NodeTitle;
+                NodeTimingAggregate aggregate;
+                if (!nodeStats.TryGetValue(key, out aggregate))
+                {
+                    aggregate = new NodeTimingAggregate(timing.NodeId, timing.NodeType, timing.NodeTitle);
+                    nodeStats.Add(key, aggregate);
+                }
+                aggregate.Add(timing.ElapsedMs);
+            }
+        }
+
+        private static void PrintLatencyStatistics(string name, List<double> values)
+        {
+            if (values == null || values.Count == 0)
+            {
+                Console.WriteLine(name + ": 无数据");
+                return;
+            }
+            var ordered = values.OrderBy(x => x).ToList();
+            Console.WriteLine(string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}: min={1:F2}ms, avg={2:F2}ms, p50={3:F2}ms, p95={4:F2}ms, max={5:F2}ms",
+                name,
+                ordered.First(),
+                ordered.Average(),
+                Percentile(ordered, 0.50),
+                Percentile(ordered, 0.95),
+                ordered.Last()));
+        }
+
+        private static double Percentile(List<double> values, double fraction)
+        {
+            if (values == null || values.Count == 0) return 0.0;
+            int index = (int)Math.Ceiling(values.Count * fraction) - 1;
+            index = Math.Max(0, Math.Min(values.Count - 1, index));
+            return values[index];
+        }
+
+        private static string FormatMs(double value)
+        {
+            return Math.Max(0.0, value).ToString("F2", CultureInfo.InvariantCulture) + "ms";
+        }
+
+        private static void PrintNodeAverages(Dictionary<string, NodeTimingAggregate> nodeStats)
+        {
+            if (nodeStats == null || nodeStats.Count == 0)
+            {
+                Console.WriteLine("流程节点平均耗时: 无数据");
+                return;
+            }
+            Console.WriteLine("流程节点平均耗时:");
+            foreach (var item in nodeStats.Values.OrderByDescending(x => x.AverageMs))
+            {
+                Console.WriteLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "  #{0} [{1}] {2}: {3:F2}ms",
+                    item.NodeId,
+                    item.NodeType,
+                    item.NodeTitle,
+                    item.AverageMs));
+            }
+        }
+
+        private static void RequirePositionCount(WorkflowArguments args, string command, int count)
+        {
+            if (args.Positionals.Count != count)
+            {
+                throw new WorkflowParameterException(command + " 需要 " + count.ToString(CultureInfo.InvariantCulture) + " 个位置参数");
+            }
+        }
+
+        private static void RequireNoArguments(WorkflowArguments args, string command)
+        {
+            if (args.Positionals.Count != 0 || args.Options.Count != 0)
+            {
+                throw new WorkflowParameterException(command + " 不接受参数");
+            }
+        }
+
+        private static void RequireNoOptions(WorkflowArguments args)
+        {
+            if (args.Options.Count != 0) throw new WorkflowParameterException("该命令不接受可选参数");
+        }
+
+        private static void ValidateOptions(WorkflowArguments args, params string[] names)
+        {
+            var accepted = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+            foreach (string name in args.Options.Keys)
+            {
+                if (!accepted.Contains(name)) throw new WorkflowParameterException("不支持的可选参数: --" + name);
+            }
+        }
+
+        private enum WorkflowInferKind
+        {
+            Structured,
+            Json,
+            Batch
+        }
+
+        private sealed class WorkflowParameterException : Exception
+        {
+            public WorkflowParameterException(string message) : base(message) { }
+        }
+
+        private sealed class WorkflowExecutionException : Exception
+        {
+            public WorkflowExecutionException(string message) : base(message) { }
+        }
+
+        private sealed class WorkflowArguments
+        {
+            public List<string> Positionals { get; private set; }
+            public Dictionary<string, string> Options { get; private set; }
+
+            private WorkflowArguments()
+            {
+                Positionals = new List<string>();
+                Options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            public static WorkflowArguments Parse(string[] args)
+            {
+                var result = new WorkflowArguments();
+                for (int index = 1; index < args.Length; index++)
+                {
+                    string value = args[index];
+                    if (!value.StartsWith("--", StringComparison.Ordinal))
+                    {
+                        result.Positionals.Add(value);
+                        continue;
+                    }
+                    string name = value.Substring(2);
+                    if (string.IsNullOrWhiteSpace(name)) throw new WorkflowParameterException("可选参数名称为空");
+                    if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+                    {
+                        throw new WorkflowParameterException("可选参数 --" + name + " 缺少值");
+                    }
+                    if (result.Options.ContainsKey(name)) throw new WorkflowParameterException("可选参数重复: --" + name);
+                    result.Options.Add(name, args[++index]);
+                }
+                return result;
+            }
+
+            public int GetInt(string name, int defaultValue, bool positive)
+            {
+                string text;
+                if (!Options.TryGetValue(name, out text)) return defaultValue;
+                int value;
+                if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value) || (positive && value <= 0) || (!positive && value < 0))
+                {
+                    throw new WorkflowParameterException("--" + name + " 必须是" + (positive ? "正整数" : "非负整数"));
+                }
+                return value;
+            }
+
+            public int GetAnyInt(string name, int defaultValue)
+            {
+                string text;
+                if (!Options.TryGetValue(name, out text)) return defaultValue;
+                int value;
+                if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+                {
+                    throw new WorkflowParameterException("--" + name + " 必须是整数");
+                }
+                return value;
+            }
+
+            public double GetDouble(string name, double defaultValue)
+            {
+                string text;
+                if (!Options.TryGetValue(name, out text)) return defaultValue;
+                double value;
+                if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) || value < 0.0 || value > 1.0)
+                {
+                    throw new WorkflowParameterException("--" + name + " 必须在 0 到 1 之间");
+                }
+                return value;
+            }
+
+            public bool GetBool(string name, bool defaultValue)
+            {
+                string text;
+                if (!Options.TryGetValue(name, out text)) return defaultValue;
+                bool value;
+                if (!bool.TryParse(text, out value)) throw new WorkflowParameterException("--" + name + " 必须为 true 或 false");
+                return value;
+            }
+
+            public JObject CreateInferParameters(int batchSize)
+            {
+                var result = new JObject
+                {
+                    ["threshold"] = GetDouble("threshold", 0.5),
+                    ["with_mask"] = GetBool("with-mask", true),
+                    ["batch_size"] = batchSize
+                };
+                string calcMean;
+                if (Options.TryGetValue("calc-mean", out calcMean))
+                {
+                    if (string.Equals(calcMean, "true", StringComparison.OrdinalIgnoreCase)) result["calc_mean"] = true;
+                    else if (string.Equals(calcMean, "false", StringComparison.OrdinalIgnoreCase)) result["calc_mean"] = false;
+                    else if (!string.Equals(calcMean, "default", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new WorkflowParameterException("--calc-mean 必须为 default、true 或 false");
+                    }
+                }
+                return result;
+            }
+        }
+
+        private sealed class WorkflowModelEntry
+        {
+            public string Name { get; private set; }
+            public string Path { get; private set; }
+            public int DeviceId { get; private set; }
+            public bool RpcMode { get; private set; }
+            public Model Model { get; private set; }
+            public double LoadMs { get; private set; }
+
+            public WorkflowModelEntry(string name, string path, int deviceId, bool rpcMode, Model model, double loadMs)
+            {
+                Name = name;
+                Path = path;
+                DeviceId = deviceId;
+                RpcMode = rpcMode;
+                Model = model;
+                LoadMs = loadMs;
+            }
+        }
+
+        private sealed class WorkflowContext
+        {
+            public Dictionary<string, WorkflowModelEntry> Models { get; private set; }
+
+            public WorkflowContext()
+            {
+                Models = new Dictionary<string, WorkflowModelEntry>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            public WorkflowModelEntry Get(string name)
+            {
+                WorkflowModelEntry entry;
+                if (!Models.TryGetValue(name, out entry)) throw new WorkflowExecutionException("未找到已加载模型: " + name);
+                return entry;
+            }
+
+            public void Free(string name)
+            {
+                WorkflowModelEntry entry = Get(name);
+                Exception freeError = null;
+                Exception disposeError = null;
+                try { entry.Model.FreeModel(); }
+                catch (Exception ex) { freeError = ex; }
+                try { entry.Model.Dispose(); }
+                catch (Exception ex) { disposeError = ex; }
+                if (freeError == null && disposeError == null)
+                {
+                    Models.Remove(name);
+                    return;
+                }
+
+                var messages = new List<string>();
+                if (freeError != null) messages.Add("FreeModel: " + freeError.Message);
+                if (disposeError != null) messages.Add("Dispose: " + disposeError.Message);
+                throw new WorkflowExecutionException("模型 " + entry.Name + " 释放失败: " + string.Join("；", messages));
+            }
+
+            public List<string> FreeAll()
+            {
+                var failures = new List<string>();
+                var entries = Models.Values.ToList();
+                foreach (var entry in entries)
+                {
+                    try { Free(entry.Name); }
+                    catch (Exception ex) { failures.Add(ex.Message); }
+                }
+                try { Utils.FreeAllModels(); }
+                catch (Exception ex) { failures.Add("Utils.FreeAllModels: " + ex.Message); }
+                return failures;
+            }
+
+            public List<string> DisposeAll()
+            {
+                var failures = new List<string>();
+                foreach (var name in Models.Keys.ToList())
+                {
+                    try { Free(name); }
+                    catch (Exception ex) { failures.Add(ex.Message); }
+                }
+                return failures;
             }
         }
 
@@ -1884,6 +2918,38 @@ namespace DlcvCSharpTest
                     }
                 }
             }
+        }
+
+        private static int RunGetModelInfoCommand(string[] args, bool dvsInfo)
+        {
+            string command = dvsInfo ? "get-dvs-model-info" : "get-model-info";
+            if (args == null || args.Length != 2)
+            {
+                Console.Error.WriteLine("用法: DlcvCSharpTest " + command + " <model>");
+                return 2;
+            }
+
+            Model model = null;
+            string resultJson = null;
+            try
+            {
+                model = new Model(args[1], GpuDeviceId, false, false);
+                JObject result = dvsInfo ? model.GetDvsModelInfo() : model.GetModelInfo();
+                resultJson = result.ToString(Formatting.Indented);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+            finally
+            {
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+            }
+
+            Console.Out.WriteLine(resultJson);
+            return 0;
         }
 
         private static int RunDvspParitySelfTest(string[] args)
@@ -4288,6 +5354,180 @@ namespace DlcvCSharpTest
             }
 
             return string.Join(" || ", parts);
+        }
+
+        private static string BuildStructuredResultSignature(Utils.CSharpResult result)
+        {
+            var samples = new JArray();
+            if (result.SampleResults != null)
+            {
+                foreach (var sample in result.SampleResults)
+                {
+                    var normalizedSample = new JObject
+                    {
+                        ["ok"] = sample.Ok.HasValue ? new JValue(sample.Ok.Value) : JValue.CreateNull(),
+                        ["reason"] = sample.Reason == null ? JValue.CreateNull() : new JValue(sample.Reason),
+                        ["results"] = new JArray()
+                    };
+                    if (sample.Results != null)
+                    {
+                        foreach (var item in sample.Results)
+                        {
+                            ((JArray)normalizedSample["results"]).Add(new JObject
+                            {
+                                ["category_id"] = item.CategoryId,
+                                ["category_name"] = item.CategoryName ?? string.Empty,
+                                ["score"] = item.Score,
+                                ["area"] = item.Area,
+                                ["bbox"] = item.Bbox == null ? new JArray() : JArray.FromObject(item.Bbox),
+                                ["with_mask"] = item.WithMask,
+                                ["with_bbox"] = item.WithBbox,
+                                ["with_angle"] = item.WithAngle,
+                                ["angle"] = item.Angle,
+                                ["with_mean"] = item.WithMean,
+                                ["foreground_mean"] = item.ForegroundMean,
+                                ["background_mean"] = item.BackgroundMean,
+                                ["extra_info"] = CanonicalizeSignatureToken(item.ExtraInfo),
+                                ["mask"] = BuildMaskSignature(item.Mask)
+                            });
+                        }
+                    }
+                    samples.Add(normalizedSample);
+                }
+            }
+            return samples.ToString(Formatting.None);
+        }
+
+        private static JToken CanonicalizeSignatureToken(JToken value)
+        {
+            if (value == null) return JValue.CreateNull();
+            var obj = value as JObject;
+            if (obj != null)
+            {
+                var result = new JObject();
+                foreach (var property in obj.Properties().OrderBy(x => x.Name, StringComparer.Ordinal))
+                {
+                    result[property.Name] = CanonicalizeSignatureToken(property.Value);
+                }
+                return result;
+            }
+            var array = value as JArray;
+            if (array != null)
+            {
+                var result = new JArray();
+                foreach (var item in array) result.Add(CanonicalizeSignatureToken(item));
+                return result;
+            }
+            return value.DeepClone();
+        }
+
+        private static JToken BuildMaskSignature(Mat mask)
+        {
+            if (mask == null || mask.Empty()) return JValue.CreateNull();
+            Mat source = mask;
+            Mat copy = null;
+            try
+            {
+                if (!mask.IsContinuous())
+                {
+                    copy = mask.Clone();
+                    source = copy;
+                }
+                long byteCountLong = source.Total() * source.ElemSize();
+                if (byteCountLong < 0 || byteCountLong > int.MaxValue) throw new InvalidOperationException("Mask 数据过大");
+                var pixels = new byte[(int)byteCountLong];
+                Marshal.Copy(source.Data, pixels, 0, pixels.Length);
+                return new JObject
+                {
+                    ["width"] = source.Width,
+                    ["height"] = source.Height,
+                    ["type"] = source.Type().ToString(),
+                    ["pixel_count"] = pixels.Length,
+                    ["pixel_hash"] = ComputePixelHash(pixels)
+                };
+            }
+            finally
+            {
+                try { copy?.Dispose(); } catch { }
+            }
+        }
+
+        private static string ComputePixelHash(byte[] pixels)
+        {
+            ulong hash = 14695981039346656037UL;
+            for (int index = 0; index < pixels.Length; index++)
+            {
+                hash ^= pixels[index];
+                hash *= 1099511628211UL;
+            }
+            return hash.ToString("X16", CultureInfo.InvariantCulture);
+        }
+
+        private static JToken NormalizeWorkflowJson(JToken value)
+        {
+            var array = value as JArray;
+            if (array != null)
+            {
+                return new JObject
+                {
+                    ["sample_results"] = new JArray { new JObject { ["results"] = CanonicalizeSignatureToken(array) } }
+                };
+            }
+
+            var root = value as JObject;
+            if (root == null) return CanonicalizeSignatureToken(value);
+            if (root["sample_results"] is JArray) return CanonicalizeSignatureToken(root);
+            var resultList = root["result_list"] as JArray;
+            if (resultList == null) return CanonicalizeSignatureToken(root);
+
+            var normalized = new JObject();
+            foreach (var property in root.Properties())
+            {
+                if (!string.Equals(property.Name, "result_list", StringComparison.Ordinal))
+                {
+                    normalized[property.Name] = CanonicalizeSignatureToken(property.Value);
+                }
+            }
+            var samples = new JArray();
+            bool nestedBatch = resultList.Count > 0 && resultList.All(x =>
+            {
+                var sample = x as JObject;
+                return sample != null && sample["result_list"] is JArray;
+            });
+            if (nestedBatch)
+            {
+                foreach (var token in resultList)
+                {
+                    var source = (JObject)token;
+                    var sample = new JObject();
+                    foreach (var property in source.Properties())
+                    {
+                        sample[property.Name == "result_list" ? "results" : property.Name] = CanonicalizeSignatureToken(property.Value);
+                    }
+                    samples.Add(sample);
+                }
+            }
+            else
+            {
+                samples.Add(new JObject { ["results"] = CanonicalizeSignatureToken(resultList) });
+            }
+            normalized["sample_results"] = samples;
+            return CanonicalizeSignatureToken(normalized);
+        }
+
+        private static void UpdateConsistencySignature(ref string baseline, ref string firstDifference, ref int firstDifferenceRun, string signature, int runIndex)
+        {
+            if (baseline == null) baseline = signature;
+            else if (firstDifference == null && !string.Equals(baseline, signature, StringComparison.Ordinal))
+            {
+                firstDifference = signature;
+                firstDifferenceRun = runIndex;
+            }
+        }
+
+        private static string ComputeTextHash(string text)
+        {
+            return ComputePixelHash(Encoding.UTF8.GetBytes(text ?? string.Empty));
         }
 
         private static void AssertNear(double expected, double actual, double tolerance, string label)

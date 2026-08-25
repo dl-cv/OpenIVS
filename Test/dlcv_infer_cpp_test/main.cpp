@@ -1,7 +1,11 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cctype>
+#include <condition_variable>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -10,9 +14,15 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
+#include <limits>
 #include <memory>
+#include <map>
+#include <mutex>
+#include <numeric>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -55,6 +65,28 @@ std::string WideToUtf8(const std::wstring& w) {
     return out;
 }
 
+void WriteUtf8(std::ostream& stream, const std::string& text) {
+#ifdef _WIN32
+    stream << dlcv_infer::convertUtf8ToGbk(text);
+#else
+    stream << text;
+#endif
+}
+
+void PrintUtf8(const std::string& text) {
+    WriteUtf8(std::cout, text);
+}
+
+void PrintUtf8Line(const std::string& text) {
+    WriteUtf8(std::cout, text);
+    std::cout << "\n";
+}
+
+void PrintUtf8ErrorLine(const std::string& text) {
+    WriteUtf8(std::cerr, text);
+    std::cerr << "\n";
+}
+
 std::wstring Utf8ToWide(const std::string& s) {
     if (s.empty()) return {};
     int chars = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0);
@@ -89,42 +121,126 @@ cv::Mat ReadImageRgb(const std::wstring& imagePath) {
     return rgb;
 }
 
-std::string BuildResultSignature(const dlcv_infer::Result& result) {
+void AppendSignatureText(std::ostringstream& oss, const std::string& value) {
+    oss << value.size() << ":" << value << ";";
+}
+
+std::uint64_t CalculateMaskDigest(const cv::Mat& mask) {
+    constexpr std::uint64_t kOffsetBasis = 1469598103934665603ULL;
+    constexpr std::uint64_t kPrime = 1099511628211ULL;
+    std::uint64_t digest = kOffsetBasis;
+    if (mask.empty()) return digest;
+    const size_t bytesPerRow = static_cast<size_t>(mask.cols) * mask.elemSize();
+    for (int row = 0; row < mask.rows; ++row) {
+        const unsigned char* data = mask.ptr<unsigned char>(row);
+        for (size_t column = 0; column < bytesPerRow; ++column) {
+            digest ^= data[column];
+            digest *= kPrime;
+        }
+    }
+    return digest;
+}
+
+std::uint64_t CalculateTextDigest(const std::string& text) {
+    constexpr std::uint64_t kOffsetBasis = 1469598103934665603ULL;
+    constexpr std::uint64_t kPrime = 1099511628211ULL;
+    std::uint64_t digest = kOffsetBasis;
+    for (const unsigned char ch : text) {
+        digest ^= ch;
+        digest *= kPrime;
+    }
+    return digest;
+}
+
+std::string ToHexDigest(std::uint64_t value) {
     std::ostringstream oss;
+    oss << std::hex << std::setw(16) << std::setfill('0') << value;
+    return oss.str();
+}
+
+std::string CanonicalJsonDump(const json& value) {
+    return value.dump();
+}
+
+void AppendJsonExtraSignature(std::ostringstream& oss, const json& value) {
+    if (value.is_array()) {
+        oss << "[" << value.size() << "]";
+        for (const auto& item : value) AppendJsonExtraSignature(oss, item);
+        return;
+    }
+    if (!value.is_object()) return;
+
+    const bool isResult = value.contains("category_id") || value.contains("category_name") || value.contains("score");
+    if (isResult) {
+        for (const char* key : {"extra_info", "extraInfo", "metadata"}) {
+            oss << key << "=";
+            if (value.contains(key)) {
+                AppendSignatureText(oss, value.at(key).dump());
+            } else {
+                AppendSignatureText(oss, "<missing>");
+            }
+        }
+    }
+    for (auto it = value.begin(); it != value.end(); ++it) {
+        AppendJsonExtraSignature(oss, it.value());
+    }
+}
+
+std::string BuildResultSignature(const dlcv_infer::Result& result, const json& jsonResult = json()) {
+    std::ostringstream oss;
+    oss << std::setprecision(std::numeric_limits<double>::max_digits10);
+    oss << "sample_count=" << result.sampleResults.size() << ";";
     for (size_t sampleIndex = 0; sampleIndex < result.sampleResults.size(); sampleIndex++) {
-        if (sampleIndex > 0) oss << " || ";
-        oss << "sample" << sampleIndex << ":";
+        oss << "sample=" << sampleIndex << ",object_count=" << result.sampleResults[sampleIndex].results.size() << ";";
         const auto& objects = result.sampleResults[sampleIndex].results;
         for (size_t objectIndex = 0; objectIndex < objects.size(); objectIndex++) {
-            if (objectIndex > 0) oss << ";";
             const auto& object = objects[objectIndex];
-            oss << object.categoryId << "|" << ToFixed(object.score, 4) << "|" << Safe(object.categoryName) << "|";
+            oss << "object=" << objectIndex
+                << ",category_id=" << object.categoryId
+                << ",category_name=";
+            AppendSignatureText(oss, object.categoryName);
+            oss << ",score=" << object.score
+                << ",area=" << object.area
+                << ",with_mask=" << object.withMask
+                << ",with_bbox=" << object.withBbox
+                << ",with_angle=" << object.withAngle
+                << ",angle=" << object.angle
+                << ",with_mean=" << object.withMean
+                << ",foreground_mean=" << object.foregroundMean
+                << ",background_mean=" << object.backgroundMean
+                << ",bbox_count=" << object.bbox.size() << ",bbox=";
             for (size_t bboxIndex = 0; bboxIndex < object.bbox.size(); bboxIndex++) {
-                if (bboxIndex > 0) oss << ",";
-                oss << ToFixed(object.bbox[bboxIndex], 3);
+                oss << object.bbox[bboxIndex] << ",";
             }
-            oss << "|" << ToFixed(object.withAngle ? object.angle : -100.0, 4);
+            oss << ",mask_rows=" << object.mask.rows
+                << ",mask_cols=" << object.mask.cols
+                << ",mask_type=" << object.mask.type()
+                << ",mask_digest=" << CalculateMaskDigest(object.mask) << ";";
         }
+    }
+    if (!jsonResult.is_null()) {
+        oss << "json_extra=";
+        AppendJsonExtraSignature(oss, jsonResult);
     }
     return oss.str();
 }
 
 int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
     if (argc < 4) {
-        std::cout << "Usage: dlcv_infer_cpp_test dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
+        PrintUtf8Line("Usage: dlcv_infer_cpp_test dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]");
         return 2;
     }
 
     const std::wstring modelPath = argv[2];
     const std::wstring imagePath = argv[3];
-    std::cout << "==== C++ DVS RGB selftest ====\n";
-    std::cout << "model: " << WideToUtf8(modelPath) << "\n";
-    std::cout << "image: " << WideToUtf8(imagePath) << "\n";
+    PrintUtf8Line("==== C++ DVS RGB selftest ====");
+    PrintUtf8Line("model: " + WideToUtf8(modelPath));
+    PrintUtf8Line("image: " + WideToUtf8(imagePath));
 
     try {
         cv::Mat rgb = ReadImageRgb(imagePath);
         if (rgb.empty()) {
-            std::cout << "selftest failed: image decode failed\n";
+            PrintUtf8Line("selftest failed: image decode failed");
             return 1;
         }
 
@@ -137,7 +253,7 @@ int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
         dlcv_infer::Result result = model.InferBatch({ rgb }, params);
         std::cout << "signature: " << BuildResultSignature(result) << "\n";
         if (result.sampleResults.empty() || result.sampleResults.front().results.empty()) {
-            std::cout << "selftest failed: DVS flow returned an empty result\n";
+            PrintUtf8Line("selftest failed: DVS flow returned an empty result");
             return 1;
         }
         const bool requirePreservedMask = argc >= 5 &&
@@ -146,12 +262,12 @@ int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
         if (requirePreservedMask) {
             const auto& object = result.sampleResults.front().results.front();
             if (!object.withMask || object.mask.empty()) {
-                std::cout << "selftest failed: segmentation mask was not preserved after OCR\n";
+                PrintUtf8Line("selftest failed: segmentation mask was not preserved after OCR");
                 DisposeResultMasks(result);
                 return 1;
             }
             if (!object.withBbox || object.bbox.size() < 4) {
-                std::cout << "selftest failed: segmentation bbox was not preserved after OCR\n";
+                PrintUtf8Line("selftest failed: segmentation bbox was not preserved after OCR");
                 DisposeResultMasks(result);
                 return 1;
             }
@@ -165,43 +281,49 @@ int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
                 width <= 0.0 || height <= 100.0 ||
                 x < -tolerance || y < -tolerance ||
                 x + width > rgb.cols + tolerance || y + height > rgb.rows + tolerance) {
-                std::cout << "selftest failed: segmentation bbox is not in original-image coordinates, image="
+                std::ostringstream message;
+                message << "selftest failed: segmentation bbox is not in original-image coordinates, image="
                     << rgb.cols << "x" << rgb.rows << ", bbox=";
                 for (size_t i = 0; i < object.bbox.size(); i++) {
-                    if (i > 0) std::cout << ",";
-                    std::cout << object.bbox[i];
+                    if (i > 0) message << ",";
+                    message << object.bbox[i];
                 }
-                std::cout << "\n";
+                PrintUtf8Line(message.str());
                 DisposeResultMasks(result);
                 return 1;
             }
             if (object.categoryName.empty()) {
-                std::cout << "selftest failed: OCR text was not merged into the segmentation result\n";
+                PrintUtf8Line("selftest failed: OCR text was not merged into the segmentation result");
                 DisposeResultMasks(result);
                 return 1;
             }
             if (!std::isfinite(object.score)) {
-                std::cout << "selftest failed: preserved segmentation score is not finite\n";
+                PrintUtf8Line("selftest failed: preserved segmentation score is not finite");
                 DisposeResultMasks(result);
                 return 1;
             }
 
             const bool fullImageMask = object.mask.cols == rgb.cols && object.mask.rows == rgb.rows;
-            std::cout << "preserved_result: image=" << rgb.cols << "x" << rgb.rows << ", bbox=";
+            std::ostringstream message;
+            message << "preserved_result: image=" << rgb.cols << "x" << rgb.rows << ", bbox=";
             for (size_t i = 0; i < object.bbox.size(); i++) {
-                if (i > 0) std::cout << ",";
-                std::cout << object.bbox[i];
+                if (i > 0) message << ",";
+                message << object.bbox[i];
             }
-            std::cout << ", mask=" << object.mask.cols << "x" << object.mask.rows
+            message << ", mask=" << object.mask.cols << "x" << object.mask.rows
                 << ", mask_space=" << (fullImageMask ? "full-image" : "roi")
-                << ", category_name=" << Safe(object.categoryName)
-                << ", score=" << ToFixed(object.score, 4) << "\n";
+                << ", category_name=";
+            PrintUtf8(message.str());
+            std::cout << object.categoryName;
+            std::ostringstream suffix;
+            suffix << ", score=" << ToFixed(object.score, 4);
+            PrintUtf8Line(suffix.str());
         }
         DisposeResultMasks(result);
-        std::cout << "C++ DVS RGB selftest passed\n";
+        PrintUtf8Line("C++ DVS RGB selftest passed");
         return 0;
     } catch (const std::exception& ex) {
-        std::cout << "selftest exception: " << ex.what() << "\n";
+        PrintUtf8Line(std::string("selftest exception: ") + ex.what());
         return 1;
     }
 }
@@ -262,7 +384,7 @@ cv::Mat LoadSingleFileWithSuffix(const std::string& dir, const std::string& suff
 
 int RunCurveTextAffineSelfTest() {
     auto fail = [](const std::string& message) -> int {
-        std::cout << "curve_text_affine selftest failed: " << message << "\n";
+        PrintUtf8Line("curve_text_affine selftest failed: " + message);
         return 1;
     };
 
@@ -325,7 +447,7 @@ int RunCurveTextAffineSelfTest() {
         return fail("curve affine image is invalid");
     }
 
-    std::cout << "curve_text_affine selftest passed\n";
+    PrintUtf8Line("curve_text_affine selftest passed");
     return 0;
 }
 
@@ -337,7 +459,7 @@ bool MatsExactlyEqual(const cv::Mat& left, const cv::Mat& right) {
 
 int RunAiOrientationAffineSelfTest() {
     auto fail = [](const std::string& message) -> int {
-        std::cout << "ai_orientation_affine selftest failed: " << message << "\n";
+        PrintUtf8Line("ai_orientation_affine selftest failed: " + message);
         return 1;
     };
 
@@ -486,13 +608,13 @@ int RunAiOrientationAffineSelfTest() {
         return fail("missing AffineImage did not preserve transform/result fallback");
     }
 
-    std::cout << "ai_orientation_affine selftest passed\n";
+    PrintUtf8Line("ai_orientation_affine selftest passed");
     return 0;
 }
 
 int RunImagePrepCheck() {
     auto fail = [](const std::string& message) -> int {
-        std::cout << "imageprepcheck failed: " << message << "\n";
+        PrintUtf8Line("imageprepcheck failed: " + message);
         return 1;
     };
 
@@ -540,13 +662,13 @@ int RunImagePrepCheck() {
         }
     }
 
-    std::cout << "imageprepcheck passed\n";
+    PrintUtf8Line("imageprepcheck passed");
     return 0;
 }
 
 int RunRectImageCorrectionSelfTest() {
     auto fail = [](const std::string& message) -> int {
-        std::cout << "rect_image_correction selftest failed: " << message << "\n";
+        PrintUtf8Line("rect_image_correction selftest failed: " + message);
         return 1;
     };
 
@@ -630,7 +752,7 @@ int RunRectImageCorrectionSelfTest() {
 
     DeleteFilesWithSuffix(saveDir, suffix + ".png");
     DeleteFileA(flowPath.c_str());
-    std::cout << "rect_image_correction selftest passed\n";
+    PrintUtf8Line("rect_image_correction selftest passed");
     return 0;
 }
 
@@ -968,7 +1090,7 @@ bool RunBBoxIoUDedupNoneVsIdentityCase(std::string& error) {
 
 int RunBBoxIoUDedupSelfTest() {
     auto fail = [](const std::string& message) -> int {
-        std::cout << "bbox_iou_dedup selftest failed: " << message << "\n";
+        PrintUtf8Line("bbox_iou_dedup selftest failed: " + message);
         return 1;
     };
 
@@ -977,7 +1099,7 @@ int RunBBoxIoUDedupSelfTest() {
     if (!RunBBoxIoUDedupFlowCase(false, 2, error)) return fail(error);
     if (!RunBBoxIoUDedupNoneVsIdentityCase(error)) return fail(error);
 
-    std::cout << "bbox_iou_dedup selftest passed\n";
+    PrintUtf8Line("bbox_iou_dedup selftest passed");
     return 0;
 }
 
@@ -1174,7 +1296,7 @@ bool RunCountResultsInvalidRangeCase(std::string& error) {
 
 int RunCountResultsSelfTest() {
     auto fail = [](const std::string& message) -> int {
-        std::cout << "count_results selftest failed: " << message << "\n";
+        PrintUtf8Line("count_results selftest failed: " + message);
         return 1;
     };
 
@@ -1205,7 +1327,7 @@ int RunCountResultsSelfTest() {
     }
     if (!RunCountResultsInvalidRangeCase(error)) return fail(error);
 
-    std::cout << "count_results selftest passed\n";
+    PrintUtf8Line("count_results selftest passed");
     return 0;
 }
 
@@ -1449,7 +1571,7 @@ bool RunCategoryCountCheckLegacyCompatibilityCase(std::string& error) {
 
 int RunCategoryCountCheckSelfTest() {
     auto fail = [](const std::string& message) -> int {
-        std::cout << "category_count_check selftest failed: " << message << "\n";
+        PrintUtf8Line("category_count_check selftest failed: " + message);
         return 1;
     };
 
@@ -1481,7 +1603,7 @@ int RunCategoryCountCheckSelfTest() {
             1, 1, true, std::string(), error)) return fail(error);
     if (!RunCategoryCountCheckLegacyCompatibilityCase(error)) return fail(error);
 
-    std::cout << "category_count_check selftest passed\n";
+    PrintUtf8Line("category_count_check selftest passed");
     return 0;
 }
 
@@ -1746,14 +1868,14 @@ bool RunImageGenerationExpandRegression(std::string& error) {
 }
 
 int RunImageGenerationExpandSelfTest() {
-    std::cout << "==== image_generation expand selftest ====\n";
+    PrintUtf8Line("==== image_generation expand selftest ====");
     std::string error;
     if (!RunImageGenerationExpandRegression(error)) {
-        std::cout << "image_generation expand selftest failed: " << error << "\n";
+        PrintUtf8Line("image_generation expand selftest failed: " + error);
         return 1;
     }
 
-    std::cout << "image_generation expand selftest passed\n";
+    PrintUtf8Line("image_generation expand selftest passed");
     return 0;
 }
 
@@ -1919,16 +2041,16 @@ bool RunCrossModelLabelMergeCase(std::string& error) {
 int RunCrossModelLabelMergeSelfTest() {
     std::string error;
     if (!RunCrossModelLabelMergeCase(error)) {
-        std::cout << "cross_model_label_merge selftest failed: " << error << "\n";
+        PrintUtf8Line("cross_model_label_merge selftest failed: " + error);
         return 1;
     }
-    std::cout << "cross_model_label_merge selftest passed\n";
+    PrintUtf8Line("cross_model_label_merge selftest passed");
     return 0;
 }
 
 int RunThreeModelLoadTiming(int argc, wchar_t* argv[]) {
     if (argc != 5) {
-        std::cout << "用法: dlcv_infer_cpp_test.exe load-three-models <元件提取模型> <元件检测模型> <IC检测模型>\n";
+        PrintUtf8Line("用法: dlcv_infer_cpp_test.exe load-three-models <元件提取模型> <元件检测模型> <IC检测模型>");
         return 2;
     }
 
@@ -1949,26 +2071,30 @@ int RunThreeModelLoadTiming(int argc, wchar_t* argv[]) {
 
     try {
         for (const auto& spec : specs) {
-            std::cout << "开始加载" << spec.name << ": " << WideToUtf8(spec.path) << "\n" << std::flush;
+            PrintUtf8Line(std::string("开始加载") + spec.name + ": " + WideToUtf8(spec.path));
+            std::cout << std::flush;
             const auto start = Clock::now();
             auto model = std::make_unique<dlcv_infer::Model>(spec.path, 0);
             const double elapsedSeconds = std::chrono::duration<double>(Clock::now() - start).count();
             totalSeconds += elapsedSeconds;
-            std::cout << spec.name << "加载完成，耗时 " << ToFixed(elapsedSeconds, 2) << " 秒\n" << std::flush;
+            PrintUtf8Line(std::string(spec.name) + "加载完成，耗时 " + ToFixed(elapsedSeconds, 2) + " 秒");
+            std::cout << std::flush;
             models.push_back(std::move(model));
         }
 
-        std::cout << "三个模型加载完成，总耗时 " << ToFixed(totalSeconds, 2) << " 秒\n" << std::flush;
+        PrintUtf8Line("三个模型加载完成，总耗时 " + ToFixed(totalSeconds, 2) + " 秒");
+        std::cout << std::flush;
         return 0;
     } catch (const std::exception& ex) {
-        std::cout << "模型加载失败: " << ex.what() << "\n" << std::flush;
+        PrintUtf8Line(std::string("模型加载失败: ") + ex.what());
+        std::cout << std::flush;
         return 1;
     }
 }
 
 int RunCalcMeanSelfTest() {
     auto fail = [](const std::string& message) -> int {
-        std::cout << "calc_mean 自测失败：" << message << "\n";
+        PrintUtf8Line("calc_mean 自测失败：" + message);
         return 1;
     };
 
@@ -2039,14 +2165,912 @@ int RunCalcMeanSelfTest() {
         return fail("缺少均值字段时的默认值错误");
     }
 
-    std::cout << "calc_mean 自测通过\n";
+    PrintUtf8Line("calc_mean 自测通过");
     return 0;
+}
+
+struct WorkflowOptions {
+    int deviceId = 0;
+    double threshold = 0.5;
+    bool withMask = true;
+    bool calcMeanSpecified = false;
+    bool calcMean = false;
+    int batchSize = 1;
+    int warmup = 1;
+    int runs = 10;
+    int threads = 1;
+    bool replace = false;
+};
+
+struct LoadedWorkflowModel {
+    std::wstring name;
+    std::wstring path;
+    int deviceId = 0;
+    double loadMs = 0.0;
+    std::unique_ptr<dlcv_infer::Model> model;
+};
+
+using WorkflowModelMap = std::map<std::string, LoadedWorkflowModel>;
+
+std::string ToLowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+std::string NormalizeModelName(const std::wstring& name) {
+    return ToLowerAscii(WideToUtf8(name));
+}
+
+bool ParseInteger(const std::wstring& text, int& value) {
+    try {
+        size_t used = 0;
+        const long long parsed = std::stoll(text, &used);
+        if (used != text.size() || parsed < INT_MIN || parsed > INT_MAX) return false;
+        value = static_cast<int>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool ParseDoubleValue(const std::wstring& text, double& value) {
+    try {
+        size_t used = 0;
+        value = std::stod(text, &used);
+        return used == text.size() && std::isfinite(value);
+    } catch (...) {
+        return false;
+    }
+}
+
+bool ParseBoolValue(const std::wstring& text, bool& value) {
+    const std::string normalized = ToLowerAscii(WideToUtf8(text));
+    if (normalized == "true") {
+        value = true;
+        return true;
+    }
+    if (normalized == "false") {
+        value = false;
+        return true;
+    }
+    return false;
+}
+
+bool IsWorkflowOptionAllowed(const std::wstring& command, const std::wstring& option) {
+    if (command == L"load-model") return option == L"--device" || option == L"--replace";
+    if (command == L"infer" || command == L"infer-json") {
+        return option == L"--threshold" || option == L"--with-mask" || option == L"--calc-mean";
+    }
+    if (command == L"infer-batch") {
+        return option == L"--threshold" || option == L"--with-mask" || option == L"--calc-mean" || option == L"--batch-size";
+    }
+    if (command == L"benchmark") {
+        return option == L"--threshold" || option == L"--with-mask" || option == L"--calc-mean"
+            || option == L"--batch-size" || option == L"--warmup" || option == L"--runs" || option == L"--threads";
+    }
+    if (command == L"consistency-test") {
+        return option == L"--threshold" || option == L"--with-mask" || option == L"--calc-mean"
+            || option == L"--runs" || option == L"--threads";
+    }
+    return false;
+}
+
+bool ParseWorkflowOptions(
+    const std::wstring& command,
+    const std::vector<std::wstring>& segment,
+    size_t firstArgument,
+    std::vector<std::wstring>& positional,
+    WorkflowOptions& options,
+    std::string& error) {
+    for (size_t i = firstArgument; i < segment.size(); ++i) {
+        const std::wstring& token = segment[i];
+        if (token.rfind(L"--", 0) != 0) {
+            positional.push_back(token);
+            continue;
+        }
+        if (!IsWorkflowOptionAllowed(command, token)) {
+            error = "命令 " + WideToUtf8(command) + " 不支持参数：" + WideToUtf8(token);
+            return false;
+        }
+        if (++i >= segment.size()) {
+            error = "参数缺少取值：" + WideToUtf8(token);
+            return false;
+        }
+
+        const std::wstring& value = segment[i];
+        if (token == L"--device") {
+            if (!ParseInteger(value, options.deviceId)) {
+                error = "--device 必须是整数";
+                return false;
+            }
+        } else if (token == L"--threshold") {
+            if (!ParseDoubleValue(value, options.threshold) || options.threshold < 0.0 || options.threshold > 1.0) {
+                error = "--threshold 必须在 0 到 1 之间";
+                return false;
+            }
+        } else if (token == L"--with-mask") {
+            if (!ParseBoolValue(value, options.withMask)) {
+                error = "--with-mask 只能为 true 或 false";
+                return false;
+            }
+        } else if (token == L"--calc-mean") {
+            const std::string normalized = ToLowerAscii(WideToUtf8(value));
+            if (normalized == "default") {
+                options.calcMeanSpecified = false;
+            } else if (normalized == "true") {
+                options.calcMeanSpecified = true;
+                options.calcMean = true;
+            } else if (normalized == "false") {
+                options.calcMeanSpecified = true;
+                options.calcMean = false;
+            } else {
+                error = "--calc-mean 只能为 default、true 或 false";
+                return false;
+            }
+        } else if (token == L"--batch-size") {
+            if (!ParseInteger(value, options.batchSize) || options.batchSize <= 0) {
+                error = "--batch-size 必须是正整数";
+                return false;
+            }
+        } else if (token == L"--warmup") {
+            if (!ParseInteger(value, options.warmup) || options.warmup < 0) {
+                error = "--warmup 必须是非负整数";
+                return false;
+            }
+        } else if (token == L"--runs") {
+            if (!ParseInteger(value, options.runs) || options.runs <= 0) {
+                error = "--runs 必须是正整数";
+                return false;
+            }
+        } else if (token == L"--threads") {
+            if (!ParseInteger(value, options.threads) || options.threads <= 0) {
+                error = "--threads 必须是正整数";
+                return false;
+            }
+        } else if (token == L"--replace") {
+            if (!ParseBoolValue(value, options.replace)) {
+                error = "--replace 只能为 true 或 false";
+                return false;
+            }
+        } else {
+            error = "未知参数：" + WideToUtf8(token);
+            return false;
+        }
+    }
+    return true;
+}
+
+json BuildInferParams(const WorkflowOptions& options, bool includeBatchSize) {
+    json params = json::object();
+    params["threshold"] = options.threshold;
+    params["with_mask"] = options.withMask;
+    if (options.calcMeanSpecified) params["calc_mean"] = options.calcMean;
+    if (includeBatchSize) params["batch_size"] = options.batchSize;
+    return params;
+}
+
+std::string DogProviderText(sntl_admin::DogProvider provider) {
+    switch (provider) {
+    case sntl_admin::DogProvider::Sentinel:
+        return "Sentinel";
+    case sntl_admin::DogProvider::Virbox:
+        return "Virbox";
+    default:
+        return "Unknown";
+    }
+}
+
+std::string MatTypeText(const cv::Mat& mat) {
+    if (mat.empty()) return "empty";
+    const int depth = mat.depth();
+    const char* depthName = "unknown";
+    switch (depth) {
+    case CV_8U: depthName = "8U"; break;
+    case CV_8S: depthName = "8S"; break;
+    case CV_16U: depthName = "16U"; break;
+    case CV_16S: depthName = "16S"; break;
+    case CV_32S: depthName = "32S"; break;
+    case CV_32F: depthName = "32F"; break;
+    case CV_64F: depthName = "64F"; break;
+    }
+    return std::string("CV_") + depthName + "C" + std::to_string(mat.channels());
+}
+
+void PrintModelHeader(const LoadedWorkflowModel& entry) {
+    PrintUtf8Line("模型: " + WideToUtf8(entry.path));
+}
+
+void PrintTimingAndInspection(size_t sampleCount) {
+    double sdkMs = 0.0;
+    double totalMs = 0.0;
+    dlcv_infer::Model::GetLastInferTiming(sdkMs, totalMs);
+    PrintUtf8Line("SDK耗时(ms): " + ToFixed(sdkMs, 3));
+    PrintUtf8Line("流程耗时(ms): " + ToFixed(totalMs, 3));
+
+    const std::vector<dlcv_infer::FlowNodeTiming> timings = dlcv_infer::Model::GetLastFlowNodeTimings();
+    if (!timings.empty()) {
+        PrintUtf8Line("流程节点耗时:");
+        for (const auto& item : timings) {
+            std::string line = "  节点 " + std::to_string(item.nodeId) + " " + item.nodeType;
+            if (!item.nodeTitle.empty()) line += " (" + item.nodeTitle + ")";
+            line += ": " + ToFixed(item.elapsedMs, 3) + " ms";
+            PrintUtf8Line(line);
+        }
+    }
+
+    for (size_t i = 0; i < sampleCount; ++i) {
+        bool ok = false;
+        std::vector<std::string> reasons;
+        if (!dlcv_infer::Model::GetLastInspectionStatus(ok, reasons, i)) continue;
+        std::string line = "检查状态[" + std::to_string(i) + "]: " + (ok ? "通过" : "不通过");
+        if (!reasons.empty()) {
+            line += "，原因: ";
+            for (size_t r = 0; r < reasons.size(); ++r) {
+                if (r > 0) line += "；";
+                line += reasons[r];
+            }
+        }
+        PrintUtf8Line(line);
+    }
+}
+
+void PrintStructuredResult(dlcv_infer::Result& result) {
+    size_t objectCount = 0;
+    for (const auto& sample : result.sampleResults) objectCount += sample.results.size();
+    PrintUtf8Line("图片结果数: " + std::to_string(result.sampleResults.size()));
+    PrintUtf8Line("目标数量: " + std::to_string(objectCount));
+    for (size_t sampleIndex = 0; sampleIndex < result.sampleResults.size(); ++sampleIndex) {
+        const auto& sample = result.sampleResults[sampleIndex];
+        PrintUtf8Line("图片[" + std::to_string(sampleIndex) + "]目标数: " + std::to_string(sample.results.size()));
+        for (size_t objectIndex = 0; objectIndex < sample.results.size(); ++objectIndex) {
+            const auto& object = sample.results[objectIndex];
+            PrintUtf8("  目标[" + std::to_string(objectIndex) + "] category_id=" + std::to_string(object.categoryId)
+                + ", category_name=");
+            std::cout << object.categoryName;
+            std::cout << ", score=" << ToFixed(object.score, 6)
+                << ", area=" << ToFixed(object.area, 3)
+                << ", with_mask=" << (object.withMask ? "true" : "false")
+                << ", with_bbox=" << (object.withBbox ? "true" : "false")
+                << ", with_angle=" << (object.withAngle ? "true" : "false")
+                << ", angle=" << ToFixed(object.angle, 3)
+                << ", with_mean=" << (object.withMean ? "true" : "false")
+                << ", foreground_mean=" << ToFixed(object.foregroundMean, 3)
+                << ", background_mean=" << ToFixed(object.backgroundMean, 3);
+            std::cout << ", bbox=[";
+            for (size_t b = 0; b < object.bbox.size(); ++b) {
+                if (b > 0) std::cout << ", ";
+                std::cout << ToFixed(object.bbox[b], 3);
+            }
+            std::cout << "]";
+            if (object.withMask && !object.mask.empty()) {
+                std::cout << ", mask=" << object.mask.cols << "x" << object.mask.rows
+                    << ", type=" << MatTypeText(object.mask);
+            }
+            std::cout << "\n";
+        }
+    }
+}
+
+bool RequireModel(
+    WorkflowModelMap& models,
+    const std::wstring& name,
+    LoadedWorkflowModel*& entry,
+    std::string& error) {
+    const auto it = models.find(NormalizeModelName(name));
+    if (it == models.end()) {
+        error = "未找到模型名称：" + WideToUtf8(name);
+        return false;
+    }
+    entry = &it->second;
+    return true;
+}
+
+bool ReadWorkflowImage(const std::wstring& path, cv::Mat& image, std::string& error) {
+    image = ReadImageRgb(path);
+    if (!image.empty()) return true;
+    error = "无法读取图片：" + WideToUtf8(path);
+    return false;
+}
+
+std::vector<cv::Mat> RepeatImage(const cv::Mat& image, int batchSize) {
+    return std::vector<cv::Mat>(static_cast<size_t>(batchSize), image);
+}
+
+void PrintWorkflowHelp() {
+    PrintUtf8(
+        "用法: dlcv_infer_cpp_test.exe <命令> [参数] [--then <命令> [参数] ...]\n"
+        "标准生命周期: 加载 → 信息 → 推理 → 释放。\n"
+        "命令可在同一进程内用 --then 串联，已加载模型按名称复用，名称不区分大小写。\n"
+        "名称 m1 只在本次进程中有效，直到 free-model、free-all-models 或进程结束。\n"
+        "  load-model <名称> <模型路径> [--device N] [--replace true|false]\n"
+        "  list-models\n"
+        "  model-info <名称>\n"
+        "  dvs-model-info <名称>\n"
+        "  infer <名称> <图片> [--threshold F --with-mask true|false --calc-mean default|true|false]\n"
+        "  infer-json <名称> <图片> [--threshold F --with-mask true|false --calc-mean default|true|false]\n"
+        "  infer-batch <名称> <图片> [--batch-size N --threshold F --with-mask true|false --calc-mean default|true|false]\n"
+        "  benchmark <名称> <图片> [--batch-size N --warmup N --runs N --threads N --threshold F --with-mask true|false --calc-mean default|true|false]\n"
+        "  consistency-test <名称> <图片> [--runs N --threads N --threshold F --with-mask true|false --calc-mean default|true|false]\n"
+        "  free-model <名称>\n"
+        "  free-all-models\n"
+        "  device-info | gpu-info | dog-info | keep-max-clock\n"
+        "  help\n"
+        "完整示例: load-model m1 <path> --device 0 --then model-info m1 --then infer m1 <image> --threshold 0.5 --then free-model m1\n");
+}
+
+struct BenchmarkRecord {
+    double externalMs = 0.0;
+    double sdkMs = 0.0;
+    double flowMs = 0.0;
+    std::vector<dlcv_infer::FlowNodeTiming> nodes;
+};
+
+class WorkerStartGate {
+public:
+    explicit WorkerStartGate(int expectedWorkers)
+        : expectedWorkers_(expectedWorkers) {}
+
+    bool ArriveAndWait() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        ++arrivedWorkers_;
+        condition_.notify_all();
+        condition_.wait(lock, [this]() { return released_ || cancelled_; });
+        return released_ && !cancelled_;
+    }
+
+    bool ReleaseWhenReady(Clock::time_point& startTime) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this]() {
+            return arrivedWorkers_ == expectedWorkers_ || cancelled_;
+        });
+        if (cancelled_) return false;
+        startTime = Clock::now();
+        released_ = true;
+        lock.unlock();
+        condition_.notify_all();
+        return true;
+    }
+
+    void Cancel() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            cancelled_ = true;
+        }
+        condition_.notify_all();
+    }
+
+private:
+    const int expectedWorkers_;
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    int arrivedWorkers_ = 0;
+    bool released_ = false;
+    bool cancelled_ = false;
+};
+
+double Percentile(std::vector<double> values, double percent) {
+    if (values.empty()) return 0.0;
+    std::sort(values.begin(), values.end());
+    const double position = percent * static_cast<double>(values.size() - 1);
+    const size_t lower = static_cast<size_t>(std::floor(position));
+    const size_t upper = static_cast<size_t>(std::ceil(position));
+    const double ratio = position - static_cast<double>(lower);
+    return values[lower] + (values[upper] - values[lower]) * ratio;
+}
+
+bool ReleaseAfterFreeAll(WorkflowModelMap& models, std::string& error) {
+    std::vector<std::string> failedNames;
+    for (auto it = models.begin(); it != models.end();) {
+        try {
+            it->second.model->FreeModel();
+            it = models.erase(it);
+        } catch (...) {
+            failedNames.push_back(WideToUtf8(it->second.name));
+            ++it;
+        }
+    }
+    if (!failedNames.empty()) {
+        error = "释放模型失败：";
+        for (size_t i = 0; i < failedNames.size(); ++i) {
+            if (i > 0) error += "，";
+            error += failedNames[i];
+        }
+        return false;
+    }
+    try {
+        dlcv_infer::Utils::FreeAllModels();
+    } catch (const std::exception& ex) {
+        error = std::string("全局模型释放接口调用失败：") + ex.what();
+        return false;
+    } catch (...) {
+        error = "全局模型释放接口调用失败";
+        return false;
+    }
+    return true;
+}
+
+bool RunBenchmark(
+    LoadedWorkflowModel& entry,
+    const cv::Mat& image,
+    const WorkflowOptions& options,
+    std::string& error) {
+    const json params = BuildInferParams(options, true);
+    const std::vector<cv::Mat> batch = RepeatImage(image, options.batchSize);
+    try {
+        for (int i = 0; i < options.warmup; ++i) {
+            dlcv_infer::Result warmupResult = entry.model->InferBatch(batch, params);
+            DisposeResultMasks(warmupResult);
+        }
+    } catch (const std::exception& ex) {
+        error = std::string("测速预热失败：") + ex.what();
+        return false;
+    }
+
+    std::vector<BenchmarkRecord> records;
+    std::mutex recordMutex;
+    std::exception_ptr workerException;
+    std::mutex errorMutex;
+    std::atomic<bool> cancelRequested{false};
+    WorkerStartGate startGate(options.threads);
+    // 一个已加载模型没有并发调用保证，线程复用该模型时按次序进入推理。
+    std::mutex modelInferMutex;
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<size_t>(options.threads));
+    try {
+        for (int threadIndex = 0; threadIndex < options.threads; ++threadIndex) {
+            workers.emplace_back([&]() {
+                try {
+                    if (!startGate.ArriveAndWait()) return;
+                    std::vector<BenchmarkRecord> local;
+                    local.reserve(static_cast<size_t>(options.runs));
+                    for (int run = 0; run < options.runs && !cancelRequested.load(); ++run) {
+                        const auto begin = Clock::now();
+                        std::unique_lock<std::mutex> modelLock(modelInferMutex);
+                        if (cancelRequested.load()) break;
+                        dlcv_infer::Result result = entry.model->InferBatch(batch, params);
+                        modelLock.unlock();
+                        const double externalMs = std::chrono::duration<double, std::milli>(Clock::now() - begin).count();
+                        DisposeResultMasks(result);
+                        BenchmarkRecord record;
+                        record.externalMs = externalMs;
+                        dlcv_infer::Model::GetLastInferTiming(record.sdkMs, record.flowMs);
+                        record.nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
+                        local.push_back(std::move(record));
+                    }
+                    std::lock_guard<std::mutex> lock(recordMutex);
+                    records.insert(records.end(), std::make_move_iterator(local.begin()), std::make_move_iterator(local.end()));
+                } catch (...) {
+                    cancelRequested.store(true);
+                    {
+                        std::lock_guard<std::mutex> lock(errorMutex);
+                        if (!workerException) workerException = std::current_exception();
+                    }
+                    startGate.Cancel();
+                }
+            });
+        }
+    } catch (...) {
+        cancelRequested.store(true);
+        {
+            std::lock_guard<std::mutex> lock(errorMutex);
+            if (!workerException) workerException = std::current_exception();
+        }
+        startGate.Cancel();
+    }
+    Clock::time_point allStart;
+    if (!startGate.ReleaseWhenReady(allStart)) {
+        error = "测速线程未能完成启动";
+    }
+    for (auto& worker : workers) worker.join();
+    if (workerException) {
+        try {
+            std::rethrow_exception(workerException);
+        } catch (const std::exception& ex) {
+            error = std::string("测速失败：") + ex.what();
+        } catch (...) {
+            error = "测速发生未知异常";
+        }
+        return false;
+    }
+    if (!error.empty()) return false;
+    const double totalWallMs = std::chrono::duration<double, std::milli>(Clock::now() - allStart).count();
+
+    std::vector<double> externalTimes;
+    double sdkTotal = 0.0;
+    double flowTotal = 0.0;
+    std::map<std::tuple<int, std::string, std::string>, std::pair<double, size_t>> nodeTotals;
+    for (const auto& record : records) {
+        externalTimes.push_back(record.externalMs);
+        sdkTotal += record.sdkMs;
+        flowTotal += record.flowMs;
+        for (const auto& node : record.nodes) {
+            const auto key = std::make_tuple(node.nodeId, node.nodeType, node.nodeTitle);
+            auto& total = nodeTotals[key];
+            total.first += node.elapsedMs;
+            total.second++;
+        }
+    }
+    if (externalTimes.empty()) {
+        error = "测速未产生结果";
+        return false;
+    }
+    const double externalSum = std::accumulate(externalTimes.begin(), externalTimes.end(), 0.0);
+    const double imageCount = static_cast<double>(records.size()) * options.batchSize;
+    PrintModelHeader(entry);
+    PrintUtf8Line("图片: " + std::to_string(image.cols) + "x" + std::to_string(image.rows));
+    PrintUtf8Line("批量大小: " + std::to_string(options.batchSize)
+        + "，预热次数: " + std::to_string(options.warmup)
+        + "，正式次数: " + std::to_string(options.runs)
+        + "，线程数: " + std::to_string(options.threads));
+    PrintUtf8Line("外部耗时(ms): min=" + ToFixed(*std::min_element(externalTimes.begin(), externalTimes.end()), 3)
+        + ", avg=" + ToFixed(externalSum / externalTimes.size(), 3)
+        + ", p50=" + ToFixed(Percentile(externalTimes, 0.50), 3)
+        + ", p95=" + ToFixed(Percentile(externalTimes, 0.95), 3)
+        + ", max=" + ToFixed(*std::max_element(externalTimes.begin(), externalTimes.end()), 3));
+    PrintUtf8Line("总墙钟耗时(ms): " + ToFixed(totalWallMs, 3));
+    PrintUtf8Line("吞吐(张/秒): " + ToFixed(totalWallMs > 0.0 ? imageCount * 1000.0 / totalWallMs : 0.0, 3));
+    PrintUtf8Line("SDK平均耗时(ms): " + ToFixed(sdkTotal / records.size(), 3));
+    PrintUtf8Line("流程平均耗时(ms): " + ToFixed(flowTotal / records.size(), 3));
+    if (!nodeTotals.empty()) {
+        PrintUtf8Line("流程节点平均耗时:");
+        for (const auto& pair : nodeTotals) {
+            const auto& key = pair.first;
+            const auto& total = pair.second;
+            std::string line = "  节点 " + std::to_string(std::get<0>(key)) + " " + std::get<1>(key);
+            if (!std::get<2>(key).empty()) line += " (" + std::get<2>(key) + ")";
+            line += ": " + ToFixed(total.first / total.second, 3) + " ms";
+            PrintUtf8Line(line);
+        }
+    }
+    return true;
+}
+
+bool RunConsistencyTest(
+    LoadedWorkflowModel& entry,
+    const cv::Mat& image,
+    const WorkflowOptions& options,
+    std::string& error) {
+    const json params = BuildInferParams(options, false);
+    std::mutex signatureMutex;
+    std::string referenceStructuredSignature;
+    std::string referenceJsonDump;
+    std::string firstDifference;
+    std::exception_ptr workerException;
+    std::mutex errorMutex;
+    std::atomic<bool> cancelRequested{false};
+    WorkerStartGate startGate(options.threads);
+    // 流程节点会复用加载期保存的模块状态，同一模型实例按次序执行推理。
+    std::mutex modelInferMutex;
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<size_t>(options.threads));
+    try {
+        for (int threadIndex = 0; threadIndex < options.threads; ++threadIndex) {
+            workers.emplace_back([&, threadIndex]() {
+                try {
+                    if (!startGate.ArriveAndWait()) return;
+                    for (int run = 0; run < options.runs && !cancelRequested.load(); ++run) {
+                        std::unique_lock<std::mutex> structuredModelLock(modelInferMutex);
+                        if (cancelRequested.load()) break;
+                        dlcv_infer::Result result = entry.model->Infer(image, params);
+                        structuredModelLock.unlock();
+                        const std::string structuredSignature = BuildResultSignature(result);
+                        DisposeResultMasks(result);
+
+                        json jsonResult;
+                        {
+                            std::lock_guard<std::mutex> lock(modelInferMutex);
+                            if (cancelRequested.load()) break;
+                            jsonResult = entry.model->InferOneOutJson(image, params);
+                        }
+                        const std::string jsonDump = CanonicalJsonDump(jsonResult);
+
+                        std::lock_guard<std::mutex> lock(signatureMutex);
+                        if (referenceStructuredSignature.empty()) {
+                            referenceStructuredSignature = structuredSignature;
+                        } else if (firstDifference.empty() && structuredSignature != referenceStructuredSignature) {
+                            firstDifference = "interface=struct,thread=" + std::to_string(threadIndex)
+                                + ",run=" + std::to_string(run + 1)
+                                + ",expected_hash=" + ToHexDigest(CalculateTextDigest(referenceStructuredSignature))
+                                + ",actual_hash=" + ToHexDigest(CalculateTextDigest(structuredSignature));
+                        }
+                        if (referenceJsonDump.empty()) {
+                            referenceJsonDump = jsonDump;
+                        } else if (firstDifference.empty() && jsonDump != referenceJsonDump) {
+                            firstDifference = "interface=json,thread=" + std::to_string(threadIndex)
+                                + ",run=" + std::to_string(run + 1)
+                                + ",expected_hash=" + ToHexDigest(CalculateTextDigest(referenceJsonDump))
+                                + ",actual_hash=" + ToHexDigest(CalculateTextDigest(jsonDump));
+                        }
+                    }
+                } catch (...) {
+                    cancelRequested.store(true);
+                    {
+                        std::lock_guard<std::mutex> lock(errorMutex);
+                        if (!workerException) workerException = std::current_exception();
+                    }
+                    startGate.Cancel();
+                }
+            });
+        }
+    } catch (...) {
+        cancelRequested.store(true);
+        {
+            std::lock_guard<std::mutex> lock(errorMutex);
+            if (!workerException) workerException = std::current_exception();
+        }
+        startGate.Cancel();
+    }
+    Clock::time_point startTime;
+    const bool started = startGate.ReleaseWhenReady(startTime);
+    for (auto& worker : workers) worker.join();
+    if (workerException) {
+        try {
+            std::rethrow_exception(workerException);
+        } catch (const std::exception& ex) {
+            error = std::string("一致性测试失败：") + ex.what();
+        } catch (...) {
+            error = "一致性测试发生未知异常";
+        }
+        return false;
+    }
+    if (!started) {
+        error = "一致性测试线程未能完成启动";
+        return false;
+    }
+    PrintModelHeader(entry);
+    PrintUtf8Line("图片: " + std::to_string(image.cols) + "x" + std::to_string(image.rows));
+    PrintUtf8Line("线程数: " + std::to_string(options.threads) + "，每线程次数: " + std::to_string(options.runs));
+    if (firstDifference.empty()) {
+        PrintUtf8Line("一致性结果: 通过");
+        std::cout << "struct_hash=" << ToHexDigest(CalculateTextDigest(referenceStructuredSignature)) << "\n";
+        std::cout << "json_hash=" << ToHexDigest(CalculateTextDigest(referenceJsonDump)) << "\n";
+        return true;
+    }
+    PrintUtf8Line("一致性结果: 不通过");
+    std::cout << "first_difference=" << firstDifference << "\n";
+    error = "推理结果不一致";
+    return false;
+}
+
+bool IsWorkflowCommand(const std::wstring& command) {
+    static const std::vector<std::wstring> commands = {
+        L"help", L"load-model", L"list-models", L"model-info", L"dvs-model-info",
+        L"infer", L"infer-json", L"infer-batch", L"benchmark", L"consistency-test",
+        L"free-model", L"free-all-models", L"device-info", L"gpu-info", L"dog-info", L"keep-max-clock"
+    };
+    return std::find(commands.begin(), commands.end(), command) != commands.end();
+}
+
+int RunWorkflowCommand(
+    const std::vector<std::wstring>& segment,
+    WorkflowModelMap& models,
+    std::string& error) {
+    if (segment.empty()) {
+        error = "--then 后缺少命令";
+        return 2;
+    }
+    const std::wstring& command = segment.front();
+    std::vector<std::wstring> positional;
+    WorkflowOptions options;
+    if (!ParseWorkflowOptions(command, segment, 1, positional, options, error)) return 2;
+
+    auto requireCount = [&](size_t count) {
+        if (positional.size() == count) return true;
+        error = "命令 " + WideToUtf8(command) + " 的参数数量不正确";
+        return false;
+    };
+
+    try {
+        if (command == L"help") {
+            if (!requireCount(0)) return 2;
+            PrintWorkflowHelp();
+            return 0;
+        }
+        if (command == L"load-model") {
+            if (!requireCount(2)) return 2;
+            const std::string key = NormalizeModelName(positional[0]);
+            if (key.empty()) {
+                error = "模型名称不能为空";
+                return 2;
+            }
+            auto found = models.find(key);
+            if (found != models.end()) {
+                if (!options.replace) {
+                    error = "模型名称已存在：" + WideToUtf8(positional[0]);
+                    return 2;
+                }
+            }
+            const auto begin = Clock::now();
+            auto model = std::make_unique<dlcv_infer::Model>(positional[1], options.deviceId);
+            const double loadMs = std::chrono::duration<double, std::milli>(Clock::now() - begin).count();
+            if (found != models.end()) {
+                found->second.model->FreeModel();
+                models.erase(found);
+            }
+            LoadedWorkflowModel entry;
+            entry.name = positional[0];
+            entry.path = positional[1];
+            entry.deviceId = options.deviceId;
+            entry.loadMs = loadMs;
+            entry.model = std::move(model);
+            auto inserted = models.emplace(key, std::move(entry));
+            const LoadedWorkflowModel& loaded = inserted.first->second;
+            PrintModelHeader(loaded);
+            PrintUtf8Line("名称: " + WideToUtf8(loaded.name));
+            PrintUtf8Line("设备: " + std::to_string(loaded.deviceId));
+            std::cout << "model_index: " << loaded.model->modelIndex << "\n";
+            std::cout << "load_ms: " << ToFixed(loaded.loadMs, 3) << "\n";
+            std::cout << "provider: " << DogProviderText(loaded.model->LoadedDogProvider()) << "\n";
+            PrintUtf8Line("DLL: " + loaded.model->LoadedNativeDllName());
+            return 0;
+        }
+        if (command == L"list-models") {
+            if (!requireCount(0)) return 2;
+            PrintUtf8Line("已加载模型数量: " + std::to_string(models.size()));
+            for (const auto& pair : models) {
+                const auto& item = pair.second;
+                PrintUtf8Line("名称: " + WideToUtf8(item.name)
+                    + "，模型: " + WideToUtf8(item.path)
+                    + "，设备: " + std::to_string(item.deviceId)
+                    + "，model_index: " + std::to_string(item.model->modelIndex));
+            }
+            return 0;
+        }
+        if (command == L"model-info" || command == L"dvs-model-info") {
+            if (!requireCount(1)) return 2;
+            LoadedWorkflowModel* entry = nullptr;
+            if (!RequireModel(models, positional[0], entry, error)) return 1;
+            PrintModelHeader(*entry);
+            const json info = command == L"model-info" ? entry->model->GetModelInfo() : entry->model->GetDvsModelInfo();
+            PrintUtf8Line(info.dump(2));
+            return 0;
+        }
+        if (command == L"free-model") {
+            if (!requireCount(1)) return 2;
+            const auto found = models.find(NormalizeModelName(positional[0]));
+            if (found == models.end()) {
+                error = "未找到模型名称：" + WideToUtf8(positional[0]);
+                return 1;
+            }
+            PrintModelHeader(found->second);
+            found->second.model->FreeModel();
+            PrintUtf8Line("已释放模型名称: " + WideToUtf8(found->second.name));
+            models.erase(found);
+            return 0;
+        }
+        if (command == L"free-all-models") {
+            if (!requireCount(0)) return 2;
+            const size_t count = models.size();
+            if (!ReleaseAfterFreeAll(models, error)) return 1;
+            PrintUtf8Line("已释放全部模型数量: " + std::to_string(count));
+            return 0;
+        }
+        if (command == L"device-info" || command == L"gpu-info" || command == L"dog-info" || command == L"keep-max-clock") {
+            if (!requireCount(0)) return 2;
+            if (command == L"device-info") {
+                PrintUtf8Line(dlcv_infer::Utils::GetDeviceInfo().dump(2));
+            } else if (command == L"gpu-info") {
+                PrintUtf8Line(dlcv_infer::Utils::GetGpuInfo().dump(2));
+            } else if (command == L"dog-info") {
+                PrintUtf8Line(dlcv_infer::GetAllDogInfo().dump(2));
+            } else {
+                dlcv_infer::Utils::KeepMaxClock();
+                PrintUtf8Line("保持最高显卡频率的请求已发送");
+            }
+            return 0;
+        }
+        if (command == L"infer" || command == L"infer-json" || command == L"infer-batch" || command == L"benchmark" || command == L"consistency-test") {
+            if (!requireCount(2)) return 2;
+            LoadedWorkflowModel* entry = nullptr;
+            if (!RequireModel(models, positional[0], entry, error)) return 1;
+            cv::Mat image;
+            if (!ReadWorkflowImage(positional[1], image, error)) return 1;
+            if (command == L"benchmark") return RunBenchmark(*entry, image, options, error) ? 0 : 1;
+            if (command == L"consistency-test") return RunConsistencyTest(*entry, image, options, error) ? 0 : 1;
+
+            PrintModelHeader(*entry);
+            PrintUtf8Line("图片: " + WideToUtf8(positional[1]) + " ("
+                + std::to_string(image.cols) + "x" + std::to_string(image.rows) + ")");
+            if (command == L"infer-json") {
+                const auto begin = Clock::now();
+                const json result = entry->model->InferOneOutJson(image, BuildInferParams(options, false));
+                PrintUtf8Line("外部耗时(ms): " + ToFixed(std::chrono::duration<double, std::milli>(Clock::now() - begin).count(), 3));
+                PrintUtf8Line(result.dump(2));
+                PrintTimingAndInspection(1);
+                return 0;
+            }
+
+            const bool batch = command == L"infer-batch";
+            const auto begin = Clock::now();
+            dlcv_infer::Result result = batch
+                ? entry->model->InferBatch(RepeatImage(image, options.batchSize), BuildInferParams(options, true))
+                : entry->model->Infer(image, BuildInferParams(options, false));
+            const double externalMs = std::chrono::duration<double, std::milli>(Clock::now() - begin).count();
+            PrintUtf8Line("批量大小: " + std::to_string(batch ? options.batchSize : 1));
+            PrintUtf8Line("阈值: " + ToFixed(options.threshold, 3));
+            PrintUtf8Line("外部耗时(ms): " + ToFixed(externalMs, 3));
+            PrintStructuredResult(result);
+            PrintTimingAndInspection(result.sampleResults.size());
+            DisposeResultMasks(result);
+            return 0;
+        }
+        error = "未知命令：" + WideToUtf8(command);
+        return 2;
+    } catch (const std::exception& ex) {
+        error = ex.what();
+        return 1;
+    } catch (...) {
+        error = "命令执行时发生未知异常";
+        return 1;
+    }
+}
+
+int RunWorkflow(int argc, wchar_t* argv[]) {
+    // 工作流模型的生命周期为加载、信息、推理和释放，模型表仅在当前进程内存活。
+    std::vector<std::vector<std::wstring>> segments(1);
+    for (int i = 1; i < argc; ++i) {
+        const std::wstring token = argv[i];
+        if (token == L"--then") {
+            if (segments.back().empty()) {
+                PrintUtf8ErrorLine("参数错误: --then 前缺少命令");
+                return 2;
+            }
+            segments.emplace_back();
+            continue;
+        }
+        segments.back().push_back(token);
+    }
+    if (segments.back().empty()) {
+        PrintUtf8ErrorLine("参数错误: --then 后缺少命令");
+        return 2;
+    }
+
+    WorkflowModelMap models;
+    for (const auto& segment : segments) {
+        std::string error;
+        const int code = RunWorkflowCommand(segment, models, error);
+        if (code != 0) {
+            models.clear();
+            PrintUtf8ErrorLine(std::string(code == 2 ? "参数错误: " : "执行失败: ") + error);
+            return code;
+        }
+    }
+    models.clear();
+    PrintUtf8Line("命令串执行结束，剩余模型已自动释放");
+    return 0;
+}
+
+int RunGetModelInfoCommand(int argc, wchar_t* argv[], bool dvsInfo) {
+    const char* command = dvsInfo ? "get-dvs-model-info" : "get-model-info";
+    if (argc != 3) {
+        PrintUtf8ErrorLine(std::string("用法: dlcv_infer_cpp_test.exe ") + command + " <model>");
+        return 2;
+    }
+
+    try {
+        json result;
+        {
+            dlcv_infer::Model model(argv[2], 0);
+            result = dvsInfo ? model.GetDvsModelInfo() : model.GetModelInfo();
+        }
+        PrintUtf8Line(result.dump(2));
+        return 0;
+    } catch (const std::exception& ex) {
+        PrintUtf8ErrorLine(ex.what());
+        return 1;
+    } catch (...) {
+        PrintUtf8ErrorLine("读取模型信息时发生未知异常");
+        return 1;
+    }
 }
 }  // namespace
 
 int wmain(int argc, wchar_t* argv[]) {
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
+    if (argc >= 2 && IsWorkflowCommand(std::wstring(argv[1]))) {
+        return RunWorkflow(argc, argv);
+    }
 
     if (argc >= 2 && std::wstring(argv[1]) == L"dvs-rgb-selftest") {
         return RunDvsRgbSelfTest(argc, argv);
@@ -2098,7 +3122,15 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunCalcMeanSelfTest();
     }
 
-    std::cout << "Usage: " << (argc >= 1 ? WideToUtf8(argv[0]) : "dlcv_infer_cpp_test") << " <subcommand>\n";
+    if (argc >= 2 && std::wstring(argv[1]) == L"get-model-info") {
+        return RunGetModelInfoCommand(argc, argv, false);
+    }
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"get-dvs-model-info") {
+        return RunGetModelInfoCommand(argc, argv, true);
+    }
+
+    PrintUtf8Line("Usage: " + (argc >= 1 ? WideToUtf8(argv[0]) : std::string("dlcv_infer_cpp_test")) + " <subcommand>");
     std::cout << "Available subcommands:\n";
     std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
     std::cout << "  curve-text-affine-selftest\n";
@@ -2112,5 +3144,9 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
     std::cout << "  calc-mean-selftest\n";
+    std::cout << "  get-model-info <model>\n";
+    std::cout << "  get-dvs-model-info <model>\n";
+    PrintUtf8("\n工作流命令帮助:\n");
+    PrintWorkflowHelp();
     return 2;
 }
