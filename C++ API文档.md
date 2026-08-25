@@ -499,11 +499,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
   - `dlcv_infer_cpp_dll/dlcv_infer.h`
   - `dlcv_infer_cpp_dll/flow/FlowGraphModel.h`
   - `dlcv_infer_cpp_dll/dlcv_sntl_admin.h`
-- C API 项目目录：`dlcv_infer_c_dll`
-- C API 工程文件：`dlcv_infer_c_dll/dlcv_infer_c_dll.vcxproj`
-- C API 对外头文件：`dlcv_infer_c_dll/dlcv_infer_c_api.h`
-- C API 工程通过 `dlcv_infer_cpp_dll.lib` 显式依赖 C++ API 工程。
-- C API 保留 `dlcv_infer_cpp_infer_c` 默认参数入口，并提供 `dlcv_infer_cpp_infer_with_params_c` 接收 JSON 参数；调用端可传入 `threshold`、`calc_mean` 等字段覆盖本次推理参数。
+- C API 的导出函数、结构定义和逐项对照统一写在 `C API文档.md`。
 
 ---
 
