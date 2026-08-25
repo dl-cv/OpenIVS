@@ -8,6 +8,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -578,35 +579,86 @@ static bool InferFingerprint(
     return true;
 }
 
-static bool RunConcurrentConsistency(
+static bool ReadModelInfo(
+    int modelIndex,
+    std::string& modelInfo,
+    std::string& error) {
+    const char* value = dlcv_infer_cpp_get_model_info_c(modelIndex);
+    if (value == nullptr) {
+        const char* lastError = dlcv_infer_cpp_get_last_error_c();
+        error = lastError == nullptr ? "获取模型信息失败" : lastError;
+        return false;
+    }
+    modelInfo = value;
+    dlcv_infer_cpp_free_string_c(value);
+    if (modelInfo.empty()) {
+        error = "模型信息为空";
+        return false;
+    }
+    return true;
+}
+
+static bool RunConcurrentModelInfoAndInference(
     const std::string& label,
     int modelIndex,
     const cv::Mat& image,
-    const std::string& expectedFingerprint,
     int threadCount,
     int iterationsPerThread) {
     std::atomic<int> ready{0};
     std::atomic<bool> start{false};
     std::atomic<int> failed{0};
-    std::mutex errorMutex;
+    std::mutex resultMutex;
+    std::string expectedModelInfo;
+    std::string expectedFingerprint;
     std::string firstError;
     std::vector<std::thread> workers;
     workers.reserve(static_cast<size_t>(threadCount));
 
     for (int threadIndex = 0; threadIndex < threadCount; ++threadIndex) {
-        workers.emplace_back([&]() {
+        workers.emplace_back([&, threadIndex]() {
             ready.fetch_add(1);
             while (!start.load()) std::this_thread::yield();
             for (int iteration = 0; iteration < iterationsPerThread; ++iteration) {
+                std::string modelInfo;
                 std::string fingerprint;
-                std::string error;
-                const bool ok = InferFingerprint(modelIndex, image, fingerprint, error);
-                if (!ok || fingerprint != expectedFingerprint) {
-                    failed.fetch_add(1);
-                    std::lock_guard<std::mutex> lock(errorMutex);
-                    if (firstError.empty()) {
-                        firstError = ok ? "result fingerprint mismatch" : error;
+                std::string modelInfoError;
+                std::string inferError;
+                bool modelInfoOk = false;
+                bool inferOk = false;
+                if ((threadIndex & 1) == 0) {
+                    modelInfoOk = ReadModelInfo(modelIndex, modelInfo, modelInfoError);
+                    inferOk = InferFingerprint(modelIndex, image, fingerprint, inferError);
+                } else {
+                    inferOk = InferFingerprint(modelIndex, image, fingerprint, inferError);
+                    modelInfoOk = ReadModelInfo(modelIndex, modelInfo, modelInfoError);
+                }
+
+                bool iterationOk = modelInfoOk && inferOk;
+                std::string iterationError;
+                {
+                    std::lock_guard<std::mutex> lock(resultMutex);
+                    if (modelInfoOk) {
+                        if (expectedModelInfo.empty()) {
+                            expectedModelInfo = modelInfo;
+                        } else if (modelInfo != expectedModelInfo) {
+                            iterationOk = false;
+                            iterationError = "模型信息不一致";
+                        }
                     }
+                    if (inferOk) {
+                        if (expectedFingerprint.empty()) {
+                            expectedFingerprint = fingerprint;
+                        } else if (fingerprint != expectedFingerprint) {
+                            iterationOk = false;
+                            if (iterationError.empty()) iterationError = "推理结果特征不一致";
+                        }
+                    }
+                    if (!modelInfoOk && iterationError.empty()) iterationError = modelInfoError;
+                    if (!inferOk && iterationError.empty()) iterationError = inferError;
+                    if (!iterationOk && firstError.empty()) firstError = iterationError;
+                }
+                if (!iterationOk) {
+                    failed.fetch_add(1);
                 }
             }
         });
@@ -616,13 +668,31 @@ static bool RunConcurrentConsistency(
     start.store(true);
     for (auto& worker : workers) worker.join();
 
-    if (failed.load() != 0) {
+    if (failed.load() != 0 || expectedModelInfo.empty() || expectedFingerprint.empty()) {
         std::cerr << "FAIL: " << label << "，失败次数=" << failed.load()
                   << "，首个错误=" << firstError << "\n";
         return false;
     }
-    std::cout << "PASS: " << label << "，总次数="
-              << threadCount * iterationsPerThread << "\n";
+
+    std::string modelInfo;
+    std::string fingerprint;
+    std::string error;
+    const bool modelInfoOk = ReadModelInfo(modelIndex, modelInfo, error);
+    if (!modelInfoOk || modelInfo != expectedModelInfo) {
+        std::cerr << "FAIL: " << label << "，并发后模型信息不一致: "
+                  << (modelInfoOk ? "模型信息不一致" : error) << "\n";
+        return false;
+    }
+    error.clear();
+    const bool inferOk = InferFingerprint(modelIndex, image, fingerprint, error);
+    if (!inferOk || fingerprint != expectedFingerprint) {
+        std::cerr << "FAIL: " << label << "，获取模型信息后推理失败: "
+                  << (inferOk ? "推理结果特征不一致" : error) << "\n";
+        return false;
+    }
+
+    std::cout << "PASS: " << label << "，线程数=" << threadCount
+              << "，每线程次数=" << iterationsPerThread << "\n";
     return true;
 }
 
@@ -834,6 +904,90 @@ static bool RunDvstIdleCacheClearCheck(const std::wstring& modelPath, const cv::
     return true;
 }
 
+static std::vector<std::wstring> GetCurrentProcessDvsTempDirs() {
+    wchar_t tempDir[MAX_PATH]{};
+    const DWORD length = GetTempPathW(MAX_PATH, tempDir);
+    if (length == 0 || length >= MAX_PATH) return {};
+
+    const std::wstring pattern = std::wstring(tempDir)
+        + L"DlcvDvs_*_"
+        + std::to_wstring(GetCurrentProcessId());
+    WIN32_FIND_DATAW findData{};
+    HANDLE findHandle = FindFirstFileW(pattern.c_str(), &findData);
+    if (findHandle == INVALID_HANDLE_VALUE) return {};
+
+    std::vector<std::wstring> dirs;
+    do {
+        if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            dirs.push_back(std::wstring(tempDir) + findData.cFileName);
+        }
+    } while (FindNextFileW(findHandle, &findData));
+    FindClose(findHandle);
+    std::sort(dirs.begin(), dirs.end());
+    return dirs;
+}
+
+static std::vector<std::wstring> GetNewDvsTempDirs(
+    const std::vector<std::wstring>& before,
+    const std::vector<std::wstring>& after) {
+    std::vector<std::wstring> added;
+    std::set_difference(
+        after.begin(), after.end(),
+        before.begin(), before.end(),
+        std::back_inserter(added));
+    return added;
+}
+
+static bool RunDvstTempDirectoryReuseCheck(const std::wstring& modelPath, const cv::Mat& image) {
+    dlcv_infer_cpp_free_all_models_c();
+    const std::vector<std::wstring> before = GetCurrentProcessDvsTempDirs();
+
+    const int firstIndex = LoadModel(modelPath);
+    if (firstIndex < 0) return false;
+    const std::vector<std::wstring> afterFirst = GetCurrentProcessDvsTempDirs();
+    const std::vector<std::wstring> firstAdded = GetNewDvsTempDirs(before, afterFirst);
+    if (firstAdded.size() != 1) {
+        std::cerr << "FAIL: 首次加载 dvst 未生成唯一稳定目录\n";
+        dlcv_infer_cpp_free_all_models_c();
+        return false;
+    }
+
+    const int secondIndex = LoadModel(modelPath);
+    if (secondIndex < 0) {
+        dlcv_infer_cpp_free_all_models_c();
+        return false;
+    }
+    const std::vector<std::wstring> afterSecond = GetCurrentProcessDvsTempDirs();
+    if (afterSecond != afterFirst) {
+        std::cerr << "FAIL: 相同 dvst 路径未复用解压目录\n";
+        dlcv_infer_cpp_free_all_models_c();
+        return false;
+    }
+
+    if (dlcv_infer_cpp_free_model_c(firstIndex) != 0 ||
+        GetFileAttributesW(firstAdded.front().c_str()) == INVALID_FILE_ATTRIBUTES) {
+        std::cerr << "FAIL: 首个实例释放后共享解压目录不可用\n";
+        dlcv_infer_cpp_free_all_models_c();
+        return false;
+    }
+
+    std::string fingerprint;
+    std::string error;
+    const bool secondInferOk = InferFingerprint(secondIndex, image, fingerprint, error);
+    const bool secondFreeOk = dlcv_infer_cpp_free_model_c(secondIndex) == 0;
+    const bool removedAfterLastRelease =
+        GetFileAttributesW(firstAdded.front().c_str()) == INVALID_FILE_ATTRIBUTES;
+    dlcv_infer_cpp_free_all_models_c();
+    if (!secondInferOk || !secondFreeOk || !removedAfterLastRelease) {
+        std::cerr << "FAIL: 共享解压目录引用计数验证失败: "
+                  << (error.empty() ? "目录清理状态异常" : error) << "\n";
+        return false;
+    }
+
+    std::cout << "PASS: 相同 dvst 路径复用解压目录且最后释放时清理\n";
+    return true;
+}
+
 static bool RunDvstContentUpdateCheck(const std::wstring& sourcePath, const cv::Mat& image) {
     dlcv_infer_cpp_free_all_models_c();
     wchar_t tempDir[MAX_PATH]{};
@@ -883,16 +1037,18 @@ static bool RunDvstContentUpdateCheck(const std::wstring& sourcePath, const cv::
 
     std::string firstFingerprint;
     std::string error;
+    const std::vector<std::wstring> dirsBeforeFirstLoad = GetCurrentProcessDvsTempDirs();
     const int firstIndex = LoadModel(tempPath);
     if (firstIndex < 0) {
         cleanup();
         return false;
     }
-    const bool firstOk = InferFingerprint(firstIndex, image, firstFingerprint, error)
-        && dlcv_infer_cpp_free_model_c(firstIndex) == 0;
+    const std::vector<std::wstring> firstAddedDirs = GetNewDvsTempDirs(
+        dirsBeforeFirstLoad,
+        GetCurrentProcessDvsTempDirs());
+    const bool firstOk = InferFingerprint(firstIndex, image, firstFingerprint, error);
     const dlcv_infer::flow::ModelPoolStats firstStats = dlcv_infer::flow::GetModelPoolStats();
-    if (!firstOk || firstStats.idleEntries == 0 || firstStats.activeEntries != 0 ||
-        firstStats.totalEntries != firstStats.idleEntries) {
+    if (!firstOk || firstAddedDirs.size() != 1 || firstStats.activeEntries == 0) {
         std::cerr << "FAIL: dvst 内容更新前加载状态异常\n";
         cleanup();
         return false;
@@ -955,15 +1111,20 @@ static bool RunDvstContentUpdateCheck(const std::wstring& sourcePath, const cv::
     }
     std::string secondFingerprint;
     error.clear();
+    const std::vector<std::wstring> secondAddedDirs = GetNewDvsTempDirs(
+        dirsBeforeFirstLoad,
+        GetCurrentProcessDvsTempDirs());
     const bool secondOk = InferFingerprint(secondIndex, image, secondFingerprint, error)
-        && secondFingerprint == firstFingerprint
-        && dlcv_infer_cpp_free_model_c(secondIndex) == 0;
+        && secondFingerprint == firstFingerprint;
     const dlcv_infer::flow::ModelPoolStats secondStats = dlcv_infer::flow::GetModelPoolStats();
-    const bool identityChanged = secondStats.activeEntries == 0
-        && secondStats.totalEntries == secondStats.idleEntries
-        && secondStats.idleEntries > firstStats.idleEntries;
+    const bool identityChanged = secondStats.activeEntries > firstStats.activeEntries
+        && secondStats.totalEntries > firstStats.totalEntries
+        && secondAddedDirs.size() == 2
+        && secondAddedDirs[0] != secondAddedDirs[1];
+    const bool releasesOk = dlcv_infer_cpp_free_model_c(firstIndex) == 0
+        && dlcv_infer_cpp_free_model_c(secondIndex) == 0;
     cleanup();
-    if (!secondOk || !identityChanged) {
+    if (!secondOk || !identityChanged || !releasesOk) {
         std::cerr << "FAIL: 同路径 dvst 内容更新后未创建新的池项"
                   << " before=" << firstStats.idleEntries
                   << " after=" << secondStats.idleEntries << "\n";
@@ -1091,6 +1252,58 @@ static bool RunFreeAllDuringInferenceCheck(const std::wstring& modelPath, const 
     return true;
 }
 
+static bool RunModelInfoConcurrencyChecks(
+    const std::wstring& dvtPath,
+    const cv::Mat& dvtImage,
+    const std::wstring& dvstPath,
+    const cv::Mat& dvstImage) {
+    bool ok = true;
+
+    const auto checkReleasedModelInfo = [](const std::string& label, const std::wstring& modelPath) {
+        try {
+            dlcv_infer::Model model(modelPath, 0);
+            const dlcv_infer::json beforeRelease = model.GetModelInfo();
+            if (beforeRelease.is_null() || beforeRelease.empty()) {
+                std::cerr << "FAIL: " << label << " 释放前模型信息为空\n";
+                return false;
+            }
+            model.FreeModel();
+            try {
+                const dlcv_infer::json afterRelease = model.GetModelInfo();
+                std::cerr << "FAIL: " << label << " 释放后仍返回模型信息: "
+                          << afterRelease.dump() << "\n";
+                return false;
+            } catch (const std::exception&) {
+            }
+            model.FreeModel();
+            std::cout << "PASS: " << label << " 获取信息后释放不会返回旧缓存\n";
+            return true;
+        } catch (const std::exception& ex) {
+            std::cerr << "FAIL: " << label << " 释放后模型信息检查失败: " << ex.what() << "\n";
+            return false;
+        }
+    };
+
+    ok = checkReleasedModelInfo("dvt", dvtPath) && ok;
+    ok = checkReleasedModelInfo("dvst", dvstPath) && ok;
+
+    const int dvtIndex = LoadModel(dvtPath);
+    if (dvtIndex < 0) return false;
+    ok = RunConcurrentModelInfoAndInference(
+        "dvt 同一实例推理与模型信息并发", dvtIndex, dvtImage, 4, 10) && ok;
+    const bool dvtReleaseOk = dlcv_infer_cpp_free_model_c(dvtIndex) == 0;
+    if (!dvtReleaseOk) std::cerr << "FAIL: dvt 并发验证后释放失败\n";
+    ok = dvtReleaseOk && ok;
+
+    const int dvstIndex = LoadModel(dvstPath);
+    if (dvstIndex < 0) return false;
+    ok = RunConcurrentModelInfoAndInference(
+        "dvst 同一实例推理与模型信息并发", dvstIndex, dvstImage, 4, 10) && ok;
+    const bool dvstReleaseOk = dlcv_infer_cpp_free_model_c(dvstIndex) == 0;
+    if (!dvstReleaseOk) std::cerr << "FAIL: dvst 并发验证后释放失败\n";
+    return dvstReleaseOk && ok;
+}
+
 int main(int argc, char** argv) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
@@ -1128,44 +1341,31 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::strcmp(argv[1], "--idle-cache-clear") == 0) {
         return RunDvstIdleCacheClearCheck(dvstPath, dvstImage) ? 0 : 1;
     }
+    if (argc == 2 && std::strcmp(argv[1], "--dvst-temp-dir") == 0) {
+        const bool directoryOk = RunDvstTempDirectoryReuseCheck(dvstPath, dvstImage)
+            && RunDvstContentUpdateCheck(dvstPath, dvstImage);
+        dlcv_infer_cpp_free_all_models_c();
+        std::cout << (directoryOk ? "\ndvst 目录测试通过\n" : "\ndvst 目录测试失败\n");
+        return directoryOk ? 0 : 1;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--model-info-concurrency") == 0) {
+        const bool concurrencyOk = RunModelInfoConcurrencyChecks(
+            dvtPath, dvtImage, dvstPath, dvstImage);
+        dlcv_infer_cpp_free_all_models_c();
+        std::cout << (concurrencyOk ? "\n并发测试通过\n" : "\n并发测试失败\n");
+        return concurrencyOk ? 0 : 1;
+    }
 
     bool ok = true;
     ok = RunCapiExportCompletenessCheck() && ok;
     ok = RunNativeCompatibilityCheck(dvtPath, dvtImage) && ok;
     ok = RunCompatibilityFlowCheck(dvstPath, dvstImage) && ok;
+    ok = RunDvstTempDirectoryReuseCheck(dvstPath, dvstImage) && ok;
     ok = RunDvstContentUpdateCheck(dvstPath, dvstImage) && ok;
     ok = RunModelPoolGenerationCheck(dvstPath, dvstImage) && ok;
     ok = RunFreeAllDuringInferenceCheck(dvstPath, dvstImage) && ok;
 
-    int dvtIndex = LoadModel(dvtPath);
-    if (dvtIndex < 0) return 1;
-    std::string dvtBaseline;
-    std::string error;
-    if (!InferFingerprint(dvtIndex, dvtImage, dvtBaseline, error)) {
-        std::cerr << "FAIL: dvt 基准推理失败: " << error << "\n";
-        ok = false;
-    } else {
-        ok = RunConcurrentConsistency("dvt 同一实例并发", dvtIndex, dvtImage, dvtBaseline, 4, 10) && ok;
-    }
-    ok = (dlcv_infer_cpp_free_model_c(dvtIndex) == 0) && ok;
-
-    int dvstIndex = LoadModel(dvstPath);
-    if (dvstIndex < 0) return 1;
-    std::string dvstBaseline;
-    error.clear();
-    if (!InferFingerprint(dvstIndex, dvstImage, dvstBaseline, error)) {
-        std::cerr << "FAIL: dvst 基准推理失败: " << error << "\n";
-        ok = false;
-    } else {
-        ok = RunConcurrentConsistency("dvst 同一实例并发", dvstIndex, dvstImage, dvstBaseline, 4, 10) && ok;
-    }
-    ok = (dlcv_infer_cpp_free_model_c(dvstIndex) == 0) && ok;
-
-    int freshDvstIndex = LoadModel(dvstPath);
-    if (freshDvstIndex < 0) return 1;
-    ok = RunConcurrentConsistency(
-        "dvst 全新实例首次并发", freshDvstIndex, dvstImage, dvstBaseline, 4, 10) && ok;
-    ok = (dlcv_infer_cpp_free_model_c(freshDvstIndex) == 0) && ok;
+    ok = RunModelInfoConcurrencyChecks(dvtPath, dvtImage, dvstPath, dvstImage) && ok;
 
     dlcv_infer_cpp_free_all_models_c();
     std::cout << (ok ? "\nTest PASSED\n" : "\nTest FAILED\n");
