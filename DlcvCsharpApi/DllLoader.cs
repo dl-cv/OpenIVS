@@ -141,6 +141,18 @@ namespace dlcv_infer_csharp
             }
         }
 
+        internal static DllLoader GetExistingOrDefaultSentinel()
+        {
+            lock (_lock)
+            {
+                if (_instance != null)
+                    return _instance;
+
+                _instance = CreateLoader(DogProvider.Sentinel);
+                return _instance;
+            }
+        }
+
         public static DllLoader ResolveForIndex(int index, out string indexType)
         {
             DogProvider provider = GetSharedIndexRoute(index, out indexType);

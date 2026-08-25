@@ -659,7 +659,7 @@ using (var model = new Model())
 | --- | --- |
 | DVT | 通过 `dlcv_load_model`、`dlcv_get_model_info`、`dlcv_infer`、`dlcv_free_model_result`、`dlcv_free_model` 工作 |
 | DVP | 自动检查后端服务；服务不可用时启动 `DLCV Test.exe --keep_alive`；推理请求固定附带 `return_polygon=true` |
-| DVS | 内部创建 `DlcvModules.DvsModel`；子模型加载时保存实际 loader。推理 DLL提供完整共享接口时，流程通过 `dlcv_register_flow_c` 注册并取得整体 index；旧 DLL缺少共享接口时继续使用本地流程 index。`GetModelInfo()` 返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息 |
+| DVS | 内部创建 `DlcvModules.DvsModel`；子模型加载时保存实际 loader。无模型节点时复用现有 loader，没有现有 loader 时直接选择 Sentinel，不执行 provider 检测。推理 DLL提供完整共享接口时，流程通过 `dlcv_register_flow_c` 注册并取得整体 index；旧 DLL缺少共享接口时继续使用本地流程 index。`GetModelInfo()` 返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息 |
 | RPC | 自动启动 `AIModelRPC.exe`；图像通过共享内存传输；结果中的 mask 可通过共享内存回读 |
 
 #### 输入与输出

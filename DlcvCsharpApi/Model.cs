@@ -544,7 +544,7 @@ namespace dlcv_infer_csharp
                     throw new InvalidDataException("流程中的模型节点不能混用 provider");
                 selectedLoader = childLoader;
             }
-            return selectedLoader;
+            return selectedLoader ?? DllLoader.GetExistingOrDefaultSentinel();
         }
 
         private void InitializeDvtMode(string modelPath, int device_id)
@@ -2864,37 +2864,5 @@ namespace dlcv_infer_csharp
         }
     }
 
-    public class SlidingWindowModel : Model
-    {
-        public SlidingWindowModel(
-            string modelPath,
-            int deviceId,
-            int smallImgWidth = 832,
-            int smallImgHeight = 704,
-            int horizontalOverlap = 16,
-            int verticalOverlap = 16,
-            float threshold = 0.5f,
-            float iouThreshold = 0.2f,
-            float combineIosThreshold = 0.2f)
-        {
-            var config = new JObject
-            {
-                ["type"] = "sliding_window_pipeline",
-                ["model_path"] = modelPath,
-                ["device_id"] = deviceId,
-                ["small_img_width"] = smallImgWidth,
-                ["small_img_height"] = smallImgHeight,
-                ["horizontal_overlap"] = horizontalOverlap,
-                ["vertical_overlap"] = verticalOverlap,
-                ["threshold"] = threshold,
-                ["iou_threshold"] = iouThreshold,
-                ["combine_ios_threshold"] = combineIosThreshold
-            };
-
-            LoadDvtModel(modelPath, config, "加载滑窗模型失败");
-            TryCacheModelInfo();
-            WarmupInfer();
-        }
-    }
 }
 

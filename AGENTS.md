@@ -39,7 +39,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 | 关注点 | 文件 | 说明 |
 |--------|------|------|
-| C++ API 头文件 | `dlcv_infer_cpp_dll/dlcv_infer.h` | `Model`、`SlidingWindowModel`、`Utils`、`DllLoader`、`GetAllDogInfo` |
+| C++ API 头文件 | `dlcv_infer_cpp_dll/dlcv_infer.h` | `Model`、`Utils`、`DllLoader`、`GetAllDogInfo` |
 | C++ API 实现 | `dlcv_infer_cpp_dll/dlcv_infer.cpp` | 模型加载、推理、DVS 解包、结果解析 |
 | C++ 加密狗 | `dlcv_infer_cpp_dll/dlcv_sntl_admin.cpp` | Sentinel/Virbox 设备与 feature 查询 |
 | C++ 流程图 | `dlcv_infer_cpp_dll/flow/FlowGraphModel.h` | `FlowGraphModel` 类 |
@@ -108,7 +108,6 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | 能力 | 类/函数 | 关键接口 |
 |------|---------|----------|
 | 普通模型 | `dlcv_infer::Model` | 构造（`std::string`/`std::wstring` + `device_id`）、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetModelInfo()`、`FreeModel()` |
-| 旧滑动窗口模型 | `dlcv_infer::SlidingWindowModel` | 保留旧接口，新增滑窗流程使用 DVST 模型 |
 | 工具类 | `dlcv_infer::Utils` | `FreeAllModels()`、`GetDeviceInfo()`、`GetGpuInfo()`、`KeepMaxClock()`、`OcrInfer()`、`JsonToString()` |
 | DLL 加载器 | `dlcv_infer::DllLoader` | `Instance()`、`EnsureForModel()`、`GetDogProvider()` |
 | 流程图模型 | `dlcv_infer::flow::FlowGraphModel` | `Load()`、`InferInternal()`、`GetModelInfo()` |

@@ -3684,7 +3684,8 @@ namespace DlcvCSharpTest
                 WriteEmptyFlowArchive(flowPath);
 
                 csharpOwner = new Model(flowPath, GpuDeviceId, false, false);
-                ResolveAndValidateSharedIndex(csharpOwner.modelIndex, "flow", "C# 空模型流程");
+                bool csharpUsesSharedFlowIndex = TryValidateSharedFlowIndex(
+                    csharpOwner.modelIndex, "C# 空模型流程");
                 JObject csharpInfo = csharpOwner.GetModelInfo();
                 if (csharpInfo == null) throw new Exception("C# 空模型流程信息为空");
                 csharpOwner.Dispose();
@@ -3692,13 +3693,18 @@ namespace DlcvCSharpTest
 
                 cppIndex = CppSharedIndexTestLoad(flowPath, GpuDeviceId);
                 if (cppIndex < 0) throw new Exception("C++ 空模型流程加载失败");
-                ResolveAndValidateSharedIndex(cppIndex, "flow", "C++ 空模型流程");
-
-                csharpBorrower = new Model { modelIndex = cppIndex, OwnModelIndex = false };
-                JObject restoredInfo = csharpBorrower.GetModelInfo();
-                if (restoredInfo == null) throw new Exception("C# 恢复空模型流程信息为空");
-                csharpBorrower.Dispose();
-                csharpBorrower = null;
+                bool cppUsesSharedFlowIndex = CppSharedIndexTestResolve(cppIndex) == 2;
+                if (csharpUsesSharedFlowIndex != cppUsesSharedFlowIndex)
+                    throw new Exception("C# 与 C++ 空模型流程索引模式不一致");
+                if (cppUsesSharedFlowIndex)
+                {
+                    ResolveAndValidateSharedIndex(cppIndex, "flow", "C++ 空模型流程");
+                    csharpBorrower = new Model { modelIndex = cppIndex, OwnModelIndex = false };
+                    JObject restoredInfo = csharpBorrower.GetModelInfo();
+                    if (restoredInfo == null) throw new Exception("C# 恢复空模型流程信息为空");
+                    csharpBorrower.Dispose();
+                    csharpBorrower = null;
+                }
 
                 if (CppSharedIndexTestFree(cppIndex) != 0)
                     throw new Exception("C++ 空模型流程释放失败");
@@ -3718,6 +3724,19 @@ namespace DlcvCSharpTest
                 try { if (cppIndex >= 0) CppSharedIndexTestFree(cppIndex); } catch { }
                 try { if (csharpOwner != null) csharpOwner.Dispose(); } catch { }
                 try { if (File.Exists(flowPath)) File.Delete(flowPath); } catch { }
+            }
+        }
+
+        private static bool TryValidateSharedFlowIndex(int index, string label)
+        {
+            try
+            {
+                ResolveAndValidateSharedIndex(index, "flow", label);
+                return true;
+            }
+            catch (NotSupportedException)
+            {
+                return false;
             }
         }
 

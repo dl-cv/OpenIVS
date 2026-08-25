@@ -8,7 +8,7 @@
 
 | 头文件 | 说明 |
 |--------|------|
-| `dlcv_infer.h` | 主接口，包含 `Model`、`SlidingWindowModel`、`Utils`、`DllLoader`、`GetAllDogInfo` |
+| `dlcv_infer.h` | 主接口，包含 `Model`、`Utils`、`DllLoader`、`GetAllDogInfo` |
 | `dlcv_sntl_admin.h` | 加密狗工具，包含 `sntl_admin::DogUtils`、`sntl_admin::DogProvider` |
 | `flow/FlowGraphModel.h` | 流程图模型，包含 `dlcv_infer::flow::FlowGraphModel` |
 
@@ -257,42 +257,18 @@ static std::vector<FlowNodeTiming> GetLastFlowNodeTimings();
 
 ---
 
-## 5. SlidingWindowModel（滑动窗口模型）
-
-该类为旧接口，新增滑窗流程使用 DVST 模型；共享流程 index 功能不扩展该类。
-
-```cpp
-class SlidingWindowModel : public Model {
-public:
-    SlidingWindowModel(
-        const std::string& modelPath,
-        int device_id,
-        int small_img_width,       // 切片宽度
-        int small_img_height,      // 切片高度
-        int horizontal_overlap,    // 水平重叠像素
-        int vertical_overlap,      // 垂直重叠像素
-        float threshold,           // 置信度阈值
-        float iou_threshold,       // NMS IoU 阈值
-        float combine_ios_threshold  // 合并 IoS 阈值
-    );
-};
-```
-
-- 内部通过 `type = "sliding_window_pipeline"` 调用 `dlcv_load_model`。
-- 继承 `Model` 的全部推理接口（`Infer`、`InferBatch`、`InferOneOutJson` 等）。
-
 ---
 
-## 6. Utils（工具类）
+## 5. Utils（工具类）
 
-### 6.1 模型管理
+### 5.1 模型管理
 
 ```cpp
 static void Utils::FreeAllModels();
 ```
 - 调用底层 `dlcv_free_all_models`，释放当前进程加载的所有模型。
 
-### 6.2 设备信息
+### 5.2 设备信息
 
 ```cpp
 static json Utils::GetDeviceInfo();
@@ -300,7 +276,7 @@ static json Utils::GetDeviceInfo();
 - 调用底层 `dlcv_get_device_info`。
 - 若函数不可用，返回 `{"code": -1, "message": "dlcv_get_device_info 不可用"}`。
 
-### 6.3 GPU 信息
+### 5.3 GPU 信息
 
 ```cpp
 static json Utils::GetGpuInfo();
@@ -309,14 +285,14 @@ static json Utils::GetGpuInfo();
 - 返回格式：`{"code": 0, "devices": [{"device_id": 0, "device_name": "..."}, ...]}`。
 - NVML 初始化失败时返回包含错误码和消息的 JSON。
 
-### 6.4 锁定最大时钟
+### 5.4 锁定最大时钟
 
 ```cpp
 static void Utils::KeepMaxClock();
 ```
 - 调用底层 `dlcv_keep_max_clock`，建议推理前执行以稳定 GPU 频率。
 
-### 6.5 OCR 推理
+### 5.5 OCR 推理
 
 ```cpp
 static Result Utils::OcrInfer(Model& detectModel, Model& recognizeModel, const cv::Mat& image);
@@ -324,7 +300,7 @@ static Result Utils::OcrInfer(Model& detectModel, Model& recognizeModel, const c
 - 先用 `detectModel` 检测文本区域，再用 `recognizeModel` 识别每个 ROI。
 - 识别结果写入原检测结果的 `categoryName` 字段。
 
-### 6.6 JSON 格式化
+### 5.6 JSON 格式化
 
 ```cpp
 static std::string Utils::JsonToString(const json& j);
@@ -333,7 +309,7 @@ static std::string Utils::JsonToString(const json& j);
 
 ---
 
-## 7. FlowGraphModel（流程图模型）
+## 6. FlowGraphModel（流程图模型）
 
 ```cpp
 namespace dlcv_infer::flow {
@@ -373,7 +349,7 @@ public:
 
 ---
 
-## 8. 加密狗查询
+## 7. 加密狗查询
 
 ```cpp
 json dlcv_infer::GetAllDogInfo();
@@ -393,7 +369,7 @@ static json GetAllDogInfo();
 
 ---
 
-## 9. 字符串编码转换工具
+## 8. 字符串编码转换工具
 
 ```cpp
 namespace dlcv_infer {
@@ -412,7 +388,7 @@ std::string  convertGbkToUtf8(const std::string& inputGbk);         // GBK → U
 
 ---
 
-## 10. 图像输入预处理
+## 9. 图像输入预处理
 
 ```cpp
 namespace dlcv_infer::image_input {
@@ -426,9 +402,9 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels);
 
 ---
 
-## 11. 调用流程
+## 10. 调用流程
 
-### 11.1 普通模型
+### 10.1 普通模型
 
 ```cpp
 #include "dlcv_infer.h"
@@ -461,7 +437,7 @@ model.FreeModel();
 dlcv_infer::Utils::FreeAllModels();  // 释放所有模型
 ```
 
-### 11.2 流程图/DVS 模型
+### 10.2 流程图/DVS 模型
 
 ```cpp
 // 1. 加载（.dvst / .dvso）
@@ -480,7 +456,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 12. 推理参数 JSON 字段
+## 11. 推理参数 JSON 字段
 
 | 字段名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
@@ -492,7 +468,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 13. 错误处理约定
+## 12. 错误处理
 
 - 所有错误通过 C++ 异常抛出（`std::runtime_error`、`std::invalid_argument` 等）。
 - 底层 C API 返回的错误码封装在异常消息中。
@@ -501,7 +477,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 14. 项目范围
+## 13. 项目范围
 
 - 项目目录：`dlcv_infer_cpp_dll`
 - 工程文件：`dlcv_infer_cpp_dll/dlcv_infer_cpp_dll.vcxproj`
@@ -523,7 +499,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 15. 构建与输出
+## 14. 构建与输出
 
 - 项目级构建与发布前构建验证统一通过 MCP 构建工具执行，解决方案级与项目级入口见 `开发文档.md` 的“统一编译说明”。
 - 工程配置：
@@ -563,7 +539,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 16. 构建期依赖解析
+## 15. 构建期依赖解析
 
 | 项目 | 当前解析顺序或检查规则 |
 | --- | --- |
@@ -574,7 +550,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 17. 运行期依赖与固定加载路径
+## 16. 运行期依赖与固定加载路径
 
 | 组件 | 当前加载方式 | 缺失时行为 |
 | --- | --- | --- |
@@ -586,7 +562,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 18. 编码与路径规则
+## 17. 编码与路径规则
 
 | 方向 | 导出函数 |
 | --- | --- |
@@ -599,7 +575,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 19. C++ 对外类型
+## 18. C++ 对外类型
 
 共享结果语义、JSON 字段语义、Flow 模块分类、模板对象语义和计时口径见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
@@ -620,104 +596,75 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 20. `Model`
+## 19. `Model`
 
-### 20.1 公开面
+### 19.1 公开面
 
 `Model` 暴露字段 `modelIndex`、`OwnModelIndex`；公开构造为默认构造、`Model(const std::string&, int)`、`Model(const std::wstring&, int)`；禁用拷贝、支持移动；公开成员函数为 `FreeModel()`、`GetModelInfo()`、`GetDvsModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetLastInferTiming()`、`GetLastFlowNodeTimings()`、`GetLastInspectionStatus()`。
 
-### 20.2 加载、释放与信息查询
+### 19.2 加载、释放与信息查询
 
-`.dvst/.dvso` 进入 FlowGraph 模式，`.dvsp` 当前直接返回不支持错误，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载，加载前由 `DllLoader::ForModel` 解析模型头并绑定对应 provider 的 loader：若模型头明确指定 `dog_provider`，则校验对应加密狗；若未指定，则通过 `AutoDetectProvider()` 按 Sentinel 优先、Virbox 第二自动检测。FlowGraph 模式创建 `flow::FlowGraphModel`，完成归档解包后加载全部模型节点，解包过程不得修改模型二进制数据。流程直接复用子模型实际使用的 loader；共享接口完整时登记共享流程，旧 DLL缺少共享接口或流程没有子模型时使用本地流程 index。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
+`.dvst/.dvso` 进入 FlowGraph 模式，`.dvsp` 当前直接返回不支持错误，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载，加载前由 `DllLoader::ForModel` 解析模型头并绑定对应 provider 的 loader：若模型头明确指定 `dog_provider`，则校验对应加密狗；若未指定，则通过 `AutoDetectProvider()` 按 Sentinel 优先、Virbox 第二自动检测。FlowGraph 模式创建 `flow::FlowGraphModel`，完成归档解包后加载全部模型节点，解包过程不得修改模型二进制数据。流程直接复用子模型实际使用的 loader；无模型节点时复用现有 loader，没有现有 loader 时直接选择 Sentinel，不执行 provider 检测。共享接口完整时登记共享流程，旧 DLL缺少共享接口时使用本地流程 index。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
 
-### 20.3 推理前图像规整
+### 19.3 推理前图像规整
 
 `prepareInferInputBatch()` 会先从模型信息推断目标通道数，并用 `_expectedChCache` 缓存结果。当前入口会先统一位深到 `CV_8U`，再按模型输入做最小必要的通道规整：三通道模型会把单通道输入补成 `RGB`，单通道模型会把三/四通道输入压成灰度；接口不负责 `BGR/BGRA -> RGB` 颜色顺序整理，三通道颜色图仍由调用方先按 RGB 送入。
 
-### 20.4 推理、结果与计时
+### 19.4 推理、结果与计时
 
 普通模型请求固定组装 `model_index + image_list` 后调用底层推理，`code!=0` 时抛异常。结构化包装阶段会自动补推断 `with_bbox`、`with_angle`，读取 `with_mean`、`foreground_mean`、`background_mean`，并对 `mask` 做 `clone()`、必要时缩放或反推框。`InferOneOutJson()` 只返回首张图结果；未产生流程判定时返回原结果数组，产生判定时返回 `{"result_list":[...],"ok":true|false,"reason":null|[...]}`。最近一次计时和流程判定状态保存在当前线程；`GetLastInspectionStatus(bool&, std::vector<std::string>&, size_t)` 按图片索引读取最近一次 `Infer`、`InferBatch` 或 `InferOneOutJson` 的状态，未产生状态时返回 `false`。FlowGraph 模式的计时优先使用流程返回的 `timing`。
 
 ---
 
-## 21. `Utils`
+## 20. `Utils`
 
 `Utils` 的公开静态函数包括 `JsonToString()`、`FreeAllModels()`、`GetDeviceInfo()`、`OcrInfer()`、`GetGpuInfo()`、`KeepMaxClock()` 和 5 个 NVML 包装函数。其行为分别是：`JsonToString()` 使用 `dump(4)`；`FreeAllModels()` 直接调用 `dlcv_free_all_models`；`GetDeviceInfo()` 直接调用 `dlcv_get_device_info`；`KeepMaxClock()` 仅在底层导出 `dlcv_keep_max_clock` 时调用；`OcrInfer()` 先用检测模型跑整图，再按 `bbox` 裁 ROI 给识别模型，若识别结果存在，则用第 1 条识别结果的 `categoryName` 覆盖检测结果的 `categoryName`；`GetGpuInfo()` 成功时返回 `{code:0,message:"Success",devices:[{device_id,device_name}]}`，NVML 初始化失败时返回 `code=1`，获取设备数量失败时返回 `code=2`。
 
 ---
 
-## 22. `sntl_admin`
+## 21. `sntl_admin`
 
 公开类型为 `SntlAdminStatus`、`SNTLDllLoader`、`SNTL`、`SNTLUtils`、`Virbox`、`DogProvider`、`DogInfo`、`DogUtils` 和 `ParseXmlToJson()`。固定 XML 常量中，`DefaultScope` 的厂商 ID 固定为 `26146`，`HaspIdFormat` 读取 `haspid`，`FeatureIdFormat` 读取 `featureid` 与 `haspid`。`SNTL` 构造时调用 `sntl_admin_context_new`，析构时调用 `Dispose()`，`Dispose()` 再调 `sntl_admin_context_delete`；`Get()` 调 `sntl_admin_get`，成功时返回 `{ "code": 0, "message": "成功", "data": ... }`，失败时返回 `{ "code": <status>, "message": "<状态描述>" }`。`SNTLUtils::GetDeviceList()` 返回 Sentinel 加密狗 ID 数组，`GetFeatureList()` 返回 Sentinel 特性 ID 数组，任一异常都返回空数组 `[]`，不再自动回退到 Virbox。`Virbox` 合并 `slm_ctrl_get_all_description` 返回的设备描述与 `slm_ctrl_get_offline_local_desc` 返回的本地软锁描述；授权码软锁使用 `user_guid` 作为唯一锁号，特性列表通过 `slm_ctrl_get_license_id` 读取。`DogUtils::GetAllDogInfo()` 返回同时包含 Sentinel 与 Virbox 信息的 JSON。
 
 ---
 
-## 23. Flow 与 DVS 的 C++ 实现
+## 22. Flow 与 DVS 的 C++ 实现
 
-### 23.1 DVS 归档加载
+### 22.1 DVS 归档加载
 
 共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧额外处理 DVS 归档解包、`pipeline.json` 中 `model_path` 重写，以及临时目录清理。
 
-### 23.2 `FlowGraphModel`
+### 22.2 `FlowGraphModel`
 
 `FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`GetDvsModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并预加载 `model/*` 节点，同时保存每个模型节点的普通模型信息。
 
-### 23.3 `ExecutionContext`
+### 22.3 `ExecutionContext`
 
 `ExecutionContext` 是轻量键值容器，公开 `Set<T>()`、`Get<T>()`、`Has()`、`Remove()`、`Clear()`；内部用 `shared_ptr<IValue>` 持有值，拷贝时做深拷贝。
 
-### 23.4 `GraphExecutor`
+### 22.4 `GraphExecutor`
 
 `GraphExecutor` 负责节点排序、链路路由、标量注入、`infer_params` 属性覆盖和 `model/*` 预加载。未注册普通节点会跳过，未注册模型节点会记录到加载报告；当前节点输出链路还会写入 `__graph_current_output_mask` 供部分模块读取。
 
-### 23.5 Flow 结果聚合
+### 22.5 Flow 结果聚合
 
 聚合读取优先级为 `frontend_payloads_by_node -> frontend_json.by_node -> frontend_json_by_node -> frontend_json.last -> frontend_payload_last`。单图时 `result_list` 直接是结果数组，存在流程判定时根对象同时包含 `ok/reason`；多图时为 `[{ "result_list": [...], "ok": ..., "reason": ... }, ...]`，未产生判定状态的图片不增加这些字段。
 
-### 23.6 已注册 Flow 节点
+### 22.6 已注册 Flow 节点
 
 C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/ModelModules.cpp`、`flow/modules/OutputModules.cpp`、`flow/modules/SlidingModules.cpp`、`flow/modules/FeatureModules.cpp`、`flow/modules/PostProcessModules.cpp`、`flow/modules/RegionStrokeVisualizeTemplateModules.cpp`。当前注册集覆盖输入、模型、预处理/特征、后处理、输出与模板模块；`features/printed_template_match` 由 `features/template_match` 兼容实现，不包含 C# Flow 的 `defer_template_creation` 候选事务、`count_priority` 数量优先和相应扩展结果字段。当前实现中，`input/*` 从磁盘读图时会把三/四通道输入统一整理为 RGB 语义后再入 Flow，`model/*` 入口不再隐式执行 BGR→RGB 转换，但仍会按模型输入做最小必要的通道规整，`output/save_image` 按内部固定 RGB 语义把三通道/四通道图像转换回 OpenCV 写盘所需的 BGR 语义。
 
 ---
 
-## 24. 仅 DLL 构建内部使用的类型
+## 23. 仅 DLL 构建内部使用的类型
 
 以下类型位于 `#ifdef DLCV_INFER_CPP_DLL_EXPORTS` 条件编译区域：
 
 - `DllLoader`
-- `SlidingWindowModel`
-
-`SlidingWindowModel` 构造参数：
-
-```cpp
-SlidingWindowModel(
-    const std::string& modelPath,
-    int device_id,
-    int small_img_width = 832,
-    int small_img_height = 704,
-    int horizontal_overlap = 16,
-    int vertical_overlap = 16,
-    float threshold = 0.5f,
-    float iou_threshold = 0.2f,
-    float combine_ios_threshold = 0.2f);
-```
-
-内部加载请求固定包含：
-
-- `type = "sliding_window_pipeline"`
-- `model_path`
-- `device_id`
-- `small_img_width`
-- `small_img_height`
-- `horizontal_overlap`
-- `vertical_overlap`
-- `threshold`
-- `iou_threshold`
-- `combine_ios_threshold`
 
 ---
 
-## 25. 同进程共享索引测试导出
+## 24. 同进程共享索引测试导出
 
 以下函数由 `dlcv_infer_cpp_dll.dll` 导出，仅用于控制台测试工程中的跨语言共享索引验证，不属于生产调用入口：
 
