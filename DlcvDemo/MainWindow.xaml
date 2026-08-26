@@ -110,7 +110,6 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -121,7 +120,6 @@
                     <Button x:Name="button_infer_json" Grid.Row="1" Grid.Column="1" Content="推理 JSON" Style="{StaticResource ActionButtonStyle}" Click="button_infer_json_Click"/>
                     <Button x:Name="button_thread_test" Grid.Row="2" Grid.Column="0" Content="多线程测试" Style="{StaticResource ActionButtonStyle}" Click="button_threadtest_Click"/>
                     <Button x:Name="button_consistency_test" Grid.Row="2" Grid.Column="1" Content="一致性测试" Style="{StaticResource ActionButtonStyle}" Click="button_consistency_test_Click"/>
-                    <Button x:Name="button_check_environment" Grid.Row="3" Grid.Column="0" Content="检查环境" Style="{StaticResource ActionButtonStyle}" Click="button_check_environment_Click"/>
                 </Grid>
 
                 <!-- 中间参数区：三行内容从顶部开始排列 -->
@@ -166,12 +164,13 @@
                     </Grid.ColumnDefinitions>
                     <CheckBox x:Name="checkBox_rpc_mode" Grid.Row="0" Grid.Column="0" Content="RPC 模式" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                     <Button x:Name="button_open_image" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" HorizontalAlignment="Stretch" Content="打开图片推理" Style="{StaticResource PrimaryButtonStyle}" Click="button_openimage_Click"/>
-                    <Button x:Name="button_save_img" Grid.Row="1" Grid.Column="0" Content="保存图像" Style="{StaticResource ActionButtonStyle}" Click="button_save_img_Click"/>
-                    <Button x:Name="button_free_model" Grid.Row="1" Grid.Column="1" Content="释放模型" Style="{StaticResource DangerButtonStyle}" Click="button_freemodel_Click"/>
-                    <Button x:Name="button_free_all_model" Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" Content="释放所有模型" Style="{StaticResource DangerButtonStyle}" Click="button_free_all_model_Click"/>
-                    <Button x:Name="button_check_dog" Grid.Row="2" Grid.Column="0" Content="检查加密狗" Style="{StaticResource ActionButtonStyle}" Click="button1_Click"/>
-                    <Button x:Name="button_github" Grid.Row="2" Grid.Column="1" Content="文档" Style="{StaticResource ActionButtonStyle}" Click="button_github_Click"/>
-                    <Button x:Name="button_get_model_info" Grid.Row="2" Grid.Column="2" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" Content="获取模型信息" Style="{StaticResource ActionButtonStyle}" Click="button_getmodelinfo_Click"/>
+                    <Button x:Name="button_save_img" Grid.Row="1" Grid.Column="1" Content="保存图像" Style="{StaticResource ActionButtonStyle}" Click="button_save_img_Click"/>
+                    <Button x:Name="button_free_model" Grid.Row="1" Grid.Column="2" Content="释放模型" Style="{StaticResource DangerButtonStyle}" Click="button_freemodel_Click"/>
+                    <Button x:Name="button_free_all_model" Grid.Row="1" Grid.Column="3" Content="释放所有模型" Style="{StaticResource DangerButtonStyle}" Click="button_free_all_model_Click"/>
+                    <Button x:Name="button_check_environment" Grid.Row="2" Grid.Column="0" Content="检查环境" Style="{StaticResource ActionButtonStyle}" Click="button_check_environment_Click"/>
+                    <Button x:Name="button_check_dog" Grid.Row="2" Grid.Column="1" Content="检查加密狗" Style="{StaticResource ActionButtonStyle}" Click="button1_Click"/>
+                    <Button x:Name="button_github" Grid.Row="2" Grid.Column="2" Content="文档" Style="{StaticResource ActionButtonStyle}" Click="button_github_Click"/>
+                    <Button x:Name="button_get_model_info" Grid.Row="2" Grid.Column="3" Content="获取模型信息" Style="{StaticResource ActionButtonStyle}" Click="button_getmodelinfo_Click"/>
                 </Grid>
             </Grid>
         </Border>
