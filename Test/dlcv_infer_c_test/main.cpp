@@ -1297,51 +1297,88 @@ static std::vector<std::wstring> GetNewDvsTempDirs(
 
 static bool RunDvstTempDirectoryReuseCheck(const std::wstring& modelPath, const cv::Mat& image) {
     dlcv_infer_cpp_free_all_models_c();
+    wchar_t tempDir[MAX_PATH]{};
+    const DWORD tempDirLength = GetTempPathW(MAX_PATH, tempDir);
+    if (tempDirLength == 0 || tempDirLength >= MAX_PATH) {
+        std::cerr << "FAIL: 无法获取 dvst 内容复用测试临时目录\n";
+        return false;
+    }
+
+    const std::wstring copiedPath = std::wstring(tempDir)
+        + L"dlcv_dvst_same_content_"
+        + std::to_wstring(GetCurrentProcessId())
+        + L"_"
+        + std::to_wstring(GetTickCount64())
+        + L".dvst";
+    if (!CopyFileW(modelPath.c_str(), copiedPath.c_str(), FALSE)) {
+        std::cerr << "FAIL: 无法复制 dvst 内容复用测试文件，错误码=" << GetLastError() << "\n";
+        return false;
+    }
+
+    const auto cleanup = [&copiedPath]() {
+        dlcv_infer_cpp_free_all_models_c();
+        DeleteFileW(copiedPath.c_str());
+    };
     const std::vector<std::wstring> before = GetCurrentProcessDvsTempDirs();
 
     const int firstIndex = LoadModel(modelPath);
-    if (firstIndex < 0) return false;
+    if (firstIndex < 0) {
+        cleanup();
+        return false;
+    }
     const std::vector<std::wstring> afterFirst = GetCurrentProcessDvsTempDirs();
     const std::vector<std::wstring> firstAdded = GetNewDvsTempDirs(before, afterFirst);
+    const dlcv_infer::flow::ModelPoolStats firstStats = dlcv_infer::flow::GetModelPoolStats();
     if (firstAdded.size() != 1) {
         std::cerr << "FAIL: 首次加载 dvst 未生成唯一稳定目录\n";
-        dlcv_infer_cpp_free_all_models_c();
+        cleanup();
         return false;
     }
 
-    const int secondIndex = LoadModel(modelPath);
+    const int secondIndex = LoadModel(copiedPath);
     if (secondIndex < 0) {
-        dlcv_infer_cpp_free_all_models_c();
+        cleanup();
         return false;
     }
     const std::vector<std::wstring> afterSecond = GetCurrentProcessDvsTempDirs();
-    if (afterSecond != afterFirst) {
-        std::cerr << "FAIL: 相同 dvst 路径未复用解压目录\n";
-        dlcv_infer_cpp_free_all_models_c();
+    const dlcv_infer::flow::ModelPoolStats secondStats = dlcv_infer::flow::GetModelPoolStats();
+    if (afterSecond != afterFirst || firstStats.totalEntries == 0 ||
+        secondStats.totalEntries != firstStats.totalEntries) {
+        std::cerr << "FAIL: 不同路径的相同 dvst 内容未复用解压目录或模型池\n";
+        cleanup();
+        return false;
+    }
+
+    std::string firstFingerprint;
+    std::string error;
+    if (!InferFingerprint(firstIndex, image, firstFingerprint, error)) {
+        std::cerr << "FAIL: 首个 dvst 内容复用实例推理失败: " << error << "\n";
+        cleanup();
         return false;
     }
 
     if (dlcv_infer_cpp_free_model_c(firstIndex) != 0 ||
         GetFileAttributesW(firstAdded.front().c_str()) == INVALID_FILE_ATTRIBUTES) {
         std::cerr << "FAIL: 首个实例释放后共享解压目录不可用\n";
-        dlcv_infer_cpp_free_all_models_c();
+        cleanup();
         return false;
     }
 
-    std::string fingerprint;
-    std::string error;
-    const bool secondInferOk = InferFingerprint(secondIndex, image, fingerprint, error);
+    std::string secondFingerprint;
+    error.clear();
+    const bool secondInferOk = InferFingerprint(secondIndex, image, secondFingerprint, error)
+        && secondFingerprint == firstFingerprint;
     const bool secondFreeOk = dlcv_infer_cpp_free_model_c(secondIndex) == 0;
     const bool removedAfterLastRelease =
         GetFileAttributesW(firstAdded.front().c_str()) == INVALID_FILE_ATTRIBUTES;
-    dlcv_infer_cpp_free_all_models_c();
+    cleanup();
     if (!secondInferOk || !secondFreeOk || !removedAfterLastRelease) {
         std::cerr << "FAIL: 共享解压目录引用计数验证失败: "
                   << (error.empty() ? "目录清理状态异常" : error) << "\n";
         return false;
     }
 
-    std::cout << "PASS: 相同 dvst 路径复用解压目录且最后释放时清理\n";
+    std::cout << "PASS: 不同路径的相同 dvst 内容复用解压目录且最后释放时清理\n";
     return true;
 }
 
