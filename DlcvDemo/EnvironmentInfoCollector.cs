@@ -12,8 +12,6 @@ namespace DlcvDemo
     {
         private const uint LoadWithAlteredSearchPath = 0x00000008;
         private const int NvmlSuccess = 0;
-        private const string ExpectedInferenceVersion = "2026.8.26.6a0";
-        private const string ExpectedInferenceSha256 = "B12153F529B851A80E298FB37DDF18A846F8FFBD42954F257D443FC9FB19451C";
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr LoadLibraryEx(string fileName, IntPtr file, uint flags);
@@ -48,7 +46,7 @@ namespace DlcvDemo
             var results = new List<ComponentInfo>
             {
                 CheckSafely("NVIDIA 驱动", CheckNvidiaDriver),
-                CheckSafely("推理主库", CheckInferenceLibrary),
+                CheckSafely("dlcv_infer", CheckInferenceLibrary),
                 CheckSafely("ONNX Runtime", CheckOnnxRuntime),
                 CheckSafely("TensorRT", CheckTensorRt),
                 CheckSafely("CUDA", CheckCuda),
@@ -66,9 +64,27 @@ namespace DlcvDemo
                 text.Append(" | ");
                 text.Append(string.IsNullOrWhiteSpace(result.Version) ? "未检测到" : result.Version);
                 text.Append(" | ");
-                text.AppendLine(string.IsNullOrWhiteSpace(result.Path) ? "-" : result.Path);
+                text.AppendLine(string.IsNullOrWhiteSpace(result.Path) ? "-" : FormatPathForDisplay(result.Path));
             }
             return text.ToString().TrimEnd();
+        }
+
+        private static string FormatPathForDisplay(string path)
+        {
+            string fullPath = Path.GetFullPath(path);
+            string parentDirectory = Path.GetDirectoryName(fullPath);
+            string baseDirectory = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
+
+            if (!string.IsNullOrWhiteSpace(parentDirectory)
+                && string.Equals(
+                    parentDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    baseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFileName(fullPath);
+            }
+
+            return fullPath;
         }
 
         private static ComponentInfo CheckSafely(string type, Func<ComponentInfo> check)
@@ -127,21 +143,10 @@ namespace DlcvDemo
             string path = FindApplicationFile("dlcv_infer.dll", "dlcv_infer_v.dll");
             if (string.IsNullOrWhiteSpace(path))
             {
-                return new ComponentInfo("推理主库", null, null);
+                return new ComponentInfo("dlcv_infer", null, null);
             }
 
-            string version = ReadProductVersion(path, 4);
-            if (string.IsNullOrWhiteSpace(version))
-            {
-                string versionFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt");
-                string fileVersion = ReadStrictVersionText(versionFile);
-                if (string.Equals(fileVersion, ExpectedInferenceVersion, StringComparison.Ordinal)
-                    && string.Equals(ComputeSha256Hex(path), ExpectedInferenceSha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    version = fileVersion;
-                }
-            }
-            return new ComponentInfo("推理主库", version, path);
+            return new ComponentInfo("dlcv_infer", ReadProductVersion(path, 4), path);
         }
 
         private static ComponentInfo CheckOnnxRuntime()
@@ -461,18 +466,6 @@ namespace DlcvDemo
             }
         }
 
-        private static string ComputeSha256Hex(string path)
-        {
-            try
-            {
-                return BitConverter.ToString(ComputeSha256(path)).Replace("-", string.Empty);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         private static string FindApplicationFile(params string[] patterns)
         {
             string directory = AppDomain.CurrentDomain.BaseDirectory;
@@ -498,12 +491,53 @@ namespace DlcvDemo
         {
             try
             {
-                return NormalizeVersion(System.Diagnostics.FileVersionInfo.GetVersionInfo(path).ProductVersion, maximumParts);
+                System.Diagnostics.FileVersionInfo versionInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(path);
+                string version = NormalizeVersion(versionInfo.ProductVersion, maximumParts);
+                if (!string.IsNullOrWhiteSpace(version))
+                {
+                    return version;
+                }
+
+                version = NormalizeVersion(versionInfo.FileVersion, maximumParts);
+                if (!string.IsNullOrWhiteSpace(version))
+                {
+                    return version;
+                }
+
+                version = FormatFixedVersion(
+                    versionInfo.ProductMajorPart,
+                    versionInfo.ProductMinorPart,
+                    versionInfo.ProductBuildPart,
+                    versionInfo.ProductPrivatePart,
+                    maximumParts);
+                if (!string.IsNullOrWhiteSpace(version))
+                {
+                    return version;
+                }
+
+                return FormatFixedVersion(
+                    versionInfo.FileMajorPart,
+                    versionInfo.FileMinorPart,
+                    versionInfo.FileBuildPart,
+                    versionInfo.FilePrivatePart,
+                    maximumParts);
             }
             catch
             {
                 return null;
             }
+        }
+
+        private static string FormatFixedVersion(int major, int minor, int build, int privatePart, int maximumParts)
+        {
+            if (major < 0 || minor < 0 || build < 0 || privatePart < 0)
+            {
+                return null;
+            }
+
+            string[] parts = { major.ToString(), minor.ToString(), build.ToString(), privatePart.ToString() };
+            int count = Math.Min(parts.Length, maximumParts);
+            return count <= 0 ? null : string.Join(".", parts, 0, count);
         }
 
         private static string ReadVersionText(string path)
@@ -516,25 +550,6 @@ namespace DlcvDemo
                 }
                 Match match = Regex.Match(File.ReadAllText(path), @"\d+(?:\.\d+){1,4}(?:a\d+)?", RegexOptions.IgnoreCase);
                 return match.Success ? match.Value : null;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static string ReadStrictVersionText(string path)
-        {
-            try
-            {
-                if (!File.Exists(path))
-                {
-                    return null;
-                }
-                string value = File.ReadAllText(path).Trim();
-                return Regex.IsMatch(value, @"^\d+\.\d+\.\d+\.\d+(?:[ab]\d+)?$", RegexOptions.CultureInvariant)
-                    ? value
-                    : null;
             }
             catch
             {
