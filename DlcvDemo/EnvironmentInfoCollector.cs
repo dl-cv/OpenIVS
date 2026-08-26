@@ -12,6 +12,8 @@ namespace DlcvDemo
     {
         private const uint LoadWithAlteredSearchPath = 0x00000008;
         private const int NvmlSuccess = 0;
+        private const string ExpectedInferenceVersion = "2026.8.26.6a0";
+        private const string ExpectedInferenceSha256 = "B12153F529B851A80E298FB37DDF18A846F8FFBD42954F257D443FC9FB19451C";
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr LoadLibraryEx(string fileName, IntPtr file, uint flags);
@@ -128,10 +130,16 @@ namespace DlcvDemo
                 return new ComponentInfo("推理主库", null, null);
             }
 
-            string version = ReadVersionText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt"));
+            string version = ReadProductVersion(path, 4);
             if (string.IsNullOrWhiteSpace(version))
             {
-                version = ReadProductVersion(path, 4);
+                string versionFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt");
+                string fileVersion = ReadStrictVersionText(versionFile);
+                if (string.Equals(fileVersion, ExpectedInferenceVersion, StringComparison.Ordinal)
+                    && string.Equals(ComputeSha256Hex(path), ExpectedInferenceSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    version = fileVersion;
+                }
             }
             return new ComponentInfo("推理主库", version, path);
         }
@@ -453,6 +461,18 @@ namespace DlcvDemo
             }
         }
 
+        private static string ComputeSha256Hex(string path)
+        {
+            try
+            {
+                return BitConverter.ToString(ComputeSha256(path)).Replace("-", string.Empty);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static string FindApplicationFile(params string[] patterns)
         {
             string directory = AppDomain.CurrentDomain.BaseDirectory;
@@ -496,6 +516,25 @@ namespace DlcvDemo
                 }
                 Match match = Regex.Match(File.ReadAllText(path), @"\d+(?:\.\d+){1,4}(?:a\d+)?", RegexOptions.IgnoreCase);
                 return match.Success ? match.Value : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string ReadStrictVersionText(string path)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    return null;
+                }
+                string value = File.ReadAllText(path).Trim();
+                return Regex.IsMatch(value, @"^\d+\.\d+\.\d+\.\d+(?:[ab]\d+)?$", RegexOptions.CultureInvariant)
+                    ? value
+                    : null;
             }
             catch
             {
