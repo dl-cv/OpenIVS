@@ -21,6 +21,7 @@ namespace DlcvDemo
     public partial class MainWindow : System.Windows.Window
     {
         private readonly UiTestOptions uiTestOptions;
+        private bool environmentCheckRunning;
         internal int UiTestExitCode { get; private set; }
 
         // 设备映射表：设备名称 -> 设备ID
@@ -69,6 +70,7 @@ namespace DlcvDemo
             Thread thread = new Thread(InitializeDeviceAndUiTest);
             thread.IsBackground = true;
             thread.Start();
+            _ = RefreshEnvironmentInfoAsync();
         }
 
         private void InitializeDeviceAndUiTest()
@@ -1117,11 +1119,17 @@ namespace DlcvDemo
 
         private async void button_check_environment_Click(object sender, EventArgs e)
         {
-            if (!button_check_environment.IsEnabled)
+            await RefreshEnvironmentInfoAsync();
+        }
+
+        private async Task RefreshEnvironmentInfoAsync()
+        {
+            if (environmentCheckRunning)
             {
                 return;
             }
 
+            environmentCheckRunning = true;
             button_check_environment.IsEnabled = false;
             richTextBox1.Text = "正在检查环境，请稍候...";
             try
@@ -1135,6 +1143,7 @@ namespace DlcvDemo
             finally
             {
                 button_check_environment.IsEnabled = true;
+                environmentCheckRunning = false;
             }
         }
 

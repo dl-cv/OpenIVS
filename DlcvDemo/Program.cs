@@ -12,6 +12,13 @@ namespace DlcvDemo
         static int Main(string[] args)
         {
             if (args != null && args.Length > 0
+                && string.Equals(args[0], "environment-version", StringComparison.OrdinalIgnoreCase))
+            {
+                CliRunner.InitializeConsole();
+                return EnvironmentInfoCollector.RunVersionHelper(args);
+            }
+
+            if (args != null && args.Length > 0
                 && string.Equals(args[0], "ui-test", StringComparison.OrdinalIgnoreCase))
             {
                 CliRunner.InitializeConsole();
