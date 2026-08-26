@@ -161,7 +161,7 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
 
-### DLL 映射（C++ / C API）
+### DLL 映射（C++ / C / C# API）
 
 | 加密狗类型 | DLL 名称 | 固定路径 |
 |-----------|---------|---------|
@@ -451,7 +451,7 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 
 - **底层推理引擎**：`dlcv_infer` 是 OpenIVS API 层的底层依赖。OpenIVS 的 C++/C API（`dlcv_infer_cpp`）和 C# API（`DlcvCsharpApi`）均通过加载 `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）调用推理能力；C++/C API 对外产物为 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 - **加密模型文件**：`dlcv_deploy` 产出的 `.dvt`/`.dvo`/`.dvst`/`.dvso` 等文件是 OpenIVS 测试程序与 WPF 框架的输入。
-- **接口范围**：OpenIVS 不根据模型包内的 `dlcv.json` 或 `header_json.dog_provider` 选择底层 DLL。`DllLoader` 按当前进程检测到的加密狗选择一次底层 DLL，后续不因模型类型切换。
+- **接口范围**：OpenIVS 的 C++、C 和 C# API 不根据模型包内的 `dlcv.json` 或 `header_json.dog_provider` 选择底层 DLL。`DllLoader` 按当前进程检测到的加密狗选择一次底层 DLL，后续不因模型类型切换；模型头字段只用于加载前授权检查。
 
 ## 运行验证方式
 
