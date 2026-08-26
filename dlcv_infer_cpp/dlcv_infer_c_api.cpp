@@ -36,6 +36,7 @@ struct CApiModelEntry {
 
 static std::unordered_map<int, std::shared_ptr<CApiModelEntry>> g_models;
 static std::mutex g_modelsMutex;
+static constexpr int kFirstFlowModelIndex = 10000;
 struct NativeJsonAllocation {
     std::vector<void*> maskBuffers;
 
@@ -167,7 +168,7 @@ static bool TryReadFlowModelPath(
 }
 
 static bool IsFlowModelIndex(int modelIndex) noexcept {
-    return modelIndex >= 10000;
+    return modelIndex >= kFirstFlowModelIndex;
 }
 
 static dlcv_infer::json AddNativeModelInfoStatus(dlcv_infer::json modelInfo) {
@@ -480,6 +481,7 @@ int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
         pathDiagnostics.c_str());
 
     try {
+        const bool isFlowModel = IsFlowModelPath(modelPath);
         auto model = std::make_shared<dlcv_infer::Model>(modelPath, device_id);
         int idx = model->modelIndex;
         if (idx < 0) {
@@ -487,9 +489,27 @@ int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
             AppendCapiDebugLog("load_model failed: %s", g_lastError.c_str());
             return -1;
         }
+        if (!isFlowModel && idx >= kFirstFlowModelIndex) {
+            std::string cleanupFailure;
+            try {
+                model->FreeModel();
+            } catch (const std::exception& ex) {
+                cleanupFailure = ex.what();
+            } catch (...) {
+                cleanupFailure = "未知异常";
+            }
+            std::string message = "普通模型索引超出支持范围 [0, 9999]：modelIndex=" +
+                std::to_string(idx) + "; " + pathDiagnostics;
+            if (!cleanupFailure.empty()) {
+                message += "；底层资源清理失败：" + cleanupFailure;
+            }
+            SetLastErrorMessage(message);
+            AppendCapiDebugLog("load_model failed: %s", g_lastError.c_str());
+            return -1;
+        }
         auto entry = std::make_shared<CApiModelEntry>();
         entry->model = std::move(model);
-        entry->serializeInfer = IsFlowModelPath(modelPath);
+        entry->serializeInfer = isFlowModel;
         std::lock_guard<std::mutex> lock(g_modelsMutex);
         g_models[idx] = std::move(entry);
         ClearLastErrorMessage();
@@ -807,7 +827,78 @@ const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str) {
     std::string modelPath;
     if (!TryParseNativeConfig(config_str, config) || !TryReadFlowModelPath(config, modelPath)) {
         return CallNativeString("dlcv_load_model", [config_str]() {
-            return dlcv_infer::NativeApi::LoadModel(config_str);
+            try {
+                const char* resultPtr = dlcv_infer::NativeApi::LoadModel(config_str);
+                if (resultPtr == nullptr) return resultPtr;
+
+                int modelIndex = -1;
+                try {
+                    const dlcv_infer::json response = dlcv_infer::json::parse(resultPtr);
+                    if (!response.is_object() || !response.contains("model_index") ||
+                        !response.at("model_index").is_number_integer()) {
+                        return resultPtr;
+                    }
+                    modelIndex = response.at("model_index").get<int>();
+                } catch (...) {
+                    return resultPtr;
+                }
+
+                if (modelIndex < kFirstFlowModelIndex) return resultPtr;
+
+                std::string cleanupFailure;
+                const auto appendCleanupFailure = [&cleanupFailure](const std::string& detail) {
+                    if (!cleanupFailure.empty()) cleanupFailure += "；";
+                    cleanupFailure += detail;
+                };
+                const std::string freeConfig = dlcv_infer::json{ { "model_index", modelIndex } }.dump();
+                const char* freeResultPtr = nullptr;
+                try {
+                    freeResultPtr = dlcv_infer::NativeApi::FreeModel(freeConfig.c_str());
+                    if (freeResultPtr == nullptr) {
+                        appendCleanupFailure("释放模型未返回结果");
+                    } else {
+                        try {
+                            const dlcv_infer::json freeResponse = dlcv_infer::json::parse(freeResultPtr);
+                            if (!freeResponse.is_object() || freeResponse.value("code", 1) != 0) {
+                                appendCleanupFailure("底层拒绝释放超范围模型");
+                            }
+                        } catch (...) {
+                            appendCleanupFailure("释放模型结果无法解析");
+                        }
+                    }
+                } catch (const std::exception& ex) {
+                    appendCleanupFailure(std::string("释放模型异常：") + ex.what());
+                } catch (...) {
+                    appendCleanupFailure("释放模型发生未知异常");
+                }
+                try {
+                    dlcv_infer::NativeApi::FreeResult(resultPtr);
+                } catch (const std::exception& ex) {
+                    appendCleanupFailure(std::string("释放加载结果异常：") + ex.what());
+                } catch (...) {
+                    appendCleanupFailure("释放加载结果发生未知异常");
+                }
+                if (freeResultPtr != nullptr) {
+                    try {
+                        dlcv_infer::NativeApi::FreeResult(freeResultPtr);
+                    } catch (const std::exception& ex) {
+                        appendCleanupFailure(std::string("释放模型结果异常：") + ex.what());
+                    } catch (...) {
+                        appendCleanupFailure("释放模型结果发生未知异常");
+                    }
+                }
+
+                std::string message = "普通模型索引超出支持范围 [0, 9999]。";
+                if (!cleanupFailure.empty()) {
+                    message += " 底层资源清理失败：" + cleanupFailure;
+                    AppendCapiDebugLog("load_model cleanup failed: modelIndex=%d, detail=%s",
+                        modelIndex,
+                        cleanupFailure.c_str());
+                }
+                return AllocateNativeJsonResult(MakeNativeStatus(1, message));
+            } catch (const std::exception& ex) {
+                return AllocateNativeJsonResult(MakeNativeStatus(1, ex.what()));
+            }
         });
     }
 

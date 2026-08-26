@@ -1701,6 +1701,22 @@ namespace dlcv_infer {
             }
             throw std::runtime_error("invalid dog provider in header_json: " + p);
         }
+
+        void EnsureRequiredDogAvailable(std::istream& stream) {
+            sntl_admin::DogProvider needed;
+            if (!TryResolveExplicitProviderFromStream(stream, needed)) {
+                return;
+            }
+
+            const auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
+                ? sntl_admin::DogUtils::GetSentinelInfo()
+                : sntl_admin::DogUtils::GetVirboxInfo();
+            if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
+                throw std::runtime_error(std::string("模型要求 ")
+                    + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
+                    + " 授权，但未检测到对应的加密狗设备或特性");
+            }
+        }
     }
 
     void DllLoader::EnsureForModel(const std::string& modelPath) {
@@ -1716,25 +1732,9 @@ namespace dlcv_infer {
         std::ifstream file(WideToUtf8Portable(wpath));
 #endif
         if (!file) {
-            throw std::runtime_error("failed to open model file");
-        }
-        sntl_admin::DogProvider needed;
-        if (!TryResolveExplicitProviderFromStream(file, needed)) {
             return;
         }
-        std::lock_guard<std::mutex> lock(g_dllLoaderMu);
-        if (instance && instance->dogProvider == needed) {
-            return;
-        }
-        auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
-            ? sntl_admin::DogUtils::GetSentinelInfo()
-            : sntl_admin::DogUtils::GetVirboxInfo();
-        if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
-            throw std::runtime_error(std::string("模型要求 provider ")
-                + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
-                + "，但未检测到对应的加密狗设备或特性");
-        }
-        instance = new DllLoader(needed);
+        EnsureRequiredDogAvailable(file);
     }
 
     void DllLoader::EnsureForModel(const std::wstring& modelPath) {
@@ -1749,25 +1749,9 @@ namespace dlcv_infer {
         std::ifstream file(WideToUtf8Portable(modelPath));
 #endif
         if (!file) {
-            throw std::runtime_error("failed to open model file");
-        }
-        sntl_admin::DogProvider needed;
-        if (!TryResolveExplicitProviderFromStream(file, needed)) {
             return;
         }
-        std::lock_guard<std::mutex> lock(g_dllLoaderMu);
-        if (instance && instance->dogProvider == needed) {
-            return;
-        }
-        auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
-            ? sntl_admin::DogUtils::GetSentinelInfo()
-            : sntl_admin::DogUtils::GetVirboxInfo();
-        if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
-            throw std::runtime_error(std::string("模型要求 provider ")
-                + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
-                + "，但未检测到对应的加密狗设备或特性");
-        }
-        instance = new DllLoader(needed);
+        EnsureRequiredDogAvailable(file);
     }
 
     // Model类实现
@@ -1792,6 +1776,9 @@ namespace dlcv_infer {
                 if (code != 0) {
                     throw std::runtime_error(report.dump());
                 }
+                _dllLoader = &DllLoader::Instance();
+                _loadedDogProvider = _dllLoader->GetDogProvider();
+                _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
                 modelIndex = AllocateFlowModelIndex();
                 return;
             } catch (const std::exception& ex) {
@@ -1858,6 +1845,9 @@ namespace dlcv_infer {
                 if (code != 0) {
                     throw std::runtime_error(report.dump());
                 }
+                _dllLoader = &DllLoader::Instance();
+                _loadedDogProvider = _dllLoader->GetDogProvider();
+                _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
                 modelIndex = AllocateFlowModelIndex();
                 return;
             } catch (const std::exception& ex) {
@@ -2927,6 +2917,13 @@ namespace dlcv_infer {
     const char* NativeApi::LoadModel(const char* configStr) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
         std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
+        if (configStr != nullptr) {
+            const json config = json::parse(configStr, nullptr, false);
+            if (config.is_object() && config.contains("model_path") &&
+                config.at("model_path").is_string()) {
+                DllLoader::EnsureForModel(config.at("model_path").get<std::string>());
+            }
+        }
         auto& loader = DllLoader::Instance();
         return RequireNativeApiFunction(loader.GetLoadModelFunc(), "dlcv_load_model")(configStr);
     }
@@ -3041,6 +3038,10 @@ namespace dlcv_infer {
 
     int NativeApi::LoadModelC(const char* modelPath, int deviceId) {
         std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
+        if (modelPath == nullptr) {
+            throw std::invalid_argument("model_path is null");
+        }
+        DllLoader::EnsureForModel(std::string(modelPath));
         auto& loader = DllLoader::Instance();
         return RequireNativeApiFunction(loader.GetLoadModelCFunc(), "dlcv_load_model_c")(
             modelPath,
