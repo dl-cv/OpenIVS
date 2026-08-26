@@ -189,10 +189,10 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <TextBlock Text="运行结果" FontSize="15" FontWeight="SemiBold" Margin="2,0,0,8"/>
-                    <TextBox x:Name="richTextBox1" Grid.Row="1" IsReadOnly="True" TextWrapping="NoWrap"
+                    <TextBox x:Name="richTextBox1" Grid.Row="1" IsReadOnly="True" TextWrapping="Wrap"
                              AcceptsReturn="True" FontFamily="Consolas, Microsoft YaHei UI" FontSize="12"
                              BorderThickness="0" Background="#FAFBFC"
-                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <TextBox.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="撤销" Command="ApplicationCommands.Undo"
