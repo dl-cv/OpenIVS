@@ -112,7 +112,7 @@ public:
     // 获取全局单例；首次调用自动检测加密狗类型，有狗时加载对应 DLL，无狗时不加载
     static DllLoader& Instance();
 
-    // 保留模型加载前检查入口；不根据模型头切换已选中的 DLL
+    // 读取模型头并检查对应授权；不根据模型头切换已选中的 DLL
     static void EnsureForModel(const std::string& modelPath);
     static void EnsureForModel(const std::wstring& modelPath);
 
@@ -153,9 +153,9 @@ private:
 
 **自动检测优先级**：先检测 Sentinel，再检测 Virbox。仅检测到 Sentinel 时加载 `dlcv_infer.dll`；仅检测到 Virbox 时加载 `dlcv_infer_v.dll`；两类加密狗同时存在时按 Sentinel 优先级加载 `dlcv_infer.dll`；均未检测到则返回 `DogProvider::Unknown`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
 
-**并发模型加载**：`DllLoader` 全局实例的访问由互斥量串行执行；`Model`、`SlidingWindowModel`、`NativeApi::LoadModel` 和 `NativeApi::LoadModelC` 进入底层模型加载函数时使用同一模型加载互斥量。流程归档的读取与展开不占用该互斥量，流程中的底层子模型加载仍经过相同保护。
+**并发模型加载**：`DllLoader` 全局实例的访问由互斥量串行执行；`Model`、`SlidingWindowModel`、`NativeApi::LoadModel` 和 `NativeApi::LoadModelC` 进入底层模型加载函数时使用同一模型加载互斥量。流程归档的读取与展开不占用该互斥量，流程中的底层子模型加载仍经过相同保护。控制台测试会并发加载普通模型和流程模型，并检查所有实例记录的底层 DLL 名称一致。
 
-底层 DLL 按当前进程检测到的加密狗选择，模型头中的 `dog_provider` 不参与 DLL 选择，也不会触发运行期切换。底层 DLL 加载完成后，模型加载、模型信息、推理和释放始终使用同一个 DLL。仅存在一类加密狗时，加载另一类加密模型会返回解析或解密失败；两类加密狗同时存在时，已选中的 DLL 可以加载两类模型。
+底层 DLL 按当前进程检测到的加密狗选择，模型头中的 `dog_provider` 只用于加载前授权检查，不参与 DLL 选择，也不会触发运行期切换。底层 DLL 加载完成后，模型加载、模型信息、推理和释放始终使用同一个 DLL。模型头声明的授权不存在时，加载入口直接返回明确错误；两类加密狗同时存在时，已选中的 DLL 可以加载两类模型。
 
 ---
 
@@ -232,7 +232,7 @@ void FreeModel();
 - 普通模式且 `OwnModelIndex == true`：调用 `dlcv_free_model`。
 - 普通模式且 `OwnModelIndex == false`：仅标记 `modelIndex = -1`，不释放底层模型。
 
-> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回（从 `0` 起递增）；流程模型（`.dvst`/`.dvso`/`.dvsp`）的 `modelIndex` 由本层自管理（从 `10000` 起递增）。二者分区，避免上层按 `modelIndex` 索引时流程模型与普通模型撞键。流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
+> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回（从 `0` 起递增），C 接口只接受 `[0, 9999]`，达到 `10000` 时释放本次加载并返回范围错误；流程模型（`.dvst`/`.dvso`/`.dvsp`）的 `modelIndex` 由本层自管理（从 `10000` 起递增）。二者分区，避免上层按 `modelIndex` 索引时流程模型与普通模型撞键。流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
 
 ### 4.7 计时查询
 

@@ -108,7 +108,7 @@ dlcv_infer_c_qt_demo/Debug/dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.exe
 | GPU 查询 | 返回 `code=0` 和 1 个 GPU |
 | 授权设备查询 | 返回 `sentinel` 与 `virbox` |
 | C API 控制台测试 | 普通模型原生 JSON 原样转发、流程模型原生 JSON、结构化结果、同索引并发和模型释放检查通过 |
-| 模型并发加载 | `--model-load-concurrency` 使用 4 个线程交替加载普通模型和流程模型；连续执行 5 次均通过 |
+| 模型并发加载 | `--model-load-concurrency` 使用 4 个线程交替加载普通模型和流程模型，并检查所有实例记录的底层 DLL 名称一致；连续执行 5 次均通过 |
 | 纯 C 头文件编译 | `pure_c_header_test.c` 由 C 编译器处理，六个结构大小与 C++ 构建一致 |
 | DVST 内容复用 | 不同路径的相同内容复用解压目录和模型池；两个实例均完成推理，最后释放后目录删除 |
 

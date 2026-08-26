@@ -95,7 +95,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 **model_index 分配约定**（避免普通模型与流程模型在同一张索引表中撞键）：
 
-- **普通模型（`.dvt`/`.dvo`）**：`model_index` 由底层 `dlcv_infer` 在加载时返回，从 `0` 起递增。
+- **普通模型（`.dvt`/`.dvo`）**：`model_index` 由底层 `dlcv_infer` 在加载时返回，从 `0` 起递增；C 接口只接受 `[0, 9999]`，达到 `10000` 时释放本次加载并返回范围错误。
 - **流程模型（`.dvst`/`.dvso`/`.dvsp`）**：`model_index` 由 `dlcv_infer_cpp` / `DlcvCsharpApi` 自管理，从 `10000` 起递增，与底层索引分区。
 
 C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索引模型；两类索引分区后，流程模型不会与任何 `index < 10000` 的普通模型互相覆盖，也允许同时加载多个流程模型。
@@ -161,7 +161,7 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
 
-### DLL 映射（C++ / C# 通用）
+### DLL 映射（C++ / C API）
 
 | 加密狗类型 | DLL 名称 | 固定路径 |
 |-----------|---------|---------|
@@ -169,7 +169,7 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | None / Unknown | 不加载 | — |
 
-自动检测优先级：先检测 Sentinel，再检测 Virbox。仅检测到 Sentinel 时加载 `dlcv_infer.dll`；仅检测到 Virbox 时加载 `dlcv_infer_v.dll`；两类加密狗同时存在时加载 `dlcv_infer.dll`；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。底层 DLL 按当前进程检测到的加密狗选择，模型头中的 `dog_provider` 不参与 DLL 选择，也不触发运行期切换。模型加载、模型信息、推理和释放始终使用已选中的同一个 DLL。仅存在一类加密狗时，加载另一类加密模型会返回解析或解密失败；两类加密狗同时存在时，已选中的 DLL 可以加载两类模型。
+自动检测优先级：先检测 Sentinel，再检测 Virbox。仅检测到 Sentinel 时加载 `dlcv_infer.dll`；仅检测到 Virbox 时加载 `dlcv_infer_v.dll`；两类加密狗同时存在时加载 `dlcv_infer.dll`；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。底层 DLL 按当前进程检测到的加密狗选择，模型头中的 `dog_provider` 只用于加载前授权检查，不参与 DLL 选择，也不触发运行期切换。模型加载、模型信息、推理和释放始终使用已选中的同一个 DLL。模型头声明的授权不存在时直接返回明确错误；两类加密狗同时存在时，已选中的 DLL 可以加载两类模型。
 
 ## 输入图像处理约定
 
