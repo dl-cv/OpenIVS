@@ -11,6 +11,7 @@ using System.IO.Pipes;
 using System.IO.MemoryMappedFiles;
 using System.Text;
 using System.Linq;
+using System.Threading;
 using DlcvModules;
 using sntl_admin_csharp;
 
@@ -91,8 +92,6 @@ namespace dlcv_infer_csharp
 
         public Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false)
         {
-            _modelPath = modelPath;
-
             // 根据模型文件后缀判断是否使用 HTTP 模式
             if (string.IsNullOrEmpty(modelPath))
             {
@@ -100,10 +99,11 @@ namespace dlcv_infer_csharp
             }
 
             string extension = Path.GetExtension(modelPath).ToLower();
-            _isDvpMode = extension == ".dvp" || extension == ".dvsp";
-            _isDvsMode = extension == ".dvst" || extension == ".dvso";
+            _isDvpMode = extension == ".dvp";
+            _isDvsMode = extension == ".dvst" || extension == ".dvso" || extension == ".dvsp";
             _isRpcMode = rpc_mode;
-            string cacheKey = BuildModelCacheKey(modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
+            _modelPath = ResolveModelPathForServiceModes(modelPath, extension);
+            string cacheKey = BuildModelCacheKey(_modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
 
             if (enableCache)
             {
@@ -138,21 +138,21 @@ namespace dlcv_infer_csharp
                 if (_isDvpMode)
                 {
                     // DVP 模式：使用 HTTP API
-                    InitializeDvpMode(modelPath, device_id);
+                    InitializeDvpMode(_modelPath, device_id);
                 }
                 else if (_isDvsMode)
                 {
-                    InitializeDvsMode(modelPath, device_id);
+                    InitializeDvsMode(_modelPath, device_id);
                 }
                 else if (_isRpcMode)
                 {
                     // DVO/DVT RPC模式：使用本地RPC（命名管道+共享内存）
-                    InitializeRpcMode(modelPath, device_id);
+                    InitializeRpcMode(_modelPath, device_id);
                 }
                 else
                 {
                     // DVT 模式：使用原来的 DLL 接口
-                    InitializeDvtMode(modelPath, device_id);
+                    InitializeDvtMode(_modelPath, device_id);
                 }
 
                 // 模型加载成功后立即读取并缓存 model_info/max_shape/max_batch_size
@@ -185,6 +185,13 @@ namespace dlcv_infer_csharp
                 }
                 throw;
             }
+        }
+
+        private static string ResolveModelPathForServiceModes(string modelPath, string extension)
+        {
+            return extension == ".dvp" || extension == ".dvsp"
+                ? Path.GetFullPath(modelPath)
+                : modelPath;
         }
 
         private static string BuildModelCacheKey(string modelPath, int deviceId, bool isDvpMode, bool isDvsMode, bool isRpcMode)
@@ -357,8 +364,11 @@ namespace dlcv_infer_csharp
             try
             {
                 EnsureDvpHttpClient();
-                var response = _httpClient.GetAsync($"{_serverUrl}/docs").GetAwaiter().GetResult();
-                return response.IsSuccessStatusCode;
+                using (var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1)))
+                using (var response = _httpClient.GetAsync($"{_serverUrl}/docs", cancellation.Token).GetAwaiter().GetResult())
+                {
+                    return response.IsSuccessStatusCode;
+                }
             }
             catch (Exception)
             {
@@ -384,9 +394,10 @@ namespace dlcv_infer_csharp
                 {
                     FileName = backendExePath,
                     Arguments = "--keep_alive",
-                    WorkingDirectory = Path.GetDirectoryName(backendExePath),
-                    UseShellExecute = true,
-                    CreateNoWindow = false
+                    WorkingDirectory = Path.GetTempPath(),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
                 };
 
                 Process.Start(processStartInfo);
@@ -556,11 +567,12 @@ namespace dlcv_infer_csharp
         /// </summary>
         private void WaitForBackendService()
         {
-            const int maxWaitTime = 30; // 最大等待30秒
-            const double checkInterval = 0.2;
-            double waitedTime = 0;
+            const int maxWaitSeconds = 300;
+            const int checkIntervalMilliseconds = 200;
+            TimeSpan maxWaitTime = TimeSpan.FromSeconds(maxWaitSeconds);
+            Stopwatch stopwatch = Stopwatch.StartNew();
 
-            while (waitedTime < maxWaitTime)
+            while (stopwatch.Elapsed < maxWaitTime)
             {
                 if (CheckBackendService())
                 {
@@ -568,12 +580,18 @@ namespace dlcv_infer_csharp
                     return;
                 }
 
-                Log($"等待后端服务启动中... ({waitedTime + checkInterval}/{maxWaitTime}秒)");
-                System.Threading.Thread.Sleep((int)(checkInterval * 1000));
-                waitedTime += checkInterval;
+                double elapsedSeconds = Math.Min(stopwatch.Elapsed.TotalSeconds, maxWaitSeconds);
+                Log($"等待后端服务启动中... ({elapsedSeconds:F1}/{maxWaitSeconds}秒)");
+
+                TimeSpan remaining = maxWaitTime - stopwatch.Elapsed;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    break;
+                }
+                Thread.Sleep(Math.Min(checkIntervalMilliseconds, (int)remaining.TotalMilliseconds));
             }
 
-            throw new Exception($"等待后端服务启动超时（{maxWaitTime}秒），请检查后端服务是否正常启动");
+            throw new Exception($"等待后端服务启动超时（{maxWaitSeconds}秒），请检查后端服务是否正常启动");
         }
 
         ~Model()
@@ -606,11 +624,43 @@ namespace dlcv_infer_csharp
                 try
                 {
                     EnsureDvpHttpClient();
-                    var request = new { model_index = modelIndex };
-                    var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
-                    var response = _httpClient.PostAsync($"{_serverUrl}/free_model", content).Result;
-                    response.EnsureSuccessStatusCode();
-                    Log($"[FreeModel][DVP] HTTP释放，状态: {response.StatusCode}");
+                    string absoluteModelPath = Path.GetFullPath(_modelPath);
+                    string encodedModelPath = Uri.EscapeDataString(absoluteModelPath);
+                    string requestUrl = $"{_serverUrl}/delete_model?model_path={encodedModelPath}";
+                    using (var content = new StringContent(string.Empty, Encoding.UTF8, "application/json"))
+                    using (var response = _httpClient.PostAsync(requestUrl, content).GetAwaiter().GetResult())
+                    {
+                        string responseJson = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            throw new Exception($"DVP模型释放失败: HTTP {(int)response.StatusCode} - {responseJson}");
+                        }
+
+                        JObject resultObject;
+                        try
+                        {
+                            resultObject = JObject.Parse(responseJson);
+                        }
+                        catch (JsonException ex)
+                        {
+                            throw new Exception("DVP模型释放失败: 服务返回内容不是有效 JSON", ex);
+                        }
+
+                        string code = resultObject["code"]?.ToString();
+                        if (!string.Equals(code, "00000", StringComparison.Ordinal))
+                        {
+                            string message = resultObject["message"]?.ToString();
+                            if (string.IsNullOrWhiteSpace(message))
+                            {
+                                message = string.IsNullOrWhiteSpace(code)
+                                    ? "服务未返回 code"
+                                    : "服务返回错误码 " + code;
+                            }
+                            throw new Exception("DVP模型释放失败: " + message);
+                        }
+
+                        Log($"[FreeModel][DVP] HTTP释放，状态: {response.StatusCode}");
+                    }
                     modelIndex = -1;
                 }
                 catch (Exception ex)
@@ -1749,17 +1799,44 @@ namespace dlcv_infer_csharp
                     }
 
                     string jsonContent = JsonConvert.SerializeObject(request);
-                    var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-                    var response = _httpClient.PostAsync($"{_serverUrl}/api/inference", content).Result;
-                    var responseJson = response.Content.ReadAsStringAsync().Result;
-
-                    if (!response.IsSuccessStatusCode)
+                    string responseJson;
+                    using (var content = new StringContent(jsonContent, Encoding.UTF8, "application/json"))
+                    using (var response = _httpClient.PostAsync($"{_serverUrl}/api/inference", content).GetAwaiter().GetResult())
                     {
-                        throw new Exception($"推理失败: {response.StatusCode} - {responseJson}");
+                        responseJson = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            throw new Exception($"DVP 推理失败: HTTP {(int)response.StatusCode} - {responseJson}");
+                        }
                     }
 
-                    var resultObject = JObject.Parse(responseJson);
+                    JObject resultObject;
+                    try
+                    {
+                        resultObject = JObject.Parse(responseJson);
+                    }
+                    catch (JsonException ex)
+                    {
+                        throw new Exception("DVP 推理异常: 服务返回内容不是有效 JSON", ex);
+                    }
+
+                    string code = resultObject["code"]?.ToString();
+                    if (!string.Equals(code, "00000", StringComparison.Ordinal))
+                    {
+                        string message = resultObject["message"]?.ToString();
+                        if (string.IsNullOrWhiteSpace(message))
+                        {
+                            message = string.IsNullOrWhiteSpace(code)
+                                ? "服务未返回 code"
+                                : "服务返回错误码 " + code;
+                        }
+                        throw new Exception("DVP 推理异常: " + message);
+                    }
+
+                    if (!(resultObject["results"] is JArray))
+                    {
+                        throw new Exception("DVP 推理异常: 服务返回的 results 必须是数组");
+                    }
                     allResults.Add(resultObject);
                 }
 
@@ -1786,6 +1863,11 @@ namespace dlcv_infer_csharp
             }
             catch (Exception ex)
             {
+                if (ex.Message.StartsWith("DVP 推理异常:", StringComparison.Ordinal) ||
+                    ex.Message.StartsWith("DVP 推理失败:", StringComparison.Ordinal))
+                {
+                    throw;
+                }
                 throw new Exception($"DVP 推理失败: {ex.Message}", ex);
             }
         }
@@ -2542,8 +2624,20 @@ namespace dlcv_infer_csharp
                 if (disposing)
                 {
                     // 释放托管资源
-                    FreeModel();
-                    _httpClient?.Dispose();
+                    try
+                    {
+                        FreeModel();
+                    }
+                    catch (Exception ex) when (_isDvpMode)
+                    {
+                        Log($"[Dispose][DVP] 模型释放失败: {ex.Message}");
+                        modelIndex = -1;
+                    }
+                    finally
+                    {
+                        _httpClient?.Dispose();
+                        _httpClient = null;
+                    }
                 }
 
                 // 设置处置标志

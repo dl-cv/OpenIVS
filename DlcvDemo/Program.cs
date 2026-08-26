@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Windows;
+using dlcv_infer_csharp;
 
 namespace DlcvDemo
 {
@@ -11,7 +12,10 @@ namespace DlcvDemo
         [STAThread]
         static int Main(string[] args)
         {
-            if (args != null && args.Length > 0
+            bool hasArguments = args != null && args.Length > 0;
+            DllLoader.ShowMissingDllDialog = !hasArguments;
+
+            if (hasArguments
                 && string.Equals(args[0], "ui-test", StringComparison.OrdinalIgnoreCase))
             {
                 CliRunner.InitializeConsole();
@@ -33,7 +37,7 @@ namespace DlcvDemo
                 return uiTestWindow.UiTestExitCode;
             }
 
-            if (args != null && args.Length > 0)
+            if (hasArguments)
             {
                 CliRunner.InitializeConsole();
                 return CliRunner.Run(args);

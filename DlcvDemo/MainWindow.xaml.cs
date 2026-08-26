@@ -67,24 +67,38 @@ namespace DlcvDemo
             MaxWidth = SystemParameters.WorkArea.Width;
             MaxHeight = SystemParameters.WorkArea.Height;
             this.Title = "C# 测试程序 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+            button_load_model.IsEnabled = false;
             Thread thread = new Thread(InitializeDeviceAndUiTest);
             thread.IsBackground = true;
             thread.Start();
-            _ = RefreshEnvironmentInfoAsync();
         }
 
         private void InitializeDeviceAndUiTest()
         {
+            Exception deviceInfoError = null;
             try
             {
                 GetDeviceInfo();
             }
+            catch (Exception ex)
+            {
+                deviceInfoError = ex;
+            }
             finally
             {
-                if (uiTestOptions != null)
+                Dispatcher.BeginInvoke(new Action(async () =>
                 {
-                    Dispatcher.BeginInvoke(new Action(RunUiTest), DispatcherPriority.ApplicationIdle);
-                }
+                    await RefreshEnvironmentInfoAsync();
+                    button_load_model.IsEnabled = true;
+                    if (deviceInfoError != null)
+                    {
+                        richTextBox1.Text += "\n设备信息读取失败：" + deviceInfoError.Message;
+                    }
+                    if (uiTestOptions != null)
+                    {
+                        RunUiTest();
+                    }
+                }), DispatcherPriority.ApplicationIdle);
             }
         }
 
@@ -471,6 +485,11 @@ namespace DlcvDemo
                 UiTestExitCode = 1;
                 richTextBox1.Text = "自动 UI 测试失败\n" + ex;
                 WriteUiTestResult("failed", ex);
+            }
+            finally
+            {
+                await Dispatcher.Yield(DispatcherPriority.Render);
+                Close();
             }
         }
 
@@ -1101,15 +1120,37 @@ namespace DlcvDemo
 
         private void Form1_FormClosing(object sender, CancelEventArgs e)
         {
-            StopPressureTest();
-            // 释放模型
-            var disposable = model as IDisposable;
-            if (disposable != null)
+            try
             {
-                disposable.Dispose();
+                StopPressureTest();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("关闭窗口时停止测试失败：" + ex);
+            }
+
+            try
+            {
+                var disposable = model as IDisposable;
+                disposable?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("关闭窗口时释放当前模型失败：" + ex);
+            }
+            finally
+            {
                 model = null;
             }
-            Utils.FreeAllModels();
+
+            try
+            {
+                Utils.FreeAllModels();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("关闭窗口时释放全部模型失败：" + ex);
+            }
         }
 
         private void button1_Click(object sender, EventArgs e)

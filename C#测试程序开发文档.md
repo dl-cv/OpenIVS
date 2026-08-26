@@ -52,7 +52,8 @@
   - `AIModelRPC.exe`：优先从 `DlcvDemo` 输出目录启动；若不存在，可使用 SDK 固定路径（如 `C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`）
 - **DVP 模式（按需，加载 `.dvp` 时启用）**
   - 需要本机后端服务可访问 `http://127.0.0.1:9890`
-  - 若服务未启动，SDK 可能尝试启动固定路径程序（例如 `C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe`）；不存在则加载失败
+  - 后端检查单次最长约 1 秒；加载、模型信息与推理请求保持 30 秒超时
+  - 若服务未启动，SDK 从系统临时目录隐藏启动 `C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe --keep_alive`，最长等待 300 秒；程序不存在则加载失败
 
 #### 2.3 从零搭建工程（建议步骤，便于复刻）
 
@@ -81,7 +82,9 @@
 
 #### 2.5 命令行推理模式
 
-无参数启动时进入 WinForms GUI。存在命令行参数时由 `CliRunner` 执行无界面模式。
+无参数启动时进入 WPF GUI。首个参数为 `ui-test` 时执行 WPF 自动测试，其他带参数启动由 `CliRunner` 执行无界面模式。无参数启动缺少原生推理 DLL 时显示「需要先安装 dlcv_infer」；任何带参数启动均不显示该系统提示框，异常由 CLI 输出或写入自动测试结果文件。
+
+自动化执行 `ui-test` 时固定使用 `--interactive-dialogs false`，模型与图片按参数直接加载，测试完成或失败后自动关闭窗口。`--interactive-dialogs true` 为明确的人工交互模式，会依次打开模型和图片选择对话框，只有对话框返回后才继续执行并关闭窗口。
 
 ```text
 "C# 测试程序.exe" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
@@ -94,6 +97,7 @@
 - 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso`/`.dvsp` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
 - `--calc-mean=true` 时，结构化与 JSON 摘要包含 `with_mean`、`foreground_mean`、`background_mean`，并通过 `mean_check_passed` 检查带掩码结果是否包含均值及两种结果的一致性；普通检测结果不参与均值检查，两条结果均为空时该检查通过。
 - 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
+- `.dvp` 与 `.dvsp` 模型参数在进入模型加载流程时转换为绝对路径，DVP 后端从系统临时目录启动时仍使用调用端解析后的真实路径。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
 - `InferOneOutJson` 返回带 `result_list` 的流程判定包装对象时，命令行模式从包装对象中读取结果数组后继续执行双路径一致性检查。
 - `structured` 与 `json` 均包含 `count`、`scores`、`categories` 和 `below_threshold`。
@@ -250,6 +254,7 @@
   - 停止正在运行的压力测试/一致性测试（若有）
   - 若当前 `model` 实现 `IDisposable`：调用 `Dispose()` 并置空引用
   - 调用 `Utils.FreeAllModels()` 释放 SDK 侧所有模型
+- DVP 模型的服务端释放异常由 `Dispose()` 记录并完成本地清理，不向关闭事件传播。
 - 关闭过程中不应额外弹出提示框（除非发生未捕获异常，属于实现缺陷）
 
 ### 7. 详细功能规格（逐按钮）

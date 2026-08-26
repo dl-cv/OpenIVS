@@ -12,6 +12,9 @@ namespace DlcvDemo
     {
         private const uint LoadWithAlteredSearchPath = 0x00000008;
         private const int NvmlSuccess = 0;
+        private static readonly object ComponentLibraryLock = new object();
+        private static readonly Dictionary<string, IntPtr> ComponentLibraries =
+            new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr LoadLibraryEx(string fileName, IntPtr file, uint flags);
@@ -268,10 +271,6 @@ namespace DlcvDemo
             {
                 return false;
             }
-            finally
-            {
-                FreeLibrary(module);
-            }
         }
 
         private static bool TryInvokeUnsignedExport(string libraryPath, string exportName, out ulong value)
@@ -283,7 +282,7 @@ namespace DlcvDemo
                 return false;
             }
 
-            List<IntPtr> supportingModules = LoadCudnnSupportingLibraries(libraryPath);
+            LoadCudnnSupportingLibraries(libraryPath);
             try
             {
                 IntPtr address = GetProcAddress(module, exportName);
@@ -298,14 +297,6 @@ namespace DlcvDemo
             catch
             {
                 return false;
-            }
-            finally
-            {
-                for (int i = supportingModules.Count - 1; i >= 0; i--)
-                {
-                    FreeLibrary(supportingModules[i]);
-                }
-                FreeLibrary(module);
             }
         }
 
@@ -332,15 +323,27 @@ namespace DlcvDemo
                 value = 0;
                 return false;
             }
-            finally
-            {
-                FreeLibrary(module);
-            }
         }
 
         private static IntPtr LoadComponentLibrary(string libraryPath)
         {
-            return LoadLibraryEx(libraryPath, IntPtr.Zero, LoadWithAlteredSearchPath);
+            string fullPath = Path.GetFullPath(libraryPath);
+            lock (ComponentLibraryLock)
+            {
+                IntPtr module;
+                if (ComponentLibraries.TryGetValue(fullPath, out module))
+                {
+                    return module;
+                }
+
+                module = LoadLibraryEx(fullPath, IntPtr.Zero, LoadWithAlteredSearchPath);
+                if (module != IntPtr.Zero)
+                {
+                    // 推理过程继续使用 GPU 运行库，进程退出时由系统统一释放。
+                    ComponentLibraries[fullPath] = module;
+                }
+                return module;
+            }
         }
 
         private static List<IntPtr> LoadCudnnSupportingLibraries(string coreLibraryPath)
