@@ -112,7 +112,7 @@ public:
     // 获取全局单例；首次调用自动检测加密狗类型，有狗时加载对应 DLL，无狗时不加载
     static DllLoader& Instance();
 
-    // 根据模型头中的 dog_provider 字段，确保加载正确的 DLL
+    // 保留模型加载前检查入口；不根据模型头切换已选中的 DLL
     static void EnsureForModel(const std::string& modelPath);
     static void EnsureForModel(const std::wstring& modelPath);
 
@@ -151,7 +151,9 @@ private:
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | Unknown（无狗） | 不加载 | — |
 
-**自动检测优先级**：先检测 Sentinel，再检测 Virbox；均未检测到则返回 `DogProvider::Unknown`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
+**自动检测优先级**：先检测 Sentinel，再检测 Virbox。仅检测到 Sentinel 时加载 `dlcv_infer.dll`；仅检测到 Virbox 时加载 `dlcv_infer_v.dll`；两类加密狗同时存在时按 Sentinel 优先级加载 `dlcv_infer.dll`；均未检测到则返回 `DogProvider::Unknown`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
+
+底层 DLL 按当前进程检测到的加密狗选择，模型头中的 `dog_provider` 不参与 DLL 选择，也不会触发运行期切换。底层 DLL 加载完成后，模型加载、模型信息、推理和释放始终使用同一个 DLL。仅存在一类加密狗时，加载另一类加密模型会返回解析或解密失败；两类加密狗同时存在时，已选中的 DLL 可以加载两类模型。
 
 ---
 
@@ -559,8 +561,8 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 | 组件 | 当前加载方式 | 缺失时行为 |
 | --- | --- | --- |
-| `dlcv_infer.dll` | Sentinel 版本；`AutoDetectProvider()` 检测到 Sentinel 时加载；先按系统搜索路径查找，再回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
-| `dlcv_infer_v.dll` | Virbox 版本；仅在模型头明确指定 `dog_provider=virbox`，或 `AutoDetectProvider()` 检测到 Virbox 且未检测到 Sentinel 时启用；查找顺序为系统搜索路径，再到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
+| `dlcv_infer.dll` | 检测到 Sentinel 时加载；两类加密狗同时存在时也选择此 DLL；先按系统搜索路径查找，再回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
+| `dlcv_infer_v.dll` | 未检测到 Sentinel、但检测到 Virbox 时加载；查找顺序为系统搜索路径，再到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
 | 无加密狗 | `AutoDetectProvider()` 返回 `DogProvider::Unknown`；创建空 `DllLoader`，不 `LoadLibrary` 任何推理 DLL | 不弹框、不抛异常；加载模型时再报「未检测到授权」 |
 | `sntl_adminapi_windows_x64.dll` | `SNTLDllLoader` 先按系统搜索路径查找，再回退到 `C:\dlcv\bin\sntl_adminapi_windows_x64.dll` | 切换为空代理：`context_new/get` 返回 `SNTL_ADMIN_LM_NOT_FOUND`，`context_delete` 返回成功，`free` 为空函数 |
 | `nvml.dll` | `Utils::GetGpuInfo()` 与 NVML 包装函数运行时 `LoadLibraryA("nvml.dll")` | `GetGpuInfo()` 返回错误 JSON；初始化失败时 `code=1`，取设备数失败时 `code=2` |

@@ -169,7 +169,7 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | None / Unknown | 不加载 | — |
 
-自动检测优先级：先检测 Sentinel，再检测 Virbox；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续所有操作都走该 loader。
+自动检测优先级：先检测 Sentinel，再检测 Virbox。仅检测到 Sentinel 时加载 `dlcv_infer.dll`；仅检测到 Virbox 时加载 `dlcv_infer_v.dll`；两类加密狗同时存在时加载 `dlcv_infer.dll`；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。底层 DLL 按当前进程检测到的加密狗选择，模型头中的 `dog_provider` 不参与 DLL 选择，也不触发运行期切换。模型加载、模型信息、推理和释放始终使用已选中的同一个 DLL。仅存在一类加密狗时，加载另一类加密模型会返回解析或解密失败；两类加密狗同时存在时，已选中的 DLL 可以加载两类模型。
 
 ## 输入图像处理约定
 
@@ -451,7 +451,7 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 
 - **底层推理引擎**：`dlcv_infer` 是 OpenIVS API 层的底层依赖。OpenIVS 的 C++/C API（`dlcv_infer_cpp`）和 C# API（`DlcvCsharpApi`）均通过加载 `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）调用推理能力；C++/C API 对外产物为 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 - **加密模型文件**：`dlcv_deploy` 产出的 `.dvt`/`.dvo`/`.dvst`/`.dvso` 等文件是 OpenIVS 测试程序与 WPF 框架的输入。
-- **接口边界**：OpenIVS 不解密模型包内 `dlcv.json` 来选择 provider；`DllLoader` 只读取模型包 `header_json.dog_provider`，Sentinel 使用 `dlcv_infer.dll`，Virbox 使用 `dlcv_infer_v.dll`。
+- **接口范围**：OpenIVS 不根据模型包内的 `dlcv.json` 或 `header_json.dog_provider` 选择底层 DLL。`DllLoader` 按当前进程检测到的加密狗选择一次底层 DLL，后续不因模型类型切换。
 
 ## 运行验证方式
 
