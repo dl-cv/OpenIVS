@@ -115,6 +115,7 @@
   - 一致性测试（检测推理结果不一致并停止）
   - 释放模型、释放所有模型
   - 检查加密狗（显示加密狗ID与特性）
+  - 检查环境（显示本机软件组件的检测状态与版本）
   - 打开在线文档链接
   - 图像结果可视化（框/Mask/标签），支持缩放/拖拽/重置/快捷键切换
 
@@ -142,7 +143,7 @@
 
 ##### 4.1.1 控件清单与默认值（文本必须一致）
 
-- **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`推理JSON`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`文档`、`获取模型信息`。
+- **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`推理JSON`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`检查环境`、`文档`、`获取模型信息`。
 - **下拉框**：设备选择。
 - **Label**：`选择显卡`、`线程数`、`batch_size`、`threshold`。
 - **三态复选框**：右侧文字按状态显示 `计算均值：默认`、`计算均值：是`、`计算均值：否`。`默认` 时不发送 `calc_mean`，`是` 时发送 `true`，`否` 时发送 `false`。
@@ -442,6 +443,19 @@
 - 使用系统默认浏览器打开链接：
   - `https://docs.dlcv.com.cn/deploy/sdk/csharp_sdk`
 
+#### 7.14 检查环境（按钮：`检查环境`）
+
+- 点击后在左侧 `richTextBox1` 按分段显示本机的 Windows / .NET、NVIDIA 驱动与 GPU、CUDA Toolkit、cuDNN、TensorRT、OpenCV、ONNX Runtime、PyTorch / LibTorch、`dlcv_infer`。
+- 每段显示状态、可读取的版本、检测位置与已检查位置；未发现组件时状态显示为`未检测到`，并保留已检查位置。
+- 检查在后台执行。开始时禁用`检查环境`按钮并显示进行提示，完成或发生异常后恢复按钮，避免重复点击阻塞界面。
+- 检测优先读取当前进程模块、程序目录、相关环境变量及常用安装目录。NVIDIA 使用 `nvidia-smi` 查询 GPU 与驱动版本，并以 WMI 补充设备信息；查询最长 3 秒。
+- TensorRT 读取 `TENSORRT_ROOT`、`TENSORRT_HOME`、`TENSORRT_DIR`，并检查 `C:\TensorRT-*` 目录。ONNX Runtime 读取 `ONNXRUNTIME_ROOT`、`ONNXRUNTIME_HOME`、`ONNXRUNTIME_DIR`，同时识别 `dlcv_onnxruntime.dll` 与 `dlcv_onnxruntime_providers_*.dll`。
+- LibTorch 读取 `LIBTORCH_ROOT`、`LIBTORCH_DIR`、`TORCH_HOME`、`PYTORCH_HOME`，并检查 DLCV Python 安装目录中的 `torch`。版本优先读取同一安装目录的 `TORCH_VERSION_MAJOR`、`TORCH_VERSION_MINOR`、`TORCH_VERSION_PATCH`，未读取到时检查 `version.py`。
+- cuDNN 支持 `v9.7\bin\12.8`、`include\12.8`、`lib\12.8\x64` 等目录结构。
+- OpenCV 优先检查 `opencv_world*.dll` 与 `OpenCvSharpExtern.dll`，支持程序目录下的 `dll\x64\OpenCvSharpExtern.dll`，以及 `OPENCV_DIR` 指向 `vcXX\lib` 时相邻的 `bin` 目录；版本从同一安装目录的 `CV_VERSION_MAJOR`、`CV_VERSION_MINOR`、`CV_VERSION_REVISION` 读取。ONNX Runtime 还检查 DLCV Python 安装目录中的 `onnxruntime\capi`。
+- DLL 已找到时优先读取其文件版本；文件版本不可用时，只读取同一安装目录的版本头文件或包元数据。`dlcv_infer` 的 Python 包元数据仅用于对应 DLL 无文件版本时的版本显示。
+- 每个组件独立处理异常，某个组件无法读取时仍继续显示其他组件的检测结果；不安装组件，也不修改系统环境变量。
+
 ### 8. 错误处理规范（必须一致）
 
 #### 8.1 统一错误输出 `ReportError(title, ex)`
@@ -511,6 +525,11 @@
 - **释放**
   - 释放模型后文本框显示 `模型已释放`
   - 释放所有模型后文本框显示 `所有模型已释放`
+
+- **环境检查**
+  - 点击`检查环境`后，左侧文本框包含 Windows / .NET、NVIDIA 驱动与 GPU、CUDA Toolkit、cuDNN、TensorRT、OpenCV、ONNX Runtime、PyTorch / LibTorch、`dlcv_infer` 九个分段。
+  - 缺失组件显示`未检测到`与已检查位置；任一组件读取异常不影响其他组件的结果显示。
+  - 检查期间按钮不可重复点击，完成后恢复可用状态。
 
 - **ImageViewer交互**
   - 滚轮缩放、左键拖拽、右键重置均有效

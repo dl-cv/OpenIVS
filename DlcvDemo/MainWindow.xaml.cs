@@ -1115,6 +1115,29 @@ namespace DlcvDemo
             ShowDogInfo();
         }
 
+        private async void button_check_environment_Click(object sender, EventArgs e)
+        {
+            if (!button_check_environment.IsEnabled)
+            {
+                return;
+            }
+
+            button_check_environment.IsEnabled = false;
+            richTextBox1.Text = "正在检查环境，请稍候...";
+            try
+            {
+                richTextBox1.Text = await Task.Run(() => EnvironmentInfoCollector.Collect());
+            }
+            catch (Exception ex)
+            {
+                richTextBox1.Text = "环境检查失败：\n" + ex.Message;
+            }
+            finally
+            {
+                button_check_environment.IsEnabled = true;
+            }
+        }
+
         private void button_free_all_model_Click(object sender, EventArgs e)
         {
             // 如果存在正在运行的压力测试，先停止它

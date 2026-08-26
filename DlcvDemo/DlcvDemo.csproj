@@ -150,6 +150,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CliRunner.cs" />
+    <Compile Include="EnvironmentInfoCollector.cs" />
     <Compile Include="UiTestOptions.cs" />
     <Compile Include="MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
