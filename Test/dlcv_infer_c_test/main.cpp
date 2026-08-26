@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -1063,6 +1064,54 @@ static int LoadModel(const std::wstring& path) {
     return modelIndex;
 }
 
+static bool RunConcurrentModelLoadingCheck(
+    const std::wstring& dvtPath,
+    const std::wstring& dvstPath,
+    int threadCount) {
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<int> failed{0};
+    std::mutex errorMutex;
+    std::string firstError;
+    std::vector<std::unique_ptr<dlcv_infer::Model>> models(static_cast<size_t>(threadCount));
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<size_t>(threadCount));
+
+    for (int threadIndex = 0; threadIndex < threadCount; ++threadIndex) {
+        workers.emplace_back([&, threadIndex]() {
+            ready.fetch_add(1);
+            while (!start.load()) std::this_thread::yield();
+            try {
+                const std::wstring& modelPath = (threadIndex & 1) == 0 ? dvtPath : dvstPath;
+                auto model = std::make_unique<dlcv_infer::Model>(modelPath, 0);
+                const dlcv_infer::json modelInfo = model->GetModelInfo();
+                if (modelInfo.is_null() || modelInfo.empty()) {
+                    throw std::runtime_error("模型信息为空");
+                }
+                models[static_cast<size_t>(threadIndex)] = std::move(model);
+            } catch (const std::exception& ex) {
+                failed.fetch_add(1);
+                std::lock_guard<std::mutex> lock(errorMutex);
+                if (firstError.empty()) firstError = ex.what();
+            }
+        });
+    }
+
+    while (ready.load() != threadCount) std::this_thread::yield();
+    start.store(true);
+    for (auto& worker : workers) worker.join();
+
+    if (failed.load() != 0) {
+        std::cerr << "FAIL: 普通模型与流程模型并发加载失败，失败次数=" << failed.load()
+                  << "，首个错误=" << firstError << "\n";
+        return false;
+    }
+
+    models.clear();
+    std::cout << "PASS: 普通模型与流程模型并发加载成功，线程数=" << threadCount << "\n";
+    return true;
+}
+
 struct ProcessMemorySnapshot {
     unsigned long long privateBytes = 0;
     unsigned long long workingSetBytes = 0;
@@ -1702,8 +1751,9 @@ int main(int argc, char** argv) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
-    if (dlcv_infer_pure_c_header_test() != 2) {
-        std::cerr << "FAIL: 纯 C 结构化接口调用失败\n";
+    const int pureCResultCode = dlcv_infer_pure_c_header_test();
+    if (pureCResultCode != 2) {
+        std::cerr << "FAIL: 纯 C 结构化接口调用失败，返回码=" << pureCResultCode << "\n";
         return 1;
     }
     std::cout << "PASS: 纯 C 结构化接口编译和调用成功\n";
@@ -1749,8 +1799,15 @@ int main(int argc, char** argv) {
         std::cout << (concurrencyOk ? "\n并发测试通过\n" : "\n并发测试失败\n");
         return concurrencyOk ? 0 : 1;
     }
+    if (argc == 2 && std::strcmp(argv[1], "--model-load-concurrency") == 0) {
+        const bool concurrencyOk = RunConcurrentModelLoadingCheck(dvtPath, dvstPath, 4);
+        dlcv_infer_cpp_free_all_models_c();
+        std::cout << (concurrencyOk ? "\n模型加载并发测试通过\n" : "\n模型加载并发测试失败\n");
+        return concurrencyOk ? 0 : 1;
+    }
 
     bool ok = true;
+    ok = RunConcurrentModelLoadingCheck(dvtPath, dvstPath, 4) && ok;
     ok = RunCapiExportCompletenessCheck() && ok;
     ok = RunNativeJsonDvtByteRegression(dvtPath, dvtImage) && ok;
     ok = RunNativeJsonDvstCheck(dvstPath, dvstImage) && ok;

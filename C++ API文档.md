@@ -153,6 +153,8 @@ private:
 
 **自动检测优先级**：先检测 Sentinel，再检测 Virbox。仅检测到 Sentinel 时加载 `dlcv_infer.dll`；仅检测到 Virbox 时加载 `dlcv_infer_v.dll`；两类加密狗同时存在时按 Sentinel 优先级加载 `dlcv_infer.dll`；均未检测到则返回 `DogProvider::Unknown`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
 
+**并发模型加载**：`DllLoader` 全局实例的访问由互斥量串行执行；`Model`、`SlidingWindowModel`、`NativeApi::LoadModel` 和 `NativeApi::LoadModelC` 进入底层模型加载函数时使用同一模型加载互斥量。流程归档的读取与展开不占用该互斥量，流程中的底层子模型加载仍经过相同保护。
+
 底层 DLL 按当前进程检测到的加密狗选择，模型头中的 `dog_provider` 不参与 DLL 选择，也不会触发运行期切换。底层 DLL 加载完成后，模型加载、模型信息、推理和释放始终使用同一个 DLL。仅存在一类加密狗时，加载另一类加密模型会返回解析或解密失败；两类加密狗同时存在时，已选中的 DLL 可以加载两类模型。
 
 ---

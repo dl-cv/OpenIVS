@@ -1385,6 +1385,12 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
 
 namespace dlcv_infer {
 
+    // DllLoader 全局实例的访问需要串行执行。
+    static std::mutex g_dllLoaderMu;
+
+    // 底层推理 DLL 的模型加载过程串行执行，避免并发加载同时修改共享状态。
+    static std::mutex g_modelLoadMu;
+
     // 底层 modelIndex 全局引用计数（解决底层 DLL content-hash dedup 导致同 modelIndex 被多对象共享的问题）
     static std::mutex g_modelIndexRefMu;
     static std::unordered_map<int, int> g_modelIndexRefCount;
@@ -1660,6 +1666,7 @@ namespace dlcv_infer {
     }
 
     DllLoader& DllLoader::Instance() {
+        std::lock_guard<std::mutex> lock(g_dllLoaderMu);
         if (!instance)
         {
             instance = new DllLoader(AutoDetectProvider());
@@ -1715,6 +1722,7 @@ namespace dlcv_infer {
         if (!TryResolveExplicitProviderFromStream(file, needed)) {
             return;
         }
+        std::lock_guard<std::mutex> lock(g_dllLoaderMu);
         if (instance && instance->dogProvider == needed) {
             return;
         }
@@ -1747,6 +1755,7 @@ namespace dlcv_infer {
         if (!TryResolveExplicitProviderFromStream(file, needed)) {
             return;
         }
+        std::lock_guard<std::mutex> lock(g_dllLoaderMu);
         if (instance && instance->dogProvider == needed) {
             return;
         }
@@ -1796,6 +1805,7 @@ namespace dlcv_infer {
             }
         }
 
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
         DllLoader::EnsureForModel(modelPathUtf8);
         _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
@@ -1861,6 +1871,7 @@ namespace dlcv_infer {
             }
         }
 
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
         DllLoader::EnsureForModel(modelPath);
         _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
@@ -2683,6 +2694,7 @@ namespace dlcv_infer {
         float threshold,
         float iou_threshold,
         float combine_ios_threshold) {
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
         DllLoader::EnsureForModel(modelPath);
         _dllLoader = &DllLoader::Instance();
         _loadedDogProvider = _dllLoader->GetDogProvider();
@@ -2914,6 +2926,7 @@ namespace dlcv_infer {
 
     const char* NativeApi::LoadModel(const char* configStr) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
         auto& loader = DllLoader::Instance();
         return RequireNativeApiFunction(loader.GetLoadModelFunc(), "dlcv_load_model")(configStr);
     }
@@ -3027,6 +3040,7 @@ namespace dlcv_infer {
     }
 
     int NativeApi::LoadModelC(const char* modelPath, int deviceId) {
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
         auto& loader = DllLoader::Instance();
         return RequireNativeApiFunction(loader.GetLoadModelCFunc(), "dlcv_load_model_c")(
             modelPath,

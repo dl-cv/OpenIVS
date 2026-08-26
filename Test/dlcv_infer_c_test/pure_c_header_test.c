@@ -26,7 +26,7 @@ int dlcv_infer_pure_c_header_test(void) {
     DlcvFreeResultCFunction free_function;
     int result_code;
 
-    if (module == NULL) return -1;
+    if (module == NULL) return -(int)GetLastError();
     infer_function = (DlcvInferCFunction)GetProcAddress(module, "dlcv_infer_c");
     free_function = (DlcvFreeResultCFunction)GetProcAddress(module, "dlcv_free_model_result_c");
     if (infer_function == NULL || free_function == NULL) {
