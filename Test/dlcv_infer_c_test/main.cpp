@@ -49,6 +49,39 @@ struct NativeCapi {
     }
 };
 
+struct NativeJsonApi {
+    using StringCall = const char* (DLCV_C_NATIVE_CALL*)(const char*);
+    using FreeString = void (DLCV_C_NATIVE_CALL*)(const char*);
+    using FreeAll = void (DLCV_C_NATIVE_CALL*)();
+
+    HMODULE module = nullptr;
+    StringCall loadModel = nullptr;
+    StringCall freeModel = nullptr;
+    StringCall getModelInfo = nullptr;
+    StringCall infer = nullptr;
+    FreeString freeModelResult = nullptr;
+    FreeString freeResult = nullptr;
+    FreeAll freeAllModels = nullptr;
+
+    ~NativeJsonApi() {
+        if (module != nullptr) FreeLibrary(module);
+    }
+};
+
+struct NativeJsonModelCleanup {
+    ~NativeJsonModelCleanup() {
+        dlcv_free_all_models();
+    }
+};
+
+static bool LoadNativeJsonApi(NativeJsonApi& api, std::string& error);
+static bool CopyJsonCallResult(
+    NativeJsonApi::StringCall call,
+    NativeJsonApi::FreeString release,
+    const std::string& config,
+    std::string& result,
+    std::string& error);
+
 static std::string WideToUtf8(const std::wstring& value) {
     if (value.empty()) return {};
     const int bytes = WideCharToMultiByte(
@@ -514,6 +547,285 @@ static bool RunCompatibilityFlowCheck(
     return true;
 }
 
+static bool LoadWrapperNativeInfer(NativeJsonApi& api, std::string& error) {
+    api.module = LoadLibraryW(L"dlcv_infer_cpp.dll");
+    if (api.module == nullptr) {
+        error = "dlcv_infer_cpp.dll 加载失败: " + std::to_string(GetLastError());
+        return false;
+    }
+    api.infer = reinterpret_cast<NativeJsonApi::StringCall>(
+        GetProcAddress(api.module, "dlcv_infer"));
+    if (api.infer == nullptr) {
+        error = "dlcv_infer_cpp.dll 缺少 dlcv_infer 导出";
+        return false;
+    }
+    return true;
+}
+
+static std::string BuildNativeInferConfig(
+    int modelIndex,
+    const cv::Mat& image,
+    bool withMask = true) {
+    dlcv_infer::json config = {
+        { "model_index", modelIndex },
+        { "image_list", dlcv_infer::json::array({
+            {
+                { "width", image.cols },
+                { "height", image.rows },
+                { "channels", image.channels() },
+                { "image_ptr", static_cast<uint64_t>(reinterpret_cast<uintptr_t>(image.data)) },
+                { "dtype", "uint8" }
+            }
+        }) },
+        { "threshold", 0.05 },
+        { "with_mask", withMask }
+    };
+    return config.dump();
+}
+
+static bool ParseSuccessfulModelIndex(const std::string& value, int& modelIndex) {
+    try {
+        const dlcv_infer::json result = dlcv_infer::json::parse(value);
+        if (!result.is_object() || result.value("code", -1) != 0 ||
+            !result.contains("model_index") || !result.at("model_index").is_number_integer()) {
+            return false;
+        }
+        modelIndex = result.at("model_index").get<int>();
+        return modelIndex >= 0;
+    } catch (...) {
+        return false;
+    }
+}
+
+static bool RunNativeJsonDvtByteRegression(
+    const std::wstring& modelPath,
+    const cv::Mat& image) {
+    NativeJsonApi native;
+    NativeJsonApi wrapper;
+    std::string error;
+    if (!LoadNativeJsonApi(native, error)) {
+        std::cerr << "FAIL: " << error << "\n";
+        return false;
+    }
+    if (!LoadWrapperNativeInfer(wrapper, error)) {
+        std::cerr << "FAIL: " << error << "\n";
+        return false;
+    }
+    NativeJsonModelCleanup modelCleanup;
+
+    dlcv_free_all_models();
+    native.freeAllModels();
+
+    const std::string missingLoadConfig = dlcv_infer::json{
+        { "model_path", "Z:\\\\dlcv_missing_model.dvt" },
+        { "device_id", 0 }
+    }.dump();
+    std::string nativeMissingLoad;
+    std::string wrapperMissingLoad;
+    if (!CopyJsonCallResult(native.loadModel, native.freeResult, missingLoadConfig,
+            nativeMissingLoad, error) ||
+        !CopyJsonCallResult(dlcv_load_model, dlcv_free_result, missingLoadConfig,
+            wrapperMissingLoad, error) ||
+        nativeMissingLoad != wrapperMissingLoad) {
+        std::cerr << "FAIL: dvt 加载失败结果未保持逐字节转发"
+                  << (error.empty() ? "" : ": " + error) << "\n";
+        return false;
+    }
+
+    const std::string loadConfig = dlcv_infer::json{
+        { "model_path", WideToUtf8(modelPath) },
+        { "device_id", 0 }
+    }.dump();
+    std::string loadResult;
+    if (!CopyJsonCallResult(dlcv_load_model, dlcv_free_result, loadConfig, loadResult, error)) {
+        std::cerr << "FAIL: dvt 原生 JSON 加载失败: " << error << "\n";
+        return false;
+    }
+    int modelIndex = -1;
+    if (!ParseSuccessfulModelIndex(loadResult, modelIndex)) {
+        std::cerr << "FAIL: dvt 原生 JSON 加载结果无有效 model_index: " << loadResult << "\n";
+        return false;
+    }
+
+    const std::string indexConfig = dlcv_infer::json{ { "model_index", modelIndex } }.dump();
+    std::string nativeInfo;
+    std::string wrapperInfo;
+    bool ok = CopyJsonCallResult(native.getModelInfo, native.freeResult, indexConfig,
+                  nativeInfo, error) &&
+        CopyJsonCallResult(dlcv_get_model_info, dlcv_free_result, indexConfig,
+                  wrapperInfo, error) &&
+        nativeInfo == wrapperInfo;
+
+    // 掩码地址由每次调用单独分配，逐字节比较时关闭掩码返回。
+    const std::string inferConfig = BuildNativeInferConfig(modelIndex, image, false);
+    std::string nativeInfer;
+    std::string wrapperInfer;
+    ok = CopyJsonCallResult(native.infer, native.freeModelResult, inferConfig,
+             nativeInfer, error) && ok;
+    ok = CopyJsonCallResult(wrapper.infer, dlcv_free_model_result, inferConfig,
+             wrapperInfer, error) && ok;
+    ok = nativeInfer == wrapperInfer && ok;
+
+    const std::string missingIndexConfig = dlcv_infer::json{ { "model_index", -987654 } }.dump();
+    std::string nativeMissingFree;
+    std::string wrapperMissingFree;
+    ok = CopyJsonCallResult(native.freeModel, native.freeResult, missingIndexConfig,
+             nativeMissingFree, error) && ok;
+    ok = CopyJsonCallResult(dlcv_free_model, dlcv_free_result, missingIndexConfig,
+             wrapperMissingFree, error) && ok;
+    ok = nativeMissingFree == wrapperMissingFree && ok;
+
+    std::string freeResult;
+    const bool validFreeOk = CopyJsonCallResult(
+        dlcv_free_model, dlcv_free_result, indexConfig, freeResult, error);
+    try {
+        ok = validFreeOk && dlcv_infer::json::parse(freeResult).value("code", -1) == 0 && ok;
+    } catch (...) {
+        ok = false;
+    }
+    dlcv_free_all_models();
+    if (!ok) {
+        std::cerr << "FAIL: dvt 原生 JSON 逐字节回归失败"
+                  << (error.empty() ? "" : ": " + error) << "\n";
+        return false;
+    }
+
+    std::cout << "PASS: dvt 原生 JSON 加载、信息、推理和释放保持底层逐字节结果\n";
+    return true;
+}
+
+static bool IsSuccessfulNativeInfo(const std::string& value) {
+    try {
+        const dlcv_infer::json result = dlcv_infer::json::parse(value);
+        return result.is_object() && result.contains("code") &&
+            result.at("code").is_number_integer() && result.at("code").get<int>() == 0 &&
+            result.contains("message") && result.at("message").is_string() &&
+            result.contains("model_info") && result.at("model_info").is_object();
+    } catch (...) {
+        return false;
+    }
+}
+
+static bool IsSuccessfulNativeInfer(const std::string& value, bool requireResults) {
+    try {
+        const dlcv_infer::json result = dlcv_infer::json::parse(value);
+        if (!result.is_object() || result.value("code", -1) != 0 ||
+            !result.contains("sample_results") || !result.at("sample_results").is_array() ||
+            result.at("sample_results").empty()) {
+            return false;
+        }
+        bool hasResults = false;
+        for (const auto& sample : result.at("sample_results")) {
+            if (!sample.is_object() || !sample.contains("results") ||
+                !sample.at("results").is_array()) {
+                return false;
+            }
+            for (const auto& object : sample.at("results")) {
+                if (!object.is_object()) return false;
+                hasResults = true;
+                if (!object.value("with_mask", false)) continue;
+                if (!object.contains("mask") || !object.at("mask").is_object()) return false;
+                const auto& mask = object.at("mask");
+                if (!mask.contains("mask_ptr") || !mask.at("mask_ptr").is_number() ||
+                    mask.at("mask_ptr").get<uint64_t>() == 0 ||
+                    mask.value("height", 0) <= 0 || mask.value("width", 0) <= 0) {
+                    return false;
+                }
+            }
+        }
+        return !requireResults || hasResults;
+    } catch (...) {
+        return false;
+    }
+}
+
+static bool RunNativeJsonDvstCheck(
+    const std::wstring& modelPath,
+    const cv::Mat& image) {
+    dlcv_free_all_models();
+    NativeJsonApi wrapper;
+    std::string error;
+    if (!LoadWrapperNativeInfer(wrapper, error)) {
+        std::cerr << "FAIL: " << error << "\n";
+        return false;
+    }
+    NativeJsonModelCleanup modelCleanup;
+    const std::string loadConfig = dlcv_infer::json{
+        { "model_path", WideToUtf8(modelPath) },
+        { "device_id", 0 }
+    }.dump();
+    std::string loadResult;
+    if (!CopyJsonCallResult(dlcv_load_model, dlcv_free_result, loadConfig, loadResult, error)) {
+        std::cerr << "FAIL: dvst 原生 JSON 加载失败: " << error << "\n";
+        return false;
+    }
+
+    int modelIndex = -1;
+    if (!ParseSuccessfulModelIndex(loadResult, modelIndex) || modelIndex < 10000) {
+        std::cerr << "FAIL: dvst 原生 JSON 未返回流程模型索引: " << loadResult << "\n";
+        return false;
+    }
+
+    const std::string infoConfig = dlcv_infer::json{ { "model_index", modelIndex } }.dump();
+    const std::string pathInfoConfig = dlcv_infer::json{
+        { "model_path", WideToUtf8(modelPath) }
+    }.dump();
+    const std::string inferConfig = BuildNativeInferConfig(modelIndex, image);
+    std::string infoResult;
+    std::string pathInfoResult;
+    std::string inferResult;
+    bool ok = CopyJsonCallResult(
+                  dlcv_get_model_info, dlcv_free_result, infoConfig, infoResult, error) &&
+        IsSuccessfulNativeInfo(infoResult);
+    ok = CopyJsonCallResult(
+             dlcv_get_model_info, dlcv_free_result, pathInfoConfig, pathInfoResult, error) &&
+        IsSuccessfulNativeInfo(pathInfoResult) && ok;
+    ok = CopyJsonCallResult(
+             wrapper.infer, dlcv_free_model_result, inferConfig, inferResult, error) && ok;
+    ok = IsSuccessfulNativeInfer(inferResult, true) && ok;
+
+    std::atomic<int> failures{0};
+    std::vector<std::thread> workers;
+    for (int threadIndex = 0; threadIndex < 4; ++threadIndex) {
+        workers.emplace_back([&, threadIndex]() {
+            for (int iteration = 0; iteration < 5; ++iteration) {
+                std::string value;
+                std::string threadError;
+                const bool readInfo = ((threadIndex + iteration) % 2) == 0;
+                const bool callOk = readInfo
+                    ? CopyJsonCallResult(
+                        dlcv_get_model_info, dlcv_free_result, infoConfig, value, threadError)
+                    : CopyJsonCallResult(
+                        wrapper.infer, dlcv_free_model_result, inferConfig, value, threadError);
+                const bool valueOk = readInfo
+                    ? IsSuccessfulNativeInfo(value)
+                    : IsSuccessfulNativeInfer(value, true);
+                if (!callOk || !valueOk) failures.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    ok = failures.load(std::memory_order_relaxed) == 0 && ok;
+
+    std::string freeResult;
+    const bool freeOk = CopyJsonCallResult(
+        dlcv_free_model, dlcv_free_result, infoConfig, freeResult, error);
+    try {
+        ok = freeOk && dlcv_infer::json::parse(freeResult).value("code", -1) == 0 && ok;
+    } catch (...) {
+        ok = false;
+    }
+    dlcv_free_all_models();
+    if (!ok) {
+        std::cerr << "FAIL: dvst 原生 JSON 加载、信息、推理、并发或释放验证失败"
+                  << (error.empty() ? "" : ": " + error) << "\n";
+        return false;
+    }
+
+    std::cout << "PASS: dvst 原生 JSON 完整流程及同索引信息/推理并发验证成功\n";
+    return true;
+}
+
 static std::string BuildResultFingerprint(const DlcvCResult& result) {
     std::ostringstream out;
     out << "samples=" << result.n;
@@ -576,6 +888,51 @@ static bool InferFingerprint(
 
     fingerprint = BuildResultFingerprint(result);
     dlcv_infer_cpp_free_model_result_c(&result);
+    return true;
+}
+
+static bool LoadNativeJsonApi(NativeJsonApi& api, std::string& error) {
+    api.module = LoadLibraryW(L"C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll");
+    if (api.module == nullptr) {
+        error = "dlcv_infer.dll 加载失败: " + std::to_string(GetLastError());
+        return false;
+    }
+    api.loadModel = reinterpret_cast<NativeJsonApi::StringCall>(
+        GetProcAddress(api.module, "dlcv_load_model"));
+    api.freeModel = reinterpret_cast<NativeJsonApi::StringCall>(
+        GetProcAddress(api.module, "dlcv_free_model"));
+    api.getModelInfo = reinterpret_cast<NativeJsonApi::StringCall>(
+        GetProcAddress(api.module, "dlcv_get_model_info"));
+    api.infer = reinterpret_cast<NativeJsonApi::StringCall>(
+        GetProcAddress(api.module, "dlcv_infer"));
+    api.freeModelResult = reinterpret_cast<NativeJsonApi::FreeString>(
+        GetProcAddress(api.module, "dlcv_free_model_result"));
+    api.freeResult = reinterpret_cast<NativeJsonApi::FreeString>(
+        GetProcAddress(api.module, "dlcv_free_result"));
+    api.freeAllModels = reinterpret_cast<NativeJsonApi::FreeAll>(
+        GetProcAddress(api.module, "dlcv_free_all_models"));
+    if (api.loadModel == nullptr || api.freeModel == nullptr || api.getModelInfo == nullptr ||
+        api.infer == nullptr || api.freeModelResult == nullptr || api.freeResult == nullptr ||
+        api.freeAllModels == nullptr) {
+        error = "dlcv_infer.dll 原生 JSON API 不完整";
+        return false;
+    }
+    return true;
+}
+
+static bool CopyJsonCallResult(
+    NativeJsonApi::StringCall call,
+    NativeJsonApi::FreeString release,
+    const std::string& config,
+    std::string& result,
+    std::string& error) {
+    const char* value = call(config.c_str());
+    if (value == nullptr) {
+        error = "原生 JSON 接口返回空指针";
+        return false;
+    }
+    result.assign(value);
+    release(value);
     return true;
 }
 
@@ -1358,6 +1715,8 @@ int main(int argc, char** argv) {
 
     bool ok = true;
     ok = RunCapiExportCompletenessCheck() && ok;
+    ok = RunNativeJsonDvtByteRegression(dvtPath, dvtImage) && ok;
+    ok = RunNativeJsonDvstCheck(dvstPath, dvstImage) && ok;
     ok = RunNativeCompatibilityCheck(dvtPath, dvtImage) && ok;
     ok = RunCompatibilityFlowCheck(dvstPath, dvstImage) && ok;
     ok = RunDvstTempDirectoryReuseCheck(dvstPath, dvstImage) && ok;
