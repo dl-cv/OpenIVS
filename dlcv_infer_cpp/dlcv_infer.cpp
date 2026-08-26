@@ -504,25 +504,6 @@ std::string ShortHash(const std::string& fullHash) {
     return fullHash.substr(0, std::min(kShortHashLength, fullHash.size()));
 }
 
-std::string GetNormalizedDvsPathUtf8(const std::wstring& archivePathW) {
-#ifdef _WIN32
-    const DWORD required = GetFullPathNameW(archivePathW.c_str(), 0, nullptr, nullptr);
-    if (required == 0) throw std::runtime_error("无法解析 DVS 完整路径");
-    std::vector<wchar_t> buffer(static_cast<size_t>(required));
-    if (GetFullPathNameW(archivePathW.c_str(), required, buffer.data(), nullptr) == 0) {
-        throw std::runtime_error("无法解析 DVS 完整路径");
-    }
-    std::wstring normalizedPath(buffer.data());
-    for (wchar_t& ch : normalizedPath) ch = static_cast<wchar_t>(std::towlower(ch));
-    return dlcv_infer::convertWstringToUtf8(normalizedPath);
-#else
-    std::error_code ec;
-    const fs::path fullPath = fs::absolute(fs::path(WideToUtf8Portable(archivePathW)), ec);
-    if (ec) throw std::runtime_error("无法解析 DVS 完整路径");
-    return fullPath.lexically_normal().string();
-#endif
-}
-
 std::string GetDvsTempDir(const std::string& archiveIdentity) {
 #ifdef _WIN32
     char tmpPath[MAX_PATH] = { 0 };
@@ -683,7 +664,6 @@ void WriteUtf8Text(const std::string& path, const std::string& content) {
 }
 
 DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
-    const std::string normalizedPath = GetNormalizedDvsPathUtf8(archivePathW);
 #ifdef _WIN32
     FILE* fp = nullptr;
     fp = _wfsopen(archivePathW.c_str(), L"rb", _SH_DENYWR);
@@ -697,12 +677,7 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
 
     DvsUnpackResult out;
     try {
-        const std::string contentHash = HashOpenFileAndRewind(fp);
-        const std::string pathHash = Sha256Hex(normalizedPath.data(), normalizedPath.size());
-        std::string identitySource = pathHash;
-        identitySource.push_back('\0');
-        identitySource += contentHash;
-        const std::string archiveIdentity = Sha256Hex(identitySource.data(), identitySource.size());
+        const std::string archiveIdentity = HashOpenFileAndRewind(fp);
         out.tempDir = GetDvsTempDir(archiveIdentity);
 
         std::lock_guard<std::mutex> cacheLock(g_dvsTempCacheMutex);
