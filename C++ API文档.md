@@ -639,6 +639,8 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧额外处理 DVS 归档解包、`pipeline.json` 中 `model_path` 重写，以及临时目录清理。
 
+DVS 临时目录使用归档文件内容的完整 SHA-256 和进程 ID 命名。相同字节内容在同一进程内复用解压目录和模型池，不受外部文件路径影响；内容变化后使用新的目录和模型池项。共享目录按实例数量计数，最后一个实例释放后删除。
+
 ### 23.2 `FlowGraphModel`
 
 `FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`GetDvsModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并预加载 `model/*` 节点，同时保存每个模型节点的普通模型信息。
