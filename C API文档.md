@@ -36,7 +36,7 @@
 | C 导出 | `dlcv_infer_cpp` | 将 19 个 JSON、设备和系统控制方法导出为 C 名称函数，并保留 4 个结构化兼容入口 |
 | 扩展接口 | `dlcv_infer_cpp` | 提供基于 C++ `Model` 的 11 个 `dlcv_infer_cpp_*_c` 入口 |
 
-23 个非公共索引接口均已增加 `NativeApi` 方法。第 1～19 项由 `dlcv_infer_cpp` 直接转发 `NativeApi`；第 20～23 项在同一工程中提供 C 接口实现，并使用 `Model` 封装保持 `.dvst/.dvso` 支持。11 个扩展入口由同一模型表提供加载、推理、查询和释放能力。
+23 个非公共索引接口均已增加 `NativeApi` 方法。JSON 模型接口对 `.dvt/.dvo` 请求继续直接转发 `NativeApi`；对 `.dvst/.dvso/.dvsp` 请求使用 `Model` 和同一模型表完成加载、推理、查询和释放。设备与系统接口继续直接转发。第 20～23 项在同一工程中提供结构化 C 接口实现，11 个扩展入口复用同一模型表。
 
 ## 3. 23 个非公共索引接口逐项对照
 
@@ -44,13 +44,13 @@
 
 | # | 底层 `dlcv_infer` 接口 | C++ 封装方法 | C 导出 | 输入 | 输出 | 释放方式 | 一致性 |
 | ---: | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `const char* dlcv_load_model(const char* config_str)` | `NativeApi::LoadModel(const char*)` | `dlcv_load_model(const char*)` | JSON 字符串：`model_path`，可选 `device_id`、`type`、`warm_up` | 新分配的 JSON 字符串，包含 `code`、`message` 和模型索引 | 用 `dlcv_free_result` 释放返回字符串 | 参数、返回 JSON 和底层模型生命周期保持一致 |
-| 2 | `const char* dlcv_free_model(const char* config_str)` | `NativeApi::FreeModel(const char*)` | `dlcv_free_model(const char*)` | JSON 字符串：`model_index` | 新分配的状态 JSON 字符串 | 用 `dlcv_free_result` 释放返回字符串 | 释放结果码和消息保持一致 |
-| 3 | `const char* dlcv_get_model_info(const char* config_str)` | `NativeApi::GetModelInfo(const char*)` | `dlcv_get_model_info(const char*)` | JSON 字符串：`model_index` 或 `model_path` | 新分配的模型信息 JSON 字符串 | 用 `dlcv_free_result` 释放返回字符串 | 两种查询方式和返回结构保持一致 |
-| 4 | `const char* dlcv_infer(const char* config_str)` | `NativeApi::Infer(const char*)` | `dlcv_infer(const char*)` | JSON 字符串：`model_index`、`image_list` 和推理参数 | 新分配的推理结果 JSON 字符串 | 只调用 `dlcv_free_model_result`；该函数同时释放 mask 和外层字符串 | 输入字段、结果字段和错误码保持一致 |
-| 5 | `void dlcv_free_model_result(const char* config_str)` | `NativeApi::FreeModelResult(const char*)` | `dlcv_free_model_result(const char*)` | `dlcv_infer` 返回的结果字符串 | 无 | 解析结果，释放 JSON 中记录的 mask 地址，最后释放外层字符串 | 释放范围和底层接口保持一致 |
+| 1 | `const char* dlcv_load_model(const char* config_str)` | `NativeApi::LoadModel(const char*)` | `dlcv_load_model(const char*)` | JSON 字符串：`model_path`，可选 `device_id`、`type`、`warm_up` | 新分配的 JSON 字符串，包含 `code`、`message` 和模型索引 | 用 `dlcv_free_result` 释放返回字符串 | `.dvt/.dvo` 原样转发；`.dvst/.dvso/.dvsp` 使用 `Model` 加载并返回同格式状态 |
+| 2 | `const char* dlcv_free_model(const char* config_str)` | `NativeApi::FreeModel(const char*)` | `dlcv_free_model(const char*)` | JSON 字符串：`model_index` | 新分配的状态 JSON 字符串 | 用 `dlcv_free_result` 释放返回字符串 | 普通模型转发到底层；流程模型从统一模型表释放，结果码和消息格式一致 |
+| 3 | `const char* dlcv_get_model_info(const char* config_str)` | `NativeApi::GetModelInfo(const char*)` | `dlcv_get_model_info(const char*)` | JSON 字符串：`model_index` 或 `model_path`，流程路径可选 `device_id` | 新分配的模型信息 JSON 字符串 | 用 `dlcv_free_result` 释放返回字符串 | 普通模型直接转发；流程模型支持索引和路径两种查询方式 |
+| 4 | `const char* dlcv_infer(const char* config_str)` | `NativeApi::Infer(const char*)` | `dlcv_infer(const char*)` | JSON 字符串：`model_index`、`image_list` 和推理参数；图像 `dtype` 支持 `uint8/uint16/float32` | 新分配的推理结果 JSON 字符串 | 只调用 `dlcv_free_model_result`；该函数同时释放 mask 和外层字符串 | 普通模型原样转发；流程模型返回 `sample_results/results/mask_ptr` 格式并支持同索引并发调用 |
+| 5 | `void dlcv_free_model_result(const char* config_str)` | `NativeApi::FreeModelResult(const char*)` | `dlcv_free_model_result(const char*)` | `dlcv_infer` 返回的结果字符串 | 无 | 普通模型结果交给底层释放；流程模型结果释放登记的 mask 和外层字符串 | 两类结果按分配来源释放 |
 | 6 | `void dlcv_free_result(const char* config_str)` | `NativeApi::FreeResult(const char*)` | `dlcv_free_result(const char*)` | 由接口返回的字符串地址 | 无 | 释放外层字符串 | 只释放字符串，不处理推理结果内部资源 |
-| 7 | `void dlcv_free_all_models()` | `NativeApi::FreeAllModels()` | `dlcv_free_all_models()` | 无 | 无 | 无返回内存；清理全部模型和流程状态 | 全局模型清理行为保持一致 |
+| 7 | `void dlcv_free_all_models()` | `NativeApi::FreeAllModels()` | `dlcv_free_all_models()` | 无 | 无 | 无返回内存；清理统一模型表和底层模型表 | 活动调用结束后释放全部普通模型与流程模型 |
 
 JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL 提供的释放函数。推理结果字符串不能直接交给只释放外层字符串的 `dlcv_free_result`。
 
@@ -161,12 +161,14 @@ C 调用端只需包含 `dlcv_infer_c_api.h`，不需要链接 `dlcv_infer_cpp.l
 | 检查项 | 结果 |
 | --- | --- |
 | Windows x64 Debug 构建与测试 | 通过 |
-| Windows x64 Release 构建与测试 | 既有 29 个接口已通过；本次新增 5 个扩展未执行 Release 构建 |
+| Windows x64 Release 构建与测试 | 通过，完整测试输出 `Test PASSED`，退出码 0 |
 | C API 导出检查 | Debug 下 `dlcv_infer_cpp.dll` 的 34 个函数均存在，包含 `dlcv_infer` 和 5 个 Qt Demo 扩展函数 |
 | JSON 接口安全失败输入比较 | 两层返回字符串一致 |
 | 设备、GPU、电源方案读取 | 返回有效字符串并由所属 DLL 释放 |
 | `.dvt` 结构化结果比较 | 输入相同，结果逐字段一致 |
 | `.dvst` 结构化兼容入口 | 加载、推理和释放通过 |
+| `.dvt` 原生 JSON | 有效模型加载、索引信息、`dtype=uint8` 推理和释放通过；关闭 mask 后与底层结果逐字节一致 |
+| `.dvst` 原生 JSON | 索引与路径信息、推理、mask 字段、释放以及同索引 4 线程信息/推理并发通过 |
 | `.dvt/.dvst` 并发 | 三组 4 线程各 40 次检查通过 |
 | `dlcv_infer_c_qt_demo` | Debug x64 构建和启动通过，窗口标题及控件完整；新增字符串与设备查询接口调用通过 |
 | `dlcv_infer_c_demo` | Debug / Release x64 构建通过；普通模型与流程模型的加载、模型信息、推理、释放和多线程结果比较通过 |
