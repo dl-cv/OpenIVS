@@ -1,21 +1,17 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace DlcvDemo
 {
     internal static class EnvironmentInfoCollector
     {
-        private const int OperationTimeoutMilliseconds = 3000;
-
-        private const uint LoadLibrarySearchDllLoadDirectory = 0x00000100;
-        private const uint LoadLibrarySearchDefaultDirectories = 0x00001000;
+        private const uint LoadWithAlteredSearchPath = 0x00000008;
+        private const int NvmlSuccess = 0;
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr LoadLibraryEx(string fileName, IntPtr file, uint flags);
@@ -26,6 +22,15 @@ namespace DlcvDemo
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool FreeLibrary(IntPtr module);
+
+        [DllImport("nvml.dll", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int nvmlInit_v2();
+
+        [DllImport("nvml.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, ExactSpelling = true)]
+        private static extern int nvmlSystemGetDriverVersion(StringBuilder version, uint length);
+
+        [DllImport("nvml.dll", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int nvmlShutdown();
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate int GetIntegerVersionDelegate();
@@ -38,18 +43,16 @@ namespace DlcvDemo
 
         internal static string Collect()
         {
-            ComponentInfo inferenceLibrary = CheckSafely("推理主库", CheckInferenceLibrary);
-            var context = new ProbeContext(inferenceLibrary.Path);
             var results = new List<ComponentInfo>
             {
                 CheckSafely("NVIDIA 驱动", CheckNvidiaDriver),
-                inferenceLibrary,
-                CheckSafely("ONNX Runtime", () => CheckOnnxRuntime(context)),
-                CheckSafely("TensorRT", () => CheckTensorRt(context)),
-                CheckSafely("CUDA", () => CheckCuda(context)),
-                CheckSafely("cuDNN", () => CheckCudnn(context)),
-                CheckSafely("OpenCV", () => CheckOpenCv(context)),
-                CheckSafely("LibTorch", () => CheckLibTorch(context))
+                CheckSafely("推理主库", CheckInferenceLibrary),
+                CheckSafely("ONNX Runtime", CheckOnnxRuntime),
+                CheckSafely("TensorRT", CheckTensorRt),
+                CheckSafely("CUDA", CheckCuda),
+                CheckSafely("cuDNN", CheckCudnn),
+                CheckSafely("OpenCV", CheckOpenCv),
+                CheckSafely("LibTorch", CheckLibTorch)
             };
 
             var text = new StringBuilder();
@@ -66,43 +69,11 @@ namespace DlcvDemo
             return text.ToString().TrimEnd();
         }
 
-        internal static int RunVersionHelper(string[] args)
-        {
-            if (args == null || args.Length != 3 || !File.Exists(args[2]))
-            {
-                return 2;
-            }
-            try
-            {
-                if (string.Equals(args[1], "tensorrt", StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine(InvokeIntegerExport(args[2], "getInferLibVersion"));
-                    return 0;
-                }
-                if (string.Equals(args[1], "cuda", StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine(InvokeCudaRuntimeVersion(args[2]));
-                    return 0;
-                }
-                if (string.Equals(args[1], "cudnn", StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine(InvokeUnsignedExport(args[2], "cudnnGetVersion"));
-                    return 0;
-                }
-            }
-            catch
-            {
-                return 1;
-            }
-            return 2;
-        }
-
         private static ComponentInfo CheckSafely(string type, Func<ComponentInfo> check)
         {
             try
             {
-                ComponentInfo result = check();
-                return result ?? new ComponentInfo(type, null, null);
+                return check() ?? new ComponentInfo(type, null, null);
             }
             catch
             {
@@ -112,210 +83,131 @@ namespace DlcvDemo
 
         private static ComponentInfo CheckNvidiaDriver()
         {
-            string path = FindExecutable(
-                "nvidia-smi.exe",
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "nvidia-smi.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"));
-            if (string.IsNullOrWhiteSpace(path))
+            string nvmlPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "nvml.dll");
+            if (!File.Exists(nvmlPath))
             {
                 return new ComponentInfo("NVIDIA 驱动", null, null);
             }
 
-            string output = RunCommand(path, "--query-gpu=driver_version --format=csv,noheader");
-            Match match = Regex.Match(output ?? string.Empty, @"\b\d+\.\d+(?:\.\d+)?\b");
-            return new ComponentInfo("NVIDIA 驱动", match.Success ? match.Value : null, path);
+            bool initialized = false;
+            try
+            {
+                initialized = nvmlInit_v2() == NvmlSuccess;
+                if (!initialized)
+                {
+                    return new ComponentInfo("NVIDIA 驱动", null, nvmlPath);
+                }
+
+                var version = new StringBuilder(96);
+                int result = nvmlSystemGetDriverVersion(version, (uint)version.Capacity);
+                return new ComponentInfo(
+                    "NVIDIA 驱动",
+                    result == NvmlSuccess ? NormalizeDriverVersion(version.ToString()) : null,
+                    nvmlPath);
+            }
+            finally
+            {
+                if (initialized)
+                {
+                    try
+                    {
+                        nvmlShutdown();
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
         }
 
         private static ComponentInfo CheckInferenceLibrary()
         {
-            string path = FindComponentFile(
-                new[] { "dlcv_infer.dll", "dlcv_infer_v.dll" },
-                new[] { "DLCV_INFER_PATH", "DLCV_INFER_ROOT" },
-                new[]
-                {
-                    @"C:\dlcv\Lib\site-packages\dlcvpro_infer",
-                    @"C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp"
-                },
-                new[] { string.Empty, "bin" });
+            string path = FindApplicationFile("dlcv_infer.dll", "dlcv_infer_v.dll");
             if (string.IsNullOrWhiteSpace(path))
             {
                 return new ComponentInfo("推理主库", null, null);
             }
 
-            string version = ReadVersionText(Path.Combine(Path.GetDirectoryName(path), "version.txt"));
+            string version = ReadVersionText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt"));
             if (string.IsNullOrWhiteSpace(version))
             {
-                version = ReadPackageVersion(path, new[] { "dlcvpro_infer" });
-            }
-            if (string.IsNullOrWhiteSpace(version))
-            {
-                version = ReadProductVersion(path);
+                version = ReadProductVersion(path, 4);
             }
             return new ComponentInfo("推理主库", version, path);
         }
 
-        private static ComponentInfo CheckOnnxRuntime(ProbeContext context)
+        private static ComponentInfo CheckOnnxRuntime()
         {
-            string path = FindComponentFile(
-                new[] { "dlcv_onnxruntime.dll", "onnxruntime.dll" },
-                new string[0],
-                context.GetKnownDirectories(@"C:\dlcv\Lib\site-packages\onnxruntime\capi"),
-                new[] { string.Empty, "capi", "bin", "lib", @"onnxruntime\capi" });
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                path = FindComponentFile(
-                    new[] { "dlcv_onnxruntime.dll", "onnxruntime.dll" },
-                    new[] { "ONNXRUNTIME_ROOT", "ONNXRUNTIME_HOME", "ONNXRUNTIME_DIR" },
-                    new[] { @"C:\onnxruntime" },
-                    new[] { string.Empty, "capi", "bin", "lib", @"onnxruntime\capi" });
-            }
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return new ComponentInfo("ONNX Runtime", null, null);
-            }
-
-            string version = ReadProductVersion(path);
-            return new ComponentInfo("ONNX Runtime", NormalizeVersion(version, 3), path);
+            string path = FindApplicationFile("dlcv_onnxruntime.dll", "onnxruntime.dll");
+            return string.IsNullOrWhiteSpace(path)
+                ? new ComponentInfo("ONNX Runtime", null, null)
+                : new ComponentInfo("ONNX Runtime", ReadProductVersion(path, 3), path);
         }
 
-        private static ComponentInfo CheckTensorRt(ProbeContext context)
+        private static ComponentInfo CheckTensorRt()
         {
-            string path = FindComponentFile(
-                new[] { "nvinfer_10.dll", "nvinfer.dll", "nvinfer_*.dll" },
-                new[] { "TENSORRT_ROOT", "TENSORRT_HOME", "TENSORRT_DIR" },
-                context.GetKnownDirectories(@"C:\dlcv\bin", @"C:\TensorRT"),
-                new[] { string.Empty, "bin", "lib" });
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return new ComponentInfo("TensorRT", null, null);
-            }
-
-            string version = ReadTensorRtVersionFromLibrary(path);
-            if (string.IsNullOrWhiteSpace(version))
-            {
-                version = ReadTensorRtVersionFromHeader(path);
-            }
-            if (string.IsNullOrWhiteSpace(version))
-            {
-                string executable = Path.Combine(Path.GetDirectoryName(path), "trtexec.exe");
-                if (File.Exists(executable))
-                {
-                    Match match = Regex.Match(RunCommand(executable, "--version") ?? string.Empty, @"TensorRT\s+v(\d+\.\d+\.\d+)", RegexOptions.IgnoreCase);
-                    version = match.Success ? match.Groups[1].Value : null;
-                }
-            }
-            return new ComponentInfo("TensorRT", version, path);
+            string path = FindApplicationFile("nvinfer_10.dll", "nvinfer.dll", "nvinfer_*.dll");
+            return string.IsNullOrWhiteSpace(path)
+                ? new ComponentInfo("TensorRT", null, null)
+                : new ComponentInfo("TensorRT", ReadTensorRtVersion(path), path);
         }
 
-        private static ComponentInfo CheckCuda(ProbeContext context)
+        private static ComponentInfo CheckCuda()
         {
-            string path = FindComponentFile(
-                new[] { "cudart64_12.dll", "cudart64_*.dll" },
-                new[] { "CUDA_PATH", "CUDA_PATH_V12_8", "CUDA_PATH_V12_3" },
-                context.GetKnownDirectories(
-                    @"C:\dlcv\Lib\site-packages\torch\lib",
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "NVIDIA GPU Computing Toolkit", "CUDA", "v12.8", "bin"),
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "NVIDIA GPU Computing Toolkit", "CUDA", "v12.3", "bin")),
-                new[] { string.Empty, "bin", "lib", @"lib\x64" });
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return new ComponentInfo("CUDA", null, null);
-            }
-
-            string version = ReadCudaVersionFromLibrary(path);
-            if (string.IsNullOrWhiteSpace(version))
-            {
-                version = ReadCudaToolkitVersion(path);
-            }
-            return new ComponentInfo("CUDA", version, path);
+            string path = FindApplicationFile("cudart64_12.dll", "cudart64_*.dll");
+            return string.IsNullOrWhiteSpace(path)
+                ? new ComponentInfo("CUDA", null, null)
+                : new ComponentInfo("CUDA", ReadCudaVersion(path), path);
         }
 
-        private static ComponentInfo CheckCudnn(ProbeContext context)
+        private static ComponentInfo CheckCudnn()
         {
-            string path = FindComponentFile(
-                new[] { "cudnn64_9.dll", "cudnn*.dll" },
-                new[] { "CUDNN_PATH", "CUDNN_ROOT", "CUDA_PATH" },
-                context.GetKnownDirectories(
-                    @"C:\dlcv\Lib\site-packages\torch\lib",
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "NVIDIA", "CUDNN")),
-                new[] { string.Empty, "bin", "lib", @"lib\x64", @"bin\12.8", @"bin\12.3" });
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return new ComponentInfo("cuDNN", null, null);
-            }
-
-            return new ComponentInfo("cuDNN", ReadCudnnVersionFromLibrary(path), path);
+            string path = FindApplicationFile("cudnn64_9.dll", "cudnn64_*.dll");
+            return string.IsNullOrWhiteSpace(path)
+                ? new ComponentInfo("cuDNN", null, null)
+                : new ComponentInfo("cuDNN", ReadCudnnVersion(path), path);
         }
 
-        private static ComponentInfo CheckOpenCv(ProbeContext context)
+        private static ComponentInfo CheckOpenCv()
         {
-            string path = FindComponentFile(
-                new[] { "opencv_world4110.dll", "opencv_world*.dll", "cv2.pyd" },
-                new[] { "OPENCV_DIR", "OPENCV_ROOT" },
-                context.GetKnownDirectories(@"C:\dlcv\Lib\site-packages\cv2", @"C:\dlcv\bin"),
-                new[] { string.Empty, "bin", @"x64\vc17\bin", @"x64\vc16\bin", "cv2" });
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return new ComponentInfo("OpenCV", null, null);
-            }
-
-            string version = ReadProductVersion(path);
-            return new ComponentInfo("OpenCV", NormalizeVersion(version, 3), path);
+            string path = FindApplicationFile("opencv_world4110.dll", "opencv_world*.dll");
+            return string.IsNullOrWhiteSpace(path)
+                ? new ComponentInfo("OpenCV", null, null)
+                : new ComponentInfo("OpenCV", ReadProductVersion(path, 3), path);
         }
 
-        private static ComponentInfo CheckLibTorch(ProbeContext context)
+        private static ComponentInfo CheckLibTorch()
         {
-            string path = FindComponentFile(
-                new[] { "torch_cpu.dll" },
-                new[] { "LIBTORCH_DIR", "LIBTORCH_ROOT" },
-                context.GetKnownDirectories(@"C:\dlcv\Lib\site-packages\torch\lib", @"C:\libtorch\lib"),
-                new[] { string.Empty, "lib", "bin", "libtorch", @"libtorch\lib", @"libtorch\bin" });
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return new ComponentInfo("LibTorch", null, null);
-            }
-
-            return new ComponentInfo("LibTorch", ReadLibTorchVersion(path), path);
+            string path = FindApplicationFile("torch_cpu.dll");
+            return string.IsNullOrWhiteSpace(path)
+                ? new ComponentInfo("LibTorch", null, null)
+                : new ComponentInfo("LibTorch", ReadLibTorchVersion(path), path);
         }
 
-        private static string ReadTensorRtVersionFromLibrary(string path)
+        private static string NormalizeDriverVersion(string value)
         {
-            int code;
-            if (!TryInvokeIntegerExport(path, "getInferLibVersion", out code) || code <= 0)
+            Match match = Regex.Match(value ?? string.Empty, @"\d+\.\d+(?:\.\d+)?");
+            return match.Success ? match.Value : null;
+        }
+
+        private static string ReadTensorRtVersion(string libraryPath)
+        {
+            int encodedVersion;
+            if (!TryInvokeIntegerExport(libraryPath, "getInferLibVersion", out encodedVersion) || encodedVersion <= 0)
             {
                 return null;
             }
 
-            int major = code / 10000;
-            int minor = (code % 10000) / 100;
-            int patch = code % 100;
+            int major = encodedVersion / 10000;
+            int minor = (encodedVersion % 10000) / 100;
+            int patch = encodedVersion % 100;
             return major + "." + minor + "." + patch;
         }
 
-        private static string ReadTensorRtVersionFromHeader(string libraryPath)
-        {
-            string directory = Path.GetDirectoryName(libraryPath);
-            string[] candidates =
-            {
-                Path.Combine(directory, "NvInferVersion.h"),
-                Path.Combine(directory, "include", "NvInferVersion.h"),
-                Path.Combine(directory, "..", "include", "NvInferVersion.h")
-            };
-            for (int i = 0; i < candidates.Length; i++)
-            {
-                string version = ReadMacroVersion(candidates[i], "NV_TENSORRT_MAJOR", "NV_TENSORRT_MINOR", "NV_TENSORRT_PATCH");
-                if (!string.IsNullOrWhiteSpace(version))
-                {
-                    return version;
-                }
-            }
-            return null;
-        }
-
-        private static string ReadCudaVersionFromLibrary(string path)
+        private static string ReadCudaVersion(string libraryPath)
         {
             int encodedVersion;
-            if (!TryInvokeCudaRuntimeVersion(path, out encodedVersion) || encodedVersion <= 0)
+            if (!TryInvokeCudaRuntimeVersion(libraryPath, out encodedVersion) || encodedVersion <= 0)
             {
                 return null;
             }
@@ -326,42 +218,10 @@ namespace DlcvDemo
             return major + "." + minor + "." + patch;
         }
 
-        private static string ReadCudaToolkitVersion(string libraryPath)
-        {
-            string directory = Path.GetDirectoryName(libraryPath);
-            string root = string.Equals(Path.GetFileName(directory), "bin", StringComparison.OrdinalIgnoreCase)
-                ? Path.GetDirectoryName(directory)
-                : directory;
-            string[] versionFiles =
-            {
-                Path.Combine(root, "version.json"),
-                Path.Combine(root, "version.txt")
-            };
-            for (int i = 0; i < versionFiles.Length; i++)
-            {
-                string version = ReadVersionText(versionFiles[i]);
-                if (!string.IsNullOrWhiteSpace(version))
-                {
-                    return NormalizeVersion(version, 3);
-                }
-            }
-
-            string nvccPath = Path.Combine(root, "bin", "nvcc.exe");
-            if (File.Exists(nvccPath))
-            {
-                Match match = Regex.Match(RunCommand(nvccPath, "--version") ?? string.Empty, @"release\s+(\d+\.\d+)", RegexOptions.IgnoreCase);
-                if (match.Success)
-                {
-                    return match.Groups[1].Value + ".0";
-                }
-            }
-            return null;
-        }
-
-        private static string ReadCudnnVersionFromLibrary(string path)
+        private static string ReadCudnnVersion(string libraryPath)
         {
             ulong encodedVersion;
-            if (!TryInvokeUnsignedExport(path, "cudnnGetVersion", out encodedVersion) || encodedVersion == 0)
+            if (!TryInvokeUnsignedExport(libraryPath, "cudnnGetVersion", out encodedVersion) || encodedVersion == 0)
             {
                 return null;
             }
@@ -372,51 +232,153 @@ namespace DlcvDemo
             return major + "." + minor + "." + patch;
         }
 
-        private static string ReadLibTorchVersion(string libraryPath)
+        private static bool TryInvokeIntegerExport(string libraryPath, string exportName, out int value)
         {
-            string libraryDirectory = Path.GetDirectoryName(libraryPath);
-            string root = string.Equals(Path.GetFileName(libraryDirectory), "lib", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(Path.GetFileName(libraryDirectory), "bin", StringComparison.OrdinalIgnoreCase)
-                ? Path.GetDirectoryName(libraryDirectory)
-                : libraryDirectory;
-            string version = ReadLibTorchVersionFromRoot(root);
-            if (!string.IsNullOrWhiteSpace(version))
+            value = 0;
+            IntPtr module = LoadComponentLibrary(libraryPath);
+            if (module == IntPtr.Zero)
             {
-                return version;
+                return false;
+            }
+            try
+            {
+                IntPtr address = GetProcAddress(module, exportName);
+                if (address == IntPtr.Zero)
+                {
+                    return false;
+                }
+                var function = (GetIntegerVersionDelegate)Marshal.GetDelegateForFunctionPointer(address, typeof(GetIntegerVersionDelegate));
+                value = function();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                FreeLibrary(module);
+            }
+        }
+
+        private static bool TryInvokeUnsignedExport(string libraryPath, string exportName, out ulong value)
+        {
+            value = 0;
+            IntPtr module = LoadComponentLibrary(libraryPath);
+            if (module == IntPtr.Zero)
+            {
+                return false;
             }
 
-            string[] candidateRoots =
+            List<IntPtr> supportingModules = LoadCudnnSupportingLibraries(libraryPath);
+            try
             {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "libtorch"),
-                @"C:\pytorch\torch",
-            };
-            for (int i = 0; i < candidateRoots.Length; i++)
-            {
-                string candidateRoot = candidateRoots[i];
-                if (string.IsNullOrWhiteSpace(candidateRoot))
+                IntPtr address = GetProcAddress(module, exportName);
+                if (address == IntPtr.Zero)
                 {
-                    continue;
+                    return false;
                 }
-                string[] candidateLibraries =
+                var function = (GetUnsignedVersionDelegate)Marshal.GetDelegateForFunctionPointer(address, typeof(GetUnsignedVersionDelegate));
+                value = function().ToUInt64();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                for (int i = supportingModules.Count - 1; i >= 0; i--)
                 {
-                    Path.Combine(candidateRoot, "lib", "torch_cpu.dll"),
-                    Path.Combine(candidateRoot, "bin", "torch_cpu.dll"),
-                    Path.Combine(candidateRoot, "torch_cpu.dll")
+                    FreeLibrary(supportingModules[i]);
+                }
+                FreeLibrary(module);
+            }
+        }
+
+        private static bool TryInvokeCudaRuntimeVersion(string libraryPath, out int value)
+        {
+            value = 0;
+            IntPtr module = LoadComponentLibrary(libraryPath);
+            if (module == IntPtr.Zero)
+            {
+                return false;
+            }
+            try
+            {
+                IntPtr address = GetProcAddress(module, "cudaRuntimeGetVersion");
+                if (address == IntPtr.Zero)
+                {
+                    return false;
+                }
+                var function = (GetCudaRuntimeVersionDelegate)Marshal.GetDelegateForFunctionPointer(address, typeof(GetCudaRuntimeVersionDelegate));
+                return function(out value) == 0;
+            }
+            catch
+            {
+                value = 0;
+                return false;
+            }
+            finally
+            {
+                FreeLibrary(module);
+            }
+        }
+
+        private static IntPtr LoadComponentLibrary(string libraryPath)
+        {
+            return LoadLibraryEx(libraryPath, IntPtr.Zero, LoadWithAlteredSearchPath);
+        }
+
+        private static List<IntPtr> LoadCudnnSupportingLibraries(string coreLibraryPath)
+        {
+            var handles = new List<IntPtr>();
+            try
+            {
+                string directory = Path.GetDirectoryName(coreLibraryPath);
+                string[] names =
+                {
+                    "cudnn_ops64_9.dll",
+                    "cudnn_graph64_9.dll",
+                    "cudnn_heuristic64_9.dll",
+                    "cudnn_engines_precompiled64_9.dll",
+                    "cudnn_engines_runtime_compiled64_9.dll",
+                    "cudnn_cnn64_9.dll",
+                    "cudnn_adv64_9.dll"
                 };
-                for (int j = 0; j < candidateLibraries.Length; j++)
+                for (int i = 0; i < names.Length; i++)
                 {
-                    if (!FilesHaveSameSha256(libraryPath, candidateLibraries[j]))
+                    string path = Path.Combine(directory, names[i]);
+                    if (!File.Exists(path))
                     {
                         continue;
                     }
-                    version = ReadLibTorchVersionFromRoot(candidateRoot);
-                    if (!string.IsNullOrWhiteSpace(version))
+                    IntPtr handle = LoadComponentLibrary(path);
+                    if (handle != IntPtr.Zero)
                     {
-                        return version;
+                        handles.Add(handle);
                     }
                 }
             }
-            return null;
+            catch
+            {
+            }
+            return handles;
+        }
+
+        private static string ReadLibTorchVersion(string libraryPath)
+        {
+            string localVersion = ReadLibTorchVersionFromRoot(AppDomain.CurrentDomain.BaseDirectory);
+            if (!string.IsNullOrWhiteSpace(localVersion))
+            {
+                return localVersion;
+            }
+
+            const string knownRoot = @"C:\pytorch\torch";
+            string knownLibrary = Path.Combine(knownRoot, "lib", "torch_cpu.dll");
+            return FilesHaveSameSha256(libraryPath, knownLibrary)
+                ? ReadLibTorchVersionFromRoot(knownRoot)
+                : null;
         }
 
         private static string ReadLibTorchVersionFromRoot(string root)
@@ -453,24 +415,6 @@ namespace DlcvDemo
             return null;
         }
 
-        private static string NormalizeLibTorchRoot(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return null;
-            }
-            string fullPath = NormalizeDirectory(path.Trim().Trim('"'));
-            if (string.IsNullOrWhiteSpace(fullPath))
-            {
-                return null;
-            }
-            string name = Path.GetFileName(fullPath);
-            return string.Equals(name, "lib", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(name, "bin", StringComparison.OrdinalIgnoreCase)
-                ? Path.GetDirectoryName(fullPath)
-                : fullPath;
-        }
-
         private static bool FilesHaveSameSha256(string firstPath, string secondPath)
         {
             try
@@ -479,27 +423,20 @@ namespace DlcvDemo
                 {
                     return false;
                 }
-                using (SHA256 algorithm = SHA256.Create())
-                using (FileStream firstStream = File.Open(firstPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                byte[] firstHash = ComputeSha256(firstPath);
+                byte[] secondHash = ComputeSha256(secondPath);
+                if (firstHash.Length != secondHash.Length)
                 {
-                    byte[] firstHash = algorithm.ComputeHash(firstStream);
-                    using (FileStream secondStream = File.Open(secondPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    return false;
+                }
+                for (int i = 0; i < firstHash.Length; i++)
+                {
+                    if (firstHash[i] != secondHash[i])
                     {
-                        byte[] secondHash = algorithm.ComputeHash(secondStream);
-                        if (firstHash.Length != secondHash.Length)
-                        {
-                            return false;
-                        }
-                        for (int i = 0; i < firstHash.Length; i++)
-                        {
-                            if (firstHash[i] != secondHash[i])
-                            {
-                                return false;
-                            }
-                        }
-                        return true;
+                        return false;
                     }
                 }
+                return true;
             }
             catch
             {
@@ -507,343 +444,27 @@ namespace DlcvDemo
             }
         }
 
-        private static bool TryInvokeIntegerExport(string libraryPath, string exportName, out int value)
+        private static byte[] ComputeSha256(string path)
         {
-            value = 0;
-            string output = RunVersionHelperCommand("tensorrt", libraryPath);
-            Match match = Regex.Match(output ?? string.Empty, @"(?m)^\s*(\d+)\s*$");
-            return match.Success && int.TryParse(match.Groups[1].Value, out value);
-        }
-
-        private static int InvokeIntegerExport(string libraryPath, string exportName)
-        {
-            IntPtr module = LoadComponentLibrary(libraryPath);
-            if (module == IntPtr.Zero)
+            using (SHA256 algorithm = SHA256.Create())
+            using (FileStream stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                return 0;
-            }
-            try
-            {
-                IntPtr address = GetProcAddress(module, exportName);
-                if (address == IntPtr.Zero)
-                {
-                    return 0;
-                }
-                var function = (GetIntegerVersionDelegate)Marshal.GetDelegateForFunctionPointer(address, typeof(GetIntegerVersionDelegate));
-                return function();
-            }
-            finally
-            {
-                FreeLibrary(module);
+                return algorithm.ComputeHash(stream);
             }
         }
 
-        private static bool TryInvokeUnsignedExport(string libraryPath, string exportName, out ulong value)
+        private static string FindApplicationFile(params string[] patterns)
         {
-            value = 0;
-            string output = RunVersionHelperCommand("cudnn", libraryPath);
-            Match match = Regex.Match(output ?? string.Empty, @"(?m)^\s*(\d+)\s*$");
-            return match.Success && ulong.TryParse(match.Groups[1].Value, out value);
-        }
-
-        private static ulong InvokeUnsignedExport(string libraryPath, string exportName)
-        {
-            IntPtr module = LoadComponentLibrary(libraryPath);
-            if (module == IntPtr.Zero)
-            {
-                return 0;
-            }
-            try
-            {
-                IntPtr address = GetProcAddress(module, exportName);
-                if (address == IntPtr.Zero)
-                {
-                    return 0;
-                }
-                var function = (GetUnsignedVersionDelegate)Marshal.GetDelegateForFunctionPointer(address, typeof(GetUnsignedVersionDelegate));
-                return function().ToUInt64();
-            }
-            finally
-            {
-                FreeLibrary(module);
-            }
-        }
-
-        private static bool TryInvokeCudaRuntimeVersion(string libraryPath, out int value)
-        {
-            value = 0;
-            string output = RunVersionHelperCommand("cuda", libraryPath);
-            Match match = Regex.Match(output ?? string.Empty, @"(?m)^\s*(\d+)\s*$");
-            return match.Success && int.TryParse(match.Groups[1].Value, out value);
-        }
-
-        private static int InvokeCudaRuntimeVersion(string libraryPath)
-        {
-            IntPtr module = LoadComponentLibrary(libraryPath);
-            if (module == IntPtr.Zero)
-            {
-                return 0;
-            }
-            try
-            {
-                IntPtr address = GetProcAddress(module, "cudaRuntimeGetVersion");
-                if (address == IntPtr.Zero)
-                {
-                    return 0;
-                }
-                var function = (GetCudaRuntimeVersionDelegate)Marshal.GetDelegateForFunctionPointer(address, typeof(GetCudaRuntimeVersionDelegate));
-                int version;
-                return function(out version) == 0 ? version : 0;
-            }
-            finally
-            {
-                FreeLibrary(module);
-            }
-        }
-
-        private static IntPtr LoadComponentLibrary(string libraryPath)
-        {
-            return LoadLibraryEx(
-                libraryPath,
-                IntPtr.Zero,
-                LoadLibrarySearchDllLoadDirectory | LoadLibrarySearchDefaultDirectories);
-        }
-
-        private static string RunVersionHelperCommand(string kind, string libraryPath)
-        {
-            string executable = typeof(EnvironmentInfoCollector).Assembly.Location;
-            string arguments = "environment-version " + QuoteArgument(kind) + " " + QuoteArgument(libraryPath);
-            return RunCommand(executable, arguments, Path.GetDirectoryName(libraryPath));
-        }
-
-        private static string RunCommand(string executable, string arguments)
-        {
-            return RunCommand(executable, arguments, null);
-        }
-
-        private static string RunCommand(string executable, string arguments, string additionalPath)
-        {
-            try
-            {
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = executable,
-                    Arguments = arguments,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    WorkingDirectory = Path.GetDirectoryName(executable) ?? AppDomain.CurrentDomain.BaseDirectory
-                };
-                if (!string.IsNullOrWhiteSpace(additionalPath))
-                {
-                    string currentPath = startInfo.EnvironmentVariables["PATH"] ?? string.Empty;
-                    startInfo.EnvironmentVariables["PATH"] = additionalPath + ";" + currentPath;
-                }
-                using (var process = new Process { StartInfo = startInfo })
-                {
-                    if (!process.Start())
-                    {
-                        return null;
-                    }
-                    Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
-                    Task<string> standardError = process.StandardError.ReadToEndAsync();
-                    if (!process.WaitForExit(OperationTimeoutMilliseconds))
-                    {
-                        try
-                        {
-                            process.Kill();
-                        }
-                        catch
-                        {
-                        }
-                        return null;
-                    }
-                    Task.WaitAll(new Task[] { standardOutput, standardError }, 500);
-                    string output = standardOutput.IsCompleted ? standardOutput.Result : string.Empty;
-                    string error = standardError.IsCompleted ? standardError.Result : string.Empty;
-                    return output + Environment.NewLine + error;
-                }
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static string QuoteArgument(string value)
-        {
-            return "\"" + (value ?? string.Empty).Replace("\"", "\\\"") + "\"";
-        }
-
-        private static string FindComponentFile(string[] patterns, string[] environmentNames, string[] knownDirectories, string[] relativeDirectories)
-        {
-            string applicationDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            return FindFileInDirectories(new[] { applicationDirectory }, patterns);
-        }
-
-        private static string FindLoadedModule(string[] patterns)
-        {
-            try
-            {
-                using (Process process = Process.GetCurrentProcess())
-                {
-                    foreach (ProcessModule module in process.Modules)
-                    {
-                        for (int i = 0; i < patterns.Length; i++)
-                        {
-                            if (WildcardMatches(module.ModuleName, patterns[i]))
-                            {
-                                return Path.GetFullPath(module.FileName);
-                            }
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-            return null;
-        }
-
-        private static bool WildcardMatches(string value, string pattern)
-        {
-            string regexPattern = "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
-            return Regex.IsMatch(value ?? string.Empty, regexPattern, RegexOptions.IgnoreCase);
-        }
-
-        private static string FindFileInDirectories(IEnumerable<string> directories, string[] patterns)
-        {
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (string rawDirectory in directories)
-            {
-                string directory = NormalizeDirectory(rawDirectory);
-                if (string.IsNullOrWhiteSpace(directory) || !visited.Add(directory) || !Directory.Exists(directory))
-                {
-                    continue;
-                }
-                for (int i = 0; i < patterns.Length; i++)
-                {
-                    try
-                    {
-                        string[] files = Directory.GetFiles(directory, patterns[i], SearchOption.TopDirectoryOnly);
-                        if (files.Length > 0)
-                        {
-                            Array.Sort(files, StringComparer.OrdinalIgnoreCase);
-                            return Path.GetFullPath(files[0]);
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-            return null;
-        }
-
-        private static void AddEnvironmentDirectories(List<string> directories, string value, string[] relativeDirectories)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return;
-            }
-            string[] parts = value.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-            for (int i = 0; i < parts.Length; i++)
-            {
-                AddDirectoryAndRelatives(directories, parts[i].Trim().Trim('"'), relativeDirectories);
-            }
-        }
-
-        private static void AddDirectoryAndRelatives(List<string> directories, string root, string[] relativeDirectories)
-        {
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                return;
-            }
-            if (File.Exists(root))
-            {
-                directories.Add(Path.GetDirectoryName(root));
-                return;
-            }
-            for (int i = 0; i < relativeDirectories.Length; i++)
-            {
-                directories.Add(string.IsNullOrWhiteSpace(relativeDirectories[i]) ? root : Path.Combine(root, relativeDirectories[i]));
-            }
-        }
-
-        private static string NormalizeDirectory(string path)
-        {
-            try
-            {
-                return string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static string FindExecutable(string fileName, params string[] knownPaths)
-        {
-            string applicationPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
-            if (File.Exists(applicationPath))
-            {
-                return Path.GetFullPath(applicationPath);
-            }
-
-            string pathValue = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-            string[] directories = pathValue.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-            for (int i = 0; i < directories.Length; i++)
+            string directory = AppDomain.CurrentDomain.BaseDirectory;
+            for (int i = 0; i < patterns.Length; i++)
             {
                 try
                 {
-                    string candidate = Path.Combine(directories[i].Trim().Trim('"'), fileName);
-                    if (File.Exists(candidate))
+                    string[] files = Directory.GetFiles(directory, patterns[i], SearchOption.TopDirectoryOnly);
+                    if (files.Length > 0)
                     {
-                        return Path.GetFullPath(candidate);
-                    }
-                }
-                catch
-                {
-                }
-            }
-            for (int i = 0; i < knownPaths.Length; i++)
-            {
-                if (File.Exists(knownPaths[i]))
-                {
-                    return Path.GetFullPath(knownPaths[i]);
-                }
-            }
-            return null;
-        }
-
-        private static string ReadPackageVersion(string binaryPath, string[] packageNames)
-        {
-            string sitePackages = FindAncestor(binaryPath, "site-packages");
-            if (string.IsNullOrWhiteSpace(sitePackages))
-            {
-                return null;
-            }
-            for (int i = 0; i < packageNames.Length; i++)
-            {
-                try
-                {
-                    string[] directories = Directory.GetDirectories(sitePackages, packageNames[i] + "-*.dist-info", SearchOption.TopDirectoryOnly);
-                    Array.Sort(directories, StringComparer.OrdinalIgnoreCase);
-                    for (int j = directories.Length - 1; j >= 0; j--)
-                    {
-                        string metadataPath = Path.Combine(directories[j], "METADATA");
-                        if (!File.Exists(metadataPath))
-                        {
-                            continue;
-                        }
-                        foreach (string line in File.ReadLines(metadataPath))
-                        {
-                            if (line.StartsWith("Version:", StringComparison.OrdinalIgnoreCase))
-                            {
-                                return line.Substring("Version:".Length).Trim();
-                            }
-                        }
+                        Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+                        return Path.GetFullPath(files[0]);
                     }
                 }
                 catch
@@ -853,18 +474,16 @@ namespace DlcvDemo
             return null;
         }
 
-        private static string FindAncestor(string path, string directoryName)
+        private static string ReadProductVersion(string path, int maximumParts)
         {
-            DirectoryInfo directory = new FileInfo(path).Directory;
-            while (directory != null)
+            try
             {
-                if (string.Equals(directory.Name, directoryName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return directory.FullName;
-                }
-                directory = directory.Parent;
+                return NormalizeVersion(System.Diagnostics.FileVersionInfo.GetVersionInfo(path).ProductVersion, maximumParts);
             }
-            return null;
+            catch
+            {
+                return null;
+            }
         }
 
         private static string ReadVersionText(string path)
@@ -910,18 +529,6 @@ namespace DlcvDemo
             return match.Success ? match.Groups[1].Value : null;
         }
 
-        private static string ReadProductVersion(string path)
-        {
-            try
-            {
-                return NormalizeVersion(FileVersionInfo.GetVersionInfo(path).ProductVersion, 4);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         private static string NormalizeVersion(string value, int maximumParts)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -950,39 +557,6 @@ namespace DlcvDemo
             internal string Type { get; private set; }
             internal string Version { get; private set; }
             internal string Path { get; private set; }
-        }
-
-        private sealed class ProbeContext
-        {
-            private readonly List<string> suiteDirectories = new List<string>();
-
-            internal ProbeContext(string inferenceLibraryPath)
-            {
-                if (string.IsNullOrWhiteSpace(inferenceLibraryPath))
-                {
-                    return;
-                }
-                string sitePackages = FindAncestor(inferenceLibraryPath, "site-packages");
-                if (string.IsNullOrWhiteSpace(sitePackages))
-                {
-                    return;
-                }
-                suiteDirectories.Add(Path.Combine(sitePackages, "onnxruntime", "capi"));
-                suiteDirectories.Add(Path.Combine(sitePackages, "torch", "lib"));
-                suiteDirectories.Add(Path.Combine(sitePackages, "cv2"));
-                DirectoryInfo sitePackagesDirectory = new DirectoryInfo(sitePackages);
-                if (sitePackagesDirectory.Parent != null && sitePackagesDirectory.Parent.Parent != null)
-                {
-                    suiteDirectories.Add(Path.Combine(sitePackagesDirectory.Parent.Parent.FullName, "bin"));
-                }
-            }
-
-            internal string[] GetKnownDirectories(params string[] additionalDirectories)
-            {
-                var result = new List<string>(suiteDirectories);
-                result.AddRange(additionalDirectories);
-                return result.ToArray();
-            }
         }
     }
 }
