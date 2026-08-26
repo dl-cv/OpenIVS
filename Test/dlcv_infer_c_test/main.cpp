@@ -1107,8 +1107,29 @@ static bool RunConcurrentModelLoadingCheck(
         return false;
     }
 
+    std::string loadedDllName;
+    for (const auto& model : models) {
+        if (!model) {
+            std::cerr << "FAIL: 并发加载完成后存在空模型实例\n";
+            return false;
+        }
+        const std::string currentDllName = model->LoadedNativeDllName();
+        if (currentDllName.empty()) {
+            std::cerr << "FAIL: 模型未记录底层 DLL 名称\n";
+            return false;
+        }
+        if (loadedDllName.empty()) {
+            loadedDllName = currentDllName;
+        } else if (currentDllName != loadedDllName) {
+            std::cerr << "FAIL: 同一进程内模型使用了不同底层 DLL："
+                      << loadedDllName << " / " << currentDllName << "\n";
+            return false;
+        }
+    }
+
     models.clear();
-    std::cout << "PASS: 普通模型与流程模型并发加载成功，线程数=" << threadCount << "\n";
+    std::cout << "PASS: 普通模型与流程模型并发加载成功，线程数=" << threadCount
+              << "，底层 DLL=" << loadedDllName << "\n";
     return true;
 }
 
@@ -1808,6 +1829,7 @@ int main(int argc, char** argv) {
 
     bool ok = true;
     ok = RunConcurrentModelLoadingCheck(dvtPath, dvstPath, 4) && ok;
+    dlcv_infer_cpp_free_all_models_c();
     ok = RunCapiExportCompletenessCheck() && ok;
     ok = RunNativeJsonDvtByteRegression(dvtPath, dvtImage) && ok;
     ok = RunNativeJsonDvstCheck(dvstPath, dvstImage) && ok;
