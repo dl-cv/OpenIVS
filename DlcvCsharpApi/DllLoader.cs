@@ -13,8 +13,6 @@ namespace dlcv_infer_csharp
         private string DllName;
         private string DllPath;
         private const CallingConvention calling_method = CallingConvention.StdCall;
-        private const uint LoadLibrarySearchDllLoadDirectory = 0x00000100;
-        private const uint LoadLibrarySearchDefaultDirectories = 0x00001000;
 
         [UnmanagedFunctionPointer(calling_method)]
         public delegate IntPtr LoadModelDelegate(string config_str);
@@ -150,14 +148,15 @@ namespace dlcv_infer_csharp
                     return loader;
                 case DogProvider.Sentinel:
                     loader.DllName = "dlcv_infer.dll";
+                    loader.DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll";
                     break;
                 case DogProvider.Virbox:
                     loader.DllName = "dlcv_infer_v.dll";
+                    loader.DllPath = @"C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll";
                     break;
                 default:
                     throw new ArgumentException("不支持的 dog provider: " + provider);
             }
-            loader.DllPath = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, loader.DllName));
             loader.LoadedNativeDllName = loader.DllName;
             loader.LoadDll();
             return loader;
@@ -209,7 +208,7 @@ namespace dlcv_infer_csharp
 
         private void LoadDll()
         {
-            if (!DllExists(DllPath))
+            if (!DllExists(DllName, DllPath))
             {
                 if (ShowMissingDllDialog)
                 {
@@ -218,13 +217,12 @@ namespace dlcv_infer_csharp
                 throw new Exception("需要先安装 dlcv_infer");
             }
 
-            IntPtr hModule = LoadLibraryEx(
-                DllPath,
-                IntPtr.Zero,
-                LoadLibrarySearchDllLoadDirectory | LoadLibrarySearchDefaultDirectories);
+            IntPtr hModule = LoadLibrary(DllName);
             if (hModule == IntPtr.Zero)
             {
-                throw new Exception("无法加载 DLL");
+                hModule = LoadLibrary(DllPath);
+                if (hModule == IntPtr.Zero)
+                    throw new Exception("无法加载 DLL");
             }
 
             dlcv_load_model = GetDelegate<LoadModelDelegate>(hModule, "dlcv_load_model");
@@ -241,9 +239,16 @@ namespace dlcv_infer_csharp
             dlcv_keep_max_clock = GetDelegate<KeepMaxClock>(hModule, "dlcv_keep_max_clock");
         }
 
-        private static bool DllExists(string dllPath)
+        private static bool DllExists(string dllName, string dllPath)
         {
-            return File.Exists(dllPath);
+            return !string.IsNullOrEmpty(SearchDllPath(dllName)) || File.Exists(dllPath);
+        }
+
+        private static string SearchDllPath(string dllName)
+        {
+            var buffer = new StringBuilder(32767);
+            uint result = SearchPath(null, dllName, null, (uint)buffer.Capacity, buffer, IntPtr.Zero);
+            return result == 0 || result >= (uint)buffer.Capacity ? null : buffer.ToString();
         }
 
         private T GetDelegate<T>(IntPtr hModule, string procedureName) where T : Delegate
@@ -252,11 +257,14 @@ namespace dlcv_infer_csharp
             return p == IntPtr.Zero ? null : (T)Marshal.GetDelegateForFunctionPointer(p, typeof(T));
         }
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, uint dwFlags);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
+
+        [DllImport("kernel32.dll", EntryPoint = "SearchPathW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint SearchPath(string lpPath, string lpFileName, string lpExtension, uint nBufferLength, StringBuilder lpBuffer, IntPtr lpFilePart);
 
         [DllImport("user32.dll", EntryPoint = "MessageBoxW", CharSet = CharSet.Unicode)]
         private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);

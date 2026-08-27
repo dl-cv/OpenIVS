@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Xml;
 using Newtonsoft.Json;
@@ -24,9 +23,8 @@ namespace sntl_admin_csharp
     public class SNTLDllLoader
     {
         private const string DllName = "sntl_adminapi_windows_x64.dll";
+        private const string DllPath = @"C:\dlcv\bin\sntl_adminapi_windows_x64.dll";
         private const CallingConvention calling_method = CallingConvention.Cdecl;
-        private const uint LoadLibrarySearchDllLoadDirectory = 0x00000100;
-        private const uint LoadLibrarySearchDefaultDirectories = 0x00001000;
 
         // 定义导入方法的委托
         [UnmanagedFunctionPointer(calling_method)]
@@ -47,26 +45,34 @@ namespace sntl_admin_csharp
 
         private void LoadDll()
         {
-            string dllPath = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, DllName));
-            if (!File.Exists(dllPath))
-            {
-                CreateEmptyDelegates();
-                return;
-            }
-            IntPtr hModule = LoadLibraryEx(
-                dllPath,
-                IntPtr.Zero,
-                LoadLibrarySearchDllLoadDirectory | LoadLibrarySearchDefaultDirectories);
+            IntPtr hModule = LoadLibrary(DllName);
             if (hModule == IntPtr.Zero)
             {
-                CreateEmptyDelegates();
-                return;
+                // 如果当前目录下的 DLL 加载失败，尝试加载指定路径的 DLL
+                hModule = LoadLibrary(DllPath);
+                if (hModule == IntPtr.Zero)
+                {
+                    // DLL加载失败，创建空的代理方法
+                    CreateEmptyDelegates();
+                    //throw new Exception("无法加载 SNTL DLL");
+                }
+                else
+                {
+                    // 获取函数指针
+                    sntl_admin_context_new = GetDelegate<SntlAdminContextNewDelegate>(hModule, "sntl_admin_context_new");
+                    sntl_admin_context_delete = GetDelegate<SntlAdminContextDeleteDelegate>(hModule, "sntl_admin_context_delete");
+                    sntl_admin_get = GetDelegate<SntlAdminGetDelegate>(hModule, "sntl_admin_get");
+                    sntl_admin_free = GetDelegate<SntlAdminFreeDelegate>(hModule, "sntl_admin_free");
+                }
             }
-
-            sntl_admin_context_new = GetDelegate<SntlAdminContextNewDelegate>(hModule, "sntl_admin_context_new");
-            sntl_admin_context_delete = GetDelegate<SntlAdminContextDeleteDelegate>(hModule, "sntl_admin_context_delete");
-            sntl_admin_get = GetDelegate<SntlAdminGetDelegate>(hModule, "sntl_admin_get");
-            sntl_admin_free = GetDelegate<SntlAdminFreeDelegate>(hModule, "sntl_admin_free");
+            else
+            {
+                // 获取函数指针
+                sntl_admin_context_new = GetDelegate<SntlAdminContextNewDelegate>(hModule, "sntl_admin_context_new");
+                sntl_admin_context_delete = GetDelegate<SntlAdminContextDeleteDelegate>(hModule, "sntl_admin_context_delete");
+                sntl_admin_get = GetDelegate<SntlAdminGetDelegate>(hModule, "sntl_admin_get");
+                sntl_admin_free = GetDelegate<SntlAdminFreeDelegate>(hModule, "sntl_admin_free");
+            }
         }
 
         // 创建空的代理方法，以便即使DLL加载失败也不会返回null
@@ -95,8 +101,8 @@ namespace sntl_admin_csharp
             return (T)Marshal.GetDelegateForFunctionPointer(pAddressOfFunctionToCall, typeof(T));
         }
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, uint dwFlags);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
@@ -371,10 +377,9 @@ namespace sntl_admin_csharp
     public class Virbox
     {
         private const string DllName = "slm_control.dll";
+        private const string DllPath = @"C:\dlcv\bin\slm_control.dll";
         private const uint SS_OK = 0;
         private const uint INFO_FORMAT_JSON = 2;
-        private const uint LoadLibrarySearchDllLoadDirectory = 0x00000100;
-        private const uint LoadLibrarySearchDefaultDirectories = 0x00001000;
         // 深度视觉开发商 ID
         private const string DlcvDeveloperId = "0800000000002866";
 
@@ -410,13 +415,11 @@ namespace sntl_admin_csharp
 
         public Virbox()
         {
-            string dllPath = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, DllName));
-            hModule = File.Exists(dllPath)
-                ? LoadLibraryEx(
-                    dllPath,
-                    IntPtr.Zero,
-                    LoadLibrarySearchDllLoadDirectory | LoadLibrarySearchDefaultDirectories)
-                : IntPtr.Zero;
+            hModule = LoadLibrary(DllName);
+            if (hModule == IntPtr.Zero)
+            {
+                hModule = LoadLibrary(DllPath);
+            }
             if (hModule == IntPtr.Zero)
             {
                 return;
@@ -719,8 +722,8 @@ namespace sntl_admin_csharp
             return proc == IntPtr.Zero ? null : (T)Marshal.GetDelegateForFunctionPointer(proc, typeof(T));
         }
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, uint dwFlags);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
