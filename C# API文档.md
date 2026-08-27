@@ -289,9 +289,6 @@ public class DvsModel : FlowGraphModel
 ```csharp
 public class DllLoader
 {
-    // 是否在缺少原生推理 DLL 时显示系统提示框，默认 true
-    public static bool ShowMissingDllDialog { get; set; }
-
     // 全局单例
     public static DllLoader Instance { get; }
 
@@ -333,8 +330,6 @@ public class DllLoader
 **模型级 Provider 解析**：
 - `.dvt`/`.dvo` 文件：读取前两行（`DV` + header_json），解析 `dog_provider` 字段。
 - `.dvp`/`.dvst`/`.dvso`/`.dvsp`：不支持通过 header 解析（DVP 由底层处理，DVS 由子模型加载时解析）。
-
-**缺少原生推理 DLL 时的提示**：`ShowMissingDllDialog` 默认为 `true`，缺少对应 DLL 时先显示「需要先安装 dlcv_infer」，随后抛出同文异常。自动运行入口可在首次访问 `DllLoader` 前将该属性设为 `false`，此时仅抛出异常。
 
 ---
 

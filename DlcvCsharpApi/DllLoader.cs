@@ -57,8 +57,6 @@ namespace dlcv_infer_csharp
         private static DllLoader _instance;
         private static readonly object _lock = new object();
 
-        public static bool ShowMissingDllDialog { get; set; } = true;
-
         public DogProvider LoadedDogProvider { get; private set; }
         public string LoadedNativeDllName { get; private set; }
 
@@ -210,10 +208,7 @@ namespace dlcv_infer_csharp
         {
             if (!DllExists(DllName, DllPath))
             {
-                if (ShowMissingDllDialog)
-                {
-                    MessageBox(IntPtr.Zero, "需要先安装 dlcv_infer", "提示", 0x00000030u);
-                }
+                MessageBox(IntPtr.Zero, "需要先安装 dlcv_infer", "提示", 0x00000030u);
                 throw new Exception("需要先安装 dlcv_infer");
             }
 
