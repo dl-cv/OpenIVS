@@ -100,8 +100,8 @@ namespace dlcv_infer_csharp
             }
 
             string extension = Path.GetExtension(modelPath).ToLower();
-            _isDvpMode = extension == ".dvp";
-            _isDvsMode = extension == ".dvst" || extension == ".dvso" || extension == ".dvsp";
+            _isDvpMode = extension == ".dvp" || extension == ".dvsp";
+            _isDvsMode = extension == ".dvst" || extension == ".dvso";
             _isRpcMode = rpc_mode;
             string cacheKey = BuildModelCacheKey(modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
 
