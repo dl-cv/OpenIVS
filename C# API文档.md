@@ -124,7 +124,6 @@ public class Model : IDisposable
 2. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
 3. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
 4. 加载完成后可通过 `Loaded` 属性判断状态。
-5. `.dvp` 与 `.dvsp` 输入路径在加载前转换为绝对路径；DVP 的加载、推理和删除请求使用同一绝对路径。
 
 ### 3.2 属性
 
@@ -144,7 +143,6 @@ public CSharpResult Infer(Mat image, JObject paramsJson = null);
 - `paramsJson`：可选推理参数，常见字段见第 10 节。
 - 内部调用 `prepareInferInput` 对图像做通道/位深归一化。
 - 返回 `CSharpResult`，`SampleResults` 长度恒为 1。
-- DVP 模式要求服务响应的 `code` 为字符串 `00000`，且 `results` 为数组；其他 `code` 使用服务返回的 `message` 抛出 DVP 推理异常。
 
 ### 3.4 批量推理
 
@@ -189,8 +187,6 @@ public void FreeModel();
 ```
 - Flow 模式：释放 `FlowGraphModel`。
 - 普通模式：调用 `dlcv_free_model` 释放底层模型。
-- DVP 模式：向 `/delete_model` 发送 POST 请求，查询参数 `model_path` 为 URL 编码后的模型绝对路径；HTTP 状态与响应 JSON 的 `code` 均成功后将 `modelIndex` 更新为 `-1`。
-- 显式调用 `FreeModel()` 时，DVP 服务返回的释放错误继续向调用方抛出；`Dispose()` 记录该错误并完成本地清理，不向窗口关闭事件传播。
 - 析构函数自动调用 `Dispose()`。
 
 ---
@@ -576,7 +572,7 @@ Console.WriteLine(info.ToString());
 - `POST /load_model`
 - `POST /get_model_info`
 - `POST /api/inference`
-- `POST /delete_model?model_path=<URL 编码的模型绝对路径>`
+- `POST /free_model`
 
 #### RPC 固定协议
 
@@ -618,7 +614,7 @@ Console.WriteLine(info.ToString());
 | 模式 | 当前行为 |
 | --- | --- |
 | DVT | 通过 `dlcv_load_model`、`dlcv_get_model_info`、`dlcv_infer`、`dlcv_free_model_result`、`dlcv_free_model` 工作 |
-| DVP | 自动检查后端服务；单次检查最长约 1 秒；服务不可用时从系统临时目录隐藏启动 `DLCV Test.exe --keep_alive`，最长等待 300 秒；加载、信息查询与推理请求保持 30 秒超时；推理请求固定附带 `return_polygon=true` |
+| DVP | 自动检查后端服务；服务不可用时启动 `DLCV Test.exe --keep_alive`；推理请求固定附带 `return_polygon=true` |
 | DVS | 内部创建 `DlcvModules.DvsModel`；`GetModelInfo()` 返回普通模型兼容结构，`GetDvsModelInfo()` 返回完整流程及全部子模型信息 |
 | RPC | 自动启动 `AIModelRPC.exe`；图像通过共享内存传输；结果中的 mask 可通过共享内存回读 |
 

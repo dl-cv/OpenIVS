@@ -52,8 +52,7 @@
   - `AIModelRPC.exe`：优先从 `DlcvDemo` 输出目录启动；若不存在，可使用 SDK 固定路径（如 `C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`）
 - **DVP 模式（按需，加载 `.dvp` 时启用）**
   - 需要本机后端服务可访问 `http://127.0.0.1:9890`
-  - 后端检查单次最长约 1 秒；加载、模型信息与推理请求保持 30 秒超时
-  - 若服务未启动，SDK 从系统临时目录隐藏启动 `C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe --keep_alive`，最长等待 300 秒；程序不存在则加载失败
+  - 若服务未启动，SDK 可能尝试启动固定路径程序（例如 `C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe`）；不存在则加载失败
 
 #### 2.3 从零搭建工程（建议步骤，便于复刻）
 
@@ -97,7 +96,6 @@
 - 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso`/`.dvsp` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
 - `--calc-mean=true` 时，结构化与 JSON 摘要包含 `with_mean`、`foreground_mean`、`background_mean`，并通过 `mean_check_passed` 检查带掩码结果是否包含均值及两种结果的一致性；普通检测结果不参与均值检查，两条结果均为空时该检查通过。
 - 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
-- `.dvp` 与 `.dvsp` 模型参数在进入模型加载流程时转换为绝对路径，DVP 后端从系统临时目录启动时仍使用调用端解析后的真实路径。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
 - `InferOneOutJson` 返回带 `result_list` 的流程判定包装对象时，命令行模式从包装对象中读取结果数组后继续执行双路径一致性检查。
 - `structured` 与 `json` 均包含 `count`、`scores`、`categories` 和 `below_threshold`。
@@ -254,7 +252,6 @@
   - 停止正在运行的压力测试/一致性测试（若有）
   - 若当前 `model` 实现 `IDisposable`：调用 `Dispose()` 并置空引用
   - 调用 `Utils.FreeAllModels()` 释放 SDK 侧所有模型
-- DVP 模型的服务端释放异常由 `Dispose()` 记录并完成本地清理，不向关闭事件传播。
 - 关闭过程中不应额外弹出提示框（除非发生未捕获异常，属于实现缺陷）
 
 ### 7. 详细功能规格（逐按钮）
@@ -450,16 +447,12 @@
 
 #### 7.14 检查环境（按钮：`检查环境`）
 
-- 点击后在左侧 `richTextBox1` 按分段显示本机的 Windows / .NET、NVIDIA 驱动与 GPU、CUDA Toolkit、cuDNN、TensorRT、OpenCV、ONNX Runtime、PyTorch / LibTorch、`dlcv_infer`。
-- 每段显示状态、可读取的版本、检测位置与已检查位置；未发现组件时状态显示为`未检测到`，并保留已检查位置。
+- 点击后在左侧 `richTextBox1` 以“类型 | 版本 | 路径”显示 NVIDIA 驱动、`dlcv_infer`、ONNX Runtime、TensorRT、CUDA、cuDNN、OpenCV、LibTorch。
+- 只读取当前进程实际已加载模块的路径；未加载时显示`未加载`。模块位于当前程序目录时，路径只显示文件名。
 - 检查在后台执行。开始时禁用`检查环境`按钮并显示进行提示，完成或发生异常后恢复按钮，避免重复点击阻塞界面。
-- 检测优先读取当前进程模块、程序目录、相关环境变量及常用安装目录。NVIDIA 使用 `nvidia-smi` 查询 GPU 与驱动版本，并以 WMI 补充设备信息；查询最长 3 秒。
-- TensorRT 读取 `TENSORRT_ROOT`、`TENSORRT_HOME`、`TENSORRT_DIR`，并检查 `C:\TensorRT-*` 目录。ONNX Runtime 读取 `ONNXRUNTIME_ROOT`、`ONNXRUNTIME_HOME`、`ONNXRUNTIME_DIR`，同时识别 `dlcv_onnxruntime.dll` 与 `dlcv_onnxruntime_providers_*.dll`。
-- LibTorch 读取 `LIBTORCH_ROOT`、`LIBTORCH_DIR`、`TORCH_HOME`、`PYTORCH_HOME`，并检查 DLCV Python 安装目录中的 `torch`。版本优先读取同一安装目录的 `TORCH_VERSION_MAJOR`、`TORCH_VERSION_MINOR`、`TORCH_VERSION_PATCH`，未读取到时检查 `version.py`。
-- cuDNN 支持 `v9.7\bin\12.8`、`include\12.8`、`lib\12.8\x64` 等目录结构。
-- OpenCV 优先检查 `opencv_world*.dll` 与 `OpenCvSharpExtern.dll`，支持程序目录下的 `dll\x64\OpenCvSharpExtern.dll`，以及 `OPENCV_DIR` 指向 `vcXX\lib` 时相邻的 `bin` 目录；版本从同一安装目录的 `CV_VERSION_MAJOR`、`CV_VERSION_MINOR`、`CV_VERSION_REVISION` 读取。ONNX Runtime 还检查 DLCV Python 安装目录中的 `onnxruntime\capi`。
-- DLL 已找到时优先读取其文件版本；文件版本不可用时，只读取同一安装目录的版本头文件或包元数据。`dlcv_infer` 的 Python 包元数据仅用于对应 DLL 无文件版本时的版本显示。
-- 每个组件独立处理异常，某个组件无法读取时仍继续显示其他组件的检测结果；不安装组件，也不修改系统环境变量。
+- TensorRT、CUDA、cuDNN 分别从已加载模块导出的版本函数读取版本；其余组件读取实际 DLL 的版本资源。
+- 不扫描目录、环境变量或安装目录，不调用`nvidia-smi`，不主动调用 `LoadLibrary` 或 `FreeLibrary`。
+- 每个组件独立处理异常，某个组件无法读取时仍继续显示其他组件的结果；不安装组件，也不修改系统环境变量。
 
 ### 8. 错误处理规范（必须一致）
 
@@ -532,8 +525,9 @@
   - 释放所有模型后文本框显示 `所有模型已释放`
 
 - **环境检查**
-  - 点击`检查环境`后，左侧文本框包含 Windows / .NET、NVIDIA 驱动与 GPU、CUDA Toolkit、cuDNN、TensorRT、OpenCV、ONNX Runtime、PyTorch / LibTorch、`dlcv_infer` 九个分段。
-  - 缺失组件显示`未检测到`与已检查位置；任一组件读取异常不影响其他组件的结果显示。
+  - 点击`检查环境`后，左侧文本框显示 NVIDIA 驱动、`dlcv_infer`、ONNX Runtime、TensorRT、CUDA、cuDNN、OpenCV、LibTorch 的类型、版本和路径。
+  - 缺失组件显示`未加载`；任一组件读取异常不影响其他组件的结果显示。
+  - 检查只使用当前进程实际已加载模块，不扫描目录、环境变量或安装目录。
   - 检查期间按钮不可重复点击，完成后恢复可用状态。
 
 - **ImageViewer交互**

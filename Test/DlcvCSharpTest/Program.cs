@@ -4,8 +4,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net;
-using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -61,11 +59,6 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "model-channel-order-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunModelChannelOrderSelfTest();
-                }
-
-                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvp-http-selftest", StringComparison.OrdinalIgnoreCase))
-                {
-                    return RunDvpHttpSelfTest();
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "cli-anomaly-threshold-selftest", StringComparison.OrdinalIgnoreCase))
@@ -214,27 +207,6 @@ namespace DlcvCSharpTest
             {
                 try { Utils.FreeAllModels(); } catch { }
                 ForceGc();
-            }
-        }
-
-        private static int RunDvpHttpSelfTest()
-        {
-            DllLoader.ShowMissingDllDialog = false;
-            Console.WriteLine("==== DVP HTTP 自测 ====");
-            try
-            {
-                VerifyDvpServiceModelPaths();
-                VerifyDvpDeleteModelRequest();
-                VerifyDvpDeleteModelErrors();
-                VerifyDvpInferenceModelPath();
-                VerifyDvpInferenceResponse();
-                Console.WriteLine("DVP HTTP 自测通过");
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("DVP HTTP 自测失败: " + ex.Message);
-                return 1;
             }
         }
 
@@ -388,259 +360,6 @@ namespace DlcvCSharpTest
         }
 
         private static void RequireCliThreshold(bool condition, string message)
-        {
-            if (!condition)
-            {
-                throw new InvalidOperationException(message);
-            }
-        }
-
-        private static void VerifyDvpServiceModelPaths()
-        {
-            string relativeDvpPath = Path.Combine("DVP 自测", "模型 A.dvp");
-            string relativeDvspPath = Path.Combine("DVP 自测", "流程 A.dvsp");
-            RequireDvpHttp(
-                string.Equals(
-                    ResolveDvpHttpTestModelPath(relativeDvpPath),
-                    Path.GetFullPath(relativeDvpPath),
-                    StringComparison.OrdinalIgnoreCase),
-                "DVP 模型路径未转换为绝对路径");
-            RequireDvpHttp(
-                string.Equals(
-                    ResolveDvpHttpTestModelPath(relativeDvspPath),
-                    Path.GetFullPath(relativeDvspPath),
-                    StringComparison.OrdinalIgnoreCase),
-                "DVSP 模型路径未转换为绝对路径");
-        }
-
-        private static void VerifyDvpDeleteModelRequest()
-        {
-            Uri capturedUri = null;
-            HttpMethod capturedMethod = null;
-            var handler = new DvpHttpTestHandler(request =>
-            {
-                capturedUri = request.RequestUri;
-                capturedMethod = request.Method;
-                return CreateDvpHttpTestResponse(HttpStatusCode.OK, "{\"code\":\"00000\",\"message\":\"成功\"}");
-            });
-
-            string relativeModelPath = Path.Combine("DVP 自测", "模型 A.dvp");
-            var model = CreateDvpHttpTestModel(relativeModelPath, handler);
-            try
-            {
-                model.FreeModel();
-                RequireDvpHttp(capturedMethod == HttpMethod.Post, "删除模型请求不是 POST");
-                RequireDvpHttp(capturedUri != null && capturedUri.AbsolutePath == "/delete_model", "删除模型请求地址错误");
-
-                string absolutePath = Path.GetFullPath(relativeModelPath);
-                string expectedQuery = "?model_path=" + Uri.EscapeDataString(absolutePath);
-                RequireDvpHttp(capturedUri.Query == expectedQuery, "删除模型请求未使用 URL 编码的绝对路径");
-                RequireDvpHttp(model.modelIndex == -1, "删除模型成功后 modelIndex 未更新");
-            }
-            finally
-            {
-                model.Dispose();
-            }
-        }
-
-        private static void VerifyDvpDeleteModelErrors()
-        {
-            var codeHandler = new DvpHttpTestHandler(request =>
-                CreateDvpHttpTestResponse(HttpStatusCode.OK, "{\"code\":\"10001\",\"message\":\"服务拒绝释放\"}"));
-            var codeModel = CreateDvpHttpTestModel("release-code-error.dvp", codeHandler);
-            try
-            {
-                Exception error = CaptureDvpHttpException(() => codeModel.FreeModel());
-                RequireDvpHttp(error != null && error.Message.Contains("服务拒绝释放"), "删除模型错误未使用服务 message");
-                RequireDvpHttp(codeModel.modelIndex == 1, "删除模型失败后 modelIndex 被提前更新");
-            }
-            finally
-            {
-                codeModel.Dispose();
-            }
-
-            var notFoundHandler = new DvpHttpTestHandler(request =>
-                CreateDvpHttpTestResponse(HttpStatusCode.NotFound, "{\"detail\":\"Not Found\"}"));
-            var notFoundModel = CreateDvpHttpTestModel("release-404.dvp", notFoundHandler);
-            notFoundModel.Dispose();
-            RequireDvpHttp(notFoundModel.modelIndex == -1, "Dispose 遇到 DVP 释放失败后未完成本地清理");
-        }
-
-        private static void VerifyDvpInferenceResponse()
-        {
-            using (var image = new Mat(1, 1, MatType.CV_8UC3, Scalar.Black))
-            {
-                var successModel = CreateDvpInferenceTestModel(
-                    "{\"code\":\"00000\",\"message\":\"成功\",\"results\":[]}");
-                try
-                {
-                    var result = InvokeDvpInference(successModel, image);
-                    RequireDvpHttp(result.Item1["sample_results"] is JArray samples &&
-                        samples.Count == 1 && samples[0]["results"] is JArray,
-                        "DVP 推理成功响应未生成数组结果");
-                }
-                finally
-                {
-                    successModel.Dispose();
-                }
-
-                var errorModel = CreateDvpInferenceTestModel(
-                    "{\"code\":\"10002\",\"message\":\"推理服务拒绝\",\"results\":[]}");
-                try
-                {
-                    Exception error = CaptureDvpHttpException(() => InvokeDvpInference(errorModel, image));
-                    RequireDvpHttp(error != null && error.Message.Contains("DVP 推理异常: 推理服务拒绝"),
-                        "DVP 推理错误未使用服务 message");
-                }
-                finally
-                {
-                    errorModel.Dispose();
-                }
-
-                var invalidResultsModel = CreateDvpInferenceTestModel(
-                    "{\"code\":\"00000\",\"message\":\"成功\",\"results\":{}}");
-                try
-                {
-                    Exception error = CaptureDvpHttpException(() => InvokeDvpInference(invalidResultsModel, image));
-                    RequireDvpHttp(error != null && error.Message.Contains("results 必须是数组"),
-                        "DVP 推理未拒绝非数组 results");
-                }
-                finally
-                {
-                    invalidResultsModel.Dispose();
-                }
-            }
-        }
-
-        private static void VerifyDvpInferenceModelPath()
-        {
-            string relativeModelPath = Path.Combine("DVP 自测", "推理模型.dvp");
-            string capturedModelPath = null;
-            var handler = new DvpHttpTestHandler(request =>
-            {
-                if (request.RequestUri.AbsolutePath == "/delete_model")
-                {
-                    return CreateDvpHttpTestResponse(HttpStatusCode.OK, "{\"code\":\"00000\"}");
-                }
-
-                string requestJson = request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                capturedModelPath = JObject.Parse(requestJson)["model_path"]?.ToString();
-                return CreateDvpHttpTestResponse(
-                    HttpStatusCode.OK,
-                    "{\"code\":\"00000\",\"message\":\"成功\",\"results\":[]}");
-            });
-
-            var model = CreateDvpHttpTestModel(relativeModelPath, handler);
-            try
-            {
-                using (var image = new Mat(1, 1, MatType.CV_8UC3, Scalar.Black))
-                {
-                    InvokeDvpInference(model, image);
-                }
-                RequireDvpHttp(
-                    string.Equals(capturedModelPath, Path.GetFullPath(relativeModelPath), StringComparison.OrdinalIgnoreCase),
-                    "DVP 推理请求未使用绝对模型路径");
-            }
-            finally
-            {
-                model.Dispose();
-            }
-        }
-
-        private static Model CreateDvpInferenceTestModel(string inferenceJson)
-        {
-            var handler = new DvpHttpTestHandler(request =>
-            {
-                if (request.RequestUri.AbsolutePath == "/delete_model")
-                {
-                    return CreateDvpHttpTestResponse(HttpStatusCode.OK, "{\"code\":\"00000\"}");
-                }
-                return CreateDvpHttpTestResponse(HttpStatusCode.OK, inferenceJson);
-            });
-            return CreateDvpHttpTestModel("inference-test.dvp", handler);
-        }
-
-        private static Model CreateDvpHttpTestModel(string modelPath, HttpMessageHandler handler)
-        {
-            var model = new Model();
-            SetDvpHttpTestField(model, "_isDvpMode", true);
-            SetDvpHttpTestField(model, "_modelPath", ResolveDvpHttpTestModelPath(modelPath));
-            SetDvpHttpTestField(model, "_serverUrl", "http://127.0.0.1:9890");
-            SetDvpHttpTestField(model, "_httpClient", new HttpClient(handler));
-            model.modelIndex = 1;
-            return model;
-        }
-
-        private static string ResolveDvpHttpTestModelPath(string modelPath)
-        {
-            MethodInfo method = typeof(Model).GetMethod(
-                "ResolveModelPathForServiceModes",
-                BindingFlags.NonPublic | BindingFlags.Static);
-            if (method == null)
-            {
-                throw new InvalidOperationException("未找到 DVP 服务模型路径转换方法");
-            }
-            return (string)method.Invoke(null, new object[]
-            {
-                modelPath,
-                Path.GetExtension(modelPath).ToLowerInvariant()
-            });
-        }
-
-        private static void SetDvpHttpTestField(Model model, string fieldName, object value)
-        {
-            FieldInfo field = typeof(Model).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
-            if (field == null)
-            {
-                throw new InvalidOperationException("未找到 Model 字段: " + fieldName);
-            }
-            field.SetValue(model, value);
-        }
-
-        private static Tuple<JObject, IntPtr> InvokeDvpInference(Model model, Mat image)
-        {
-            MethodInfo method = typeof(Model).GetMethod("InferInternalDvp", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (method == null)
-            {
-                throw new InvalidOperationException("未找到 DVP 推理方法");
-            }
-
-            try
-            {
-                return (Tuple<JObject, IntPtr>)method.Invoke(model, new object[]
-                {
-                    new List<Mat> { image },
-                    new JObject()
-                });
-            }
-            catch (TargetInvocationException ex)
-            {
-                throw ex.InnerException ?? ex;
-            }
-        }
-
-        private static Exception CaptureDvpHttpException(Action action)
-        {
-            try
-            {
-                action();
-                return null;
-            }
-            catch (Exception ex)
-            {
-                return ex;
-            }
-        }
-
-        private static HttpResponseMessage CreateDvpHttpTestResponse(HttpStatusCode statusCode, string json)
-        {
-            return new HttpResponseMessage(statusCode)
-            {
-                Content = new StringContent(json, Encoding.UTF8, "application/json")
-            };
-        }
-
-        private static void RequireDvpHttp(bool condition, string message)
         {
             if (!condition)
             {
@@ -6760,25 +6479,6 @@ namespace DlcvCSharpTest
             finally
             {
                 try { Directory.Delete(root, true); } catch { }
-            }
-        }
-
-        private sealed class DvpHttpTestHandler : HttpMessageHandler
-        {
-            private readonly Func<HttpRequestMessage, HttpResponseMessage> _responseFactory;
-
-            public DvpHttpTestHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
-            {
-                _responseFactory = responseFactory ?? throw new ArgumentNullException(nameof(responseFactory));
-            }
-
-            protected override System.Threading.Tasks.Task<HttpResponseMessage> SendAsync(
-                HttpRequestMessage request,
-                CancellationToken cancellationToken)
-            {
-                HttpResponseMessage response = _responseFactory(request);
-                response.RequestMessage = request;
-                return System.Threading.Tasks.Task.FromResult(response);
             }
         }
 
