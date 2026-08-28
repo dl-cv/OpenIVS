@@ -76,7 +76,6 @@ private:
     int _deviceId = 0;
     std::string _flowJsonPath;
     std::vector<std::string> _acquiredModelKeys;
-    std::shared_ptr<const ModelBinaryStore> _modelBinaryStore;
 
     void ReleaseOwnedModelsNoexcept();
     Json LoadFromRoot(

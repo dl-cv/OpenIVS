@@ -284,7 +284,8 @@ namespace dlcv_infer {
         int _expectedChCache = -2;
         bool _hasCachedModelInfo = false;
         json _cachedModelInfo;
-        std::shared_ptr<const std::vector<unsigned char>> _modelBinaryOwner;
+        // 保留原有成员布局；全内存流程加载时该字符串保持为空。
+        std::string _tempDir;
 
         int resolveEffectiveInputCh();
         std::vector<cv::Mat> prepareInferInputBatch(const std::vector<cv::Mat>& images);

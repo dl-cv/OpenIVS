@@ -7,6 +7,8 @@
 #include <cmath>
 #include <climits>
 #include <fstream>
+#include <list>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,6 +19,89 @@
 
 namespace dlcv_infer {
 namespace flow {
+
+namespace {
+
+struct FlowBinaryStoreState final {
+    FlowGraphModel* owner = nullptr;
+    std::shared_ptr<const ModelBinaryStore> store;
+
+    FlowBinaryStoreState(FlowGraphModel* ownerValue,
+                         std::shared_ptr<const ModelBinaryStore> storeValue)
+        : owner(ownerValue), store(std::move(storeValue)) {}
+};
+
+std::mutex& FlowBinaryStoreStateMutex() {
+    static std::mutex* mutex = new std::mutex();
+    return *mutex;
+}
+
+std::list<FlowBinaryStoreState>& FlowBinaryStoreStates() {
+    static std::list<FlowBinaryStoreState>* states =
+        new std::list<FlowBinaryStoreState>();
+    return *states;
+}
+
+std::list<FlowBinaryStoreState>::iterator FindFlowBinaryStoreState(
+    FlowGraphModel* owner) {
+    std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+    return std::find_if(states.begin(), states.end(),
+        [owner](const FlowBinaryStoreState& state) {
+            return state.owner == owner;
+        });
+}
+
+std::shared_ptr<const ModelBinaryStore> GetFlowBinaryStore(
+    const FlowGraphModel* owner) {
+    std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
+    std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+    const auto it = std::find_if(states.begin(), states.end(),
+        [owner](const FlowBinaryStoreState& state) {
+            return state.owner == owner;
+        });
+    return it == states.end() ? std::shared_ptr<const ModelBinaryStore>() : it->store;
+}
+
+void SetFlowBinaryStore(
+    FlowGraphModel* owner,
+    std::shared_ptr<const ModelBinaryStore> store) {
+    std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
+    std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+    const auto it = FindFlowBinaryStoreState(owner);
+    if (!store) {
+        if (it != states.end()) states.erase(it);
+        return;
+    }
+    if (it != states.end()) {
+        it->store = std::move(store);
+        return;
+    }
+    states.emplace_back(owner, std::move(store));
+}
+
+void ClearFlowBinaryStoreNoexcept(FlowGraphModel* owner) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
+        std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+        const auto it = FindFlowBinaryStoreState(owner);
+        if (it != states.end()) states.erase(it);
+    } catch (...) {}
+}
+
+void TransferFlowBinaryStoreNoexcept(
+    FlowGraphModel* destination,
+    FlowGraphModel* source) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
+        std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+        const auto destinationIt = FindFlowBinaryStoreState(destination);
+        if (destinationIt != states.end()) states.erase(destinationIt);
+        const auto sourceIt = FindFlowBinaryStoreState(source);
+        if (sourceIt != states.end()) sourceIt->owner = destination;
+    } catch (...) {}
+}
+
+} // namespace
 
 static std::string ReadAllTextUtf8(const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
@@ -492,6 +577,7 @@ void FlowGraphModel::ReleaseOwnedModelsNoexcept() {
 
 FlowGraphModel::~FlowGraphModel() {
     ReleaseOwnedModelsNoexcept();
+    ClearFlowBinaryStoreNoexcept(this);
     _nodes.clear();
     _root = Json::object();
     _loadedModelMeta = Json::array();
@@ -499,7 +585,6 @@ FlowGraphModel::~FlowGraphModel() {
     _deviceId = 0;
     _flowJsonPath.clear();
     _acquiredModelKeys.clear();
-    _modelBinaryStore.reset();
 }
 
 FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
@@ -510,7 +595,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
     _acquiredModelKeys = std::move(other._acquiredModelKeys);
-    _modelBinaryStore = std::move(other._modelBinaryStore);
+    TransferFlowBinaryStoreNoexcept(this, &other);
 
     // moved-from：不再负责释放
     other._nodes.clear();
@@ -520,7 +605,6 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     other._deviceId = 0;
     other._flowJsonPath.clear();
     other._acquiredModelKeys.clear();
-    other._modelBinaryStore.reset();
 }
 
 FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
@@ -536,7 +620,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
     _acquiredModelKeys = std::move(other._acquiredModelKeys);
-    _modelBinaryStore = std::move(other._modelBinaryStore);
+    TransferFlowBinaryStoreNoexcept(this, &other);
 
     other._nodes.clear();
     other._root = Json::object();
@@ -545,7 +629,6 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     other._deviceId = 0;
     other._flowJsonPath.clear();
     other._acquiredModelKeys.clear();
-    other._modelBinaryStore.reset();
 
     return *this;
 }
@@ -577,7 +660,7 @@ Json FlowGraphModel::LoadFromRoot(
     }
 
     ReleaseOwnedModelsNoexcept();
-    _modelBinaryStore = std::move(modelBinaryStore);
+    ClearFlowBinaryStoreNoexcept(this);
     _loaded = false;
     _nodes.clear();
     for (const auto& n : root.at("nodes")) {
@@ -586,17 +669,19 @@ Json FlowGraphModel::LoadFromRoot(
     _root = root;
     _deviceId = deviceId;
 
-    ExecutionContext ctx;
-    ctx.Set<int>("device_id", deviceId);
-    if (_modelBinaryStore) {
-        ctx.Set<std::shared_ptr<const ModelBinaryStore>>("model_binary_store", _modelBinaryStore);
-    }
-    GraphExecutor exec(_nodes, &ctx);
-    Json report = exec.LoadModels();
-    _loadedModelMeta = ctx.Get<Json>("loaded_model_meta", Json::array());
-    if (!_loadedModelMeta.is_array()) {
-        _loadedModelMeta = Json::array();
-    }
+    try {
+        ExecutionContext ctx;
+        ctx.Set<int>("device_id", deviceId);
+        if (modelBinaryStore) {
+            ctx.Set<std::shared_ptr<const ModelBinaryStore>>(
+                "model_binary_store", modelBinaryStore);
+        }
+        GraphExecutor exec(_nodes, &ctx);
+        Json report = exec.LoadModels();
+        _loadedModelMeta = ctx.Get<Json>("loaded_model_meta", Json::array());
+        if (!_loadedModelMeta.is_array()) {
+            _loadedModelMeta = Json::array();
+        }
 
     // 简化错误信息（与 C# FlowGraphModel.LoadFromRoot 的思路一致）
     int code = 1;
@@ -662,8 +747,15 @@ Json FlowGraphModel::LoadFromRoot(
         }
     }
 
-    _loaded = true;
-    return report;
+        SetFlowBinaryStore(this, std::move(modelBinaryStore));
+        _loaded = true;
+        return report;
+    } catch (...) {
+        ReleaseOwnedModelsNoexcept();
+        ClearFlowBinaryStoreNoexcept(this);
+        _loaded = false;
+        throw;
+    }
 }
 
 Json FlowGraphModel::GetModelInfo() const {
@@ -751,8 +843,11 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     ctx.Set<std::vector<cv::Mat>>("frontend_image_mat_list", rgbBatch);
     ctx.Set<std::string>("frontend_image_path", std::string());
     ctx.Set<int>("device_id", _deviceId);
-    if (_modelBinaryStore) {
-        ctx.Set<std::shared_ptr<const ModelBinaryStore>>("model_binary_store", _modelBinaryStore);
+    const std::shared_ptr<const ModelBinaryStore> modelBinaryStore =
+        GetFlowBinaryStore(this);
+    if (modelBinaryStore) {
+        ctx.Set<std::shared_ptr<const ModelBinaryStore>>(
+            "model_binary_store", modelBinaryStore);
     }
     ctx.Set<Json>("infer_params", paramsJson.is_object() ? paramsJson : Json::object());
     ctx.Set<double>("flow_dlcv_infer_ms_acc", 0.0);

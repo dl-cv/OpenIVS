@@ -1607,16 +1607,15 @@ namespace dlcv_infer {
         std::shared_ptr<const std::vector<unsigned char>> modelData,
         const std::string& modelName,
         int device_id)
-        : _deviceId(device_id),
-          _modelBinaryOwner(std::move(modelData)) {
-        if (!_modelBinaryOwner || _modelBinaryOwner->empty()) {
+        : _deviceId(device_id) {
+        if (!modelData || modelData->empty()) {
             throw std::invalid_argument("子模型数据为空");
         }
         const std::string displayName = modelName.empty() ? "未命名子模型" : modelName;
 
         _dllLoader = &DllLoader::ForModelBuffer(
-            _modelBinaryOwner->data(),
-            _modelBinaryOwner->size());
+            modelData->data(),
+            modelData->size());
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
         const auto loadModelBinary = _dllLoader->GetLoadModelBinaryFunc();
@@ -1629,8 +1628,8 @@ namespace dlcv_infer {
         const std::string jsonStr = config.dump();
 
         void* resultPtr = loadModelBinary(
-            _modelBinaryOwner->data(),
-            _modelBinaryOwner->size(),
+            modelData->data(),
+            modelData->size(),
             jsonStr.c_str());
         if (resultPtr == nullptr) {
             throw std::runtime_error("二进制模型加载未返回结果");
@@ -1664,7 +1663,7 @@ namespace dlcv_infer {
         _expectedChCache(other._expectedChCache),
         _hasCachedModelInfo(other._hasCachedModelInfo),
         _cachedModelInfo(std::move(other._cachedModelInfo)),
-        _modelBinaryOwner(std::move(other._modelBinaryOwner)),
+        _tempDir(std::move(other._tempDir)),
         _dllLoader(other._dllLoader),
         _loadedDogProvider(other._loadedDogProvider),
         _loadedNativeDllName(std::move(other._loadedNativeDllName)) {
@@ -1676,7 +1675,7 @@ namespace dlcv_infer {
         other._expectedChCache = -2;
         other._hasCachedModelInfo = false;
         other._cachedModelInfo = json();
-        other._modelBinaryOwner.reset();
+        other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
         other._loadedNativeDllName.clear();
@@ -1697,7 +1696,7 @@ namespace dlcv_infer {
         _expectedChCache = other._expectedChCache;
         _hasCachedModelInfo = other._hasCachedModelInfo;
         _cachedModelInfo = std::move(other._cachedModelInfo);
-        _modelBinaryOwner = std::move(other._modelBinaryOwner);
+        _tempDir = std::move(other._tempDir);
         _dllLoader = other._dllLoader;
         _loadedDogProvider = other._loadedDogProvider;
         _loadedNativeDllName = std::move(other._loadedNativeDllName);
@@ -1710,7 +1709,7 @@ namespace dlcv_infer {
         other._expectedChCache = -2;
         other._hasCachedModelInfo = false;
         other._cachedModelInfo = json();
-        other._modelBinaryOwner.reset();
+        other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
         other._loadedNativeDllName.clear();
@@ -1726,19 +1725,16 @@ namespace dlcv_infer {
         if (_isFlowGraphMode) {
             delete _flowModel;
             _flowModel = nullptr;
-            _modelBinaryOwner.reset();
             modelIndex = -1;
             return;
         }
 
         if (modelIndex == -1) {
-            _modelBinaryOwner.reset();
             return;
         }
         // 仅“借用”modelIndex 时，不释放底层模型；只把本对象标记为无效。
         if (!OwnModelIndex) {
             modelIndex = -1;
-            _modelBinaryOwner.reset();
             return;
         }
 
@@ -1808,7 +1804,6 @@ namespace dlcv_infer {
             freeResult(resultPtr);
         }
         modelIndex = -1;
-        _modelBinaryOwner.reset();
     }
 
     json Model::GetModelInfo() {

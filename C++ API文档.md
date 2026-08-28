@@ -643,9 +643,13 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧从 `.dvst`、`.dvso` 归档内存读取 `pipeline.json` 和子模型二进制，为流程节点增加内部模型数据标识，并调用 `dlcv_load_model_binary`；加载期间不写入模型文件，`.dvsp` 当前不支持。
 
+`Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。公开类保留原有数据成员列表和顺序。
+
 ### 23.2 `FlowGraphModel`
 
 `FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`GetDvsModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并预加载 `model/*` 节点，同时保存每个模型节点的普通模型信息。
+
+流程归档的子模型二进制由 DLL 内部状态保存，不在 `FlowGraphModel` 公开类中增加数据成员；析构、重复加载和移动操作会同步清理或转移该状态。
 
 ### 23.3 `ExecutionContext`
 
