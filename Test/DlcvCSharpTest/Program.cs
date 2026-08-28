@@ -83,6 +83,16 @@ namespace DlcvCSharpTest
                     return RunDvsRgbSelfTest(args);
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvs-memory-loading-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDvsMemoryLoadingSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-reject-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDvspRejectSelfTest(args);
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-parity-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunDvspParitySelfTest(args);
@@ -2950,6 +2960,199 @@ namespace DlcvCSharpTest
 
             Console.Out.WriteLine(resultJson);
             return 0;
+        }
+
+        private static int RunDvsMemoryLoadingSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 3 || args.Length > 4)
+            {
+                Console.Error.WriteLine("用法: DlcvCSharpTest dvs-memory-loading-selftest <modelPath> <imagePath> [device]");
+                return 2;
+            }
+
+            if (!TryNormalizeSelfTestPath(args[1], "模型", out string modelPath)
+                || !TryNormalizeSelfTestPath(args[2], "图片", out string imagePath))
+            {
+                return 2;
+            }
+            int deviceId = GpuDeviceId;
+            if (args.Length == 4 && !int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceId))
+            {
+                Console.Error.WriteLine("device 必须为整数");
+                return 2;
+            }
+            string extension = Path.GetExtension(modelPath);
+            if (!string.Equals(extension, ".dvst", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(extension, ".dvso", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine("模型必须为 .dvst 或 .dvso");
+                return 2;
+            }
+            if (!File.Exists(modelPath) || !File.Exists(imagePath))
+            {
+                Console.Error.WriteLine("模型或图片不存在");
+                return 2;
+            }
+
+            DvsTempArtifactMonitor monitor = null;
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            Utils.CSharpResult result = default(Utils.CSharpResult);
+            string operationError = null;
+            try
+            {
+                monitor = new DvsTempArtifactMonitor(modelPath);
+                model = new Model(modelPath, deviceId, false, false);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图片读取失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+                result = model.Infer(rgb, new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = true,
+                    ["batch_size"] = 1
+                });
+            }
+            catch (Exception ex)
+            {
+                operationError = ex.Message;
+            }
+            finally
+            {
+                DisposeResultMasks(result);
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch (Exception ex) { if (operationError == null) operationError = ex.Message; }
+                ForceGc();
+                if (monitor != null) monitor.Dispose();
+            }
+
+            if (!string.IsNullOrEmpty(operationError))
+            {
+                Console.Error.WriteLine(operationError);
+                return 1;
+            }
+            if (monitor != null && (monitor.HasArtifacts || monitor.HasWatcherError))
+            {
+                Console.Error.WriteLine("系统临时目录出现流程归档文件: " + monitor.Describe());
+                return 1;
+            }
+            Console.WriteLine("C# 流程归档内存加载测试通过");
+            return 0;
+        }
+
+        private static int RunDvspRejectSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 2 || args.Length > 3)
+            {
+                Console.Error.WriteLine("用法: DlcvCSharpTest dvsp-reject-selftest <modelPath> [device]");
+                return 2;
+            }
+
+            if (!TryNormalizeSelfTestPath(args[1], "模型", out string modelPath))
+            {
+                return 2;
+            }
+            int deviceId = GpuDeviceId;
+            if (args.Length == 3 && !int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceId))
+            {
+                Console.Error.WriteLine("device 必须为整数");
+                return 2;
+            }
+            if (!string.Equals(Path.GetExtension(modelPath), ".dvsp", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine("模型必须为 .dvsp");
+                return 2;
+            }
+            if (!File.Exists(modelPath))
+            {
+                Console.Error.WriteLine("模型不存在");
+                return 2;
+            }
+
+            DvsTempArtifactMonitor monitor = null;
+            Model model = null;
+            string errorMessage = null;
+            try
+            {
+                monitor = new DvsTempArtifactMonitor(modelPath, false);
+                model = new Model(modelPath, deviceId, false, false);
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+            }
+            finally
+            {
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+                if (monitor != null) monitor.Dispose();
+            }
+
+            if (!HasExplicitDvspUnsupportedMessage(errorMessage))
+            {
+                Console.Error.WriteLine(".dvsp 未返回明确的不支持错误: " + (errorMessage ?? string.Empty));
+                return 1;
+            }
+            if (monitor != null && (monitor.HasArtifacts || monitor.HasWatcherError))
+            {
+                Console.Error.WriteLine("拒绝 .dvsp 时系统临时目录出现流程归档文件: " + monitor.Describe());
+                return 1;
+            }
+            Console.WriteLine("C# .dvsp 拒绝测试通过");
+            return 0;
+        }
+
+        private static bool TryNormalizeSelfTestPath(string value, string displayName, out string normalizedPath)
+        {
+            normalizedPath = (value ?? string.Empty).Trim();
+            if (normalizedPath.Length >= 2)
+            {
+                char first = normalizedPath[0];
+                char last = normalizedPath[normalizedPath.Length - 1];
+                if ((first == '"' && last == '"') || (first == '\'' && last == '\''))
+                {
+                    normalizedPath = normalizedPath.Substring(1, normalizedPath.Length - 2).Trim();
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(normalizedPath))
+            {
+                Console.Error.WriteLine(displayName + "路径为空");
+                return false;
+            }
+
+            try
+            {
+                normalizedPath = Path.GetFullPath(normalizedPath);
+                return true;
+            }
+            catch (ArgumentException ex)
+            {
+                Console.Error.WriteLine(displayName + "路径无效: " + ex.Message);
+                return false;
+            }
+            catch (NotSupportedException ex)
+            {
+                Console.Error.WriteLine(displayName + "路径无效: " + ex.Message);
+                return false;
+            }
+            catch (PathTooLongException ex)
+            {
+                Console.Error.WriteLine(displayName + "路径过长: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool HasExplicitDvspUnsupportedMessage(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return false;
+            return message.IndexOf("dvsp", StringComparison.OrdinalIgnoreCase) >= 0
+                && (message.IndexOf("不支持", StringComparison.Ordinal) >= 0
+                    || message.IndexOf("unsupported", StringComparison.OrdinalIgnoreCase) >= 0
+                    || message.IndexOf("not support", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static int RunDvspParitySelfTest(string[] args)

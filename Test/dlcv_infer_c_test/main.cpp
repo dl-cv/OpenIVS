@@ -1,8 +1,16 @@
 #include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include <windows.h>
 
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+
+#include "../DvsTempArtifactMonitor.h"
 #include "dlcv_infer_c_api.h"
 #include "dlcv_infer.h"
 
@@ -15,9 +23,146 @@ static std::string WideToUtf8(const std::wstring& w) {
     return out;
 }
 
-int main() {
+static cv::Mat ReadImageRgb(const std::wstring& imagePath) {
+    FILE* file = nullptr;
+    if (_wfopen_s(&file, imagePath.c_str(), L"rb") != 0 || file == nullptr) return {};
+    std::unique_ptr<FILE, decltype(&fclose)> holder(file, &fclose);
+    if (fseek(file, 0, SEEK_END) != 0) return {};
+    const long size = ftell(file);
+    if (size <= 0 || fseek(file, 0, SEEK_SET) != 0) return {};
+    std::vector<unsigned char> data(static_cast<size_t>(size));
+    if (fread(data.data(), 1, data.size(), file) != data.size()) return {};
+    cv::Mat decoded = cv::imdecode(data, cv::IMREAD_COLOR);
+    if (decoded.empty()) return {};
+    cv::Mat rgb;
+    cv::cvtColor(decoded, rgb, cv::COLOR_BGR2RGB);
+    return rgb;
+}
+
+static int RunDvsMemoryLoadingSelfTest(int argc, wchar_t* argv[]) {
+    if (argc < 4 || argc > 5) {
+        std::cerr << "用法: dlcv_infer_c_test dvs-memory-loading-selftest <modelPath> <imagePath> [device]\n";
+        return 2;
+    }
+    const std::wstring modelPath = argv[2];
+    const std::wstring imagePath = argv[3];
+    const int deviceId = argc == 5 ? _wtoi(argv[4]) : 0;
+    const std::wstring extension = dvs_test::Lower(std::filesystem::path(modelPath).extension().wstring());
+    if (extension != L".dvst" && extension != L".dvso") {
+        std::cerr << "模型必须为 .dvst 或 .dvso\n";
+        return 2;
+    }
+
+    try {
+        cv::Mat rgb = ReadImageRgb(imagePath);
+        if (rgb.empty()) {
+            std::cerr << "图片读取失败\n";
+            return 2;
+        }
+
+        dvs_test::TempArtifactMonitor monitor(dvs_test::ReadArchiveFileNames(modelPath));
+        monitor.Start();
+        std::string operationError;
+        int modelIndex = -1;
+        DlcvCResult result{};
+        try {
+            const std::string modelPathUtf8 = WideToUtf8(modelPath);
+            modelIndex = dlcv_infer_cpp_load_model_c(modelPathUtf8.c_str(), deviceId);
+            if (modelIndex < 0) {
+                const char* lastError = dlcv_infer_cpp_get_last_error_c();
+                operationError = lastError ? lastError : "C 接口加载失败";
+            } else {
+                DlcvCImage image{};
+                image.data_ptr = reinterpret_cast<long long>(rgb.data);
+                image.height = rgb.rows;
+                image.width = rgb.cols;
+                image.channel = rgb.channels();
+                DlcvCImageList imageList{&image, 1};
+                result = dlcv_infer_cpp_infer_c(modelIndex, &imageList);
+                if (result.code != 0) {
+                    operationError = result.message ? result.message : "C 接口推理失败";
+                }
+            }
+        } catch (const std::exception& ex) {
+            operationError = ex.what();
+        } catch (...) {
+            operationError = "加载、推理或释放时发生未知异常";
+        }
+        dlcv_infer_cpp_free_model_result_c(&result);
+        if (modelIndex >= 0 && dlcv_infer_cpp_free_model_c(modelIndex) != 0 && operationError.empty()) {
+            const char* lastError = dlcv_infer_cpp_get_last_error_c();
+            operationError = lastError ? lastError : "C 接口释放失败";
+        }
+        monitor.Stop();
+
+        if (!operationError.empty()) {
+            std::cerr << operationError << "\n";
+            return 1;
+        }
+        if (monitor.HasArtifacts()) {
+            std::cerr << "系统临时目录出现流程归档文件: " << monitor.DescribeUtf8() << "\n";
+            return 1;
+        }
+        std::cout << "C 接口流程归档内存加载测试通过\n";
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cerr << ex.what() << "\n";
+        return 1;
+    }
+}
+
+static int RunDvspRejectSelfTest(int argc, wchar_t* argv[]) {
+    if (argc < 3 || argc > 4) {
+        std::cerr << "用法: dlcv_infer_c_test dvsp-reject-selftest <modelPath> [device]\n";
+        return 2;
+    }
+    const std::wstring modelPath = argv[2];
+    const int deviceId = argc == 4 ? _wtoi(argv[3]) : 0;
+    if (dvs_test::Lower(std::filesystem::path(modelPath).extension().wstring()) != L".dvsp") {
+        std::cerr << "模型必须为 .dvsp\n";
+        return 2;
+    }
+
+    try {
+        dvs_test::TempArtifactMonitor monitor({});
+        monitor.Start();
+        const std::string pathUtf8 = WideToUtf8(modelPath);
+        const int modelIndex = dlcv_infer_cpp_load_model_c(pathUtf8.c_str(), deviceId);
+        std::string errorMessage;
+        if (modelIndex >= 0) {
+            dlcv_infer_cpp_free_model_c(modelIndex);
+        } else {
+            const char* lastError = dlcv_infer_cpp_get_last_error_c();
+            if (lastError) errorMessage = lastError;
+        }
+        monitor.Stop();
+
+        if (modelIndex >= 0 || !dvs_test::HasExplicitDvspUnsupportedMessage(errorMessage)) {
+            std::cerr << ".dvsp 未返回明确的不支持错误: " << errorMessage << "\n";
+            return 1;
+        }
+        if (monitor.HasArtifacts()) {
+            std::cerr << "拒绝 .dvsp 时系统临时目录出现流程归档文件: " << monitor.DescribeUtf8() << "\n";
+            return 1;
+        }
+        std::cout << "C 接口 .dvsp 拒绝测试通过\n";
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cerr << ex.what() << "\n";
+        return 1;
+    }
+}
+
+int wmain(int argc, wchar_t* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"dvs-memory-loading-selftest") {
+        return RunDvsMemoryLoadingSelfTest(argc, argv);
+    }
+    if (argc >= 2 && std::wstring(argv[1]) == L"dvsp-reject-selftest") {
+        return RunDvspRejectSelfTest(argc, argv);
+    }
 
     constexpr int kFlowIndexBase = 10000;
     const std::wstring dvstPathW = L"Y:\\测试模型\\AOI_120_50_s.dvst";

@@ -499,6 +499,7 @@ FlowGraphModel::~FlowGraphModel() {
     _deviceId = 0;
     _flowJsonPath.clear();
     _acquiredModelKeys.clear();
+    _modelBinaryStore.reset();
 }
 
 FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
@@ -509,6 +510,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
     _acquiredModelKeys = std::move(other._acquiredModelKeys);
+    _modelBinaryStore = std::move(other._modelBinaryStore);
 
     // moved-from：不再负责释放
     other._nodes.clear();
@@ -518,6 +520,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     other._deviceId = 0;
     other._flowJsonPath.clear();
     other._acquiredModelKeys.clear();
+    other._modelBinaryStore.reset();
 }
 
 FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
@@ -533,6 +536,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
     _acquiredModelKeys = std::move(other._acquiredModelKeys);
+    _modelBinaryStore = std::move(other._modelBinaryStore);
 
     other._nodes.clear();
     other._root = Json::object();
@@ -541,6 +545,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     other._deviceId = 0;
     other._flowJsonPath.clear();
     other._acquiredModelKeys.clear();
+    other._modelBinaryStore.reset();
 
     return *this;
 }
@@ -550,16 +555,29 @@ Json FlowGraphModel::Load(const std::string& flowJsonPath, int deviceId) {
     const std::string text = ReadAllTextUtf8(flowJsonPath);
     Json root = Json::parse(text);
     _flowJsonPath = flowJsonPath;
-    return LoadFromRoot(root, deviceId);
+    return LoadFromRoot(root, deviceId, nullptr);
 }
 
-Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
+Json FlowGraphModel::LoadFromArchive(
+    const Json& root,
+    std::shared_ptr<const ModelBinaryStore> modelBinaryStore,
+    int deviceId) {
+    if (!modelBinaryStore) throw std::invalid_argument("流程模型字节存储为空");
+    _flowJsonPath.clear();
+    return LoadFromRoot(root, deviceId, std::move(modelBinaryStore));
+}
+
+Json FlowGraphModel::LoadFromRoot(
+    const Json& root,
+    int deviceId,
+    std::shared_ptr<const ModelBinaryStore> modelBinaryStore) {
     if (!root.is_object()) throw std::invalid_argument("flow root is not object");
     if (!root.contains("nodes") || !root.at("nodes").is_array()) {
         throw std::runtime_error("flow json missing nodes array");
     }
 
     ReleaseOwnedModelsNoexcept();
+    _modelBinaryStore = std::move(modelBinaryStore);
     _loaded = false;
     _nodes.clear();
     for (const auto& n : root.at("nodes")) {
@@ -570,6 +588,9 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
 
     ExecutionContext ctx;
     ctx.Set<int>("device_id", deviceId);
+    if (_modelBinaryStore) {
+        ctx.Set<std::shared_ptr<const ModelBinaryStore>>("model_binary_store", _modelBinaryStore);
+    }
     GraphExecutor exec(_nodes, &ctx);
     Json report = exec.LoadModels();
     _loadedModelMeta = ctx.Get<Json>("loaded_model_meta", Json::array());
@@ -620,24 +641,23 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
         report = Json::object({ {"code", 1}, {"message", simpleMessage} });
     }
 
-    // 使用实际加载时保存的路径和设备保留模型引用。
+    // 使用预加载阶段生成的模型池 key 保留模型引用。
     for (const auto& item : _loadedModelMeta) {
         if (!IsModelMeta(item)) continue;
-        std::string modelPath;
-        int nodeDeviceId = deviceId;
+        std::string key;
         try {
-            if (item.contains("model_path") && item.at("model_path").is_string())
-                modelPath = item.at("model_path").get<std::string>();
-            if (item.contains("device_id"))
-                nodeDeviceId = ReadIntField(item, "device_id", deviceId);
+            if (item.contains("model_pool_key") && item.at("model_pool_key").is_string()) {
+                key = item.at("model_pool_key").get<std::string>();
+            }
         } catch (...) {}
-        if (modelPath.empty()) continue;
+        if (key.empty()) continue;
 
-        const std::string key = ModelPool::MakeKey(modelPath, nodeDeviceId);
         // 去重：同一流程可能多个节点引用同一模型
         if (std::find(_acquiredModelKeys.begin(), _acquiredModelKeys.end(), key)
             == _acquiredModelKeys.end()) {
-            ModelPool::Instance().Acquire(modelPath, nodeDeviceId);
+            if (!ModelPool::Instance().RetainByKey(key)) {
+                throw std::runtime_error("流程模型预加载状态失效");
+            }
             _acquiredModelKeys.push_back(key);
         }
     }
@@ -663,14 +683,18 @@ Json FlowGraphModel::GetDvsModelInfo() const {
                 if (properties.contains("model_path_original") && properties.at("model_path_original").is_string()) {
                     properties["model_path"] = properties.at("model_path_original");
                 }
+                properties.erase("model_buffer_key");
             }
         }
     } catch (...) {}
     if (_loadedModelMeta.is_array() && !_loadedModelMeta.empty()) {
         Json publicMeta = _loadedModelMeta;
         for (auto& item : publicMeta) {
-            if (!item.is_object() || !item.contains("model_path_original") || !item.at("model_path_original").is_string()) continue;
-            item["model_path"] = item.at("model_path_original");
+            if (!item.is_object()) continue;
+            item.erase("model_pool_key");
+            if (item.contains("model_path_original") && item.at("model_path_original").is_string()) {
+                item["model_path"] = item.at("model_path_original");
+            }
         }
         root["loaded_model_meta"] = std::move(publicMeta);
     }
@@ -727,6 +751,9 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     ctx.Set<std::vector<cv::Mat>>("frontend_image_mat_list", rgbBatch);
     ctx.Set<std::string>("frontend_image_path", std::string());
     ctx.Set<int>("device_id", _deviceId);
+    if (_modelBinaryStore) {
+        ctx.Set<std::shared_ptr<const ModelBinaryStore>>("model_binary_store", _modelBinaryStore);
+    }
     ctx.Set<Json>("infer_params", paramsJson.is_object() ? paramsJson : Json::object());
     ctx.Set<double>("flow_dlcv_infer_ms_acc", 0.0);
 

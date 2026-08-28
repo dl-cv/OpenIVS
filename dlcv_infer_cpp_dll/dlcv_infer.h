@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <fstream>
@@ -34,6 +35,7 @@ namespace dlcv_infer {
 
     namespace flow {
         class FlowGraphModel;
+        class ModelPool;
     }
 
     DLCV_INFER_CPP_DLL_API std::wstring convertStringToWstring(const std::string& inputString);
@@ -70,6 +72,7 @@ namespace dlcv_infer {
 
     // 外部 DLL 接口函数类型定义
     typedef void* (*LoadModelFuncType)(const char* config_str);
+    typedef void* (*LoadModelBinaryFuncType)(const unsigned char* model_data, size_t model_size, const char* config_str);
     typedef void* (*FreeModelFuncType)(const char* config_str);
     typedef void* (*GetModelInfoFuncType)(const char* config_str);
     typedef void* (*InferFuncType)(const char* config_str);
@@ -91,6 +94,7 @@ namespace dlcv_infer {
 
         // 函数指针
         LoadModelFuncType dlcv_load_model = nullptr;
+        LoadModelBinaryFuncType dlcv_load_model_binary = nullptr;
         FreeModelFuncType dlcv_free_model = nullptr;
         GetModelInfoFuncType dlcv_get_model_info = nullptr;
         InferFuncType dlcv_infer = nullptr;
@@ -102,6 +106,7 @@ namespace dlcv_infer {
 
         // 加载 DLL
         void LoadDll();
+        static DllLoader& GetOrCreateForProvider(sntl_admin::DogProvider provider);
 
         static DllLoader* instance;
         DllLoader(sntl_admin::DogProvider provider);
@@ -113,6 +118,7 @@ namespace dlcv_infer {
         static DllLoader& Instance();
         static void EnsureForModel(const std::string& modelPath);
         static void EnsureForModel(const std::wstring& modelPath);
+        static DllLoader& ForModelBuffer(const unsigned char* modelData, size_t modelSize);
 
         /// <summary>
         /// 自动检测当前插入的加密狗，按 Sentinel 优先、Virbox 第二返回 Provider。
@@ -122,6 +128,9 @@ namespace dlcv_infer {
 
         LoadModelFuncType GetLoadModelFunc() const {
             return dlcv_load_model;
+        }
+        LoadModelBinaryFuncType GetLoadModelBinaryFunc() const {
+            return dlcv_load_model_binary;
         }
         FreeModelFuncType GetFreeModelFunc() const {
             return dlcv_free_model;
@@ -261,14 +270,21 @@ namespace dlcv_infer {
             size_t sampleIndex = 0);
 
     private:
+#ifdef DLCV_INFER_CPP_DLL_EXPORTS
+        friend class flow::ModelPool;
+        Model(
+            std::shared_ptr<const std::vector<unsigned char>> modelData,
+            const std::string& modelName,
+            int device_id);
+#endif
+
         bool _isFlowGraphMode = false;
         int _deviceId = 0;
         flow::FlowGraphModel* _flowModel = nullptr;
         int _expectedChCache = -2;
         bool _hasCachedModelInfo = false;
         json _cachedModelInfo;
-        // DVS 模式：持有临时目录路径，确保在 Model 对象存活期间文件不被删除
-        std::string _tempDir;
+        std::shared_ptr<const std::vector<unsigned char>> _modelBinaryOwner;
 
         int resolveEffectiveInputCh();
         std::vector<cv::Mat> prepareInferInputBatch(const std::vector<cv::Mat>& images);
