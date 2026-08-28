@@ -34,22 +34,42 @@ namespace {
 using json = nlohmann::json;
 
 #ifdef _WIN32
+bool IsUsableStandardHandle(DWORD standardHandle) {
+    const HANDLE handle = GetStdHandle(standardHandle);
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    SetLastError(ERROR_SUCCESS);
+    const DWORD fileType = GetFileType(handle);
+    return fileType != FILE_TYPE_UNKNOWN || GetLastError() == ERROR_SUCCESS;
+}
+
 void InitializeConsoleForCommandLine() {
-    const BOOL attached = AttachConsole(ATTACH_PARENT_PROCESS);
-    if (!attached) {
-        const DWORD error = GetLastError();
-        if (error != ERROR_ACCESS_DENIED && !AllocConsole()) {
-            return;
-        }
+    const bool hasStdout = IsUsableStandardHandle(STD_OUTPUT_HANDLE);
+    const bool hasStderr = IsUsableStandardHandle(STD_ERROR_HANDLE);
+    if (hasStdout && hasStderr) {
+        return;
+    }
+
+    if (!AttachConsole(ATTACH_PARENT_PROCESS) && GetLastError() != ERROR_ACCESS_DENIED) {
+        return;
     }
 
     FILE* stream = nullptr;
-    freopen_s(&stream, "CONOUT$", "w", stdout);
-    freopen_s(&stream, "CONOUT$", "w", stderr);
-    freopen_s(&stream, "CONIN$", "r", stdin);
+    if (!hasStdout) {
+        freopen_s(&stream, "CONOUT$", "w", stdout);
+    }
+    if (!hasStderr) {
+        freopen_s(&stream, "CONOUT$", "w", stderr);
+    }
     std::ios::sync_with_stdio(true);
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
+
+    DWORD consoleMode = 0;
+    if (GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &consoleMode) ||
+        GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &consoleMode)) {
+        SetConsoleOutputCP(CP_UTF8);
+    }
 }
 #endif
 
