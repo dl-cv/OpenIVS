@@ -9,6 +9,20 @@ using dlcv_infer_csharp;
 
 namespace DlcvModules
 {
+    internal sealed class FlowModelSource
+    {
+        public string CacheKey { get; private set; }
+        public string ModelName { get; private set; }
+        public byte[] Data { get; private set; }
+
+        public FlowModelSource(string cacheKey, string modelName, byte[] data)
+        {
+            CacheKey = cacheKey;
+            ModelName = modelName;
+            Data = data;
+        }
+    }
+
     /// <summary>
     /// 流程图推理模型封装：与普通模型一致的调用方式（先加载，再推理/测速）。
     /// 强类型直连 ExecutionContext/GraphExecutor，便于调试与维护。
@@ -22,6 +36,7 @@ namespace DlcvModules
         private int _deviceId = 0;
         private string _flowJsonPath;
         private JArray _loadedModelMeta = new JArray();
+        private Dictionary<int, FlowModelSource> _modelSources = new Dictionary<int, FlowModelSource>();
 
         public bool IsLoaded { get { return _loaded; } }
 
@@ -47,17 +62,30 @@ namespace DlcvModules
         /// <returns>模型加载报告</returns>
         protected JObject LoadFromRoot(JObject root, int deviceId)
         {
+            return LoadFromRoot(root, deviceId, null);
+        }
+
+        internal JObject LoadFromRoot(JObject root, int deviceId, Dictionary<int, FlowModelSource> modelSources)
+        {
             if (root == null) throw new ArgumentNullException("root");
 
             var nodesToken = root["nodes"] as JArray;
             if (nodesToken == null) throw new InvalidOperationException("流程 JSON 缺少 nodes 数组");
 
+            if (_modelSources != null && _modelSources.Count > 0)
+            {
+                BaseModelModule.ReleaseBinaryModels(_modelSources, _deviceId);
+            }
             _nodes = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(nodesToken.ToString());
             _root = root;
             _deviceId = deviceId;
+            _modelSources = modelSources != null
+                ? new Dictionary<int, FlowModelSource>(modelSources)
+                : new Dictionary<int, FlowModelSource>();
 
             var ctx = new ExecutionContext();
             ctx.Set("device_id", deviceId);
+            SetModelSources(ctx);
             var exec = new GraphExecutor(_nodes, ctx);
             var report = exec.LoadModels();
             try
@@ -132,6 +160,14 @@ namespace DlcvModules
             }
             _loaded = true;
             return report;
+        }
+
+        private void SetModelSources(ExecutionContext context)
+        {
+            if (context != null && _modelSources != null && _modelSources.Count > 0)
+            {
+                context.Set("flow_model_sources", _modelSources);
+            }
         }
 
         public JArray GetLoadedModelMeta()
@@ -542,6 +578,7 @@ namespace DlcvModules
                 ctx.Set("device_id", _deviceId);
                 ctx.Set("return_json_emit_poly", emitPoly);
                 ctx.Set("infer_params", paramsJson ?? new JObject());
+                SetModelSources(ctx);
 
                 InferTiming.BeginFlowRequest();
                 var flowSw = System.Diagnostics.Stopwatch.StartNew();
@@ -738,6 +775,11 @@ namespace DlcvModules
         {
             if (!_disposed)
             {
+                if (disposing)
+                {
+                    BaseModelModule.ReleaseBinaryModels(_modelSources, _deviceId);
+                }
+                _modelSources = new Dictionary<int, FlowModelSource>();
                 _disposed = true;
             }
         }

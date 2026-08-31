@@ -7,6 +7,8 @@
 #include <cmath>
 #include <climits>
 #include <fstream>
+#include <list>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,6 +19,89 @@
 
 namespace dlcv_infer {
 namespace flow {
+
+namespace {
+
+struct FlowBinaryStoreState final {
+    FlowGraphModel* owner = nullptr;
+    std::shared_ptr<const ModelBinaryStore> store;
+
+    FlowBinaryStoreState(FlowGraphModel* ownerValue,
+                         std::shared_ptr<const ModelBinaryStore> storeValue)
+        : owner(ownerValue), store(std::move(storeValue)) {}
+};
+
+std::mutex& FlowBinaryStoreStateMutex() {
+    static std::mutex* mutex = new std::mutex();
+    return *mutex;
+}
+
+std::list<FlowBinaryStoreState>& FlowBinaryStoreStates() {
+    static std::list<FlowBinaryStoreState>* states =
+        new std::list<FlowBinaryStoreState>();
+    return *states;
+}
+
+std::list<FlowBinaryStoreState>::iterator FindFlowBinaryStoreState(
+    FlowGraphModel* owner) {
+    std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+    return std::find_if(states.begin(), states.end(),
+        [owner](const FlowBinaryStoreState& state) {
+            return state.owner == owner;
+        });
+}
+
+std::shared_ptr<const ModelBinaryStore> GetFlowBinaryStore(
+    const FlowGraphModel* owner) {
+    std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
+    std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+    const auto it = std::find_if(states.begin(), states.end(),
+        [owner](const FlowBinaryStoreState& state) {
+            return state.owner == owner;
+        });
+    return it == states.end() ? std::shared_ptr<const ModelBinaryStore>() : it->store;
+}
+
+void SetFlowBinaryStore(
+    FlowGraphModel* owner,
+    std::shared_ptr<const ModelBinaryStore> store) {
+    std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
+    std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+    const auto it = FindFlowBinaryStoreState(owner);
+    if (!store) {
+        if (it != states.end()) states.erase(it);
+        return;
+    }
+    if (it != states.end()) {
+        it->store = std::move(store);
+        return;
+    }
+    states.emplace_back(owner, std::move(store));
+}
+
+void ClearFlowBinaryStoreNoexcept(FlowGraphModel* owner) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
+        std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+        const auto it = FindFlowBinaryStoreState(owner);
+        if (it != states.end()) states.erase(it);
+    } catch (...) {}
+}
+
+void TransferFlowBinaryStoreNoexcept(
+    FlowGraphModel* destination,
+    FlowGraphModel* source) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
+        std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
+        const auto destinationIt = FindFlowBinaryStoreState(destination);
+        if (destinationIt != states.end()) states.erase(destinationIt);
+        const auto sourceIt = FindFlowBinaryStoreState(source);
+        if (sourceIt != states.end()) sourceIt->owner = destination;
+    } catch (...) {}
+}
+
+} // namespace
 
 static std::string ReadAllTextUtf8(const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
@@ -492,6 +577,7 @@ void FlowGraphModel::ReleaseOwnedModelsNoexcept() {
 
 FlowGraphModel::~FlowGraphModel() {
     ReleaseOwnedModelsNoexcept();
+    ClearFlowBinaryStoreNoexcept(this);
     _nodes.clear();
     _root = Json::object();
     _loadedModelMeta = Json::array();
@@ -509,6 +595,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
     _acquiredModelKeys = std::move(other._acquiredModelKeys);
+    TransferFlowBinaryStoreNoexcept(this, &other);
 
     // moved-from：不再负责释放
     other._nodes.clear();
@@ -533,6 +620,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
     _acquiredModelKeys = std::move(other._acquiredModelKeys);
+    TransferFlowBinaryStoreNoexcept(this, &other);
 
     other._nodes.clear();
     other._root = Json::object();
@@ -550,16 +638,29 @@ Json FlowGraphModel::Load(const std::string& flowJsonPath, int deviceId) {
     const std::string text = ReadAllTextUtf8(flowJsonPath);
     Json root = Json::parse(text);
     _flowJsonPath = flowJsonPath;
-    return LoadFromRoot(root, deviceId);
+    return LoadFromRoot(root, deviceId, nullptr);
 }
 
-Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
+Json FlowGraphModel::LoadFromArchive(
+    const Json& root,
+    std::shared_ptr<const ModelBinaryStore> modelBinaryStore,
+    int deviceId) {
+    if (!modelBinaryStore) throw std::invalid_argument("流程模型字节存储为空");
+    _flowJsonPath.clear();
+    return LoadFromRoot(root, deviceId, std::move(modelBinaryStore));
+}
+
+Json FlowGraphModel::LoadFromRoot(
+    const Json& root,
+    int deviceId,
+    std::shared_ptr<const ModelBinaryStore> modelBinaryStore) {
     if (!root.is_object()) throw std::invalid_argument("flow root is not object");
     if (!root.contains("nodes") || !root.at("nodes").is_array()) {
         throw std::runtime_error("flow json missing nodes array");
     }
 
     ReleaseOwnedModelsNoexcept();
+    ClearFlowBinaryStoreNoexcept(this);
     _loaded = false;
     _nodes.clear();
     for (const auto& n : root.at("nodes")) {
@@ -568,14 +669,19 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
     _root = root;
     _deviceId = deviceId;
 
-    ExecutionContext ctx;
-    ctx.Set<int>("device_id", deviceId);
-    GraphExecutor exec(_nodes, &ctx);
-    Json report = exec.LoadModels();
-    _loadedModelMeta = ctx.Get<Json>("loaded_model_meta", Json::array());
-    if (!_loadedModelMeta.is_array()) {
-        _loadedModelMeta = Json::array();
-    }
+    try {
+        ExecutionContext ctx;
+        ctx.Set<int>("device_id", deviceId);
+        if (modelBinaryStore) {
+            ctx.Set<std::shared_ptr<const ModelBinaryStore>>(
+                "model_binary_store", modelBinaryStore);
+        }
+        GraphExecutor exec(_nodes, &ctx);
+        Json report = exec.LoadModels();
+        _loadedModelMeta = ctx.Get<Json>("loaded_model_meta", Json::array());
+        if (!_loadedModelMeta.is_array()) {
+            _loadedModelMeta = Json::array();
+        }
 
     // 简化错误信息（与 C# FlowGraphModel.LoadFromRoot 的思路一致）
     int code = 1;
@@ -620,30 +726,36 @@ Json FlowGraphModel::LoadFromRoot(const Json& root, int deviceId) {
         report = Json::object({ {"code", 1}, {"message", simpleMessage} });
     }
 
-    // 使用实际加载时保存的路径和设备保留模型引用。
+    // 使用预加载阶段生成的模型池 key 保留模型引用。
     for (const auto& item : _loadedModelMeta) {
         if (!IsModelMeta(item)) continue;
-        std::string modelPath;
-        int nodeDeviceId = deviceId;
+        std::string key;
         try {
-            if (item.contains("model_path") && item.at("model_path").is_string())
-                modelPath = item.at("model_path").get<std::string>();
-            if (item.contains("device_id"))
-                nodeDeviceId = ReadIntField(item, "device_id", deviceId);
+            if (item.contains("model_pool_key") && item.at("model_pool_key").is_string()) {
+                key = item.at("model_pool_key").get<std::string>();
+            }
         } catch (...) {}
-        if (modelPath.empty()) continue;
+        if (key.empty()) continue;
 
-        const std::string key = ModelPool::MakeKey(modelPath, nodeDeviceId);
         // 去重：同一流程可能多个节点引用同一模型
         if (std::find(_acquiredModelKeys.begin(), _acquiredModelKeys.end(), key)
             == _acquiredModelKeys.end()) {
-            ModelPool::Instance().Acquire(modelPath, nodeDeviceId);
+            if (!ModelPool::Instance().RetainByKey(key)) {
+                throw std::runtime_error("流程模型预加载状态失效");
+            }
             _acquiredModelKeys.push_back(key);
         }
     }
 
-    _loaded = true;
-    return report;
+        SetFlowBinaryStore(this, std::move(modelBinaryStore));
+        _loaded = true;
+        return report;
+    } catch (...) {
+        ReleaseOwnedModelsNoexcept();
+        ClearFlowBinaryStoreNoexcept(this);
+        _loaded = false;
+        throw;
+    }
 }
 
 Json FlowGraphModel::GetModelInfo() const {
@@ -663,14 +775,18 @@ Json FlowGraphModel::GetDvsModelInfo() const {
                 if (properties.contains("model_path_original") && properties.at("model_path_original").is_string()) {
                     properties["model_path"] = properties.at("model_path_original");
                 }
+                properties.erase("model_buffer_key");
             }
         }
     } catch (...) {}
     if (_loadedModelMeta.is_array() && !_loadedModelMeta.empty()) {
         Json publicMeta = _loadedModelMeta;
         for (auto& item : publicMeta) {
-            if (!item.is_object() || !item.contains("model_path_original") || !item.at("model_path_original").is_string()) continue;
-            item["model_path"] = item.at("model_path_original");
+            if (!item.is_object()) continue;
+            item.erase("model_pool_key");
+            if (item.contains("model_path_original") && item.at("model_path_original").is_string()) {
+                item["model_path"] = item.at("model_path_original");
+            }
         }
         root["loaded_model_meta"] = std::move(publicMeta);
     }
@@ -727,6 +843,12 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     ctx.Set<std::vector<cv::Mat>>("frontend_image_mat_list", rgbBatch);
     ctx.Set<std::string>("frontend_image_path", std::string());
     ctx.Set<int>("device_id", _deviceId);
+    const std::shared_ptr<const ModelBinaryStore> modelBinaryStore =
+        GetFlowBinaryStore(this);
+    if (modelBinaryStore) {
+        ctx.Set<std::shared_ptr<const ModelBinaryStore>>(
+            "model_binary_store", modelBinaryStore);
+    }
     ctx.Set<Json>("infer_params", paramsJson.is_object() ? paramsJson : Json::object());
     ctx.Set<double>("flow_dlcv_infer_ms_acc", 0.0);
 

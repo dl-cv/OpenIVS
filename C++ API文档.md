@@ -178,9 +178,10 @@ public:
 ```
 
 **构造函数行为**：
-1. 若路径以 `.dvst` / `.dvso` / `.dvsp` 结尾 → 进入 Flow/DVS 模式，解包归档并加载流程图。
-2. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 `dlcv_load_model`。
-3. 构造失败时抛出 `std::runtime_error`，错误信息包含底层返回的 JSON。
+1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，从归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；加载期间不写入模型文件。
+2. `.dvsp` 当前不支持，构造时抛出 `std::invalid_argument`。
+3. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 `dlcv_load_model`。
+4. 构造失败时抛出 `std::runtime_error`，错误信息包含底层返回的 JSON。
 
 ### 4.2 模型信息
 
@@ -612,7 +613,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 20.2 加载、释放与信息查询
 
-`.dvst/.dvso/.dvsp` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式。普通模型通过 `dlcv_load_model` 加载。FlowGraph 模式完成归档解包后加载全部模型节点。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
+`.dvst/.dvso` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式；`.dvsp` 当前不支持。普通模型通过 `dlcv_load_model` 加载，归档子模型通过 `dlcv_load_model_binary` 从内存加载。FlowGraph 模式读取归档内存中的 `pipeline.json` 并加载全部模型节点。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
 
 ### 20.3 推理前图像规整
 
@@ -640,11 +641,15 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 23.1 DVS 归档加载
 
-共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧额外处理 DVS 归档解包、`pipeline.json` 中 `model_path` 重写，以及临时目录清理。
+共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧从 `.dvst`、`.dvso` 归档内存读取 `pipeline.json` 和子模型二进制，为流程节点增加内部模型数据标识，并调用 `dlcv_load_model_binary`；加载期间不写入模型文件，`.dvsp` 当前不支持。
+
+`Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。公开类保留原有数据成员列表和顺序。
 
 ### 23.2 `FlowGraphModel`
 
 `FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`GetDvsModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并预加载 `model/*` 节点，同时保存每个模型节点的普通模型信息。
+
+流程归档的子模型二进制由 DLL 内部状态保存，不在 `FlowGraphModel` 公开类中增加数据成员；析构、重复加载和移动操作会同步清理或转移该状态。
 
 ### 23.3 `ExecutionContext`
 

@@ -19,6 +19,10 @@ namespace dlcv_infer_csharp
         public LoadModelDelegate dlcv_load_model;
 
         [UnmanagedFunctionPointer(calling_method)]
+        public delegate IntPtr LoadModelBinaryDelegate(IntPtr model_data, UIntPtr model_size, string config_str);
+        public LoadModelBinaryDelegate dlcv_load_model_binary;
+
+        [UnmanagedFunctionPointer(calling_method)]
         public delegate IntPtr FreeModelDelegate(string config_str);
         public FreeModelDelegate dlcv_free_model;
 
@@ -98,6 +102,43 @@ namespace dlcv_infer_csharp
                 }
 
                 _instance = CreateLoader(needed.Value);
+            }
+        }
+
+        internal static DllLoader ForModel(byte[] modelData, string modelName)
+        {
+            DogProvider? needed = ResolveProviderFromHeader(modelData, modelName);
+            if (!needed.HasValue)
+            {
+                return Instance;
+            }
+
+            if (_instance != null && _instance.LoadedDogProvider == needed.Value)
+            {
+                return _instance;
+            }
+
+            lock (_lock)
+            {
+                if (_instance != null && _instance.LoadedDogProvider == needed.Value)
+                {
+                    return _instance;
+                }
+
+                List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
+                if (!availableProviders.Contains(needed.Value))
+                {
+                    if (availableProviders.Count == 0)
+                    {
+                        throw new Exception("未检测到授权");
+                    }
+                    string current = FormatProviderNames(availableProviders);
+                    string neededName = ProviderToDisplayName(needed.Value);
+                    throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
+                }
+
+                _instance = CreateLoader(needed.Value);
+                return _instance;
             }
         }
 
@@ -204,6 +245,34 @@ namespace dlcv_infer_csharp
             }
         }
 
+        private static DogProvider? ResolveProviderFromHeader(byte[] modelData, string modelName)
+        {
+            if (modelData == null || modelData.Length == 0)
+                throw new ArgumentException("模型数据为空", nameof(modelData));
+
+            string displayName = string.IsNullOrWhiteSpace(modelName) ? "内存模型" : modelName;
+            if (modelData.Length < 3 || modelData[0] != (byte)'D' || modelData[1] != (byte)'V' || modelData[2] != (byte)'\n')
+                throw new Exception($"模型文件格式错误：{displayName} 缺少 DV 头");
+
+            int headerEnd = Array.IndexOf(modelData, (byte)'\n', 3);
+            if (headerEnd < 0)
+                throw new Exception($"模型文件格式错误：{displayName} 缺少 header_json");
+
+            int headerLength = headerEnd - 3;
+            if (headerLength <= 0)
+                throw new Exception($"模型文件格式错误：{displayName} 缺少 header_json");
+
+            string headerJsonStr = Encoding.UTF8.GetString(modelData, 3, headerLength).TrimEnd('\r');
+            JObject headerJson = JObject.Parse(headerJsonStr);
+            if (!headerJson.ContainsKey("dog_provider"))
+                return null;
+
+            string providerText = headerJson["dog_provider"]?.ToString()?.ToLowerInvariant() ?? "";
+            if (providerText == "sentinel") return DogProvider.Sentinel;
+            if (providerText == "virbox") return DogProvider.Virbox;
+            throw new Exception($"模型头中的 dog_provider 无效：{providerText}");
+        }
+
         private void LoadDll()
         {
             if (!DllExists(DllName, DllPath))
@@ -221,6 +290,7 @@ namespace dlcv_infer_csharp
             }
 
             dlcv_load_model = GetDelegate<LoadModelDelegate>(hModule, "dlcv_load_model");
+            dlcv_load_model_binary = GetDelegate<LoadModelBinaryDelegate>(hModule, "dlcv_load_model_binary");
             dlcv_free_model = GetDelegate<FreeModelDelegate>(hModule, "dlcv_free_model");
             dlcv_get_model_info = GetDelegate<GetModelInfoDelegate>(hModule, "dlcv_get_model_info");
             dlcv_infer = GetDelegate<InferDelegate>(hModule, "dlcv_infer");
