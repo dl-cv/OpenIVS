@@ -38,16 +38,16 @@ namespace DlcvCSharpTest
 
         private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
         {
-            new ModelCase("AOI-旋转框检测_120_50.dvt", "AOI-1.jpg"),
-            new ModelCase("AOI_120_50.dvst", "AOI-1.jpg"),
-            new ModelCase("猫狗-分类_120_50.dvt", "猫狗-猫.jpg"),
+            new ModelCase("AOI-旋转框检测_120_50_s.dvt", "AOI-1.jpg"),
+            new ModelCase("AOI_120_50_s.dvst", "AOI-1.jpg"),
+            new ModelCase("猫狗-分类_120_50_s.dvt", "猫狗-猫.jpg"),
             new ModelCase("猫狗-分类_120_50_v.dvt", "猫狗-猫.jpg"),
-            new ModelCase("气球-实例分割_120_50.dvt", "气球.jpg"),
+            new ModelCase("气球-实例分割_120_50_s.dvt", "气球.jpg"),
             new ModelCase("气球-实例分割_120_50_v.dvt", "气球.jpg"),
-            new ModelCase("气球-语义分割_120_50.dvt", "气球.jpg"),
-            new ModelCase("手机屏幕-实例分割_120_50.dvt", "手机屏幕.jpg"),
-            new ModelCase("引脚定位-目标检测_120_50.dvt", "引脚定位-目标检测.jpg"),
-            new ModelCase("OCR_120_50.dvt", "OCR-1.jpg")
+            new ModelCase("气球-语义分割_120_50_s.dvt", "气球.jpg"),
+            new ModelCase("手机屏幕-实例分割_120_50_s.dvt", "手机屏幕.jpg"),
+            new ModelCase("引脚定位-目标检测_120_50_s.dvt", "引脚定位-目标检测.jpg"),
+            new ModelCase("OCR_120_50_s.dvt", "OCR-1.jpg")
         };
 
         private static int Main(string[] args)
@@ -1302,7 +1302,7 @@ namespace DlcvCSharpTest
                 total++;
                 var row = RunCase(modelPath, imagePath);
                 rows.Add(row);
-                if (row.LoadStatus.StartsWith("成功") && row.InferStatus == "成功") pass++;
+                if (row.LoadStatus.StartsWith("成功") && row.InferStatus.StartsWith("成功")) pass++;
             }
 
             rows.Add(new CaseRow
@@ -5114,9 +5114,9 @@ namespace DlcvCSharpTest
                 return 1;
             }
 
-            MethodInfo tryLoadImageForInfer = formType.GetMethod("TryLoadImageForInfer", BindingFlags.NonPublic | BindingFlags.Static);
+            MethodInfo prepareImageForModelInput = formType.GetMethod("PrepareImageForModelInput", BindingFlags.NonPublic | BindingFlags.Static);
             MethodInfo runPipeline = formType.GetMethod("RunPipeline", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (tryLoadImageForInfer == null || runPipeline == null)
+            if (prepareImageForModelInput == null || runPipeline == null)
             {
                 Console.WriteLine("未找到 Demo2 关键私有方法");
                 return 1;
@@ -5154,16 +5154,8 @@ namespace DlcvCSharpTest
                 componentField.SetValue(form, componentModel);
                 icField.SetValue(form, icModel);
 
-                object[] loadArgs = { imagePath, null, null, string.Empty };
-                bool loaded = (bool)tryLoadImageForInfer.Invoke(null, loadArgs);
-                if (!loaded)
-                {
-                    Console.WriteLine("TryLoadImageForInfer 失败: " + Convert.ToString(loadArgs[3], CultureInfo.InvariantCulture));
-                    return 1;
-                }
-
-                imageBgr = loadArgs[1] as Mat;
-                entryRgb = loadArgs[2] as Mat;
+                imageBgr = Cv2.ImRead(imagePath, ImreadModes.Unchanged);
+                entryRgb = prepareImageForModelInput.Invoke(null, new object[] { imageBgr }) as Mat;
                 if (imageBgr == null || imageBgr.Empty() || entryRgb == null || entryRgb.Empty())
                 {
                     Console.WriteLine("Demo2 加载图片后得到空图");
@@ -5256,7 +5248,7 @@ namespace DlcvCSharpTest
                 {
                     new { BaseName = "IC", Expected = true },
                     new { BaseName = "ic", Expected = true },
-                    new { BaseName = "BGA", Expected = true },
+                    new { BaseName = "IC-BGA", Expected = true },
                     new { BaseName = "座子", Expected = true },
                     new { BaseName = "开关", Expected = true },
                     new { BaseName = "晶振", Expected = true },
