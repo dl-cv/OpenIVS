@@ -82,6 +82,11 @@
       SourceFiles="$(ProjectDir)..\..\dlcv_infer_cpp\dlcv_infer_c_api.h"
       DestinationFolder="$(IntDir)standalone_c_include" />
   </Target>
+  <Target Name="CopyDlcvInferCppRuntime" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
+    <Copy
+      SourceFiles="$(ProjectDir)..\..\dlcv_infer_cpp\$(Configuration)\dlcv_infer_cpp.dll"
+      DestinationFolder="$(OutDir)" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

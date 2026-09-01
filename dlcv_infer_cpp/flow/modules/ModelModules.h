@@ -144,6 +144,7 @@ public:
 
     const std::string& ModelPathUtf8() const { return _modelPathUtf8; }
     const std::string& ModelIdentityUtf8() const { return _modelIdentityUtf8; }
+    const std::string& ModelPoolKey() const { return _modelIdentityUtf8; }
     int ResolvedDeviceId() const { return _resolvedDeviceId; }
     const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _modelLease.Model(); }
 };
