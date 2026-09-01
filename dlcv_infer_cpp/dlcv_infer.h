@@ -273,6 +273,11 @@ namespace dlcv_infer {
         // 解析推理结果
         Result ParseToStructResult(const json& resultObject);
 
+        // 解析推理结果并保留底层返回的 mask 尺寸与内容。
+        Result ParseToStructResultPreservingOriginalMask(const json& resultObject);
+
+        Result ParseToStructResultInternal(const json& resultObject, bool preserveOriginalMask);
+
     public:
         int modelIndex = -1;
         /// <summary>
@@ -309,6 +314,11 @@ namespace dlcv_infer {
 
         Result InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json = nullptr);
 
+        // 供结构化 C 接口使用；普通模型保留底层返回的原始 mask，流程模型行为不变。
+        Result InferBatchPreservingOriginalMask(
+            const std::vector<cv::Mat>& image_list,
+            const json& params_json = nullptr);
+
         json InferOneOutJson(const cv::Mat& image, const json& params_json = nullptr);
 
         static void GetLastInferTiming(double& dlcvInferMs, double& totalInferMs);
@@ -331,6 +341,11 @@ namespace dlcv_infer {
         std::mutex _modelInfoMutex;
         // DVS 模式：持有临时目录路径，确保在 Model 对象存活期间文件不被删除
         std::string _tempDir;
+
+        Result InferBatchInternal(
+            const std::vector<cv::Mat>& image_list,
+            const json& params_json,
+            bool preserveOriginalMask);
 
         void freeModelLocked();
         json getModelInfoLocked();

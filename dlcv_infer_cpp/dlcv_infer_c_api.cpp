@@ -594,7 +594,8 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
             }
         }
 
-        dlcv_infer::Result cppResult = entry->model->InferBatch(mats, params);
+        dlcv_infer::Result cppResult =
+            entry->model->InferBatchPreservingOriginalMask(mats, params);
 
         result.code = 0;
         result.message = _strdup("success");

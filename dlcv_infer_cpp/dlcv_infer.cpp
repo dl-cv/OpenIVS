@@ -2228,6 +2228,16 @@ namespace dlcv_infer {
     }
 
     Result Model::ParseToStructResult(const json& resultObject) {
+        return ParseToStructResultInternal(resultObject, false);
+    }
+
+    Result Model::ParseToStructResultPreservingOriginalMask(const json& resultObject) {
+        return ParseToStructResultInternal(resultObject, true);
+    }
+
+    Result Model::ParseToStructResultInternal(
+        const json& resultObject,
+        bool preserveOriginalMask) {
         std::vector<SampleResult> sampleResults;
         auto sampleResultsArray = resultObject["sample_results"];
 
@@ -2349,9 +2359,10 @@ namespace dlcv_infer {
                     mask_img = cv::Mat(mask_height, mask_width, CV_8UC1, mask_ptr).clone();
                 }
 
-                // 与 C# 对齐：普通模型路径下，mask 需要归一到 bbox 尺寸，
-                // 否则 flow 的 mask_to_rbox 会把“整图 mask”再次叠加 bbox 偏移，导致旋转框偏大。
-                if (!mask_img.empty() && bbox.size() >= 4)
+                // 普通 C++ 模型路径与 C# 保持一致，将 mask 调整到 bbox 尺寸，
+                // 避免 flow 的 mask_to_rbox 再次叠加 bbox 偏移后得到过大的旋转框。
+                // 结构化 C 接口需要原样传递底层 mask，因此跳过此处理。
+                if (!preserveOriginalMask && !mask_img.empty() && bbox.size() >= 4)
                 {
                     const int bbox_w = std::max(0, static_cast<int>(std::llround(std::abs(bbox[2]))));
                     const int bbox_h = std::max(0, static_cast<int>(std::llround(std::abs(bbox[3]))));
@@ -2455,6 +2466,19 @@ namespace dlcv_infer {
     }
 
     Result Model::InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json) {
+        return InferBatchInternal(image_list, params_json, false);
+    }
+
+    Result Model::InferBatchPreservingOriginalMask(
+        const std::vector<cv::Mat>& image_list,
+        const json& params_json) {
+        return InferBatchInternal(image_list, params_json, true);
+    }
+
+    Result Model::InferBatchInternal(
+        const std::vector<cv::Mat>& image_list,
+        const json& params_json,
+        bool preserveOriginalMask) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
         std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
         ClearLastInspectionStatuses();
@@ -2517,7 +2541,9 @@ namespace dlcv_infer {
 
         try
         {
-            Result result = ParseToStructResult(resultTuple.first);
+            Result result = preserveOriginalMask
+                ? ParseToStructResultPreservingOriginalMask(resultTuple.first)
+                : ParseToStructResult(resultTuple.first);
             // 完成后释放结果
             _dllLoader->GetFreeModelResultFunc()(resultTuple.second);
             return result;
