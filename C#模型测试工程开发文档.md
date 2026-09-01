@@ -11,6 +11,7 @@
 
 - 模型加载成功/失败判断
 - 推理成功/失败判断
+- 固定模型预测结果回归校验
 - 推理结果类别列表输出（按出现次数展开）
 - 3 秒平均推理速度
 - Batch 推理速度（单独字段）
@@ -32,7 +33,7 @@
   - 推理前将图片从 BGR 转为 RGB
   - 结果中的 `Mask` 显式 `Dispose`
   - 内存采样使用 `GetProcessMemoryInfo`
-  - 支持 `demo2-rgb-selftest` 子命令：反射驱动 `DlcvDemo2.Form1` 的私有图片加载与 `RunPipeline`，对同一张图分别执行“Demo2 实际入口 RGB”“手工 RGB”“原始 BGR”三条路径并输出签名比对结果
+  - 支持 `demo2-rgb-selftest` 子命令：反射调用 `DlcvDemo2.Form1` 的 `PrepareImageForModelInput` 与 `RunPipeline`，对同一张图分别执行“Demo2 实际入口 RGB”“手工 RGB”“原始 BGR”三种处理并输出签名比对结果
 
 ### 2.2 C++ 工程
 
@@ -48,23 +49,40 @@
     - 若调用 `dlcv_infer::Model(const std::wstring& modelPath, ...)`（推荐）：可直接传 Windows UTF-16 路径，内部处理转码，避免测试代码到处写转换函数
   - Windows 控制台保持 GBK。程序内部生成的 UTF-8 文本在输出前转换为 GBK，再通过 `cout` 或 `cerr` 输出，不设置控制台代码页；模型结果中已经是本地编码的类别名不重复转换。
 
-## 3. 默认测试用例映射
+## 3. 默认固定模型回归用例
 
-- `AOI-旋转框检测.dvt` -> `AOI-测试.jpg`
-- `猫狗-分类.dvt` -> `猫狗-猫.jpg`
-- `气球-实例分割.dvt` -> `气球.jpg`
-- `气球-语义分割.dvt` -> `气球.jpg`
-- `手机屏幕-实例分割.dvt` -> `手机屏幕.jpg`
-- `引脚定位-目标检测.dvt` -> `引脚定位-目标检测.jpg`
-- `OCR.dvt` -> `OCR-1.jpg`
+- `测试无监督-v5_120_50_s.dvt` -> `1786969663716.jpg`
+- `猫狗-分类_120_50_s.dvt` -> `猫狗-狗.jpg`
+- `猫狗-分类_120_50_v.dvt` -> `猫狗-狗.jpg`
+- `气球-大模型_20260830_010011_120_50_s.dvt` -> `气球.jpg`
+- `气球-实例分割_120_50_s.dvt` -> `气球.jpg`
+- `气球-实例分割_120_50_v.dvt` -> `气球.jpg`
+- `气球-语义分割_120_50_s.dvt` -> `气球.jpg`
+- `手机屏幕-实例分割_120_50_s.dvt` -> `手机屏幕.jpg`
+- `引脚定位-目标检测_120_50_s.dvt` -> `引脚定位-目标检测.jpg`
+- `AOI-旋转框检测_120_50_s.dvt` -> `AOI-测试.jpg`
+- `OCR_120_50_s.dvt` -> `OCR-472.jpg`
+
+模型与图片从 `Y:\测试模型` 读取。模型或图片缺失时用例失败。
+
+每个用例依次校验样本数量、结果数量、`category_id`、`category_name`、`with_bbox`、`with_mask`、`with_angle`、score、bbox、area、angle 和 mask。数值容差如下：
+
+- score：`0.002`
+- bbox：`1.0`
+- area：`128.0`
+- angle：`0.05`
+- mask 非零像素数：`128`
+
+mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask 通过 C# API 按 bbox 尺寸缩放，固定基准记录 `CSharpObjectResult.Mask` 的实际输出。
 
 ## 4. 输出格式
 
 控制台输出 markdown 表格，列如下：
 
-- 模型
+- 用例
 - 加载（成功/失败 + 耗时 + 增量 + provider + DLL 名）
 - 推理（成功/失败）
+- 结果校验（结果一致/失败字段）
 - 类别列表（例如：气球，气球）
 - 3秒速度
 - Batch速度（单独一列，不支持显示 N/A）
@@ -149,6 +167,12 @@
 ```
 
 ## 6. 构建与运行
+
+### 6.1 统一测试入口
+
+`Test\DlcvCSharpTest\RunAllTests.ps1 [日志路径]` 是日常完整验证入口。脚本隐藏启动一次 `DlcvCSharpTest.exe all-tests`，统一收集 C# 和原生库输出，测试结束后只在控制台显示各组测试状态、耗时及最终统计。全部原始输出保存到一个日志文件；未提供日志路径时，日志保存为程序目录下的 `bin\x64\Release\DlcvCSharpTest-all-tests.log`。
+
+测试程序在单个进程内依次执行 14 项无外部参数自测和 11 个固定模型回归用例。完整清单执行结束后再返回，任一测试失败时返回 `1`，参数或日志路径无效时返回 `2`。日常完整验证只需启动脚本一次，无须分别调用各个 `*-selftest` 子命令。
 
 - 解决方案级构建、项目级构建与发布前构建验证统一通过 `.cursor/skills/vs-build/scripts/build.py` 执行，入口见 `开发文档.md` 的“统一编译说明”
 - 运行文件：

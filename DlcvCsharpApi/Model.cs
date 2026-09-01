@@ -101,7 +101,12 @@ namespace dlcv_infer_csharp
             }
 
             string extension = Path.GetExtension(modelPath).ToLower();
-            _isDvpMode = extension == ".dvp" || extension == ".dvsp";
+            if (extension == ".dvsp")
+            {
+                throw new NotSupportedException("当前不支持 .dvsp 模型，请使用 .dvst 或 .dvso");
+            }
+
+            _isDvpMode = extension == ".dvp";
             _isDvsMode = extension == ".dvst" || extension == ".dvso";
             _isRpcMode = rpc_mode;
             string cacheKey = BuildModelCacheKey(modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
@@ -186,6 +191,19 @@ namespace dlcv_infer_csharp
                 }
                 throw;
             }
+        }
+
+        internal Model(byte[] modelData, string modelName, int device_id)
+        {
+            if (modelData == null || modelData.Length == 0)
+            {
+                throw new ArgumentException("模型数据为空", nameof(modelData));
+            }
+
+            _modelPath = string.IsNullOrWhiteSpace(modelName) ? "memory_model" : modelName;
+            InitializeDvtMode(modelData, _modelPath, device_id);
+            TryCacheModelInfo();
+            WarmupInfer();
         }
 
         private static string BuildModelCacheKey(string modelPath, int deviceId, bool isDvpMode, bool isDvsMode, bool isRpcMode)
@@ -311,6 +329,16 @@ namespace dlcv_infer_csharp
             LoadDvtModel(modelPath, config, "加载模型失败");
         }
 
+        private void InitializeDvtMode(byte[] modelData, string modelName, int device_id)
+        {
+            var config = new JObject
+            {
+                ["device_id"] = device_id
+            };
+
+            LoadDvtModel(modelData, modelName, config, "加载模型失败");
+        }
+
         protected void LoadDvtModel(string modelPath, JObject config, string failureMessagePrefix)
         {
             lock (s_dvtModelLoadLock)
@@ -348,6 +376,64 @@ namespace dlcv_infer_csharp
                     {
                         _dllLoader.dlcv_free_result(resultPtr);
                     }
+                }
+            }
+        }
+
+        private void LoadDvtModel(byte[] modelData, string modelName, JObject config, string failureMessagePrefix)
+        {
+            _dllLoader = DllLoader.ForModel(modelData, modelName);
+            if (_dllLoader == null || _dllLoader.dlcv_load_model_binary == null)
+            {
+                throw new NotSupportedException("当前推理组件不支持从内存加载模型");
+            }
+
+            var setting = new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii };
+            string jsonStr = JsonConvert.SerializeObject(config, setting);
+
+            GCHandle modelHandle = default(GCHandle);
+            IntPtr resultPtr = IntPtr.Zero;
+            try
+            {
+                modelHandle = GCHandle.Alloc(modelData, GCHandleType.Pinned);
+                UIntPtr modelSize = new UIntPtr((ulong)modelData.LongLength);
+                resultPtr = _dllLoader.dlcv_load_model_binary(
+                    modelHandle.AddrOfPinnedObject(),
+                    modelSize,
+                    jsonStr);
+            }
+            finally
+            {
+                if (modelHandle.IsAllocated)
+                {
+                    modelHandle.Free();
+                }
+            }
+
+            try
+            {
+                if (resultPtr == IntPtr.Zero)
+                {
+                    throw new Exception(failureMessagePrefix + "：底层未返回加载结果");
+                }
+
+                string resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                JObject resultObject = JObject.Parse(resultJson);
+                Log("Model load result: " + resultObject.ToString());
+                if (resultObject.ContainsKey("model_index"))
+                {
+                    modelIndex = resultObject["model_index"].Value<int>();
+                }
+                else
+                {
+                    throw new Exception(failureMessagePrefix + "：" + resultObject.ToString());
+                }
+            }
+            finally
+            {
+                if (resultPtr != IntPtr.Zero)
+                {
+                    _dllLoader.dlcv_free_result(resultPtr);
                 }
             }
         }

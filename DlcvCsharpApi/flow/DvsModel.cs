@@ -1,214 +1,270 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using OpenCvSharp;
-using dlcv_infer_csharp;
 
 namespace DlcvModules
 {
     /// <summary>
-    /// 支持加载 .dvst/dvso/dvsp 格式（包含 pipeline.json + 多个 .dvt/.dvs/.dvp 模型）
-    /// 解包 -> 临时存储 -> 加载 -> 清理
+    /// 从 .dvst 或 .dvso 归档读取流程配置和子模型数据。
     /// </summary>
     public class DvsModel : FlowGraphModel
     {
-        private string _dvsPath;
-        // 临时文件夹路径，用于清理
-        private string _tempDir = null;
+        private const int MaxHeaderLength = 16 * 1024 * 1024;
+
+        private sealed class ArchiveEntry
+        {
+            public string NormalizedName { get; private set; }
+            public byte[] Data { get; private set; }
+
+            public ArchiveEntry(string normalizedName, byte[] data)
+            {
+                NormalizedName = normalizedName;
+                Data = data;
+            }
+        }
 
         public new JObject Load(string dvsPath, int deviceId = 0)
         {
-            if (string.IsNullOrWhiteSpace(dvsPath)) throw new ArgumentException("文件路径为空", nameof(dvsPath));
-            if (!File.Exists(dvsPath)) throw new FileNotFoundException("文件不存在", dvsPath);
+            if (string.IsNullOrWhiteSpace(dvsPath))
+                throw new ArgumentException("文件路径为空", nameof(dvsPath));
 
-            _dvsPath = dvsPath;
+            string extension = Path.GetExtension(dvsPath).ToLowerInvariant();
+            if (extension == ".dvsp")
+                throw new NotSupportedException("当前不支持 .dvsp 模型，请使用 .dvst 或 .dvso");
+            if (extension != ".dvst" && extension != ".dvso")
+                throw new ArgumentException("DvsModel 仅支持 .dvst 和 .dvso 文件", nameof(dvsPath));
+            if (!File.Exists(dvsPath))
+                throw new FileNotFoundException("文件不存在", dvsPath);
 
-            // 1. 准备临时目录
-            _tempDir = Path.Combine(Path.GetTempPath(), "DlcvDvs_" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(_tempDir);
+            JObject pipelineJson;
+            Dictionary<string, ArchiveEntry> entries;
+            using (var stream = new FileStream(dvsPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                ReadArchive(stream, out pipelineJson, out entries);
+            }
 
-            JObject pipelineJson = null;
-            var extractedFiles = new Dictionary<string, string>(); // filename -> fullPath
-            // 映射：原始文件名 -> 临时文件路径（Guid命名）
-            var fileNameToTempPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string archiveCacheKey = Guid.NewGuid().ToString("N");
+            Dictionary<int, FlowModelSource> modelSources = BuildModelSources(pipelineJson, entries, archiveCacheKey);
+            return LoadFromRoot(pipelineJson, deviceId, modelSources);
+        }
 
+        private static void ReadArchive(Stream stream, out JObject pipelineJson, out Dictionary<string, ArchiveEntry> entries)
+        {
+            byte[] magic = ReadExactBytes(stream, 3, "文件读取意外结束");
+            if (magic[0] != (byte)'D' || magic[1] != (byte)'V' || magic[2] != (byte)'\n')
+                throw new InvalidDataException("文件格式错误：缺少 DV 头部");
+
+            string headerText = ReadHeaderLine(stream);
+            JObject header;
             try
             {
-                using (FileStream fs = new FileStream(dvsPath, FileMode.Open, FileAccess.Read))
-                {
-                    // 2. 校验头部 "DV\n"
-                    byte[] magic = new byte[3];
-                    if (fs.Read(magic, 0, 3) != 3 || magic[0] != 'D' || magic[1] != 'V' || magic[2] != '\n')
-                    {
-                        throw new InvalidDataException("文件格式错误：缺少 DV 头部");
-                    }
-
-                    // 3. 读取 JSON 头行
-                    List<byte> lineBytes = new List<byte>();
-                    int b;
-                    while ((b = fs.ReadByte()) != -1)
-                    {
-                        if (b == '\n') break;
-                        lineBytes.Add((byte)b);
-                    }
-                    string headerStr = Encoding.UTF8.GetString(lineBytes.ToArray());
-                    JObject header = JObject.Parse(headerStr);
-
-                    JArray fileList = header["file_list"] as JArray;
-                    JArray fileSize = header["file_size"] as JArray;
-
-                    if (fileList == null || fileSize == null || fileList.Count != fileSize.Count)
-                    {
-                        throw new InvalidDataException("文件头信息损坏：file_list 或 file_size 缺失/不匹配");
-                    }
-
-                    // 4. 遍历解包
-                    for (int i = 0; i < fileList.Count; i++)
-                    {
-                        string fileName = fileList[i].ToString();
-                        long size = (long)fileSize[i];
-
-                        // 如果是 pipeline.json，直接读取到内存
-                        if (fileName == "pipeline.json")
-                        {
-                            byte[] data = new byte[size];
-                            if (fs.Read(data, 0, (int)size) != size) throw new EndOfStreamException("文件读取意外结束");
-                            string jsonText = Encoding.UTF8.GetString(data);
-                            pipelineJson = JObject.Parse(jsonText);
-                        }
-                        else
-                        {
-                            // 其他文件（.dvt/.dvs/.dvo/.dvr 等）写入临时目录
-                            // 关键修改：为了避免中文文件名导致的底层库打开失败，我们将临时文件重命名为纯英文（Guid）
-                            // 保留原始扩展名以便识别
-                            string ext = Path.GetExtension(fileName);
-                            if (string.IsNullOrEmpty(ext)) ext = ".tmp";
-                            string safeName = Guid.NewGuid().ToString("N") + ext;
-                            string targetPath = Path.Combine(_tempDir, safeName);
-                            
-                            using (FileStream outFs = new FileStream(targetPath, FileMode.Create, FileAccess.Write))
-                            {
-                                byte[] buffer = new byte[8192];
-                                long remaining = size;
-                                while (remaining > 0)
-                                {
-                                    int read = fs.Read(buffer, 0, (int)Math.Min(remaining, buffer.Length));
-                                    if (read == 0) throw new EndOfStreamException("文件读取意外结束");
-                                    outFs.Write(buffer, 0, read);
-                                    remaining -= read;
-                                }
-                            }
-                            extractedFiles[fileName] = targetPath;
-                            fileNameToTempPath[fileName] = targetPath;
-                        }
-                    }
-                }
-
-                if (pipelineJson == null) throw new InvalidDataException("未找到 pipeline.json");
-                // 5. 修改 Pipeline 中的 model_path
-                var nodesToken = pipelineJson["nodes"] as JArray;
-                if (nodesToken == null) throw new InvalidOperationException("Pipeline 缺少 nodes 数组");
-
-                foreach (var node in nodesToken)
-                {
-                    if (node["properties"] is JObject props)
-                    {
-                        if (props.ContainsKey("model_path"))
-                        {
-                            string originalPath = props["model_path"].ToString();
-                            props["model_path_original"] = originalPath;
-                            string originalName = originalPath;
-                            try
-                            {
-                                string fileName = Path.GetFileName(originalPath);
-                                if (!string.IsNullOrWhiteSpace(fileName))
-                                {
-                                    originalName = fileName;
-                                }
-                            }
-                            catch
-                            {
-                            }
-                            props["model_name"] = originalName;
-                            
-                            // 尝试匹配策略：
-                            // 1. 原始路径是否就是文件名且在映射中？
-                            if (fileNameToTempPath.ContainsKey(originalPath))
-                            {
-                                props["model_path"] = fileNameToTempPath[originalPath];
-                            }
-                            else
-                            {
-                                // 2. 尝试提取原始路径的文件名部分进行匹配
-                                try 
-                                {
-                                    string justName = Path.GetFileName(originalPath);
-                                    if (!string.IsNullOrEmpty(justName) && fileNameToTempPath.ContainsKey(justName))
-                                    {
-                                        props["model_path"] = fileNameToTempPath[justName];
-                                    }
-                                }
-                                catch {}
-                            }
-                        }
-                    }
-                }
-
-                // 6. 复用 FlowGraphModel 的核心加载逻辑（从已经修改好的 pipelineJson 中加载）
-                var report = LoadFromRoot(pipelineJson, deviceId);
-                return report;
+                header = JObject.Parse(headerText);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // 加载失败，立即清理（如果成功加载，finally块中不清理？不，题目要求加载完即删除）
-                // 但如果 MainProcess 正在占用文件句柄，这里删除会失败。
-                // 假设底层库是 read-all-bytes 或者是 Copy-to-Memory，则可以删除。
-                // 如果是 File Mapping，则不能删除。
-                // 根据用户指示：“加载完之后删除此临时目录即可”，我们尝试删除。
-                throw;
+                throw new InvalidDataException("文件头信息损坏：JSON 无法解析", ex);
             }
-            finally
+
+            JArray fileList = header["file_list"] as JArray;
+            JArray fileSize = header["file_size"] as JArray;
+            if (fileList == null || fileSize == null || fileList.Count != fileSize.Count)
+                throw new InvalidDataException("文件头信息损坏：file_list 或 file_size 缺失或数量不一致");
+
+            pipelineJson = null;
+            entries = new Dictionary<string, ArchiveEntry>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < fileList.Count; i++)
             {
-                // 8. 清理临时文件
-                CleanupTemp();
+                string entryName = fileList[i]?.ToString();
+                if (string.IsNullOrWhiteSpace(entryName))
+                    throw new InvalidDataException($"文件头信息损坏：第 {i + 1} 个文件名为空");
+
+                long declaredSize = ReadDeclaredSize(fileSize[i], i);
+                byte[] data = ReadExactBytes(stream, declaredSize, $"读取 {entryName} 时文件意外结束");
+                string normalizedName = NormalizeArchiveName(entryName);
+
+                if (string.Equals(normalizedName, "pipeline.json", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (pipelineJson != null)
+                        throw new InvalidDataException("归档中存在多个 pipeline.json");
+                    try
+                    {
+                        pipelineJson = JObject.Parse(Encoding.UTF8.GetString(data));
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidDataException("pipeline.json 无法解析", ex);
+                    }
+                    continue;
+                }
+
+                if (entries.ContainsKey(normalizedName))
+                    throw new InvalidDataException($"归档中存在重复文件：{entryName}");
+                entries[normalizedName] = new ArchiveEntry(normalizedName, data);
             }
+
+            if (pipelineJson == null)
+                throw new InvalidDataException("未找到 pipeline.json");
         }
 
-        private void CleanupTemp()
+        private static string ReadHeaderLine(Stream stream)
         {
-            if (!string.IsNullOrEmpty(_tempDir) && Directory.Exists(_tempDir))
+            var bytes = new List<byte>();
+            while (true)
             {
-                try
+                int value = stream.ReadByte();
+                if (value < 0)
+                    throw new InvalidDataException("文件头信息损坏：JSON 头行未结束");
+                if (value == '\n')
+                    break;
+                if (bytes.Count >= MaxHeaderLength)
+                    throw new InvalidDataException("文件头信息损坏：JSON 头行过大");
+                bytes.Add((byte)value);
+            }
+            return Encoding.UTF8.GetString(bytes.ToArray()).TrimEnd('\r');
+        }
+
+        private static long ReadDeclaredSize(JToken token, int index)
+        {
+            if (token == null || token.Type != JTokenType.Integer)
+                throw new InvalidDataException($"文件头信息损坏：第 {index + 1} 个文件大小不是整数");
+
+            long size;
+            try
+            {
+                size = token.Value<long>();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidDataException($"文件头信息损坏：第 {index + 1} 个文件大小超出范围", ex);
+            }
+            if (size < 0)
+                throw new InvalidDataException($"文件头信息损坏：第 {index + 1} 个文件大小为负数");
+            if (size > int.MaxValue)
+                throw new InvalidDataException($"归档文件过大，无法读入内存：{size} 字节");
+            return size;
+        }
+
+        private static byte[] ReadExactBytes(Stream stream, long size, string errorMessage)
+        {
+            byte[] data = new byte[checked((int)size)];
+            int offset = 0;
+            while (offset < data.Length)
+            {
+                int read = stream.Read(data, offset, data.Length - offset);
+                if (read <= 0)
+                    throw new EndOfStreamException(errorMessage);
+                offset += read;
+            }
+            return data;
+        }
+
+        private static Dictionary<int, FlowModelSource> BuildModelSources(
+            JObject pipelineJson,
+            Dictionary<string, ArchiveEntry> entries,
+            string archiveCacheKey)
+        {
+            JArray nodes = pipelineJson["nodes"] as JArray;
+            if (nodes == null)
+                throw new InvalidOperationException("Pipeline 缺少 nodes 数组");
+
+            var entriesByFileName = new Dictionary<string, List<ArchiveEntry>>(StringComparer.OrdinalIgnoreCase);
+            foreach (ArchiveEntry entry in entries.Values)
+            {
+                string fileName = GetArchiveFileName(entry.NormalizedName);
+                if (!entriesByFileName.TryGetValue(fileName, out List<ArchiveEntry> sameNameEntries))
                 {
-                    Directory.Delete(_tempDir, true);
+                    sameNameEntries = new List<ArchiveEntry>();
+                    entriesByFileName[fileName] = sameNameEntries;
                 }
-                catch (Exception ex)
+                sameNameEntries.Add(entry);
+            }
+
+            var sourcesByEntry = new Dictionary<string, FlowModelSource>(StringComparer.OrdinalIgnoreCase);
+            var sourcesByNode = new Dictionary<int, FlowModelSource>();
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                JObject node = nodes[i] as JObject;
+                if (node == null)
+                    continue;
+
+                string nodeType = node["type"]?.ToString() ?? string.Empty;
+                if (!nodeType.StartsWith("model/", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                JObject properties = node["properties"] as JObject;
+                string originalPath = properties?["model_path"]?.ToString();
+                int nodeId = ReadNodeId(node, i);
+                if (string.IsNullOrWhiteSpace(originalPath))
+                    throw new InvalidDataException($"模型节点 {nodeId} 缺少 model_path");
+
+                ArchiveEntry entry = FindArchiveEntry(originalPath, entries, entriesByFileName, nodeId);
+                string modelName = GetArchiveFileName(entry.NormalizedName);
+                properties["model_path_original"] = originalPath;
+                properties["model_name"] = modelName;
+
+                if (!sourcesByEntry.TryGetValue(entry.NormalizedName, out FlowModelSource source))
                 {
-                    Console.Error.WriteLine($"[DvsModel] Warning: Failed to cleanup temp dir {_tempDir}: {ex.Message}");
+                    string cacheKey = archiveCacheKey + "|" + entry.NormalizedName.ToLowerInvariant();
+                    source = new FlowModelSource(cacheKey, modelName, entry.Data);
+                    sourcesByEntry[entry.NormalizedName] = source;
                 }
-                _tempDir = null;
+
+                if (sourcesByNode.ContainsKey(nodeId))
+                    throw new InvalidDataException($"流程中存在重复模型节点编号：{nodeId}");
+                sourcesByNode[nodeId] = source;
+            }
+
+            return sourcesByNode;
+        }
+
+        private static ArchiveEntry FindArchiveEntry(
+            string modelPath,
+            Dictionary<string, ArchiveEntry> entries,
+            Dictionary<string, List<ArchiveEntry>> entriesByFileName,
+            int nodeId)
+        {
+            string normalizedPath = NormalizeArchiveName(modelPath);
+            if (entries.TryGetValue(normalizedPath, out ArchiveEntry entry))
+                return entry;
+
+            string fileName = GetArchiveFileName(normalizedPath);
+            if (!entriesByFileName.TryGetValue(fileName, out List<ArchiveEntry> candidates) || candidates.Count == 0)
+                throw new InvalidDataException($"模型节点 {nodeId} 引用的归档文件不存在：{modelPath}");
+            if (candidates.Count > 1)
+                throw new InvalidDataException($"模型节点 {nodeId} 引用的文件名不唯一：{fileName}");
+            return candidates[0];
+        }
+
+        private static int ReadNodeId(JObject node, int defaultValue)
+        {
+            try
+            {
+                return node["id"] != null ? node["id"].Value<int>() : defaultValue;
+            }
+            catch
+            {
+                return defaultValue;
             }
         }
 
-        public new void Dispose()
+        private static string NormalizeArchiveName(string name)
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
+            string normalized = (name ?? string.Empty).Trim().Replace('\\', '/');
+            while (normalized.StartsWith("./", StringComparison.Ordinal))
+            {
+                normalized = normalized.Substring(2);
+            }
+            return normalized;
         }
 
-        protected override void Dispose(bool disposing)
+        private static string GetArchiveFileName(string name)
         {
-            base.Dispose(disposing);
-            CleanupTemp();
-        }
-
-        ~DvsModel()
-        {
-            Dispose(false);
+            string normalized = NormalizeArchiveName(name);
+            int slashIndex = normalized.LastIndexOf('/');
+            return slashIndex >= 0 ? normalized.Substring(slashIndex + 1) : normalized;
         }
     }
 }

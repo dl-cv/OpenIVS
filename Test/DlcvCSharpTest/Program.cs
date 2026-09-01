@@ -36,19 +36,27 @@ namespace DlcvCSharpTest
         private const string FlowInstanceSegFilterModelPath = @"Y:\zxc\模块化任务测试\实例分割筛选测试_120_50.dvst";
         private const string FlowInstanceSegFilterImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png";
 
-        private static readonly List<ModelCase> DefaultCases = new List<ModelCase>
+        private static readonly List<ModelRegressionCase> DefaultCases = ModelRegressionCases.Cases;
+
+        private sealed class UnifiedTestCase
         {
-            new ModelCase("AOI-旋转框检测_120_50.dvt", "AOI-1.jpg"),
-            new ModelCase("AOI_120_50.dvst", "AOI-1.jpg"),
-            new ModelCase("猫狗-分类_120_50.dvt", "猫狗-猫.jpg"),
-            new ModelCase("猫狗-分类_120_50_v.dvt", "猫狗-猫.jpg"),
-            new ModelCase("气球-实例分割_120_50.dvt", "气球.jpg"),
-            new ModelCase("气球-实例分割_120_50_v.dvt", "气球.jpg"),
-            new ModelCase("气球-语义分割_120_50.dvt", "气球.jpg"),
-            new ModelCase("手机屏幕-实例分割_120_50.dvt", "手机屏幕.jpg"),
-            new ModelCase("引脚定位-目标检测_120_50.dvt", "引脚定位-目标检测.jpg"),
-            new ModelCase("OCR_120_50.dvt", "OCR-1.jpg")
-        };
+            public readonly string Name;
+            public readonly Func<int> Run;
+
+            public UnifiedTestCase(string name, Func<int> run)
+            {
+                Name = name;
+                Run = run;
+            }
+        }
+
+        private sealed class UnifiedTestResult
+        {
+            public string Name;
+            public int ExitCode;
+            public long ElapsedMilliseconds;
+            public string Error;
+        }
 
         private static int Main(string[] args)
         {
@@ -56,6 +64,11 @@ namespace DlcvCSharpTest
             Model.EnableConsoleLog = false;
             try
             {
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "all-tests", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunAllTests(args);
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "model-channel-order-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunModelChannelOrderSelfTest();
@@ -81,6 +94,16 @@ namespace DlcvCSharpTest
                     || string.Equals(args[0], "dvs-bgr-selftest", StringComparison.OrdinalIgnoreCase)))
                 {
                     return RunDvsRgbSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvs-memory-loading-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDvsMemoryLoadingSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-reject-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDvspRejectSelfTest(args);
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-parity-selftest", StringComparison.OrdinalIgnoreCase))
@@ -203,6 +226,126 @@ namespace DlcvCSharpTest
                 try { Utils.FreeAllModels(); } catch { }
                 ForceGc();
             }
+        }
+
+        private static int RunAllTests(string[] args)
+        {
+            if (args == null || args.Length > 2)
+            {
+                Console.WriteLine("用法: all-tests [日志路径]");
+                return 2;
+            }
+
+            string logPath;
+            try
+            {
+                logPath = args.Length == 2
+                    ? Path.GetFullPath(args[1])
+                    : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DlcvCSharpTest-all-tests.log");
+                string logDirectory = Path.GetDirectoryName(logPath);
+                if (!string.IsNullOrEmpty(logDirectory)) Directory.CreateDirectory(logDirectory);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("日志路径无效: " + ex.Message);
+                return 2;
+            }
+
+            var tests = new List<UnifiedTestCase>
+            {
+                new UnifiedTestCase("模型通道顺序", RunModelChannelOrderSelfTest),
+                new UnifiedTestCase("掩膜旋转框", RunMaskToRBoxSelfTest),
+                new UnifiedTestCase("曲线文字仿射变换", RunCurveTextAffineSelfTest),
+                new UnifiedTestCase("AI方向仿射变换", RunAiOrientationAffineSelfTest),
+                new UnifiedTestCase("检测框重复结果过滤", RunBBoxIoUDedupSelfTest),
+                new UnifiedTestCase("结果数量检查", RunCountResultsSelfTest),
+                new UnifiedTestCase("类别数量检查", RunCategoryCountCheckSelfTest),
+                new UnifiedTestCase("模板数量优先级", RunTemplateCountPrioritySelfTest),
+                new UnifiedTestCase("生成图扩展", RunImageGenerationExpandSelfTest),
+                new UnifiedTestCase("跨模型标签合并", RunCrossModelLabelMergeSelfTest),
+                new UnifiedTestCase("矩形图像矫正", RunRectImageCorrectionSelfTest),
+                new UnifiedTestCase("Demo2路由规则", RunDemo2RouteRuleSelfTest),
+                new UnifiedTestCase("掩膜输出开关", RunWithMaskSelfTest),
+                new UnifiedTestCase("均值计算", RunCalcMeanSelfTest),
+                new UnifiedTestCase("固定模型结果回归", RunDefaultCases)
+            };
+
+            var results = new List<UnifiedTestResult>(tests.Count);
+            TextWriter consoleOutput = Console.Out;
+            var totalWatch = Stopwatch.StartNew();
+            try
+            {
+                using (var log = new StreamWriter(logPath, false, new UTF8Encoding(false)))
+                {
+                    log.AutoFlush = true;
+                    Console.SetOut(log);
+                    Console.WriteLine("==== C# 统一测试详细输出 ====");
+                    Console.WriteLine("开始时间: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                    Console.WriteLine("用例数量: " + tests.Count);
+
+                    foreach (var test in tests)
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine("==== 开始: " + test.Name + " ====");
+                        var watch = Stopwatch.StartNew();
+                        int exitCode = 1;
+                        string error = null;
+                        try
+                        {
+                            exitCode = test.Run();
+                        }
+                        catch (Exception ex)
+                        {
+                            error = ex.ToString();
+                            Console.WriteLine("测试异常: " + error);
+                        }
+                        finally
+                        {
+                            watch.Stop();
+                            try { Utils.FreeAllModels(); } catch (Exception ex) { Console.WriteLine("释放模型异常: " + ex.Message); }
+                            ForceGc();
+                        }
+
+                        results.Add(new UnifiedTestResult
+                        {
+                            Name = test.Name,
+                            ExitCode = exitCode,
+                            ElapsedMilliseconds = watch.ElapsedMilliseconds,
+                            Error = error
+                        });
+                        Console.WriteLine("==== 结束: " + test.Name + "，状态=" + (exitCode == 0 ? "通过" : "失败")
+                            + "，耗时=" + watch.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + "秒 ====");
+                    }
+
+                    totalWatch.Stop();
+                    Console.WriteLine();
+                    Console.WriteLine("==== C# 统一测试详细输出结束 ====");
+                }
+            }
+            catch (Exception ex)
+            {
+                totalWatch.Stop();
+                Console.SetOut(consoleOutput);
+                Console.WriteLine("统一测试无法写入日志: " + ex.Message);
+                return 2;
+            }
+            finally
+            {
+                Console.SetOut(consoleOutput);
+            }
+
+            int passed = results.Count(r => r.ExitCode == 0);
+            Console.WriteLine("==== C# 统一测试汇总 ====");
+            Console.WriteLine("总数: " + results.Count + "，通过: " + passed + "，失败: " + (results.Count - passed));
+            foreach (var result in results)
+            {
+                Console.WriteLine("[" + (result.ExitCode == 0 ? "通过" : "失败") + "] " + result.Name
+                    + "，耗时=" + (result.ElapsedMilliseconds / 1000.0).ToString("F2", CultureInfo.InvariantCulture) + "秒"
+                    + (string.IsNullOrEmpty(result.Error) ? string.Empty : "，异常已记录"));
+            }
+            Console.WriteLine("总耗时: " + totalWatch.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + "秒");
+            Console.WriteLine("详细日志: " + logPath);
+            return passed == results.Count ? 0 : 1;
         }
 
         private static readonly HashSet<string> WorkflowCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1226,7 +1369,7 @@ namespace DlcvCSharpTest
 
         private static int RunDefaultCases()
         {
-            Console.WriteLine("==== C# 默认测试（DefaultCases） ====");
+            Console.WriteLine("==== C# 固定模型结果回归测试 ====");
             Console.WriteLine("模型目录: " + ModelRoot);
             Console.WriteLine("固定设备: GPU(" + GpuDeviceId + ")");
             Console.WriteLine("固定Batch: " + FixedBatchSize);
@@ -1238,14 +1381,14 @@ namespace DlcvCSharpTest
                 Console.WriteLine("模型目录不存在: " + ModelRoot);
             }
 
-            // 内存泄露专项：只跑一个实例分割模型
+            // 内存检查只使用清单中的实例分割模型。
             string leakModelPath = null;
             string leakImagePath = null;
             if (modelRootOk)
             {
                 foreach (var c in DefaultCases)
                 {
-                    if (!c.ModelFile.Contains("实例分割")) continue;
+                    if (!c.Name.Contains("实例分割")) continue;
                     string mp = Path.Combine(ModelRoot, c.ModelFile);
                     string ip = Path.Combine(ModelRoot, c.ImageFile);
                     if (!File.Exists(mp) || !File.Exists(ip)) continue;
@@ -1256,7 +1399,7 @@ namespace DlcvCSharpTest
             }
 
             var rows = new List<CaseRow>(DefaultCases.Count);
-            int total = 0;
+            int total = DefaultCases.Count;
             int pass = 0;
             foreach (var c in DefaultCases)
             {
@@ -1266,10 +1409,11 @@ namespace DlcvCSharpTest
                 {
                     rows.Add(new CaseRow
                     {
-                        ModelName = c.ModelFile,
-                        LoadStatus = "跳过",
-                        InferStatus = "-",
-                        CategoryList = "模型目录不存在",
+                        ModelName = c.Name,
+                        LoadStatus = "失败",
+                        InferStatus = "未执行",
+                        ResultStatus = "失败：模型目录不存在",
+                        CategoryList = "-",
                         SpeedText = "-",
                         BatchText = "-"
                     });
@@ -1279,20 +1423,20 @@ namespace DlcvCSharpTest
                 {
                     rows.Add(new CaseRow
                     {
-                        ModelName = Path.GetFileName(modelPath),
-                        LoadStatus = "跳过",
-                        InferStatus = "-",
-                        CategoryList = "模型或图片不存在",
+                        ModelName = c.Name,
+                        LoadStatus = "失败",
+                        InferStatus = "未执行",
+                        ResultStatus = "失败：" + (!File.Exists(modelPath) ? "模型不存在" : "图片不存在"),
+                        CategoryList = "-",
                         SpeedText = "-",
                         BatchText = "-"
                     });
                     continue;
                 }
 
-                total++;
-                var row = RunCase(modelPath, imagePath);
+                var row = RunCase(c, modelPath, imagePath);
                 rows.Add(row);
-                if (row.LoadStatus.StartsWith("成功") && row.InferStatus == "成功") pass++;
+                if (row.LoadStatus.StartsWith("成功") && row.InferStatus.StartsWith("成功") && row.ResultStatus == "结果一致") pass++;
             }
 
             rows.Add(new CaseRow
@@ -1300,7 +1444,8 @@ namespace DlcvCSharpTest
                 ModelName = "汇总",
                 LoadStatus = "总数=" + total,
                 InferStatus = "成功=" + pass,
-                CategoryList = "失败=" + (total - pass),
+                ResultStatus = "失败=" + (total - pass),
+                CategoryList = "-",
                 SpeedText = "-",
                 BatchText = "-"
             });
@@ -1308,18 +1453,18 @@ namespace DlcvCSharpTest
             PrintHeader();
             foreach (var r in rows)
             {
-                PrintRow(r.ModelName, r.LoadStatus, r.InferStatus, r.CategoryList, r.SpeedText, r.BatchText);
+                PrintRow(r.ModelName, r.LoadStatus, r.InferStatus, r.ResultStatus, r.CategoryList, r.SpeedText, r.BatchText);
             }
             PrintFooter();
 
             Console.WriteLine("==== 内存泄露专项(仅测1个实例分割模型) ====");
             if (!modelRootOk)
             {
-                Console.WriteLine("跳过：模型目录不存在");
+                Console.WriteLine("失败：模型目录不存在");
             }
             else if (string.IsNullOrEmpty(leakModelPath) || string.IsNullOrEmpty(leakImagePath))
             {
-                Console.WriteLine("跳过：未找到可用实例分割模型");
+                Console.WriteLine("失败：未找到可用实例分割模型");
             }
             else
             {
@@ -2095,13 +2240,14 @@ namespace DlcvCSharpTest
             return true;
         }
 
-        private static CaseRow RunCase(string modelPath, string imagePath)
+        private static CaseRow RunCase(ModelRegressionCase regressionCase, string modelPath, string imagePath)
         {
             var row = new CaseRow
             {
-                ModelName = Path.GetFileName(modelPath),
+                ModelName = regressionCase.Name,
                 LoadStatus = "失败",
                 InferStatus = "失败",
+                ResultStatus = "未校验",
                 CategoryList = "-",
                 SpeedText = "-",
                 BatchText = "-"
@@ -2129,6 +2275,7 @@ namespace DlcvCSharpTest
 
             if (model == null || model.modelIndex == -1)
             {
+                try { if (model != null) model.Dispose(); } catch { }
                 return row;
             }
 
@@ -2141,20 +2288,36 @@ namespace DlcvCSharpTest
                 rgb = new Mat();
                 Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
 
-                var p = new JObject { ["threshold"] = 0.05, ["with_mask"] = true };
+                var p = new JObject { ["threshold"] = 0.5, ["with_mask"] = true };
                 try
                 {
                     var swInfer = Stopwatch.StartNew();
                     var r = model.InferBatch(new List<Mat> { rgb }, p);
                     swInfer.Stop();
-                    row.InferStatus = (r.SampleResults != null && r.SampleResults.Count > 0) ? "成功(" + swInfer.Elapsed.TotalMilliseconds.ToString("F2", CultureInfo.InvariantCulture) + "ms)" : "失败";
-                    row.CategoryList = BuildCategoryList(r);
-                    if (string.IsNullOrWhiteSpace(row.CategoryList)) row.CategoryList = "(空)";
-                    DisposeResultMasks(r);
+                    try
+                    {
+                        row.InferStatus = (r.SampleResults != null && r.SampleResults.Count > 0) ? "成功(" + swInfer.Elapsed.TotalMilliseconds.ToString("F2", CultureInfo.InvariantCulture) + "ms)" : "失败";
+                        row.CategoryList = BuildCategoryList(r);
+                        if (string.IsNullOrWhiteSpace(row.CategoryList)) row.CategoryList = "(空)";
+                        string validationFailure;
+                        if (ValidateRegressionResult(regressionCase, r, out validationFailure))
+                        {
+                            row.ResultStatus = "结果一致";
+                        }
+                        else
+                        {
+                            row.ResultStatus = "失败：" + validationFailure;
+                        }
+                    }
+                    finally
+                    {
+                        DisposeResultMasks(r);
+                    }
                 }
                 catch (Exception ex)
                 {
                     row.InferStatus = "失败";
+                    row.ResultStatus = "未校验";
                     row.CategoryList = "错误:" + Trim(ex.Message);
                 }
 
@@ -2179,6 +2342,7 @@ namespace DlcvCSharpTest
             catch (Exception ex)
             {
                 row.InferStatus = "失败";
+                row.ResultStatus = "未校验";
                 row.CategoryList = "错误:" + Trim(ex.Message);
             }
             finally
@@ -2190,6 +2354,144 @@ namespace DlcvCSharpTest
             try { model.Dispose(); } catch { }
             ForceGc();
             return row;
+        }
+
+        private static bool ValidateRegressionResult(ModelRegressionCase regressionCase, Utils.CSharpResult actual, out string failure)
+        {
+            var failures = new List<string>();
+            int actualSampleCount = actual.SampleResults == null ? 0 : actual.SampleResults.Count;
+            if (actualSampleCount != regressionCase.Samples.Count)
+            {
+                failures.Add(RegressionMismatch(regressionCase.Name, "samples.count", regressionCase.Samples.Count, actualSampleCount, 0));
+            }
+
+            int sampleCount = Math.Min(regressionCase.Samples.Count, actualSampleCount);
+            for (int sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+            {
+                var expectedSample = regressionCase.Samples[sampleIndex];
+                var actualSample = actual.SampleResults[sampleIndex];
+                int actualResultCount = actualSample.Results == null ? 0 : actualSample.Results.Count;
+                if (actualResultCount != expectedSample.Results.Count)
+                {
+                    failures.Add(RegressionMismatch(regressionCase.Name, "samples[" + sampleIndex + "].results.count", expectedSample.Results.Count, actualResultCount, 0));
+                }
+
+                int resultCount = Math.Min(expectedSample.Results.Count, actualResultCount);
+                for (int resultIndex = 0; resultIndex < resultCount; resultIndex++)
+                {
+                    ValidateRegressionObject(regressionCase.Name, sampleIndex, resultIndex,
+                        expectedSample.Results[resultIndex], actualSample.Results[resultIndex], failures);
+                }
+            }
+
+            failure = failures.Count == 0 ? string.Empty : string.Join("；", failures);
+            return failures.Count == 0;
+        }
+
+        private static void ValidateRegressionObject(string caseName, int sampleIndex, int resultIndex,
+            ModelRegressionResult expected, Utils.CSharpObjectResult actual, List<string> failures)
+        {
+            string path = "samples[" + sampleIndex + "].results[" + resultIndex + "]";
+            if (actual.CategoryId != expected.CategoryId)
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".category_id", expected.CategoryId, actual.CategoryId, 0));
+            }
+            if (!string.Equals(actual.CategoryName, expected.CategoryName, StringComparison.Ordinal))
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".category_name", expected.CategoryName, actual.CategoryName, "无"));
+            }
+            if (actual.WithBbox != expected.WithBbox)
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".with_bbox", expected.WithBbox, actual.WithBbox, "无"));
+            }
+            if (actual.WithMask != expected.WithMask)
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".with_mask", expected.WithMask, actual.WithMask, "无"));
+            }
+            if (actual.WithAngle != expected.WithAngle)
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".with_angle", expected.WithAngle, actual.WithAngle, "无"));
+            }
+            ValidateRegressionNumber(caseName, path + ".score", expected.Score, actual.Score, ModelRegressionCases.ScoreTolerance, failures);
+            ValidateRegressionBbox(caseName, path, expected.Bbox, actual.Bbox, failures);
+            ValidateRegressionNumber(caseName, path + ".area", expected.Area, actual.Area, ModelRegressionCases.AreaTolerance, failures);
+            ValidateRegressionNumber(caseName, path + ".angle", expected.Angle, actual.Angle, ModelRegressionCases.AngleTolerance, failures);
+
+            if (expected.WithMask)
+            {
+                ValidateRegressionMask(caseName, path + ".mask", expected.Mask, actual.Mask, failures);
+            }
+            else if (actual.Mask != null && !actual.Mask.Empty())
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".mask", "空引用", "非空 Mat", "无"));
+            }
+        }
+
+        private static void ValidateRegressionBbox(string caseName, string path, double[] expected, List<double> actual, List<string> failures)
+        {
+            int actualCount = actual == null ? 0 : actual.Count;
+            if (actualCount != expected.Length)
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".bbox.count", expected.Length, actualCount, 0));
+            }
+            int count = Math.Min(expected.Length, actualCount);
+            for (int index = 0; index < count; index++)
+            {
+                ValidateRegressionNumber(caseName, path + ".bbox[" + index + "]", expected[index], actual[index], ModelRegressionCases.BboxTolerance, failures);
+            }
+        }
+
+        private static void ValidateRegressionMask(string caseName, string path, ModelRegressionMask expected, Mat actual, List<string> failures)
+        {
+            if (actual == null)
+            {
+                failures.Add(RegressionMismatch(caseName, path, "非空 Mat", "空引用", "无"));
+                return;
+            }
+            if (actual.Empty())
+            {
+                failures.Add(RegressionMismatch(caseName, path, "非空 Mat", "空 Mat", "无"));
+                return;
+            }
+            if (actual.Width != expected.Width)
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".width", expected.Width, actual.Width, 0));
+            }
+            if (actual.Height != expected.Height)
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".height", expected.Height, actual.Height, 0));
+            }
+            if (actual.Channels() != 1)
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".channels", 1, actual.Channels(), 0));
+                return;
+            }
+            int actualNonZero = Cv2.CountNonZero(actual);
+            if (Math.Abs(actualNonZero - expected.NonZero) > ModelRegressionCases.MaskNonZeroTolerance)
+            {
+                failures.Add(RegressionMismatch(caseName, path + ".nonzero", expected.NonZero, actualNonZero, ModelRegressionCases.MaskNonZeroTolerance));
+            }
+        }
+
+        private static void ValidateRegressionNumber(string caseName, string path, double expected, double actual, double tolerance, List<string> failures)
+        {
+            if (double.IsNaN(actual) || double.IsInfinity(actual) || Math.Abs(expected - actual) > tolerance)
+            {
+                failures.Add(RegressionMismatch(caseName, path, expected, actual, tolerance));
+            }
+        }
+
+        private static string RegressionMismatch(string caseName, string path, object expected, object actual, object tolerance)
+        {
+            return caseName + " " + path + "，期望=" + FormatRegressionValue(expected)
+                + "，实际=" + FormatRegressionValue(actual) + "，容差=" + FormatRegressionValue(tolerance);
+        }
+
+        private static string FormatRegressionValue(object value)
+        {
+            if (value == null) return "空引用";
+            var number = value as IFormattable;
+            return number == null ? value.ToString() : number.ToString(null, CultureInfo.InvariantCulture);
         }
 
         private static bool IsInstanceSegModel(string modelPath)
@@ -2315,13 +2617,13 @@ namespace DlcvCSharpTest
 
         private static void PrintHeader()
         {
-            Console.WriteLine("| 模型 | 加载 | 推理 | 类别列表 | 3秒速度 | Batch速度 |");
-            Console.WriteLine("|---|---|---|---|---|---|");
+            Console.WriteLine("| 用例 | 加载 | 推理 | 结果校验 | 类别列表 | 3秒速度 | Batch速度 |");
+            Console.WriteLine("|---|---|---|---|---|---|---|");
         }
 
-        private static void PrintRow(string model, string load, string infer, string cats, string speed, string batch)
+        private static void PrintRow(string model, string load, string infer, string validation, string cats, string speed, string batch)
         {
-            Console.WriteLine("| " + Safe(model) + " | " + Safe(load) + " | " + Safe(infer) + " | " + Safe(cats) + " | " + Safe(speed) + " | " + Safe(batch) + " |");
+            Console.WriteLine("| " + Safe(model) + " | " + Safe(load) + " | " + Safe(infer) + " | " + Safe(validation) + " | " + Safe(cats) + " | " + Safe(speed) + " | " + Safe(batch) + " |");
         }
 
         private static void PrintFooter()
@@ -2950,6 +3252,199 @@ namespace DlcvCSharpTest
 
             Console.Out.WriteLine(resultJson);
             return 0;
+        }
+
+        private static int RunDvsMemoryLoadingSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 3 || args.Length > 4)
+            {
+                Console.Error.WriteLine("用法: DlcvCSharpTest dvs-memory-loading-selftest <modelPath> <imagePath> [device]");
+                return 2;
+            }
+
+            if (!TryNormalizeSelfTestPath(args[1], "模型", out string modelPath)
+                || !TryNormalizeSelfTestPath(args[2], "图片", out string imagePath))
+            {
+                return 2;
+            }
+            int deviceId = GpuDeviceId;
+            if (args.Length == 4 && !int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceId))
+            {
+                Console.Error.WriteLine("device 必须为整数");
+                return 2;
+            }
+            string extension = Path.GetExtension(modelPath);
+            if (!string.Equals(extension, ".dvst", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(extension, ".dvso", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine("模型必须为 .dvst 或 .dvso");
+                return 2;
+            }
+            if (!File.Exists(modelPath) || !File.Exists(imagePath))
+            {
+                Console.Error.WriteLine("模型或图片不存在");
+                return 2;
+            }
+
+            DvsTempArtifactMonitor monitor = null;
+            Model model = null;
+            Mat bgr = null;
+            Mat rgb = null;
+            Utils.CSharpResult result = default(Utils.CSharpResult);
+            string operationError = null;
+            try
+            {
+                monitor = new DvsTempArtifactMonitor(modelPath);
+                model = new Model(modelPath, deviceId, false, false);
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图片读取失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+                result = model.Infer(rgb, new JObject
+                {
+                    ["threshold"] = 0.5,
+                    ["with_mask"] = true,
+                    ["batch_size"] = 1
+                });
+            }
+            catch (Exception ex)
+            {
+                operationError = ex.Message;
+            }
+            finally
+            {
+                DisposeResultMasks(result);
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+                try { if (model != null) model.Dispose(); } catch (Exception ex) { if (operationError == null) operationError = ex.Message; }
+                ForceGc();
+                if (monitor != null) monitor.Dispose();
+            }
+
+            if (!string.IsNullOrEmpty(operationError))
+            {
+                Console.Error.WriteLine(operationError);
+                return 1;
+            }
+            if (monitor != null && (monitor.HasArtifacts || monitor.HasWatcherError))
+            {
+                Console.Error.WriteLine("系统临时目录出现流程归档文件: " + monitor.Describe());
+                return 1;
+            }
+            Console.WriteLine("C# 流程归档内存加载测试通过");
+            return 0;
+        }
+
+        private static int RunDvspRejectSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 2 || args.Length > 3)
+            {
+                Console.Error.WriteLine("用法: DlcvCSharpTest dvsp-reject-selftest <modelPath> [device]");
+                return 2;
+            }
+
+            if (!TryNormalizeSelfTestPath(args[1], "模型", out string modelPath))
+            {
+                return 2;
+            }
+            int deviceId = GpuDeviceId;
+            if (args.Length == 3 && !int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceId))
+            {
+                Console.Error.WriteLine("device 必须为整数");
+                return 2;
+            }
+            if (!string.Equals(Path.GetExtension(modelPath), ".dvsp", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine("模型必须为 .dvsp");
+                return 2;
+            }
+            if (!File.Exists(modelPath))
+            {
+                Console.Error.WriteLine("模型不存在");
+                return 2;
+            }
+
+            DvsTempArtifactMonitor monitor = null;
+            Model model = null;
+            string errorMessage = null;
+            try
+            {
+                monitor = new DvsTempArtifactMonitor(modelPath, false);
+                model = new Model(modelPath, deviceId, false, false);
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+            }
+            finally
+            {
+                try { if (model != null) model.Dispose(); } catch { }
+                ForceGc();
+                if (monitor != null) monitor.Dispose();
+            }
+
+            if (!HasExplicitDvspUnsupportedMessage(errorMessage))
+            {
+                Console.Error.WriteLine(".dvsp 未返回明确的不支持错误: " + (errorMessage ?? string.Empty));
+                return 1;
+            }
+            if (monitor != null && (monitor.HasArtifacts || monitor.HasWatcherError))
+            {
+                Console.Error.WriteLine("拒绝 .dvsp 时系统临时目录出现流程归档文件: " + monitor.Describe());
+                return 1;
+            }
+            Console.WriteLine("C# .dvsp 拒绝测试通过");
+            return 0;
+        }
+
+        private static bool TryNormalizeSelfTestPath(string value, string displayName, out string normalizedPath)
+        {
+            normalizedPath = (value ?? string.Empty).Trim();
+            if (normalizedPath.Length >= 2)
+            {
+                char first = normalizedPath[0];
+                char last = normalizedPath[normalizedPath.Length - 1];
+                if ((first == '"' && last == '"') || (first == '\'' && last == '\''))
+                {
+                    normalizedPath = normalizedPath.Substring(1, normalizedPath.Length - 2).Trim();
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(normalizedPath))
+            {
+                Console.Error.WriteLine(displayName + "路径为空");
+                return false;
+            }
+
+            try
+            {
+                normalizedPath = Path.GetFullPath(normalizedPath);
+                return true;
+            }
+            catch (ArgumentException ex)
+            {
+                Console.Error.WriteLine(displayName + "路径无效: " + ex.Message);
+                return false;
+            }
+            catch (NotSupportedException ex)
+            {
+                Console.Error.WriteLine(displayName + "路径无效: " + ex.Message);
+                return false;
+            }
+            catch (PathTooLongException ex)
+            {
+                Console.Error.WriteLine(displayName + "路径过长: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool HasExplicitDvspUnsupportedMessage(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return false;
+            return message.IndexOf("dvsp", StringComparison.OrdinalIgnoreCase) >= 0
+                && (message.IndexOf("不支持", StringComparison.Ordinal) >= 0
+                    || message.IndexOf("unsupported", StringComparison.OrdinalIgnoreCase) >= 0
+                    || message.IndexOf("not support", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static int RunDvspParitySelfTest(string[] args)
@@ -4911,9 +5406,9 @@ namespace DlcvCSharpTest
                 return 1;
             }
 
-            MethodInfo tryLoadImageForInfer = formType.GetMethod("TryLoadImageForInfer", BindingFlags.NonPublic | BindingFlags.Static);
+            MethodInfo prepareImageForModelInput = formType.GetMethod("PrepareImageForModelInput", BindingFlags.NonPublic | BindingFlags.Static);
             MethodInfo runPipeline = formType.GetMethod("RunPipeline", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (tryLoadImageForInfer == null || runPipeline == null)
+            if (prepareImageForModelInput == null || runPipeline == null)
             {
                 Console.WriteLine("未找到 Demo2 关键私有方法");
                 return 1;
@@ -4951,16 +5446,8 @@ namespace DlcvCSharpTest
                 componentField.SetValue(form, componentModel);
                 icField.SetValue(form, icModel);
 
-                object[] loadArgs = { imagePath, null, null, string.Empty };
-                bool loaded = (bool)tryLoadImageForInfer.Invoke(null, loadArgs);
-                if (!loaded)
-                {
-                    Console.WriteLine("TryLoadImageForInfer 失败: " + Convert.ToString(loadArgs[3], CultureInfo.InvariantCulture));
-                    return 1;
-                }
-
-                imageBgr = loadArgs[1] as Mat;
-                entryRgb = loadArgs[2] as Mat;
+                imageBgr = Cv2.ImRead(imagePath, ImreadModes.Unchanged);
+                entryRgb = prepareImageForModelInput.Invoke(null, new object[] { imageBgr }) as Mat;
                 if (imageBgr == null || imageBgr.Empty() || entryRgb == null || entryRgb.Empty())
                 {
                     Console.WriteLine("Demo2 加载图片后得到空图");
@@ -5053,7 +5540,7 @@ namespace DlcvCSharpTest
                 {
                     new { BaseName = "IC", Expected = true },
                     new { BaseName = "ic", Expected = true },
-                    new { BaseName = "BGA", Expected = true },
+                    new { BaseName = "IC-BGA", Expected = true },
                     new { BaseName = "座子", Expected = true },
                     new { BaseName = "开关", Expected = true },
                     new { BaseName = "晶振", Expected = true },
@@ -5554,18 +6041,12 @@ namespace DlcvCSharpTest
         }
 
 
-        private struct ModelCase
-        {
-            public readonly string ModelFile;
-            public readonly string ImageFile;
-            public ModelCase(string modelFile, string imageFile) { ModelFile = modelFile; ImageFile = imageFile; }
-        }
-
         private struct CaseRow
         {
             public string ModelName;
             public string LoadStatus;
             public string InferStatus;
+            public string ResultStatus;
             public string CategoryList;
             public string SpeedText;
             public string BatchText;
