@@ -27,6 +27,7 @@
 #include "dlcv_infer_cpp/dlcv_infer_c_api.h"
 #undef dlcv_infer
 #undef DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
+#include "dlcv_infer_cpp/dlcv_infer.h"
 #include "dlcv_infer_cpp/flow/modules/ModelModules.h"
 
 #pragma comment(lib, "psapi.lib")
@@ -436,6 +437,185 @@ static bool IsReleasedResult(const DlcvCResult& result, int expectedCode) {
         result.sample_results == nullptr && result.n == 0;
 }
 
+static bool NearlyEqual(double left, double right, double tolerance = 1e-5) {
+    return std::abs(left - right) <= tolerance;
+}
+
+static bool CompareMask(
+    const cv::Mat& cppMask,
+    const DlcvCMask& cMask,
+    std::string& error) {
+    if (cppMask.empty()) {
+        if (cMask.mask_ptr != 0 || cMask.width != 0 || cMask.height != 0) {
+            error = "C++ mask 为空，但 C mask 不为空";
+            return false;
+        }
+        return true;
+    }
+    if (cppMask.type() != CV_8UC1) {
+        error = "C++ mask 不是 CV_8UC1";
+        return false;
+    }
+    if (cMask.mask_ptr == 0 || cMask.width != cppMask.cols || cMask.height != cppMask.rows) {
+        std::ostringstream out;
+        out << "mask 尺寸不一致: C++=" << cppMask.cols << 'x' << cppMask.rows
+            << " C=" << cMask.width << 'x' << cMask.height;
+        error = out.str();
+        return false;
+    }
+
+    const auto* cData = reinterpret_cast<const unsigned char*>(
+        static_cast<uintptr_t>(cMask.mask_ptr));
+    const size_t rowBytes = static_cast<size_t>(cppMask.cols);
+    for (int row = 0; row < cppMask.rows; ++row) {
+        if (std::memcmp(cppMask.ptr<unsigned char>(row), cData + rowBytes * row, rowBytes) != 0) {
+            error = "mask 像素内容不一致";
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool CompareCppAndCResult(
+    const dlcv_infer::Result& cppResult,
+    const DlcvCResult& cResult,
+    std::string& error) {
+    if (cResult.code != 0 || cResult.n != static_cast<int>(cppResult.sampleResults.size())) {
+        error = "返回码或样本数不一致";
+        return false;
+    }
+    if (cResult.n > 0 && cResult.sample_results == nullptr) {
+        error = "C 结果缺少样本数据";
+        return false;
+    }
+
+    for (int sampleIndex = 0; sampleIndex < cResult.n; ++sampleIndex) {
+        const auto& cppSample = cppResult.sampleResults[static_cast<size_t>(sampleIndex)];
+        const DlcvCSampleResult& cSample = cResult.sample_results[sampleIndex];
+        if (cSample.n != static_cast<int>(cppSample.results.size()) ||
+            (cSample.n > 0 && cSample.results == nullptr)) {
+            error = "目标数或目标数据不一致";
+            return false;
+        }
+
+        for (int objectIndex = 0; objectIndex < cSample.n; ++objectIndex) {
+            const auto& cppObject = cppSample.results[static_cast<size_t>(objectIndex)];
+            const DlcvCObjectResult& cObject = cSample.results[objectIndex];
+            const std::string cCategory = cObject.category_name == nullptr
+                ? std::string()
+                : std::string(cObject.category_name);
+            const double cppX = cppObject.bbox.size() >= 4 ? cppObject.bbox[0] : 0.0;
+            const double cppY = cppObject.bbox.size() >= 4 ? cppObject.bbox[1] : 0.0;
+            const double cppW = cppObject.bbox.size() >= 4 ? cppObject.bbox[2] : 0.0;
+            const double cppH = cppObject.bbox.size() >= 4 ? cppObject.bbox[3] : 0.0;
+
+            if (cObject.category_id != cppObject.categoryId ||
+                cCategory != cppObject.categoryName ||
+                cObject.with_bbox != cppObject.withBbox ||
+                cObject.with_mask != cppObject.withMask ||
+                cObject.with_angle != cppObject.withAngle ||
+                cObject.with_mean != cppObject.withMean ||
+                !NearlyEqual(cObject.score, cppObject.score) ||
+                !NearlyEqual(cObject.area, cppObject.area) ||
+                !NearlyEqual(cObject.x, cppX) ||
+                !NearlyEqual(cObject.y, cppY) ||
+                !NearlyEqual(cObject.w, cppW) ||
+                !NearlyEqual(cObject.h, cppH) ||
+                !NearlyEqual(cObject.angle, cppObject.angle) ||
+                !NearlyEqual(cObject.foreground_mean, cppObject.foregroundMean) ||
+                !NearlyEqual(cObject.background_mean, cppObject.backgroundMean)) {
+                std::ostringstream out;
+                out << "样本 " << sampleIndex << " 目标 " << objectIndex << " 字段不一致";
+                error = out.str();
+                return false;
+            }
+            if (!CompareMask(cppObject.mask, cObject.mask, error)) {
+                std::ostringstream out;
+                out << "样本 " << sampleIndex << " 目标 " << objectIndex << ' ' << error;
+                error = out.str();
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool CompareCResults(
+    const DlcvCResult& left,
+    const DlcvCResult& right,
+    std::string& error) {
+    if (left.code != right.code ||
+        (left.message == nullptr) != (right.message == nullptr) ||
+        (left.message != nullptr && std::strcmp(left.message, right.message) != 0) ||
+        left.n != right.n) {
+        error = "返回码、消息或样本数不一致";
+        return false;
+    }
+    if ((left.n > 0 && left.sample_results == nullptr) ||
+        (right.n > 0 && right.sample_results == nullptr)) {
+        error = "样本数据为空";
+        return false;
+    }
+
+    for (int sampleIndex = 0; sampleIndex < left.n; ++sampleIndex) {
+        const DlcvCSampleResult& leftSample = left.sample_results[sampleIndex];
+        const DlcvCSampleResult& rightSample = right.sample_results[sampleIndex];
+        if (leftSample.n != rightSample.n ||
+            (leftSample.n > 0 && (leftSample.results == nullptr || rightSample.results == nullptr))) {
+            error = "目标数或目标数据不一致";
+            return false;
+        }
+
+        for (int objectIndex = 0; objectIndex < leftSample.n; ++objectIndex) {
+            const DlcvCObjectResult& leftObject = leftSample.results[objectIndex];
+            const DlcvCObjectResult& rightObject = rightSample.results[objectIndex];
+            const std::string leftCategory = leftObject.category_name == nullptr
+                ? std::string()
+                : std::string(leftObject.category_name);
+            const std::string rightCategory = rightObject.category_name == nullptr
+                ? std::string()
+                : std::string(rightObject.category_name);
+            if (leftObject.category_id != rightObject.category_id ||
+                leftCategory != rightCategory ||
+                leftObject.with_bbox != rightObject.with_bbox ||
+                leftObject.with_mask != rightObject.with_mask ||
+                leftObject.with_angle != rightObject.with_angle ||
+                leftObject.with_mean != rightObject.with_mean ||
+                !NearlyEqual(leftObject.score, rightObject.score) ||
+                !NearlyEqual(leftObject.area, rightObject.area) ||
+                !NearlyEqual(leftObject.x, rightObject.x) ||
+                !NearlyEqual(leftObject.y, rightObject.y) ||
+                !NearlyEqual(leftObject.w, rightObject.w) ||
+                !NearlyEqual(leftObject.h, rightObject.h) ||
+                !NearlyEqual(leftObject.angle, rightObject.angle) ||
+                !NearlyEqual(leftObject.foreground_mean, rightObject.foreground_mean) ||
+                !NearlyEqual(leftObject.background_mean, rightObject.background_mean)) {
+                error = "目标字段不一致";
+                return false;
+            }
+            if (leftObject.mask.width != rightObject.mask.width ||
+                leftObject.mask.height != rightObject.mask.height ||
+                (leftObject.mask.mask_ptr == 0) != (rightObject.mask.mask_ptr == 0)) {
+                error = "mask 尺寸或有效状态不一致";
+                return false;
+            }
+            if (leftObject.mask.mask_ptr != 0) {
+                const size_t bytes = static_cast<size_t>(leftObject.mask.width) *
+                    static_cast<size_t>(leftObject.mask.height);
+                const auto* leftData = reinterpret_cast<const unsigned char*>(
+                    static_cast<uintptr_t>(leftObject.mask.mask_ptr));
+                const auto* rightData = reinterpret_cast<const unsigned char*>(
+                    static_cast<uintptr_t>(rightObject.mask.mask_ptr));
+                if (std::memcmp(leftData, rightData, bytes) != 0) {
+                    error = "mask 像素内容不一致";
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 static bool RunNativeCompatibilityCheck(
     const std::wstring& modelPath,
     const cv::Mat& image) {
@@ -469,7 +649,9 @@ static bool RunNativeCompatibilityCheck(
     DlcvCResult nativeResult = native.infer(nativeIndex, &imageList);
     const std::string wrapperSuccessFingerprint = BuildCompleteFingerprint(wrapperResult);
     const std::string nativeSuccessFingerprint = BuildCompleteFingerprint(nativeResult);
-    const bool sameSuccessResult = wrapperSuccessFingerprint == nativeSuccessFingerprint;
+    std::string successCompareError;
+    const bool sameSuccessResult = CompareCResults(
+        wrapperResult, nativeResult, successCompareError);
     dlcv_free_model_result_c(&wrapperResult);
     native.freeResult(&nativeResult);
     const bool sameSuccessRelease = IsReleasedResult(wrapperResult, 0) && IsReleasedResult(nativeResult, 0);
@@ -497,6 +679,7 @@ static bool RunNativeCompatibilityCheck(
         if (!sameSuccessResult) {
             std::cerr << "  C API 成功结果: " << wrapperSuccessFingerprint << "\n";
             std::cerr << "  dlcv_infer 成功结果: " << nativeSuccessFingerprint << "\n";
+            std::cerr << "  差异: " << successCompareError << "\n";
         }
         if (!sameFailureResult) {
             std::cerr << "  C API 失败结果: " << wrapperFailureFingerprint << "\n";
@@ -518,10 +701,19 @@ static bool RunNativeCompatibilityCheck(
 static bool RunCompatibilityFlowCheck(
     const std::wstring& modelPath,
     const cv::Mat& image) {
+    dlcv_infer::Result cppResult(std::vector<dlcv_infer::SampleResult>{});
+    try {
+        dlcv_infer::Model cppModel(modelPath, 0);
+        cppResult = cppModel.InferBatch({image}, dlcv_infer::json::object());
+    } catch (const std::exception& ex) {
+        std::cerr << "FAIL: C++ 接口执行 dvst 失败: " << ex.what() << "\n";
+        return false;
+    }
+
     const std::string ansiPath = WideToAnsi(modelPath);
-    const int modelIndex = dlcv_load_model_c(ansiPath.c_str(), 0);
+    const int modelIndex = dlcv_infer_cpp_load_model_c(ansiPath.c_str(), 0);
     if (modelIndex < 0) {
-        std::cerr << "FAIL: 同名兼容入口加载 dvst 失败\n";
+        std::cerr << "FAIL: 扩展 C 接口加载 dvst 失败\n";
         return false;
     }
 
@@ -534,18 +726,50 @@ static bool RunCompatibilityFlowCheck(
     imageList.images = &cImage;
     imageList.n = 1;
 
-    DlcvCResult result = dlcv_infer_c(modelIndex, &imageList);
+    const char* params = "{}";
+    DlcvCResult result = dlcv_infer_cpp_infer_with_params_c(modelIndex, &imageList, params);
     const bool inferOk = result.code == 0 && result.message != nullptr &&
-        std::strcmp(result.message, "Success") == 0 && result.n == 1 && result.sample_results != nullptr;
-    dlcv_free_model_result_c(&result);
+        std::strcmp(result.message, "success") == 0 && result.n == 1 && result.sample_results != nullptr;
+    std::string compareError;
+    const bool sameResult = inferOk && CompareCppAndCResult(cppResult, result, compareError);
+    dlcv_infer_cpp_free_model_result_c(&result);
     const bool resultFreeOk = IsReleasedResult(result, 0);
-    const bool modelFreeOk = dlcv_free_model_c(modelIndex) == 0 && dlcv_free_model_c(modelIndex) == -1;
-    if (!inferOk || !resultFreeOk || !modelFreeOk) {
-        std::cerr << "FAIL: 同名兼容入口 dvst 验证失败\n";
+    const bool modelFreeOk = dlcv_infer_cpp_free_model_c(modelIndex) == 0 &&
+        dlcv_infer_cpp_free_model_c(modelIndex) == -1;
+    if (!sameResult || !resultFreeOk || !modelFreeOk) {
+        std::cerr << "FAIL: dvst C 与 C++ 结果比较失败";
+        if (!compareError.empty()) std::cerr << ": " << compareError;
+        std::cerr << "\n";
         return false;
     }
-    std::cout << "PASS: 同名兼容入口支持 dvst\n";
+    std::cout << "PASS: dvst C 与 C++ 结果逐字段及 mask 内容一致\n";
     return true;
+}
+
+static bool RunAllCompatibilityFlowChecks() {
+    struct FlowCase {
+        const wchar_t* modelPath;
+        const wchar_t* imagePath;
+    };
+    const FlowCase cases[] = {
+        {L"Y:\\测试模型\\AOI_120_50_s.dvst", L"Y:\\测试模型\\AOI-1.jpg"},
+        {L"Y:\\测试模型\\AOI-无CAD检测-20260721_120_50_s.dvst", L"Y:\\测试模型\\OK1.png"},
+        {L"Y:\\测试模型\\模型1-元件提取-20260721_120_50_s.dvst", L"Y:\\测试模型\\OK1.png"},
+        {L"Y:\\测试模型\\模型2-元件检测-20260721_120_50_s.dvst", L"Y:\\测试模型\\OK1.png"},
+        {L"Y:\\测试模型\\模型3-IC检测-20260721_120_50_s.dvst", L"Y:\\测试模型\\OK1.png"},
+    };
+
+    bool ok = true;
+    for (const FlowCase& testCase : cases) {
+        const cv::Mat image = ReadImageRgb(testCase.imagePath);
+        if (image.empty()) {
+            std::cerr << "FAIL: dvst C 与 C++ 比较图片读取失败\n";
+            ok = false;
+            continue;
+        }
+        ok = RunCompatibilityFlowCheck(testCase.modelPath, image) && ok;
+    }
+    return ok;
 }
 
 static bool LoadWrapperNativeInfer(NativeJsonApi& api, std::string& error) {
@@ -1834,7 +2058,7 @@ int main(int argc, char** argv) {
     ok = RunNativeJsonDvtByteRegression(dvtPath, dvtImage) && ok;
     ok = RunNativeJsonDvstCheck(dvstPath, dvstImage) && ok;
     ok = RunNativeCompatibilityCheck(dvtPath, dvtImage) && ok;
-    ok = RunCompatibilityFlowCheck(dvstPath, dvstImage) && ok;
+    ok = RunAllCompatibilityFlowChecks() && ok;
     ok = RunDvstTempDirectoryReuseCheck(dvstPath, dvstImage) && ok;
     ok = RunDvstContentUpdateCheck(dvstPath, dvstImage) && ok;
     ok = RunModelPoolGenerationCheck(dvstPath, dvstImage) && ok;

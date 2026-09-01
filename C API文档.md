@@ -165,8 +165,8 @@ C 调用端只需包含 `dlcv_infer_c_api.h`，不需要链接 `dlcv_infer_cpp.l
 | C API 导出检查 | Debug 下 `dlcv_infer_cpp.dll` 的 34 个函数均存在，包含 `dlcv_infer` 和 5 个 Qt Demo 扩展函数 |
 | JSON 接口安全失败输入比较 | 两层返回字符串一致 |
 | 设备、GPU、电源方案读取 | 返回有效字符串并由所属 DLL 释放 |
-| `.dvt` 结构化结果比较 | 输入相同，结果逐字段一致 |
-| `.dvst` 结构化兼容入口 | 加载、推理和释放通过 |
+| `.dvt` 结构化结果比较 | C 接口与直接调用 `dlcv_infer` 的结果字段、mask 尺寸及 mask 字节一致 |
+| `.dvst` 结构化结果比较 | 5 个流程模型的扩展 C 接口与 `dlcv_infer::Model::InferBatch` 结果字段、mask 尺寸及 mask 字节一致 |
 | `.dvt` 原生 JSON | 有效模型加载、索引信息、`dtype=uint8` 推理和释放通过；关闭 mask 后与底层结果逐字节一致 |
 | `.dvst` 原生 JSON | 索引与路径信息、推理、mask 字段、释放以及同索引 4 线程信息/推理并发通过 |
 | `.dvt/.dvst` 并发 | 三组 4 线程各 40 次检查通过 |
