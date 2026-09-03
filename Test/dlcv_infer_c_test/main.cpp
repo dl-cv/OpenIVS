@@ -33,6 +33,7 @@
 #pragma comment(lib, "psapi.lib")
 
 extern "C" int dlcv_infer_pure_c_header_test(void);
+extern "C" int dlcv_infer_pure_c_invalid_input_test(void);
 
 struct NativeCapi {
     using LoadModel = int(__stdcall*)(const char*, int);
@@ -348,6 +349,14 @@ static bool RunCapiExportCompletenessCheck() {
     };
 
     bool ok = true;
+    const int invalidInputCode = dlcv_infer_pure_c_invalid_input_test();
+    if (invalidInputCode != 0) {
+        std::cerr << "FAIL: C 接口异常输入兼容性检查失败，返回码="
+                  << invalidInputCode << "\n";
+        ok = false;
+    } else {
+        std::cout << "PASS: C 接口异常输入兼容性检查通过\n";
+    }
     bool exportsPresent = true;
     for (const char* name : expectedExports) {
         if (GetProcAddress(module, name) == nullptr) {
@@ -2002,6 +2011,17 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::cout << "PASS: 纯 C 结构化接口编译和调用成功\n";
+
+    if (argc == 2 && std::strcmp(argv[1], "--c-api-invalid-input") == 0) {
+        const int invalidInputCode = dlcv_infer_pure_c_invalid_input_test();
+        if (invalidInputCode != 0) {
+            std::cerr << "FAIL: C 接口异常输入兼容性检查失败，返回码="
+                      << invalidInputCode << "\n";
+            return 1;
+        }
+        std::cout << "PASS: C 接口异常输入兼容性检查通过\n";
+        return 0;
+    }
 
     const std::wstring dvtPath = L"Y:\\测试模型\\猫狗-分类_120_50_s.dvt";
     const std::wstring dvtImagePath = L"Y:\\测试模型\\猫狗-狗.jpg";
