@@ -3594,6 +3594,120 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_resolve_c(int index
     }
 }
 
+extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_double_load_free_c(
+    const wchar_t* model_path,
+    int device_id) {
+    if (model_path == nullptr || *model_path == L'\0') return -1;
+    try {
+        dlcv_infer::Model first(std::wstring(model_path), device_id);
+        dlcv_infer::Model second(std::wstring(model_path), device_id);
+        const int firstIndex = first.modelIndex;
+        const int secondIndex = second.modelIndex;
+        if (firstIndex < 0 || secondIndex < 0) return -1;
+        if (firstIndex != secondIndex) return -2;
+        int indexType = 0;
+        dlcv_infer::DllLoader& loader =
+            dlcv_infer::DllLoader::ResolveForIndex(firstIndex, indexType);
+        if (indexType != 1 || loader.GetIndexTypeFunc() == nullptr) return -3;
+        first.FreeModel();
+        second.FreeModel();
+        return loader.GetIndexTypeFunc()(firstIndex);
+    } catch (const std::exception& ex) {
+        std::cerr << "共享索引双加载释放检查失败: " << ex.what() << std::endl;
+        return -1;
+    } catch (...) {
+        std::cerr << "共享索引双加载释放检查失败: 未知异常" << std::endl;
+        return -1;
+    }
+}
+
+extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_double_flow_load_free_c(
+    const wchar_t* model_path,
+    int device_id) {
+    if (model_path == nullptr || *model_path == L'\0') return -1;
+    try {
+        dlcv_infer::Model first(std::wstring(model_path), device_id);
+        dlcv_infer::Model second(std::wstring(model_path), device_id);
+        if (first.modelIndex < 0 || second.modelIndex < 0) return -1;
+        if (first.modelIndex == second.modelIndex) return -2;
+
+        int firstType = 0;
+        dlcv_infer::DllLoader& firstLoader =
+            dlcv_infer::DllLoader::ResolveForIndex(first.modelIndex, firstType);
+        int secondType = 0;
+        dlcv_infer::DllLoader& secondLoader =
+            dlcv_infer::DllLoader::ResolveForIndex(second.modelIndex, secondType);
+        if (firstType != 2 || secondType != 2 || &firstLoader != &secondLoader) return -3;
+
+        const dlcv_infer::json firstInfo = dlcv_infer::ReadSharedIndexResult(
+            &firstLoader, firstLoader.GetFlowInfoFunc()(first.modelIndex));
+        const dlcv_infer::json secondInfo = dlcv_infer::ReadSharedIndexResult(
+            &secondLoader, secondLoader.GetFlowInfoFunc()(second.modelIndex));
+        if (!firstInfo.contains("model_bindings") || !firstInfo.at("model_bindings").is_array() ||
+            !secondInfo.contains("model_bindings") || !secondInfo.at("model_bindings").is_array() ||
+            firstInfo.at("model_bindings").empty() || secondInfo.at("model_bindings").empty()) {
+            return -4;
+        }
+
+        const int firstChildIndex = firstInfo.at("model_bindings").front().value("model_index", -1);
+        const int secondChildIndex = secondInfo.at("model_bindings").front().value("model_index", -1);
+        if (firstChildIndex < 0 || firstChildIndex != secondChildIndex) return -5;
+
+        first.FreeModel();
+        second.FreeModel();
+        if (firstLoader.GetIndexTypeFunc() == nullptr) return -6;
+        return firstLoader.GetIndexTypeFunc()(firstChildIndex);
+    } catch (const std::exception& ex) {
+        std::cerr << "共享流程双加载释放检查失败: " << ex.what() << std::endl;
+        return -1;
+    } catch (...) {
+        std::cerr << "共享流程双加载释放检查失败: 未知异常" << std::endl;
+        return -1;
+    }
+}
+
+extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_empty_flow_after_provider_c(
+    const wchar_t* provider_model_path,
+    const wchar_t* flow_path,
+    int device_id) {
+    if (provider_model_path == nullptr || *provider_model_path == L'\0' ||
+        flow_path == nullptr || *flow_path == L'\0') {
+        return -1;
+    }
+    try {
+        (void)dlcv_infer::DllLoader::EnsureForModel(std::wstring(provider_model_path));
+        dlcv_infer::Model flow(std::wstring(flow_path), device_id);
+        const int index = flow.modelIndex;
+        flow.FreeModel();
+        return index;
+    } catch (const std::exception& ex) {
+        std::cerr << "空流程默认 provider 检查失败: " << ex.what() << std::endl;
+        return -1;
+    } catch (...) {
+        std::cerr << "空流程默认 provider 检查失败: 未知异常" << std::endl;
+        return -1;
+    }
+}
+
+extern "C" DLCV_INFER_CPP_DLL_API const char* dlcv_shared_index_test_info_c(int index) {
+    dlcv_infer::json response;
+    try {
+        dlcv_infer::Model model;
+        model.modelIndex = index;
+        model.OwnModelIndex = false;
+        response["code"] = 0;
+        response["index"] = index;
+        response["model_info"] = model.GetModelInfo();
+    } catch (const std::exception& ex) {
+        response["code"] = 1;
+        response["message"] = ex.what();
+    } catch (...) {
+        response["code"] = 1;
+        response["message"] = "shared index info failed";
+    }
+    return AllocateSharedIndexTestJson(response);
+}
+
 extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_register_flow_c(int model_index) {
     try {
         dlcv_infer::json modelBindings = dlcv_infer::json::array({

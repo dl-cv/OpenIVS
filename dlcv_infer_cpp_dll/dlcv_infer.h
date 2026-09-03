@@ -395,5 +395,12 @@ extern "C" {
     DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_resolve_c(int index);
     DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_register_flow_c(int model_index);
     DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_index_rules_c();
+    DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_double_load_free_c(const wchar_t* model_path, int device_id);
+    DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_double_flow_load_free_c(const wchar_t* model_path, int device_id);
+    DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_empty_flow_after_provider_c(
+        const wchar_t* provider_model_path,
+        const wchar_t* flow_path,
+        int device_id);
+    DLCV_INFER_CPP_DLL_API const char* dlcv_shared_index_test_info_c(int index);
     DLCV_INFER_CPP_DLL_API void dlcv_shared_index_test_free_string_c(const char* result);
 }

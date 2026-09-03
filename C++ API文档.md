@@ -700,10 +700,21 @@ C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/Mode
 int dlcv_shared_index_test_load_c(const wchar_t* model_path, int device_id);
 const char* dlcv_shared_index_test_infer_c(int index, const wchar_t* image_path);
 int dlcv_shared_index_test_free_c(int index);
+int dlcv_shared_index_test_double_load_free_c(const wchar_t* model_path, int device_id);
+int dlcv_shared_index_test_double_flow_load_free_c(const wchar_t* model_path, int device_id);
+int dlcv_shared_index_test_empty_flow_after_provider_c(
+    const wchar_t* provider_model_path,
+    const wchar_t* flow_path,
+    int device_id);
+const char* dlcv_shared_index_test_info_c(int index);
 void dlcv_shared_index_test_free_string_c(const char* result);
 ```
 
 - `dlcv_shared_index_test_load_c` 使用 C++ `Model` 加载模型并在 DLL 内保存所有者，成功返回 `modelIndex`，失败返回 `-1`。
 - `dlcv_shared_index_test_infer_c` 在单次调用内构造空 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，依次执行 `GetModelInfo()`、`Infer()`、`InferOneOutJson()`；返回 UTF-8 JSON，包含 `code`、`index`、`model_info`、`structured` 和 `infer_json`。`structured` 只保留样本数量、目标数量、类别、分数、bbox、mask 标志及 mask 尺寸。
 - `dlcv_shared_index_test_free_c` 释放 DLL 内保存的 C++ 所有者，成功返回 `0`，失败返回 `-1`。
-- `dlcv_shared_index_test_free_string_c` 释放 `dlcv_shared_index_test_infer_c` 返回的字符串。
+- `dlcv_shared_index_test_double_load_free_c` 用两个 C++ `Model` 连续加载同一路径，确认复用同一 `modelIndex` 后分别释放；返回释放后的 `dlcv_get_index_type_c` 结果，`0` 表示已清除，`1` 表示普通模型仍在，负数表示加载失败或未复用 index。
+- `dlcv_shared_index_test_double_flow_load_free_c` 连续加载同一流程两次，读取两个流程登记的首个子模型 index，确认两次流程共用同一底层模型；两个流程释放后返回子模型的 `dlcv_get_index_type_c` 结果。
+- `dlcv_shared_index_test_empty_flow_after_provider_c` 先按指定模型文件切换 provider，再加载无模型节点流程并返回流程 index，用于检查无模型节点流程是否始终使用 Sentinel。
+- `dlcv_shared_index_test_info_c` 构造空 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，只调用 `GetModelInfo()`；返回 UTF-8 JSON，包含 `code`、`index`、`model_info`，失败时包含 `message`。
+- `dlcv_shared_index_test_free_string_c` 释放 `dlcv_shared_index_test_infer_c` 和 `dlcv_shared_index_test_info_c` 返回的字符串。

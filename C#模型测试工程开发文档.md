@@ -189,6 +189,9 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `calc-mean-selftest`
   - `category-count-check-selftest`
   - `shared-index-csharp-selftest <model.dvo> <flow.dvst> <image> [deviceId]`
+  - `shared-index-review-selftest [model.dvo] [flow.dvst] [virbox-model.dvt]`
+  - `shared-index-format-selftest`
+  - `shared-index-provider-model-selftest`
   - `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-model-info <model>`，构造指定模型并把 `GetModelInfo` 返回的完整 JSON 写入标准输出。
   - `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-dvs-model-info <model>`，构造指定模型并把 `GetDvsModelInfo` 返回的完整 JSON 写入标准输出；普通模型不支持该接口时，异常写入标准错误并返回非零状态。
   - `get-model-info` 接收单个普通模型或流程模型路径；`get-dvs-model-info` 按 C# 公共接口支持范围接收 `.dvst`、`.dvso` 流程模型路径。命令不包含针对指定模型内容的预期值。
@@ -207,6 +210,19 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - 流程模型加载期间保留已经加载成功的模型模块，流程对象取得模型池引用后再释放临时模块；每个不同的子模型只执行一次原生加载。
   - 成功返回 `0`，模型加载异常返回 `1`，参数数量错误返回 `2`。
 - `DlcvCSharpTest.exe calc-mean-selftest` 检查结果构造函数、均值字段，以及 Flow 节点默认值、入口显式覆盖和后续恢复。
+- `DlcvCSharpTest.exe shared-index-review-selftest` 检查以下事实：
+  - C#、C++ 对同一普通模型连续加载两次后释放，底层 index 应被清除。
+  - C++ 连续加载同一流程两次并释放后，共用的子模型 index 应被清除。
+  - 普通模型和流程各建立两个借用对象；持有方与首个借用对象释放后，第二个借用对象仍可读取模型信息，最后释放时 index 应被清除。
+  - 人为提前解绑一个流程子模型，使 C# 流程对象释放子模型时返回失败；随后释放流程持有方，检查外层 flow index 是否仍被保留。
+  - 空流程 `GetModelInfo()` 不应返回流程节点 JSON。
+  - 源文件删除后，按路径再次加载应失败；已经取得的普通模型 index 和流程 index 仍可读取模型信息。
+  - 当前 provider 为 Virbox 时，无模型节点流程仍应使用 Sentinel 流程范围。
+  - `ResolveForIndex` 对不存在的 index 应失败，不能只按数字分段返回类型。
+  - 未传路径时，默认使用 `Y:\测试模型` 中的 Sentinel DVO、Sentinel DVST 和 Virbox DVT。
+- `DlcvCSharpTest.exe shared-index-format-selftest` 验证 DVT、DVO、DVST 和 DVSO 的 C# 持有/C++ 借用、C++ 持有/C# 借用两种方向。测试目录没有独立 DVSO 时，将 DVST 归档复制到系统临时目录并改用 `.dvso` 扩展名，只检查 DVSO 分支与共享 index 行为；正式验收仍需使用实际导出的 DVSO。
+- `DlcvCSharpTest.exe shared-index-provider-model-selftest` 使用 `Y:\测试模型\猫狗-分类_120_50_s.dvt` 和 `Y:\测试模型\猫狗-分类_120_50_v.dvt`，验证 Sentinel、Virbox 普通模型的 index 范围、双向读取和推理结果。
+- `all-tests` 已加入上述三组共享 index 测试；相关问题未修复前，统一测试会按实际结果返回失败。
 - `DlcvCSharpTest.exe shared-index-csharp-selftest` 依次执行以下检查：
   - C# `Model(modelPath)` 加载普通模型，底层 `dlcv_get_model_info_c` 可按同一 index 查询；空构造 `Model` 借用后完成推理，借用实例释放后持有方继续推理。
   - 同一空构造实例先使用不存在的 index 触发失败，再改为有效 index，确认恢复状态可重试并完成推理。
