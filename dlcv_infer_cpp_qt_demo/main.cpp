@@ -11,6 +11,7 @@
 #include <QStringList>
 
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -31,6 +32,46 @@
 namespace {
 
 using json = nlohmann::json;
+
+#ifdef _WIN32
+bool IsUsableStandardHandle(DWORD standardHandle) {
+    const HANDLE handle = GetStdHandle(standardHandle);
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    SetLastError(ERROR_SUCCESS);
+    const DWORD fileType = GetFileType(handle);
+    return fileType != FILE_TYPE_UNKNOWN || GetLastError() == ERROR_SUCCESS;
+}
+
+void InitializeConsoleForCommandLine() {
+    const bool hasStdout = IsUsableStandardHandle(STD_OUTPUT_HANDLE);
+    const bool hasStderr = IsUsableStandardHandle(STD_ERROR_HANDLE);
+    if (hasStdout && hasStderr) {
+        return;
+    }
+
+    if (!AttachConsole(ATTACH_PARENT_PROCESS) && GetLastError() != ERROR_ACCESS_DENIED) {
+        return;
+    }
+
+    FILE* stream = nullptr;
+    if (!hasStdout) {
+        freopen_s(&stream, "CONOUT$", "w", stdout);
+    }
+    if (!hasStderr) {
+        freopen_s(&stream, "CONOUT$", "w", stderr);
+    }
+    std::ios::sync_with_stdio(true);
+
+    DWORD consoleMode = 0;
+    if (GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &consoleMode) ||
+        GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &consoleMode)) {
+        SetConsoleOutputCP(CP_UTF8);
+    }
+}
+#endif
 
 struct InferOptions {
     QString modelPath;
@@ -774,8 +815,9 @@ std::string GetCppDllPath() {
 
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
+    if (argc > 1) {
+        InitializeConsoleForCommandLine();
+    }
 #endif
 
     QApplication app(argc, argv);

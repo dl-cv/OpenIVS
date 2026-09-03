@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ DEMO_EXE_NAME = "C# 测试程序.exe"
 SIGNTOOL_PATH = Path(r"C:\sign-tool\signtool.exe")
 SIGN_CERT_SUBJECT = "深度视觉（广东）人工智能研究有限公司"
 TIMESTAMP_URL = "http://time.certum.pl"
+CODE_SIGNING_EKU = "1.3.6.1.5.5.7.3.3"
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,6 +39,65 @@ def run_step(name: str, command: list[str]) -> None:
     print(f"[build_package] {name}")
     print(f"[build_package] command: {subprocess.list2cmdline(command)}")
     subprocess.run(command, cwd=REPO_ROOT, check=True)
+
+
+def find_signing_certificate_thumbprint() -> str:
+    powershell = shutil.which("powershell.exe")
+    if powershell is None:
+        raise FileNotFoundError("未找到 powershell.exe，无法读取代码签名证书")
+
+    subject_code_units = ", ".join(str(ord(character)) for character in SIGN_CERT_SUBJECT)
+    script = f"""
+$subjectName = -join @({subject_code_units} | ForEach-Object {{ [char]$_ }})
+$codeSigningEku = '{CODE_SIGNING_EKU}'
+$now = Get-Date
+$certificates = @(Get-ChildItem -LiteralPath 'Cert:\\CurrentUser\\My' | Where-Object {{
+    $certificate = $_
+    $ekuExtension = $certificate.Extensions |
+        Where-Object {{ $_.Oid.Value -eq '2.5.29.37' }} |
+        Select-Object -First 1
+    $hasCodeSigningEku = $null -ne $ekuExtension -and
+        @($ekuExtension.EnhancedKeyUsages | Where-Object {{ $_.Value -eq $codeSigningEku }}).Count -gt 0
+    $certificate.GetNameInfo(
+        [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+        $false
+    ) -ceq $subjectName -and
+        $certificate.HasPrivateKey -and
+        $certificate.NotBefore -le $now -and
+        $certificate.NotAfter -ge $now -and
+        $hasCodeSigningEku
+}})
+if ($certificates.Count -ne 1) {{
+    [Console]::Error.Write($certificates.Count)
+    exit 1
+}}
+[Console]::Out.Write($certificates[0].Thumbprint.Replace(' ', ''))
+"""
+    powershell_env = os.environ.copy()
+    powershell_env["PSModulePath"] = os.pathsep.join(
+        os.path.expandvars(path)
+        for path in (
+            r"%USERPROFILE%\Documents\WindowsPowerShell\Modules",
+            r"%ProgramFiles%\WindowsPowerShell\Modules",
+            r"%SystemRoot%\System32\WindowsPowerShell\v1.0\Modules",
+        )
+    )
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="ascii",
+        env=powershell_env,
+    )
+    if result.returncode != 0:
+        certificate_count = result.stderr.strip() or "未知"
+        raise RuntimeError(f"有效代码签名证书数量不是 1：{certificate_count}")
+    thumbprint = result.stdout.strip()
+    if re.fullmatch(r"[0-9A-Fa-f]{40}", thumbprint) is None:
+        raise RuntimeError("代码签名证书指纹格式无效")
+    return thumbprint
 
 
 def rebuild_staging_directory() -> None:
@@ -135,15 +196,18 @@ def main() -> int:
         )
 
         demo_exe = copy_package_files()
+        certificate_thumbprint = find_signing_certificate_thumbprint()
         run_step(
             "签名 C# 测试程序",
             [
                 str(SIGNTOOL_PATH),
                 "sign",
-                "/n",
-                SIGN_CERT_SUBJECT,
-                "/t",
+                "/sha1",
+                certificate_thumbprint,
+                "/tr",
                 TIMESTAMP_URL,
+                "/td",
+                "sha256",
                 "/fd",
                 "sha256",
                 "/v",

@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <mutex>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 
@@ -14,6 +15,11 @@ namespace dlcv_infer {
 namespace flow {
 
 using BoundModelMap = std::unordered_map<int, std::shared_ptr<dlcv_infer::Model>>;
+struct ModelBinaryStore final {
+    uint64_t StoreId = 0;
+    std::unordered_map<std::string, std::shared_ptr<const std::vector<unsigned char>>> Buffers;
+    std::unordered_map<std::string, std::string> Aliases;
+};
 
 /// <summary>
 /// 模型池：按 model_path+device_id 缓存 dlcv_infer::Model，避免重复加载。
@@ -29,6 +35,15 @@ public:
     std::shared_ptr<dlcv_infer::Model> Acquire(
         const std::string& modelPathUtf8, int deviceId);
 
+    std::shared_ptr<dlcv_infer::Model> AcquireBinary(
+        const std::shared_ptr<const ModelBinaryStore>& store,
+        const std::string& bufferKey,
+        const std::string& modelName,
+        int deviceId);
+
+    bool RetainByKey(const std::string& key);
+    std::shared_ptr<dlcv_infer::Model> AcquireByKey(const std::string& key);
+
     /// 释放一个引用。refCount 减 1；归零时从缓存移除。
     /// 若 key 不存在，无操作。
     void Release(const std::string& modelPathUtf8, int deviceId);
@@ -40,6 +55,7 @@ public:
     void Clear();
 
     static std::string MakeKey(const std::string& modelPathUtf8, int deviceId);
+    static std::string MakeBinaryKey(uint64_t storeId, const std::string& bufferKey, int deviceId);
 
 private:
     struct Entry {
@@ -60,6 +76,8 @@ protected:
     std::string _modelPathUtf8;
     int _modelIndex = -1;
     bool _usesModelIndex = false;
+    std::string _modelBufferKey;
+    std::string _modelPoolKey;
     int _deviceId = 0;
     int _resolvedDeviceId = 0;
     std::shared_ptr<dlcv_infer::Model> _model;
@@ -73,13 +91,14 @@ public:
         _modelPathUtf8 = ReadString("model_path", std::string());
         _modelIndex = ReadInt("model_index", -1);
         _usesModelIndex = _modelIndex >= 0;
+        _modelBufferKey = ReadString("model_buffer_key", std::string());
         _deviceId = ReadInt("device_id", 0);
         _resolvedDeviceId = _deviceId;
     }
 
     ~BaseModelModule() {
-        if (!_usesModelIndex && !_modelPathUtf8.empty() && _model) {
-            try { ModelPool::Instance().Release(_modelPathUtf8, _resolvedDeviceId); } catch (...) {}
+        if (!_modelPoolKey.empty() && _model) {
+            try { ModelPool::Instance().ReleaseByKey(_modelPoolKey); } catch (...) {}
         }
     }
 
@@ -88,6 +107,7 @@ public:
 
     const std::string& ModelPathUtf8() const { return _modelPathUtf8; }
     int ResolvedDeviceId() const { return _resolvedDeviceId; }
+    const std::string& ModelPoolKey() const { return _modelPoolKey; }
     const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _model; }
 };
 

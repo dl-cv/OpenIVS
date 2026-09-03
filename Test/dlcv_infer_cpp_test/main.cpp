@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <fstream>
 #include <functional>
@@ -35,6 +36,7 @@
 #include "../../dlcv_infer_cpp_dll/flow/FlowGraphModel.h"
 #include "../../dlcv_infer_cpp_dll/flow/ModuleRegistry.h"
 #include "../../dlcv_infer_cpp_dll/flow/utils/MaskRleUtils.h"
+#include "../DvsTempArtifactMonitor.h"
 #include "dlcv_infer.h"
 
 namespace {
@@ -324,6 +326,109 @@ int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
         return 0;
     } catch (const std::exception& ex) {
         PrintUtf8Line(std::string("selftest exception: ") + ex.what());
+        return 1;
+    }
+}
+
+int RunDvsMemoryLoadingSelfTest(int argc, wchar_t* argv[]) {
+    if (argc < 4 || argc > 5) {
+        PrintUtf8Line("用法: dlcv_infer_cpp_test dvs-memory-loading-selftest <modelPath> <imagePath> [device]");
+        return 2;
+    }
+
+    const std::wstring modelPath = argv[2];
+    const std::wstring imagePath = argv[3];
+    const int deviceId = argc == 5 ? _wtoi(argv[4]) : 0;
+    const std::wstring extension = dvs_test::Lower(std::filesystem::path(modelPath).extension().wstring());
+    if (extension != L".dvst" && extension != L".dvso") {
+        PrintUtf8Line("模型必须为 .dvst 或 .dvso");
+        return 2;
+    }
+
+    try {
+        cv::Mat rgb = ReadImageRgb(imagePath);
+        if (rgb.empty()) {
+            PrintUtf8Line("图片读取失败");
+            return 2;
+        }
+
+        dvs_test::TempArtifactMonitor monitor(dvs_test::ReadArchiveFileNames(modelPath));
+        monitor.Start();
+        std::string operationError;
+        try {
+            dlcv_infer::Model model(modelPath, deviceId);
+            json params = {
+                {"threshold", 0.5},
+                {"with_mask", true},
+                {"batch_size", 1}
+            };
+            dlcv_infer::Result result = model.Infer(rgb, params);
+            DisposeResultMasks(result);
+            model.FreeModel();
+        } catch (const std::exception& ex) {
+            operationError = ex.what();
+        } catch (...) {
+            operationError = "加载、推理或释放时发生未知异常";
+        }
+        monitor.Stop();
+
+        if (!operationError.empty()) {
+            PrintUtf8ErrorLine(operationError);
+            return 1;
+        }
+        if (monitor.HasArtifacts()) {
+            PrintUtf8ErrorLine("系统临时目录出现流程归档文件: " + monitor.DescribeUtf8());
+            return 1;
+        }
+        PrintUtf8Line("C++ 流程归档内存加载测试通过");
+        return 0;
+    } catch (const std::exception& ex) {
+        PrintUtf8ErrorLine(ex.what());
+        return 1;
+    }
+}
+
+int RunDvspRejectSelfTest(int argc, wchar_t* argv[]) {
+    if (argc < 3 || argc > 4) {
+        PrintUtf8Line("用法: dlcv_infer_cpp_test dvsp-reject-selftest <modelPath> [device]");
+        return 2;
+    }
+
+    const std::wstring modelPath = argv[2];
+    const int deviceId = argc == 4 ? _wtoi(argv[3]) : 0;
+    if (dvs_test::Lower(std::filesystem::path(modelPath).extension().wstring()) != L".dvsp") {
+        PrintUtf8Line("模型必须为 .dvsp");
+        return 2;
+    }
+
+    try {
+        dvs_test::TempArtifactMonitor monitor({});
+        monitor.Start();
+        bool rejected = false;
+        std::string errorMessage;
+        try {
+            dlcv_infer::Model model(modelPath, deviceId);
+            model.FreeModel();
+        } catch (const std::exception& ex) {
+            errorMessage = ex.what();
+            rejected = dvs_test::HasExplicitDvspUnsupportedMessage(errorMessage);
+        } catch (...) {
+            errorMessage = "加载 .dvsp 时发生未知异常";
+        }
+        monitor.Stop();
+
+        if (!rejected) {
+            PrintUtf8ErrorLine(".dvsp 未返回明确的不支持错误: " + errorMessage);
+            return 1;
+        }
+        if (monitor.HasArtifacts()) {
+            PrintUtf8ErrorLine("拒绝 .dvsp 时系统临时目录出现流程归档文件: " + monitor.DescribeUtf8());
+            return 1;
+        }
+        PrintUtf8Line("C++ .dvsp 拒绝测试通过");
+        return 0;
+    } catch (const std::exception& ex) {
+        PrintUtf8ErrorLine(ex.what());
         return 1;
     }
 }
@@ -3090,6 +3195,14 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunDvsRgbSelfTest(argc, argv);
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"dvs-memory-loading-selftest") {
+        return RunDvsMemoryLoadingSelfTest(argc, argv);
+    }
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"dvsp-reject-selftest") {
+        return RunDvspRejectSelfTest(argc, argv);
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"curve-text-affine-selftest") {
         return RunCurveTextAffineSelfTest();
     }
@@ -3152,6 +3265,8 @@ int wmain(int argc, wchar_t* argv[]) {
     PrintUtf8Line("Usage: " + (argc >= 1 ? WideToUtf8(argv[0]) : std::string("dlcv_infer_cpp_test")) + " <subcommand>");
     std::cout << "Available subcommands:\n";
     std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
+    std::cout << "  dvs-memory-loading-selftest <modelPath> <imagePath> [device]\n";
+    std::cout << "  dvsp-reject-selftest <modelPath> [device]\n";
     std::cout << "  curve-text-affine-selftest\n";
     std::cout << "  ai-orientation-affine-selftest\n";
     std::cout << "  imageprepcheck\n";

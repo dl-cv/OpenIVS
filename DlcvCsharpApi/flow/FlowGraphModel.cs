@@ -9,6 +9,20 @@ using dlcv_infer_csharp;
 
 namespace DlcvModules
 {
+    internal sealed class FlowModelSource
+    {
+        public string CacheKey { get; private set; }
+        public string ModelName { get; private set; }
+        public byte[] Data { get; private set; }
+
+        public FlowModelSource(string cacheKey, string modelName, byte[] data)
+        {
+            CacheKey = cacheKey;
+            ModelName = modelName;
+            Data = data;
+        }
+    }
+
     /// <summary>
     /// 流程图推理模型封装：与普通模型一致的调用方式（先加载，再推理/测速）。
     /// 强类型直连 ExecutionContext/GraphExecutor，便于调试与维护。
@@ -25,6 +39,7 @@ namespace DlcvModules
         private Dictionary<int, Model> _modelsByIndex = new Dictionary<int, Model>();
         private JArray _modelBindings = new JArray();
         private JObject _registrationPipeline = new JObject();
+        private Dictionary<int, FlowModelSource> _modelSources = new Dictionary<int, FlowModelSource>();
 
         public bool IsLoaded { get { return _loaded; } }
 
@@ -54,11 +69,30 @@ namespace DlcvModules
             Dictionary<int, Model> modelsByIndex = null,
             JObject registrationPipeline = null)
         {
+            return LoadFromRootInternal(root, deviceId, modelsByIndex, registrationPipeline, null);
+        }
+
+        internal JObject LoadFromRoot(JObject root, int deviceId, Dictionary<int, FlowModelSource> modelSources)
+        {
+            return LoadFromRootInternal(root, deviceId, null, null, modelSources);
+        }
+
+        private JObject LoadFromRootInternal(
+            JObject root,
+            int deviceId,
+            Dictionary<int, Model> modelsByIndex,
+            JObject registrationPipeline,
+            Dictionary<int, FlowModelSource> modelSources)
+        {
             if (root == null) throw new ArgumentNullException("root");
 
             var nodesToken = root["nodes"] as JArray;
             if (nodesToken == null) throw new InvalidOperationException("流程 JSON 缺少 nodes 数组");
 
+            if (_modelSources != null && _modelSources.Count > 0)
+            {
+                BaseModelModule.ReleaseBinaryModels(_modelSources, _deviceId);
+            }
             _nodes = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(nodesToken.ToString());
             _root = root;
             _registrationPipeline = registrationPipeline != null
@@ -67,9 +101,13 @@ namespace DlcvModules
             _deviceId = deviceId;
             ReplaceOwnedModels(modelsByIndex);
             RefreshModelBindings();
+            _modelSources = modelSources != null
+                ? new Dictionary<int, FlowModelSource>(modelSources)
+                : new Dictionary<int, FlowModelSource>();
 
             var ctx = CreateExecutionContext();
             ctx.Set("device_id", deviceId);
+            SetModelSources(ctx);
             var exec = new GraphExecutor(_nodes, ctx);
             var report = exec.LoadModels();
             RefreshModelBindings();
@@ -89,6 +127,7 @@ namespace DlcvModules
             {
                 _loadedModelMeta = new JArray();
             }
+            RefreshModelBindings();
             int code = report != null && report["code"] != null ? (int)report["code"] : 1;
             if (code != 0)
             {
@@ -147,6 +186,14 @@ namespace DlcvModules
             return report;
         }
 
+        private void SetModelSources(ExecutionContext context)
+        {
+            if (context != null && _modelSources != null && _modelSources.Count > 0)
+            {
+                context.Set("flow_model_sources", _modelSources);
+            }
+        }
+
         public JArray GetLoadedModelMeta()
         {
             var result = _loadedModelMeta != null ? (JArray)_loadedModelMeta.DeepClone() : new JArray();
@@ -162,6 +209,27 @@ namespace DlcvModules
         public JArray GetModelBindings()
         {
             return _modelBindings != null ? (JArray)_modelBindings.DeepClone() : new JArray();
+        }
+
+        internal DllLoader GetLoadedModelLoader(int modelIndex)
+        {
+            Model model;
+            if (_modelsByIndex != null && _modelsByIndex.TryGetValue(modelIndex, out model) && model != null)
+                return model.Loader;
+
+            if (_loadedModelMeta != null && _modelSources != null)
+            {
+                foreach (JObject item in _loadedModelMeta.OfType<JObject>())
+                {
+                    if (item["model_index"] == null || item["node_id"] == null ||
+                        item["model_index"].Value<int>() != modelIndex)
+                        continue;
+                    FlowModelSource source;
+                    if (_modelSources.TryGetValue(item["node_id"].Value<int>(), out source) && source != null)
+                        return DllLoader.ForModel(source.Data, source.ModelName);
+                }
+            }
+            return null;
         }
 
         protected void SetModelBindings(JArray modelBindings)
@@ -572,6 +640,7 @@ namespace DlcvModules
                 ctx.Set("device_id", _deviceId);
                 ctx.Set("return_json_emit_poly", emitPoly);
                 ctx.Set("infer_params", paramsJson ?? new JObject());
+                SetModelSources(ctx);
 
                 InferTiming.BeginFlowRequest();
                 var flowSw = System.Diagnostics.Stopwatch.StartNew();
@@ -771,11 +840,9 @@ namespace DlcvModules
                 if (disposing)
                 {
                     DisposeOwnedModels();
+                    BaseModelModule.ReleaseBinaryModels(_modelSources, _deviceId);
                 }
-                else
-                {
-                    try { DisposeOwnedModels(); } catch { }
-                }
+                _modelSources = new Dictionary<int, FlowModelSource>();
                 _disposed = true;
             }
         }
@@ -820,6 +887,29 @@ namespace DlcvModules
         private void RefreshModelBindings()
         {
             var bindings = new JArray();
+            var loadedIndicesByNode = new Dictionary<int, int>();
+            if (_loadedModelMeta != null)
+            {
+                foreach (JObject item in _loadedModelMeta.OfType<JObject>())
+                {
+                    int nodeId;
+                    int modelIndex;
+                    try
+                    {
+                        nodeId = item["node_id"].Value<int>();
+                        modelIndex = item["model_index"].Value<int>();
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+                    if (nodeId >= 0 && modelIndex >= 0)
+                    {
+                        loadedIndicesByNode[nodeId] = modelIndex;
+                    }
+                }
+            }
+
             if (_nodes != null)
             {
                 for (int i = 0; i < _nodes.Count; i++)
@@ -832,11 +922,14 @@ namespace DlcvModules
 
                     int nodeId;
                     if (!node.TryGetValue("id", out object nodeValue) || !TryGetInt(nodeValue, out nodeId)) continue;
-                    if (!node.TryGetValue("properties", out object propertiesValue)) continue;
-                    var properties = propertiesValue as Dictionary<string, object>;
-                    if (properties == null || !properties.TryGetValue("model_index", out object indexValue)) continue;
                     int modelIndex;
-                    if (!TryGetInt(indexValue, out modelIndex) || modelIndex < 0) continue;
+                    if (!loadedIndicesByNode.TryGetValue(nodeId, out modelIndex))
+                    {
+                        if (!node.TryGetValue("properties", out object propertiesValue)) continue;
+                        var properties = propertiesValue as Dictionary<string, object>;
+                        if (properties == null || !properties.TryGetValue("model_index", out object indexValue)) continue;
+                        if (!TryGetInt(indexValue, out modelIndex) || modelIndex < 0) continue;
+                    }
                     bindings.Add(new JObject
                     {
                         ["node_id"] = nodeId,

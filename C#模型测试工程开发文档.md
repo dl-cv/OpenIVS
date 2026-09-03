@@ -11,6 +11,7 @@
 
 - 模型加载成功/失败判断
 - 推理成功/失败判断
+- 固定模型预测结果回归校验
 - 推理结果类别列表输出（按出现次数展开）
 - 3 秒平均推理速度
 - Batch 推理速度（单独字段）
@@ -50,15 +51,31 @@
     - 若调用 `dlcv_infer::Model(const std::wstring& modelPath, ...)`（推荐）：可直接传 Windows UTF-16 路径，内部处理转码，避免测试代码到处写转换函数
   - Windows 控制台保持 GBK。程序内部生成的 UTF-8 文本在输出前转换为 GBK，再通过 `cout` 或 `cerr` 输出，不设置控制台代码页；模型结果中已经是本地编码的类别名不重复转换。
 
-## 3. 默认测试用例映射
+## 3. 默认固定模型回归用例
 
-- `AOI-旋转框检测.dvt` -> `AOI-测试.jpg`
-- `猫狗-分类.dvt` -> `猫狗-猫.jpg`
-- `气球-实例分割.dvt` -> `气球.jpg`
-- `气球-语义分割.dvt` -> `气球.jpg`
-- `手机屏幕-实例分割.dvt` -> `手机屏幕.jpg`
-- `引脚定位-目标检测.dvt` -> `引脚定位-目标检测.jpg`
-- `OCR.dvt` -> `OCR-1.jpg`
+- `测试无监督-v5_120_50_s.dvt` -> `1786969663716.jpg`
+- `猫狗-分类_120_50_s.dvt` -> `猫狗-狗.jpg`
+- `猫狗-分类_120_50_v.dvt` -> `猫狗-狗.jpg`
+- `气球-大模型_20260830_010011_120_50_s.dvt` -> `气球.jpg`
+- `气球-实例分割_120_50_s.dvt` -> `气球.jpg`
+- `气球-实例分割_120_50_v.dvt` -> `气球.jpg`
+- `气球-语义分割_120_50_s.dvt` -> `气球.jpg`
+- `手机屏幕-实例分割_120_50_s.dvt` -> `手机屏幕.jpg`
+- `引脚定位-目标检测_120_50_s.dvt` -> `引脚定位-目标检测.jpg`
+- `AOI-旋转框检测_120_50_s.dvt` -> `AOI-测试.jpg`
+- `OCR_120_50_s.dvt` -> `OCR-472.jpg`
+
+模型与图片从 `Y:\测试模型` 读取。模型或图片缺失时用例失败。
+
+每个用例依次校验样本数量、结果数量、`category_id`、`category_name`、`with_bbox`、`with_mask`、`with_angle`、score、bbox、area、angle 和 mask。数值容差如下：
+
+- score：`0.002`
+- bbox：`1.0`
+- area：`128.0`
+- angle：`0.05`
+- mask 非零像素数：`128`
+
+mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask 通过 C# API 按 bbox 尺寸缩放，固定基准记录 `CSharpObjectResult.Mask` 的实际输出。
 
 ## 4. 输出格式
 
@@ -152,6 +169,12 @@
 
 ## 6. 构建与运行
 
+### 6.1 统一测试入口
+
+`Test\\DlcvCSharpTest\\RunAllTests.ps1 [日志路径]` 是完整验证入口。脚本启动一次 `DlcvCSharpTest.exe all-tests`，统一收集 C# 和原生库输出；测试结束后在控制台显示各组测试状态、耗时及最终统计，原始输出保存到一个日志文件。未提供日志路径时，日志保存为程序目录下的 `bin\\x64\\Release\\DlcvCSharpTest-all-tests.log`。
+
+测试程序在单个进程内依次执行无外部参数自测和固定模型回归用例。完整清单执行结束后返回，任一测试失败时返回 `1`，参数或日志路径无效时返回 `2`。
+
 - 解决方案级构建、项目级构建与发布前构建验证统一通过 `.cursor/skills/vs-build/scripts/build.py` 执行，入口见 `开发文档.md` 的“统一编译说明”
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
@@ -172,6 +195,10 @@
   - 测试时直接按需调用 C#、C++ 可执行程序的上述命令，检查命令返回状态及标准输出中的 JSON。
   - 两个命令成功返回 `0`，模型加载或接口调用异常返回 `1`，参数数量错误返回 `2`。
 - `dlcv_infer_cpp_test.exe` 支持 `count-results-selftest`，验证新配置闭区间、非法范围与旧配置兼容逻辑。
+- `dlcv_infer_cpp_test.exe` 还支持以下流程模型专项自测：
+  - `dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]`
+  - `dvs-memory-loading-selftest <modelPath> <imagePath> [device]`
+  - `dvsp-reject-selftest <modelPath> [device]`
 - `DlcvCSharpTest.exe category-count-check-selftest` 与 `dlcv_infer_cpp_test.exe category-count-check-selftest` 验证类型数量规则、同一原图局部结果聚合、粘性 `ok=false`、字符串或数组 `reason`、Flow 输出包装及旧流程兼容行为。
 - `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
   - `load-three-models <extractModelPath> <componentModelPath> <icModelPath>`
@@ -184,7 +211,7 @@
   - C# `Model(modelPath)` 加载普通模型，底层 `dlcv_get_model_info_c` 可按同一 index 查询；空构造 `Model` 借用后完成推理，借用实例释放后持有方继续推理。
   - 同一空构造实例先使用不存在的 index 触发失败，再改为有效 index，确认恢复状态可重试并完成推理。
   - 底层 `dlcv_load_model_c` 加载普通模型，C# 空构造 `Model` 按 index 查询和推理；C# 借用实例释放后底层模型仍可查询。
-  - C# `Model(flowPath)` 加载 DVST 后，`dlcv_get_flow_info_c` 返回绝对 `source_path`、`device_id`、`provider`、`pipeline` 与非空 `model_bindings`；空构造 `Model` 使用保存的 `pipeline` 恢复流程，归档只用于读取必需资源。
+  - C# `Model(flowPath)` 加载 DVST 后，`dlcv_get_flow_info_c` 返回绝对 `source_path`、`device_id`、`provider`、`pipeline` 与非空 `model_bindings`；空构造 `Model` 使用保存的 `pipeline` 和绑定关系恢复流程，不读取归档文件。
   - 每次恢复时检查 index 所属范围：Sentinel 普通模型 `0～9999`、Sentinel 流程 `10000～19999`、Virbox 普通模型 `20000～29999`、Virbox 流程 `30000～39999`。
   - `dvsp-disabled-selftest` 检查 C# API 对 `.dvsp` 直接返回不支持错误。
   - `empty-flow-index-selftest` 检查无模型节点 DVST 可由 C#、C++ 分别登记，并检查 C# 可按 C++ flow index 恢复空绑定流程。

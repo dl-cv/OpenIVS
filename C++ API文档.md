@@ -8,7 +8,7 @@
 
 | 头文件 | 说明 |
 |--------|------|
-| `dlcv_infer.h` | 主接口，包含 `Model`、`Utils`、`DllLoader`、`GetAllDogInfo` |
+| `dlcv_infer.h` | 主接口，包含 `Model`、`SlidingWindowModel`、`Utils`、`DllLoader`、`GetAllDogInfo` |
 | `dlcv_sntl_admin.h` | 加密狗工具，包含 `sntl_admin::DogUtils`、`sntl_admin::DogProvider` |
 | `flow/FlowGraphModel.h` | 流程图模型，包含 `dlcv_infer::flow::FlowGraphModel` |
 
@@ -181,7 +181,7 @@ public:
 ```
 
 **构造函数行为**：
-1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，解包归档并加载流程图。
+1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，从归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；加载期间不写入模型文件。推理组件缺少该接口时，兼容路径才将模型文件写入临时目录后按路径加载。
 2. 若路径以 `.dvsp` 结尾 → 抛出 `std::invalid_argument`，不加载文件。
 3. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 `dlcv_load_model`。
 4. 构造失败时抛出 `std::runtime_error`，错误信息包含底层返回的 JSON。
@@ -239,7 +239,7 @@ void FreeModel();
 >
 > 同一个 `.dvst/.dvso` 的全部模型节点必须属于同一 provider，不支持在一个流程内混用 Sentinel 与 Virbox。无模型节点流程优先复用当前 loader；没有当前 loader 时直接使用 Sentinel，不执行双 provider 探测。
 >
-> `.dvsp` 不支持推理。C++ API 不提供 `SlidingWindowModel`；滑窗处理使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
+> `.dvsp` 不支持推理。当前头文件在 `DLCV_INFER_CPP_DLL_EXPORTS` 条件下提供 `SlidingWindowModel`；其他调用场景使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 
 | provider | 类型 | index 范围 |
 |---|---|---|
@@ -263,7 +263,31 @@ static std::vector<FlowNodeTiming> GetLastFlowNodeTimings();
 
 ---
 
-## 5. Utils（工具类）
+## 5. SlidingWindowModel（滑动窗口模型）
+
+当前 `dlcv_infer_cpp_dll/dlcv_infer.h` 在 `DLCV_INFER_CPP_DLL_EXPORTS` 条件下公开 `SlidingWindowModel`，继承 `Model`：
+
+```cpp
+class SlidingWindowModel : public Model {
+public:
+    SlidingWindowModel(
+        const std::string& modelPath,
+        int device_id,
+        int small_img_width = 832,
+        int small_img_height = 704,
+        int horizontal_overlap = 16,
+        int vertical_overlap = 16,
+        float threshold = 0.5f,
+        float iou_threshold = 0.2f,
+        float combine_ios_threshold = 0.2f);
+};
+```
+
+构造时以 `type = "sliding_window_pipeline"` 组装底层加载请求，继承 `Model` 的推理接口。
+
+---
+
+## 6. Utils（工具类）
 
 ### 5.1 模型管理
 
@@ -636,7 +660,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 22.1 DVS 归档加载
 
-共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧额外处理 DVS 归档解包、`pipeline.json` 中 `model_path` 重写，以及临时目录清理。
+共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧优先从 DVS 归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；推理组件缺少该接口时，兼容路径才将模型文件写入临时目录后按路径加载，加载完成后清理临时目录。
 
 ### 22.2 `FlowGraphModel`
 

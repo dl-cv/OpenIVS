@@ -16,14 +16,12 @@ namespace DlcvModules
 	public abstract class BaseModelModule : BaseModule
 	{
 		protected string _modelPath;
+		protected int _modelIndex = -1;
 		protected int _deviceId;
 		protected Model _model;
 		protected JObject _modelInfo;
 		protected JArray _maxShape;
 		protected int _maxBatchSize = 0;
-		protected int _modelIndex = -1;
-
-		public int LoadedModelIndex { get { return _model != null ? _model.modelIndex : _modelIndex; } }
 
 		// 按 (modelPath|deviceId|rpcMode) 缓存 Model 实例，避免 Flow 每次推理重复加载
 		private static readonly Dictionary<string, Model> _modelCache = new Dictionary<string, Model>(StringComparer.OrdinalIgnoreCase);
@@ -33,8 +31,8 @@ namespace DlcvModules
 			: base(nodeId, title, properties, context)
 		{
 			_modelPath = ReadStringOrDefault("model_path", null);
-			_deviceId = ReadInt("device_id", 0);
 			_modelIndex = ReadInt("model_index", -1);
+			_deviceId = ReadInt("device_id", 0);
 			// 简化：初始化在首次推理时完成
 		}
 
@@ -77,23 +75,39 @@ namespace DlcvModules
 					Dictionary<int, Model> flowModels = null;
 					try { flowModels = Context != null ? Context.Get<Dictionary<int, Model>>("flow_models", null) : null; } catch { }
 					if (flowModels == null || !flowModels.ContainsKey(_modelIndex))
-					{
 						throw new InvalidOperationException("流程模型索引未加载: " + _modelIndex);
-					}
 					_model = flowModels[_modelIndex];
 				}
 				else
 				{
-					string normalizedPath = NormalizeModelPath(_modelPath);
-					string cacheKey = (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
-					lock (_modelCacheLock)
+				FlowModelSource modelSource = null;
+				if (Context != null)
+				{
+					try
 					{
-						if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
+						var sources = Context.Get<Dictionary<int, FlowModelSource>>("flow_model_sources", null);
+						if (sources != null)
 						{
-							_model = new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
-							_modelCache[cacheKey] = _model;
+							sources.TryGetValue(NodeId, out modelSource);
 						}
 					}
+					catch { }
+				}
+
+				string normalizedPath = modelSource == null ? NormalizeModelPath(_modelPath) : null;
+				string cacheKey = modelSource != null
+					? BuildBinaryCacheKey(modelSource.CacheKey, deviceId)
+					: (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
+				lock (_modelCacheLock)
+				{
+					if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
+					{
+						_model = modelSource != null
+							? new Model(modelSource.Data, modelSource.ModelName, deviceId)
+							: new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
+						_modelCache[cacheKey] = _model;
+					}
+				}
 				}
 				// 多个模块/面可共享同一路径模型实例；不在模块侧单独 Dispose。
 				SyncModelMeta();
@@ -104,12 +118,47 @@ namespace DlcvModules
 			}
 		}
 
+		public int LoadedModelIndex { get { return _model != null ? _model.modelIndex : -1; } }
+
 		public static void ClearModelCache()
 		{
 			lock (_modelCacheLock)
 			{
 				_modelCache.Clear();
 			}
+		}
+
+		internal static void ReleaseBinaryModels(Dictionary<int, FlowModelSource> modelSources, int deviceId)
+		{
+			if (modelSources == null || modelSources.Count == 0)
+				return;
+
+			var releasedModels = new HashSet<Model>();
+			lock (_modelCacheLock)
+			{
+				foreach (FlowModelSource source in modelSources.Values)
+				{
+					if (source == null)
+						continue;
+
+					string cacheKey = BuildBinaryCacheKey(source.CacheKey, deviceId);
+					if (_modelCache.TryGetValue(cacheKey, out Model model) && model != null)
+					{
+						releasedModels.Add(model);
+						_modelCache.Remove(cacheKey);
+					}
+				}
+			}
+
+			foreach (Model model in releasedModels)
+			{
+				model.Dispose();
+			}
+		}
+
+		private static string BuildBinaryCacheKey(string sourceKey, int deviceId)
+		{
+			return "binary|" + sourceKey + "|" + deviceId;
 		}
 
 		private static string NormalizeModelPath(string modelPath)

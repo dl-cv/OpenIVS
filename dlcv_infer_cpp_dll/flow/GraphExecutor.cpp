@@ -673,6 +673,7 @@ Json GraphExecutor::LoadModels() {
                 throw std::runtime_error("model_module_did_not_expose_loaded_model");
             }
             item["model_index"] = modelModule->GetLoadedModelIndex();
+            item["model_pool_key"] = modelModule->ModelPoolKey();
             item["model_info"] = modelModule->LoadedModel()->GetModelInfo();
             item["device_id"] = modelModule->ResolvedDeviceId();
             item["status_code"] = 0;

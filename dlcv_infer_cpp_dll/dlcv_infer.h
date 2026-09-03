@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -35,6 +36,7 @@ namespace dlcv_infer {
 
     namespace flow {
         class FlowGraphModel;
+        class ModelPool;
     }
 
     DLCV_INFER_CPP_DLL_API std::wstring convertStringToWstring(const std::string& inputString);
@@ -71,6 +73,7 @@ namespace dlcv_infer {
 
     // 外部 DLL 接口函数类型定义
     typedef void* (*LoadModelFuncType)(const char* config_str);
+    typedef void* (*LoadModelBinaryFuncType)(const unsigned char* model_data, size_t model_size, const char* config_str);
     typedef void* (*FreeModelFuncType)(const char* config_str);
     typedef void* (*GetModelInfoFuncType)(const char* config_str);
     typedef void* (*InferFuncType)(const char* config_str);
@@ -86,7 +89,7 @@ namespace dlcv_infer {
     typedef int (*FreeFlowFuncType)(int flowIndex);
     typedef int (*BindIndexFuncType)(int index);
     typedef int (*UnbindIndexFuncType)(int index);
-    typedef void (*FreeStringFuncType)(const char* result);
+    typedef FreeResultFuncType FreeStringFuncType;
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS
     // DLL 加载器（内部使用）
@@ -100,6 +103,7 @@ namespace dlcv_infer {
 
         // 函数指针
         LoadModelFuncType dlcv_load_model = nullptr;
+        LoadModelBinaryFuncType dlcv_load_model_binary = nullptr;
         FreeModelFuncType dlcv_free_model = nullptr;
         GetModelInfoFuncType dlcv_get_model_info = nullptr;
         InferFuncType dlcv_infer = nullptr;
@@ -119,6 +123,7 @@ namespace dlcv_infer {
 
         // 加载 DLL
         void LoadDll();
+        static DllLoader& GetOrCreateForProvider(sntl_admin::DogProvider provider);
 
         static DllLoader* instance;
         DllLoader(sntl_admin::DogProvider provider);
@@ -130,8 +135,9 @@ namespace dlcv_infer {
         static DllLoader& Instance();
         static DllLoader& GetExistingOrDefaultSentinel();
         static DllLoader& ResolveForIndex(int index, int& indexType);
-        static void EnsureForModel(const std::string& modelPath);
-        static void EnsureForModel(const std::wstring& modelPath);
+        static DllLoader& EnsureForModel(const std::string& modelPath);
+        static DllLoader& EnsureForModel(const std::wstring& modelPath);
+        static DllLoader& ForModelBuffer(const unsigned char* modelData, size_t modelSize);
 
         /// <summary>
         /// 自动检测当前插入的加密狗，按 Sentinel 优先、Virbox 第二返回 Provider。
@@ -141,6 +147,9 @@ namespace dlcv_infer {
 
         LoadModelFuncType GetLoadModelFunc() const {
             return dlcv_load_model;
+        }
+        LoadModelBinaryFuncType GetLoadModelBinaryFunc() const {
+            return dlcv_load_model_binary;
         }
         FreeModelFuncType GetFreeModelFunc() const {
             return dlcv_free_model;
@@ -288,6 +297,15 @@ namespace dlcv_infer {
             size_t sampleIndex = 0);
 
     private:
+#ifdef DLCV_INFER_CPP_DLL_EXPORTS
+        friend class flow::ModelPool;
+        friend class SlidingWindowModel;
+        Model(
+            std::shared_ptr<const std::vector<unsigned char>> modelData,
+            const std::string& modelName,
+            int device_id);
+#endif
+
         bool _isFlowGraphMode = false;
         int _deviceId = 0;
         flow::FlowGraphModel* _flowModel = nullptr;
@@ -321,6 +339,23 @@ namespace dlcv_infer {
 #endif
     };
 #pragma warning(pop)
+
+#ifdef DLCV_INFER_CPP_DLL_EXPORTS
+    // 滑动窗口模型（内部使用，如需对外可再单独开放）
+    class SlidingWindowModel : public Model {
+    public:
+        SlidingWindowModel(
+            const std::string& modelPath,
+            int device_id,
+            int small_img_width = 832,
+            int small_img_height = 704,
+            int horizontal_overlap = 16,
+            int vertical_overlap = 16,
+            float threshold = 0.5f,
+            float iou_threshold = 0.2f,
+            float combine_ios_threshold = 0.2f);
+    };
+#endif
 
     /// <summary>
     /// 工具类：静态方法集合。

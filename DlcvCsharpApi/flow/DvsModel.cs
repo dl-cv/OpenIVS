@@ -1,29 +1,55 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using OpenCvSharp;
 using dlcv_infer_csharp;
 
 namespace DlcvModules
 {
     /// <summary>
-    /// 支持加载 .dvst/.dvso 格式（包含 pipeline.json + 多个 .dvt/.dvs/.dvp 模型）
-    /// 解包 -> 临时存储 -> 加载 -> 清理
+    /// 从 .dvst 或 .dvso 归档读取流程配置和子模型数据。
     /// </summary>
     public class DvsModel : FlowGraphModel
     {
-        private string _dvsPath;
-        // 临时文件夹路径，用于清理
-        private string _tempDir = null;
-        private readonly Dictionary<int, DllLoader> _loadedModelLoaders = new Dictionary<int, DllLoader>();
+        private const int MaxHeaderLength = 16 * 1024 * 1024;
+
+        private sealed class ArchiveEntry
+        {
+            public string NormalizedName { get; private set; }
+            public byte[] Data { get; private set; }
+
+            public ArchiveEntry(string normalizedName, byte[] data)
+            {
+                NormalizedName = normalizedName;
+                Data = data;
+            }
+        }
 
         public new JObject Load(string dvsPath, int deviceId = 0)
         {
-            return LoadCore(dvsPath, null, null, deviceId);
+            if (string.IsNullOrWhiteSpace(dvsPath))
+                throw new ArgumentException("文件路径为空", nameof(dvsPath));
+
+            string extension = Path.GetExtension(dvsPath).ToLowerInvariant();
+            if (extension == ".dvsp")
+                throw new NotSupportedException("当前不支持 .dvsp 模型，请使用 .dvst 或 .dvso");
+            if (extension != ".dvst" && extension != ".dvso")
+                throw new ArgumentException("DvsModel 仅支持 .dvst 和 .dvso 文件", nameof(dvsPath));
+            if (!File.Exists(dvsPath))
+                throw new FileNotFoundException("文件不存在", dvsPath);
+
+            JObject pipelineJson;
+            Dictionary<string, ArchiveEntry> entries;
+            using (var stream = new FileStream(dvsPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                ReadArchive(stream, out pipelineJson, out entries);
+            }
+
+            string archiveCacheKey = Guid.NewGuid().ToString("N");
+            Dictionary<int, FlowModelSource> modelSources = BuildModelSources(pipelineJson, entries, archiveCacheKey);
+            return LoadFromRoot(pipelineJson, deviceId, modelSources);
         }
 
         public JObject LoadFromModelBindings(
@@ -35,13 +61,13 @@ namespace DlcvModules
             if (savedPipeline == null) throw new ArgumentNullException(nameof(savedPipeline));
             if (modelBindings == null) throw new ArgumentNullException(nameof(modelBindings));
 
-            var bindings = new Dictionary<int, int>();
-            foreach (var item in modelBindings)
+            var modelsByIndex = new Dictionary<int, Model>();
+            var bindingsByNode = new Dictionary<int, int>();
+            foreach (JToken token in modelBindings)
             {
-                var binding = item as JObject;
+                JObject binding = token as JObject;
                 if (binding == null || binding["node_id"] == null || binding["model_index"] == null)
                     throw new InvalidDataException("流程模型绑定格式无效");
-
                 int nodeId;
                 int modelIndex;
                 try
@@ -53,471 +79,277 @@ namespace DlcvModules
                 {
                     throw new InvalidDataException("流程模型绑定格式无效", ex);
                 }
-                if (nodeId < 0 || modelIndex < 0) throw new InvalidDataException("流程模型绑定索引无效");
-                bindings[nodeId] = modelIndex;
+                if (nodeId < 0 || modelIndex < 0 || bindingsByNode.ContainsKey(nodeId))
+                    throw new InvalidDataException("流程模型绑定索引无效");
+                bindingsByNode[nodeId] = modelIndex;
+                modelsByIndex[modelIndex] = new Model
+                {
+                    modelIndex = modelIndex,
+                    OwnModelIndex = false
+                };
             }
-            return LoadCore(sourcePath, savedPipeline, bindings, deviceId);
+
+            JObject root = (JObject)savedPipeline.DeepClone();
+            JArray nodes = root["nodes"] as JArray;
+            if (nodes == null) throw new InvalidDataException("流程配置缺少 nodes 数组");
+            var foundNodeIds = new HashSet<int>();
+            foreach (JObject node in nodes.OfType<JObject>())
+            {
+                string nodeType = node["type"]?.ToString() ?? string.Empty;
+                if (!nodeType.StartsWith("model/", StringComparison.Ordinal)) continue;
+
+                int nodeId = ReadNodeId(node, -1);
+                if (!foundNodeIds.Add(nodeId))
+                    throw new InvalidDataException("流程中存在重复模型节点编号：" + nodeId);
+                int modelIndex;
+                if (!bindingsByNode.TryGetValue(nodeId, out modelIndex))
+                    throw new InvalidDataException("流程模型节点缺少索引绑定：" + nodeId);
+                JObject properties = node["properties"] as JObject;
+                if (properties == null)
+                {
+                    properties = new JObject();
+                    node["properties"] = properties;
+                }
+                string modelPath = properties["model_path"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(modelPath))
+                    properties["model_name"] = GetArchiveFileName(modelPath);
+                properties["model_index"] = modelIndex;
+            }
+            foreach (int nodeId in bindingsByNode.Keys)
+            {
+                if (!foundNodeIds.Contains(nodeId))
+                    throw new InvalidDataException("流程模型绑定节点不存在：" + nodeId);
+            }
+            return LoadFromRoot(root, deviceId, modelsByIndex, savedPipeline);
         }
 
-        internal DllLoader GetLoadedModelLoader(int modelIndex)
+        internal new DllLoader GetLoadedModelLoader(int modelIndex)
         {
-            DllLoader loader;
-            return _loadedModelLoaders.TryGetValue(modelIndex, out loader) ? loader : null;
+            return base.GetLoadedModelLoader(modelIndex);
         }
 
-        private JObject LoadCore(
-            string dvsPath,
-            JObject savedPipeline,
-            Dictionary<int, int> modelBindings,
-            int deviceId)
+        private static void ReadArchive(Stream stream, out JObject pipelineJson, out Dictionary<string, ArchiveEntry> entries)
         {
-            if (string.IsNullOrWhiteSpace(dvsPath)) throw new ArgumentException("文件路径为空", nameof(dvsPath));
-            if (string.Equals(Path.GetExtension(dvsPath), ".dvsp", StringComparison.OrdinalIgnoreCase))
-                throw new NotSupportedException("不支持 .dvsp 模型推理");
-            if (!File.Exists(dvsPath)) throw new FileNotFoundException("文件不存在", dvsPath);
+            byte[] magic = ReadExactBytes(stream, 3, "文件读取意外结束");
+            if (magic[0] != (byte)'D' || magic[1] != (byte)'V' || magic[2] != (byte)'\n')
+                throw new InvalidDataException("文件格式错误：缺少 DV 头部");
 
-            _dvsPath = dvsPath;
-            _loadedModelLoaders.Clear();
-
-            // 1. 准备临时目录
-            _tempDir = Path.Combine(Path.GetTempPath(), "DlcvDvs_" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(_tempDir);
-
-            JObject pipelineJson = savedPipeline != null ? (JObject)savedPipeline.DeepClone() : null;
-            HashSet<string> borrowedModelFiles = modelBindings != null
-                ? CollectModelArchiveNames(pipelineJson)
-                : null;
-            // 映射：原始文件名 -> 临时文件路径（Guid命名）
-            var fileNameToTempPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            Dictionary<int, Model> modelsByIndex = null;
+            string headerText = ReadHeaderLine(stream);
+            JObject header;
             try
             {
-                using (FileStream fs = new FileStream(dvsPath, FileMode.Open, FileAccess.Read))
-                {
-                    // 2. 校验头部 "DV\n"
-                    byte[] magic = new byte[3];
-                    if (fs.Read(magic, 0, 3) != 3 || magic[0] != 'D' || magic[1] != 'V' || magic[2] != '\n')
-                    {
-                        throw new InvalidDataException("文件格式错误：缺少 DV 头部");
-                    }
-
-                    // 3. 读取 JSON 头行
-                    List<byte> lineBytes = new List<byte>();
-                    int b;
-                    while ((b = fs.ReadByte()) != -1)
-                    {
-                        if (b == '\n') break;
-                        lineBytes.Add((byte)b);
-                    }
-                    string headerStr = Encoding.UTF8.GetString(lineBytes.ToArray());
-                    JObject header = JObject.Parse(headerStr);
-
-                    JArray fileList = header["file_list"] as JArray;
-                    JArray fileSize = header["file_size"] as JArray;
-
-                    if (fileList == null || fileSize == null || fileList.Count != fileSize.Count)
-                    {
-                        throw new InvalidDataException("文件头信息损坏：file_list 或 file_size 缺失/不匹配");
-                    }
-
-                    // 4. 遍历解包
-                    for (int i = 0; i < fileList.Count; i++)
-                    {
-                        string fileName = fileList[i].ToString();
-                        long size = (long)fileSize[i];
-
-                        // 如果是 pipeline.json，直接读取到内存
-                        if (fileName.Equals("pipeline.json", StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (pipelineJson == null)
-                            {
-                                byte[] data = ReadExact(fs, size);
-                                string jsonText = Encoding.UTF8.GetString(data);
-                                pipelineJson = JObject.Parse(jsonText);
-                            }
-                            else
-                            {
-                                SkipExact(fs, size);
-                            }
-                        }
-                        else if (borrowedModelFiles != null &&
-                                 (borrowedModelFiles.Contains(fileName) || borrowedModelFiles.Contains(Path.GetFileName(fileName))))
-                        {
-                            SkipExact(fs, size);
-                        }
-                        else
-                        {
-                            // 其他文件（.dvt/.dvs/.dvo/.dvr 等）写入临时目录
-                            // 关键修改：为了避免中文文件名导致的底层库打开失败，我们将临时文件重命名为纯英文（Guid）
-                            // 保留原始扩展名以便识别
-                            string ext = Path.GetExtension(fileName);
-                            if (string.IsNullOrEmpty(ext)) ext = ".tmp";
-                            string safeName = Guid.NewGuid().ToString("N") + ext;
-                            string targetPath = Path.Combine(_tempDir, safeName);
-                            
-                            using (FileStream outFs = new FileStream(targetPath, FileMode.Create, FileAccess.Write))
-                            {
-                                byte[] buffer = new byte[8192];
-                                long remaining = size;
-                                while (remaining > 0)
-                                {
-                                    int read = fs.Read(buffer, 0, (int)Math.Min(remaining, buffer.Length));
-                                    if (read == 0) throw new EndOfStreamException("文件读取意外结束");
-                                    outFs.Write(buffer, 0, read);
-                                    remaining -= read;
-                                }
-                            }
-                            fileNameToTempPath[fileName] = targetPath;
-                        }
-                    }
-                }
-
-                if (pipelineJson == null) throw new InvalidDataException("未找到 pipeline.json");
-                JObject registrationPipeline = (JObject)pipelineJson.DeepClone();
-                // 5. 更新流程中的模型引用
-                var nodesToken = pipelineJson["nodes"] as JArray;
-                if (nodesToken == null) throw new InvalidOperationException("Pipeline 缺少 nodes 数组");
-
-                if (modelBindings == null)
-                {
-                    RewriteModelPaths(nodesToken, fileNameToTempPath);
-                    modelsByIndex = LoadUniqueModels(nodesToken, deviceId);
-                }
-                else
-                {
-                    ApplyModelBindings(nodesToken, modelBindings);
-                    modelsByIndex = CreateBorrowedModels(modelBindings);
-                }
-
-                JArray resolvedBindings = BuildResolvedModelBindings(nodesToken, modelsByIndex);
-
-                // 6. 复用 FlowGraphModel 的核心加载逻辑（从已经修改好的 pipelineJson 中加载）
-                var report = LoadFromRoot(pipelineJson, deviceId, modelsByIndex, registrationPipeline);
-                SetModelBindings(resolvedBindings);
-                if (modelBindings == null)
-                {
-                    CaptureLoadedModelLoaders(modelsByIndex);
-                }
-                modelsByIndex = null;
-                return report;
+                header = JObject.Parse(headerText);
             }
-            finally
+            catch (Exception ex)
             {
-                DisposeModels(modelsByIndex);
-                // 8. 清理临时文件
-                CleanupTemp();
+                throw new InvalidDataException("文件头信息损坏：JSON 无法解析", ex);
             }
-        }
 
-        private static void RewriteModelPaths(JArray nodes, Dictionary<string, string> fileNameToTempPath)
-        {
-            foreach (var node in nodes)
+            JArray fileList = header["file_list"] as JArray;
+            JArray fileSize = header["file_size"] as JArray;
+            if (fileList == null || fileSize == null || fileList.Count != fileSize.Count)
+                throw new InvalidDataException("文件头信息损坏：file_list 或 file_size 缺失或数量不一致");
+
+            pipelineJson = null;
+            entries = new Dictionary<string, ArchiveEntry>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < fileList.Count; i++)
             {
-                if (!IsModelNode(node, out int nodeId)) continue;
-                var props = EnsureProperties(node);
-                if (props["model_path"] == null) continue;
+                string entryName = fileList[i]?.ToString();
+                if (string.IsNullOrWhiteSpace(entryName))
+                    throw new InvalidDataException($"文件头信息损坏：第 {i + 1} 个文件名为空");
 
-                string originalPath = props["model_path"].ToString();
-                props["model_path_original"] = originalPath;
-                props["model_name"] = GetModelName(originalPath);
-                string tempPath;
-                if (fileNameToTempPath.TryGetValue(originalPath, out tempPath))
+                long declaredSize = ReadDeclaredSize(fileSize[i], i);
+                byte[] data = ReadExactBytes(stream, declaredSize, $"读取 {entryName} 时文件意外结束");
+                string normalizedName = NormalizeArchiveName(entryName);
+
+                if (string.Equals(normalizedName, "pipeline.json", StringComparison.OrdinalIgnoreCase))
                 {
-                    props["model_path"] = tempPath;
+                    if (pipelineJson != null)
+                        throw new InvalidDataException("归档中存在多个 pipeline.json");
+                    try
+                    {
+                        pipelineJson = JObject.Parse(Encoding.UTF8.GetString(data));
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidDataException("pipeline.json 无法解析", ex);
+                    }
                     continue;
                 }
 
-                string fileName = Path.GetFileName(originalPath);
-                if (!string.IsNullOrWhiteSpace(fileName) && fileNameToTempPath.TryGetValue(fileName, out tempPath))
-                {
-                    props["model_path"] = tempPath;
-                    continue;
-                }
-                throw new InvalidDataException("流程模型文件未找到: " + originalPath);
+                if (entries.ContainsKey(normalizedName))
+                    throw new InvalidDataException($"归档中存在重复文件：{entryName}");
+                entries[normalizedName] = new ArchiveEntry(normalizedName, data);
             }
+
+            if (pipelineJson == null)
+                throw new InvalidDataException("未找到 pipeline.json");
         }
 
-        private static byte[] ReadExact(Stream stream, long size)
+        private static string ReadHeaderLine(Stream stream)
         {
-            if (size < 0 || size > int.MaxValue) throw new InvalidDataException("文件大小无效");
-            byte[] data = new byte[(int)size];
+            var bytes = new List<byte>();
+            while (true)
+            {
+                int value = stream.ReadByte();
+                if (value < 0)
+                    throw new InvalidDataException("文件头信息损坏：JSON 头行未结束");
+                if (value == '\n')
+                    break;
+                if (bytes.Count >= MaxHeaderLength)
+                    throw new InvalidDataException("文件头信息损坏：JSON 头行过大");
+                bytes.Add((byte)value);
+            }
+            return Encoding.UTF8.GetString(bytes.ToArray()).TrimEnd('\r');
+        }
+
+        private static long ReadDeclaredSize(JToken token, int index)
+        {
+            if (token == null || token.Type != JTokenType.Integer)
+                throw new InvalidDataException($"文件头信息损坏：第 {index + 1} 个文件大小不是整数");
+
+            long size;
+            try
+            {
+                size = token.Value<long>();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidDataException($"文件头信息损坏：第 {index + 1} 个文件大小超出范围", ex);
+            }
+            if (size < 0)
+                throw new InvalidDataException($"文件头信息损坏：第 {index + 1} 个文件大小为负数");
+            if (size > int.MaxValue)
+                throw new InvalidDataException($"归档文件过大，无法读入内存：{size} 字节");
+            return size;
+        }
+
+        private static byte[] ReadExactBytes(Stream stream, long size, string errorMessage)
+        {
+            byte[] data = new byte[checked((int)size)];
             int offset = 0;
             while (offset < data.Length)
             {
                 int read = stream.Read(data, offset, data.Length - offset);
-                if (read <= 0) throw new EndOfStreamException("文件读取意外结束");
+                if (read <= 0)
+                    throw new EndOfStreamException(errorMessage);
                 offset += read;
             }
             return data;
         }
 
-        private static void SkipExact(Stream stream, long size)
+        private static Dictionary<int, FlowModelSource> BuildModelSources(
+            JObject pipelineJson,
+            Dictionary<string, ArchiveEntry> entries,
+            string archiveCacheKey)
         {
-            byte[] buffer = new byte[8192];
-            long remaining = size;
-            while (remaining > 0)
+            JArray nodes = pipelineJson["nodes"] as JArray;
+            if (nodes == null)
+                throw new InvalidOperationException("Pipeline 缺少 nodes 数组");
+
+            var entriesByFileName = new Dictionary<string, List<ArchiveEntry>>(StringComparer.OrdinalIgnoreCase);
+            foreach (ArchiveEntry entry in entries.Values)
             {
-                int read = stream.Read(buffer, 0, (int)Math.Min(remaining, buffer.Length));
-                if (read <= 0) throw new EndOfStreamException("文件读取意外结束");
-                remaining -= read;
+                string fileName = GetArchiveFileName(entry.NormalizedName);
+                if (!entriesByFileName.TryGetValue(fileName, out List<ArchiveEntry> sameNameEntries))
+                {
+                    sameNameEntries = new List<ArchiveEntry>();
+                    entriesByFileName[fileName] = sameNameEntries;
+                }
+                sameNameEntries.Add(entry);
             }
+
+            var sourcesByEntry = new Dictionary<string, FlowModelSource>(StringComparer.OrdinalIgnoreCase);
+            var sourcesByNode = new Dictionary<int, FlowModelSource>();
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                JObject node = nodes[i] as JObject;
+                if (node == null)
+                    continue;
+
+                string nodeType = node["type"]?.ToString() ?? string.Empty;
+                if (!nodeType.StartsWith("model/", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                JObject properties = node["properties"] as JObject;
+                string originalPath = properties?["model_path"]?.ToString();
+                int nodeId = ReadNodeId(node, i);
+                if (string.IsNullOrWhiteSpace(originalPath))
+                    throw new InvalidDataException($"模型节点 {nodeId} 缺少 model_path");
+
+                ArchiveEntry entry = FindArchiveEntry(originalPath, entries, entriesByFileName, nodeId);
+                string modelName = GetArchiveFileName(entry.NormalizedName);
+                properties["model_path_original"] = originalPath;
+                properties["model_name"] = modelName;
+
+                if (!sourcesByEntry.TryGetValue(entry.NormalizedName, out FlowModelSource source))
+                {
+                    string cacheKey = archiveCacheKey + "|" + entry.NormalizedName.ToLowerInvariant();
+                    source = new FlowModelSource(cacheKey, modelName, entry.Data);
+                    sourcesByEntry[entry.NormalizedName] = source;
+                }
+
+                if (sourcesByNode.ContainsKey(nodeId))
+                    throw new InvalidDataException($"流程中存在重复模型节点编号：{nodeId}");
+                sourcesByNode[nodeId] = source;
+            }
+
+            return sourcesByNode;
         }
 
-        private static HashSet<string> CollectModelArchiveNames(JObject pipeline)
+        private static ArchiveEntry FindArchiveEntry(
+            string modelPath,
+            Dictionary<string, ArchiveEntry> entries,
+            Dictionary<string, List<ArchiveEntry>> entriesByFileName,
+            int nodeId)
         {
-            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var nodes = pipeline != null ? pipeline["nodes"] as JArray : null;
-            if (nodes == null) return names;
-            foreach (var node in nodes)
-            {
-                if (!IsModelNode(node, out int nodeId)) continue;
-                var properties = (node as JObject)?["properties"] as JObject;
-                string modelPath = properties?["model_path"]?.ToString();
-                if (string.IsNullOrWhiteSpace(modelPath)) continue;
-                names.Add(modelPath);
-                try
-                {
-                    string fileName = Path.GetFileName(modelPath);
-                    if (!string.IsNullOrWhiteSpace(fileName)) names.Add(fileName);
-                }
-                catch
-                {
-                }
-            }
-            return names;
+            string normalizedPath = NormalizeArchiveName(modelPath);
+            if (entries.TryGetValue(normalizedPath, out ArchiveEntry entry))
+                return entry;
+
+            string fileName = GetArchiveFileName(normalizedPath);
+            if (!entriesByFileName.TryGetValue(fileName, out List<ArchiveEntry> candidates) || candidates.Count == 0)
+                throw new InvalidDataException($"模型节点 {nodeId} 引用的归档文件不存在：{modelPath}");
+            if (candidates.Count > 1)
+                throw new InvalidDataException($"模型节点 {nodeId} 引用的文件名不唯一：{fileName}");
+            return candidates[0];
         }
 
-        private static Dictionary<int, Model> LoadUniqueModels(JArray nodes, int deviceId)
+        private static int ReadNodeId(JObject node, int defaultValue)
         {
-            var modelsByPath = new Dictionary<string, Model>(StringComparer.OrdinalIgnoreCase);
-            var modelsByIndex = new Dictionary<int, Model>();
             try
             {
-                foreach (var node in nodes)
-                {
-                    if (!IsModelNode(node, out int nodeId)) continue;
-                    var props = EnsureProperties(node);
-                    string modelPath = props["model_path"] != null ? props["model_path"].ToString() : null;
-                    if (string.IsNullOrWhiteSpace(modelPath)) throw new InvalidDataException("流程模型路径为空");
-
-                    int nodeDeviceId = ReadDeviceId(props, deviceId);
-                    string key = NormalizeModelPath(modelPath) + "|" + nodeDeviceId;
-                    Model model;
-                    if (!modelsByPath.TryGetValue(key, out model))
-                    {
-                        model = new Model(modelPath, nodeDeviceId, false, false);
-                        Model existingModel;
-                        if (modelsByIndex.TryGetValue(model.modelIndex, out existingModel))
-                        {
-                            if (!ReferenceEquals(existingModel, model))
-                            {
-                                model.Dispose();
-                            }
-                            model = existingModel;
-                        }
-                        else
-                        {
-                            modelsByIndex.Add(model.modelIndex, model);
-                        }
-                        modelsByPath.Add(key, model);
-                    }
-                    props["model_index"] = model.modelIndex;
-                }
-                return modelsByIndex;
+                int nodeId = node["id"] != null ? node["id"].Value<int>() : defaultValue;
+                if (nodeId < 0)
+                    throw new InvalidDataException("流程模型节点缺少有效 ID");
+                return nodeId;
             }
-            catch
+            catch (InvalidDataException)
             {
-                DisposeModels(modelsByIndex);
                 throw;
             }
-        }
-
-        private static Dictionary<int, Model> CreateBorrowedModels(Dictionary<int, int> modelBindings)
-        {
-            var models = new Dictionary<int, Model>();
-            foreach (var binding in modelBindings)
+            catch (Exception ex)
             {
-                if (models.ContainsKey(binding.Value)) continue;
-                models.Add(binding.Value, new Model { modelIndex = binding.Value, OwnModelIndex = false });
-            }
-            return models;
-        }
-
-        private void CaptureLoadedModelLoaders(Dictionary<int, Model> modelsByIndex)
-        {
-            if (modelsByIndex == null) return;
-            foreach (var item in modelsByIndex)
-            {
-                DllLoader loader = item.Value != null ? item.Value.Loader : null;
-                if (loader == null)
-                    throw new InvalidDataException("流程模型未保存加载 DLL: " + item.Key);
-                _loadedModelLoaders[item.Key] = loader;
+                throw new InvalidDataException("流程模型节点缺少有效 ID", ex);
             }
         }
 
-        private static JArray BuildResolvedModelBindings(JArray nodes, Dictionary<int, Model> modelsByIndex)
+        private static string NormalizeArchiveName(string name)
         {
-            if (nodes == null) throw new ArgumentNullException(nameof(nodes));
-            if (modelsByIndex == null) throw new ArgumentNullException(nameof(modelsByIndex));
-
-            var bindings = new JArray();
-            var nodeIds = new HashSet<int>();
-            foreach (var node in nodes)
+            string normalized = (name ?? string.Empty).Trim().Replace('\\', '/');
+            while (normalized.StartsWith("./", StringComparison.Ordinal))
             {
-                if (!IsModelNode(node, out int nodeId)) continue;
-                if (!nodeIds.Add(nodeId))
-                    throw new InvalidDataException("流程模型节点 ID 重复: " + nodeId);
-
-                JObject properties = EnsureProperties(node);
-                if (properties["model_index"] == null)
-                    throw new InvalidDataException("流程模型节点缺少 model_index: " + nodeId);
-                int modelIndex;
-                try
-                {
-                    modelIndex = properties["model_index"].Value<int>();
-                }
-                catch (Exception ex)
-                {
-                    throw new InvalidDataException("流程模型节点 model_index 无效: " + nodeId, ex);
-                }
-                if (modelIndex < 0 || !modelsByIndex.ContainsKey(modelIndex))
-                    throw new InvalidDataException("流程模型节点 index 未加载: " + modelIndex);
-
-                bindings.Add(new JObject
-                {
-                    ["node_id"] = nodeId,
-                    ["model_index"] = modelIndex
-                });
+                normalized = normalized.Substring(2);
             }
-            return bindings;
+            return normalized;
         }
 
-        private static void ApplyModelBindings(JArray nodes, Dictionary<int, int> modelBindings)
+        private static string GetArchiveFileName(string name)
         {
-            var foundNodeIds = new HashSet<int>();
-            foreach (var node in nodes)
-            {
-                if (!IsModelNode(node, out int nodeId)) continue;
-                int modelIndex;
-                if (!modelBindings.TryGetValue(nodeId, out modelIndex))
-                    throw new InvalidDataException("流程模型节点缺少索引绑定: " + nodeId);
-
-                var props = EnsureProperties(node);
-                string modelPath = props["model_path"] != null ? props["model_path"].ToString() : null;
-                if (!string.IsNullOrWhiteSpace(modelPath))
-                {
-                    props["model_path_original"] = modelPath;
-                    props["model_name"] = GetModelName(modelPath);
-                }
-                props["model_index"] = modelIndex;
-                foundNodeIds.Add(nodeId);
-            }
-
-            foreach (var binding in modelBindings)
-            {
-                if (!foundNodeIds.Contains(binding.Key))
-                    throw new InvalidDataException("流程模型绑定节点不存在: " + binding.Key);
-            }
-        }
-
-        private static bool IsModelNode(JToken node, out int nodeId)
-        {
-            nodeId = -1;
-            var obj = node as JObject;
-            if (obj == null) return false;
-            string type = obj["type"] != null ? obj["type"].ToString() : null;
-            if (string.IsNullOrWhiteSpace(type) || !type.StartsWith("model/", StringComparison.Ordinal)) return false;
-            try
-            {
-                nodeId = obj["id"].Value<int>();
-                return nodeId >= 0;
-            }
-            catch
-            {
-                throw new InvalidDataException("流程模型节点缺少有效 ID");
-            }
-        }
-
-        private static JObject EnsureProperties(JToken node)
-        {
-            var obj = (JObject)node;
-            var props = obj["properties"] as JObject;
-            if (props == null)
-            {
-                props = new JObject();
-                obj["properties"] = props;
-            }
-            return props;
-        }
-
-        private static int ReadDeviceId(JObject properties, int defaultDeviceId)
-        {
-            try { return properties["device_id"] != null ? properties["device_id"].Value<int>() : defaultDeviceId; }
-            catch { return defaultDeviceId; }
-        }
-
-        private static string NormalizeModelPath(string modelPath)
-        {
-            try { return Path.GetFullPath(modelPath).Trim(); }
-            catch { return modelPath != null ? modelPath.Trim() : string.Empty; }
-        }
-
-        private static string GetModelName(string modelPath)
-        {
-            try
-            {
-                string name = Path.GetFileName(modelPath);
-                return string.IsNullOrWhiteSpace(name) ? modelPath : name;
-            }
-            catch
-            {
-                return modelPath;
-            }
-        }
-
-        private static void DisposeModels(Dictionary<int, Model> models)
-        {
-            if (models == null) return;
-            var disposedModels = new HashSet<Model>();
-            foreach (var model in models.Values)
-            {
-                if (model == null || !disposedModels.Add(model)) continue;
-                try { model.Dispose(); } catch { }
-            }
-        }
-
-        private void CleanupTemp()
-        {
-            if (!string.IsNullOrEmpty(_tempDir) && Directory.Exists(_tempDir))
-            {
-                try
-                {
-                    Directory.Delete(_tempDir, true);
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"[DvsModel] Warning: Failed to cleanup temp dir {_tempDir}: {ex.Message}");
-                }
-                _tempDir = null;
-            }
-        }
-
-        public new void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            base.Dispose(disposing);
-            CleanupTemp();
-        }
-
-        ~DvsModel()
-        {
-            Dispose(false);
+            string normalized = NormalizeArchiveName(name);
+            int slashIndex = normalized.LastIndexOf('/');
+            return slashIndex >= 0 ? normalized.Substring(slashIndex + 1) : normalized;
         }
     }
 }

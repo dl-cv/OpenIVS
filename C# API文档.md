@@ -278,12 +278,12 @@ public class DvsModel : FlowGraphModel
 **`Load` 行为**：
 1. 打开 `.dvst`/`.dvso` 文件，校验头部 `DV\n`。
 2. 读取 JSON 头行，解析 `file_list` 和 `file_size` 数组。
-3. 将 `pipeline.json` 读入内存，其他文件解包到临时目录（临时文件名使用 `Guid.NewGuid().ToString("N")` + 原扩展名，避免中文路径问题）。
-4. 根据临时模型路径加载每个唯一子模型，将模型节点改为 `model_index`，同时保留 `model_path_original` 和 `model_name`。
-5. 调用 `LoadFromRoot` 完成加载；`FlowGraphModel` 持有节点对应的模型对象，推理期间按 index 复用。
-6. `finally` 中清理临时目录。
+3. 将 `pipeline.json` 和归档内子模型二进制读入内存。
+4. 根据模型节点建立内存模型来源表，保留 `model_path_original` 和 `model_name`，通过 `dlcv_load_model_binary` 加载每个唯一子模型。
+5. 调用带内存模型来源表的 `LoadFromRoot` 完成加载；`FlowGraphModel` 持有节点对应的模型对象，推理期间按 index 复用。
+6. 不创建模型临时文件；推理组件不提供内存加载接口时直接返回不支持错误。
 
-`LoadFromModelBindings` 用于恢复共享流程：使用 `savedPipeline` 作为流程定义，按 `node_id` 把 `modelBindings` 写入模型节点的 `model_index`，不再按子模型路径加载。`sourcePath` 只读取非 pipeline 且非子模型的必需归档资源。`GetRegistrationPipeline()` 返回注册时使用的原始流程 JSON，`GetModelBindings()` 返回 `[{node_id, model_index}]`。
+`LoadFromModelBindings` 用于恢复共享流程：使用 `savedPipeline` 作为流程定义，按 `node_id` 把 `modelBindings` 写入模型节点的 `model_index`，不再按子模型路径加载。当前实现不读取 `sourcePath`。`GetRegistrationPipeline()` 返回注册时使用的原始流程 JSON，`GetModelBindings()` 返回 `[{node_id, model_index}]`。
 
 `DvsModel` 继承 `FlowGraphModel` 的推理语义：归档中模型节点使用 `pipeline.json` 保存的阈值，调用 `.dvst`/`.dvso` 时传入的 `threshold` 只过滤最终对外结果。
 
@@ -685,7 +685,7 @@ C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`Ge
 
 `DvsModel` 继承 `FlowGraphModel`，用于加载 `.dvst`、`.dvso` 文件。当前实现文件为 `DlcvCsharpApi\flow\DvsModel.cs`。
 
-C# 侧额外处理 `DV\n` 文件头校验、归档解包、子模型加载、模型节点 `model_index` 写入、共享绑定恢复以及临时目录清理。
+C# 侧额外处理 `DV\n` 文件头校验、归档内存读取、子模型二进制加载、模型节点 `model_index` 写入和共享绑定恢复；子模型通过 `dlcv_load_model_binary` 加载。
 
 ### 14.4 `DllLoader`
 

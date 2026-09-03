@@ -52,8 +52,8 @@
 
 ### 3.1 程序入口（main.cpp）
 
-- 无参数时初始化 `QApplication`、显示 `MainWindow`，退出前调用 `FreeAllModels()`。
-- 有参数时解析 `infer`、`render`、`mask-visualization-selftest` 或 `--help`；命令行模式不进入主窗口事件循环，完成验证后直接返回退出码。
+- 无参数时按 Windows 图形界面子系统启动，初始化 `QApplication`、显示 `MainWindow`，不创建控制台窗口，退出前调用 `FreeAllModels()`。
+- 有参数时连接父控制台；没有父控制台时创建控制台，再解析 `infer`、`render`、`mask-visualization-selftest` 或 `--help`。命令行模式不进入主窗口事件循环，完成验证后直接返回退出码。
 - Windows 控制台输入输出使用 UTF-8；模型路径通过 `std::wstring` 传给 C++ API。
 
 ### 3.2 命令行推理模式
