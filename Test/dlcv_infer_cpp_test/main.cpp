@@ -2669,6 +2669,202 @@ private:
     bool cancelled_ = false;
 };
 
+class ReusableWorkerGate {
+public:
+    explicit ReusableWorkerGate(int expectedWorkers)
+        : expectedWorkers_(expectedWorkers) {}
+
+    bool ArriveAndWait() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (cancelled_) return false;
+        const int generation = generation_;
+        ++arrivedWorkers_;
+        if (arrivedWorkers_ == expectedWorkers_) {
+            arrivedWorkers_ = 0;
+            ++generation_;
+            lock.unlock();
+            condition_.notify_all();
+            return true;
+        }
+        condition_.wait(lock, [this, generation]() {
+            return cancelled_ || generation_ != generation;
+        });
+        return !cancelled_;
+    }
+
+    void Cancel() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            cancelled_ = true;
+        }
+        condition_.notify_all();
+    }
+
+private:
+    const int expectedWorkers_;
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    int arrivedWorkers_ = 0;
+    int generation_ = 0;
+    bool cancelled_ = false;
+};
+
+struct ProviderLoadTestState {
+    std::unique_ptr<dlcv_infer::Model> model;
+    std::string error;
+};
+
+void ReleaseProviderLoadTestModel(std::unique_ptr<dlcv_infer::Model>& model) {
+    if (!model) return;
+    model->OwnModelIndex = false;
+    try {
+        model->FreeModel();
+    } catch (...) {
+    }
+    model.reset();
+}
+
+bool IsModelInfoUnavailable(
+    dlcv_infer::Model& model,
+    std::string& detail) {
+    try {
+        const json info = model.GetModelInfo();
+        if (!info.is_object() || info.empty()) {
+            detail = "返回为空";
+            return true;
+        }
+        if (info.contains("code") && info.at("code").is_number() &&
+            info.at("code").get<int>() != 0) {
+            return true;
+        }
+        detail = info.dump();
+        return false;
+    } catch (const std::exception& ex) {
+        detail = ex.what();
+        return true;
+    } catch (...) {
+        detail = "发生未知异常";
+        return true;
+    }
+}
+
+int RunProviderLoaderSelfTest(int argc, wchar_t* argv[]) {
+    if (argc != 4 && argc != 5) {
+        PrintUtf8ErrorLine(
+            "用法: dlcv_infer_cpp_test.exe provider-loader-selftest <Sentinel模型路径> <Virbox模型路径> [轮数]");
+        return 2;
+    }
+
+    int rounds = 8;
+    if (argc == 5 && (!ParseInteger(argv[4], rounds) || rounds <= 0)) {
+        PrintUtf8ErrorLine("轮数必须是正整数");
+        return 2;
+    }
+
+    const std::wstring sentinelModelPath = argv[2];
+    const std::wstring virboxModelPath = argv[3];
+    ProviderLoadTestState sentinelState;
+    ProviderLoadTestState virboxState;
+    ReusableWorkerGate roundGate(2);
+
+    auto loadWorker = [&](const std::wstring& modelPath,
+                          sntl_admin::DogProvider expectedProvider,
+                          ProviderLoadTestState& state) {
+        try {
+            for (int round = 0; round < rounds; ++round) {
+                if (!roundGate.ArriveAndWait()) return;
+                auto model = std::make_unique<dlcv_infer::Model>(modelPath, 0);
+                const auto actualProvider = model->LoadedDogProvider();
+                if (actualProvider != expectedProvider) {
+                    throw std::runtime_error(
+                        "第 " + std::to_string(round + 1) + " 轮 provider 错误，期望 " +
+                        DogProviderText(expectedProvider) + "，实际 " + DogProviderText(actualProvider));
+                }
+                if (round + 1 == rounds) {
+                    state.model = std::move(model);
+                } else {
+                    model->FreeModel();
+                }
+            }
+        } catch (const std::exception& ex) {
+            state.error = ex.what();
+            roundGate.Cancel();
+        } catch (...) {
+            state.error = "并发加载时发生未知异常";
+            roundGate.Cancel();
+        }
+    };
+
+    std::thread sentinelWorker(
+        loadWorker, sentinelModelPath, sntl_admin::DogProvider::Sentinel, std::ref(sentinelState));
+    std::thread virboxWorker(
+        loadWorker, virboxModelPath, sntl_admin::DogProvider::Virbox, std::ref(virboxState));
+    sentinelWorker.join();
+    virboxWorker.join();
+
+    if (!sentinelState.error.empty() || !virboxState.error.empty() ||
+        !sentinelState.model || !virboxState.model) {
+        ReleaseProviderLoadTestModel(sentinelState.model);
+        ReleaseProviderLoadTestModel(virboxState.model);
+        if (!sentinelState.error.empty()) {
+            PrintUtf8ErrorLine("Sentinel 并发加载失败: " + sentinelState.error);
+        }
+        if (!virboxState.error.empty()) {
+            PrintUtf8ErrorLine("Virbox 并发加载失败: " + virboxState.error);
+        }
+        return 1;
+    }
+
+    PrintUtf8Line(
+        "并发加载后的 provider: Sentinel=" +
+        DogProviderText(sentinelState.model->LoadedDogProvider()) +
+        "，Virbox=" + DogProviderText(virboxState.model->LoadedDogProvider()));
+
+    const int sentinelIndex = sentinelState.model->modelIndex;
+    const int virboxIndex = virboxState.model->modelIndex;
+    sentinelState.model->OwnModelIndex = false;
+    virboxState.model->OwnModelIndex = false;
+    try {
+        dlcv_infer::Utils::FreeAllModels();
+    } catch (const std::exception& ex) {
+        ReleaseProviderLoadTestModel(sentinelState.model);
+        ReleaseProviderLoadTestModel(virboxState.model);
+        PrintUtf8ErrorLine(std::string("全量释放失败: ") + ex.what());
+        return 1;
+    } catch (...) {
+        ReleaseProviderLoadTestModel(sentinelState.model);
+        ReleaseProviderLoadTestModel(virboxState.model);
+        PrintUtf8ErrorLine("全量释放时发生未知异常");
+        return 1;
+    }
+
+    std::string sentinelInfo;
+    std::string virboxInfo;
+    const bool sentinelUnavailable = IsModelInfoUnavailable(*sentinelState.model, sentinelInfo);
+    const bool virboxUnavailable = IsModelInfoUnavailable(*virboxState.model, virboxInfo);
+    const bool passed = sentinelUnavailable && virboxUnavailable;
+    PrintUtf8Line(
+        "FreeAllModels 后 index 查询: Sentinel(" + std::to_string(sentinelIndex) + ")=" +
+        (sentinelUnavailable ? "不可查询" : "仍可查询") +
+        "，Virbox(" + std::to_string(virboxIndex) + ")=" +
+        (virboxUnavailable ? "不可查询" : "仍可查询"));
+    if (!sentinelUnavailable) {
+        PrintUtf8ErrorLine("Sentinel index 查询结果: " + sentinelInfo);
+    }
+    if (!virboxUnavailable) {
+        PrintUtf8ErrorLine("Virbox index 查询结果: " + virboxInfo);
+    }
+
+    ReleaseProviderLoadTestModel(sentinelState.model);
+    ReleaseProviderLoadTestModel(virboxState.model);
+    if (!passed) {
+        PrintUtf8ErrorLine("provider loader 回归检查失败");
+        return 1;
+    }
+    PrintUtf8Line("provider loader 回归检查通过");
+    return 0;
+}
+
 double Percentile(std::vector<double> values, double percent) {
     if (values.empty()) return 0.0;
     std::sort(values.begin(), values.end());
@@ -3253,6 +3449,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunDvspDisabledSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"provider-loader-selftest") {
+        return RunProviderLoaderSelfTest(argc, argv);
+    }
+
     std::cout << "Usage: " << (argc >= 1 ? WideToUtf8(argv[0]) : "dlcv_infer_cpp_test") << " <subcommand>\n";
     if (argc >= 2 && std::wstring(argv[1]) == L"get-model-info") {
         return RunGetModelInfoCommand(argc, argv, false);
@@ -3279,6 +3479,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
     std::cout << "  calc-mean-selftest\n";
     std::cout << "  dvsp-disabled-selftest\n";
+    std::cout << "  provider-loader-selftest <SentinelModelPath> <VirboxModelPath> [rounds]\n";
     std::cout << "  get-model-info <model>\n";
     std::cout << "  get-dvs-model-info <model>\n";
     PrintUtf8("\n工作流命令帮助:\n");

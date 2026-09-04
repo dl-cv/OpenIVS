@@ -125,7 +125,6 @@ namespace dlcv_infer {
         void LoadDll();
         static DllLoader& GetOrCreateForProvider(sntl_admin::DogProvider provider);
 
-        static DllLoader* instance;
         DllLoader(sntl_admin::DogProvider provider);
 
     public:

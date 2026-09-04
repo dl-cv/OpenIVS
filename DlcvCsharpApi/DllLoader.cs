@@ -87,6 +87,8 @@ namespace dlcv_infer_csharp
         public KeepMaxClock dlcv_keep_max_clock;
 
         private static DllLoader _instance;
+        private static readonly Dictionary<DogProvider, DllLoader> _loaders =
+            new Dictionary<DogProvider, DllLoader>();
         private static readonly object _lock = new object();
 
         public DogProvider LoadedDogProvider { get; private set; }
@@ -108,40 +110,31 @@ namespace dlcv_infer_csharp
         {
             get
             {
-                if (_instance == null)
+                lock (_lock)
                 {
-                    lock (_lock)
-                    {
-                        if (_instance == null)
-                            _instance = CreateLoader(AutoDetectProvider());
-                    }
+                    if (_instance == null)
+                        _instance = GetOrCreateLoaderLocked(AutoDetectProvider());
+                    return _instance;
                 }
-                return _instance;
             }
         }
 
         public static void EnsureForModel(string modelPath)
         {
+            GetForModel(modelPath);
+        }
+
+        internal static DllLoader GetForModel(string modelPath)
+        {
             DogProvider? needed = ResolveProviderFromHeader(modelPath);
-            if (!needed.HasValue) return;
-            if (_instance != null && _instance.LoadedDogProvider == needed.Value) return;
+            if (!needed.HasValue)
+                return Instance;
+
             lock (_lock)
             {
-                if (_instance != null && _instance.LoadedDogProvider == needed.Value) return;
-
-                List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
-                if (!availableProviders.Contains(needed.Value))
-                {
-                    if (availableProviders.Count == 0)
-                    {
-                        throw new Exception("未检测到授权");
-                    }
-                    string current = FormatProviderNames(availableProviders);
-                    string neededName = ProviderToDisplayName(needed.Value);
-                    throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
-                }
-
-                _instance = CreateLoader(needed.Value);
+                ValidateProviderAvailability(needed.Value);
+                _instance = GetOrCreateLoaderLocked(needed.Value);
+                return _instance;
             }
         }
 
@@ -149,35 +142,12 @@ namespace dlcv_infer_csharp
         {
             DogProvider? needed = ResolveProviderFromHeader(modelData, modelName);
             if (!needed.HasValue)
-            {
                 return Instance;
-            }
-
-            if (_instance != null && _instance.LoadedDogProvider == needed.Value)
-            {
-                return _instance;
-            }
 
             lock (_lock)
             {
-                if (_instance != null && _instance.LoadedDogProvider == needed.Value)
-                {
-                    return _instance;
-                }
-
-                List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
-                if (!availableProviders.Contains(needed.Value))
-                {
-                    if (availableProviders.Count == 0)
-                    {
-                        throw new Exception("未检测到授权");
-                    }
-                    string current = FormatProviderNames(availableProviders);
-                    string neededName = ProviderToDisplayName(needed.Value);
-                    throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
-                }
-
-                _instance = CreateLoader(needed.Value);
+                ValidateProviderAvailability(needed.Value);
+                _instance = GetOrCreateLoaderLocked(needed.Value);
                 return _instance;
             }
         }
@@ -189,8 +159,16 @@ namespace dlcv_infer_csharp
                 if (_instance != null)
                     return _instance;
 
-                _instance = CreateLoader(DogProvider.Sentinel);
+                _instance = GetOrCreateLoaderLocked(DogProvider.Sentinel);
                 return _instance;
+            }
+        }
+
+        internal static List<DllLoader> GetLoadedLoaders()
+        {
+            lock (_lock)
+            {
+                return new List<DllLoader>(_loaders.Values);
             }
         }
 
@@ -228,10 +206,11 @@ namespace dlcv_infer_csharp
         public static DllLoader ResolveForIndex(int index, out string indexType)
         {
             DogProvider provider = GetSharedIndexRoute(index, out indexType);
-            DllLoader current = _instance;
-            DllLoader loader = current != null && current.LoadedDogProvider == provider
-                ? current
-                : CreateLoader(provider);
+            DllLoader loader;
+            lock (_lock)
+            {
+                loader = GetOrCreateLoaderLocked(provider);
+            }
             loader.EnsureSharedIndexSupport(indexType);
             return loader;
         }
@@ -380,6 +359,31 @@ namespace dlcv_infer_csharp
         {
             if (value == null)
                 throw new MissingMethodException("未找到 " + name);
+        }
+
+        private static DllLoader GetOrCreateLoaderLocked(DogProvider provider)
+        {
+            DllLoader loader;
+            if (_loaders.TryGetValue(provider, out loader))
+                return loader;
+
+            loader = CreateLoader(provider);
+            _loaders.Add(provider, loader);
+            return loader;
+        }
+
+        private static void ValidateProviderAvailability(DogProvider needed)
+        {
+            List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
+            if (availableProviders.Contains(needed))
+                return;
+
+            if (availableProviders.Count == 0)
+                throw new Exception("未检测到授权");
+
+            string current = FormatProviderNames(availableProviders);
+            string neededName = ProviderToDisplayName(needed);
+            throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
         }
 
         private static DllLoader CreateLoader(DogProvider provider)

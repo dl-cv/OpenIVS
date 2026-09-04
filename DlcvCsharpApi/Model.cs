@@ -585,8 +585,7 @@ namespace dlcv_infer_csharp
 
         protected void LoadDvtModel(string modelPath, JObject config, string failureMessagePrefix)
         {
-            DllLoader.EnsureForModel(modelPath);
-            _dllLoader = DllLoader.Instance;
+            _dllLoader = DllLoader.GetForModel(modelPath);
             if (_dllLoader == null || _dllLoader.dlcv_load_model == null)
             {
                 throw new Exception("未检测到授权");

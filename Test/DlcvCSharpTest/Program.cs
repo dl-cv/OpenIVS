@@ -4351,7 +4351,9 @@ namespace DlcvCSharpTest
             string virboxModelPath = args != null && args.Length >= 4
                 ? args[3]
                 : Path.Combine(ModelRoot, "猫狗-分类_120_50_v.dvt");
-            string sentinelModelPath = Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
+            string sentinelModelPath = args != null && args.Length >= 5
+                ? args[4]
+                : Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
             foreach (string path in new[] { dvoPath, dvstPath, virboxModelPath, sentinelModelPath })
             {
                 if (!File.Exists(path))
@@ -4362,6 +4364,8 @@ namespace DlcvCSharpTest
             }
 
             var checks = new List<ReviewCheck>();
+            checks.Add(RunCsharpProviderConcurrencyAndFreeAllCheck(
+                sentinelModelPath, virboxModelPath));
             checks.Add(RunCsharpDoubleLoadFreeCheck(dvoPath));
             checks.Add(RunCppDoubleLoadFreeCheck(dvoPath));
             checks.Add(RunCppDoubleFlowLoadFreeCheck(dvstPath));
@@ -4394,6 +4398,110 @@ namespace DlcvCSharpTest
             }
             Console.WriteLine("共享索引审查自测: " + (failed == 0 ? "全部通过" : "失败 " + failed + " 项"));
             return failed == 0 ? 0 : 1;
+        }
+
+        private static ReviewCheck RunCsharpProviderConcurrencyAndFreeAllCheck(
+            string sentinelModelPath,
+            string virboxModelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "C# 双 provider 并发加载与全部释放",
+                Expected = "两个真实模型并发加载后 provider 与 index 分段正确，FreeAllModels 后两个 index 类型均为 0"
+            };
+            Model sentinelModel = null;
+            Model virboxModel = null;
+            Exception sentinelError = null;
+            Exception virboxError = null;
+            bool allModelsFreed = false;
+            ManualResetEventSlim start = new ManualResetEventSlim(false);
+            Thread sentinelThread = new Thread(() =>
+            {
+                start.Wait();
+                try
+                {
+                    sentinelModel = new Model(sentinelModelPath, GpuDeviceId, false, false);
+                }
+                catch (Exception ex)
+                {
+                    sentinelError = ex;
+                }
+            });
+            Thread virboxThread = new Thread(() =>
+            {
+                start.Wait();
+                try
+                {
+                    virboxModel = new Model(virboxModelPath, GpuDeviceId, false, false);
+                }
+                catch (Exception ex)
+                {
+                    virboxError = ex;
+                }
+            });
+
+            try
+            {
+                sentinelThread.Start();
+                virboxThread.Start();
+                start.Set();
+                sentinelThread.Join();
+                virboxThread.Join();
+
+                if (sentinelError != null || virboxError != null)
+                {
+                    throw new Exception(
+                        "Sentinel=" + (sentinelError == null ? "成功" : sentinelError.Message) +
+                        "；Virbox=" + (virboxError == null ? "成功" : virboxError.Message));
+                }
+                if (sentinelModel == null || virboxModel == null)
+                    throw new Exception("并发加载未生成两个模型实例");
+
+                int sentinelIndex = sentinelModel.modelIndex;
+                int virboxIndex = virboxModel.modelIndex;
+                bool sentinelProviderOk = sentinelModel.LoadedDogProvider == DogProvider.Sentinel;
+                bool virboxProviderOk = virboxModel.LoadedDogProvider == DogProvider.Virbox;
+                bool sentinelIndexOk = sentinelIndex >= 0 && sentinelIndex < 10000;
+                bool virboxIndexOk = virboxIndex >= 20000 && virboxIndex < 30000;
+                if (!sentinelProviderOk || !virboxProviderOk || !sentinelIndexOk || !virboxIndexOk)
+                {
+                    throw new Exception(
+                        "Sentinel provider=" + sentinelModel.LoadedDogProvider +
+                        ", index=" + sentinelIndex +
+                        "；Virbox provider=" + virboxModel.LoadedDogProvider +
+                        ", index=" + virboxIndex);
+                }
+
+                Utils.FreeAllModels();
+                allModelsFreed = true;
+                int sentinelIndexType = QueryNativeIndexType(sentinelIndex);
+                int virboxIndexType = QueryNativeIndexType(virboxIndex);
+                check.Actual =
+                    "Sentinel provider=" + sentinelModel.LoadedDogProvider +
+                    ", index=" + sentinelIndex +
+                    ", 释放后类型=" + sentinelIndexType +
+                    "；Virbox provider=" + virboxModel.LoadedDogProvider +
+                    ", index=" + virboxIndex +
+                    ", 释放后类型=" + virboxIndexType;
+                check.Passed = sentinelIndexType == 0 && virboxIndexType == 0;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { start.Dispose(); } catch { }
+                if (!allModelsFreed)
+                {
+                    try { sentinelModel?.Dispose(); } catch { }
+                    try { virboxModel?.Dispose(); } catch { }
+                }
+                try { Utils.FreeAllModels(); } catch { }
+            }
         }
 
         private static ReviewCheck RunCsharpDoubleLoadFreeCheck(string modelPath)

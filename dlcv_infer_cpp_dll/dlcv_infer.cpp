@@ -1374,6 +1374,33 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
 
 namespace dlcv_infer {
 
+    namespace {
+        std::mutex& DllLoaderRegistryMutex() {
+            static std::mutex mutex;
+            return mutex;
+        }
+
+        std::unordered_map<int, std::unique_ptr<DllLoader>>& DllLoaderRegistry() {
+            static std::unordered_map<int, std::unique_ptr<DllLoader>> loaders;
+            return loaders;
+        }
+
+        std::mutex& DefaultLoaderMutex() {
+            static std::mutex mutex;
+            return mutex;
+        }
+
+        DllLoader*& DefaultLoaderSlot() {
+            static DllLoader* loader = nullptr;
+            return loader;
+        }
+
+        void SetDefaultLoader(DllLoader& loader) {
+            std::lock_guard<std::mutex> lock(DefaultLoaderMutex());
+            DefaultLoaderSlot() = &loader;
+        }
+    }
+
     static int LoadModelIndexByPath(
         DllLoader* loader,
         const std::string& modelPathUtf8,
@@ -1535,8 +1562,6 @@ namespace dlcv_infer {
     }
 
     // DllLoader类实现
-    DllLoader* DllLoader::instance = nullptr;
-
     DllLoader::DllLoader(sntl_admin::DogProvider provider) : dogProvider(provider) {
         switch (provider) {
         case sntl_admin::DogProvider::Unknown:
@@ -1703,17 +1728,27 @@ namespace dlcv_infer {
     }
 
     DllLoader& DllLoader::Instance() {
-        if (instance == nullptr) {
-            instance = &GetOrCreateForProvider(AutoDetectProvider());
+        DllLoader* defaultLoader = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(DefaultLoaderMutex());
+            defaultLoader = DefaultLoaderSlot();
         }
-        return *instance;
+        if (defaultLoader != nullptr) return *defaultLoader;
+
+        DllLoader& detectedLoader = GetOrCreateForProvider(AutoDetectProvider());
+        {
+            std::lock_guard<std::mutex> lock(DefaultLoaderMutex());
+            DllLoader*& currentDefaultLoader = DefaultLoaderSlot();
+            if (currentDefaultLoader == nullptr) {
+                currentDefaultLoader = &detectedLoader;
+            }
+            return *currentDefaultLoader;
+        }
     }
 
     DllLoader& DllLoader::GetOrCreateForProvider(sntl_admin::DogProvider provider) {
-        static std::mutex loaderMutex;
-        static std::unordered_map<int, std::unique_ptr<DllLoader>> loaders;
-
-        std::lock_guard<std::mutex> lock(loaderMutex);
+        std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());
+        auto& loaders = DllLoaderRegistry();
         const int providerKey = static_cast<int>(provider);
         auto it = loaders.find(providerKey);
         if (it == loaders.end()) {
@@ -1725,10 +1760,26 @@ namespace dlcv_infer {
     }
 
     DllLoader& DllLoader::GetExistingOrDefaultSentinel() {
-        if (instance == nullptr || instance->GetDogProvider() == sntl_admin::DogProvider::Unknown) {
-            instance = &GetOrCreateForProvider(sntl_admin::DogProvider::Sentinel);
+        DllLoader* defaultLoader = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(DefaultLoaderMutex());
+            defaultLoader = DefaultLoaderSlot();
         }
-        return *instance;
+        if (defaultLoader != nullptr &&
+            defaultLoader->GetDogProvider() != sntl_admin::DogProvider::Unknown) {
+            return *defaultLoader;
+        }
+
+        DllLoader& sentinelLoader = GetOrCreateForProvider(sntl_admin::DogProvider::Sentinel);
+        {
+            std::lock_guard<std::mutex> lock(DefaultLoaderMutex());
+            DllLoader*& currentDefaultLoader = DefaultLoaderSlot();
+            if (currentDefaultLoader == nullptr ||
+                currentDefaultLoader->GetDogProvider() == sntl_admin::DogProvider::Unknown) {
+                currentDefaultLoader = &sentinelLoader;
+            }
+            return *currentDefaultLoader;
+        }
     }
 
     DllLoader& DllLoader::ResolveForIndex(int index, int& indexType) {
@@ -1819,11 +1870,9 @@ namespace dlcv_infer {
         if (!TryResolveExplicitProviderFromBuffer(modelData, modelSize, needed)) {
             return Instance();
         }
-        if (instance != nullptr && instance->GetDogProvider() == needed) {
-            return *instance;
-        }
-        instance = &GetOrCreateForProvider(needed);
-        return *instance;
+        DllLoader& selectedLoader = GetOrCreateForProvider(needed);
+        SetDefaultLoader(selectedLoader);
+        return selectedLoader;
     }
 
     DllLoader& DllLoader::EnsureForModel(const std::string& modelPath) {
@@ -1845,11 +1894,9 @@ namespace dlcv_infer {
         if (!TryResolveExplicitProviderFromStream(file, needed)) {
             return Instance();
         }
-        if (instance && instance->dogProvider == needed) {
-            return *instance;
-        }
-        instance = &GetOrCreateForProvider(needed);
-        return *instance;
+        DllLoader& selectedLoader = GetOrCreateForProvider(needed);
+        SetDefaultLoader(selectedLoader);
+        return selectedLoader;
     }
 
     DllLoader& DllLoader::EnsureForModel(const std::wstring& modelPath) {
@@ -1870,11 +1917,9 @@ namespace dlcv_infer {
         if (!TryResolveExplicitProviderFromStream(file, needed)) {
             return Instance();
         }
-        if (instance && instance->dogProvider == needed) {
-            return *instance;
-        }
-        instance = &GetOrCreateForProvider(needed);
-        return *instance;
+        DllLoader& selectedLoader = GetOrCreateForProvider(needed);
+        SetDefaultLoader(selectedLoader);
+        return selectedLoader;
     }
 
     static json ReadSharedIndexResult(DllLoader* loader, const char* resultPtr) {
@@ -3208,10 +3253,18 @@ namespace dlcv_infer {
     }
 
     void Utils::FreeAllModels() {
-        auto& loader = DllLoader::Instance();
-        if (loader.GetFreeAllModelsFunc())
+        std::vector<FreeAllModelsFuncType> freeAllModelsFunctions;
         {
-            loader.GetFreeAllModelsFunc()();
+            std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());
+            for (const auto& item : DllLoaderRegistry()) {
+                if (item.second && item.second->GetFreeAllModelsFunc()) {
+                    freeAllModelsFunctions.push_back(item.second->GetFreeAllModelsFunc());
+                }
+            }
+        }
+
+        for (const auto freeAllModels : freeAllModelsFunctions) {
+            freeAllModels();
         }
     }
 
