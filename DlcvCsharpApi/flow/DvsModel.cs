@@ -73,6 +73,7 @@ namespace DlcvModules
                 throw new InvalidDataException("文件头信息损坏：file_list 或 file_size 缺失或数量不一致");
 
             pipelineJson = null;
+            byte[] pipelineData = null;
             entries = new Dictionary<string, ArchiveEntry>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < fileList.Count; i++)
             {
@@ -87,10 +88,15 @@ namespace DlcvModules
                 if (string.Equals(normalizedName, "pipeline.json", StringComparison.OrdinalIgnoreCase))
                 {
                     if (pipelineJson != null)
-                        throw new InvalidDataException("归档中存在多个 pipeline.json");
+                    {
+                        if (!ByteArraysEqual(pipelineData, data))
+                            throw new InvalidDataException("归档中存在同名但内容不同的文件：pipeline.json");
+                        continue;
+                    }
                     try
                     {
                         pipelineJson = JObject.Parse(Encoding.UTF8.GetString(data));
+                        pipelineData = data;
                     }
                     catch (Exception ex)
                     {
@@ -99,8 +105,12 @@ namespace DlcvModules
                     continue;
                 }
 
-                if (entries.ContainsKey(normalizedName))
-                    throw new InvalidDataException($"归档中存在重复文件：{entryName}");
+                if (entries.TryGetValue(normalizedName, out ArchiveEntry existingEntry))
+                {
+                    if (!ByteArraysEqual(existingEntry.Data, data))
+                        throw new InvalidDataException($"归档中存在同名但内容不同的文件：{entryName}");
+                    continue;
+                }
                 entries[normalizedName] = new ArchiveEntry(normalizedName, data);
             }
 
@@ -158,6 +168,21 @@ namespace DlcvModules
                 offset += read;
             }
             return data;
+        }
+
+        private static bool ByteArraysEqual(byte[] left, byte[] right)
+        {
+            if (ReferenceEquals(left, right))
+                return true;
+            if (left == null || right == null || left.Length != right.Length)
+                return false;
+
+            for (int i = 0; i < left.Length; i++)
+            {
+                if (left[i] != right[i])
+                    return false;
+            }
+            return true;
         }
 
         private static Dictionary<int, FlowModelSource> BuildModelSources(
