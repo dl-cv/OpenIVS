@@ -288,6 +288,11 @@ namespace DlcvCSharpTest
                     return RunSharedIndexRouteSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "free-all-modules-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunCsharpFreeAllModulesSelfTest(args);
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-review-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunSharedIndexReviewSelfTest(args);
@@ -366,6 +371,7 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("掩膜输出开关", RunWithMaskSelfTest),
                 new UnifiedTestCase("均值计算", RunCalcMeanSelfTest),
                 new UnifiedTestCase("共享 index 审查检查", () => RunSharedIndexReviewSelfTest(new[] { "shared-index-review-selftest" })),
+                new UnifiedTestCase("C# 全部 DLL 模块释放", () => RunCsharpFreeAllModulesSelfTest(new[] { "free-all-modules-selftest" })),
                 new UnifiedTestCase("共享 index 格式覆盖", RunSharedIndexFormatSelfTest),
                 new UnifiedTestCase("共享 index 双 provider 普通模型", RunSharedIndexProviderModelSelfTest),
                 new UnifiedTestCase("固定模型结果回归", RunDefaultCases)
@@ -4400,6 +4406,113 @@ namespace DlcvCSharpTest
             return failed == 0 ? 0 : 1;
         }
 
+        private static int RunCsharpFreeAllModulesSelfTest(string[] args)
+        {
+            if (args == null || (args.Length != 1 && args.Length != 3))
+            {
+                Console.WriteLine("用法: free-all-modules-selftest [Sentinel模型路径 Virbox模型路径]");
+                return 2;
+            }
+
+            string sentinelModelPath = args.Length == 3
+                ? args[1]
+                : Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
+            string virboxModelPath = args.Length == 3
+                ? args[2]
+                : Path.Combine(ModelRoot, "猫狗-分类_120_50_v.dvt");
+            Model sentinelDirectModel = null;
+            Model virboxDirectModel = null;
+            Model sentinelUtilsModel = null;
+            Model virboxUtilsModel = null;
+            try
+            {
+                DllLoader.EnsureForModel(sentinelModelPath);
+                DllLoader sentinelLoader = DllLoader.Instance;
+                DllLoader.EnsureForModel(virboxModelPath);
+                DllLoader virboxLoader = DllLoader.Instance;
+                if (sentinelLoader.dlcv_free_all_models == null ||
+                    virboxLoader.dlcv_free_all_models == null)
+                {
+                    throw new Exception("推理 DLL 缺少 FreeAllModels 接口");
+                }
+
+                sentinelDirectModel = new Model(sentinelModelPath, GpuDeviceId, false, false);
+                virboxDirectModel = new Model(virboxModelPath, GpuDeviceId, false, false);
+                int sentinelDirectIndex = sentinelDirectModel.modelIndex;
+                int virboxDirectIndex = virboxDirectModel.modelIndex;
+                int sentinelTypeBefore = QueryNativeIndexType(sentinelDirectIndex);
+                int virboxTypeBefore = QueryNativeIndexType(virboxDirectIndex);
+                sentinelDirectModel.OwnModelIndex = false;
+                virboxDirectModel.OwnModelIndex = false;
+
+                sentinelLoader.dlcv_free_all_models();
+                int sentinelTypeAfterSentinelFree = QueryNativeIndexType(sentinelDirectIndex);
+                int virboxTypeAfterSentinelFree = QueryNativeIndexType(virboxDirectIndex);
+                virboxLoader.dlcv_free_all_models();
+                int virboxTypeAfterVirboxFree = QueryNativeIndexType(virboxDirectIndex);
+                Console.WriteLine(
+                    "C# 单独调用 Sentinel FreeAllModels 前后: Sentinel=" +
+                    sentinelTypeBefore + "->" + sentinelTypeAfterSentinelFree +
+                    "，Virbox=" + virboxTypeBefore + "->" + virboxTypeAfterSentinelFree +
+                    "；再调用 Virbox 后=" + virboxTypeAfterVirboxFree);
+                if (sentinelTypeBefore != 1 || virboxTypeBefore != 1 ||
+                    sentinelTypeAfterSentinelFree != 0 || virboxTypeAfterSentinelFree != 1 ||
+                    virboxTypeAfterVirboxFree != 0)
+                {
+                    throw new Exception("两个 DLL 模块的模型表隔离结果不符合预期");
+                }
+                sentinelDirectModel.Dispose();
+                virboxDirectModel.Dispose();
+                sentinelDirectModel = null;
+                virboxDirectModel = null;
+
+                sentinelUtilsModel = new Model(sentinelModelPath, GpuDeviceId, false, false);
+                virboxUtilsModel = new Model(virboxModelPath, GpuDeviceId, false, false);
+                int sentinelUtilsIndex = sentinelUtilsModel.modelIndex;
+                int virboxUtilsIndex = virboxUtilsModel.modelIndex;
+                int sentinelUtilsTypeBefore = QueryNativeIndexType(sentinelUtilsIndex);
+                int virboxUtilsTypeBefore = QueryNativeIndexType(virboxUtilsIndex);
+                sentinelUtilsModel.OwnModelIndex = false;
+                virboxUtilsModel.OwnModelIndex = false;
+
+                Utils.FreeAllModels();
+                int sentinelUtilsTypeAfter = QueryNativeIndexType(sentinelUtilsIndex);
+                int virboxUtilsTypeAfter = QueryNativeIndexType(virboxUtilsIndex);
+                Console.WriteLine(
+                    "C# Utils.FreeAllModels 前后: Sentinel=" +
+                    sentinelUtilsTypeBefore + "->" + sentinelUtilsTypeAfter +
+                    "，Virbox=" + virboxUtilsTypeBefore + "->" + virboxUtilsTypeAfter);
+                if (sentinelUtilsTypeBefore != 1 || virboxUtilsTypeBefore != 1 ||
+                    sentinelUtilsTypeAfter != 0 || virboxUtilsTypeAfter != 0)
+                {
+                    throw new Exception("C# FreeAllModels 未清理全部 DLL 模块");
+                }
+
+                sentinelUtilsModel.Dispose();
+                virboxUtilsModel.Dispose();
+                sentinelUtilsModel = null;
+                virboxUtilsModel = null;
+                Console.WriteLine("C# FreeAllModels 全部模块检查通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("C# FreeAllModels 全部模块检查失败：" + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                foreach (Model model in new[]
+                {
+                    sentinelDirectModel, virboxDirectModel, sentinelUtilsModel, virboxUtilsModel
+                })
+                {
+                    if (model == null) continue;
+                    try { model.OwnModelIndex = false; model.Dispose(); } catch { }
+                }
+                try { Utils.FreeAllModels(); } catch { }
+            }
+        }
         private static ReviewCheck RunCsharpProviderConcurrencyAndFreeAllCheck(
             string sentinelModelPath,
             string virboxModelPath)

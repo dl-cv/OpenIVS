@@ -2831,6 +2831,84 @@ bool VerifyProviderModuleMemoryIsolation(
     }
 }
 
+bool VerifyCppUtilsFreeAllModels(
+    const std::wstring& sentinelModelPath,
+    const std::wstring& virboxModelPath) {
+    std::unique_ptr<dlcv_infer::Model> sentinelModel;
+    std::unique_ptr<dlcv_infer::Model> virboxModel;
+    try {
+        sentinelModel = std::make_unique<dlcv_infer::Model>(sentinelModelPath, 0);
+        virboxModel = std::make_unique<dlcv_infer::Model>(virboxModelPath, 0);
+
+        HMODULE sentinelModule = GetModuleHandleW(L"dlcv_infer.dll");
+        HMODULE virboxModule = GetModuleHandleW(L"dlcv_infer_v.dll");
+        auto sentinelGetIndexType = sentinelModule == nullptr ? nullptr :
+            reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
+                GetProcAddress(sentinelModule, "dlcv_get_index_type_c"));
+        auto virboxGetIndexType = virboxModule == nullptr ? nullptr :
+            reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
+                GetProcAddress(virboxModule, "dlcv_get_index_type_c"));
+        if (sentinelGetIndexType == nullptr || virboxGetIndexType == nullptr) {
+            throw std::runtime_error("未取得两个模块的 index 类型查询接口");
+        }
+
+        const int sentinelIndex = sentinelModel->modelIndex;
+        const int virboxIndex = virboxModel->modelIndex;
+        const int sentinelTypeBefore = sentinelGetIndexType(sentinelIndex);
+        const int virboxTypeBefore = virboxGetIndexType(virboxIndex);
+        sentinelModel->OwnModelIndex = false;
+        virboxModel->OwnModelIndex = false;
+
+        dlcv_infer::Utils::FreeAllModels();
+
+        const int sentinelTypeAfter = sentinelGetIndexType(sentinelIndex);
+        const int virboxTypeAfter = virboxGetIndexType(virboxIndex);
+        PrintUtf8Line(
+            "C++ Utils::FreeAllModels 前后: Sentinel=" +
+            std::to_string(sentinelTypeBefore) + "->" + std::to_string(sentinelTypeAfter) +
+            "，Virbox=" + std::to_string(virboxTypeBefore) + "->" +
+            std::to_string(virboxTypeAfter));
+
+        const bool passed = sentinelTypeBefore == 1 && virboxTypeBefore == 1 &&
+            sentinelTypeAfter == 0 && virboxTypeAfter == 0;
+        ReleaseProviderLoadTestModel(sentinelModel);
+        ReleaseProviderLoadTestModel(virboxModel);
+        return passed;
+    } catch (const std::exception& ex) {
+        try { dlcv_infer::Utils::FreeAllModels(); } catch (...) {}
+        ReleaseProviderLoadTestModel(sentinelModel);
+        ReleaseProviderLoadTestModel(virboxModel);
+        PrintUtf8ErrorLine(std::string("C++ 全部模块释放检查失败: ") + ex.what());
+        return false;
+    } catch (...) {
+        try { dlcv_infer::Utils::FreeAllModels(); } catch (...) {}
+        ReleaseProviderLoadTestModel(sentinelModel);
+        ReleaseProviderLoadTestModel(virboxModel);
+        PrintUtf8ErrorLine("C++ 全部模块释放检查发生未知异常");
+        return false;
+    }
+}
+
+int RunFreeAllModulesSelfTest(int argc, wchar_t* argv[]) {
+    if (argc != 4) {
+        PrintUtf8ErrorLine(
+            "用法: dlcv_infer_cpp_test.exe free-all-modules-selftest <Sentinel模型路径> <Virbox模型路径>");
+        return 2;
+    }
+
+    const std::wstring sentinelModelPath = argv[2];
+    const std::wstring virboxModelPath = argv[3];
+    if (!VerifyProviderModuleMemoryIsolation(sentinelModelPath, virboxModelPath)) {
+        return 1;
+    }
+    if (!VerifyCppUtilsFreeAllModels(sentinelModelPath, virboxModelPath)) {
+        PrintUtf8ErrorLine("C++ FreeAllModels 全部模块检查失败");
+        return 1;
+    }
+    PrintUtf8Line("C++ FreeAllModels 全部模块检查通过");
+    return 0;
+}
+
 int RunProviderLoaderSelfTest(int argc, wchar_t* argv[]) {
     if (argc != 4 && argc != 5) {
         PrintUtf8ErrorLine(
@@ -3535,6 +3613,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunDvspDisabledSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"free-all-modules-selftest") {
+        return RunFreeAllModulesSelfTest(argc, argv);
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"provider-loader-selftest") {
         return RunProviderLoaderSelfTest(argc, argv);
     }
@@ -3565,6 +3647,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
     std::cout << "  calc-mean-selftest\n";
     std::cout << "  dvsp-disabled-selftest\n";
+    std::cout << "  free-all-modules-selftest <SentinelModelPath> <VirboxModelPath>\n";
     std::cout << "  provider-loader-selftest <SentinelModelPath> <VirboxModelPath> [rounds]\n";
     std::cout << "  get-model-info <model>\n";
     std::cout << "  get-dvs-model-info <model>\n";
