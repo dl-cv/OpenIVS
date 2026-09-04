@@ -101,6 +101,11 @@ namespace DlcvCSharpTest
                     return RunDvsMemoryLoadingSelfTest(args);
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvs-duplicate-entry-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return DvsArchiveDuplicateSelfTest.Run();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-reject-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunDvspRejectSelfTest(args);
@@ -254,6 +259,7 @@ namespace DlcvCSharpTest
             var tests = new List<UnifiedTestCase>
             {
                 new UnifiedTestCase("模型通道顺序", RunModelChannelOrderSelfTest),
+                new UnifiedTestCase("DVS 同名成员内容", DvsArchiveDuplicateSelfTest.Run),
                 new UnifiedTestCase("掩膜旋转框", RunMaskToRBoxSelfTest),
                 new UnifiedTestCase("曲线文字仿射变换", RunCurveTextAffineSelfTest),
                 new UnifiedTestCase("AI方向仿射变换", RunAiOrientationAffineSelfTest),
