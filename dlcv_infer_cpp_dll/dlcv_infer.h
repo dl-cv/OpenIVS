@@ -9,6 +9,7 @@
 #include <memory>
 #include <cstddef>
 #include <functional>
+#include <stdexcept>
 #include <map>
 #include <mutex>
 #include <fstream>
@@ -338,6 +339,20 @@ namespace dlcv_infer {
 #endif
     };
 #pragma warning(pop)
+
+    /// <summary>
+    /// 从已加载的共享索引创建模型对象，并在创建时绑定该索引。
+    /// </summary>
+    inline Model CreateModelFromIndex(int index) {
+        if (index < 0) {
+            throw std::invalid_argument("model index 无效");
+        }
+        Model model;
+        model.modelIndex = index;
+        model.OwnModelIndex = false;
+        (void)model.GetModelInfo();
+        return model;
+    }
 
 #ifdef DLCV_INFER_CPP_DLL_EXPORTS
     // 滑动窗口模型（内部使用，如需对外可再单独开放）

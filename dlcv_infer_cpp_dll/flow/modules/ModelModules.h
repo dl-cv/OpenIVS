@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <memory>
 #include <mutex>
@@ -50,6 +50,9 @@ public:
 
     /// 通过 key 释放引用（避免调用方重复拼接/解析）。
     void ReleaseByKey(const std::string& key);
+
+    /// 全量释放底层模型前清空缓存，后续加载会重新创建模型对象。
+    void ClearForFreeAllModels();
 
     [[deprecated("Use Acquire/Release instead")]]
     void Clear();

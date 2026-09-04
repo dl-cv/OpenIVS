@@ -180,6 +180,15 @@ public:
 };
 ```
 
+**头文件内联辅助函数**：
+```cpp
+dlcv_infer::Model CreateModelFromIndex(int index);
+```
+- 该函数定义在 `dlcv_infer.h` 中，为完全内联实现，不增加 DLL 导出符号，也不改变 `Model` 的数据布局。
+- 函数使用默认构造的 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，随后立即调用 `GetModelInfo()`，以绑定已有索引并完成模型信息读取。
+- `index` 必须为非负值；非法参数或索引不可用时抛出异常。
+- 创建成功时增加该索引的外部使用计数；返回对象析构或调用 `FreeModel()` 时撤销绑定并减少使用计数，不释放索引所属的底层模型。
+
 **构造函数行为**：
 1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，从归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；加载期间不写入模型文件。推理组件缺少该接口时，兼容路径才将模型文件写入临时目录后按路径加载。
 2. 若路径以 `.dvsp` 结尾 → 抛出 `std::invalid_argument`，不加载文件。

@@ -202,6 +202,8 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]`
   - `dvs-memory-loading-selftest <modelPath> <imagePath> [device]`
   - `dvsp-reject-selftest <modelPath> [device]`
+  - `create-model-from-index-selftest <modelPath> [device]`
+- `create-model-from-index-selftest` 检查 C++ 头文件内联辅助函数创建时增加 index 使用次数、对象释放时减少使用次数；流程模型还会检查 `FreeAllModels()` 清空模型池、旧流程对象在底层释放失败后完成本地清理，以及相同流程能够重新加载。
 - `DlcvCSharpTest.exe category-count-check-selftest` 与 `dlcv_infer_cpp_test.exe category-count-check-selftest` 验证类型数量规则、同一原图局部结果聚合、粘性 `ok=false`、字符串或数组 `reason`、Flow 输出包装及旧流程兼容行为。
 - `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
   - `load-three-models <extractModelPath> <componentModelPath> <icModelPath>`
@@ -214,6 +216,8 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - C#、C++ 对同一普通模型连续加载两次后释放，底层 index 应被清除。
   - C++ 连续加载同一流程两次并释放后，共用的子模型 index 应被清除。
   - 普通模型和流程各建立两个借用对象；持有方与首个借用对象释放后，第二个借用对象仍可读取模型信息，最后释放时 index 应被清除。
+  - `ModelFactory.CreateFromIndex` 创建时立即增加普通模型 index 的使用次数；持有方释放后借用对象仍可查询，借用对象显式释放后 index 被清除。
+  - `ModelFactory.CreateFromIndex` 创建的借用对象未显式释放时，强制 GC 会执行终结器并撤销 index 使用记录。
   - 人为提前解绑一个流程子模型，使 C# 流程对象释放子模型时返回失败；随后释放流程持有方，检查外层 flow index 是否仍被保留。
   - 空流程 `GetModelInfo()` 不应返回流程节点 JSON。
   - 源文件删除后，按路径再次加载应失败；已经取得的普通模型 index 和流程 index 仍可读取模型信息。

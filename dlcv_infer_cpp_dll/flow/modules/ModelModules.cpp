@@ -140,9 +140,13 @@ void ModelPool::ReleaseByKey(const std::string& key) {
     }
 }
 
-void ModelPool::Clear() {
+void ModelPool::ClearForFreeAllModels() {
     std::lock_guard<std::mutex> lk(_mu);
     _cache.clear();
+}
+
+void ModelPool::Clear() {
+    ClearForFreeAllModels();
 }
 
 static std::string GetFileNameOnlyLocal(const std::string& path) {

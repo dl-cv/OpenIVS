@@ -4380,6 +4380,8 @@ namespace DlcvCSharpTest
             checks.Add(RunMultipleBorrowersCheck(dvstPath, "flow", "流程多借用方"));
             checks.Add(RunCsharpFlowDisposeFailureCheck(dvstPath));
             try { Utils.FreeAllModels(); } catch { }
+            checks.Add(RunModelFactoryBorrowerDisposeCheck(sentinelModelPath));
+            checks.Add(RunModelFactoryBorrowerFinalizeCheck(sentinelModelPath));
             checks.Add(RunEmptyFlowModelInfoCheck());
             checks.Add(RunPathLoadAfterSourceRemovedCheck(dvoPath));
             checks.Add(RunPathLoadAfterSourceRemovedCheck(dvstPath));
@@ -4715,6 +4717,114 @@ namespace DlcvCSharpTest
                 check.Actual = ex.Message;
                 check.Passed = false;
                 return check;
+            }
+        }
+
+        private static ReviewCheck RunModelFactoryBorrowerDisposeCheck(string modelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "ModelFactory 普通模型借用释放",
+                Expected = "持有方释放后 index 仍存在，借用方 Dispose 后 index 删除"
+            };
+            int index = -1;
+            Model owner = null;
+            Model borrower = null;
+            DllLoader loader = null;
+            try
+            {
+                owner = new Model(modelPath, GpuDeviceId);
+                index = owner.modelIndex;
+                loader = ResolveAndValidateSharedIndex(index, "model", "ModelFactory 普通模型借用释放");
+                borrower = ModelFactory.CreateFromIndex(index);
+                if (borrower.modelIndex != index || borrower.OwnModelIndex)
+                    throw new Exception("工厂返回的模型实例状态错误");
+
+                owner.Dispose();
+                owner = null;
+                int typeAfterOwnerDispose = loader.GetIndexType(index);
+                if (typeAfterOwnerDispose == 0)
+                    throw new Exception("持有方释放后 index 已删除");
+                if (borrower.GetModelInfo() == null)
+                    throw new Exception("持有方释放后无法读取借用模型信息");
+
+                borrower.Dispose();
+                borrower = null;
+                EnsureIndexRemoved(loader, index, "ModelFactory 普通模型借用释放");
+                check.Actual = "持有方释放后类型为 " + typeAfterOwnerDispose + "，借用方释放后 index 已删除";
+                check.Passed = true;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { borrower?.Dispose(); } catch { }
+                try { owner?.Dispose(); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunModelFactoryBorrowerFinalizeCheck(string modelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "ModelFactory 普通模型借用终结器",
+                Expected = "不显式 Dispose，强制 GC 后撤销借用绑定并删除 index"
+            };
+            DllLoader loader = null;
+            WeakReference borrowerReference = null;
+            int index = -1;
+            try
+            {
+                index = CreateModelFactoryBorrowerForGc(modelPath, out loader, out borrowerReference);
+                ForceGc();
+                if (borrowerReference != null && borrowerReference.IsAlive)
+                    throw new Exception("工厂借用对象在强制 GC 后仍未回收");
+                EnsureIndexRemoved(loader, index, "ModelFactory 普通模型借用终结器");
+                check.Actual = "强制 GC 后借用对象已回收，index 已删除";
+                check.Passed = true;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static int CreateModelFactoryBorrowerForGc(
+            string modelPath,
+            out DllLoader loader,
+            out WeakReference borrowerReference)
+        {
+            Model owner = null;
+            loader = null;
+            borrowerReference = null;
+            try
+            {
+                owner = new Model(modelPath, GpuDeviceId);
+                int index = owner.modelIndex;
+                loader = ResolveAndValidateSharedIndex(index, "model", "ModelFactory 普通模型借用终结器");
+                Model borrower = ModelFactory.CreateFromIndex(index);
+                if (borrower.modelIndex != index || borrower.OwnModelIndex)
+                    throw new Exception("工厂返回的模型实例状态错误");
+                borrowerReference = new WeakReference(borrower);
+
+                owner.Dispose();
+                owner = null;
+                if (loader.GetIndexType(index) == 0)
+                    throw new Exception("持有方释放后 index 已删除");
+                return index;
+            }
+            finally
+            {
+                try { owner?.Dispose(); } catch { }
             }
         }
 

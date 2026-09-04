@@ -17,8 +17,8 @@
 | `flow/runtime/ExecutionRuntime.cs` | `InferTiming` 类，推理计时 |
 
 命名空间：
-- `DlcvModules`：`Model`、`Utils`、`FlowGraphModel`、`DvsModel`、`InferTiming`
-- `dlcv_infer_csharp`：`DllLoader`
+- `DlcvModules`：`Utils`、`FlowGraphModel`、`DvsModel`、`InferTiming`
+- `dlcv_infer_csharp`：`Model`、`ModelFactory`、`DllLoader`
 - `sntl_admin_csharp`：`DogUtils`、`DogProvider`（加密狗工具，C# 同名封装）
 
 ---
@@ -118,6 +118,11 @@ public class Model : IDisposable
     public Model();
     public Model(string modelPath, int deviceId = 0, bool rpcMode = false, bool enableCache = false);
 }
+
+public static class ModelFactory
+{
+    public static Model CreateFromIndex(int index);
+}
 ```
 
 **构造函数行为**：
@@ -127,6 +132,7 @@ public class Model : IDisposable
 4. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
 5. 加载完成后可通过 `Loaded` 属性判断状态。
 6. 空构造实例可在设置 `modelIndex` 且设置 `OwnModelIndex=false` 后使用；首次 `GetModelInfo` 或推理时查询 index 类型、增加当前实例的使用记录。流程 index 使用共享信息中保存的 `pipeline`，按 `model_bindings` 恢复子模型引用；`source_path` 只保存原始来源信息，按 index 恢复时不读取该路径。
+7. `ModelFactory.CreateFromIndex(index)` 会先校验 index 范围，再创建空 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，并立即调用 `GetModelInfo` 完成初始化。index 非法时抛出 `ArgumentOutOfRangeException`；初始化失败时会释放已完成的借用绑定。
 
 ### 3.2 属性
 
@@ -194,7 +200,7 @@ public void FreeModel();
 - Flow 模式：持有方调用 `dlcv_free_flow_c` 释放流程注册，借用方调用 `dlcv_unbind_index_c`，同时释放本地 `FlowGraphModel`。
 - 普通模式：调用 `dlcv_free_model` 释放底层模型。
 - `OwnModelIndex=false` 的共享 index 实例不会释放持有方资源；若该实例已经绑定，则调用 `dlcv_unbind_index_c` 撤销当前使用记录。
-- 析构函数自动调用 `Dispose()`。
+- 终结器会撤销借用实例增加的 index 绑定，未显式调用 `Dispose` 时也会释放该使用记录。
 
 ---
 
@@ -498,17 +504,14 @@ Console.WriteLine(info.ToString());
 ### 9.3 借用已有 index
 
 ```csharp
-using (var model = new Model())
+using (var model = ModelFactory.CreateFromIndex(existingIndex))
 {
-    model.modelIndex = existingIndex;
-    model.OwnModelIndex = false;
-
     JObject info = model.GetModelInfo();
     CSharpResult result = model.Infer(rgb, paramsJson);
 }
 ```
 
-首次查询或推理会识别普通模型或流程模型并调用 `dlcv_bind_index_c`。`Dispose` 只调用 `dlcv_unbind_index_c` 撤销该实例增加的使用记录，原持有方可继续查询与推理。
+`CreateFromIndex` 会校验 index 范围，创建空 `Model` 并设置为借用实例，然后立即调用 `GetModelInfo` 完成绑定和信息读取。`Dispose` 只调用 `dlcv_unbind_index_c` 撤销该实例增加的使用记录，原持有方可继续查询与推理。
 
 ---
 

@@ -2491,10 +2491,18 @@ namespace dlcv_infer {
         std::lock_guard<std::mutex> indexLock(_indexStateMu);
         _expectedChCache = -2;
         if (_ownsRegisteredFlowIndex) {
-            if (modelIndex < 0 || _dllLoader == nullptr || _dllLoader->GetFreeFlowFunc() == nullptr ||
-                _dllLoader->GetFreeFlowFunc()(modelIndex) != 0) {
-                throw std::runtime_error("释放流程索引失败");
+            bool freeFlowFailed = false;
+            try {
+                if (modelIndex < 0 || _dllLoader == nullptr || _dllLoader->GetFreeFlowFunc() == nullptr ||
+                    _dllLoader->GetFreeFlowFunc()(modelIndex) != 0) {
+                    freeFlowFailed = true;
+                }
+            } catch (...) {
+                freeFlowFailed = true;
             }
+
+            // 无论底层释放流程索引是否成功，都先完成本地清理，
+            // 避免析构或移动赋值吞掉异常后遗留 _flowModel 与临时目录。
             delete _flowModel;
             _flowModel = nullptr;
             if (!_tempDir.empty()) {
@@ -2507,13 +2515,23 @@ namespace dlcv_infer {
             _indexReady = false;
             _ownsRegisteredFlowIndex = false;
             modelIndex = -1;
+
+            // 底层失败信息在本地清理完成后继续上报，显式调用方仍能收到异常。
+            if (freeFlowFailed) {
+                throw std::runtime_error("释放流程索引失败");
+            }
             return;
         }
 
         if (_indexBound) {
-            if (!UnbindCurrentIndexNoexcept()) {
-                throw std::runtime_error("解绑共享索引失败");
+            const bool unbindFailed = !UnbindCurrentIndexNoexcept();
+            if (unbindFailed) {
+                // 解绑失败时 UnbindCurrentIndexNoexcept 不会改动这两个标记，
+                // 这里补做复位，使失败后的本地状态与成功解绑后一致。
+                _indexBound = false;
+                _indexReady = false;
             }
+            // 与成功路径一致，先清理本地资源，失败信息在清理完成后上报。
             delete _flowModel;
             _flowModel = nullptr;
             if (!_tempDir.empty()) {
@@ -2524,6 +2542,10 @@ namespace dlcv_infer {
             _hasCachedModelInfo = false;
             _cachedModelInfo = json();
             modelIndex = -1;
+
+            if (unbindFailed) {
+                throw std::runtime_error("解绑共享索引失败");
+            }
             return;
         }
         if (_isFlowGraphMode) {
@@ -3253,6 +3275,10 @@ namespace dlcv_infer {
     }
 
     void Utils::FreeAllModels() {
+        // 底层模型表清空后，模型池中的对象将持有失效 index。
+        // 先清空模型池，确保后续流程加载会重新创建子模型。
+        flow::ModelPool::Instance().ClearForFreeAllModels();
+
         std::vector<FreeAllModelsFuncType> freeAllModelsFunctions;
         {
             std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());

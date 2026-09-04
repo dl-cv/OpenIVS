@@ -2944,18 +2944,60 @@ namespace dlcv_infer_csharp
 
         protected virtual void Dispose(bool disposing)
         {
-            if (!_disposed)
+            if (_disposed)
             {
-                if (disposing)
-                {
-                    // 释放托管资源
-                    FreeModel();
-                    _httpClient?.Dispose();
-                }
-
-                // 设置处置标志
-                _disposed = true;
+                return;
             }
+
+            if (disposing)
+            {
+                // 显式释放：保留 FreeModel 的错误上报行为
+                FreeModel();
+                _httpClient?.Dispose();
+            }
+            else
+            {
+                // 终结器路径：只撤销外部共享 index 绑定，不依赖显式释放
+                ReleaseSharedIndexForFinalize();
+            }
+
+            _disposed = true;
+        }
+
+        /// <summary>
+        /// 终结器专用：撤销外部共享 index 的外层绑定并复位本地字段。
+        /// 终结器内不能向外抛异常，也不能调用可能已被终结的复杂托管对象，
+        /// 因此只执行必要的原生解绑，不触碰 DvsModel、HttpClient 等托管对象。
+        /// </summary>
+        private void ReleaseSharedIndexForFinalize()
+        {
+            // 仅处理共享/借用且已成功绑定外部 index 的实例
+            if (OwnModelIndex || !_sharedIndexBound)
+            {
+                return;
+            }
+
+            DllLoader loader = _dllLoader;
+            int index = modelIndex;
+            if (loader != null && index >= 0)
+            {
+                try
+                {
+                    loader.UnbindIndex(index);
+                }
+                catch
+                {
+                    // 终结器内释放失败时不向外抛异常，仅放弃本次释放
+                }
+            }
+
+            // 复位共享状态，避免重复释放
+            _dvsModel = null;
+            _sharedIndexBound = false;
+            _sharedIndexType = null;
+            _sharedIndexState = SharedIndexAttachState.NotStarted;
+            _isDvsMode = false;
+            modelIndex = -1;
         }
 
         /// <summary>
@@ -2988,6 +3030,53 @@ namespace dlcv_infer_csharp
                     _modelCache.Remove(_cacheKey);
                 }
                 _loadingModels.Remove(_cacheKey);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 从已登记的共享 index 创建借用模型实例。
+    /// </summary>
+    public static class ModelFactory
+    {
+        /// <summary>
+        /// 创建并初始化一个借用已有 index 的模型实例。
+        /// </summary>
+        /// <param name="index">已登记的普通模型或流程模型 index。</param>
+        /// <returns>已完成 index 绑定的借用模型实例。</returns>
+        /// <exception cref="ArgumentOutOfRangeException">index 不在支持范围内。</exception>
+        public static Model CreateFromIndex(int index)
+        {
+            DllLoader.GetSharedIndexRoute(index, out _);
+
+            Model model = null;
+            try
+            {
+                model = new Model
+                {
+                    modelIndex = index,
+                    OwnModelIndex = false
+                };
+
+                if (model.GetModelInfo() == null)
+                    throw new InvalidOperationException("获取共享 index 模型信息失败：返回结果为空");
+
+                return model;
+            }
+            catch
+            {
+                if (model != null)
+                {
+                    try
+                    {
+                        model.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                    model = null;
+                }
+                throw;
             }
         }
     }
