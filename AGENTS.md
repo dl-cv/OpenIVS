@@ -438,6 +438,13 @@ C# 与 C++ API 不提供 `SlidingWindowModel`。需要滑窗处理时，使用 `
 - **加密模型文件**：`dlcv_deploy` 产出的 `.dvt`/`.dvo`/`.dvst`/`.dvso` 等文件是 OpenIVS 测试程序与 WPF 框架的输入。
 - **接口边界**：OpenIVS 不解密模型包内 `dlcv.json` 来选择 provider；`DllLoader` 只读取模型包 `header_json.dog_provider`，Sentinel 使用 `dlcv_infer.dll`，Virbox 使用 `dlcv_infer_v.dll`。
 
+### 双 DLL 运行事实
+
+- `dlcv_infer.dll` 与 `dlcv_infer_v.dll` 来自同一套推理实现，推理能力相同。两个对应加密狗同时存在时，任一 DLL 均可加载两种加密模型，不得把“选到另一 provider DLL”表述为模型不兼容或加载错误。
+- 按模型头选择 provider 的目的是避免在缺少对应加密狗时调用错误 DLL；这种调用可能使加密狗服务长时间无响应。
+- 两个文件名不同的 DLL 同时加载后处于同一进程地址空间，但属于两个独立 Windows 模块实例，各自保存模块静态数据和模型表。相同实现不代表模型表共享。
+- `FreeAllModels()` 需要分别调用进程内已经加载的两个模块。实测单独调用 Sentinel 模块后，仅 Sentinel index 从模型类型变为不存在，Virbox index 保持不变。
+
 ## 运行验证方式
 
 - 构建完成后可运行 `DlcvDemo` 或 `dlcv_infer_cpp_qt_demo` GUI 加载模型并执行单次推理验证。

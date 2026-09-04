@@ -2748,6 +2748,89 @@ bool IsModelInfoUnavailable(
     }
 }
 
+bool VerifyProviderModuleMemoryIsolation(
+    const std::wstring& sentinelModelPath,
+    const std::wstring& virboxModelPath) {
+    std::unique_ptr<dlcv_infer::Model> sentinelModel;
+    std::unique_ptr<dlcv_infer::Model> virboxModel;
+    try {
+        sentinelModel = std::make_unique<dlcv_infer::Model>(sentinelModelPath, 0);
+        virboxModel = std::make_unique<dlcv_infer::Model>(virboxModelPath, 0);
+
+        HMODULE sentinelModule = GetModuleHandleW(L"dlcv_infer.dll");
+        HMODULE virboxModule = GetModuleHandleW(L"dlcv_infer_v.dll");
+        if (sentinelModule == nullptr || virboxModule == nullptr) {
+            throw std::runtime_error("未找到两个已加载的推理 DLL 模块");
+        }
+
+        auto sentinelFreeAll = reinterpret_cast<dlcv_infer::FreeAllModelsFuncType>(
+            GetProcAddress(sentinelModule, "dlcv_free_all_models"));
+        auto virboxFreeAll = reinterpret_cast<dlcv_infer::FreeAllModelsFuncType>(
+            GetProcAddress(virboxModule, "dlcv_free_all_models"));
+        auto sentinelGetIndexType = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
+            GetProcAddress(sentinelModule, "dlcv_get_index_type_c"));
+        auto virboxGetIndexType = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
+            GetProcAddress(virboxModule, "dlcv_get_index_type_c"));
+        if (sentinelFreeAll == nullptr || virboxFreeAll == nullptr ||
+            sentinelGetIndexType == nullptr || virboxGetIndexType == nullptr) {
+            throw std::runtime_error("推理 DLL 缺少内存隔离验证所需接口");
+        }
+
+        const int sentinelIndex = sentinelModel->modelIndex;
+        const int virboxIndex = virboxModel->modelIndex;
+        const int sentinelTypeBefore = sentinelGetIndexType(sentinelIndex);
+        const int virboxTypeBefore = virboxGetIndexType(virboxIndex);
+
+        sentinelModel->OwnModelIndex = false;
+        virboxModel->OwnModelIndex = false;
+        sentinelFreeAll();
+
+        const int sentinelTypeAfterSentinelFree = sentinelGetIndexType(sentinelIndex);
+        const int virboxTypeAfterSentinelFree = virboxGetIndexType(virboxIndex);
+        virboxFreeAll();
+        const int virboxTypeAfterVirboxFree = virboxGetIndexType(virboxIndex);
+
+        std::ostringstream moduleSummary;
+        moduleSummary << "模块句柄: Sentinel=0x" << std::hex
+                      << reinterpret_cast<uintptr_t>(sentinelModule)
+                      << "，Virbox=0x" << reinterpret_cast<uintptr_t>(virboxModule);
+        PrintUtf8Line(moduleSummary.str());
+        PrintUtf8Line(
+            "单独调用 Sentinel FreeAllModels 前后: Sentinel=" +
+            std::to_string(sentinelTypeBefore) + "->" +
+            std::to_string(sentinelTypeAfterSentinelFree) + "，Virbox=" +
+            std::to_string(virboxTypeBefore) + "->" +
+            std::to_string(virboxTypeAfterSentinelFree) +
+            "；再调用 Virbox 后=" + std::to_string(virboxTypeAfterVirboxFree));
+
+        const bool passed =
+            sentinelModule != virboxModule &&
+            sentinelTypeBefore == 1 &&
+            virboxTypeBefore == 1 &&
+            sentinelTypeAfterSentinelFree == 0 &&
+            virboxTypeAfterSentinelFree == 1 &&
+            virboxTypeAfterVirboxFree == 0;
+        ReleaseProviderLoadTestModel(sentinelModel);
+        ReleaseProviderLoadTestModel(virboxModel);
+        if (!passed) {
+            PrintUtf8ErrorLine("两个推理 DLL 的模块与模型表隔离检查失败");
+            return false;
+        }
+        PrintUtf8Line("两个推理 DLL 使用不同模块实例，模型表相互独立");
+        return true;
+    } catch (const std::exception& ex) {
+        ReleaseProviderLoadTestModel(sentinelModel);
+        ReleaseProviderLoadTestModel(virboxModel);
+        PrintUtf8ErrorLine(std::string("模块与模型表隔离检查失败: ") + ex.what());
+        return false;
+    } catch (...) {
+        ReleaseProviderLoadTestModel(sentinelModel);
+        ReleaseProviderLoadTestModel(virboxModel);
+        PrintUtf8ErrorLine("模块与模型表隔离检查发生未知异常");
+        return false;
+    }
+}
+
 int RunProviderLoaderSelfTest(int argc, wchar_t* argv[]) {
     if (argc != 4 && argc != 5) {
         PrintUtf8ErrorLine(
@@ -2763,6 +2846,9 @@ int RunProviderLoaderSelfTest(int argc, wchar_t* argv[]) {
 
     const std::wstring sentinelModelPath = argv[2];
     const std::wstring virboxModelPath = argv[3];
+    if (!VerifyProviderModuleMemoryIsolation(sentinelModelPath, virboxModelPath)) {
+        return 1;
+    }
     ProviderLoadTestState sentinelState;
     ProviderLoadTestState virboxState;
     ReusableWorkerGate roundGate(2);
@@ -2777,8 +2863,8 @@ int RunProviderLoaderSelfTest(int argc, wchar_t* argv[]) {
                 const auto actualProvider = model->LoadedDogProvider();
                 if (actualProvider != expectedProvider) {
                     throw std::runtime_error(
-                        "第 " + std::to_string(round + 1) + " 轮 provider 错误，期望 " +
-                        DogProviderText(expectedProvider) + "，实际 " + DogProviderText(actualProvider));
+                        "第 " + std::to_string(round + 1) + " 轮 provider 路由与模型头不一致，模型头 " +
+                        DogProviderText(expectedProvider) + "，实际 DLL " + DogProviderText(actualProvider));
                 }
                 if (round + 1 == rounds) {
                     state.model = std::move(model);
@@ -2858,10 +2944,10 @@ int RunProviderLoaderSelfTest(int argc, wchar_t* argv[]) {
     ReleaseProviderLoadTestModel(sentinelState.model);
     ReleaseProviderLoadTestModel(virboxState.model);
     if (!passed) {
-        PrintUtf8ErrorLine("provider loader 回归检查失败");
+        PrintUtf8ErrorLine("双 DLL 路由与清理检查失败");
         return 1;
     }
-    PrintUtf8Line("provider loader 回归检查通过");
+    PrintUtf8Line("双 DLL 路由与清理检查通过");
     return 0;
 }
 
