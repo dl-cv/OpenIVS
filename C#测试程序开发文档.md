@@ -32,6 +32,7 @@
   - 说明：当前源码中 **没有**为 `DlcvDemo` 配置“自动复制 `AIModelRPC.exe`”的构建步骤；若要启用 RPC 模式，请确保 `AIModelRPC.exe` 位于以下任一路径（见 `DlcvCsharpApi/Model.cs` 的查找顺序）：
     - `DlcvDemo` 的输出目录（与主 EXE 同目录）
     - SDK 固定路径：`C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`
+  - 正式打包从当前 Python 环境已安装的 `dlcvpro_infer_csharp` 包复制 `AIModelRPC.exe`，并签名后写入新 wheel；打包脚本不会收录 `DlcvDemo.exe` 或其他未列入发布文件清单的 exe。
 
 #### 2.2 运行时外部依赖（必须满足/按功能启用）
 
