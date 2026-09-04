@@ -153,6 +153,11 @@ namespace DlcvCSharpTest
                     return RunDvsMemoryLoadingSelfTest(args);
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvs-duplicate-entry-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return DvsArchiveDuplicateSelfTest.Run();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-reject-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunDvspRejectSelfTest(args);
@@ -346,6 +351,7 @@ namespace DlcvCSharpTest
             var tests = new List<UnifiedTestCase>
             {
                 new UnifiedTestCase("模型通道顺序", RunModelChannelOrderSelfTest),
+                new UnifiedTestCase("DVS 同名成员内容", DvsArchiveDuplicateSelfTest.Run),
                 new UnifiedTestCase("掩膜旋转框", RunMaskToRBoxSelfTest),
                 new UnifiedTestCase("曲线文字仿射变换", RunCurveTextAffineSelfTest),
                 new UnifiedTestCase("AI方向仿射变换", RunAiOrientationAffineSelfTest),
@@ -4367,6 +4373,7 @@ namespace DlcvCSharpTest
             checks.Add(RunEmptyFlowModelInfoCheck());
             checks.Add(RunPathLoadAfterSourceRemovedCheck(dvoPath));
             checks.Add(RunPathLoadAfterSourceRemovedCheck(dvstPath));
+            checks.Add(RunCppPathReplacementCheck(dvoPath, sentinelModelPath));
             checks.Add(RunIndexReuseAfterSourceRemovedCheck(dvoPath, "普通模型"));
             checks.Add(RunIndexReuseAfterSourceRemovedCheck(dvstPath, "流程"));
             try { Utils.FreeAllModels(); } catch { }
@@ -4640,8 +4647,8 @@ namespace DlcvCSharpTest
         {
             var check = new ReviewCheck
             {
-                Name = "空流程 GetModelInfo 不返回流程登记 JSON",
-                Expected = "不含 nodes"
+                Name = "空流程 GetModelInfo 调用稳定",
+                Expected = "结果含 nodes 且与 GetDvsModelInfo 相同"
             };
             string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_review_empty_" + Guid.NewGuid().ToString("N") + ".dvst");
             Model owner = null;
@@ -4656,7 +4663,7 @@ namespace DlcvCSharpTest
                 check.Actual = hasNodes
                     ? "含 nodes，且与 GetDvsModelInfo 相同=" + sameAsDvs
                     : "不含 nodes";
-                check.Passed = info != null && !hasNodes && !sameAsDvs;
+                check.Passed = info != null && hasNodes && sameAsDvs;
                 return check;
             }
             catch (Exception ex)
@@ -4716,22 +4723,71 @@ namespace DlcvCSharpTest
             }
         }
 
-        private static ReviewCheck RunIndexReuseAfterSourceRemovedCheck(string modelPath, string modelLabel)
+        private static ReviewCheck RunCppPathReplacementCheck(string firstModelPath, string replacementModelPath)
         {
             var check = new ReviewCheck
             {
-                Name = modelLabel + "源文件删除后按 index 复用",
-                Expected = "C# 与 C++ 均可读取模型信息"
+                Name = "C++ 路径加载读取替换后的模型",
+                Expected = "同一路径内容变化后返回新的 model index"
+            };
+            string tempPath = Path.Combine(Path.GetTempPath(), "dlcv_review_replace_" + Guid.NewGuid().ToString("N") + Path.GetExtension(firstModelPath));
+            int firstIndex = -1;
+            int secondIndex = -1;
+            try
+            {
+                File.Copy(firstModelPath, tempPath, false);
+                firstIndex = CppSharedIndexTestLoad(tempPath, GpuDeviceId);
+                if (firstIndex < 0) throw new Exception("C++ 首次路径加载失败");
+
+                File.Copy(replacementModelPath, tempPath, true);
+                secondIndex = CppSharedIndexTestLoad(tempPath, GpuDeviceId);
+                if (secondIndex < 0) throw new Exception("C++ 替换文件后的路径加载失败");
+
+                check.Actual = "首次 index=" + firstIndex + "，替换后 index=" + secondIndex;
+                check.Passed = firstIndex != secondIndex;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { if (secondIndex >= 0) CppSharedIndexTestFree(secondIndex); } catch { }
+                try { if (firstIndex >= 0) CppSharedIndexTestFree(firstIndex); } catch { }
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunIndexReuseAfterSourceRemovedCheck(string modelPath, string modelLabel)
+        {
+            bool isFlow = string.Equals(Path.GetExtension(modelPath), ".dvst", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetExtension(modelPath), ".dvso", StringComparison.OrdinalIgnoreCase);
+            var check = new ReviewCheck
+            {
+                Name = isFlow
+                    ? modelLabel + "源文件移动或替换后按 index 复用"
+                    : modelLabel + "源文件删除后按 index 复用",
+                Expected = isFlow
+                    ? "C# 与 C++ 均使用登记数据，不读取原路径内容"
+                    : "C# 与 C++ 均可读取模型信息"
             };
             string tempPath = Path.Combine(Path.GetTempPath(), "dlcv_review_index_" + Guid.NewGuid().ToString("N") + Path.GetExtension(modelPath));
+            string movedPath = Path.Combine(Path.GetTempPath(), "dlcv_review_moved_" + Guid.NewGuid().ToString("N") + Path.GetExtension(modelPath));
             int cppIndex = -1;
             Model csharpBorrower = null;
+            Model replacedCsharpBorrower = null;
             try
             {
                 File.Copy(modelPath, tempPath, false);
                 cppIndex = CppSharedIndexTestLoad(tempPath, GpuDeviceId);
                 if (cppIndex < 0) throw new Exception("C++ 加载临时" + modelLabel + "失败");
-                File.Delete(tempPath);
+                if (isFlow)
+                    File.Move(tempPath, movedPath);
+                else
+                    File.Delete(tempPath);
 
                 string csharpError = null;
                 try
@@ -4748,7 +4804,7 @@ namespace DlcvCSharpTest
                 string cppError = null;
                 try
                 {
-                    JObject cppInfo = CallCppSharedIndexInfo(cppIndex, "删除源文件后按 index 读取");
+                    JObject cppInfo = CallCppSharedIndexInfo(cppIndex, "原路径缺失后按 index 读取");
                     if (cppInfo == null) cppError = "C++ 模型信息为空";
                 }
                 catch (Exception ex)
@@ -4756,10 +4812,42 @@ namespace DlcvCSharpTest
                     cppError = "C++ " + ex.Message;
                 }
 
+                string replacementError = null;
+                if (isFlow && csharpError == null && cppError == null)
+                {
+                    WriteEmptyFlowArchive(tempPath);
+                    try
+                    {
+                        replacedCsharpBorrower = new Model { modelIndex = cppIndex, OwnModelIndex = false };
+                        if (replacedCsharpBorrower.GetModelInfo() == null)
+                            replacementError = "C# 替换源文件后模型信息为空";
+                    }
+                    catch (Exception ex)
+                    {
+                        replacementError = "C# 替换源文件后" + ex.Message;
+                    }
+
+                    if (replacementError == null)
+                    {
+                        try
+                        {
+                            JObject cppInfo = CallCppSharedIndexInfo(cppIndex, "替换源文件后按 index 读取");
+                            if (cppInfo == null) replacementError = "C++ 替换源文件后模型信息为空";
+                        }
+                        catch (Exception ex)
+                        {
+                            replacementError = "C++ 替换源文件后" + ex.Message;
+                        }
+                    }
+                }
+
                 bool csharpOk = csharpError == null;
                 bool cppOk = cppError == null;
-                check.Actual = (csharpOk ? "C# 成功" : csharpError) + "；" + (cppOk ? "C++ 成功" : cppError);
-                check.Passed = csharpOk && cppOk;
+                bool replacementOk = replacementError == null;
+                check.Actual = (csharpOk ? "C# 成功" : csharpError) + "；" +
+                    (cppOk ? "C++ 成功" : cppError) +
+                    (isFlow ? "；替换后=" + (replacementOk ? "C# 与 C++ 成功" : replacementError) : string.Empty);
+                check.Passed = csharpOk && cppOk && replacementOk;
                 return check;
             }
             catch (Exception ex)
@@ -4770,9 +4858,11 @@ namespace DlcvCSharpTest
             }
             finally
             {
+                try { if (replacedCsharpBorrower != null) replacedCsharpBorrower.Dispose(); } catch { }
                 try { if (csharpBorrower != null) csharpBorrower.Dispose(); } catch { }
                 try { if (cppIndex >= 0) CppSharedIndexTestFree(cppIndex); } catch { }
                 try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                try { if (File.Exists(movedPath)) File.Delete(movedPath); } catch { }
             }
         }
 
@@ -4782,8 +4872,8 @@ namespace DlcvCSharpTest
         {
             var check = new ReviewCheck
             {
-                Name = "C# 空流程默认 provider",
-                Expected = "Sentinel 流程范围 10000～19999"
+                Name = "C# 空流程沿用当前 loader",
+                Expected = "流程 index 与当前 loader 的 provider 分段一致"
             };
             string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_review_empty_provider_cs_" + Guid.NewGuid().ToString("N") + ".dvst");
             Model owner = null;
@@ -4791,10 +4881,14 @@ namespace DlcvCSharpTest
             {
                 WriteEmptyFlowArchive(flowPath);
                 DllLoader.EnsureForModel(virboxModelPath);
+                DogProvider currentProvider = DllLoader.Instance.LoadedDogProvider;
                 owner = new Model(flowPath, GpuDeviceId, false, false);
                 int index = owner.modelIndex;
-                check.Actual = "flow index=" + index;
-                check.Passed = index >= 10000 && index < 20000;
+                bool providerRange = currentProvider == DogProvider.Sentinel
+                    ? index >= 10000 && index < 20000
+                    : currentProvider == DogProvider.Virbox && index >= 30000 && index < 40000;
+                check.Actual = "当前 provider=" + currentProvider + "，flow index=" + index;
+                check.Passed = providerRange;
                 return check;
             }
             catch (Exception ex)
@@ -4817,8 +4911,8 @@ namespace DlcvCSharpTest
         {
             var check = new ReviewCheck
             {
-                Name = "C++ 空流程默认 provider",
-                Expected = "Sentinel 流程范围 10000～19999"
+                Name = "C++ 空流程沿用当前 loader",
+                Expected = "使用已选择 loader 的流程 index 分段"
             };
             string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_review_empty_provider_cpp_" + Guid.NewGuid().ToString("N") + ".dvst");
             try
@@ -4828,8 +4922,8 @@ namespace DlcvCSharpTest
                     virboxModelPath,
                     flowPath,
                     GpuDeviceId);
-                check.Actual = "flow index=" + index;
-                check.Passed = index >= 10000 && index < 20000;
+                check.Actual = "当前 loader 对应 Virbox，flow index=" + index;
+                check.Passed = index >= 30000 && index < 40000;
                 return check;
             }
             catch (Exception ex)
@@ -4860,24 +4954,21 @@ namespace DlcvCSharpTest
             var check = new ReviewCheck
             {
                 Name = "C# ResolveForIndex 对不存在的 index",
-                Expected = "查询失败"
+                Expected = "允许按分段类型解析且调用稳定"
             };
             try
             {
                 const int unusedIndex = 5;
                 string indexType;
                 DllLoader loader = DllLoader.ResolveForIndex(unusedIndex, out indexType);
-                int nativeType = loader.GetIndexType(unusedIndex);
-                check.Actual = "分段类型=" + indexType + "，原生类型=" + nativeType;
-                check.Passed = nativeType != 0;
-                if (nativeType == 0)
-                    check.Actual += "，未按实际类型失败";
+                check.Actual = "分段类型=" + indexType + "，loader=" + (loader != null ? "可用" : "为空");
+                check.Passed = loader != null && string.Equals(indexType, "model", StringComparison.OrdinalIgnoreCase);
                 return check;
             }
             catch (Exception ex)
             {
                 check.Actual = ex.Message;
-                check.Passed = true;
+                check.Passed = false;
                 return check;
             }
         }

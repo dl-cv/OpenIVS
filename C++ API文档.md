@@ -195,7 +195,7 @@ json GetDvsModelInfo();
 - `GetModelInfo()` 对普通模型和流程模型返回相同层级。流程模型的输入通道和输入形状取首个模型，任务类型、类别列表和类别数量取最终输出可达的模型。
 - `GetDvsModelInfo()` 支持流程模型，返回完整流程 JSON、`loaded_model_meta`、按模型文件名组织的 `model_info`，以及首模型和最终输出模型的节点编号。
 - 普通模式下通过 `dlcv_get_model_info` 获取。
-- 空对象设置有效的 `modelIndex` 后，首次调用按新版四段 index 规则选择对应 loader，并增加外部使用计数。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `source_path` 解包归档资源，再按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`。该过程不查询加密狗，不访问另一 provider，也不修改 `DllLoader::Instance()`。
+- 空对象设置有效的 `modelIndex` 后，首次调用按新版四段 index 规则选择对应 loader，并增加外部使用计数。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`；`source_path` 只保存原始来源信息，按 index 恢复时不读取该路径。该过程不查询加密狗，不访问另一 provider，也不修改 `DllLoader::Instance()`。
 - 共享流程加载时为每个不同的子模型 index 创建一次借用 `Model` 并保存在 `FlowGraphModel`；后续推理中的模型节点直接复用这些已绑定对象，流程释放时统一解绑。
 
 ### 4.3 单图推理

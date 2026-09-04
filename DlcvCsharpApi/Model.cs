@@ -926,9 +926,35 @@ namespace dlcv_infer_csharp
                         if (_dllLoader == null || modelIndex < 0)
                             throw new InvalidOperationException("共享 index 状态不完整");
 
-                        _dvsModel?.Dispose();
-                        EnsureIndexStatusSucceeded(_dllLoader.UnbindIndex(modelIndex), "解绑 index");
+                        Exception childDisposeError = null;
+                        try
+                        {
+                            _dvsModel?.Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+                            childDisposeError = ex;
+                        }
+
+                        Exception unbindError = null;
+                        try
+                        {
+                            EnsureIndexStatusSucceeded(_dllLoader.UnbindIndex(modelIndex), "解绑 index");
+                        }
+                        catch (Exception ex)
+                        {
+                            unbindError = ex;
+                        }
+
                         _dvsModel = null;
+                        _sharedIndexBound = false;
+                        _sharedIndexType = null;
+                        _sharedIndexState = SharedIndexAttachState.NotStarted;
+                        _isDvsMode = false;
+                        modelIndex = -1;
+
+                        if (childDisposeError != null) throw childDisposeError;
+                        if (unbindError != null) throw unbindError;
                     }
                     _sharedIndexBound = false;
                     _sharedIndexType = null;
@@ -973,15 +999,35 @@ namespace dlcv_infer_csharp
                     return;
                 }
                 int flowIndex = modelIndex;
-                _dvsModel?.Dispose();
+                Exception childDisposeError = null;
+                try
+                {
+                    _dvsModel?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    childDisposeError = ex;
+                }
+
+                Exception freeFlowError = null;
                 if (_ownsRegisteredFlowIndex && _dllLoader != null)
                 {
-                    EnsureIndexStatusSucceeded(_dllLoader.FreeFlow(flowIndex), "释放流程 index");
+                    try
+                    {
+                        EnsureIndexStatusSucceeded(_dllLoader.FreeFlow(flowIndex), "释放流程 index");
+                    }
+                    catch (Exception ex)
+                    {
+                        freeFlowError = ex;
+                    }
                 }
                 _dvsModel = null;
                 _ownsRegisteredFlowIndex = false;
                 modelIndex = -1;
                 Log("[FreeModel][DVS] FlowGraph已释放");
+
+                if (childDisposeError != null) throw childDisposeError;
+                if (freeFlowError != null) throw freeFlowError;
             }
             else if (_isRpcMode)
             {

@@ -14,7 +14,7 @@
 #include <link.h>
 #include <unistd.h>
 #endif
-#include <atomic>
+#include <algorithm>
 #include <cerrno>
 #include <array>
 #include <cmath>
@@ -260,7 +260,34 @@ struct DvsArchiveData {
     std::shared_ptr<dlcv_infer::flow::ModelBinaryStore> modelBinaryStore;
 };
 
-std::atomic<uint64_t> g_nextModelBinaryStoreId{1};
+uint64_t HashModelBinaryStore(const DvsArchiveData& archive) {
+    const uint64_t offset = 1469598103934665603ULL;
+    const uint64_t prime = 1099511628211ULL;
+    uint64_t value = offset;
+    const std::string pipelineText = archive.pipelineRoot.dump();
+    for (unsigned char byte : pipelineText) {
+        value ^= byte;
+        value *= prime;
+    }
+
+    std::vector<std::string> keys;
+    keys.reserve(archive.modelBinaryStore->Buffers.size());
+    for (const auto& item : archive.modelBinaryStore->Buffers) keys.push_back(item.first);
+    std::sort(keys.begin(), keys.end());
+    for (const std::string& key : keys) {
+        for (unsigned char byte : key) {
+            value ^= byte;
+            value *= prime;
+        }
+        const auto it = archive.modelBinaryStore->Buffers.find(key);
+        if (it == archive.modelBinaryStore->Buffers.end() || !it->second) continue;
+        for (unsigned char byte : *it->second) {
+            value ^= byte;
+            value *= prime;
+        }
+    }
+    return value == 0 ? 1 : value;
+}
 
 static bool DeleteDirectoryRecursive(const std::string& dir) {
     if (dir.empty()) return true;
@@ -482,7 +509,6 @@ DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
 
     DvsArchiveData out;
     out.modelBinaryStore = std::make_shared<dlcv_infer::flow::ModelBinaryStore>();
-    out.modelBinaryStore->StoreId = g_nextModelBinaryStoreId.fetch_add(1, std::memory_order_relaxed);
     try {
         char magic[3] = { 0 };
         ReadExactOrThrow(fp, magic, 3, "无法读取流程模型文件头");
@@ -543,6 +569,7 @@ DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
 
         if (!gotPipeline) throw std::runtime_error("流程模型中未找到 pipeline.json");
         BindPipelineModelBuffers(out.pipelineRoot, *out.modelBinaryStore);
+        out.modelBinaryStore->StoreId = HashModelBinaryStore(out);
     } catch (...) {
         std::fclose(fp);
         throw;
@@ -1347,9 +1374,37 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
 
 namespace dlcv_infer {
 
-    // 底层 modelIndex 全局引用计数（解决底层 DLL content-hash dedup 导致同 modelIndex 被多对象共享的问题）
-    static std::mutex g_modelIndexRefMu;
-    static std::unordered_map<DllLoader*, std::unordered_map<int, int>> g_modelIndexRefCount;
+    static int LoadModelIndexByPath(
+        DllLoader* loader,
+        const std::string& modelPathUtf8,
+        int deviceId) {
+        if (loader == nullptr || loader->GetLoadModelFunc() == nullptr ||
+            loader->GetFreeResultFunc() == nullptr) {
+            throw std::runtime_error("模型加载接口不可用");
+        }
+
+        json config;
+        config["model_path"] = modelPathUtf8;
+        config["device_id"] = deviceId;
+        const std::string jsonStr = config.dump();
+        void* resultPtr = loader->GetLoadModelFunc()(jsonStr.c_str());
+        if (resultPtr == nullptr) throw std::runtime_error("模型加载未返回结果");
+
+        int modelIndex = -1;
+        try {
+            const json resultObject = json::parse(static_cast<const char*>(resultPtr));
+            if (!resultObject.contains("model_index")) {
+                throw std::runtime_error("load model failed: " + resultObject.dump());
+            }
+            modelIndex = resultObject.at("model_index").get<int>();
+        } catch (...) {
+            loader->GetFreeResultFunc()(resultPtr);
+            throw;
+        }
+        loader->GetFreeResultFunc()(resultPtr);
+        if (modelIndex < 0) throw std::runtime_error("模型加载返回的 index 无效");
+        return modelIndex;
+    }
 
     static std::mutex g_flowModelIndexMu;
     static int g_nextSentinelFlowModelIndex = 10000;
@@ -2084,7 +2139,6 @@ namespace dlcv_infer {
 
     void Model::RestoreFlowFromSharedInfo(const json& flowInfo) {
         if (!flowInfo.is_object() || !flowInfo.contains("provider") || !flowInfo.at("provider").is_string() ||
-            !flowInfo.contains("source_path") || !flowInfo.at("source_path").is_string() ||
             !flowInfo.contains("pipeline") || !flowInfo.at("pipeline").is_object() ||
             !flowInfo.contains("model_bindings") || !flowInfo.at("model_bindings").is_array()) {
             throw std::runtime_error("共享流程信息不完整");
@@ -2111,19 +2165,6 @@ namespace dlcv_infer {
             throw std::runtime_error("共享流程模型绑定不完整");
         }
 
-        const std::wstring sourcePath = convertUtf8ToWstring(flowInfo.at("source_path").get<std::string>());
-        std::shared_ptr<const flow::ModelBinaryStore> modelBinaryStore;
-        const bool useMemoryArchive = _dllLoader != nullptr &&
-            _dllLoader->GetLoadModelBinaryFunc() != nullptr;
-        if (useMemoryArchive) {
-            DvsArchiveData archive = ReadDvsArchive(sourcePath);
-            BindPipelineModelBuffers(pipelineRoot, *archive.modelBinaryStore);
-            modelBinaryStore = archive.modelBinaryStore;
-        } else {
-            DvsUnpackResult unpack = UnpackDvsArchiveToTemp(sourcePath, &pipelineRoot);
-            _tempDir = unpack.tempDir;
-            pipelineRoot = unpack.pipelineRoot;
-        }
         for (auto& node : pipelineRoot["nodes"]) {
             if (!node.is_object()) continue;
             const auto binding = modelBindings.find(node.value("id", -1));
@@ -2137,14 +2178,7 @@ namespace dlcv_infer {
         _deviceId = flowInfo.value("device_id", _deviceId);
         _isFlowGraphMode = true;
         _flowModel = new flow::FlowGraphModel();
-        json report;
-        if (modelBinaryStore) {
-            report = _flowModel->LoadFromArchive(pipelineRoot, modelBinaryStore, _deviceId);
-        } else {
-            const std::string pipelinePath = JoinPath(_tempDir, "pipeline.json");
-            WriteUtf8Text(pipelinePath, pipelineRoot.dump());
-            report = _flowModel->Load(pipelinePath, _deviceId);
-        }
+        const json report = _flowModel->LoadFromRoot(pipelineRoot, _deviceId);
         if (report.value("code", 1) != 0) {
             throw std::runtime_error("恢复流程失败: " + report.dump());
         }
@@ -2244,30 +2278,7 @@ namespace dlcv_infer {
             throw std::runtime_error("未检测到授权");
         }
 
-        json config;
-        config["model_path"] = modelPathUtf8;
-        config["device_id"] = device_id;
-
-        std::string jsonStr = config.dump();
-
-        void* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
-        json resultObject = json::parse(resultJson);
-        if (resultObject.contains("model_index"))
-        {
-            modelIndex = resultObject["model_index"].get<int>();
-        } else
-        {
-            _dllLoader->GetFreeResultFunc()(resultPtr);
-            throw std::runtime_error("load model failed: " + resultObject.dump());
-        }
-
-        _dllLoader->GetFreeResultFunc()(resultPtr);
-
-        if (modelIndex >= 0 && OwnModelIndex) {
-            std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
-            g_modelIndexRefCount[_dllLoader][modelIndex]++;
-        }
+        modelIndex = LoadModelIndexByPath(_dllLoader, modelPathUtf8, device_id);
         _ownsNativeModelIndex = modelIndex >= 0;
         _indexReady = _ownsNativeModelIndex;
     }
@@ -2300,30 +2311,7 @@ namespace dlcv_infer {
             throw std::runtime_error("未检测到授权");
         }
 
-        json config;
-        config["model_path"] = modelPathUtf8;
-        config["device_id"] = device_id;
-
-        std::string jsonStr = config.dump();
-
-        void* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
-        json resultObject = json::parse(resultJson);
-        if (resultObject.contains("model_index"))
-        {
-            modelIndex = resultObject["model_index"].get<int>();
-        } else
-        {
-            _dllLoader->GetFreeResultFunc()(resultPtr);
-            throw std::runtime_error("load model failed: " + resultObject.dump());
-        }
-
-        _dllLoader->GetFreeResultFunc()(resultPtr);
-
-        if (modelIndex >= 0 && OwnModelIndex) {
-            std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
-            g_modelIndexRefCount[_dllLoader][modelIndex]++;
-        }
+        modelIndex = LoadModelIndexByPath(_dllLoader, modelPathUtf8, device_id);
         _ownsNativeModelIndex = modelIndex >= 0;
         _indexReady = _ownsNativeModelIndex;
     }
@@ -2368,11 +2356,6 @@ namespace dlcv_infer {
             throw;
         }
         _dllLoader->GetFreeResultFunc()(resultPtr);
-
-        if (modelIndex >= 0 && OwnModelIndex) {
-            std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
-            g_modelIndexRefCount[_dllLoader][modelIndex]++;
-        }
         _ownsNativeModelIndex = modelIndex >= 0;
         _indexReady = _ownsNativeModelIndex;
     }
@@ -2526,81 +2509,49 @@ namespace dlcv_infer {
             return;
         }
 
-        bool shouldFreeUnderlying = false;
-        {
-            std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
-            auto loaderIt = g_modelIndexRefCount.find(_dllLoader);
-            if (loaderIt != g_modelIndexRefCount.end()) {
-                auto indexIt = loaderIt->second.find(modelIndex);
-                if (indexIt != loaderIt->second.end()) {
-                    indexIt->second--;
-                    if (indexIt->second <= 0) {
-                        loaderIt->second.erase(indexIt);
-                        if (loaderIt->second.empty()) {
-                            g_modelIndexRefCount.erase(loaderIt);
-                        }
-                        shouldFreeUnderlying = true;
-                    }
-                } else {
-                    shouldFreeUnderlying = true;
-                }
-            } else {
-                // 防御性处理：计数表中没有记录，但仍然需要释放
-                shouldFreeUnderlying = true;
-            }
+        if (!_dllLoader || !_dllLoader->GetFreeModelFunc() || !_dllLoader->GetFreeResultFunc()) {
+            throw std::runtime_error("DVT模型释放失败：推理DLL缺少释放接口");
         }
 
-        if (shouldFreeUnderlying) {
-            const auto restoreReference = [this]() {
-                std::lock_guard<std::mutex> lock(g_modelIndexRefMu);
-                g_modelIndexRefCount[_dllLoader][modelIndex]++;
-            };
-            if (!_dllLoader || !_dllLoader->GetFreeModelFunc() || !_dllLoader->GetFreeResultFunc()) {
-                restoreReference();
-                throw std::runtime_error("DVT模型释放失败：推理DLL缺少释放接口");
+        json config;
+        config["model_index"] = modelIndex;
+        const std::string jsonStr = config.dump();
+        const auto freeModel = _dllLoader->GetFreeModelFunc();
+        const auto freeResult = _dllLoader->GetFreeResultFunc();
+        void* resultPtr = nullptr;
+        try {
+            resultPtr = freeModel(jsonStr.c_str());
+            if (resultPtr == nullptr) {
+                throw std::runtime_error("DVT模型释放未返回结果");
+            }
+            const std::string resultJson(static_cast<const char*>(resultPtr));
+            const json resultObject = json::parse(resultJson);
+            std::string message = "底层未返回错误说明";
+            if (resultObject.is_object() && resultObject.contains("message")) {
+                const json& messageToken = resultObject.at("message");
+                message = messageToken.is_string() ? messageToken.get<std::string>() : messageToken.dump();
             }
 
-            json config;
-            config["model_index"] = modelIndex;
-            const std::string jsonStr = config.dump();
-            const auto freeModel = _dllLoader->GetFreeModelFunc();
-            const auto freeResult = _dllLoader->GetFreeResultFunc();
-            void* resultPtr = nullptr;
+            if (!resultObject.is_object() || !resultObject.contains("code")) {
+                throw std::runtime_error("DVT模型释放失败：" + message);
+            }
+
+            int code = 0;
             try {
-                resultPtr = freeModel(jsonStr.c_str());
-                if (resultPtr == nullptr) {
-                    throw std::runtime_error("DVT模型释放未返回结果");
-                }
-                const std::string resultJson(static_cast<const char*>(resultPtr));
-                const json resultObject = json::parse(resultJson);
-                std::string message = "底层未返回错误说明";
-                if (resultObject.is_object() && resultObject.contains("message")) {
-                    const json& messageToken = resultObject.at("message");
-                    message = messageToken.is_string() ? messageToken.get<std::string>() : messageToken.dump();
-                }
-
-                if (!resultObject.is_object() || !resultObject.contains("code")) {
-                    throw std::runtime_error("DVT模型释放失败：" + message);
-                }
-
-                int code = 0;
-                try {
-                    code = resultObject.at("code").get<int>();
-                } catch (...) {
-                    throw std::runtime_error("DVT模型释放失败：" + message);
-                }
-                if (code != 0) {
-                    throw std::runtime_error("DVT模型释放失败：" + message);
-                }
+                code = resultObject.at("code").get<int>();
             } catch (...) {
-                if (resultPtr != nullptr) {
-                    freeResult(resultPtr);
-                }
-                restoreReference();
-                throw;
+                throw std::runtime_error("DVT模型释放失败：" + message);
             }
-            freeResult(resultPtr);
+            if (code != 0) {
+                throw std::runtime_error("DVT模型释放失败：" + message);
+            }
+        } catch (...) {
+            if (resultPtr != nullptr) {
+                freeResult(resultPtr);
+            }
+            throw;
         }
+        freeResult(resultPtr);
         _ownsNativeModelIndex = false;
         _indexReady = false;
         modelIndex = -1;
@@ -3247,10 +3198,6 @@ namespace dlcv_infer {
         _dllLoader->GetFreeResultFunc()(resultPtr);
 
         _deviceId = device_id;
-        if (modelIndex >= 0 && OwnModelIndex) {
-            std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
-            g_modelIndexRefCount[_dllLoader][modelIndex]++;
-        }
         _ownsNativeModelIndex = modelIndex >= 0;
         _indexReady = _ownsNativeModelIndex;
     }

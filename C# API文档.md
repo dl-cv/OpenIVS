@@ -126,7 +126,7 @@ public class Model : IDisposable
 3. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
 4. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
 5. 加载完成后可通过 `Loaded` 属性判断状态。
-6. 空构造实例可在设置 `modelIndex` 且设置 `OwnModelIndex=false` 后使用；首次 `GetModelInfo` 或推理时查询 index 类型、增加当前实例的使用记录。流程 index 优先使用共享信息中保存的 `pipeline`，按 `model_bindings` 恢复子模型引用，`source_path` 仅用于读取必需的归档资源。
+6. 空构造实例可在设置 `modelIndex` 且设置 `OwnModelIndex=false` 后使用；首次 `GetModelInfo` 或推理时查询 index 类型、增加当前实例的使用记录。流程 index 使用共享信息中保存的 `pipeline`，按 `model_bindings` 恢复子模型引用；`source_path` 只保存原始来源信息，按 index 恢复时不读取该路径。
 
 ### 3.2 属性
 
@@ -278,10 +278,10 @@ public class DvsModel : FlowGraphModel
 **`Load` 行为**：
 1. 打开 `.dvst`/`.dvso` 文件，校验头部 `DV\n`。
 2. 读取 JSON 头行，解析 `file_list` 和 `file_size` 数组。
-3. 将 `pipeline.json` 和归档内子模型二进制读入内存。
+3. 将 `pipeline.json` 和归档内子模型二进制读入内存，不写入模型文件；同名成员内容完全相同时保留第一份并复用，内容不同时抛出 `InvalidDataException`。
 4. 根据模型节点建立内存模型来源表，保留 `model_path_original` 和 `model_name`，通过 `dlcv_load_model_binary` 加载每个唯一子模型。
 5. 调用带内存模型来源表的 `LoadFromRoot` 完成加载；`FlowGraphModel` 持有节点对应的模型对象，推理期间按 index 复用。
-6. 不创建模型临时文件；推理组件不提供内存加载接口时直接返回不支持错误。
+6. 加载期间不创建模型临时文件；推理组件不提供内存加载接口时直接返回不支持错误。
 
 `LoadFromModelBindings` 用于恢复共享流程：使用 `savedPipeline` 作为流程定义，按 `node_id` 把 `modelBindings` 写入模型节点的 `model_index`，不再按子模型路径加载。当前实现不读取 `sourcePath`。`GetRegistrationPipeline()` 返回注册时使用的原始流程 JSON，`GetModelBindings()` 返回 `[{node_id, model_index}]`。
 
