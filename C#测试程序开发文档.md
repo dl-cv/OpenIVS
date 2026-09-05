@@ -7,7 +7,7 @@
 - **软件名称**：`C# 测试程序`（主窗体标题与程序集名称一致）
 - **项目/模块**：`DlcvDemo`（WinForms Demo）
 - **DLCV SDK**：本 Demo 依赖的推理能力提供方（包含 `dlcv_infer_csharp`、`DlcvModules` 等）
-- **模型文件**：深度视觉模型，扩展名包含 `.dvt/.dvo/.dvp/.dvst/.dvso/.dvsp`
+- **模型文件**：深度视觉模型，扩展名包含 `.dvt/.dvo/.dvp/.dvst/.dvso`
 
 ### 2. 运行环境与依赖（必须满足）
 
@@ -92,7 +92,7 @@
 
 - `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`。省略 `--calc-mean` 时不发送该字段，流程模型继续使用节点中保存的配置。
 - `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
-- 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso`/`.dvsp` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
+- 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
 - `--calc-mean=true` 时，结构化与 JSON 摘要包含 `with_mean`、`foreground_mean`、`background_mean`，并通过 `mean_check_passed` 检查带掩码结果是否包含均值及两种结果的一致性；普通检测结果不参与均值检查，两条结果均为空时该检查通过。
 - 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
@@ -262,7 +262,7 @@
 - **文件选择对话框**：
   - 标题：`选择模型`
   - 过滤器：
-    - `深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*`
+    - `深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*`
   - 初始目录/默认文件名：
     - 尝试从 `LastModelPath` 提取（异常忽略）
 - **路径与编码约定（避免中文路径踩坑）**：
@@ -277,7 +277,8 @@
   - 创建新模型实例（等价行为即可）：`new Model(path, deviceId, rpc_mode)`
   - **模式说明（需保持一致）**：
     - 模型后缀为 `.dvp`：走 DVP 模式（HTTP 后端服务），`RPC模式` 勾选不影响行为
-    - 模型后缀为 `.dvst/.dvso/.dvsp`：走 DVS 模式，`RPC模式` 勾选不影响行为
+    - 模型后缀为 `.dvst/.dvso`：走 DVS 模式，`RPC模式` 勾选不影响行为
+    - 模型后缀为 `.dvsp`：显示不支持错误，不保存为最近模型
     - 其他（如 `.dvt/.dvo`）：默认走本地 DLL 推理；若勾选 `RPC模式`，则使用本地 RPC 服务（依赖 `AIModelRPC.exe`）
   - 加载成功后自动执行一次“获取模型信息”（同 7.4）
 - **异常**：
@@ -483,7 +484,7 @@
   - 若 GPU 枚举失败，`richTextBox1` 必须出现 `GPU信息获取失败：`
 
 - **加载模型**
-  - 选择 `.dvt/.dvo/.dvp/.dvst/.dvso/.dvsp` 任一文件均可尝试加载
+  - 选择 `.dvt/.dvo/.dvp/.dvst/.dvso` 任一文件均可尝试加载
   - 加载完成后点击/自动触发“获取模型信息”可在文本框看到 JSON（或摘要）
 
 - **打开图片推理**

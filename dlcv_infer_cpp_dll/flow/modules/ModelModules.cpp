@@ -110,6 +110,15 @@ bool ModelPool::RetainByKey(const std::string& key) {
     return true;
 }
 
+std::shared_ptr<dlcv_infer::Model> ModelPool::AcquireByKey(const std::string& key) {
+    if (key.empty()) return nullptr;
+    std::lock_guard<std::mutex> lk(_mu);
+    auto it = _cache.find(key);
+    if (it == _cache.end() || !it->second.model) return nullptr;
+    ++it->second.refCount;
+    return it->second.model;
+}
+
 void ModelPool::Release(const std::string& modelPathUtf8, int deviceId) {
     if (modelPathUtf8.empty()) return;
     const std::string key = ModelPool::MakeKey(modelPathUtf8, deviceId);
@@ -131,9 +140,13 @@ void ModelPool::ReleaseByKey(const std::string& key) {
     }
 }
 
-void ModelPool::Clear() {
+void ModelPool::ClearForFreeAllModels() {
     std::lock_guard<std::mutex> lk(_mu);
     _cache.clear();
+}
+
+void ModelPool::Clear() {
+    ClearForFreeAllModels();
 }
 
 static std::string GetFileNameOnlyLocal(const std::string& path) {
@@ -154,6 +167,25 @@ void BaseModelModule::LoadModel() {
     } catch (...) {}
 
     _resolvedDeviceId = deviceId;
+    if (_usesModelIndex) {
+        if (Context != nullptr) {
+            const auto boundModels = Context->Get<std::shared_ptr<const BoundModelMap>>(
+                "bound_models_by_index", std::shared_ptr<const BoundModelMap>());
+            if (boundModels) {
+                const auto it = boundModels->find(_modelIndex);
+                if (it != boundModels->end() && it->second) {
+                    _model = it->second;
+                    return;
+                }
+            }
+        }
+
+        _model = std::make_shared<dlcv_infer::Model>();
+        _model->modelIndex = _modelIndex;
+        _model->OwnModelIndex = false;
+        (void)_model->GetModelInfo();
+        return;
+    }
     if (!_modelBufferKey.empty()) {
         if (Context == nullptr) {
             throw std::runtime_error("流程模型缺少执行上下文");

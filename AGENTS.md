@@ -39,7 +39,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 | 关注点 | 文件 | 说明 |
 |--------|------|------|
-| C++ API 头文件 | `dlcv_infer_cpp_dll/dlcv_infer.h` | `Model`、`SlidingWindowModel`、`Utils`、`DllLoader`、`GetAllDogInfo` |
+| C++ API 头文件 | `dlcv_infer_cpp_dll/dlcv_infer.h` | `Model`、`Utils`、`DllLoader`、`GetAllDogInfo` |
 | C++ API 实现 | `dlcv_infer_cpp_dll/dlcv_infer.cpp` | 模型加载、推理、DVS 解包、结果解析 |
 | C++ 加密狗 | `dlcv_infer_cpp_dll/dlcv_sntl_admin.cpp` | Sentinel/Virbox 设备与 feature 查询 |
 | C++ 流程图 | `dlcv_infer_cpp_dll/flow/FlowGraphModel.h` | `FlowGraphModel` 类 |
@@ -47,7 +47,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | C# 工具类 | `DlcvCsharpApi/Utils.cs` | 结果类型、编码转换、DLL 释放 |
 | C# DLL 加载器 | `DlcvCsharpApi/DllLoader.cs` | 加密狗自动检测、DLL 路径解析、函数代理 |
 | C# 流程图 | `DlcvCsharpApi/flow/FlowGraphModel.cs` | `FlowGraphModel`：加载、推理、JSON 输出 |
-| C# DVS 模型 | `DlcvCsharpApi/flow/DvsModel.cs` | `.dvst/.dvso/.dvsp` 归档解包与加载 |
+| C# DVS 模型 | `DlcvCsharpApi/flow/DvsModel.cs` | `.dvst/.dvso` 归档解包与加载 |
 | C# 结果类型 | `DlcvCsharpApi/DataTypes.cs` | `CSharpObjectResult`、`CSharpSampleResult`、`CSharpResult` |
 | C# 加密狗工具 | `DlcvCsharpApi/sntl_admin_csharp.cs` | `DogUtils`、`DogProvider` |
 | C++ 图像输入 | `dlcv_infer_cpp_dll/ImageInputUtils.h` | 图像预处理与格式转换 |
@@ -86,14 +86,24 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 1. **普通模型文件**：`.dvt`、`.dvo`。由 `Model` 直接加载，适合单模型推理。
 2. **流程模型文件**：`.dvst`、`.dvso`。由 `FlowGraphModel` 或 `DvsModel` 加载，适合把多步处理组织成一条完整流程。
 
+`.dvsp` 不进入 C# 或 C++ 推理模式，模型接口直接返回不支持错误，测试程序的模型选择窗口不显示该后缀。
+
+C# 与 C++ API 不提供 `SlidingWindowModel`。需要滑窗处理时，使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
+
+同一个 `.dvst/.dvso` 内的全部模型节点必须属于同一 provider，不支持在一个流程内混用 Sentinel 与 Virbox。无模型节点流程优先复用当前 loader；没有当前 loader 时直接使用 Sentinel，不执行双 provider 探测。
+
 调用端不需要为这两类模型准备两套完全不同的调用方式。传入模型路径、设备和请求参数后，入口对象会完成对应的加载与执行。
 
-**model_index 分配约定**（避免普通模型与流程模型在同一张索引表中撞键）：
+**model_index 分配规则**：
 
-- **普通模型（`.dvt`/`.dvo`）**：`model_index` 由底层 `dlcv_infer` 在加载时返回，从 `0` 起递增。
-- **流程模型（`.dvst`/`.dvso`/`.dvsp`）**：`model_index` 由 `dlcv_infer_cpp_dll` / `DlcvCsharpApi` 自管理，从 `10000` 起递增，与底层索引分区。
+| provider | 类型 | 索引范围 |
+|---|---|---|
+| Sentinel | 普通模型 | `0～9999` |
+| Sentinel | 流程 | `10000～19999` |
+| Virbox | 普通模型 | `20000～29999` |
+| Virbox | 流程 | `30000～39999` |
 
-C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索引模型；两类索引分区后，流程模型不会与任何 `index < 10000` 的普通模型互相覆盖，也允许同时加载多个流程模型。
+普通模型索引由底层 `dlcv_infer` 加载接口返回。流程由 C# 或 C++ 完成解析和子模型加载；推理 DLL 提供完整共享接口时，向底层注册流程 JSON 并使用底层返回的流程索引；旧 DLL 缺少共享接口时使用本地流程索引，原有加载和推理行为保持不变。每段索引独立递增，不复用已释放索引。
 
 ## API 速查表
 
@@ -102,7 +112,6 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 | 能力 | 类/函数 | 关键接口 |
 |------|---------|----------|
 | 普通模型 | `dlcv_infer::Model` | 构造（`std::string`/`std::wstring` + `device_id`）、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetModelInfo()`、`FreeModel()` |
-| 滑动窗口模型 | `dlcv_infer::SlidingWindowModel` | 继承 `Model`，构造参数含 `small_img_width/height`、`horizontal/vertical_overlap`、`threshold`、`iou_threshold`、`combine_ios_threshold` |
 | 工具类 | `dlcv_infer::Utils` | `FreeAllModels()`、`GetDeviceInfo()`、`GetGpuInfo()`、`KeepMaxClock()`、`OcrInfer()`、`JsonToString()` |
 | DLL 加载器 | `dlcv_infer::DllLoader` | `Instance()`、`EnsureForModel()`、`GetDogProvider()` |
 | 流程图模型 | `dlcv_infer::flow::FlowGraphModel` | `Load()`、`InferInternal()`、`GetModelInfo()` |
@@ -155,7 +164,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | None / Unknown | 不加载 | — |
 
-自动检测优先级：先检测 Sentinel，再检测 Virbox；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。每个 `Model` 实例在加载时绑定自己的 `_dllLoader`，后续所有操作都走该 loader。
+模型头包含 `dog_provider` 时直接加载对应 DLL，不查询加密狗，也不检查另一种 provider。模型头没有 `dog_provider` 时，自动检测优先级为 Sentinel、Virbox；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。每个 `Model` 实例在加载时保存自己的 loader，后续所有操作都走该 loader。共享 index 解析只返回 index 所属 loader，不修改默认 loader；C# 普通模型缓存同时保存 index 和加载时 loader。
 
 ## 输入图像处理约定
 
@@ -257,7 +266,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 
 | 能力 | 说明 |
 | --- | --- |
-| `Load()` | 读取流程 JSON，并预加载所有 `model/*` 节点 |
+| `Load()` | 读取流程 JSON，并预加载所有 `model/*` 节点；共享流程按子模型 index 保存已绑定模型供后续推理复用 |
 | `GetModelInfo()` | 返回流程根对象及流程元信息 |
 | `GetLoadedModelMeta()` | 返回流程中每个模型节点的加载信息 |
 | `Infer()` / `InferBatch()` | 返回标准结构化结果 |
@@ -275,7 +284,7 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 
 ### `DvsModel`
 
-`DvsModel` 负责把 `.dvst`、`.dvso`、`.dvsp` 归档文件变成可直接执行的流程对象。对调用方来说，它的外部行为与 `FlowGraphModel` 一样，区别只在于加载入口是一个归档文件。
+`DvsModel` 负责把 `.dvst`、`.dvso` 归档文件变成可直接执行的流程对象。对调用方来说，它的外部行为与 `FlowGraphModel` 一样，区别只在于加载入口是一个归档文件。
 
 归档加载过程：
 1. 检查文件头是否为 `DV\n`。
@@ -428,6 +437,13 @@ C API 封装层（`dlcv_infer_c_dll`）以 `model_index` 作为全局表键索�
 - **底层推理引擎**：`dlcv_infer` 是 OpenIVS API 层的底层依赖。OpenIVS 的 C++ API（`dlcv_infer_cpp_dll`）和 C# API（`DlcvCsharpApi`）均通过加载 `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）调用推理能力。
 - **加密模型文件**：`dlcv_deploy` 产出的 `.dvt`/`.dvo`/`.dvst`/`.dvso` 等文件是 OpenIVS 测试程序与 WPF 框架的输入。
 - **接口边界**：OpenIVS 不解密模型包内 `dlcv.json` 来选择 provider；`DllLoader` 只读取模型包 `header_json.dog_provider`，Sentinel 使用 `dlcv_infer.dll`，Virbox 使用 `dlcv_infer_v.dll`。
+
+### 双 DLL 运行事实
+
+- `dlcv_infer.dll` 与 `dlcv_infer_v.dll` 来自同一套推理实现，推理能力相同。两个对应加密狗同时存在时，任一 DLL 均可加载两种加密模型，不得把“选到另一 provider DLL”表述为模型不兼容或加载错误。
+- 按模型头选择 provider 的目的是避免在缺少对应加密狗时调用错误 DLL；这种调用可能使加密狗服务长时间无响应。
+- 两个文件名不同的 DLL 同时加载后处于同一进程地址空间，但属于两个独立 Windows 模块实例，各自保存模块静态数据和模型表。相同实现不代表模型表共享。
+- `FreeAllModels()` 需要分别调用进程内已经加载的两个模块。实测单独调用 Sentinel 模块后，仅 Sentinel index 从模型类型变为不存在，Virbox index 保持不变。
 
 ## 运行验证方式
 

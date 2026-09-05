@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <memory>
 #include <mutex>
@@ -14,6 +14,7 @@
 namespace dlcv_infer {
 namespace flow {
 
+using BoundModelMap = std::unordered_map<int, std::shared_ptr<dlcv_infer::Model>>;
 struct ModelBinaryStore final {
     uint64_t StoreId = 0;
     std::unordered_map<std::string, std::shared_ptr<const std::vector<unsigned char>>> Buffers;
@@ -41,6 +42,7 @@ public:
         int deviceId);
 
     bool RetainByKey(const std::string& key);
+    std::shared_ptr<dlcv_infer::Model> AcquireByKey(const std::string& key);
 
     /// 释放一个引用。refCount 减 1；归零时从缓存移除。
     /// 若 key 不存在，无操作。
@@ -48,6 +50,9 @@ public:
 
     /// 通过 key 释放引用（避免调用方重复拼接/解析）。
     void ReleaseByKey(const std::string& key);
+
+    /// 全量释放底层模型前清空缓存，后续加载会重新创建模型对象。
+    void ClearForFreeAllModels();
 
     [[deprecated("Use Acquire/Release instead")]]
     void Clear();
@@ -72,6 +77,8 @@ private:
 class BaseModelModule : public BaseModule {
 protected:
     std::string _modelPathUtf8;
+    int _modelIndex = -1;
+    bool _usesModelIndex = false;
     std::string _modelBufferKey;
     std::string _modelPoolKey;
     int _deviceId = 0;
@@ -85,6 +92,8 @@ public:
                     ExecutionContext* context = nullptr)
         : BaseModule(nodeId, title, properties, context) {
         _modelPathUtf8 = ReadString("model_path", std::string());
+        _modelIndex = ReadInt("model_index", -1);
+        _usesModelIndex = _modelIndex >= 0;
         _modelBufferKey = ReadString("model_buffer_key", std::string());
         _deviceId = ReadInt("device_id", 0);
         _resolvedDeviceId = _deviceId;
@@ -97,6 +106,7 @@ public:
     }
 
     void LoadModel() override;
+    int GetLoadedModelIndex() const { return _model ? _model->modelIndex : -1; }
 
     const std::string& ModelPathUtf8() const { return _modelPathUtf8; }
     int ResolvedDeviceId() const { return _resolvedDeviceId; }

@@ -47,6 +47,34 @@ namespace dlcv_infer_csharp
         public FreeAllModelsDelegate dlcv_free_all_models;
 
         [UnmanagedFunctionPointer(calling_method)]
+        public delegate int GetIndexTypeDelegate(int index);
+        public GetIndexTypeDelegate dlcv_get_index_type_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate IntPtr GetModelInfoByIndexDelegate(int index);
+        public GetModelInfoByIndexDelegate dlcv_get_model_info_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate int RegisterFlowDelegate(IntPtr flowJsonUtf8);
+        public RegisterFlowDelegate dlcv_register_flow_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate IntPtr GetFlowInfoDelegate(int index);
+        public GetFlowInfoDelegate dlcv_get_flow_info_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate int FreeFlowDelegate(int index);
+        public FreeFlowDelegate dlcv_free_flow_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate int BindIndexDelegate(int index);
+        public BindIndexDelegate dlcv_bind_index_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate int UnbindIndexDelegate(int index);
+        public UnbindIndexDelegate dlcv_unbind_index_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
         public delegate IntPtr GetDeviceInfo();
         public GetDeviceInfo dlcv_get_device_info;
 
@@ -59,49 +87,54 @@ namespace dlcv_infer_csharp
         public KeepMaxClock dlcv_keep_max_clock;
 
         private static DllLoader _instance;
+        private static readonly Dictionary<DogProvider, DllLoader> _loaders =
+            new Dictionary<DogProvider, DllLoader>();
         private static readonly object _lock = new object();
 
         public DogProvider LoadedDogProvider { get; private set; }
         public string LoadedNativeDllName { get; private set; }
+        internal bool SupportsSharedFlowIndex
+        {
+            get
+            {
+                return dlcv_get_index_type_c != null &&
+                       dlcv_register_flow_c != null &&
+                       dlcv_get_flow_info_c != null &&
+                       dlcv_free_flow_c != null &&
+                       dlcv_bind_index_c != null &&
+                       dlcv_unbind_index_c != null;
+            }
+        }
 
         public static DllLoader Instance
         {
             get
             {
-                if (_instance == null)
+                lock (_lock)
                 {
-                    lock (_lock)
-                    {
-                        if (_instance == null)
-                            _instance = CreateLoader(AutoDetectProvider());
-                    }
+                    if (_instance == null)
+                        _instance = GetOrCreateLoaderLocked(AutoDetectProvider());
+                    return _instance;
                 }
-                return _instance;
             }
         }
 
         public static void EnsureForModel(string modelPath)
         {
+            GetForModel(modelPath);
+        }
+
+        internal static DllLoader GetForModel(string modelPath)
+        {
             DogProvider? needed = ResolveProviderFromHeader(modelPath);
-            if (!needed.HasValue) return;
-            if (_instance != null && _instance.LoadedDogProvider == needed.Value) return;
+            if (!needed.HasValue)
+                return Instance;
+
             lock (_lock)
             {
-                if (_instance != null && _instance.LoadedDogProvider == needed.Value) return;
-
-                List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
-                if (!availableProviders.Contains(needed.Value))
-                {
-                    if (availableProviders.Count == 0)
-                    {
-                        throw new Exception("未检测到授权");
-                    }
-                    string current = FormatProviderNames(availableProviders);
-                    string neededName = ProviderToDisplayName(needed.Value);
-                    throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
-                }
-
-                _instance = CreateLoader(needed.Value);
+                ValidateProviderAvailability(needed.Value);
+                _instance = GetOrCreateLoaderLocked(needed.Value);
+                return _instance;
             }
         }
 
@@ -109,36 +142,33 @@ namespace dlcv_infer_csharp
         {
             DogProvider? needed = ResolveProviderFromHeader(modelData, modelName);
             if (!needed.HasValue)
-            {
                 return Instance;
-            }
-
-            if (_instance != null && _instance.LoadedDogProvider == needed.Value)
-            {
-                return _instance;
-            }
 
             lock (_lock)
             {
-                if (_instance != null && _instance.LoadedDogProvider == needed.Value)
-                {
-                    return _instance;
-                }
-
-                List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
-                if (!availableProviders.Contains(needed.Value))
-                {
-                    if (availableProviders.Count == 0)
-                    {
-                        throw new Exception("未检测到授权");
-                    }
-                    string current = FormatProviderNames(availableProviders);
-                    string neededName = ProviderToDisplayName(needed.Value);
-                    throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
-                }
-
-                _instance = CreateLoader(needed.Value);
+                ValidateProviderAvailability(needed.Value);
+                _instance = GetOrCreateLoaderLocked(needed.Value);
                 return _instance;
+            }
+        }
+
+        internal static DllLoader GetExistingOrDefaultSentinel()
+        {
+            lock (_lock)
+            {
+                if (_instance != null)
+                    return _instance;
+
+                _instance = GetOrCreateLoaderLocked(DogProvider.Sentinel);
+                return _instance;
+            }
+        }
+
+        internal static List<DllLoader> GetLoadedLoaders()
+        {
+            lock (_lock)
+            {
+                return new List<DllLoader>(_loaders.Values);
             }
         }
 
@@ -171,6 +201,189 @@ namespace dlcv_infer_csharp
                 sb.Append(ProviderToDisplayName(providers[i]));
             }
             return sb.ToString();
+        }
+
+        public static DllLoader ResolveForIndex(int index, out string indexType)
+        {
+            DogProvider provider = GetSharedIndexRoute(index, out indexType);
+            DllLoader loader;
+            lock (_lock)
+            {
+                loader = GetOrCreateLoaderLocked(provider);
+            }
+            loader.EnsureSharedIndexSupport(indexType);
+            return loader;
+        }
+
+        public static DogProvider GetSharedIndexRoute(int index, out string indexType)
+        {
+            if (index >= 0 && index < 10000)
+            {
+                indexType = "model";
+                return DogProvider.Sentinel;
+            }
+            if (index >= 10000 && index < 20000)
+            {
+                indexType = "flow";
+                return DogProvider.Sentinel;
+            }
+            if (index >= 20000 && index < 30000)
+            {
+                indexType = "model";
+                return DogProvider.Virbox;
+            }
+            if (index >= 30000 && index < 40000)
+            {
+                indexType = "flow";
+                return DogProvider.Virbox;
+            }
+
+            throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 不在支持范围内: " + index);
+        }
+
+        private void EnsureSharedIndexSupport(string indexType)
+        {
+            var missing = new List<string>();
+            if (dlcv_get_index_type_c == null) missing.Add("dlcv_get_index_type_c");
+            if (dlcv_bind_index_c == null) missing.Add("dlcv_bind_index_c");
+            if (dlcv_unbind_index_c == null) missing.Add("dlcv_unbind_index_c");
+            if (string.Equals(indexType, "model", StringComparison.Ordinal) && dlcv_get_model_info_c == null)
+                missing.Add("dlcv_get_model_info_c");
+            if (string.Equals(indexType, "flow", StringComparison.Ordinal) && dlcv_get_flow_info_c == null)
+                missing.Add("dlcv_get_flow_info_c");
+            if (missing.Count > 0)
+            {
+                throw new NotSupportedException(
+                    "当前 dlcv_infer 不支持外部共享 index，缺少接口: " + string.Join(", ", missing));
+            }
+        }
+
+        public int GetIndexType(int index)
+        {
+            EnsureDelegate(dlcv_get_index_type_c, "dlcv_get_index_type_c");
+            return dlcv_get_index_type_c(index);
+        }
+
+        public JObject GetModelInfoByIndex(int index)
+        {
+            return InvokeJson(() =>
+            {
+                EnsureDelegate(dlcv_get_model_info_c, "dlcv_get_model_info_c");
+                return dlcv_get_model_info_c(index);
+            }, "获取模型信息");
+        }
+
+        public int RegisterFlow(string flowJson)
+        {
+            if (flowJson == null)
+                throw new ArgumentNullException(nameof(flowJson));
+            EnsureDelegate(dlcv_register_flow_c, "dlcv_register_flow_c");
+            return InvokeUtf8(flowJson, dlcv_register_flow_c);
+        }
+
+        public JObject GetFlowInfo(int index)
+        {
+            return InvokeJson(() =>
+            {
+                EnsureDelegate(dlcv_get_flow_info_c, "dlcv_get_flow_info_c");
+                return dlcv_get_flow_info_c(index);
+            }, "获取流程信息");
+        }
+
+        public int FreeFlow(int index)
+        {
+            EnsureDelegate(dlcv_free_flow_c, "dlcv_free_flow_c");
+            return dlcv_free_flow_c(index);
+        }
+
+        public int BindIndex(int index)
+        {
+            EnsureDelegate(dlcv_bind_index_c, "dlcv_bind_index_c");
+            return dlcv_bind_index_c(index);
+        }
+
+        public int UnbindIndex(int index)
+        {
+            EnsureDelegate(dlcv_unbind_index_c, "dlcv_unbind_index_c");
+            return dlcv_unbind_index_c(index);
+        }
+
+        private delegate IntPtr JsonCall();
+
+        private JObject InvokeJson(JsonCall call, string operation)
+        {
+            IntPtr resultPtr = call();
+            if (resultPtr == IntPtr.Zero)
+                throw new Exception(operation + "失败：返回结果为空");
+
+            try
+            {
+                string json = ReadUtf8String(resultPtr);
+                if (string.IsNullOrWhiteSpace(json))
+                    throw new Exception(operation + "失败：返回 JSON 为空");
+                return JObject.Parse(json);
+            }
+            finally
+            {
+                if (dlcv_free_result == null)
+                    throw new MissingMethodException("未找到 dlcv_free_result");
+                dlcv_free_result(resultPtr);
+            }
+        }
+
+        private static int InvokeUtf8(string value, RegisterFlowDelegate call)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value + "\0");
+            GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+            try
+            {
+                return call(handle.AddrOfPinnedObject());
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
+        private static string ReadUtf8String(IntPtr value)
+        {
+            int length = 0;
+            while (Marshal.ReadByte(value, length) != 0)
+                length++;
+            byte[] bytes = new byte[length];
+            Marshal.Copy(value, bytes, 0, length);
+            return Encoding.UTF8.GetString(bytes);
+        }
+
+        private static void EnsureDelegate(Delegate value, string name)
+        {
+            if (value == null)
+                throw new MissingMethodException("未找到 " + name);
+        }
+
+        private static DllLoader GetOrCreateLoaderLocked(DogProvider provider)
+        {
+            DllLoader loader;
+            if (_loaders.TryGetValue(provider, out loader))
+                return loader;
+
+            loader = CreateLoader(provider);
+            _loaders.Add(provider, loader);
+            return loader;
+        }
+
+        private static void ValidateProviderAvailability(DogProvider needed)
+        {
+            List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
+            if (availableProviders.Contains(needed))
+                return;
+
+            if (availableProviders.Count == 0)
+                throw new Exception("未检测到授权");
+
+            string current = FormatProviderNames(availableProviders);
+            string neededName = ProviderToDisplayName(needed);
+            throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
         }
 
         private static DllLoader CreateLoader(DogProvider provider)
@@ -220,7 +433,9 @@ namespace dlcv_infer_csharp
             string ext = Path.GetExtension(modelPath).ToLower();
             if (ext == ".dvp")
                 throw new NotSupportedException("DVP 模式不通过 header 解析 provider");
-            if (ext == ".dvst" || ext == ".dvso" || ext == ".dvsp")
+            if (ext == ".dvsp")
+                throw new NotSupportedException("不支持 .dvsp 模型推理");
+            if (ext == ".dvst" || ext == ".dvso")
                 throw new NotSupportedException("DVS 模式在子模型加载时解析 header provider");
 
             using (var fs = new FileStream(modelPath, FileMode.Open, FileAccess.Read))
@@ -297,6 +512,13 @@ namespace dlcv_infer_csharp
             dlcv_free_model_result = GetDelegate<FreeModelResultDelegate>(hModule, "dlcv_free_model_result");
             dlcv_free_result = GetDelegate<FreeResultDelegate>(hModule, "dlcv_free_result");
             dlcv_free_all_models = GetDelegate<FreeAllModelsDelegate>(hModule, "dlcv_free_all_models");
+            dlcv_get_index_type_c = GetDelegate<GetIndexTypeDelegate>(hModule, "dlcv_get_index_type_c");
+            dlcv_get_model_info_c = GetDelegate<GetModelInfoByIndexDelegate>(hModule, "dlcv_get_model_info_c");
+            dlcv_register_flow_c = GetDelegate<RegisterFlowDelegate>(hModule, "dlcv_register_flow_c");
+            dlcv_get_flow_info_c = GetDelegate<GetFlowInfoDelegate>(hModule, "dlcv_get_flow_info_c");
+            dlcv_free_flow_c = GetDelegate<FreeFlowDelegate>(hModule, "dlcv_free_flow_c");
+            dlcv_bind_index_c = GetDelegate<BindIndexDelegate>(hModule, "dlcv_bind_index_c");
+            dlcv_unbind_index_c = GetDelegate<UnbindIndexDelegate>(hModule, "dlcv_unbind_index_c");
             IntPtr gpuInfoPtr = GetProcAddress(hModule, "dlcv_get_gpu_info");
             dlcv_get_gpu_info = gpuInfoPtr != IntPtr.Zero ? (GetGpuInfo)Marshal.GetDelegateForFunctionPointer(gpuInfoPtr, typeof(GetGpuInfo)) : null;
             IntPtr devInfoPtr = GetProcAddress(hModule, "dlcv_get_device_info");

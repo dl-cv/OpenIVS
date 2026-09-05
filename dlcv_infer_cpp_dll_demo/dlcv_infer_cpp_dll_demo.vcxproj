@@ -215,6 +215,17 @@
            Text="未找到 dlcvpro_infer JSON 头文件。请确保设置 DLCVPRO_INFER_INCLUDE，或提供 third_party\dlcvpro_infer\include。" />
   </Target>
 
+  <Target Name="CopyDlcvInferCppDll" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
+    <PropertyGroup>
+      <DlcvInferCppDllRuntimePath>$([System.IO.Path]::GetFullPath('$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\dlcv_infer_cpp_dll.dll'))</DlcvInferCppDllRuntimePath>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(DlcvInferCppDllRuntimePath)')"
+           Text="未找到本次构建的 dlcv_infer_cpp_dll.dll：$(DlcvInferCppDllRuntimePath)" />
+    <Copy SourceFiles="$(DlcvInferCppDllRuntimePath)"
+          DestinationFolder="$(TargetDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

@@ -231,7 +231,7 @@ namespace DlcvDemo
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
-        private bool isCurrentFlowModel = false; // 当前是否为流程模型(dvst/dvso/dvsp)
+        private bool isCurrentFlowModel = false; // 当前是否为流程模型(dvst/dvso)
 
         private void DisposeCurrentModel()
         {
@@ -256,7 +256,7 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
+            openFileDialog.Filter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*";
             openFileDialog.Title = "选择模型";
             try
             {
@@ -283,16 +283,17 @@ namespace DlcvDemo
 
         private void LoadModelFromPath(string selectedFilePath, int? deviceOverride, bool saveLastPath)
         {
+            string ext = Path.GetExtension(selectedFilePath) ?? "";
+            if (ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException("不支持 .dvsp 模型推理");
             if (saveLastPath)
             {
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
                 Properties.Settings.Default.Save();
             }
-            string ext = Path.GetExtension(selectedFilePath) ?? "";
             isCurrentFlowModel =
                 ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase) ||
-                ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase) ||
-                ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase);
+                ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase);
             if (model != null)
             {
                 DisposeCurrentModel();

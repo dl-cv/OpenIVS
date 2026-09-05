@@ -573,6 +573,7 @@ void FlowGraphModel::ReleaseOwnedModelsNoexcept() {
         }
     } catch (...) {}
     _acquiredModelKeys.clear();
+    _boundModelsByIndex.reset();
 }
 
 FlowGraphModel::~FlowGraphModel() {
@@ -585,6 +586,7 @@ FlowGraphModel::~FlowGraphModel() {
     _deviceId = 0;
     _flowJsonPath.clear();
     _acquiredModelKeys.clear();
+    _boundModelsByIndex.reset();
 }
 
 FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
@@ -595,6 +597,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
     _acquiredModelKeys = std::move(other._acquiredModelKeys);
+    _boundModelsByIndex = std::move(other._boundModelsByIndex);
     TransferFlowBinaryStoreNoexcept(this, &other);
 
     // moved-from：不再负责释放
@@ -605,6 +608,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     other._deviceId = 0;
     other._flowJsonPath.clear();
     other._acquiredModelKeys.clear();
+    other._boundModelsByIndex.reset();
 }
 
 FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
@@ -620,6 +624,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
     _acquiredModelKeys = std::move(other._acquiredModelKeys);
+    _boundModelsByIndex = std::move(other._boundModelsByIndex);
     TransferFlowBinaryStoreNoexcept(this, &other);
 
     other._nodes.clear();
@@ -629,6 +634,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     other._deviceId = 0;
     other._flowJsonPath.clear();
     other._acquiredModelKeys.clear();
+    other._boundModelsByIndex.reset();
 
     return *this;
 }
@@ -669,9 +675,44 @@ Json FlowGraphModel::LoadFromRoot(
     _root = root;
     _deviceId = deviceId;
 
+    _boundModelsByIndex = std::make_shared<BoundModelMap>();
+    for (const auto& node : _nodes) {
+        if (!node.is_object()) continue;
+
+        std::string type;
+        try {
+            if (node.contains("type") && node.at("type").is_string()) {
+                type = node.at("type").get<std::string>();
+            }
+        } catch (...) {}
+        if (type.rfind("model/", 0) != 0) continue;
+
+        int modelIndex = -1;
+        try {
+            if (node.contains("properties") && node.at("properties").is_object()) {
+                const auto& props = node.at("properties");
+                if (props.contains("model_index") && props.at("model_index").is_number_integer()) {
+                    modelIndex = props.at("model_index").get<int>();
+                }
+            }
+        } catch (...) {
+            modelIndex = -1;
+        }
+        if (modelIndex < 0 || _boundModelsByIndex->find(modelIndex) != _boundModelsByIndex->end()) {
+            continue;
+        }
+
+        auto model = std::make_shared<dlcv_infer::Model>();
+        model->modelIndex = modelIndex;
+        model->OwnModelIndex = false;
+        (void)model->GetModelInfo();
+        _boundModelsByIndex->emplace(modelIndex, std::move(model));
+    }
+
+    ExecutionContext ctx;
+    ctx.Set<int>("device_id", deviceId);
+    ctx.Set<std::shared_ptr<const BoundModelMap>>("bound_models_by_index", _boundModelsByIndex);
     try {
-        ExecutionContext ctx;
-        ctx.Set<int>("device_id", deviceId);
         if (modelBinaryStore) {
             ctx.Set<std::shared_ptr<const ModelBinaryStore>>(
                 "model_binary_store", modelBinaryStore);
@@ -729,21 +770,38 @@ Json FlowGraphModel::LoadFromRoot(
     // 使用预加载阶段生成的模型池 key 保留模型引用。
     for (const auto& item : _loadedModelMeta) {
         if (!IsModelMeta(item)) continue;
+        int modelIndex = -1;
+        try {
+            if (item.contains("model_index"))
+                modelIndex = ReadIntField(item, "model_index", -1);
+        } catch (...) {}
         std::string key;
         try {
             if (item.contains("model_pool_key") && item.at("model_pool_key").is_string()) {
                 key = item.at("model_pool_key").get<std::string>();
             }
         } catch (...) {}
-        if (key.empty()) continue;
+        if (modelIndex < 0 || key.empty()) continue;
+
+        const auto existing = _boundModelsByIndex->find(modelIndex);
+        if (existing != _boundModelsByIndex->end() && existing->second) continue;
 
         // 去重：同一流程可能多个节点引用同一模型
+        std::shared_ptr<dlcv_infer::Model> model;
         if (std::find(_acquiredModelKeys.begin(), _acquiredModelKeys.end(), key)
             == _acquiredModelKeys.end()) {
-            if (!ModelPool::Instance().RetainByKey(key)) {
+            model = ModelPool::Instance().AcquireByKey(key);
+            if (!model) {
                 throw std::runtime_error("流程模型预加载状态失效");
             }
             _acquiredModelKeys.push_back(key);
+        } else {
+            model = ModelPool::Instance().AcquireByKey(key);
+            if (!model) throw std::runtime_error("流程模型预加载状态失效");
+            ModelPool::Instance().ReleaseByKey(key);
+        }
+        if (model) {
+            _boundModelsByIndex->emplace(modelIndex, std::move(model));
         }
     }
 
@@ -756,6 +814,12 @@ Json FlowGraphModel::LoadFromRoot(
         _loaded = false;
         throw;
     }
+}
+
+std::shared_ptr<dlcv_infer::Model> FlowGraphModel::GetLoadedModelByIndex(int modelIndex) const {
+    if (!_boundModelsByIndex) return nullptr;
+    const auto it = _boundModelsByIndex->find(modelIndex);
+    return it == _boundModelsByIndex->end() ? nullptr : it->second;
 }
 
 Json FlowGraphModel::GetModelInfo() const {
@@ -851,6 +915,7 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     }
     ctx.Set<Json>("infer_params", paramsJson.is_object() ? paramsJson : Json::object());
     ctx.Set<double>("flow_dlcv_infer_ms_acc", 0.0);
+    ctx.Set<std::shared_ptr<const BoundModelMap>>("bound_models_by_index", _boundModelsByIndex);
 
     GraphExecutor exec(_nodes, &ctx);
     const auto runStart = std::chrono::steady_clock::now();

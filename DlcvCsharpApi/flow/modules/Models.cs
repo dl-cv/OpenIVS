@@ -16,6 +16,7 @@ namespace DlcvModules
 	public abstract class BaseModelModule : BaseModule
 	{
 		protected string _modelPath;
+		protected int _modelIndex = -1;
 		protected int _deviceId;
 		protected Model _model;
 		protected JObject _modelInfo;
@@ -30,6 +31,7 @@ namespace DlcvModules
 			: base(nodeId, title, properties, context)
 		{
 			_modelPath = ReadStringOrDefault("model_path", null);
+			_modelIndex = ReadInt("model_index", -1);
 			_deviceId = ReadInt("device_id", 0);
 			// 简化：初始化在首次推理时完成
 		}
@@ -68,6 +70,16 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
+				if (_modelIndex >= 0)
+				{
+					Dictionary<int, Model> flowModels = null;
+					try { flowModels = Context != null ? Context.Get<Dictionary<int, Model>>("flow_models", null) : null; } catch { }
+					if (flowModels == null || !flowModels.ContainsKey(_modelIndex))
+						throw new InvalidOperationException("流程模型索引未加载: " + _modelIndex);
+					_model = flowModels[_modelIndex];
+				}
+				else
+				{
 				FlowModelSource modelSource = null;
 				if (Context != null)
 				{
@@ -96,6 +108,7 @@ namespace DlcvModules
 						_modelCache[cacheKey] = _model;
 					}
 				}
+				}
 				// 多个模块/面可共享同一路径模型实例；不在模块侧单独 Dispose。
 				SyncModelMeta();
 			}
@@ -104,6 +117,8 @@ namespace DlcvModules
 				SyncModelMeta();
 			}
 		}
+
+		public int LoadedModelIndex { get { return _model != null ? _model.modelIndex : -1; } }
 
 		public static void ClearModelCache()
 		{

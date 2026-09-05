@@ -5,9 +5,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -44,7 +48,6 @@ struct CaseRow {
 
 struct Options {
     bool PressureMode = false;
-    bool DefaultCasesMode = false;
     int DeviceId = 0;
     int ThreadCount = 1;
     int BatchSize = 1;
@@ -147,7 +150,7 @@ std::string BuildCategoryList(const dlcv_infer::Result& result) {
 
 void PrintUsage(const char* exeName) {
     std::cout << "用法:\n"
-              << "  默认测试（无参数）:\n"
+              << "  默认螺丝头部外观推理（无参数）:\n"
               << "    " << exeName << "\n\n"
               << "  单次验证（可多组）:\n"
               << "    " << exeName << " --case <model.dvst> <image.jpg> [--case <model2.dvst> <image2.jpg> ...] [--device 0]\n"
@@ -156,7 +159,7 @@ void PrintUsage(const char* exeName) {
               << "    " << exeName << " --pressure --model <model.dvst> --image <image.jpg>\n"
               << "                [--threads 4] [--batch 2] [--seconds 30] [--device 0]\n\n"
               << "说明:\n"
-              << "  - 默认测试会按内置模型列表依次加载、推理并打印表格。\n"
+              << "  - 无参数时从程序目录向上查找旋转测试目录，只加载螺丝头部外观流程模型和 test.bmp。\n"
               << "  - Flow 模型入口按 RGB 语义执行，demo 会把读取到的 BGR 图像转换为 RGB。\n"
               << "  - 压测统计口径对齐 C#：完成请求 = 完成批次数 * batch_size。\n";
 }
@@ -229,10 +232,6 @@ bool ParseArgs(int argc, char** argv, Options& opt) {
         opt.Cases.push_back(InferCase{ opt.SingleModelPath, opt.SingleImagePath });
     }
 
-    if (!opt.PressureMode && opt.Cases.empty()) {
-        opt.DefaultCasesMode = true;
-    }
-
     opt.ThreadCount = std::max(1, opt.ThreadCount);
     opt.BatchSize = std::max(1, opt.BatchSize);
     opt.DurationSeconds = std::max(1, opt.DurationSeconds);
@@ -247,6 +246,46 @@ cv::Mat LoadRgbImage(const std::string& imagePath) {
     cv::Mat rgb;
     cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
     return rgb;
+}
+
+cv::Mat LoadRgbImage(const std::filesystem::path& imagePath) {
+    std::ifstream input(imagePath, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("读取图片失败");
+    }
+    const std::vector<unsigned char> data(
+        (std::istreambuf_iterator<char>(input)),
+        std::istreambuf_iterator<char>());
+    const cv::Mat bgr = cv::imdecode(data, cv::IMREAD_COLOR);
+    if (bgr.empty()) {
+        throw std::runtime_error("图像解码失败");
+    }
+    cv::Mat rgb;
+    cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+    return rgb;
+}
+
+std::filesystem::path FindRotateTestDirectory() {
+    std::vector<wchar_t> executablePath(32768, L'\0');
+    const DWORD pathLength = GetModuleFileNameW(
+        nullptr,
+        executablePath.data(),
+        static_cast<DWORD>(executablePath.size()));
+    if (pathLength == 0 || pathLength >= executablePath.size()) {
+        throw std::runtime_error("无法获取程序路径");
+    }
+
+    std::filesystem::path current = std::filesystem::path(executablePath.data()).parent_path();
+    for (int i = 0; i < 8; ++i) {
+        const std::filesystem::path candidate = current / L"旋转测试";
+        std::error_code ec;
+        if (std::filesystem::is_directory(candidate, ec) && !ec) {
+            return candidate;
+        }
+        if (!current.has_parent_path()) break;
+        current = current.parent_path();
+    }
+    throw std::runtime_error("未找到旋转测试目录");
 }
 
 CaseRow RunCase(const std::string& modelPath, const std::string& imagePath, int deviceId) {
@@ -457,6 +496,74 @@ void RunSingleCases(const Options& opt) {
     }
 }
 
+int RunDefaultScrewCase(int deviceId) {
+    const std::filesystem::path testDir = FindRotateTestDirectory();
+    const std::filesystem::path modelPath = testDir / L"螺丝头部外观_120_50_s.dvst";
+    const std::filesystem::path imagePath = testDir / L"test.bmp";
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(modelPath, ec) || ec) {
+        throw std::runtime_error("默认流程模型不存在");
+    }
+    ec.clear();
+    if (!std::filesystem::is_regular_file(imagePath, ec) || ec) {
+        throw std::runtime_error("默认测试图片不存在");
+    }
+
+    std::cout << "=== 默认螺丝头部外观推理 ===" << std::endl;
+    dlcv_infer::Model model(modelPath.wstring(), deviceId);
+    const cv::Mat rgb = LoadRgbImage(imagePath);
+    dlcv_infer::json inferParams;
+    inferParams["with_mask"] = true;
+    inferParams["threshold"] = 0.05;
+    const auto t0 = std::chrono::steady_clock::now();
+    const dlcv_infer::Result result = model.InferBatch(std::vector<cv::Mat>{ rgb }, inferParams);
+    const auto t1 = std::chrono::steady_clock::now();
+    const double elapsedMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    std::cout << "推理耗时: " << std::fixed << std::setprecision(3) << elapsedMs << " ms" << std::endl;
+    PrintSingleResultSummary(result);
+
+    if (result.sampleResults.size() != 1 || result.sampleResults.front().results.size() != 1) {
+        std::cerr << "默认结果校验失败：目标数量不是 1" << std::endl;
+        return 1;
+    }
+    const auto& object = result.sampleResults.front().results.front();
+    const std::string expectedCategory = dlcv_infer::convertUtf8ToGbk(u8"开裂");
+    if (object.categoryName != expectedCategory && object.categoryName != u8"开裂") {
+        std::cerr << "默认结果校验失败：类别不是 开裂" << std::endl;
+        return 1;
+    }
+    if (!std::isfinite(object.score) || std::abs(object.score - 0.9716797f) > 0.0001f) {
+        std::cerr << "默认结果校验失败：分数不在期望范围" << std::endl;
+        return 1;
+    }
+    if (!object.withBbox || object.bbox.size() < 4 ||
+        !std::isfinite(object.bbox[0]) || !std::isfinite(object.bbox[1]) ||
+        !std::isfinite(object.bbox[2]) || !std::isfinite(object.bbox[3]) ||
+        object.bbox[2] <= 0.0 || object.bbox[3] <= 0.0 ||
+        object.bbox[0] < 0.0 || object.bbox[1] < 0.0 ||
+        object.bbox[0] + object.bbox[2] > rgb.cols ||
+        object.bbox[1] + object.bbox[3] > rgb.rows) {
+        std::cerr << "默认结果校验失败：bbox 无效" << std::endl;
+        return 1;
+    }
+    if (std::abs(object.bbox[0] - 336.0) > 0.5 ||
+        std::abs(object.bbox[1] - 459.0) > 0.5 ||
+        std::abs(object.bbox[2] - 81.0) > 0.5 ||
+        std::abs(object.bbox[3] - 53.0) > 0.5) {
+        std::cerr << "默认结果校验失败：bbox 与参考结果不一致" << std::endl;
+        return 1;
+    }
+    if (!object.withMask || object.mask.empty()) {
+        std::cerr << "默认结果校验失败：mask 为空" << std::endl;
+        return 1;
+    }
+    if (object.mask.cols != 79 || object.mask.rows != 51) {
+        std::cerr << "默认结果校验失败：mask 尺寸与参考结果不一致" << std::endl;
+        return 1;
+    }
+    return 0;
+}
+
 void RunPressureTest(const Options& opt) {
     std::string modelPath;
     std::string imagePath;
@@ -567,8 +674,8 @@ int main(int argc, char** argv) {
     try {
         if (opt.PressureMode) {
             RunPressureTest(opt);
-        } else if (opt.DefaultCasesMode) {
-            return RunDefaultCases(opt.DeviceId);
+        } else if (opt.Cases.empty()) {
+            return RunDefaultScrewCase(opt.DeviceId);
         } else {
             RunSingleCases(opt);
         }

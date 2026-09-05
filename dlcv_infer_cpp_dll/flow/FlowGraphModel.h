@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -7,6 +8,7 @@
 #include "flow/ExecutionContext.h"
 #include "flow/FlowTypes.h"
 #include "flow/GraphExecutor.h"
+#include "flow/modules/ModelModules.h"
 
 namespace dlcv_infer {
 namespace flow {
@@ -66,6 +68,11 @@ public:
     /// </summary>
     DLCV_INFER_CPP_DLL_API double Benchmark(const cv::Mat& image, int warmup = 1, int runs = 10);
 
+    /// <summary>
+    /// 获取流程加载期间实际创建的子模型。
+    /// </summary>
+    std::shared_ptr<dlcv_infer::Model> GetLoadedModelByIndex(int modelIndex) const;
+
 private:
     friend class ::dlcv_infer::Model;
 
@@ -76,6 +83,7 @@ private:
     int _deviceId = 0;
     std::string _flowJsonPath;
     std::vector<std::string> _acquiredModelKeys;
+    std::shared_ptr<BoundModelMap> _boundModelsByIndex;
 
     void ReleaseOwnedModelsNoexcept();
     Json LoadFromRoot(

@@ -672,12 +672,13 @@ Json GraphExecutor::LoadModels() {
             if (modelModule == nullptr || !modelModule->LoadedModel()) {
                 throw std::runtime_error("model_module_did_not_expose_loaded_model");
             }
+            item["model_index"] = modelModule->GetLoadedModelIndex();
             item["model_pool_key"] = modelModule->ModelPoolKey();
             item["model_info"] = modelModule->LoadedModel()->GetModelInfo();
             item["device_id"] = modelModule->ResolvedDeviceId();
             item["status_code"] = 0;
             item["status_message"] = "ok";
-            if (item.contains("model_info")) loadedModelMeta.push_back(item);
+            loadedModelMeta.push_back(item);
             // 保持加载成功的模块存活，等待 FlowGraphModel 接收模型池引用后再统一释放。
             _modelLoadHolds.push_back(std::move(module));
         } catch (const std::exception& ex) {
