@@ -1,9 +1,6 @@
 using System;
-using System.ComponentModel;
 using System.Threading;
-using System.Windows;
-using System.Windows.Threading;
-using Microsoft.Win32;
+using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using dlcv_infer_csharp;
@@ -18,7 +15,7 @@ using System.Threading.Tasks;
 
 namespace DlcvDemo
 {
-    public partial class MainWindow : System.Windows.Window
+    public partial class MainWindow : Form
     {
         private readonly UiTestOptions uiTestOptions;
         private bool environmentCheckRunning;
@@ -54,22 +51,125 @@ namespace DlcvDemo
         internal MainWindow(UiTestOptions options)
         {
             uiTestOptions = options;
+            UiTestExitCode = options == null ? 0 : 1;
             InitializeComponent();
-            if (uiTestOptions != null)
+            using (var iconStream = typeof(MainWindow).Assembly.GetManifestResourceStream("DlcvDemo.MainWindow.ico"))
             {
-                ShowActivated = uiTestOptions.InteractiveDialogs;
+                Icon = new System.Drawing.Icon(iconStream);
             }
+            Shown += MainWindow_Shown;
+            SizeChanged += (sender, args) => UpdateResponsiveLayout();
+            DpiChanged += MainWindow_DpiChanged;
         }
 
-        private void Form1_Load(object sender, RoutedEventArgs e)
+        protected override bool ShowWithoutActivation => uiTestOptions != null && !uiTestOptions.InteractiveDialogs;
+
+        private void Form1_Load(object sender, EventArgs e)
         {
-            Topmost = false;
-            MaxWidth = SystemParameters.WorkArea.Width;
-            MaxHeight = SystemParameters.WorkArea.Height;
-            this.Title = "C# 测试程序 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+            UpdateWindowSizeLimits(DeviceDpi, Screen.FromControl(this).WorkingArea);
+            ConfigureResultPanel((int)Math.Round(380 * DeviceDpi / 96.0));
+            UpdateResponsiveLayout();
+            TopMost = false;
+            Text = "C# 测试程序 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+        }
+
+        private void ConfigureResultPanel(int desiredWidth)
+        {
+            splitContainerMain.Panel1MinSize = (int)Math.Round(240 * DeviceDpi / 96.0);
+            splitContainerMain.Panel2MinSize = (int)Math.Round(360 * DeviceDpi / 96.0);
+            int maximum = splitContainerMain.Width - splitContainerMain.SplitterWidth - splitContainerMain.Panel2MinSize;
+            splitContainerMain.SplitterDistance = Math.Max(splitContainerMain.Panel1MinSize, Math.Min(desiredWidth, maximum));
+        }
+
+        private void UpdateWindowSizeLimits(int dpi, System.Drawing.Rectangle workingArea)
+        {
+            MinimumSize = new System.Drawing.Size(
+                (int)Math.Round(1040 * dpi / 96.0),
+                (int)Math.Round(500 * dpi / 96.0));
+            MaximumSize = workingArea.Size;
+        }
+
+        private void MainWindow_DpiChanged(object sender, DpiChangedEventArgs e)
+        {
+            int resultWidth = (int)Math.Round(splitContainerMain.SplitterDistance * (double)e.DeviceDpiNew / e.DeviceDpiOld);
+            UpdateWindowSizeLimits(e.DeviceDpiNew, Screen.FromRectangle(e.SuggestedRectangle).WorkingArea);
+            // 等框架完成本次 DPI 缩放后，再设置按当前 DPI 计算的布局尺寸。
+            BeginInvoke(new Action(() =>
+            {
+                if (!IsDisposed && !Disposing)
+                {
+                    ConfigureResultPanel(resultWidth);
+                    UpdateResponsiveLayout();
+                }
+            }));
+        }
+
+        private void UpdateResponsiveLayout()
+        {
+            if (topCard == null || IsDisposed || Disposing)
+            {
+                return;
+            }
+            float scale = DeviceDpi / 96F;
+            bool compact = topCard.ClientSize.Width < 1160 * scale;
+            int buttonWidth = (int)Math.Round((compact ? 90 : 104) * scale);
+            int numericWidth = (int)Math.Round((compact ? 80 : 110) * scale);
+            int margin = (int)Math.Round(8 * scale);
+            topLayout.SuspendLayout();
+            foreach (Control control in leftOpsTable.Controls)
+            {
+                if (control is Button && control != button_load_model)
+                {
+                    control.Width = buttonWidth;
+                }
+            }
+            foreach (Control control in rightOpsTable.Controls)
+            {
+                if (control is Button && control != button_open_image)
+                {
+                    control.Width = control == button_free_all_model || control == button_get_model_info
+                        ? (int)Math.Round(104 * scale)
+                        : buttonWidth;
+                }
+            }
+            leftOpsTable.Width = 2 * (buttonWidth + margin);
+            rightOpsTable.Width = 3 * (buttonWidth + margin) + (int)Math.Round(104 * scale) + margin;
+            numericUpDown_batch_size.Width = numericWidth;
+            numericUpDown_threshold.Width = numericWidth;
+            numericUpDown_num_thread.Width = numericWidth;
+            topLayout.ColumnStyles[1].Width = (compact ? 8 : 16) * scale;
+            topLayout.ColumnStyles[3].Width = (compact ? 8 : 16) * scale;
+            topLayout.ResumeLayout(true);
+        }
+
+        private void MainWindow_Shown(object sender, EventArgs e)
+        {
             Thread thread = new Thread(InitializeDeviceAndUiTest);
             thread.IsBackground = true;
             thread.Start();
+        }
+
+        private void RunOnUiThread(Action action)
+        {
+            if (IsDisposed || Disposing || !IsHandleCreated)
+            {
+                return;
+            }
+            try
+            {
+                if (InvokeRequired)
+                {
+                    Invoke(action);
+                }
+                else
+                {
+                    action();
+                }
+            }
+            catch (InvalidOperationException) when (IsDisposed || Disposing || !IsHandleCreated)
+            {
+                // 窗口关闭后不再更新控件。
+            }
         }
 
         private void InitializeDeviceAndUiTest()
@@ -85,8 +185,24 @@ namespace DlcvDemo
             }
             finally
             {
-                Dispatcher.BeginInvoke(new Action(() =>
+                CompleteDeviceInitialization(deviceInfoError);
+            }
+        }
+
+        private void CompleteDeviceInitialization(Exception deviceInfoError)
+        {
+            if (IsDisposed || Disposing || !IsHandleCreated)
+            {
+                return;
+            }
+            try
+            {
+                BeginInvoke(new Action(() =>
                 {
+                    if (IsDisposed || Disposing)
+                    {
+                        return;
+                    }
                     if (deviceInfoError != null)
                     {
                         richTextBox1.Text += "\n设备信息读取失败：" + deviceInfoError.Message;
@@ -95,7 +211,11 @@ namespace DlcvDemo
                     {
                         RunUiTest();
                     }
-                }), DispatcherPriority.ApplicationIdle);
+                }));
+            }
+            catch (InvalidOperationException) when (IsDisposed || Disposing || !IsHandleCreated)
+            {
+                // 窗口关闭后无需继续设备初始化回调。
             }
         }
 
@@ -108,7 +228,7 @@ namespace DlcvDemo
             JObject allDogInfo = QueryAllDogInfo();
             bool hasDog = HasAnyDog(allDogInfo);
 
-            Dispatcher.Invoke(delegate
+            RunOnUiThread(delegate
             {
                 // 清空现有项目和映射表
                 comboBox1.Items.Clear();
@@ -240,7 +360,7 @@ namespace DlcvDemo
         private string image_path;
         private int batch_size = 1;
         private PressureTestRunner pressureTestRunner;
-        private DispatcherTimer updateTimer;
+        private System.Windows.Forms.Timer updateTimer;
         private dynamic baselineJsonResult = null;
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
@@ -281,7 +401,7 @@ namespace DlcvDemo
                 Console.WriteLine(ex.Message);
             }
 
-            if (openFileDialog.ShowDialog(this) == true)
+            if (openFileDialog.ShowDialog(this) == DialogResult.OK)
             {
                 try
                 {
@@ -313,7 +433,7 @@ namespace DlcvDemo
             bool rpc_mode = false;
             try
             {
-                rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.IsChecked == true;
+                rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked;
             }
             catch { }
 
@@ -408,7 +528,7 @@ namespace DlcvDemo
             {
                 Console.WriteLine(ex.Message);
             }
-            if (openFileDialog.ShowDialog(this) == true)
+            if (openFileDialog.ShowDialog(this) == DialogResult.OK)
             {
                 OpenImageFromPath(openFileDialog.FileName, true);
             }
@@ -430,7 +550,9 @@ namespace DlcvDemo
             try
             {
                 numericUpDown_threshold.Value = uiTestOptions.Threshold;
-                checkBox_calc_mean.IsChecked = uiTestOptions.CalcMean;
+                checkBox_calc_mean.CheckState = !uiTestOptions.CalcMean.HasValue
+                    ? CheckState.Indeterminate
+                    : (uiTestOptions.CalcMean.Value ? CheckState.Checked : CheckState.Unchecked);
                 WriteUiTestResult("started", null);
 
                 if (uiTestOptions.InteractiveDialogs)
@@ -473,7 +595,9 @@ namespace DlcvDemo
                     throw new InvalidOperationException("界面未生成推理结果: " + richTextBox1.Text);
                 }
 
-                await Dispatcher.Yield(DispatcherPriority.Render);
+                await Task.Yield();
+                Refresh();
+                SaveUiTestScreenshot();
                 UiTestExitCode = 0;
                 WriteUiTestResult("passed", null);
             }
@@ -481,12 +605,36 @@ namespace DlcvDemo
             {
                 UiTestExitCode = 1;
                 richTextBox1.Text = "自动 UI 测试失败\n" + ex;
-                WriteUiTestResult("failed", ex);
+                try
+                {
+                    WriteUiTestResult("failed", ex);
+                }
+                catch (Exception outputError) when (outputError is IOException || outputError is UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine("自动 UI 测试结果写入失败：" + outputError.Message);
+                    Console.Error.WriteLine(ex);
+                }
             }
             finally
             {
-                await Dispatcher.Yield(DispatcherPriority.Render);
+                await Task.Yield();
+                Refresh();
                 Close();
+            }
+        }
+
+        private void SaveUiTestScreenshot()
+        {
+            if (string.IsNullOrWhiteSpace(uiTestOptions.ScreenshotPath))
+            {
+                return;
+            }
+            string path = Path.GetFullPath(uiTestOptions.ScreenshotPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            using (var bitmap = new System.Drawing.Bitmap(Width, Height))
+            {
+                DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, Width, Height));
+                bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
             }
         }
 
@@ -519,7 +667,9 @@ namespace DlcvDemo
                     : JValue.CreateNull(),
                 ["device"] = uiTestOptions.DeviceId,
                 ["interactive_dialogs"] = uiTestOptions.InteractiveDialogs,
-                ["window_title"] = Title,
+                ["window_title"] = Text,
+                ["ui_framework"] = "WinForms",
+                ["screenshot"] = uiTestOptions.ScreenshotPath,
                 ["result_text"] = richTextBox1.Text ?? string.Empty,
                 ["error"] = error == null ? null : error.ToString()
             };
@@ -548,39 +698,39 @@ namespace DlcvDemo
 
         private void AddCalcMeanOverride(JObject data)
         {
-            bool? calcMean = checkBox_calc_mean.IsChecked;
+            bool? calcMean = checkBox_calc_mean.CheckState == CheckState.Indeterminate
+                ? (bool?)null
+                : checkBox_calc_mean.Checked;
             if (calcMean.HasValue)
             {
                 data["calc_mean"] = calcMean.Value;
             }
         }
 
-        private void checkBox_calc_mean_StateChanged(object sender, RoutedEventArgs e)
+        private void checkBox_calc_mean_StateChanged(object sender, EventArgs e)
         {
             if (checkBox_calc_mean == null)
             {
                 return;
             }
 
-            string stateText = !checkBox_calc_mean.IsChecked.HasValue
+            string stateText = checkBox_calc_mean.CheckState == CheckState.Indeterminate
                 ? "默认"
-                : (checkBox_calc_mean.IsChecked.Value ? "是" : "否");
-            checkBox_calc_mean.Content = $"计算均值：{stateText}";
+                : (checkBox_calc_mean.Checked ? "是" : "否");
+            checkBox_calc_mean.Text = $"计算均值：{stateText}";
         }
 
-        private void resultTextWordWrapMenuItem_Click(object sender, RoutedEventArgs e)
+        private void resultTextWordWrapMenuItem_Click(object sender, EventArgs e)
         {
-            var menuItem = sender as System.Windows.Controls.MenuItem;
+            var menuItem = sender as ToolStripMenuItem;
             if (menuItem == null)
             {
                 return;
             }
 
-            bool wordWrapEnabled = menuItem.IsChecked;
-            richTextBox1.TextWrapping = wordWrapEnabled ? TextWrapping.Wrap : TextWrapping.NoWrap;
-            richTextBox1.HorizontalScrollBarVisibility = wordWrapEnabled
-                ? System.Windows.Controls.ScrollBarVisibility.Disabled
-                : System.Windows.Controls.ScrollBarVisibility.Auto;
+            bool wordWrapEnabled = menuItem.Checked;
+            richTextBox1.WordWrap = wordWrapEnabled;
+            richTextBox1.ScrollBars = wordWrapEnabled ? ScrollBars.Vertical : ScrollBars.Both;
         }
 
         private void button_infer_Click(object sender, EventArgs e)
@@ -890,7 +1040,7 @@ namespace DlcvDemo
                                 shouldStopPressureTest = true;
 
                                 // 发现不一致，向主线程报告
-                                Dispatcher.Invoke(delegate
+                                RunOnUiThread(delegate
                                 {
                                     // 立即停止测试
                                     StopPressureTest();
@@ -904,7 +1054,7 @@ namespace DlcvDemo
                                     string s = sb.ToString();
 
                                     richTextBox1.Text = s;
-                                    MessageBox.Show(this, "检测到推理结果不一致，测试已停止！", "结果不一致", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                    MessageBox.Show(this, "检测到推理结果不一致，测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
                                     baselineJsonResult = null;
                                 });
@@ -928,11 +1078,11 @@ namespace DlcvDemo
                 shouldStopPressureTest = true;
 
                 // 向主线程报告错误
-                Dispatcher.Invoke(delegate
+                RunOnUiThread(delegate
                 {
                     StopPressureTest();
                     string testType = isConsistencyTestMode ? "一致性测试" : "压力测试";
-                    MessageBox.Show(this, $"{testType}过程中发生错误: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show(this, $"{testType}过程中发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     richTextBox1.Text = $"推理错误: {ex.Message}";
                 });
             }
@@ -946,7 +1096,7 @@ namespace DlcvDemo
             if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
                 // 在UI上显示统计信息
-                Dispatcher.Invoke(delegate
+                RunOnUiThread(delegate
                 {
                     string stats = pressureTestRunner.GetStatistics(false);
                     if (isConsistencyTestMode && baselineJsonResult != null)
@@ -1017,8 +1167,8 @@ namespace DlcvDemo
                 // 创建并启动定时器更新UI
                 if (updateTimer == null)
                 {
-                    updateTimer = new DispatcherTimer();
-                    updateTimer.Interval = TimeSpan.FromMilliseconds(500);
+                    updateTimer = new System.Windows.Forms.Timer(components);
+                    updateTimer.Interval = 500;
                     updateTimer.Tick += UpdateStatisticsTimer_Tick;
                 }
                 updateTimer.Start();
@@ -1029,17 +1179,17 @@ namespace DlcvDemo
                 // 根据模式设置按钮文本
                 if (consistencyTestMode)
                 {
-                    button_consistency_test.Content = "停止";
+                    button_consistency_test.Text = "停止";
                 }
                 else
                 {
-                    button_thread_test.Content = "停止";
+                    button_thread_test.Text = "停止";
                 }
             }
             catch (Exception ex)
             {
                 string testType = consistencyTestMode ? "一致性测试" : "压力测试";
-                MessageBox.Show(this, $"启动{testType}失败: " + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(this, $"启动{testType}失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -1064,11 +1214,11 @@ namespace DlcvDemo
                 // 根据模式重置按钮文本
                 if (isConsistencyTestMode)
                 {
-                    button_consistency_test.Content = "一致性测试";
+                    button_consistency_test.Text = "一致性测试";
                 }
                 else
                 {
-                    button_thread_test.Content = "多线程测试";
+                    button_thread_test.Text = "多线程测试";
                 }
 
                 // 重置测试模式
@@ -1115,7 +1265,7 @@ namespace DlcvDemo
             Process.Start("https://docs.dlcv.com.cn/deploy/sdk/csharp_sdk");
         }
 
-        private void Form1_FormClosing(object sender, CancelEventArgs e)
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
             try
             {
@@ -1168,20 +1318,30 @@ namespace DlcvDemo
             }
 
             environmentCheckRunning = true;
-            button_check_environment.IsEnabled = false;
+            button_check_environment.Enabled = false;
             richTextBox1.Text = "正在检查环境，请稍候...";
             try
             {
                 string environmentInfo = await Task.Run(() => EnvironmentInfoCollector.Collect());
+                if (IsDisposed || Disposing)
+                {
+                    return;
+                }
                 richTextBox1.Text = FormatEnvironmentInfoText(environmentInfo, QueryAllDogInfo());
             }
             catch (Exception ex)
             {
-                richTextBox1.Text = FormatEnvironmentInfoText("环境检查失败：\n" + ex.Message, QueryAllDogInfo());
+                if (!IsDisposed && !Disposing)
+                {
+                    richTextBox1.Text = FormatEnvironmentInfoText("环境检查失败：\n" + ex.Message, QueryAllDogInfo());
+                }
             }
             finally
             {
-                button_check_environment.IsEnabled = true;
+                if (!IsDisposed && !Disposing)
+                {
+                    button_check_environment.Enabled = true;
+                }
                 environmentCheckRunning = false;
             }
         }
@@ -1227,7 +1387,7 @@ namespace DlcvDemo
 			catch { }
 			if (uiTestOptions == null)
 			{
-				MessageBox.Show(this, title + ": " + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+				MessageBox.Show(this, title + ": " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
 
@@ -1265,7 +1425,7 @@ namespace DlcvDemo
                     Console.WriteLine(ex.Message);
                 }
 
-                if (saveFileDialog.ShowDialog(this) != true)
+                if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
                 {
                     return;
                 }

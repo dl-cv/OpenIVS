@@ -188,7 +188,11 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
   - `calc-mean-selftest`
   - `category-count-check-selftest`
+  - `ui-test-options-selftest`
+  - `winforms-mainwindow-selftest`
 - `cli-anomaly-threshold-selftest` 不读取模型和图片，检查 CLI 对异常分数、普通分类低分、两路结果不一致及非有限分数的验证结果；运行前需先构建 `DlcvDemo.csproj`。
+- `ui-test-options-selftest` 反射调用 `DlcvDemo.UiTestOptions.TryParse`，覆盖 `--screenshot` 的 `.png`/`.PNG` 与省略场景，非 `.png` 后缀拒绝，`--screenshot` 与 `--model`、`--image`、`--output`、`--output.tmp` 相同的输出碰撞拒绝，以及 `--output` 的中间 `.tmp` 路径与 `--model`、`--image` 重合拒绝；运行前需先构建 `DlcvDemo.csproj`。
+- `winforms-mainwindow-selftest` 在 STA 线程内反射创建真实 `DlcvDemo.MainWindow`（不显示、不启用设备线程），校验 Form 类型、控件 Name/文本与默认 Enabled、三个 NumericUpDown 的范围与默认值及 threshold 步进 `0.05`、原生 Flat 按钮蓝/灰/红配色及 MouseOver/MouseDown 差异、三态计算均值 Indeterminate/true/false 映射，并将窗口设为 MinimumSize 后校验 threshold 与 calc_mean 完整位于父容器 ClientRectangle 内；运行前需先构建 `DlcvDemo.csproj`。
 - `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-model-info <model>`，构造指定模型并把 `GetModelInfo` 返回的完整 JSON 写入标准输出。
 - `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-dvs-model-info <model>`，构造指定模型并把 `GetDvsModelInfo` 返回的完整 JSON 写入标准输出；普通模型不支持该接口时，异常写入标准错误并返回非零状态。
 - `get-model-info` 接收单个普通模型或流程模型路径；`get-dvs-model-info` 按 C# 公共接口支持范围接收 `.dvst`、`.dvso` 流程模型路径。命令不包含针对指定模型内容的预期值。

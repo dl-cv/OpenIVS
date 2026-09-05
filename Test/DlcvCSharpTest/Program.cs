@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Windows.Forms;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -82,6 +83,16 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "environment-cli-compatibility-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunEnvironmentCliCompatibilitySelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "ui-test-options-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunUiTestOptionsSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "winforms-mainwindow-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunWinFormsMainWindowSelfTest();
                 }
 
                 if (IsWorkflowCommand(args))
@@ -438,6 +449,533 @@ namespace DlcvCSharpTest
             }
         }
 
+        private sealed class UiTestOptionsParseResult
+        {
+            public readonly bool Ok;
+            public readonly object Options;
+            public readonly string Error;
+
+            public UiTestOptionsParseResult(bool ok, object options, string error)
+            {
+                Ok = ok;
+                Options = options;
+                Error = error;
+            }
+        }
+
+        private static UiTestOptionsParseResult InvokeUiTestOptionsParse(MethodInfo method, string[] args)
+        {
+            object[] parameters = new object[] { args, null, null };
+            bool ok = (bool)method.Invoke(null, parameters);
+            return new UiTestOptionsParseResult(ok, parameters[1], parameters[2] as string);
+        }
+
+        private static int RunUiTestOptionsSelfTest()
+        {
+            Console.WriteLine("==== ui-test 参数解析自测 ====");
+            try
+            {
+                return ExecuteUiTestOptionsSelfTest();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("ui-test 参数解析自测失败: " + ex.Message);
+                return 1;
+            }
+        }
+
+        private static int ExecuteUiTestOptionsSelfTest()
+        {
+            string demoAssemblyPath = ResolveDemoAssemblyPath();
+            if (!File.Exists(demoAssemblyPath))
+            {
+                Console.WriteLine("未找到 DlcvDemo 可执行文件: " + demoAssemblyPath);
+                Console.WriteLine("请先构建 DlcvDemo.csproj。");
+                return 2;
+            }
+
+            Assembly demoAssembly = Assembly.LoadFrom(demoAssemblyPath);
+            Type optionsType = demoAssembly.GetType("DlcvDemo.UiTestOptions", throwOnError: true);
+            MethodInfo tryParseMethod = optionsType.GetMethod(
+                "TryParse",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            PropertyInfo screenshotPathProperty = optionsType.GetProperty(
+                "ScreenshotPath",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (tryParseMethod == null || screenshotPathProperty == null)
+            {
+                throw new InvalidOperationException("未找到 UiTestOptions.TryParse 或 ScreenshotPath");
+            }
+
+            string root = Path.Combine(Path.GetTempPath(), "DlcvUiTestOptions_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                string modelPath = Path.Combine(root, "model.dvt");
+                string imagePath = Path.Combine(root, "image.jpg");
+                string outputPath = Path.Combine(root, "result.json");
+                File.WriteAllText(modelPath, string.Empty);
+                File.WriteAllText(imagePath, string.Empty);
+
+                // 正例：--screenshot 使用 .png 后缀。
+                string screenshotPng = Path.Combine(root, "window.png");
+                UiTestOptionsParseResult pngResult = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                {
+                    "ui-test",
+                    "--model", modelPath,
+                    "--image", imagePath,
+                    "--output", outputPath,
+                    "--screenshot", screenshotPng
+                });
+                RequireWinFormsSelfTest(pngResult.Ok, "合法 --screenshot 参数被拒绝: " + pngResult.Error);
+                string actualScreenshot = Convert.ToString(
+                    screenshotPathProperty.GetValue(pngResult.Options, null),
+                    CultureInfo.InvariantCulture);
+                RequireWinFormsSelfTest(
+                    string.Equals(
+                        Path.GetFullPath(actualScreenshot),
+                        Path.GetFullPath(screenshotPng),
+                        StringComparison.OrdinalIgnoreCase),
+                    "--screenshot 参数未被正确保存: " + actualScreenshot);
+
+                // 正例：--screenshot 后缀大小写不敏感，且参数可省略。
+                string screenshotUpper = Path.Combine(root, "window_upper.PNG");
+                UiTestOptionsParseResult upperResult = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                {
+                    "ui-test",
+                    "--model", modelPath,
+                    "--image", imagePath,
+                    "--output", outputPath,
+                    "--screenshot", screenshotUpper
+                });
+                RequireWinFormsSelfTest(upperResult.Ok, ".PNG 后缀参数被拒绝: " + upperResult.Error);
+                UiTestOptionsParseResult noScreenshotResult = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                {
+                    "ui-test",
+                    "--model", modelPath,
+                    "--image", imagePath,
+                    "--output", outputPath
+                });
+                RequireWinFormsSelfTest(noScreenshotResult.Ok, "省略 --screenshot 时参数被拒绝: " + noScreenshotResult.Error);
+                RequireWinFormsSelfTest(
+                    screenshotPathProperty.GetValue(noScreenshotResult.Options, null) == null,
+                    "省略 --screenshot 时 ScreenshotPath 应为空");
+
+                // 负例：非 .png 后缀。
+                string screenshotBmp = Path.Combine(root, "window.bmp");
+                UiTestOptionsParseResult bmpResult = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                {
+                    "ui-test",
+                    "--model", modelPath,
+                    "--image", imagePath,
+                    "--output", outputPath,
+                    "--screenshot", screenshotBmp
+                });
+                RequireWinFormsSelfTest(
+                    !bmpResult.Ok && !string.IsNullOrEmpty(bmpResult.Error)
+                        && bmpResult.Error.IndexOf("PNG", StringComparison.Ordinal) >= 0,
+                    "非 PNG 的 --screenshot 未被拒绝: " + bmpResult.Error);
+
+                // 负例：--screenshot 与模型、图片、JSON 输出或其临时输出路径相同。
+                string[] collisionTargets =
+                {
+                    modelPath,
+                    imagePath,
+                    outputPath,
+                    outputPath + ".tmp"
+                };
+                for (int i = 0; i < collisionTargets.Length; i++)
+                {
+                    UiTestOptionsParseResult collisionResult = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                    {
+                        "ui-test",
+                        "--model", modelPath,
+                        "--image", imagePath,
+                        "--output", outputPath,
+                        "--screenshot", collisionTargets[i]
+                    });
+                    RequireWinFormsSelfTest(
+                        !collisionResult.Ok && !string.IsNullOrEmpty(collisionResult.Error)
+                            && collisionResult.Error.IndexOf("不能与输入文件或其他输出文件相同", StringComparison.Ordinal) >= 0,
+                        "--screenshot 与输出路径相同未被拒绝: " + collisionTargets[i] + "，错误: " + collisionResult.Error);
+                }
+
+                // 负例：--output 的中间 .tmp 写入路径与 --model / --image 重合（避免写中间 JSON 覆盖输入）。
+                string collideModelPath = Path.Combine(root, "collide_model.tmp");
+                string collideImagePath = Path.Combine(root, "collide_image.tmp");
+                File.WriteAllText(collideModelPath, string.Empty);
+                File.WriteAllText(collideImagePath, string.Empty);
+                string[] outputTempCollisionCases =
+                {
+                    collideModelPath + "|" + Path.Combine(root, "collide_model"),
+                    collideImagePath + "|" + Path.Combine(root, "collide_image")
+                };
+                for (int i = 0; i < outputTempCollisionCases.Length; i++)
+                {
+                    string[] parts = outputTempCollisionCases[i].Split('|');
+                    string[] outputTempArgs;
+                    if (string.Equals(parts[0], collideModelPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        outputTempArgs = new[]
+                        {
+                            "ui-test",
+                            "--model", parts[0],
+                            "--image", imagePath,
+                            "--output", parts[1]
+                        };
+                    }
+                    else
+                    {
+                        outputTempArgs = new[]
+                        {
+                            "ui-test",
+                            "--model", modelPath,
+                            "--image", parts[0],
+                            "--output", parts[1]
+                        };
+                    }
+                    UiTestOptionsParseResult outputTempResult = InvokeUiTestOptionsParse(tryParseMethod, outputTempArgs);
+                    RequireWinFormsSelfTest(
+                        !outputTempResult.Ok && !string.IsNullOrEmpty(outputTempResult.Error)
+                            && outputTempResult.Error.IndexOf("不能与输入文件或其他输出文件相同", StringComparison.Ordinal) >= 0,
+                        "--output 的 .tmp 中间路径与输入重合未被拒绝: " + parts[0] + "，输出: " + parts[1] + "，错误: " + outputTempResult.Error);
+                }
+
+                Console.WriteLine("ui-test 参数解析自测通过");
+                return 0;
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch { }
+            }
+        }
+
+        private static int RunWinFormsMainWindowSelfTest()
+        {
+            Console.WriteLine("==== WinForms 主窗口自测 ====");
+            int exitCode = 1;
+            Exception threadException = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    exitCode = ExecuteWinFormsMainWindowSelfTest();
+                }
+                catch (Exception ex)
+                {
+                    threadException = ex;
+                }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+
+            if (threadException != null)
+            {
+                Console.WriteLine("WinForms 主窗口自测异常: " + threadException);
+                return 1;
+            }
+
+            return exitCode;
+        }
+
+        private static int ExecuteWinFormsMainWindowSelfTest()
+        {
+            try
+            {
+                string demoAssemblyPath = ResolveDemoAssemblyPath();
+                if (!File.Exists(demoAssemblyPath))
+                {
+                    Console.WriteLine("未找到 DlcvDemo 可执行文件: " + demoAssemblyPath);
+                    Console.WriteLine("请先构建 DlcvDemo.csproj。");
+                    return 2;
+                }
+
+                Assembly demoAssembly = Assembly.LoadFrom(demoAssemblyPath);
+                Type mainWindowType = demoAssembly.GetType("DlcvDemo.MainWindow", throwOnError: true);
+                RequireWinFormsSelfTest(
+                    typeof(Form).IsAssignableFrom(mainWindowType),
+                    "DlcvDemo.MainWindow 不是 WinForms Form（实际类型: " + mainWindowType.FullName
+                        + "，基类: " + (mainWindowType.BaseType != null ? mainWindowType.BaseType.FullName : "无") + "）。");
+                RequireWinFormsSelfTest(
+                    mainWindowType.GetProperty("UiTestExitCode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance) != null,
+                    "未找到 MainWindow.UiTestExitCode 属性。");
+                RequireWinFormsSelfTest(
+                    mainWindowType.GetMethod("FormatEnvironmentInfoText", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static) != null,
+                    "未找到 MainWindow.FormatEnvironmentInfoText 方法。");
+
+                Type optionsType = demoAssembly.GetType("DlcvDemo.UiTestOptions", throwOnError: true);
+                object options = Activator.CreateInstance(optionsType, true);
+                ConstructorInfo optionsConstructor = mainWindowType.GetConstructor(
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                    null,
+                    new[] { optionsType },
+                    null);
+                RequireWinFormsSelfTest(optionsConstructor != null, "未找到 MainWindow(UiTestOptions) 构造方法。");
+
+                var window = (Form)optionsConstructor.Invoke(new object[] { options });
+                RequireWinFormsSelfTest(window != null, "MainWindow(UiTestOptions) 创建失败。");
+
+                try
+                {
+                    // 不显示窗口：设备初始化只挂接在 Shown 之后，未显示则不应启用设备线程。
+                    RequireWinFormsSelfTest(!window.Visible, "创建 MainWindow 后不应显示窗口。");
+                    RequireWinFormsSelfTest(!window.IsHandleCreated, "创建 MainWindow 后不应创建设备初始化句柄。");
+
+                    Button loadModelButton = RequireWindowButton(window, "button_load_model", "加载模型");
+                    Button environmentButton = RequireWindowButton(window, "button_check_environment", "检查环境");
+                    Button freeModelButton = RequireWindowButton(window, "button_free_model", "释放模型");
+                    // 原生按钮三组配色：蓝色主操作、灰色辅助、红色危险；未禁用且 MouseOver/MouseDown 均不同于基色。
+                    RequireNativeFlatButtonState(
+                        loadModelButton,
+                        "button_load_model",
+                        RgbArgb(25, 118, 210),
+                        RgbArgb(21, 101, 192),
+                        RgbArgb(13, 71, 161),
+                        RgbArgb(255, 255, 255));
+                    RequireNativeFlatButtonState(
+                        environmentButton,
+                        "button_check_environment",
+                        RgbArgb(231, 235, 239),
+                        RgbArgb(216, 222, 228),
+                        RgbArgb(199, 207, 215),
+                        RgbArgb(38, 50, 56));
+                    RequireNativeFlatButtonState(
+                        freeModelButton,
+                        "button_free_model",
+                        RgbArgb(239, 83, 80),
+                        RgbArgb(229, 57, 53),
+                        RgbArgb(198, 40, 40),
+                        RgbArgb(255, 255, 255));
+
+                    CheckBox calcMeanCheckBox = RequireWindowCheckBox(window);
+                    RequireWinFormsSelfTest(calcMeanCheckBox.ThreeState, "checkBox_calc_mean 应为标准三态 CheckBox。");
+                    RequireWinFormsSelfTest(
+                        calcMeanCheckBox.CheckState == CheckState.Indeterminate,
+                        "checkBox_calc_mean 默认应为 Indeterminate。");
+                    RequireWinFormsSelfTest(
+                        string.Equals(calcMeanCheckBox.Text, "计算均值：默认", StringComparison.Ordinal),
+                        "checkBox_calc_mean 默认文本异常: " + calcMeanCheckBox.Text);
+
+                    var deviceComboBox = RequireWindowControl(window, "comboBox1") as ComboBox;
+                    RequireWinFormsSelfTest(deviceComboBox != null, "comboBox1 不是 ComboBox。");
+                    RequireWinFormsSelfTest(deviceComboBox.Items.Count == 0, "未显示窗口时设备列表应保持为空（设备线程未启用）。");
+                    RequireWindowDeviceMapEmpty(window);
+                    RequireWindowControl(window, "richTextBox1");
+
+                    // 参数输入：三个 NumericUpDown 范围/默认值，threshold 步进 0.05。
+                    RequireWindowNumericUpDown(window, "numericUpDown_batch_size", 1m, 1024m, 1m, 0, 1m);
+                    RequireWindowNumericUpDown(window, "numericUpDown_threshold", 0m, 1m, 0.5m, 2, 0.05m);
+                    RequireWindowNumericUpDown(window, "numericUpDown_num_thread", 1m, 32m, 1m, 0, 1m);
+
+                    // 三态计算均值映射：Indeterminate 不写 calc_mean，Checked 写 true，Unchecked 写 false。
+                    MethodInfo overrideMethod = mainWindowType.GetMethod("AddCalcMeanOverride", BindingFlags.NonPublic | BindingFlags.Instance);
+                    RequireWinFormsSelfTest(overrideMethod != null, "未找到 MainWindow.AddCalcMeanOverride 方法。");
+                    RequireWinFormsSelfTest(
+                        !ApplyCalcMeanOverride(overrideMethod, window, CheckState.Indeterminate).ContainsKey("calc_mean"),
+                        "三态默认 Indeterminate 不应写入 calc_mean。");
+                    RequireWinFormsSelfTest(
+                        ApplyCalcMeanOverride(overrideMethod, window, CheckState.Checked).Value<bool>("calc_mean") == true,
+                        "Checked 状态应映射 calc_mean=true。");
+                    RequireWinFormsSelfTest(
+                        ApplyCalcMeanOverride(overrideMethod, window, CheckState.Unchecked).Value<bool>("calc_mean") == false,
+                        "Unchecked 状态应映射 calc_mean=false。");
+
+                    // 环境按钮可操作：按钮默认可用且点击处理方法保留即可，不执行真实环境检查。
+                    RequireWinFormsSelfTest(
+                        mainWindowType.GetMethod("button_check_environment_Click", BindingFlags.NonPublic | BindingFlags.Instance) != null,
+                        "未找到环境按钮点击处理 button_check_environment_Click。");
+
+                    // 最小窗口布局：创建句柄但不显示，threshold 与 calc_mean 应完整位于父容器 ClientRectangle 内。
+                    RequireWinFormsSelfTest(window.Handle != IntPtr.Zero, "MainWindow 句柄创建失败。");
+                    RequireWinFormsSelfTest(!window.Visible, "创建句柄后窗口仍不应显示。");
+                    RequireWinFormsSelfTest(
+                        ((ComboBox)RequireWindowControl(window, "comboBox1")).Items.Count == 0,
+                        "创建句柄后设备列表应保持为空（设备线程未启用）。");
+                    RequireWindowDeviceMapEmpty(window);
+                    window.Size = window.MinimumSize;
+                    window.PerformLayout();
+                    RequireControlInsideParent(window, "numericUpDown_threshold");
+                    RequireControlInsideParent(window, "checkBox_calc_mean");
+
+                    // 尺寸计算方法：显式按 96/144 DPI 更新最小窗口与目标工作区上限，不显示窗口。
+                    RequireWindowSizeLimits(window, 96, 0, 0, 1920, 1040, 1040, 500);
+                    RequireWindowSizeLimits(window, 144, 0, 0, 2560, 1380, 1560, 750);
+
+                    // 关闭窗口应释放：Close 后应已 Dispose。
+                    window.Close();
+                    RequireWinFormsSelfTest(window.IsDisposed, "关闭窗口后 MainWindow 应已 Dispose。");
+                }
+                finally
+                {
+                    if (window != null && !window.IsDisposed)
+                    {
+                        window.Dispose();
+                    }
+                }
+
+                Console.WriteLine("WinForms 主窗口自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("WinForms 主窗口自测失败: " + ex.Message);
+                return 1;
+            }
+        }
+
+        private static void RequireWinFormsSelfTest(bool condition, string message)
+        {
+            if (!condition)
+            {
+                throw new InvalidOperationException(message);
+            }
+        }
+
+        private static int RgbArgb(int r, int g, int b)
+        {
+            return unchecked((int)(0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b));
+        }
+
+        private static void RequireNativeFlatButtonState(
+            Button button,
+            string fieldName,
+            int expectedBackArgb,
+            int expectedOverArgb,
+            int expectedDownArgb,
+            int expectedForeArgb)
+        {
+            RequireWinFormsSelfTest(button != null, "MainWindow 控件字段 " + fieldName + " 不是 Button。");
+            RequireWinFormsSelfTest(button.Enabled, fieldName + " 按钮默认应 Enabled。");
+            RequireWinFormsSelfTest(button.FlatStyle == FlatStyle.Flat, fieldName + " 应为原生 Flat 按钮。");
+            RequireWinFormsSelfTest(
+                button.BackColor.ToArgb() == expectedBackArgb,
+                fieldName + " 基色异常: " + button.BackColor.ToArgb().ToString("X8"));
+            RequireWinFormsSelfTest(
+                button.ForeColor.ToArgb() == expectedForeArgb,
+                fieldName + " 前景色异常: " + button.ForeColor.ToArgb().ToString("X8"));
+            RequireWinFormsSelfTest(
+                button.FlatAppearance.MouseOverBackColor.ToArgb() == expectedOverArgb,
+                fieldName + " MouseOver 色异常: " + button.FlatAppearance.MouseOverBackColor.ToArgb().ToString("X8"));
+            RequireWinFormsSelfTest(
+                button.FlatAppearance.MouseDownBackColor.ToArgb() == expectedDownArgb,
+                fieldName + " MouseDown 色异常: " + button.FlatAppearance.MouseDownBackColor.ToArgb().ToString("X8"));
+            RequireWinFormsSelfTest(
+                button.FlatAppearance.MouseOverBackColor.ToArgb() != button.BackColor.ToArgb()
+                    && button.FlatAppearance.MouseDownBackColor.ToArgb() != button.BackColor.ToArgb()
+                    && button.FlatAppearance.MouseOverBackColor.ToArgb() != button.FlatAppearance.MouseDownBackColor.ToArgb(),
+                fieldName + " MouseOver/MouseDown 应与基色互不相同。");
+        }
+
+        private static void RequireWindowNumericUpDown(
+            Form window,
+            string fieldName,
+            decimal minimum,
+            decimal maximum,
+            decimal value,
+            int decimalPlaces,
+            decimal increment)
+        {
+            var numeric = RequireWindowControl(window, fieldName) as NumericUpDown;
+            RequireWinFormsSelfTest(numeric != null, fieldName + " 不是 NumericUpDown。");
+            RequireWinFormsSelfTest(numeric.Enabled, fieldName + " 默认应 Enabled。");
+            RequireWinFormsSelfTest(numeric.Minimum == minimum, fieldName + " Minimum 异常: " + numeric.Minimum);
+            RequireWinFormsSelfTest(numeric.Maximum == maximum, fieldName + " Maximum 异常: " + numeric.Maximum);
+            RequireWinFormsSelfTest(numeric.Value == value, fieldName + " 默认值异常: " + numeric.Value);
+            RequireWinFormsSelfTest(numeric.DecimalPlaces == decimalPlaces, fieldName + " DecimalPlaces 异常: " + numeric.DecimalPlaces);
+            RequireWinFormsSelfTest(numeric.Increment == increment, fieldName + " Increment 异常: " + numeric.Increment);
+        }
+
+        private static void RequireControlInsideParent(Form window, string fieldName)
+        {
+            Control control = RequireWindowControl(window, fieldName);
+            Control parent = control.Parent;
+            RequireWinFormsSelfTest(parent != null, fieldName + " 缺少父容器。");
+            int left = control.Left;
+            int top = control.Top;
+            int right = left + control.Width;
+            int bottom = top + control.Height;
+            int clientRight = parent.ClientSize.Width;
+            int clientBottom = parent.ClientSize.Height;
+            RequireWinFormsSelfTest(
+                left >= 0 && top >= 0 && right <= clientRight && bottom <= clientBottom,
+                fieldName + " 未完整位于父容器 ClientRectangle 内: bounds=["
+                    + left + "," + top + "," + right + "," + bottom + "] client=[0,0,"
+                    + clientRight + "," + clientBottom + "]");
+        }
+
+        private static void RequireWindowSizeLimits(
+            Form window,
+            int dpi,
+            int workX,
+            int workY,
+            int workWidth,
+            int workHeight,
+            int expectedMinWidth,
+            int expectedMinHeight)
+        {
+            MethodInfo sizeLimitMethod = window.GetType().GetMethod(
+                "UpdateWindowSizeLimits",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            RequireWinFormsSelfTest(sizeLimitMethod != null, "未找到 MainWindow.UpdateWindowSizeLimits 方法。");
+            sizeLimitMethod.Invoke(
+                window,
+                new object[] { dpi, new System.Drawing.Rectangle(workX, workY, workWidth, workHeight) });
+            RequireWinFormsSelfTest(
+                window.MinimumSize.Width == expectedMinWidth && window.MinimumSize.Height == expectedMinHeight,
+                dpi + " DPI 最小窗口异常: " + window.MinimumSize);
+            RequireWinFormsSelfTest(
+                window.MaximumSize.Width == workWidth && window.MaximumSize.Height == workHeight,
+                dpi + " DPI 最大窗口异常: " + window.MaximumSize);
+        }
+
+        private static Control RequireWindowControl(Form window, string fieldName)
+        {
+            FieldInfo field = window.GetType().GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+            RequireWinFormsSelfTest(field != null, "MainWindow 缺少控件字段: " + fieldName + "。");
+            var control = field.GetValue(window) as Control;
+            RequireWinFormsSelfTest(control != null, "MainWindow 控件字段 " + fieldName + " 不是 Control。");
+            RequireWinFormsSelfTest(
+                string.Equals(control.Name, fieldName, StringComparison.Ordinal),
+                "控件字段 " + fieldName + " 的 Name 不一致: " + (control.Name ?? string.Empty));
+            return control;
+        }
+
+        private static Button RequireWindowButton(Form window, string fieldName, string expectedText)
+        {
+            var button = RequireWindowControl(window, fieldName) as Button;
+            RequireWinFormsSelfTest(button != null, "MainWindow 控件字段 " + fieldName + " 不是 Button。");
+            RequireWinFormsSelfTest(
+                string.Equals(button.Text, expectedText, StringComparison.Ordinal),
+                "MainWindow 控件字段 " + fieldName + " 文本异常: " + button.Text);
+            return button;
+        }
+
+        private static CheckBox RequireWindowCheckBox(Form window)
+        {
+            const string fieldName = "checkBox_calc_mean";
+            var checkBox = RequireWindowControl(window, fieldName) as CheckBox;
+            RequireWinFormsSelfTest(checkBox != null, "MainWindow 控件字段 " + fieldName + " 不是 CheckBox。");
+            return checkBox;
+        }
+
+        private static void RequireWindowDeviceMapEmpty(Form window)
+        {
+            FieldInfo mapField = window.GetType().GetField("deviceNameToIdMap", BindingFlags.NonPublic | BindingFlags.Instance);
+            RequireWinFormsSelfTest(mapField != null, "MainWindow 缺少 deviceNameToIdMap 字段。");
+            var map = mapField.GetValue(window) as System.Collections.IDictionary;
+            RequireWinFormsSelfTest(map != null && map.Count == 0, "未显示窗口时设备映射应保持为空（设备线程未启用）。");
+        }
+
+        private static JObject ApplyCalcMeanOverride(MethodInfo method, Form window, CheckState state)
+        {
+            CheckBox checkBox = RequireWindowCheckBox(window);
+            checkBox.CheckState = state;
+            var data = new JObject();
+            method.Invoke(window, new object[] { data });
+            return data;
+        }
+
         private static bool InvokeCliThresholdCheck(
             MethodInfo method,
             IList<string> structuredCategories,
@@ -521,6 +1059,8 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("掩膜输出开关", RunWithMaskSelfTest),
                 new UnifiedTestCase("均值计算", RunCalcMeanSelfTest),
                 new UnifiedTestCase("环境提醒与 CLI 输出", RunEnvironmentCliCompatibilitySelfTest),
+                new UnifiedTestCase("ui-test 参数解析", RunUiTestOptionsSelfTest),
+                new UnifiedTestCase("WinForms 主窗口自测", RunWinFormsMainWindowSelfTest),
                 new UnifiedTestCase("固定模型结果回归", RunDefaultCases)
             };
 
