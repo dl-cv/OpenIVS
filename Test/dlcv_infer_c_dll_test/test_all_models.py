@@ -13,6 +13,9 @@ import numpy as np
 
 
 SUPPORTED_EXTENSIONS = {".dvt", ".dvo", ".dvst", ".dvso"}
+EXCLUDED_MODELS = {
+    "aoi-旋转框检测_s.dvo": "尚未支持 ONNX Runtime 自定义算子 MMCVRoIAlignRotated",
+}
 DEFAULT_MODEL_ROOT = Path(r"Y:\测试模型")
 DEFAULT_CONFIGURATION = "Debug"
 DEFAULT_DEVICE = 0
@@ -837,6 +840,20 @@ def build_parser():
     return parser
 
 
+def discover_models(model_root):
+    models = []
+    excluded = []
+    for path in sorted(model_root.iterdir(), key=lambda path: path.name.lower()):
+        if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+        reason = EXCLUDED_MODELS.get(path.name.lower())
+        if reason:
+            excluded.append({"模型": str(path), "原因": reason})
+        else:
+            models.append(path)
+    return models, excluded
+
+
 def main():
     configure_console()
     args = build_parser().parse_args()
@@ -860,16 +877,11 @@ def main():
         print(f"初始化失败: {exc}", file=sys.stderr)
         return 2
 
-    models = sorted(
-        (
-            path
-            for path in model_root.iterdir()
-            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
-        ),
-        key=lambda path: path.name.lower(),
-    )
+    models, excluded_models = discover_models(model_root)
+    for excluded in excluded_models:
+        print(f"不纳入测试: {excluded['模型']}；{excluded['原因']}")
     if not models:
-        print("没有找到支持格式模型", file=sys.stderr)
+        print("没有找到适用测试模型", file=sys.stderr)
         return 2
 
     params = json.dumps(
@@ -979,6 +991,7 @@ def main():
         "DLL": str(dll_path),
         "模型目录": str(model_root),
         "文件数": len(rows),
+        "不纳入测试": excluded_models,
         "扩展名统计": dict(sorted(extension_counts.items())),
         "全部步骤通过": passed,
         "结果一致": sum(1 for row in rows if row["结果一致"]),

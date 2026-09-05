@@ -1,5 +1,6 @@
 import ctypes
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -27,6 +28,37 @@ def make_prediction(**overrides):
     }
     value.update(overrides)
     return value
+
+
+class ModelSelectionTest(unittest.TestCase):
+    def test_excludes_only_unsupported_rotated_dvo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("AOI-旋转框检测_s.dvo", "AOI-旋转框检测_s.dvt", "其他.dvo"):
+                (root / name).touch()
+            (root / "图片.png").touch()
+            (root / "目录.dvo").mkdir()
+            models, excluded = all_models.discover_models(root)
+            self.assertEqual(
+                ["AOI-旋转框检测_s.dvt", "其他.dvo"],
+                [path.name for path in models],
+            )
+            self.assertEqual(1, len(excluded))
+            self.assertEqual("AOI-旋转框检测_s.dvo", Path(excluded[0]["模型"]).name)
+            self.assertIn("MMCVRoIAlignRotated", excluded[0]["原因"])
+
+    def test_exclusion_ignores_filename_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "aoi-旋转框检测_S.DVO").touch()
+            models, excluded = all_models.discover_models(root)
+            self.assertEqual([], models)
+            self.assertEqual(1, len(excluded))
+
+    def test_default_expected_failures_is_empty(self):
+        self.assertEqual(
+            {}, all_models.load_expected_failures(all_models.DEFAULT_EXPECTED_FAILURES)
+        )
 
 
 class ImageSelectionTest(unittest.TestCase):

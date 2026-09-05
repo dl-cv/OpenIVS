@@ -11,6 +11,8 @@
 
 `.dvr`、`.dvp`、`.dvsp` 不纳入 C 接口推理测试。
 
+`AOI-旋转框检测_s.dvo` 依赖尚未支持的 ONNX Runtime 自定义算子 `MMCVRoIAlignRotated`，不纳入测试，不计入通过或预期失败数量。程序在控制台和结果汇总中记录排除原因；其他 `.dvo` 和旋转框 `.dvt` 模型仍按原范围测试。
+
 每个模型依次执行：
 
 1. `dlcv_infer_cpp_load_model_c`
