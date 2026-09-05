@@ -598,7 +598,7 @@ namespace DlcvDemo
                 ["exception_type"] = ex.GetType().FullName
             };
             string errorText = error.ToString(Formatting.Indented);
-            Console.Out.WriteLine(errorText);
+            Console.Error.WriteLine(errorText);
         }
 
         private static bool IsFinite(double value)

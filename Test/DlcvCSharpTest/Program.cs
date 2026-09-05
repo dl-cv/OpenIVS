@@ -79,6 +79,11 @@ namespace DlcvCSharpTest
                     return RunCliAnomalyThresholdSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "environment-cli-compatibility-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunEnvironmentCliCompatibilitySelfTest();
+                }
+
                 if (IsWorkflowCommand(args))
                 {
                     return RunWorkflowCommands(args);
@@ -353,6 +358,86 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static int RunEnvironmentCliCompatibilitySelfTest()
+        {
+            Console.WriteLine("==== 环境提醒与 CLI 输出自测 ====");
+            try
+            {
+                string demoAssemblyPath = ResolveDemoAssemblyPath();
+                if (!File.Exists(demoAssemblyPath))
+                {
+                    throw new FileNotFoundException("未找到 DlcvDemo 可执行文件，请先构建 DlcvDemo.csproj。", demoAssemblyPath);
+                }
+
+                Assembly demoAssembly = Assembly.LoadFrom(demoAssemblyPath);
+                Type mainWindowType = demoAssembly.GetType("DlcvDemo.MainWindow", throwOnError: true);
+                MethodInfo environmentFormatter = mainWindowType.GetMethod(
+                    "FormatEnvironmentInfoText",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                Type cliRunnerType = demoAssembly.GetType("DlcvDemo.CliRunner", throwOnError: true);
+                MethodInfo writeExceptionMethod = cliRunnerType.GetMethod(
+                    "WriteException",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (environmentFormatter == null || writeExceptionMethod == null)
+                {
+                    throw new InvalidOperationException("未找到兼容性验证方法");
+                }
+
+                var noDogInfo = new JObject
+                {
+                    ["sentinel"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() },
+                    ["virbox"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() }
+                };
+                string noDogText = (string)environmentFormatter.Invoke(
+                    null,
+                    new object[] { "环境检查结果", noDogInfo });
+                RequireCliThreshold(
+                    noDogText.StartsWith("未检测到加密狗", StringComparison.Ordinal)
+                    && noDogText.Contains("环境检查结果"),
+                    "无加密狗提醒未保留在环境检查结果前面");
+
+                var dogInfo = new JObject
+                {
+                    ["sentinel"] = new JObject { ["devices"] = new JArray { "123" }, ["features"] = new JArray() },
+                    ["virbox"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() }
+                };
+                string dogText = (string)environmentFormatter.Invoke(
+                    null,
+                    new object[] { "环境检查结果", dogInfo });
+                RequireCliThreshold(
+                    string.Equals(dogText, "环境检查结果", StringComparison.Ordinal),
+                    "检测到加密狗时环境检查结果被额外改写");
+
+                TextWriter originalOut = Console.Out;
+                TextWriter originalError = Console.Error;
+                try
+                {
+                    var capturedOut = new StringWriter(CultureInfo.InvariantCulture);
+                    var capturedError = new StringWriter(CultureInfo.InvariantCulture);
+                    Console.SetOut(capturedOut);
+                    Console.SetError(capturedError);
+                    writeExceptionMethod.Invoke(null, new object[] { new InvalidOperationException("测试异常") });
+                    RequireCliThreshold(
+                        string.IsNullOrEmpty(capturedOut.ToString())
+                        && JObject.Parse(capturedError.ToString()).Value<string>("error") == "测试异常",
+                        "运行异常 JSON 未写入标准错误");
+                }
+                finally
+                {
+                    Console.SetOut(originalOut);
+                    Console.SetError(originalError);
+                }
+
+                Console.WriteLine("环境提醒与 CLI 输出自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("环境提醒与 CLI 输出自测失败: " + ex.Message);
+                return 1;
+            }
+        }
+
         private static bool InvokeCliThresholdCheck(
             MethodInfo method,
             IList<string> structuredCategories,
@@ -435,6 +520,7 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("Demo2路由规则", RunDemo2RouteRuleSelfTest),
                 new UnifiedTestCase("掩膜输出开关", RunWithMaskSelfTest),
                 new UnifiedTestCase("均值计算", RunCalcMeanSelfTest),
+                new UnifiedTestCase("环境提醒与 CLI 输出", RunEnvironmentCliCompatibilitySelfTest),
                 new UnifiedTestCase("固定模型结果回归", RunDefaultCases)
             };
 

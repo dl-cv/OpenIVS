@@ -1175,17 +1175,31 @@ namespace DlcvDemo
             richTextBox1.Text = "正在检查环境，请稍候...";
             try
             {
-                richTextBox1.Text = await Task.Run(() => EnvironmentInfoCollector.Collect());
+                string environmentInfo = await Task.Run(() => EnvironmentInfoCollector.Collect());
+                richTextBox1.Text = FormatEnvironmentInfoText(environmentInfo, QueryAllDogInfo());
             }
             catch (Exception ex)
             {
-                richTextBox1.Text = "环境检查失败：\n" + ex.Message;
+                richTextBox1.Text = FormatEnvironmentInfoText("环境检查失败：\n" + ex.Message, QueryAllDogInfo());
             }
             finally
             {
                 button_check_environment.IsEnabled = true;
                 environmentCheckRunning = false;
             }
+        }
+
+        internal static string FormatEnvironmentInfoText(string environmentInfo, JObject allInfo)
+        {
+            string normalizedEnvironmentInfo = environmentInfo ?? string.Empty;
+            if (HasAnyDog(allInfo))
+            {
+                return normalizedEnvironmentInfo;
+            }
+
+            return FormatDogInfoText(allInfo, prependNoDogHint: true)
+                + "\n\n"
+                + normalizedEnvironmentInfo;
         }
 
         private void button_free_all_model_Click(object sender, EventArgs e)
