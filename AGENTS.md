@@ -1,4 +1,4 @@
-# OpenIVS Agent 规则
+﻿# OpenIVS Agent 规则
 
 > **规则映射说明**：本文档仅记录本项目特定的技术规则与上下文。关于 Git 工作流、PR 规范、文档原则、Agent 执行规范、编码与工程原则等用户级通用规则，请查阅 ~/.kimi-code/AGENTS.md（dlcv_mcp 仓库）。
 
@@ -52,7 +52,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | C# 加密狗工具 | `DlcvCsharpApi/sntl_admin_csharp.cs` | `DogUtils`、`DogProvider` |
 | C++ 图像输入 | `dlcv_infer_cpp_dll/ImageInputUtils.h` | 图像预处理与格式转换 |
 | C++ 测试程序 | `dlcv_infer_cpp_qt_demo/MainWindow.cpp` | 模型加载、推理、压力测试、加密狗检测 |
-| C# 测试程序 | `DlcvDemo/Form1.cs` | WinForms 测试程序主窗口 |
+| C# 测试程序 | `DlcvDemo/MainWindow.cs` | WinForms 测试程序主窗口 |
 | C# 压力测试 | `PressureTestRunner/PressureTestRunner.cs` | 多线程/一致性测试框架 |
 
 ## 常见修改点
@@ -62,7 +62,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
   - 修改图像预处理逻辑 → 同步检查 C++ `dlcv_infer.cpp` 与 C# `Model.cs` 的 `PrepareInferImages`
   - 新增模型格式支持 → 同步更新 `DllLoader`（C++ 与 C#）的 `ResolveProviderFromHeader`
 - **测试程序修改**：
-  - 新增推理参数 → 同步更新 C++ `MainWindow.cpp` 与 C# `Form1.cs` 的参数 JSON 构建
+  - 新增推理参数 → 同步更新 C++ `MainWindow.cpp` 与 C# `MainWindow.cs` 的参数 JSON 构建
   - 修改可视化规则 → 同步检查 C++ `ImageViewerWidget` 与 C# `ImageViewer`
 
 ## 关键依赖路径
