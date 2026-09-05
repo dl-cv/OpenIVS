@@ -19,6 +19,7 @@
 #include <cstring>
 #include <ctime>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -59,6 +60,119 @@ static std::unordered_map<const char*, NativeJsonAllocation> g_nativeJsonAllocat
 static std::mutex g_nativeJsonAllocationsMutex;
 static thread_local std::string g_lastError;
 static const char* kDlcvCapiDebugLogPath = "C:\\ProgramData\\dlcvInfer_c_api_debug.log";
+
+
+static char* DuplicateCString(const char* value) {
+    if (value == nullptr) value = "";
+    const size_t size = std::strlen(value) + 1;
+    char* copy = static_cast<char*>(std::malloc(size));
+    if (copy == nullptr) throw std::bad_alloc();
+    std::memcpy(copy, value, size);
+    return copy;
+}
+
+static char* TryDuplicateCString(const char* value) noexcept {
+    try {
+        return DuplicateCString(value);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+template <typename T>
+static T* AllocateZeroedArray(size_t count) {
+    if (count == 0) return nullptr;
+    if (count > std::numeric_limits<size_t>::max() / sizeof(T)) throw std::bad_alloc();
+    T* result = static_cast<T*>(std::calloc(count, sizeof(T)));
+    if (result == nullptr) throw std::bad_alloc();
+    return result;
+}
+
+static int CheckedCCount(size_t count) {
+    if (count > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        throw std::length_error("result count exceeds C API range");
+    }
+    return static_cast<int>(count);
+}
+
+static void ReleaseCResultMemory(DlcvCResult* result) noexcept {
+    if (result == nullptr) return;
+    std::free(result->message);
+    result->message = nullptr;
+    if (result->sample_results != nullptr) {
+        if (result->n > 0) {
+            for (int i = 0; i < result->n; ++i) {
+                DlcvCSampleResult& sample = result->sample_results[i];
+                if (sample.results != nullptr) {
+                    if (sample.n > 0) {
+                        for (int j = 0; j < sample.n; ++j) {
+                            DlcvCObjectResult& object = sample.results[j];
+                            std::free(object.category_name);
+                            object.category_name = nullptr;
+                            if (object.mask.mask_ptr != 0) {
+                                std::free(reinterpret_cast<void*>(
+                                    static_cast<uintptr_t>(object.mask.mask_ptr)));
+                                object.mask.mask_ptr = 0;
+                            }
+                            object.mask.height = 0;
+                            object.mask.width = 0;
+                        }
+                    }
+                    std::free(sample.results);
+                    sample.results = nullptr;
+                }
+                sample.n = 0;
+            }
+        }
+        std::free(result->sample_results);
+        result->sample_results = nullptr;
+    }
+    result->n = 0;
+}
+
+static void SetCResultError(DlcvCResult& result, const char* message) noexcept {
+    ReleaseCResultMemory(&result);
+    result.code = -1;
+    result.message = TryDuplicateCString(message);
+}
+
+static const char* ValidateCImage(const DlcvCImage& image) noexcept {
+    if (image.data_ptr == 0) return "invalid image data";
+    if (image.height <= 0 || image.width <= 0) return "invalid image size";
+    if (image.channel <= 0 || image.channel > CV_CN_MAX) return "invalid image type";
+
+    const size_t width = static_cast<size_t>(image.width);
+    const size_t height = static_cast<size_t>(image.height);
+    const size_t channel = static_cast<size_t>(image.channel);
+    if (width > std::numeric_limits<size_t>::max() / height) return "invalid image size";
+    const size_t pixels = width * height;
+    if (pixels > std::numeric_limits<size_t>::max() / channel) return "invalid image size";
+    return nullptr;
+}
+
+static std::vector<cv::Mat> BuildCImageList(const DlcvCImageList* imageList) {
+    if (imageList == nullptr || imageList->n <= 0 || imageList->images == nullptr) {
+        throw std::invalid_argument("invalid image list");
+    }
+
+    std::vector<cv::Mat> images;
+    images.reserve(static_cast<size_t>(imageList->n));
+    for (int i = 0; i < imageList->n; ++i) {
+        const DlcvCImage& image = imageList->images[i];
+        const char* validationError = ValidateCImage(image);
+        if (validationError != nullptr) throw std::invalid_argument(validationError);
+        try {
+            images.emplace_back(
+                image.height,
+                image.width,
+                CV_MAKETYPE(CV_8U, image.channel),
+                reinterpret_cast<void*>(static_cast<uintptr_t>(image.data_ptr)));
+        } catch (const cv::Exception&) {
+            throw std::invalid_argument("invalid image size");
+        }
+    }
+    return images;
+}
 
 static void SetLastErrorMessage(const std::string& message) {
     g_lastError = message;
@@ -370,7 +484,7 @@ static void ReplaceResultMessage(DlcvCResult& result, const char* message) {
         std::free(result.message);
         result.message = nullptr;
     }
-    result.message = _strdup(message);
+    result.message = TryDuplicateCString(message);
 }
 
 static void NormalizeNativeCompatibleResult(DlcvCResult& result) {
@@ -404,6 +518,18 @@ static void NormalizeNativeCompatibleResult(DlcvCResult& result) {
     if (result.message != nullptr && std::strcmp(result.message, "model not found") == 0) {
         result.code = 2;
         ReplaceResultMessage(result, "Model not found.");
+    } else if (result.message != nullptr && std::strcmp(result.message, "invalid image list") == 0) {
+        result.code = 1;
+        ReplaceResultMessage(result, "Invalid image list.");
+    } else if (result.message != nullptr && std::strcmp(result.message, "invalid image data") == 0) {
+        result.code = 1;
+        ReplaceResultMessage(result, "Invalid image data.");
+    } else if (result.message != nullptr && std::strcmp(result.message, "invalid image size") == 0) {
+        result.code = 1;
+        ReplaceResultMessage(result, "Invalid image size.");
+    } else if (result.message != nullptr && std::strcmp(result.message, "invalid image type") == 0) {
+        result.code = 1;
+        ReplaceResultMessage(result, "Invalid image type.");
     } else {
         result.code = 1;
     }
@@ -551,39 +677,23 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
     DlcvCResult result{};
     result.code = -1;
 
-    if (!image_list || image_list->n <= 0 || !image_list->images) {
-        result.message = _strdup("invalid image list");
-        return result;
-    }
-
-    std::shared_ptr<CApiModelEntry> entry;
-    {
-        std::lock_guard<std::mutex> lock(g_modelsMutex);
-        auto it = g_models.find(model_index);
-        if (it == g_models.end()) {
-            result.message = _strdup("model not found");
-            return result;
-        }
-        entry = it->second;
-    }
-
-    std::unique_lock<std::mutex> inferLock(entry->inferMutex, std::defer_lock);
-    if (entry->serializeInfer) {
-        inferLock.lock();
-    }
-
     try {
-        std::vector<cv::Mat> mats;
-        mats.reserve(image_list->n);
-        for (int i = 0; i < image_list->n; ++i) {
-            const DlcvCImage& img = image_list->images[i];
-            if (!img.data_ptr || img.height <= 0 || img.width <= 0 || img.channel <= 0) {
-                result.message = _strdup("invalid image data");
+        std::vector<cv::Mat> mats = BuildCImageList(image_list);
+
+        std::shared_ptr<CApiModelEntry> entry;
+        {
+            std::lock_guard<std::mutex> lock(g_modelsMutex);
+            auto it = g_models.find(model_index);
+            if (it == g_models.end()) {
+                SetCResultError(result, "model not found");
                 return result;
             }
-            int type = CV_8UC(img.channel);
-            cv::Mat mat(img.height, img.width, type, reinterpret_cast<void*>(static_cast<uintptr_t>(img.data_ptr)));
-            mats.push_back(mat);
+            entry = it->second;
+        }
+
+        std::unique_lock<std::mutex> inferLock(entry->inferMutex, std::defer_lock);
+        if (entry->serializeInfer) {
+            inferLock.lock();
         }
 
         dlcv_infer::json params = dlcv_infer::json::object();
@@ -597,24 +707,25 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
         dlcv_infer::Result cppResult =
             entry->model->InferBatchPreservingOriginalMask(mats, params);
 
-        result.code = 0;
-        result.message = _strdup("success");
-        result.n = static_cast<int>(cppResult.sampleResults.size());
-        if (result.n > 0) {
-            result.sample_results = static_cast<DlcvCSampleResult*>(std::malloc(sizeof(DlcvCSampleResult) * result.n));
-            std::memset(result.sample_results, 0, sizeof(DlcvCSampleResult) * result.n);
-            for (int i = 0; i < result.n; ++i) {
+        result.message = DuplicateCString("success");
+        const int sampleCount = CheckedCCount(cppResult.sampleResults.size());
+        if (sampleCount > 0) {
+            result.sample_results = AllocateZeroedArray<DlcvCSampleResult>(
+                static_cast<size_t>(sampleCount));
+            result.n = sampleCount;
+            for (int i = 0; i < sampleCount; ++i) {
                 const auto& sample = cppResult.sampleResults[i];
                 DlcvCSampleResult& sr = result.sample_results[i];
-                sr.n = static_cast<int>(sample.results.size());
-                if (sr.n > 0) {
-                    sr.results = static_cast<DlcvCObjectResult*>(std::malloc(sizeof(DlcvCObjectResult) * sr.n));
-                    std::memset(sr.results, 0, sizeof(DlcvCObjectResult) * sr.n);
-                    for (int j = 0; j < sr.n; ++j) {
+                const int objectCount = CheckedCCount(sample.results.size());
+                if (objectCount > 0) {
+                    sr.results = AllocateZeroedArray<DlcvCObjectResult>(
+                        static_cast<size_t>(objectCount));
+                    sr.n = objectCount;
+                    for (int j = 0; j < objectCount; ++j) {
                         const auto& obj = sample.results[j];
                         DlcvCObjectResult& o = sr.results[j];
                         o.category_id = obj.categoryId;
-                        o.category_name = _strdup(obj.categoryName.c_str());
+                        o.category_name = DuplicateCString(obj.categoryName.c_str());
                         o.score = obj.score;
                         o.with_bbox = obj.withBbox;
                         o.area = obj.area;
@@ -627,16 +738,13 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
                         o.with_mask = obj.withMask;
                         if (obj.withMask && !obj.mask.empty()) {
                             cv::Mat maskClone = obj.mask.clone();
-                            size_t bytes = maskClone.total() * maskClone.elemSize();
+                            const size_t bytes = maskClone.total() * maskClone.elemSize();
                             unsigned char* maskData = static_cast<unsigned char*>(std::malloc(bytes));
+                            if (maskData == nullptr && bytes > 0) throw std::bad_alloc();
                             std::memcpy(maskData, maskClone.data, bytes);
                             o.mask.mask_ptr = static_cast<long long>(reinterpret_cast<uintptr_t>(maskData));
                             o.mask.width = maskClone.cols;
                             o.mask.height = maskClone.rows;
-                        } else {
-                            o.mask.mask_ptr = 0;
-                            o.mask.width = 0;
-                            o.mask.height = 0;
                         }
                         o.with_angle = obj.withAngle;
                         o.angle = obj.angle;
@@ -644,53 +752,22 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
                         o.foreground_mean = obj.foregroundMean;
                         o.background_mean = obj.backgroundMean;
                     }
-                } else {
-                    sr.results = nullptr;
                 }
             }
-        } else {
-            result.sample_results = nullptr;
         }
+        result.code = 0;
     } catch (const std::exception& ex) {
-        result.code = -1;
-        result.message = _strdup(ex.what());
+        SetCResultError(result, ex.what());
     } catch (...) {
-        result.code = -1;
-        result.message = _strdup("unknown error");
+        SetCResultError(result, "unknown error");
     }
 
     return result;
 }
 
 void dlcv_infer_cpp_free_model_result_c(DlcvCResult* result) {
-    if (!result) return;
-    if (result->message) {
-        std::free(result->message);
-        result->message = nullptr;
-    }
-    if (result->sample_results && result->n > 0) {
-        for (int i = 0; i < result->n; ++i) {
-            DlcvCSampleResult& sr = result->sample_results[i];
-            if (sr.results && sr.n > 0) {
-                for (int j = 0; j < sr.n; ++j) {
-                    DlcvCObjectResult& o = sr.results[j];
-                    if (o.category_name) {
-                        std::free(o.category_name);
-                        o.category_name = nullptr;
-                    }
-                    if (o.with_mask && o.mask.mask_ptr) {
-                        std::free(reinterpret_cast<void*>(static_cast<uintptr_t>(o.mask.mask_ptr)));
-                        o.mask.mask_ptr = 0;
-                    }
-                }
-                std::free(sr.results);
-                sr.results = nullptr;
-            }
-        }
-        std::free(result->sample_results);
-        result->sample_results = nullptr;
-    }
-    result->n = 0;
+    if (result == nullptr) return;
+    ReleaseCResultMemory(result);
     result->code = 0;
 }
 
@@ -710,7 +787,7 @@ const char* dlcv_infer_cpp_get_model_info_c(int model_index) {
 
     try {
         const std::string value = entry->model->GetModelInfo().dump();
-        return _strdup(value.c_str());
+        return DuplicateCString(value.c_str());
     } catch (const std::exception& ex) {
         SetLastErrorMessage(ex.what());
     } catch (...) {
@@ -725,8 +802,25 @@ const char* dlcv_infer_cpp_infer_json_c(
     const char* params_json) {
     dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
     ClearLastErrorMessage();
-    if (image == nullptr || image->data_ptr == 0 || image->height <= 0 || image->width <= 0 || image->channel <= 0) {
+    if (image == nullptr) {
         SetLastErrorMessage("invalid image data");
+        return nullptr;
+    }
+    const char* validationError = ValidateCImage(*image);
+    if (validationError != nullptr) {
+        SetLastErrorMessage(validationError);
+        return nullptr;
+    }
+
+    cv::Mat mat;
+    try {
+        mat = cv::Mat(
+            image->height,
+            image->width,
+            CV_MAKETYPE(CV_8U, image->channel),
+            reinterpret_cast<void*>(static_cast<uintptr_t>(image->data_ptr)));
+    } catch (const cv::Exception&) {
+        SetLastErrorMessage("invalid image size");
         return nullptr;
     }
 
@@ -747,12 +841,6 @@ const char* dlcv_infer_cpp_infer_json_c(
     }
 
     try {
-        const int type = CV_8UC(image->channel);
-        cv::Mat mat(
-            image->height,
-            image->width,
-            type,
-            reinterpret_cast<void*>(static_cast<uintptr_t>(image->data_ptr)));
         dlcv_infer::json params = dlcv_infer::json::object();
         if (params_json != nullptr && params_json[0] != '\0') {
             params = dlcv_infer::json::parse(params_json);
@@ -761,7 +849,7 @@ const char* dlcv_infer_cpp_infer_json_c(
             }
         }
         const std::string value = entry->model->InferOneOutJson(mat, params).dump();
-        return _strdup(value.c_str());
+        return DuplicateCString(value.c_str());
     } catch (const std::exception& ex) {
         SetLastErrorMessage(ex.what());
     } catch (...) {
@@ -774,7 +862,7 @@ const char* dlcv_infer_cpp_get_all_dog_info_c() {
     ClearLastErrorMessage();
     try {
         const std::string value = dlcv_infer::GetAllDogInfo().dump();
-        return _strdup(value.c_str());
+        return DuplicateCString(value.c_str());
     } catch (const std::exception& ex) {
         SetLastErrorMessage(ex.what());
     } catch (...) {

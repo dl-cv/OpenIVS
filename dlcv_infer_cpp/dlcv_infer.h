@@ -362,23 +362,6 @@ namespace dlcv_infer {
     };
 #pragma warning(pop)
 
-#ifdef DLCV_INFER_CPP_EXPORTS
-    // 滑动窗口模型（内部使用，如需对外可再单独开放）
-    class SlidingWindowModel : public Model {
-    public:
-        SlidingWindowModel(
-            const std::string& modelPath,
-            int device_id,
-            int small_img_width = 832,
-            int small_img_height = 704,
-            int horizontal_overlap = 16,
-            int vertical_overlap = 16,
-            float threshold = 0.5f,
-            float iou_threshold = 0.2f,
-            float combine_ios_threshold = 0.2f);
-    };
-#endif
-
     /// <summary>
     /// 工具类：静态方法集合。
     /// 注意：FreeAllModels 会释放底层 dlcv_infer.dll 中的所有已加载模型，属于全局操作。

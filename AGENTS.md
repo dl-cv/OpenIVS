@@ -40,7 +40,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 | 关注点 | 文件 | 说明 |
 |--------|------|------|
-| C++ API 头文件 | `dlcv_infer_cpp/dlcv_infer.h` | `Model`、`SlidingWindowModel`、`Utils`、`DllLoader`、`GetAllDogInfo` |
+| C++ API 头文件 | `dlcv_infer_cpp/dlcv_infer.h` | `Model`、`Utils`、`DllLoader`、`GetAllDogInfo` |
 | C API 头文件 | `dlcv_infer_cpp/dlcv_infer_c_api.h` | C 名称函数、C 数据结构和结果释放接口 |
 | C++ API 实现 | `dlcv_infer_cpp/dlcv_infer.cpp` | 模型加载、推理、DVS 解包、结果解析 |
 | C API 实现 | `dlcv_infer_cpp/dlcv_infer_c_api.cpp` | C 接口导出、模型表管理、结果转换与释放 |
@@ -107,7 +107,6 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 | 能力 | 类/函数 | 关键接口 |
 |------|---------|----------|
 | 普通模型 | `dlcv_infer::Model` | 构造（`std::string`/`std::wstring` + `device_id`）、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetModelInfo()`、`FreeModel()` |
-| 滑动窗口模型 | `dlcv_infer::SlidingWindowModel` | 继承 `Model`，构造参数含 `small_img_width/height`、`horizontal/vertical_overlap`、`threshold`、`iou_threshold`、`combine_ios_threshold` |
 | 工具类 | `dlcv_infer::Utils` | `FreeAllModels()`、`GetDeviceInfo()`、`GetGpuInfo()`、`KeepMaxClock()`、`OcrInfer()`、`JsonToString()` |
 | DLL 加载器 | `dlcv_infer::DllLoader` | `Instance()`、`EnsureForModel()`、`GetDogProvider()` |
 | 流程图模型 | `dlcv_infer::flow::FlowGraphModel` | `Load()`、`InferInternal()`、`GetModelInfo()` |

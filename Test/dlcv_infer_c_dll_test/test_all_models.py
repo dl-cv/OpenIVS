@@ -161,9 +161,10 @@ def resolve_dll_path(explicit_path, configuration):
     raise FileNotFoundError(f"未找到 dlcv_infer_cpp.dll，已检查:\n{searched}")
 
 
-def add_runtime_directories(dll_path, configuration):
+def add_runtime_directories(dll_path, configuration, core_dll_dir=None):
     root = repository_root()
     candidates = (
+        *((Path(core_dll_dir).resolve(),) if core_dll_dir else ()),
         dll_path.parent,
         root / "dlcv_infer_cpp" / configuration,
         root / configuration,
@@ -195,6 +196,11 @@ class DlcvCApi:
         library.dlcv_infer_cpp_free_model_c.restype = ctypes.c_int
         library.dlcv_infer_cpp_get_model_info_c.argtypes = [ctypes.c_int]
         library.dlcv_infer_cpp_get_model_info_c.restype = ctypes.c_void_p
+        library.dlcv_infer_cpp_infer_c.argtypes = [
+            ctypes.c_int,
+            ctypes.POINTER(DlcvCImageList),
+        ]
+        library.dlcv_infer_cpp_infer_c.restype = DlcvCResult
         library.dlcv_infer_cpp_infer_with_params_c.argtypes = [
             ctypes.c_int,
             ctypes.POINTER(DlcvCImageList),
@@ -211,6 +217,13 @@ class DlcvCApi:
             ctypes.POINTER(DlcvCResult)
         ]
         library.dlcv_infer_cpp_free_model_result_c.restype = None
+        library.dlcv_infer_c.argtypes = [
+            ctypes.c_int,
+            ctypes.POINTER(DlcvCImageList),
+        ]
+        library.dlcv_infer_c.restype = DlcvCResult
+        library.dlcv_free_model_result_c.argtypes = [ctypes.POINTER(DlcvCResult)]
+        library.dlcv_free_model_result_c.restype = None
         library.dlcv_infer_cpp_free_string_c.argtypes = [ctypes.c_void_p]
         library.dlcv_infer_cpp_free_string_c.restype = None
         library.dlcv_infer_cpp_free_all_models_c.argtypes = []
@@ -218,6 +231,122 @@ class DlcvCApi:
 
     def last_error(self):
         return decode_c_text(self.library.dlcv_infer_cpp_get_last_error_c())
+
+
+def check_released_result(result, expected_code):
+    return (
+        result.code == expected_code
+        and not result.message
+        and not result.sample_results
+        and result.n == 0
+    )
+
+
+def run_invalid_input_checks(api):
+    library = api.library
+    pixel = (ctypes.c_ubyte * 6)()
+    valid_image = DlcvCImage(ctypes.addressof(pixel), 1, 1, 3)
+    invalid_cases = [
+        (None, "Invalid image list."),
+        (ctypes.pointer(DlcvCImageList(None, -1)), "Invalid image list."),
+        (ctypes.pointer(DlcvCImageList(ctypes.pointer(valid_image), 0)), "Invalid image list."),
+        (ctypes.pointer(DlcvCImageList(None, 1)), "Invalid image list."),
+        (ctypes.pointer(DlcvCImageList(ctypes.pointer(DlcvCImage(0, 1, 1, 3)), 1)), "Invalid image data."),
+        (ctypes.pointer(DlcvCImageList(ctypes.pointer(DlcvCImage(ctypes.addressof(pixel), 0, 1, 3)), 1)), "Invalid image size."),
+        (ctypes.pointer(DlcvCImageList(ctypes.pointer(DlcvCImage(ctypes.addressof(pixel), 1, 0, 3)), 1)), "Invalid image size."),
+        (ctypes.pointer(DlcvCImageList(ctypes.pointer(DlcvCImage(ctypes.addressof(pixel), 1, 1, 0)), 1)), "Invalid image type."),
+        (ctypes.pointer(DlcvCImageList(ctypes.pointer(DlcvCImage(ctypes.addressof(pixel), 1, 1, 2**31 - 1)), 1)), "Invalid image type."),
+        (ctypes.pointer(DlcvCImageList(ctypes.pointer(DlcvCImage(ctypes.addressof(pixel), 2**31 - 1, 2**31 - 1, 512)), 1)), "Invalid image size."),
+    ]
+
+    library.dlcv_free_model_result_c(None)
+    library.dlcv_infer_cpp_free_model_result_c(None)
+    for image_list, expected_message in invalid_cases:
+        result = library.dlcv_infer_c(-1, image_list)
+        actual_message = decode_c_text(result.message)
+        if result.code != 1 or actual_message != expected_message or result.sample_results or result.n != 0:
+            library.dlcv_free_model_result_c(ctypes.byref(result))
+            raise TestFailure(
+                "C ABI 异常输入",
+                f"返回不一致: code={result.code}, message={actual_message!r}, n={result.n}",
+            )
+        library.dlcv_free_model_result_c(ctypes.byref(result))
+        if not check_released_result(result, 1):
+            raise TestFailure("C ABI 结果释放", "兼容释放函数未保留返回码或未清空结果")
+        library.dlcv_free_model_result_c(ctypes.byref(result))
+        if not check_released_result(result, 1):
+            raise TestFailure("C ABI 结果释放", "兼容结果重复释放后的状态异常")
+
+    invalid_images = (DlcvCImage * 2)(
+        valid_image,
+        DlcvCImage(ctypes.addressof(pixel), 1, 0, 3),
+    )
+    image_list = DlcvCImageList(invalid_images, 2)
+    result = library.dlcv_infer_c(-1, ctypes.byref(image_list))
+    actual_message = decode_c_text(result.message)
+    if result.code != 1 or actual_message != "Invalid image size." or result.sample_results or result.n != 0:
+        library.dlcv_free_model_result_c(ctypes.byref(result))
+        raise TestFailure("C ABI 图像数组", f"数组内坏图未被拒绝: code={result.code}, message={actual_message!r}")
+    library.dlcv_free_model_result_c(ctypes.byref(result))
+
+    invalid_type = DlcvCImage(ctypes.addressof(pixel), 1, 1, 2**31 - 1)
+    image_list = DlcvCImageList(ctypes.pointer(invalid_type), 1)
+    result = library.dlcv_infer_cpp_infer_c(-1, ctypes.byref(image_list))
+    actual_message = decode_c_text(result.message)
+    if result.code != -1 or actual_message != "invalid image type" or result.sample_results or result.n != 0:
+        library.dlcv_infer_cpp_free_model_result_c(ctypes.byref(result))
+        raise TestFailure("C ABI 扩展入口", f"非法通道未被拒绝: code={result.code}, message={actual_message!r}")
+    library.dlcv_infer_cpp_free_model_result_c(ctypes.byref(result))
+    if not check_released_result(result, 0):
+        raise TestFailure("C ABI 扩展释放", "扩展释放函数未清空结果")
+
+    image_list = DlcvCImageList(ctypes.pointer(valid_image), 1)
+    result = library.dlcv_infer_c(-1, ctypes.byref(image_list))
+    actual_message = decode_c_text(result.message)
+    if result.code != 2 or actual_message != "Model not found." or result.sample_results or result.n != 0:
+        library.dlcv_free_model_result_c(ctypes.byref(result))
+        raise TestFailure("C ABI 模型索引", f"有效图像的缺失模型返回不一致: code={result.code}, message={actual_message!r}")
+    library.dlcv_free_model_result_c(ctypes.byref(result))
+    if not check_released_result(result, 2):
+        raise TestFailure("C ABI 模型索引释放", "缺失模型结果释放后的状态异常")
+
+
+def get_loaded_core_dll_paths():
+    if os.name != "nt":
+        return []
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+    kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+    kernel32.GetModuleFileNameW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_wchar_p,
+        ctypes.c_uint,
+    ]
+    kernel32.GetModuleFileNameW.restype = ctypes.c_uint
+    paths = []
+    for name in ("dlcv_infer.dll", "dlcv_infer_v.dll"):
+        module = kernel32.GetModuleHandleW(name)
+        if not module:
+            continue
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = kernel32.GetModuleFileNameW(module, buffer, len(buffer))
+        if length:
+            paths.append(Path(buffer.value).resolve())
+    return paths
+
+
+def verify_loaded_core_dll(expected_directory):
+    expected = Path(expected_directory).resolve()
+    loaded = get_loaded_core_dll_paths()
+    if not loaded:
+        raise TestFailure("核心 DLL 路径", "当前进程未加载 dlcv_infer.dll 或 dlcv_infer_v.dll")
+    unexpected = [path for path in loaded if path.parent != expected]
+    if unexpected:
+        raise TestFailure(
+            "核心 DLL 路径",
+            f"实际加载目录不符: 期望={expected}, 实际={', '.join(str(path) for path in loaded)}",
+        )
+    return loaded
 
 
 def load_image_map(path, model_root):
@@ -663,6 +792,10 @@ def build_parser():
         help="dlcv_infer_cpp.dll 路径；未指定时按构建目录查找",
     )
     parser.add_argument(
+        "--core-dll-dir",
+        help="正式加密核心 DLL 所在目录；加入运行目录并核对实际加载路径",
+    )
+    parser.add_argument(
         "--configuration",
         choices=("Debug", "Release"),
         default=DEFAULT_CONFIGURATION,
@@ -714,8 +847,13 @@ def main():
 
     try:
         dll_path = resolve_dll_path(args.dll, args.configuration)
-        runtime_handles = add_runtime_directories(dll_path, args.configuration)
+        runtime_handles = add_runtime_directories(
+            dll_path,
+            args.configuration,
+            args.core_dll_dir,
+        )
         api = DlcvCApi(dll_path)
+        run_invalid_input_checks(api)
         image_map = load_image_map(args.image_map, model_root)
         expected_failures = load_expected_failures(args.expected_failures)
     except Exception as exc:
@@ -752,6 +890,8 @@ def main():
     started = time.perf_counter()
     rows = []
     free_all_error = ""
+    core_dll_paths = []
+    core_dll_error = ""
     try:
         for index, model_path in enumerate(models, 1):
             try:
@@ -812,6 +952,13 @@ def main():
                     f"[{index}/{len(models)}] 失败 {model_path.name} "
                     f"阶段={row['错误阶段']} 错误={row['错误']}"
                 )
+        if args.core_dll_dir:
+            try:
+                core_dll_paths = verify_loaded_core_dll(args.core_dll_dir)
+                print("核心 DLL: " + ", ".join(str(path) for path in core_dll_paths))
+            except TestFailure as exc:
+                core_dll_error = str(exc)
+                print(f"核心 DLL 路径检查失败: {core_dll_error}", file=sys.stderr)
     finally:
         try:
             api.library.dlcv_infer_cpp_free_all_models_c()
@@ -841,6 +988,13 @@ def main():
         "符合预期": matched,
         "释放全部模型": not free_all_error,
         "释放全部模型错误": free_all_error,
+        "核心 DLL": [str(path) for path in core_dll_paths],
+        "核心 DLL 路径检查": (
+            "通过" if args.core_dll_dir and not core_dll_error
+            else "失败" if args.core_dll_dir
+            else "未检查"
+        ),
+        "核心 DLL 路径错误": core_dll_error,
         "总耗时秒": duration,
         "数值比较": {
             "相对容差": FLOAT_RELATIVE_TOLERANCE,
@@ -865,7 +1019,7 @@ def main():
         f"耗时={duration:.3f}s"
     )
     del runtime_handles
-    return 0 if matched == len(rows) and not free_all_error else 1
+    return 0 if matched == len(rows) and not free_all_error and not core_dll_error else 1
 
 
 if __name__ == "__main__":

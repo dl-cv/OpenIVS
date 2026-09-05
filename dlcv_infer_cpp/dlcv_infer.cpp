@@ -2699,55 +2699,6 @@ namespace dlcv_infer {
         return true;
     }
 
-    // SlidingWindowModel类实现
-    SlidingWindowModel::SlidingWindowModel(
-        const std::string& modelPath,
-        int device_id,
-        int small_img_width,
-        int small_img_height,
-        int horizontal_overlap,
-        int vertical_overlap,
-        float threshold,
-        float iou_threshold,
-        float combine_ios_threshold) {
-        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
-        DllLoader::EnsureForModel(modelPath);
-        _dllLoader = &DllLoader::Instance();
-        _loadedDogProvider = _dllLoader->GetDogProvider();
-        _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
-        if (!_dllLoader->GetLoadModelFunc()) {
-            throw std::runtime_error("未检测到授权");
-        }
-
-        json config;
-        config["type"] = "sliding_window_pipeline";
-        config["model_path"] = modelPath;
-        config["device_id"] = device_id;
-        config["small_img_width"] = small_img_width;
-        config["small_img_height"] = small_img_height;
-        config["horizontal_overlap"] = horizontal_overlap;
-        config["vertical_overlap"] = vertical_overlap;
-        config["threshold"] = threshold;
-        config["iou_threshold"] = iou_threshold;
-        config["combine_ios_threshold"] = combine_ios_threshold;
-
-        std::string jsonStr = config.dump();
-
-        const char* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
-        std::string resultJson = std::string(resultPtr);
-        json resultObject = json::parse(resultJson);
-        if (resultObject.contains("model_index"))
-        {
-            modelIndex = resultObject["model_index"].get<int>();
-        } else
-        {
-            _dllLoader->GetFreeResultFunc()(resultPtr);
-            throw std::runtime_error("load sliding window model failed: " + resultObject.dump());
-        }
-
-        _dllLoader->GetFreeResultFunc()(resultPtr);
-    }
-
     // Utils类实现
     std::string Utils::JsonToString(const json& j) {
         return j.dump(4); // 缩进为4

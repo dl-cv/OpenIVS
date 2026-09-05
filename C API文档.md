@@ -97,10 +97,25 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 
 输入图像要求：
 
-- `data_ptr` 指向连续图像内存；
-- `height`、`width`、`channel` 与实际内存一致；
-- 当前结构没有数据类型和行跨度字段，调用方需先完成必要转换；
+- `DlcvCImageList.n` 必须大于 `0`，`images` 必须指向至少 `n` 个 `DlcvCImage`；
+- `data_ptr` 必须非零并指向连续图像内存；
+- `height`、`width` 必须大于 `0`，`width × height × channel` 必须能由当前进程的 `size_t` 表示；
+- `channel` 的封装层可构造范围为 `1`～OpenCV 的 `CV_CN_MAX`，模型仍可按自身输入要求拒绝不符合要求的通道数；
+- 结构化 C 接口没有数据类型和行跨度字段，数据固定按无符号 8 位连续图像解释；`uint16`、`float32` 或带额外行跨度的数据必须由调用方先转换；
+- C 接口无法从裸指针确认实际缓冲区容量，调用方需保证内存至少包含 `width × height × channel` 字节；
 - 调用方不能在推理完成前释放或修改输入图像内存。
+
+结构化兼容入口 `dlcv_infer_c` 在模型查找前检查完整图像列表，当前固定的输入错误如下：
+
+| 输入情况 | `code` | `message` |
+| --- | ---: | --- |
+| 空列表、非正数量或空图像数组 | `1` | `Invalid image list.` |
+| `data_ptr` 为零 | `1` | `Invalid image data.` |
+| 非正宽高或字节数计算溢出 | `1` | `Invalid image size.` |
+| 非正通道数或通道数超过 `CV_CN_MAX` | `1` | `Invalid image type.` |
+| 图像输入有效但模型索引不存在 | `2` | `Model not found.` |
+
+上述消息与底层结构化接口的同类失败格式保持一致。模型内部校验、运行期异常和内存分配失败的文本可能来自 C++ 封装或依赖库，不声明所有失败文本逐字一致。失败结果的 `sample_results` 为空且 `n` 为 `0`。兼容释放函数释放后保留原 `code`，扩展释放函数将 `code` 置为 `0`；两者均清空结果指针和数量，支持空指针及对已释放结果再次调用。
 
 ## 5. 11 个扩展入口
 
@@ -156,7 +171,76 @@ C 调用端只需包含 `dlcv_infer_c_api.h`，不需要链接 `dlcv_infer_cpp.l
 
 调用端复制或安装这两个交付文件即可使用 C 接口声明和统一动态库；OpenCV、Visual C++ 运行库、底层推理 DLL 及模型授权环境仍按既有 SDK 环境提供。
 
+### 6.3 异常输入、完整 C 测试与正式模型测试
+
+构建完成后，纯 C 异常输入测试使用实际导出函数，不依赖源码文本检查：
+
+```powershell
+& .\Debug\dlcv_infer_c_test.exe --c-api-invalid-input
+```
+
+Release 构建将目录改为 `Release`。
+
+默认完整 C 测试需要通过 `DLCV_TEST_CORE_DLL` 指定参照核心的绝对路径。配置缺失、文件不存在或加载失败时直接返回失败，不读取其他安装目录。三个原生接口加载位置均输出实际核心路径，原生接口和包装接口应使用同一正式加密核心。
+
+```powershell
+$repo = (Resolve-Path '.').Path
+$runtime = 'C:\path\to\正式加密包目录'
+$oldPath = $env:PATH
+$oldCore = $env:DLCV_TEST_CORE_DLL
+try {
+    $env:DLCV_TEST_CORE_DLL = Join-Path $runtime 'dlcv_infer.dll'
+    $env:PATH = "$runtime;$oldPath"
+    Push-Location -LiteralPath $runtime
+    & (Join-Path $repo 'Debug\dlcv_infer_c_test.exe')
+    if ($LASTEXITCODE -ne 0) { throw "完整 C 测试失败，退出码 $LASTEXITCODE" }
+} finally {
+    Pop-Location
+    $env:PATH = $oldPath
+    $env:DLCV_TEST_CORE_DLL = $oldCore
+}
+```
+
+`test_all_models.py` 没有固定模型数量参数，会测试 `--model-root` 一级目录中的全部 `.dvt`、`.dvo`、`.dvst` 和 `.dvso` 文件。模型目录内容会变化，执行前记录实际文件清单与数量；历史 25 模型结果不表示后续目录仍只有 25 个模型。
+
+测试使用的 `dlcv_infer_cpp.dll` 可位于工程构建目录，`dlcv_infer.dll`、`dlcv_infer_v.dll` 必须来自正式加密包，二者可以位于不同目录。执行时将正式加密包目录设为当前目录并置于 `PATH` 首位，使用 `--dll` 指定包装 DLL，使用 `--core-dll-dir` 指定并核对正式加密核心 DLL 目录。脚本会读取当前进程实际加载的核心 DLL 路径；未加载核心 DLL，或实际目录不是 `--core-dll-dir` 时，测试返回失败。该方式只调整测试进程的查找目录，不修改安装内容或系统环境。
+
+示例参数：
+
+```powershell
+$repo = (Resolve-Path '.').Path
+$wrapper = Join-Path $repo 'Release\dlcv_infer_cpp.dll'
+$runtime = 'C:\path\to\正式加密包目录'
+$models = Get-ChildItem -LiteralPath 'Y:\测试模型' -File |
+    Where-Object { $_.Extension.ToLowerInvariant() -in '.dvt', '.dvo', '.dvst', '.dvso' }
+Write-Output "支持格式模型数量：$($models.Count)"
+
+$oldPath = $env:PATH
+try {
+    $env:PATH = "$runtime;$oldPath"
+    Push-Location -LiteralPath $runtime
+    & 'C:\dlcv\python.exe' `
+        (Join-Path $repo 'Test\dlcv_infer_c_dll_test\test_all_models.py') `
+        --model-root 'Y:\测试模型' `
+        --dll $wrapper `
+        --core-dll-dir $runtime `
+        --configuration Release `
+        --device 0 `
+        --threshold 0.5 `
+        --expected-failures (Join-Path $repo 'Test\dlcv_infer_c_dll_test\expected_failures.json') `
+        --output (Join-Path $env:TEMP 'dlcv_infer_c_api_models_release.json')
+    if ($LASTEXITCODE -ne 0) { throw "C API 模型测试失败，退出码 $LASTEXITCODE" }
+} finally {
+    Pop-Location
+    $env:PATH = $oldPath
+}
+```
+
+不传 `--with-mask` 和 `--calc-mean` 时，两项均为关闭；脚本固定使用 `batch_size=1`。
+
 ## 7. 验证范围
+
+下表保留累计验证记录。2026-09-05 本轮重新构建了 Debug/x64 的包装 DLL、C 测试、C Qt Demo、C# API 和 Halcon Demo；纯 C 异常输入及配置同一正式加密核心后的完整 C 测试通过。本轮未重新构建完整解决方案或 Release 配置。
 
 | 检查项 | 结果 |
 | --- | --- |

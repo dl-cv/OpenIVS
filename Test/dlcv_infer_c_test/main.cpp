@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -107,6 +108,69 @@ static std::string WideToAnsi(const std::wstring& value) {
     return out;
 }
 
+static bool GetConfiguredCoreDllPath(std::wstring& path, std::string& error) {
+    constexpr wchar_t kEnvironmentName[] = L"DLCV_TEST_CORE_DLL";
+    const DWORD required = GetEnvironmentVariableW(kEnvironmentName, nullptr, 0);
+    if (required == 0) {
+        error = "未设置 DLCV_TEST_CORE_DLL，必须指定本轮 dlcv_infer.dll 的绝对路径";
+        return false;
+    }
+
+    std::vector<wchar_t> buffer(static_cast<size_t>(required));
+    const DWORD written = GetEnvironmentVariableW(
+        kEnvironmentName, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (written == 0 || written >= buffer.size()) {
+        error = "读取 DLCV_TEST_CORE_DLL 失败: " + std::to_string(GetLastError());
+        return false;
+    }
+
+    const std::filesystem::path configuredPath(buffer.data());
+    if (!configuredPath.is_absolute()) {
+        error = "DLCV_TEST_CORE_DLL 必须是绝对路径";
+        return false;
+    }
+
+    std::error_code fileError;
+    if (!std::filesystem::is_regular_file(configuredPath, fileError)) {
+        error = "DLCV_TEST_CORE_DLL 指定的文件不存在或不是普通文件: "
+            + WideToUtf8(configuredPath.wstring());
+        return false;
+    }
+
+    path = configuredPath.lexically_normal().wstring();
+    return true;
+}
+
+static std::wstring GetLoadedModulePath(HMODULE module) {
+    std::vector<wchar_t> buffer(32768);
+    const DWORD written = GetModuleFileNameW(
+        module, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (written == 0 || written >= buffer.size()) return {};
+    return std::wstring(buffer.data(), written);
+}
+
+static HMODULE LoadConfiguredCoreDll(std::string& error) {
+    std::wstring configuredPath;
+    if (!GetConfiguredCoreDllPath(configuredPath, error)) return nullptr;
+
+    HMODULE module = LoadLibraryW(configuredPath.c_str());
+    if (module == nullptr) {
+        error = "DLCV_TEST_CORE_DLL 加载失败: " + std::to_string(GetLastError())
+            + "，路径=" + WideToUtf8(configuredPath);
+        return nullptr;
+    }
+
+    const std::wstring loadedPath = GetLoadedModulePath(module);
+    if (loadedPath.empty()) {
+        error = "读取已加载核心 DLL 路径失败: " + std::to_string(GetLastError());
+        FreeLibrary(module);
+        return nullptr;
+    }
+
+    std::cout << "[DLCV_TEST_CORE_DLL] loaded: " << WideToUtf8(loadedPath) << "\n";
+    return module;
+}
+
 static cv::Mat ReadImageRgb(const std::wstring& path) {
     FILE* fp = nullptr;
     if (_wfopen_s(&fp, path.c_str(), L"rb") != 0 || fp == nullptr) {
@@ -142,9 +206,11 @@ static long long Quantize(double value, double scale) {
 }
 
 static bool LoadNativeCapi(NativeCapi& api, std::string& error) {
-    api.module = LoadLibraryW(L"C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll");
+    api.module = LoadConfiguredCoreDll(error);
     if (api.module == nullptr) {
-        error = "dlcv_infer.dll 加载失败: " + std::to_string(GetLastError());
+        if (error.empty()) {
+            error = "dlcv_infer.dll 加载失败: " + std::to_string(GetLastError());
+        }
         return false;
     }
     api.loadModel = reinterpret_cast<NativeCapi::LoadModel>(GetProcAddress(api.module, "dlcv_load_model_c"));
@@ -179,14 +245,11 @@ static bool CompareForwardedJsonCall(
 }
 
 static bool RunCapiForwardingCheck(HMODULE cModule) {
-    HMODULE nativeModule = GetModuleHandleW(L"dlcv_infer.dll");
-    bool ownsNativeModule = false;
+    std::string loadError;
+    HMODULE nativeModule = LoadConfiguredCoreDll(loadError);
+    const bool ownsNativeModule = nativeModule != nullptr;
     if (nativeModule == nullptr) {
-        nativeModule = LoadLibraryW(L"C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll");
-        ownsNativeModule = true;
-    }
-    if (nativeModule == nullptr) {
-        std::cerr << "FAIL: 原生 dlcv_infer.dll 加载失败: " << GetLastError() << "\n";
+        std::cerr << "FAIL: " << loadError << "\n";
         return false;
     }
 
@@ -1126,9 +1189,11 @@ static bool InferFingerprint(
 }
 
 static bool LoadNativeJsonApi(NativeJsonApi& api, std::string& error) {
-    api.module = LoadLibraryW(L"C:\\dlcv\\Lib\\site-packages\\dlcvpro_infer\\dlcv_infer.dll");
+    api.module = LoadConfiguredCoreDll(error);
     if (api.module == nullptr) {
-        error = "dlcv_infer.dll 加载失败: " + std::to_string(GetLastError());
+        if (error.empty()) {
+            error = "dlcv_infer.dll 加载失败: " + std::to_string(GetLastError());
+        }
         return false;
     }
     api.loadModel = reinterpret_cast<NativeJsonApi::StringCall>(
