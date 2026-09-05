@@ -270,7 +270,7 @@ public class DvsModel : FlowGraphModel
 **`Load` 行为**：
 1. 打开 `.dvst`/`.dvso` 文件，校验头部 `DV\n`；`.dvsp` 当前不支持。
 2. 读取 JSON 头行，解析 `file_list` 和 `file_size` 数组。
-3. 将 `pipeline.json` 和归档内子模型二进制读入内存，不写入模型文件。
+3. 将 `pipeline.json` 和归档内子模型二进制读入内存，不写入模型文件；同名成员内容完全相同时保留第一份并复用，内容不同时抛出 `InvalidDataException`。
 4. 按模型节点编号建立内存模型来源表，并保留 `model_path_original` 和 `model_name`。
 5. 调用带内存模型来源表的 `LoadFromRoot` 完成加载。
 6. 加载期间不创建模型临时文件。
