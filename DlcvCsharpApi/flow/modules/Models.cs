@@ -68,13 +68,31 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				string normalizedPath = NormalizeModelPath(_modelPath);
-				string cacheKey = (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
+				FlowModelSource modelSource = null;
+				if (Context != null)
+				{
+					try
+					{
+						var sources = Context.Get<Dictionary<int, FlowModelSource>>("flow_model_sources", null);
+						if (sources != null)
+						{
+							sources.TryGetValue(NodeId, out modelSource);
+						}
+					}
+					catch { }
+				}
+
+				string normalizedPath = modelSource == null ? NormalizeModelPath(_modelPath) : null;
+				string cacheKey = modelSource != null
+					? BuildBinaryCacheKey(modelSource.CacheKey, deviceId)
+					: (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
 				lock (_modelCacheLock)
 				{
 					if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
 					{
-						_model = new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
+						_model = modelSource != null
+							? new Model(modelSource.Data, modelSource.ModelName, deviceId)
+							: new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
 						_modelCache[cacheKey] = _model;
 					}
 				}
@@ -93,6 +111,39 @@ namespace DlcvModules
 			{
 				_modelCache.Clear();
 			}
+		}
+
+		internal static void ReleaseBinaryModels(Dictionary<int, FlowModelSource> modelSources, int deviceId)
+		{
+			if (modelSources == null || modelSources.Count == 0)
+				return;
+
+			var releasedModels = new HashSet<Model>();
+			lock (_modelCacheLock)
+			{
+				foreach (FlowModelSource source in modelSources.Values)
+				{
+					if (source == null)
+						continue;
+
+					string cacheKey = BuildBinaryCacheKey(source.CacheKey, deviceId);
+					if (_modelCache.TryGetValue(cacheKey, out Model model) && model != null)
+					{
+						releasedModels.Add(model);
+						_modelCache.Remove(cacheKey);
+					}
+				}
+			}
+
+			foreach (Model model in releasedModels)
+			{
+				model.Dispose();
+			}
+		}
+
+		private static string BuildBinaryCacheKey(string sourceKey, int deviceId)
+		{
+			return "binary|" + sourceKey + "|" + deviceId;
 		}
 
 		private static string NormalizeModelPath(string modelPath)

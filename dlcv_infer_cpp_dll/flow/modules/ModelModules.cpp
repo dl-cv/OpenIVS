@@ -20,6 +20,10 @@ std::string ModelPool::MakeKey(const std::string& modelPathUtf8, int deviceId) {
     return modelPathUtf8 + "|dev:" + std::to_string(deviceId);
 }
 
+std::string ModelPool::MakeBinaryKey(uint64_t storeId, const std::string& bufferKey, int deviceId) {
+    return "memory:" + std::to_string(storeId) + ":" + bufferKey + "|dev:" + std::to_string(deviceId);
+}
+
 ModelPool& ModelPool::Instance() {
     static ModelPool s;
     return s;
@@ -30,21 +34,80 @@ std::shared_ptr<dlcv_infer::Model> ModelPool::Acquire(const std::string& modelPa
         throw std::invalid_argument("model_path is empty");
     }
     const std::string key = ModelPool::MakeKey(modelPathUtf8, deviceId);
-    std::lock_guard<std::mutex> lk(_mu);
-    auto it = _cache.find(key);
-    if (it != _cache.end() && it->second.model) {
-        it->second.refCount++;
-        return it->second.model;
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        auto it = _cache.find(key);
+        if (it != _cache.end() && it->second.model) {
+            it->second.refCount++;
+            return it->second.model;
+        }
     }
 
     // FlowGraph 内部按 UTF-8 存储；现有 dlcv_infer::Model 构造函数按“输入为 GBK”处理
     const std::string gbkPath = dlcv_infer::convertUtf8ToGbk(modelPathUtf8);
     auto model = std::make_shared<dlcv_infer::Model>(gbkPath, deviceId);
-    Entry entry;
-    entry.model = model;
-    entry.refCount = 1;
-    _cache[key] = std::move(entry);
-    return model;
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        auto it = _cache.find(key);
+        if (it != _cache.end() && it->second.model) {
+            it->second.refCount++;
+            return it->second.model;
+        }
+        Entry entry;
+        entry.model = model;
+        entry.refCount = 1;
+        _cache[key] = std::move(entry);
+        return model;
+    }
+}
+
+std::shared_ptr<dlcv_infer::Model> ModelPool::AcquireBinary(
+    const std::shared_ptr<const ModelBinaryStore>& store,
+    const std::string& bufferKey,
+    const std::string& modelName,
+    int deviceId) {
+    if (!store) {
+        throw std::invalid_argument("流程模型字节存储为空");
+    }
+    const auto bufferIt = store->Buffers.find(bufferKey);
+    if (bufferIt == store->Buffers.end() || !bufferIt->second || bufferIt->second->empty()) {
+        throw std::runtime_error("流程模型中未找到子模型数据: " + modelName);
+    }
+
+    const std::string key = ModelPool::MakeBinaryKey(store->StoreId, bufferKey, deviceId);
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        auto it = _cache.find(key);
+        if (it != _cache.end() && it->second.model) {
+            it->second.refCount++;
+            return it->second.model;
+        }
+    }
+
+    std::shared_ptr<dlcv_infer::Model> model(
+        new dlcv_infer::Model(bufferIt->second, modelName, deviceId));
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        auto it = _cache.find(key);
+        if (it != _cache.end() && it->second.model) {
+            it->second.refCount++;
+            return it->second.model;
+        }
+        Entry entry;
+        entry.model = model;
+        entry.refCount = 1;
+        _cache[key] = std::move(entry);
+        return model;
+    }
+}
+
+bool ModelPool::RetainByKey(const std::string& key) {
+    if (key.empty()) return false;
+    std::lock_guard<std::mutex> lk(_mu);
+    auto it = _cache.find(key);
+    if (it == _cache.end() || !it->second.model) return false;
+    it->second.refCount++;
+    return true;
 }
 
 void ModelPool::Release(const std::string& modelPathUtf8, int deviceId) {
@@ -55,12 +118,16 @@ void ModelPool::Release(const std::string& modelPathUtf8, int deviceId) {
 
 void ModelPool::ReleaseByKey(const std::string& key) {
     if (key.empty()) return;
-    std::lock_guard<std::mutex> lk(_mu);
-    auto it = _cache.find(key);
-    if (it == _cache.end()) return;
-    it->second.refCount--;
-    if (it->second.refCount <= 0) {
-        _cache.erase(it);
+    std::shared_ptr<dlcv_infer::Model> releasedModel;
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        auto it = _cache.find(key);
+        if (it == _cache.end()) return;
+        it->second.refCount--;
+        if (it->second.refCount <= 0) {
+            releasedModel = std::move(it->second.model);
+            _cache.erase(it);
+        }
     }
 }
 
@@ -87,6 +154,22 @@ void BaseModelModule::LoadModel() {
     } catch (...) {}
 
     _resolvedDeviceId = deviceId;
+    if (!_modelBufferKey.empty()) {
+        if (Context == nullptr) {
+            throw std::runtime_error("流程模型缺少执行上下文");
+        }
+        const auto store = Context->Get<std::shared_ptr<const ModelBinaryStore>>(
+            "model_binary_store",
+            std::shared_ptr<const ModelBinaryStore>());
+        std::string modelName = ReadString("model_name", std::string());
+        if (modelName.empty()) modelName = GetFileNameOnlyLocal(_modelPathUtf8);
+        if (modelName.empty()) modelName = _modelBufferKey;
+        _modelPoolKey = ModelPool::MakeBinaryKey(store ? store->StoreId : 0, _modelBufferKey, deviceId);
+        _model = ModelPool::Instance().AcquireBinary(store, _modelBufferKey, modelName, deviceId);
+        return;
+    }
+
+    _modelPoolKey = ModelPool::MakeKey(_modelPathUtf8, deviceId);
     _model = ModelPool::Instance().Acquire(_modelPathUtf8, deviceId);
 }
 

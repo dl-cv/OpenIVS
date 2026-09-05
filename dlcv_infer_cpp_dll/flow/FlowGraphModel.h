@@ -11,6 +11,8 @@
 namespace dlcv_infer {
 namespace flow {
 
+struct ModelBinaryStore;
+
 /// <summary>
 /// 流程图推理模型封装：与普通模型一致的调用方式（先加载，再推理/测速）。
 /// 对齐 OpenIVS/DlcvCsharpApi/FlowGraphModel.cs 的接口风格，但为纯 C++ 实现。
@@ -65,6 +67,8 @@ public:
     DLCV_INFER_CPP_DLL_API double Benchmark(const cv::Mat& image, int warmup = 1, int runs = 10);
 
 private:
+    friend class ::dlcv_infer::Model;
+
     std::vector<Json> _nodes;
     Json _root = Json::object();
     Json _loadedModelMeta = Json::array();
@@ -74,7 +78,14 @@ private:
     std::vector<std::string> _acquiredModelKeys;
 
     void ReleaseOwnedModelsNoexcept();
-    Json LoadFromRoot(const Json& root, int deviceId);
+    Json LoadFromRoot(
+        const Json& root,
+        int deviceId,
+        std::shared_ptr<const ModelBinaryStore> modelBinaryStore = nullptr);
+    Json LoadFromArchive(
+        const Json& root,
+        std::shared_ptr<const ModelBinaryStore> modelBinaryStore,
+        int deviceId);
 };
 
 } // namespace flow
