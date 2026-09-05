@@ -67,7 +67,6 @@ namespace DlcvDemo
             MaxWidth = SystemParameters.WorkArea.Width;
             MaxHeight = SystemParameters.WorkArea.Height;
             this.Title = "C# 测试程序 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
-            button_load_model.IsEnabled = false;
             Thread thread = new Thread(InitializeDeviceAndUiTest);
             thread.IsBackground = true;
             thread.Start();
@@ -86,10 +85,8 @@ namespace DlcvDemo
             }
             finally
             {
-                Dispatcher.BeginInvoke(new Action(async () =>
+                Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    await RefreshEnvironmentInfoAsync();
-                    button_load_model.IsEnabled = true;
                     if (deviceInfoError != null)
                     {
                         richTextBox1.Text += "\n设备信息读取失败：" + deviceInfoError.Message;
