@@ -110,7 +110,7 @@ dlcv_infer_c_qt_demo/Debug/dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.exe
 | C API 控制台测试 | 普通模型原生 JSON 原样转发、流程模型原生 JSON、结构化结果、同索引并发和模型释放检查通过 |
 | 模型并发加载 | `--model-load-concurrency` 使用 4 个线程交替加载普通模型和流程模型，并检查所有实例记录的底层 DLL 名称一致；连续执行 5 次均通过 |
 | 纯 C 头文件编译 | `pure_c_header_test.c` 由 C 编译器处理，六个结构大小与 C++ 构建一致 |
-| DVST 内容复用 | 不同路径的相同内容复用解压目录和模型池；两个实例均完成推理，最后释放后目录删除 |
+| DVST 独立加载 | 不同归档加载实例分别持有模型池引用；同一次加载中的相同成员共享模型，加载和推理不生成解包目录 |
 
 ## 6. 纯 C 命令行 Demo
 
@@ -168,3 +168,14 @@ dlcv_infer_c_demo.exe load-model <名称> <模型路径> --then benchmark <名�
 ## 7. Qt C Demo 导出检查
 
 `dlcv_infer_c_qt_demo.exe --check-c-api-exports` 不启动窗口，使用 `LoadLibraryW` 和 `GetProcAddress` 检查 `dlcv_infer_cpp.dll` 的全部 34 个 C 导出函数。检查通过时返回退出码 0，并输出 `C API 导出检查通过`。该检查覆盖 11 个扩展结构化接口、4 个兼容结构化接口和 19 个底层 C 导出接口。
+
+## 8. 控制台模型池释放检查
+
+```text
+Debug\dlcv_infer_c_test.exe --dvst-pool-release
+Debug\dlcv_infer_c_test.exe
+```
+
+`--dvst-pool-release` 使用源码中的流程模型与图片输入，检查 C API 加载、推理、释放、再次加载后的模型池数量。所有引用释放后模型池立即清空，活动模型存在时 `idleEntries` 仍为 `0`，不要求跨次加载保留模型。
+
+无参数执行完整 C 测试，包含普通及流程模型、并发调用、结果释放、全部模型释放同步与旧实例释放检查。运行时通过 `DLCV_TEST_CORE_DLL` 指定参照运行库，使用对应版本的运行环境。原 `--dvst-temp-dir` 检查已删除，不再以解包目录或跨归档内容缓存作为预期结果。

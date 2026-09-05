@@ -36,7 +36,7 @@
 | C 导出 | `dlcv_infer_cpp` | 将 19 个 JSON、设备和系统控制方法导出为 C 名称函数，并保留 4 个结构化兼容入口 |
 | 扩展接口 | `dlcv_infer_cpp` | 提供基于 C++ `Model` 的 11 个 `dlcv_infer_cpp_*_c` 入口 |
 
-23 个非公共索引接口均已增加 `NativeApi` 方法。JSON 模型接口对 `.dvt/.dvo` 请求继续直接转发 `NativeApi`；对 `.dvst/.dvso/.dvsp` 请求使用 `Model` 和同一模型表完成加载、推理、查询和释放。设备与系统接口继续直接转发。第 20～23 项在同一工程中提供结构化 C 接口实现，11 个扩展入口复用同一模型表。
+23 个非公共索引接口均已增加 `NativeApi` 方法。JSON 模型接口对 `.dvt/.dvo` 请求继续直接转发 `NativeApi`；对 `.dvst/.dvso` 请求使用 `Model` 和同一模型表完成加载、推理、查询和释放；`.dvsp` 返回不支持的格式错误。设备与系统接口继续直接转发。第 20～23 项在同一工程中提供结构化 C 接口实现，11 个扩展入口复用同一模型表。
 
 ## 3. 23 个非公共索引接口逐项对照
 
@@ -44,7 +44,7 @@
 
 | # | 底层 `dlcv_infer` 接口 | C++ 封装方法 | C 导出 | 输入 | 输出 | 释放方式 | 一致性 |
 | ---: | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `const char* dlcv_load_model(const char* config_str)` | `NativeApi::LoadModel(const char*)` | `dlcv_load_model(const char*)` | JSON 字符串：`model_path`，可选 `device_id`、`type`、`warm_up` | 新分配的 JSON 字符串，包含 `code`、`message` 和模型索引 | 用 `dlcv_free_result` 释放返回字符串 | `.dvt/.dvo` 原样转发；`.dvst/.dvso/.dvsp` 使用 `Model` 加载并返回同格式状态 |
+| 1 | `const char* dlcv_load_model(const char* config_str)` | `NativeApi::LoadModel(const char*)` | `dlcv_load_model(const char*)` | JSON 字符串：`model_path`，可选 `device_id`、`type`、`warm_up` | 新分配的 JSON 字符串，包含 `code`、`message` 和模型索引 | 用 `dlcv_free_result` 释放返回字符串 | `.dvt/.dvo` 原样转发；`.dvst/.dvso` 使用 `Model` 加载并返回同格式状态；`.dvsp` 返回格式错误 |
 | 2 | `const char* dlcv_free_model(const char* config_str)` | `NativeApi::FreeModel(const char*)` | `dlcv_free_model(const char*)` | JSON 字符串：`model_index` | 新分配的状态 JSON 字符串 | 用 `dlcv_free_result` 释放返回字符串 | 普通模型转发到底层；流程模型从统一模型表释放，结果码和消息格式一致 |
 | 3 | `const char* dlcv_get_model_info(const char* config_str)` | `NativeApi::GetModelInfo(const char*)` | `dlcv_get_model_info(const char*)` | JSON 字符串：`model_index` 或 `model_path`，流程路径可选 `device_id` | 新分配的模型信息 JSON 字符串 | 用 `dlcv_free_result` 释放返回字符串 | 普通模型直接转发；流程模型支持索引和路径两种查询方式 |
 | 4 | `const char* dlcv_infer(const char* config_str)` | `NativeApi::Infer(const char*)` | `dlcv_infer(const char*)` | JSON 字符串：`model_index`、`image_list` 和推理参数；图像 `dtype` 支持 `uint8/uint16/float32` | 新分配的推理结果 JSON 字符串 | 只调用 `dlcv_free_model_result`；该函数同时释放 mask 和外层字符串 | 普通模型原样转发；流程模型返回 `sample_results/results/mask_ptr` 格式并支持同索引并发调用 |

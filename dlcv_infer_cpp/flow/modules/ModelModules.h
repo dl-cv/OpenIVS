@@ -37,6 +37,12 @@ private:
     bool _ownsExclusiveLock = false;
 };
 
+struct ModelBinaryStore final {
+    uint64_t StoreId = 0;
+    std::unordered_map<std::string, std::shared_ptr<const std::vector<unsigned char>>> Buffers;
+    std::unordered_map<std::string, std::string> Aliases;
+};
+
 class ModelPool;
 
 class ModelPoolLease final {
@@ -86,8 +92,15 @@ public:
     /// 若不存在，创建新的 Model 对象，refCount = 1。
     ModelPoolLease Acquire(
         const std::string& modelPathUtf8,
-        int deviceId,
-        const std::string& modelIdentityUtf8 = std::string());
+        int deviceId);
+
+    ModelPoolLease AcquireBinary(
+        const std::shared_ptr<const ModelBinaryStore>& store,
+        const std::string& bufferKey,
+        const std::string& modelName,
+        int deviceId);
+    ModelPoolLease RetainByKey(const std::string& key);
+    static std::string MakeBinaryKey(uint64_t storeId, const std::string& bufferKey, int deviceId);
 
     void Clear();
     ModelPoolStats GetStats();
@@ -98,20 +111,15 @@ private:
     struct Entry {
         std::shared_ptr<dlcv_infer::Model> model;
         int refCount = 0;
-        std::uint64_t lastUse = 0;
         std::uint64_t identity = 0;
-        bool retainWhenIdle = false;
     };
 
     ModelPool() = default;
     friend class ModelPoolLease;
     void ReleaseByKey(const std::string& key, std::uint64_t entryIdentity);
-    void EvictIdleLocked();
 
-    static constexpr size_t MaxIdleEntries = 8;
     std::mutex _mu;
     std::unordered_map<std::string, Entry> _cache;
-    std::uint64_t _useSequence = 0;
     std::uint64_t _entrySequence = 0;
 };
 
@@ -123,7 +131,7 @@ protected:
     std::string _modelPathUtf8;
     int _deviceId = 0;
     int _resolvedDeviceId = 0;
-    std::string _modelIdentityUtf8;
+    std::string _modelBufferKey;
     ModelPoolLease _modelLease;
 
 public:
@@ -133,7 +141,7 @@ public:
                     ExecutionContext* context = nullptr)
         : BaseModule(nodeId, title, properties, context) {
         _modelPathUtf8 = ReadString("model_path", std::string());
-        _modelIdentityUtf8 = ReadString("model_pool_key", _modelPathUtf8);
+        _modelBufferKey = ReadString("model_buffer_key", std::string());
         _deviceId = ReadInt("device_id", 0);
         _resolvedDeviceId = _deviceId;
     }
@@ -143,8 +151,7 @@ public:
     void LoadModel() override;
 
     const std::string& ModelPathUtf8() const { return _modelPathUtf8; }
-    const std::string& ModelIdentityUtf8() const { return _modelIdentityUtf8; }
-    const std::string& ModelPoolKey() const { return _modelIdentityUtf8; }
+    const std::string& ModelPoolKey() const { return _modelLease.Key(); }
     int ResolvedDeviceId() const { return _resolvedDeviceId; }
     const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _modelLease.Model(); }
 };

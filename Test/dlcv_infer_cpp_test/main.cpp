@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 
 #include <algorithm>
 #include <atomic>
@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -22,9 +23,11 @@
 #include <mutex>
 #include <numeric>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -35,6 +38,7 @@
 #include "../../dlcv_infer_cpp/ImageInputUtils.h"
 #include "../../dlcv_infer_cpp/flow/FlowGraphModel.h"
 #include "../../dlcv_infer_cpp/flow/ModuleRegistry.h"
+#include "../../dlcv_infer_cpp/flow/modules/ModelModules.h"
 #include "../../dlcv_infer_cpp/flow/utils/MaskRleUtils.h"
 #include "../DvsTempArtifactMonitor.h"
 #include "dlcv_infer.h"
@@ -429,6 +433,296 @@ int RunDvspRejectSelfTest(int argc, wchar_t* argv[]) {
         return 0;
     } catch (const std::exception& ex) {
         PrintUtf8ErrorLine(ex.what());
+        return 1;
+    }
+}
+
+struct ScopedDvsSelfTestFile final {
+    std::wstring path;
+
+    explicit ScopedDvsSelfTestFile(std::wstring value) : path(std::move(value)) {}
+    ~ScopedDvsSelfTestFile() {
+        if (!path.empty()) DeleteFileW(path.c_str());
+    }
+
+    ScopedDvsSelfTestFile(const ScopedDvsSelfTestFile&) = delete;
+    ScopedDvsSelfTestFile& operator=(const ScopedDvsSelfTestFile&) = delete;
+};
+
+std::wstring BuildDvsSelfTestFilePath(const wchar_t* suffix) {
+    wchar_t tempPath[MAX_PATH] = {0};
+    const DWORD length = GetTempPathW(static_cast<DWORD>(sizeof(tempPath) / sizeof(tempPath[0])), tempPath);
+    if (length == 0 || length >= sizeof(tempPath) / sizeof(tempPath[0])) {
+        throw std::runtime_error("无法获取系统临时目录");
+    }
+
+    static std::atomic<std::uint64_t> sequence{0};
+    std::wstring path(tempPath, length);
+    path += L"dlcv_cpp_dvs_";
+    path += std::to_wstring(GetCurrentProcessId());
+    path += L"_";
+    path += std::to_wstring(sequence.fetch_add(1, std::memory_order_relaxed));
+    path += L"_";
+    path += suffix;
+    path += L".dvst";
+    return path;
+}
+
+void AppendBytes(std::vector<unsigned char>& output, const unsigned char* data, size_t size) {
+    output.insert(output.end(), data, data + size);
+}
+
+std::vector<unsigned char> BuildDvsSelfTestArchive(
+    const std::vector<std::string>& fileNames,
+    const std::vector<std::vector<unsigned char>>& fileData) {
+    if (fileNames.size() != fileData.size()) {
+        throw std::invalid_argument("归档文件名与数据数量不一致");
+    }
+
+    json header = json::object();
+    header["file_list"] = json::array();
+    header["file_size"] = json::array();
+    for (size_t i = 0; i < fileNames.size(); ++i) {
+        header["file_list"].push_back(fileNames[i]);
+        header["file_size"].push_back(fileData[i].size());
+    }
+
+    std::vector<unsigned char> archive;
+    static constexpr unsigned char magic[] = {'D', 'V', '\n'};
+    AppendBytes(archive, magic, sizeof(magic));
+    const std::string headerLine = header.dump() + "\n";
+    AppendBytes(
+        archive,
+        reinterpret_cast<const unsigned char*>(headerLine.data()),
+        headerLine.size());
+    for (const auto& data : fileData) {
+        if (!data.empty()) AppendBytes(archive, data.data(), data.size());
+    }
+    return archive;
+}
+
+void WriteDvsSelfTestFile(const std::wstring& path, const std::vector<unsigned char>& data) {
+    FILE* file = nullptr;
+    if (_wfopen_s(&file, path.c_str(), L"wb") != 0 || file == nullptr) {
+        throw std::runtime_error("无法写入 DVS 自测归档");
+    }
+    const size_t written = data.empty() ? 0 : std::fwrite(data.data(), 1, data.size(), file);
+    const int closeResult = std::fclose(file);
+    if (written != data.size() || closeResult != 0) {
+        DeleteFileW(path.c_str());
+        throw std::runtime_error("DVS 自测归档写入不完整");
+    }
+}
+
+bool ContainsArchiveDuplicateError(const std::string& message, const std::string& name) {
+    const std::string prefix = "归档中存在同名但内容不同的文件：";
+    return message.find(prefix) != std::string::npos && message.find(name) != std::string::npos;
+}
+
+bool LoadDvsArchiveForSelfTest(const std::wstring& path, std::string& error) {
+    try {
+        dlcv_infer::Model model(path, 0);
+        model.FreeModel();
+        return true;
+    } catch (const std::exception& ex) {
+        error = ex.what();
+        return false;
+    } catch (...) {
+        error = "加载 DVS 自测归档时发生未知异常";
+        return false;
+    }
+}
+
+bool VerifyDvsArchiveAccepted(
+    const std::vector<std::string>& fileNames,
+    const std::vector<std::vector<unsigned char>>& fileData,
+    std::string& error) {
+    ScopedDvsSelfTestFile file(BuildDvsSelfTestFilePath(L"accepted"));
+    WriteDvsSelfTestFile(file.path, BuildDvsSelfTestArchive(fileNames, fileData));
+    return LoadDvsArchiveForSelfTest(file.path, error);
+}
+
+bool VerifyDvsArchiveRejected(
+    const std::vector<std::string>& fileNames,
+    const std::vector<std::vector<unsigned char>>& fileData,
+    const std::string& expectedName,
+    std::string& error) {
+    ScopedDvsSelfTestFile file(BuildDvsSelfTestFilePath(L"rejected"));
+    WriteDvsSelfTestFile(file.path, BuildDvsSelfTestArchive(fileNames, fileData));
+    if (LoadDvsArchiveForSelfTest(file.path, error)) {
+        error = "同名但内容不同的归档未被拒绝";
+        return false;
+    }
+    if (!ContainsArchiveDuplicateError(error, expectedName)) {
+        error = "归档拒绝信息不符合预期: " + error;
+        return false;
+    }
+    return true;
+}
+
+int RunDvsArchiveDuplicateSelfTest() {
+    try {
+        const std::vector<unsigned char> emptyPipeline = {
+            '{', '"', 'n', 'o', 'd', 'e', 's', '"', ':', '[', ']', '}'
+        };
+        const std::vector<unsigned char> modelBytes = {'s', 'a', 'm', 'e', '-', 'm', 'o', 'd', 'e', 'l'};
+        const std::vector<unsigned char> otherModelBytes = {'s', 'a', 'm', 'e', '-', 'm', 'o', 'd', 'e', 'x'};
+        std::string error;
+
+        if (!VerifyDvsArchiveAccepted(
+                {"pipeline.json", "model.dvt", " \t.\\./MODEL.DVT \r"},
+                {emptyPipeline, modelBytes, modelBytes},
+                error)) {
+            PrintUtf8ErrorLine("DVS 同名模型同字节归档检查失败: " + error);
+            return 1;
+        }
+        if (!VerifyDvsArchiveRejected(
+                {"pipeline.json", "model.dvt", "./model.dvt"},
+                {emptyPipeline, modelBytes, otherModelBytes},
+                "model.dvt",
+                error)) {
+            PrintUtf8ErrorLine("DVS 同名模型不同字节归档检查失败: " + error);
+            return 1;
+        }
+        if (!VerifyDvsArchiveAccepted(
+                {"pipeline.json", " \t.\\./PIPELINE.JSON \r", "model.dvt"},
+                {emptyPipeline, emptyPipeline, modelBytes},
+                error)) {
+            PrintUtf8ErrorLine("DVS 同名 pipeline.json 同字节归档检查失败: " + error);
+            return 1;
+        }
+        const std::vector<unsigned char> otherPipeline = {
+            '{', '"', 'n', 'o', 'd', 'e', 's', '"', ':', '[', '{', '}', ']', '}'
+        };
+        if (!VerifyDvsArchiveRejected(
+                {"pipeline.json", "./pipeline.json"},
+                {emptyPipeline, otherPipeline},
+                "pipeline.json",
+                error)) {
+            PrintUtf8ErrorLine("DVS 同名 pipeline.json 不同字节归档检查失败: " + error);
+            return 1;
+        }
+
+        PrintUtf8Line("DVS 同名归档成员内容检查通过");
+        return 0;
+    } catch (const std::exception& ex) {
+        PrintUtf8ErrorLine(std::string("DVS 同名归档成员内容检查异常: ") + ex.what());
+        return 1;
+    } catch (...) {
+        PrintUtf8ErrorLine("DVS 同名归档成员内容检查发生未知异常");
+        return 1;
+    }
+}
+
+std::vector<unsigned char> ReadBinaryForDvsPoolSelfTest(const std::wstring& path) {
+    FILE* file = nullptr;
+    if (_wfopen_s(&file, path.c_str(), L"rb") != 0 || file == nullptr) return {};
+    std::unique_ptr<FILE, decltype(&fclose)> holder(file, &fclose);
+    if (_fseeki64(file, 0, SEEK_END) != 0) return {};
+    const __int64 size = _ftelli64(file);
+    if (size <= 0 || _fseeki64(file, 0, SEEK_SET) != 0) return {};
+    std::vector<unsigned char> data(static_cast<size_t>(size));
+    if (std::fread(data.data(), 1, data.size(), file) != data.size()) return {};
+    return data;
+}
+
+std::vector<unsigned char> BuildDvsModelPoolPipeline() {
+    json pipeline = json::object();
+    pipeline["nodes"] = json::array();
+    for (const auto& item : std::vector<std::pair<int, std::string>>{
+             {1, "model.dvt"}, {2, ".\\./MODEL.DVT"}}) {
+        json node = json::object();
+        node["id"] = item.first;
+        node["type"] = "model/det";
+        node["properties"] = json::object({{"model_path", item.second}});
+        pipeline["nodes"].push_back(std::move(node));
+    }
+    const std::string text = pipeline.dump();
+    return std::vector<unsigned char>(text.begin(), text.end());
+}
+
+std::vector<unsigned char> BuildDvsModelPoolArchive(const std::vector<unsigned char>& modelData) {
+    return BuildDvsSelfTestArchive(
+        {"pipeline.json", "model.dvt"},
+        {BuildDvsModelPoolPipeline(), modelData});
+}
+
+bool IsExpectedModelPoolStats(
+    const dlcv_infer::flow::ModelPoolStats& stats,
+    size_t totalEntries) {
+    return stats.totalEntries == totalEntries &&
+        stats.activeEntries == totalEntries &&
+        stats.idleEntries == 0;
+}
+
+bool IsEmptyModelPoolStats(const dlcv_infer::flow::ModelPoolStats& stats) {
+    return stats.totalEntries == 0 && stats.activeEntries == 0 && stats.idleEntries == 0;
+}
+
+int RunDvsModelPoolSelfTest(int argc, wchar_t* argv[]) {
+    if (argc < 3 || argc > 4) {
+        PrintUtf8Line("用法: dlcv_infer_cpp_test dvs-model-pool-selftest <modelPath> [device]");
+        return 2;
+    }
+
+    const std::wstring modelPath = argv[2];
+    const int deviceId = argc == 4 ? _wtoi(argv[3]) : 0;
+    try {
+        const std::vector<unsigned char> modelData = ReadBinaryForDvsPoolSelfTest(modelPath);
+        if (modelData.empty()) {
+            PrintUtf8ErrorLine("模型文件为空或读取失败");
+            return 2;
+        }
+
+        const ScopedDvsSelfTestFile firstArchive(BuildDvsSelfTestFilePath(L"pool_first"));
+        const ScopedDvsSelfTestFile secondArchive(BuildDvsSelfTestFilePath(L"pool_second"));
+        const std::vector<unsigned char> archive = BuildDvsModelPoolArchive(modelData);
+        WriteDvsSelfTestFile(firstArchive.path, archive);
+        WriteDvsSelfTestFile(secondArchive.path, archive);
+        dlcv_infer::NativeApi::FreeAllModels();
+
+        std::unique_ptr<dlcv_infer::Model> firstModel =
+            std::make_unique<dlcv_infer::Model>(firstArchive.path, deviceId);
+        const auto firstStats = dlcv_infer::flow::GetModelPoolStats();
+        if (!IsExpectedModelPoolStats(firstStats, 1)) {
+            PrintUtf8ErrorLine("一个归档内多个相同模型节点未复用为一个模型池项");
+            return 1;
+        }
+
+        std::unique_ptr<dlcv_infer::Model> secondModel =
+            std::make_unique<dlcv_infer::Model>(secondArchive.path, deviceId);
+        const auto twoArchiveStats = dlcv_infer::flow::GetModelPoolStats();
+        if (!IsExpectedModelPoolStats(twoArchiveStats, 2)) {
+            PrintUtf8ErrorLine("两个独立归档加载实例未分别创建模型池项");
+            return 1;
+        }
+
+        firstModel->FreeModel();
+        firstModel.reset();
+        const auto afterFirstRelease = dlcv_infer::flow::GetModelPoolStats();
+        if (!IsExpectedModelPoolStats(afterFirstRelease, 1)) {
+            PrintUtf8ErrorLine("释放第一个归档实例后第二个实例未保持有效");
+            return 1;
+        }
+
+        secondModel->FreeModel();
+        secondModel.reset();
+        const auto afterAllRelease = dlcv_infer::flow::GetModelPoolStats();
+        if (!IsEmptyModelPoolStats(afterAllRelease)) {
+            PrintUtf8ErrorLine("释放全部归档实例后模型池未清空");
+            return 1;
+        }
+
+        dlcv_infer::NativeApi::FreeAllModels();
+        PrintUtf8Line("DVS 模型池复用、独立归档加载与释放检查通过");
+        return 0;
+    } catch (const std::exception& ex) {
+        dlcv_infer::NativeApi::FreeAllModels();
+        PrintUtf8ErrorLine(std::string("DVS 模型池检查失败: ") + ex.what());
+        return 1;
+    } catch (...) {
+        dlcv_infer::NativeApi::FreeAllModels();
+        PrintUtf8ErrorLine("DVS 模型池检查发生未知异常");
         return 1;
     }
 }
@@ -3181,6 +3475,14 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunDvsRgbSelfTest(argc, argv);
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"dvs-archive-duplicate-selftest") {
+        return RunDvsArchiveDuplicateSelfTest();
+    }
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"dvs-model-pool-selftest") {
+        return RunDvsModelPoolSelfTest(argc, argv);
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"dvs-memory-loading-selftest") {
         return RunDvsMemoryLoadingSelfTest(argc, argv);
     }
@@ -3246,6 +3548,8 @@ int wmain(int argc, wchar_t* argv[]) {
     PrintUtf8Line("Usage: " + (argc >= 1 ? WideToUtf8(argv[0]) : std::string("dlcv_infer_cpp_test")) + " <subcommand>");
     std::cout << "Available subcommands:\n";
     std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
+    std::cout << "  dvs-archive-duplicate-selftest\n";
+    std::cout << "  dvs-model-pool-selftest <modelPath> [device]\n";
     std::cout << "  dvs-memory-loading-selftest <modelPath> <imagePath> [device]\n";
     std::cout << "  dvsp-reject-selftest <modelPath> [device]\n";
     std::cout << "  curve-text-affine-selftest\n";

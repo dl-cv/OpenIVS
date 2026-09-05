@@ -73,9 +73,15 @@ private:
     int _deviceId = 0;
     std::string _flowJsonPath;
     std::vector<ModelPoolLease> _acquiredModelLeases;
+    std::shared_ptr<const ModelBinaryStore> _modelBinaryStore;
 
     void ReleaseOwnedModelsNoexcept();
-    Json LoadFromRoot(const Json& root, int deviceId);
+    friend class dlcv_infer::Model;
+    Json LoadFromRoot(const Json& root, int deviceId,
+                      std::shared_ptr<const ModelBinaryStore> modelBinaryStore);
+    Json LoadFromArchive(const Json& root,
+                         std::shared_ptr<const ModelBinaryStore> modelBinaryStore,
+                         int deviceId);
 };
 
 } // namespace flow

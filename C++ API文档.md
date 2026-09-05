@@ -233,7 +233,7 @@ void FreeModel();
 - 普通模式且 `OwnModelIndex == true`：调用 `dlcv_free_model`。
 - 普通模式且 `OwnModelIndex == false`：仅标记 `modelIndex = -1`，不释放底层模型。
 
-> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回（从 `0` 起递增），C 接口只接受 `[0, 9999]`，达到 `10000` 时释放本次加载并返回范围错误；流程模型（`.dvst`/`.dvso`/`.dvsp`）的 `modelIndex` 由本层自管理（从 `10000` 起递增）。二者分区，避免上层按 `modelIndex` 索引时流程模型与普通模型撞键。流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
+> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回（从 `0` 起递增），C 接口只接受 `[0, 9999]`，达到 `10000` 时释放本次加载并返回范围错误；流程模型（`.dvst`/`.dvso`）的 `modelIndex` 由本层自管理（从 `10000` 起递增）。二者分区，避免上层按 `modelIndex` 索引时流程模型与普通模型撞键。流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
 
 ### 4.7 计时查询
 
@@ -429,7 +429,7 @@ dlcv_infer::Utils::FreeAllModels();  // 释放所有模型
 ### 10.2 流程图/DVS 模型
 
 ```cpp
-// 1. 加载（.dvst / .dvso / .dvsp）
+// 1. 加载（.dvst / .dvso）
 dlcv_infer::Model model("C:/models/pipeline.dvst", 0);
 
 // 2. 推理（与普通模型接口完全一致）
@@ -620,15 +620,20 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧从 `.dvst`、`.dvso` 归档内存读取 `pipeline.json` 和子模型二进制，为流程节点增加内部模型数据标识，并调用 `dlcv_load_model_binary`；加载期间不写入模型文件，`.dvsp` 当前不支持。
 
-`Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。公开类保留原有数据成员列表和顺序。
+`Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。公开类布局已调整，调用方需使用同一版头文件重新编译。
 
-DVS 临时目录使用归档文件内容的完整 SHA-256 和进程 ID 命名。相同字节内容在同一进程内复用解压目录和模型池，不受外部文件路径影响；内容变化后使用新的目录和模型池项。共享目录按实例数量计数，最后一个实例释放后删除。
+- 流程归档使用既有 `ModelBinaryStore` 保存只读子模型字节，通过 `ModelPool::AcquireBinary` 调用内存加载接口，不计算整包摘要，不生成解包临时文件。
+- 每次读取归档分配新的 `StoreId`；模型池键由 `StoreId`、归档成员键与设备组成。同一次加载中引用同一成员的多个节点共享模型，不同加载实例分别持有模型池引用。
+- 普通流程子模型仍按路径和设备查找同一模型池。最后一个引用释放后移除该模型，不保留空闲模型缓存。
+- 归档成员名称统一路径分隔符、去除 ASCII 首尾空白和开头的 `./`，名称比较不区分 ASCII 大小写。同名成员逐字节比较：相同内容保留首份，不同内容报错；`pipeline.json` 使用相同检查。
+- 节点引用先匹配完整成员名，再匹配文件名；文件名对应多个成员时报错，不自动选择其中一个。
+- C 接口调用相同的 C++ `Model` 实现，不单独维护归档加载与子模型缓存。
 
 ### 22.2 `FlowGraphModel`
 
 `FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`GetDvsModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并预加载 `model/*` 节点，同时保存每个模型节点的普通模型信息。
 
-流程归档的子模型二进制由 DLL 内部状态保存，不在 `FlowGraphModel` 公开类中增加数据成员；析构、重复加载和移动操作会同步清理或转移该状态。
+流程归档的子模型二进制由 `FlowGraphModel` 的 `_modelBinaryStore` 成员持有；析构、重复加载和移动操作会清理或转移该成员及模型池引用。
 
 ### 22.3 `ExecutionContext`
 

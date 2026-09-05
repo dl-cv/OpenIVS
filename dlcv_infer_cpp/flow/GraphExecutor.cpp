@@ -638,9 +638,6 @@ Json GraphExecutor::LoadModels() {
             if (props.contains("model_name") && props.at("model_name").is_string()) {
                 item["model_name"] = props.at("model_name");
             }
-            if (props.contains("model_pool_key") && props.at("model_pool_key").is_string()) {
-                item["model_pool_key"] = props.at("model_pool_key");
-            }
         } catch (...) {}
         if (!item.contains("model_path_original")) item["model_path_original"] = modelPath;
         if (!item.contains("model_name")) {

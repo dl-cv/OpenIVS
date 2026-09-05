@@ -1,4 +1,4 @@
-#include "dlcv_infer.h"
+﻿#include "dlcv_infer.h"
 #include "dlcv_sntl_admin.h"
 #include "ImageInputUtils.h"
 #include "flow/FlowGraphModel.h"
@@ -7,7 +7,6 @@
 #include "flow/utils/MaskRleUtils.h"
 #ifdef _WIN32
 #include <Windows.h>
-#include <share.h>
 #else
 #include <dlfcn.h>
 #include <filesystem>
@@ -16,7 +15,8 @@
 #include <unistd.h>
 #endif
 #include <algorithm>
-#include <array>
+#include <atomic>
+#include <limits>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -246,67 +246,12 @@ inline void* ResolveSymbol(void* module, const char* name) {
 }
 #endif
 
-struct DvsUnpackResult {
+struct DvsArchiveData {
     Json pipelineRoot = Json::object();
-    std::string tempDir;
+    std::shared_ptr<dlcv_infer::flow::ModelBinaryStore> modelBinaryStore;
 };
 
-struct DvsTempCacheEntry {
-    Json pipelineRoot = Json::object();
-    size_t refCount = 0;
-};
-
-std::mutex g_dvsTempCacheMutex;
-std::unordered_map<std::string, DvsTempCacheEntry> g_dvsTempCache;
-
-static bool DeleteDirectoryRecursive(const std::string& dir) {
-    if (dir.empty()) return true;
-#ifdef _WIN32
-    WIN32_FIND_DATAA ffd;
-    const std::string pattern = dir + "\\*";
-    HANDLE hFind = FindFirstFileA(pattern.c_str(), &ffd);
-    if (hFind != INVALID_HANDLE_VALUE) {
-        do {
-            const std::string name = ffd.cFileName;
-            if (name == "." || name == "..") continue;
-            const std::string path = dir + "\\" + name;
-            if ((ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-                (void)DeleteDirectoryRecursive(path);
-            } else {
-                SetFileAttributesA(path.c_str(), FILE_ATTRIBUTE_NORMAL);
-                (void)DeleteFileA(path.c_str());
-            }
-        } while (FindNextFileA(hFind, &ffd) != 0);
-        FindClose(hFind);
-    }
-    SetFileAttributesA(dir.c_str(), FILE_ATTRIBUTE_NORMAL);
-    return RemoveDirectoryA(dir.c_str()) != 0;
-#else
-    std::error_code ec;
-    fs::remove_all(dir, ec);
-    return !ec;
-#endif
-}
-
-class TempDirGuard final {
-public:
-    explicit TempDirGuard(std::string dir) : _dir(std::move(dir)) {}
-    ~TempDirGuard() { CleanupNoexcept(); }
-    void Release() { _dir.clear(); }
-    TempDirGuard(const TempDirGuard&) = delete;
-    TempDirGuard& operator=(const TempDirGuard&) = delete;
-    TempDirGuard(TempDirGuard&&) = delete;
-    TempDirGuard& operator=(TempDirGuard&&) = delete;
-
-private:
-    std::string _dir;
-
-    void CleanupNoexcept() {
-        if (_dir.empty()) return;
-        try { (void)DeleteDirectoryRecursive(_dir); } catch (...) {}
-        _dir.clear();
-    }
-};
+std::atomic<uint64_t> g_nextModelBinaryStoreId{1};
 
 std::string ToLowerAscii(std::string s) {
     for (size_t i = 0; i < s.size(); i++) {
@@ -314,6 +259,15 @@ std::string ToLowerAscii(std::string s) {
         if (ch >= 'A' && ch <= 'Z') s[i] = static_cast<char>(ch - 'A' + 'a');
     }
     return s;
+}
+
+std::string NormalizeArchiveName(std::string name) {
+    const auto first = name.find_first_not_of(" \t\r\n\f\v");
+    if (first == std::string::npos) return std::string();
+    name = name.substr(first, name.find_last_not_of(" \t\r\n\f\v") - first + 1);
+    std::replace(name.begin(), name.end(), '\\', '/');
+    while (name.rfind("./", 0) == 0) name.erase(0, 2);
+    return name;
 }
 
 bool EndsWithIgnoreCase(const std::string& text, const std::string& suffix) {
@@ -331,8 +285,11 @@ bool EndsWithIgnoreCase(const std::string& text, const std::string& suffix) {
 
 bool IsFlowArchivePath(const std::string& pathUtf8) {
     return EndsWithIgnoreCase(pathUtf8, ".dvst") ||
-           EndsWithIgnoreCase(pathUtf8, ".dvso") ||
-           EndsWithIgnoreCase(pathUtf8, ".dvsp");
+           EndsWithIgnoreCase(pathUtf8, ".dvso");
+}
+
+bool IsUnsupportedDvspPath(const std::string& pathUtf8) {
+    return EndsWithIgnoreCase(pathUtf8, ".dvsp");
 }
 
 std::string JoinPath(const std::string& a, const std::string& b) {
@@ -352,230 +309,7 @@ std::string GetFileNameOnly(const std::string& path) {
     return (pos == std::string::npos) ? path : path.substr(pos + 1);
 }
 
-std::string GetExtensionWithDot(const std::string& path) {
-    const std::string name = GetFileNameOnly(path);
-    const size_t pos = name.find_last_of('.');
-    if (pos == std::string::npos) return std::string();
-    return name.substr(pos);
-}
-
-class Sha256Digest final {
-public:
-    void Update(const void* data, size_t len) {
-        if (data == nullptr || len == 0) return;
-        const auto* bytes = static_cast<const unsigned char*>(data);
-        _totalBytes += static_cast<std::uint64_t>(len);
-        while (len > 0) {
-            const size_t copySize = std::min(len, _buffer.size() - _bufferSize);
-            std::memcpy(_buffer.data() + _bufferSize, bytes, copySize);
-            _bufferSize += copySize;
-            bytes += copySize;
-            len -= copySize;
-            if (_bufferSize == _buffer.size()) {
-                Transform(_buffer.data());
-                _bufferSize = 0;
-            }
-        }
-    }
-
-    std::string FinalHex() {
-        const std::uint64_t bitLength = _totalBytes * 8ULL;
-        _buffer[_bufferSize++] = 0x80;
-        if (_bufferSize > 56) {
-            while (_bufferSize < 64) _buffer[_bufferSize++] = 0;
-            Transform(_buffer.data());
-            _bufferSize = 0;
-        }
-        while (_bufferSize < 56) _buffer[_bufferSize++] = 0;
-        for (int i = 7; i >= 0; --i) {
-            _buffer[_bufferSize++] = static_cast<unsigned char>((bitLength >> (i * 8)) & 0xFFU);
-        }
-        Transform(_buffer.data());
-        _bufferSize = 0;
-
-        static const char* kHex = "0123456789abcdef";
-        std::string out;
-        out.reserve(64);
-        for (const std::uint32_t value : _state) {
-            for (int shift = 28; shift >= 0; shift -= 4) {
-                out.push_back(kHex[(value >> shift) & 0x0FU]);
-            }
-        }
-        return out;
-    }
-
-private:
-    static std::uint32_t RotateRight(std::uint32_t value, unsigned int bits) {
-        return (value >> bits) | (value << (32U - bits));
-    }
-
-    void Transform(const unsigned char* block) {
-        static constexpr std::array<std::uint32_t, 64> kRoundConstants = {
-            0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U,
-            0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U,
-            0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U,
-            0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U,
-            0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU,
-            0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU,
-            0x983e5152U, 0xa831c66dU, 0xb00327c8U, 0xbf597fc7U,
-            0xc6e00bf3U, 0xd5a79147U, 0x06ca6351U, 0x14292967U,
-            0x27b70a85U, 0x2e1b2138U, 0x4d2c6dfcU, 0x53380d13U,
-            0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U,
-            0xa2bfe8a1U, 0xa81a664bU, 0xc24b8b70U, 0xc76c51a3U,
-            0xd192e819U, 0xd6990624U, 0xf40e3585U, 0x106aa070U,
-            0x19a4c116U, 0x1e376c08U, 0x2748774cU, 0x34b0bcb5U,
-            0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU, 0x682e6ff3U,
-            0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U,
-            0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U
-        };
-
-        std::array<std::uint32_t, 64> words{};
-        for (size_t i = 0; i < 16; ++i) {
-            const size_t offset = i * 4;
-            words[i] = (static_cast<std::uint32_t>(block[offset]) << 24)
-                | (static_cast<std::uint32_t>(block[offset + 1]) << 16)
-                | (static_cast<std::uint32_t>(block[offset + 2]) << 8)
-                | static_cast<std::uint32_t>(block[offset + 3]);
-        }
-        for (size_t i = 16; i < words.size(); ++i) {
-            const std::uint32_t s0 = RotateRight(words[i - 15], 7)
-                ^ RotateRight(words[i - 15], 18)
-                ^ (words[i - 15] >> 3);
-            const std::uint32_t s1 = RotateRight(words[i - 2], 17)
-                ^ RotateRight(words[i - 2], 19)
-                ^ (words[i - 2] >> 10);
-            words[i] = words[i - 16] + s0 + words[i - 7] + s1;
-        }
-
-        std::uint32_t a = _state[0];
-        std::uint32_t b = _state[1];
-        std::uint32_t c = _state[2];
-        std::uint32_t d = _state[3];
-        std::uint32_t e = _state[4];
-        std::uint32_t f = _state[5];
-        std::uint32_t g = _state[6];
-        std::uint32_t h = _state[7];
-
-        for (size_t i = 0; i < words.size(); ++i) {
-            const std::uint32_t sum1 = RotateRight(e, 6) ^ RotateRight(e, 11) ^ RotateRight(e, 25);
-            const std::uint32_t choose = (e & f) ^ ((~e) & g);
-            const std::uint32_t temp1 = h + sum1 + choose + kRoundConstants[i] + words[i];
-            const std::uint32_t sum0 = RotateRight(a, 2) ^ RotateRight(a, 13) ^ RotateRight(a, 22);
-            const std::uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
-            const std::uint32_t temp2 = sum0 + majority;
-
-            h = g;
-            g = f;
-            f = e;
-            e = d + temp1;
-            d = c;
-            c = b;
-            b = a;
-            a = temp1 + temp2;
-        }
-
-        _state[0] += a;
-        _state[1] += b;
-        _state[2] += c;
-        _state[3] += d;
-        _state[4] += e;
-        _state[5] += f;
-        _state[6] += g;
-        _state[7] += h;
-    }
-
-    std::array<std::uint32_t, 8> _state = {
-        0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
-        0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U
-    };
-    std::array<unsigned char, 64> _buffer{};
-    size_t _bufferSize = 0;
-    std::uint64_t _totalBytes = 0;
-};
-
-std::string Sha256Hex(const void* data, size_t len) {
-    Sha256Digest digest;
-    digest.Update(data, len);
-    return digest.FinalHex();
-}
-
-std::string ShortHash(const std::string& fullHash) {
-    static constexpr size_t kShortHashLength = 16;
-    return fullHash.substr(0, std::min(kShortHashLength, fullHash.size()));
-}
-
-std::string GetDvsTempDir(const std::string& archiveIdentity) {
-#ifdef _WIN32
-    char tmpPath[MAX_PATH] = { 0 };
-    DWORD n = GetTempPathA(MAX_PATH, tmpPath);
-    if (n == 0 || n >= MAX_PATH) {
-        throw std::runtime_error("failed to get temp directory");
-    }
-    const std::string processId = std::to_string(GetCurrentProcessId());
-    return JoinPath(
-        std::string(tmpPath),
-        "DlcvDvs_" + archiveIdentity + "_" + processId);
-#else
-    std::error_code ec;
-    const fs::path base = fs::temp_directory_path(ec);
-    if (ec) {
-        throw std::runtime_error("failed to get temp directory");
-    }
-    return (base / (
-        "DlcvDvs_" + archiveIdentity
-        + "_" + std::to_string(static_cast<long long>(getpid())))).string();
-#endif
-}
-
-void CreateCleanDvsTempDir(const std::string& dir) {
-    (void)DeleteDirectoryRecursive(dir);
-#ifdef _WIN32
-    if (CreateDirectoryA(dir.c_str(), nullptr) == 0) {
-        throw std::runtime_error("failed to create temp directory");
-    }
-#else
-    std::error_code ec;
-    if (!fs::create_directory(fs::path(dir), ec) || ec) {
-        throw std::runtime_error("failed to create temp directory");
-    }
-#endif
-}
-
-void ReleaseDvsTempDir(const std::string& dir) {
-    if (dir.empty()) return;
-    std::lock_guard<std::mutex> lock(g_dvsTempCacheMutex);
-    const auto it = g_dvsTempCache.find(dir);
-    if (it == g_dvsTempCache.end()) return;
-    if (it->second.refCount > 0) --it->second.refCount;
-    if (it->second.refCount == 0) {
-        g_dvsTempCache.erase(it);
-        (void)DeleteDirectoryRecursive(dir);
-    }
-}
-
-std::string HashOpenFileAndRewind(FILE* fp) {
-    if (fp == nullptr) throw std::runtime_error("file handle is null");
-    Sha256Digest digest;
-    std::vector<char> buffer(1024 * 1024);
-    for (;;) {
-        const size_t n = std::fread(buffer.data(), 1, buffer.size(), fp);
-        if (n > 0) digest.Update(buffer.data(), n);
-        if (n < buffer.size()) {
-            if (std::ferror(fp)) throw std::runtime_error("failed to read dvst file content");
-            break;
-        }
-    }
-    if (std::fseek(fp, 0, SEEK_SET) != 0) {
-        throw std::runtime_error("failed to rewind dvst file");
-    }
-    return digest.FinalHex();
-}
-
-void ReadExactOrThrow(
-    FILE* fp,
-    char* dst,
-    size_t len,
-    const std::string& errMsg) {
+void ReadExactOrThrow(FILE* fp, char* dst, size_t len, const std::string& errMsg) {
     if (len == 0) return;
     if (fp == nullptr || dst == nullptr) throw std::runtime_error(errMsg);
     const size_t n = std::fread(dst, 1, len, fp);
@@ -583,7 +317,7 @@ void ReadExactOrThrow(
 }
 
 std::string ReadLineOrThrow(FILE* fp) {
-    if (fp == nullptr) throw std::runtime_error("file handle is null");
+    if (fp == nullptr) throw std::runtime_error("流程模型文件未打开");
     std::string line;
     for (;;) {
         const int c = std::fgetc(fp);
@@ -591,7 +325,7 @@ std::string ReadLineOrThrow(FILE* fp) {
         if (c == '\n') break;
         line.push_back(static_cast<char>(c));
     }
-    if (line.empty()) throw std::runtime_error("failed to read dvst header line");
+    if (line.empty()) throw std::runtime_error("无法读取流程模型头信息");
     return line;
 }
 
@@ -604,33 +338,17 @@ long long ReadFileSizeFromJson(const Json& v) {
     return -1;
 }
 
-void CopyStreamToFile(FILE* fp, const std::string& outPath, long long bytes) {
-    if (bytes < 0) throw std::runtime_error("invalid file size in dvst archive");
-    std::ofstream ofs(outPath, std::ios::binary);
-    if (!ofs) throw std::runtime_error("failed to write temp model file: " + outPath);
-
-    std::vector<char> buffer(1024 * 1024);
-    long long remaining = bytes;
-    while (remaining > 0) {
-        const size_t chunk = static_cast<size_t>(std::min<long long>(remaining, static_cast<long long>(buffer.size())));
-        const size_t n = std::fread(buffer.data(), 1, chunk, fp);
-        if (n != chunk) throw std::runtime_error("failed to read dvst file content");
-        ofs.write(buffer.data(), static_cast<std::streamsize>(chunk));
-        if (!ofs) throw std::runtime_error("failed to write temp model file: " + outPath);
-        remaining -= static_cast<long long>(chunk);
-    }
-}
-
-void RewritePipelineModelPath(
+void BindPipelineModelBuffers(
     Json& pipelineRoot,
-    const std::unordered_map<std::string, std::string>& fileMap,
-    const std::string& modelPoolPrefix) {
+    const dlcv_infer::flow::ModelBinaryStore& modelBinaryStore) {
     if (!pipelineRoot.is_object() || !pipelineRoot.contains("nodes") || !pipelineRoot.at("nodes").is_array()) {
-        throw std::runtime_error("pipeline.json missing nodes");
+        throw std::runtime_error("pipeline.json 缺少 nodes");
     }
 
     for (auto& node : pipelineRoot.at("nodes")) {
         if (!node.is_object()) continue;
+        const std::string nodeType = ToLowerAscii(node.value("type", std::string()));
+        if (nodeType.rfind("model/", 0) != 0) continue;
         if (!node.contains("properties") || !node.at("properties").is_object()) continue;
 
         auto& props = node.at("properties");
@@ -640,62 +358,43 @@ void RewritePipelineModelPath(
         props["model_path_original"] = originalPath;
         const std::string originalName = GetFileNameOnly(originalPath);
         props["model_name"] = originalName.empty() ? originalPath : originalName;
-        props["model_pool_key"] = modelPoolPrefix + "|model:" + ToLowerAscii(originalPath);
 
-        auto it = fileMap.find(ToLowerAscii(originalPath));
-        if (it != fileMap.end()) {
-            props["model_path"] = it->second;
+        std::string aliasKey = ToLowerAscii(NormalizeArchiveName(originalPath));
+        if (modelBinaryStore.Buffers.find(aliasKey) != modelBinaryStore.Buffers.end()) {
+            props["model_buffer_key"] = aliasKey;
             continue;
         }
-
-        const std::string fileName = GetFileNameOnly(originalPath);
-        it = fileMap.find(ToLowerAscii(fileName));
-        if (it != fileMap.end()) {
-            props["model_path"] = it->second;
+        auto aliasIt = modelBinaryStore.Aliases.find(ToLowerAscii(GetFileNameOnly(aliasKey)));
+        if (aliasIt != modelBinaryStore.Aliases.end() && aliasIt->second.empty()) {
+            throw std::runtime_error("流程归档中存在多个同名子模型，请使用完整路径: " + originalPath);
         }
+        if (aliasIt == modelBinaryStore.Aliases.end() ||
+            modelBinaryStore.Buffers.find(aliasIt->second) == modelBinaryStore.Buffers.end()) {
+            throw std::runtime_error("流程归档中未找到子模型: " + originalPath);
+        }
+        props["model_buffer_key"] = aliasIt->second;
     }
 }
 
-void WriteUtf8Text(const std::string& path, const std::string& content) {
-    std::ofstream ofs(path, std::ios::binary);
-    if (!ofs) throw std::runtime_error("failed to write file: " + path);
-    ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
-    if (!ofs) throw std::runtime_error("failed to write file: " + path);
-}
-
-DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
+DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
 #ifdef _WIN32
     FILE* fp = nullptr;
-    fp = _wfsopen(archivePathW.c_str(), L"rb", _SH_DENYWR);
-    if (fp == nullptr) {
+    if (_wfopen_s(&fp, archivePathW.c_str(), L"rb") != 0 || fp == nullptr) {
 #else
     FILE* fp = std::fopen(WideToUtf8Portable(archivePathW).c_str(), "rb");
     if (fp == nullptr) {
 #endif
-        throw std::runtime_error("failed to open dvst file");
+        throw std::runtime_error("无法打开流程模型文件");
     }
 
-    DvsUnpackResult out;
+    DvsArchiveData out;
+    out.modelBinaryStore = std::make_shared<dlcv_infer::flow::ModelBinaryStore>();
+    out.modelBinaryStore->StoreId = g_nextModelBinaryStoreId.fetch_add(1, std::memory_order_relaxed);
     try {
-        const std::string archiveIdentity = HashOpenFileAndRewind(fp);
-        out.tempDir = GetDvsTempDir(archiveIdentity);
-
-        std::lock_guard<std::mutex> cacheLock(g_dvsTempCacheMutex);
-        const auto cached = g_dvsTempCache.find(out.tempDir);
-        if (cached != g_dvsTempCache.end()) {
-            out.pipelineRoot = cached->second.pipelineRoot;
-            ++cached->second.refCount;
-            std::fclose(fp);
-            return out;
-        }
-
-        CreateCleanDvsTempDir(out.tempDir);
-        TempDirGuard unpackGuard(out.tempDir);
-
         char magic[3] = { 0 };
-        ReadExactOrThrow(fp, magic, 3, "failed to read dvst magic");
+        ReadExactOrThrow(fp, magic, 3, "无法读取流程模型文件头");
         if (!(magic[0] == 'D' && magic[1] == 'V' && magic[2] == '\n')) {
-            throw std::runtime_error("invalid dvst format: missing DV header");
+            throw std::runtime_error("流程模型格式无效: 缺少 DV 文件头");
         }
 
         const std::string headerLine = ReadLineOrThrow(fp);
@@ -704,55 +403,68 @@ DvsUnpackResult UnpackDvsArchiveToTemp(const std::wstring& archivePathW) {
             !header.contains("file_list") || !header.at("file_list").is_array() ||
             !header.contains("file_size") || !header.at("file_size").is_array() ||
             header.at("file_list").size() != header.at("file_size").size()) {
-            throw std::runtime_error("invalid dvst header: file_list/file_size mismatch");
+            throw std::runtime_error("流程模型文件头中的 file_list 与 file_size 不匹配");
         }
 
-        std::unordered_map<std::string, std::string> fileNameToTemp;
         bool gotPipeline = false;
+        std::string pipelineData;
 
         const auto& fileList = header.at("file_list");
         const auto& fileSize = header.at("file_size");
         for (size_t i = 0; i < fileList.size(); i++) {
-            if (!fileList.at(i).is_string()) throw std::runtime_error("invalid dvst header: file_list item is not string");
+            if (!fileList.at(i).is_string()) throw std::runtime_error("流程模型文件头中的文件名不是字符串");
 
-            const std::string fileName = fileList.at(i).get<std::string>();
+            const std::string fileName = NormalizeArchiveName(fileList.at(i).get<std::string>());
             const long long size = ReadFileSizeFromJson(fileSize.at(i));
-            if (size < 0) throw std::runtime_error("invalid file size in dvst header");
+            if (size < 0 || static_cast<unsigned long long>(size) >
+                static_cast<unsigned long long>(std::numeric_limits<size_t>::max())) {
+                throw std::runtime_error("流程模型中的文件大小无效");
+            }
+            const size_t byteCount = static_cast<size_t>(size);
 
             if (ToLowerAscii(fileName) == "pipeline.json") {
-                std::string text(static_cast<size_t>(size), '\0');
-                if (size > 0) {
-                    ReadExactOrThrow(
-                        fp,
-                        &text[0],
-                        static_cast<size_t>(size),
-                        "failed to read pipeline.json");
+                std::string text(byteCount, '\0');
+                if (byteCount > 0) {
+                    ReadExactOrThrow(fp, &text[0], byteCount, "无法读取 pipeline.json");
+                }
+                if (gotPipeline) {
+                    if (pipelineData != text) {
+                        throw std::runtime_error("归档中存在同名但内容不同的文件：pipeline.json");
+                    }
+                    continue;
                 }
                 out.pipelineRoot = Json::parse(text);
+                pipelineData = std::move(text);
                 gotPipeline = true;
             } else {
-                std::string ext = GetExtensionWithDot(fileName);
-                if (ext.empty()) ext = ".tmp";
-                const std::string normalizedFileName = ToLowerAscii(fileName);
-                const std::string fileHash = Sha256Hex(normalizedFileName.data(), normalizedFileName.size());
-                const std::string safeName = "file_" + std::to_string(i) + "_" + ShortHash(fileHash) + ext;
-                const std::string fullPath = JoinPath(out.tempDir, safeName);
-
-                CopyStreamToFile(fp, fullPath, size);
-                fileNameToTemp[ToLowerAscii(fileName)] = fullPath;
-                fileNameToTemp[ToLowerAscii(GetFileNameOnly(fileName))] = fullPath;
+                auto bytes = std::make_shared<std::vector<unsigned char>>(byteCount);
+                if (byteCount > 0) {
+                    ReadExactOrThrow(
+                        fp,
+                        reinterpret_cast<char*>(bytes->data()),
+                        byteCount,
+                        "无法读取流程模型中的文件数据");
+                }
+                const std::shared_ptr<const std::vector<unsigned char>> readonlyBytes = bytes;
+                const std::string canonicalKey = ToLowerAscii(fileName);
+                const auto existing = out.modelBinaryStore->Buffers.find(canonicalKey);
+                if (existing != out.modelBinaryStore->Buffers.end()) {
+                    if (*existing->second != *readonlyBytes) {
+                        throw std::runtime_error("归档中存在同名但内容不同的文件：" + fileName);
+                    }
+                    continue;
+                }
+                out.modelBinaryStore->Buffers.emplace(canonicalKey, readonlyBytes);
+                const std::string shortName = ToLowerAscii(GetFileNameOnly(fileName));
+                const auto alias = out.modelBinaryStore->Aliases.emplace(shortName, canonicalKey);
+                if (!alias.second && alias.first->second != canonicalKey) {
+                    alias.first->second.clear();
+                }
             }
         }
 
-        if (!gotPipeline) throw std::runtime_error("pipeline.json not found in dvst archive");
-        const std::string modelPoolPrefix = "dvs:" + archiveIdentity;
-        RewritePipelineModelPath(out.pipelineRoot, fileNameToTemp, modelPoolPrefix);
-        WriteUtf8Text(JoinPath(out.tempDir, "pipeline.json"), out.pipelineRoot.dump());
-        DvsTempCacheEntry cacheEntry;
-        cacheEntry.pipelineRoot = out.pipelineRoot;
-        cacheEntry.refCount = 1;
-        g_dvsTempCache.emplace(out.tempDir, std::move(cacheEntry));
-        unpackGuard.Release();
+        if (!gotPipeline) throw std::runtime_error("流程模型中未找到 pipeline.json");
+        BindPipelineModelBuffers(out.pipelineRoot, *out.modelBinaryStore);
     } catch (...) {
         std::fclose(fp);
         throw;
@@ -1393,7 +1105,7 @@ namespace dlcv_infer {
 
     // 底层 modelIndex 全局引用计数（解决底层 DLL content-hash dedup 导致同 modelIndex 被多对象共享的问题）
     static std::mutex g_modelIndexRefMu;
-    static std::unordered_map<int, int> g_modelIndexRefCount;
+    static std::unordered_map<DllLoader*, std::unordered_map<int, int>> g_modelIndexRefCount;
 
     // dvst（流程模型）的 modelIndex 由本层自管理，从 10000 起递增，
     // 与底层 dvt 返回的 model_index（0 起递增）分区，避免上层按 modelIndex 索引时 dvst 与 dvt 撞键。
@@ -1618,6 +1330,7 @@ namespace dlcv_infer {
 #endif
 
         dlcv_load_model = (LoadModelFuncType)ResolveSymbol(hModule, "dlcv_load_model");
+        dlcv_load_model_binary = (LoadModelBinaryFuncType)ResolveSymbol(hModule, "dlcv_load_model_binary");
         dlcv_free_model = (FreeModelFuncType)ResolveSymbol(hModule, "dlcv_free_model");
         dlcv_get_model_info = (GetModelInfoFuncType)ResolveSymbol(hModule, "dlcv_get_model_info");
         dlcv_infer = (InferFuncType)ResolveSymbol(hModule, "dlcv_infer");
@@ -1666,15 +1379,50 @@ namespace dlcv_infer {
     }
 
     DllLoader& DllLoader::Instance() {
-        std::lock_guard<std::mutex> lock(g_dllLoaderMu);
-        if (!instance)
         {
-            instance = new DllLoader(AutoDetectProvider());
+            std::lock_guard<std::mutex> lock(g_dllLoaderMu);
+            if (instance) return *instance;
         }
+        return GetOrCreateForProvider(AutoDetectProvider());
+    }
+
+    DllLoader& DllLoader::GetOrCreateForProvider(sntl_admin::DogProvider provider) {
+        static std::unordered_map<int, DllLoader*> loaders;
+
+        std::lock_guard<std::mutex> lock(g_dllLoaderMu);
+        const int providerKey = static_cast<int>(provider);
+        auto it = loaders.find(providerKey);
+        if (it == loaders.end()) {
+            DllLoader* loader = new DllLoader(provider);
+            it = loaders.emplace(providerKey, loader).first;
+        }
+        instance = it->second;
         return *instance;
     }
 
     namespace {
+        bool TryResolveExplicitProviderFromHeaderJson(
+            const std::string& headerJsonStr,
+            sntl_admin::DogProvider& outProvider) {
+            auto headerJson = nlohmann::json::parse(headerJsonStr);
+            if (!headerJson.contains("dog_provider")) {
+                return false;
+            }
+            std::string providerName = headerJson["dog_provider"].get<std::string>();
+            for (auto& c : providerName) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (providerName == "sentinel") {
+                outProvider = sntl_admin::DogProvider::Sentinel;
+                return true;
+            }
+            if (providerName == "virbox") {
+                outProvider = sntl_admin::DogProvider::Virbox;
+                return true;
+            }
+            throw std::runtime_error("模型文件中的 dog_provider 无效: " + providerName);
+        }
+
         bool TryResolveExplicitProviderFromStream(std::istream& stream, sntl_admin::DogProvider& outProvider) {
             std::string header;
             std::string headerJsonStr;
@@ -1683,40 +1431,58 @@ namespace dlcv_infer {
             if (header != "DV") {
                 throw std::runtime_error("invalid model format: missing DV header");
             }
-            auto headerJson = nlohmann::json::parse(headerJsonStr);
-            if (!headerJson.contains("dog_provider")) {
-                return false;
-            }
-            std::string p = headerJson["dog_provider"].get<std::string>();
-            for (auto& c : p) {
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            }
-            if (p == "sentinel") {
-                outProvider = sntl_admin::DogProvider::Sentinel;
-                return true;
-            }
-            if (p == "virbox") {
-                outProvider = sntl_admin::DogProvider::Virbox;
-                return true;
-            }
-            throw std::runtime_error("invalid dog provider in header_json: " + p);
+            return TryResolveExplicitProviderFromHeaderJson(headerJsonStr, outProvider);
         }
 
-        void EnsureRequiredDogAvailable(std::istream& stream) {
-            sntl_admin::DogProvider needed;
-            if (!TryResolveExplicitProviderFromStream(stream, needed)) {
-                return;
+        bool TryResolveExplicitProviderFromBuffer(
+            const unsigned char* modelData,
+            size_t modelSize,
+            sntl_admin::DogProvider& outProvider) {
+            if (modelData == nullptr || modelSize < 4) {
+                throw std::runtime_error("子模型数据为空或不完整");
             }
+            const unsigned char* dataEnd = modelData + modelSize;
+            const unsigned char* firstLineEnd = std::find(modelData, dataEnd, static_cast<unsigned char>('\n'));
+            const std::string magicLine(
+                reinterpret_cast<const char*>(modelData),
+                firstLineEnd == dataEnd ? modelSize : static_cast<size_t>(firstLineEnd - modelData));
+            if (firstLineEnd == dataEnd || magicLine != "DV") {
+                throw std::runtime_error("子模型格式无效: 缺少 DV 文件头");
+            }
+            const unsigned char* headerStart = firstLineEnd + 1;
+            const unsigned char* headerEnd = std::find(headerStart, dataEnd, static_cast<unsigned char>('\n'));
+            if (headerEnd == dataEnd) {
+                throw std::runtime_error("子模型格式无效: 缺少头信息");
+            }
+            const std::string headerJsonStr(
+                reinterpret_cast<const char*>(headerStart),
+                static_cast<size_t>(headerEnd - headerStart));
+            return TryResolveExplicitProviderFromHeaderJson(headerJsonStr, outProvider);
+        }
 
-            const auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
+        void EnsureProviderAvailable(sntl_admin::DogProvider needed) {
+#ifdef _WIN32
+            auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
                 ? sntl_admin::DogUtils::GetSentinelInfo()
                 : sntl_admin::DogUtils::GetVirboxInfo();
             if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
-                throw std::runtime_error(std::string("模型要求 ")
+                throw std::runtime_error(std::string("模型要求 provider ")
                     + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
-                    + " 授权，但未检测到对应的加密狗设备或特性");
+                    + "，但未检测到对应的加密狗设备或特性");
             }
+#else
+            (void)needed;
+#endif
         }
+    }
+
+    DllLoader& DllLoader::ForModelBuffer(const unsigned char* modelData, size_t modelSize) {
+        sntl_admin::DogProvider needed;
+        if (!TryResolveExplicitProviderFromBuffer(modelData, modelSize, needed)) {
+            return Instance();
+        }
+        EnsureProviderAvailable(needed);
+        return GetOrCreateForProvider(needed);
     }
 
     void DllLoader::EnsureForModel(const std::string& modelPath) {
@@ -1734,7 +1500,12 @@ namespace dlcv_infer {
         if (!file) {
             return;
         }
-        EnsureRequiredDogAvailable(file);
+        sntl_admin::DogProvider needed;
+        if (!TryResolveExplicitProviderFromStream(file, needed)) {
+            return;
+        }
+        EnsureProviderAvailable(needed);
+        (void)GetOrCreateForProvider(needed);
     }
 
     void DllLoader::EnsureForModel(const std::wstring& modelPath) {
@@ -1751,7 +1522,12 @@ namespace dlcv_infer {
         if (!file) {
             return;
         }
-        EnsureRequiredDogAvailable(file);
+        sntl_admin::DogProvider needed;
+        if (!TryResolveExplicitProviderFromStream(file, needed)) {
+            return;
+        }
+        EnsureProviderAvailable(needed);
+        (void)GetOrCreateForProvider(needed);
     }
 
     // Model类实现
@@ -1762,15 +1538,16 @@ namespace dlcv_infer {
         flow::ModelLifecycleReadGuard lifecycleGuard;
         const std::wstring modelPathW = DecodeModelPathString(modelPath);
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPathW);
+        if (IsUnsupportedDvspPath(modelPathUtf8)) {
+            throw std::invalid_argument(".dvsp 格式暂不支持，请改用 .dvst 或 .dvso");
+        }
         if (IsFlowArchivePath(modelPathUtf8)) {
             _isFlowGraphMode = true;
             _flowModel = new flow::FlowGraphModel();
             try {
-                DvsUnpackResult unpack = UnpackDvsArchiveToTemp(modelPathW);
-                _tempDir = unpack.tempDir;
-
-                const std::string pipelinePath = JoinPath(unpack.tempDir, "pipeline.json");
-                json report = _flowModel->Load(pipelinePath, device_id);
+                DvsArchiveData archive = ReadDvsArchive(modelPathW);
+                json report = _flowModel->LoadFromArchive(
+                    archive.pipelineRoot, archive.modelBinaryStore, device_id);
                 int code = 1;
                 try { code = report.contains("code") ? report.at("code").get<int>() : 1; } catch (...) { code = 1; }
                 if (code != 0) {
@@ -1784,10 +1561,6 @@ namespace dlcv_infer {
             } catch (const std::exception& ex) {
                 delete _flowModel;
                 _flowModel = nullptr;
-                if (!_tempDir.empty()) {
-                    ReleaseDvsTempDir(_tempDir);
-                    _tempDir.clear();
-                }
                 throw std::runtime_error(std::string("failed to load dvs model: ") + ex.what());
             }
         }
@@ -1823,7 +1596,7 @@ namespace dlcv_infer {
 
         if (modelIndex >= 0 && OwnModelIndex) {
             std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
-            g_modelIndexRefCount[modelIndex]++;
+            g_modelIndexRefCount[_dllLoader][modelIndex]++;
         }
     }
 
@@ -1831,15 +1604,16 @@ namespace dlcv_infer {
         : _deviceId(device_id) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPath);
+        if (IsUnsupportedDvspPath(modelPathUtf8)) {
+            throw std::invalid_argument(".dvsp 格式暂不支持，请改用 .dvst 或 .dvso");
+        }
         if (IsFlowArchivePath(modelPathUtf8)) {
             _isFlowGraphMode = true;
             _flowModel = new flow::FlowGraphModel();
             try {
-                DvsUnpackResult unpack = UnpackDvsArchiveToTemp(modelPath);
-                _tempDir = unpack.tempDir;
-
-                const std::string pipelinePath = JoinPath(unpack.tempDir, "pipeline.json");
-                json report = _flowModel->Load(pipelinePath, device_id);
+                DvsArchiveData archive = ReadDvsArchive(modelPath);
+                json report = _flowModel->LoadFromArchive(
+                    archive.pipelineRoot, archive.modelBinaryStore, device_id);
                 int code = 1;
                 try { code = report.contains("code") ? report.at("code").get<int>() : 1; } catch (...) { code = 1; }
                 if (code != 0) {
@@ -1853,10 +1627,6 @@ namespace dlcv_infer {
             } catch (const std::exception& ex) {
                 delete _flowModel;
                 _flowModel = nullptr;
-                if (!_tempDir.empty()) {
-                    ReleaseDvsTempDir(_tempDir);
-                    _tempDir.clear();
-                }
                 throw std::runtime_error(std::string("failed to load dvs model: ") + ex.what());
             }
         }
@@ -1892,7 +1662,60 @@ namespace dlcv_infer {
 
         if (modelIndex >= 0 && OwnModelIndex) {
             std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
-            g_modelIndexRefCount[modelIndex]++;
+            g_modelIndexRefCount[_dllLoader][modelIndex]++;
+        }
+    }
+
+    Model::Model(
+        std::shared_ptr<const std::vector<unsigned char>> modelData,
+        const std::string& modelName,
+        int device_id)
+        : _deviceId(device_id) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
+        if (!modelData || modelData->empty()) {
+            throw std::invalid_argument("子模型数据为空");
+        }
+        const std::string displayName = modelName.empty() ? "未命名子模型" : modelName;
+
+        _dllLoader = &DllLoader::ForModelBuffer(
+            modelData->data(),
+            modelData->size());
+        _loadedDogProvider = _dllLoader->GetDogProvider();
+        _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
+        const auto loadModelBinary = _dllLoader->GetLoadModelBinaryFunc();
+        if (!loadModelBinary) {
+            throw std::runtime_error("当前 dlcv_infer 不支持二进制模型加载: " + displayName);
+        }
+
+        json config;
+        config["device_id"] = device_id;
+        const std::string jsonStr = config.dump();
+
+        const char* resultPtr = loadModelBinary(
+            modelData->data(),
+            modelData->size(),
+            jsonStr.c_str());
+        if (resultPtr == nullptr) {
+            throw std::runtime_error("二进制模型加载未返回结果");
+        }
+
+        try {
+            const std::string resultJson(static_cast<const char*>(resultPtr));
+            const json resultObject = json::parse(resultJson);
+            if (!resultObject.contains("model_index")) {
+                throw std::runtime_error("二进制模型加载失败: " + displayName + ": " + resultObject.dump());
+            }
+            modelIndex = resultObject.at("model_index").get<int>();
+        } catch (...) {
+            _dllLoader->GetFreeResultFunc()(resultPtr);
+            throw;
+        }
+        _dllLoader->GetFreeResultFunc()(resultPtr);
+
+        if (modelIndex >= 0 && OwnModelIndex) {
+            std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
+            g_modelIndexRefCount[_dllLoader][modelIndex]++;
         }
     }
 
@@ -1907,7 +1730,6 @@ namespace dlcv_infer {
         _expectedChCache = other._expectedChCache;
         _hasCachedModelInfo = other._hasCachedModelInfo;
         _cachedModelInfo = std::move(other._cachedModelInfo);
-        _tempDir = std::move(other._tempDir);
         _dllLoader = other._dllLoader;
         _loadedDogProvider = other._loadedDogProvider;
         _loadedNativeDllName = std::move(other._loadedNativeDllName);
@@ -1920,7 +1742,6 @@ namespace dlcv_infer {
         other._expectedChCache = -2;
         other._hasCachedModelInfo = false;
         other._cachedModelInfo = json();
-        other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
         other._loadedNativeDllName.clear();
@@ -1947,7 +1768,6 @@ namespace dlcv_infer {
         _expectedChCache = other._expectedChCache;
         _hasCachedModelInfo = other._hasCachedModelInfo;
         _cachedModelInfo = std::move(other._cachedModelInfo);
-        _tempDir = std::move(other._tempDir);
         _dllLoader = other._dllLoader;
         _loadedDogProvider = other._loadedDogProvider;
         _loadedNativeDllName = std::move(other._loadedNativeDllName);
@@ -1960,7 +1780,6 @@ namespace dlcv_infer {
         other._expectedChCache = -2;
         other._hasCachedModelInfo = false;
         other._cachedModelInfo = json();
-        other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
         other._loadedNativeDllName.clear();
@@ -1987,10 +1806,6 @@ namespace dlcv_infer {
         if (_isFlowGraphMode) {
             delete _flowModel;
             _flowModel = nullptr;
-            if (!_tempDir.empty()) {
-                ReleaseDvsTempDir(_tempDir);
-                _tempDir.clear();
-            }
             modelIndex = -1;
             _isFlowGraphMode = false;
             return;
@@ -2010,11 +1825,12 @@ namespace dlcv_infer {
         bool shouldFreeUnderlying = false;
         {
             std::lock_guard<std::mutex> lk(g_modelIndexRefMu);
-            auto it = g_modelIndexRefCount.find(modelIndex);
-            if (it != g_modelIndexRefCount.end()) {
+            auto& loaderRefs = g_modelIndexRefCount[_dllLoader];
+            auto it = loaderRefs.find(modelIndex);
+            if (it != loaderRefs.end()) {
                 it->second--;
                 if (it->second <= 0) {
-                    g_modelIndexRefCount.erase(it);
+                    loaderRefs.erase(it);
                     shouldFreeUnderlying = true;
                 }
             } else {

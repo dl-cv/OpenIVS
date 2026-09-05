@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <cstddef>
 #include <mutex>
 #include <shared_mutex>
 #include <functional>
@@ -43,6 +44,7 @@ namespace dlcv_infer {
 
     namespace flow {
         class FlowGraphModel;
+        class ModelPool;
     }
 
     DLCV_INFER_CPP_API std::wstring convertStringToWstring(const std::string& inputString);
@@ -79,6 +81,7 @@ namespace dlcv_infer {
 
     // 外部 DLL 接口函数类型定义
     typedef const char* (DLCV_INFER_NATIVE_CALL *LoadModelFuncType)(const char* config_str);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *LoadModelBinaryFuncType)(const unsigned char* model_data, size_t model_size, const char* config_str);
     typedef const char* (DLCV_INFER_NATIVE_CALL *FreeModelFuncType)(const char* config_str);
     typedef const char* (DLCV_INFER_NATIVE_CALL *GetModelInfoFuncType)(const char* config_str);
     typedef const char* (DLCV_INFER_NATIVE_CALL *InferFuncType)(const char* config_str);
@@ -119,6 +122,7 @@ namespace dlcv_infer {
 
         // 函数指针
         LoadModelFuncType dlcv_load_model = nullptr;
+        LoadModelBinaryFuncType dlcv_load_model_binary = nullptr;
         FreeModelFuncType dlcv_free_model = nullptr;
         GetModelInfoFuncType dlcv_get_model_info = nullptr;
         InferFuncType dlcv_infer = nullptr;
@@ -144,6 +148,7 @@ namespace dlcv_infer {
 
         // 加载 DLL
         void LoadDll();
+        static DllLoader& GetOrCreateForProvider(sntl_admin::DogProvider provider);
 
         static DllLoader* instance;
         DllLoader(sntl_admin::DogProvider provider);
@@ -155,6 +160,8 @@ namespace dlcv_infer {
         static DllLoader& Instance();
         static void EnsureForModel(const std::string& modelPath);
         static void EnsureForModel(const std::wstring& modelPath);
+        static DllLoader& ForModelBuffer(const unsigned char* modelData, size_t modelSize);
+        LoadModelBinaryFuncType GetLoadModelBinaryFunc() const { return dlcv_load_model_binary; }
 
         /// <summary>
         /// 自动检测当前插入的加密狗，按 Sentinel 优先、Virbox 第二返回 Provider。
@@ -331,6 +338,11 @@ namespace dlcv_infer {
             size_t sampleIndex = 0);
 
     private:
+#ifdef DLCV_INFER_CPP_EXPORTS
+        friend class flow::ModelPool;
+        Model(std::shared_ptr<const std::vector<unsigned char>> modelData,
+              const std::string& modelName, int device_id);
+#endif
         bool _isFlowGraphMode = false;
         int _deviceId = 0;
         flow::FlowGraphModel* _flowModel = nullptr;
@@ -339,8 +351,6 @@ namespace dlcv_infer {
         json _cachedModelInfo;
         mutable std::shared_mutex _stateMutex;
         std::mutex _modelInfoMutex;
-        // DVS 模式：持有临时目录路径，确保在 Model 对象存活期间文件不被删除
-        std::string _tempDir;
 
         Result InferBatchInternal(
             const std::vector<cv::Mat>& image_list,

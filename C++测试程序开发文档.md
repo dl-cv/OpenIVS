@@ -283,3 +283,25 @@ json gpuInfo = dlcv_infer::Utils::GetGpuInfo();
 ---
 
 *本文档只记录当前源码实现。如需了解 API 详细定义，参见 `C++ API文档.md`。*
+
+## 控制台归档与模型池检查
+
+以下命令由 `Test/dlcv_infer_cpp_test` 提供，不启动 Qt 窗口。通过项目构建脚本生成 Debug/x64 测试程序后执行：
+
+```text
+Debug\dlcv_infer_cpp_test.exe dvs-archive-duplicate-selftest
+Debug\dlcv_infer_cpp_test.exe dvs-model-pool-selftest <普通模型路径> [设备编号]
+Debug\dlcv_infer_cpp_test.exe dvs-memory-loading-selftest <流程模型路径> <图片路径> [设备编号]
+Debug\dlcv_infer_cpp_test.exe dvsp-reject-selftest <dvsp路径> [设备编号]
+```
+
+| 命令 | 输入与检查范围 |
+|---|---|
+| `dvs-archive-duplicate-selftest` | 在系统临时目录生成测试归档；检查模型成员和 `pipeline.json` 的规范化同名处理，相同字节允许读取，不同字节明确报错。模型差异用例使用等长数据且仅末字节不同；不执行模型推理 |
+| `dvs-model-pool-selftest` | 读取现有普通 `.dvt`，生成包含两个相同模型节点的测试归档；通过公开 `Model` 和导出的模型池统计函数检查实例内复用、独立归档分别持有引用、逐个释放后数量变化以及全部释放后无空闲项。不在测试程序中另建模型池，不执行推理 |
+| `dvs-memory-loading-selftest` | 使用 `.dvst/.dvso` 及对应图片执行加载、推理、释放，并监测解包临时文件；参数为 `threshold=0.5`、`with_mask=true`、`batch_size=1`，不进行 mask 数值比较 |
+| `dvsp-reject-selftest` | 检查 `.dvsp` 返回明确的不支持错误，且不生成归档临时文件；不执行推理 |
+
+设备编号默认 `0`。模型池检查中的两个归档内容相同，但每次读取使用独立的 `StoreId`；包装层不额外进行整包内容缓存。临时测试归档由测试程序创建并在结束时删除，这与运行库解包产生临时文件不同。
+
+命令退出码 `0` 表示检查通过，非零表示失败或参数无效。这些命令不验证源模型转换、多设备运行、完整路径优先或短文件名多候选处理，也不代表 C++ 与 C# 的全部功能已经一致。
