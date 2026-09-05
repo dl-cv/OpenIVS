@@ -7,8 +7,6 @@
 #include <cmath>
 #include <climits>
 #include <fstream>
-#include <list>
-#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -19,89 +17,6 @@
 
 namespace dlcv_infer {
 namespace flow {
-
-namespace {
-
-struct FlowBinaryStoreState final {
-    FlowGraphModel* owner = nullptr;
-    std::shared_ptr<const ModelBinaryStore> store;
-
-    FlowBinaryStoreState(FlowGraphModel* ownerValue,
-                         std::shared_ptr<const ModelBinaryStore> storeValue)
-        : owner(ownerValue), store(std::move(storeValue)) {}
-};
-
-std::mutex& FlowBinaryStoreStateMutex() {
-    static std::mutex* mutex = new std::mutex();
-    return *mutex;
-}
-
-std::list<FlowBinaryStoreState>& FlowBinaryStoreStates() {
-    static std::list<FlowBinaryStoreState>* states =
-        new std::list<FlowBinaryStoreState>();
-    return *states;
-}
-
-std::list<FlowBinaryStoreState>::iterator FindFlowBinaryStoreState(
-    FlowGraphModel* owner) {
-    std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
-    return std::find_if(states.begin(), states.end(),
-        [owner](const FlowBinaryStoreState& state) {
-            return state.owner == owner;
-        });
-}
-
-std::shared_ptr<const ModelBinaryStore> GetFlowBinaryStore(
-    const FlowGraphModel* owner) {
-    std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
-    std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
-    const auto it = std::find_if(states.begin(), states.end(),
-        [owner](const FlowBinaryStoreState& state) {
-            return state.owner == owner;
-        });
-    return it == states.end() ? std::shared_ptr<const ModelBinaryStore>() : it->store;
-}
-
-void SetFlowBinaryStore(
-    FlowGraphModel* owner,
-    std::shared_ptr<const ModelBinaryStore> store) {
-    std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
-    std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
-    const auto it = FindFlowBinaryStoreState(owner);
-    if (!store) {
-        if (it != states.end()) states.erase(it);
-        return;
-    }
-    if (it != states.end()) {
-        it->store = std::move(store);
-        return;
-    }
-    states.emplace_back(owner, std::move(store));
-}
-
-void ClearFlowBinaryStoreNoexcept(FlowGraphModel* owner) noexcept {
-    try {
-        std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
-        std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
-        const auto it = FindFlowBinaryStoreState(owner);
-        if (it != states.end()) states.erase(it);
-    } catch (...) {}
-}
-
-void TransferFlowBinaryStoreNoexcept(
-    FlowGraphModel* destination,
-    FlowGraphModel* source) noexcept {
-    try {
-        std::lock_guard<std::mutex> lock(FlowBinaryStoreStateMutex());
-        std::list<FlowBinaryStoreState>& states = FlowBinaryStoreStates();
-        const auto destinationIt = FindFlowBinaryStoreState(destination);
-        if (destinationIt != states.end()) states.erase(destinationIt);
-        const auto sourceIt = FindFlowBinaryStoreState(source);
-        if (sourceIt != states.end()) sourceIt->owner = destination;
-    } catch (...) {}
-}
-
-} // namespace
 
 static std::string ReadAllTextUtf8(const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
@@ -567,24 +482,19 @@ static void ApplyFinalThresholdFilter(Json& flowRoot, const Json& paramsJson) {
 }
 
 void FlowGraphModel::ReleaseOwnedModelsNoexcept() {
-    try {
-        for (const auto& key : _acquiredModelKeys) {
-            ModelPool::Instance().ReleaseByKey(key);
-        }
-    } catch (...) {}
-    _acquiredModelKeys.clear();
+    try { _acquiredModelLeases.clear(); } catch (...) {}
+    _modelBinaryStore.reset();
 }
 
 FlowGraphModel::~FlowGraphModel() {
     ReleaseOwnedModelsNoexcept();
-    ClearFlowBinaryStoreNoexcept(this);
     _nodes.clear();
     _root = Json::object();
     _loadedModelMeta = Json::array();
     _loaded = false;
     _deviceId = 0;
     _flowJsonPath.clear();
-    _acquiredModelKeys.clear();
+    _acquiredModelLeases.clear();
 }
 
 FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
@@ -594,8 +504,8 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     _loaded = other._loaded;
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
-    _acquiredModelKeys = std::move(other._acquiredModelKeys);
-    TransferFlowBinaryStoreNoexcept(this, &other);
+    _acquiredModelLeases = std::move(other._acquiredModelLeases);
+    _modelBinaryStore = std::move(other._modelBinaryStore);
 
     // moved-from：不再负责释放
     other._nodes.clear();
@@ -604,7 +514,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     other._loaded = false;
     other._deviceId = 0;
     other._flowJsonPath.clear();
-    other._acquiredModelKeys.clear();
+    other._acquiredModelLeases.clear();
 }
 
 FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
@@ -619,8 +529,8 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     _loaded = other._loaded;
     _deviceId = other._deviceId;
     _flowJsonPath = std::move(other._flowJsonPath);
-    _acquiredModelKeys = std::move(other._acquiredModelKeys);
-    TransferFlowBinaryStoreNoexcept(this, &other);
+    _acquiredModelLeases = std::move(other._acquiredModelLeases);
+    _modelBinaryStore = std::move(other._modelBinaryStore);
 
     other._nodes.clear();
     other._root = Json::object();
@@ -628,12 +538,13 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     other._loaded = false;
     other._deviceId = 0;
     other._flowJsonPath.clear();
-    other._acquiredModelKeys.clear();
+    other._acquiredModelLeases.clear();
 
     return *this;
 }
 
 Json FlowGraphModel::Load(const std::string& flowJsonPath, int deviceId) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (flowJsonPath.empty()) throw std::invalid_argument("flowJsonPath is empty");
     const std::string text = ReadAllTextUtf8(flowJsonPath);
     Json root = Json::parse(text);
@@ -645,6 +556,7 @@ Json FlowGraphModel::LoadFromArchive(
     const Json& root,
     std::shared_ptr<const ModelBinaryStore> modelBinaryStore,
     int deviceId) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (!modelBinaryStore) throw std::invalid_argument("流程模型字节存储为空");
     _flowJsonPath.clear();
     return LoadFromRoot(root, deviceId, std::move(modelBinaryStore));
@@ -654,13 +566,13 @@ Json FlowGraphModel::LoadFromRoot(
     const Json& root,
     int deviceId,
     std::shared_ptr<const ModelBinaryStore> modelBinaryStore) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (!root.is_object()) throw std::invalid_argument("flow root is not object");
     if (!root.contains("nodes") || !root.at("nodes").is_array()) {
         throw std::runtime_error("flow json missing nodes array");
     }
 
     ReleaseOwnedModelsNoexcept();
-    ClearFlowBinaryStoreNoexcept(this);
     _loaded = false;
     _nodes.clear();
     for (const auto& n : root.at("nodes")) {
@@ -683,88 +595,92 @@ Json FlowGraphModel::LoadFromRoot(
             _loadedModelMeta = Json::array();
         }
 
-    // 简化错误信息（与 C# FlowGraphModel.LoadFromRoot 的思路一致）
-    int code = 1;
-    try { code = report.contains("code") ? report.at("code").get<int>() : 1; } catch (...) { code = 1; }
-    if (code != 0) {
-        std::string simpleMessage;
-        try {
-            if (report.contains("models") && report.at("models").is_array()) {
-                for (const auto& m : report.at("models")) {
-                    if (!m.is_object()) continue;
-                    int sc = 0;
-                    try { sc = m.contains("status_code") ? m.at("status_code").get<int>() : 0; } catch (...) { sc = 0; }
-                    if (sc == 0) continue;
+        // 简化错误信息（与 C# FlowGraphModel.LoadFromRoot 的思路一致）
+        int code = 1;
+        try { code = report.contains("code") ? report.at("code").get<int>() : 1; } catch (...) { code = 1; }
+        if (code != 0) {
+            std::string simpleMessage;
+            try {
+                if (report.contains("models") && report.at("models").is_array()) {
+                    for (const auto& m : report.at("models")) {
+                        if (!m.is_object()) continue;
+                        int sc = 0;
+                        try { sc = m.contains("status_code") ? m.at("status_code").get<int>() : 0; } catch (...) { sc = 0; }
+                        if (sc == 0) continue;
 
-                    std::string statusMsg;
-                    try {
-                        if (m.contains("status_message")) {
-                            const auto& sm = m.at("status_message");
-                            statusMsg = sm.is_string() ? sm.get<std::string>() : sm.dump();
-                        }
-                    } catch (...) {}
-                    if (statusMsg.empty()) statusMsg = "unknown";
+                        std::string statusMsg;
+                        try {
+                            if (m.contains("status_message")) {
+                                const auto& sm = m.at("status_message");
+                                statusMsg = sm.is_string() ? sm.get<std::string>() : sm.dump();
+                            }
+                        } catch (...) {}
+                        if (statusMsg.empty()) statusMsg = "unknown";
 
-                    std::string nodeType, nodeTitle, modelPath;
-                    int nodeId = -1;
-                    try { if (m.contains("type") && m.at("type").is_string()) nodeType = m.at("type").get<std::string>(); } catch (...) {}
-                    try { if (m.contains("title") && m.at("title").is_string()) nodeTitle = m.at("title").get<std::string>(); } catch (...) {}
-                    try { if (m.contains("node_id")) nodeId = m.at("node_id").get<int>(); } catch (...) {}
-                    try { if (m.contains("model_path") && m.at("model_path").is_string()) modelPath = m.at("model_path").get<std::string>(); } catch (...) {}
+                        std::string nodeType, nodeTitle, modelPath;
+                        int nodeId = -1;
+                        try { if (m.contains("type") && m.at("type").is_string()) nodeType = m.at("type").get<std::string>(); } catch (...) {}
+                        try { if (m.contains("title") && m.at("title").is_string()) nodeTitle = m.at("title").get<std::string>(); } catch (...) {}
+                        try { if (m.contains("node_id")) nodeId = m.at("node_id").get<int>(); } catch (...) {}
+                        try { if (m.contains("model_path") && m.at("model_path").is_string()) modelPath = m.at("model_path").get<std::string>(); } catch (...) {}
 
-                    simpleMessage = statusMsg + ": type=\"" + nodeType + "\" node_id=" + std::to_string(nodeId);
-                    if (!nodeTitle.empty()) simpleMessage += " title=\"" + nodeTitle + "\"";
-                    if (!modelPath.empty()) simpleMessage += " model_path=\"" + modelPath + "\"";
-                    break;
+                        simpleMessage = statusMsg + ": type=\"" + nodeType + "\" node_id=" + std::to_string(nodeId);
+                        if (!nodeTitle.empty()) simpleMessage += " title=\"" + nodeTitle + "\"";
+                        if (!modelPath.empty()) simpleMessage += " model_path=\"" + modelPath + "\"";
+                        break;
+                    }
                 }
+            } catch (...) {}
+            if (simpleMessage.empty()) {
+                try { if (report.contains("message")) simpleMessage = report.at("message").get<std::string>(); } catch (...) {}
             }
-        } catch (...) {}
-        if (simpleMessage.empty()) {
-            try { if (report.contains("message")) simpleMessage = report.at("message").get<std::string>(); } catch (...) {}
+            if (simpleMessage.empty()) simpleMessage = "unknown error";
+            report = Json::object({ {"code", 1}, {"message", simpleMessage} });
         }
-        if (simpleMessage.empty()) simpleMessage = "unknown error";
-        report = Json::object({ {"code", 1}, {"message", simpleMessage} });
-    }
 
-    // 使用预加载阶段生成的模型池 key 保留模型引用。
-    for (const auto& item : _loadedModelMeta) {
-        if (!IsModelMeta(item)) continue;
-        std::string key;
-        try {
-            if (item.contains("model_pool_key") && item.at("model_pool_key").is_string()) {
-                key = item.at("model_pool_key").get<std::string>();
-            }
-        } catch (...) {}
-        if (key.empty()) continue;
+        // 使用预加载阶段生成的模型池 key 保留模型引用。
+        for (const auto& item : _loadedModelMeta) {
+            if (!IsModelMeta(item)) continue;
+            std::string key;
+            try {
+                if (item.contains("model_pool_key") && item.at("model_pool_key").is_string()) {
+                    key = item.at("model_pool_key").get<std::string>();
+                }
+            } catch (...) {}
+            if (key.empty()) continue;
 
-        // 去重：同一流程可能多个节点引用同一模型
-        if (std::find(_acquiredModelKeys.begin(), _acquiredModelKeys.end(), key)
-            == _acquiredModelKeys.end()) {
-            if (!ModelPool::Instance().RetainByKey(key)) {
-                throw std::runtime_error("流程模型预加载状态失效");
+            // 去重：同一流程可能多个节点引用同一模型
+            const auto existing = std::find_if(
+                _acquiredModelLeases.begin(), _acquiredModelLeases.end(),
+                [&key](const ModelPoolLease& lease) { return lease.Key() == key; });
+            if (existing == _acquiredModelLeases.end()) {
+                auto lease = ModelPool::Instance().RetainByKey(key);
+                if (!lease) {
+                    throw std::runtime_error("流程模型预加载状态失效");
+                }
+                _acquiredModelLeases.push_back(std::move(lease));
             }
-            _acquiredModelKeys.push_back(key);
         }
-    }
 
-        SetFlowBinaryStore(this, std::move(modelBinaryStore));
+        _modelBinaryStore = std::move(modelBinaryStore);
         _loaded = true;
         return report;
     } catch (...) {
         ReleaseOwnedModelsNoexcept();
-        ClearFlowBinaryStoreNoexcept(this);
         _loaded = false;
         throw;
     }
 }
 
 Json FlowGraphModel::GetModelInfo() const {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
     Json compatible = BuildCompatibleModelInfo(_nodes, _loadedModelMeta);
     return compatible.is_null() ? GetDvsModelInfo() : compatible;
 }
 
 Json FlowGraphModel::GetDvsModelInfo() const {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
     Json root = _root.is_object() ? _root : Json::object();
     try {
@@ -776,6 +692,7 @@ Json FlowGraphModel::GetDvsModelInfo() const {
                     properties["model_path"] = properties.at("model_path_original");
                 }
                 properties.erase("model_buffer_key");
+                properties.erase("model_pool_key");
             }
         }
     } catch (...) {}
@@ -783,10 +700,10 @@ Json FlowGraphModel::GetDvsModelInfo() const {
         Json publicMeta = _loadedModelMeta;
         for (auto& item : publicMeta) {
             if (!item.is_object()) continue;
-            item.erase("model_pool_key");
             if (item.contains("model_path_original") && item.at("model_path_original").is_string()) {
                 item["model_path"] = item.at("model_path_original");
             }
+            item.erase("model_pool_key");
         }
         root["loaded_model_meta"] = std::move(publicMeta);
     }
@@ -826,6 +743,7 @@ Json FlowGraphModel::GetDvsModelInfo() const {
 }
 
 Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Json& paramsJson) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
     if (images.empty()) throw std::invalid_argument("images is empty");
 
@@ -843,11 +761,9 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     ctx.Set<std::vector<cv::Mat>>("frontend_image_mat_list", rgbBatch);
     ctx.Set<std::string>("frontend_image_path", std::string());
     ctx.Set<int>("device_id", _deviceId);
-    const std::shared_ptr<const ModelBinaryStore> modelBinaryStore =
-        GetFlowBinaryStore(this);
-    if (modelBinaryStore) {
+    if (_modelBinaryStore) {
         ctx.Set<std::shared_ptr<const ModelBinaryStore>>(
-            "model_binary_store", modelBinaryStore);
+            "model_binary_store", _modelBinaryStore);
     }
     ctx.Set<Json>("infer_params", paramsJson.is_object() ? paramsJson : Json::object());
     ctx.Set<double>("flow_dlcv_infer_ms_acc", 0.0);
@@ -913,6 +829,7 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
 }
 
 Json FlowGraphModel::InferOneOutJson(const cv::Mat& image, const Json& paramsJson) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (image.empty()) throw std::invalid_argument("image is empty");
     Json root = InferInternal(std::vector<cv::Mat>{ image }, paramsJson);
     try {
@@ -931,6 +848,7 @@ Json FlowGraphModel::InferOneOutJson(const cv::Mat& image, const Json& paramsJso
 }
 
 double FlowGraphModel::Benchmark(const cv::Mat& image, int warmup, int runs) {
+    ModelLifecycleReadGuard lifecycleGuard;
     if (image.empty()) throw std::invalid_argument("image is empty");
     if (warmup < 0) warmup = 0;
     if (runs < 1) runs = 1;

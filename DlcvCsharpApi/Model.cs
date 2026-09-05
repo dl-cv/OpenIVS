@@ -40,6 +40,7 @@ namespace dlcv_infer_csharp
         // 与 dvt 从底层 DLL 返回的 model_index（0 起递增）分区，避免上层按 modelIndex 索引时 dvst 与 dvt 撞键。
         private static int s_nextFlowModelIndex = 10000;
         private static readonly object s_flowModelIndexLock = new object();
+        private static readonly object s_dvtModelLoadLock = new object();
 
         private static int AllocateFlowModelIndex()
         {
@@ -340,38 +341,41 @@ namespace dlcv_infer_csharp
 
         protected void LoadDvtModel(string modelPath, JObject config, string failureMessagePrefix)
         {
-            DllLoader.EnsureForModel(modelPath);
-            _dllLoader = DllLoader.Instance;
-            if (_dllLoader == null || _dllLoader.dlcv_load_model == null)
+            lock (s_dvtModelLoadLock)
             {
-                throw new Exception("未检测到授权");
-            }
-
-            var setting = new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii };
-
-            string jsonStr = JsonConvert.SerializeObject(config, setting);
-
-            IntPtr resultPtr = _dllLoader.dlcv_load_model(jsonStr);
-            try
-            {
-                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-                var resultObject = JObject.Parse(resultJson);
-
-                Log("Model load result: " + resultObject.ToString());
-                if (resultObject.ContainsKey("model_index"))
+                DllLoader.EnsureForModel(modelPath);
+                _dllLoader = DllLoader.Instance;
+                if (_dllLoader == null || _dllLoader.dlcv_load_model == null)
                 {
-                    modelIndex = resultObject["model_index"].Value<int>();
+                    throw new Exception("未检测到授权");
                 }
-                else
+
+                var setting = new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii };
+
+                string jsonStr = JsonConvert.SerializeObject(config, setting);
+
+                IntPtr resultPtr = _dllLoader.dlcv_load_model(jsonStr);
+                try
                 {
-                    throw new Exception(failureMessagePrefix + "：" + resultObject.ToString());
+                    var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                    var resultObject = JObject.Parse(resultJson);
+
+                    Log("Model load result: " + resultObject.ToString());
+                    if (resultObject.ContainsKey("model_index"))
+                    {
+                        modelIndex = resultObject["model_index"].Value<int>();
+                    }
+                    else
+                    {
+                        throw new Exception(failureMessagePrefix + "：" + resultObject.ToString());
+                    }
                 }
-            }
-            finally
-            {
-                if (resultPtr != IntPtr.Zero)
+                finally
                 {
-                    _dllLoader.dlcv_free_result(resultPtr);
+                    if (resultPtr != IntPtr.Zero)
+                    {
+                        _dllLoader.dlcv_free_result(resultPtr);
+                    }
                 }
             }
         }
@@ -2671,37 +2675,5 @@ namespace dlcv_infer_csharp
         }
     }
 
-    public class SlidingWindowModel : Model
-    {
-        public SlidingWindowModel(
-            string modelPath,
-            int deviceId,
-            int smallImgWidth = 832,
-            int smallImgHeight = 704,
-            int horizontalOverlap = 16,
-            int verticalOverlap = 16,
-            float threshold = 0.5f,
-            float iouThreshold = 0.2f,
-            float combineIosThreshold = 0.2f)
-        {
-            var config = new JObject
-            {
-                ["type"] = "sliding_window_pipeline",
-                ["model_path"] = modelPath,
-                ["device_id"] = deviceId,
-                ["small_img_width"] = smallImgWidth,
-                ["small_img_height"] = smallImgHeight,
-                ["horizontal_overlap"] = horizontalOverlap,
-                ["vertical_overlap"] = verticalOverlap,
-                ["threshold"] = threshold,
-                ["iou_threshold"] = iouThreshold,
-                ["combine_ios_threshold"] = combineIosThreshold
-            };
-
-            LoadDvtModel(modelPath, config, "加载滑窗模型失败");
-            TryCacheModelInfo();
-            WarmupInfer();
-        }
-    }
 }
 

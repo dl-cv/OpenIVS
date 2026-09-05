@@ -39,7 +39,7 @@
 
 - 工程名：`Test/dlcv_infer_cpp_test`
 - 入口文件：`Test/dlcv_infer_cpp_test/main.cpp`
-- 依赖项目：`dlcv_infer_cpp_dll`
+- 依赖项目：`dlcv_infer_cpp`
 - 关键点：
   - 头文件通过工程依赖配置（`AdditionalIncludeDirectories`）引入，代码中使用 `#include "dlcv_infer.h"`，不使用相对路径包含
   - 使用 `GetProcessMemoryInfo` 采样私有内存与工作集
@@ -178,7 +178,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
   - `Release\dlcv_infer_cpp_test.exe`
-- 通过 `OpenIVS.sln` 构建时，`dlcv_infer_cpp_dll` 与 `dlcv_infer_cpp_test` 的 x64 产物输出到解决方案目录下的 `Debug` 或 `Release`。
+- 通过 `OpenIVS.sln` 构建时，`dlcv_infer_cpp` 与 `dlcv_infer_cpp_test` 的 x64 产物输出到解决方案目录下的 `Debug` 或 `Release`。
 - `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
   - `model-channel-order-selftest`
   - `count-results-selftest`
@@ -192,6 +192,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - `get-model-info` 接收单个普通模型或流程模型路径；`get-dvs-model-info` 按 C# 公共接口支持范围接收 `.dvst`、`.dvso` 流程模型路径。命令不包含针对指定模型内容的预期值。
 - 测试时直接按需调用 C#、C++ 可执行程序的上述命令，检查命令返回状态及标准输出中的 JSON。
 - 两个命令成功返回 `0`，模型加载或接口调用异常返回 `1`，参数数量错误返回 `2`。
+- 双授权环境验证中，C# 新进程首次加载 Virbox 模型时选择 Sentinel provider 和 `dlcv_infer.dll`；同一进程依次加载 Sentinel、Virbox 模型时两者继续使用同一 DLL，Virbox 模型的信息读取、推理和释放均成功。
 - `dlcv_infer_cpp_test.exe` 支持 `count-results-selftest`，验证新配置闭区间、非法范围与旧配置兼容逻辑。
 - `DlcvCSharpTest.exe category-count-check-selftest` 与 `dlcv_infer_cpp_test.exe category-count-check-selftest` 验证类型数量规则、同一原图局部结果聚合、粘性 `ok=false`、字符串或数组 `reason`、Flow 输出包装及旧流程兼容行为。
 - `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：

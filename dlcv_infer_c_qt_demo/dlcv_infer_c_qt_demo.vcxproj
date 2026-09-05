@@ -22,8 +22,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{D3F5B7C1-62A8-4F5C-BE31-6C2C4A77B2E1}</ProjectGuid>
-    <RootNamespace>dlcvinfercppdlldemo2</RootNamespace>
+    <ProjectGuid>{A0C272DF-78CA-43A5-A66F-CD0BCEAA8FE1}</ProjectGuid>
+    <RootNamespace>dlcvinfercqtdemo</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
 
@@ -58,8 +58,10 @@
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
 
-  <ImportGroup Label="ExtensionSettings" />
-  <ImportGroup Label="Shared" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
@@ -76,44 +78,30 @@
   <PropertyGroup Label="UserMacros" />
 
   <PropertyGroup>
-    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_INCLUDE_DIR)'!=''">$(OpenCV_INCLUDE_DIR)</OpenCvIncludeDir>
-    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\opencv2\core.hpp')">$(OpenCV_DIR)</OpenCvIncludeDir>
-    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\include\opencv2\core.hpp')">$(OpenCV_DIR)\include</OpenCvIncludeDir>
-    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\..\..\include\opencv2\core.hpp')">$([System.IO.Path]::GetFullPath('$(OpenCV_DIR)\..\..\include'))</OpenCvIncludeDir>
-    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(SolutionDir)third_party\opencv\build\include\opencv2\core.hpp')">$(SolutionDir)third_party\opencv\build\include</OpenCvIncludeDir>
-    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\opencv\build\include\opencv2\core.hpp')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\opencv\build\include'))</OpenCvIncludeDir>
-    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('C:\OpenCV\build\include\opencv2\core.hpp')">C:\OpenCV\build\include</OpenCvIncludeDir>
-
-    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_LIB_DIR)'!=''">$(OpenCV_LIB_DIR)</OpenCvLibDir>
-    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\opencv_world4100.lib')">$(OpenCV_DIR)</OpenCvLibDir>
-    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\lib\opencv_world4100.lib')">$(OpenCV_DIR)\lib</OpenCvLibDir>
-    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\x64\vc16\lib\opencv_world4100.lib')">$(OpenCV_DIR)\x64\vc16\lib</OpenCvLibDir>
-    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and Exists('$(SolutionDir)third_party\opencv\build\x64\vc16\lib\opencv_world4100.lib')">$(SolutionDir)third_party\opencv\build\x64\vc16\lib</OpenCvLibDir>
-    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and Exists('$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib\opencv_world4100.lib')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib'))</OpenCvLibDir>
-    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and Exists('C:\OpenCV\build\x64\vc16\lib\opencv_world4100.lib')">C:\OpenCV\build\x64\vc16\lib</OpenCvLibDir>
-
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DLCVPRO_INFER_INCLUDE)'!=''">$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(SolutionDir)third_party\dlcvpro_infer\include')">$(SolutionDir)third_party\dlcvpro_infer\include</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\dlcvpro_infer\include')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\dlcvpro_infer\include'))</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('C:\dlcv\Lib\site-packages\dlcvpro_infer\include')">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
-
-    <DlcvInferCppDllOutDir Condition="'$(DlcvInferCppDllOutDir)'=='' and '$(SolutionDir)'!=''">$(SolutionDir)$(Configuration)\</DlcvInferCppDllOutDir>
-    <DlcvInferCppDllOutDir Condition="'$(DlcvInferCppDllOutDir)'==''">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\'))</DlcvInferCppDllOutDir>
+    <Qt6Dir Condition="'$(Qt6Dir)'==''">$(Qt6_DIR)</Qt6Dir>
+    <QtInstallDir Condition="'$(QtInstallDir)'==''">$([System.IO.Path]::GetFullPath('$(Qt6Dir)\..\..'))</QtInstallDir>
+    <QtBinDir Condition="'$(QtBinDir)'==''">$(QtInstallDir)\bin</QtBinDir>
+    <QtIncludeDir Condition="'$(QtIncludeDir)'==''">$(QtInstallDir)\include</QtIncludeDir>
+    <QtLibDir Condition="'$(QtLibDir)'==''">$(QtInstallDir)\lib</QtLibDir>
+    <QtPluginsDir Condition="'$(QtPluginsDir)'==''">$(QtInstallDir)\plugins</QtPluginsDir>
+    <DlcvInferCppDllOutDir Condition="'$(SolutionPath)'!=''">$(SolutionDir)$(Configuration)\</DlcvInferCppDllOutDir>
+    <DlcvInferCppDllOutDir Condition="'$(SolutionPath)'==''">$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\</DlcvInferCppDllOutDir>
+    <DlcvInferCppDllPath>$(DlcvInferCppDllOutDir)dlcv_infer_cpp.dll</DlcvInferCppDllPath>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
-    <LibraryPath>$(OpenCvLibDir);$(LibraryPath)</LibraryPath>
-    <OutDir Condition="'$(SolutionDir)'!=''">$(SolutionDir)$(Configuration)\</OutDir>
-    <OutDir Condition="'$(SolutionDir)'==''">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\$(Configuration)\'))</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp;$(SolutionDir)dlcv_infer_cpp;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
+    <LibraryPath>C:\OpenCV\build\x64\vc16\lib;$(QtLibDir);$(LibraryPath)</LibraryPath>
+    <OutDir>$(SolutionDir)$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <QtDllSuffix>d</QtDllSuffix>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
-    <LibraryPath>$(OpenCvLibDir);$(LibraryPath)</LibraryPath>
-    <OutDir Condition="'$(SolutionDir)'!=''">$(SolutionDir)$(Configuration)\</OutDir>
-    <OutDir Condition="'$(SolutionDir)'==''">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\$(Configuration)\'))</OutDir>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp;$(SolutionDir)dlcv_infer_cpp;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
+    <LibraryPath>C:\OpenCV\build\x64\vc16\lib;$(QtLibDir);$(LibraryPath)</LibraryPath>
+    <OutDir>$(SolutionDir)$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <QtDllSuffix></QtDllSuffix>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
@@ -125,11 +113,12 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -139,13 +128,14 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -162,14 +152,25 @@
       <ConformanceMode>true</ConformanceMode>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\;$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>dlcv_infer_cpp.lib;opencv_world4100d.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opencv_world4100d.lib;Qt6Widgetsd.lib;Qt6Guid.lib;Qt6Cored.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
+if not exist "$(TargetDir)styles" mkdir "$(TargetDir)styles"
+if not exist "$(DlcvInferCppDllPath)" exit /b 1
+copy /Y "$(DlcvInferCppDllPath)" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" "$(TargetDir)platforms\"
+if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" "$(TargetDir)styles\"
+if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" "$(TargetDir)styles\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -181,46 +182,55 @@
       <ConformanceMode>true</ConformanceMode>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\;$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>dlcv_infer_cpp.lib;opencv_world4100.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opencv_world4100.lib;Qt6Widgets.lib;Qt6Gui.lib;Qt6Core.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
+if not exist "$(TargetDir)styles" mkdir "$(TargetDir)styles"
+if not exist "$(DlcvInferCppDllPath)" exit /b 1
+copy /Y "$(DlcvInferCppDllPath)" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" "$(TargetDir)"
+if exist "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" "$(TargetDir)platforms\"
+if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" "$(TargetDir)styles\"
+if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" "$(TargetDir)styles\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="model_infer.cpp" />
-    <ClCompile Include="model_loader.cpp" />
+    <ClInclude Include="MainWindow.h" />
+    <ClInclude Include="DlcvInferApi.h" />
+    <ClInclude Include="DisplayResult.h" />
+    <ClInclude Include="ImageViewerWidget.h" />
   </ItemGroup>
 
   <ItemGroup>
-    <ClInclude Include="demo2_api.h" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="MainWindow.cpp" />
+    <ClCompile Include="DlcvInferApi.cpp" />
+    <ClCompile Include="ImageViewerWidget.cpp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ResourceCompile Include="app_icon.rc" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
       <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
-      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
     </ProjectReference>
   </ItemGroup>
 
-  <Target Name="ValidatePortableDeps" BeforeTargets="ClCompile" Condition="'$(Platform)'=='x64'">
-    <Error Condition="!Exists('$(OpenCvIncludeDir)\opencv2\core.hpp')"
-           Text="未找到 OpenCV 头文件。请确保以下任一路径可用：1) 设置 OpenCV_DIR；2) 仓库 third_party\opencv\build；3) C:\OpenCV\build。" />
-    <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100d.lib') and '$(Configuration)'=='Debug'"
-           Text="未找到 OpenCV Debug 库 opencv_world4100d.lib。请检查 OpenCV 库目录是否正确。" />
-    <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100.lib') and '$(Configuration)'!='Debug'"
-           Text="未找到 OpenCV Release 库 opencv_world4100.lib。请检查 OpenCV 库目录是否正确。" />
-    <Error Condition="!Exists('$(DlcvProInferIncludeDir)\json\json.hpp') and !Exists('$(DlcvProInferIncludeDir)\nlohmann\json.hpp')"
-           Text="未找到 dlcvpro_infer JSON 头文件。请确保设置 DLCVPRO_INFER_INCLUDE，或提供 third_party\dlcvpro_infer\include。" />
-  </Target>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <ImportGroup Label="ExtensionTargets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
 </Project>

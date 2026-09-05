@@ -11,25 +11,43 @@
     </Filter>
     <Filter Include="资源文件">
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;svg;qrc;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="生成文件">
+      <UniqueIdentifier>{A0A58F8F-DDF1-4CE6-8D39-0C344813BB96}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="dlcv_infer.cpp">
+    <ClCompile Include="main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="dlcv_sntl_admin.cpp">
+    <ClCompile Include="MainWindow.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="DlcvInferApi.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="ImageViewerWidget.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="dlcv_infer.h">
+    <ClInclude Include="DisplayResult.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="dlcv_sntl_admin.h">
+    <ClInclude Include="MainWindow.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ImageViewerWidget.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="DlcvInferApi.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="app_icon.rc">
+      <Filter>资源文件</Filter>
+    </ResourceCompile>
+  </ItemGroup>
 </Project>
-
-
