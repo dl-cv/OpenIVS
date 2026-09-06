@@ -57,7 +57,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | C++ 测试程序 | `dlcv_infer_cpp_qt_demo/MainWindow.cpp` | 模型加载、推理、压力测试、加密狗检测 |
 | C 测试程序 | `dlcv_infer_c_qt_demo/MainWindow.cpp` | 通过 C ABI 执行模型加载、推理、压力测试和加密狗检测 |
 | 纯 C 控制台 Demo | `dlcv_infer_c_demo/main.cpp` | 动态解析 34 个 C 导出中的所需函数，执行普通模型、流程模型和多线程结果比较 |
-| C# 测试程序 | `DlcvDemo/Form1.cs` | WinForms 测试程序主窗口 |
+| C# 测试程序 | `DlcvDemo/MainWindow.cs` | WinForms 测试程序主窗口 |
 | C# 压力测试 | `PressureTestRunner/PressureTestRunner.cs` | 多线程/一致性测试框架 |
 
 ## 常见修改点
@@ -67,7 +67,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
   - 修改图像预处理逻辑 → 同步检查 C++ `dlcv_infer.cpp` 与 C# `Model.cs` 的 `PrepareInferImages`
   - 新增模型格式支持 → 同步更新 `DllLoader`（C++ 与 C#）的 `ResolveProviderFromHeader`
 - **测试程序修改**：
-  - 新增推理参数 → 同步更新 C++ `MainWindow.cpp` 与 C# `Form1.cs` 的参数 JSON 构建
+  - 新增推理参数 → 同步更新 C++ `MainWindow.cpp` 与 C# `MainWindow.cs` 的参数 JSON 构建
   - 修改可视化规则 → 同步检查 C++ `ImageViewerWidget` 与 C# `ImageViewer`
 
 ## 关键依赖路径

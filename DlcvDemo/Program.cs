@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Windows;
+using System.Windows.Forms;
 
 namespace DlcvDemo
 {
@@ -27,10 +27,13 @@ namespace DlcvDemo
                     return 2;
                 }
 
-                var uiTestApplication = new System.Windows.Application();
-                var uiTestWindow = new MainWindow(options);
-                uiTestApplication.Run(uiTestWindow);
-                return uiTestWindow.UiTestExitCode;
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                using (var uiTestWindow = new MainWindow(options))
+                {
+                    Application.Run(uiTestWindow);
+                    return uiTestWindow.UiTestExitCode;
+                }
             }
 
             if (args != null && args.Length > 0)
@@ -39,9 +42,12 @@ namespace DlcvDemo
                 return CliRunner.Run(args);
             }
 
-            var application = new System.Windows.Application();
-            var window = new MainWindow();
-            application.Run(window);
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            using (var window = new MainWindow())
+            {
+                Application.Run(window);
+            }
             return 0;
         }
     }
