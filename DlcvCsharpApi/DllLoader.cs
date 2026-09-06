@@ -104,11 +104,13 @@ namespace dlcv_infer_csharp
             get
             {
                 return dlcv_get_index_type_c != null &&
+                       dlcv_get_model_info_c != null &&
                        dlcv_register_flow_c != null &&
                        dlcv_get_flow_info_c != null &&
                        dlcv_free_flow_c != null &&
                        dlcv_bind_index_c != null &&
-                       dlcv_unbind_index_c != null;
+                       dlcv_unbind_index_c != null &&
+                       dlcv_free_result != null;
             }
         }
 
@@ -313,8 +315,8 @@ namespace dlcv_infer_csharp
             if (dlcv_get_index_type_c == null) missing.Add("dlcv_get_index_type_c");
             if (dlcv_bind_index_c == null) missing.Add("dlcv_bind_index_c");
             if (dlcv_unbind_index_c == null) missing.Add("dlcv_unbind_index_c");
-            if (string.Equals(indexType, "model", StringComparison.Ordinal) && dlcv_get_model_info_c == null)
-                missing.Add("dlcv_get_model_info_c");
+            if (dlcv_free_result == null) missing.Add("dlcv_free_result");
+            if (dlcv_get_model_info_c == null) missing.Add("dlcv_get_model_info_c");
             if (string.Equals(indexType, "flow", StringComparison.Ordinal) && dlcv_get_flow_info_c == null)
                 missing.Add("dlcv_get_flow_info_c");
             if (missing.Count > 0)

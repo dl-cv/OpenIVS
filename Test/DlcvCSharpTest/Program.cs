@@ -1449,6 +1449,12 @@ namespace DlcvCSharpTest
                     dlcv_unbind_index_c = index => 0
                 };
 
+                var legacyWithoutQuery = new DllLoader
+                {
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0
+                };
+
                 string indexType;
                 DllLoader selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(
                     256,
@@ -1463,6 +1469,41 @@ namespace DlcvCSharpTest
                     out indexType);
                 if (!object.ReferenceEquals(selected, newVirbox) || indexType != "model")
                     throw new Exception("新版编号 256 的唯一资源选择错误");
+
+                selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                    256,
+                    new List<DllLoader> { legacyWithoutQuery, oldSentinel },
+                    out indexType);
+                if (!object.ReferenceEquals(selected, oldSentinel) || indexType != "model")
+                    throw new Exception("缺少查询接口的旧 DLL 不应参与共享资源选择");
+
+                var incompleteSharedFlow = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => 2,
+                    dlcv_get_flow_info_c = index => IntPtr.Zero,
+                    dlcv_free_flow_c = index => 0,
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0
+                };
+                if (incompleteSharedFlow.SupportsSharedFlowIndex)
+                    throw new Exception("缺少模型信息或结果释放接口的旧 DLL 错误启用共享流程登记");
+                EnsureThrows<NotSupportedException>(
+                    () => incompleteSharedFlow.EnsureSharedIndexSupport("flow"),
+                    "缺少共享流程接口时未拒绝严格恢复");
+
+                var completeSharedFlow = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => 2,
+                    dlcv_get_model_info_c = index => IntPtr.Zero,
+                    dlcv_register_flow_c = ptr => 0,
+                    dlcv_get_flow_info_c = index => IntPtr.Zero,
+                    dlcv_free_flow_c = index => 0,
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0,
+                    dlcv_free_result = ptr => { }
+                };
+                if (!completeSharedFlow.SupportsSharedFlowIndex)
+                    throw new Exception("完整共享流程接口未被识别");
 
                 EnsureThrows<InvalidOperationException>(
                     () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
@@ -1553,7 +1594,8 @@ namespace DlcvCSharpTest
                     dlcv_get_index_type_c = index => 1,
                     dlcv_get_model_info_c = index => IntPtr.Zero,
                     dlcv_unbind_index_c = index => 0,
-                    dlcv_bind_index_c = index => { bindAttempts++; return -7; }
+                    dlcv_bind_index_c = index => { bindAttempts++; return -7; },
+                    dlcv_free_result = ptr => { }
                 };
                 using (var fixedModel = Model.CreateFromKnownLoader(256, fixedLoader))
                 {
