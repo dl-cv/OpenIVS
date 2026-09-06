@@ -17,7 +17,6 @@
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <iomanip>
@@ -41,17 +40,17 @@ static std::unordered_map<int, std::shared_ptr<CApiModelEntry>> g_models;
 static std::mutex g_modelsMutex;
 static constexpr int kFirstFlowModelIndex = 10000;
 struct NativeJsonAllocation {
-    std::vector<void*> maskBuffers;
+    std::vector<unsigned char*> maskBuffers;
 
     NativeJsonAllocation() = default;
-    explicit NativeJsonAllocation(std::vector<void*> buffers)
+    explicit NativeJsonAllocation(std::vector<unsigned char*> buffers)
         : maskBuffers(std::move(buffers)) {}
     NativeJsonAllocation(const NativeJsonAllocation&) = delete;
     NativeJsonAllocation& operator=(const NativeJsonAllocation&) = delete;
     NativeJsonAllocation(NativeJsonAllocation&&) noexcept = default;
     NativeJsonAllocation& operator=(NativeJsonAllocation&&) noexcept = default;
     ~NativeJsonAllocation() {
-        for (void* buffer : maskBuffers) std::free(buffer);
+        for (unsigned char* buffer : maskBuffers) delete[] buffer;
     }
 
     void KeepMaskBuffersAllocated() noexcept {
@@ -70,32 +69,6 @@ static std::wstring GetDlcvCapiDebugLogPath() {
 }
 
 
-static char* DuplicateCString(const char* value) {
-    if (value == nullptr) value = "";
-    const size_t size = std::strlen(value) + 1;
-    char* copy = static_cast<char*>(std::malloc(size));
-    if (copy == nullptr) throw std::bad_alloc();
-    std::memcpy(copy, value, size);
-    return copy;
-}
-
-static char* TryDuplicateCString(const char* value) noexcept {
-    try {
-        return DuplicateCString(value);
-    } catch (...) {
-        return nullptr;
-    }
-}
-
-template <typename T>
-static T* AllocateZeroedArray(size_t count) {
-    if (count == 0) return nullptr;
-    if (count > std::numeric_limits<size_t>::max() / sizeof(T)) throw std::bad_alloc();
-    T* result = static_cast<T*>(std::calloc(count, sizeof(T)));
-    if (result == nullptr) throw std::bad_alloc();
-    return result;
-}
-
 static int CheckedCCount(size_t count) {
     if (count > static_cast<size_t>(std::numeric_limits<int>::max())) {
         throw std::length_error("result count exceeds C API range");
@@ -105,7 +78,7 @@ static int CheckedCCount(size_t count) {
 
 static void ReleaseCResultMemory(DlcvCResult* result) noexcept {
     if (result == nullptr) return;
-    std::free(result->message);
+    delete[] result->message;
     result->message = nullptr;
     if (result->sample_results != nullptr) {
         if (result->n > 0) {
@@ -115,24 +88,24 @@ static void ReleaseCResultMemory(DlcvCResult* result) noexcept {
                     if (sample.n > 0) {
                         for (int j = 0; j < sample.n; ++j) {
                             DlcvCObjectResult& object = sample.results[j];
-                            std::free(object.category_name);
+                            delete[] object.category_name;
                             object.category_name = nullptr;
                             if (object.mask.mask_ptr != 0) {
-                                std::free(reinterpret_cast<void*>(
-                                    static_cast<uintptr_t>(object.mask.mask_ptr)));
+                                delete[] reinterpret_cast<unsigned char*>(
+                                    static_cast<uintptr_t>(object.mask.mask_ptr));
                                 object.mask.mask_ptr = 0;
                             }
                             object.mask.height = 0;
                             object.mask.width = 0;
                         }
                     }
-                    std::free(sample.results);
+                    delete[] sample.results;
                     sample.results = nullptr;
                 }
                 sample.n = 0;
             }
         }
-        std::free(result->sample_results);
+        delete[] result->sample_results;
         result->sample_results = nullptr;
     }
     result->n = 0;
@@ -141,7 +114,14 @@ static void ReleaseCResultMemory(DlcvCResult* result) noexcept {
 static void SetCResultError(DlcvCResult& result, const char* message) noexcept {
     ReleaseCResultMemory(&result);
     result.code = -1;
-    result.message = TryDuplicateCString(message);
+    try {
+        if (message == nullptr) message = "";
+        const size_t size = std::strlen(message) + 1;
+        result.message = new char[size];
+        std::memcpy(result.message, message, size);
+    } catch (...) {
+        result.message = nullptr;
+    }
 }
 
 static const char* ValidateCImage(const DlcvCImage& image) noexcept {
@@ -207,22 +187,18 @@ static bool IsFlowModelPath(const std::string& modelPath) {
 
 static const char* AllocateNativeJsonResult(
     const dlcv_infer::json& value,
-    std::vector<void*> maskBuffers = {}) {
+    std::vector<unsigned char*> maskBuffers = {}) {
+    NativeJsonAllocation allocation(std::move(maskBuffers));
     const std::string serialized = value.dump();
-    char* result = static_cast<char*>(std::malloc(serialized.size() + 1));
-    if (result == nullptr) {
-        for (void* buffer : maskBuffers) std::free(buffer);
-        throw std::bad_alloc();
-    }
+    char* result = new char[serialized.size() + 1];
     std::memcpy(result, serialized.c_str(), serialized.size() + 1);
 
-    NativeJsonAllocation allocation(std::move(maskBuffers));
     try {
         std::lock_guard<std::mutex> lock(g_nativeJsonAllocationsMutex);
         const auto inserted = g_nativeJsonAllocations.emplace(result, std::move(allocation));
         if (!inserted.second) throw std::runtime_error("原生 JSON 返回指针重复");
     } catch (...) {
-        std::free(result);
+        delete[] result;
         throw;
     }
     return result;
@@ -241,7 +217,7 @@ static bool ReleaseNativeJsonResult(const char* result, bool releaseMaskBuffers)
     }
 
     if (!releaseMaskBuffers) allocation.KeepMaskBuffersAllocated();
-    std::free(const_cast<char*>(result));
+    delete[] result;
     return true;
 }
 
@@ -358,7 +334,7 @@ static dlcv_infer::json BuildNativeInferParams(const dlcv_infer::json& config) {
 
 static dlcv_infer::json BuildNativeObjectResult(
     const dlcv_infer::ObjectResult& object,
-    std::vector<void*>& maskBuffers) {
+    std::vector<unsigned char*>& maskBuffers) {
     dlcv_infer::json bbox = dlcv_infer::json::array();
     for (double value : object.bbox) bbox.push_back(value);
 
@@ -370,11 +346,12 @@ static dlcv_infer::json BuildNativeObjectResult(
     if (object.withMask && !object.mask.empty()) {
         cv::Mat continuousMask = object.mask.isContinuous() ? object.mask : object.mask.clone();
         const size_t byteCount = continuousMask.total() * continuousMask.elemSize();
-        void* maskBuffer = std::malloc(byteCount);
-        if (maskBuffer == nullptr) throw std::bad_alloc();
-        std::memcpy(maskBuffer, continuousMask.data, byteCount);
-        maskBuffers.push_back(maskBuffer);
-        mask["mask_ptr"] = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(maskBuffer));
+        std::unique_ptr<unsigned char[]> maskBuffer(new unsigned char[byteCount]);
+        std::memcpy(maskBuffer.get(), continuousMask.data, byteCount);
+        maskBuffers.push_back(maskBuffer.get());
+        const uint64_t maskPointer = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(maskBuffer.release()));
+        mask["mask_ptr"] = maskPointer;
         mask["height"] = continuousMask.rows;
         mask["width"] = continuousMask.cols;
     }
@@ -404,7 +381,7 @@ static const char* InferFlowModelWithNativeJson(
     const std::vector<cv::Mat> images = ParseNativeImageList(config);
     const dlcv_infer::Result inferResult = entry->model->InferBatch(images, BuildNativeInferParams(config));
 
-    std::vector<void*> maskBuffers;
+    std::vector<unsigned char*> maskBuffers;
     try {
         dlcv_infer::json sampleResults = dlcv_infer::json::array();
         for (const auto& sample : inferResult.sampleResults) {
@@ -422,7 +399,7 @@ static const char* InferFlowModelWithNativeJson(
         };
         return AllocateNativeJsonResult(response, std::move(maskBuffers));
     } catch (...) {
-        for (void* buffer : maskBuffers) std::free(buffer);
+        for (unsigned char* buffer : maskBuffers) delete[] buffer;
         throw;
     }
 }
@@ -492,10 +469,17 @@ static std::string DescribeModelPathBytes(const std::string& modelPath) {
 
 static void ReplaceResultMessage(DlcvCResult& result, const char* message) {
     if (result.message != nullptr) {
-        std::free(result.message);
+        delete[] result.message;
         result.message = nullptr;
     }
-    result.message = TryDuplicateCString(message);
+    try {
+        if (message == nullptr) message = "";
+        const size_t size = std::strlen(message) + 1;
+        result.message = new char[size];
+        std::memcpy(result.message, message, size);
+    } catch (...) {
+        result.message = nullptr;
+    }
 }
 
 static void NormalizeNativeCompatibleResult(DlcvCResult& result) {
@@ -718,25 +702,28 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
         dlcv_infer::Result cppResult =
             entry->model->InferBatchPreservingOriginalMask(mats, params);
 
-        result.message = DuplicateCString("success");
+        result.message = new char[sizeof("success")];
+        std::memcpy(result.message, "success", sizeof("success"));
         const int sampleCount = CheckedCCount(cppResult.sampleResults.size());
         if (sampleCount > 0) {
-            result.sample_results = AllocateZeroedArray<DlcvCSampleResult>(
-                static_cast<size_t>(sampleCount));
+            result.sample_results = new DlcvCSampleResult[sampleCount]{};
             result.n = sampleCount;
             for (int i = 0; i < sampleCount; ++i) {
                 const auto& sample = cppResult.sampleResults[i];
                 DlcvCSampleResult& sr = result.sample_results[i];
                 const int objectCount = CheckedCCount(sample.results.size());
                 if (objectCount > 0) {
-                    sr.results = AllocateZeroedArray<DlcvCObjectResult>(
-                        static_cast<size_t>(objectCount));
+                    sr.results = new DlcvCObjectResult[objectCount]{};
                     sr.n = objectCount;
                     for (int j = 0; j < objectCount; ++j) {
                         const auto& obj = sample.results[j];
                         DlcvCObjectResult& o = sr.results[j];
                         o.category_id = obj.categoryId;
-                        o.category_name = DuplicateCString(obj.categoryName.c_str());
+                        o.category_name = new char[obj.categoryName.size() + 1];
+                        std::memcpy(
+                            o.category_name,
+                            obj.categoryName.c_str(),
+                            obj.categoryName.size() + 1);
                         o.score = obj.score;
                         o.with_bbox = obj.withBbox;
                         o.area = obj.area;
@@ -750,8 +737,7 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
                         if (obj.withMask && !obj.mask.empty()) {
                             cv::Mat maskClone = obj.mask.clone();
                             const size_t bytes = maskClone.total() * maskClone.elemSize();
-                            unsigned char* maskData = static_cast<unsigned char*>(std::malloc(bytes));
-                            if (maskData == nullptr && bytes > 0) throw std::bad_alloc();
+                            unsigned char* maskData = new unsigned char[bytes];
                             std::memcpy(maskData, maskClone.data, bytes);
                             o.mask.mask_ptr = static_cast<long long>(reinterpret_cast<uintptr_t>(maskData));
                             o.mask.width = maskClone.cols;
@@ -798,7 +784,9 @@ const char* dlcv_infer_cpp_get_model_info_c(int model_index) {
 
     try {
         const std::string value = entry->model->GetModelInfo().dump();
-        return DuplicateCString(value.c_str());
+        char* result = new char[value.size() + 1];
+        std::memcpy(result, value.c_str(), value.size() + 1);
+        return result;
     } catch (const std::exception& ex) {
         SetLastErrorMessage(ex.what());
     } catch (...) {
@@ -860,7 +848,9 @@ const char* dlcv_infer_cpp_infer_json_c(
             }
         }
         const std::string value = entry->model->InferOneOutJson(mat, params).dump();
-        return DuplicateCString(value.c_str());
+        char* result = new char[value.size() + 1];
+        std::memcpy(result, value.c_str(), value.size() + 1);
+        return result;
     } catch (const std::exception& ex) {
         SetLastErrorMessage(ex.what());
     } catch (...) {
@@ -873,7 +863,9 @@ const char* dlcv_infer_cpp_get_all_dog_info_c() {
     ClearLastErrorMessage();
     try {
         const std::string value = dlcv_infer::GetAllDogInfo().dump();
-        return DuplicateCString(value.c_str());
+        char* result = new char[value.size() + 1];
+        std::memcpy(result, value.c_str(), value.size() + 1);
+        return result;
     } catch (const std::exception& ex) {
         SetLastErrorMessage(ex.what());
     } catch (...) {
@@ -883,7 +875,7 @@ const char* dlcv_infer_cpp_get_all_dog_info_c() {
 }
 
 void dlcv_infer_cpp_free_string_c(const char* value) {
-    std::free(const_cast<char*>(value));
+    delete[] value;
 }
 
 void dlcv_infer_cpp_free_all_models_c() {
