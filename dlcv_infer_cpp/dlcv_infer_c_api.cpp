@@ -12,6 +12,8 @@
 
 #include <opencv2/core.hpp>
 
+#include <windows.h>
+
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
@@ -59,7 +61,13 @@ struct NativeJsonAllocation {
 static std::unordered_map<const char*, NativeJsonAllocation> g_nativeJsonAllocations;
 static std::mutex g_nativeJsonAllocationsMutex;
 static thread_local std::string g_lastError;
-static const char* kDlcvCapiDebugLogPath = "C:\\ProgramData\\dlcvInfer_c_api_debug.log";
+
+static std::wstring GetDlcvCapiDebugLogPath() {
+    wchar_t tempDirectory[MAX_PATH + 1] = {0};
+    const DWORD length = GetTempPathW(MAX_PATH + 1, tempDirectory);
+    if (length == 0 || length > MAX_PATH) return {};
+    return std::wstring(tempDirectory, length) + L"dlcvInfer_c_api_debug.log";
+}
 
 
 static char* DuplicateCString(const char* value) {
@@ -434,8 +442,11 @@ static void AppendCapiDebugLog(const char* format, ...) {
     vsnprintf(message, sizeof(message), format, args);
     va_end(args);
 
+    const std::wstring logPath = GetDlcvCapiDebugLogPath();
+    if (logPath.empty()) return;
+
     FILE* fp = nullptr;
-    if (fopen_s(&fp, kDlcvCapiDebugLogPath, "a") == 0 && fp != nullptr) {
+    if (_wfopen_s(&fp, logPath.c_str(), L"a") == 0 && fp != nullptr) {
         fprintf(fp, "%04d-%02d-%02d %02d:%02d:%02d [dlcvInferCAPI] %s\n",
             localTime.tm_year + 1900,
             localTime.tm_mon + 1,
