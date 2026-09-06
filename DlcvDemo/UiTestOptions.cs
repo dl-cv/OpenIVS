@@ -10,6 +10,7 @@ namespace DlcvDemo
         internal string ModelPath { get; private set; }
         internal string ImagePath { get; private set; }
         internal string OutputPath { get; private set; }
+        internal string ScreenshotPath { get; private set; }
         internal decimal Threshold { get; private set; } = 0.5m;
         internal int DeviceId { get; private set; } = 0;
         internal bool? CalcMean { get; private set; }
@@ -50,6 +51,9 @@ namespace DlcvDemo
                         break;
                     case "--output":
                         options.OutputPath = value;
+                        break;
+                    case "--screenshot":
+                        options.ScreenshotPath = value;
                         break;
                     case "--threshold":
                         if (!decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal threshold)
@@ -116,16 +120,45 @@ namespace DlcvDemo
                 error = "图片文件不存在: " + options.ImagePath;
                 return false;
             }
+            try
+            {
+                string model = Path.GetFullPath(options.ModelPath);
+                string image = Path.GetFullPath(options.ImagePath);
+                string output = Path.GetFullPath(options.OutputPath);
+                string screenshot = options.ScreenshotPath == null ? null : Path.GetFullPath(options.ScreenshotPath);
+                if (string.Equals(output, model, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(output, image, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(output + ".tmp", model, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(output + ".tmp", image, StringComparison.OrdinalIgnoreCase)
+                    || (screenshot != null && (string.Equals(screenshot, model, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(screenshot, image, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(screenshot, output, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(screenshot, output + ".tmp", StringComparison.OrdinalIgnoreCase))))
+                {
+                    error = "测试输出路径不能与输入文件或其他输出文件相同。";
+                    return false;
+                }
+                if (screenshot != null && !string.Equals(Path.GetExtension(screenshot), ".png", StringComparison.OrdinalIgnoreCase))
+                {
+                    error = "--screenshot 必须指定 PNG 文件路径。";
+                    return false;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                error = "测试路径无效: " + ex.Message;
+                return false;
+            }
             return true;
         }
 
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>]");
             Console.Out.WriteLine();
-            Console.Out.WriteLine("ui-test starts the real WPF window and writes its progress/result to --output.");
-            Console.Out.WriteLine("interactive-dialogs=false loads inputs without opening file dialogs and does not activate the window.");
+            Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
+            Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");
         }
     }
 }
