@@ -147,7 +147,7 @@ namespace DlcvDemo
             this.button_load_model.BackColor = Color.FromArgb(25, 118, 210);
             this.button_load_model.FlatAppearance.BorderSize = 0;
             this.button_load_model.FlatAppearance.MouseDownBackColor = Color.FromArgb(13, 71, 161);
-            this.button_load_model.FlatAppearance.MouseOverBackColor = Color.FromArgb(21, 101, 192);
+            this.button_load_model.FlatAppearance.MouseOverBackColor = Color.FromArgb(25, 118, 210);
             this.button_load_model.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.button_load_model.ForeColor = Color.White;
             this.button_load_model.Margin = new System.Windows.Forms.Padding(4);
@@ -162,7 +162,7 @@ namespace DlcvDemo
             this.button_infer.BackColor = Color.FromArgb(25, 118, 210);
             this.button_infer.FlatAppearance.BorderSize = 0;
             this.button_infer.FlatAppearance.MouseDownBackColor = Color.FromArgb(13, 71, 161);
-            this.button_infer.FlatAppearance.MouseOverBackColor = Color.FromArgb(21, 101, 192);
+            this.button_infer.FlatAppearance.MouseOverBackColor = Color.FromArgb(25, 118, 210);
             this.button_infer.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.button_infer.ForeColor = Color.White;
             this.button_infer.Margin = new System.Windows.Forms.Padding(4);
@@ -362,7 +362,7 @@ namespace DlcvDemo
             this.button_open_image.BackColor = Color.FromArgb(25, 118, 210);
             this.button_open_image.FlatAppearance.BorderSize = 0;
             this.button_open_image.FlatAppearance.MouseDownBackColor = Color.FromArgb(13, 71, 161);
-            this.button_open_image.FlatAppearance.MouseOverBackColor = Color.FromArgb(21, 101, 192);
+            this.button_open_image.FlatAppearance.MouseOverBackColor = Color.FromArgb(25, 118, 210);
             this.button_open_image.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.button_open_image.ForeColor = Color.White;
             this.button_open_image.Margin = new System.Windows.Forms.Padding(4);
@@ -392,7 +392,7 @@ namespace DlcvDemo
             this.button_free_model.BackColor = Color.FromArgb(239, 83, 80);
             this.button_free_model.FlatAppearance.BorderSize = 0;
             this.button_free_model.FlatAppearance.MouseDownBackColor = Color.FromArgb(198, 40, 40);
-            this.button_free_model.FlatAppearance.MouseOverBackColor = Color.FromArgb(229, 57, 53);
+            this.button_free_model.FlatAppearance.MouseOverBackColor = Color.FromArgb(239, 83, 80);
             this.button_free_model.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.button_free_model.ForeColor = Color.White;
             this.button_free_model.Margin = new System.Windows.Forms.Padding(4);
@@ -407,7 +407,7 @@ namespace DlcvDemo
             this.button_free_all_model.BackColor = Color.FromArgb(239, 83, 80);
             this.button_free_all_model.FlatAppearance.BorderSize = 0;
             this.button_free_all_model.FlatAppearance.MouseDownBackColor = Color.FromArgb(198, 40, 40);
-            this.button_free_all_model.FlatAppearance.MouseOverBackColor = Color.FromArgb(229, 57, 53);
+            this.button_free_all_model.FlatAppearance.MouseOverBackColor = Color.FromArgb(239, 83, 80);
             this.button_free_all_model.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.button_free_all_model.ForeColor = Color.White;
             this.button_free_all_model.Margin = new System.Windows.Forms.Padding(4);
