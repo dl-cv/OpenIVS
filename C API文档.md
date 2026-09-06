@@ -52,7 +52,7 @@
 | 6 | `void dlcv_free_result(const char* config_str)` | `NativeApi::FreeResult(const char*)` | `dlcv_free_result(const char*)` | 由接口返回的字符串地址 | 无 | 释放外层字符串 | 只释放字符串，不处理推理结果内部资源 |
 | 7 | `void dlcv_free_all_models()` | `NativeApi::FreeAllModels()` | `dlcv_free_all_models()` | 无 | 无 | 无返回内存；清理统一模型表和底层模型表 | 活动调用结束后释放全部普通模型与流程模型 |
 
-JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL 提供的释放函数。推理结果字符串不能直接交给只释放外层字符串的 `dlcv_free_result`。
+JSON 接口返回的字符串由产生它的 DLL 使用 `new char[]` 分配，并由同一 DLL 的释放函数使用 `delete[]` 释放。推理结果字符串不能直接交给只释放外层字符串的 `dlcv_free_result`。
 
 ### 3.2 设备与系统控制接口
 
@@ -135,7 +135,7 @@ JSON 接口返回的字符串由产生它的 DLL 分配，必须使用同一 DLL
 | 10 | `dlcv_infer_cpp_free_string_c(const char*)` | 无；释放扩展接口字符串 | 扩展接口返回的字符串 | 无 | 仅用于第 7～9 项返回值 | 字符串由 `dlcv_infer_cpp.dll` 分配和释放 |
 | 11 | `dlcv_infer_cpp_free_all_models_c()` | 无；清空扩展模型表并调用全部模型释放接口 | 无 | 无 | 无 | 释放普通模型和流程模型实例 |
 
-前 6 个扩展入口和四项结构化兼容入口都由 `dlcv_infer_cpp.dll` 分配结果内存，内部字段使用同一分配方式。为保持释放后的 `code` 行为，调用方应按入口名称配套使用结果释放函数。`dlcv_infer.dll` 直接生成的结构化结果使用另一套分配方式，不能交给 `dlcv_infer_cpp.dll` 释放。
+前 6 个扩展入口和四项结构化兼容入口都由 `dlcv_infer_cpp.dll` 使用 `new[]` 分配结果内存，并由对应函数使用 `delete[]` 释放。为保持释放后的 `code` 行为，调用方应按入口名称配套使用结果释放函数。`dlcv_infer.dll` 直接生成的结构化结果同样使用 `new[]/delete[]`，但仍须交回产生该结果的 DLL 释放。
 
 ## 6. 导出清单
 
