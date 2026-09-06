@@ -39,6 +39,8 @@
 #  define DLCV_INFER_NATIVE_CALL
 #endif
 
+struct CApiModelEntry;
+
 namespace dlcv_infer {
 
     class DllLoader;
@@ -47,6 +49,7 @@ namespace dlcv_infer {
         class FlowGraphModel;
         class ModelPool;
     }
+    class Utils;
 
     DLCV_INFER_CPP_API std::wstring convertStringToWstring(const std::string& inputString);
     DLCV_INFER_CPP_API std::string convertWstringToString(const std::wstring& inputWstring);
@@ -123,6 +126,7 @@ namespace dlcv_infer {
     // DLL 加载器（内部使用）
     class DllLoader {
     private:
+        friend class Utils;
         std::string dllName;
         std::string dllPath;
         std::string dllDevPath;
@@ -165,9 +169,18 @@ namespace dlcv_infer {
 
         // 加载 DLL
         void LoadDll();
+        void ResolveSymbols();
         static DllLoader& GetOrCreateForProvider(sntl_admin::DogProvider provider);
+        static DllLoader& GetOrCreateForExistingModule(
+            sntl_admin::DogProvider provider,
+            void* module,
+            const std::string& loadedPath);
 
         DllLoader(sntl_admin::DogProvider provider);
+        DllLoader(
+            sntl_admin::DogProvider provider,
+            void* existingModule,
+            const std::string& loadedPath);
 
     public:
         sntl_admin::DogProvider GetDogProvider() const { return dogProvider; }
@@ -364,6 +377,8 @@ namespace dlcv_infer {
             size_t sampleIndex = 0);
 
     private:
+        friend struct ::CApiModelEntry;
+        friend class flow::FlowGraphModel;
 #ifdef DLCV_INFER_CPP_EXPORTS
         friend class flow::ModelPool;
         Model(std::shared_ptr<const std::vector<unsigned char>> modelData,
@@ -384,6 +399,7 @@ namespace dlcv_infer {
         std::string _tempDir;
 
         void EnsureBoundIndexReady();
+        void SetPreferredDllLoader(DllLoader* loader) noexcept;
         void LoadFlowArchiveAndRegister(const std::wstring& modelPath, int deviceId);
         void RestoreFlowFromSharedInfo(const json& flowInfo);
         bool UnbindCurrentIndexNoexcept();

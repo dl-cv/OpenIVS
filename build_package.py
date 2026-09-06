@@ -217,6 +217,30 @@ def main() -> int:
             ],
         )
 
+        test_projects = [
+            REPO_ROOT / "Test" / "dlcv_infer_cpp_test" / "dlcv_infer_cpp_test.vcxproj",
+            REPO_ROOT / "Test" / "dlcv_infer_c_test" / "dlcv_infer_c_test.vcxproj",
+            REPO_ROOT / "Test" / "DlcvCSharpTest" / "DlcvCSharpTest.csproj",
+        ]
+        for test_project in test_projects:
+            require_file(test_project)
+            run_step(
+                f"构建测试程序 {test_project.stem}",
+                [
+                    sys.executable,
+                    str(build_script),
+                    str(test_project),
+                    "--configuration",
+                    "Release",
+                    "--platform",
+                    "x64",
+                    "--target",
+                    "Build",
+                    "--verbosity",
+                    "minimal",
+                ],
+            )
+
         signed_executables = copy_package_files()
         certificate_thumbprint = find_signing_certificate_thumbprint()
         for executable in signed_executables:

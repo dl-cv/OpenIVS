@@ -28,6 +28,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - Qt 项目需配置 Qt 路径和 OpenCV 路径
 - 构建前需确保深度视觉 SDK 已正确安装（`dlcv_infer.dll` 可用）
 - WPF 框架额外需要海康 MVS 安装
+- 正式打包入口仍为 `1_编译打包.bat`；其中 `build_package.py` 按顺序串行构建 C#、C++、C 三个控制台测试工程。
 
 ## 统一运行与验证输入规则
 
@@ -103,15 +104,19 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 **model_index 分配规则**：
 
+- 对外仍使用 `int model_index`，不改变现有接口签名，不增加导出函数。
+- 每个推理 DLL 使用模型与流程共用的递增序号；编号编码跳过 `bit8`（数值 `256`）。`bit8` 对应发号 DLL 的 `DogProvider` 标记，但不表示模型内容的加密 provider 或资源类型。
+- 每个 DLL 可分配 `2^30` 个序号；编号不回绕、不重发。释放资源和 `FreeAllModels()` 均不重置计数器，序号耗尽时返回错误。
+- 新版编号用于避免重复，但恢复旧资源不依赖 `bit8`。具备完整共享接口的旧四段编号 DLL 使用相同的查询方式；缺少共享接口的更旧 DLL 保留普通加载和本地流程处理，不支持跨语言索引恢复。
 
-| provider | 类型 | 索引范围 |
-|---|---|---|
-| Sentinel | 普通模型 | `0～9999` |
-| Sentinel | 流程 | `10000～19999` |
-| Virbox | 普通模型 | `20000～29999` |
-| Virbox | 流程 | `30000～39999` |
+**按查询恢复共享索引**：
 
-普通模型索引由底层 `dlcv_infer` 加载接口返回。流程由 C# 或 C++ 完成解析和子模型加载；推理 DLL 提供完整共享接口时，向底层注册流程 JSON 并使用底层返回的流程索引；旧 DLL 缺少共享接口时使用本地流程索引，原有加载和推理行为保持不变。每段索引独立递增，不复用已释放索引。
+- 恢复时枚举进程内实际已加载的目标 DLL，候选集合包含另一语言已经加载的模块，不为探测额外加载 provider DLL。
+- 对具备 `dlcv_get_index_type_c` 导出的候选 DLL 调用该函数，由 DLL 自己查询资源表；返回 `-1` 或未知值视为查询错误，不能当作不存在。恰有一个候选返回有效结果后，选定该 DLL 并检查完成共享操作所需的导出是否齐全；缺少接口时报错，不改选其他 DLL。
+- 选定 DLL 后由 Model 恢复调用已有绑定接口并保存该 DLL 的 loader；无结果、多个结果、查询异常或绑定失败均报错，不改选其他 DLL。
+- 绑定完成后后续操作固定使用已保存的 loader；资源失效时不重新搜索其他 DLL。
+
+普通模型索引由底层 `dlcv_infer` 加载接口返回。流程由 C# 或 C++ 完成解析和子模型加载；推理 DLL 提供完整共享接口时，向底层注册流程 JSON 并使用底层返回的流程索引；旧 DLL 缺少共享接口时使用本地流程索引，原有加载和推理行为保持不变。
 
 
 ## API 速查表
@@ -183,7 +188,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | None / Unknown | 不加载 | — |
 
 
-模型头包含 `dog_provider` 时直接加载对应 DLL，不查询加密狗，也不检查另一种 provider。模型头没有 `dog_provider` 时，自动检测优先级为 Sentinel、Virbox；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。每个 `Model` 实例在加载时保存自己的 loader，后续所有操作都走该 loader。共享 index 解析只返回 index 所属 loader，不修改默认 loader；C# 普通模型缓存同时保存 index 和加载时 loader。
+模型头包含 `dog_provider` 时直接加载对应 DLL，不查询加密狗，也不检查另一种 provider。模型头没有 `dog_provider` 时，自动检测优先级为 Sentinel、Virbox；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。每个 `Model` 实例在加载时保存自己的 loader，后续所有操作都走该 loader。共享 index 恢复不按四段范围、资源类型、模型内容的加密 provider 或 `bit8` 选 DLL，而是查询进程内实际已加载的目标 DLL；`-1`、未知返回值、无有效结果、歧义或绑定失败直接报错，不修改默认 loader。`bit8` 仍对应发号 DLL 的 `DogProvider` 标记。C# 普通模型缓存同时保存 index 和加载时 loader。
 
 
 ## 输入图像处理约定
@@ -473,7 +478,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - `dlcv_infer.dll` 与 `dlcv_infer_v.dll` 来自同一套推理实现，推理能力相同。两个对应加密狗同时存在时，任一 DLL 均可加载两种加密模型，不得把“选到另一 provider DLL”表述为模型不兼容或加载错误。
 - 按模型头选择 provider 的目的是避免在缺少对应加密狗时调用错误 DLL；这种调用可能使加密狗服务长时间无响应。
 - 两个文件名不同的 DLL 同时加载后处于同一进程地址空间，但属于两个独立 Windows 模块实例，各自保存模块静态数据和模型表。相同实现不代表模型表共享。
-- `FreeAllModels()` 需要分别调用进程内已经加载的两个模块。实测单独调用 Sentinel 模块后，仅 Sentinel index 从模型类型变为不存在，Virbox index 保持不变。
+- `FreeAllModels()` 需要处理进程内实际已加载的目标模块；释放不会重置各 DLL 的编号计数器，已释放编号不再次发放。
 
 ## 运行验证方式
 

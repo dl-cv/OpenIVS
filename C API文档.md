@@ -25,7 +25,7 @@
 | `dlcv_bind_index_c` |
 | `dlcv_unbind_index_c` |
 
-全部 C 接口声明在 `dlcv_infer_c_api.h`。共享数据结构使用 `typedef struct`，C 模式下由该头文件引入 `<stdbool.h>`，结构化接口使用指针参数，头文件可由 C 或 C++ 编译器使用。
+全部 C 接口声明在 `dlcv_infer_c_api.h`。共享数据结构使用 `typedef struct`，C 模式下由该头文件引入 `<stdbool.h>`，结构化接口使用指针参数，头文件可由 C 或 C++ 编译器使用。公共索引接口继续使用现有 `int` 参数和返回值，保留现有签名和导出函数。
 
 ## 2. 两层封装关系
 
@@ -75,10 +75,12 @@ JSON 接口返回的字符串由产生它的 DLL 使用 `new char[]` 分配，�
 
 | # | 底层 `dlcv_infer` 接口 | C++ 封装方法 | C 导出 | 输入 | 输出 | 释放方式 | 一致性 |
 | ---: | --- | --- | --- | --- | --- | --- | --- |
-| 20 | `int dlcv_load_model_c(const char* model_path, int device_id)` | `NativeApi::LoadModelC(const char*, int)` | `dlcv_load_model_c(const char*, int)` | 当前路径规则支持的模型路径、设备编号 | 成功返回非负模型索引，失败返回 `-1` | 无返回字符串 | C++ 方法严格调用底层；同一工程中的 C 接口使用 `Model` 加载并支持 `.dvst/.dvso` |
+| 20 | `int dlcv_load_model_c(const char* model_path, int device_id)` | `NativeApi::LoadModelC(const char*, int)` | `dlcv_load_model_c(const char*, int)` | 当前路径规则支持的模型路径、设备编号 | 成功返回非负模型索引，失败返回 `-1` | 无返回字符串 | C++ 方法严格调用底层；同一工程中的 C 入口使用统一模型表加载并支持 `.dvst/.dvso`；旧版加载路径取得的索引可由结构化入口按需恢复 |
 | 21 | `int dlcv_free_model_c(int model_index)` | `NativeApi::FreeModelC(int)` | `dlcv_free_model_c(int)` | 模型索引 | 成功返回 `0`，失败返回负值 | 无 | C++ 方法严格调用底层；C 接口释放同一工程模型表中的对象 |
 | 22 | `DlcvCResult dlcv_infer_c(int, const DlcvCImageList*)` | `NativeApi::InferC(int, const DlcvCImageList&)` | `dlcv_infer_c(int, const DlcvCImageList*)` | 模型索引、图像列表指针；输入图像内存由调用方持有 | `DlcvCResult`，包含状态、消息、样本结果、目标、框、mask、角度和均值 | 用 `dlcv_free_model_result_c` 释放返回结构中的字符串、数组和 mask | C++ 方法通过地址调用底层；同一工程中的 C 接口通过 `Model::InferBatch` 生成结果并转换为底层结果语义 |
 | 23 | `void dlcv_free_model_result_c(DlcvCResult*)` | `NativeApi::FreeModelResultC(DlcvCResult&)` | `dlcv_free_model_result_c(DlcvCResult*)` | 当前 DLL 返回的 `DlcvCResult` 地址 | 无；释放后指针字段为空、数量为 `0`，兼容入口保留原 `code` | 只能使用生成结果的同一 DLL 释放 | C++ 方法通过地址释放底层结果；C 接口释放同一工程生成的结果，释放后字段一致 |
+
+兼容 C facade 的结构化入口先查询统一模型表。legacy 普通模型加载成功时登记 index、实际 loader 和原生持有状态，但不立即创建结构化对象；首次结构化查询或推理时，沿已保存的 loader 建立借用 Model。未在本包装登记的外部 index 才枚举已加载模块查询归属；唯一选定的 loader 先保存，再校验接口并绑定。校验、绑定、信息读取或流程恢复失败时保留原 loader，后续重试不改选其他 DLL。
 
 ## 4. 结构化 C 数据类型
 
@@ -148,7 +150,7 @@ JSON 接口返回的字符串由产生它的 DLL 使用 `new char[]` 分配，�
 | C++ Model 扩展入口 | 11 | 第 5 节 |
 | 合计 | 34 | 已通过 Debug 导出检查，不含公共索引接口 |
 
-公共索引接口另行记录在“双语言 model index 互通”任务文档中。
+公共索引接口另行记录在“双语言 model index 互通”任务文档中。跨语言恢复时不按 `bit8`、资源类型或模型内容的加密 provider 推导 DLL；恢复方只枚举进程内实际已加载的 `dlcv_infer.dll` 与 `dlcv_infer_v.dll`，不为探测额外加载其他 infer DLL，把具备 `dlcv_get_index_type_c` 导出的 DLL 作为候选并查询。返回 `-1` 或未知值视为查询错误，不能当作不存在；恰有一个候选返回有效结果时先保存该 loader，再检查完成共享操作所需的导出是否齐全，缺少接口时报错且不改选其他 DLL。随后由恢复调用使用已有绑定接口；校验、绑定或后续恢复失败时仍使用已保存的 loader，不改选其他 DLL。无结果、歧义、查询异常或绑定失败均报错。`bit8` 对应发号 DLL 的 `DogProvider` 标记，但不表示模型内容的加密 provider 或资源类型。
 
 ### 6.1 动态调用方式
 
@@ -240,7 +242,7 @@ try {
 
 ## 7. 验证范围
 
-下表保留累计验证记录。2026-09-05 本轮重新构建了 Debug/x64 的包装 DLL、C 测试、C Qt Demo、C# API 和 Halcon Demo；纯 C 异常输入及配置同一正式加密核心后的完整 C 测试通过。本轮未重新构建完整解决方案或 Release 配置。
+下表保留历史验证记录，不作为当前 bit8 编号兼容回归的结果。
 
 | 检查项 | 结果 |
 | --- | --- |

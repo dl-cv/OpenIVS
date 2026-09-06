@@ -71,6 +71,13 @@ namespace DlcvCSharpTest
         private static extern IntPtr CppSharedIndexTestInfo(int index);
 
         [DllImport("dlcv_infer_cpp.dll", CallingConvention = CallingConvention.Cdecl,
+            ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_index_rules_c")]
+        private static extern int CppSharedIndexTestIndexRules();
+
+        [DllImport("kernel32.dll", EntryPoint = "LoadLibraryW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadNativeModule(string fileName);
+
+        [DllImport("dlcv_infer_cpp.dll", CallingConvention = CallingConvention.Cdecl,
             CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_double_flow_load_free_c")]
         private static extern int CppSharedIndexTestDoubleFlowLoadFree(string modelPath, int deviceId);
 
@@ -307,6 +314,16 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-route-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunSharedIndexRouteSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-native-rule-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexNativeRuleSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-compat-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexCompatSelfTest(args);
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "free-all-modules-selftest", StringComparison.OrdinalIgnoreCase))
@@ -1156,6 +1173,8 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("掩膜输出开关", RunWithMaskSelfTest),
                 new UnifiedTestCase("均值计算", RunCalcMeanSelfTest),
                 new UnifiedTestCase("共享 index 审查检查", () => RunSharedIndexReviewSelfTest(new[] { "shared-index-review-selftest" })),
+                new UnifiedTestCase("共享 index 纯规则与查询选择", RunSharedIndexRouteSelfTest),
+                new UnifiedTestCase("C++ 共享 index 查询选择", RunSharedIndexNativeRuleSelfTest),
                 new UnifiedTestCase("C# 全部 DLL 模块释放", () => RunCsharpFreeAllModulesSelfTest(new[] { "free-all-modules-selftest" })),
                 new UnifiedTestCase("共享 index 格式覆盖", RunSharedIndexFormatSelfTest),
                 new UnifiedTestCase("共享 index 双 provider 普通模型", RunSharedIndexProviderModelSelfTest),
@@ -1415,39 +1434,143 @@ namespace DlcvCSharpTest
 
         private static int RunSharedIndexRouteSelfTest()
         {
-            var cases = new[]
-            {
-                new { Index = 0, Provider = DogProvider.Sentinel, Type = "model" },
-                new { Index = 9999, Provider = DogProvider.Sentinel, Type = "model" },
-                new { Index = 10000, Provider = DogProvider.Sentinel, Type = "flow" },
-                new { Index = 19999, Provider = DogProvider.Sentinel, Type = "flow" },
-                new { Index = 20000, Provider = DogProvider.Virbox, Type = "model" },
-                new { Index = 29999, Provider = DogProvider.Virbox, Type = "model" },
-                new { Index = 30000, Provider = DogProvider.Virbox, Type = "flow" },
-                new { Index = 39999, Provider = DogProvider.Virbox, Type = "flow" }
-            };
-
             try
             {
-                foreach (var item in cases)
+                var oldSentinel = new DllLoader
                 {
-                    string indexType;
-                    DogProvider provider = DllLoader.GetSharedIndexRoute(item.Index, out indexType);
-                    if (provider != item.Provider || !string.Equals(indexType, item.Type, StringComparison.Ordinal))
-                    {
-                        throw new Exception("index 分段解析错误: " + item.Index);
-                    }
+                    dlcv_get_index_type_c = index => index == 256 ? 1 : 0,
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0
+                };
+                var newVirbox = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => index == 256 ? 1 : 0,
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0
+                };
+
+                string indexType;
+                DllLoader selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                    256,
+                    new List<DllLoader> { oldSentinel },
+                    out indexType);
+                if (!object.ReferenceEquals(selected, oldSentinel) || indexType != "model")
+                    throw new Exception("旧四段编号 256 的唯一资源选择错误");
+
+                selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                    256,
+                    new List<DllLoader> { newVirbox },
+                    out indexType);
+                if (!object.ReferenceEquals(selected, newVirbox) || indexType != "model")
+                    throw new Exception("新版编号 256 的唯一资源选择错误");
+
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                        256,
+                        new List<DllLoader> { oldSentinel, newVirbox },
+                        out indexType),
+                    "双 DLL 同时有效时未报告歧义");
+
+                bool otherQueried = false;
+                var throwing = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => throw new InvalidOperationException("query failed")
+                };
+                var other = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => { otherQueried = true; return 1; }
+                };
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                        256,
+                        new List<DllLoader> { throwing, other },
+                        out indexType),
+                    "查询异常未直接返回");
+                if (otherQueried)
+                    throw new Exception("查询异常后错误切换到其他 DLL");
+
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                        256,
+                        new List<DllLoader>
+                        {
+                            new DllLoader { dlcv_get_index_type_c = index => -1 }
+                        },
+                        out indexType),
+                    "未知类型 -1 未拒绝");
+
+                EnsureThrows<NotSupportedException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                        256,
+                        new List<DllLoader> { new DllLoader() },
+                        out indexType),
+                    "缺少共享查询接口未拒绝");
+
+                int alternativeQueryCount = 0;
+                bool alternativeBound = false;
+                var bindingFailureLoader = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => 1,
+                    dlcv_bind_index_c = index => -7
+                };
+                var alternative = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => { alternativeQueryCount++; return 0; },
+                    dlcv_bind_index_c = index => { alternativeBound = true; return 0; }
+                };
+                selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                    256,
+                    new List<DllLoader> { bindingFailureLoader, alternative },
+                    out indexType);
+                if (!object.ReferenceEquals(selected, bindingFailureLoader) || selected.BindIndex(256) == 0)
+                    throw new Exception("绑定失败测试未命中选定 DLL");
+                if (alternativeQueryCount != 1 || alternativeBound)
+                    throw new Exception("绑定失败后错误改选其他 DLL");
+
+                EnsureThrows<ArgumentOutOfRangeException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(-1, new List<DllLoader> { oldSentinel }, out indexType),
+                    "负数编号未拒绝");
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(7, new List<DllLoader> { oldSentinel }, out indexType),
+                    "不存在的编号未拒绝");
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(256,
+                        new List<DllLoader> { new DllLoader { dlcv_get_index_type_c = index => 7 } }, out indexType),
+                    "未知类型 7 未拒绝");
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(256,
+                        new List<DllLoader> { oldSentinel, throwing }, out indexType),
+                    "已有有效结果时忽略了后续查询异常");
+                var flowOnly = new DllLoader { dlcv_get_index_type_c = index => 2 };
+                selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(0,
+                    new List<DllLoader> { flowOnly }, out indexType);
+                if (!object.ReferenceEquals(selected, flowOnly) || indexType != "flow")
+                    throw new Exception("小编号流程没有按查询结果识别");
+
+                int bindAttempts = 0;
+                var fixedLoader = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => 1,
+                    dlcv_get_model_info_c = index => IntPtr.Zero,
+                    dlcv_unbind_index_c = index => 0,
+                    dlcv_bind_index_c = index => { bindAttempts++; return -7; }
+                };
+                using (var fixedModel = Model.CreateFromKnownLoader(256, fixedLoader))
+                {
+                    var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                    EnsureThrows<Exception>(() => fixedModel.GetModelInfo(), "首次绑定失败未返回错误");
+                    EnsureThrows<Exception>(() => fixedModel.GetModelInfo(), "再次绑定失败未返回错误");
+                    if (bindAttempts != 2 || !object.ReferenceEquals(
+                        typeof(Model).GetField("_dllLoader", flags).GetValue(fixedModel), fixedLoader))
+                        throw new Exception("绑定失败重试没有保持原 loader");
                 }
 
-                try
-                {
-                    string indexType;
-                    DllLoader.GetSharedIndexRoute(40000, out indexType);
-                    throw new Exception("未拒绝超出范围的 index");
-                }
-                catch (ArgumentOutOfRangeException)
-                {
-                }
+                EnsureThrows<InvalidDataException>(
+                    () => Model.CreateFromKnownLoader(256, new DllLoader { dlcv_get_index_type_c = index => 0 }),
+                    "流程子模型失效后没有拒绝恢复");
+                EnsureThrows<InvalidDataException>(
+                    () => Model.CreateFromKnownLoader(256, new DllLoader { dlcv_get_index_type_c = index => 2 }),
+                    "流程子模型错误接受流程类型");
 
                 Console.WriteLine("shared-index-route-selftest 通过");
                 return 0;
@@ -1457,6 +1580,166 @@ namespace DlcvCSharpTest
                 Console.WriteLine("shared-index-route-selftest 失败: " + ex.Message);
                 return 1;
             }
+        }
+
+        private static int RunSharedIndexNativeRuleSelfTest()
+        {
+            try
+            {
+                int result = CppSharedIndexTestIndexRules();
+                if (result != 0)
+                    throw new Exception("C++ 共享 index 查询选择测试返回 " + result);
+                Console.WriteLine("shared-index-native-rule-selftest 通过");
+                return 0;
+            }
+            catch (DllNotFoundException ex)
+            {
+                Console.WriteLine("shared-index-native-rule-selftest 未执行：缺少 dlcv_infer_cpp.dll，" + ex.Message);
+                return 2;
+            }
+            catch (EntryPointNotFoundException ex)
+            {
+                Console.WriteLine("shared-index-native-rule-selftest 未执行：缺少规则导出，" + ex.Message);
+                return 2;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-native-rule-selftest 失败: " + ex.Message);
+                return 1;
+            }
+        }
+
+        private static int RunSharedIndexCompatSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 3 || args.Length > 4 ||
+                (args.Length == 4 && args[3] != "ambiguous"))
+            {
+                Console.WriteLine("用法: DlcvCSharpTest shared-index-compat-selftest <first_dll> <second_dll> [ambiguous]");
+                return 2;
+            }
+
+            string firstPath = Path.GetFullPath(args[1]);
+            string secondPath = Path.GetFullPath(args[2]);
+            bool requireAmbiguity = args.Length == 4;
+            var registered = new List<Tuple<DllLoader, int>>();
+            string sourcePath = Path.Combine(Path.GetTempPath(), "dlcv_shared_index_compat.dvst");
+            try
+            {
+                if (!File.Exists(firstPath) || !File.Exists(secondPath))
+                    throw new Exception("指定 DLL 不存在");
+                if (LoadNativeModule(firstPath) == IntPtr.Zero || LoadNativeModule(secondPath) == IntPtr.Zero)
+                    throw new Exception("无法按绝对路径加载两个目标 DLL");
+
+                var selectedLoaders = DllLoader.GetLoadedLoaders().Where(loader =>
+                    string.Equals(loader.LoadedNativeModulePath, firstPath, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(loader.LoadedNativeModulePath, secondPath, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (selectedLoaders.Count != 2 || selectedLoaders.Any(loader => !loader.SupportsSharedFlowIndex))
+                    throw new Exception("必须枚举到两个具备完整共享接口的指定 DLL");
+
+                Func<DllLoader, int> register = loader =>
+                {
+                    string provider = loader.LoadedDogProvider == DogProvider.Virbox ? "virbox" : "sentinel";
+                    string flowJson = new JObject
+                    {
+                        ["schema_version"] = 1, ["flow_type"] = "dvst", ["provider"] = provider,
+                        ["source_path"] = sourcePath, ["device_id"] = 0,
+                        ["pipeline"] = new JObject { ["nodes"] = new JArray(), ["edges"] = new JArray() },
+                        ["model_bindings"] = new JArray()
+                    }.ToString(Formatting.None);
+                    int index = loader.RegisterFlow(flowJson);
+                    if (index < 0) throw new Exception("流程登记失败: " + loader.LoadedNativeModulePath);
+                    return index;
+                };
+                foreach (DllLoader loader in selectedLoaders)
+                    registered.Add(Tuple.Create(loader, register(loader)));
+
+                if (registered[0].Item2 != registered[1].Item2)
+                {
+                    foreach (var item in registered)
+                    {
+                        string indexType;
+                        DllLoader resolved = DllLoader.ResolveForIndex(item.Item2, out indexType);
+                        if (indexType != "flow" || !object.ReferenceEquals(resolved, item.Item1) ||
+                            CppSharedIndexTestResolve(item.Item2) != 2)
+                            throw new Exception("C# / C++ 未选择实际持有资源的模块");
+                        if (resolved.BindIndex(item.Item2) != 0 || resolved.UnbindIndex(item.Item2) != 0)
+                            throw new Exception("唯一资源的绑定或解绑失败");
+                        Console.WriteLine("唯一流程 index=" + item.Item2 + "，DLL=" + resolved.LoadedNativeModulePath);
+                    }
+                }
+
+                if (requireAmbiguity)
+                {
+                    for (int attempt = 0; registered[0].Item2 != registered[1].Item2 && attempt < 40000; attempt++)
+                    {
+                        int lower = registered[0].Item2 < registered[1].Item2 ? 0 : 1;
+                        var previous = registered[lower];
+                        if (previous.Item1.FreeFlow(previous.Item2) != 0)
+                            throw new Exception("推进编号时释放流程失败");
+                        registered[lower] = Tuple.Create(previous.Item1, -1);
+                        int next = register(previous.Item1);
+                        registered[lower] = Tuple.Create(previous.Item1, next);
+                        if (next <= previous.Item2) throw new Exception("DLL 重复发放了已释放编号");
+                    }
+                    if (registered[0].Item2 != registered[1].Item2)
+                        throw new Exception("测试要求真实编号歧义，但指定 DLL 未产生相同编号");
+                }
+
+                if (registered[0].Item2 == registered[1].Item2)
+                {
+                    int duplicate = registered[0].Item2;
+                    string indexType;
+                    EnsureThrows<InvalidOperationException>(
+                        () => DllLoader.ResolveForIndex(duplicate, out indexType), "C# 未拒绝编号歧义");
+                    if (CppSharedIndexTestResolve(duplicate) != 0)
+                        throw new Exception("C++ 未拒绝编号歧义");
+                    Console.WriteLine("C# / C++ 同编号歧义检查通过: " + duplicate);
+                    if (registered[0].Item1.FreeFlow(duplicate) != 0)
+                        throw new Exception("释放第一个歧义资源失败");
+                    registered[0] = Tuple.Create(registered[0].Item1, -1);
+                    if (!object.ReferenceEquals(DllLoader.ResolveForIndex(duplicate, out indexType), registered[1].Item1) ||
+                        CppSharedIndexTestResolve(duplicate) != 2)
+                        throw new Exception("仅剩一个资源时未恢复唯一模块");
+                }
+
+                foreach (var item in registered.Where(item => item.Item2 >= 0))
+                    if (item.Item1.FreeFlow(item.Item2) != 0) throw new Exception("测试资源释放失败");
+                var releasedIndices = registered.Where(item => item.Item2 >= 0).Select(item => item.Item2).ToList();
+                registered.Clear();
+                foreach (int index in releasedIndices)
+                {
+                    string indexType;
+                    EnsureThrows<InvalidOperationException>(
+                        () => DllLoader.ResolveForIndex(index, out indexType), "C# 接受了已释放编号");
+                    if (CppSharedIndexTestResolve(index) != 0) throw new Exception("C++ 接受了已释放编号");
+                }
+                Console.WriteLine("shared-index-compat-selftest 通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-compat-selftest 失败: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                foreach (var item in registered.Where(item => item.Item2 >= 0))
+                    try { item.Item1.FreeFlow(item.Item2); } catch { }
+            }
+        }
+
+        private static void EnsureThrows<TException>(Action action, string message)
+            where TException : Exception
+        {
+            try
+            {
+                action();
+            }
+            catch (TException)
+            {
+                return;
+            }
+            throw new Exception(message);
         }
 
         private static void RunCSharpOwnerCppBorrowerCase(
@@ -1568,37 +1851,9 @@ namespace DlcvCSharpTest
             DllLoader loader = DllLoader.ResolveForIndex(index, out indexType);
             if (!string.Equals(indexType, expectedIndexType, StringComparison.Ordinal))
                 throw new Exception(label + " index 类型错误: " + indexType);
-            ValidateSharedIndexRange(index, indexType, loader.LoadedDogProvider, label);
             Console.WriteLine(label + " index=" + index + ", type=" + indexType +
                 ", provider=" + loader.LoadedDogProvider);
             return loader;
-        }
-
-        private static void ValidateSharedIndexRange(
-            int index,
-            string indexType,
-            sntl_admin_csharp.DogProvider provider,
-            string label)
-        {
-            int minimum;
-            int maximum;
-            if (provider == sntl_admin_csharp.DogProvider.Sentinel)
-            {
-                minimum = string.Equals(indexType, "flow", StringComparison.Ordinal) ? 10000 : 0;
-                maximum = string.Equals(indexType, "flow", StringComparison.Ordinal) ? 19999 : 9999;
-            }
-            else if (provider == sntl_admin_csharp.DogProvider.Virbox)
-            {
-                minimum = string.Equals(indexType, "flow", StringComparison.Ordinal) ? 30000 : 20000;
-                maximum = string.Equals(indexType, "flow", StringComparison.Ordinal) ? 39999 : 29999;
-            }
-            else
-            {
-                throw new Exception(label + " provider 无效");
-            }
-
-            if (index < minimum || index > maximum)
-                throw new Exception(label + " index 超出 provider 类型范围: " + index);
         }
 
         private static void ValidateFlowInfoWhenNeeded(
@@ -5364,8 +5619,12 @@ namespace DlcvCSharpTest
                 int virboxIndex = virboxModel.modelIndex;
                 bool sentinelProviderOk = sentinelModel.LoadedDogProvider == DogProvider.Sentinel;
                 bool virboxProviderOk = virboxModel.LoadedDogProvider == DogProvider.Virbox;
-                bool sentinelIndexOk = sentinelIndex >= 0 && sentinelIndex < 10000;
-                bool virboxIndexOk = virboxIndex >= 20000 && virboxIndex < 30000;
+                string sentinelType;
+                string virboxType;
+                DllLoader sentinelResolved = DllLoader.ResolveForIndex(sentinelIndex, out sentinelType);
+                DllLoader virboxResolved = DllLoader.ResolveForIndex(virboxIndex, out virboxType);
+                bool sentinelIndexOk = sentinelResolved.LoadedDogProvider == DogProvider.Sentinel && sentinelType == "model";
+                bool virboxIndexOk = virboxResolved.LoadedDogProvider == DogProvider.Virbox && virboxType == "model";
                 if (!sentinelProviderOk || !virboxProviderOk || !sentinelIndexOk || !virboxIndexOk)
                 {
                     throw new Exception(
@@ -5992,7 +6251,7 @@ namespace DlcvCSharpTest
             var check = new ReviewCheck
             {
                 Name = "C# 空流程沿用当前 loader",
-                Expected = "流程 index 与当前 loader 的 provider 分段一致"
+                Expected = "流程登记使用当前 loader；共享接口存在时按类型查询恢复"
             };
             string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_review_empty_provider_cs_" + Guid.NewGuid().ToString("N") + ".dvst");
             Model owner = null;
@@ -6003,11 +6262,19 @@ namespace DlcvCSharpTest
                 DogProvider currentProvider = DllLoader.Instance.LoadedDogProvider;
                 owner = new Model(flowPath, GpuDeviceId, false, false);
                 int index = owner.modelIndex;
-                bool providerRange = currentProvider == DogProvider.Sentinel
-                    ? index >= 10000 && index < 20000
-                    : currentProvider == DogProvider.Virbox && index >= 30000 && index < 40000;
                 check.Actual = "当前 provider=" + currentProvider + "，flow index=" + index;
-                check.Passed = providerRange;
+                if (owner.Loader != null && owner.Loader.SupportsSharedFlowIndex)
+                {
+                    string indexType;
+                    DllLoader resolved = DllLoader.ResolveForIndex(index, out indexType);
+                    check.Passed = indexType == "flow" && resolved.LoadedDogProvider == currentProvider;
+                    check.Actual += "，查询类型=" + indexType + "，查询 provider=" + resolved.LoadedDogProvider;
+                }
+                else
+                {
+                    check.Passed = index >= 0 && owner.LoadedDogProvider == currentProvider;
+                    check.Actual += "，共享流程接口缺失，保留本地流程路径";
+                }
                 return check;
             }
             catch (Exception ex)
@@ -6031,7 +6298,7 @@ namespace DlcvCSharpTest
             var check = new ReviewCheck
             {
                 Name = "C++ 空流程沿用当前 loader",
-                Expected = "使用已选择 loader 的流程 index 分段"
+                Expected = "共享接口可用时按查询结果检查；缺少共享接口时保留本地流程路径"
             };
             string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_review_empty_provider_cpp_" + Guid.NewGuid().ToString("N") + ".dvst");
             try
@@ -6042,7 +6309,14 @@ namespace DlcvCSharpTest
                     flowPath,
                     GpuDeviceId);
                 check.Actual = "当前 loader 对应 Virbox，flow index=" + index;
-                check.Passed = index >= 30000 && index < 40000;
+                int indexType = CppSharedIndexTestResolve(index);
+                check.Actual += "，查询类型码=" + indexType;
+                bool sharedFlowAvailable = DllLoader.GetLoadedLoaders().Any(
+                    loader => loader.LoadedDogProvider == DogProvider.Virbox && loader.SupportsSharedFlowIndex);
+                check.Passed = index >= 0 &&
+                    (indexType == 0 || indexType == 2 || (!sharedFlowAvailable && indexType == -1));
+                if (!sharedFlowAvailable)
+                    check.Actual += "，共享接口缺失，按本地流程路径检查";
                 return check;
             }
             catch (Exception ex)
@@ -6073,15 +6347,27 @@ namespace DlcvCSharpTest
             var check = new ReviewCheck
             {
                 Name = "C# ResolveForIndex 对不存在的 index",
-                Expected = "允许按分段类型解析且调用稳定"
+                Expected = "查询返回 0 时拒绝不存在的 index；查询异常不转成不存在"
             };
             try
             {
                 const int unusedIndex = 5;
                 string indexType;
-                DllLoader loader = DllLoader.ResolveForIndex(unusedIndex, out indexType);
-                check.Actual = "分段类型=" + indexType + "，loader=" + (loader != null ? "可用" : "为空");
-                check.Passed = loader != null && string.Equals(indexType, "model", StringComparison.OrdinalIgnoreCase);
+                DllLoader.ResolveForIndex(unusedIndex, out indexType);
+                check.Actual = "不存在的 index 被错误解析为 " + indexType;
+                check.Passed = false;
+                return check;
+            }
+            catch (InvalidOperationException ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = ex.Message.IndexOf("均未找到共享 index", StringComparison.Ordinal) >= 0;
+                return check;
+            }
+            catch (NotSupportedException ex)
+            {
+                check.Actual = "当前 DLL 缺少共享查询接口: " + ex.Message;
+                check.Passed = true;
                 return check;
             }
             catch (Exception ex)
@@ -6094,17 +6380,25 @@ namespace DlcvCSharpTest
 
         private static int QueryNativeIndexType(int index)
         {
-            try
+            bool queryable = false;
+            int foundType = 0;
+            foreach (DllLoader loader in DllLoader.GetLoadedLoaders())
             {
-                string indexType;
-                DllLoader loader = DllLoader.ResolveForIndex(index, out indexType);
-                return loader.GetIndexType(index);
+                if (loader == null || loader.dlcv_get_index_type_c == null)
+                    continue;
+                queryable = true;
+                int nativeType = loader.GetIndexType(index);
+                if (nativeType == 0)
+                    continue;
+                if (nativeType != 1 && nativeType != 2)
+                    throw new InvalidOperationException("共享 index 查询返回未知类型: " + nativeType);
+                if (foundType != 0)
+                    throw new InvalidOperationException("共享 index 同时存在于多个 DLL: " + index);
+                foundType = nativeType;
             }
-            catch
-            {
-                try { return DllLoader.Instance.GetIndexType(index); }
-                catch { return -1; }
-            }
+            if (!queryable)
+                throw new NotSupportedException("进程内没有共享 index 查询接口");
+            return foundType;
         }
 
         private static JObject CallCppSharedIndexInfo(int index, string operation)
@@ -6234,8 +6528,8 @@ namespace DlcvCSharpTest
                 ResolveAndValidateSharedIndex(sentinelModel, "model", "Sentinel 模型");
 
                 virboxFlow = RegisterVirboxEmptyFlow();
-                if (virboxFlow < 30000 || virboxFlow > 39999)
-                    throw new Exception("Virbox 空流程 index 超出范围: " + virboxFlow);
+                if (virboxFlow < 0)
+                    throw new Exception("Virbox 空流程登记失败: " + virboxFlow);
 
                 cachedOwner = new Model(args[1], GpuDeviceId, false, true);
                 sntl_admin_csharp.DogProvider defaultProvider = DllLoader.Instance.LoadedDogProvider;

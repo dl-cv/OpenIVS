@@ -509,6 +509,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     _boundModelsByIndex = std::move(other._boundModelsByIndex);
     _acquiredModelLeases = std::move(other._acquiredModelLeases);
     _modelBinaryStore = std::move(other._modelBinaryStore);
+    _preferredDllLoader = other._preferredDllLoader;
 
     // moved-from：不再负责释放
     other._nodes.clear();
@@ -519,6 +520,7 @@ FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
     other._flowJsonPath.clear();
     other._boundModelsByIndex.reset();
     other._acquiredModelLeases.clear();
+    other._preferredDllLoader = nullptr;
 }
 
 FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
@@ -536,6 +538,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     _boundModelsByIndex = std::move(other._boundModelsByIndex);
     _acquiredModelLeases = std::move(other._acquiredModelLeases);
     _modelBinaryStore = std::move(other._modelBinaryStore);
+    _preferredDllLoader = other._preferredDllLoader;
 
     other._nodes.clear();
     other._root = Json::object();
@@ -545,6 +548,7 @@ FlowGraphModel& FlowGraphModel::operator=(FlowGraphModel&& other) noexcept {
     other._flowJsonPath.clear();
     other._boundModelsByIndex.reset();
     other._acquiredModelLeases.clear();
+    other._preferredDllLoader = nullptr;
 
     return *this;
 }
@@ -577,6 +581,9 @@ Json FlowGraphModel::LoadFromRoot(
     if (!root.contains("nodes") || !root.at("nodes").is_array()) {
         throw std::runtime_error("flow json missing nodes array");
     }
+
+    DllLoader* preferredDllLoader = _preferredDllLoader;
+    _preferredDllLoader = nullptr;
 
     ReleaseOwnedModelsNoexcept();
     _loaded = false;
@@ -617,6 +624,13 @@ Json FlowGraphModel::LoadFromRoot(
         auto model = std::make_shared<dlcv_infer::Model>();
         model->modelIndex = modelIndex;
         model->OwnModelIndex = false;
+        if (preferredDllLoader != nullptr) {
+            const auto queryType = preferredDllLoader->GetIndexTypeFunc();
+            if (queryType == nullptr || queryType(modelIndex) != 1) {
+                throw std::runtime_error("流程子模型在所属 DLL 中无效");
+            }
+            model->SetPreferredDllLoader(preferredDllLoader);
+        }
         (void)model->GetModelInfo();
         _boundModelsByIndex->emplace(modelIndex, std::move(model));
     }

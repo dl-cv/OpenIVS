@@ -88,6 +88,7 @@ namespace dlcv_infer_csharp
         private readonly object _sharedIndexLock = new object();
         private bool _sharedIndexBound;
         private string _sharedIndexType;
+        private bool _sharedIndexRouteResolved;
         private bool _ownsRegisteredFlowIndex;
         private SharedIndexAttachState _sharedIndexState = SharedIndexAttachState.NotStarted;
 
@@ -326,7 +327,6 @@ namespace dlcv_infer_csharp
             return !_disposed &&
                    !OwnModelIndex &&
                    modelIndex >= 0 &&
-                   (_dllLoader == null || (_sharedIndexBound && _sharedIndexState == SharedIndexAttachState.NotStarted)) &&
                    _dvsModel == null &&
                    !_isDvpMode &&
                    !_isDvsMode &&
@@ -366,6 +366,21 @@ namespace dlcv_infer_csharp
             }
         }
 
+        internal static Model CreateFromKnownLoader(int index, DllLoader loader)
+        {
+            if (loader == null) throw new ArgumentNullException(nameof(loader));
+            if (index < 0 || loader.GetIndexType(index) != 1)
+                throw new InvalidDataException("流程子模型在所属 DLL 中无效：" + index);
+            return new Model
+            {
+                modelIndex = index,
+                OwnModelIndex = false,
+                _dllLoader = loader,
+                _sharedIndexType = "model",
+                _sharedIndexRouteResolved = true
+            };
+        }
+
         private void EnsureExternalIndexReady()
         {
             if (_sharedIndexState == SharedIndexAttachState.Ready || !IsExternalIndexCandidate())
@@ -384,9 +399,17 @@ namespace dlcv_infer_csharp
                 string indexType = _sharedIndexType;
                 try
                 {
-                    if (!_sharedIndexBound)
+                    if (!_sharedIndexBound && !_sharedIndexRouteResolved)
                     {
-                        loader = DllLoader.ResolveForIndex(externalIndex, out indexType);
+                        loader = DllLoader.ResolveSharedIndexLoader(externalIndex, out indexType);
+                        _dllLoader = loader;
+                        _sharedIndexType = indexType.ToLowerInvariant();
+                        _sharedIndexRouteResolved = true;
+                    }
+                    else if (!_sharedIndexBound)
+                    {
+                        loader = _dllLoader;
+                        indexType = _sharedIndexType;
                     }
                     if (!string.Equals(indexType, "model", StringComparison.OrdinalIgnoreCase) &&
                         !string.Equals(indexType, "flow", StringComparison.OrdinalIgnoreCase))
@@ -394,12 +417,11 @@ namespace dlcv_infer_csharp
                         throw new Exception("不支持的 index 类型: " + (indexType ?? "空"));
                     }
 
+                    loader.EnsureSharedIndexSupport(indexType);
                     if (!_sharedIndexBound)
                     {
                         EnsureIndexStatusSucceeded(loader.BindIndex(externalIndex), "绑定 index");
                         bindingAdded = true;
-                        _dllLoader = loader;
-                        _sharedIndexType = indexType.ToLowerInvariant();
                         _sharedIndexBound = true;
                     }
 
@@ -444,7 +466,7 @@ namespace dlcv_infer_csharp
                             sourcePath,
                             (JObject)savedPipeline.DeepClone(),
                             (JArray)modelBindings.DeepClone(),
-                            deviceId);
+                            deviceId, loader);
                         int code = report != null && report["code"] != null ? report["code"].Value<int>() : 1;
                         if (code != 0)
                         {
@@ -472,11 +494,7 @@ namespace dlcv_infer_csharp
                         try { bindingRemoved = loader.UnbindIndex(externalIndex) == 0; } catch { bindingRemoved = false; }
                     }
                     if (bindingRemoved)
-                    {
-                        _dllLoader = null;
-                        _sharedIndexType = null;
                         _sharedIndexBound = false;
-                    }
                     _sharedIndexState = SharedIndexAttachState.NotStarted;
                     _dvsModel = null;
                     _isDvsMode = false;
@@ -556,8 +574,8 @@ namespace dlcv_infer_csharp
                 DllLoader childLoader = dvsModel.GetLoadedModelLoader(childModelIndex);
                 if (childLoader == null)
                     throw new InvalidDataException("流程模型节点缺少加载 DLL: " + childModelIndex);
-                if (selectedLoader != null && selectedLoader.LoadedDogProvider != childLoader.LoadedDogProvider)
-                    throw new InvalidDataException("流程中的模型节点不能混用 provider");
+                if (selectedLoader != null && !object.ReferenceEquals(selectedLoader, childLoader))
+                    throw new InvalidDataException("流程中的模型节点不能混用推理 DLL");
                 selectedLoader = childLoader;
             }
             return selectedLoader ?? DllLoader.GetExistingOrDefaultSentinel();
@@ -953,6 +971,7 @@ namespace dlcv_infer_csharp
                         _dvsModel = null;
                         _sharedIndexBound = false;
                         _sharedIndexType = null;
+                        _sharedIndexRouteResolved = false;
                         _sharedIndexState = SharedIndexAttachState.NotStarted;
                         _isDvsMode = false;
                         modelIndex = -1;
@@ -962,6 +981,7 @@ namespace dlcv_infer_csharp
                     }
                     _sharedIndexBound = false;
                     _sharedIndexType = null;
+                    _sharedIndexRouteResolved = false;
                     _sharedIndexState = SharedIndexAttachState.NotStarted;
                     _isDvsMode = false;
                     modelIndex = -1;
@@ -3000,6 +3020,7 @@ namespace dlcv_infer_csharp
             _dvsModel = null;
             _sharedIndexBound = false;
             _sharedIndexType = null;
+            _sharedIndexRouteResolved = false;
             _sharedIndexState = SharedIndexAttachState.NotStarted;
             _isDvsMode = false;
             modelIndex = -1;
@@ -3052,8 +3073,6 @@ namespace dlcv_infer_csharp
         /// <exception cref="ArgumentOutOfRangeException">index 不在支持范围内。</exception>
         public static Model CreateFromIndex(int index)
         {
-            DllLoader.GetSharedIndexRoute(index, out _);
-
             Model model = null;
             try
             {

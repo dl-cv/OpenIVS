@@ -19,6 +19,8 @@ using System.Runtime.InteropServices;
 //请将此类型的 ComVisible 特性设置为 true。
 [assembly: ComVisible(false)]
 
+[assembly: InternalsVisibleTo("DlcvCSharpTest")]
+
 // 如果此项目向 COM 公开，则下列 GUID 用于类型库的 ID
 [assembly: Guid("73d82dbe-59d3-46f9-a8b3-87e13eb220ec")]
 

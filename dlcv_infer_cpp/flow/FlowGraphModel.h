@@ -81,8 +81,11 @@ private:
     std::shared_ptr<BoundModelMap> _boundModelsByIndex;
     std::vector<ModelPoolLease> _acquiredModelLeases;
     std::shared_ptr<const ModelBinaryStore> _modelBinaryStore;
+    // 共享流程恢复期间暂存父索引所属的加载器，不拥有其生命周期。
+    DllLoader* _preferredDllLoader = nullptr;
 
     void ReleaseOwnedModelsNoexcept();
+    void SetPreferredDllLoader(DllLoader* loader) noexcept { _preferredDllLoader = loader; }
     friend class dlcv_infer::Model;
     Json LoadFromRoot(const Json& root, int deviceId,
                       std::shared_ptr<const ModelBinaryStore> modelBinaryStore);

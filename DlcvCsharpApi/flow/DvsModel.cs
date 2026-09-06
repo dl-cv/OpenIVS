@@ -58,6 +58,12 @@ namespace DlcvModules
             JArray modelBindings,
             int deviceId)
         {
+            return LoadFromModelBindings(sourcePath, savedPipeline, modelBindings, deviceId, null);
+        }
+
+        internal JObject LoadFromModelBindings(
+            string sourcePath, JObject savedPipeline, JArray modelBindings, int deviceId, DllLoader ownerLoader)
+        {
             if (savedPipeline == null) throw new ArgumentNullException(nameof(savedPipeline));
             if (modelBindings == null) throw new ArgumentNullException(nameof(modelBindings));
 
@@ -82,11 +88,9 @@ namespace DlcvModules
                 if (nodeId < 0 || modelIndex < 0 || bindingsByNode.ContainsKey(nodeId))
                     throw new InvalidDataException("流程模型绑定索引无效");
                 bindingsByNode[nodeId] = modelIndex;
-                modelsByIndex[modelIndex] = new Model
-                {
-                    modelIndex = modelIndex,
-                    OwnModelIndex = false
-                };
+                modelsByIndex[modelIndex] = ownerLoader != null
+                    ? Model.CreateFromKnownLoader(modelIndex, ownerLoader)
+                    : new Model { modelIndex = modelIndex, OwnModelIndex = false };
             }
 
             JObject root = (JObject)savedPipeline.DeepClone();

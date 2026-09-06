@@ -7,6 +7,7 @@
 #include "flow/utils/MaskRleUtils.h"
 #ifdef _WIN32
 #include <Windows.h>
+#include <TlHelp32.h>
 #else
 #include <dlfcn.h>
 #include <filesystem>
@@ -28,6 +29,7 @@
 #include <cstring>
 #include <cwctype>
 #include <fstream>
+#include <exception>
 #include <iterator>
 #include <locale>
 #include <random>
@@ -35,6 +37,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <system_error>
+#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -1395,6 +1398,11 @@ namespace dlcv_infer {
             return loaders;
         }
 
+        std::unordered_map<void*, std::unique_ptr<DllLoader>>& ExistingModuleLoaderRegistry() {
+            static std::unordered_map<void*, std::unique_ptr<DllLoader>> loaders;
+            return loaders;
+        }
+
         std::mutex& DefaultLoaderMutex() {
             static std::mutex mutex;
             return mutex;
@@ -1408,6 +1416,223 @@ namespace dlcv_infer {
         void SetDefaultLoader(DllLoader& loader) {
             std::lock_guard<std::mutex> lock(DefaultLoaderMutex());
             DefaultLoaderSlot() = &loader;
+        }
+
+        struct LoadedInferModule final {
+            sntl_admin::DogProvider Provider = sntl_admin::DogProvider::Unknown;
+            void* Module = nullptr;
+            std::string Path;
+        };
+
+        struct SharedIndexCandidate final {
+            void* Module = nullptr;
+            DllLoader* Loader = nullptr;
+            std::function<int(int)> Query;
+        };
+
+        static DllLoader* SelectSharedIndexCandidate(
+            int index,
+            const std::vector<SharedIndexCandidate>& candidates,
+            int& indexType) {
+            if (index < 0) {
+                throw std::invalid_argument("共享 index 无效");
+            }
+
+            bool hasSharedIndexCandidate = false;
+            struct Match final {
+                const SharedIndexCandidate* Candidate = nullptr;
+                int Type = 0;
+            };
+            std::vector<Match> matches;
+            std::unordered_set<void*> seenModules;
+            for (const auto& candidate : candidates) {
+                if (!candidate.Query) continue;
+                if (candidate.Module != nullptr &&
+                    !seenModules.insert(candidate.Module).second) {
+                    continue;
+                }
+                hasSharedIndexCandidate = true;
+                int candidateType = 0;
+                try {
+                    candidateType = candidate.Query(index);
+                } catch (const std::exception& ex) {
+                    throw std::runtime_error(std::string("查询共享 index 失败: ") + ex.what());
+                } catch (...) {
+                    throw std::runtime_error("查询共享 index 发生异常");
+                }
+                if (candidateType == 0) continue;
+                if (candidateType != 1 && candidateType != 2) {
+                    throw std::runtime_error("共享 index 类型查询返回未知值");
+                }
+                matches.push_back({&candidate, candidateType});
+            }
+
+            if (!hasSharedIndexCandidate) {
+                throw std::domain_error(
+                    "dlcv_infer 不支持共享模型索引接口；仅可使用加载时返回的本地模型 index");
+            }
+            if (matches.empty()) {
+                throw std::invalid_argument("共享 index 不可用");
+            }
+            if (matches.size() != 1) {
+                throw std::runtime_error("共享 index 在多个推理 DLL 中有效，无法确定所属模块");
+            }
+            indexType = matches.front().Type;
+            return matches.front().Candidate->Loader;
+        }
+
+        static std::string LowerAscii(std::string value) {
+            for (char& ch : value) {
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            }
+            return value;
+        }
+
+        static bool IsTargetInferModuleName(const std::string& name, sntl_admin::DogProvider& provider) {
+            const std::string lowerName = LowerAscii(name);
+            const size_t slash = lowerName.find_last_of("/\\");
+            const std::string baseName = slash == std::string::npos
+                ? lowerName
+                : lowerName.substr(slash + 1);
+            if (baseName == "dlcv_infer.dll" || baseName == "libdlcv_infer_s.so") {
+                provider = sntl_admin::DogProvider::Sentinel;
+                return true;
+            }
+            if (baseName == "dlcv_infer_v.dll" || baseName == "libdlcv_infer_v.so") {
+                provider = sntl_admin::DogProvider::Virbox;
+                return true;
+            }
+            return false;
+        }
+
+        std::mutex& HeldInferModuleMutex() {
+            static std::mutex mutex;
+            return mutex;
+        }
+
+        std::unordered_map<void*, void*>& HeldInferModules() {
+            static std::unordered_map<void*, void*> modules;
+            return modules;
+        }
+
+#ifndef _WIN32
+        struct DlIterateInferContext final {
+            std::vector<LoadedInferModule>* Modules = nullptr;
+            std::string Error;
+            std::exception_ptr Exception;
+        };
+
+        static int CollectLoadedInferModule(
+            struct dl_phdr_info* info,
+            size_t,
+            void* userData) {
+            if (info == nullptr || info->dlpi_name == nullptr || info->dlpi_name[0] == '\0') {
+                return 0;
+            }
+            auto* context = static_cast<DlIterateInferContext*>(userData);
+            try {
+                sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
+                if (!IsTargetInferModuleName(info->dlpi_name, provider)) return 0;
+
+                void* module = dlopen(info->dlpi_name, RTLD_LAZY | RTLD_LOCAL | RTLD_NOLOAD);
+                if (module == nullptr) {
+                    context->Error = "无法持有已加载的推理 DLL";
+                    return 1;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(HeldInferModuleMutex());
+                    auto& heldModules = HeldInferModules();
+                    const auto it = heldModules.find(module);
+                    if (it == heldModules.end()) {
+                        heldModules.emplace(module, module);
+                    } else {
+                        dlclose(module);
+                        module = it->second;
+                    }
+                }
+                context->Modules->push_back({provider, module, info->dlpi_name});
+                return 0;
+            } catch (...) {
+                context->Exception = std::current_exception();
+                return 1;
+            }
+        }
+#endif
+
+        static std::vector<LoadedInferModule> EnumerateLoadedInferModules() {
+            std::vector<LoadedInferModule> modules;
+#ifdef _WIN32
+            const HANDLE snapshot = CreateToolhelp32Snapshot(
+                TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
+                GetCurrentProcessId());
+            if (snapshot == INVALID_HANDLE_VALUE) {
+                throw std::runtime_error("无法枚举当前进程模块");
+            }
+
+            MODULEENTRY32W entry{};
+            entry.dwSize = sizeof(entry);
+            BOOL hasEntry = Module32FirstW(snapshot, &entry);
+            while (hasEntry) {
+                const std::wstring moduleName(entry.szModule);
+                const std::string moduleNameUtf8 = convertWstringToUtf8(moduleName);
+                sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
+                if (IsTargetInferModuleName(moduleNameUtf8, provider)) {
+                    if (entry.hModule == nullptr) {
+                        CloseHandle(snapshot);
+                        throw std::runtime_error("已加载推理 DLL 句柄为空");
+                    }
+                    HMODULE heldModule = nullptr;
+                    {
+                        std::lock_guard<std::mutex> lock(HeldInferModuleMutex());
+                        auto& heldModules = HeldInferModules();
+                        const auto it = heldModules.find(entry.hModule);
+                        if (it != heldModules.end()) {
+                            heldModule = static_cast<HMODULE>(it->second);
+                        } else {
+                            if (!GetModuleHandleExW(
+                                    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                                    reinterpret_cast<LPCWSTR>(entry.hModule),
+                                    &heldModule)) {
+                                CloseHandle(snapshot);
+                                throw std::runtime_error("无法持有已加载的推理 DLL");
+                            }
+                            if (heldModule != entry.hModule) {
+                                FreeLibrary(heldModule);
+                                CloseHandle(snapshot);
+                                throw std::runtime_error("已加载推理 DLL 句柄发生变化");
+                            }
+                            heldModules.emplace(entry.hModule, heldModule);
+                        }
+                    }
+                    modules.push_back({
+                        provider,
+                        static_cast<void*>(heldModule),
+                        convertWstringToUtf8(std::wstring(entry.szExePath))
+                    });
+                }
+                hasEntry = Module32NextW(snapshot, &entry);
+            }
+            if (!hasEntry) {
+                const DWORD error = GetLastError();
+                if (error == ERROR_NO_MORE_FILES) {
+                    CloseHandle(snapshot);
+                    return modules;
+                }
+                CloseHandle(snapshot);
+                throw std::runtime_error(
+                    "枚举当前进程模块失败: " + std::to_string(error));
+            }
+            CloseHandle(snapshot);
+#else
+            DlIterateInferContext context;
+            context.Modules = &modules;
+            dl_iterate_phdr(CollectLoadedInferModule, &context);
+            if (context.Exception) std::rethrow_exception(context.Exception);
+            if (!context.Error.empty()) {
+                throw std::runtime_error(context.Error);
+            }
+#endif
+            return modules;
         }
     }
 
@@ -1446,6 +1671,7 @@ namespace dlcv_infer {
     static std::mutex g_flowModelIndexMu;
     static int g_nextSentinelFlowModelIndex = 10000;
     static int g_nextVirboxFlowModelIndex = 30000;
+    static constexpr int kProviderBit = 0x100;
 
     static int AllocateFlowModelIndex(sntl_admin::DogProvider provider) {
         std::lock_guard<std::mutex> lock(g_flowModelIndexMu);
@@ -1468,27 +1694,12 @@ namespace dlcv_infer {
         int index,
         sntl_admin::DogProvider& provider,
         int& indexType) {
-        if (index >= 0 && index < 10000) {
-            provider = sntl_admin::DogProvider::Sentinel;
-            indexType = 1;
-            return true;
-        }
-        if (index >= 10000 && index < 20000) {
-            provider = sntl_admin::DogProvider::Sentinel;
-            indexType = 2;
-            return true;
-        }
-        if (index >= 20000 && index < 30000) {
-            provider = sntl_admin::DogProvider::Virbox;
-            indexType = 1;
-            return true;
-        }
-        if (index >= 30000 && index < 40000) {
-            provider = sntl_admin::DogProvider::Virbox;
-            indexType = 2;
-            return true;
-        }
-        return false;
+        if (index < 0) return false;
+        provider = (index & kProviderBit) != 0
+            ? sntl_admin::DogProvider::Virbox
+            : sntl_admin::DogProvider::Sentinel;
+        indexType = 0;
+        return true;
     }
 
 #ifdef _WIN32
@@ -1610,6 +1821,27 @@ namespace dlcv_infer {
         LoadDll();
     }
 
+    DllLoader::DllLoader(
+        sntl_admin::DogProvider provider,
+        void* existingModule,
+        const std::string& loadedPath)
+        : dogProvider(provider), hModule(existingModule) {
+        if (hModule == nullptr) {
+            throw std::runtime_error("已加载推理 DLL 句柄为空");
+        }
+#ifdef _WIN32
+        dllName = provider == sntl_admin::DogProvider::Sentinel
+            ? "dlcv_infer.dll"
+            : "dlcv_infer_v.dll";
+#else
+        dllName = provider == sntl_admin::DogProvider::Sentinel
+            ? "libdlcv_infer_s.so"
+            : "libdlcv_infer_v.so";
+#endif
+        dllPath = loadedPath;
+        ResolveSymbols();
+    }
+
     void DllLoader::LoadDll() {
 #ifdef _WIN32
         const std::string dllCurrentPath = JoinPath(".", dllName);
@@ -1701,6 +1933,10 @@ namespace dlcv_infer {
         }
 #endif
 
+        ResolveSymbols();
+    }
+
+    void DllLoader::ResolveSymbols() {
         dlcv_load_model = (LoadModelFuncType)ResolveSymbol(hModule, "dlcv_load_model");
         dlcv_load_model_binary = (LoadModelBinaryFuncType)ResolveSymbol(hModule, "dlcv_load_model_binary");
         dlcv_free_model = (FreeModelFuncType)ResolveSymbol(hModule, "dlcv_free_model");
@@ -1790,6 +2026,31 @@ namespace dlcv_infer {
         return *it->second;
     }
 
+    DllLoader& DllLoader::GetOrCreateForExistingModule(
+        sntl_admin::DogProvider provider,
+        void* module,
+        const std::string& loadedPath) {
+        if (module == nullptr) {
+            throw std::invalid_argument("已加载推理 DLL 句柄为空");
+        }
+
+        std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());
+        for (const auto& item : DllLoaderRegistry()) {
+            if (item.second && item.second->hModule == module) {
+                return *item.second;
+            }
+        }
+
+        auto& loaders = ExistingModuleLoaderRegistry();
+        auto it = loaders.find(module);
+        if (it == loaders.end()) {
+            it = loaders.emplace(
+                module,
+                std::unique_ptr<DllLoader>(new DllLoader(provider, module, loadedPath))).first;
+        }
+        return *it->second;
+    }
+
     DllLoader& DllLoader::GetExistingOrDefaultSentinel() {
         DllLoader* defaultLoader = nullptr;
         {
@@ -1814,20 +2075,34 @@ namespace dlcv_infer {
     }
 
     DllLoader& DllLoader::ResolveForIndex(int index, int& indexType) {
-        sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
-        int expectedIndexType = 0;
-        if (!ClassifySharedIndex(index, provider, expectedIndexType)) {
-            throw std::invalid_argument("共享 index 不在支持的分段范围内");
+        if (index < 0) {
+            throw std::invalid_argument("共享 index 无效");
         }
 
-        DllLoader* loader = &GetOrCreateForProvider(provider);
-        if (loader->GetIndexTypeFunc() == nullptr) {
-            throw std::runtime_error("dlcv_infer 不支持共享模型索引接口；仅可使用加载时返回的本地模型 index");
+        std::vector<SharedIndexCandidate> candidates;
+        std::unordered_set<void*> seenModules;
+        for (const auto& module : EnumerateLoadedInferModules()) {
+            if (module.Module == nullptr || !seenModules.insert(module.Module).second) {
+                continue;
+            }
+            DllLoader& loader = GetOrCreateForExistingModule(
+                module.Provider,
+                module.Module,
+                module.Path);
+            const GetIndexTypeFuncType getIndexType = loader.GetIndexTypeFunc();
+            if (getIndexType == nullptr) {
+                continue;
+            }
+            candidates.push_back({
+                module.Module,
+                &loader,
+                [getIndexType](int value) { return getIndexType(value); }
+            });
         }
 
-        indexType = loader->GetIndexTypeFunc()(index);
-        if (indexType != expectedIndexType) {
-            throw std::runtime_error("共享 index 类型与分段规则不一致或索引不可用");
+        DllLoader* loader = SelectSharedIndexCandidate(index, candidates, indexType);
+        if (loader == nullptr) {
+            throw std::runtime_error("共享 index 没有关联推理 DLL");
         }
         return *loader;
     }
@@ -1999,8 +2274,8 @@ namespace dlcv_infer {
             }
             if (selectedLoader == nullptr) {
                 selectedLoader = childLoader;
-            } else if (selectedLoader->GetDogProvider() != childLoader->GetDogProvider()) {
-                throw std::runtime_error("同一流程不能混用 Sentinel 与 Virbox 模型");
+            } else if (selectedLoader != childLoader) {
+                throw std::runtime_error("同一流程不能混用不同推理 DLL");
             }
         }
         return selectedLoader != nullptr
@@ -2034,8 +2309,8 @@ namespace dlcv_infer {
                 bufferIt->second->data(), bufferIt->second->size());
             if (selectedLoader == nullptr) {
                 selectedLoader = &loader;
-            } else if (selectedLoader->GetDogProvider() != loader.GetDogProvider()) {
-                throw std::runtime_error("同一流程不能混用 Sentinel 与 Virbox 模型");
+            } else if (selectedLoader != &loader) {
+                throw std::runtime_error("同一流程不能混用不同推理 DLL");
             }
             if (loader.GetLoadModelBinaryFunc() == nullptr) return false;
         }
@@ -2254,6 +2529,7 @@ namespace dlcv_infer {
         _deviceId = flowInfo.value("device_id", _deviceId);
         _isFlowGraphMode = true;
         _flowModel = new flow::FlowGraphModel();
+        _flowModel->SetPreferredDllLoader(_dllLoader);
         const json report = _flowModel->LoadFromRoot(pipelineRoot, _deviceId, nullptr);
         if (report.value("code", 1) != 0) {
             throw std::runtime_error("恢复流程失败: " + report.dump());
@@ -2262,27 +2538,38 @@ namespace dlcv_infer {
         _hasCachedModelInfo = true;
     }
 
+    void Model::SetPreferredDllLoader(DllLoader* loader) noexcept {
+        _dllLoader = loader;
+    }
+
     void Model::EnsureBoundIndexReady() {
         std::lock_guard<std::mutex> lock(_indexStateMu);
         if (modelIndex < 0 || _indexReady || _ownsNativeModelIndex || _ownsRegisteredFlowIndex) return;
 
         try {
             int indexType = 0;
-            if (!_indexBound) {
-                DllLoader& loader = DllLoader::ResolveForIndex(modelIndex, indexType);
-                EnsureSharedIndexFunctions(&loader);
-                if (loader.GetBindIndexFunc()(modelIndex) != 0) {
-                    throw std::runtime_error("绑定索引失败");
-                }
-                _dllLoader = &loader;
-                _indexBound = true;
-                _loadedDogProvider = loader.GetDogProvider();
-                _loadedNativeDllName = loader.GetLoadedNativeDllName();
+            if (!_indexBound && _dllLoader == nullptr) {
+                DllLoader* resolvedLoader = &DllLoader::ResolveForIndex(modelIndex, indexType);
+                _dllLoader = resolvedLoader;
+                // 先保存所属加载器，再检查共享接口；失败后仍固定使用该加载器。
+                EnsureSharedIndexFunctions(_dllLoader);
             } else {
                 if (_dllLoader == nullptr) throw std::runtime_error("共享索引没有关联推理 DLL");
                 EnsureSharedIndexFunctions(_dllLoader);
                 indexType = _dllLoader->GetIndexTypeFunc()(modelIndex);
+                if (indexType != 1 && indexType != 2) {
+                    throw std::runtime_error("共享 index 不可用");
+                }
             }
+
+            if (!_indexBound) {
+                if (_dllLoader->GetBindIndexFunc()(modelIndex) != 0) {
+                    throw std::runtime_error("绑定索引失败");
+                }
+                _indexBound = true;
+            }
+            _loadedDogProvider = _dllLoader->GetDogProvider();
+            _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
 
             if (indexType == 1) {
                 _cachedModelInfo = ReadSharedIndexResult(
@@ -2313,10 +2600,8 @@ namespace dlcv_infer {
             _hasCachedModelInfo = false;
             _cachedModelInfo = json();
             _indexReady = false;
-            if (UnbindCurrentIndexNoexcept()) {
-                _dllLoader = nullptr;
-                _loadedDogProvider = sntl_admin::DogProvider::Unknown;
-                _loadedNativeDllName.clear();
+            if (_indexBound) {
+                (void)UnbindCurrentIndexNoexcept();
             }
             throw;
         }
@@ -3337,11 +3622,26 @@ namespace dlcv_infer {
         // 先清空模型池，确保后续流程加载会重新创建子模型。
         flow::ModelPool::Instance().ClearForFreeAllModels();
 
+        for (const auto& module : EnumerateLoadedInferModules()) {
+            (void)DllLoader::GetOrCreateForExistingModule(
+                module.Provider,
+                module.Module,
+                module.Path);
+        }
+
         std::vector<FreeAllModelsFuncType> freeAllModelsFunctions;
+        std::unordered_set<DllLoader*> seenLoaders;
         {
             std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());
             for (const auto& item : DllLoaderRegistry()) {
-                if (item.second && item.second->GetFreeAllModelsFunc()) {
+                if (item.second && seenLoaders.insert(item.second.get()).second &&
+                    item.second->GetFreeAllModelsFunc()) {
+                    freeAllModelsFunctions.push_back(item.second->GetFreeAllModelsFunc());
+                }
+            }
+            for (const auto& item : ExistingModuleLoaderRegistry()) {
+                if (item.second && seenLoaders.insert(item.second.get()).second &&
+                    item.second->GetFreeAllModelsFunc()) {
                     freeAllModelsFunctions.push_back(item.second->GetFreeAllModelsFunc());
                 }
             }
@@ -3980,31 +4280,114 @@ extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_index_rules_c() {
     struct Case final {
         int Index;
         sntl_admin::DogProvider Provider;
-        int IndexType;
     };
     const Case cases[] = {
-        {0, sntl_admin::DogProvider::Sentinel, 1},
-        {9999, sntl_admin::DogProvider::Sentinel, 1},
-        {10000, sntl_admin::DogProvider::Sentinel, 2},
-        {19999, sntl_admin::DogProvider::Sentinel, 2},
-        {20000, sntl_admin::DogProvider::Virbox, 1},
-        {29999, sntl_admin::DogProvider::Virbox, 1},
-        {30000, sntl_admin::DogProvider::Virbox, 2},
-        {39999, sntl_admin::DogProvider::Virbox, 2}
+        {0, sntl_admin::DogProvider::Sentinel},
+        {1, sntl_admin::DogProvider::Sentinel},
+        {255, sntl_admin::DogProvider::Sentinel},
+        {512, sntl_admin::DogProvider::Sentinel},
+        {256, sntl_admin::DogProvider::Virbox},
+        {257, sntl_admin::DogProvider::Virbox},
+        {511, sntl_admin::DogProvider::Virbox},
+        {768, sntl_admin::DogProvider::Virbox},
+        {std::numeric_limits<int>::max(), sntl_admin::DogProvider::Virbox}
     };
     for (const auto& item : cases) {
         sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
         int indexType = 0;
         if (!dlcv_infer::ClassifySharedIndex(item.Index, provider, indexType) ||
-            provider != item.Provider || indexType != item.IndexType) {
+            provider != item.Provider || indexType != 0) {
             return -1;
         }
     }
 
     sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
     int indexType = 0;
-    return (!dlcv_infer::ClassifySharedIndex(-1, provider, indexType) &&
-            !dlcv_infer::ClassifySharedIndex(40000, provider, indexType)) ? 0 : -1;
+    if (dlcv_infer::ClassifySharedIndex(-1, provider, indexType)) return -1;
+
+    int sentinelTag = 0;
+    int virboxTag = 0;
+    auto* sentinelLoader = reinterpret_cast<dlcv_infer::DllLoader*>(&sentinelTag);
+    auto* virboxLoader = reinterpret_cast<dlcv_infer::DllLoader*>(&virboxTag);
+
+    const std::vector<dlcv_infer::SharedIndexCandidate> oppositeBitCandidates = {
+        {&sentinelTag, sentinelLoader, [](int value) { return value == 256 ? 1 : 0; }},
+        {&virboxTag, virboxLoader, [](int) { return 0; }}
+    };
+    int selectedType = 0;
+    if (dlcv_infer::SelectSharedIndexCandidate(
+            256, oppositeBitCandidates, selectedType) != sentinelLoader ||
+        selectedType != 1) {
+        return -2;
+    }
+
+    const std::vector<dlcv_infer::SharedIndexCandidate> secondOppositeBitCandidates = {
+        {&sentinelTag, sentinelLoader, [](int) { return 0; }},
+        {&virboxTag, virboxLoader, [](int value) { return value == 0 ? 2 : 0; }}
+    };
+    if (dlcv_infer::SelectSharedIndexCandidate(
+            0, secondOppositeBitCandidates, selectedType) != virboxLoader ||
+        selectedType != 2) {
+        return -3;
+    }
+
+    const auto expectFailure = [](
+        const std::vector<dlcv_infer::SharedIndexCandidate>& candidates,
+        int index,
+        const std::type_info& expectedType) {
+        int type = 0;
+        try {
+            (void)dlcv_infer::SelectSharedIndexCandidate(index, candidates, type);
+        } catch (const std::exception& ex) {
+            return typeid(ex) == expectedType;
+        } catch (...) {
+            return false;
+        }
+        return false;
+    };
+
+    const std::vector<dlcv_infer::SharedIndexCandidate> noResultCandidates = {
+        {&sentinelTag, sentinelLoader, [](int) { return 0; }}
+    };
+    if (!expectFailure(noResultCandidates, 0, typeid(std::invalid_argument))) return -4;
+    if (!expectFailure(noResultCandidates, -1, typeid(std::invalid_argument))) return -9;
+
+    const std::vector<dlcv_infer::SharedIndexCandidate> ambiguousCandidates = {
+        {&sentinelTag, sentinelLoader, [](int) { return 1; }},
+        {&virboxTag, virboxLoader, [](int) { return 2; }}
+    };
+    if (!expectFailure(ambiguousCandidates, 0, typeid(std::runtime_error))) return -5;
+
+    const std::vector<dlcv_infer::SharedIndexCandidate> unknownCandidates = {
+        {&sentinelTag, sentinelLoader, [](int) { return -1; }}
+    };
+    if (!expectFailure(unknownCandidates, 0, typeid(std::runtime_error))) return -6;
+
+    const std::vector<dlcv_infer::SharedIndexCandidate> throwingCandidates = {
+        {&sentinelTag, sentinelLoader, [](int) -> int {
+            throw std::runtime_error("query failed");
+        }}
+    };
+    if (!expectFailure(throwingCandidates, 0, typeid(std::runtime_error))) return -7;
+
+    const std::vector<dlcv_infer::SharedIndexCandidate> domainErrorCandidates = {
+        {&sentinelTag, sentinelLoader, [](int) { return 1; }},
+        {&virboxTag, virboxLoader, [](int) -> int {
+            throw std::domain_error("query failure is not missing capability");
+        }}
+    };
+    if (!expectFailure(domainErrorCandidates, 0, typeid(std::runtime_error))) return -10;
+    const std::vector<dlcv_infer::SharedIndexCandidate> nonstandardErrorCandidates = {
+        {&sentinelTag, sentinelLoader, [](int) -> int { throw 7; }}
+    };
+    if (!expectFailure(nonstandardErrorCandidates, 0, typeid(std::runtime_error))) return -11;
+
+    const std::vector<dlcv_infer::SharedIndexCandidate> noInterfaceCandidates = {
+        {&sentinelTag, sentinelLoader, {}}
+    };
+    if (!expectFailure(noInterfaceCandidates, 0, typeid(std::domain_error))) return -8;
+
+    return 0;
 }
 
 extern "C" DLCV_INFER_CPP_API void dlcv_shared_index_test_free_string_c(const char* result) {

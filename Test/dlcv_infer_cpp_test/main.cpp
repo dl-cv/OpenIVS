@@ -1,4 +1,5 @@
 ﻿#include <windows.h>
+#include <TlHelp32.h>
 
 #include <algorithm>
 #include <atomic>
@@ -3206,25 +3207,51 @@ bool VerifyCppUtilsFreeAllModels(
 }
 
 int QueryNativeIndexTypeForSelfTest(int index) {
-    const wchar_t* moduleName = nullptr;
-    if (index >= 0 && index < 20000) {
-        moduleName = L"dlcv_infer.dll";
-    } else if (index >= 20000 && index < 40000) {
-        moduleName = L"dlcv_infer_v.dll";
-    } else {
-        throw std::invalid_argument("索引不在测试支持的范围内");
+    const HANDLE snapshot = CreateToolhelp32Snapshot(
+        TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
+        GetCurrentProcessId());
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("无法枚举当前进程模块");
     }
 
-    const HMODULE module = GetModuleHandleW(moduleName);
-    if (module == nullptr) {
-        throw std::runtime_error("未找到索引所属的推理 DLL");
+    std::vector<HMODULE> modules;
+    MODULEENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    BOOL hasEntry = Module32FirstW(snapshot, &entry);
+    while (hasEntry) {
+        const bool isTarget = _wcsicmp(entry.szModule, L"dlcv_infer.dll") == 0 ||
+            _wcsicmp(entry.szModule, L"dlcv_infer_v.dll") == 0;
+        if (isTarget && std::find(modules.begin(), modules.end(), entry.hModule) == modules.end()) {
+            modules.push_back(entry.hModule);
+        }
+        hasEntry = Module32NextW(snapshot, &entry);
     }
-    const auto getIndexType = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
-        GetProcAddress(module, "dlcv_get_index_type_c"));
-    if (getIndexType == nullptr) {
-        throw std::runtime_error("推理 DLL 缺少 index 类型查询接口");
+    if (!hasEntry) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_NO_MORE_FILES) {
+            CloseHandle(snapshot);
+            throw std::runtime_error("枚举当前进程模块失败: " + std::to_string(error));
+        }
     }
-    return getIndexType(index);
+    CloseHandle(snapshot);
+
+    std::vector<int> validTypes;
+    for (const HMODULE module : modules) {
+        const auto getIndexType = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
+            GetProcAddress(module, "dlcv_get_index_type_c"));
+        if (getIndexType == nullptr) continue;
+        const int indexType = getIndexType(index);
+        if (indexType == 0) continue;
+        if (indexType != 1 && indexType != 2) {
+            throw std::runtime_error("推理 DLL 返回未知 index 类型");
+        }
+        validTypes.push_back(indexType);
+    }
+    if (validTypes.empty()) return 0;
+    if (validTypes.size() != 1) {
+        throw std::runtime_error("index 在多个推理 DLL 中有效");
+    }
+    return validTypes.front();
 }
 
 int ReadFirstFlowModelIndexForSelfTest(const json& info) {
@@ -4182,6 +4209,16 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunProviderLoaderSelfTest(argc, argv);
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"shared-index-rules-selftest") {
+        if (argc != 2) {
+            PrintUtf8ErrorLine("用法: dlcv_infer_cpp_test.exe shared-index-rules-selftest");
+            return 2;
+        }
+        const int result = dlcv_shared_index_test_index_rules_c();
+        PrintUtf8Line(result == 0 ? "共享索引查询选择自测通过" : "共享索引查询选择自测失败");
+        return result == 0 ? 0 : 1;
+    }
+
     std::cout << "Usage: " << (argc >= 1 ? WideToUtf8(argv[0]) : "dlcv_infer_cpp_test") << " <subcommand>\n";
     if (argc >= 2 && std::wstring(argv[1]) == L"get-model-info") {
         return RunGetModelInfoCommand(argc, argv, false);
@@ -4213,6 +4250,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  free-all-modules-selftest <SentinelModelPath> <VirboxModelPath>\n";
     std::cout << "  create-model-from-index-selftest <modelPath> [device]\n";
     std::cout << "  provider-loader-selftest <SentinelModelPath> <VirboxModelPath> [rounds]\n";
+    std::cout << "  shared-index-rules-selftest\n";
     std::cout << "  get-model-info <model>\n";
     std::cout << "  get-dvs-model-info <model>\n";
     PrintUtf8("\n工作流命令帮助:\n");

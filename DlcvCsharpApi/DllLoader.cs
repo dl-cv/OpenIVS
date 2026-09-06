@@ -89,10 +89,16 @@ namespace dlcv_infer_csharp
         private static DllLoader _instance;
         private static readonly Dictionary<DogProvider, DllLoader> _loaders =
             new Dictionary<DogProvider, DllLoader>();
+        private static readonly Dictionary<IntPtr, DllLoader> _moduleLoaders =
+            new Dictionary<IntPtr, DllLoader>();
         private static readonly object _lock = new object();
+
+        private IntPtr _moduleHandle;
+        private string _modulePath;
 
         public DogProvider LoadedDogProvider { get; private set; }
         public string LoadedNativeDllName { get; private set; }
+        internal string LoadedNativeModulePath { get { return _modulePath; } }
         internal bool SupportsSharedFlowIndex
         {
             get
@@ -168,7 +174,7 @@ namespace dlcv_infer_csharp
         {
             lock (_lock)
             {
-                return new List<DllLoader>(_loaders.Values);
+                return GetLoadedModuleLoadersLocked();
             }
         }
 
@@ -205,43 +211,103 @@ namespace dlcv_infer_csharp
 
         public static DllLoader ResolveForIndex(int index, out string indexType)
         {
-            DogProvider provider = GetSharedIndexRoute(index, out indexType);
-            DllLoader loader;
-            lock (_lock)
-            {
-                loader = GetOrCreateLoaderLocked(provider);
-            }
+            DllLoader loader = ResolveSharedIndexLoader(index, out indexType);
             loader.EnsureSharedIndexSupport(indexType);
             return loader;
         }
 
         public static DogProvider GetSharedIndexRoute(int index, out string indexType)
         {
-            if (index >= 0 && index < 10000)
-            {
-                indexType = "model";
-                return DogProvider.Sentinel;
-            }
-            if (index >= 10000 && index < 20000)
-            {
-                indexType = "flow";
-                return DogProvider.Sentinel;
-            }
-            if (index >= 20000 && index < 30000)
-            {
-                indexType = "model";
-                return DogProvider.Virbox;
-            }
-            if (index >= 30000 && index < 40000)
-            {
-                indexType = "flow";
-                return DogProvider.Virbox;
-            }
-
-            throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 不在支持范围内: " + index);
+            return ResolveSharedIndexLoader(index, out indexType).LoadedDogProvider;
         }
 
-        private void EnsureSharedIndexSupport(string indexType)
+        internal static DllLoader ResolveSharedIndexLoader(int index, out string indexType)
+        {
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 不能为负数: " + index);
+
+            List<DllLoader> candidates;
+            lock (_lock)
+            {
+                candidates = GetLoadedModuleLoadersLocked();
+            }
+
+            return ResolveSharedIndexLoaderFromCandidates(index, candidates, out indexType);
+        }
+
+        internal static DllLoader ResolveSharedIndexLoaderFromCandidates(
+            int index,
+            IList<DllLoader> candidates,
+            out string indexType)
+        {
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 不能为负数: " + index);
+            if (candidates == null)
+                throw new ArgumentNullException(nameof(candidates));
+
+            var queryableCandidates = new List<DllLoader>();
+            foreach (DllLoader candidate in candidates)
+            {
+                if (candidate.dlcv_get_index_type_c != null)
+                    queryableCandidates.Add(candidate);
+            }
+
+            if (queryableCandidates.Count == 0)
+            {
+                throw new NotSupportedException(
+                    "进程内没有已加载且提供 dlcv_get_index_type_c 的推理 DLL，无法恢复共享 index");
+            }
+
+            var matches = new List<Tuple<DllLoader, int>>();
+            foreach (DllLoader candidate in queryableCandidates)
+            {
+                int nativeType;
+                try
+                {
+                    nativeType = candidate.GetIndexType(index);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        "查询共享 index 所属 DLL 失败: " + candidate.GetModuleDisplayName(), ex);
+                }
+
+                if (nativeType == 0)
+                    continue;
+                if (nativeType != 1 && nativeType != 2)
+                {
+                    throw new InvalidOperationException(
+                        "共享 index 查询返回未知类型: " + nativeType + "，DLL=" + candidate.GetModuleDisplayName());
+                }
+
+                matches.Add(Tuple.Create(candidate, nativeType));
+            }
+
+            if (matches.Count == 0)
+            {
+                throw new InvalidOperationException("进程内已加载的推理 DLL 均未找到共享 index: " + index);
+            }
+            if (matches.Count > 1)
+            {
+                var names = new List<string>();
+                foreach (Tuple<DllLoader, int> match in matches)
+                    names.Add(match.Item1.GetModuleDisplayName());
+                throw new InvalidOperationException(
+                    "共享 index 同时存在于多个 DLL，无法确定所属模块: " + string.Join("、", names));
+            }
+
+            indexType = IndexTypeName(matches[0].Item2);
+            return matches[0].Item1;
+        }
+
+        private static string IndexTypeName(int nativeType)
+        {
+            if (nativeType == 1) return "model";
+            if (nativeType == 2) return "flow";
+            throw new InvalidOperationException("共享 index 类型无效: " + nativeType);
+        }
+
+        internal void EnsureSharedIndexSupport(string indexType)
         {
             var missing = new List<string>();
             if (dlcv_get_index_type_c == null) missing.Add("dlcv_get_index_type_c");
@@ -369,7 +435,79 @@ namespace dlcv_infer_csharp
 
             loader = CreateLoader(provider);
             _loaders.Add(provider, loader);
+            if (loader._moduleHandle != IntPtr.Zero)
+                _moduleLoaders[loader._moduleHandle] = loader;
             return loader;
+        }
+
+        private static List<DllLoader> GetLoadedModuleLoadersLocked()
+        {
+            var result = new List<DllLoader>();
+            var seen = new HashSet<IntPtr>();
+
+            foreach (IntPtr moduleHandle in EnumerateTargetModules())
+            {
+                if (moduleHandle == IntPtr.Zero || !seen.Add(moduleHandle))
+                    continue;
+
+                DllLoader loader;
+                if (!_moduleLoaders.TryGetValue(moduleHandle, out loader))
+                {
+                    loader = AttachLoadedModuleLocked(moduleHandle);
+                    if (loader != null)
+                        _moduleLoaders[moduleHandle] = loader;
+                }
+
+                if (loader != null)
+                    result.Add(loader);
+            }
+
+            foreach (DllLoader loader in _loaders.Values)
+            {
+                if (loader == null || loader._moduleHandle == IntPtr.Zero || !seen.Add(loader._moduleHandle))
+                    continue;
+                result.Add(loader);
+            }
+
+            return result;
+        }
+
+        private static DllLoader AttachLoadedModuleLocked(IntPtr moduleHandle)
+        {
+            string modulePath = GetModulePath(moduleHandle);
+            string moduleName = string.IsNullOrEmpty(modulePath)
+                ? null
+                : Path.GetFileName(modulePath);
+            DogProvider provider;
+            if (string.Equals(moduleName, "dlcv_infer.dll", StringComparison.OrdinalIgnoreCase))
+                provider = DogProvider.Sentinel;
+            else if (string.Equals(moduleName, "dlcv_infer_v.dll", StringComparison.OrdinalIgnoreCase))
+                provider = DogProvider.Virbox;
+            else
+                return null;
+
+            IntPtr protectedHandle;
+            if (!ProtectLoadedModule(modulePath, moduleHandle, out protectedHandle))
+                throw new InvalidOperationException("无法保护已加载推理 DLL: " + (modulePath ?? moduleName));
+
+            var loader = new DllLoader();
+            loader.LoadedDogProvider = provider;
+            loader.DllName = moduleName;
+            loader.DllPath = modulePath;
+            loader.LoadedNativeDllName = moduleName;
+            loader._moduleHandle = protectedHandle;
+            loader._modulePath = modulePath;
+            loader.LoadDelegates(protectedHandle);
+            return loader;
+        }
+
+        private string GetModuleDisplayName()
+        {
+            if (!string.IsNullOrWhiteSpace(_modulePath))
+                return _modulePath;
+            if (!string.IsNullOrWhiteSpace(LoadedNativeDllName))
+                return LoadedNativeDllName;
+            return LoadedDogProvider.ToString();
         }
 
         private static void ValidateProviderAvailability(DogProvider needed)
@@ -508,6 +646,13 @@ namespace dlcv_infer_csharp
                     throw new Exception("无法加载 DLL");
             }
 
+            _moduleHandle = hModule;
+            _modulePath = DllPath;
+            LoadDelegates(hModule);
+        }
+
+        private void LoadDelegates(IntPtr hModule)
+        {
             dlcv_load_model = GetDelegate<LoadModelDelegate>(hModule, "dlcv_load_model");
             dlcv_load_model_binary = GetDelegate<LoadModelBinaryDelegate>(hModule, "dlcv_load_model_binary");
             dlcv_free_model = GetDelegate<FreeModelDelegate>(hModule, "dlcv_free_model");
@@ -535,6 +680,83 @@ namespace dlcv_infer_csharp
             return !string.IsNullOrEmpty(SearchDllPath(dllName)) || File.Exists(dllPath);
         }
 
+        private static List<IntPtr> EnumerateTargetModules()
+        {
+            var result = new List<IntPtr>();
+            IntPtr process = GetCurrentProcess();
+            int capacity = 256;
+            while (true)
+            {
+                var modules = new IntPtr[capacity];
+                uint bytesNeeded;
+                if (!EnumProcessModules(process, modules, (uint)(modules.Length * IntPtr.Size), out bytesNeeded))
+                    throw new InvalidOperationException("枚举进程模块失败，无法确定共享 index 候选 DLL");
+
+                int count = (int)(bytesNeeded / (uint)IntPtr.Size);
+                if (count < modules.Length)
+                {
+                    for (int i = 0; i < count; i++)
+                    {
+                        string path = GetModulePath(process, modules[i]);
+                        if (string.IsNullOrEmpty(path))
+                            throw new InvalidOperationException("读取进程模块路径失败，无法确定共享 index 候选 DLL");
+                        string name = Path.GetFileName(path);
+                        if (string.Equals(name, "dlcv_infer.dll", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "dlcv_infer_v.dll", StringComparison.OrdinalIgnoreCase))
+                        {
+                            result.Add(modules[i]);
+                        }
+                    }
+                    return result;
+                }
+
+                capacity *= 2;
+                if (capacity > 32768)
+                    throw new InvalidOperationException("进程模块数量超出枚举容量，无法确定共享 index 候选 DLL");
+            }
+        }
+
+        private static string GetModulePath(IntPtr moduleHandle)
+        {
+            string path = GetModulePath(GetCurrentProcess(), moduleHandle);
+            if (string.IsNullOrEmpty(path))
+                throw new InvalidOperationException("读取已加载推理 DLL 路径失败");
+            return path;
+        }
+
+        private static string GetModulePath(IntPtr processHandle, IntPtr moduleHandle)
+        {
+            var buffer = new StringBuilder(32768);
+            uint length = GetModuleFileNameEx(processHandle, moduleHandle, buffer, (uint)buffer.Capacity);
+            return length == 0 ? null : buffer.ToString();
+        }
+
+        private static bool ProtectLoadedModule(string modulePath, IntPtr moduleHandle, out IntPtr protectedHandle)
+        {
+            if (!string.IsNullOrWhiteSpace(modulePath) &&
+                GetModuleHandleEx(0, modulePath, out protectedHandle))
+            {
+                if (protectedHandle == moduleHandle)
+                    return true;
+                protectedHandle = IntPtr.Zero;
+                return false;
+            }
+
+            if (!GetModuleHandleEx(
+                GetModuleHandleExFlagFromAddress,
+                moduleHandle,
+                out protectedHandle))
+            {
+                return false;
+            }
+            if (protectedHandle != moduleHandle)
+            {
+                protectedHandle = IntPtr.Zero;
+                return false;
+            }
+            return true;
+        }
+
         private static string SearchDllPath(string dllName)
         {
             var buffer = new StringBuilder(32767);
@@ -551,6 +773,29 @@ namespace dlcv_infer_csharp
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr LoadLibrary(string lpFileName);
 
+        [DllImport("kernel32.dll", EntryPoint = "GetCurrentProcess")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [DllImport("kernel32.dll", EntryPoint = "GetModuleHandleExW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool GetModuleHandleEx(uint flags, string moduleName, out IntPtr moduleHandle);
+
+        [DllImport("kernel32.dll", EntryPoint = "GetModuleHandleExW", SetLastError = true)]
+        private static extern bool GetModuleHandleEx(uint flags, IntPtr moduleAddress, out IntPtr moduleHandle);
+
+        [DllImport("psapi.dll", SetLastError = true)]
+        private static extern bool EnumProcessModules(
+            IntPtr processHandle,
+            [Out] IntPtr[] moduleHandles,
+            uint bytesAllocated,
+            out uint bytesNeeded);
+
+        [DllImport("psapi.dll", EntryPoint = "GetModuleFileNameExW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetModuleFileNameEx(
+            IntPtr processHandle,
+            IntPtr moduleHandle,
+            StringBuilder fileName,
+            uint size);
+
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
 
@@ -559,5 +804,7 @@ namespace dlcv_infer_csharp
 
         [DllImport("user32.dll", EntryPoint = "MessageBoxW", CharSet = CharSet.Unicode)]
         private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
+
+        private const uint GetModuleHandleExFlagFromAddress = 0x00000004;
     }
 }
