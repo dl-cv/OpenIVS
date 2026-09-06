@@ -20,6 +20,7 @@ namespace DlcvDemo
         private const int ErrorAccessDenied = 5;
         private const double ScoreConsistencyTolerance = 1e-6;
         private const double MeanConsistencyTolerance = 1e-6;
+        private const string AnomalyScoreCategoryName = "异常分数";
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool AttachConsole(uint processId);
@@ -115,7 +116,7 @@ namespace DlcvDemo
                 bool consistent = summary.Value<bool>("consistent");
                 bool thresholdCheckPassed = summary.Value<bool>("threshold_check_passed");
                 bool meanCheckPassed = summary.Value<bool>("mean_check_passed");
-                return consistent && thresholdCheckPassed && meanCheckPassed ? 0 : 3;
+                return IsValidationPassed(consistent, thresholdCheckPassed, meanCheckPassed) ? 0 : 3;
             }
             catch (Exception ex)
             {
@@ -186,8 +187,13 @@ namespace DlcvDemo
 
                 PathSummary jsonSummary = BuildJsonSummary(jsonResults, options.Threshold);
                 bool consistent = AreConsistent(structuredSummary, jsonSummary);
-                bool thresholdCheckPassed = structuredSummary.BelowThresholdCount == 0
-                    && jsonSummary.BelowThresholdCount == 0;
+                bool thresholdCheckPassed = IsThresholdCheckPassed(
+                    structuredSummary.Categories,
+                    structuredSummary.Scores,
+                    structuredSummary.BelowThresholdCount,
+                    jsonSummary.Categories,
+                    jsonSummary.Scores,
+                    jsonSummary.BelowThresholdCount);
                 bool bothResultsEmpty = structuredSummary.Count == 0 && jsonSummary.Count == 0;
                 bool meanCheckPassed = !options.CalcMean.HasValue
                     || bothResultsEmpty
@@ -330,6 +336,48 @@ namespace DlcvDemo
                     if (!IsFinite(left.BackgroundMeans[i]) || !IsFinite(right.BackgroundMeans[i])) return false;
                     if (Math.Abs(left.ForegroundMeans[i] - right.ForegroundMeans[i]) > MeanConsistencyTolerance) return false;
                     if (Math.Abs(left.BackgroundMeans[i] - right.BackgroundMeans[i]) > MeanConsistencyTolerance) return false;
+                }
+            }
+            return true;
+        }
+
+        internal static bool IsThresholdCheckPassed(
+            IList<string> structuredCategories,
+            IList<double> structuredScores,
+            int structuredBelowThresholdCount,
+            IList<string> jsonCategories,
+            IList<double> jsonScores,
+            int jsonBelowThresholdCount)
+        {
+            bool anomalyScoreOnly = IsFiniteAnomalyScoreOnly(structuredCategories, structuredScores)
+                && IsFiniteAnomalyScoreOnly(jsonCategories, jsonScores);
+            return anomalyScoreOnly
+                || (structuredBelowThresholdCount == 0 && jsonBelowThresholdCount == 0);
+        }
+
+        internal static bool IsValidationPassed(
+            bool consistent,
+            bool thresholdCheckPassed,
+            bool meanCheckPassed)
+        {
+            return consistent && thresholdCheckPassed && meanCheckPassed;
+        }
+
+        private static bool IsFiniteAnomalyScoreOnly(
+            IList<string> categories,
+            IList<double> scores)
+        {
+            if (categories == null || scores == null || categories.Count == 0 || categories.Count != scores.Count)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < categories.Count; i++)
+            {
+                if (!string.Equals(categories[i], AnomalyScoreCategoryName, StringComparison.Ordinal)
+                    || !IsFinite(scores[i]))
+                {
+                    return false;
                 }
             }
             return true;
@@ -549,7 +597,8 @@ namespace DlcvDemo
                 ["error"] = ex.Message,
                 ["exception_type"] = ex.GetType().FullName
             };
-            Console.Error.WriteLine(error.ToString(Formatting.Indented));
+            string errorText = error.ToString(Formatting.Indented);
+            Console.Error.WriteLine(errorText);
         }
 
         private static bool IsFinite(double value)

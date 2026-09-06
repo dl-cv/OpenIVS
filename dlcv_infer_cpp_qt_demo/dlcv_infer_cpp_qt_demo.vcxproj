@@ -85,19 +85,19 @@
     <QtLibDir Condition="'$(QtLibDir)'==''">$(QtInstallDir)\lib</QtLibDir>
     <QtPluginsDir Condition="'$(QtPluginsDir)'==''">$(QtInstallDir)\plugins</QtPluginsDir>
     <DlcvInferCppDllOutDir Condition="'$(BuildingSolutionFile)'=='true'">$(SolutionDir)$(Configuration)\</DlcvInferCppDllOutDir>
-    <DlcvInferCppDllOutDir Condition="'$(BuildingSolutionFile)'!='true'">$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\</DlcvInferCppDllOutDir>
-    <DlcvInferCppDllPath>$(DlcvInferCppDllOutDir)dlcv_infer_cpp_dll.dll</DlcvInferCppDllPath>
+    <DlcvInferCppDllOutDir Condition="'$(BuildingSolutionFile)'!='true'">$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\</DlcvInferCppDllOutDir>
+    <DlcvInferCppDllPath>$(DlcvInferCppDllOutDir)dlcv_infer_cpp.dll</DlcvInferCppDllPath>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp_dll;$(SolutionDir)dlcv_infer_cpp_dll;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp;$(SolutionDir)dlcv_infer_cpp;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
     <LibraryPath>C:\OpenCV\build\x64\vc16\lib;$(QtLibDir);$(LibraryPath)</LibraryPath>
     <OutDir>$(SolutionDir)$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <QtDllSuffix>d</QtDllSuffix>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp_dll;$(SolutionDir)dlcv_infer_cpp_dll;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp;$(SolutionDir)dlcv_infer_cpp;C:\OpenCV\build\include;C:\dlcv\Lib\site-packages\dlcvpro_infer\include;$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
     <LibraryPath>C:\OpenCV\build\x64\vc16\lib;$(QtLibDir);$(LibraryPath)</LibraryPath>
     <OutDir>$(SolutionDir)$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
@@ -161,7 +161,7 @@
       <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100d.lib;Qt6Widgetsd.lib;Qt6Guid.lib;Qt6Cored.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>dlcv_infer_cpp.lib;opencv_world4100d.lib;Qt6Widgetsd.lib;Qt6Guid.lib;Qt6Cored.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
@@ -195,7 +195,7 @@ if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDi
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100.lib;Qt6Widgets.lib;Qt6Gui.lib;Qt6Core.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>dlcv_infer_cpp.lib;opencv_world4100.lib;Qt6Widgets.lib;Qt6Gui.lib;Qt6Core.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
@@ -227,7 +227,7 @@ if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDi
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\dlcv_infer_cpp_dll\dlcv_infer_cpp_dll.vcxproj">
+    <ProjectReference Include="..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
       <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
       <LinkLibraryDependencies>true</LinkLibraryDependencies>
     </ProjectReference>

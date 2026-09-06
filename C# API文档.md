@@ -308,7 +308,9 @@ public class DllLoader
     // 全局单例
     public static DllLoader Instance { get; }
 
+
     // 根据模型头中的 dog_provider 字段加载对应 DLL
+
     public static void EnsureForModel(string modelPath);
     public static DllLoader ResolveForIndex(int index, out string indexType);
 
@@ -344,15 +346,17 @@ public class DllLoader
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | None（无狗） | 不加载 | — |
 
-**自动检测优先级**：`Instance` 初始化时调用一次 `DogUtils.GetAvailableProviders()`，按 **Sentinel 优先、Virbox 第二** 选择 Provider；均未检测到时返回 `DogProvider.None`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
+**自动检测优先级**：`Instance` 首次初始化或首次模型加载时调用 `DogUtils.GetAvailableProviders()`，按 **Sentinel 优先、Virbox 第二** 选择 Provider；均未检测到时返回 `DogProvider.None`，**不加载**任何推理 DLL，也不抛异常。模型头没有 `dog_provider` 的模型沿用默认 DLL；模型头含 `dog_provider` 时按下方“模型 provider 选择”加载对应 provider 的 DLL。
+
 
 **模型 provider 选择**：`EnsureForModel` 读取模型头 `dog_provider` 后直接创建对应 provider 的 `DllLoader`，不调用 `DogUtils.GetAvailableProviders()`，也不检查另一种 provider。模型头没有 `dog_provider` 时保留原有自动检测。
+
 
 **模型级 Provider 解析**：
 - `.dvt`/`.dvo` 文件：读取前两行（`DV` + header_json），解析 `dog_provider` 字段。
 - `.dvp`/`.dvst`/`.dvso`：不支持通过 header 解析（DVP 由底层处理，DVS 由子模型加载时解析）。
 - `.dvsp`：不支持推理，不解析 provider。
-- C# API 不提供 `SlidingWindowModel`；滑窗处理使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
+- 滑窗处理使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 
 **共享 index 接口**：
 - `ResolveForIndex` 仅按新版四段 index 规则选择对应 provider 的 loader，不查询加密狗，也不访问另一 provider 的 DLL；该方法不修改 `Instance` 当前保存的默认 loader。
@@ -692,9 +696,11 @@ C# 侧额外处理 `DV\n` 文件头校验、归档内存读取、子模型二进
 
 ### 14.4 `DllLoader`
 
+
 `DllLoader` 是 provider-aware 原生入口分发器。`EnsureForModel` 根据普通模型文件头中的 `dog_provider` 选择 `dlcv_infer.dll` 或 `dlcv_infer_v.dll`；`Instance` 在首次创建时按 Sentinel、Virbox 顺序选择当前可用 provider。
 
 `ResolveForIndex` 按新版四段 index 规则选择 loader，用于空构造 `Model` 恢复普通模型或流程模型。旧版 Virbox 小 index 不进入外部共享模式。每个 `Model` 实例及普通模型缓存均保存实际使用的 loader，后续查询、推理、绑定和解绑不访问其他 provider。普通 DVS 加载直接复用子模型保存的 loader，不调用 `ResolveForIndex`。
+
 
 ### 14.5 `sntl_admin_csharp`
 

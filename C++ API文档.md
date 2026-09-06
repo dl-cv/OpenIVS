@@ -1,6 +1,6 @@
 # C++ API 文档
 
-**文档定位**：记录 `dlcv_infer_cpp_dll` 的精确函数签名、数据结构、工程结构、构建配置、依赖、编码路径规则与 C++ 对外接口。所有内容以当前源码实现为准。
+**文档定位**：记录 `dlcv_infer_cpp` 的精确函数签名、数据结构、工程结构、构建配置、依赖、编码路径规则与 C++、C 对外接口。所有内容以当前源码实现为准。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 头文件 | 说明 |
 |--------|------|
-| `dlcv_infer.h` | 主接口，包含 `Model`、`SlidingWindowModel`、`Utils`、`DllLoader`、`GetAllDogInfo` |
+| `dlcv_infer.h` | 主接口，包含 `Model`、`Utils`、`DllLoader`、`GetAllDogInfo` |
 | `dlcv_sntl_admin.h` | 加密狗工具，包含 `sntl_admin::DogUtils`、`sntl_admin::DogProvider` |
 | `flow/FlowGraphModel.h` | 流程图模型，包含 `dlcv_infer::flow::FlowGraphModel` |
 
@@ -112,10 +112,12 @@ public:
     // 获取全局单例；首次调用自动检测加密狗类型，有狗时加载对应 DLL，无狗时不加载
     static DllLoader& Instance();
 
+
     // 根据共享 index 返回所属 DLL，不修改全局单例
     static DllLoader& ResolveForIndex(int index, int& indexType);
 
     // 根据模型头中的 dog_provider 字段加载对应 DLL
+
     static void EnsureForModel(const std::string& modelPath);
     static void EnsureForModel(const std::wstring& modelPath);
 
@@ -155,6 +157,10 @@ private:
 | Unknown（无狗） | 不加载 | — |
 
 **自动检测优先级**：先检测 Sentinel，再检测 Virbox；均未检测到则返回 `DogProvider::Unknown`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
+
+**并发模型加载**：`DllLoader` 全局实例的访问由互斥量串行执行；`Model`、`NativeApi::LoadModel` 和 `NativeApi::LoadModelC` 进入底层模型加载函数时使用同一模型加载互斥量。流程归档的读取与展开不占用该互斥量，流程中的底层子模型加载仍经过相同保护。
+
+
 
 ---
 
@@ -244,11 +250,13 @@ void FreeModel();
 - 普通模型且由当前对象加载：按现有 `dlcv_free_model` 释放规则处理。
 - 通过共享 `modelIndex` 恢复的普通模型或流程模型：无论 `OwnModelIndex` 是否为 `false`，只减少当前对象增加的使用计数，不直接释放共享资源。
 
+
 > **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回。流程模型（`.dvst`/`.dvso`）先加载其中的子模型；推理 DLL 提供完整共享接口时，再注册包含 `schema_version`、`flow_type`、`provider`、`source_path`、`device_id`、`pipeline`、`model_bindings` 的流程 JSON。旧 DLL 缺少共享接口时使用本地流程 index，原有加载和推理行为保持不变。
 >
 > 同一个 `.dvst/.dvso` 的全部模型节点必须属于同一 provider，不支持在一个流程内混用 Sentinel 与 Virbox。无模型节点流程优先复用当前 loader；没有当前 loader 时直接使用 Sentinel，不执行双 provider 探测。
 >
-> `.dvsp` 不支持推理。当前头文件在 `DLCV_INFER_CPP_DLL_EXPORTS` 条件下提供 `SlidingWindowModel`；其他调用场景使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
+> `.dvsp` 不支持推理。需要滑窗处理时使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
+> 流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
 
 | provider | 类型 | index 范围 |
 |---|---|---|
@@ -256,6 +264,7 @@ void FreeModel();
 | Sentinel | 流程 | `10000～19999` |
 | Virbox | 普通模型 | `20000～29999` |
 | Virbox | 流程 | `30000～39999` |
+
 
 ### 4.7 计时查询
 
@@ -270,33 +279,9 @@ static std::vector<FlowNodeTiming> GetLastFlowNodeTimings();
 
 ---
 
----
 
-## 5. SlidingWindowModel（滑动窗口模型）
+## 5. Utils（工具类）
 
-当前 `dlcv_infer_cpp_dll/dlcv_infer.h` 在 `DLCV_INFER_CPP_DLL_EXPORTS` 条件下公开 `SlidingWindowModel`，继承 `Model`：
-
-```cpp
-class SlidingWindowModel : public Model {
-public:
-    SlidingWindowModel(
-        const std::string& modelPath,
-        int device_id,
-        int small_img_width = 832,
-        int small_img_height = 704,
-        int horizontal_overlap = 16,
-        int vertical_overlap = 16,
-        float threshold = 0.5f,
-        float iou_threshold = 0.2f,
-        float combine_ios_threshold = 0.2f);
-};
-```
-
-构造时以 `type = "sliding_window_pipeline"` 组装底层加载请求，继承 `Model` 的推理接口。
-
----
-
-## 6. Utils（工具类）
 
 ### 5.1 模型管理
 
@@ -505,7 +490,9 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
-## 12. 错误处理
+
+## 12. 错误处理约定
+
 
 - 所有错误通过 C++ 异常抛出（`std::runtime_error`、`std::invalid_argument` 等）。
 - 底层 C API 返回的错误码封装在异常消息中。
@@ -516,8 +503,8 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ## 13. 项目范围
 
-- 项目目录：`dlcv_infer_cpp_dll`
-- 工程文件：`dlcv_infer_cpp_dll/dlcv_infer_cpp_dll.vcxproj`
+- 项目目录：`dlcv_infer_cpp`
+- 工程文件：`dlcv_infer_cpp/dlcv_infer_cpp.vcxproj`
 - 工程类型：Windows 动态库
 - 根命名空间：`dlcvinfercppdll`
 - 主要命名空间：
@@ -525,14 +512,11 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
   - `dlcv_infer::flow`
   - `sntl_admin`
 - 对外头文件：
-  - `dlcv_infer_cpp_dll/dlcv_infer.h`
-  - `dlcv_infer_cpp_dll/flow/FlowGraphModel.h`
-  - `dlcv_infer_cpp_dll/dlcv_sntl_admin.h`
-- C API 项目目录：`dlcv_infer_c_dll`
-- C API 工程文件：`dlcv_infer_c_dll/dlcv_infer_c_dll.vcxproj`
-- C API 对外头文件：`dlcv_infer_c_dll/dlcv_infer_c_api.h`
-- C API 工程通过 `dlcv_infer_cpp_dll.lib` 显式依赖 C++ API 工程。
-- C API 保留 `dlcv_infer_cpp_infer_c` 默认参数入口，并提供 `dlcv_infer_cpp_infer_with_params_c` 接收 JSON 参数；调用端可传入 `threshold`、`calc_mean` 等字段覆盖本次推理参数。
+  - `dlcv_infer_cpp/dlcv_infer.h`
+  - `dlcv_infer_cpp/flow/FlowGraphModel.h`
+  - `dlcv_infer_cpp/dlcv_sntl_admin.h`
+  - `dlcv_infer_cpp/dlcv_infer_c_api.h`
+- C API 的导出函数、结构定义和逐项对照统一写在 `C API文档.md`。
 
 ---
 
@@ -555,14 +539,14 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 - 输出目录仅在 `x64` 配置中显式设置为 `$(SolutionDir)$(Configuration)\`。
 - Debug x64 链接库：`opencv_world4100d.lib`
 - Release x64 链接库：`opencv_world4100.lib`
-- `dlcv_infer_c_dll` 工程配置为 `Debug|x64` 和 `Release|x64`，输出目录为 `$(SolutionDir)$(Configuration)\`。
-- `dlcv_infer_c_dll` 编译时定义 `DLCV_INFER_C_DLL_EXPORTS`，链接 `dlcv_infer_cpp_dll.lib` 与对应配置的 OpenCV 库。
+- C API 源码与 C++ API 源码使用同一工程配置，统一输出 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 
 当前工程的编译单元按“入口绑定 -> Flow 执行框架 -> 节点实现”三层拆分：
 
 | 分组 | 文件 | 当前职责 |
 | --- | --- | --- |
 | 入口与外部绑定 | `dlcv_infer.cpp` | `Model`、`Utils`、底层 `dlcv_infer.dll` 绑定、DVS 归档解包、普通模型与 Flow 结果转换 |
+| 入口与外部绑定 | `dlcv_infer_c_api.cpp` | C 接口导出、C 结构转换、模型表管理与结果释放 |
 | 入口与外部绑定 | `dlcv_sntl_admin.cpp` | 加密狗管理 DLL 绑定、XML 转 JSON、设备与特性查询 |
 | Flow 执行框架 | `flow/GraphExecutor.cpp` | 节点排序、链路路由、属性覆盖、标量端口注入、节点计时 |
 | Flow 执行框架 | `flow/FlowGraphModel.cpp` | Flow JSON 加载、`model/*` 预加载、执行上下文初始化、前端结果聚合 |
@@ -591,8 +575,8 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 | 组件 | 当前加载方式 | 缺失时行为 |
 | --- | --- | --- |
-| `dlcv_infer.dll` | Sentinel 版本；`AutoDetectProvider()` 检测到 Sentinel 时加载；先按系统搜索路径查找，再回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
-| `dlcv_infer_v.dll` | Virbox 版本；仅在模型头明确指定 `dog_provider=virbox`，或 `AutoDetectProvider()` 检测到 Virbox 且未检测到 Sentinel 时启用；查找顺序为系统搜索路径，再到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
+| `dlcv_infer.dll` | 检测到 Sentinel 时加载；两类加密狗同时存在时也选择此 DLL；先按系统搜索路径查找，再回退到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
+| `dlcv_infer_v.dll` | 未检测到 Sentinel、但检测到 Virbox 时加载；查找顺序为系统搜索路径，再到 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` | 弹框 `需要先安装 dlcv_infer`，并抛出 `need install dlcv_infer first` |
 | 无加密狗 | `AutoDetectProvider()` 返回 `DogProvider::Unknown`；创建空 `DllLoader`，不 `LoadLibrary` 任何推理 DLL | 不弹框、不抛异常；加载模型时再报「未检测到授权」 |
 | `sntl_adminapi_windows_x64.dll` | `SNTLDllLoader` 先按系统搜索路径查找，再回退到 `C:\dlcv\bin\sntl_adminapi_windows_x64.dll` | 切换为空代理：`context_new/get` 返回 `SNTL_ADMIN_LM_NOT_FOUND`，`context_delete` 返回成功，`free` 为空函数 |
 | `nvml.dll` | `Utils::GetGpuInfo()` 与 NVML 包装函数运行时 `LoadLibraryA("nvml.dll")` | `GetGpuInfo()` 返回错误 JSON；初始化失败时 `code=1`，取设备数失败时 `code=2` |
@@ -616,7 +600,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 共享结果语义、JSON 字段语义、Flow 模块分类、模板对象语义和计时口径见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
 
-### 19.1 对外类型名
+### 18.1 对外类型名
 
 | 类型 | 当前字段 |
 | --- | --- |
@@ -627,7 +611,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 以上为 C++ API 对外结构体字段名。C++ 公共成员命名使用 `camelCase`。
 
-### 19.2 Flow 聚合结构
+### 18.2 Flow 聚合结构
 
 `FlowResultItem`、`FlowByImageEntry`、`FlowFrontendPayload`、`FlowFrontendByNodePayload`、`FlowBatchResult` 用于 Flow 结果聚合，属于 C++ 侧内部承载结构。
 
@@ -671,9 +655,24 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧优先从 DVS 归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；推理组件缺少该接口时，兼容路径才将模型文件写入临时目录后按路径加载，加载完成后清理临时目录。
 
+
+`Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。公开类布局已调整，调用方需使用同一版头文件重新编译。
+
+- 流程归档使用既有 `ModelBinaryStore` 保存只读子模型字节，通过 `ModelPool::AcquireBinary` 调用内存加载接口，不计算整包摘要，不生成解包临时文件。
+- 每次读取归档分配新的 `StoreId`；模型池键由 `StoreId`、归档成员键与设备组成。同一次加载中引用同一成员的多个节点共享模型，不同加载实例分别持有模型池引用。
+- 普通流程子模型仍按路径和设备查找同一模型池。最后一个引用释放后移除该模型，不保留空闲模型缓存。
+- 归档成员名称统一路径分隔符、去除 ASCII 首尾空白和开头的 `./`，名称比较不区分 ASCII 大小写。同名成员逐字节比较：相同内容保留首份，不同内容报错；`pipeline.json` 使用相同检查。
+- 节点引用先匹配完整成员名，再匹配文件名；文件名对应多个成员时报错，不自动选择其中一个。
+- C 接口调用相同的 C++ `Model` 实现，不单独维护归档加载与子模型缓存。
+
+
 ### 22.2 `FlowGraphModel`
 
 `FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`GetDvsModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并预加载 `model/*` 节点，同时保存每个模型节点的普通模型信息。
+
+
+流程归档的子模型二进制由 `FlowGraphModel` 的 `_modelBinaryStore` 成员持有；析构、重复加载和移动操作会清理或转移该成员及模型池引用。
+
 
 ### 22.3 `ExecutionContext`
 
@@ -695,15 +694,16 @@ C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/Mode
 
 ## 23. 仅 DLL 构建内部使用的类型
 
-以下类型位于 `#ifdef DLCV_INFER_CPP_DLL_EXPORTS` 条件编译区域：
+以下类型位于 `#ifdef DLCV_INFER_CPP_EXPORTS` 条件编译区域：
 
 - `DllLoader`
+
 
 ---
 
 ## 24. 同进程共享索引测试导出
 
-以下函数由 `dlcv_infer_cpp_dll.dll` 导出，仅用于控制台测试工程中的跨语言共享索引验证，不属于生产调用入口：
+以下函数由 `dlcv_infer_cpp.dll` 导出，仅用于控制台测试工程中的跨语言共享索引验证，不属于生产调用入口：
 
 ```cpp
 int dlcv_shared_index_test_load_c(const wchar_t* model_path, int device_id);

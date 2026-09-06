@@ -1,4 +1,4 @@
-#include "dlcv_infer.h"
+﻿#include "dlcv_infer.h"
 #include "dlcv_sntl_admin.h"
 #include "ImageInputUtils.h"
 #include "flow/FlowGraphModel.h"
@@ -15,20 +15,24 @@
 #include <unistd.h>
 #endif
 #include <algorithm>
+#include <atomic>
+#include <limits>
 #include <cerrno>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <codecvt>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwctype>
 #include <fstream>
 #include <iterator>
-#include <limits>
 #include <locale>
 #include <random>
 #include <set>
+#include <mutex>
 #include <stdexcept>
 #include <system_error>
 #include <unordered_map>
@@ -260,34 +264,7 @@ struct DvsArchiveData {
     std::shared_ptr<dlcv_infer::flow::ModelBinaryStore> modelBinaryStore;
 };
 
-uint64_t HashModelBinaryStore(const DvsArchiveData& archive) {
-    const uint64_t offset = 1469598103934665603ULL;
-    const uint64_t prime = 1099511628211ULL;
-    uint64_t value = offset;
-    const std::string pipelineText = archive.pipelineRoot.dump();
-    for (unsigned char byte : pipelineText) {
-        value ^= byte;
-        value *= prime;
-    }
-
-    std::vector<std::string> keys;
-    keys.reserve(archive.modelBinaryStore->Buffers.size());
-    for (const auto& item : archive.modelBinaryStore->Buffers) keys.push_back(item.first);
-    std::sort(keys.begin(), keys.end());
-    for (const std::string& key : keys) {
-        for (unsigned char byte : key) {
-            value ^= byte;
-            value *= prime;
-        }
-        const auto it = archive.modelBinaryStore->Buffers.find(key);
-        if (it == archive.modelBinaryStore->Buffers.end() || !it->second) continue;
-        for (unsigned char byte : *it->second) {
-            value ^= byte;
-            value *= prime;
-        }
-    }
-    return value == 0 ? 1 : value;
-}
+std::atomic<uint64_t> g_nextModelBinaryStoreId{1};
 
 static bool DeleteDirectoryRecursive(const std::string& dir) {
     if (dir.empty()) return true;
@@ -344,6 +321,15 @@ std::string ToLowerAscii(std::string s) {
         if (ch >= 'A' && ch <= 'Z') s[i] = static_cast<char>(ch - 'A' + 'a');
     }
     return s;
+}
+
+std::string NormalizeArchiveName(std::string name) {
+    const auto first = name.find_first_not_of(" \t\r\n\f\v");
+    if (first == std::string::npos) return std::string();
+    name = name.substr(first, name.find_last_not_of(" \t\r\n\f\v") - first + 1);
+    std::replace(name.begin(), name.end(), '\\', '/');
+    while (name.rfind("./", 0) == 0) name.erase(0, 2);
+    return name;
 }
 
 bool EndsWithIgnoreCase(const std::string& text, const std::string& suffix) {
@@ -470,7 +456,7 @@ void BindPipelineModelBuffers(
 
     for (auto& node : pipelineRoot.at("nodes")) {
         if (!node.is_object()) continue;
-        const std::string nodeType = node.value("type", std::string());
+        const std::string nodeType = ToLowerAscii(node.value("type", std::string()));
         if (nodeType.rfind("model/", 0) != 0) continue;
         if (!node.contains("properties") || !node.at("properties").is_object()) continue;
 
@@ -482,11 +468,14 @@ void BindPipelineModelBuffers(
         const std::string originalName = GetFileNameOnly(originalPath);
         props["model_name"] = originalName.empty() ? originalPath : originalName;
 
-        std::string aliasKey = ToLowerAscii(originalPath);
-        auto aliasIt = modelBinaryStore.Aliases.find(aliasKey);
-        if (aliasIt == modelBinaryStore.Aliases.end()) {
-            aliasKey = ToLowerAscii(GetFileNameOnly(originalPath));
-            aliasIt = modelBinaryStore.Aliases.find(aliasKey);
+        std::string aliasKey = ToLowerAscii(NormalizeArchiveName(originalPath));
+        if (modelBinaryStore.Buffers.find(aliasKey) != modelBinaryStore.Buffers.end()) {
+            props["model_buffer_key"] = aliasKey;
+            continue;
+        }
+        auto aliasIt = modelBinaryStore.Aliases.find(ToLowerAscii(GetFileNameOnly(aliasKey)));
+        if (aliasIt != modelBinaryStore.Aliases.end() && aliasIt->second.empty()) {
+            throw std::runtime_error("流程归档中存在多个同名子模型，请使用完整路径: " + originalPath);
         }
         if (aliasIt == modelBinaryStore.Aliases.end() ||
             modelBinaryStore.Buffers.find(aliasIt->second) == modelBinaryStore.Buffers.end()) {
@@ -509,6 +498,7 @@ DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
 
     DvsArchiveData out;
     out.modelBinaryStore = std::make_shared<dlcv_infer::flow::ModelBinaryStore>();
+    out.modelBinaryStore->StoreId = g_nextModelBinaryStoreId.fetch_add(1, std::memory_order_relaxed);
     try {
         char magic[3] = { 0 };
         ReadExactOrThrow(fp, magic, 3, "无法读取流程模型文件头");
@@ -526,6 +516,8 @@ DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
         }
 
         bool gotPipeline = false;
+        std::string pipelineData;
+
         const auto& fileList = header.at("file_list");
         const auto& fileSize = header.at("file_size");
         for (size_t i = 0; i < fileList.size(); i++) {
@@ -533,7 +525,7 @@ DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
                 throw std::runtime_error("流程模型文件头中的文件名不是字符串");
             }
 
-            const std::string fileName = fileList.at(i).get<std::string>();
+            const std::string fileName = NormalizeArchiveName(fileList.at(i).get<std::string>());
             const long long size = ReadFileSizeFromJson(fileSize.at(i));
             if (size < 0 || static_cast<unsigned long long>(size) >
                 static_cast<unsigned long long>(std::numeric_limits<size_t>::max())) {
@@ -546,30 +538,46 @@ DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
                 if (byteCount > 0) {
                     ReadExactOrThrow(fp, &text[0], byteCount, "无法读取 pipeline.json");
                 }
+                if (gotPipeline) {
+                    if (pipelineData != text) {
+                        throw std::runtime_error("归档中存在同名但内容不同的文件：pipeline.json");
+                    }
+                    continue;
+                }
                 out.pipelineRoot = Json::parse(text);
-                out.originalPipelineRoot = out.pipelineRoot;
+                pipelineData = std::move(text);
                 gotPipeline = true;
-                continue;
+            } else {
+                auto bytes = std::make_shared<std::vector<unsigned char>>(byteCount);
+                if (byteCount > 0) {
+                    ReadExactOrThrow(
+                        fp,
+                        reinterpret_cast<char*>(bytes->data()),
+                        byteCount,
+                        "无法读取流程模型中的文件数据");
+                }
+                const std::shared_ptr<const std::vector<unsigned char>> readonlyBytes = bytes;
+                const std::string canonicalKey = ToLowerAscii(fileName);
+                const auto existing = out.modelBinaryStore->Buffers.find(canonicalKey);
+                if (existing != out.modelBinaryStore->Buffers.end()) {
+                    if (*existing->second != *readonlyBytes) {
+                        throw std::runtime_error("归档中存在同名但内容不同的文件：" + fileName);
+                    }
+                    continue;
+                }
+                out.modelBinaryStore->Buffers.emplace(canonicalKey, readonlyBytes);
+                const std::string shortName = ToLowerAscii(GetFileNameOnly(fileName));
+                const auto alias = out.modelBinaryStore->Aliases.emplace(shortName, canonicalKey);
+                if (!alias.second && alias.first->second != canonicalKey) {
+                    alias.first->second.clear();
+                }
             }
 
-            auto bytes = std::make_shared<std::vector<unsigned char>>(byteCount);
-            if (byteCount > 0) {
-                ReadExactOrThrow(
-                    fp,
-                    reinterpret_cast<char*>(bytes->data()),
-                    byteCount,
-                    "无法读取流程模型中的文件数据");
-            }
-            const std::shared_ptr<const std::vector<unsigned char>> readonlyBytes = bytes;
-            const std::string canonicalKey = ToLowerAscii(fileName);
-            out.modelBinaryStore->Buffers[canonicalKey] = readonlyBytes;
-            out.modelBinaryStore->Aliases[canonicalKey] = canonicalKey;
-            out.modelBinaryStore->Aliases[ToLowerAscii(GetFileNameOnly(fileName))] = canonicalKey;
         }
 
         if (!gotPipeline) throw std::runtime_error("流程模型中未找到 pipeline.json");
+        out.originalPipelineRoot = out.pipelineRoot;
         BindPipelineModelBuffers(out.pipelineRoot, *out.modelBinaryStore);
-        out.modelBinaryStore->StoreId = HashModelBinaryStore(out);
     } catch (...) {
         std::fclose(fp);
         throw;
@@ -1374,6 +1382,8 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
 
 namespace dlcv_infer {
 
+    static std::mutex g_modelLoadMu;
+
     namespace {
         std::mutex& DllLoaderRegistryMutex() {
             static std::mutex mutex;
@@ -1414,7 +1424,7 @@ namespace dlcv_infer {
         config["model_path"] = modelPathUtf8;
         config["device_id"] = deviceId;
         const std::string jsonStr = config.dump();
-        void* resultPtr = loader->GetLoadModelFunc()(jsonStr.c_str());
+        const char* resultPtr = loader->GetLoadModelFunc()(jsonStr.c_str());
         if (resultPtr == nullptr) throw std::runtime_error("模型加载未返回结果");
 
         int modelIndex = -1;
@@ -1709,6 +1719,27 @@ namespace dlcv_infer {
         dlcv_bind_index_c = (BindIndexFuncType)ResolveSymbol(hModule, "dlcv_bind_index_c");
         dlcv_unbind_index_c = (UnbindIndexFuncType)ResolveSymbol(hModule, "dlcv_unbind_index_c");
         dlcv_free_string = (FreeStringFuncType)ResolveSymbol(hModule, "dlcv_free_result");
+        dlcv_get_gpu_info = (GetGpuInfoFuncType)ResolveSymbol(hModule, "dlcv_get_gpu_info");
+        dlcv_reset_max_clock = (ResetMaxClockFuncType)ResolveSymbol(hModule, "dlcv_reset_max_clock");
+        dlcv_set_gpu_max_clock = (SetGpuMaxClockFuncType)ResolveSymbol(hModule, "dlcv_set_gpu_max_clock");
+        dlcv_reset_gpu_max_clock = (ResetGpuMaxClockFuncType)ResolveSymbol(hModule, "dlcv_reset_gpu_max_clock");
+        dlcv_get_power_scheme_guid = (GetPowerSchemeGuidFuncType)ResolveSymbol(hModule, "dlcv_get_power_scheme_guid");
+        dlcv_set_power_scheme_guid = (SetPowerSchemeGuidFuncType)ResolveSymbol(hModule, "dlcv_set_power_scheme_guid");
+        dlcv_get_power_scheme = (GetPowerSchemeFuncType)ResolveSymbol(hModule, "dlcv_get_power_scheme");
+        dlcv_set_power_scheme = (SetPowerSchemeFuncType)ResolveSymbol(hModule, "dlcv_set_power_scheme");
+        dlcv_set_current_process_affinity_to_big_cores =
+            (SetCurrentProcessAffinityToBigCoresFuncType)ResolveSymbol(
+                hModule,
+                "dlcv_set_current_process_affinity_to_big_cores");
+        dlcv_set_current_process_priority_highest =
+            (SetCurrentProcessPriorityHighestFuncType)ResolveSymbol(
+                hModule,
+                "dlcv_set_current_process_priority_highest");
+        dlcv_load_model_c = (LoadModelCFuncType)ResolveSymbol(hModule, "dlcv_load_model_c");
+        dlcv_free_model_c = (FreeModelCFuncType)ResolveSymbol(hModule, "dlcv_free_model_c");
+        dlcv_infer_c = (InferCFuncType)ResolveSymbol(hModule, "dlcv_infer_c");
+        dlcv_free_model_result_c =
+            (FreeModelResultCFuncType)ResolveSymbol(hModule, "dlcv_free_model_result_c");
     }
 
     sntl_admin::DogProvider DllLoader::AutoDetectProvider() {
@@ -2223,7 +2254,7 @@ namespace dlcv_infer {
         _deviceId = flowInfo.value("device_id", _deviceId);
         _isFlowGraphMode = true;
         _flowModel = new flow::FlowGraphModel();
-        const json report = _flowModel->LoadFromRoot(pipelineRoot, _deviceId);
+        const json report = _flowModel->LoadFromRoot(pipelineRoot, _deviceId, nullptr);
         if (report.value("code", 1) != 0) {
             throw std::runtime_error("恢复流程失败: " + report.dump());
         }
@@ -2296,6 +2327,7 @@ namespace dlcv_infer {
 
     Model::Model(const std::string& modelPath, int device_id)
         : _deviceId(device_id) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         const std::wstring modelPathW = DecodeModelPathString(modelPath);
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPathW);
         if (IsUnsupportedDvspPath(modelPathUtf8)) {
@@ -2316,6 +2348,7 @@ namespace dlcv_infer {
             }
         }
 
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
         _dllLoader = &DllLoader::EnsureForModel(modelPathUtf8);
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
@@ -2330,6 +2363,7 @@ namespace dlcv_infer {
 
     Model::Model(const std::wstring& modelPath, int device_id)
         : _deviceId(device_id) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPath);
         if (IsUnsupportedDvspPath(modelPathUtf8)) {
             throw std::invalid_argument("不支持 .dvsp 模型推理");
@@ -2349,6 +2383,7 @@ namespace dlcv_infer {
             }
         }
 
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
         _dllLoader = &DllLoader::EnsureForModel(modelPath);
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
@@ -2366,6 +2401,8 @@ namespace dlcv_infer {
         const std::string& modelName,
         int device_id)
         : _deviceId(device_id) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
         if (!modelData || modelData->empty()) {
             throw std::invalid_argument("子模型数据为空");
         }
@@ -2382,8 +2419,11 @@ namespace dlcv_infer {
         json config;
         config["device_id"] = device_id;
         const std::string jsonStr = config.dump();
-        void* resultPtr = loadModelBinary(
-            modelData->data(), modelData->size(), jsonStr.c_str());
+
+        const char* resultPtr = loadModelBinary(
+            modelData->data(),
+            modelData->size(),
+            jsonStr.c_str());
         if (resultPtr == nullptr) {
             throw std::runtime_error("二进制模型加载未返回结果");
         }
@@ -2405,23 +2445,26 @@ namespace dlcv_infer {
         _indexReady = _ownsNativeModelIndex;
     }
 
-    Model::Model(Model&& other) noexcept
-        : modelIndex(other.modelIndex),
-        OwnModelIndex(other.OwnModelIndex),
-        _isFlowGraphMode(other._isFlowGraphMode),
-        _deviceId(other._deviceId),
-        _flowModel(other._flowModel),
-        _expectedChCache(other._expectedChCache),
-        _hasCachedModelInfo(other._hasCachedModelInfo),
-        _cachedModelInfo(std::move(other._cachedModelInfo)),
-        _indexBound(other._indexBound),
-        _indexReady(other._indexReady),
-        _ownsNativeModelIndex(other._ownsNativeModelIndex),
-        _ownsRegisteredFlowIndex(other._ownsRegisteredFlowIndex),
-        _tempDir(std::move(other._tempDir)),
-        _dllLoader(other._dllLoader),
-        _loadedDogProvider(other._loadedDogProvider),
-        _loadedNativeDllName(std::move(other._loadedNativeDllName)) {
+    Model::Model(Model&& other) noexcept {
+        std::unique_lock<std::shared_mutex> otherStateLock(other._stateMutex);
+        std::lock_guard<std::mutex> otherModelInfoLock(other._modelInfoMutex);
+        modelIndex = other.modelIndex;
+        OwnModelIndex = other.OwnModelIndex;
+        _isFlowGraphMode = other._isFlowGraphMode;
+        _deviceId = other._deviceId;
+        _flowModel = other._flowModel;
+        _expectedChCache = other._expectedChCache;
+        _hasCachedModelInfo = other._hasCachedModelInfo;
+        _cachedModelInfo = std::move(other._cachedModelInfo);
+        _dllLoader = other._dllLoader;
+        _loadedDogProvider = other._loadedDogProvider;
+        _loadedNativeDllName = std::move(other._loadedNativeDllName);
+
+        _indexBound = other._indexBound;
+        _indexReady = other._indexReady;
+        _ownsNativeModelIndex = other._ownsNativeModelIndex;
+        _ownsRegisteredFlowIndex = other._ownsRegisteredFlowIndex;
+        _tempDir = std::move(other._tempDir);
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
@@ -2445,8 +2488,14 @@ namespace dlcv_infer {
             return *this;
         }
 
-        try { FreeModel(); } catch (...) {}
-
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::unique_lock<std::shared_mutex> stateLock(_stateMutex, std::defer_lock);
+        std::unique_lock<std::shared_mutex> otherStateLock(other._stateMutex, std::defer_lock);
+        std::lock(stateLock, otherStateLock);
+        try { freeModelLocked(); } catch (...) {}
+        std::unique_lock<std::mutex> modelInfoLock(_modelInfoMutex, std::defer_lock);
+        std::unique_lock<std::mutex> otherModelInfoLock(other._modelInfoMutex, std::defer_lock);
+        std::lock(modelInfoLock, otherModelInfoLock);
         modelIndex = other.modelIndex;
         OwnModelIndex = other.OwnModelIndex;
         _isFlowGraphMode = other._isFlowGraphMode;
@@ -2488,6 +2537,18 @@ namespace dlcv_infer {
     }
 
     void Model::FreeModel() {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::unique_lock<std::shared_mutex> stateLock(_stateMutex);
+        freeModelLocked();
+    }
+
+    void Model::freeModelLocked() {
+        {
+            std::lock_guard<std::mutex> modelInfoLock(_modelInfoMutex);
+            _expectedChCache = -2;
+            _hasCachedModelInfo = false;
+            _cachedModelInfo = json();
+        }
         std::lock_guard<std::mutex> indexLock(_indexStateMu);
         _expectedChCache = -2;
         if (_ownsRegisteredFlowIndex) {
@@ -2558,10 +2619,12 @@ namespace dlcv_infer {
             _isFlowGraphMode = false;
             _indexReady = false;
             modelIndex = -1;
+            _isFlowGraphMode = false;
             return;
         }
 
         if (modelIndex == -1) {
+            _isFlowGraphMode = false;
             return;
         }
         if (!_ownsNativeModelIndex) {
@@ -2573,6 +2636,7 @@ namespace dlcv_infer {
             _ownsNativeModelIndex = false;
             _indexReady = false;
             modelIndex = -1;
+            _isFlowGraphMode = false;
             return;
         }
 
@@ -2585,7 +2649,7 @@ namespace dlcv_infer {
         const std::string jsonStr = config.dump();
         const auto freeModel = _dllLoader->GetFreeModelFunc();
         const auto freeResult = _dllLoader->GetFreeResultFunc();
-        void* resultPtr = nullptr;
+        const char* resultPtr = nullptr;
         try {
             resultPtr = freeModel(jsonStr.c_str());
             if (resultPtr == nullptr) {
@@ -2622,12 +2686,17 @@ namespace dlcv_infer {
         _ownsNativeModelIndex = false;
         _indexReady = false;
         modelIndex = -1;
+        _isFlowGraphMode = false;
     }
 
-    json Model::GetModelInfo() {
+    json Model::getModelInfoLocked() {
         EnsureBoundIndexReady();
         if (_hasCachedModelInfo) {
             return _cachedModelInfo;
+        }
+
+        if (!_isFlowGraphMode && modelIndex < 0) {
+            throw std::runtime_error("模型尚未加载");
         }
 
         if (_isFlowGraphMode) {
@@ -2641,8 +2710,8 @@ namespace dlcv_infer {
         config["model_index"] = modelIndex;
 
         std::string jsonStr = config.dump();
-        void* resultPtr = _dllLoader->GetModelInfoFunc()(jsonStr.c_str());
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+        const char* resultPtr = _dllLoader->GetModelInfoFunc()(jsonStr.c_str());
+        std::string resultJson = std::string(resultPtr);
         json resultObject = json::parse(resultJson);
         _dllLoader->GetFreeResultFunc()(resultPtr);
         _cachedModelInfo = resultObject;
@@ -2650,7 +2719,16 @@ namespace dlcv_infer {
         return resultObject;
     }
 
+    json Model::GetModelInfo() {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
+        std::lock_guard<std::mutex> lock(_modelInfoMutex);
+        return getModelInfoLocked();
+    }
+
     json Model::GetDvsModelInfo() {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
         EnsureBoundIndexReady();
         if (!_isFlowGraphMode) {
             throw std::runtime_error("GetDvsModelInfo 仅支持流程模型");
@@ -2662,6 +2740,7 @@ namespace dlcv_infer {
     }
 
     int Model::resolveEffectiveInputCh() {
+        std::lock_guard<std::mutex> lock(_modelInfoMutex);
         if (_expectedChCache != -2) {
             return (_expectedChCache == -1) ? 3 : _expectedChCache;
         }
@@ -2670,7 +2749,7 @@ namespace dlcv_infer {
                 _expectedChCache = -1;
                 return 3;
             }
-            const json info = GetModelInfo();
+            const json info = getModelInfoLocked();
             const int p = ParseInputChFromModelInfo(info);
             if (p == 1 || p == 3) {
                 _expectedChCache = p;
@@ -2698,7 +2777,7 @@ namespace dlcv_infer {
         return out;
     }
 
-    std::pair<json, void*> Model::InferInternal(const std::vector<cv::Mat>& images, const json& params_json) {
+    std::pair<json, const char*> Model::InferInternal(const std::vector<cv::Mat>& images, const json& params_json) {
         EnsureBoundIndexReady();
         json imageInfoList = json::array();
         std::vector<std::pair<cv::Mat, bool>> processImages;
@@ -2744,8 +2823,8 @@ namespace dlcv_infer {
 
             // 执行推理
             std::string jsonStr = inferRequest.dump();
-            void* resultPtr = _dllLoader->GetInferFunc()(jsonStr.c_str());
-            std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+            const char* resultPtr = _dllLoader->GetInferFunc()(jsonStr.c_str());
+            std::string resultJson = std::string(resultPtr);
             json resultObject = json::parse(resultJson);
 
             // 检查是否返回错误
@@ -2773,6 +2852,16 @@ namespace dlcv_infer {
     }
 
     Result Model::ParseToStructResult(const json& resultObject) {
+        return ParseToStructResultInternal(resultObject, false);
+    }
+
+    Result Model::ParseToStructResultPreservingOriginalMask(const json& resultObject) {
+        return ParseToStructResultInternal(resultObject, true);
+    }
+
+    Result Model::ParseToStructResultInternal(
+        const json& resultObject,
+        bool preserveOriginalMask) {
         std::vector<SampleResult> sampleResults;
         auto sampleResultsArray = resultObject["sample_results"];
 
@@ -2894,9 +2983,10 @@ namespace dlcv_infer {
                     mask_img = cv::Mat(mask_height, mask_width, CV_8UC1, mask_ptr).clone();
                 }
 
-                // 与 C# 保持一致：普通模型路径下，mask 需要归一到 bbox 尺寸，
-                // 否则 flow 的 mask_to_rbox 会把“整图 mask”再次叠加 bbox 偏移，导致旋转框偏大。
-                if (!mask_img.empty() && bbox.size() >= 4)
+                // 普通 C++ 模型路径与 C# 保持一致，将 mask 调整到 bbox 尺寸，
+                // 避免 flow 的 mask_to_rbox 再次叠加 bbox 偏移后得到过大的旋转框。
+                // 结构化 C 接口需要原样传递底层 mask，因此跳过此处理。
+                if (!preserveOriginalMask && !mask_img.empty() && bbox.size() >= 4)
                 {
                     const int bbox_w = std::max(0, static_cast<int>(std::abs(bbox[2])));
                     const int bbox_h = std::max(0, static_cast<int>(std::abs(bbox[3])));
@@ -2937,6 +3027,8 @@ namespace dlcv_infer {
     }
 
     Result Model::Infer(const cv::Mat& image, const json& params_json) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
         ClearLastInspectionStatuses();
         EnsureBoundIndexReady();
         if (_isFlowGraphMode) {
@@ -2999,6 +3091,21 @@ namespace dlcv_infer {
     }
 
     Result Model::InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json) {
+        return InferBatchInternal(image_list, params_json, false);
+    }
+
+    Result Model::InferBatchPreservingOriginalMask(
+        const std::vector<cv::Mat>& image_list,
+        const json& params_json) {
+        return InferBatchInternal(image_list, params_json, true);
+    }
+
+    Result Model::InferBatchInternal(
+        const std::vector<cv::Mat>& image_list,
+        const json& params_json,
+        bool preserveOriginalMask) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
         ClearLastInspectionStatuses();
         EnsureBoundIndexReady();
         if (_isFlowGraphMode) {
@@ -3060,7 +3167,9 @@ namespace dlcv_infer {
 
         try
         {
-            Result result = ParseToStructResult(resultTuple.first);
+            Result result = preserveOriginalMask
+                ? ParseToStructResultPreservingOriginalMask(resultTuple.first)
+                : ParseToStructResult(resultTuple.first);
             // 完成后释放结果
             _dllLoader->GetFreeModelResultFunc()(resultTuple.second);
             return result;
@@ -3074,6 +3183,8 @@ namespace dlcv_infer {
     }
 
     json Model::InferOneOutJson(const cv::Mat& image, const json& params_json) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::shared_lock<std::shared_mutex> stateLock(_stateMutex);
         ClearLastInspectionStatuses();
         EnsureBoundIndexReady();
         if (_isFlowGraphMode) {
@@ -3215,66 +3326,13 @@ namespace dlcv_infer {
         return true;
     }
 
-    // SlidingWindowModel类实现
-    SlidingWindowModel::SlidingWindowModel(
-        const std::string& modelPath,
-        int device_id,
-        int small_img_width,
-        int small_img_height,
-        int horizontal_overlap,
-        int vertical_overlap,
-        float threshold,
-        float iou_threshold,
-        float combine_ios_threshold) {
-        _dllLoader = &DllLoader::EnsureForModel(modelPath);
-        _loadedDogProvider = _dllLoader->GetDogProvider();
-        _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
-        if (!_dllLoader->GetLoadModelFunc()) {
-            throw std::runtime_error("未检测到授权");
-        }
-
-        json config;
-        config["type"] = "sliding_window_pipeline";
-        config["model_path"] = modelPath;
-        config["device_id"] = device_id;
-        config["small_img_width"] = small_img_width;
-        config["small_img_height"] = small_img_height;
-        config["horizontal_overlap"] = horizontal_overlap;
-        config["vertical_overlap"] = vertical_overlap;
-        config["threshold"] = threshold;
-        config["iou_threshold"] = iou_threshold;
-        config["combine_ios_threshold"] = combine_ios_threshold;
-
-        const std::string jsonStr = config.dump();
-        void* resultPtr = _dllLoader->GetLoadModelFunc()(jsonStr.c_str());
-        if (resultPtr == nullptr) {
-            throw std::runtime_error("滑动窗口模型加载未返回结果");
-        }
-
-        try {
-            const std::string resultJson(static_cast<const char*>(resultPtr));
-            const json resultObject = json::parse(resultJson);
-            if (!resultObject.contains("model_index")) {
-                throw std::runtime_error("load sliding window model failed: " + resultObject.dump());
-            }
-            modelIndex = resultObject.at("model_index").get<int>();
-        } catch (...) {
-            _dllLoader->GetFreeResultFunc()(resultPtr);
-            throw;
-        }
-        _dllLoader->GetFreeResultFunc()(resultPtr);
-
-        _deviceId = device_id;
-        _ownsNativeModelIndex = modelIndex >= 0;
-        _indexReady = _ownsNativeModelIndex;
-    }
-
     // Utils类实现
     std::string Utils::JsonToString(const json& j) {
         return j.dump(4); // 缩进为4
     }
 
     void Utils::FreeAllModels() {
+        flow::ModelLifecycleWriteGuard lifecycleGuard;
         // 底层模型表清空后，模型池中的对象将持有失效 index。
         // 先清空模型池，确保后续流程加载会重新创建子模型。
         flow::ModelPool::Instance().ClearForFreeAllModels();
@@ -3296,7 +3354,7 @@ namespace dlcv_infer {
 
     json Utils::GetDeviceInfo() {
         auto& loader = DllLoader::Instance();
-        void* resultPtr = nullptr;
+        const char* resultPtr = nullptr;
         if (loader.GetDeviceInfoFunc())
         {
             resultPtr = loader.GetDeviceInfoFunc()();
@@ -3308,7 +3366,7 @@ namespace dlcv_infer {
             ret["message"] = "dlcv_get_device_info 不可用";
             return ret;
         }
-        std::string resultJson = std::string(static_cast<const char*>(resultPtr));
+        std::string resultJson = std::string(resultPtr);
         json resultObject = json::parse(resultJson);
         loader.GetFreeResultFunc()(resultPtr);
         return resultObject;
@@ -3461,6 +3519,165 @@ namespace dlcv_infer {
         return NvmlLibrary::Get().DeviceGetHandleByIndex(index, device);
     }
 
+    namespace {
+        template <typename FunctionType>
+        FunctionType RequireNativeApiFunction(FunctionType function, const char* functionName) {
+            if (function == nullptr) {
+                throw std::runtime_error(std::string(functionName) + " 不可用");
+            }
+            return function;
+        }
+    }
+
+    const char* NativeApi::LoadModel(const char* configStr) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
+        if (configStr != nullptr) {
+            const json config = json::parse(configStr, nullptr, false);
+            if (config.is_object() && config.contains("model_path") &&
+                config.at("model_path").is_string()) {
+                DllLoader::EnsureForModel(config.at("model_path").get<std::string>());
+            }
+        }
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetLoadModelFunc(), "dlcv_load_model")(configStr);
+    }
+
+    const char* NativeApi::FreeModel(const char* configStr) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetFreeModelFunc(), "dlcv_free_model")(configStr);
+    }
+
+    const char* NativeApi::GetModelInfo(const char* configStr) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetModelInfoFunc(), "dlcv_get_model_info")(configStr);
+    }
+
+    const char* NativeApi::Infer(const char* configStr) {
+        flow::ModelLifecycleReadGuard lifecycleGuard;
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetInferFunc(), "dlcv_infer")(configStr);
+    }
+
+    void NativeApi::FreeModelResult(const char* configStr) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetFreeModelResultFunc(), "dlcv_free_model_result")(configStr);
+    }
+
+    void NativeApi::FreeResult(const char* resultPtr) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetFreeResultFunc(), "dlcv_free_result")(resultPtr);
+    }
+
+    void NativeApi::FreeAllModels() {
+        flow::ModelLifecycleWriteGuard lifecycleGuard;
+        flow::ModelPool::Instance().Clear();
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetFreeAllModelsFunc(), "dlcv_free_all_models")();
+    }
+
+    const char* NativeApi::GetDeviceInfo() {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetDeviceInfoFunc(), "dlcv_get_device_info")();
+    }
+
+    const char* NativeApi::GetGpuInfo() {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetGpuInfoFunc(), "dlcv_get_gpu_info")();
+    }
+
+    void NativeApi::KeepMaxClock() {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetKeepMaxClockFunc(), "dlcv_keep_max_clock")();
+    }
+
+    void NativeApi::ResetMaxClock() {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetResetMaxClockFunc(), "dlcv_reset_max_clock")();
+    }
+
+    void NativeApi::SetGpuMaxClock(bool verbose) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetSetGpuMaxClockFunc(), "dlcv_set_gpu_max_clock")(verbose);
+    }
+
+    void NativeApi::ResetGpuMaxClock(bool verbose) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetResetGpuMaxClockFunc(), "dlcv_reset_gpu_max_clock")(verbose);
+    }
+
+    const char* NativeApi::GetPowerSchemeGuid(int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetPowerSchemeGuidFunc(),
+            "dlcv_get_power_scheme_guid")(verbose);
+    }
+
+    int NativeApi::SetPowerSchemeGuid(const char* schemeGuid, int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetSetPowerSchemeGuidFunc(),
+            "dlcv_set_power_scheme_guid")(schemeGuid, verbose);
+    }
+
+    const char* NativeApi::GetPowerScheme(int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetPowerSchemeFunc(), "dlcv_get_power_scheme")(verbose);
+    }
+
+    int NativeApi::SetPowerScheme(const char* schemeName, int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetSetPowerSchemeFunc(),
+            "dlcv_set_power_scheme")(schemeName, verbose);
+    }
+
+    int NativeApi::SetCurrentProcessAffinityToBigCores(int verbose) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetSetCurrentProcessAffinityToBigCoresFunc(),
+            "dlcv_set_current_process_affinity_to_big_cores")(verbose);
+    }
+
+    int NativeApi::SetCurrentProcessPriorityHighest(
+        int preferRealtime,
+        int verbose,
+        int bindBigCores) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(
+            loader.GetSetCurrentProcessPriorityHighestFunc(),
+            "dlcv_set_current_process_priority_highest")(preferRealtime, verbose, bindBigCores);
+    }
+
+    int NativeApi::LoadModelC(const char* modelPath, int deviceId) {
+        std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
+        if (modelPath == nullptr) {
+            throw std::invalid_argument("model_path is null");
+        }
+        DllLoader::EnsureForModel(std::string(modelPath));
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetLoadModelCFunc(), "dlcv_load_model_c")(
+            modelPath,
+            deviceId);
+    }
+
+    int NativeApi::FreeModelC(int modelIndex) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetFreeModelCFunc(), "dlcv_free_model_c")(modelIndex);
+    }
+
+    DlcvCResult NativeApi::InferC(int modelIndex, const DlcvCImageList& imageList) {
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetInferCFunc(), "dlcv_infer_c")(modelIndex, &imageList);
+    }
+
+    void NativeApi::FreeModelResultC(DlcvCResult& result) {
+        auto& loader = DllLoader::Instance();
+        RequireNativeApiFunction(loader.GetFreeModelResultCFunc(), "dlcv_free_model_result_c")(&result);
+    }
+
 }
 
 namespace {
@@ -3535,7 +3752,7 @@ namespace {
     }
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_load_c(
+extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_load_c(
     const wchar_t* model_path,
     int device_id) {
     if (model_path == nullptr || *model_path == L'\0') return -1;
@@ -3556,7 +3773,7 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_load_c(
     }
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API const char* dlcv_shared_index_test_infer_c(
+extern "C" DLCV_INFER_CPP_API const char* dlcv_shared_index_test_infer_c(
     int index,
     const wchar_t* image_path) {
     dlcv_infer::json response;
@@ -3587,7 +3804,7 @@ extern "C" DLCV_INFER_CPP_DLL_API const char* dlcv_shared_index_test_infer_c(
     return AllocateSharedIndexTestJson(response);
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_free_c(int index) {
+extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_free_c(int index) {
     std::shared_ptr<dlcv_infer::Model> owner;
     {
         std::lock_guard<std::mutex> lock(g_sharedIndexTestOwnersMu);
@@ -3610,7 +3827,7 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_free_c(int index) {
     return 0;
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_resolve_c(int index) {
+extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_resolve_c(int index) {
     try {
         int indexType = 0;
         dlcv_infer::DllLoader::ResolveForIndex(index, indexType);
@@ -3620,7 +3837,7 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_resolve_c(int index
     }
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_double_load_free_c(
+extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_double_load_free_c(
     const wchar_t* model_path,
     int device_id) {
     if (model_path == nullptr || *model_path == L'\0') return -1;
@@ -3647,7 +3864,7 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_double_load_free_c(
     }
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_double_flow_load_free_c(
+extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_double_flow_load_free_c(
     const wchar_t* model_path,
     int device_id) {
     if (model_path == nullptr || *model_path == L'\0') return -1;
@@ -3692,7 +3909,7 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_double_flow_load_fr
     }
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_empty_flow_after_provider_c(
+extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_empty_flow_after_provider_c(
     const wchar_t* provider_model_path,
     const wchar_t* flow_path,
     int device_id) {
@@ -3715,7 +3932,7 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_empty_flow_after_pr
     }
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API const char* dlcv_shared_index_test_info_c(int index) {
+extern "C" DLCV_INFER_CPP_API const char* dlcv_shared_index_test_info_c(int index) {
     dlcv_infer::json response;
     try {
         dlcv_infer::Model model;
@@ -3734,7 +3951,7 @@ extern "C" DLCV_INFER_CPP_DLL_API const char* dlcv_shared_index_test_info_c(int 
     return AllocateSharedIndexTestJson(response);
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_register_flow_c(int model_index) {
+extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_register_flow_c(int model_index) {
     try {
         dlcv_infer::json modelBindings = dlcv_infer::json::array({
             {{"node_id", 1}, {"model_index", model_index}}
@@ -3759,7 +3976,7 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_register_flow_c(int
     }
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_index_rules_c() {
+extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_index_rules_c() {
     struct Case final {
         int Index;
         sntl_admin::DogProvider Provider;
@@ -3790,6 +4007,6 @@ extern "C" DLCV_INFER_CPP_DLL_API int dlcv_shared_index_test_index_rules_c() {
             !dlcv_infer::ClassifySharedIndex(40000, provider, indexType)) ? 0 : -1;
 }
 
-extern "C" DLCV_INFER_CPP_DLL_API void dlcv_shared_index_test_free_string_c(const char* result) {
+extern "C" DLCV_INFER_CPP_API void dlcv_shared_index_test_free_string_c(const char* result) {
     delete[] result;
 }

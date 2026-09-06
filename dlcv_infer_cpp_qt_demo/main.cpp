@@ -883,7 +883,7 @@ int main(int argc, char* argv[]) {
         dlcv_infer::Utils::FreeAllModels();
     });
 
-    std::cout << "[dlcv_infer_cpp_dll] " << GetCppDllPath() << std::endl;
+    std::cout << "[dlcv_infer_cpp] " << GetCppDllPath() << std::endl;
 
     MainWindow w;
     w.show();

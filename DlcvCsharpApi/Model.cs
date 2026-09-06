@@ -38,6 +38,7 @@ namespace dlcv_infer_csharp
 
         private static int s_nextFlowModelIndex = 10000;
         private static readonly object s_flowModelIndexLock = new object();
+        private static readonly object s_dvtModelLoadLock = new object();
 
         private static int AllocateFlowModelIndex()
         {
@@ -585,40 +586,44 @@ namespace dlcv_infer_csharp
 
         protected void LoadDvtModel(string modelPath, JObject config, string failureMessagePrefix)
         {
-            _dllLoader = DllLoader.GetForModel(modelPath);
-            if (_dllLoader == null || _dllLoader.dlcv_load_model == null)
-            {
-                throw new Exception("未检测到授权");
+                lock (s_dvtModelLoadLock)
+                {
+                _dllLoader = DllLoader.GetForModel(modelPath);
+                if (_dllLoader == null || _dllLoader.dlcv_load_model == null)
+                {
+                    throw new Exception("未检测到授权");
+                }
+
+                var setting = new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii };
+
+                string jsonStr = JsonConvert.SerializeObject(config, setting);
+
+                IntPtr resultPtr = _dllLoader.dlcv_load_model(jsonStr);
+                try
+                {
+                    var resultJson = Marshal.PtrToStringAnsi(resultPtr);
+                    var resultObject = JObject.Parse(resultJson);
+
+                    Log("Model load result: " + resultObject.ToString());
+                    if (resultObject.ContainsKey("model_index"))
+                    {
+                        modelIndex = resultObject["model_index"].Value<int>();
+                    }
+                    else
+                    {
+                        throw new Exception(failureMessagePrefix + "：" + resultObject.ToString());
+                    }
+                }
+                finally
+                {
+                    if (resultPtr != IntPtr.Zero)
+                    {
+                        _dllLoader.dlcv_free_result(resultPtr);
+                    }
+                }
+            }
             }
 
-            var setting = new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii };
-
-            string jsonStr = JsonConvert.SerializeObject(config, setting);
-
-            IntPtr resultPtr = _dllLoader.dlcv_load_model(jsonStr);
-            try
-            {
-                var resultJson = Marshal.PtrToStringAnsi(resultPtr);
-                var resultObject = JObject.Parse(resultJson);
-
-                Log("Model load result: " + resultObject.ToString());
-                if (resultObject.ContainsKey("model_index"))
-                {
-                    modelIndex = resultObject["model_index"].Value<int>();
-                }
-                else
-                {
-                    throw new Exception(failureMessagePrefix + "：" + resultObject.ToString());
-                }
-            }
-            finally
-            {
-                if (resultPtr != IntPtr.Zero)
-                {
-                    _dllLoader.dlcv_free_result(resultPtr);
-                }
-            }
-        }
 
         private void LoadDvtModel(byte[] modelData, string modelName, JObject config, string failureMessagePrefix)
         {

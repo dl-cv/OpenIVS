@@ -41,7 +41,7 @@
 
 - 工程名：`Test/dlcv_infer_cpp_test`
 - 入口文件：`Test/dlcv_infer_cpp_test/main.cpp`
-- 依赖项目：`dlcv_infer_cpp_dll`
+- 依赖项目：`dlcv_infer_cpp`
 - 关键点：
   - 头文件通过工程依赖配置（`AdditionalIncludeDirectories`）引入，代码中使用 `#include "dlcv_infer.h"`，不使用相对路径包含
   - 使用 `GetProcessMemoryInfo` 采样私有内存与工作集
@@ -179,9 +179,10 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
   - `Release\dlcv_infer_cpp_test.exe`
-- 通过 `OpenIVS.sln` 构建时，`dlcv_infer_cpp_dll` 与 `dlcv_infer_cpp_test` 的 x64 产物输出到解决方案目录下的 `Debug` 或 `Release`。
+- 通过 `OpenIVS.sln` 构建时，`dlcv_infer_cpp` 与 `dlcv_infer_cpp_test` 的 x64 产物输出到解决方案目录下的 `Debug` 或 `Release`。
 - `DlcvCSharpTest.exe` 当前支持的专项自测子命令包括：
   - `model-channel-order-selftest`
+  - `cli-anomaly-threshold-selftest`
   - `count-results-selftest`
   - `dvs-rgb-selftest <modelPath> <imagePath>`
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
@@ -192,11 +193,18 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `shared-index-review-selftest [model.dvo] [flow.dvst] [virbox-model.dvt]`
   - `shared-index-format-selftest`
   - `shared-index-provider-model-selftest`
-  - `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-model-info <model>`，构造指定模型并把 `GetModelInfo` 返回的完整 JSON 写入标准输出。
-  - `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-dvs-model-info <model>`，构造指定模型并把 `GetDvsModelInfo` 返回的完整 JSON 写入标准输出；普通模型不支持该接口时，异常写入标准错误并返回非零状态。
-  - `get-model-info` 接收单个普通模型或流程模型路径；`get-dvs-model-info` 按 C# 公共接口支持范围接收 `.dvst`、`.dvso` 流程模型路径。命令不包含针对指定模型内容的预期值。
-  - 测试时直接按需调用 C#、C++ 可执行程序的上述命令，检查命令返回状态及标准输出中的 JSON。
-  - 两个命令成功返回 `0`，模型加载或接口调用异常返回 `1`，参数数量错误返回 `2`。
+
+  - `ui-test-options-selftest`
+  - `winforms-mainwindow-selftest`
+- `cli-anomaly-threshold-selftest` 不读取模型和图片，检查 CLI 对异常分数、普通分类低分、两路结果不一致及非有限分数的验证结果；运行前需先构建 `DlcvDemo.csproj`。
+- `ui-test-options-selftest` 反射调用 `DlcvDemo.UiTestOptions.TryParse`，覆盖 `--screenshot` 的 `.png`/`.PNG` 与省略场景，非 `.png` 后缀拒绝，`--screenshot` 与 `--model`、`--image`、`--output`、`--output.tmp` 相同的输出碰撞拒绝，以及 `--output` 的中间 `.tmp` 路径与 `--model`、`--image` 重合拒绝；运行前需先构建 `DlcvDemo.csproj`。
+- `winforms-mainwindow-selftest` 在 STA 线程内反射创建真实 `DlcvDemo.MainWindow`（不显示、不启用设备线程），校验 Form 类型、控件 Name/文本与默认 Enabled、三个 NumericUpDown 的范围与默认值及 threshold 步进 `0.05`、原生 Flat 按钮蓝/灰/红配色及 MouseOver/MouseDown 差异、三态计算均值 Indeterminate/true/false 映射，并将窗口设为 MinimumSize 后校验 threshold 与 calc_mean 完整位于父容器 ClientRectangle 内；运行前需先构建 `DlcvDemo.csproj`。
+- `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-model-info <model>`，构造指定模型并把 `GetModelInfo` 返回的完整 JSON 写入标准输出。
+- `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-dvs-model-info <model>`，构造指定模型并把 `GetDvsModelInfo` 返回的完整 JSON 写入标准输出；普通模型不支持该接口时，异常写入标准错误并返回非零状态。
+- `get-model-info` 接收单个普通模型或流程模型路径；`get-dvs-model-info` 按 C# 公共接口支持范围接收 `.dvst`、`.dvso` 流程模型路径。命令不包含针对指定模型内容的预期值。
+- 测试时直接按需调用 C#、C++ 可执行程序的上述命令，检查命令返回状态及标准输出中的 JSON。
+- 两个命令成功返回 `0`，模型加载或接口调用异常返回 `1`，参数数量错误返回 `2`。
+
 - `dlcv_infer_cpp_test.exe` 支持 `count-results-selftest`，验证新配置闭区间、非法范围与旧配置兼容逻辑。
 - `dlcv_infer_cpp_test.exe` 还支持以下流程模型专项自测：
   - `dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]`

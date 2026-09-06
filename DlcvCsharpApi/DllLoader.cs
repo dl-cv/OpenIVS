@@ -417,7 +417,11 @@ namespace dlcv_infer_csharp
         private static DogProvider AutoDetectProvider()
         {
             // 只做一次加密狗检测：先 Sentinel 再 Virbox；都没有则不加载任何推理 DLL，也不抛异常
-            List<DogProvider> available = DogUtils.GetAvailableProviders();
+            return SelectPreferredProvider(DogUtils.GetAvailableProviders());
+        }
+
+        private static DogProvider SelectPreferredProvider(List<DogProvider> available)
+        {
             if (available.Contains(DogProvider.Sentinel))
                 return DogProvider.Sentinel;
             if (available.Contains(DogProvider.Virbox))

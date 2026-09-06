@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="源文件">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="头文件">
+      <UniqueIdentifier>{93995380-89BD-4B04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="源文件\flow">
+      <UniqueIdentifier>{8726C56E-1C18-4CF0-9B06-A2983CF62CAA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="源文件\flow\modules">
+      <UniqueIdentifier>{68B0C7F6-D7E4-42AA-B721-E115B7D63820}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="头文件\flow">
+      <UniqueIdentifier>{35D8F3CD-6696-420B-A9D4-2E55A963E2E0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="头文件\flow\modules">
+      <UniqueIdentifier>{91D41F52-CBEE-4E83-B0B6-6E2108CB1E38}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="头文件\flow\utils">
+      <UniqueIdentifier>{F2C7CE02-4C1B-40A3-BFE6-349A0D424D74}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="dlcv_infer.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="dlcv_infer_c_api.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="dlcv_sntl_admin.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="flow\GraphExecutor.cpp"><Filter>源文件\flow</Filter></ClCompile>
+    <ClCompile Include="flow\FlowGraphModel.cpp"><Filter>源文件\flow</Filter></ClCompile>
+    <ClCompile Include="flow\modules\ModelModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
+    <ClCompile Include="flow\modules\CurveTextAffineModule.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
+    <ClCompile Include="flow\modules\InputModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
+    <ClCompile Include="flow\modules\OutputModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
+    <ClCompile Include="flow\modules\SlidingModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
+    <ClCompile Include="flow\modules\FeatureModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
+    <ClCompile Include="flow\modules\PostProcessModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
+    <ClCompile Include="flow\modules\RegionStrokeVisualizeTemplateModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="dlcv_infer.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="dlcv_infer_c_api.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="dlcv_sntl_admin.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="ImageInputUtils.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="flow\BaseModule.h"><Filter>头文件\flow</Filter></ClInclude>
+    <ClInclude Include="flow\ExecutionContext.h"><Filter>头文件\flow</Filter></ClInclude>
+    <ClInclude Include="flow\FlowGraphModel.h"><Filter>头文件\flow</Filter></ClInclude>
+    <ClInclude Include="flow\FlowPayloadTypes.h"><Filter>头文件\flow</Filter></ClInclude>
+    <ClInclude Include="flow\FlowTypes.h"><Filter>头文件\flow</Filter></ClInclude>
+    <ClInclude Include="flow\GraphExecutor.h"><Filter>头文件\flow</Filter></ClInclude>
+    <ClInclude Include="flow\ModuleRegistry.h"><Filter>头文件\flow</Filter></ClInclude>
+    <ClInclude Include="flow\modules\ModelModules.h"><Filter>头文件\flow\modules</Filter></ClInclude>
+    <ClInclude Include="flow\utils\FlowPlatformUtils.h"><Filter>头文件\flow\utils</Filter></ClInclude>
+    <ClInclude Include="flow\utils\MaskRleUtils.h"><Filter>头文件\flow\utils</Filter></ClInclude>
+  </ItemGroup>
+</Project>
