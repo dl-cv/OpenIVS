@@ -145,7 +145,6 @@ namespace DlcvDemo
             //
             this.button_load_model.Anchor = System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.button_load_model.BackColor = Color.FromArgb(25, 118, 210);
-            this.button_load_model.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_load_model.FlatAppearance.BorderSize = 0;
             this.button_load_model.FlatAppearance.MouseDownBackColor = Color.FromArgb(13, 71, 161);
             this.button_load_model.FlatAppearance.MouseOverBackColor = Color.FromArgb(21, 101, 192);
@@ -161,7 +160,6 @@ namespace DlcvDemo
             // button_infer
             //
             this.button_infer.BackColor = Color.FromArgb(25, 118, 210);
-            this.button_infer.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_infer.FlatAppearance.BorderSize = 0;
             this.button_infer.FlatAppearance.MouseDownBackColor = Color.FromArgb(13, 71, 161);
             this.button_infer.FlatAppearance.MouseOverBackColor = Color.FromArgb(21, 101, 192);
@@ -177,7 +175,6 @@ namespace DlcvDemo
             // button_infer_json
             //
             this.button_infer_json.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_infer_json.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_infer_json.FlatAppearance.BorderSize = 0;
             this.button_infer_json.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
             this.button_infer_json.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
@@ -193,7 +190,6 @@ namespace DlcvDemo
             // button_thread_test
             //
             this.button_thread_test.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_thread_test.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_thread_test.FlatAppearance.BorderSize = 0;
             this.button_thread_test.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
             this.button_thread_test.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
@@ -209,7 +205,6 @@ namespace DlcvDemo
             // button_consistency_test
             //
             this.button_consistency_test.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_consistency_test.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_consistency_test.FlatAppearance.BorderSize = 0;
             this.button_consistency_test.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
             this.button_consistency_test.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
@@ -365,7 +360,6 @@ namespace DlcvDemo
             //
             this.button_open_image.Anchor = System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.button_open_image.BackColor = Color.FromArgb(25, 118, 210);
-            this.button_open_image.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_open_image.FlatAppearance.BorderSize = 0;
             this.button_open_image.FlatAppearance.MouseDownBackColor = Color.FromArgb(13, 71, 161);
             this.button_open_image.FlatAppearance.MouseOverBackColor = Color.FromArgb(21, 101, 192);
@@ -381,7 +375,6 @@ namespace DlcvDemo
             // button_save_img
             //
             this.button_save_img.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_save_img.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_save_img.FlatAppearance.BorderSize = 0;
             this.button_save_img.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
             this.button_save_img.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
@@ -397,7 +390,6 @@ namespace DlcvDemo
             // button_free_model
             //
             this.button_free_model.BackColor = Color.FromArgb(239, 83, 80);
-            this.button_free_model.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_free_model.FlatAppearance.BorderSize = 0;
             this.button_free_model.FlatAppearance.MouseDownBackColor = Color.FromArgb(198, 40, 40);
             this.button_free_model.FlatAppearance.MouseOverBackColor = Color.FromArgb(229, 57, 53);
@@ -413,7 +405,6 @@ namespace DlcvDemo
             // button_free_all_model
             //
             this.button_free_all_model.BackColor = Color.FromArgb(239, 83, 80);
-            this.button_free_all_model.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_free_all_model.FlatAppearance.BorderSize = 0;
             this.button_free_all_model.FlatAppearance.MouseDownBackColor = Color.FromArgb(198, 40, 40);
             this.button_free_all_model.FlatAppearance.MouseOverBackColor = Color.FromArgb(229, 57, 53);
@@ -429,7 +420,6 @@ namespace DlcvDemo
             // button_check_environment
             //
             this.button_check_environment.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_check_environment.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_check_environment.FlatAppearance.BorderSize = 0;
             this.button_check_environment.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
             this.button_check_environment.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
@@ -445,7 +435,6 @@ namespace DlcvDemo
             // button_check_dog
             //
             this.button_check_dog.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_check_dog.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_check_dog.FlatAppearance.BorderSize = 0;
             this.button_check_dog.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
             this.button_check_dog.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
@@ -461,7 +450,6 @@ namespace DlcvDemo
             // button_github
             //
             this.button_github.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_github.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_github.FlatAppearance.BorderSize = 0;
             this.button_github.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
             this.button_github.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
@@ -477,7 +465,6 @@ namespace DlcvDemo
             // button_get_model_info
             //
             this.button_get_model_info.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_get_model_info.Cursor = System.Windows.Forms.Cursors.Hand;
             this.button_get_model_info.FlatAppearance.BorderSize = 0;
             this.button_get_model_info.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
             this.button_get_model_info.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);

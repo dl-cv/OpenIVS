@@ -7,11 +7,10 @@
 #include "flow/ExecutionContext.h"
 #include "flow/FlowTypes.h"
 #include "flow/GraphExecutor.h"
+#include "flow/modules/ModelModules.h"
 
 namespace dlcv_infer {
 namespace flow {
-
-struct ModelBinaryStore;
 
 /// <summary>
 /// 流程图推理模型封装：与普通模型一致的调用方式（先加载，再推理/测速）。
@@ -20,12 +19,12 @@ struct ModelBinaryStore;
 class FlowGraphModel final {
 public:
     FlowGraphModel() = default;
-    DLCV_INFER_CPP_DLL_API ~FlowGraphModel();
+    DLCV_INFER_CPP_API ~FlowGraphModel();
 
     FlowGraphModel(const FlowGraphModel&) = delete;
     FlowGraphModel& operator=(const FlowGraphModel&) = delete;
-    DLCV_INFER_CPP_DLL_API FlowGraphModel(FlowGraphModel&& other) noexcept;
-    DLCV_INFER_CPP_DLL_API FlowGraphModel& operator=(FlowGraphModel&& other) noexcept;
+    DLCV_INFER_CPP_API FlowGraphModel(FlowGraphModel&& other) noexcept;
+    DLCV_INFER_CPP_API FlowGraphModel& operator=(FlowGraphModel&& other) noexcept;
 
     bool IsLoaded() const { return _loaded; }
 
@@ -33,17 +32,17 @@ public:
     /// 从流程 JSON 文件加载流程图并预加载模型（model/*）。
     /// 返回：{code,message,models:[...]}（与 C# GraphExecutor.LoadModels 对齐）
     /// </summary>
-    DLCV_INFER_CPP_DLL_API Json Load(const std::string& flowJsonPath, int deviceId = 0);
+    DLCV_INFER_CPP_API Json Load(const std::string& flowJsonPath, int deviceId = 0);
 
     /// <summary>
     /// 获取与普通模型一致的兼容信息。
     /// </summary>
-    DLCV_INFER_CPP_DLL_API Json GetModelInfo() const;
+    DLCV_INFER_CPP_API Json GetModelInfo() const;
 
     /// <summary>
     /// 获取完整流程信息，包括流程节点、已加载模型信息和按模型名组织的信息。
     /// </summary>
-    DLCV_INFER_CPP_DLL_API Json GetDvsModelInfo() const;
+    DLCV_INFER_CPP_API Json GetDvsModelInfo() const;
 
     /// <summary>
     /// 对单张图片进行推理，返回 JSON 格式的结果数组：
@@ -52,40 +51,37 @@ public:
     ///   ...
     /// ]
     /// </summary>
-    DLCV_INFER_CPP_DLL_API Json InferOneOutJson(const cv::Mat& image, const Json& paramsJson = Json());
+    DLCV_INFER_CPP_API Json InferOneOutJson(const cv::Mat& image, const Json& paramsJson = Json());
 
     /// <summary>
     /// 对多张图片进行推理，返回 { \"result_list\": ... }。
     /// 若 images.size()==1，则 result_list 为数组；
     /// 否则为 [{\"result_list\":[...]} ...] 的批量容器格式。
     /// </summary>
-    DLCV_INFER_CPP_DLL_API Json InferInternal(const std::vector<cv::Mat>& images, const Json& paramsJson = Json());
+    DLCV_INFER_CPP_API Json InferInternal(const std::vector<cv::Mat>& images, const Json& paramsJson = Json());
 
     /// <summary>
     /// 性能测试：返回平均耗时(ms)
     /// </summary>
-    DLCV_INFER_CPP_DLL_API double Benchmark(const cv::Mat& image, int warmup = 1, int runs = 10);
+    DLCV_INFER_CPP_API double Benchmark(const cv::Mat& image, int warmup = 1, int runs = 10);
 
 private:
-    friend class ::dlcv_infer::Model;
-
     std::vector<Json> _nodes;
     Json _root = Json::object();
     Json _loadedModelMeta = Json::array();
     bool _loaded = false;
     int _deviceId = 0;
     std::string _flowJsonPath;
-    std::vector<std::string> _acquiredModelKeys;
+    std::vector<ModelPoolLease> _acquiredModelLeases;
+    std::shared_ptr<const ModelBinaryStore> _modelBinaryStore;
 
     void ReleaseOwnedModelsNoexcept();
-    Json LoadFromRoot(
-        const Json& root,
-        int deviceId,
-        std::shared_ptr<const ModelBinaryStore> modelBinaryStore = nullptr);
-    Json LoadFromArchive(
-        const Json& root,
-        std::shared_ptr<const ModelBinaryStore> modelBinaryStore,
-        int deviceId);
+    friend class dlcv_infer::Model;
+    Json LoadFromRoot(const Json& root, int deviceId,
+                      std::shared_ptr<const ModelBinaryStore> modelBinaryStore);
+    Json LoadFromArchive(const Json& root,
+                         std::shared_ptr<const ModelBinaryStore> modelBinaryStore,
+                         int deviceId);
 };
 
 } // namespace flow

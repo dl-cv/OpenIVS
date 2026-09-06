@@ -51,7 +51,6 @@
             this.cmbCameraInterface = new System.Windows.Forms.ComboBox();
             this.lblCameraInterface = new System.Windows.Forms.Label();
             this.panelTop = new System.Windows.Forms.Panel();
-            this.btnLoadSlidingWindowModel = new System.Windows.Forms.Button();
             this.panel1.SuspendLayout();
             this.tabControl.SuspendLayout();
             this.tabImage.SuspendLayout();
@@ -340,24 +339,11 @@
             this.panelTop.Controls.Add(this.lblModelPath);
             this.panelTop.Controls.Add(this.txtModelPath);
             this.panelTop.Controls.Add(this.btnSelectModel);
-            this.panelTop.Controls.Add(this.btnLoadSlidingWindowModel);
             this.panelTop.Location = new System.Drawing.Point(18, 18);
             this.panelTop.Margin = new System.Windows.Forms.Padding(4);
             this.panelTop.Name = "panelTop";
             this.panelTop.Size = new System.Drawing.Size(1164, 66);
             this.panelTop.TabIndex = 9;
-            // 
-            // btnLoadSlidingWindowModel
-            // 
-            this.btnLoadSlidingWindowModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnLoadSlidingWindowModel.Location = new System.Drawing.Point(1001, 19);
-            this.btnLoadSlidingWindowModel.Margin = new System.Windows.Forms.Padding(4);
-            this.btnLoadSlidingWindowModel.Name = "btnLoadSlidingWindowModel";
-            this.btnLoadSlidingWindowModel.Size = new System.Drawing.Size(152, 34);
-            this.btnLoadSlidingWindowModel.TabIndex = 10;
-            this.btnLoadSlidingWindowModel.Text = "加载滑窗模型";
-            this.btnLoadSlidingWindowModel.UseVisualStyleBackColor = true;
-            this.btnLoadSlidingWindowModel.Click += new System.EventHandler(this.btnLoadSlidingWindowModel_Click);
             // 
             // Form1
             // 
@@ -413,7 +399,6 @@
         private System.Windows.Forms.ComboBox cmbCameraInterface;
         private System.Windows.Forms.Label lblCameraInterface;
         private System.Windows.Forms.Panel panelTop;
-        private System.Windows.Forms.Button btnLoadSlidingWindowModel;
     }
 }
 

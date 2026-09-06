@@ -5,10 +5,15 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <deque>
 #include <iomanip>
 #include <iostream>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -52,6 +57,16 @@ struct Options {
     std::vector<InferCase> Cases;
     std::string SingleModelPath;
     std::string SingleImagePath;
+};
+
+class ProcessModelCleanup {
+public:
+    ~ProcessModelCleanup() {
+        try {
+            dlcv_infer::Utils::FreeAllModels();
+        } catch (...) {
+        }
+    }
 };
 
 const std::string ModelRoot = R"(Y:\测试模型)";
@@ -265,9 +280,9 @@ CaseRow RunCase(const std::string& modelPath, const std::string& imagePath, int 
 
     double memBefore = GetCurrentPrivateMemoryMb();
     auto tLoad0 = std::chrono::steady_clock::now();
-    dlcv_infer::Model* model = nullptr;
+    std::unique_ptr<dlcv_infer::Model> model;
     try {
-        model = new dlcv_infer::Model(modelPath, deviceId);
+        model = std::make_unique<dlcv_infer::Model>(modelPath, deviceId);
         row.LoadStatus = (model != nullptr && model->modelIndex != -1) ? "成功" : "失败";
     } catch (const std::exception& ex) {
         row.LoadStatus = "失败";
@@ -326,9 +341,6 @@ CaseRow RunCase(const std::string& modelPath, const std::string& imagePath, int 
         row.CategoryList = std::string("错误:") + TrimMessage(ex.what());
     }
 
-    try {
-        delete model;
-    } catch (...) {}
     return row;
 }
 
@@ -552,11 +564,535 @@ void RunPressureTest(const Options& opt) {
     std::cout << "实时速率(最近窗口): " << std::fixed << std::setprecision(2) << recentRate << " 请求/秒" << std::endl;
 }
 
+struct CommandOptions {
+    int DeviceId = 0;
+    double Threshold = 0.05;
+    bool WithMask = true;
+    bool CalcMean = false;
+    int Threads = 1;
+    int Runs = 10;
+    int BatchSize = 1;
+};
+
+constexpr int MaxCommandThreads = 32;
+
+struct LoadedCommandModel {
+    std::string Name;
+    std::string Path;
+    int DeviceId = 0;
+    std::unique_ptr<dlcv_infer::Model> Model;
+};
+
+using CommandModelMap = std::map<std::string, LoadedCommandModel>;
+
+bool ParseDoubleArg(const std::string& text, double& out) {
+    try {
+        size_t used = 0;
+        const double value = std::stod(text, &used);
+        if (used != text.size() || !std::isfinite(value)) return false;
+        out = value;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool ParseBoolArg(const std::string& text, bool& out) {
+    if (text == "true") {
+        out = true;
+        return true;
+    }
+    if (text == "false") {
+        out = false;
+        return true;
+    }
+    return false;
+}
+
+bool IsCommandName(const std::string& text) {
+    return text == "help" || text == "--help" || text == "load-model" || text == "list-models"
+        || text == "model-info" || text == "dvs-model-info" || text == "infer"
+        || text == "benchmark" || text == "free-model" || text == "free-all-models";
+}
+
+bool IsCommandOptionAllowed(const std::string& command, const std::string& option) {
+    if (command == "load-model") return option == "--device";
+    if (command == "infer") {
+        return option == "--threshold" || option == "--with-mask" || option == "--calc-mean";
+    }
+    if (command == "benchmark") {
+        return option == "--threads" || option == "--runs" || option == "--batch-size";
+    }
+    return false;
+}
+
+bool ParseCommandArguments(
+    const std::vector<std::string>& segment,
+    std::vector<std::string>& positional,
+    CommandOptions& options,
+    std::string& error) {
+    const std::string& command = segment.front();
+    for (size_t index = 1; index < segment.size(); ++index) {
+        const std::string& token = segment[index];
+        if (token.rfind("--", 0) != 0) {
+            positional.push_back(token);
+            continue;
+        }
+        if (!IsCommandOptionAllowed(command, token)) {
+            error = "命令 " + command + " 不支持参数: " + token;
+            return false;
+        }
+        if (++index >= segment.size()) {
+            error = "参数缺少取值: " + token;
+            return false;
+        }
+        const std::string& value = segment[index];
+        if (token == "--device") {
+            if (!ParseIntArg(value, options.DeviceId)) {
+                error = "--device 必须是整数";
+                return false;
+            }
+        } else if (token == "--threshold") {
+            if (!ParseDoubleArg(value, options.Threshold) || options.Threshold < 0.0 || options.Threshold > 1.0) {
+                error = "--threshold 必须在 0 到 1 之间";
+                return false;
+            }
+        } else if (token == "--with-mask") {
+            if (!ParseBoolArg(value, options.WithMask)) {
+                error = "--with-mask 只能为 true 或 false";
+                return false;
+            }
+        } else if (token == "--calc-mean") {
+            if (!ParseBoolArg(value, options.CalcMean)) {
+                error = "--calc-mean 只能为 true 或 false";
+                return false;
+            }
+        } else if (token == "--threads") {
+            if (!ParseIntArg(value, options.Threads) || options.Threads <= 0 || options.Threads > MaxCommandThreads) {
+                error = "--threads 必须是 1 到 " + std::to_string(MaxCommandThreads) + " 之间的整数";
+                return false;
+            }
+        } else if (token == "--runs") {
+            if (!ParseIntArg(value, options.Runs) || options.Runs <= 0) {
+                error = "--runs 必须是正整数";
+                return false;
+            }
+        } else if (token == "--batch-size") {
+            if (!ParseIntArg(value, options.BatchSize) || options.BatchSize <= 0) {
+                error = "--batch-size 必须是正整数";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+dlcv_infer::json BuildCommandInferParams(const CommandOptions& options, bool includeBatchSize) {
+    dlcv_infer::json params;
+    params["threshold"] = options.Threshold;
+    params["with_mask"] = options.WithMask;
+    params["calc_mean"] = options.CalcMean;
+    if (includeBatchSize) params["batch_size"] = options.BatchSize;
+    return params;
+}
+
+void PrintCommandHelp(const char* exeName) {
+    std::cout << "命令串用法:\n"
+              << "  " << exeName << " load-model <名称> <模型> [--device N] --then list-models\n"
+              << "  " << exeName << " load-model <名称> <模型> --then model-info <名称> --then infer <名称> <图片>\n"
+              << "\n命令可用 --then 串联，模型名称只在本次进程内有效。\n"
+              << "  load-model <名称> <模型> [--device N]\n"
+              << "  list-models\n"
+              << "  model-info <名称>\n"
+              << "  dvs-model-info <名称>\n"
+              << "  infer <名称> <图片> [--threshold F] [--with-mask true|false] [--calc-mean true|false]\n"
+              << "  benchmark <名称> <图片> [--threads N，范围 1-" << MaxCommandThreads
+              << "] [--runs N] [--batch-size N]\n"
+              << "  free-model <名称>\n"
+              << "  free-all-models\n"
+              << "  help\n"
+              << "\n退出码: 0 成功，1 执行失败，2 参数错误。\n";
+}
+
+bool FindCommandModel(CommandModelMap& models, const std::string& name, LoadedCommandModel*& out, std::string& error) {
+    const auto found = models.find(name);
+    if (found == models.end()) {
+        error = "未找到模型名称: " + name;
+        return false;
+    }
+    out = &found->second;
+    return true;
+}
+
+void ReleaseCommandModels(CommandModelMap& models) {
+    for (auto& pair : models) {
+        try {
+            pair.second.Model->FreeModel();
+        } catch (...) {
+        }
+    }
+    models.clear();
+}
+
+bool IsSameBenchmarkResult(
+    const dlcv_infer::Result& baseline,
+    const dlcv_infer::Result& candidate,
+    std::string& difference) {
+    if (candidate.sampleResults.size() != baseline.sampleResults.size()) {
+        difference = "批次大小不一致，基线=" + std::to_string(baseline.sampleResults.size())
+            + "，当前=" + std::to_string(candidate.sampleResults.size());
+        return false;
+    }
+    for (size_t sampleIndex = 0; sampleIndex < baseline.sampleResults.size(); ++sampleIndex) {
+        const auto& baselineSample = baseline.sampleResults[sampleIndex];
+        const auto& candidateSample = candidate.sampleResults[sampleIndex];
+        if (candidateSample.results.size() != baselineSample.results.size()) {
+            difference = "图片[" + std::to_string(sampleIndex) + "]结果数量不一致，基线="
+                + std::to_string(baselineSample.results.size()) + "，当前=" + std::to_string(candidateSample.results.size());
+            return false;
+        }
+        for (size_t objectIndex = 0; objectIndex < baselineSample.results.size(); ++objectIndex) {
+            const auto& baselineObject = baselineSample.results[objectIndex];
+            const auto& candidateObject = candidateSample.results[objectIndex];
+            if (candidateObject.categoryId != baselineObject.categoryId
+                || candidateObject.categoryName != baselineObject.categoryName
+                || candidateObject.withBbox != baselineObject.withBbox
+                || candidateObject.withAngle != baselineObject.withAngle
+                || candidateObject.withMask != baselineObject.withMask
+                || candidateObject.withMean != baselineObject.withMean) {
+                difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
+                    + "]稳定字段不一致";
+                return false;
+            }
+            if (candidateObject.bbox.size() != baselineObject.bbox.size()) {
+                difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
+                    + "]定位框长度不一致";
+                return false;
+            }
+            for (size_t bboxIndex = 0; bboxIndex < baselineObject.bbox.size(); ++bboxIndex) {
+                if (std::abs(candidateObject.bbox[bboxIndex] - baselineObject.bbox[bboxIndex]) > 1e-4f) {
+                    difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
+                        + "]定位框不一致";
+                    return false;
+                }
+            }
+            if (candidateObject.mask.rows != baselineObject.mask.rows
+                || candidateObject.mask.cols != baselineObject.mask.cols
+                || candidateObject.mask.type() != baselineObject.mask.type()) {
+                difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
+                    + "]mask 尺寸或类型不一致";
+                return false;
+            }
+            if (!baselineObject.mask.empty()
+                && cv::norm(candidateObject.mask, baselineObject.mask, cv::NORM_INF) != 0.0) {
+                difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
+                    + "]mask 像素不一致";
+                return false;
+            }
+            if (std::abs(candidateObject.score - baselineObject.score) > 1e-4f
+                || std::abs(candidateObject.angle - baselineObject.angle) > 1e-4f
+                || std::abs(candidateObject.area - baselineObject.area) > 1e-3f
+                || std::abs(candidateObject.foregroundMean - baselineObject.foregroundMean) > 1e-4f
+                || std::abs(candidateObject.backgroundMean - baselineObject.backgroundMean) > 1e-4f) {
+                difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
+                    + "]数值字段不一致";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool RunCommandBenchmark(LoadedCommandModel& entry, const cv::Mat& image, const CommandOptions& options, std::string& error) {
+    const std::vector<cv::Mat> batch(static_cast<size_t>(options.BatchSize), image);
+    const dlcv_infer::json params = BuildCommandInferParams(options, true);
+    dlcv_infer::Result baseline(std::vector<dlcv_infer::SampleResult>{});
+    try {
+        baseline = entry.Model->InferBatch(batch, params);
+    } catch (const std::exception& ex) {
+        error = std::string("生成基线结果失败: ") + ex.what();
+        return false;
+    } catch (...) {
+        error = "生成基线结果时发生未知异常";
+        return false;
+    }
+    if (baseline.sampleResults.size() != static_cast<size_t>(options.BatchSize)) {
+        error = "基线批次大小错误，期望=" + std::to_string(options.BatchSize)
+            + "，实际=" + std::to_string(baseline.sampleResults.size());
+        return false;
+    }
+    size_t baselineObjectCount = 0;
+    for (const auto& sample : baseline.sampleResults) baselineObjectCount += sample.results.size();
+    std::cout << "测速基线: 批次大小=" << baseline.sampleResults.size()
+              << "，结果数量=" << baselineObjectCount << std::endl;
+
+    std::atomic<int> nextRun{ 0 };
+    std::atomic<int> failedRuns{ 0 };
+    std::atomic<bool> stopWorkers{ false };
+    std::mutex errorMutex;
+    std::string firstError;
+    std::vector<double> elapsedMs(static_cast<size_t>(options.Runs), 0.0);
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<size_t>(options.Threads));
+
+    const auto begin = std::chrono::steady_clock::now();
+    try {
+        for (int threadIndex = 0; threadIndex < options.Threads; ++threadIndex) {
+            workers.emplace_back([&]() {
+                for (;;) {
+                    if (stopWorkers.load(std::memory_order_relaxed)) return;
+                const int runIndex = nextRun.fetch_add(1, std::memory_order_relaxed);
+                if (runIndex >= options.Runs) return;
+                try {
+                    const auto runBegin = std::chrono::steady_clock::now();
+                    const auto result = entry.Model->InferBatch(batch, params);
+                    std::string difference;
+                    if (!IsSameBenchmarkResult(baseline, result, difference)) {
+                        failedRuns.fetch_add(1, std::memory_order_relaxed);
+                        stopWorkers.store(true, std::memory_order_relaxed);
+                        std::lock_guard<std::mutex> lock(errorMutex);
+                        if (firstError.empty()) firstError = difference;
+                        return;
+                    }
+                    elapsedMs[static_cast<size_t>(runIndex)] = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - runBegin).count();
+                } catch (const std::exception& ex) {
+                    failedRuns.fetch_add(1, std::memory_order_relaxed);
+                    std::lock_guard<std::mutex> lock(errorMutex);
+                    if (firstError.empty()) firstError = ex.what();
+                } catch (...) {
+                    failedRuns.fetch_add(1, std::memory_order_relaxed);
+                    std::lock_guard<std::mutex> lock(errorMutex);
+                    if (firstError.empty()) firstError = "未知异常";
+                }
+            }
+            });
+        }
+    } catch (const std::exception& ex) {
+        stopWorkers.store(true, std::memory_order_relaxed);
+        for (auto& worker : workers) {
+            if (worker.joinable()) worker.join();
+        }
+        error = std::string("创建测速线程失败: ") + ex.what();
+        return false;
+    } catch (...) {
+        stopWorkers.store(true, std::memory_order_relaxed);
+        for (auto& worker : workers) {
+            if (worker.joinable()) worker.join();
+        }
+        error = "创建测速线程时发生未知异常";
+        return false;
+    }
+    for (auto& worker : workers) {
+        if (worker.joinable()) worker.join();
+    }
+    const double totalMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+
+    const int failed = failedRuns.load(std::memory_order_relaxed);
+    const int succeeded = options.Runs - failed;
+    if (failed > 0) {
+        error = "测速失败 " + std::to_string(failed) + " 次: " + firstError;
+        return false;
+    }
+    const double sumMs = std::accumulate(elapsedMs.begin(), elapsedMs.end(), 0.0);
+    const double totalSeconds = std::max(0.001, totalMs / 1000.0);
+    std::cout << "测速结果:\n"
+              << "  模型名称: " << entry.Name << "\n"
+              << "  线程数: " << options.Threads << "\n"
+              << "  运行次数: " << succeeded << "\n"
+              << "  批量大小: " << options.BatchSize << "\n"
+              << "  平均单次耗时: " << std::fixed << std::setprecision(3) << (sumMs / succeeded) << " ms\n"
+              << "  总耗时: " << totalMs << " ms\n"
+              << "  吞吐量: " << (static_cast<double>(succeeded) * options.BatchSize / totalSeconds) << " 图片/秒\n";
+    return true;
+}
+
+int RunCommandSegment(const std::vector<std::string>& segment, CommandModelMap& models, std::string& error) {
+    if (segment.empty()) {
+        error = "--then 后缺少命令";
+        return 2;
+    }
+    const std::string command = segment.front() == "--help" ? "help" : segment.front();
+    if (!IsCommandName(command)) {
+        error = "未知命令: " + command;
+        return 2;
+    }
+    std::vector<std::string> positional;
+    CommandOptions options;
+    if (!ParseCommandArguments(segment, positional, options, error)) return 2;
+    const auto requireCount = [&](size_t count) {
+        if (positional.size() == count) return true;
+        error = "命令 " + command + " 的参数数量不正确";
+        return false;
+    };
+
+    try {
+        if (command == "help") {
+            if (!requireCount(0)) return 2;
+            PrintCommandHelp("dlcv_infer_cpp_dll_demo.exe");
+            return 0;
+        }
+        if (command == "load-model") {
+            if (!requireCount(2)) return 2;
+            if (positional[0].empty()) {
+                error = "模型名称不能为空";
+                return 2;
+            }
+            if (models.find(positional[0]) != models.end()) {
+                error = "模型名称已存在: " + positional[0];
+                return 2;
+            }
+            const auto begin = std::chrono::steady_clock::now();
+            auto model = std::make_unique<dlcv_infer::Model>(positional[1], options.DeviceId);
+            if (model->modelIndex == -1) {
+                error = "模型加载失败: " + positional[1];
+                return 1;
+            }
+            const double loadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            LoadedCommandModel loaded;
+            loaded.Name = positional[0];
+            loaded.Path = positional[1];
+            loaded.DeviceId = options.DeviceId;
+            loaded.Model = std::move(model);
+            const int modelIndex = loaded.Model->modelIndex;
+            models.emplace(loaded.Name, std::move(loaded));
+            std::cout << "加载成功: 名称=" << positional[0] << "，设备=" << options.DeviceId
+                      << "，模型索引=" << modelIndex << "，耗时=" << std::fixed << std::setprecision(3)
+                      << loadMs << " ms" << std::endl;
+            return 0;
+        }
+        if (command == "list-models") {
+            if (!requireCount(0)) return 2;
+            std::cout << "已加载模型数量: " << models.size() << std::endl;
+            for (const auto& pair : models) {
+                const auto& item = pair.second;
+                std::cout << "  名称=" << item.Name << "，模型=" << item.Path << "，设备="
+                          << item.DeviceId << "，模型索引=" << item.Model->modelIndex << std::endl;
+            }
+            return 0;
+        }
+        if (command == "model-info" || command == "dvs-model-info") {
+            if (!requireCount(1)) return 2;
+            LoadedCommandModel* entry = nullptr;
+            if (!FindCommandModel(models, positional[0], entry, error)) return 1;
+            const auto info = command == "model-info" ? entry->Model->GetModelInfo() : entry->Model->GetDvsModelInfo();
+            std::cout << info.dump(2) << std::endl;
+            return 0;
+        }
+        if (command == "infer") {
+            if (!requireCount(2)) return 2;
+            LoadedCommandModel* entry = nullptr;
+            if (!FindCommandModel(models, positional[0], entry, error)) return 1;
+            const cv::Mat image = LoadRgbImage(positional[1]);
+            const auto begin = std::chrono::steady_clock::now();
+            const auto result = entry->Model->Infer(image, BuildCommandInferParams(options, false));
+            const double elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            std::cout << "推理成功，耗时: " << std::fixed << std::setprecision(3) << elapsedMs << " ms" << std::endl;
+            PrintSingleResultSummary(result);
+            return 0;
+        }
+        if (command == "benchmark") {
+            if (!requireCount(2)) return 2;
+            LoadedCommandModel* entry = nullptr;
+            if (!FindCommandModel(models, positional[0], entry, error)) return 1;
+            const cv::Mat image = LoadRgbImage(positional[1]);
+            return RunCommandBenchmark(*entry, image, options, error) ? 0 : 1;
+        }
+        if (command == "free-model") {
+            if (!requireCount(1)) return 2;
+            const auto found = models.find(positional[0]);
+            if (found == models.end()) {
+                error = "未找到模型名称: " + positional[0];
+                return 1;
+            }
+            found->second.Model->FreeModel();
+            std::cout << "已释放模型: " << found->second.Name << std::endl;
+            models.erase(found);
+            return 0;
+        }
+        if (command == "free-all-models") {
+            if (!requireCount(0)) return 2;
+            const size_t count = models.size();
+            ReleaseCommandModels(models);
+            dlcv_infer::Utils::FreeAllModels();
+            std::cout << "已释放全部模型: " << count << std::endl;
+            return 0;
+        }
+    } catch (const std::exception& ex) {
+        error = ex.what();
+        return 1;
+    } catch (...) {
+        error = "命令执行时发生未知异常";
+        return 1;
+    }
+    error = "未知命令: " + command;
+    return 2;
+}
+
+int RunCommandWorkflow(int argc, char** argv) {
+    CommandModelMap models;
+    const auto finish = [&](int code) {
+        ReleaseCommandModels(models);
+        try {
+            dlcv_infer::Utils::FreeAllModels();
+        } catch (...) {
+        }
+        return code;
+    };
+
+    std::vector<std::vector<std::string>> segments(1);
+    try {
+        for (int index = 1; index < argc; ++index) {
+            const std::string token = argv[index];
+            if (token == "--then") {
+                if (segments.back().empty()) {
+                    std::cerr << "参数错误: --then 前缺少命令" << std::endl;
+                    return finish(2);
+                }
+                segments.emplace_back();
+            } else {
+                segments.back().push_back(token);
+            }
+        }
+        if (segments.back().empty()) {
+            std::cerr << "参数错误: --then 后缺少命令" << std::endl;
+            return finish(2);
+        }
+
+        for (const auto& segment : segments) {
+            std::string error;
+            const int code = RunCommandSegment(segment, models, error);
+            if (code != 0) {
+                std::cerr << (code == 2 ? "参数错误: " : "执行失败: ") << error << std::endl;
+                return finish(code);
+            }
+        }
+        std::cout << "命令串执行结束，剩余模型已释放" << std::endl;
+        return finish(0);
+    } catch (const std::exception& ex) {
+        std::cerr << "执行失败: " << ex.what() << std::endl;
+        return finish(1);
+    } catch (...) {
+        std::cerr << "执行失败: 命令串发生未知异常" << std::endl;
+        return finish(1);
+    }
+}
+
+bool IsLegacyFirstArgument(const std::string& text) {
+    return text == "--pressure" || text == "--case" || text == "--model" || text == "--image"
+        || text == "--device" || text == "--threads" || text == "--batch" || text == "--seconds" || text == "-h";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     InitGbkConsole();
+    ProcessModelCleanup processModelCleanup;
     dlcv_infer::Utils::KeepMaxClock();
+
+    if (argc >= 2 && !IsLegacyFirstArgument(argv[1])) {
+        return RunCommandWorkflow(argc, argv);
+    }
 
     Options opt;
     if (!ParseArgs(argc, argv, opt)) {
@@ -574,10 +1110,8 @@ int main(int argc, char** argv) {
         }
     } catch (const std::exception& ex) {
         std::cerr << "执行失败: " << ex.what() << std::endl;
-        dlcv_infer::Utils::FreeAllModels();
         return 2;
     }
 
-    dlcv_infer::Utils::FreeAllModels();
     return 0;
 }

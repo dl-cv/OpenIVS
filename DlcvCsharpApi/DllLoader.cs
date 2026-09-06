@@ -83,14 +83,10 @@ namespace dlcv_infer_csharp
         public static void EnsureForModel(string modelPath)
         {
             DogProvider? needed = ResolveProviderFromHeader(modelPath);
-            if (!needed.HasValue) return;
-            if (_instance != null && _instance.LoadedDogProvider == needed.Value) return;
             lock (_lock)
             {
-                if (_instance != null && _instance.LoadedDogProvider == needed.Value) return;
-
                 List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
-                if (!availableProviders.Contains(needed.Value))
+                if (needed.HasValue && !availableProviders.Contains(needed.Value))
                 {
                     if (availableProviders.Count == 0)
                     {
@@ -101,7 +97,10 @@ namespace dlcv_infer_csharp
                     throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
                 }
 
-                _instance = CreateLoader(needed.Value);
+                // 原生 DLL 在进程内只按首次检测到的授权类型加载一次。
+                // 模型头仅用于授权检查，不能据此更换已加载的 DLL。
+                if (_instance == null)
+                    _instance = CreateLoader(SelectPreferredProvider(availableProviders));
             }
         }
 
@@ -204,7 +203,11 @@ namespace dlcv_infer_csharp
         private static DogProvider AutoDetectProvider()
         {
             // 只做一次加密狗检测：先 Sentinel 再 Virbox；都没有则不加载任何推理 DLL，也不抛异常
-            List<DogProvider> available = DogUtils.GetAvailableProviders();
+            return SelectPreferredProvider(DogUtils.GetAvailableProviders());
+        }
+
+        private static DogProvider SelectPreferredProvider(List<DogProvider> available)
+        {
             if (available.Contains(DogProvider.Sentinel))
                 return DogProvider.Sentinel;
             if (available.Contains(DogProvider.Virbox))

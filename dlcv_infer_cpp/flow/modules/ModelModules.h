@@ -1,8 +1,9 @@
 ﻿#pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
-#include <cstdint>
 #include <string>
 #include <unordered_map>
 
@@ -14,11 +15,69 @@
 namespace dlcv_infer {
 namespace flow {
 
+class DLCV_INFER_CPP_API ModelLifecycleReadGuard final {
+public:
+    ModelLifecycleReadGuard();
+    ~ModelLifecycleReadGuard();
+    ModelLifecycleReadGuard(const ModelLifecycleReadGuard&) = delete;
+    ModelLifecycleReadGuard& operator=(const ModelLifecycleReadGuard&) = delete;
+
+private:
+    bool _ownsSharedLock = false;
+};
+
+class DLCV_INFER_CPP_API ModelLifecycleWriteGuard final {
+public:
+    ModelLifecycleWriteGuard();
+    ~ModelLifecycleWriteGuard();
+    ModelLifecycleWriteGuard(const ModelLifecycleWriteGuard&) = delete;
+    ModelLifecycleWriteGuard& operator=(const ModelLifecycleWriteGuard&) = delete;
+
+private:
+    bool _ownsExclusiveLock = false;
+};
+
 struct ModelBinaryStore final {
     uint64_t StoreId = 0;
     std::unordered_map<std::string, std::shared_ptr<const std::vector<unsigned char>>> Buffers;
     std::unordered_map<std::string, std::string> Aliases;
 };
+
+class ModelPool;
+
+class ModelPoolLease final {
+public:
+    ModelPoolLease() = default;
+    DLCV_INFER_CPP_API ~ModelPoolLease();
+    DLCV_INFER_CPP_API ModelPoolLease(ModelPoolLease&& other) noexcept;
+    DLCV_INFER_CPP_API ModelPoolLease& operator=(ModelPoolLease&& other) noexcept;
+    ModelPoolLease(const ModelPoolLease&) = delete;
+    ModelPoolLease& operator=(const ModelPoolLease&) = delete;
+
+    DLCV_INFER_CPP_API void Reset() noexcept;
+    const std::shared_ptr<dlcv_infer::Model>& Model() const { return _model; }
+    const std::string& Key() const { return _key; }
+    explicit operator bool() const { return _model != nullptr; }
+
+private:
+    friend class ModelPool;
+    DLCV_INFER_CPP_API ModelPoolLease(
+        std::shared_ptr<dlcv_infer::Model> model,
+        std::string key,
+        std::uint64_t entryIdentity);
+
+    std::shared_ptr<dlcv_infer::Model> _model;
+    std::string _key;
+    std::uint64_t _entryIdentity = 0;
+};
+
+struct ModelPoolStats {
+    size_t totalEntries = 0;
+    size_t activeEntries = 0;
+    size_t idleEntries = 0;
+};
+
+DLCV_INFER_CPP_API ModelPoolStats GetModelPoolStats();
 
 /// <summary>
 /// 模型池：按 model_path+device_id 缓存 dlcv_infer::Model，避免重复加载。
@@ -31,39 +90,37 @@ public:
     /// 获取模型，增加该 key 的引用计数。
     /// 若缓存中已存在且有效，直接返回并 +1。
     /// 若不存在，创建新的 Model 对象，refCount = 1。
-    std::shared_ptr<dlcv_infer::Model> Acquire(
-        const std::string& modelPathUtf8, int deviceId);
+    ModelPoolLease Acquire(
+        const std::string& modelPathUtf8,
+        int deviceId);
 
-    std::shared_ptr<dlcv_infer::Model> AcquireBinary(
+    ModelPoolLease AcquireBinary(
         const std::shared_ptr<const ModelBinaryStore>& store,
         const std::string& bufferKey,
         const std::string& modelName,
         int deviceId);
-
-    bool RetainByKey(const std::string& key);
-
-    /// 释放一个引用。refCount 减 1；归零时从缓存移除。
-    /// 若 key 不存在，无操作。
-    void Release(const std::string& modelPathUtf8, int deviceId);
-
-    /// 通过 key 释放引用（避免调用方重复拼接/解析）。
-    void ReleaseByKey(const std::string& key);
-
-    [[deprecated("Use Acquire/Release instead")]]
-    void Clear();
-
-    static std::string MakeKey(const std::string& modelPathUtf8, int deviceId);
+    ModelPoolLease RetainByKey(const std::string& key);
     static std::string MakeBinaryKey(uint64_t storeId, const std::string& bufferKey, int deviceId);
+
+    void Clear();
+    ModelPoolStats GetStats();
+
+    static std::string MakeKey(const std::string& modelIdentityUtf8, int deviceId);
 
 private:
     struct Entry {
         std::shared_ptr<dlcv_infer::Model> model;
         int refCount = 0;
+        std::uint64_t identity = 0;
     };
 
     ModelPool() = default;
+    friend class ModelPoolLease;
+    void ReleaseByKey(const std::string& key, std::uint64_t entryIdentity);
+
     std::mutex _mu;
     std::unordered_map<std::string, Entry> _cache;
+    std::uint64_t _entrySequence = 0;
 };
 
 /// <summary>
@@ -72,11 +129,10 @@ private:
 class BaseModelModule : public BaseModule {
 protected:
     std::string _modelPathUtf8;
-    std::string _modelBufferKey;
-    std::string _modelPoolKey;
     int _deviceId = 0;
     int _resolvedDeviceId = 0;
-    std::shared_ptr<dlcv_infer::Model> _model;
+    std::string _modelBufferKey;
+    ModelPoolLease _modelLease;
 
 public:
     BaseModelModule(int nodeId,
@@ -90,18 +146,14 @@ public:
         _resolvedDeviceId = _deviceId;
     }
 
-    ~BaseModelModule() {
-        if (!_modelPoolKey.empty() && _model) {
-            try { ModelPool::Instance().ReleaseByKey(_modelPoolKey); } catch (...) {}
-        }
-    }
+    ~BaseModelModule() = default;
 
     void LoadModel() override;
 
     const std::string& ModelPathUtf8() const { return _modelPathUtf8; }
+    const std::string& ModelPoolKey() const { return _modelLease.Key(); }
     int ResolvedDeviceId() const { return _resolvedDeviceId; }
-    const std::string& ModelPoolKey() const { return _modelPoolKey; }
-    const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _model; }
+    const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _modelLease.Model(); }
 };
 
 /// <summary>

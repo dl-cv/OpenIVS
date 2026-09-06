@@ -98,18 +98,18 @@
     <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('C:\dlcv\Lib\site-packages\dlcvpro_infer\include')">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
 
     <DlcvInferCppDllOutDir Condition="'$(DlcvInferCppDllOutDir)'=='' and '$(SolutionDir)'!=''">$(SolutionDir)$(Configuration)\</DlcvInferCppDllOutDir>
-    <DlcvInferCppDllOutDir Condition="'$(DlcvInferCppDllOutDir)'==''">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\'))</DlcvInferCppDllOutDir>
+    <DlcvInferCppDllOutDir Condition="'$(DlcvInferCppDllOutDir)'==''">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\'))</DlcvInferCppDllOutDir>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp_dll;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
     <LibraryPath>$(OpenCvLibDir);$(LibraryPath)</LibraryPath>
     <OutDir Condition="'$(SolutionDir)'!=''">$(SolutionDir)$(Configuration)\</OutDir>
     <OutDir Condition="'$(SolutionDir)'==''">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\$(Configuration)\'))</OutDir>
     <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp_dll;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(IncludePath)</IncludePath>
     <LibraryPath>$(OpenCvLibDir);$(LibraryPath)</LibraryPath>
     <OutDir Condition="'$(SolutionDir)'!=''">$(SolutionDir)$(Configuration)\</OutDir>
     <OutDir Condition="'$(SolutionDir)'==''">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\$(Configuration)\'))</OutDir>
@@ -167,8 +167,8 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100d.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\;$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>dlcv_infer_cpp.lib;opencv_world4100d.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -188,8 +188,8 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\dlcv_infer_cpp_dll\$(Configuration)\;$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>dlcv_infer_cpp_dll.lib;opencv_world4100.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\;$(DlcvInferCppDllOutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>dlcv_infer_cpp.lib;opencv_world4100.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 
@@ -198,7 +198,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\dlcv_infer_cpp_dll\dlcv_infer_cpp_dll.vcxproj">
+    <ProjectReference Include="..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
       <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
       <LinkLibraryDependencies>true</LinkLibraryDependencies>
     </ProjectReference>
