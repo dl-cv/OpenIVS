@@ -36,6 +36,8 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - 两个实际测试程序无命令行参数时仍启动原 GUI，不改变桌面交互行为。
 - 其他程序、自测入口和临时排查入口仅使用各自文档中已经定义的参数；未记录的业务输入通过源码固定变量或配置对象字段设置。
 - 命令行推理模式输出结构化与 JSON 两条 API 路径的结果摘要，并以退出码区分成功、运行错误、参数错误和验证失败。
+- C# GUI 验证只使用 `DlcvDemo` 的 `ui-test` 命令行入口并固定 `--interactive-dialogs false`：程序自动加载参数中的模型与图片，完成或失败后自动关闭窗口，以进程退出码与 `--output` 的无 BOM UTF-8 JSON 结果文件为判断依据，输出写入系统临时目录；禁止通过桌面自动化、鼠标键盘或窗口控制验证，也不以无参数 GUI 启动代替测试。
+- `infer` 与 `ui-test` 用途不同：`infer` 是无界面功能测试，验证结构化与 JSON 双路径一致性、阈值过滤等，不创建窗口；`ui-test` 是界面自动验证，在真实窗口中复用模型加载、图片推理与绘制逻辑。
 
 ## 核心模块与入口
 
@@ -482,8 +484,8 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ## 运行验证方式
 
-- 构建完成后可运行 `DlcvDemo`、`dlcv_infer_cpp_qt_demo` 或 `dlcv_infer_c_qt_demo` GUI 加载模型并执行单次推理验证。
-- 自动验证使用两个实际测试程序的 `infer` 命令行模式；模型、图片与阈值通过已定义参数传入。
+- 构建完成后可人工打开 `DlcvDemo`、`dlcv_infer_cpp_qt_demo` 或 `dlcv_infer_c_qt_demo` 界面加载模型并执行单次推理确认。
+- 自动验证：无界面功能验证使用两个实际测试程序的 `infer` 命令行模式（模型、图片与阈值通过已定义参数传入）；C# GUI 自动验证使用 `DlcvDemo` 的 `ui-test --interactive-dialogs false`，判断规则见“统一运行与验证输入规则”。
 - 使用 `Test/DlcvCSharpTest` 或 `Test/dlcv_infer_cpp_test` 执行自动化控制台测试（模型加载、推理、速度、内存）。
 - C# 测试支持 `demo2-rgb-selftest` 验证 Demo2 入口 RGB 数据流一致性。
 
