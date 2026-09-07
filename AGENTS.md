@@ -1,4 +1,4 @@
-# OpenIVS Agent 规则
+﻿# OpenIVS Agent 规则
 
 > **规则映射说明**：本文档仅记录本项目特定的技术规则与上下文。关于 Git 工作流、PR 规范、文档原则、Agent 执行规范、编码与工程原则等用户级通用规则，请查阅 ~/.kimi-code/AGENTS.md（dlcv_mcp 仓库）。
 
@@ -462,7 +462,8 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 ## 运行验证方式
 
 - 构建完成后可运行 `DlcvDemo`、`dlcv_infer_cpp_qt_demo` 或 `dlcv_infer_c_qt_demo` GUI 加载模型并执行单次推理验证。
-- 自动验证使用两个实际测试程序的 `infer` 命令行模式；模型、图片与阈值通过已定义参数传入。
+- 自动推理验证使用两个实际测试程序的 `infer` 命令行模式；模型、图片与阈值通过已定义参数传入。
+- C++ Qt Demo 完整窗口截图使用 `ui-test --model <path> --image <path> --threshold <0..1> --device <id> --screenshot <pngPath> --output <jsonPath>`；测试结束自动关闭，检查退出码及 UTF-8 JSON。
 - 使用 `Test/DlcvCSharpTest` 或 `Test/dlcv_infer_cpp_test` 执行自动化控制台测试（模型加载、推理、速度、内存）。
 - C# 测试支持 `demo2-rgb-selftest` 验证 Demo2 入口 RGB 数据流一致性。
 

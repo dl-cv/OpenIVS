@@ -107,9 +107,11 @@
 
 #### 2.6 UI 自动测试与截图
 
-- `ui-test --model <模型路径> --image <图片路径> --output <JSON路径> [--screenshot <PNG路径>]` 使用正式 WinForms 主窗口，加载模型后打开图片并调用原推理事件。
-- `--screenshot` 为可选参数，通过 `Form.DrawToBitmap` 保存窗口截图，不模拟鼠标键盘，也不抓取整个桌面。
-- 截图路径必须使用 `.png` 后缀，截图、测试 JSON 及其中间文件不能覆盖模型、图片或彼此。结果 JSON 保留已有字段，补充 `ui_framework` 与 `screenshot`。
+- `ui-test --model <模型路径> --image <图片路径> --output <JSON路径> [--inference-count <正整数>] [--screenshot <PNG路径>]` 使用正式 WinForms 主窗口，加载模型并在同一窗口中执行指定次数的真实推理。
+- `--inference-count` 默认为 `1`，必须是大于等于 `1` 的整数；`--inference-count 2` 会在第二次真实推理完成后截取窗口，并以第二次结果作为最终界面内容。
+- `--screenshot` 为可选参数，通过 Win32 `PrintWindow` 保存包含标题栏的完整窗口截图，不模拟鼠标键盘，也不抓取整个桌面。
+- 截图路径必须使用 `.png` 后缀，截图、测试 JSON 及其中间文件不能覆盖模型、图片或彼此。结果 JSON 保留已有字段，补充 `ui_framework`、`screenshot`、`requested_inference_count`、`inference_count` 和 `inference_durations_ms`。
+- `inference_count` 是已完成的真实推理次数；`inference_durations_ms` 按执行顺序记录每次耗时，失败时保留已完成次数和耗时。
 - 自动测试使用 `--interactive-dialogs false`；测试输出和截图写入系统临时目录，不进入代码仓库。
 
 ### 3. 功能边界（必须严格一致）

@@ -9,6 +9,9 @@
 #include <QPixmap>
 #include <QSaveFile>
 #include <QStringList>
+#include <QTimer>
+#include <QElapsedTimer>
+#include <QSet>
 
 #include <cmath>
 #include <cstdio>
@@ -159,6 +162,9 @@ void PrintHelp(const QString& programPath) {
         << "  " << program
         << " render --model <path> --image <path> --threshold <0..1> --output <pngPath>"
            " [--device <int>] [--with-mask <true|false>]\n"
+        << "  " << program
+        << " ui-test --model <path> --image <path> --threshold <0..1> --screenshot <pngPath> --output <jsonPath>"
+           " [--device <int>] [--calc-mean <true|false>] [--inference-count <positive integer>]\n"
         << "  " << program << " mask-visualization-selftest\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
@@ -811,6 +817,126 @@ std::string GetCppDllPath() {
     return "";
 }
 
+
+QImage CaptureMainWindow(MainWindow& window) {
+#ifdef _WIN32
+    const HWND hwnd = reinterpret_cast<HWND>(window.winId());
+    RECT rect{};
+    if (!GetWindowRect(hwnd, &rect)) throw std::runtime_error("GetWindowRect failed");
+    const int width = rect.right - rect.left, height = rect.bottom - rect.top;
+    HDC dc = GetDC(hwnd);
+    HDC memory = CreateCompatibleDC(dc);
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void* pixels = nullptr;
+    HBITMAP bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+    HGDIOBJ previous = bitmap ? SelectObject(memory, bitmap) : nullptr;
+    const bool ok = bitmap && PrintWindow(hwnd, memory, 2);
+    QImage result;
+    if (ok) result = QImage(static_cast<uchar*>(pixels), width, height, QImage::Format_RGB32).copy();
+    if (previous) SelectObject(memory, previous);
+    if (bitmap) DeleteObject(bitmap);
+    DeleteDC(memory);
+    ReleaseDC(hwnd, dc);
+    if (result.isNull()) throw std::runtime_error("full window capture failed");
+    return result;
+#else
+    throw std::runtime_error("full window capture requires Windows");
+#endif
+}
+
+int RunUiTest(QApplication& app, const QStringList& args) {
+    QStringList inferArgs{args.at(0), QStringLiteral("infer")};
+    QString screenshot;
+    int inferenceCount = 1;
+    bool hasInferenceCount = false;
+    for (int i = 2; i < args.size(); i += 2) {
+        if (i + 1 >= args.size()) { std::cerr << "missing option value\n"; return 2; }
+        if (args.at(i) == QStringLiteral("--screenshot")) {
+            if (!screenshot.isEmpty()) { std::cerr << "duplicate screenshot option\n"; return 2; }
+            screenshot = args.at(i + 1);
+        } else if (args.at(i) == QStringLiteral("--inference-count")) {
+            bool ok = false;
+            inferenceCount = args.at(i + 1).toInt(&ok);
+            if (hasInferenceCount || !ok || inferenceCount < 1) {
+                std::cerr << "inference-count must be a positive integer, specified once\n"; return 2;
+            }
+            hasInferenceCount = true;
+        } else inferArgs << args.at(i) << args.at(i + 1);
+    }
+    InferOptions options;
+    QString error;
+    if (!ParseInferOptions(inferArgs, options, error)) {
+        std::cerr << ToUtf8(error) << "\n"; return 2;
+    }
+    if (screenshot.isEmpty() || options.outputPath.isEmpty() || !options.withMask) {
+        std::cerr << "ui-test requires --screenshot, --output and with-mask=true\n"; return 2;
+    }
+    if (QFileInfo(options.outputPath).isDir()) {
+        std::cerr << "output cannot be a directory\n"; return 2;
+    }
+    const QFileInfo shotInfo(screenshot);
+    if (shotInfo.suffix().compare("png", Qt::CaseInsensitive) != 0 ||
+        !QDir(shotInfo.absolutePath()).exists() || shotInfo.isDir()) {
+        std::cerr << "screenshot must be a PNG in an existing directory\n"; return 2;
+    }
+    QSet<QString> paths;
+    for (const QString& path : {options.modelPath, options.imagePath, options.outputPath, screenshot}) {
+        const QFileInfo info(path);
+        const QString canonical = info.canonicalFilePath();
+        const QString key = QDir::cleanPath(canonical.isEmpty() ? info.absoluteFilePath() : canonical).toCaseFolded();
+        if (paths.contains(key)) { std::cerr << "input and output paths must be different\n"; return 2; }
+        paths.insert(key);
+    }
+    MainWindow window(nullptr, true);
+    window.resize(1280, 850);
+    window.show();
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QTimer ready;
+    ready.setInterval(50);
+    auto finish = [&](bool success, const QString& detail) {
+        json result = {{"success", success}, {"inference_count", window.inferenceDurations().size()},
+                       {"requested_inference_count", inferenceCount},
+                       {"inference_durations_ms", window.inferenceDurations()},
+                       {"result_text", ToUtf8(window.resultText())}, {"error", ToUtf8(detail)},
+                       {"screenshot", ToUtf8(screenshot)}};
+        QSaveFile file(options.outputPath);
+        const QByteArray bytes = QByteArray::fromStdString(result.dump(2));
+        const bool saved = file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit();
+        window.close();
+        app.exit(success && saved ? 0 : 1);
+    };
+    QObject::connect(&ready, &QTimer::timeout, &window, [&]() {
+        if (!window.devicesReady()) {
+            if (elapsed.elapsed() > 60000) { ready.stop(); finish(false, "device initialization timeout"); }
+            return;
+        }
+        ready.stop();
+        try {
+            if (!window.runUiTest(options.modelPath, options.imagePath, options.device,
+                                  options.threshold, options.calcMean, inferenceCount)) {
+                finish(false, window.resultText()); return;
+            }
+            // 结果控件完成布局和绘制后，读取包含原生标题栏的窗口位图。
+            QTimer::singleShot(500, &window, [&]() {
+                try {
+                    if (!CaptureMainWindow(window).save(screenshot, "PNG"))
+                        throw std::runtime_error("cannot save screenshot");
+                    finish(true, {});
+                } catch (const std::exception& e) { finish(false, FromExceptionMessage(e.what())); }
+            });
+        } catch (const std::exception& e) { finish(false, FromExceptionMessage(e.what())); }
+    });
+    ready.start();
+    return app.exec();
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -827,6 +953,10 @@ int main(int argc, char* argv[]) {
 
     const QStringList args = app.arguments();
     if (args.size() > 1) {
+        if (args.at(1) == QStringLiteral("ui-test")) {
+            if (args.contains(QStringLiteral("--help"))) { PrintHelp(args.at(0)); return 0; }
+            return RunUiTest(app, args);
+        }
         if (args.at(1) == QStringLiteral("--help") ||
             ((args.at(1) == QStringLiteral("infer") || args.at(1) == QStringLiteral("render"))
              && args.contains(QStringLiteral("--help")))) {

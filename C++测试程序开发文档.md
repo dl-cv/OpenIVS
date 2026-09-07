@@ -1,4 +1,4 @@
-# C++ 测试程序开发文档
+﻿# C++ 测试程序开发文档
 
 **文档定位**：记录 `dlcv_infer_cpp_qt_demo` 的编译、运行方式与调试方法。所有内容以当前源码实现为准。
 
@@ -53,7 +53,7 @@
 ### 3.1 程序入口（main.cpp）
 
 - 无参数时按 Windows 图形界面子系统启动，初始化 `QApplication`、显示 `MainWindow`，不创建控制台窗口，退出前调用 `FreeAllModels()`。
-- 有参数时连接父控制台；没有父控制台时创建控制台，再解析 `infer`、`render`、`mask-visualization-selftest` 或 `--help`。命令行模式不进入主窗口事件循环，完成验证后直接返回退出码。
+- 有参数时连接父控制台；没有父控制台时创建控制台，再解析 `infer`、`render`、`ui-test`、`mask-visualization-selftest` 或 `--help`。`infer`、`render` 和自测不进入主窗口事件循环；`ui-test` 显示真实主窗口，完成后自动关闭。
 - Windows 控制台输入输出使用 UTF-8；模型路径通过 `std::wstring` 传给 C++ API。
 
 ### 3.2 命令行推理模式
@@ -305,3 +305,17 @@ Debug\dlcv_infer_cpp_test.exe dvsp-reject-selftest <dvsp路径> [设备编号]
 设备编号默认 `0`。模型池检查中的两个归档内容相同，但每次读取使用独立的 `StoreId`；包装层不额外进行整包内容缓存。临时测试归档由测试程序创建并在结束时删除，这与运行库解包产生临时文件不同。
 
 命令退出码 `0` 表示检查通过，非零表示失败或参数无效。这些命令不验证源模型转换、多设备运行、完整路径优先或短文件名多候选处理，也不代表 C++ 与 C# 的全部功能已经一致。
+
+## 真实窗口截图测试
+
+```text
+dlcv_infer_cpp_qt_demo.exe ui-test --model <path> --image <path> --threshold 0.5 --device 0 --screenshot <pngPath> --output <jsonPath>
+```
+
+- 等待实际设备查询完成，在主窗口选择设备、加载模型并调用与“单次推理”按钮相同的处理函数；batch size 为 1，mask 开启，可通过 `--calc-mean true` 开启均值计算。
+- 使用 Windows `PrintWindow` 获取完整窗口，包含原生标题栏、按钮、结果文本和结果图，不使用键鼠模拟。
+- JSON 采用 UTF-8，记录 `success`、`requested_inference_count`、`inference_count`、`inference_durations_ms`、`result_text`、`error` 与 `screenshot`。截图对应本次真实推理，耗时来自窗口结果文本。
+- 测试不读取或保存窗口布局，不更新最近使用的模型、图片设置。运行错误不弹出对话框，输出错误并退出。
+- `--screenshot` 必须为 PNG，`--output` 为 JSON；父目录必须存在，输入和输出路径不得重复。参数错误返回 2，运行或写入失败返回 1，成功返回 0。
+
+- `ui-test --inference-count 2` 在同一窗口加载一次模型后连续执行两次推理，截图显示第二次结果；默认次数为 1，参数必须为正整数。`inference_durations_ms` 按执行顺序记录每次实际耗时。

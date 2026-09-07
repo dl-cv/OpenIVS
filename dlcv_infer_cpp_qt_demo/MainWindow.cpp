@@ -112,15 +112,17 @@ cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
 
 }  // namespace
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget* parent, bool uiTest) : QMainWindow(parent), uiTest_(uiTest) {
     setupUi();
     bindSignals();
     initializeDevicesAsync();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    settings_.setValue("Geometry", saveGeometry());
-    settings_.setValue("WindowState", saveState());
+    if (!uiTest_) {
+        settings_.setValue("Geometry", saveGeometry());
+        settings_.setValue("WindowState", saveState());
+    }
     stopPressureTest();
     model_.reset();
     dlcv_infer::Utils::FreeAllModels();
@@ -266,7 +268,7 @@ void MainWindow::setupUi() {
 
     setCentralWidget(centralWidget);
 
-    if (settings_.contains("Geometry")) {
+    if (!uiTest_ && settings_.contains("Geometry")) {
         restoreGeometry(settings_.value("Geometry").toByteArray());
         restoreState(settings_.value("WindowState").toByteArray());
 
@@ -365,6 +367,7 @@ void MainWindow::initializeDevicesAsync() {
                     self->deviceNameToId_.insert(device.name, device.id);
                 }
 
+                self->devicesReady_ = true;
                 self->comboDevice_->setCurrentIndex(gpuDevices.empty() ? 0 : 1);
                 if (!warning.isEmpty()) {
                     self->outputText_->setPlainText("GPU信息获取失败：\n" + warning);
@@ -386,7 +389,8 @@ bool MainWindow::ensureModelLoaded() {
     if (model_) {
         return true;
     }
-    QMessageBox::warning(this, "提示", "请先加载模型文件！");
+    if (uiTest_) reportError("加载模型失败", "请先加载模型文件！");
+    else QMessageBox::warning(this, "提示", "请先加载模型文件！");
     return false;
 }
 
@@ -394,7 +398,8 @@ bool MainWindow::ensureImageSelected() {
     if (!imagePath_.isEmpty()) {
         return true;
     }
-    QMessageBox::warning(this, "提示", "请先选择图片文件！");
+    if (uiTest_) reportError("选择图片失败", "请先选择图片文件！");
+    else QMessageBox::warning(this, "提示", "请先选择图片文件！");
     return false;
 }
 
@@ -416,7 +421,7 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
 
 void MainWindow::reportError(const QString& title, const QString& detail) {
     outputText_->setPlainText(title + "\n" + detail);
-    QMessageBox::critical(this, "错误", title + ": " + detail);
+    if (!uiTest_) QMessageBox::critical(this, "错误", title + ": " + detail);
 }
 
 QString MainWindow::formatResultText(const dlcv_infer::Result& output) const {
@@ -502,23 +507,41 @@ void MainWindow::onLoadModel() {
 
     settings_.setValue("LastModelPath", selectedModelPath);
 
-    // 用户确认选择后，再释放旧模型并加载新模型
+    if (loadModelFromPath(selectedModelPath)) onGetModelInfo();
+}
+
+bool MainWindow::loadModelFromPath(const QString& path) {
     model_.reset();
-
-    try
-    {
-        const std::string modelPathLocal8 = selectedModelPath.toLocal8Bit().toStdString();
-        model_ = std::make_unique<dlcv_infer::Model>(modelPathLocal8, selectedDeviceId());
-        modelPath_ = selectedModelPath;
-    }
-    catch (const std::exception& e)
-    {
-        model_.reset();
+    try {
+        model_ = std::make_unique<dlcv_infer::Model>(path.toStdWString(), selectedDeviceId());
+        modelPath_ = path;
+        return true;
+    } catch (const std::exception& e) {
         outputText_->setPlainText(QString::fromLocal8Bit(e.what()));
-        return;
+        return false;
     }
+}
 
-    onGetModelInfo();
+QString MainWindow::resultText() const { return outputText_->toPlainText(); }
+
+bool MainWindow::runUiTest(const QString& model, const QString& image, int device,
+                           double threshold, bool calcMean, int inferenceCount) {
+    int index = -1;
+    for (int i = 0; i < comboDevice_->count(); ++i) {
+        if (deviceNameToId_.value(comboDevice_->itemText(i), -2) == device) index = i;
+    }
+    if (index < 0) { reportError("设备选择失败", "指定设备不存在"); return false; }
+    comboDevice_->setCurrentIndex(index);
+    spinThreshold_->setValue(threshold);
+    checkCalcMean_->setChecked(calcMean);
+    if (!loadModelFromPath(model)) return false;
+    imagePath_ = image;
+    inferenceDurations_.clear();
+    for (int i = 0; i < inferenceCount; ++i) {
+        onInfer();
+        if (!inferenceSucceeded_) return false;
+    }
+    return true;
 }
 
 void MainWindow::onOpenImageInfer() {
@@ -549,6 +572,7 @@ void MainWindow::onOpenImageInfer() {
 }
 
 void MainWindow::onInfer() {
+    inferenceSucceeded_ = false;
     if (pressureTestRunning_) {
         return;
     }
@@ -628,6 +652,8 @@ void MainWindow::onInfer() {
         text += formatResultText(output);
     }
     outputText_->setPlainText(text);
+    inferenceSucceeded_ = true;
+    if (uiTest_) inferenceDurations_.push_back(elapsedMs);
 }
 
 void MainWindow::onInferJson() {

@@ -7,6 +7,7 @@ using dlcv_infer_csharp;
 using System.IO;
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using static dlcv_infer_csharp.Utils;
 using DLCV;
 using System.Text;
@@ -365,6 +366,29 @@ namespace DlcvDemo
         private volatile bool shouldStopPressureTest = false;
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
         private bool isCurrentFlowModel = false; // 当前是否为流程模型(dvst/dvso/dvsp)
+        private readonly List<double> uiTestInferenceDurationsMs = new List<double>();
+        private int uiTestCompletedInferenceCount;
+        private InferenceExecution lastInferenceExecution;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeRect
+        {
+            internal int Left;
+            internal int Top;
+            internal int Right;
+            internal int Bottom;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint flags);
+
+        private sealed class InferenceExecution
+        {
+            internal double ElapsedMilliseconds { get; set; }
+        }
 
         private void DisposeCurrentModel()
         {
@@ -530,11 +554,18 @@ namespace DlcvDemo
             }
             if (openFileDialog.ShowDialog(this) == DialogResult.OK)
             {
-                OpenImageFromPath(openFileDialog.FileName, true);
+                try
+                {
+                    OpenImageFromPath(openFileDialog.FileName, true);
+                }
+                catch (Exception ex)
+                {
+                    ReportError("推理失败", ex);
+                }
             }
         }
 
-        private void OpenImageFromPath(string selectedImagePath, bool saveLastPath)
+        private InferenceExecution OpenImageFromPath(string selectedImagePath, bool saveLastPath)
         {
             image_path = selectedImagePath;
             if (saveLastPath)
@@ -542,13 +573,17 @@ namespace DlcvDemo
                 Properties.Settings.Default.LastImagePath = image_path;
                 Properties.Settings.Default.Save();
             }
-            button_infer_Click(this, EventArgs.Empty);
+            lastInferenceExecution = InferCurrentImage();
+            return lastInferenceExecution;
         }
 
         private async void RunUiTest()
         {
             try
             {
+                uiTestInferenceDurationsMs.Clear();
+                uiTestCompletedInferenceCount = 0;
+                lastInferenceExecution = null;
                 numericUpDown_threshold.Value = uiTestOptions.Threshold;
                 checkBox_calc_mean.CheckState = !uiTestOptions.CalcMean.HasValue
                     ? CheckState.Indeterminate
@@ -583,6 +618,20 @@ namespace DlcvDemo
                 else
                 {
                     OpenImageFromPath(uiTestOptions.ImagePath, false);
+                }
+                if (lastInferenceExecution == null)
+                {
+                    throw new InvalidOperationException("未完成首次真实推理: " + richTextBox1.Text);
+                }
+                RecordUiTestInference(lastInferenceExecution);
+                for (int i = 1; i < uiTestOptions.InferenceCount; i++)
+                {
+                    lastInferenceExecution = InferCurrentImage();
+                    RecordUiTestInference(lastInferenceExecution);
+                }
+                if (uiTestCompletedInferenceCount != uiTestOptions.InferenceCount)
+                {
+                    throw new InvalidOperationException("实际推理次数与请求次数不一致。");
                 }
                 if (uiTestOptions.InteractiveDialogs
                     && !PathsEqual(image_path, uiTestOptions.ImagePath))
@@ -623,6 +672,16 @@ namespace DlcvDemo
             }
         }
 
+        private void RecordUiTestInference(InferenceExecution execution)
+        {
+            if (execution == null)
+            {
+                throw new InvalidOperationException("真实推理未返回执行记录。");
+            }
+            uiTestInferenceDurationsMs.Add(execution.ElapsedMilliseconds);
+            uiTestCompletedInferenceCount++;
+        }
+
         private void SaveUiTestScreenshot()
         {
             if (string.IsNullOrWhiteSpace(uiTestOptions.ScreenshotPath))
@@ -631,9 +690,33 @@ namespace DlcvDemo
             }
             string path = Path.GetFullPath(uiTestOptions.ScreenshotPath);
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            using (var bitmap = new System.Drawing.Bitmap(Width, Height))
+            NativeRect rect;
+            if (!GetWindowRect(Handle, out rect))
             {
-                DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, Width, Height));
+                throw new InvalidOperationException("获取窗口区域失败: " + Marshal.GetLastWin32Error());
+            }
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+            if (width <= 0 || height <= 0)
+            {
+                throw new InvalidOperationException("窗口尺寸无效。");
+            }
+
+            using (var bitmap = new System.Drawing.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+            {
+                IntPtr hdc = graphics.GetHdc();
+                try
+                {
+                    if (!PrintWindow(Handle, hdc, 2))
+                    {
+                        throw new InvalidOperationException("捕获完整窗口失败: " + Marshal.GetLastWin32Error());
+                    }
+                }
+                finally
+                {
+                    graphics.ReleaseHdc(hdc);
+                }
                 bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
             }
         }
@@ -650,6 +733,11 @@ namespace DlcvDemo
         private void WriteUiTestResult(string status, Exception error)
         {
             string outputPath = Path.GetFullPath(uiTestOptions.OutputPath);
+            var inferenceDurations = new JArray();
+            foreach (double duration in uiTestInferenceDurationsMs)
+            {
+                inferenceDurations.Add(duration);
+            }
             string outputDirectory = Path.GetDirectoryName(outputPath);
             if (!string.IsNullOrWhiteSpace(outputDirectory))
             {
@@ -670,6 +758,9 @@ namespace DlcvDemo
                 ["window_title"] = Text,
                 ["ui_framework"] = "WinForms",
                 ["screenshot"] = uiTestOptions.ScreenshotPath,
+                ["requested_inference_count"] = uiTestOptions.InferenceCount,
+                ["inference_count"] = uiTestCompletedInferenceCount,
+                ["inference_durations_ms"] = inferenceDurations,
                 ["result_text"] = richTextBox1.Text ?? string.Empty,
                 ["error"] = error == null ? null : error.ToString()
             };
@@ -747,94 +838,108 @@ namespace DlcvDemo
                     MessageBox.Show("请先选择图片文件！");
                     return;
                 }
-
-                Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
-                if (image.Empty())
-                {
-                    throw new Exception("图像解码失败！");
-                }
-                batch_size = (int)numericUpDown_batch_size.Value;
-                JObject data = new JObject();
-                data["threshold"] = (float)numericUpDown_threshold.Value;
-                data["with_mask"] = true;
-                AddCalcMeanOverride(data);
-
-                Stopwatch stopwatch = new Stopwatch();
-                stopwatch.Start();
-
-				Mat inferImage = PrepareImageForModelInput(image);
-				CSharpResult result;
-				try
-				{
-					var inferImageList = new List<Mat>();
-					for (int i = 0; i < batch_size; i++)
-					{
-						inferImageList.Add(inferImage);
-					}
-					result = model.InferBatch(inferImageList, data);
-				}
-				finally
-				{
-					if (!object.ReferenceEquals(inferImage, image))
-					{
-						inferImage.Dispose();
-					}
-				}
-
-                stopwatch.Stop();
-                double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
-                Console.WriteLine($"推理时间: {delay_ms:F2}ms");
-
-                imagePanel1.UpdateImageAndResult(image, result);
-
-                StringBuilder sb = new StringBuilder();
-                sb.AppendLine("模型: " + model_path);
-                sb.AppendLine("图片: " + image_path);
-                sb.AppendLine($"batch_size: {batch_size}");
-                sb.AppendLine($"threshold: {(float)numericUpDown_threshold.Value:F2}");
-                sb.AppendLine($"推理时间: {delay_ms:F2}ms");
-
-                List<CSharpObjectResult> objects = null;
-                bool? inspectionOk = null;
-                string reason = null;
-                if (result.SampleResults != null && result.SampleResults.Count > 0)
-                {
-                    objects = result.SampleResults[0].Results;
-                    inspectionOk = result.SampleResults[0].Ok;
-                    reason = result.SampleResults[0].Reason;
-                }
-                if (objects == null)
-                {
-                    objects = new List<CSharpObjectResult>();
-                }
-
-                sb.AppendLine($"推理结果: {objects.Count}个");
-                if (inspectionOk.HasValue)
-                {
-                    sb.AppendLine(inspectionOk.Value ? "流程输出结果：OK" : "流程输出结果：NG");
-                }
-                if (!string.IsNullOrWhiteSpace(reason))
-                {
-                    sb.AppendLine("流程输出原因：" + reason);
-                }
-                if (objects.Count == 0)
-                {
-                    sb.AppendLine("未检测到目标。");
-                }
-                else
-                {
-                    sb.AppendLine();
-                    for (int i = 0; i < objects.Count; i++)
-                    {
-                        sb.AppendLine(BuildObjectResultText(i + 1, objects[i]));
-                    }
-                }
-                richTextBox1.Text = sb.ToString();
+                lastInferenceExecution = InferCurrentImage();
             }
             catch (Exception ex)
             {
                 ReportError("推理失败", ex);
             }
+        }
+
+        private InferenceExecution InferCurrentImage()
+        {
+            if (model == null)
+            {
+                throw new InvalidOperationException("请先加载模型文件！");
+            }
+            if (string.IsNullOrWhiteSpace(image_path))
+            {
+                throw new InvalidOperationException("请先选择图片文件！");
+            }
+
+            Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
+            if (image.Empty())
+            {
+                throw new Exception("图像解码失败！");
+            }
+            batch_size = (int)numericUpDown_batch_size.Value;
+            JObject data = new JObject();
+            data["threshold"] = (float)numericUpDown_threshold.Value;
+            data["with_mask"] = true;
+            AddCalcMeanOverride(data);
+
+            Stopwatch stopwatch = new Stopwatch();
+            stopwatch.Start();
+
+            Mat inferImage = PrepareImageForModelInput(image);
+            CSharpResult result;
+            try
+            {
+                var inferImageList = new List<Mat>();
+                for (int i = 0; i < batch_size; i++)
+                {
+                    inferImageList.Add(inferImage);
+                }
+                result = model.InferBatch(inferImageList, data);
+            }
+            finally
+            {
+                if (!object.ReferenceEquals(inferImage, image))
+                {
+                    inferImage.Dispose();
+                }
+            }
+
+            stopwatch.Stop();
+            double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
+            Console.WriteLine($"推理时间: {delay_ms:F2}ms");
+
+            imagePanel1.UpdateImageAndResult(image, result);
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("模型: " + model_path);
+            sb.AppendLine("图片: " + image_path);
+            sb.AppendLine($"batch_size: {batch_size}");
+            sb.AppendLine($"threshold: {(float)numericUpDown_threshold.Value:F2}");
+            sb.AppendLine($"推理时间: {delay_ms:F2}ms");
+
+            List<CSharpObjectResult> objects = null;
+            bool? inspectionOk = null;
+            string reason = null;
+            if (result.SampleResults != null && result.SampleResults.Count > 0)
+            {
+                objects = result.SampleResults[0].Results;
+                inspectionOk = result.SampleResults[0].Ok;
+                reason = result.SampleResults[0].Reason;
+            }
+            if (objects == null)
+            {
+                objects = new List<CSharpObjectResult>();
+            }
+
+            sb.AppendLine($"推理结果: {objects.Count}个");
+            if (inspectionOk.HasValue)
+            {
+                sb.AppendLine(inspectionOk.Value ? "流程输出结果：OK" : "流程输出结果：NG");
+            }
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                sb.AppendLine("流程输出原因：" + reason);
+            }
+            if (objects.Count == 0)
+            {
+                sb.AppendLine("未检测到目标。");
+            }
+            else
+            {
+                sb.AppendLine();
+                for (int i = 0; i < objects.Count; i++)
+                {
+                    sb.AppendLine(BuildObjectResultText(i + 1, objects[i]));
+                }
+            }
+            richTextBox1.Text = sb.ToString();
+            return new InferenceExecution { ElapsedMilliseconds = delay_ms };
         }
 
         private static string BuildObjectResultText(int index, CSharpObjectResult obj)

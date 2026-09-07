@@ -11,6 +11,7 @@ namespace DlcvDemo
         internal string ImagePath { get; private set; }
         internal string OutputPath { get; private set; }
         internal string ScreenshotPath { get; private set; }
+        internal int InferenceCount { get; private set; } = 1;
         internal decimal Threshold { get; private set; } = 0.5m;
         internal int DeviceId { get; private set; } = 0;
         internal bool? CalcMean { get; private set; }
@@ -54,6 +55,15 @@ namespace DlcvDemo
                         break;
                     case "--screenshot":
                         options.ScreenshotPath = value;
+                        break;
+                    case "--inference-count":
+                        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int inferenceCount)
+                            || inferenceCount < 1)
+                        {
+                            error = "--inference-count 必须是大于等于 1 的整数。";
+                            return false;
+                        }
+                        options.InferenceCount = inferenceCount;
                         break;
                     case "--threshold":
                         if (!decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal threshold)
@@ -155,7 +165,7 @@ namespace DlcvDemo
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--inference-count <positive integer>] [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");

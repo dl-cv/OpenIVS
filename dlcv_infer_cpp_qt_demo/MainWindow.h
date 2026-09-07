@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <atomic>
 #include <chrono>
@@ -30,7 +30,11 @@ class ImageViewerWidget;
 
 class MainWindow : public QMainWindow {
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(QWidget* parent = nullptr, bool uiTest = false);
+    bool devicesReady() const { return devicesReady_; }
+    bool runUiTest(const QString& model, const QString& image, int device, double threshold, bool calcMean, int inferenceCount);
+    const std::vector<double>& inferenceDurations() const { return inferenceDurations_; }
+    QString resultText() const;
     ~MainWindow() override = default;
 
 protected:
@@ -74,6 +78,11 @@ private:
     void updatePressureTestStatistics();
     void setUiEnabledForPressureTest(bool enabled);
 
+    bool uiTest_ = false;
+    bool devicesReady_ = false;
+    bool inferenceSucceeded_ = false;
+    std::vector<double> inferenceDurations_;
+    bool loadModelFromPath(const QString& path);
     std::unique_ptr<dlcv_infer::Model> model_;
     QSettings settings_{"dlcv", "DlcvDemoQt"};
     QHash<QString, int> deviceNameToId_;
