@@ -1090,6 +1090,9 @@ public:
 
                 if (hasMergedRle) {
                     merged["with_mask"] = true;
+                    const double maskArea = CalculateMaskArea(mergedMaskRle);
+                    merged["area"] = maskArea;
+                    if (merged.contains("mask_area")) merged["mask_area"] = maskArea;
                     merged["mask_rle"] = std::move(mergedMaskRle);
                     merged.erase("mask_array");
                 } else {

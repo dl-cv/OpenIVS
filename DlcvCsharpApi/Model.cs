@@ -2120,6 +2120,12 @@ namespace dlcv_infer_csharp
                         }
                     }
 
+                    // area 表示当前 mask 的面积，不能沿用缩放前的 SDK 面积。
+                    if (!mask_img.Empty())
+                    {
+                        area = Cv2.CountNonZero(mask_img);
+                    }
+
                     // 补充逻辑：如果bbox无效但有mask，尝试从mask计算bbox
                     if ((bbox == null || bbox.Count < 4) && !mask_img.Empty())
                     {

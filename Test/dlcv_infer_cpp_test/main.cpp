@@ -43,6 +43,7 @@
 #include "../DvsTempArtifactMonitor.h"
 #include "dlcv_infer.h"
 #include "RegionMaskSelfTest.h"
+#include "MaskAreaSelfTest.h"
 
 namespace {
 using json = nlohmann::json;
@@ -3508,6 +3509,9 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunRectImageCorrectionSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"mask-area-selftest") {
+        return RunMaskAreaSelfTest();
+    }
     if (argc >= 2 && std::wstring(argv[1]) == L"region-mask-selftest") {
         return RunRegionMaskSelfTest();
     }

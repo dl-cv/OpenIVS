@@ -2191,6 +2191,11 @@ namespace dlcv_infer {
                     }
                 }
 
+                // area 表示当前 mask 的面积，不能沿用缩放前的 SDK 面积。
+                if (!mask_img.empty()) {
+                    area = static_cast<float>(cv::countNonZero(mask_img));
+                }
+
                 if ((bbox.size() < 4) && !mask_img.empty())
                 {
                     std::vector<cv::Point> nz;
