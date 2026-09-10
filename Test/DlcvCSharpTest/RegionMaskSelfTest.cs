@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using DlcvModules;
 using Newtonsoft.Json.Linq;
@@ -69,6 +69,21 @@ namespace DlcvCSharpTest
                     check("resize-nearest", low, Entries(Det(8, 9, 10, 10)), true, null, 1);
                     var full = Det(0, 0, 32, 32, 8, 10); full["bbox"] = new JArray(8, 0, 2, 32);
                     check("full-image-mask", full, Entries(Det(8, 0, 2, 32)), true, null, 1);
+                    // 分流后区域 index 可从 1 重排成 0，原图身份不能随 index 改变。
+                    var multiImages = new List<ModuleImage> { images[0], new ModuleImage(image, image, new TransformationState(32, 32), 1) };
+                    var multiTargets = Entries(Det(8, 9, 2, 2));
+                    var second = (JObject)multiTargets[0].DeepClone(); second["index"] = 1; second["origin_index"] = 1;
+                    multiTargets.Add(second);
+                    var otherRegion = Entries(Det(8, 9, 2, 2)); otherRegion[0]["origin_index"] = 1;
+                    var isolated = new ResultFilterRegion(1, properties: new Dictionary<string, object> { ["filter_mode"] = "mask" });
+                    isolated.ExtraInputsIn.Add(new ModuleChannel(null, otherRegion));
+                    var isolatedOutput = isolated.Process(multiImages, multiTargets);
+                    if (isolatedOutput.ResultList.Count != 1 || isolatedOutput.ResultList[0]["origin_index"].Value<int>() != 1
+                        || isolatedOutput.ImageList.Count != 1 || isolatedOutput.ImageList[0].OriginalIndex != 1
+                        || isolatedOutput.ResultList[0]["index"].Value<int>() != 0
+                        || isolated.ExtraOutputs[0].ResultList.Count != 1 || isolated.ExtraOutputs[0].ImageList[0].OriginalIndex != 0)
+                        throw new Exception("origin-isolation-reindexed-region: wrong source image");
+                    Console.WriteLine("PASS origin-isolation-reindexed-region"); count++;
                     var unconnected = new ResultFilterRegion(1, properties: new Dictionary<string, object> { ["filter_mode"] = "mask" });
                     bool rejected = false;
                     try { unconnected.Process(images, Entries(Det(0, 0, 2, 2))); } catch (ArgumentException) { rejected = true; }

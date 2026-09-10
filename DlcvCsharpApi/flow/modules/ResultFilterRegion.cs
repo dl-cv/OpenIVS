@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json.Linq;
@@ -100,11 +100,28 @@ namespace DlcvModules
                 }
             }
 
+            bool maskMode = string.Equals(ReadString("filter_mode", "legacy"), "mask", StringComparison.OrdinalIgnoreCase);
             ModuleImage PickWrapForEntry(JObject entry)
             {
                 if (entry == null) return null;
                 int originIndex = entry["origin_index"]?.Value<int?>() ?? -1;
                 int idx = entry["index"]?.Value<int?>() ?? -1;
+                if (maskMode)
+                {
+                    // Mask 分支先限制原图，再按 transform/index 定位，避免分流重排或相同 transform 串图。
+                    bool hasOrigin = entry["origin_index"] != null && entry["origin_index"].Type != JTokenType.Null;
+                    var candidates = images.FindAll(wrap => wrap != null && (!hasOrigin || wrap.OriginalIndex == originIndex));
+                    if (candidates.Count == 0) return null;
+                    var indexed = indexToWrap.TryGetValue(idx, out var atIndex) ? atIndex : null;
+                    string sig = SerializeTransformSig(entry["transform"] as JObject);
+                    var matching = candidates.FindAll(wrap => sig != null && SerializeTransformSig(wrap.TransformState) == sig);
+                    if (matching.Contains(indexed)) return indexed;
+                    if (matching.Count == 1) return matching[0];
+                    if (candidates.Contains(indexed)) return indexed;
+                    if (hasOrigin) return candidates[0];
+                    throw new ArgumentException("Mask mode requires origin_index or a valid image index");
+                }
+
                 try
                 {
                     var stObj = entry["transform"] as JObject;
@@ -121,7 +138,7 @@ namespace DlcvModules
                 return null;
             }
 
-            if (string.Equals(ReadString("filter_mode", "legacy"), "mask", StringComparison.OrdinalIgnoreCase))
+            if (maskMode)
             {
                 return ProcessMask(images, results, PickWrapForEntry);
             }
