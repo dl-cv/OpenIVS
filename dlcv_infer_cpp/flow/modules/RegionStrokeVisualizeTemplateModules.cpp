@@ -9,6 +9,9 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <functional>
+#include <limits>
+#include <stdexcept>
 #include <iomanip>
 #include <iterator>
 #include <sstream>
@@ -134,6 +137,10 @@ protected:
             if (originIdx >= 0 && itOrigin != originToWrapIndex.end()) return itOrigin->second;
             return -1;
         };
+
+        if (ToLowerCopy(ReadString("filter_mode", "legacy")) == "mask") {
+            return ProcessMask(images, results, pickWrapIndexForEntry);
+        }
 
         bool forceOriginal = false;
         for (const auto& token : results) {
@@ -1024,6 +1031,200 @@ private:
             d2["metadata"] = std::move(meta);
         } catch (...) {}
         return d2;
+    }
+
+    // Mask 模式不回退 bbox/矩形 ROI；临时原图 mask 不改变输出几何。
+    struct RegionMask {
+        cv::Rect Bounds;
+        cv::Mat Pixels;
+        int Area = 0;
+    };
+
+    ModuleIO ProcessMask(const std::vector<ModuleImage>& images, const Json& results,
+                         const std::function<int(const Json&)>& pickWrap) {
+        const auto input = ReadResultRegionInput();
+        if (!input.first) throw std::invalid_argument("Mask mode requires result_region input");
+        const std::string metric = ToLowerCopy(ReadString("metric", "ios"));
+        if (metric != "ios" && metric != "iou") throw std::invalid_argument("Mask metric must be ios or iou");
+        double threshold = 0.5;
+        if (Properties.contains("overlap_threshold") && !TryToDouble(Properties.at("overlap_threshold"), threshold))
+            throw std::invalid_argument("Invalid mask overlap_threshold");
+        if (!std::isfinite(threshold) || threshold < 0 || threshold > 1)
+            throw std::invalid_argument("Mask overlap_threshold must be in [0, 1]");
+        const bool top1 = ToLowerCopy(ReadString("result_region_mode", "any_bbox")) == "top1_bbox";
+        std::unordered_map<int, std::vector<RegionMask>> regions;
+        std::unordered_map<int, double> scores;
+        for (const auto& entry : input.second) {
+            if (!entry.is_object() || !CaseEquals(entry.value("type", ""), "local")) continue;
+            const int index = pickWrap(entry);
+            if (index < 0) continue;
+            const auto& wrap = images.at(index);
+            for (const auto& det : entry.value("sample_results", Json::array())) {
+                if (!det.is_object()) continue;
+                auto mask = PrepareRegionMask(det, entry, wrap);
+                if (!mask.Area) continue;
+                double score = -std::numeric_limits<double>::infinity();
+                TryExtractScore(det, score);
+                auto& list = regions[wrap.OriginalIndex];
+                if (top1 && !list.empty() && score <= scores[wrap.OriginalIndex]) continue;
+                if (top1) list.clear();
+                list.push_back(std::move(mask));
+                scores[wrap.OriginalIndex] = score;
+            }
+        }
+        std::array<std::vector<std::pair<Json, int>>, 2> branchEntries;
+        std::array<std::vector<bool>, 2> flags{std::vector<bool>(images.size()), std::vector<bool>(images.size())};
+        Json others = Json::array();
+        for (const auto& entry : results) {
+            if (!entry.is_object() || !CaseEquals(entry.value("type", ""), "local") ||
+                !entry.contains("sample_results") || !entry.at("sample_results").is_array()) {
+                others.push_back(entry); continue;
+            }
+            const int index = pickWrap(entry);
+            if (index < 0) throw std::invalid_argument("Mask mode cannot locate target image");
+            const auto& wrap = images.at(index);
+            std::array<Json, 2> split{Json::array(), Json::array()};
+            for (const auto& det : entry.at("sample_results")) {
+                if (!det.is_object()) continue;
+                const auto mask = PrepareRegionMask(det, entry, wrap);
+                bool inside = false;
+                auto found = regions.find(wrap.OriginalIndex);
+                if (mask.Area && found != regions.end()) {
+                    for (const auto& region : found->second) {
+                        if (RegionMasksMatch(mask, region, metric, threshold)) { inside = true; break; }
+                    }
+                }
+                split[inside ? 0 : 1].push_back(det);
+            }
+            for (int branch = 0; branch < 2; ++branch) {
+                if (split[branch].empty()) continue;
+                Json copy = entry;
+                copy["sample_results"] = std::move(split[branch]);
+                branchEntries[branch].emplace_back(std::move(copy), index);
+                flags[branch][index] = true;
+            }
+        }
+        std::array<ModuleIO, 2> outputs;
+        for (int branch = 0; branch < 2; ++branch) {
+            std::vector<int> indices(images.size(), -1);
+            for (size_t i = 0; i < images.size(); ++i) {
+                if (!flags[branch][i]) continue;
+                indices[i] = static_cast<int>(outputs[branch].ImageList.size());
+                outputs[branch].ImageList.push_back(images[i]);
+            }
+            for (auto& item : branchEntries[branch]) {
+                item.first["index"] = indices[item.second];
+                outputs[branch].ResultList.push_back(std::move(item.first));
+            }
+            for (const auto& other : others) outputs[branch].ResultList.push_back(other);
+        }
+        ExtraOutputs.emplace_back(std::move(outputs[1].ImageList), std::move(outputs[1].ResultList));
+        ScalarOutputsByName["has_positive"] = !branchEntries[0].empty();
+        return std::move(outputs[0]);
+    }
+
+    static RegionMask PrepareRegionMask(const Json& det, const Json& entry, const ModuleImage& wrap) {
+        cv::Mat mask;
+        if (det.contains("mask_array") && !det.at("mask_array").is_null()) {
+            const auto& rows = det.at("mask_array");
+            if (!rows.is_array()) throw std::invalid_argument("Mask array must be two-dimensional uint8");
+            if (rows.empty()) return {};
+            if (!rows.at(0).is_array()) throw std::invalid_argument("Mask array must be two-dimensional uint8");
+            if (rows.at(0).empty()) return {};
+            mask.create(static_cast<int>(rows.size()), static_cast<int>(rows.at(0).size()), CV_8UC1);
+            for (int y = 0; y < mask.rows; ++y) {
+                const auto& row = rows.at(y);
+                if (!row.is_array() || row.size() != static_cast<size_t>(mask.cols)) throw std::invalid_argument("Invalid mask row");
+                for (int x = 0; x < mask.cols; ++x) {
+                    double value = 0;
+                    if (!TryToDouble(row.at(x), value) || !std::isfinite(value) || value < 0 || value > 255 || value != std::floor(value))
+                        throw std::invalid_argument("Mask array must be uint8");
+                    mask.at<unsigned char>(y,x) = value > 127 ? 255 : 0;
+                }
+            }
+        } else if (det.contains("mask_rle") && !det.at("mask_rle").is_null()) {
+            mask = MaskInfoToMat(det.at("mask_rle"));
+            if (mask.empty()) return {};
+            cv::threshold(mask, mask, 127, 255, cv::THRESH_BINARY);
+        } else return {};
+        if (!cv::countNonZero(mask)) return {};
+        const int W = wrap.TransformState.OriginalWidth, H = wrap.TransformState.OriginalHeight;
+        int sourceW = W, sourceH = H;
+        cv::Matx23d inverse(1,0,0,0,1,0);
+        if (entry.contains("transform") && !entry.at("transform").is_null()) {
+            const auto& t = entry.at("transform");
+            if (!t.is_object()) throw std::invalid_argument("Invalid mask transform");
+            // Native affine_2x3 已融合裁剪；Python affine_matrix 需组合 crop_box。
+            const bool native = t.contains("original_width");
+            const int tw = native ? t.at("original_width").get<int>() : t.at("original_size").at(0).get<int>();
+            const int th = native ? t.at("original_height").get<int>() : t.at("original_size").at(1).get<int>();
+            if (tw != W || th != H) throw std::invalid_argument("Mask original sizes differ");
+            if (t.contains("output_size")) {
+                sourceW = t.at("output_size").at(0).get<int>(); sourceH = t.at("output_size").at(1).get<int>();
+            } else if (!native) throw std::invalid_argument("Missing mask output_size");
+            cv::Matx23d a(1,0,0,0,1,0);
+            if (native) {
+                if (t.contains("affine_2x3")) {
+                    const auto flat = t.at("affine_2x3").get<std::vector<double>>();
+                    if (flat.size() != 6) throw std::invalid_argument("Invalid mask affine");
+                    for (int i = 0; i < 6; ++i) a.val[i] = flat[i];
+                }
+            } else {
+                const auto& rows = t.at("affine_matrix");
+                for (int i = 0; i < 6; ++i) a.val[i] = rows.at(i/3).at(i%3).get<double>();
+                const double cx = t.at("crop_box").at(0).get<double>(), cy = t.at("crop_box").at(1).get<double>();
+                a(0,2) -= a(0,0)*cx + a(0,1)*cy; a(1,2) -= a(1,0)*cx + a(1,1)*cy;
+            }
+            for (double v : a.val) if (!std::isfinite(v)) throw std::invalid_argument("Invalid mask affine");
+            const double determinant = a(0,0)*a(1,1)-a(0,1)*a(1,0);
+            if (determinant == 0 || !std::isfinite(determinant)) throw std::invalid_argument("Singular mask transform");
+            cv::invertAffineTransform(a, inverse);
+            for (double v : inverse.val) if (!std::isfinite(v)) throw std::invalid_argument("Invalid inverse mask transform");
+        }
+        if (std::min({W,H,sourceW,sourceH}) <= 0) throw std::invalid_argument("Invalid mask image size");
+        int x1 = 0, y1 = 0, x2 = sourceW, y2 = sourceH;
+        if (mask.cols != sourceW || mask.rows != sourceH) {
+            double bx1,by1,bx2,by2;
+            if (!det.contains("bbox") || !det.at("bbox").is_array() || det.at("bbox").size() < 4 ||
+                det.at("bbox").at(2).get<double>() <= 0 || det.at("bbox").at(3).get<double>() <= 0 ||
+                !TryExtractBboxAabbCurrent(det,bx1,by1,bx2,by2) ||
+                !std::isfinite(bx1) || !std::isfinite(by1) || !std::isfinite(bx2) || !std::isfinite(by2))
+                throw std::invalid_argument("Local mask requires a valid XYWH bbox");
+            x1 = static_cast<int>(std::floor(bx1)); y1 = static_cast<int>(std::floor(by1));
+            x2 = static_cast<int>(std::ceil(bx2)); y2 = static_cast<int>(std::ceil(by2));
+            if (mask.cols != x2-x1 || mask.rows != y2-y1)
+                cv::resize(mask, mask, cv::Size(x2-x1,y2-y1),0,0,cv::INTER_NEAREST);
+        }
+        const int sx = std::max(0,x1), sy = std::max(0,y1), ex = std::min(sourceW,x2), ey = std::min(sourceH,y2);
+        if (ex <= sx || ey <= sy) return {};
+        const cv::Mat clipped = mask(cv::Rect(sx-x1,sy-y1,ex-sx,ey-sy));
+        inverse(0,2) += inverse(0,0)*sx + inverse(0,1)*sy;
+        inverse(1,2) += inverse(1,0)*sx + inverse(1,1)*sy;
+        double minX = std::numeric_limits<double>::infinity(), minY = minX, maxX = -minX, maxY = -minX;
+        for (double px : {-0.5, clipped.cols-0.5}) for (double py : {-0.5, clipped.rows-0.5}) {
+            const double ox = inverse(0,0)*px+inverse(0,1)*py+inverse(0,2), oy = inverse(1,0)*px+inverse(1,1)*py+inverse(1,2);
+            minX = std::min(minX,ox); maxX = std::max(maxX,ox); minY = std::min(minY,oy); maxY = std::max(maxY,oy);
+        }
+        const int ox1 = std::max(0,static_cast<int>(std::floor(minX+0.5))), oy1 = std::max(0,static_cast<int>(std::floor(minY+0.5)));
+        const int ox2 = std::min(W,static_cast<int>(std::ceil(maxX+0.5))), oy2 = std::min(H,static_cast<int>(std::ceil(maxY+0.5)));
+        if (ox2 <= ox1 || oy2 <= oy1) return {};
+        inverse(0,2) -= ox1; inverse(1,2) -= oy1;
+        RegionMask result;
+        result.Bounds = cv::Rect(ox1,oy1,ox2-ox1,oy2-oy1);
+        cv::warpAffine(clipped,result.Pixels,inverse,result.Bounds.size(),cv::INTER_NEAREST,cv::BORDER_CONSTANT,cv::Scalar(0));
+        result.Area = cv::countNonZero(result.Pixels);
+        return result;
+    }
+
+    static bool RegionMasksMatch(const RegionMask& a, const RegionMask& b, const std::string& metric, double threshold) {
+        const cv::Rect overlap = a.Bounds & b.Bounds;
+        if (overlap.empty()) return false;
+        cv::Mat intersectionMask;
+        cv::bitwise_and(a.Pixels(cv::Rect(overlap.tl()-a.Bounds.tl(),overlap.size())),
+                        b.Pixels(cv::Rect(overlap.tl()-b.Bounds.tl(),overlap.size())), intersectionMask);
+        const int intersection = cv::countNonZero(intersectionMask);
+        const double denominator = metric == "ios" ? std::min(a.Area,b.Area) : static_cast<double>(a.Area)+b.Area-intersection;
+        return intersection > 0 && intersection/denominator >= threshold;
     }
 
     std::pair<bool, Json> ReadResultRegionInput() const {

@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <atomic>
@@ -42,6 +42,7 @@
 #include "../../dlcv_infer_cpp/flow/utils/MaskRleUtils.h"
 #include "../DvsTempArtifactMonitor.h"
 #include "dlcv_infer.h"
+#include "RegionMaskSelfTest.h"
 
 namespace {
 using json = nlohmann::json;
@@ -3507,6 +3508,9 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunRectImageCorrectionSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"region-mask-selftest") {
+        return RunRegionMaskSelfTest();
+    }
     if (argc >= 2 && std::wstring(argv[1]) == L"bbox-iou-dedup-selftest") {
         return RunBBoxIoUDedupSelfTest();
     }
