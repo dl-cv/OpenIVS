@@ -121,6 +121,11 @@ namespace DlcvModules
                 return null;
             }
 
+            if (string.Equals(ReadString("filter_mode", "legacy"), "mask", StringComparison.OrdinalIgnoreCase))
+            {
+                return ProcessMask(images, results, PickWrapForEntry);
+            }
+
             // Python 对齐：不聚合为“每图一个 entry”，而是保留 entry 结构，仅拆分 sample_results。
             // 同时记录 entry 绑定的输入图像下标 oldIdx，便于分支输出时重排 index，避免二路错位。
             var insideEntries = new List<Tuple<JObject, int>>();
@@ -746,6 +751,224 @@ namespace DlcvModules
             catch { }
 
             return new ModuleIO(outImagesIn, outResultsIn);
+        }
+
+        // Mask 模式单独分支，保留旧 ROI 行为；临时 mask 不写回输入结果。
+        private sealed class RegionMask
+        {
+            public int X, Y, Width, Height, Area;
+            public byte[] Pixels;
+        }
+
+        private ModuleIO ProcessMask(List<ModuleImage> images, JArray results, Func<JObject, ModuleImage> pickWrap)
+        {
+            var input = ReadResultRegionInput();
+            if (!input.Item1) throw new ArgumentException("Mask mode requires result_region input");
+            string metric = ReadString("metric", "ios").ToLowerInvariant();
+            if (metric != "ios" && metric != "iou") throw new ArgumentException("Mask metric must be ios or iou");
+            double threshold = Properties.ContainsKey("overlap_threshold")
+                ? Convert.ToDouble(Properties["overlap_threshold"], System.Globalization.CultureInfo.InvariantCulture) : 0.5;
+            if (!IsFinite(threshold) || threshold < 0 || threshold > 1)
+                throw new ArgumentException("Mask overlap_threshold must be in [0, 1]");
+            bool top1 = string.Equals(ReadString("result_region_mode", "any_bbox"), "top1_bbox", StringComparison.OrdinalIgnoreCase);
+            var regions = new Dictionary<int, List<RegionMask>>();
+            var scores = new Dictionary<int, double>();
+            foreach (var token in input.Item2)
+            {
+                var entry = token as JObject;
+                if (entry == null || !string.Equals(entry["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase)) continue;
+                var wrap = pickWrap(entry);
+                if (wrap == null) continue;
+                foreach (var det in (entry["sample_results"] as JArray) ?? new JArray())
+                {
+                    if (!(det is JObject obj)) continue;
+                    var mask = PrepareRegionMask(obj, entry, wrap);
+                    if (mask == null) continue;
+                    int origin = wrap.OriginalIndex;
+                    double score = TryExtractScore(obj) ?? double.NegativeInfinity;
+                    if (!regions.TryGetValue(origin, out var list))
+                    {
+                        list = new List<RegionMask>();
+                        regions[origin] = list;
+                        scores[origin] = double.NegativeInfinity;
+                    }
+                    if (top1 && list.Count > 0 && score <= scores[origin]) continue;
+                    if (top1) list.Clear();
+                    list.Add(mask);
+                    scores[origin] = score;
+                }
+            }
+            var branchEntries = new[] { new List<Tuple<JObject, int>>(), new List<Tuple<JObject, int>>() };
+            var flags = new[] { new bool[images.Count], new bool[images.Count] };
+            var others = new JArray();
+            foreach (var token in results)
+            {
+                var entry = token as JObject;
+                if (entry == null || !string.Equals(entry["type"]?.ToString(), "local", StringComparison.OrdinalIgnoreCase) || !(entry["sample_results"] is JArray dets))
+                { others.Add(token.DeepClone()); continue; }
+                var wrap = pickWrap(entry);
+                if (wrap == null) throw new ArgumentException("Mask mode cannot locate target image");
+                int index = images.IndexOf(wrap);
+                var split = new[] { new JArray(), new JArray() };
+                foreach (var tokenDet in dets)
+                {
+                    if (!(tokenDet is JObject det)) continue;
+                    var mask = PrepareRegionMask(det, entry, wrap);
+                    bool inside = mask != null && regions.TryGetValue(wrap.OriginalIndex, out var list)
+                        && list.Exists(region => RegionMasksMatch(mask, region, metric, threshold));
+                    split[inside ? 0 : 1].Add(det.DeepClone());
+                }
+                for (int branch = 0; branch < 2; branch++)
+                {
+                    if (split[branch].Count == 0) continue;
+                    var copy = (JObject)entry.DeepClone();
+                    copy["sample_results"] = split[branch];
+                    branchEntries[branch].Add(Tuple.Create(copy, index));
+                    flags[branch][index] = true;
+                }
+            }
+            var outputs = new ModuleIO[2];
+            for (int branch = 0; branch < 2; branch++)
+            {
+                var branchImages = new List<ModuleImage>();
+                var indices = new Dictionary<int, int>();
+                for (int i = 0; i < images.Count; i++)
+                    if (flags[branch][i]) { indices[i] = branchImages.Count; branchImages.Add(images[i]); }
+                var entries = new JArray();
+                foreach (var item in branchEntries[branch])
+                { item.Item1["index"] = indices[item.Item2]; entries.Add(item.Item1); }
+                foreach (var other in others) entries.Add(other.DeepClone());
+                outputs[branch] = new ModuleIO(branchImages, entries);
+            }
+            ExtraOutputs.Add(new ModuleChannel(outputs[1].ImageList, outputs[1].ResultList));
+            ScalarOutputsByName["has_positive"] = branchEntries[0].Count > 0;
+            return outputs[0];
+        }
+
+        private static bool IsFinite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
+
+        private static RegionMask PrepareRegionMask(JObject det, JObject entry, ModuleImage wrap)
+        {
+            // SDK RLE 解码为 0/255；JSON mask_array 严格沿用 Python 的 >127 前景阈值。
+            var raw = det["mask_array"];
+            using (var mask = new Mat())
+            {
+                if (raw != null && raw.Type != JTokenType.Null)
+                {
+                    if (!(raw is JArray rows)) throw new ArgumentException("Mask array must be two-dimensional uint8");
+                    if (rows.Count == 0) return null;
+                    if (!(rows[0] is JArray first)) throw new ArgumentException("Mask array must be two-dimensional uint8");
+                    if (first.Count == 0) return null;
+                    mask.Create(rows.Count, first.Count, MatType.CV_8UC1);
+                    for (int y = 0; y < rows.Count; y++)
+                    {
+                        if (!(rows[y] is JArray row) || row.Count != first.Count) throw new ArgumentException("Invalid mask row");
+                        for (int x = 0; x < row.Count; x++)
+                        {
+                            double v = row[x].Value<double>();
+                            if (!IsFinite(v) || v < 0 || v > 255 || v != Math.Floor(v)) throw new ArgumentException("Mask array must be uint8");
+                            mask.Set(y, x, (byte)(v > 127 ? 255 : 0));
+                        }
+                    }
+                }
+                else if (det["mask_rle"] != null && det["mask_rle"].Type != JTokenType.Null)
+                {
+                    using (var decoded = MaskRleUtils.MaskInfoToMat(det["mask_rle"]))
+                    {
+                        if (decoded == null || decoded.Empty()) return null;
+                        Cv2.Threshold(decoded, mask, 127, 255, ThresholdTypes.Binary);
+                    }
+                }
+                else return null;
+                if (Cv2.CountNonZero(mask) == 0) return null;
+                int W = wrap.TransformState.OriginalWidth, H = wrap.TransformState.OriginalHeight;
+                int sourceW = W, sourceH = H;
+                double[] inv = { 1, 0, 0, 0, 1, 0 };
+                var transform = entry["transform"];
+                if (transform != null && transform.Type != JTokenType.Null)
+                {
+                    if (!(transform is JObject t)) throw new ArgumentException("Invalid mask transform");
+                    // Native affine_2x3 已包含裁剪；Python affine_matrix 则需组合 crop_box。
+                    bool native = t["original_width"] != null;
+                    int tw = native ? t["original_width"].Value<int>() : t["original_size"][0].Value<int>();
+                    int th = native ? t["original_height"].Value<int>() : t["original_size"][1].Value<int>();
+                    if (tw != W || th != H) throw new ArgumentException("Mask original sizes differ");
+                    var os = t["output_size"] as JArray;
+                    sourceW = os == null && native ? W : os[0].Value<int>();
+                    sourceH = os == null && native ? H : os[1].Value<int>();
+                    double[] a = { 1, 0, 0, 0, 1, 0 };
+                    if (native)
+                    {
+                        if (t["affine_2x3"] is JArray flat) a = flat.ToObject<double[]>();
+                    }
+                    else
+                    {
+                        var rows = (JArray)t["affine_matrix"];
+                        a = new[] { rows[0][0].Value<double>(), rows[0][1].Value<double>(), rows[0][2].Value<double>(),
+                            rows[1][0].Value<double>(), rows[1][1].Value<double>(), rows[1][2].Value<double>() };
+                        double cx = t["crop_box"][0].Value<double>(), cy = t["crop_box"][1].Value<double>();
+                        a[2] -= a[0] * cx + a[1] * cy; a[5] -= a[3] * cx + a[4] * cy;
+                    }
+                    if (a.Length != 6 || Array.Exists(a, v => !IsFinite(v))) throw new ArgumentException("Invalid mask affine");
+                    double determinant = a[0] * a[4] - a[1] * a[3];
+                    if (determinant == 0 || !IsFinite(determinant)) throw new ArgumentException("Singular mask transform");
+                    inv = new[] { a[4] / determinant, -a[1] / determinant, (a[1] * a[5] - a[4] * a[2]) / determinant,
+                        -a[3] / determinant, a[0] / determinant, (a[3] * a[2] - a[0] * a[5]) / determinant };
+                    if (Array.Exists(inv, v => !IsFinite(v))) throw new ArgumentException("Invalid inverse mask transform");
+                }
+                if (Math.Min(Math.Min(W, H), Math.Min(sourceW, sourceH)) <= 0) throw new ArgumentException("Invalid mask image size");
+                int x1 = 0, y1 = 0, x2 = sourceW, y2 = sourceH;
+                if (mask.Cols != sourceW || mask.Rows != sourceH)
+                {
+                    if (!(det["bbox"] is JArray bbox) || bbox.Count < 4 || bbox[2].Value<double>() <= 0 || bbox[3].Value<double>() <= 0
+                        || !TryExtractBboxAabbCurrent(det, out double bx1, out double by1, out double bx2, out double by2)
+                        || !IsFinite(bx1) || !IsFinite(by1) || !IsFinite(bx2) || !IsFinite(by2))
+                        throw new ArgumentException("Local mask requires a valid XYWH bbox");
+                    x1 = (int)Math.Floor(bx1); y1 = (int)Math.Floor(by1);
+                    x2 = (int)Math.Ceiling(bx2); y2 = (int)Math.Ceiling(by2);
+                    if (mask.Cols != x2 - x1 || mask.Rows != y2 - y1)
+                        Cv2.Resize(mask, mask, new Size(x2 - x1, y2 - y1), 0, 0, InterpolationFlags.Nearest);
+                }
+                int sx = Math.Max(0, x1), sy = Math.Max(0, y1);
+                int ex = Math.Min(sourceW, x2), ey = Math.Min(sourceH, y2);
+                if (ex <= sx || ey <= sy) return null;
+                using (var clipped = new Mat(mask, new Rect(sx - x1, sy - y1, ex - sx, ey - sy)))
+                using (var aligned = new Mat())
+                using (var mapping = new Mat(2, 3, MatType.CV_64FC1))
+                {
+                    inv[2] += inv[0] * sx + inv[1] * sy; inv[5] += inv[3] * sx + inv[4] * sy;
+                    double minX = double.PositiveInfinity, minY = minX, maxX = double.NegativeInfinity, maxY = maxX;
+                    foreach (double px in new[] { -0.5, clipped.Cols - 0.5 })
+                    foreach (double py in new[] { -0.5, clipped.Rows - 0.5 })
+                    {
+                        double ox = inv[0] * px + inv[1] * py + inv[2], oy = inv[3] * px + inv[4] * py + inv[5];
+                        minX = Math.Min(minX, ox); maxX = Math.Max(maxX, ox); minY = Math.Min(minY, oy); maxY = Math.Max(maxY, oy);
+                    }
+                    int ox1 = Math.Max(0, (int)Math.Floor(minX + 0.5)), oy1 = Math.Max(0, (int)Math.Floor(minY + 0.5));
+                    int ox2 = Math.Min(W, (int)Math.Ceiling(maxX + 0.5)), oy2 = Math.Min(H, (int)Math.Ceiling(maxY + 0.5));
+                    if (ox2 <= ox1 || oy2 <= oy1) return null;
+                    inv[2] -= ox1; inv[5] -= oy1;
+                    for (int i = 0; i < 6; i++) mapping.Set(i / 3, i % 3, inv[i]);
+                    Cv2.WarpAffine(clipped, aligned, mapping, new Size(ox2 - ox1, oy2 - oy1), InterpolationFlags.Nearest, BorderTypes.Constant, Scalar.Black);
+                    int area = Cv2.CountNonZero(aligned);
+                    if (area == 0) return null;
+                    var pixels = new byte[aligned.Rows * aligned.Cols];
+                    System.Runtime.InteropServices.Marshal.Copy(aligned.Data, pixels, 0, pixels.Length);
+                    return new RegionMask { X = ox1, Y = oy1, Width = aligned.Cols, Height = aligned.Rows, Area = area, Pixels = pixels };
+                }
+            }
+        }
+
+        private static bool RegionMasksMatch(RegionMask a, RegionMask b, string metric, double threshold)
+        {
+            int x1 = Math.Max(a.X, b.X), y1 = Math.Max(a.Y, b.Y);
+            int x2 = Math.Min(a.X + a.Width, b.X + b.Width), y2 = Math.Min(a.Y + a.Height, b.Y + b.Height);
+            long intersection = 0;
+            for (int y = y1; y < y2; y++)
+                for (int x = x1; x < x2; x++)
+                    if ((a.Pixels[(y - a.Y) * a.Width + x - a.X] & b.Pixels[(y - b.Y) * b.Width + x - b.X]) != 0) intersection++;
+            double denominator = metric == "ios" ? Math.Min(a.Area, b.Area) : (double)a.Area + b.Area - intersection;
+            return intersection > 0 && intersection / denominator >= threshold;
         }
 
         private int ReadInt(string key, int dv)

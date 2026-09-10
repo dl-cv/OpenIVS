@@ -152,6 +152,11 @@ namespace DlcvCSharpTest
                     return RunAiOrientationAffineSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "region-mask-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RegionMaskSelfTest.Run();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bbox-iou-dedup-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunBBoxIoUDedupSelfTest();

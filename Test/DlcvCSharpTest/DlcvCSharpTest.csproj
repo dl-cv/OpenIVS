@@ -73,6 +73,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="DvsArchiveDuplicateSelfTest.cs" />
+    <Compile Include="RegionMaskSelfTest.cs" />
     <Compile Include="DvsTempArtifactMonitor.cs" />
     <Compile Include="ModelRegressionCases.cs" />
     <Compile Include="Program.cs" />
