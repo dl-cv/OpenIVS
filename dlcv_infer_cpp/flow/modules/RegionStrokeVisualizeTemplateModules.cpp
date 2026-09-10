@@ -1,4 +1,4 @@
-﻿#include "flow/BaseModule.h"
+#include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/FlowPlatformUtils.h"
 #include "flow/utils/MaskRleUtils.h"

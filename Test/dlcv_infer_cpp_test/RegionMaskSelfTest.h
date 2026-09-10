@@ -1,4 +1,5 @@
 #pragma once
+#include <opencv2/imgproc.hpp>
 
 // 固定输入的模块自测，不依赖模型和加密狗。
 static int RunRegionMaskSelfTest() {
@@ -22,10 +23,12 @@ static int RunRegionMaskSelfTest() {
         auto factory = ModuleRegistry::Get("post_process/result_filter_region");
         if (!factory) throw std::runtime_error("region module not registered");
         int count = 0;
+        std::string regionMode = "any_bbox";
+        bool global = false;
         auto check = [&](const std::string& name, Json target, Json regions, bool expected, const std::string& metric, double threshold) {
-            Json props{{"filter_mode", "mask"}, {"overlap_threshold", threshold}};
+            Json props{{"filter_mode", "mask"}, {"overlap_threshold", threshold}, {"result_region_mode", regionMode}};
             if (!metric.empty()) props["metric"] = metric;
-            auto module = factory(1, "", props, nullptr);
+            auto module = (global ? ModuleRegistry::Get("post_process/result_filter_region_global") : factory)(1, "", props, nullptr);
             module->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{}, regions);
             auto input = entries(target);
             auto before = input;
@@ -56,6 +59,53 @@ static int RunRegionMaskSelfTest() {
         check("resize-nearest",low,entries(det(8,9,10,10)),true,"",1);
         auto full = det(0,0,32,32,8,10); full["bbox"] = {8,0,2,32};
         check("full-image-mask",full,entries(det(8,0,2,32)),true,"",1);
+        for (int value : {1,127,128}) {
+            auto binary = det(8,9,2,2); binary["mask_array"] = {{value,value},{value,value}};
+            check("foreground-"+std::to_string(value),binary,entries(det(8,9,2,2)),value>127,"",1);
+        }
+        regionMode = "top1_bbox";
+        auto highMissing = missing; highMissing["score"] = 1;
+        auto topRegions = entries(highMissing); topRegions[0]["sample_results"].push_back(det(8,9,2,2));
+        check("top1-skips-missing-mask",det(8,9,2,2),topRegions,true,"",1);
+        auto highFar = det(20,20,2,2); highFar["score"] = 1;
+        topRegions = entries(det(8,9,2,2)); topRegions[0]["sample_results"].push_back(highFar);
+        check("top1-highest-valid-score",det(8,9,2,2),topRegions,false,"",1);
+        for (auto& d : topRegions[0]["sample_results"]) d.erase("score");
+        check("top1-first-without-score",det(8,9,2,2),topRegions,true,"",1);
+        regionMode = "any_bbox";
+        global = true;
+        check("global-mask-iou",det(8,9,10,10),entries(det(8,9,2,2)),false,"iou",0.5);
+        global = false;
+        // Compare cropped window warping with the full original-canvas reference.
+        for (const auto& spec : std::vector<std::pair<double,double>>{{17,1},{45,0.7},{-33,1.4},{90,1},{180,1},{0,-1}}) {
+            auto affine = cv::getRotationMatrix2D(cv::Point2f(8,8),spec.first,spec.second<0?1:spec.second);
+            if (spec.second<0) { affine.at<double>(0,0)=-1; affine.at<double>(0,2)=15; }
+            auto forward = affine.clone();
+            forward.at<double>(0,2) -= 2*affine.at<double>(0,0)+affine.at<double>(0,1);
+            forward.at<double>(1,2) -= 2*affine.at<double>(1,0)+affine.at<double>(1,1);
+            cv::Mat inverse,reference,source(16,16,CV_8UC1,cv::Scalar::all(0));
+            cv::invertAffineTransform(forward,inverse);
+            auto local = det(5,4,6,7);
+            for (int iy=0;iy<7;++iy) for (int ix=0;ix<6;++ix) {
+                unsigned char value = (iy<3 && ix<4 || iy>=2 && ix>=2)?255:0;
+                local["mask_array"][iy][ix]=value; source.at<unsigned char>(4+iy,5+ix)=value;
+            }
+            cv::warpAffine(source,reference,inverse,cv::Size(32,32),cv::INTER_NEAREST,cv::BORDER_CONSTANT,cv::Scalar::all(0));
+            auto expected = det(0,0,32,32);
+            for (int iy=0;iy<32;++iy) for (int ix=0;ix<32;++ix) expected["mask_array"][iy][ix]=reference.at<unsigned char>(iy,ix);
+            for (bool native : {false,true}) {
+                Json transform{{"crop_box",{2,1,16,16}},{"output_size",{16,16}}};
+                if (native) {
+                    transform["original_width"]=32; transform["original_height"]=32;
+                    transform["affine_2x3"]={forward.at<double>(0,0),forward.at<double>(0,1),forward.at<double>(0,2),forward.at<double>(1,0),forward.at<double>(1,1),forward.at<double>(1,2)};
+                } else {
+                    transform["original_size"]={32,32};
+                    transform["affine_matrix"]={{affine.at<double>(0,0),affine.at<double>(0,1),affine.at<double>(0,2)},{affine.at<double>(1,0),affine.at<double>(1,1),affine.at<double>(1,2)}};
+                }
+                auto transformed = entries(local); transformed[0]["transform"]=transform;
+                check("affine-"+std::to_string(spec.first)+"-"+std::to_string(spec.second)+(native?"-native":"-python"),expected,transformed,true,"iou",1);
+            }
+        }
         // A region branch may reindex image 1 to index 0; origin remains authoritative.
         auto multiImages = images;
         multiImages.emplace_back(image,image,TransformationState(32,32),1);
@@ -72,6 +122,22 @@ static int RunRegionMaskSelfTest() {
             || isolated->ExtraOutputs[0].ResultList.size() != 1 || isolated->ExtraOutputs[0].ImageList[0].OriginalIndex != 0)
             throw std::runtime_error("origin-isolation-reindexed-region: wrong source image");
         std::cout << "PASS origin-isolation-reindexed-region" << std::endl; ++count;
+        for (Json invalid : std::vector<Json>{{{"metric","bad"}},{{"overlap_threshold",-1}},{{"overlap_threshold",2}},{{"overlap_threshold","nan"}}}) {
+            invalid["filter_mode"]="mask";
+            auto invalidModule = factory(1,"",invalid,nullptr);
+            invalidModule->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{},entries(det(0,0,2,2)));
+            bool failed=false;
+            try { invalidModule->Process(images,entries(det(0,0,2,2))); } catch (const std::invalid_argument&) { failed=true; }
+            if (!failed) throw std::runtime_error("invalid-mask-parameter accepted");
+            std::cout << "PASS invalid-mask-parameter" << std::endl; ++count;
+        }
+        auto unknown = entries(det(8,9,2,2)); unknown[0]["origin_index"]=9;
+        auto unknownModule = factory(1,"",Json{{"filter_mode","mask"}},nullptr);
+        unknownModule->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{},entries(det(8,9,2,2)));
+        bool unknownRejected=false;
+        try { unknownModule->Process(images,unknown); } catch (const std::invalid_argument&) { unknownRejected=true; }
+        if (!unknownRejected) throw std::runtime_error("unknown origin accepted");
+        std::cout << "PASS unknown-target-origin" << std::endl; ++count;
         auto module = factory(1,"",Json{{"filter_mode","mask"}},nullptr);
         bool rejected = false;
         try { module->Process(images,entries(det(0,0,2,2))); } catch (const std::invalid_argument&) { rejected = true; }
