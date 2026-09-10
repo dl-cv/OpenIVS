@@ -1,4 +1,4 @@
-#include "flow/BaseModule.h"
+﻿#include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/FlowPlatformUtils.h"
 #include "flow/utils/MaskRleUtils.h"
@@ -117,8 +117,30 @@ protected:
             if (!sig.empty()) sigToWrapIndex[sig] = i;
         }
 
+        const bool maskMode = ToLowerCopy(ReadString("filter_mode", "legacy")) == "mask";
         const auto pickWrapIndexForEntry = [&](const Json& entry) -> int {
             if (!entry.is_object()) return -1;
+            if (maskMode) {
+                // Limit by original image before transform/index; branch indices may have been reassigned.
+                const bool hasOrigin = entry.contains("origin_index") && !entry.at("origin_index").is_null();
+                const int origin = hasOrigin ? entry.at("origin_index").get<int>() : -1;
+                const int indexed = entry.value("index", -1);
+                const std::string sig = entry.contains("transform") && entry.at("transform").is_object()
+                    ? SerializeTransformSig(entry.at("transform")) : "";
+                std::vector<int> candidates, matching;
+                for (int i = 0; i < static_cast<int>(images.size()); ++i) {
+                    if (hasOrigin && images[i].OriginalIndex != origin) continue;
+                    candidates.push_back(i);
+                    if (!sig.empty() && SerializeTransformSig(images[i].TransformState) == sig) matching.push_back(i);
+                }
+                if (candidates.empty()) return -1;
+                if (std::find(matching.begin(), matching.end(), indexed) != matching.end()) return indexed;
+                if (matching.size() == 1) return matching[0];
+                if (std::find(candidates.begin(), candidates.end(), indexed) != candidates.end()) return indexed;
+                if (hasOrigin) return candidates[0];
+                throw std::invalid_argument("Mask mode requires origin_index or a valid image index");
+            }
+
             try {
                 if (entry.contains("transform") && entry.at("transform").is_object()) {
                     const std::string sig = SerializeTransformSig(entry.at("transform"));
@@ -138,7 +160,7 @@ protected:
             return -1;
         };
 
-        if (ToLowerCopy(ReadString("filter_mode", "legacy")) == "mask") {
+        if (maskMode) {
             return ProcessMask(images, results, pickWrapIndexForEntry);
         }
 

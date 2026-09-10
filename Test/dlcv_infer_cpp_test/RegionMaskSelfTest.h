@@ -56,6 +56,22 @@ static int RunRegionMaskSelfTest() {
         check("resize-nearest",low,entries(det(8,9,10,10)),true,"",1);
         auto full = det(0,0,32,32,8,10); full["bbox"] = {8,0,2,32};
         check("full-image-mask",full,entries(det(8,0,2,32)),true,"",1);
+        // A region branch may reindex image 1 to index 0; origin remains authoritative.
+        auto multiImages = images;
+        multiImages.emplace_back(image,image,TransformationState(32,32),1);
+        auto multiTargets = entries(det(8,9,2,2));
+        auto second = multiTargets.at(0); second["index"] = 1; second["origin_index"] = 1;
+        multiTargets.push_back(second);
+        auto otherRegion = entries(det(8,9,2,2)); otherRegion[0]["origin_index"] = 1;
+        auto isolated = factory(1,"",Json{{"filter_mode","mask"}},nullptr);
+        isolated->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{},otherRegion);
+        auto isolatedOutput = isolated->Process(multiImages,multiTargets);
+        if (isolatedOutput.ResultList.size() != 1 || isolatedOutput.ResultList[0]["origin_index"] != 1
+            || isolatedOutput.ImageList.size() != 1 || isolatedOutput.ImageList[0].OriginalIndex != 1
+            || isolatedOutput.ResultList[0]["index"] != 0
+            || isolated->ExtraOutputs[0].ResultList.size() != 1 || isolated->ExtraOutputs[0].ImageList[0].OriginalIndex != 0)
+            throw std::runtime_error("origin-isolation-reindexed-region: wrong source image");
+        std::cout << "PASS origin-isolation-reindexed-region" << std::endl; ++count;
         auto module = factory(1,"",Json{{"filter_mode","mask"}},nullptr);
         bool rejected = false;
         try { module->Process(images,entries(det(0,0,2,2))); } catch (const std::invalid_argument&) { rejected = true; }
