@@ -1,4 +1,4 @@
-# C++ 测试程序开发文档
+﻿# C++ 测试程序开发文档
 
 **文档定位**：记录 `dlcv_infer_cpp_qt_demo` 的编译、运行方式与调试方法。所有内容以当前源码实现为准。
 
@@ -61,6 +61,7 @@
 ```text
 dlcv_infer_cpp_qt_demo.exe infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
 dlcv_infer_cpp_qt_demo.exe render --model <path> --image <path> --threshold <0..1> --output <pngPath> [--device <int>] [--with-mask <true|false>]
+dlcv_infer_cpp_qt_demo.exe ui-test --model <path> --image <path> --threshold <0..1> --output <jsonPath> [--device <int>] [--batch-size <1..1024>] [--calc-mean <true|false>] [--device-timeout-ms <正整数>] [--require-results <true|false>]
 dlcv_infer_cpp_qt_demo.exe mask-visualization-selftest
 dlcv_infer_cpp_qt_demo.exe --help
 ```
@@ -75,6 +76,10 @@ dlcv_infer_cpp_qt_demo.exe --help
 - `infer --output` 使用 `QSaveFile` 原子写入 UTF-8 JSON；`render --output` 保存 `ImageViewerWidget` 的真实绘制结果，输出逻辑尺寸与原图一致。输出路径不得覆盖模型或图片，父目录必须存在。
 - 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致、存在低于阈值的结果或均值检查失败。
 - `render` 使用原图作为底图，并把最终结果中的 ROI Mask 缩放到 bbox 后回贴到原图坐标；完整图 Mask 则从 `(0,0)` 绘制。
+- `ui-test` 使用真实主窗口流程执行设备信息读取、`std::make_unique<Model>` 模型加载、`onGetModelInfo`、`onInfer` 批量推理、结果复制、`ImageViewerWidget` 绘制和 `closeEvent` 释放。窗口不显示在桌面，不使用鼠标键盘模拟。
+- `ui-test` 必须通过 `--output` 写入 UTF-8 JSON。输出包含设备初始化状态、实际设备编号、批次数量、类别、分数、框、角度、均值、Mask 尺寸与非零像素数、绘制尺寸和关闭释放状态。
+- `ui-test` 默认要求首个样本存在结果；预期允许空结果时使用 `--require-results false`。固定测试数据应比较 `results`、`categories`、`scores` 和 Mask 统计，不只检查进程退出码。
+- `ui-test` 将 `QSettings` 指向系统临时目录，测试结束后自动删除，不读取或改写常用窗口配置。
 - `mask-visualization-selftest` 使用一个完整图 Mask 合成用例，检查其未被重复叠加 bbox 偏移；渲染结果写入系统临时目录的 `dlcv_mask_visualization_selftest.png`。
 
 ### 3.3 UI 布局

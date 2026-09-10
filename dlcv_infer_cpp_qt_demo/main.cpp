@@ -2,13 +2,18 @@
 #include <QByteArray>
 #include <QColor>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QElapsedTimer>
 #include <QFont>
 #include <QImage>
 #include <QPixmap>
 #include <QSaveFile>
+#include <QSettings>
 #include <QStringList>
+#include <QTemporaryDir>
+#include <QThread>
 
 #include <cmath>
 #include <cstdio>
@@ -90,6 +95,16 @@ struct InferOptions {
     bool hasOutput = false;
 };
 
+struct UiTestOptions {
+    InferOptions infer;
+    int batchSize = 1;
+    int deviceTimeoutMs = 60000;
+    bool requireResults = true;
+    bool hasBatchSize = false;
+    bool hasDeviceTimeout = false;
+    bool hasRequireResults = false;
+};
+
 struct PathSummary {
     int count = 0;
     json scores = json::array();
@@ -159,6 +174,10 @@ void PrintHelp(const QString& programPath) {
         << "  " << program
         << " render --model <path> --image <path> --threshold <0..1> --output <pngPath>"
            " [--device <int>] [--with-mask <true|false>]\n"
+        << "  " << program
+           << " ui-test --model <path> --image <path> --threshold <0..1> --output <jsonPath>"
+           " [--device <int>] [--batch-size <1..1024>] [--calc-mean <true|false>]"
+           " [--device-timeout-ms <positive integer>] [--require-results <true|false>]\n"
         << "  " << program << " mask-visualization-selftest\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
@@ -319,6 +338,70 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             return false;
         }
         options.outputPath = outputFullPath;
+    }
+    return true;
+}
+
+
+bool ParseUiTestOptions(const QStringList& args, UiTestOptions& options, QString& error) {
+    QStringList inferArgs{args.at(0), QStringLiteral("infer")};
+    for (int i = 2; i < args.size(); ++i) {
+        const QString option = args.at(i);
+        if (i + 1 >= args.size()) {
+            error = QStringLiteral("missing value for option: %1").arg(option);
+            return false;
+        }
+        const QString value = args.at(++i);
+        if (option == QStringLiteral("--batch-size")) {
+            bool ok = false;
+            const int batchSize = value.toInt(&ok);
+            if (options.hasBatchSize) {
+                error = QStringLiteral("duplicate option: --batch-size");
+                return false;
+            }
+            if (!ok || batchSize < 1 || batchSize > 1024) {
+                error = QStringLiteral("--batch-size must be an integer from 1 to 1024");
+                return false;
+            }
+            options.batchSize = batchSize;
+            options.hasBatchSize = true;
+            continue;
+        }
+        if (option == QStringLiteral("--device-timeout-ms")) {
+            bool ok = false;
+            const int timeoutMs = value.toInt(&ok);
+            if (options.hasDeviceTimeout) {
+                error = QStringLiteral("duplicate option: --device-timeout-ms");
+                return false;
+            }
+            if (!ok || timeoutMs < 1) {
+                error = QStringLiteral("--device-timeout-ms must be a positive integer");
+                return false;
+            }
+            options.deviceTimeoutMs = timeoutMs;
+            options.hasDeviceTimeout = true;
+            continue;
+        }
+        if (option == QStringLiteral("--require-results")) {
+            bool parsed = false;
+            if (options.hasRequireResults || !ParseBool(value, parsed)) {
+                error = QStringLiteral("--require-results must be true or false and specified once");
+                return false;
+            }
+            options.requireResults = parsed;
+            options.hasRequireResults = true;
+            continue;
+        }
+        inferArgs.push_back(option);
+        inferArgs.push_back(value);
+    }
+
+    if (!ParseInferOptions(inferArgs, options.infer, error)) {
+        return false;
+    }
+    if (!options.infer.hasOutput) {
+        error = QStringLiteral("ui-test requires --output");
+        return false;
     }
     return true;
 }
@@ -792,6 +875,144 @@ int RunMaskVisualizationSelfTest() {
     return 0;
 }
 
+
+int RunUiTest(const QStringList& args) {
+    UiTestOptions options;
+    QString parseError;
+    if (!ParseUiTestOptions(args, options, parseError)) {
+        std::cerr << "ui-test argument error: " << ToUtf8(parseError) << "\n";
+        return 2;
+    }
+
+    QTemporaryDir settingsDirectory(
+        QDir::tempPath() + QStringLiteral("/dlcv_cpp_qt_ui_test_XXXXXX"));
+    if (!settingsDirectory.isValid()) {
+        const json output = {
+            {"command", "ui-test"},
+            {"success", false},
+            {"error", "failed to create temporary settings directory"}
+        };
+        try {
+            WriteJsonFile(options.infer.outputPath, output.dump(2));
+        } catch (...) {
+        }
+        return 1;
+    }
+
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDirectory.path());
+    QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, settingsDirectory.path());
+
+    try {
+        CoutSilencer silenceApiLogs;
+        MainWindow window(nullptr, true);
+        window.setAttribute(Qt::WA_DontShowOnScreen, true);
+        window.resize(1280, 850);
+        window.show();
+        QCoreApplication::processEvents();
+
+        MainWindow::UiTestReport report;
+        const bool workflowSuccess = window.runUiTest(
+            options.infer.modelPath,
+            options.infer.imagePath,
+            options.infer.device,
+            options.infer.hasDevice,
+            options.deviceTimeoutMs,
+            options.batchSize,
+            options.infer.threshold,
+            options.infer.calcMean,
+            report);
+
+        json categories = json::array();
+        json scores = json::array();
+        long long maskNonzeroTotal = 0;
+        int maskResultCount = 0;
+        for (const auto& result : report.displayResults) {
+            categories.push_back(result.value("category", std::string{}));
+            scores.push_back(result.value("score", 0.0));
+            if (result.contains("mask") && result["mask"].is_object() &&
+                result["mask"].value("present", false)) {
+                ++maskResultCount;
+                maskNonzeroTotal += result["mask"].value("nonzero", 0LL);
+            }
+        }
+
+        const bool resultsPresent = !report.displayResults.empty();
+        const bool resultRequirementPassed = !options.requireResults || resultsPresent;
+        const bool success = workflowSuccess && resultRequirementPassed;
+        std::string error = ToUtf8(report.errorText);
+        if (workflowSuccess && !resultRequirementPassed) {
+            error = "GUI result list is empty";
+        }
+
+        const json output = {
+            {"command", "ui-test"},
+            {"success", success},
+            {"settings_isolated", true},
+            {"device_initialization_completed", report.deviceInitializationCompleted},
+            {"device_warning", ToUtf8(report.deviceWarning)},
+            {"available_device_count", report.availableDeviceCount},
+            {"effective_device_id", report.effectiveDeviceId},
+            {"model_loaded", report.modelLoaded},
+            {"model_info_read", report.modelInfoRead},
+            {"inference_completed", report.inferenceCompleted},
+            {"batch_size_matched", report.batchSizeMatched},
+            {"render_completed", report.renderCompleted},
+            {"release_completed", report.releaseCompleted},
+            {"close_completed", report.closeCompleted},
+            {"batch_size", report.requestedBatchSize},
+            {"sample_count", report.sampleCount},
+            {"first_result_count", report.firstResultCount},
+            {"results_present", resultsPresent},
+            {"require_results", options.requireResults},
+            {"result_requirement_passed", resultRequirementPassed},
+            {"categories", std::move(categories)},
+            {"scores", std::move(scores)},
+            {"mask_result_count", maskResultCount},
+            {"mask_nonzero_total", maskNonzeroTotal},
+            {"results", report.displayResults},
+            {"inference_ms", report.inferenceMs},
+            {"render_width", report.renderWidth},
+            {"render_height", report.renderHeight},
+            {"error", error}
+        };
+        WriteJsonFile(options.infer.outputPath, output.dump(2));
+
+        if (success) {
+            return 0;
+        }
+        if (!report.deviceInitializationCompleted || !report.modelLoaded ||
+            !report.modelInfoRead || !report.inferenceCompleted ||
+            !report.releaseCompleted || !report.closeCompleted) {
+            return 1;
+        }
+        return 3;
+    } catch (const std::exception& e) {
+        const json output = {
+            {"command", "ui-test"},
+            {"success", false},
+            {"error", ToUtf8(FromExceptionMessage(e.what()))}
+        };
+        try {
+            WriteJsonFile(options.infer.outputPath, output.dump(2));
+        } catch (const std::exception& writeError) {
+            std::cerr << "ui-test output error: " << writeError.what() << "\n";
+        }
+        return 1;
+    } catch (...) {
+        const json output = {
+            {"command", "ui-test"},
+            {"success", false},
+            {"error", "unknown error"}
+        };
+        try {
+            WriteJsonFile(options.infer.outputPath, output.dump(2));
+        } catch (...) {
+        }
+        return 1;
+    }
+}
+
 std::string GetCppDllPath() {
 #ifdef _WIN32
     char path[MAX_PATH];
@@ -827,6 +1048,13 @@ int main(int argc, char* argv[]) {
 
     const QStringList args = app.arguments();
     if (args.size() > 1) {
+        if (args.at(1) == QStringLiteral("ui-test")) {
+            if (args.contains(QStringLiteral("--help"))) {
+                PrintHelp(args.at(0));
+                return 0;
+            }
+            return RunUiTest(args);
+        }
         if (args.at(1) == QStringLiteral("--help") ||
             ((args.at(1) == QStringLiteral("infer") || args.at(1) == QStringLiteral("render"))
              && args.contains(QStringLiteral("--help")))) {
@@ -839,7 +1067,7 @@ int main(int argc, char* argv[]) {
         const bool isInferCommand = args.at(1) == QStringLiteral("infer");
         const bool isRenderCommand = args.at(1) == QStringLiteral("render");
         if (!isInferCommand && !isRenderCommand) {
-            std::cerr << "error: expected 'infer', 'render', 'mask-visualization-selftest', or '--help'\n";
+            std::cerr << "error: expected 'infer', 'render', 'ui-test', 'mask-visualization-selftest', or '--help'\n";
             PrintHelp(args.at(0));
             return 2;
         }

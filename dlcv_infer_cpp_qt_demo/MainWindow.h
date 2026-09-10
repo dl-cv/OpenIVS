@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <atomic>
 #include <chrono>
@@ -30,8 +30,42 @@ class ImageViewerWidget;
 
 class MainWindow : public QMainWindow {
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
-    ~MainWindow() override = default;
+    struct UiTestReport {
+        bool deviceInitializationCompleted = false;
+        bool modelLoaded = false;
+        bool modelInfoRead = false;
+        bool inferenceCompleted = false;
+        bool batchSizeMatched = false;
+        bool renderCompleted = false;
+        bool releaseCompleted = false;
+        bool closeCompleted = false;
+        int requestedBatchSize = 0;
+        int effectiveDeviceId = -1;
+        int availableDeviceCount = 0;
+        int sampleCount = 0;
+        int firstResultCount = 0;
+        int renderWidth = 0;
+        int renderHeight = 0;
+        double inferenceMs = 0.0;
+        QString modelInfoText;
+        QString inferenceText;
+        QString deviceWarning;
+        QString errorText;
+        dlcv_infer::json displayResults = dlcv_infer::json::array();
+    };
+
+    explicit MainWindow(QWidget* parent = nullptr, bool uiTest = false);
+    bool runUiTest(
+        const QString& modelPath,
+        const QString& imagePath,
+        int deviceId,
+        bool hasDeviceId,
+        int deviceTimeoutMs,
+        int batchSize,
+        double threshold,
+        bool calcMean,
+        UiTestReport& report);
+    ~MainWindow() override;
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -49,8 +83,11 @@ private:
     void setupUi();
     void bindSignals();
     void initializeDevicesAsync();
+    bool waitForDeviceInitialization(int timeoutMs);
+    void joinDeviceInitialization();
 
     int selectedDeviceId() const;
+    bool loadModelFromPath(const QString& path, int deviceId);
     bool ensureModelLoaded();
     bool ensureImageSelected();
     bool loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const;
@@ -74,6 +111,16 @@ private:
     void updatePressureTestStatistics();
     void setUiEnabledForPressureTest(bool enabled);
 
+    bool uiTest_ = false;
+    bool lastActionSucceeded_ = false;
+    QString lastErrorText_;
+    int lastSampleCount_ = 0;
+    int lastFirstResultCount_ = 0;
+    double lastInferenceMs_ = 0.0;
+    std::vector<dlcv_infer::ObjectResult> lastDisplayedResults_;
+    std::atomic<bool> devicesReady_{false};
+    QString deviceInitializationWarning_;
+    std::thread deviceInitThread_;
     std::unique_ptr<dlcv_infer::Model> model_;
     QSettings settings_{"dlcv", "DlcvDemoQt"};
     QHash<QString, int> deviceNameToId_;

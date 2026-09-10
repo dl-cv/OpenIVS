@@ -35,6 +35,7 @@
 
 extern "C" int dlcv_infer_pure_c_header_test(void);
 extern "C" int dlcv_infer_pure_c_invalid_input_test(void);
+extern "C" int dlcv_infer_pure_c_header_compat_test(void);
 
 struct NativeCapi {
     using LoadModel = int(__stdcall*)(const char*, int);
@@ -412,14 +413,6 @@ static bool RunCapiExportCompletenessCheck() {
     };
 
     bool ok = true;
-    const int invalidInputCode = dlcv_infer_pure_c_invalid_input_test();
-    if (invalidInputCode != 0) {
-        std::cerr << "FAIL: C 接口异常输入兼容性检查失败，返回码="
-                  << invalidInputCode << "\n";
-        ok = false;
-    } else {
-        std::cout << "PASS: C 接口异常输入兼容性检查通过\n";
-    }
     bool exportsPresent = true;
     for (const char* name : expectedExports) {
         if (GetProcAddress(module, name) == nullptr) {
@@ -474,6 +467,44 @@ static bool RunCapiExportCompletenessCheck() {
         std::cout << "PASS: dlcv_infer_cpp.dll 的 C 接口导出函数均存在，安全只读接口调用成功\n";
     }
     return ok;
+}
+
+static bool RunCapiReleaseErrorCheck() {
+    if (dlcv_infer_cpp_load_model_c(nullptr, 0) != -1) {
+        std::cerr << "FAIL: 空模型路径未返回失败\n";
+        return false;
+    }
+    const char* initialError = dlcv_infer_cpp_get_last_error_c();
+    if (initialError == nullptr || std::strcmp(initialError, "model_path is null") != 0) {
+        std::cerr << "FAIL: 空模型路径错误信息不正确\n";
+        return false;
+    }
+
+    if (dlcv_infer_cpp_free_model_c(-1) != -1) {
+        std::cerr << "FAIL: 释放不存在的模型未返回失败\n";
+        return false;
+    }
+    const char* releaseError = dlcv_infer_cpp_get_last_error_c();
+    if (releaseError == nullptr || std::strcmp(releaseError, "model not found") != 0) {
+        std::cerr << "FAIL: 释放不存在模型后的错误信息不正确，实际="
+                  << (releaseError == nullptr ? "<null>" : releaseError) << "\n";
+        return false;
+    }
+
+    if (dlcv_infer_cpp_load_model_c(nullptr, 0) != -1) {
+        std::cerr << "FAIL: 无法准备释放全部模型前的错误状态\n";
+        return false;
+    }
+    dlcv_infer_cpp_free_all_models_c();
+    const char* freeAllError = dlcv_infer_cpp_get_last_error_c();
+    if (freeAllError == nullptr || freeAllError[0] != '\0') {
+        std::cerr << "FAIL: 释放全部模型成功后未清除旧错误，实际="
+                  << (freeAllError == nullptr ? "<null>" : freeAllError) << "\n";
+        return false;
+    }
+
+    std::cout << "PASS: 模型释放错误信息及释放全部模型错误清理正确\n";
+    return true;
 }
 
 static std::string BuildCompleteFingerprint(const DlcvCResult& result) {
@@ -1798,6 +1829,13 @@ int main(int argc, char** argv) {
     }
     std::cout << "PASS: 纯 C 结构化接口编译和调用成功\n";
 
+    const int pureCCompatCode = dlcv_infer_pure_c_header_compat_test();
+    if (pureCCompatCode != 0) {
+        std::cerr << "FAIL: 纯 C 头文件兼容性检查失败，返回码=" << pureCCompatCode << "\n";
+        return 1;
+    }
+    std::cout << "PASS: 纯 C 头文件兼容性检查通过\n";
+
     if (argc == 2 && std::strcmp(argv[1], "--c-api-invalid-input") == 0) {
         const int invalidInputCode = dlcv_infer_pure_c_invalid_input_test();
         if (invalidInputCode != 0) {
@@ -1807,6 +1845,21 @@ int main(int argc, char** argv) {
         }
         std::cout << "PASS: C 接口异常输入兼容性检查通过\n";
         return 0;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--c-api-release-error") == 0) {
+        return RunCapiReleaseErrorCheck() ? 0 : 1;
+    }
+
+    const int invalidInputCode = dlcv_infer_pure_c_invalid_input_test();
+    if (invalidInputCode != 0) {
+        std::cerr << "FAIL: C 接口异常输入兼容性检查失败，返回码="
+                  << invalidInputCode << "\n";
+        return 1;
+    }
+    std::cout << "PASS: C 接口异常输入兼容性检查通过\n";
+
+    if (!RunCapiReleaseErrorCheck()) {
+        return 1;
     }
 
     const std::wstring dvtPath = L"Y:\\测试模型\\猫狗-分类_120_50_s.dvt";

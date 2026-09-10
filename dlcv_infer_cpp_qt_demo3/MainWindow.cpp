@@ -1,9 +1,11 @@
-#include "MainWindow.h"
+﻿#include "MainWindow.h"
 
 #include <algorithm>
 #include <cmath>
 #include <exception>
 #include <functional>
+#include <stdexcept>
+#include <utility>
 
 #include <QCloseEvent>
 #include <QCoreApplication>
@@ -413,12 +415,12 @@ void MainWindow::onLoadModel1() {
         return;
     }
     try {
-        model1_ = std::make_unique<dlcv_infer::Model>(modelPath.toStdWString(), selectedDeviceId());
+        auto newModel = std::make_unique<dlcv_infer::Model>(modelPath.toStdWString(), selectedDeviceId());
+        model1_ = std::move(newModel);
         settings_.setValue("LastModel1Path", modelPath);
         appendLog("模型1加载成功:\n" + modelPath);
         onGetModelInfo();
     } catch (const std::exception& e) {
-        model1_.reset();
         reportError("模型1加载失败", QString::fromLocal8Bit(e.what()));
     }
 }
@@ -435,12 +437,12 @@ void MainWindow::onLoadModel2() {
         return;
     }
     try {
-        model2_ = std::make_unique<dlcv_infer::Model>(modelPath.toStdWString(), selectedDeviceId());
+        auto newModel = std::make_unique<dlcv_infer::Model>(modelPath.toStdWString(), selectedDeviceId());
+        model2_ = std::move(newModel);
         settings_.setValue("LastModel2Path", modelPath);
         appendLog("模型2加载成功:\n" + modelPath);
         onGetModelInfo();
     } catch (const std::exception& e) {
-        model2_.reset();
         reportError("模型2加载失败", QString::fromLocal8Bit(e.what()));
     }
 }
@@ -1022,24 +1024,27 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
     }
 
     std::vector<std::vector<dlcv_infer::ObjectResult>> partials(chunks.size());
+    std::vector<std::exception_ptr> chunkErrors(chunks.size());
     std::atomic<int> processed{0};
-    std::mutex logMutex;
 
     auto processChunk = [&](int chunkIndex) {
         const auto& chunk = chunks[chunkIndex];
-        std::vector<cv::Mat> mats;
-        mats.reserve(chunk.size());
-        for (const auto& c : chunk) {
-            mats.push_back(c.cropRgb);
-        }
-
-        dlcv_infer::Result batchResult(std::vector<dlcv_infer::SampleResult>{});
         try {
-            batchResult = model2.InferBatch(mats, params);
+            std::vector<cv::Mat> mats;
+            mats.reserve(chunk.size());
+            for (const auto& c : chunk) {
+                mats.push_back(c.cropRgb);
+            }
+
+            const dlcv_infer::Result batchResult = model2.InferBatch(mats, params);
+            if (batchResult.sampleResults.size() != chunk.size()) {
+                const QString detail = QString("模型2 batch 返回样本数不正确，输入=%1，输出=%2")
+                    .arg(static_cast<int>(chunk.size()))
+                    .arg(static_cast<int>(batchResult.sampleResults.size()));
+                throw std::runtime_error(detail.toLocal8Bit().toStdString());
+            }
+
             for (int i = 0; i < static_cast<int>(chunk.size()); ++i) {
-                if (i >= static_cast<int>(batchResult.sampleResults.size())) {
-                    continue;
-                }
                 for (const auto& localObj : batchResult.sampleResults[i].results) {
                     dlcv_infer::ObjectResult mapped = localObj;
                     if (!tryMapObjectByTranslate(localObj, chunk[i].translateX, chunk[i].translateY, mapped)) {
@@ -1051,19 +1056,13 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
                     }
                 }
             }
-        } catch (const std::exception& e) {
-            std::lock_guard<std::mutex> guard(logMutex);
-            int begin = chunkIndex * batchLimit + 1;
-            runResult.logs.push_back(
-                QString("模型2 batch 推理失败(从第 %1 张开始，共 %2 张): %3")
-                    .arg(begin)
-                    .arg(static_cast<int>(chunk.size()))
-                    .arg(QString::fromLocal8Bit(e.what())));
-        }
 
-        const int done = processed.fetch_add(static_cast<int>(chunk.size())) + static_cast<int>(chunk.size());
-        int percent = 30 + static_cast<int>(std::llround(55.0 * static_cast<double>(done) / std::max(1, total)));
-        report(percent, QString("模型2 batch 推理 %1/%2").arg(done).arg(total));
+            const int done = processed.fetch_add(static_cast<int>(chunk.size())) + static_cast<int>(chunk.size());
+            int percent = 30 + static_cast<int>(std::llround(55.0 * static_cast<double>(done) / std::max(1, total)));
+            report(percent, QString("模型2 batch 推理 %1/%2").arg(done).arg(total));
+        } catch (...) {
+            chunkErrors[chunkIndex] = std::current_exception();
+        }
     };
 
     if (threadCount <= 1) {
@@ -1073,15 +1072,44 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
     } else {
         std::vector<std::thread> workers;
         workers.reserve(threadCount);
-        for (int t = 0; t < threadCount; ++t) {
-            workers.emplace_back([&, t]() {
-                for (int c = t; c < static_cast<int>(chunks.size()); c += threadCount) {
-                    processChunk(c);
-                }
-            });
+        try {
+            for (int t = 0; t < threadCount; ++t) {
+                workers.emplace_back([&, t]() {
+                    for (int c = t; c < static_cast<int>(chunks.size()); c += threadCount) {
+                        processChunk(c);
+                    }
+                });
+            }
+        } catch (...) {
+            // 已启动的线程结束后才能释放其访问的局部数据。
+            for (auto& w : workers) {
+                if (w.joinable()) w.join();
+            }
+            throw;
         }
         for (auto& w : workers) {
             w.join();
+        }
+    }
+
+    for (int chunkIndex = 0; chunkIndex < static_cast<int>(chunkErrors.size()); ++chunkIndex) {
+        if (!chunkErrors[chunkIndex]) {
+            continue;
+        }
+        const int begin = chunkIndex * batchLimit + 1;
+        try {
+            std::rethrow_exception(chunkErrors[chunkIndex]);
+        } catch (const std::exception& e) {
+            const QString detail = QString("模型2 batch 推理失败（从第 %1 张开始，共 %2 张）：%3")
+                .arg(begin)
+                .arg(static_cast<int>(chunks[chunkIndex].size()))
+                .arg(QString::fromLocal8Bit(e.what()));
+            throw std::runtime_error(detail.toLocal8Bit().toStdString());
+        } catch (...) {
+            const QString detail = QString("模型2 batch 推理失败（从第 %1 张开始，共 %2 张）：未知异常")
+                .arg(begin)
+                .arg(static_cast<int>(chunks[chunkIndex].size()));
+            throw std::runtime_error(detail.toLocal8Bit().toStdString());
         }
     }
 

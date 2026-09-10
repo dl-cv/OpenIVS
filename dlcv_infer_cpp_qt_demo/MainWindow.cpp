@@ -14,6 +14,8 @@
 #include <QDebug>
 #include <QDesktopServices>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGridLayout>
@@ -27,9 +29,12 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QPixmap>
 #include <QScreen>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -112,16 +117,23 @@ cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
 
 }  // namespace
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget* parent, bool uiTest) : QMainWindow(parent), uiTest_(uiTest) {
     setupUi();
     bindSignals();
     initializeDevicesAsync();
 }
 
+MainWindow::~MainWindow() {
+    joinDeviceInitialization();
+}
+
 void MainWindow::closeEvent(QCloseEvent* event) {
-    settings_.setValue("Geometry", saveGeometry());
-    settings_.setValue("WindowState", saveState());
+    if (!uiTest_) {
+        settings_.setValue("Geometry", saveGeometry());
+        settings_.setValue("WindowState", saveState());
+    }
     stopPressureTest();
+    joinDeviceInitialization();
     model_.reset();
     dlcv_infer::Utils::FreeAllModels();
     QMainWindow::closeEvent(event);
@@ -266,7 +278,7 @@ void MainWindow::setupUi() {
 
     setCentralWidget(centralWidget);
 
-    if (settings_.contains("Geometry")) {
+    if (!uiTest_ && settings_.contains("Geometry")) {
         restoreGeometry(settings_.value("Geometry").toByteArray());
         restoreState(settings_.value("WindowState").toByteArray());
 
@@ -313,8 +325,11 @@ void MainWindow::bindSignals() {
 }
 
 void MainWindow::initializeDevicesAsync() {
-    const QPointer<MainWindow> self(this);
-    std::thread([self]() {
+    devicesReady_.store(false, std::memory_order_release);
+    deviceInitializationWarning_.clear();
+    joinDeviceInitialization();
+
+    deviceInitThread_ = std::thread([this]() {
         struct GpuDeviceItem {
             QString name;
             int id = -1;
@@ -322,9 +337,9 @@ void MainWindow::initializeDevicesAsync() {
 
         std::vector<GpuDeviceItem> gpuDevices;
         QString warning;
-        dlcv_infer::Utils::KeepMaxClock();
         try
         {
+            dlcv_infer::Utils::KeepMaxClock();
             const json gpuInfo = dlcv_infer::Utils::GetGpuInfo();
             if (gpuInfo.contains("code") && gpuInfo["code"].is_number_integer() && gpuInfo["code"].get<int>() == 0
                 && gpuInfo.contains("devices") && gpuInfo["devices"].is_array())
@@ -347,31 +362,53 @@ void MainWindow::initializeDevicesAsync() {
         {
             warning = QString::fromLocal8Bit(e.what());
         }
+        catch (...)
+        {
+            warning = QStringLiteral("设备初始化发生未知异常");
+        }
 
         QMetaObject::invokeMethod(
-            QCoreApplication::instance(),
-            [self, gpuDevices, warning]() {
-                if (self.isNull()) {
-                    return;
-                }
+            this,
+            [this, gpuDevices, warning]() {
+                comboDevice_->clear();
+                deviceNameToId_.clear();
 
-                self->comboDevice_->clear();
-                self->deviceNameToId_.clear();
-
-                self->comboDevice_->addItem("CPU");
-                self->deviceNameToId_.insert("CPU", -1);
+                comboDevice_->addItem("CPU");
+                deviceNameToId_.insert("CPU", -1);
                 for (const auto& device : gpuDevices) {
-                    self->comboDevice_->addItem(device.name);
-                    self->deviceNameToId_.insert(device.name, device.id);
+                    comboDevice_->addItem(device.name);
+                    deviceNameToId_.insert(device.name, device.id);
                 }
 
-                self->comboDevice_->setCurrentIndex(gpuDevices.empty() ? 0 : 1);
+                comboDevice_->setCurrentIndex(gpuDevices.empty() ? 0 : 1);
+                deviceInitializationWarning_ = warning;
+                devicesReady_.store(true, std::memory_order_release);
                 if (!warning.isEmpty()) {
-                    self->outputText_->setPlainText("GPU信息获取失败：\n" + warning);
+                    outputText_->setPlainText("GPU信息获取失败：\n" + warning);
                 }
             },
             Qt::QueuedConnection);
-    }).detach();
+    });
+}
+
+bool MainWindow::waitForDeviceInitialization(int timeoutMs) {
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (!devicesReady_.load(std::memory_order_acquire)) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        if (elapsed.elapsed() >= timeoutMs) {
+            return false;
+        }
+        QThread::msleep(10);
+    }
+    joinDeviceInitialization();
+    return true;
+}
+
+void MainWindow::joinDeviceInitialization() {
+    if (deviceInitThread_.joinable() && deviceInitThread_.get_id() != std::this_thread::get_id()) {
+        deviceInitThread_.join();
+    }
 }
 
 int MainWindow::selectedDeviceId() const {
@@ -382,11 +419,37 @@ int MainWindow::selectedDeviceId() const {
     return -1;
 }
 
+bool MainWindow::loadModelFromPath(const QString& path, int deviceId) {
+    lastActionSucceeded_ = false;
+    lastErrorText_.clear();
+    model_.reset();
+
+    try
+    {
+        const std::string modelPathLocal8 = path.toLocal8Bit().toStdString();
+        model_ = std::make_unique<dlcv_infer::Model>(modelPathLocal8, deviceId);
+        modelPath_ = path;
+        lastActionSucceeded_ = true;
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        model_.reset();
+        lastErrorText_ = QString::fromLocal8Bit(e.what());
+        outputText_->setPlainText(lastErrorText_);
+        return false;
+    }
+}
+
 bool MainWindow::ensureModelLoaded() {
     if (model_) {
         return true;
     }
-    QMessageBox::warning(this, "提示", "请先加载模型文件！");
+    if (uiTest_) {
+        reportError("加载模型失败", "请先加载模型文件！");
+    } else {
+        QMessageBox::warning(this, "提示", "请先加载模型文件！");
+    }
     return false;
 }
 
@@ -394,7 +457,11 @@ bool MainWindow::ensureImageSelected() {
     if (!imagePath_.isEmpty()) {
         return true;
     }
-    QMessageBox::warning(this, "提示", "请先选择图片文件！");
+    if (uiTest_) {
+        reportError("选择图片失败", "请先选择图片文件！");
+    } else {
+        QMessageBox::warning(this, "提示", "请先选择图片文件！");
+    }
     return false;
 }
 
@@ -415,8 +482,12 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
 }
 
 void MainWindow::reportError(const QString& title, const QString& detail) {
+    lastActionSucceeded_ = false;
+    lastErrorText_ = title + ": " + detail;
     outputText_->setPlainText(title + "\n" + detail);
-    QMessageBox::critical(this, "错误", title + ": " + detail);
+    if (!uiTest_) {
+        QMessageBox::critical(this, "错误", title + ": " + detail);
+    }
 }
 
 QString MainWindow::formatResultText(const dlcv_infer::Result& output) const {
@@ -502,19 +573,7 @@ void MainWindow::onLoadModel() {
 
     settings_.setValue("LastModelPath", selectedModelPath);
 
-    // 用户确认选择后，再释放旧模型并加载新模型
-    model_.reset();
-
-    try
-    {
-        const std::string modelPathLocal8 = selectedModelPath.toLocal8Bit().toStdString();
-        model_ = std::make_unique<dlcv_infer::Model>(modelPathLocal8, selectedDeviceId());
-        modelPath_ = selectedModelPath;
-    }
-    catch (const std::exception& e)
-    {
-        model_.reset();
-        outputText_->setPlainText(QString::fromLocal8Bit(e.what()));
+    if (!loadModelFromPath(selectedModelPath, selectedDeviceId())) {
         return;
     }
 
@@ -549,6 +608,12 @@ void MainWindow::onOpenImageInfer() {
 }
 
 void MainWindow::onInfer() {
+    lastActionSucceeded_ = false;
+    lastErrorText_.clear();
+    lastSampleCount_ = 0;
+    lastFirstResultCount_ = 0;
+    lastInferenceMs_ = 0.0;
+    lastDisplayedResults_.clear();
     if (pressureTestRunning_) {
         return;
     }
@@ -605,7 +670,8 @@ void MainWindow::onInfer() {
     currentBgrImage_ = bgrImage;
     const std::vector<dlcv_infer::ObjectResult> firstResults =
         output.sampleResults.empty() ? std::vector<dlcv_infer::ObjectResult>{} : output.sampleResults.front().results;
-    imageViewer_->setImageAndResults(currentBgrImage_, firstResults);
+    lastDisplayedResults_ = firstResults;
+    imageViewer_->setImageAndResults(currentBgrImage_, lastDisplayedResults_);
     if (hasInspectionStatus) imageViewer_->setInspectionStatus(inspectionOk);
 
     QString text;
@@ -628,6 +694,10 @@ void MainWindow::onInfer() {
         text += formatResultText(output);
     }
     outputText_->setPlainText(text);
+    lastSampleCount_ = static_cast<int>(output.sampleResults.size());
+    lastFirstResultCount_ = static_cast<int>(firstResults.size());
+    lastInferenceMs_ = elapsedMs;
+    lastActionSucceeded_ = true;
 }
 
 void MainWindow::onInferJson() {
@@ -1010,6 +1080,8 @@ void MainWindow::setUiEnabledForPressureTest(bool enabled) {
 }
 
 void MainWindow::onGetModelInfo() {
+    lastActionSucceeded_ = false;
+    lastErrorText_.clear();
     if (!ensureModelLoaded()) {
         return;
     }
@@ -1021,7 +1093,8 @@ void MainWindow::onGetModelInfo() {
     }
     catch (const std::exception& e)
     {
-        outputText_->setPlainText(QString::fromLocal8Bit(e.what()));
+        lastErrorText_ = QString::fromLocal8Bit(e.what());
+        outputText_->setPlainText(lastErrorText_);
         return;
     }
 
@@ -1030,6 +1103,130 @@ void MainWindow::onGetModelInfo() {
     } else {
         outputText_->setPlainText(jsonToQStringPretty(modelInfo, 2));
     }
+    lastActionSucceeded_ = true;
+}
+
+bool MainWindow::runUiTest(
+    const QString& modelPath,
+    const QString& imagePath,
+    int deviceId,
+    bool hasDeviceId,
+    int deviceTimeoutMs,
+    int batchSize,
+    double threshold,
+    bool calcMean,
+    UiTestReport& report) {
+    report = UiTestReport{};
+    report.requestedBatchSize = batchSize;
+
+    auto closeWindow = [&]() {
+        try {
+            close();
+            report.releaseCompleted = model_ == nullptr;
+            report.closeCompleted = !isVisible();
+        } catch (const std::exception& e) {
+            if (report.errorText.isEmpty()) {
+                report.errorText = QString::fromLocal8Bit(e.what());
+            }
+        } catch (...) {
+            if (report.errorText.isEmpty()) {
+                report.errorText = QStringLiteral("关闭窗口时发生未知异常");
+            }
+        }
+    };
+
+    if (!waitForDeviceInitialization(deviceTimeoutMs)) {
+        report.errorText = QStringLiteral("设备初始化超时");
+        closeWindow();
+        return false;
+    }
+    report.deviceInitializationCompleted = true;
+    report.deviceWarning = deviceInitializationWarning_;
+    report.availableDeviceCount = static_cast<int>(deviceNameToId_.size());
+    report.effectiveDeviceId = hasDeviceId ? deviceId : selectedDeviceId();
+
+    if (!loadModelFromPath(modelPath, report.effectiveDeviceId)) {
+        report.errorText = lastErrorText_;
+        closeWindow();
+        return false;
+    }
+    report.modelLoaded = true;
+
+    onGetModelInfo();
+    if (!lastActionSucceeded_) {
+        report.errorText = lastErrorText_.isEmpty() ? outputText_->toPlainText() : lastErrorText_;
+        closeWindow();
+        return false;
+    }
+    report.modelInfoRead = true;
+    report.modelInfoText = outputText_->toPlainText();
+
+    imagePath_ = imagePath;
+    spinBatchSize_->setValue(batchSize);
+    {
+        const QSignalBlocker thresholdBlocker(spinThreshold_);
+        spinThreshold_->setValue(threshold);
+    }
+    checkCalcMean_->setChecked(calcMean);
+    onInfer();
+    if (!lastActionSucceeded_) {
+        report.errorText = lastErrorText_.isEmpty() ? outputText_->toPlainText() : lastErrorText_;
+        closeWindow();
+        return false;
+    }
+
+    report.inferenceCompleted = true;
+    report.sampleCount = lastSampleCount_;
+    report.batchSizeMatched = report.sampleCount == batchSize;
+    report.firstResultCount = lastFirstResultCount_;
+    report.inferenceMs = lastInferenceMs_;
+    report.inferenceText = outputText_->toPlainText();
+
+    report.displayResults = dlcv_infer::json::array();
+    for (const dlcv_infer::ObjectResult& object : lastDisplayedResults_) {
+        dlcv_infer::json maskStats = {
+            {"present", object.withMask && !object.mask.empty()},
+            {"width", object.mask.empty() ? 0 : object.mask.cols},
+            {"height", object.mask.empty() ? 0 : object.mask.rows},
+            {"channels", object.mask.empty() ? 0 : object.mask.channels()},
+            {"nonzero", 0}
+        };
+        if (!object.mask.empty()) {
+            const cv::Mat flattened = object.mask.reshape(1);
+            maskStats["nonzero"] = cv::countNonZero(flattened);
+        }
+
+        report.displayResults.push_back({
+            {"category_id", object.categoryId},
+            {"category", QString::fromLocal8Bit(object.categoryName.c_str()).toUtf8().toStdString()},
+            {"score", object.score},
+            {"area", object.area},
+            {"bbox", object.bbox},
+            {"with_bbox", object.withBbox},
+            {"with_angle", object.withAngle},
+            {"angle", object.angle},
+            {"with_mean", object.withMean},
+            {"foreground_mean", object.foregroundMean},
+            {"background_mean", object.backgroundMean},
+            {"mask", std::move(maskStats)}
+        });
+    }
+
+    QCoreApplication::processEvents();
+    const QPixmap rendered = imageViewer_->grab();
+    report.renderWidth = rendered.width();
+    report.renderHeight = rendered.height();
+    report.renderCompleted = !rendered.isNull() && report.renderWidth > 0 && report.renderHeight > 0;
+    if (!report.batchSizeMatched) {
+        report.errorText = QStringLiteral("推理结果批次数量与请求不一致");
+    } else if (!report.renderCompleted) {
+        report.errorText = QStringLiteral("结果区域渲染失败");
+    }
+
+    closeWindow();
+    return report.deviceInitializationCompleted && report.modelLoaded && report.modelInfoRead &&
+           report.inferenceCompleted && report.batchSizeMatched && report.renderCompleted &&
+           report.releaseCompleted && report.closeCompleted;
 }
 
 void MainWindow::onFreeModel() {

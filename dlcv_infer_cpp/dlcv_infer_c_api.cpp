@@ -575,6 +575,7 @@ static int CallNativeInt(const char* apiName, Invoke&& invoke) noexcept {
 template <typename Invoke>
 static void CallNativeVoid(const char* apiName, Invoke&& invoke) noexcept {
     try {
+        ClearLastErrorMessage();
         invoke();
     } catch (const std::exception& ex) {
         RecordNativeApiFailure(apiName, ex.what());
@@ -653,9 +654,13 @@ const char* dlcv_infer_cpp_get_last_error_c() {
 
 int dlcv_infer_cpp_free_model_c(int model_index) {
     dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
+    ClearLastErrorMessage();
     std::lock_guard<std::mutex> lock(g_modelsMutex);
     auto it = g_models.find(model_index);
-    if (it == g_models.end()) return -1;
+    if (it == g_models.end()) {
+        SetLastErrorMessage("model not found");
+        return -1;
+    }
     g_models.erase(it);
     return 0;
 }
@@ -879,7 +884,7 @@ void dlcv_infer_cpp_free_string_c(const char* value) {
 }
 
 void dlcv_infer_cpp_free_all_models_c() {
-    CallNativeVoid("dlcv_free_all_models", []() {
+    CallNativeVoid("dlcv_infer_cpp_free_all_models_c", []() {
         dlcv_infer::flow::ModelLifecycleWriteGuard lifecycleGuard;
         std::unordered_map<int, std::shared_ptr<CApiModelEntry>> models;
         {

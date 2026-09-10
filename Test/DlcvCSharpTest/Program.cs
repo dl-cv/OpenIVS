@@ -95,6 +95,11 @@ namespace DlcvCSharpTest
                     return RunWinFormsMainWindowSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "failure-propagation-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunFailurePropagationSelfTest();
+                }
+
                 if (IsWorkflowCommand(args))
                 {
                     return RunWorkflowCommands(args);
@@ -249,8 +254,19 @@ namespace DlcvCSharpTest
             }
             finally
             {
-                try { Utils.FreeAllModels(); } catch { }
-                ForceGc();
+                try
+                {
+                    Utils.FreeAllModels();
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("程序清理失败: " + ex.Message);
+                    throw new InvalidOperationException("程序清理失败", ex);
+                }
+                finally
+                {
+                    ForceGc();
+                }
             }
         }
 
@@ -1018,6 +1034,114 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static int RunFailurePropagationSelfTest()
+        {
+            Console.WriteLine("==== 失败传播与清理退出码自测 ====");
+            try
+            {
+                string cleanupError = null;
+                int cleanupExitCode = ApplyCleanupFailure(0, new InvalidOperationException("cleanup-marker"), ref cleanupError);
+                RequireFailurePropagation(cleanupExitCode == 1 && cleanupError.Contains("cleanup-marker"), "清理失败没有改为退出码 1");
+                RequireFailurePropagation(DetermineWithMaskExitCode(0, 0) == 2, "with_mask 零执行没有返回 2");
+                RequireFailurePropagation(DetermineWithMaskExitCode(1, 0) == 0, "with_mask 成功状态错误");
+                RequireFailurePropagation(DetermineWithMaskExitCode(1, 1) == 1, "with_mask 失败状态错误");
+
+                string demo2Path = ResolveDemo2AssemblyPath();
+                string demo3Path = ResolveDemo3AssemblyPath();
+                if (!File.Exists(demo2Path) || !File.Exists(demo3Path))
+                {
+                    Console.WriteLine("Demo2 或 Demo3 程序不存在，请先构建对应项目。");
+                    return 2;
+                }
+
+                VerifyFailurePropagation(
+                    demo2Path,
+                    "DlcvDemo2.Form1",
+                    "ExecuteSecondaryInference",
+                    new object[] { "元件检测模型", "测试类别" },
+                    new[] { "元件检测模型", "测试类别", "secondary-marker" },
+                    "secondary-marker");
+                VerifyFailurePropagation(
+                    demo3Path,
+                    "DlcvDemo3.Demo3Pipeline",
+                    "ExecuteModel2BatchInference",
+                    new object[] { 3, 2 },
+                    new[] { "第 3 张", "共 2 张", "batch-marker" },
+                    "batch-marker");
+                VerifyDemo2RegionClone(demo2Path);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("失败传播与清理退出码自测失败: " + ex);
+                return 1;
+            }
+        }
+
+        private static void VerifyFailurePropagation(
+            string assemblyPath,
+            string typeName,
+            string methodName,
+            object[] contextArguments,
+            string[] expectedParts,
+            string sourceMessage)
+        {
+            Type type = Assembly.LoadFrom(assemblyPath).GetType(typeName, true);
+            MethodInfo method = type.GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static);
+            RequireFailurePropagation(method != null, "未找到失败传播方法: " + methodName);
+
+            var source = new InvalidOperationException(sourceMessage);
+            string loggedMessage = null;
+            var arguments = new List<object>
+            {
+                new Func<List<Utils.CSharpObjectResult>>(() => { throw source; })
+            };
+            arguments.AddRange(contextArguments);
+            arguments.Add(new Action<string>(message => loggedMessage = message));
+
+            try
+            {
+                method.Invoke(null, arguments.ToArray());
+                throw new InvalidOperationException(methodName + " 吞掉了推理异常");
+            }
+            catch (TargetInvocationException ex)
+            {
+                var propagated = ex.InnerException as InvalidOperationException;
+                RequireFailurePropagation(propagated != null && object.ReferenceEquals(propagated.InnerException, source), "原始异常未继续传播");
+                RequireFailurePropagation(!string.IsNullOrEmpty(loggedMessage), "失败日志为空");
+                foreach (string part in expectedParts)
+                {
+                    RequireFailurePropagation(propagated.Message.Contains(part) && loggedMessage.Contains(part), "失败信息缺少: " + part);
+                }
+            }
+        }
+
+        private static void VerifyDemo2RegionClone(string assemblyPath)
+        {
+            Type type = Assembly.LoadFrom(assemblyPath).GetType("DlcvDemo2.Form1", true);
+            MethodInfo method = type.GetMethod("CloneImageRegion", BindingFlags.NonPublic | BindingFlags.Static);
+            RequireFailurePropagation(method != null, "未找到 Demo2 图像区域复制方法");
+            using (var source = new Mat(3, 3, MatType.CV_8UC1, new Scalar(7)))
+            using (var clone = method.Invoke(null, new object[] { source, new Rect(1, 1, 2, 2) }) as Mat)
+            {
+                RequireFailurePropagation(clone != null && clone.Width == 2 && clone.Height == 2, "Demo2 图像区域复制尺寸错误");
+                source.SetTo(Scalar.Black);
+                RequireFailurePropagation(Cv2.CountNonZero(clone) == 4, "Demo2 图像区域复制未生成独立数据");
+            }
+        }
+
+        private static int ApplyCleanupFailure(int exitCode, Exception cleanupException, ref string error)
+        {
+            string message = "释放模型异常: " + (cleanupException?.Message ?? "未知错误");
+            error = string.IsNullOrEmpty(error) ? message : error + Environment.NewLine + message;
+            return exitCode == 0 ? 1 : exitCode;
+        }
+
+        private static void RequireFailurePropagation(bool condition, string message)
+        {
+            if (!condition) throw new InvalidOperationException(message);
+        }
+
         private static int RunAllTests(string[] args)
         {
             if (args == null || args.Length > 2)
@@ -1056,6 +1180,7 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("跨模型标签合并", RunCrossModelLabelMergeSelfTest),
                 new UnifiedTestCase("矩形图像矫正", RunRectImageCorrectionSelfTest),
                 new UnifiedTestCase("Demo2路由规则", RunDemo2RouteRuleSelfTest),
+                new UnifiedTestCase("失败传播与清理退出码", RunFailurePropagationSelfTest),
                 new UnifiedTestCase("掩膜输出开关", RunWithMaskSelfTest),
                 new UnifiedTestCase("均值计算", RunCalcMeanSelfTest),
                 new UnifiedTestCase("环境提醒与 CLI 输出", RunEnvironmentCliCompatibilitySelfTest),
@@ -1096,7 +1221,15 @@ namespace DlcvCSharpTest
                         finally
                         {
                             watch.Stop();
-                            try { Utils.FreeAllModels(); } catch (Exception ex) { Console.WriteLine("释放模型异常: " + ex.Message); }
+                            try
+                            {
+                                Utils.FreeAllModels();
+                            }
+                            catch (Exception ex)
+                            {
+                                exitCode = ApplyCleanupFailure(exitCode, ex, ref error);
+                                Console.WriteLine("测试清理失败: " + ex.Message);
+                            }
                             ForceGc();
                         }
 
@@ -6548,6 +6681,17 @@ namespace DlcvCSharpTest
             return candidates[0];
         }
 
+        private static string ResolveDemo3AssemblyPath()
+        {
+            string repoRoot = ResolveRepoRoot();
+            string[] candidates =
+            {
+                Path.Combine(repoRoot, "DlcvDemo3", "bin", "C# 测试程序3.exe"),
+                Path.Combine(repoRoot, "DlcvDemo3", "bin", "Debug", "C# 测试程序3.exe")
+            };
+            return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
+        }
+
         private static string ResolveRepoRoot()
         {
             string root = TryFindRepoRoot(Environment.CurrentDirectory);
@@ -7123,142 +7267,127 @@ namespace DlcvCSharpTest
         private static int RunWithMaskSelfTest()
         {
             Console.WriteLine("==== with_mask 参数透传自测 ====");
-
+            ModelRegressionCase balloonSentinelCase = DefaultCases.Single(
+                x => string.Equals(x.Name, "气球实例分割 Sentinel DVT", StringComparison.Ordinal));
             var cases = new[]
             {
-                new { Name = "seg测试", ModelPath = @"C:\Users\Administrator\Desktop\seg.dvt", ImagePath = @"C:\Users\Administrator\Desktop\seg.jpg" },
-                new { Name = "实例分割-dvt", ModelPath = @"Y:\zxc\模块化任务测试\实例分割\实例分割.dvt", ImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png" },
-                new { Name = "实例分割-dvst", ModelPath = @"Y:\zxc\模块化任务测试\实例分割\滑窗测试_120_50.dvst", ImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png" }
+                new
+                {
+                    Name = balloonSentinelCase.Name,
+                    ModelPath = Path.Combine(ModelRoot, balloonSentinelCase.ModelFile),
+                    ImagePath = Path.Combine(ModelRoot, balloonSentinelCase.ImageFile),
+                    RegressionCase = balloonSentinelCase
+                },
+                new { Name = "seg测试", ModelPath = @"C:\Users\Administrator\Desktop\seg.dvt", ImagePath = @"C:\Users\Administrator\Desktop\seg.jpg", RegressionCase = (ModelRegressionCase)null },
+                new { Name = "实例分割-dvt", ModelPath = @"Y:\zxc\模块化任务测试\实例分割\实例分割.dvt", ImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png", RegressionCase = (ModelRegressionCase)null },
+                new { Name = "实例分割-dvst", ModelPath = @"Y:\zxc\模块化任务测试\实例分割\滑窗测试_120_50.dvst", ImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png", RegressionCase = (ModelRegressionCase)null }
             };
 
-            int globalFail = 0;
+            int executedCases = 0;
+            int failedCases = 0;
             foreach (var c in cases)
             {
                 Console.WriteLine();
                 Console.WriteLine("[" + c.Name + "]");
-                Console.WriteLine("model: " + c.ModelPath);
-                Console.WriteLine("image: " + c.ImagePath);
-
-                if (!File.Exists(c.ModelPath))
+                if (!File.Exists(c.ModelPath) || !File.Exists(c.ImagePath))
                 {
-                    Console.WriteLine("模型不存在，跳过");
-                    continue;
-                }
-                if (!File.Exists(c.ImagePath))
-                {
-                    Console.WriteLine("图片不存在，跳过");
+                    Console.WriteLine("模型或图片不存在，跳过");
                     continue;
                 }
 
+                executedCases++;
                 Model model = null;
                 Mat bgr = null;
                 Mat rgb = null;
+                Utils.CSharpResult batchTrue = default(Utils.CSharpResult);
+                Utils.CSharpResult batchFalse = default(Utils.CSharpResult);
                 try
                 {
                     model = new Model(c.ModelPath, GpuDeviceId, false, false);
-                    Console.WriteLine("加载成功: provider=" + model.LoadedDogProvider + ", dll=" + model.LoadedNativeDllName);
-
                     bgr = Cv2.ImRead(c.ImagePath, ImreadModes.Color);
-                    if (bgr == null || bgr.Empty()) throw new Exception("图像解码失败");
+                    if (bgr == null || bgr.Empty()) throw new InvalidOperationException("图像解码失败");
                     rgb = new Mat();
                     Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
 
-                    // 1) InferOneOutJson with_mask=true
                     var pTrue = new JObject { ["threshold"] = 0.5, ["with_mask"] = true, ["batch_size"] = 1 };
-                    dynamic jsonResult = model.InferOneOutJson(rgb, pTrue);
-                    var arr = jsonResult as JArray ?? new JArray();
-                    int trueCount = 0;
-                    foreach (JObject o in arr)
+                    JArray jsonTrue = GetJsonResultArray(model.InferOneOutJson(rgb, pTrue));
+                    batchTrue = model.InferBatch(new List<Mat> { rgb }, pTrue);
+                    List<Utils.CSharpObjectResult> trueObjects = GetFirstResultObjects(batchTrue);
+                    if (jsonTrue.Count == 0 || trueObjects.Count == 0) throw new InvalidOperationException("with_mask=true 没有目标");
+                    if (jsonTrue.Any(x => !(x?["with_mask"]?.Value<bool>() ?? false) || !HasValidJsonMask(x?["mask"])))
+                        throw new InvalidOperationException("with_mask=true 的 JSON 含无效 mask");
+                    if (trueObjects.Any(x => !x.WithMask || x.Mask == null || x.Mask.Empty() || x.Mask.Channels() != 1 || Cv2.CountNonZero(x.Mask) <= 0))
+                        throw new InvalidOperationException("with_mask=true 的结构化结果含无效 mask");
+                    if (c.RegressionCase != null)
                     {
-                        bool wm = o["with_mask"]?.Value<bool>() ?? false;
-                        if (wm) trueCount++;
-                    }
-                    Console.WriteLine("InferOneOutJson(with_mask=true): 目标数=" + arr.Count + ", with_mask=true 数=" + trueCount);
-                    if (arr.Count > 0)
-                    {
-                        try
-                        {
-                            var rawFirst = arr[0] as JObject;
-                            Console.WriteLine("  标准化后首个对象: " + rawFirst?.ToString(Formatting.None)?.Substring(0, Math.Min(300, rawFirst?.ToString(Formatting.None)?.Length ?? 0)));
-                        }
-                        catch { }
+                        string regressionFailure;
+                        if (!ValidateRegressionResult(c.RegressionCase, batchTrue, out regressionFailure))
+                            throw new InvalidOperationException("固定 mask 基准不一致：" + regressionFailure);
+                        ModelRegressionMask expectedMask = c.RegressionCase.Samples[0].Results[0].Mask;
+                        Console.WriteLine("固定 mask 基准=" + expectedMask.Width + "x" + expectedMask.Height + "，非零=" + expectedMask.NonZero);
                     }
 
-                    // 2) Infer / InferBatch with_mask=true
-                    var batchResult = model.InferBatch(new List<Mat> { rgb }, pTrue);
-                    int batchTrueCount = 0;
-                    if (batchResult.SampleResults != null && batchResult.SampleResults.Count > 0)
-                    {
-                        foreach (var obj in batchResult.SampleResults[0].Results)
-                        {
-                            if (obj.WithMask) batchTrueCount++;
-                        }
-                        Console.WriteLine("InferBatch(with_mask=true): 目标数=" + batchResult.SampleResults[0].Results.Count + ", WithMask=true 数=" + batchTrueCount);
-                    }
-                    DisposeResultMasks(batchResult);
-
-                    // 3) InferOneOutJson with_mask=false
                     var pFalse = new JObject { ["threshold"] = 0.5, ["with_mask"] = false, ["batch_size"] = 1 };
-                    dynamic jsonResultFalse = model.InferOneOutJson(rgb, pFalse);
-                    var arrFalse = jsonResultFalse as JArray ?? new JArray();
-                    int falseCount = 0;
-                    foreach (JObject o in arrFalse)
-                    {
-                        bool wm = o["with_mask"]?.Value<bool>() ?? false;
-                        if (!wm) falseCount++;
-                    }
-                    Console.WriteLine("InferOneOutJson(with_mask=false): 目标数=" + arrFalse.Count + ", with_mask=false 数=" + falseCount);
+                    JArray jsonFalse = GetJsonResultArray(model.InferOneOutJson(rgb, pFalse));
+                    batchFalse = model.InferBatch(new List<Mat> { rgb }, pFalse);
+                    List<Utils.CSharpObjectResult> falseObjects = GetFirstResultObjects(batchFalse);
+                    if (jsonFalse.Count == 0 || falseObjects.Count == 0) throw new InvalidOperationException("with_mask=false 没有目标");
+                    if (jsonTrue.Count != jsonFalse.Count || trueObjects.Count != falseObjects.Count)
+                        throw new InvalidOperationException("with_mask 开关前后目标数不一致");
+                    if (jsonFalse.Any(x => (x?["with_mask"]?.Value<bool>() ?? false) || HasValidJsonMask(x?["mask"])))
+                        throw new InvalidOperationException("with_mask=false 的 JSON 仍含有效 mask");
+                    if (falseObjects.Any(x => x.WithMask || (x.Mask != null && !x.Mask.Empty())))
+                        throw new InvalidOperationException("with_mask=false 的结构化结果仍含有效 mask");
 
-                    // 4) InferBatch with_mask=false
-                    var batchFalseResult = model.InferBatch(new List<Mat> { rgb }, pFalse);
-                    int batchFalseCount = 0;
-                    if (batchFalseResult.SampleResults != null && batchFalseResult.SampleResults.Count > 0)
-                    {
-                        foreach (var obj in batchFalseResult.SampleResults[0].Results)
-                        {
-                            if (!obj.WithMask) batchFalseCount++;
-                        }
-                        Console.WriteLine("InferBatch(with_mask=false): 目标数=" + batchFalseResult.SampleResults[0].Results.Count + ", WithMask=false 数=" + batchFalseCount);
-                    }
-                    DisposeResultMasks(batchFalseResult);
-
-                    // 判定：如果模型是实例/语义分割模型，with_mask=true 时应当有 mask
-                    // 这里只做参数透传检查：true 请求不应被强制改为 false（除非模型本身不输出 mask）
-                    // 打印原始底层 JSON 中是否有 mask_ptr，帮助定位
-                    if (arr.Count > 0)
-                    {
-                        var first = arr[0] as JObject;
-                        var maskTok = first["mask"];
-                        if (maskTok is JObject maskObj)
-                        {
-                            long ptr = maskObj["mask_ptr"]?.Value<long>() ?? 0;
-                            Console.WriteLine("底层 mask 对象: ptr=" + ptr + ", w=" + (maskObj["width"]?.Value<int>() ?? 0) + ", h=" + (maskObj["height"]?.Value<int>() ?? 0));
-                        }
-                    }
+                    Console.WriteLine("检查通过，目标数=" + trueObjects.Count);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("异常: " + ex.Message);
-                    Console.WriteLine(ex.StackTrace);
-                    globalFail++;
+                    Console.WriteLine("检查失败: " + ex.Message);
+                    failedCases++;
                 }
                 finally
                 {
-                    if (rgb != null) rgb.Dispose();
-                    if (bgr != null) bgr.Dispose();
-                    try { if (model != null) model.Dispose(); } catch { }
+                    DisposeResultMasks(batchFalse);
+                    DisposeResultMasks(batchTrue);
+                    rgb?.Dispose();
+                    bgr?.Dispose();
+                    try { model?.Dispose(); } catch (Exception ex) { Console.WriteLine("模型释放失败: " + ex.Message); failedCases++; }
                     ForceGc();
                 }
             }
 
-            Console.WriteLine();
-            if (globalFail == 0)
-            {
-                Console.WriteLine("==== with_mask 参数透传自测 完成 ====");
-                return 0;
-            }
-            Console.WriteLine("==== with_mask 参数透传自测 失败数=" + globalFail + " ====");
-            return 1;
+            int exitCode = DetermineWithMaskExitCode(executedCases, failedCases);
+            Console.WriteLine("==== with_mask 参数透传自测 执行数=" + executedCases + "，失败数=" + failedCases + " ====");
+            return exitCode;
+        }
+
+        private static int DetermineWithMaskExitCode(int executedCases, int failedCases)
+        {
+            if (executedCases <= 0) return 2;
+            return failedCases == 0 ? 0 : 1;
+        }
+
+        private static JArray GetJsonResultArray(object result)
+        {
+            return result as JArray ?? (result as JObject)?["result_list"] as JArray ?? new JArray();
+        }
+
+        private static List<Utils.CSharpObjectResult> GetFirstResultObjects(Utils.CSharpResult result)
+        {
+            if (result.SampleResults == null || result.SampleResults.Count == 0 || result.SampleResults[0].Results == null)
+                return new List<Utils.CSharpObjectResult>();
+            return result.SampleResults[0].Results;
+        }
+
+        private static bool HasValidJsonMask(JToken token)
+        {
+            var points = token as JArray;
+            if (points != null) return points.Count > 0;
+            var mask = token as JObject;
+            return mask != null && (mask["mask_ptr"]?.Value<long>() ?? 0) != 0
+                && (mask["width"]?.Value<int>() ?? 0) > 0
+                && (mask["height"]?.Value<int>() ?? 0) > 0;
         }
 
         private static int RunTemplateCountPrioritySelfTest()

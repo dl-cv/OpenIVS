@@ -1531,9 +1531,9 @@ namespace dlcv_infer {
     }
 
     // Model类实现
-    Model::Model() {}
+    Model::Model(detail::ModelAbiTagCurrent) {}
 
-    Model::Model(const std::string& modelPath, int device_id)
+    Model::Model(const std::string& modelPath, int device_id, detail::ModelAbiTagCurrent)
         : _deviceId(device_id) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
         const std::wstring modelPathW = DecodeModelPathString(modelPath);
@@ -1600,7 +1600,7 @@ namespace dlcv_infer {
         }
     }
 
-    Model::Model(const std::wstring& modelPath, int device_id)
+    Model::Model(const std::wstring& modelPath, int device_id, detail::ModelAbiTagCurrent)
         : _deviceId(device_id) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
         const std::string modelPathUtf8 = convertWstringToUtf8(modelPath);
@@ -1669,7 +1669,8 @@ namespace dlcv_infer {
     Model::Model(
         std::shared_ptr<const std::vector<unsigned char>> modelData,
         const std::string& modelName,
-        int device_id)
+        int device_id,
+        detail::ModelAbiTagCurrent)
         : _deviceId(device_id) {
         flow::ModelLifecycleReadGuard lifecycleGuard;
         std::lock_guard<std::mutex> modelLoadLock(g_modelLoadMu);
@@ -1719,7 +1720,7 @@ namespace dlcv_infer {
         }
     }
 
-    Model::Model(Model&& other) noexcept {
+    Model::Model(Model&& other, detail::ModelAbiTagCurrent) noexcept {
         std::unique_lock<std::shared_mutex> otherStateLock(other._stateMutex);
         std::lock_guard<std::mutex> otherModelInfoLock(other._modelInfoMutex);
         modelIndex = other.modelIndex;
@@ -1784,6 +1785,41 @@ namespace dlcv_infer {
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
         other._loadedNativeDllName.clear();
         return *this;
+    }
+
+    std::uint64_t GetModelAbiValue(ModelAbiValue value, detail::ModelAbiTagCurrent) {
+        switch (value) {
+        case ModelAbiValue::LayoutVersion:
+            return detail::ModelAbiLayoutVersion;
+        case ModelAbiValue::BuildConfiguration:
+            return detail::ModelAbiBuildConfiguration;
+        case ModelAbiValue::IteratorDebugLevel:
+            return detail::ModelAbiIteratorDebugLevel;
+        case ModelAbiValue::ModelSize:
+            return sizeof(Model);
+        case ModelAbiValue::ModelAlignment:
+            return alignof(Model);
+        case ModelAbiValue::ObjectResultSize:
+            return sizeof(ObjectResult);
+        case ModelAbiValue::SampleResultSize:
+            return sizeof(SampleResult);
+        case ModelAbiValue::ResultSize:
+            return sizeof(Result);
+        case ModelAbiValue::StringSize:
+            return sizeof(std::string);
+        case ModelAbiValue::VectorSize:
+            return sizeof(std::vector<double>);
+        case ModelAbiValue::JsonSize:
+            return sizeof(json);
+        case ModelAbiValue::MatSize:
+            return sizeof(cv::Mat);
+        case ModelAbiValue::MutexSize:
+            return sizeof(std::mutex);
+        case ModelAbiValue::SharedMutexSize:
+            return sizeof(std::shared_mutex);
+        default:
+            return 0;
+        }
     }
 
     Model::~Model() {

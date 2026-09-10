@@ -123,15 +123,7 @@
     <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100d.lib') and '$(Configuration)'=='Debug'" Text="未找到 OpenCV Debug 库 opencv_world4100d.lib。" />
     <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100.lib') and '$(Configuration)'!='Debug'" Text="未找到 OpenCV Release 库 opencv_world4100.lib。" />
   </Target>
-  <Target Name="CopyDlcvInferCppDll" AfterTargets="Build">
-    <PropertyGroup>
-      <DlcvInferCppDll Condition="'$(BuildingSolutionFile)'=='true'">$([System.IO.Path]::GetFullPath('$(SolutionDir)$(Configuration)\dlcv_infer_cpp.dll'))</DlcvInferCppDll>
-      <DlcvInferCppDll Condition="'$(BuildingSolutionFile)'!='true'">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\dlcv_infer_cpp.dll'))</DlcvInferCppDll>
-    </PropertyGroup>
-    <Error Condition="!Exists('$(DlcvInferCppDll)')" Text="未找到本次构建生成的 dlcv_infer_cpp.dll：$(DlcvInferCppDll)" />
-    <Message Text="复制 dlcv_infer_cpp.dll：$(DlcvInferCppDll) -> $(OutDir)" Importance="high" />
-    <Copy SourceFiles="$(DlcvInferCppDll)" DestinationFiles="$(OutDir)dlcv_infer_cpp.dll" />
-  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="$(ProjectDir)..\DlcvNativeRuntime.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

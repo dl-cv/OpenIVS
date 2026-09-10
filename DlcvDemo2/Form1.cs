@@ -438,27 +438,23 @@ namespace DlcvDemo2
                         continue;
                     }
 
-                    try
+                    string routeName = useIcDetectModel ? "IC检测模型" : "元件检测模型";
+                    List<CSharpObjectResult> mapped = ExecuteSecondaryInference(
+                        () => InferDetectionModelAndMapBack(roi, target.ObjectResult, useIcDetectModel),
+                        routeName,
+                        target.ObjectResult.CategoryName,
+                        message => runResult.Logs.Add(message));
+                    runResult.FinalObjects.AddRange(mapped);
+                    int realResultCount = mapped.Count == 1 && ReferenceEquals(mapped[0], target.ObjectResult)
+                        ? 0
+                        : mapped.Count;
+                    if (useIcDetectModel)
                     {
-                        List<CSharpObjectResult> mapped = InferDetectionModelAndMapBack(roi, target.ObjectResult, useIcDetectModel);
-                        runResult.FinalObjects.AddRange(mapped);
-                        int realResultCount = mapped.Count == 1 && ReferenceEquals(mapped[0], target.ObjectResult)
-                            ? 0
-                            : mapped.Count;
-                        if (useIcDetectModel)
-                        {
-                            runResult.IcModelResultCount += realResultCount;
-                        }
-                        else
-                        {
-                            runResult.ComponentModelResultCount += realResultCount;
-                        }
+                        runResult.IcModelResultCount += realResultCount;
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        string routeName = useIcDetectModel ? "IC检测模型" : "元件检测模型";
-                        runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]{routeName}推理失败，保留元件提取结果：{ex.Message}");
-                        runResult.FinalObjects.Add(target.ObjectResult);
+                        runResult.ComponentModelResultCount += realResultCount;
                     }
                 }
 
@@ -471,6 +467,46 @@ namespace DlcvDemo2
             runResult.DisplayResult = BuildDisplayResult(runResult.FinalObjects);
             ReportInferenceProgress(progress, 100, "推理完成");
             return runResult;
+        }
+
+        private static Mat CloneImageRegion(Mat image, Rect region)
+        {
+            if (image == null)
+            {
+                throw new ArgumentNullException(nameof(image));
+            }
+
+            using (var view = new Mat(image, region))
+            {
+                return view.Clone();
+            }
+        }
+
+        private static List<CSharpObjectResult> ExecuteSecondaryInference(
+            Func<List<CSharpObjectResult>> inferenceAction,
+            string routeName,
+            string categoryName,
+            Action<string> failureLogger)
+        {
+            if (inferenceAction == null)
+            {
+                throw new ArgumentNullException(nameof(inferenceAction));
+            }
+
+            try
+            {
+                return inferenceAction();
+            }
+            catch (Exception ex)
+            {
+                string safeRouteName = string.IsNullOrWhiteSpace(routeName) ? "二级模型" : routeName.Trim();
+                string safeCategoryName = string.IsNullOrWhiteSpace(categoryName) ? "未知类别" : categoryName.Trim();
+                var failure = new InvalidOperationException(
+                    $"目标[{safeCategoryName}]{safeRouteName}推理失败：{ex.Message}",
+                    ex);
+                failureLogger?.Invoke(failure.Message);
+                throw failure;
+            }
         }
 
         private static bool ShouldUseIcDetectModel(string baseName)
@@ -503,7 +539,7 @@ namespace DlcvDemo2
             for (int i = 0; i < totalWindows; i++)
             {
                 Rect window = windows[i];
-                using (var tile = new Mat(fullImageRgb, window).Clone())
+                using (var tile = CloneImageRegion(fullImageRgb, window))
                 {
                     CSharpResult tileResult = extractModel.Infer(tile, inferParams);
                     if (tileResult.SampleResults == null || tileResult.SampleResults.Count == 0)
@@ -567,7 +603,7 @@ namespace DlcvDemo2
                         return result;
                     }
 
-                    roi = new Mat(fullImageRgb, roiRect).Clone();
+                    roi = CloneImageRegion(fullImageRgb, roiRect);
                     fullToCropAffine = new[] { 1.0, 0.0, -roiRect.X, 0.0, 1.0, -roiRect.Y };
                 }
 

@@ -464,11 +464,24 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
     return !image.empty();
 }
 
-void MainWindow::freeCurrentModel() {
-    if (modelIndex_ >= 0 && api_.isLoaded()) {
-        api_.freeModel(modelIndex_);
+bool MainWindow::freeCurrentModel() {
+    if (modelIndex_ < 0) {
+        return true;
+    }
+    if (!api_.isLoaded()) {
+        reportError("释放模型失败", "推理库未加载");
+        return false;
+    }
+    if (api_.freeModel(modelIndex_) != 0) {
+        QString detail = lastCError();
+        if (detail.isEmpty()) {
+            detail = "C接口未返回错误信息";
+        }
+        reportError("释放模型失败", detail);
+        return false;
     }
     modelIndex_ = -1;
+    return true;
 }
 
 void MainWindow::reportError(const QString& title, const QString& detail) {
@@ -595,7 +608,9 @@ void MainWindow::onLoadModel() {
 
     const QString selectedPath = dialog.selectedFiles().front();
     settings_.setValue("LastModelPath", selectedPath);
-    freeCurrentModel();
+    if (!freeCurrentModel()) {
+        return;
+    }
 
     const QByteArray pathBytes = selectedPath.toLocal8Bit();
     const int modelIndex = api_.loadModel(pathBytes.constData(), selectedDeviceId());
@@ -947,8 +962,12 @@ void MainWindow::onGetModelInfo() {
 
 void MainWindow::onFreeModel() {
     stopPressureTest();
-    freeCurrentModel();
-    outputText_->setPlainText("模型已释放");
+    if (!ensureModelLoaded()) {
+        return;
+    }
+    if (freeCurrentModel()) {
+        outputText_->setPlainText("模型已释放");
+    }
 }
 
 void MainWindow::onFreeAllModels() {
@@ -958,6 +977,11 @@ void MainWindow::onFreeAllModels() {
         return;
     }
     api_.freeAllModels();
+    const QString error = lastCError();
+    if (!error.isEmpty()) {
+        reportError("释放所有模型失败", error);
+        return;
+    }
     modelIndex_ = -1;
     outputText_->setPlainText("所有模型已释放");
 }

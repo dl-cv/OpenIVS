@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -205,16 +205,18 @@ namespace DlcvDemo3
                     {
                         try
                         {
-                            partials[c] = ProcessModel2Chunk(fullImageRgb, chunks[c], model2, inferParams);
-                        }
-                        catch (Exception ex)
-                        {
-                            lock (logLock)
-                            {
-                                int begin = c * batchLimit + 1;
-                                runResult.Logs.Add($"模型2 batch 推理失败(从第 {begin} 张开始，共 {chunks[c].Count} 张)：{ex.Message}");
-                            }
-                            partials[c] = new List<CSharpObjectResult>();
+                            int begin = c * batchLimit + 1;
+                            partials[c] = ExecuteModel2BatchInference(
+                                () => ProcessModel2Chunk(fullImageRgb, chunks[c], model2, inferParams),
+                                begin,
+                                chunks[c].Count,
+                                message =>
+                                {
+                                    lock (logLock)
+                                    {
+                                        runResult.Logs.Add(message);
+                                    }
+                                });
                         }
                         finally
                         {
@@ -236,16 +238,18 @@ namespace DlcvDemo3
                             {
                                 try
                                 {
-                                    partials[c] = ProcessModel2Chunk(fullImageRgb, chunks[c], model2, inferParams);
-                                }
-                                catch (Exception ex)
-                                {
-                                    lock (logLock)
-                                    {
-                                        int begin = c * batchLimit + 1;
-                                        runResult.Logs.Add($"模型2 batch 推理失败(从第 {begin} 张开始，共 {chunks[c].Count} 张)：{ex.Message}");
-                                    }
-                                    partials[c] = new List<CSharpObjectResult>();
+                                    int begin = c * batchLimit + 1;
+                                    partials[c] = ExecuteModel2BatchInference(
+                                        () => ProcessModel2Chunk(fullImageRgb, chunks[c], model2, inferParams),
+                                        begin,
+                                        chunks[c].Count,
+                                        message =>
+                                        {
+                                            lock (logLock)
+                                            {
+                                                runResult.Logs.Add(message);
+                                            }
+                                        });
                                 }
                                 finally
                                 {
@@ -257,7 +261,21 @@ namespace DlcvDemo3
                         });
                     }
 
-                    Task.WaitAll(tasks);
+                    try
+                    {
+                        Task.WaitAll(tasks);
+                    }
+                    catch (AggregateException ex)
+                    {
+                        var failures = ex.Flatten().InnerExceptions;
+                        if (failures.Count == 1)
+                        {
+                            throw failures[0];
+                        }
+
+                        string detail = string.Join("；", failures.Select(x => x.Message));
+                        throw new InvalidOperationException("模型2多个 batch 推理失败：" + detail, ex);
+                    }
                 }
 
                 foreach (var list in partials)
@@ -280,6 +298,33 @@ namespace DlcvDemo3
                 {
                     context.Dispose();
                 }
+            }
+        }
+
+        private static List<CSharpObjectResult> ExecuteModel2BatchInference(
+            Func<List<CSharpObjectResult>> inferenceAction,
+            int begin,
+            int count,
+            Action<string> failureLogger)
+        {
+            if (inferenceAction == null)
+            {
+                throw new ArgumentNullException(nameof(inferenceAction));
+            }
+
+            try
+            {
+                return inferenceAction();
+            }
+            catch (Exception ex)
+            {
+                int safeBegin = Math.Max(1, begin);
+                int safeCount = Math.Max(0, count);
+                var failure = new InvalidOperationException(
+                    $"模型2 batch 推理失败（从第 {safeBegin} 张开始，共 {safeCount} 张）：{ex.Message}",
+                    ex);
+                failureLogger?.Invoke(failure.Message);
+                throw failure;
             }
         }
 
