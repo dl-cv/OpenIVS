@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- 从工程引用读取实际产物，避免从其他输出目录取到同名旧 DLL。 -->
+  <Target Name="CopyDlcvReferencedRuntime" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
+    <ItemGroup>
+      <_DlcvRuntimeProject Include="@(ProjectReference)" Condition="'%(ProjectReference.Filename)'=='dlcv_infer_cpp'" />
+    </ItemGroup>
+    <Error Condition="'@(_DlcvRuntimeProject->Count())'!='1'" Text="必须有且仅有一个 dlcv_infer_cpp 工程引用。" />
+    <MSBuild Projects="@(_DlcvRuntimeProject)" Targets="GetTargetPath" BuildInParallel="false"
+             Properties="Configuration=$(Configuration);Platform=$(Platform)">
+      <Output TaskParameter="TargetOutputs" ItemName="_DlcvRuntimeOutput" />
+    </MSBuild>
+    <Error Condition="'@(_DlcvRuntimeOutput->Count())'!='1'" Text="无法确定工程引用的唯一 DLL 产物。" />
+    <Error Condition="'%(_DlcvRuntimeOutput.Extension)'!='.dll'" Text="工程引用返回的产物不是 DLL。" />
+    <Error Condition="!Exists('%(_DlcvRuntimeOutput.FullPath)')" Text="本次引用工程的 DLL 不存在：%(_DlcvRuntimeOutput.FullPath)" />
+    <Copy SourceFiles="@(_DlcvRuntimeOutput)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="false" />
+  </Target>
+  <!-- Qt 运行文件逐项检查；任一必需文件复制失败都使构建失败。 -->
+  <Target Name="CopyDlcvQtRuntime" AfterTargets="CopyDlcvReferencedRuntime"
+          Condition="'$(Platform)'=='x64' and '$(DlcvCopyQtRuntime)'=='true'">
+    <ItemGroup>
+      <_DlcvQtRuntime Include="$(QtBinDir)\Qt6Core$(QtDllSuffix).dll;$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll;$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_DlcvQtRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <MakeDir Directories="$(TargetDir)platforms;$(TargetDir)styles" />
+    <Copy SourceFiles="$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" DestinationFolder="$(TargetDir)platforms" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" DestinationFolder="$(TargetDir)styles" SkipUnchangedFiles="true"
+          Condition="Exists('$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll')" />
+  </Target>
+</Project>
