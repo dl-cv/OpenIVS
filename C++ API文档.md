@@ -187,30 +187,7 @@ public:
 3. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 `dlcv_load_model`。
 4. 构造失败时抛出 `std::runtime_error`，错误信息包含底层返回的 JSON。
 
-### 4.2 C++ Model ABI 保护
-
-`Model` 的默认构造、字符串路径构造、宽字符串路径构造、移动构造和 DLL 内二进制构造均带有默认 ABI tag。源码调用形式不变，ABI tag 会进入 MSVC 导入与导出修饰名。
-
-ABI tag 包含以下编译事实：
-
-- `Model` 布局代次；
-- Debug 或 Release；
-- `_ITERATOR_DEBUG_LEVEL`；
-- `std::string`、`std::vector`、`json`、`cv::Mat`、`std::mutex`、`std::shared_mutex`的尺寸与内存排列要求。
-
-`ModelAbiLayoutVersion`是人工维护的 ABI 代次。`Model`、`ObjectResult`、`SampleResult`或`Result`的字段增删、顺序调整、类型变化、继承变化或虚函数变化时，必须先递增该值，再构建全部 C++调用程序。即使最终 `sizeof`没有变化，也必须递增。
-
-布局代次或相关编译事实变化后，旧 C++ EXE 不会继续绑定新版 DLL 的 `Model`构造函数。新版 C++ EXE 配旧 DLL 时也会缺少对应符号。两类不兼容组合均应在入口解析阶段失败，不能继续构造尺寸不一致的对象。
-
-本次保护依据已经确认的二进制事实：同一不兼容组合中，调用端为 `Model`分配 `0xC0`字节，DLL 构造路径按 `0x138`字节布局写入，差值为 120 字节。现有证据只确认两份产物不兼容，不据此判断两份产物的生成先后。
-
-`GetModelAbiValue()`返回 DLL 实际编译出的布局代次、配置、迭代器调试级别及公开对象尺寸。`Test/dlcv_infer_cpp_abi_selftest`同时输出头文件值、DLL 值和实际加载 DLL 路径，两组值全部一致时返回 0。
-
-此修改要求重新构建全部 C++调用程序及测试程序。旧 C++ EXE 不能与新版 DLL 混用，也不作为继续运行的兼容目标。
-
-C ABI 不使用 `Model`调用端对象布局，`dlcv_infer_c_api.h`中的函数名、参数、结果释放方式及既有导出名称保持不变。C 调用程序不因本次 C++构造函数 ABI tag 产生源码变化。
-
-### 4.3 模型信息
+### 4.2 模型信息
 
 ```cpp
 json GetModelInfo();
@@ -220,7 +197,7 @@ json GetDvsModelInfo();
 - `GetDvsModelInfo()` 支持流程模型，返回完整流程 JSON、`loaded_model_meta`、按模型文件名组织的 `model_info`，以及首模型和最终输出模型的节点编号。
 - 普通模式下通过 `dlcv_get_model_info` 获取。
 
-### 4.4 单图推理
+### 4.3 单图推理
 
 ```cpp
 Result Infer(const cv::Mat& image, const json& params_json = json::object());
@@ -230,7 +207,7 @@ Result Infer(const cv::Mat& image, const json& params_json = json::object());
 - 内部调用 `prepareInferInputBatch` 对图像做通道/位深归一化。
 - 返回 `Result` 结构，包含 `sampleResults` 数组。
 
-### 4.5 批量推理
+### 4.4 批量推理
 
 ```cpp
 Result InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json = json::object());
@@ -238,7 +215,7 @@ Result InferBatch(const std::vector<cv::Mat>& image_list, const json& params_jso
 - `image_list`：输入图像列表，长度即 batch size。
 - 返回结果中 `sampleResults` 长度与输入图像数量一致（Batch=1 时也为 1 个元素）。
 
-### 4.6 JSON 单图输出
+### 4.5 JSON 单图输出
 
 ```cpp
 json InferOneOutJson(const cv::Mat& image, const json& params_json = json::object());
@@ -247,7 +224,7 @@ json InferOneOutJson(const cv::Mat& image, const json& params_json = json::objec
 - 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
 - 普通模式下将底层返回的 `mask_ptr` mask 转换为点数组形式。
 
-### 4.7 释放模型
+### 4.6 释放模型
 
 ```cpp
 void FreeModel();
@@ -258,7 +235,7 @@ void FreeModel();
 
 > **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回（从 `0` 起递增），C 接口只接受 `[0, 9999]`，达到 `10000` 时释放本次加载并返回范围错误；流程模型（`.dvst`/`.dvso`）的 `modelIndex` 由本层自管理（从 `10000` 起递增）。二者分区，避免上层按 `modelIndex` 索引时流程模型与普通模型撞键。流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
 
-### 4.8 计时查询
+### 4.7 计时查询
 
 ```cpp
 static void GetLastInferTiming(double& dlcvInferMs, double& totalInferMs);

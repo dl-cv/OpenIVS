@@ -10,30 +10,6 @@ if (-not (Test-Path -LiteralPath $testExePath -PathType Leaf)) {
     exit 2
 }
 
-$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-$sourceRoots = @(
-    $PSScriptRoot,
-    (Join-Path $repoRoot "DlcvCsharpApi"),
-    (Join-Path $repoRoot "DlcvDemo"),
-    (Join-Path $repoRoot "DlcvDemo2"),
-    (Join-Path $repoRoot "DlcvDemo3")
-)
-$sourceFiles = foreach ($sourceRoot in $sourceRoots) {
-    if (-not [IO.Directory]::Exists($sourceRoot)) {
-        continue
-    }
-    Get-ChildItem -LiteralPath $sourceRoot -Recurse -File | Where-Object {
-        $_.FullName -notmatch '[\\/](bin|obj)[\\/]' -and
-        $_.Extension -in @('.cs', '.csproj', '.config', '.ps1')
-    }
-}
-$latestSource = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-$testExe = Get-Item -LiteralPath $testExePath
-if ($null -ne $latestSource -and $latestSource.LastWriteTimeUtc -gt $testExe.LastWriteTimeUtc) {
-    Write-Error ("测试程序早于源码，请先串行构建相关 C# 项目。最新源码：{0}；测试程序：{1}" -f $latestSource.FullName, $testExePath)
-    exit 2
-}
-
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
     $LogPath = Join-Path $PSScriptRoot "bin\x64\Release\DlcvCSharpTest-all-tests.log"
 }

@@ -5,7 +5,6 @@
 #include <cmath>
 #include <exception>
 #include <map>
-#include <stdexcept>
 #include <utility>
 
 #include <QCloseEvent>
@@ -1528,9 +1527,10 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
             }
         } catch (const std::exception& ex) {
             const QString routeName = useIcDetectModel ? QStringLiteral("IC检测模型") : QStringLiteral("元件检测模型");
-            const QString detail = QString("目标[%1]%2推理失败：%3")
-                .arg(categoryToQString(target.objectResult.categoryName), routeName, QString::fromLocal8Bit(ex.what()));
-            throw std::runtime_error(detail.toLocal8Bit().toStdString());
+            runResult.logs.push_back(
+                QString("目标[%1]%2推理失败，保留元件提取结果：%3")
+                    .arg(categoryToQString(target.objectResult.categoryName), routeName, QString::fromLocal8Bit(ex.what())));
+            runResult.finalObjects.push_back(target.objectResult);
         }
 
         ++roiCompleted;

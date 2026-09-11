@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -8,7 +8,6 @@
 #include <vector>
 #include <memory>
 #include <cstddef>
-#include <cstdint>
 #include <mutex>
 #include <shared_mutex>
 #include <functional>
@@ -60,75 +59,6 @@ namespace dlcv_infer {
 
     // 使用 nlohmann/json
     using json = nlohmann::json;
-
-    namespace detail {
-#if defined(_DEBUG)
-        constexpr std::uint32_t ModelAbiBuildConfiguration = 1;
-#else
-        constexpr std::uint32_t ModelAbiBuildConfiguration = 2;
-#endif
-
-        // Model 或公开结果类型的字段、继承和虚函数发生 ABI 变化时递增此值。
-        constexpr std::uint32_t ModelAbiLayoutVersion = 2;
-
-#ifdef _ITERATOR_DEBUG_LEVEL
-        constexpr std::uint32_t ModelAbiIteratorDebugLevel = _ITERATOR_DEBUG_LEVEL;
-#else
-        constexpr std::uint32_t ModelAbiIteratorDebugLevel = 0;
-#endif
-
-        template <
-            std::uint32_t LayoutVersion,
-            std::uint32_t BuildConfiguration,
-            std::uint32_t IteratorDebugLevel,
-            std::size_t StringSize,
-            std::size_t StringAlignment,
-            std::size_t VectorSize,
-            std::size_t VectorAlignment,
-            std::size_t JsonSize,
-            std::size_t JsonAlignment,
-            std::size_t MatSize,
-            std::size_t MatAlignment,
-            std::size_t MutexSize,
-            std::size_t MutexAlignment,
-            std::size_t SharedMutexSize,
-            std::size_t SharedMutexAlignment>
-        struct ModelAbiTag final {};
-
-        using ModelAbiTagCurrent = ModelAbiTag<
-            ModelAbiLayoutVersion,
-            ModelAbiBuildConfiguration,
-            ModelAbiIteratorDebugLevel,
-            sizeof(std::string),
-            alignof(std::string),
-            sizeof(std::vector<double>),
-            alignof(std::vector<double>),
-            sizeof(json),
-            alignof(json),
-            sizeof(cv::Mat),
-            alignof(cv::Mat),
-            sizeof(std::mutex),
-            alignof(std::mutex),
-            sizeof(std::shared_mutex),
-            alignof(std::shared_mutex)>;
-    }
-
-    enum class ModelAbiValue : std::uint32_t {
-        LayoutVersion = 1,
-        BuildConfiguration = 2,
-        IteratorDebugLevel = 3,
-        ModelSize = 4,
-        ModelAlignment = 5,
-        ObjectResultSize = 6,
-        SampleResultSize = 7,
-        ResultSize = 8,
-        StringSize = 9,
-        VectorSize = 10,
-        JsonSize = 11,
-        MatSize = 12,
-        MutexSize = 13,
-        SharedMutexSize = 14
-    };
 
     DLCV_INFER_CPP_API json GetAllDogInfo();
 
@@ -364,18 +294,18 @@ namespace dlcv_infer {
         /// </summary>
         bool OwnModelIndex = true;
 
-        Model(detail::ModelAbiTagCurrent abiTag = {});
+        Model();
 
-        Model(const std::string& modelPath, int device_id, detail::ModelAbiTagCurrent abiTag = {});
+        Model(const std::string& modelPath, int device_id);
 
         // Windows 下推荐直接传 UTF-16 路径（std::wstring），内部会按本地代码页(GBK/936)转换后再加载，
         // 以避免调用侧手动做字符串编码转换导致路径乱码。
-        Model(const std::wstring& modelPath, int device_id, detail::ModelAbiTagCurrent abiTag = {});
+        Model(const std::wstring& modelPath, int device_id);
 
         Model(const Model&) = delete;
         Model& operator=(const Model&) = delete;
 
-        Model(Model&& other, detail::ModelAbiTagCurrent abiTag = {}) noexcept;
+        Model(Model&& other) noexcept;
         Model& operator=(Model&& other) noexcept;
 
         virtual ~Model();
@@ -411,8 +341,7 @@ namespace dlcv_infer {
 #ifdef DLCV_INFER_CPP_EXPORTS
         friend class flow::ModelPool;
         Model(std::shared_ptr<const std::vector<unsigned char>> modelData,
-              const std::string& modelName, int device_id,
-              detail::ModelAbiTagCurrent abiTag = {});
+              const std::string& modelName, int device_id);
 #endif
         bool _isFlowGraphMode = false;
         int _deviceId = 0;
@@ -442,10 +371,6 @@ namespace dlcv_infer {
         std::string LoadedNativeDllName() const { return _loadedNativeDllName; }
     };
 #pragma warning(pop)
-
-    DLCV_INFER_CPP_API std::uint64_t GetModelAbiValue(
-        ModelAbiValue value,
-        detail::ModelAbiTagCurrent abiTag = {});
 
     /// <summary>
     /// 工具类：静态方法集合。

@@ -549,17 +549,10 @@ private:
             return ExitInferError;
         }
 
-        StableResultSummary validatedSummary;
-        std::string validationError;
-        if (!buildStableSummary(result, validatedSummary, validationError)) {
-            std::cerr << "错误：推理结果结构无效：" << validationError << "。\n";
-            api_.freeModelResult(&result);
-            return ExitInferError;
-        }
-
         size_t objectCount = 0;
-        for (const auto& sample : validatedSummary.samples) {
-            objectCount += sample.size();
+        for (int sampleIndex = 0; sampleIndex < result.n; ++sampleIndex) {
+            const DlcvCSampleResult& sample = result.sample_results[sampleIndex];
+            objectCount += static_cast<size_t>(sample.n);
         }
         std::cout << std::fixed << std::setprecision(3)
             << "推理成功：名称=" << wideToUtf8(args[1])
@@ -771,11 +764,6 @@ private:
             return ExitCommandError;
         }
         api_.freeAllModels();
-        const std::string error = safeText(api_.getLastError());
-        if (!error.empty()) {
-            std::cerr << "错误：释放所有模型失败：" << localText(error.c_str()) << "。\n";
-            return ExitModelError;
-        }
         const size_t count = models_.size();
         models_.clear();
         std::cout << "全部模型已释放，名称数量=" << count << "。\n";

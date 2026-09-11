@@ -44,7 +44,7 @@ private:
     bool ensureModelLoaded();
     bool ensureImageSelected();
     bool loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const;
-    bool freeCurrentModel();
+    void freeCurrentModel();
 
     void reportError(const QString& title, const QString& detail);
     QString lastCError() const;

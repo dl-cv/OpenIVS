@@ -9,7 +9,6 @@
 #define DLCV_DATA_TYPE_C_H
 
 typedef struct DlcvCImage {
-    /* 指向连续紧密排列的 8 位图像数据，推理调用返回前必须保持有效。 */
     long long data_ptr;
     int height;
     int width;
@@ -85,26 +84,22 @@ extern "C" {
 #endif
 
 DLCV_C_API int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id);
-/* 返回当前线程持有的错误信息，不得释放；同一线程后续 C API 调用可能使其失效。 */
-DLCV_C_API const char* dlcv_infer_cpp_get_last_error_c(void);
+DLCV_C_API const char* dlcv_infer_cpp_get_last_error_c();
 DLCV_C_API int dlcv_infer_cpp_free_model_c(int model_index);
 DLCV_C_API DlcvCResult dlcv_infer_cpp_infer_c(int model_index, const DlcvCImageList* image_list);
 DLCV_C_API DlcvCResult dlcv_infer_cpp_infer_with_params_c(
     int model_index,
     const DlcvCImageList* image_list,
     const char* params_json);
-/* 释放结构化推理结果；允许传入空指针或重复释放已清空的结果结构。 */
 DLCV_C_API void dlcv_infer_cpp_free_model_result_c(DlcvCResult* result);
-/* get_model_info、infer_json、get_all_dog_info 成功返回的字符串须使用 free_string 释放。 */
 DLCV_C_API const char* dlcv_infer_cpp_get_model_info_c(int model_index);
 DLCV_C_API const char* dlcv_infer_cpp_infer_json_c(
     int model_index,
     const DlcvCImage* image,
     const char* params_json);
-DLCV_C_API const char* dlcv_infer_cpp_get_all_dog_info_c(void);
-/* 只接受上述三个字符串函数返回的指针；不得用于释放 get_last_error 的返回值。 */
+DLCV_C_API const char* dlcv_infer_cpp_get_all_dog_info_c();
 DLCV_C_API void dlcv_infer_cpp_free_string_c(const char* value);
-DLCV_C_API void dlcv_infer_cpp_free_all_models_c(void);
+DLCV_C_API void dlcv_infer_cpp_free_all_models_c();
 
 DLCV_C_API int DLCV_C_NATIVE_CALL dlcv_load_model_c(const char* model_path, int device_id);
 DLCV_C_API int DLCV_C_NATIVE_CALL dlcv_free_model_c(int model_index);
@@ -113,7 +108,6 @@ DLCV_C_API DlcvCResult DLCV_C_NATIVE_CALL dlcv_infer_c(
     const DlcvCImageList* image_list);
 DLCV_C_API void DLCV_C_NATIVE_CALL dlcv_free_model_result_c(DlcvCResult* result);
 
-/* 原生 JSON 字符串由库分配：推理结果使用 free_model_result，其余结果使用 free_result。 */
 DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str);
 DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_free_model(const char* config_str);
 DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_get_model_info(const char* config_str);
@@ -122,13 +116,13 @@ DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_infer(const char* config_s
 #endif
 DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_free_model_result(const char* config_str);
 DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_free_result(const char* config_str);
-DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_free_all_models(void);
+DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_free_all_models();
 
-DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_get_device_info(void);
-DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_get_gpu_info(void);
+DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_get_device_info();
+DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_get_gpu_info();
 
-DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_keep_max_clock(void);
-DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_reset_max_clock(void);
+DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_keep_max_clock();
+DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_reset_max_clock();
 DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_set_gpu_max_clock(bool verbose);
 DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_reset_gpu_max_clock(bool verbose);
 
