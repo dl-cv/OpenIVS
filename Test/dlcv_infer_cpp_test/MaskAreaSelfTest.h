@@ -1,10 +1,11 @@
 #pragma once
 
+#include "../../dlcv_infer_cpp/MaskUtils.h"
+
 class MaskAreaParseModel : public dlcv_infer::Model {
 public:
     using dlcv_infer::Model::ParseToStructResult;
     using dlcv_infer::Model::ParseToStructResultPreservingOriginalMask;
-    using dlcv_infer::Model::ParseInferOneOutJsonResults;
 };
 
 static int RunMaskAreaSelfTest() {
@@ -46,9 +47,9 @@ static int RunMaskAreaSelfTest() {
             Json raw{{"sample_results", Json::array({Json{{"results", Json::array({object})}}})}};
 
             const auto structured = model.ParseToStructResult(raw).sampleResults.at(0).results.at(0);
-            const Json jsonResults = model.ParseInferOneOutJsonResults(
-                raw.at("sample_results").at(0).at("results"));
-            const double jsonArea = jsonResults.at(0).at("area").get<double>();
+            Json jsonObject = object;
+            dlcv_infer::mask_utils::ConvertPointerMaskToContour(jsonObject);
+            const double jsonArea = jsonObject.at("area").get<double>();
             if (structured.area != expectedArea || jsonArea != expectedArea ||
                 jsonArea != static_cast<double>(structured.area)) {
                 throw std::runtime_error("shared area mismatch");
@@ -60,6 +61,13 @@ static int RunMaskAreaSelfTest() {
     };
 
     checkSharedMaskArea("json-4x4-to-2x2", mask, true, 2, 2, 4);
+    checkSharedMaskArea("json-unchanged-size", mask, true, 4, 4, 16);
+    check("json-no-mask-does-not-read-pointer", [&] {
+        Json object{{"with_mask", false}, {"area", 99}};
+        const Json original = object;
+        dlcv_infer::mask_utils::ConvertPointerMaskToContour(object);
+        if (object != original) throw std::runtime_error("disabled mask result changed");
+    });
     checkSharedMaskArea("json-noninteger-bbox-rounding", mask, true, 2.6, 3.4, 9);
 
     check("json-contour-uses-rounded-grid", [&] {
@@ -67,10 +75,8 @@ static int RunMaskAreaSelfTest() {
             {"bbox", {0, 0, 2.6, 3.4}}, {"with_mask", true},
             {"mask", {{"width", mask.cols}, {"height", mask.rows},
                 {"mask_ptr", reinterpret_cast<uintptr_t>(mask.data)}}}};
-        Json raw{{"sample_results", Json::array({Json{{"results", Json::array({object})}}})}};
-        const Json jsonResults = model.ParseInferOneOutJsonResults(
-            raw.at("sample_results").at(0).at("results"));
-        const auto& points = jsonResults.at(0).at("mask");
+        dlcv_infer::mask_utils::ConvertPointerMaskToContour(object);
+        const auto& points = object.at("mask");
         bool hasBottomRight = false;
         for (const auto& point : points) {
             if (point.at("x").get<int>() == 2 && point.at("y").get<int>() == 2) {

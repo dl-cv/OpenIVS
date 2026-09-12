@@ -45,6 +45,7 @@
     <ClInclude Include="dlcv_infer_c_api.h"><Filter>头文件</Filter></ClInclude>
     <ClInclude Include="dlcv_sntl_admin.h"><Filter>头文件</Filter></ClInclude>
     <ClInclude Include="ImageInputUtils.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="MaskUtils.h"><Filter>头文件</Filter></ClInclude>
     <ClInclude Include="flow\BaseModule.h"><Filter>头文件\flow</Filter></ClInclude>
     <ClInclude Include="flow\ExecutionContext.h"><Filter>头文件\flow</Filter></ClInclude>
     <ClInclude Include="flow\FlowGraphModel.h"><Filter>头文件\flow</Filter></ClInclude>
