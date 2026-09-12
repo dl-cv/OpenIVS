@@ -2459,6 +2459,12 @@ namespace dlcv_infer_csharp
                         }
                     }
 
+                    // area 表示当前 mask 的面积，不能沿用缩放前的 SDK 面积。
+                    if (!mask_img.Empty())
+                    {
+                        area = Cv2.CountNonZero(mask_img);
+                    }
+
                     // 补充逻辑：如果bbox无效但有mask，尝试从mask计算bbox
                     if ((bbox == null || bbox.Count < 4) && !mask_img.Empty())
                     {
@@ -2902,7 +2908,7 @@ namespace dlcv_infer_csharp
                         withMask = true;
                     }
                 }
-                else if (m is JObject maskObj)
+                else if (m is JObject maskObj && (item["with_mask"]?.Value<bool>() ?? true))
                 {
                     // DVT Mask Object with ptr
                     long ptrVal = maskObj["mask_ptr"]?.Value<long>() ?? 0;
@@ -2924,9 +2930,12 @@ namespace dlcv_infer_csharp
                                 bool needDispose = false;
                                 if (bw > 0 && bh > 0 && (maskImg.Cols != bw || maskImg.Rows != bh))
                                 {
-                                    procImg = maskImg.Resize(new Size(bw, bh));
+                                    procImg = maskImg.Resize(new Size(bw, bh), 0, 0, InterpolationFlags.Nearest);
                                     needDispose = true;
                                 }
+
+                                // 面积按原图坐标中的当前掩码计算，与结构化结果使用相同的栅格。
+                                result["area"] = Cv2.CountNonZero(procImg);
 
                                 var contours = procImg.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
                                 if (contours.Length > 0)

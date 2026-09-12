@@ -43,6 +43,8 @@
 #include "../../dlcv_infer_cpp/flow/utils/MaskRleUtils.h"
 #include "../DvsTempArtifactMonitor.h"
 #include "dlcv_infer.h"
+#include "RegionMaskSelfTest.h"
+#include "MaskAreaSelfTest.h"
 
 namespace {
 using json = nlohmann::json;
@@ -4033,6 +4035,8 @@ int RunWorkflowCommand(
                 const json result = entry->model->InferOneOutJson(image, BuildInferParams(options, false));
                 PrintUtf8Line("外部耗时(ms): " + ToFixed(std::chrono::duration<double, std::milli>(Clock::now() - begin).count(), 3));
                 PrintUtf8Line(result.dump(2));
+                // 在释放模型前输出完整 JSON，避免原生库日志插入缓冲中的结果。
+                std::cout.flush();
                 PrintTimingAndInspection(1);
                 return 0;
             }
@@ -4163,6 +4167,12 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunRectImageCorrectionSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"mask-area-selftest") {
+        return RunMaskAreaSelfTest();
+    }
+    if (argc >= 2 && std::wstring(argv[1]) == L"region-mask-selftest") {
+        return RunRegionMaskSelfTest();
+    }
     if (argc >= 2 && std::wstring(argv[1]) == L"bbox-iou-dedup-selftest") {
         return RunBBoxIoUDedupSelfTest();
     }
