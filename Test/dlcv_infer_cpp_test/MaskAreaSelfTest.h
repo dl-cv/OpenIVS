@@ -4,6 +4,7 @@ class MaskAreaParseModel : public dlcv_infer::Model {
 public:
     using dlcv_infer::Model::ParseToStructResult;
     using dlcv_infer::Model::ParseToStructResultPreservingOriginalMask;
+    using dlcv_infer::Model::ParseInferOneOutJsonResults;
 };
 
 static int RunMaskAreaSelfTest() {
@@ -34,6 +35,68 @@ static int RunMaskAreaSelfTest() {
             if (withMask && output.area != CalculateMaskArea(MatToMaskInfo(output.mask))) throw std::runtime_error("RLE area mismatch");
         });
     }
+    auto checkSharedMaskArea = [&](const std::string& name, const cv::Mat& mask,
+        bool withMask, double bboxWidth, double bboxHeight, double expectedArea) {
+        check(name, [&] {
+            const cv::Mat originalMask = mask.clone();
+            Json object{{"category_id", 0}, {"category_name", "target"}, {"score", 0.9}, {"area", 99},
+                {"bbox", {0, 0, bboxWidth, bboxHeight}}, {"with_mask", withMask},
+                {"mask", {{"width", mask.cols}, {"height", mask.rows},
+                    {"mask_ptr", reinterpret_cast<uintptr_t>(mask.data)}}}};
+            Json raw{{"sample_results", Json::array({Json{{"results", Json::array({object})}}})}};
+
+            const auto structured = model.ParseToStructResult(raw).sampleResults.at(0).results.at(0);
+            const Json jsonResults = model.ParseInferOneOutJsonResults(
+                raw.at("sample_results").at(0).at("results"));
+            const double jsonArea = jsonResults.at(0).at("area").get<double>();
+            if (structured.area != expectedArea || jsonArea != expectedArea ||
+                jsonArea != static_cast<double>(structured.area)) {
+                throw std::runtime_error("shared area mismatch");
+            }
+            if (cv::norm(mask, originalMask, cv::NORM_INF) != 0.0) {
+                throw std::runtime_error("input mask changed");
+            }
+        });
+    };
+
+    checkSharedMaskArea("json-4x4-to-2x2", mask, true, 2, 2, 4);
+    checkSharedMaskArea("json-noninteger-bbox-rounding", mask, true, 2.6, 3.4, 9);
+
+    check("json-contour-uses-rounded-grid", [&] {
+        Json object{{"category_id", 0}, {"category_name", "target"}, {"score", 0.9}, {"area", 99},
+            {"bbox", {0, 0, 2.6, 3.4}}, {"with_mask", true},
+            {"mask", {{"width", mask.cols}, {"height", mask.rows},
+                {"mask_ptr", reinterpret_cast<uintptr_t>(mask.data)}}}};
+        Json raw{{"sample_results", Json::array({Json{{"results", Json::array({object})}}})}};
+        const Json jsonResults = model.ParseInferOneOutJsonResults(
+            raw.at("sample_results").at(0).at("results"));
+        const auto& points = jsonResults.at(0).at("mask");
+        bool hasBottomRight = false;
+        for (const auto& point : points) {
+            if (point.at("x").get<int>() == 2 && point.at("y").get<int>() == 2) {
+                hasBottomRight = true;
+                break;
+            }
+        }
+        if (!hasBottomRight) throw std::runtime_error("contour still uses truncated bbox size");
+    });
+
+    cv::Mat sparseMask = cv::Mat::zeros(4, 4, CV_8UC1);
+    sparseMask.at<unsigned char>(1, 1) = 255;
+    cv::Mat linearMask;
+    cv::resize(sparseMask, linearMask, cv::Size(3, 3), 0, 0, cv::INTER_LINEAR);
+    if (cv::countNonZero(linearMask) != 4) {
+        ++failures;
+        std::cout << "FAIL sparse-mask-linear-reference: unexpected reference area" << std::endl;
+    } else {
+        std::cout << "PASS sparse-mask-linear-reference" << std::endl;
+    }
+    checkSharedMaskArea("json-sparse-mask-nearest", sparseMask, true, 3, 3, 1);
+
+    cv::Mat emptyMask = cv::Mat::zeros(4, 4, CV_8UC1);
+    checkSharedMaskArea("json-empty-mask", emptyMask, true, 2, 2, 0);
+    checkSharedMaskArea("json-no-mask-keeps-area", mask, false, 2, 2, 99);
+
     for (bool hasArea : {true, false}) {
         check(hasArea ? "merge-overwrites-area" : "merge-fills-area", [&] {
             cv::Mat image(16, 16, CV_8UC3, cv::Scalar::all(0));

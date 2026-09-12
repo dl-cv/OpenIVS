@@ -285,6 +285,9 @@ namespace dlcv_infer {
 
         Result ParseToStructResultInternal(const json& resultObject, bool preserveOriginalMask);
 
+        // 解析普通模型 JSON 结果并生成与结构化结果相同的 mask 网格。
+        static json ParseInferOneOutJsonResults(const json& results);
+
     public:
         int modelIndex = -1;
         /// <summary>

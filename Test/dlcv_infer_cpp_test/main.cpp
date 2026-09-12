@@ -3379,6 +3379,8 @@ int RunWorkflowCommand(
                 const json result = entry->model->InferOneOutJson(image, BuildInferParams(options, false));
                 PrintUtf8Line("外部耗时(ms): " + ToFixed(std::chrono::duration<double, std::milli>(Clock::now() - begin).count(), 3));
                 PrintUtf8Line(result.dump(2));
+                // 在释放模型前输出完整 JSON，避免原生库日志插入缓冲中的结果。
+                std::cout.flush();
                 PrintTimingAndInspection(1);
                 return 0;
             }

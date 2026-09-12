@@ -913,6 +913,23 @@ void ParseFlowTimingFromRoot(
     }
 }
 
+cv::Mat ResizeMaskToBboxGrid(const cv::Mat& mask, const std::vector<double>& bbox) {
+    if (mask.empty()) return cv::Mat();
+
+    if (bbox.size() < 4) return mask;
+
+    const int bboxWidth = std::max(0, static_cast<int>(std::llround(std::abs(bbox[2]))));
+    const int bboxHeight = std::max(0, static_cast<int>(std::llround(std::abs(bbox[3]))));
+    if (bboxWidth <= 0 || bboxHeight <= 0 ||
+        (mask.cols == bboxWidth && mask.rows == bboxHeight)) {
+        return mask;
+    }
+
+    cv::Mat output;
+    cv::resize(mask, output, cv::Size(bboxWidth, bboxHeight), 0, 0, cv::INTER_NEAREST);
+    return output;
+}
+
 } // namespace
 
 namespace {
@@ -2051,6 +2068,52 @@ namespace dlcv_infer {
         return ParseToStructResultInternal(resultObject, true);
     }
 
+    json Model::ParseInferOneOutJsonResults(const json& inputResults) {
+        json results = inputResults;
+        if (!results.is_array()) throw std::invalid_argument("推理结果必须为数组");
+
+        for (auto& result : results)
+        {
+            const bool withMask = result["with_mask"].get<bool>();
+            if (!withMask) continue;
+
+            const std::vector<double> bbox = result["bbox"].get<std::vector<double>>();
+            const auto mask = result["mask"];
+            const int maskWidth = mask["width"].get<int>();
+            const int maskHeight = mask["height"].get<int>();
+            cv::Mat maskImage;
+            if (maskWidth > 0 && maskHeight > 0 && mask["mask_ptr"].get<uint64_t>() != 0)
+            {
+                void* maskPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(mask["mask_ptr"].get<uint64_t>()));
+                maskImage = cv::Mat(maskHeight, maskWidth, CV_8UC1, maskPtr);
+            }
+
+            const cv::Mat effectiveMask = ResizeMaskToBboxGrid(maskImage, bbox);
+            if (!effectiveMask.empty()) {
+                result["area"] = cv::countNonZero(effectiveMask);
+            }
+
+            json pointsJson = json::array();
+            if (!effectiveMask.empty() && bbox.size() >= 4)
+            {
+                std::vector<std::vector<cv::Point>> contours;
+                cv::findContours(effectiveMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+                if (!contours.empty())
+                {
+                    for (const auto& point : contours[0])
+                    {
+                        pointsJson.push_back(json{
+                            {"x", static_cast<int>(point.x + bbox[0])},
+                            {"y", static_cast<int>(point.y + bbox[1])}
+                        });
+                    }
+                }
+            }
+            result["mask"] = std::move(pointsJson);
+        }
+        return results;
+    }
+
     Result Model::ParseToStructResultInternal(
         const json& resultObject,
         bool preserveOriginalMask) {
@@ -2175,20 +2238,10 @@ namespace dlcv_infer {
                     mask_img = cv::Mat(mask_height, mask_width, CV_8UC1, mask_ptr).clone();
                 }
 
-                // 普通 C++ 模型路径与 C# 保持一致，将 mask 调整到 bbox 尺寸，
-                // 避免 flow 的 mask_to_rbox 再次叠加 bbox 偏移后得到过大的旋转框。
-                // 结构化 C 接口需要原样传递底层 mask，因此跳过此处理。
-                if (!preserveOriginalMask && !mask_img.empty() && bbox.size() >= 4)
+                // 普通 C++ 模型路径使用 bbox 尺寸和最近邻插值生成有效 mask。
+                if (!preserveOriginalMask)
                 {
-                    const int bbox_w = std::max(0, static_cast<int>(std::llround(std::abs(bbox[2]))));
-                    const int bbox_h = std::max(0, static_cast<int>(std::llround(std::abs(bbox[3]))));
-                    if (bbox_w > 0 && bbox_h > 0 &&
-                        (mask_img.cols != bbox_w || mask_img.rows != bbox_h))
-                    {
-                        cv::Mat resized;
-                        cv::resize(mask_img, resized, cv::Size(bbox_w, bbox_h), 0, 0, cv::INTER_NEAREST);
-                        mask_img = resized;
-                    }
+                    mask_img = ResizeMaskToBboxGrid(mask_img, bbox);
                 }
 
                 // area 表示当前 mask 的面积，不能沿用缩放前的 SDK 面积。
@@ -2443,46 +2496,8 @@ namespace dlcv_infer {
 
         try
         {
-            json results = resultTuple.first["sample_results"][0]["results"];
-
-            for (auto& result : results)
-            {
-                std::vector<double> bbox = result["bbox"].get<std::vector<double>>();
-                bool withMask = result["with_mask"].get<bool>();
-
-                auto mask = result["mask"];
-                int mask_width = mask["width"].get<int>();
-                int mask_height = mask["height"].get<int>();
-                int width = static_cast<int>(bbox[2]);
-                int height = static_cast<int>(bbox[3]);
-
-                if (withMask)
-                {
-                    void* mask_ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(mask["mask_ptr"].get<uint64_t>()));
-                    cv::Mat mask_img(mask_height, mask_width, CV_8UC1, mask_ptr);
-
-                    if (mask_img.cols != width || mask_img.rows != height)
-                    {
-                        cv::resize(mask_img, mask_img, cv::Size(width, height));
-                    }
-
-                    std::vector<std::vector<cv::Point>> contours;
-                    cv::findContours(mask_img, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
-                    json pointsJson = json::array();
-                    if (!contours.empty())
-                    {
-                        for (const auto& point : contours[0])
-                        {
-                            json point_obj;
-                            point_obj["x"] = static_cast<int>(point.x + bbox[0]);
-                            point_obj["y"] = static_cast<int>(point.y + bbox[1]);
-                            pointsJson.push_back(point_obj);
-                        }
-                    }
-                    result["mask"] = pointsJson;
-                }
-            }
+            json results = ParseInferOneOutJsonResults(
+                resultTuple.first["sample_results"][0]["results"]);
 
             // 完成后释放结果
             _dllLoader->GetFreeModelResultFunc()(resultTuple.second);
