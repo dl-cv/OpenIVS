@@ -73,6 +73,18 @@
       <Project>{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}</Project>
       <Name>DlcvCsharpApi</Name>
     </ProjectReference>
+    <ProjectReference Include="..\..\DlcvDemo\DlcvDemo.csproj">
+      <Project>{948F3CAC-2D10-4B59-947C-8D00C7B9198A}</Project>
+      <Name>DlcvDemo</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <BuildReference>true</BuildReference>
+    </ProjectReference>
+    <ProjectReference Include="..\..\DlcvDemo2\DlcvDemo2.csproj">
+      <Project>{6A6E287C-573B-4C0D-9FB4-88CDE8F6E3B2}</Project>
+      <Name>DlcvDemo2</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <BuildReference>true</BuildReference>
+    </ProjectReference>
     <ProjectReference Include="..\..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
       <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
       <Name>dlcv_infer_cpp</Name>

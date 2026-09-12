@@ -77,6 +77,12 @@ namespace DlcvCSharpTest
         [DllImport("kernel32.dll", EntryPoint = "LoadLibraryW", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr LoadNativeModule(string fileName);
 
+        [DllImport("kernel32.dll", EntryPoint = "GetModuleFileNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetModuleFileNameW(IntPtr moduleHandle, StringBuilder fileName, uint size);
+
+        [DllImport("kernel32.dll", EntryPoint = "GetProcAddress", ExactSpelling = true, SetLastError = true)]
+        private static extern IntPtr GetNativeProcAddress(IntPtr moduleHandle, string procedureName);
+
         [DllImport("dlcv_infer_cpp.dll", CallingConvention = CallingConvention.Cdecl,
             CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "dlcv_shared_index_test_double_flow_load_free_c")]
         private static extern int CppSharedIndexTestDoubleFlowLoadFree(string modelPath, int deviceId);
@@ -97,6 +103,17 @@ namespace DlcvCSharpTest
         private static extern int VirboxFreeFlow(int flowIndex);
 
         private static readonly List<ModelRegressionCase> DefaultCases = ModelRegressionCases.Cases;
+        private static readonly string[] SharedIndexNativeExports =
+        {
+            "dlcv_get_index_type_c",
+            "dlcv_get_model_info_c",
+            "dlcv_register_flow_c",
+            "dlcv_get_flow_info_c",
+            "dlcv_free_flow_c",
+            "dlcv_bind_index_c",
+            "dlcv_unbind_index_c",
+            "dlcv_free_result"
+        };
 
         private sealed class UnifiedTestCase
         {
@@ -1134,16 +1151,16 @@ namespace DlcvCSharpTest
 
         private static int RunAllTests(string[] args)
         {
-            if (args == null || args.Length > 2)
+            if (args == null || (args.Length != 1 && args.Length != 2 && args.Length != 4))
             {
-                Console.WriteLine("用法: all-tests [日志路径]");
+                Console.WriteLine("用法: all-tests [日志路径] 或 all-tests <日志路径> <dlcv_infer.dll绝对路径> <dlcv_infer_v.dll绝对路径>");
                 return 2;
             }
 
             string logPath;
             try
             {
-                logPath = args.Length == 2
+                logPath = args.Length >= 2
                     ? Path.GetFullPath(args[1])
                     : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DlcvCSharpTest-all-tests.log");
                 string logDirectory = Path.GetDirectoryName(logPath);
@@ -1187,6 +1204,10 @@ namespace DlcvCSharpTest
             var results = new List<UnifiedTestResult>(tests.Count);
             TextWriter consoleOutput = Console.Out;
             var totalWatch = Stopwatch.StartNew();
+            int setupExitCode = 0;
+            bool nativePathsValid = true;
+            string originalWorkingDirectory = Environment.CurrentDirectory;
+            Dictionary<string, string> selectedNativePaths = null;
             try
             {
                 using (var log = new StreamWriter(logPath, false, new UTF8Encoding(false)))
@@ -1196,41 +1217,72 @@ namespace DlcvCSharpTest
                     Console.WriteLine("==== C# 统一测试详细输出 ====");
                     Console.WriteLine("开始时间: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
                     Console.WriteLine("用例数量: " + tests.Count);
+                    Console.WriteLine("DLL选择模式: " + (args.Length == 4 ? "显式候选路径" : "默认 SDK"));
 
-                    foreach (var test in tests)
+                    if (args.Length == 4)
                     {
-                        Console.WriteLine();
-                        Console.WriteLine("==== 开始: " + test.Name + " ====");
-                        var watch = Stopwatch.StartNew();
-                        int exitCode = 1;
-                        string error = null;
                         try
                         {
-                            exitCode = test.Run();
+                            selectedNativePaths = PrepareExplicitNativeDlls(args[2], args[3]);
                         }
                         catch (Exception ex)
                         {
-                            error = ex.ToString();
-                            Console.WriteLine("测试异常: " + error);
+                            setupExitCode = 1;
+                            Console.WriteLine("显式 DLL 选择失败: " + ex.Message);
+                            Console.WriteLine("完整测试未开始。");
                         }
-                        finally
-                        {
-                            watch.Stop();
-                            try { Utils.FreeAllModels(); } catch (Exception ex) { Console.WriteLine("释放模型异常: " + ex.Message); }
-                            ForceGc();
-                        }
-
-                        results.Add(new UnifiedTestResult
-                        {
-                            Name = test.Name,
-                            ExitCode = exitCode,
-                            ElapsedMilliseconds = watch.ElapsedMilliseconds,
-                            Error = error
-                        });
-                        Console.WriteLine("==== 结束: " + test.Name + "，状态=" + (exitCode == 0 ? "通过" : "失败")
-                            + "，耗时=" + watch.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + "秒 ====");
                     }
 
+                    if (setupExitCode == 0)
+                    {
+                        foreach (var test in tests)
+                        {
+                            Console.WriteLine();
+                            Console.WriteLine("==== 开始: " + test.Name + " ====");
+                            var watch = Stopwatch.StartNew();
+                            int exitCode = 1;
+                            string error = null;
+                            try
+                            {
+                                exitCode = test.Run();
+                            }
+                            catch (Exception ex)
+                            {
+                                error = ex.ToString();
+                                Console.WriteLine("测试异常: " + error);
+                            }
+                            finally
+                            {
+                                watch.Stop();
+                                try { Utils.FreeAllModels(); } catch (Exception ex) { Console.WriteLine("释放模型异常: " + ex.Message); }
+                                ForceGc();
+                            }
+
+                            results.Add(new UnifiedTestResult
+                            {
+                                Name = test.Name,
+                                ExitCode = exitCode,
+                                ElapsedMilliseconds = watch.ElapsedMilliseconds,
+                                Error = error
+                            });
+                            Console.WriteLine("==== 结束: " + test.Name + "，状态=" + (exitCode == 0 ? "通过" : "失败")
+                                + "，耗时=" + watch.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + "秒 ====");
+                        }
+                    }
+
+                    if (selectedNativePaths != null)
+                    {
+                        try
+                        {
+                            ValidateExplicitNativeModulePaths(selectedNativePaths);
+                        }
+                        catch (Exception ex)
+                        {
+                            nativePathsValid = false;
+                            Console.WriteLine("显式 DLL 路径检查失败: " + ex.Message);
+                        }
+                    }
+                    WriteLoadedNativeModulePaths();
                     totalWatch.Stop();
                     Console.WriteLine();
                     Console.WriteLine("==== C# 统一测试详细输出结束 ====");
@@ -1246,6 +1298,13 @@ namespace DlcvCSharpTest
             finally
             {
                 Console.SetOut(consoleOutput);
+                Environment.CurrentDirectory = originalWorkingDirectory;
+            }
+
+            if (setupExitCode != 0)
+            {
+                Console.WriteLine("显式 DLL 选择失败，详细日志: " + logPath);
+                return setupExitCode;
             }
 
             int passed = results.Count(r => r.ExitCode == 0);
@@ -1259,7 +1318,163 @@ namespace DlcvCSharpTest
             }
             Console.WriteLine("总耗时: " + totalWatch.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + "秒");
             Console.WriteLine("详细日志: " + logPath);
-            return passed == results.Count ? 0 : 1;
+            if (!nativePathsValid) Console.WriteLine("显式 DLL 路径检查失败，测试结果不能作为候选 SDK 验证结果。");
+            return passed == results.Count && nativePathsValid ? 0 : 1;
+        }
+
+        private static Dictionary<string, string> PrepareExplicitNativeDlls(string sentinelPathArgument, string virboxPathArgument)
+        {
+            var requested = new[]
+            {
+                Tuple.Create(sentinelPathArgument, "dlcv_infer.dll"),
+                Tuple.Create(virboxPathArgument, "dlcv_infer_v.dll")
+            };
+            var paths = new List<Tuple<string, string>>(requested.Length);
+
+            foreach (Tuple<string, string> item in requested)
+            {
+                if (string.IsNullOrWhiteSpace(item.Item1))
+                    throw new InvalidOperationException("显式 DLL 路径不能为空: " + item.Item2);
+
+                string fullPath;
+                try
+                {
+                    fullPath = Path.GetFullPath(item.Item1);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException("显式 DLL 路径无效: " + item.Item1, ex);
+                }
+
+                if (!File.Exists(fullPath))
+                    throw new FileNotFoundException("显式 DLL 不存在: " + fullPath, fullPath);
+                if (!string.Equals(Path.GetFileName(fullPath), item.Item2, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "显式 DLL 文件名错误: 需要 " + item.Item2 + "，实际为 " + Path.GetFileName(fullPath));
+                }
+                paths.Add(Tuple.Create(fullPath, item.Item2));
+            }
+
+            string nativeDirectory = Path.GetDirectoryName(paths[0].Item1);
+            if (!string.Equals(nativeDirectory, Path.GetDirectoryName(paths[1].Item1), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("完整测试的两个推理 DLL 必须来自同一个 SDK 目录。");
+
+            // C++ 普通加载优先读取当前工作目录，显式测试保持两种语言使用同一套 SDK。
+            Environment.CurrentDirectory = nativeDirectory;
+            Console.WriteLine("显式 SDK 工作目录: " + nativeDirectory);
+
+            foreach (Tuple<string, string> item in paths)
+            {
+                IntPtr moduleHandle = LoadNativeModule(item.Item1);
+                if (moduleHandle == IntPtr.Zero)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    throw new InvalidOperationException(
+                        "无法加载显式 DLL " + item.Item1 + (error == 0 ? string.Empty : "，Win32错误=" + error));
+                }
+
+                string actualPath = GetActualNativeModulePath(moduleHandle);
+                if (!string.Equals(actualPath, item.Item1, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "显式 DLL 实际加载路径不一致: 选择=" + item.Item1 + "，实际=" + actualPath);
+                }
+
+                var missing = new List<string>();
+                foreach (string exportName in SharedIndexNativeExports)
+                {
+                    if (GetNativeProcAddress(moduleHandle, exportName) == IntPtr.Zero)
+                        missing.Add(exportName);
+                }
+                if (missing.Count > 0)
+                {
+                    throw new MissingMethodException(
+                        "显式 DLL 缺少完整共享接口: " + item.Item1 + "，缺少 " + string.Join("、", missing));
+                }
+
+                Console.WriteLine("显式选择 " + item.Item2 + " 实际路径: " + actualPath);
+            }
+
+            var selectedPaths = paths.ToDictionary(item => item.Item2, item => item.Item1, StringComparer.OrdinalIgnoreCase);
+            selectedPaths.Add("dlcv_infer_cpp.dll", Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "dlcv_infer_cpp.dll"));
+            ValidateExplicitNativeModulePaths(selectedPaths);
+            return selectedPaths;
+        }
+
+        private static void ValidateExplicitNativeModulePaths(IDictionary<string, string> selectedPaths)
+        {
+            using (Process process = Process.GetCurrentProcess())
+            {
+                foreach (ProcessModule module in process.Modules)
+                {
+                    string selectedPath;
+                    if (!selectedPaths.TryGetValue(module.ModuleName, out selectedPath)) continue;
+                    string actualPath = GetActualNativeModulePath(module.BaseAddress);
+                    if (!string.Equals(actualPath, selectedPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException(
+                            "进程加载了非本次选择的 DLL: " + actualPath + "，本次选择=" + selectedPath);
+                    }
+                }
+            }
+        }
+
+        private static string GetActualNativeModulePath(IntPtr moduleHandle)
+        {
+            var buffer = new StringBuilder(32768);
+            uint length = GetModuleFileNameW(moduleHandle, buffer, (uint)buffer.Capacity);
+            if (length == 0)
+            {
+                int error = Marshal.GetLastWin32Error();
+                throw new InvalidOperationException(
+                    "无法读取已加载 DLL 的实际路径" + (error == 0 ? string.Empty : "，Win32错误=" + error));
+            }
+            return buffer.ToString();
+        }
+
+        private static void WriteLoadedNativeModulePaths()
+        {
+            Console.WriteLine();
+            Console.WriteLine("==== 进程内实际已加载的推理 DLL ====");
+            var targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "dlcv_infer.dll",
+                "dlcv_infer_v.dll",
+                "dlcv_infer_cpp.dll"
+            };
+
+            try
+            {
+                var modules = Process.GetCurrentProcess().Modules.Cast<ProcessModule>()
+                    .Where(module => targetNames.Contains(module.ModuleName))
+                    .OrderBy(module => module.ModuleName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(module => module.FileName, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (modules.Count == 0)
+                {
+                    Console.WriteLine("未找到目标 DLL");
+                    return;
+                }
+
+                foreach (ProcessModule module in modules)
+                {
+                    string actualPath;
+                    try
+                    {
+                        actualPath = GetActualNativeModulePath(module.BaseAddress);
+                    }
+                    catch
+                    {
+                        actualPath = module.FileName;
+                    }
+                    Console.WriteLine(module.ModuleName + ": " + actualPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("读取进程内已加载 DLL 路径失败: " + ex.Message);
+            }
         }
 
         private static int RunSharedIndexCSharpSelfTest(string[] args)

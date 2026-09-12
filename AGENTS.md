@@ -20,15 +20,22 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ## 构建方式
 
-- **编译时优先使用项目 skill**：`.cursor/skills/vs-build/scripts/build.py`
+### 日常项目编译
+
+- 单个 `.sln`、`.csproj` 或 `.vcxproj` 的日常编译、构建和重建使用用户级 `vs-build-1.0.0`，由项目保留的 `.cursor/skills/vs-build/scripts/build.py` 调用 Visual Studio 工具链。
+- .NET 与 C++ 项目均受支持；C++/C API、Qt Demo 和控制台测试等 `.vcxproj` 的日常编译继续使用此入口。
 - **禁止直接调用** `msbuild`、`dotnet`、`devenv` 或其他本地 shell 编译命令
 - **默认构建参数**：`Debug`、`x64`、`Build`、`minimal`
 - 用户明确指定 `Release`、`Rebuild`、`Clean` 等参数时，按指定值执行
-- .NET 与 C++ 项目均通过 `.cursor/skills/vs-build/scripts/build.py` 调用 Visual Studio 工具链编译
 - Qt 项目需配置 Qt 路径和 OpenCV 路径
 - 构建前需确保深度视觉 SDK 已正确安装（`dlcv_infer.dll` 可用）
 - WPF 框架额外需要海康 MVS 安装
 - 正式打包入口仍为 `1_编译打包.bat`；其中 `build_package.py` 按顺序串行构建 C#、C++、C 三个控制台测试工程。
+
+### 正式编译、打包与安装
+
+- 仓库级编译验证、正式打包和安装使用用户级 `dlcv-build-install-1.0.0`，按根目录编号脚本执行，不用 `vs-build-1.0.0` 替代正式流程。
+- 发布 C# 测试程序 wheel：`1_编译打包.bat`，需要安装时再执行 `2_安装新版.bat`。
 
 ## 统一运行与验证输入规则
 

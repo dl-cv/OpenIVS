@@ -54,11 +54,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile><WarningLevel>Level3</WarningLevel><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions><LanguageStandard>stdcpp17</LanguageStandard><AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>$(ProjectDir)..\..;C:\OpenCV\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
-    <Link><SubSystem>Console</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\..\dlcv_infer_cpp\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>dlcv_infer_cpp.lib;opencv_world4100d.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies><DelayLoadDLLs>dlcv_infer_cpp.dll;%(DelayLoadDLLs)</DelayLoadDLLs></Link>
+    <Link><SubSystem>Console</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\..\dlcv_infer_cpp\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>opencv_world4100d.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies><DelayLoadDLLs>dlcv_infer_cpp.dll;%(DelayLoadDLLs)</DelayLoadDLLs></Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile><WarningLevel>Level3</WarningLevel><FunctionLevelLinking>true</FunctionLevelLinking><IntrinsicFunctions>true</IntrinsicFunctions><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions><LanguageStandard>stdcpp17</LanguageStandard><AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>$(ProjectDir)..\..;C:\OpenCV\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
-    <Link><SubSystem>Console</SubSystem><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\..\dlcv_infer_cpp\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>dlcv_infer_cpp.lib;opencv_world4100.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies><DelayLoadDLLs>dlcv_infer_cpp.dll;%(DelayLoadDLLs)</DelayLoadDLLs></Link>
+    <Link><SubSystem>Console</SubSystem><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\..\dlcv_infer_cpp\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>opencv_world4100.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies><DelayLoadDLLs>dlcv_infer_cpp.dll;%(DelayLoadDLLs)</DelayLoadDLLs></Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -82,11 +82,7 @@
       SourceFiles="$(ProjectDir)..\..\dlcv_infer_cpp\dlcv_infer_c_api.h"
       DestinationFolder="$(IntDir)standalone_c_include" />
   </Target>
-  <Target Name="CopyDlcvInferCppRuntime" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
-    <Copy
-      SourceFiles="$(ProjectDir)..\..\dlcv_infer_cpp\$(Configuration)\dlcv_infer_cpp.dll"
-      DestinationFolder="$(OutDir)" />
-  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="$(ProjectDir)..\..\DlcvNativeRuntime.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

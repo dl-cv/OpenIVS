@@ -169,7 +169,12 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 
 ## 6. 构建与运行
 
+- `DlcvCSharpTest` 以仅构建方式引用 `DlcvDemo`、`DlcvDemo2`。构建控制台测试工程时同步生成反射自测需要的两个程序；Demo 程序集不作为测试工程的编译引用。
+
 ### 6.1 统一测试入口
+
+- `RunAllTests.ps1` 可通过 `-SentinelDllPath` 和 `-VirboxDllPath` 同时指定两种推理 DLL；脚本将绝对路径传给 `DlcvCSharpTest.exe all-tests <日志路径> <Sentinel DLL> <Virbox DLL>`。未指定时保留原 DLL 搜索方式。
+- 显式指定的两个推理 DLL 必须位于同一 SDK 目录；测试进程以该目录为工作目录，在执行用例前加载并核查实际路径及共享导出，失败直接结束，不改选其他 DLL。执行后再次检查进程内推理 DLL 与 C++ 包装 DLL 的实际路径，出现非本次选择的同名 DLL 时返回失败；详细日志保留实际模块路径。
 
 `Test\\DlcvCSharpTest\\RunAllTests.ps1 [日志路径]` 是完整验证入口。脚本启动一次 `DlcvCSharpTest.exe all-tests`，统一收集 C# 和原生库输出；测试结束后在控制台显示各组测试状态、耗时及最终统计，原始输出保存到一个日志文件。未提供日志路径时，日志保存为程序目录下的 `bin\\x64\\Release\\DlcvCSharpTest-all-tests.log`。
 

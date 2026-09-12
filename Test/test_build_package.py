@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
@@ -50,6 +51,41 @@ class CopyPackageFilesTest(unittest.TestCase):
             self.assertNotIn("DlcvDemo.exe", actual_names)
             self.assertNotIn("DlcvDemo.exe.config", actual_names)
             self.assertNotIn("old-runtime.dll", actual_names)
+
+
+class TestProjectDependenciesTest(unittest.TestCase):
+    def test_reflection_demo_projects_are_build_dependencies(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        namespace = {"msbuild": "http://schemas.microsoft.com/developer/msbuild/2003"}
+        test_project = ET.parse(repo_root / "Test" / "DlcvCSharpTest" / "DlcvCSharpTest.csproj")
+        references = {
+            item.attrib["Include"]: item
+            for item in test_project.findall(".//msbuild:ProjectReference", namespace)
+        }
+
+        for name in ("DlcvDemo", "DlcvDemo2"):
+            with self.subTest(project=name):
+                relative_path = f"..\\..\\{name}\\{name}.csproj"
+                self.assertIn(relative_path, references)
+                reference = references[relative_path]
+                demo_project = ET.parse(repo_root / name / f"{name}.csproj")
+                expected_guid = demo_project.findtext(".//msbuild:ProjectGuid", namespaces=namespace)
+                self.assertEqual(expected_guid, reference.findtext("msbuild:Project", namespaces=namespace))
+                self.assertEqual("false", reference.findtext("msbuild:ReferenceOutputAssembly", namespaces=namespace))
+                self.assertEqual("true", reference.findtext("msbuild:BuildReference", namespaces=namespace))
+
+
+class CompleteTestRunnerOptionsTest(unittest.TestCase):
+    def test_explicit_native_library_pair_is_forwarded(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        runner = (repo_root / "Test" / "DlcvCSharpTest" / "RunAllTests.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("[string]$SentinelDllPath", runner)
+        self.assertIn("[string]$VirboxDllPath", runner)
+        self.assertIn("$hasSentinelDll -ne $hasVirboxDll", runner)
+        self.assertIn("[IO.Path]::GetFullPath($SentinelDllPath)", runner)
+        self.assertIn("[IO.Path]::GetFullPath($VirboxDllPath)", runner)
+        self.assertIn("-ArgumentList $allTestsArguments", runner)
+        self.assertNotIn("$env:PATH", runner)
 
 
 if __name__ == "__main__":

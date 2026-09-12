@@ -159,18 +159,6 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>opencv_world4100d.lib;Qt6Widgetsd.lib;Qt6Guid.lib;Qt6Cored.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
-if not exist "$(TargetDir)styles" mkdir "$(TargetDir)styles"
-if not exist "$(DlcvInferCppDllPath)" exit /b 1
-copy /Y "$(DlcvInferCppDllPath)" "$(TargetDir)"
-if exist "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" "$(TargetDir)"
-if exist "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" "$(TargetDir)"
-if exist "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" "$(TargetDir)"
-if exist "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" "$(TargetDir)platforms\"
-if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" "$(TargetDir)styles\"
-if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" "$(TargetDir)styles\"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -191,18 +179,6 @@ if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDi
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>opencv_world4100.lib;Qt6Widgets.lib;Qt6Gui.lib;Qt6Core.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>if not exist "$(TargetDir)platforms" mkdir "$(TargetDir)platforms"
-if not exist "$(TargetDir)styles" mkdir "$(TargetDir)styles"
-if not exist "$(DlcvInferCppDllPath)" exit /b 1
-copy /Y "$(DlcvInferCppDllPath)" "$(TargetDir)"
-if exist "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Core$(QtDllSuffix).dll" "$(TargetDir)"
-if exist "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll" "$(TargetDir)"
-if exist "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" copy /Y "$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll" "$(TargetDir)"
-if exist "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\platforms\qwindows$(QtDllSuffix).dll" "$(TargetDir)platforms\"
-if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle$(QtDllSuffix).dll" "$(TargetDir)styles\"
-if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" "$(TargetDir)styles\"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
 
   <ItemGroup>
@@ -231,6 +207,8 @@ if exist "$(QtPluginsDir)\styles\qmodernwindowsstyle.dll" copy /Y "$(QtPluginsDi
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <PropertyGroup><DlcvCopyQtRuntime>true</DlcvCopyQtRuntime></PropertyGroup>
+  <Import Project="$(ProjectDir)..\DlcvNativeRuntime.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
