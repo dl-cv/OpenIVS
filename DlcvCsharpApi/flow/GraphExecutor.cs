@@ -301,6 +301,7 @@ namespace DlcvModules
 				try
 				{
 					modelModule.LoadModel();
+					item["model_index"] = modelModule.LoadedModelIndex;
 					var modelInfo = modelModule.GetLoadedModelInfo();
 					if (modelInfo != null)
 					{
@@ -315,7 +316,7 @@ namespace DlcvModules
 					}
 					item["status_code"] = 0;
 					item["status_message"] = "ok";
-					}
+				}
 					catch (Exception ex)
 					{
 						failCount++;

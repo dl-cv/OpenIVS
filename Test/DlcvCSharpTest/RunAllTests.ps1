@@ -1,6 +1,8 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$LogPath
+    [string]$LogPath,
+    [string]$SentinelDllPath,
+    [string]$VirboxDllPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +29,19 @@ $managedLogPath = $testTempPrefix + "-managed.log"
 $stdoutLogPath = $testTempPrefix + "-stdout.log"
 $stderrLogPath = $testTempPrefix + "-stderr.log"
 $testProcess = $null
+
+$hasSentinelDll = -not [string]::IsNullOrWhiteSpace($SentinelDllPath)
+$hasVirboxDll = -not [string]::IsNullOrWhiteSpace($VirboxDllPath)
+if ($hasSentinelDll -ne $hasVirboxDll) {
+    Write-Output "指定推理 DLL 时必须同时提供 SentinelDllPath 和 VirboxDllPath。"
+    exit 2
+}
+
+$allTestsArguments = @("all-tests", ('"' + $managedLogPath + '"'))
+if ($hasSentinelDll) {
+    $allTestsArguments += ('"' + [IO.Path]::GetFullPath($SentinelDllPath) + '"')
+    $allTestsArguments += ('"' + [IO.Path]::GetFullPath($VirboxDllPath) + '"')
+}
 
 function Add-Utf8Text {
     param(
@@ -60,7 +75,7 @@ function Add-FileContent {
 try {
     $testProcess = Start-Process `
         -FilePath $testExePath `
-        -ArgumentList @("all-tests", ('"' + $managedLogPath + '"')) `
+        -ArgumentList $allTestsArguments `
         -WindowStyle Hidden `
         -RedirectStandardOutput $stdoutLogPath `
         -RedirectStandardError $stderrLogPath `

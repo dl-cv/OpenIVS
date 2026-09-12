@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +15,7 @@
 namespace dlcv_infer {
 namespace flow {
 
+using BoundModelMap = std::unordered_map<int, std::shared_ptr<dlcv_infer::Model>>;
 class DLCV_INFER_CPP_API ModelLifecycleReadGuard final {
 public:
     ModelLifecycleReadGuard();
@@ -99,9 +100,12 @@ public:
         const std::string& bufferKey,
         const std::string& modelName,
         int deviceId);
+
     ModelPoolLease RetainByKey(const std::string& key);
     static std::string MakeBinaryKey(uint64_t storeId, const std::string& bufferKey, int deviceId);
 
+    /// 全量释放底层模型前清空缓存，后续加载会重新创建模型对象。
+    void ClearForFreeAllModels();
     void Clear();
     ModelPoolStats GetStats();
 
@@ -129,9 +133,12 @@ private:
 class BaseModelModule : public BaseModule {
 protected:
     std::string _modelPathUtf8;
+    int _modelIndex = -1;
+    bool _usesModelIndex = false;
+    std::string _modelBufferKey;
     int _deviceId = 0;
     int _resolvedDeviceId = 0;
-    std::string _modelBufferKey;
+    std::shared_ptr<dlcv_infer::Model> _model;
     ModelPoolLease _modelLease;
 
 public:
@@ -141,6 +148,8 @@ public:
                     ExecutionContext* context = nullptr)
         : BaseModule(nodeId, title, properties, context) {
         _modelPathUtf8 = ReadString("model_path", std::string());
+        _modelIndex = ReadInt("model_index", -1);
+        _usesModelIndex = _modelIndex >= 0;
         _modelBufferKey = ReadString("model_buffer_key", std::string());
         _deviceId = ReadInt("device_id", 0);
         _resolvedDeviceId = _deviceId;
@@ -149,11 +158,17 @@ public:
     ~BaseModelModule() = default;
 
     void LoadModel() override;
+    int GetLoadedModelIndex() const {
+        const auto& model = LoadedModel();
+        return model ? model->modelIndex : -1;
+    }
 
     const std::string& ModelPathUtf8() const { return _modelPathUtf8; }
     const std::string& ModelPoolKey() const { return _modelLease.Key(); }
     int ResolvedDeviceId() const { return _resolvedDeviceId; }
-    const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _modelLease.Model(); }
+    const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const {
+        return _model ? _model : _modelLease.Model();
+    }
 };
 
 /// <summary>

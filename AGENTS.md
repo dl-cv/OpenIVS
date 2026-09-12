@@ -30,6 +30,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - Qt 项目需配置 Qt 路径和 OpenCV 路径
 - 构建前需确保深度视觉 SDK 已正确安装（`dlcv_infer.dll` 可用）
 - WPF 框架额外需要海康 MVS 安装
+- 正式打包入口仍为 `1_编译打包.bat`；其中 `build_package.py` 按顺序串行构建 C#、C++、C 三个控制台测试工程。
 
 ### 正式编译、打包与安装
 
@@ -42,22 +43,26 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - 两个实际测试程序无命令行参数时仍启动原 GUI，不改变桌面交互行为。
 - 其他程序、自测入口和临时排查入口仅使用各自文档中已经定义的参数；未记录的业务输入通过源码固定变量或配置对象字段设置。
 - 命令行推理模式输出结构化与 JSON 两条 API 路径的结果摘要，并以退出码区分成功、运行错误、参数错误和验证失败。
+- C# GUI 验证只使用 `DlcvDemo` 的 `ui-test` 命令行入口并固定 `--interactive-dialogs false`：程序自动加载参数中的模型与图片，完成或失败后自动关闭窗口，以进程退出码与 `--output` 的无 BOM UTF-8 JSON 结果文件为判断依据，输出写入系统临时目录；禁止通过桌面自动化、鼠标键盘或窗口控制验证，也不以无参数 GUI 启动代替测试。
+- `infer` 与 `ui-test` 用途不同：`infer` 是无界面功能测试，验证结构化与 JSON 双路径一致性、阈值过滤等，不创建窗口；`ui-test` 是界面自动验证，在真实窗口中复用模型加载、图片推理与绘制逻辑。
 
 ## 核心模块与入口
 
 | 关注点 | 文件 | 说明 |
 |--------|------|------|
+
 | C++ API 头文件 | `dlcv_infer_cpp/dlcv_infer.h` | `Model`、`Utils`、`DllLoader`、`GetAllDogInfo` |
 | C API 头文件 | `dlcv_infer_cpp/dlcv_infer_c_api.h` | C 名称函数、C 数据结构和结果释放接口 |
 | C++ API 实现 | `dlcv_infer_cpp/dlcv_infer.cpp` | 模型加载、推理、DVS 解包、结果解析 |
 | C API 实现 | `dlcv_infer_cpp/dlcv_infer_c_api.cpp` | C 接口导出、模型表管理、结果转换与释放 |
 | C++ 加密狗 | `dlcv_infer_cpp/dlcv_sntl_admin.cpp` | Sentinel/Virbox 设备与 feature 查询 |
 | C++ 流程图 | `dlcv_infer_cpp/flow/FlowGraphModel.h` | `FlowGraphModel` 类 |
+
 | C# 封装层 | `DlcvCsharpApi/Model.cs` | `Model`：构造、加载、推理、释放 |
 | C# 工具类 | `DlcvCsharpApi/Utils.cs` | 结果类型、编码转换、DLL 释放 |
 | C# DLL 加载器 | `DlcvCsharpApi/DllLoader.cs` | 加密狗自动检测、DLL 路径解析、函数代理 |
 | C# 流程图 | `DlcvCsharpApi/flow/FlowGraphModel.cs` | `FlowGraphModel`：加载、推理、JSON 输出 |
-| C# DVS 模型 | `DlcvCsharpApi/flow/DvsModel.cs` | `.dvst/.dvso/.dvsp` 归档解包与加载 |
+| C# DVS 模型 | `DlcvCsharpApi/flow/DvsModel.cs` | `.dvst/.dvso` 归档解包与加载 |
 | C# 结果类型 | `DlcvCsharpApi/DataTypes.cs` | `CSharpObjectResult`、`CSharpSampleResult`、`CSharpResult` |
 | C# 加密狗工具 | `DlcvCsharpApi/sntl_admin_csharp.cs` | `DogUtils`、`DogProvider` |
 | C++ 图像输入 | `dlcv_infer_cpp/ImageInputUtils.h` | 图像预处理与格式转换 |
@@ -98,14 +103,30 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 1. **普通模型文件**：`.dvt`、`.dvo`。由 `Model` 直接加载，适合单模型推理。
 2. **流程模型文件**：`.dvst`、`.dvso`。由 `FlowGraphModel` 或 `DvsModel` 加载，适合把多步处理组织成一条完整流程。
 
+`.dvsp` 不进入 C# 或 C++ 推理模式，模型接口直接返回不支持错误，测试程序的模型选择窗口不显示该后缀。
+
+需要滑窗处理时，使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
+
+同一个 `.dvst/.dvso` 内的全部模型节点必须属于同一 provider，不支持在一个流程内混用 Sentinel 与 Virbox。无模型节点流程优先复用当前 loader；没有当前 loader 时直接使用 Sentinel，不执行双 provider 探测。
+
 调用端不需要为这两类模型准备两套完全不同的调用方式。传入模型路径、设备和请求参数后，入口对象会完成对应的加载与执行。
 
-**model_index 分配约定**（避免普通模型与流程模型在同一张索引表中撞键）：
+**model_index 分配规则**：
 
-- **普通模型（`.dvt`/`.dvo`）**：`model_index` 由底层 `dlcv_infer` 在加载时返回，从 `0` 起递增；C 接口只接受 `[0, 9999]`，达到 `10000` 时释放本次加载并返回范围错误。
-- **流程模型（`.dvst`/`.dvso`/`.dvsp`）**：`model_index` 由 `dlcv_infer_cpp` / `DlcvCsharpApi` 自管理，从 `10000` 起递增，与底层索引分区。
+- 对外仍使用 `int model_index`，不改变现有接口签名，不增加导出函数。
+- 每个推理 DLL 使用模型与流程共用的递增序号；编号编码跳过 `bit8`（数值 `256`）。`bit8` 对应发号 DLL 的 `DogProvider` 标记，但不表示模型内容的加密 provider 或资源类型。
+- 每个 DLL 可分配 `2^30` 个序号；编号不回绕、不重发。释放资源和 `FreeAllModels()` 均不重置计数器，序号耗尽时返回错误。
+- 新版编号用于避免重复，但恢复旧资源不依赖 `bit8`。具备完整共享接口的旧四段编号 DLL 使用相同的查询方式；缺少共享接口的更旧 DLL 保留普通加载和本地流程处理，不支持跨语言索引恢复。
 
-C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索引模型；两类索引分区后，流程模型不会与任何 `index < 10000` 的普通模型互相覆盖，也允许同时加载多个流程模型。
+**按查询恢复共享索引**：
+
+- 恢复时枚举进程内实际已加载的目标 DLL，候选集合包含另一语言已经加载的模块，不为探测额外加载 provider DLL。
+- 对具备 `dlcv_get_index_type_c` 导出的候选 DLL 调用该函数，由 DLL 自己查询资源表；返回 `-1` 或未知值视为查询错误，不能当作不存在。恰有一个候选返回有效结果后，选定该 DLL 并检查完成共享操作所需的导出是否齐全；缺少接口时报错，不改选其他 DLL。
+- 选定 DLL 后由 Model 恢复调用已有绑定接口并保存该 DLL 的 loader；无结果、多个结果、查询异常或绑定失败均报错，不改选其他 DLL。
+- 绑定完成后后续操作固定使用已保存的 loader；资源失效时不重新搜索其他 DLL。
+
+普通模型索引由底层 `dlcv_infer` 加载接口返回。流程由 C# 或 C++ 完成解析和子模型加载；推理 DLL 提供完整共享接口时，向底层注册流程 JSON 并使用底层返回的流程索引；旧 DLL 缺少共享接口时使用本地流程索引，原有加载和推理行为保持不变。
+
 
 ## API 速查表
 
@@ -175,7 +196,9 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | None / Unknown | 不加载 | — |
 
-自动检测优先级：先检测 Sentinel，再检测 Virbox。仅检测到 Sentinel 时加载 `dlcv_infer.dll`；仅检测到 Virbox 时加载 `dlcv_infer_v.dll`；两类加密狗同时存在时加载 `dlcv_infer.dll`；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。底层 DLL 按当前进程检测到的加密狗选择，模型头中的 `dog_provider` 只用于加载前授权检查，不参与 DLL 选择，也不触发运行期切换。模型加载、模型信息、推理和释放始终使用已选中的同一个 DLL。模型头声明的授权不存在时直接返回明确错误；两类加密狗同时存在时，已选中的 DLL 可以加载两类模型。
+
+模型头包含 `dog_provider` 时直接加载对应 DLL，不查询加密狗，也不检查另一种 provider。模型头没有 `dog_provider` 时，自动检测优先级为 Sentinel、Virbox；均未检测到则返回 `None`/`Unknown`，不加载任何推理 DLL。每个 `Model` 实例在加载时保存自己的 loader，后续所有操作都走该 loader。共享 index 恢复不按四段范围、资源类型、模型内容的加密 provider 或 `bit8` 选 DLL，而是查询进程内实际已加载的目标 DLL；`-1`、未知返回值、无有效结果、歧义或绑定失败直接报错，不修改默认 loader。`bit8` 仍对应发号 DLL 的 `DogProvider` 标记。C# 普通模型缓存同时保存 index 和加载时 loader。
+
 
 ## 输入图像处理约定
 
@@ -277,7 +300,7 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 
 | 能力 | 说明 |
 | --- | --- |
-| `Load()` | 读取流程 JSON，并预加载所有 `model/*` 节点 |
+| `Load()` | 读取流程 JSON，并预加载所有 `model/*` 节点；共享流程按子模型 index 保存已绑定模型供后续推理复用 |
 | `GetModelInfo()` | 返回流程根对象及流程元信息 |
 | `GetLoadedModelMeta()` | 返回流程中每个模型节点的加载信息 |
 | `Infer()` / `InferBatch()` | 返回标准结构化结果 |
@@ -295,7 +318,7 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 
 ### `DvsModel`
 
-`DvsModel` 负责把 `.dvst`、`.dvso`、`.dvsp` 归档文件变成可直接执行的流程对象。对调用方来说，它的外部行为与 `FlowGraphModel` 一样，区别只在于加载入口是一个归档文件。
+`DvsModel` 负责把 `.dvst`、`.dvso` 归档文件变成可直接执行的流程对象。对调用方来说，它的外部行为与 `FlowGraphModel` 一样，区别只在于加载入口是一个归档文件。
 
 归档加载过程：
 1. 检查文件头是否为 `DV\n`。
@@ -459,10 +482,17 @@ C API（位于 `dlcv_infer_cpp` 工程）以 `model_index` 作为全局表键索
 - **加密模型文件**：`dlcv_deploy` 产出的 `.dvt`/`.dvo`/`.dvst`/`.dvso` 等文件是 OpenIVS 测试程序与 WPF 框架的输入。
 - **接口范围**：OpenIVS 的 C++、C 和 C# API 不根据模型包内的 `dlcv.json` 或 `header_json.dog_provider` 选择底层 DLL。`DllLoader` 按当前进程检测到的加密狗选择一次底层 DLL，后续不因模型类型切换；模型头字段只用于加载前授权检查。
 
+### 双 DLL 运行事实
+
+- `dlcv_infer.dll` 与 `dlcv_infer_v.dll` 来自同一套推理实现，推理能力相同。两个对应加密狗同时存在时，任一 DLL 均可加载两种加密模型，不得把“选到另一 provider DLL”表述为模型不兼容或加载错误。
+- 按模型头选择 provider 的目的是避免在缺少对应加密狗时调用错误 DLL；这种调用可能使加密狗服务长时间无响应。
+- 两个文件名不同的 DLL 同时加载后处于同一进程地址空间，但属于两个独立 Windows 模块实例，各自保存模块静态数据和模型表。相同实现不代表模型表共享。
+- `FreeAllModels()` 需要处理进程内实际已加载的目标模块；释放不会重置各 DLL 的编号计数器，已释放编号不再次发放。
+
 ## 运行验证方式
 
-- 构建完成后可运行 `DlcvDemo`、`dlcv_infer_cpp_qt_demo` 或 `dlcv_infer_c_qt_demo` GUI 加载模型并执行单次推理验证。
-- 自动验证使用两个实际测试程序的 `infer` 命令行模式；模型、图片与阈值通过已定义参数传入。
+- 构建完成后可人工打开 `DlcvDemo`、`dlcv_infer_cpp_qt_demo` 或 `dlcv_infer_c_qt_demo` 界面加载模型并执行单次推理确认。
+- 自动验证：无界面功能验证使用两个实际测试程序的 `infer` 命令行模式（模型、图片与阈值通过已定义参数传入）；C# GUI 自动验证使用 `DlcvDemo` 的 `ui-test --interactive-dialogs false`，判断规则见“统一运行与验证输入规则”。
 - 使用 `Test/DlcvCSharpTest` 或 `Test/dlcv_infer_cpp_test` 执行自动化控制台测试（模型加载、推理、速度、内存）。
 - C# 测试支持 `demo2-rgb-selftest` 验证 Demo2 入口 RGB 数据流一致性。
 

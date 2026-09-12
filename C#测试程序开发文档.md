@@ -7,7 +7,7 @@
 - **软件名称**：`C# 测试程序`（主窗体标题与程序集名称一致）
 - **项目/模块**：`DlcvDemo`（WinForms Demo）
 - **DLCV SDK**：本 Demo 依赖的推理能力提供方（包含 `dlcv_infer_csharp`、`DlcvModules` 等）
-- **模型文件**：深度视觉模型，扩展名包含 `.dvt/.dvo/.dvp/.dvst/.dvso/.dvsp`
+- **模型文件**：深度视觉模型，扩展名包含 `.dvt/.dvo/.dvp/.dvst/.dvso`
 
 ### 2. 运行环境与依赖（必须满足）
 
@@ -84,7 +84,7 @@
 
 无参数启动时进入 WinForms GUI。首个参数为 `ui-test` 时执行同一个 `MainWindow` 的自动测试，其他带参数启动由 `CliRunner` 执行无界面模式。无参数启动缺少原生推理 DLL 时显示「需要先安装 dlcv_infer」；任何带参数启动均不显示该系统提示框，异常由 CLI 输出或写入自动测试结果文件。
 
-自动化执行 `ui-test` 时固定使用 `--interactive-dialogs false`，模型与图片按参数直接加载，测试完成或失败后自动关闭窗口。`--interactive-dialogs true` 为明确的人工交互模式，会依次打开模型和图片选择对话框，只有对话框返回后才继续执行并关闭窗口。
+`infer` 是无界面功能测试，不创建窗口；界面自动验证使用 2.6 的 `ui-test`。
 
 ```text
 "C# 测试程序.exe" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
@@ -94,7 +94,7 @@
 
 - `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`。省略 `--calc-mean` 时不发送该字段，流程模型继续使用节点中保存的配置。
 - `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
-- 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso`/`.dvsp` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
+- 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
 - `--calc-mean=true` 时，结构化与 JSON 摘要包含 `with_mean`、`foreground_mean`、`background_mean`，并通过 `mean_check_passed` 检查带掩码结果是否包含均值及两种结果的一致性；普通检测结果不参与均值检查，两条结果均为空时该检查通过。
 - 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
@@ -107,10 +107,17 @@
 
 #### 2.6 UI 自动测试与截图
 
-- `ui-test --model <模型路径> --image <图片路径> --output <JSON路径> [--screenshot <PNG路径>]` 使用正式 WinForms 主窗口，加载模型后打开图片并调用原推理事件。
-- `--screenshot` 为可选参数，通过 `Form.DrawToBitmap` 保存窗口截图，不模拟鼠标键盘，也不抓取整个桌面。
-- 截图路径必须使用 `.png` 后缀，截图、测试 JSON 及其中间文件不能覆盖模型、图片或彼此。结果 JSON 保留已有字段，补充 `ui_framework` 与 `screenshot`。
-- 自动测试使用 `--interactive-dialogs false`；测试输出和截图写入系统临时目录，不进入代码仓库。
+C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs false`：程序按参数自动加载模型与图片，在真实 WinForms 主窗口中执行模型加载、图片推理与结果文本逻辑，完成或失败后自动关闭窗口。完整命令示例（输出写入系统临时目录）：
+
+```text
+"C# 测试程序.exe" ui-test --model <模型路径> --image <图片路径> --output "%TEMP%\ui-test-result.json" --threshold 0.5 --device 0 --calc-mean false --interactive-dialogs false
+```
+
+- `--interactive-dialogs false` 时不弹出文件对话框且不激活窗口，模型与图片直接按参数加载；`true` 为人工交互模式，依次打开模型和图片选择对话框，对话框返回后才继续执行并关闭窗口。
+- 判断依据为进程退出码与 `--output` 指定的无 BOM UTF-8 JSON 文件（状态依次为 `started`、`model_loaded`、`passed`/`failed`，含模型、图片、阈值、设备、`ui_framework`、`screenshot`、窗口标题、结果文本与错误信息）；退出码 `0` 通过、`1` 失败、`2` 参数错误。
+- 禁止通过桌面自动化、鼠标键盘模拟或窗口控制验证界面，也不以无参数 GUI 启动代替测试；`infer` 是无界面功能测试，`ui-test` 是界面自动验证，两者用途不同，不互相替代。
+- `--screenshot` 为可选参数，路径必须为 `.png`，通过 `Form.DrawToBitmap` 保存窗口截图，不模拟鼠标键盘，也不抓取整个桌面。
+- 输出与截图写入系统临时目录，不进入代码仓库；各输出路径不得覆盖模型、图片或彼此。
 
 ### 3. 功能边界（必须严格一致）
 
@@ -275,7 +282,7 @@
 - **文件选择对话框**：
   - 标题：`选择模型`
   - 过滤器：
-    - `深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*`
+    - `深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*`
   - 初始目录/默认文件名：
     - 尝试从 `LastModelPath` 提取（异常忽略）
 - **路径与编码约定（避免中文路径踩坑）**：
@@ -290,7 +297,8 @@
   - 创建新模型实例（等价行为即可）：`new Model(path, deviceId, rpc_mode)`
   - **模式说明（需保持一致）**：
     - 模型后缀为 `.dvp`：走 DVP 模式（HTTP 后端服务），`RPC模式` 勾选不影响行为
-    - 模型后缀为 `.dvst/.dvso/.dvsp`：走 DVS 模式，`RPC模式` 勾选不影响行为
+    - 模型后缀为 `.dvst/.dvso`：走 DVS 模式，`RPC模式` 勾选不影响行为
+    - 模型后缀为 `.dvsp`：显示不支持错误，不保存为最近模型
     - 其他（如 `.dvt/.dvo`）：默认走本地 DLL 推理；若勾选 `RPC模式`，则使用本地 RPC 服务（依赖 `AIModelRPC.exe`）
   - 加载成功后自动执行一次“获取模型信息”（同 7.4）
 - **异常**：
@@ -506,7 +514,7 @@
   - 若 GPU 枚举失败，`richTextBox1` 必须出现 `GPU信息获取失败：`
 
 - **加载模型**
-  - 选择 `.dvt/.dvo/.dvp/.dvst/.dvso/.dvsp` 任一文件均可尝试加载
+  - 选择 `.dvt/.dvo/.dvp/.dvst/.dvso` 任一文件均可尝试加载
   - 加载完成后点击/自动触发“获取模型信息”可在文本框看到 JSON（或摘要）
 
 - **打开图片推理**

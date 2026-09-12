@@ -35,6 +35,9 @@
     <ErrorReport>prompt</ErrorReport>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
+  <PropertyGroup>
+    <DlcvInferCppDllPath Condition="'$(DlcvInferCppDllPath)' == ''">$(ProjectDir)..\..\dlcv_infer_cpp\$(Configuration)\dlcv_infer_cpp.dll</DlcvInferCppDllPath>
+  </PropertyGroup>
   <ItemGroup>
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
@@ -70,6 +73,24 @@
       <Project>{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}</Project>
       <Name>DlcvCsharpApi</Name>
     </ProjectReference>
+    <ProjectReference Include="..\..\DlcvDemo\DlcvDemo.csproj">
+      <Project>{948F3CAC-2D10-4B59-947C-8D00C7B9198A}</Project>
+      <Name>DlcvDemo</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <BuildReference>true</BuildReference>
+    </ProjectReference>
+    <ProjectReference Include="..\..\DlcvDemo2\DlcvDemo2.csproj">
+      <Project>{6A6E287C-573B-4C0D-9FB4-88CDE8F6E3B2}</Project>
+      <Name>DlcvDemo2</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <BuildReference>true</BuildReference>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
+      <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
+      <Name>dlcv_infer_cpp</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <BuildReference>true</BuildReference>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="DvsArchiveDuplicateSelfTest.cs" />
@@ -89,5 +110,9 @@
       <ErrorText>这台计算机上缺少此项目引用的 NuGet 程序包。使用“NuGet 程序包还原”可下载这些程序包。有关更多信息，请参见 http://go.microsoft.com/fwlink/?LinkID=322105。缺少的文件是 {0}。</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('..\..\packages\OpenCvSharp4.runtime.win.4.10.0.20241108\build\netstandard\OpenCvSharp4.runtime.win.props')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\OpenCvSharp4.runtime.win.4.10.0.20241108\build\netstandard\OpenCvSharp4.runtime.win.props'))" />
+  </Target>
+  <Target Name="CopyDlcvInferCppDll" AfterTargets="Build">
+    <Error Condition="!Exists('$(DlcvInferCppDllPath)')" Text="未找到 C++ 推理 DLL：$(DlcvInferCppDllPath)" />
+    <Copy SourceFiles="$(DlcvInferCppDllPath)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
   </Target>
 </Project>

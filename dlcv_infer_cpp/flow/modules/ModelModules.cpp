@@ -1,4 +1,4 @@
-﻿#include "flow/modules/ModelModules.h"
+#include "flow/modules/ModelModules.h"
 
 #include <algorithm>
 #include <cmath>
@@ -223,9 +223,13 @@ void ModelPool::ReleaseByKey(const std::string& key, std::uint64_t entryIdentity
     }
 }
 
-void ModelPool::Clear() {
+void ModelPool::ClearForFreeAllModels() {
     std::lock_guard<std::mutex> lk(_mu);
     _cache.clear();
+}
+
+void ModelPool::Clear() {
+    ClearForFreeAllModels();
 }
 
 ModelPoolStats ModelPool::GetStats() {
@@ -254,7 +258,7 @@ static std::string GetFileNameOnlyLocal(const std::string& path) {
 }
 
 void BaseModelModule::LoadModel() {
-    if (_modelLease) return;
+    if (_model || _modelLease) return;
 
     int deviceId = _deviceId;
     try {
@@ -264,6 +268,25 @@ void BaseModelModule::LoadModel() {
     } catch (...) {}
 
     _resolvedDeviceId = deviceId;
+    if (_usesModelIndex) {
+        if (Context != nullptr) {
+            const auto boundModels = Context->Get<std::shared_ptr<const BoundModelMap>>(
+                "bound_models_by_index", std::shared_ptr<const BoundModelMap>());
+            if (boundModels) {
+                const auto it = boundModels->find(_modelIndex);
+                if (it != boundModels->end() && it->second) {
+                    _model = it->second;
+                    return;
+                }
+            }
+        }
+
+        _model = std::make_shared<dlcv_infer::Model>();
+        _model->modelIndex = _modelIndex;
+        _model->OwnModelIndex = false;
+        (void)_model->GetModelInfo();
+        return;
+    }
     if (!_modelBufferKey.empty()) {
         if (Context == nullptr) {
             throw std::runtime_error("流程模型缺少执行上下文");
@@ -583,7 +606,7 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     const bool emitMaskRle = includeMask;
     const bool emitMaskDerivedMeta = false;
 
-    const int effectiveBatch = ResolveEffectiveBatchLimit(_modelLease.Model(), this->Properties);
+    const int effectiveBatch = ResolveEffectiveBatchLimit(LoadedModel(), this->Properties);
     p["batch_size"] = effectiveBatch;
 
     std::vector<cv::Mat> rgbInputs;
@@ -646,7 +669,7 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
                 chunkMats.push_back(rgbInputs[static_cast<size_t>(localIdx)]);
             }
 
-            dlcv_infer::Result res = _modelLease.Model()->InferBatch(chunkMats, paramsToPass);
+            dlcv_infer::Result res = LoadedModel()->InferBatch(chunkMats, paramsToPass);
             try {
                 if (Context != nullptr) {
                     double prev = Context->Get<double>("flow_dlcv_infer_ms_acc", 0.0);

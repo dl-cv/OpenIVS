@@ -112,7 +112,12 @@ public:
     // 获取全局单例；首次调用自动检测加密狗类型，有狗时加载对应 DLL，无狗时不加载
     static DllLoader& Instance();
 
-    // 读取模型头并检查对应授权；不根据模型头切换已选中的 DLL
+
+    // 根据共享 index 查询实际所属 DLL，不修改全局单例
+    static DllLoader& ResolveForIndex(int index, int& indexType);
+
+    // 根据模型头中的 dog_provider 字段加载对应 DLL
+
     static void EnsureForModel(const std::string& modelPath);
     static void EnsureForModel(const std::wstring& modelPath);
 
@@ -151,11 +156,11 @@ private:
 | Virbox | `dlcv_infer_v.dll` | `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | Unknown（无狗） | 不加载 | — |
 
-**自动检测优先级**：先检测 Sentinel，再检测 Virbox。仅检测到 Sentinel 时加载 `dlcv_infer.dll`；仅检测到 Virbox 时加载 `dlcv_infer_v.dll`；两类加密狗同时存在时按 Sentinel 优先级加载 `dlcv_infer.dll`；均未检测到则返回 `DogProvider::Unknown`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
+**自动检测优先级**：先检测 Sentinel，再检测 Virbox；均未检测到则返回 `DogProvider::Unknown`，**不加载**任何推理 DLL，也不抛异常。真正加载模型时若仍无授权，再抛出 `未检测到授权`。
 
-**并发模型加载**：`DllLoader` 全局实例的访问由互斥量串行执行；`Model`、`NativeApi::LoadModel` 和 `NativeApi::LoadModelC` 进入底层模型加载函数时使用同一模型加载互斥量。流程归档的读取与展开不占用该互斥量，流程中的底层子模型加载仍经过相同保护。控制台测试会并发加载普通模型和流程模型，并检查所有实例记录的底层 DLL 名称一致。
+**并发模型加载**：`DllLoader` 全局实例的访问由互斥量串行执行；`Model`、`NativeApi::LoadModel` 和 `NativeApi::LoadModelC` 进入底层模型加载函数时使用同一模型加载互斥量。流程归档的读取与展开不占用该互斥量，流程中的底层子模型加载仍经过相同保护。
 
-底层 DLL 按当前进程检测到的加密狗选择，模型头中的 `dog_provider` 只用于加载前授权检查，不参与 DLL 选择，也不会触发运行期切换。底层 DLL 加载完成后，模型加载、模型信息、推理和释放始终使用同一个 DLL。模型头声明的授权不存在时，加载入口直接返回明确错误；两类加密狗同时存在时，已选中的 DLL 可以加载两类模型。
+
 
 ---
 
@@ -181,9 +186,18 @@ public:
 };
 ```
 
+**头文件内联辅助函数**：
+```cpp
+dlcv_infer::Model CreateModelFromIndex(int index);
+```
+- 该函数定义在 `dlcv_infer.h` 中，为完全内联实现，不增加 DLL 导出符号，也不改变 `Model` 的数据布局。
+- 函数使用默认构造的 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，随后立即调用 `GetModelInfo()`，以绑定已有索引并完成模型信息读取。
+- `index` 必须为非负值；非法参数或索引不可用时抛出异常。
+- 创建成功时增加该索引的外部使用计数；返回对象析构或调用 `FreeModel()` 时撤销绑定并减少使用计数，不释放索引所属的底层模型。
+
 **构造函数行为**：
-1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，从归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；加载期间不写入模型文件。
-2. `.dvsp` 当前不支持，构造时抛出 `std::invalid_argument`。
+1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，从归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；加载期间不写入模型文件。推理组件缺少该接口时，兼容路径才将模型文件写入临时目录后按路径加载。
+2. 若路径以 `.dvsp` 结尾 → 抛出 `std::invalid_argument`，不加载文件。
 3. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 `dlcv_load_model`。
 4. 构造失败时抛出 `std::runtime_error`，错误信息包含底层返回的 JSON。
 
@@ -196,6 +210,8 @@ json GetDvsModelInfo();
 - `GetModelInfo()` 对普通模型和流程模型返回相同层级。流程模型的输入通道和输入形状取首个模型，任务类型、类别列表和类别数量取最终输出可达的模型。
 - `GetDvsModelInfo()` 支持流程模型，返回完整流程 JSON、`loaded_model_meta`、按模型文件名组织的 `model_info`，以及首模型和最终输出模型的节点编号。
 - 普通模式下通过 `dlcv_get_model_info` 获取。
+- 空对象设置有效的 `modelIndex` 后，首次调用只枚举进程内实际已加载的目标 DLL，把具备 `dlcv_get_index_type_c` 导出的 DLL 作为候选并查询 index 类型，不为探测加载其他 infer DLL。返回 `-1` 或未知值视为查询错误，不能当作不存在。恰有一个候选返回有效结果时，先将该 loader 保存到本对象，再检查完成共享操作所需的导出并调用已有绑定接口；缺少接口、绑定失败或后续恢复失败时不改选其他 DLL。无结果、多个结果或查询异常均抛出异常，不改选其他 DLL。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`；`source_path` 只保存原始来源信息，按 index 恢复时不读取该路径。该过程不按资源类型、模型内容的加密 provider、编号数值或 `bit8` 推导归属，也不修改 `DllLoader::Instance()`。
+- 共享流程加载时，父流程选定的 loader 传给每个不同的子模型 index；每个子模型只在该 loader 中校验并创建一次借用 `Model`，后续推理直接复用这些已绑定对象，流程释放时统一解绑。
 
 ### 4.3 单图推理
 
@@ -229,11 +245,24 @@ json InferOneOutJson(const cv::Mat& image, const json& params_json = json::objec
 ```cpp
 void FreeModel();
 ```
-- Flow 模式：删除 `_flowModel`。
-- 普通模式且 `OwnModelIndex == true`：调用 `dlcv_free_model`。
-- 普通模式且 `OwnModelIndex == false`：仅标记 `modelIndex = -1`，不释放底层模型。
+- Flow 模式且由当前对象注册：删除 `_flowModel` 后调用 `dlcv_free_flow_c`。
+- Flow 模式且通过共享索引恢复：删除 `_flowModel` 后调用 `dlcv_unbind_index_c`。
+- 普通模型且由当前对象加载：按现有 `dlcv_free_model` 释放规则处理。
+- 通过共享 `modelIndex` 恢复的普通模型或流程模型：无论 `OwnModelIndex` 是否为 `false`，只减少当前对象增加的使用计数，不直接释放共享资源。
 
-> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回（从 `0` 起递增），C 接口只接受 `[0, 9999]`，达到 `10000` 时释放本次加载并返回范围错误；流程模型（`.dvst`/`.dvso`）的 `modelIndex` 由本层自管理（从 `10000` 起递增）。二者分区，避免上层按 `modelIndex` 索引时流程模型与普通模型撞键。流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
+
+> **model_index 来源**：普通模型的 `modelIndex` 由底层 `dlcv_infer` 加载时返回。流程模型（`.dvst`/`.dvso`）先加载其中的子模型；推理 DLL 提供完整共享接口时，再注册包含 `schema_version`、`flow_type`、`provider`、`source_path`、`device_id`、`pipeline`、`model_bindings` 的流程 JSON。旧 DLL 缺少共享接口时使用本地流程 index，原有加载和推理行为保持不变。
+>
+> 同一个 `.dvst/.dvso` 的全部模型节点必须属于同一 provider，不支持在一个流程内混用 Sentinel 与 Virbox。共享流程恢复时所有子模型沿父流程已选 loader，不为单个子模型重新搜索 DLL。无模型节点流程优先复用当前 loader；没有当前 loader 时直接使用 Sentinel，不执行双 provider 探测。跨语言恢复按实际已加载 DLL 查询，不根据 `bit8` 或流程类型选择 loader。
+>
+> `.dvsp` 不支持推理。需要滑窗处理时使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
+> 流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
+
+共享 index 仍使用 `int`，不改变现有公开签名，不新增公共 C 导出。每个 DLL 使用模型与流程共用的递增序号，编码跳过 `bit8`（数值 `256`）；`bit8` 对应发号 DLL 的 `DogProvider` 标记，但不表示模型内容的加密 provider 或资源类型。每个 DLL 可分配 `2^30` 个序号，编号不回绕、不重发；释放和 `FreeAllModels()` 不重置计数器，耗尽时返回错误。
+
+旧版共享索引且具备完整共享接口时仍按各 DLL 的实际查询结果恢复，不按编号数值推导归属。更旧且缺少共享接口的 DLL 保留普通加载和本地流程处理，不支持跨语言索引恢复。恢复成功后后续查询、推理、绑定和解绑固定使用已保存的 loader；资源失效时不重新搜索。
+
+C 兼容层在 legacy 普通加载成功时登记 index、实际 loader 与原生持有状态；结构化入口首次查询或推理时才沿已登记的 loader 创建借用 `Model`。未登记的外部 index 通过实际模块查询唯一归属后先保存 loader，再校验和绑定；失败重试不改选其他 DLL。
 
 ### 4.7 计时查询
 
@@ -248,7 +277,9 @@ static std::vector<FlowNodeTiming> GetLastFlowNodeTimings();
 
 ---
 
+
 ## 5. Utils（工具类）
+
 
 ### 5.1 模型管理
 
@@ -457,7 +488,9 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ---
 
+
 ## 12. 错误处理约定
+
 
 - 所有错误通过 C++ 异常抛出（`std::runtime_error`、`std::invalid_argument` 等）。
 - 底层 C API 返回的错误码封装在异常消息中。
@@ -590,7 +623,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 19.2 加载、释放与信息查询
 
-`.dvst/.dvso` 进入 FlowGraph 模式，其余走底层 `dlcv_infer.dll` 普通模型模式；`.dvsp` 当前不支持。普通模型通过 `dlcv_load_model` 加载，归档子模型通过 `dlcv_load_model_binary` 从内存加载。FlowGraph 模式读取归档内存中的 `pipeline.json` 并加载全部模型节点。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
+`.dvst/.dvso` 进入 FlowGraph 模式，`.dvsp` 当前直接返回不支持错误，其余走底层推理 DLL 普通模型模式。普通模型通过 `dlcv_load_model` 加载，加载前由 `DllLoader::EnsureForModel` 解析模型头：模型头明确指定 `dog_provider` 时直接加载对应 DLL，不查询加密狗，也不检查另一种 provider；未指定时通过 `AutoDetectProvider()` 按 Sentinel 优先、Virbox 第二自动检测。FlowGraph 模式创建 `flow::FlowGraphModel`，完成归档解包后加载全部模型节点，解包过程不得修改模型二进制数据。流程直接复用子模型实际使用的 loader；无模型节点时复用现有 loader，没有现有 loader 时直接选择 Sentinel，不执行 provider 检测。共享接口完整时登记共享流程，旧 DLL 缺少共享接口时使用本地流程 index。`FreeModel()` 会按 `OwnModelIndex` 决定释放底层资源还是仅清空索引。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
 
 ### 19.3 推理前图像规整
 
@@ -618,9 +651,10 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 22.1 DVS 归档加载
 
-共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧从 `.dvst`、`.dvso` 归档内存读取 `pipeline.json` 和子模型二进制，为流程节点增加内部模型数据标识，并调用 `dlcv_load_model_binary`；加载期间不写入模型文件，`.dvsp` 当前不支持。
+共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧优先从 DVS 归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；推理组件缺少该接口时，兼容路径才将模型文件写入临时目录后按路径加载，加载完成后清理临时目录。
 
-`Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。公开类布局已调整，调用方需使用同一版头文件重新编译。
+
+`Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。公开类布局已调整，调用方需使用匹配版本的头文件和库重新编译；公开方法签名虽未改变，旧 C++ 应用二进制不能直接替换 DLL 获得 ABI 兼容。旧 infer 兼容仅表示新版包装层可配合旧 infer DLL，不表示旧 C++ 应用二进制的 ABI 承诺。
 
 - 流程归档使用既有 `ModelBinaryStore` 保存只读子模型字节，通过 `ModelPool::AcquireBinary` 调用内存加载接口，不计算整包摘要，不生成解包临时文件。
 - 每次读取归档分配新的 `StoreId`；模型池键由 `StoreId`、归档成员键与设备组成。同一次加载中引用同一成员的多个节点共享模型，不同加载实例分别持有模型池引用。
@@ -629,11 +663,14 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 - 节点引用先匹配完整成员名，再匹配文件名；文件名对应多个成员时报错，不自动选择其中一个。
 - C 接口调用相同的 C++ `Model` 实现，不单独维护归档加载与子模型缓存。
 
+
 ### 22.2 `FlowGraphModel`
 
 `FlowGraphModel` 公开接口为 `IsLoaded()`、`Load()`、`GetModelInfo()`、`GetDvsModelInfo()`、`InferOneOutJson()`、`InferInternal()`、`Benchmark()`，禁用拷贝、支持移动。`Load()` 从 UTF-8 流程 JSON 读取 `nodes` 并预加载 `model/*` 节点，同时保存每个模型节点的普通模型信息。
 
+
 流程归档的子模型二进制由 `FlowGraphModel` 的 `_modelBinaryStore` 成员持有；析构、重复加载和移动操作会清理或转移该成员及模型池引用。
+
 
 ### 22.3 `ExecutionContext`
 
@@ -658,3 +695,33 @@ C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/Mode
 以下类型位于 `#ifdef DLCV_INFER_CPP_EXPORTS` 条件编译区域：
 
 - `DllLoader`
+
+
+---
+
+## 24. 同进程共享索引测试导出
+
+以下函数由 `dlcv_infer_cpp.dll` 导出，仅用于控制台测试工程中的跨语言共享索引验证，不属于生产调用入口：
+
+```cpp
+int dlcv_shared_index_test_load_c(const wchar_t* model_path, int device_id);
+const char* dlcv_shared_index_test_infer_c(int index, const wchar_t* image_path);
+int dlcv_shared_index_test_free_c(int index);
+int dlcv_shared_index_test_double_load_free_c(const wchar_t* model_path, int device_id);
+int dlcv_shared_index_test_double_flow_load_free_c(const wchar_t* model_path, int device_id);
+int dlcv_shared_index_test_empty_flow_after_provider_c(
+    const wchar_t* provider_model_path,
+    const wchar_t* flow_path,
+    int device_id);
+const char* dlcv_shared_index_test_info_c(int index);
+void dlcv_shared_index_test_free_string_c(const char* result);
+```
+
+- `dlcv_shared_index_test_load_c` 使用 C++ `Model` 加载模型并在 DLL 内保存所有者，成功返回 `modelIndex`，失败返回 `-1`。
+- `dlcv_shared_index_test_infer_c` 在单次调用内构造空 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，依次执行 `GetModelInfo()`、`Infer()`、`InferOneOutJson()`；返回 UTF-8 JSON，包含 `code`、`index`、`model_info`、`structured` 和 `infer_json`。`structured` 只保留样本数量、目标数量、类别、分数、bbox、mask 标志及 mask 尺寸。
+- `dlcv_shared_index_test_free_c` 释放 DLL 内保存的 C++ 所有者，成功返回 `0`，失败返回 `-1`。
+- `dlcv_shared_index_test_double_load_free_c` 用两个 C++ `Model` 连续加载同一路径，确认复用同一 `modelIndex` 后分别释放；返回释放后的 `dlcv_get_index_type_c` 结果，`0` 表示已清除，`1` 表示普通模型仍在，负数表示加载失败或未复用 index。
+- `dlcv_shared_index_test_double_flow_load_free_c` 连续加载同一流程两次，读取两个流程登记的首个子模型 index，确认两次流程共用同一底层模型；两个流程释放后返回子模型的 `dlcv_get_index_type_c` 结果。
+- `dlcv_shared_index_test_empty_flow_after_provider_c` 先按指定模型文件切换 provider，再加载无模型节点流程并返回流程 index，用于检查无模型节点流程是否始终使用 Sentinel。
+- `dlcv_shared_index_test_info_c` 构造空 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，只调用 `GetModelInfo()`；返回 UTF-8 JSON，包含 `code`、`index`、`model_info`，失败时包含 `message`。
+- `dlcv_shared_index_test_free_string_c` 释放 `dlcv_shared_index_test_infer_c` 和 `dlcv_shared_index_test_info_c` 返回的字符串。
