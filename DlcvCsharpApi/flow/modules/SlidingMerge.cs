@@ -688,6 +688,7 @@ namespace DlcvModules
 						{
 							merged["with_mask"] = true;
 							merged["mask_rle"] = mergedMaskRle;
+							merged["area"] = MaskRleUtils.CalculateMaskArea(mergedMaskRle);
 							merged.Remove("mask_array");
 						}
 						else

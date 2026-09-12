@@ -152,6 +152,16 @@ namespace DlcvCSharpTest
                     return RunAiOrientationAffineSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "mask-area-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return MaskAreaSelfTest.Run();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "region-mask-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RegionMaskSelfTest.Run();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "bbox-iou-dedup-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunBBoxIoUDedupSelfTest();
@@ -1046,6 +1056,8 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("模型通道顺序", RunModelChannelOrderSelfTest),
                 new UnifiedTestCase("DVS 同名成员内容", DvsArchiveDuplicateSelfTest.Run),
                 new UnifiedTestCase("掩膜旋转框", RunMaskToRBoxSelfTest),
+                new UnifiedTestCase("掩码面积与 JSON 输出", MaskAreaSelfTest.Run),
+                new UnifiedTestCase("区域掩码筛选", RegionMaskSelfTest.Run),
                 new UnifiedTestCase("曲线文字仿射变换", RunCurveTextAffineSelfTest),
                 new UnifiedTestCase("AI方向仿射变换", RunAiOrientationAffineSelfTest),
                 new UnifiedTestCase("检测框重复结果过滤", RunBBoxIoUDedupSelfTest),

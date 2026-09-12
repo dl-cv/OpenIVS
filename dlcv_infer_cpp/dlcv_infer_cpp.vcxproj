@@ -199,6 +199,7 @@
     <ClInclude Include="dlcv_infer_c_api.h" />
     <ClInclude Include="dlcv_sntl_admin.h" />
     <ClInclude Include="ImageInputUtils.h" />
+    <ClInclude Include="MaskUtils.h" />
     <ClInclude Include="flow\ExecutionContext.h" />
     <ClInclude Include="flow\FlowPayloadTypes.h" />
     <ClInclude Include="flow\FlowTypes.h" />
