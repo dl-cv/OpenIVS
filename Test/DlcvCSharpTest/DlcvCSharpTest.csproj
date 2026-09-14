@@ -35,9 +35,6 @@
     <ErrorReport>prompt</ErrorReport>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
-  <PropertyGroup>
-    <DlcvInferCppDllPath Condition="'$(DlcvInferCppDllPath)' == ''">$(ProjectDir)..\..\dlcv_infer_cpp\$(Configuration)\dlcv_infer_cpp.dll</DlcvInferCppDllPath>
-  </PropertyGroup>
   <ItemGroup>
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
@@ -88,6 +85,9 @@
     <ProjectReference Include="..\..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
       <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
       <Name>dlcv_infer_cpp</Name>
+      <!-- 原生 Build 不返回 DLL 路径，显式查询 GetTargetPath 供测试目录复制。 -->
+      <Targets>Build;GetTargetPath</Targets>
+      <OutputItemType>DlcvInferCppTargetPath</OutputItemType>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <BuildReference>true</BuildReference>
     </ProjectReference>
@@ -112,7 +112,10 @@
     <Error Condition="!Exists('..\..\packages\OpenCvSharp4.runtime.win.4.10.0.20241108\build\netstandard\OpenCvSharp4.runtime.win.props')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\OpenCvSharp4.runtime.win.4.10.0.20241108\build\netstandard\OpenCvSharp4.runtime.win.props'))" />
   </Target>
   <Target Name="CopyDlcvInferCppDll" AfterTargets="Build">
-    <Error Condition="!Exists('$(DlcvInferCppDllPath)')" Text="未找到 C++ 推理 DLL：$(DlcvInferCppDllPath)" />
+    <PropertyGroup>
+      <DlcvInferCppDllPath Condition="'$(DlcvInferCppDllPath)' == ''">@(DlcvInferCppTargetPath)</DlcvInferCppDllPath>
+    </PropertyGroup>
+    <Error Condition="'$(DlcvInferCppDllPath)' == '' Or !Exists('$(DlcvInferCppDllPath)')" Text="未找到本次项目引用输出的 C++ 推理 DLL：$(DlcvInferCppDllPath)" />
     <Copy SourceFiles="$(DlcvInferCppDllPath)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
   </Target>
 </Project>

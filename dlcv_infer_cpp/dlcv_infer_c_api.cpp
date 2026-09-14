@@ -62,7 +62,10 @@ struct CApiModelEntry {
     }
 };
 
-static std::unordered_map<int, std::shared_ptr<CApiModelEntry>> g_models;
+using CApiModelStack = std::vector<std::shared_ptr<CApiModelEntry>>;
+using CApiModelTable = std::unordered_map<int, CApiModelStack>;
+// 每次成功加载保留独立持有，释放时只移除其中一次。
+static CApiModelTable g_models;
 static std::mutex g_modelsMutex;
 enum class NativeJsonReleaseKind {
     DeleteArray,
@@ -314,6 +317,15 @@ static bool TryReadModelIndex(const dlcv_infer::json& config, int& modelIndex) n
         if (!config.is_object() || !config.contains("model_index")) return false;
         const auto& value = config.at("model_index");
         if (!value.is_number_integer()) return false;
+        if (value.is_number_unsigned()) {
+            if (value.get<dlcv_infer::json::number_unsigned_t>() >
+                static_cast<dlcv_infer::json::number_unsigned_t>((std::numeric_limits<int>::max)())) {
+                return false;
+            }
+        } else {
+            const auto index = value.get<dlcv_infer::json::number_integer_t>();
+            if (index < 0 || index > (std::numeric_limits<int>::max)()) return false;
+        }
         modelIndex = value.get<int>();
         return true;
     } catch (...) {
@@ -345,26 +357,21 @@ static dlcv_infer::json AddNativeModelInfoStatus(dlcv_infer::json modelInfo) {
     return modelInfo;
 }
 
-static std::shared_ptr<CApiModelEntry> FindModelEntry(int modelIndex) {
-    std::lock_guard<std::mutex> lock(g_modelsMutex);
-    const auto it = g_models.find(modelIndex);
-    return it == g_models.end() ? nullptr : it->second;
-}
-
 static void StoreModelEntry(int modelIndex, const std::shared_ptr<CApiModelEntry>& entry) {
     std::lock_guard<std::mutex> lock(g_modelsMutex);
-    const auto inserted = g_models.emplace(modelIndex, entry);
-    if (!inserted.second) {
-        throw std::runtime_error("model_index 已由本 C API 使用");
-    }
-}
-
-static void EraseModelEntry(int modelIndex, const std::shared_ptr<CApiModelEntry>& expected) {
-    std::lock_guard<std::mutex> lock(g_modelsMutex);
     const auto it = g_models.find(modelIndex);
-    if (it != g_models.end() && it->second == expected) {
-        g_models.erase(it);
+    if (it == g_models.end()) {
+        g_models.emplace(modelIndex, CApiModelStack{entry});
+        return;
     }
+    const auto& stored = it->second.back();
+    if (stored->loader == nullptr || entry->loader == nullptr ||
+        stored->loader->NativeModuleIdentity() == nullptr ||
+        stored->loader->NativeModuleIdentity() != entry->loader->NativeModuleIdentity() ||
+        stored->serializeInfer != entry->serializeInfer) {
+        throw std::runtime_error("model_index 已由其他模块或资源类型使用");
+    }
+    it->second.push_back(entry);
 }
 
 template <typename Func>
@@ -391,6 +398,31 @@ static bool IsNativeSuccessResult(const char* result) {
     }
 }
 
+static bool ReleaseModelEntry(int modelIndex, const char* configStr, const char*& nativeResult) {
+    nativeResult = nullptr;
+    std::shared_ptr<CApiModelEntry> releasedEntry;
+    {
+        // 选择、释放和移除同一持有在同一临界区完成，防止并发释放重复消耗底层持有。
+        std::lock_guard<std::mutex> lock(g_modelsMutex);
+        const auto it = g_models.find(modelIndex);
+        if (it == g_models.end()) return false;
+        releasedEntry = it->second.back();
+        if (releasedEntry->nativeOwner) {
+            if (releasedEntry->loader == nullptr) throw std::runtime_error("本地模型缺少所属 DLL");
+            nativeResult = InvokeTrackedNativeJson(
+                *releasedEntry->loader,
+                releasedEntry->loader->GetFreeModelFunc(),
+                configStr,
+                NativeJsonReleaseKind::Result);
+            if (!IsNativeSuccessResult(nativeResult)) return false;
+        }
+        it->second.pop_back();
+        if (it->second.empty()) g_models.erase(it);
+    }
+    // 在模型表解锁后销毁实例；进行中的调用仍通过 shared_ptr 保留其使用权。
+    return true;
+}
+
 static std::shared_ptr<CApiModelEntry> CreateSharedModelEntry(
     int modelIndex,
     dlcv_infer::DllLoader& loader,
@@ -405,23 +437,24 @@ static std::shared_ptr<CApiModelEntry> CreateSharedModelEntry(
     return entry;
 }
 
-static std::shared_ptr<CApiModelEntry> FindOrRestoreSharedModelEntry(int modelIndex) {
+static std::shared_ptr<CApiModelEntry> FindOrRestoreSharedModelEntry(
+    int modelIndex, bool requireStructuredModel = false) {
     std::shared_ptr<CApiModelEntry> entry;
     {
         std::lock_guard<std::mutex> lock(g_modelsMutex);
         const auto it = g_models.find(modelIndex);
         if (it != g_models.end()) {
-            entry = it->second;
+            entry = it->second.back();
         } else {
             int indexType = 0;
             auto* loader = &dlcv_infer::DllLoader::ResolveForIndex(modelIndex, indexType);
             entry = CreateSharedModelEntry(modelIndex, *loader, indexType);
             // 先保存唯一选定的 DLL，再建立共享持有；失败时保留记录。
-            g_models.emplace(modelIndex, entry);
+            g_models.emplace(modelIndex, CApiModelStack{entry});
         }
     }
     // 本地原生加载已知所属 DLL；缺少共享接口的旧 SDK 保留原 JSON 调用。
-    if (!entry->nativeOwner || entry->HasSharedIndexFunctions()) {
+    if (requireStructuredModel || !entry->nativeOwner || entry->HasSharedIndexFunctions()) {
         (void)entry->GetModel();
     }
     return entry;
@@ -429,9 +462,7 @@ static std::shared_ptr<CApiModelEntry> FindOrRestoreSharedModelEntry(int modelIn
 
 static std::shared_ptr<CApiModelEntry> GetStructuredModelEntry(int modelIndex) {
     if (modelIndex < 0) throw std::runtime_error("model not found");
-    auto entry = FindOrRestoreSharedModelEntry(modelIndex);
-    (void)entry->GetModel();
-    return entry;
+    return FindOrRestoreSharedModelEntry(modelIndex, true);
 }
 
 static int ReadNativeImageDepth(const dlcv_infer::json& imageInfo) {
@@ -732,6 +763,26 @@ static void CallNativeVoid(const char* apiName, Invoke&& invoke) noexcept {
     }
 }
 
+static const char* InvalidNativeModelIndexResult(const char* apiName) noexcept {
+    return CallNativeString(apiName, []() {
+        return AllocateNativeJsonResult(MakeNativeStatus(1, "model_index 必须是非负 int 范围内的整数"));
+    });
+}
+
+namespace dlcv_infer {
+
+void ClearCApiModelsForFreeAllModels() {
+    CApiModelTable models;
+    {
+        std::lock_guard<std::mutex> lock(g_modelsMutex);
+        models.swap(g_models);
+    }
+    // 调用方持有生命周期写锁；先释放模型表锁，再清理模型及共享绑定。
+    models.clear();
+}
+
+} // namespace dlcv_infer
+
 extern "C" {
 
 int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
@@ -764,8 +815,7 @@ int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
         entry->loader = entry->model->LoadedDllLoader();
         entry->modelIndex = idx;
         entry->serializeInfer = isFlowModel;
-        std::lock_guard<std::mutex> lock(g_modelsMutex);
-        g_models[idx] = std::move(entry);
+        StoreModelEntry(idx, entry);
         ClearLastErrorMessage();
         AppendCapiDebugLog("load_model success: modelIndex=%d", idx);
         return idx;
@@ -785,27 +835,14 @@ const char* dlcv_infer_cpp_get_last_error_c() {
 }
 
 int dlcv_infer_cpp_free_model_c(int model_index) {
-    dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
-    const std::shared_ptr<CApiModelEntry> entry = FindModelEntry(model_index);
-    if (!entry) return -1;
-
     try {
-        if (entry->nativeOwner) {
-            if (entry->loader == nullptr) {
-                SetLastErrorMessage("本地模型缺少所属 DLL");
-                return -1;
-            }
-            const std::string config = dlcv_infer::json{ { "model_index", model_index } }.dump();
-            const char* result = entry->loader->GetFreeModelFunc()(config.c_str());
-            const bool success = IsNativeSuccessResult(result);
-            if (result != nullptr) entry->loader->GetFreeResultFunc()(result);
-            if (!success) {
-                SetLastErrorMessage("底层模型释放失败");
-                return -1;
-            }
-        }
-        EraseModelEntry(model_index, entry);
-        return 0;
+        dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
+        const std::string config = dlcv_infer::json{ { "model_index", model_index } }.dump();
+        const char* nativeResult = nullptr;
+        const bool success = ReleaseModelEntry(model_index, config.c_str(), nativeResult);
+        ReleaseNativeJsonResult(nativeResult, true);
+        if (success) return 0;
+        SetLastErrorMessage("模型不存在或底层模型释放失败");
     } catch (const std::exception& ex) {
         SetLastErrorMessage(ex.what());
     } catch (...) {
@@ -1003,13 +1040,6 @@ void dlcv_infer_cpp_free_string_c(const char* value) {
 
 void dlcv_infer_cpp_free_all_models_c() {
     CallNativeVoid("dlcv_free_all_models", []() {
-        dlcv_infer::flow::ModelLifecycleWriteGuard lifecycleGuard;
-        std::unordered_map<int, std::shared_ptr<CApiModelEntry>> models;
-        {
-            std::lock_guard<std::mutex> lock(g_modelsMutex);
-            models.swap(g_models);
-        }
-        models.clear();
         dlcv_infer::Utils::FreeAllModels();
     });
 }
@@ -1041,8 +1071,15 @@ const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str) {
     dlcv_infer::json config;
     std::string modelPath;
     if (!TryParseNativeConfig(config_str, config) || !TryReadFlowModelPath(config, modelPath)) {
-        return CallNativeString("dlcv_load_model", [config_str]() {
+        return CallNativeString("dlcv_load_model", [config_str, config]() {
             try {
+                dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
+                if (config.is_object() && config.contains("model_path") &&
+                    config.at("model_path").is_string()) {
+                    // 普通文件先完成授权检查，调用仍使用进程默认 DLL。
+                    (void)dlcv_infer::DllLoader::EnsureForModel(
+                        config.at("model_path").get<std::string>());
+                }
                 dlcv_infer::DllLoader& nativeLoader = dlcv_infer::DllLoader::Instance();
                 const char* resultPtr = InvokeTrackedNativeJson(
                     nativeLoader,
@@ -1065,39 +1102,31 @@ const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str) {
                     return resultPtr;
                 }
 
-                const auto getIndexType = nativeLoader.GetIndexTypeFunc();
-                if (getIndexType != nullptr) {
-                    const int indexType = getIndexType(modelIndex);
-                    if (indexType != 0 && indexType != 1 && indexType != 2) {
-                        ReleaseNativeJsonResult(resultPtr, true);
-                        throw std::runtime_error("共享 index 类型查询返回未知值");
-                    }
-                    if (indexType == 2) {
-                        const std::string freeConfig = dlcv_infer::json{
-                            { "model_index", modelIndex }
-                        }.dump();
-                        const char* freeResult = nativeLoader.GetFreeModelFunc()(freeConfig.c_str());
-                        if (freeResult != nullptr) nativeLoader.GetFreeResultFunc()(freeResult);
-                        ReleaseNativeJsonResult(resultPtr, true);
-                        return AllocateNativeJsonResult(MakeNativeStatus(
-                            1,
-                            "普通模型返回了流程索引。"));
-                    }
-                }
-
-                auto entry = std::make_shared<CApiModelEntry>();
-                entry->loader = &nativeLoader;
-                entry->modelIndex = modelIndex;
-                entry->nativeOwner = true;
                 try {
+                    const auto getIndexType = nativeLoader.GetIndexTypeFunc();
+                    if (getIndexType != nullptr) {
+                        const int indexType = getIndexType(modelIndex);
+                        if (indexType != 1) {
+                            throw std::runtime_error("普通模型加载后 index 类型无效");
+                        }
+                    }
+                    auto entry = std::make_shared<CApiModelEntry>();
+                    entry->loader = &nativeLoader;
+                    entry->modelIndex = modelIndex;
+                    entry->nativeOwner = true;
                     StoreModelEntry(modelIndex, entry);
                 } catch (...) {
+                    // 加载已取得一次持有；后续查询或登记失败时必须归还该次持有。
+                    ReleaseNativeJsonResult(resultPtr, true);
                     const std::string freeConfig = dlcv_infer::json{
                         { "model_index", modelIndex }
                     }.dump();
-                    const char* freeResult = nativeLoader.GetFreeModelFunc()(freeConfig.c_str());
-                    if (freeResult != nullptr) nativeLoader.GetFreeResultFunc()(freeResult);
-                    ReleaseNativeJsonResult(resultPtr, true);
+                    const char* freeResult = InvokeTrackedNativeJson(
+                        nativeLoader, nativeLoader.GetFreeModelFunc(), freeConfig.c_str(),
+                        NativeJsonReleaseKind::Result);
+                    const bool freed = IsNativeSuccessResult(freeResult);
+                    ReleaseNativeJsonResult(freeResult, true);
+                    if (!freed) throw std::runtime_error("模型登记失败，且底层持有释放失败");
                     throw;
                 }
                 return resultPtr;
@@ -1134,8 +1163,14 @@ const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str) {
 const char* DLCV_NATIVE_C_CALL dlcv_free_model(const char* config_str) {
     dlcv_infer::json config;
     int modelIndex = -1;
-    if (!TryParseNativeConfig(config_str, config) || !TryReadModelIndex(config, modelIndex)) {
+    const bool parsed = TryParseNativeConfig(config_str, config);
+    const bool hasModelIndex = parsed && TryReadModelIndex(config, modelIndex);
+    if (parsed && config.contains("model_index") && !hasModelIndex) {
+        return InvalidNativeModelIndexResult("dlcv_free_model");
+    }
+    if (!hasModelIndex) {
         return CallNativeString("dlcv_free_model", [config_str]() {
+            dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
             dlcv_infer::DllLoader& loader = dlcv_infer::DllLoader::Instance();
             return InvokeTrackedNativeJson(
                 loader,
@@ -1148,25 +1183,12 @@ const char* DLCV_NATIVE_C_CALL dlcv_free_model(const char* config_str) {
     return CallNativeString("dlcv_free_model", [config_str, modelIndex]() {
         try {
             dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
-            const std::shared_ptr<CApiModelEntry> entry =
-                FindOrRestoreSharedModelEntry(modelIndex);
-            if (entry->nativeOwner) {
-                if (entry->loader == nullptr) {
-                    return AllocateNativeJsonResult(MakeNativeStatus(1, "本地模型缺少所属 DLL"));
-                }
-                const char* result = InvokeTrackedNativeJson(
-                    *entry->loader,
-                    entry->loader->GetFreeModelFunc(),
-                    config_str,
-                    NativeJsonReleaseKind::Result);
-                if (IsNativeSuccessResult(result)) EraseModelEntry(modelIndex, entry);
-                return result;
-            }
-
-            if (dlcv_infer_cpp_free_model_c(modelIndex) != 0) {
-                return AllocateNativeJsonResult(MakeNativeStatus(2, "Model not found."));
-            }
-            return AllocateNativeJsonResult(MakeNativeStatus(0, "Successfully freed model."));
+            const char* nativeResult = nullptr;
+            const bool success = ReleaseModelEntry(modelIndex, config_str, nativeResult);
+            if (nativeResult != nullptr) return nativeResult;
+            return AllocateNativeJsonResult(success
+                ? MakeNativeStatus(0, "Successfully freed model.")
+                : MakeNativeStatus(2, "Model not found."));
         } catch (const std::exception& ex) {
             return AllocateNativeJsonResult(MakeNativeStatus(1, ex.what()));
         }
@@ -1180,6 +1202,9 @@ const char* DLCV_NATIVE_C_CALL dlcv_get_model_info(const char* config_str) {
     const bool parsed = TryParseNativeConfig(config_str, config);
     const bool hasFlowPath = parsed && TryReadFlowModelPath(config, modelPath);
     const bool hasModelIndex = parsed && TryReadModelIndex(config, modelIndex);
+    if (parsed && config.contains("model_index") && !hasModelIndex) {
+        return InvalidNativeModelIndexResult("dlcv_get_model_info");
+    }
     if (!hasFlowPath && !hasModelIndex) {
         return CallNativeString("dlcv_get_model_info", [config_str]() {
             dlcv_infer::DllLoader& loader = dlcv_infer::DllLoader::Instance();
@@ -1191,7 +1216,7 @@ const char* DLCV_NATIVE_C_CALL dlcv_get_model_info(const char* config_str) {
         });
     }
 
-    return CallNativeString("dlcv_get_model_info", [config, modelPath, hasFlowPath, modelIndex, config_str]() {
+    return CallNativeString("dlcv_get_model_info", [config, modelPath, hasFlowPath, modelIndex]() {
         try {
             dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
             if (hasFlowPath) {
@@ -1225,7 +1250,12 @@ const char* DLCV_NATIVE_C_CALL dlcv_get_model_info(const char* config_str) {
 extern "C" const char* DLCV_NATIVE_C_CALL dlcv_infer_json_impl(const char* config_str) {
     dlcv_infer::json config;
     int modelIndex = -1;
-    if (!TryParseNativeConfig(config_str, config) || !TryReadModelIndex(config, modelIndex)) {
+    const bool parsed = TryParseNativeConfig(config_str, config);
+    const bool hasModelIndex = parsed && TryReadModelIndex(config, modelIndex);
+    if (parsed && config.contains("model_index") && !hasModelIndex) {
+        return InvalidNativeModelIndexResult("dlcv_infer");
+    }
+    if (!hasModelIndex) {
         return CallNativeString("dlcv_infer", [config_str]() {
             dlcv_infer::DllLoader& loader = dlcv_infer::DllLoader::Instance();
             return InvokeTrackedNativeJson(
@@ -1275,14 +1305,7 @@ void DLCV_NATIVE_C_CALL dlcv_free_result(const char* config_str) {
 }
 
 void DLCV_NATIVE_C_CALL dlcv_free_all_models() {
-    CallNativeVoid("dlcv_free_all_models", []() {
-        dlcv_infer::flow::ModelLifecycleWriteGuard lifecycleGuard;
-        {
-            std::lock_guard<std::mutex> lock(g_modelsMutex);
-            g_models.clear();
-        }
-        dlcv_infer::Utils::FreeAllModels();
-    });
+    dlcv_infer_cpp_free_all_models_c();
 }
 
 const char* DLCV_NATIVE_C_CALL dlcv_get_device_info() {

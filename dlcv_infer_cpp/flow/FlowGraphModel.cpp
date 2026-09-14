@@ -587,6 +587,7 @@ Json FlowGraphModel::LoadFromRoot(
 
     ReleaseOwnedModelsNoexcept();
     _loaded = false;
+    _loadedModelMeta = Json::array();
     _nodes.clear();
     for (const auto& n : root.at("nodes")) {
         if (n.is_object()) _nodes.push_back(n);
@@ -594,51 +595,51 @@ Json FlowGraphModel::LoadFromRoot(
     _root = root;
     _deviceId = deviceId;
 
-    _boundModelsByIndex = std::make_shared<BoundModelMap>();
-    for (const auto& node : _nodes) {
-        if (!node.is_object()) continue;
-
-        std::string type;
-        try {
-            if (node.contains("type") && node.at("type").is_string()) {
-                type = node.at("type").get<std::string>();
-            }
-        } catch (...) {}
-        if (type.rfind("model/", 0) != 0) continue;
-
-        int modelIndex = -1;
-        try {
-            if (node.contains("properties") && node.at("properties").is_object()) {
-                const auto& props = node.at("properties");
-                if (props.contains("model_index") && props.at("model_index").is_number_integer()) {
-                    modelIndex = props.at("model_index").get<int>();
-                }
-            }
-        } catch (...) {
-            modelIndex = -1;
-        }
-        if (modelIndex < 0 || _boundModelsByIndex->find(modelIndex) != _boundModelsByIndex->end()) {
-            continue;
-        }
-
-        auto model = std::make_shared<dlcv_infer::Model>();
-        model->modelIndex = modelIndex;
-        model->OwnModelIndex = false;
-        if (preferredDllLoader != nullptr) {
-            const auto queryType = preferredDllLoader->GetIndexTypeFunc();
-            if (queryType == nullptr || queryType(modelIndex) != 1) {
-                throw std::runtime_error("流程子模型在所属 DLL 中无效");
-            }
-            model->SetPreferredDllLoader(preferredDllLoader);
-        }
-        (void)model->GetModelInfo();
-        _boundModelsByIndex->emplace(modelIndex, std::move(model));
-    }
-
-    ExecutionContext ctx;
-    ctx.Set<int>("device_id", deviceId);
-    ctx.Set<std::shared_ptr<const BoundModelMap>>("bound_models_by_index", _boundModelsByIndex);
     try {
+        _boundModelsByIndex = std::make_shared<BoundModelMap>();
+        for (const auto& node : _nodes) {
+            if (!node.is_object()) continue;
+
+            std::string type;
+            try {
+                if (node.contains("type") && node.at("type").is_string()) {
+                    type = node.at("type").get<std::string>();
+                }
+            } catch (...) {}
+            if (type.rfind("model/", 0) != 0) continue;
+
+            int modelIndex = -1;
+            try {
+                if (node.contains("properties") && node.at("properties").is_object()) {
+                    const auto& props = node.at("properties");
+                    if (props.contains("model_index") && props.at("model_index").is_number_integer()) {
+                        modelIndex = props.at("model_index").get<int>();
+                    }
+                }
+            } catch (...) {
+                modelIndex = -1;
+            }
+            if (modelIndex < 0 || _boundModelsByIndex->find(modelIndex) != _boundModelsByIndex->end()) {
+                continue;
+            }
+
+            auto model = std::make_shared<dlcv_infer::Model>();
+            model->modelIndex = modelIndex;
+            model->OwnModelIndex = false;
+            if (preferredDllLoader != nullptr) {
+                const auto queryType = preferredDllLoader->GetIndexTypeFunc();
+                if (queryType == nullptr || queryType(modelIndex) != 1) {
+                    throw std::runtime_error("流程子模型在所属 DLL 中无效");
+                }
+                model->SetPreferredDllLoader(preferredDllLoader);
+            }
+            (void)model->GetModelInfo();
+            _boundModelsByIndex->emplace(modelIndex, std::move(model));
+        }
+
+        ExecutionContext ctx;
+        ctx.Set<int>("device_id", deviceId);
+        ctx.Set<std::shared_ptr<const BoundModelMap>>("bound_models_by_index", _boundModelsByIndex);
         if (modelBinaryStore) {
             ctx.Set<std::shared_ptr<const ModelBinaryStore>>(
                 "model_binary_store", modelBinaryStore);
@@ -691,17 +692,16 @@ Json FlowGraphModel::LoadFromRoot(
             }
             if (simpleMessage.empty()) simpleMessage = "unknown error";
             report = Json::object({ {"code", 1}, {"message", simpleMessage} });
+            ReleaseOwnedModelsNoexcept();
+            _loadedModelMeta = Json::array();
+            return report;
         }
 
-        // 使用预加载阶段生成的模型池 key 保留模型引用；model_index 节点直接复用已绑定对象。
+        // 每个模型池 key 分别保留引用，即使不同来源共享同一 index；索引节点没有模型池 key。
         for (const auto& item : _loadedModelMeta) {
             if (!IsModelMeta(item)) continue;
             int modelIndex = -1;
             try { if (item.contains("model_index")) modelIndex = ReadIntField(item, "model_index", -1); } catch (...) {}
-            if (modelIndex >= 0 && _boundModelsByIndex && _boundModelsByIndex->find(modelIndex) != _boundModelsByIndex->end()) {
-                continue;
-            }
-
             std::string key;
             try {
                 if (item.contains("model_pool_key") && item.at("model_pool_key").is_string()) {
@@ -815,6 +815,13 @@ Json FlowGraphModel::InferInternal(const std::vector<cv::Mat>& images, const Jso
     ModelLifecycleReadGuard lifecycleGuard;
     if (!_loaded) throw std::runtime_error("flow graph not loaded");
     if (images.empty()) throw std::invalid_argument("images is empty");
+
+    // 全量释放后不得通过旧流程重新加载子模型。
+    for (const auto& lease : _acquiredModelLeases) {
+        if (!lease.IsCurrent()) {
+            throw std::runtime_error("流程子模型已释放，请重新加载流程");
+        }
+    }
 
     // 入口与 C# 对齐：前端输入语义为 RGB。
     // 调用方负责准备通道顺序；FlowGraph 入口仅透传。

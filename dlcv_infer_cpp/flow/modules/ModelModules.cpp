@@ -110,6 +110,14 @@ void ModelPoolLease::Reset() noexcept {
     }
 }
 
+bool ModelPoolLease::IsCurrent() const {
+    if (!_model || _key.empty() || _entryIdentity == 0) return false;
+    auto& pool = ModelPool::Instance();
+    std::lock_guard<std::mutex> lock(pool._mu);
+    const auto it = pool._cache.find(_key);
+    return it != pool._cache.end() && it->second.identity == _entryIdentity;
+}
+
 std::string ModelPool::MakeKey(const std::string& modelIdentityUtf8, int deviceId) {
     return modelIdentityUtf8 + "|dev:" + std::to_string(deviceId);
 }
@@ -281,10 +289,11 @@ void BaseModelModule::LoadModel() {
             }
         }
 
-        _model = std::make_shared<dlcv_infer::Model>();
-        _model->modelIndex = _modelIndex;
-        _model->OwnModelIndex = false;
-        (void)_model->GetModelInfo();
+        auto model = std::make_shared<dlcv_infer::Model>();
+        model->modelIndex = _modelIndex;
+        model->OwnModelIndex = false;
+        (void)model->GetModelInfo();
+        _model = std::move(model);
         return;
     }
     if (!_modelBufferKey.empty()) {

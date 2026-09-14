@@ -87,8 +87,6 @@ namespace dlcv_infer_csharp
         public KeepMaxClock dlcv_keep_max_clock;
 
         private static DllLoader _instance;
-        private static readonly Dictionary<DogProvider, DllLoader> _loaders =
-            new Dictionary<DogProvider, DllLoader>();
         private static readonly Dictionary<IntPtr, DllLoader> _moduleLoaders =
             new Dictionary<IntPtr, DllLoader>();
         private static readonly object _lock = new object();
@@ -121,7 +119,7 @@ namespace dlcv_infer_csharp
                 lock (_lock)
                 {
                     if (_instance == null)
-                        _instance = GetOrCreateLoaderLocked(AutoDetectProvider());
+                        _instance = CreateLoader(AutoDetectProvider());
                     return _instance;
                 }
             }
@@ -134,28 +132,29 @@ namespace dlcv_infer_csharp
 
         internal static DllLoader GetForModel(string modelPath)
         {
-            DogProvider? needed = ResolveProviderFromHeader(modelPath);
-            if (!needed.HasValue)
-                return Instance;
-
-            lock (_lock)
-            {
-                ValidateProviderAvailability(needed.Value);
-                _instance = GetOrCreateLoaderLocked(needed.Value);
-                return _instance;
-            }
+            return GetAuthorizedDefaultLoader(ResolveProviderFromHeader(modelPath));
         }
 
         internal static DllLoader ForModel(byte[] modelData, string modelName)
         {
-            DogProvider? needed = ResolveProviderFromHeader(modelData, modelName);
-            if (!needed.HasValue)
-                return Instance;
+            return GetAuthorizedDefaultLoader(ResolveProviderFromHeader(modelData, modelName));
+        }
 
+        private static DllLoader GetAuthorizedDefaultLoader(DogProvider? needed)
+        {
             lock (_lock)
             {
-                ValidateProviderAvailability(needed.Value);
-                _instance = GetOrCreateLoaderLocked(needed.Value);
+                List<DogProvider> available = DogUtils.GetAvailableProviders();
+                if (needed.HasValue && !available.Contains(needed.Value))
+                {
+                    if (available.Count == 0)
+                        throw new Exception("未检测到授权");
+                    throw new Exception($"当前使用的是 {FormatProviderNames(available)}，加载的模型是 {ProviderToDisplayName(needed.Value)} 格式，类型错误");
+                }
+
+                // 模型头只检查授权；普通模型始终复用进程首次选定的 DLL。
+                if (_instance == null)
+                    _instance = CreateLoader(SelectPreferredProvider(available));
                 return _instance;
             }
         }
@@ -167,7 +166,7 @@ namespace dlcv_infer_csharp
                 if (_instance != null)
                     return _instance;
 
-                _instance = GetOrCreateLoaderLocked(DogProvider.Sentinel);
+                _instance = CreateLoader(DogProvider.Sentinel);
                 return _instance;
             }
         }
@@ -247,22 +246,16 @@ namespace dlcv_infer_csharp
             if (candidates == null)
                 throw new ArgumentNullException(nameof(candidates));
 
-            var queryableCandidates = new List<DllLoader>();
+            bool hasTypeQuery = false;
+            DllLoader matchedLoader = null;
+            int matchedType = 0;
+            var matchingModuleNames = new List<string>();
             foreach (DllLoader candidate in candidates)
             {
-                if (candidate.dlcv_get_index_type_c != null)
-                    queryableCandidates.Add(candidate);
-            }
+                if (candidate.dlcv_get_index_type_c == null)
+                    continue;
+                hasTypeQuery = true;
 
-            if (queryableCandidates.Count == 0)
-            {
-                throw new NotSupportedException(
-                    "进程内没有已加载且提供 dlcv_get_index_type_c 的推理 DLL，无法恢复共享 index");
-            }
-
-            var matches = new List<Tuple<DllLoader, int>>();
-            foreach (DllLoader candidate in queryableCandidates)
-            {
                 int nativeType;
                 try
                 {
@@ -282,31 +275,26 @@ namespace dlcv_infer_csharp
                         "共享 index 查询返回未知类型: " + nativeType + "，DLL=" + candidate.GetModuleDisplayName());
                 }
 
-                matches.Add(Tuple.Create(candidate, nativeType));
+                matchedLoader = candidate;
+                matchedType = nativeType;
+                matchingModuleNames.Add(candidate.GetModuleDisplayName());
             }
 
-            if (matches.Count == 0)
+            if (!hasTypeQuery)
             {
+                throw new NotSupportedException(
+                    "进程内没有已加载且提供 dlcv_get_index_type_c 的推理 DLL，无法恢复共享 index");
+            }
+            if (matchedLoader == null)
                 throw new InvalidOperationException("进程内已加载的推理 DLL 均未找到共享 index: " + index);
-            }
-            if (matches.Count > 1)
+            if (matchingModuleNames.Count > 1)
             {
-                var names = new List<string>();
-                foreach (Tuple<DllLoader, int> match in matches)
-                    names.Add(match.Item1.GetModuleDisplayName());
                 throw new InvalidOperationException(
-                    "共享 index 同时存在于多个 DLL，无法确定所属模块: " + string.Join("、", names));
+                    "共享 index 同时存在于多个 DLL，无法确定所属模块: " + string.Join("、", matchingModuleNames));
             }
 
-            indexType = IndexTypeName(matches[0].Item2);
-            return matches[0].Item1;
-        }
-
-        private static string IndexTypeName(int nativeType)
-        {
-            if (nativeType == 1) return "model";
-            if (nativeType == 2) return "flow";
-            throw new InvalidOperationException("共享 index 类型无效: " + nativeType);
+            indexType = matchedType == 1 ? "model" : "flow";
+            return matchedLoader;
         }
 
         internal void EnsureSharedIndexSupport(string indexType)
@@ -334,11 +322,9 @@ namespace dlcv_infer_csharp
 
         public JObject GetModelInfoByIndex(int index)
         {
-            return InvokeJson(() =>
-            {
-                EnsureDelegate(dlcv_get_model_info_c, "dlcv_get_model_info_c");
-                return dlcv_get_model_info_c(index);
-            }, "获取模型信息");
+            EnsureDelegate(dlcv_get_model_info_c, "dlcv_get_model_info_c");
+            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
+            return ReadJsonResult(dlcv_get_model_info_c(index), "获取模型信息");
         }
 
         public int RegisterFlow(string flowJson)
@@ -346,16 +332,24 @@ namespace dlcv_infer_csharp
             if (flowJson == null)
                 throw new ArgumentNullException(nameof(flowJson));
             EnsureDelegate(dlcv_register_flow_c, "dlcv_register_flow_c");
-            return InvokeUtf8(flowJson, dlcv_register_flow_c);
+
+            byte[] bytes = Encoding.UTF8.GetBytes(flowJson + "\0");
+            GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+            try
+            {
+                return dlcv_register_flow_c(handle.AddrOfPinnedObject());
+            }
+            finally
+            {
+                handle.Free();
+            }
         }
 
         public JObject GetFlowInfo(int index)
         {
-            return InvokeJson(() =>
-            {
-                EnsureDelegate(dlcv_get_flow_info_c, "dlcv_get_flow_info_c");
-                return dlcv_get_flow_info_c(index);
-            }, "获取流程信息");
+            EnsureDelegate(dlcv_get_flow_info_c, "dlcv_get_flow_info_c");
+            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
+            return ReadJsonResult(dlcv_get_flow_info_c(index), "获取流程信息");
         }
 
         public int FreeFlow(int index)
@@ -376,11 +370,8 @@ namespace dlcv_infer_csharp
             return dlcv_unbind_index_c(index);
         }
 
-        private delegate IntPtr JsonCall();
-
-        private JObject InvokeJson(JsonCall call, string operation)
+        private JObject ReadJsonResult(IntPtr resultPtr, string operation)
         {
-            IntPtr resultPtr = call();
             if (resultPtr == IntPtr.Zero)
                 throw new Exception(operation + "失败：返回结果为空");
 
@@ -393,23 +384,7 @@ namespace dlcv_infer_csharp
             }
             finally
             {
-                if (dlcv_free_result == null)
-                    throw new MissingMethodException("未找到 dlcv_free_result");
                 dlcv_free_result(resultPtr);
-            }
-        }
-
-        private static int InvokeUtf8(string value, RegisterFlowDelegate call)
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes(value + "\0");
-            GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
-            try
-            {
-                return call(handle.AddrOfPinnedObject());
-            }
-            finally
-            {
-                handle.Free();
             }
         }
 
@@ -427,19 +402,6 @@ namespace dlcv_infer_csharp
         {
             if (value == null)
                 throw new MissingMethodException("未找到 " + name);
-        }
-
-        private static DllLoader GetOrCreateLoaderLocked(DogProvider provider)
-        {
-            DllLoader loader;
-            if (_loaders.TryGetValue(provider, out loader))
-                return loader;
-
-            loader = CreateLoader(provider);
-            _loaders.Add(provider, loader);
-            if (loader._moduleHandle != IntPtr.Zero)
-                _moduleLoaders[loader._moduleHandle] = loader;
-            return loader;
         }
 
         private static List<DllLoader> GetLoadedModuleLoadersLocked()
@@ -462,13 +424,6 @@ namespace dlcv_infer_csharp
 
                 if (loader != null)
                     result.Add(loader);
-            }
-
-            foreach (DllLoader loader in _loaders.Values)
-            {
-                if (loader == null || loader._moduleHandle == IntPtr.Zero || !seen.Add(loader._moduleHandle))
-                    continue;
-                result.Add(loader);
             }
 
             return result;
@@ -512,20 +467,6 @@ namespace dlcv_infer_csharp
             return LoadedDogProvider.ToString();
         }
 
-        private static void ValidateProviderAvailability(DogProvider needed)
-        {
-            List<DogProvider> availableProviders = DogUtils.GetAvailableProviders();
-            if (availableProviders.Contains(needed))
-                return;
-
-            if (availableProviders.Count == 0)
-                throw new Exception("未检测到授权");
-
-            string current = FormatProviderNames(availableProviders);
-            string neededName = ProviderToDisplayName(needed);
-            throw new Exception($"当前使用的是 {current}，加载的模型是 {neededName} 格式，类型错误");
-        }
-
         private static DllLoader CreateLoader(DogProvider provider)
         {
             var loader = new DllLoader();
@@ -551,6 +492,14 @@ namespace dlcv_infer_csharp
             }
             loader.LoadedNativeDllName = loader.DllName;
             loader.LoadDll();
+            DllLoader existing;
+            if (_moduleLoaders.TryGetValue(loader._moduleHandle, out existing))
+            {
+                // 已从另一语言发现过同一模块，复用现有 loader 并撤销本次多余的模块引用。
+                FreeLibrary(loader._moduleHandle);
+                return existing;
+            }
+            _moduleLoaders.Add(loader._moduleHandle, loader);
             return loader;
         }
 
@@ -649,7 +598,7 @@ namespace dlcv_infer_csharp
             }
 
             _moduleHandle = hModule;
-            _modulePath = DllPath;
+            _modulePath = GetModulePath(hModule);
             LoadDelegates(hModule);
         }
 
@@ -774,6 +723,9 @@ namespace dlcv_infer_csharp
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr LoadLibrary(string lpFileName);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool FreeLibrary(IntPtr moduleHandle);
 
         [DllImport("kernel32.dll", EntryPoint = "GetCurrentProcess")]
         private static extern IntPtr GetCurrentProcess();

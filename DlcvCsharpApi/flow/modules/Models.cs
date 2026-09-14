@@ -70,55 +70,45 @@ namespace DlcvModules
 					try { _modelPath = Context.Get<string>("model_path", null); } catch { }
 				}
 
-				if (_modelIndex >= 0)
+				var boundModels = Context != null
+					? Context.Get<Dictionary<int, Model>>("flow_models", null) : null;
+				if (boundModels != null)
 				{
-					Dictionary<int, Model> flowModels = null;
-					try { flowModels = Context != null ? Context.Get<Dictionary<int, Model>>("flow_models", null) : null; } catch { }
-					if (flowModels == null || !flowModels.ContainsKey(_modelIndex))
+					if (!boundModels.TryGetValue(_modelIndex, out _model) || _model == null ||
+						_model.modelIndex != _modelIndex)
 						throw new InvalidOperationException("流程模型索引未加载: " + _modelIndex);
-					_model = flowModels[_modelIndex];
+					// 共享子模型必须完成绑定，不能把绑定异常当作缺少可选元信息。
+					_modelInfo = _model.GetCachedModelInfo() ?? _model.GetModelInfo();
 				}
 				else
 				{
-				FlowModelSource modelSource = null;
-				if (Context != null)
-				{
-					try
+					FlowModelSource modelSource = null;
+					var sources = Context != null
+						? Context.Get<Dictionary<int, FlowModelSource>>("flow_model_sources", null) : null;
+					if (sources != null && (!sources.TryGetValue(NodeId, out modelSource) || modelSource == null))
+						throw new InvalidOperationException("流程模型节点缺少内存数据: " + NodeId);
+
+					string normalizedPath = modelSource == null ? NormalizeModelPath(_modelPath) : null;
+					string cacheKey = modelSource != null
+						? BuildBinaryCacheKey(modelSource.CacheKey, deviceId)
+						: (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
+					lock (_modelCacheLock)
 					{
-						var sources = Context.Get<Dictionary<int, FlowModelSource>>("flow_model_sources", null);
-						if (sources != null)
+						if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
 						{
-							sources.TryGetValue(NodeId, out modelSource);
+							_model = modelSource != null
+								? new Model(modelSource.Data, modelSource.ModelName, deviceId)
+								: new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
+							_modelCache[cacheKey] = _model;
 						}
 					}
-					catch { }
 				}
-
-				string normalizedPath = modelSource == null ? NormalizeModelPath(_modelPath) : null;
-				string cacheKey = modelSource != null
-					? BuildBinaryCacheKey(modelSource.CacheKey, deviceId)
-					: (normalizedPath ?? "") + "|" + deviceId + "|" + rpcMode;
-				lock (_modelCacheLock)
-				{
-					if (!_modelCache.TryGetValue(cacheKey, out _model) || _model == null)
-					{
-						_model = modelSource != null
-							? new Model(modelSource.Data, modelSource.ModelName, deviceId)
-							: new Model(normalizedPath ?? _modelPath, deviceId, rpcMode, true);
-						_modelCache[cacheKey] = _model;
-					}
-				}
-				}
-				// 多个模块/面可共享同一路径模型实例；不在模块侧单独 Dispose。
-				SyncModelMeta();
 			}
-			else
-			{
-				SyncModelMeta();
-			}
+			// 同一路径的模型和共享索引对象由所属流程或缓存释放，模块不单独释放。
+			SyncModelMeta();
 		}
 
-		public int LoadedModelIndex { get { return _model != null ? _model.modelIndex : -1; } }
+		internal Model LoadedModel { get { return _model; } }
 
 		public static void ClearModelCache()
 		{
@@ -128,32 +118,55 @@ namespace DlcvModules
 			}
 		}
 
-		internal static void ReleaseBinaryModels(Dictionary<int, FlowModelSource> modelSources, int deviceId)
+		internal static void ReleaseBinaryModels(
+			Dictionary<int, FlowModelSource> modelSources,
+			int deviceId,
+			Dictionary<int, Model> loadedModelsByNode)
 		{
 			if (modelSources == null || modelSources.Count == 0)
 				return;
 
-			var releasedModels = new HashSet<Model>();
+			var errors = new List<Exception>();
 			lock (_modelCacheLock)
 			{
+				// 全量释放可能已清空缓存，所属流程仍须保留并释放实际加载的对象。
+				var modelsToRelease = new HashSet<Model>(loadedModelsByNode.Values);
 				foreach (FlowModelSource source in modelSources.Values)
 				{
-					if (source == null)
-						continue;
-
+					if (source == null) continue;
 					string cacheKey = BuildBinaryCacheKey(source.CacheKey, deviceId);
 					if (_modelCache.TryGetValue(cacheKey, out Model model) && model != null)
+						modelsToRelease.Add(model);
+				}
+
+				var releasedModels = new HashSet<Model>();
+				foreach (Model model in modelsToRelease)
+				{
+					if (model == null) continue;
+					try
 					{
+						model.Dispose();
 						releasedModels.Add(model);
-						_modelCache.Remove(cacheKey);
 					}
+					catch (Exception ex) { errors.Add(ex); }
+				}
+
+				// 只移除释放成功的对象，失败对象和内存来源保留到下次释放。
+				foreach (FlowModelSource source in modelSources.Values)
+				{
+					if (source == null) continue;
+					string cacheKey = BuildBinaryCacheKey(source.CacheKey, deviceId);
+					if (_modelCache.TryGetValue(cacheKey, out Model model) && releasedModels.Contains(model))
+						_modelCache.Remove(cacheKey);
+				}
+				foreach (int nodeId in new List<int>(loadedModelsByNode.Keys))
+				{
+					if (releasedModels.Contains(loadedModelsByNode[nodeId]))
+						loadedModelsByNode.Remove(nodeId);
 				}
 			}
-
-			foreach (Model model in releasedModels)
-			{
-				model.Dispose();
-			}
+			if (errors.Count > 0)
+				throw new AggregateException("释放流程内存模型失败", errors);
 		}
 
 		private static string BuildBinaryCacheKey(string sourceKey, int deviceId)

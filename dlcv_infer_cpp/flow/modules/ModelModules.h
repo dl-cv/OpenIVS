@@ -62,6 +62,8 @@ public:
 
 private:
     friend class ModelPool;
+    friend class FlowGraphModel;
+    bool IsCurrent() const;
     DLCV_INFER_CPP_API ModelPoolLease(
         std::shared_ptr<dlcv_infer::Model> model,
         std::string key,

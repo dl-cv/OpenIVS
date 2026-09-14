@@ -9,7 +9,7 @@ using dlcv_infer_csharp;
 namespace DlcvModules
 {
     /// <summary>
-    /// 从 .dvst 或 .dvso 归档读取流程配置和子模型数据。
+    /// 在内存中解析 .dvst 或 .dvso 归档，子模型数据不写入文件。
     /// </summary>
     public class DvsModel : FlowGraphModel
     {
@@ -67,12 +67,12 @@ namespace DlcvModules
             if (savedPipeline == null) throw new ArgumentNullException(nameof(savedPipeline));
             if (modelBindings == null) throw new ArgumentNullException(nameof(modelBindings));
 
-            var modelsByIndex = new Dictionary<int, Model>();
             var bindingsByNode = new Dictionary<int, int>();
             foreach (JToken token in modelBindings)
             {
                 JObject binding = token as JObject;
-                if (binding == null || binding["node_id"] == null || binding["model_index"] == null)
+                if (binding == null || binding["node_id"]?.Type != JTokenType.Integer ||
+                    binding["model_index"]?.Type != JTokenType.Integer)
                     throw new InvalidDataException("流程模型绑定格式无效");
                 int nodeId;
                 int modelIndex;
@@ -88,9 +88,6 @@ namespace DlcvModules
                 if (nodeId < 0 || modelIndex < 0 || bindingsByNode.ContainsKey(nodeId))
                     throw new InvalidDataException("流程模型绑定索引无效");
                 bindingsByNode[nodeId] = modelIndex;
-                modelsByIndex[modelIndex] = ownerLoader != null
-                    ? Model.CreateFromKnownLoader(modelIndex, ownerLoader)
-                    : new Model { modelIndex = modelIndex, OwnModelIndex = false };
             }
 
             JObject root = (JObject)savedPipeline.DeepClone();
@@ -100,7 +97,7 @@ namespace DlcvModules
             foreach (JObject node in nodes.OfType<JObject>())
             {
                 string nodeType = node["type"]?.ToString() ?? string.Empty;
-                if (!nodeType.StartsWith("model/", StringComparison.Ordinal)) continue;
+                if (!nodeType.StartsWith("model/", StringComparison.OrdinalIgnoreCase)) continue;
 
                 int nodeId = ReadNodeId(node, -1);
                 if (!foundNodeIds.Add(nodeId))
@@ -124,12 +121,31 @@ namespace DlcvModules
                 if (!foundNodeIds.Contains(nodeId))
                     throw new InvalidDataException("流程模型绑定节点不存在：" + nodeId);
             }
+            // 配置检查完成后再创建借用对象；同一子模型只增加一次使用记录。
+            var modelsByIndex = new Dictionary<int, Model>();
+            try
+            {
+                foreach (int modelIndex in bindingsByNode.Values)
+                {
+                    if (modelsByIndex.ContainsKey(modelIndex)) continue;
+                    modelsByIndex.Add(modelIndex, ownerLoader != null
+                        ? Model.CreateFromKnownLoader(modelIndex, ownerLoader)
+                        : new Model { modelIndex = modelIndex, OwnModelIndex = false });
+                }
+            }
+            catch (Exception loadError)
+            {
+                var errors = new List<Exception> { loadError };
+                foreach (Model model in modelsByIndex.Values)
+                {
+                    try { model.Dispose(); }
+                    catch (Exception disposeError) { errors.Add(disposeError); }
+                }
+                if (errors.Count > 1)
+                    throw new AggregateException("恢复流程及释放子模型失败", errors);
+                throw;
+            }
             return LoadFromRoot(root, deviceId, modelsByIndex, savedPipeline);
-        }
-
-        internal new DllLoader GetLoadedModelLoader(int modelIndex)
-        {
-            return base.GetLoadedModelLoader(modelIndex);
         }
 
         private static void ReadArchive(Stream stream, out JObject pipelineJson, out Dictionary<string, ArchiveEntry> entries)
@@ -304,6 +320,7 @@ namespace DlcvModules
                 JObject properties = node["properties"] as JObject;
                 string originalPath = properties?["model_path"]?.ToString();
                 int nodeId = ReadNodeId(node, i);
+                node["id"] = nodeId;
                 if (string.IsNullOrWhiteSpace(originalPath))
                     throw new InvalidDataException($"模型节点 {nodeId} 缺少 model_path");
 

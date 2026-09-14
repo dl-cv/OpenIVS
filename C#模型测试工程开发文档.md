@@ -169,6 +169,8 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 
 ## 6. 构建与运行
 
+- 产品打包使用根目录 `1_编译打包.bat`，仅构建 C# 发布所需项目，不构建控制台回归测试。
+- 跨语言回归先执行 `Test/1_编译测试.bat`，串行构建 C++、C、C# 控制台测试工程；此入口不签名、不打包、不安装，也不执行测试。构建成功后再按需要运行以下测试命令。
 - `DlcvCSharpTest` 以仅构建方式引用 `DlcvDemo`、`DlcvDemo2`。构建控制台测试工程时同步生成反射自测需要的两个程序；Demo 程序集不作为测试工程的编译引用。
 
 ### 6.1 统一测试入口
@@ -180,7 +182,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 
 测试程序在单个进程内依次执行无外部参数自测和固定模型回归用例。完整清单执行结束后返回，任一测试失败时返回 `1`，参数或日志路径无效时返回 `2`。
 
-- 解决方案级构建、项目级构建与发布前构建验证统一通过 `.cursor/skills/vs-build/scripts/build.py` 执行，入口见 `开发文档.md` 的“统一编译说明”
+- 单项目日常构建使用 `.cursor/skills/vs-build/scripts/build.py`；产品打包与完整回归构建分别使用上述两个独立入口。
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
   - `Release\dlcv_infer_cpp_test.exe`

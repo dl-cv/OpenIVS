@@ -120,6 +120,12 @@ try {
         Write-Output ("详细日志: " + $finalLogPath)
     }
 
+    if ($testProcess.ExitCode -eq 0 -and
+        ($summaryStart -lt 0 -or -not [IO.File]::Exists($managedLogPath))) {
+        Write-Output "测试程序未提供完整汇总与详细日志，不能标为通过。"
+        exit 1
+    }
+
     exit $testProcess.ExitCode
 }
 finally {

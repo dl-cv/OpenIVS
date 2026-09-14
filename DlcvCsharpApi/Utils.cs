@@ -389,14 +389,18 @@ namespace dlcv_infer_csharp
 
         public static void FreeAllModels()
         {
+            var errors = new List<Exception>();
             foreach (DllLoader loader in DllLoader.GetLoadedLoaders())
             {
-                loader.dlcv_free_all_models?.Invoke();
+                try { loader.dlcv_free_all_models?.Invoke(); }
+                catch (Exception ex) { errors.Add(ex); }
             }
 
-            // 底层模型已全部释放，同步清空路径缓存，避免同路径再次命中失效 index。
+            // 即使某个 DLL 释放失败，其余 DLL 的旧索引也可能失效，不能继续复用缓存。
             Model.ClearModelCache();
             DlcvModules.BaseModelModule.ClearModelCache();
+            if (errors.Count > 0)
+                throw new AggregateException("释放全部模型失败", errors);
         }
 
         public static JObject GetDeviceInfo()

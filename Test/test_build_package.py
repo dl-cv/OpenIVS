@@ -1,3 +1,4 @@
+import argparse
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -51,6 +52,41 @@ class CopyPackageFilesTest(unittest.TestCase):
             self.assertNotIn("DlcvDemo.exe", actual_names)
             self.assertNotIn("DlcvDemo.exe.config", actual_names)
             self.assertNotIn("old-runtime.dll", actual_names)
+
+
+class BuildScopeTest(unittest.TestCase):
+    def test_packaging_builds_only_the_csharp_product(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        with (
+            patch.object(build_package, "parse_args", return_value=argparse.Namespace(install=False)),
+            patch.object(build_package.os, "chdir"),
+            patch.object(build_package, "require_file"),
+            patch.object(build_package, "run_step") as run_step,
+            patch.object(build_package, "copy_package_files", return_value=[]),
+            patch.object(build_package, "find_signing_certificate_thumbprint", return_value="test"),
+            patch.object(build_package, "snapshot_wheels", return_value={}),
+            patch.object(build_package, "find_generated_wheel", return_value=repo_root / "dist" / "test.whl"),
+        ):
+            self.assertEqual(0, build_package.main())
+
+        built_projects = []
+        for call in run_step.call_args_list:
+            for argument in call.args[1]:
+                if argument.endswith((".csproj", ".vcxproj", ".sln")):
+                    built_projects.append(Path(argument))
+        self.assertEqual([repo_root / "DlcvDemo" / "DlcvDemo.csproj"], built_projects)
+
+    def test_regression_build_has_a_separate_serial_entry(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = (repo_root / "Test" / "1_编译测试.bat").read_text(encoding="ascii")
+        lines = script.splitlines()
+        commands = [line for line in lines if line.startswith("python ")]
+        self.assertEqual(3, len(commands))
+        for command, project in zip(commands, ("dlcv_infer_cpp_test", "dlcv_infer_c_test", "DlcvCSharpTest")):
+            self.assertIn(project, command)
+            self.assertEqual("if errorlevel 1 exit /b %errorlevel%", lines[lines.index(command) + 1])
+        self.assertNotIn("build_package.py", script)
+        self.assertNotIn("start ", script.lower())
 
 
 class TestProjectDependenciesTest(unittest.TestCase):

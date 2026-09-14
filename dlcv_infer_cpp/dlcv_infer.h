@@ -185,6 +185,7 @@ namespace dlcv_infer {
     public:
         sntl_admin::DogProvider GetDogProvider() const { return dogProvider; }
         std::string GetLoadedNativeDllName() const { return dllName; }
+        void* NativeModuleIdentity() const noexcept { return hModule; }
 
         static DllLoader& Instance();
         static DllLoader& GetExistingOrDefaultSentinel();
@@ -395,7 +396,7 @@ namespace dlcv_infer {
         bool _ownsNativeModelIndex = false;
         bool _ownsRegisteredFlowIndex = false;
         std::mutex _indexStateMu;
-        // DVS 模式：持有临时目录路径，确保在 Model 对象存活期间文件不被删除
+        // 保留现有类成员布局；全内存流程加载时该字符串保持为空。
         std::string _tempDir;
 
         void EnsureBoundIndexReady();

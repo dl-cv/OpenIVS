@@ -20,7 +20,6 @@
 #include <atomic>
 #include <limits>
 #include <cerrno>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -33,7 +32,6 @@
 #include <exception>
 #include <iterator>
 #include <locale>
-#include <random>
 #include <set>
 #include <mutex>
 #include <stdexcept>
@@ -255,13 +253,6 @@ inline void* ResolveSymbol(void* module, const char* name) {
 }
 #endif
 
-struct DvsUnpackResult {
-    Json pipelineRoot = Json::object();
-    Json originalPipelineRoot = Json::object();
-    std::unordered_map<std::string, std::string> fileNameToTemp;
-    std::string tempDir;
-};
-
 struct DvsArchiveData {
     Json pipelineRoot = Json::object();
     Json originalPipelineRoot = Json::object();
@@ -269,55 +260,6 @@ struct DvsArchiveData {
 };
 
 std::atomic<uint64_t> g_nextModelBinaryStoreId{1};
-
-static bool DeleteDirectoryRecursive(const std::string& dir) {
-    if (dir.empty()) return true;
-#ifdef _WIN32
-    WIN32_FIND_DATAA ffd;
-    const std::string pattern = dir + "\\*";
-    HANDLE hFind = FindFirstFileA(pattern.c_str(), &ffd);
-    if (hFind != INVALID_HANDLE_VALUE) {
-        do {
-            const std::string name = ffd.cFileName;
-            if (name == "." || name == "..") continue;
-            const std::string path = dir + "\\" + name;
-            if ((ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-                (void)DeleteDirectoryRecursive(path);
-            } else {
-                SetFileAttributesA(path.c_str(), FILE_ATTRIBUTE_NORMAL);
-                (void)DeleteFileA(path.c_str());
-            }
-        } while (FindNextFileA(hFind, &ffd) != 0);
-        FindClose(hFind);
-    }
-    SetFileAttributesA(dir.c_str(), FILE_ATTRIBUTE_NORMAL);
-    return RemoveDirectoryA(dir.c_str()) != 0;
-#else
-    std::error_code ec;
-    fs::remove_all(dir, ec);
-    return !ec;
-#endif
-}
-
-class TempDirGuard final {
-public:
-    explicit TempDirGuard(std::string dir) : _dir(std::move(dir)) {}
-    ~TempDirGuard() { CleanupNoexcept(); }
-    void Release() { _dir.clear(); }
-    TempDirGuard(const TempDirGuard&) = delete;
-    TempDirGuard& operator=(const TempDirGuard&) = delete;
-    TempDirGuard(TempDirGuard&&) = delete;
-    TempDirGuard& operator=(TempDirGuard&&) = delete;
-
-private:
-    std::string _dir;
-
-    void CleanupNoexcept() {
-        if (_dir.empty()) return;
-        try { (void)DeleteDirectoryRecursive(_dir); } catch (...) {}
-        _dir.clear();
-    }
-};
 
 std::string ToLowerAscii(std::string s) {
     for (size_t i = 0; i < s.size(); i++) {
@@ -380,46 +322,6 @@ std::string GetExtensionWithDot(const std::string& path) {
     const size_t pos = name.find_last_of('.');
     if (pos == std::string::npos) return std::string();
     return name.substr(pos);
-}
-
-std::string RandomHex(size_t len) {
-    static std::mt19937_64 rng{ std::random_device{}() };
-    static const char* kHex = "0123456789abcdef";
-
-    std::string out;
-    out.reserve(len);
-    for (size_t i = 0; i < len; i++) {
-        out.push_back(kHex[static_cast<size_t>(rng() & 0xF)]);
-    }
-    return out;
-}
-
-std::string CreateTempDir() {
-#ifdef _WIN32
-    char tmpPath[MAX_PATH] = { 0 };
-    DWORD n = GetTempPathA(MAX_PATH, tmpPath);
-    if (n == 0 || n >= MAX_PATH) {
-        throw std::runtime_error("failed to get temp directory");
-    }
-    for (int retry = 0; retry < 8; retry++) {
-        const std::string dir = JoinPath(std::string(tmpPath), "DlcvDvs_" + RandomHex(24));
-        if (CreateDirectoryA(dir.c_str(), nullptr) != 0) return dir;
-    }
-#else
-    std::error_code ec;
-    const fs::path base = fs::temp_directory_path(ec);
-    if (ec) {
-        throw std::runtime_error("failed to get temp directory");
-    }
-    for (int retry = 0; retry < 8; retry++) {
-        const fs::path dirPath = base / ("DlcvDvs_" + RandomHex(24));
-        if (fs::create_directory(dirPath, ec)) {
-            return dirPath.string();
-        }
-        if (ec) ec.clear();
-    }
-#endif
-    throw std::runtime_error("failed to create temp directory");
 }
 
 void ReadExactOrThrow(FILE* fp, char* dst, size_t len, const std::string& errMsg) {
@@ -582,178 +484,6 @@ DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
         if (!gotPipeline) throw std::runtime_error("流程模型中未找到 pipeline.json");
         out.originalPipelineRoot = out.pipelineRoot;
         BindPipelineModelBuffers(out.pipelineRoot, *out.modelBinaryStore);
-    } catch (...) {
-        std::fclose(fp);
-        throw;
-    }
-
-    std::fclose(fp);
-    return out;
-}
-
-void CopyStreamToFile(FILE* fp, const std::string& outPath, long long bytes) {
-    if (bytes < 0) throw std::runtime_error("invalid file size in dvst archive");
-    std::ofstream ofs(outPath, std::ios::binary);
-    if (!ofs) throw std::runtime_error("failed to write temp model file: " + outPath);
-
-    std::vector<char> buffer(1024 * 1024);
-    long long remaining = bytes;
-    while (remaining > 0) {
-        const size_t chunk = static_cast<size_t>(std::min<long long>(remaining, static_cast<long long>(buffer.size())));
-        const size_t n = std::fread(buffer.data(), 1, chunk, fp);
-        if (n != chunk) throw std::runtime_error("failed to read dvst file content");
-        ofs.write(buffer.data(), static_cast<std::streamsize>(chunk));
-        if (!ofs) throw std::runtime_error("failed to write temp model file: " + outPath);
-        remaining -= static_cast<long long>(chunk);
-    }
-}
-
-void SkipStream(FILE* fp, long long bytes) {
-    if (bytes < 0) throw std::runtime_error("invalid dvst archive size");
-    std::array<char, 64 * 1024> buffer{};
-    long long remain = bytes;
-    while (remain > 0) {
-        const size_t chunk = static_cast<size_t>(std::min<long long>(remain, static_cast<long long>(buffer.size())));
-        ReadExactOrThrow(fp, buffer.data(), chunk, "failed to skip dvst archive entry");
-        remain -= static_cast<long long>(chunk);
-    }
-}
-
-void RewritePipelineModelPath(Json& pipelineRoot, const std::unordered_map<std::string, std::string>& fileMap) {
-    if (!pipelineRoot.is_object() || !pipelineRoot.contains("nodes") || !pipelineRoot.at("nodes").is_array()) {
-        throw std::runtime_error("pipeline.json missing nodes");
-    }
-
-    for (auto& node : pipelineRoot.at("nodes")) {
-        if (!node.is_object()) continue;
-        if (!node.contains("properties") || !node.at("properties").is_object()) continue;
-
-        auto& props = node.at("properties");
-        if (!props.contains("model_path") || !props.at("model_path").is_string()) continue;
-
-        const std::string originalPath = props.at("model_path").get<std::string>();
-        props["model_path_original"] = originalPath;
-        const std::string originalName = GetFileNameOnly(originalPath);
-        props["model_name"] = originalName.empty() ? originalPath : originalName;
-
-        auto it = fileMap.find(ToLowerAscii(originalPath));
-        if (it != fileMap.end()) {
-            props["model_path"] = it->second;
-            continue;
-        }
-
-        const std::string fileName = GetFileNameOnly(originalPath);
-        it = fileMap.find(ToLowerAscii(fileName));
-        if (it != fileMap.end()) {
-            props["model_path"] = it->second;
-        }
-    }
-}
-
-void WriteUtf8Text(const std::string& path, const std::string& content) {
-    std::ofstream ofs(path, std::ios::binary);
-    if (!ofs) throw std::runtime_error("failed to write file: " + path);
-    ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
-    if (!ofs) throw std::runtime_error("failed to write file: " + path);
-}
-
-DvsUnpackResult UnpackDvsArchiveToTemp(
-    const std::wstring& archivePathW,
-    const Json* storedPipeline = nullptr) {
-#ifdef _WIN32
-    FILE* fp = nullptr;
-    if (_wfopen_s(&fp, archivePathW.c_str(), L"rb") != 0 || fp == nullptr) {
-#else
-    FILE* fp = std::fopen(WideToUtf8Portable(archivePathW).c_str(), "rb");
-    if (fp == nullptr) {
-#endif
-        throw std::runtime_error("failed to open dvst file");
-    }
-
-    DvsUnpackResult out;
-    try {
-        char magic[3] = { 0 };
-        ReadExactOrThrow(fp, magic, 3, "failed to read dvst magic");
-        if (!(magic[0] == 'D' && magic[1] == 'V' && magic[2] == '\n')) {
-            throw std::runtime_error("invalid dvst format: missing DV header");
-        }
-
-        const std::string headerLine = ReadLineOrThrow(fp);
-        const Json header = Json::parse(headerLine);
-        if (!header.is_object() ||
-            !header.contains("file_list") || !header.at("file_list").is_array() ||
-            !header.contains("file_size") || !header.at("file_size").is_array() ||
-            header.at("file_list").size() != header.at("file_size").size()) {
-            throw std::runtime_error("invalid dvst header: file_list/file_size mismatch");
-        }
-
-        out.tempDir = CreateTempDir();
-        TempDirGuard unpackGuard(out.tempDir);
-        std::unordered_map<std::string, std::string> fileNameToTemp;
-        std::unordered_set<std::string> modelArchiveEntries;
-        if (storedPipeline != nullptr && storedPipeline->is_object() &&
-            storedPipeline->contains("nodes") && storedPipeline->at("nodes").is_array()) {
-            for (const auto& node : storedPipeline->at("nodes")) {
-                if (!node.is_object() || !node.contains("properties") || !node.at("properties").is_object()) continue;
-                const std::string nodeType = node.value("type", std::string());
-                if (nodeType.rfind("model/", 0) != 0) continue;
-                const auto& properties = node.at("properties");
-                if (!properties.contains("model_path") || !properties.at("model_path").is_string()) continue;
-                const std::string modelPath = properties.at("model_path").get<std::string>();
-                modelArchiveEntries.insert(ToLowerAscii(modelPath));
-                modelArchiveEntries.insert(ToLowerAscii(GetFileNameOnly(modelPath)));
-            }
-        }
-        bool gotPipeline = false;
-
-        const auto& fileList = header.at("file_list");
-        const auto& fileSize = header.at("file_size");
-        for (size_t i = 0; i < fileList.size(); i++) {
-            if (!fileList.at(i).is_string()) throw std::runtime_error("invalid dvst header: file_list item is not string");
-
-            const std::string fileName = fileList.at(i).get<std::string>();
-            const long long size = ReadFileSizeFromJson(fileSize.at(i));
-            if (size < 0) throw std::runtime_error("invalid file size in dvst header");
-
-            if (ToLowerAscii(fileName) == "pipeline.json") {
-                if (storedPipeline != nullptr) {
-                    SkipStream(fp, size);
-                } else {
-                    std::string text(static_cast<size_t>(size), '\0');
-                    if (size > 0) {
-                        ReadExactOrThrow(fp, &text[0], static_cast<size_t>(size), "failed to read pipeline.json");
-                    }
-                    out.pipelineRoot = Json::parse(text);
-                    out.originalPipelineRoot = out.pipelineRoot;
-                }
-                gotPipeline = true;
-            } else {
-                const std::string lowerFileName = ToLowerAscii(fileName);
-                if (storedPipeline != nullptr &&
-                    (modelArchiveEntries.find(lowerFileName) != modelArchiveEntries.end() ||
-                     modelArchiveEntries.find(ToLowerAscii(GetFileNameOnly(fileName))) != modelArchiveEntries.end())) {
-                    SkipStream(fp, size);
-                    continue;
-                }
-                std::string ext = GetExtensionWithDot(fileName);
-                if (ext.empty()) ext = ".tmp";
-                const std::string safeName = RandomHex(32) + ext;
-                const std::string fullPath = JoinPath(out.tempDir, safeName);
-
-                CopyStreamToFile(fp, fullPath, size);
-                fileNameToTemp[lowerFileName] = fullPath;
-                fileNameToTemp[ToLowerAscii(GetFileNameOnly(fileName))] = fullPath;
-            }
-        }
-
-        if (!gotPipeline) throw std::runtime_error("pipeline.json not found in dvst archive");
-        if (storedPipeline != nullptr) {
-            out.pipelineRoot = *storedPipeline;
-            out.originalPipelineRoot = *storedPipeline;
-        }
-        out.fileNameToTemp = fileNameToTemp;
-        RewritePipelineModelPath(out.pipelineRoot, fileNameToTemp);
-        unpackGuard.Release();
     } catch (...) {
         std::fclose(fp);
         throw;
@@ -1386,6 +1116,9 @@ cv::Mat NormalizeInferInputImage(const cv::Mat& src, int expectedChannels) {
 
 namespace dlcv_infer {
 
+    // C 与 C++ 入口共用全局释放流程；模型表的销毁在底层释放前完成。
+    void ClearCApiModelsForFreeAllModels();
+
     static std::mutex g_modelLoadMu;
 
     namespace {
@@ -1394,12 +1127,7 @@ namespace dlcv_infer {
             return mutex;
         }
 
-        std::unordered_map<int, std::unique_ptr<DllLoader>>& DllLoaderRegistry() {
-            static std::unordered_map<int, std::unique_ptr<DllLoader>> loaders;
-            return loaders;
-        }
-
-        std::unordered_map<void*, std::unique_ptr<DllLoader>>& ExistingModuleLoaderRegistry() {
+        std::unordered_map<void*, std::unique_ptr<DllLoader>>& DllLoaderRegistry() {
             static std::unordered_map<void*, std::unique_ptr<DllLoader>> loaders;
             return loaders;
         }
@@ -1414,11 +1142,6 @@ namespace dlcv_infer {
             return loader;
         }
 
-        void SetDefaultLoader(DllLoader& loader) {
-            std::lock_guard<std::mutex> lock(DefaultLoaderMutex());
-            DefaultLoaderSlot() = &loader;
-        }
-
         struct LoadedInferModule final {
             sntl_admin::DogProvider Provider = sntl_admin::DogProvider::Unknown;
             void* Module = nullptr;
@@ -1431,7 +1154,7 @@ namespace dlcv_infer {
             std::function<int(int)> Query;
         };
 
-        static DllLoader* SelectSharedIndexCandidate(
+        static const SharedIndexCandidate& SelectSharedIndexCandidate(
             int index,
             const std::vector<SharedIndexCandidate>& candidates,
             int& indexType) {
@@ -1479,7 +1202,7 @@ namespace dlcv_infer {
                 throw std::runtime_error("共享 index 在多个推理 DLL 中有效，无法确定所属模块");
             }
             indexType = matches.front().Type;
-            return matches.front().Candidate->Loader;
+            return *matches.front().Candidate;
         }
 
         static std::string LowerAscii(std::string value) {
@@ -2017,14 +1740,22 @@ namespace dlcv_infer {
     DllLoader& DllLoader::GetOrCreateForProvider(sntl_admin::DogProvider provider) {
         std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());
         auto& loaders = DllLoaderRegistry();
-        const int providerKey = static_cast<int>(provider);
-        auto it = loaders.find(providerKey);
-        if (it == loaders.end()) {
-            it = loaders.emplace(
-                providerKey,
-                std::unique_ptr<DllLoader>(new DllLoader(provider))).first;
+        std::unique_ptr<DllLoader> loader(new DllLoader(provider));
+        void* module = loader->NativeModuleIdentity();
+        const auto existing = loaders.find(module);
+        if (existing != loaders.end()) {
+            // 同一模块可能先由另一语言加载；撤销本次加载增加的引用并复用已有 loader。
+            if (module != nullptr) {
+#ifdef _WIN32
+                FreeLibrary(static_cast<HMODULE>(module));
+#else
+                dlclose(module);
+#endif
+            }
+            return *existing->second;
         }
-        return *it->second;
+        const auto inserted = loaders.emplace(module, std::move(loader));
+        return *inserted.first->second;
     }
 
     DllLoader& DllLoader::GetOrCreateForExistingModule(
@@ -2036,13 +1767,7 @@ namespace dlcv_infer {
         }
 
         std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());
-        for (const auto& item : DllLoaderRegistry()) {
-            if (item.second && item.second->hModule == module) {
-                return *item.second;
-            }
-        }
-
-        auto& loaders = ExistingModuleLoaderRegistry();
+        auto& loaders = DllLoaderRegistry();
         auto it = loaders.find(module);
         if (it == loaders.end()) {
             it = loaders.emplace(
@@ -2097,15 +1822,15 @@ namespace dlcv_infer {
             candidates.push_back({
                 module.Module,
                 &loader,
-                [getIndexType](int value) { return getIndexType(value); }
+                getIndexType
             });
         }
 
-        DllLoader* loader = SelectSharedIndexCandidate(index, candidates, indexType);
-        if (loader == nullptr) {
+        const SharedIndexCandidate& selected = SelectSharedIndexCandidate(index, candidates, indexType);
+        if (selected.Loader == nullptr) {
             throw std::runtime_error("共享 index 没有关联推理 DLL");
         }
-        return *loader;
+        return *selected.Loader;
     }
 
     namespace {
@@ -2172,46 +1897,35 @@ namespace dlcv_infer {
 
     }
 
+    static void EnsureProviderAvailable(sntl_admin::DogProvider needed) {
+#ifdef _WIN32
+        const auto dogInfo = needed == sntl_admin::DogProvider::Sentinel
+            ? sntl_admin::DogUtils::GetSentinelInfo()
+            : sntl_admin::DogUtils::GetVirboxInfo();
+        if (dogInfo.provider == sntl_admin::DogProvider::Unknown) {
+            throw std::runtime_error(std::string("模型要求 provider ")
+                + (needed == sntl_admin::DogProvider::Sentinel ? "Sentinel" : "Virbox")
+                + "，但未检测到对应的加密狗设备或特性");
+        }
+#else
+        (void)needed;
+#endif
+    }
+
     DllLoader& DllLoader::ForModelBuffer(const unsigned char* modelData, size_t modelSize) {
         sntl_admin::DogProvider needed;
-        if (!TryResolveExplicitProviderFromBuffer(modelData, modelSize, needed)) {
-            return Instance();
+        if (TryResolveExplicitProviderFromBuffer(modelData, modelSize, needed)) {
+            EnsureProviderAvailable(needed);
         }
-        DllLoader& selectedLoader = GetOrCreateForProvider(needed);
-        SetDefaultLoader(selectedLoader);
-        return selectedLoader;
+        // 模型内容的授权来源不决定承载模型的 DLL；普通加载始终使用默认模块。
+        return Instance();
     }
 
     DllLoader& DllLoader::EnsureForModel(const std::string& modelPath) {
-#ifndef _WIN32
-        // Linux 默认认为有加密狗，跳过 sntl_adminapi 检测
-        (void)modelPath;
-        return Instance();
-#endif
-        std::wstring wpath = convertUtf8ToWstring(modelPath);
-#ifdef _WIN32
-        std::ifstream file(wpath);
-#else
-        std::ifstream file(WideToUtf8Portable(wpath));
-#endif
-        if (!file) {
-            throw std::runtime_error("failed to open model file");
-        }
-        sntl_admin::DogProvider needed;
-        if (!TryResolveExplicitProviderFromStream(file, needed)) {
-            return Instance();
-        }
-        DllLoader& selectedLoader = GetOrCreateForProvider(needed);
-        SetDefaultLoader(selectedLoader);
-        return selectedLoader;
+        return EnsureForModel(convertUtf8ToWstring(modelPath));
     }
 
     DllLoader& DllLoader::EnsureForModel(const std::wstring& modelPath) {
-#ifndef _WIN32
-        // Linux 默认认为有加密狗，跳过 sntl_adminapi 检测
-        (void)modelPath;
-        return Instance();
-#endif
 #ifdef _WIN32
         std::ifstream file(modelPath);
 #else
@@ -2221,21 +1935,25 @@ namespace dlcv_infer {
             throw std::runtime_error("failed to open model file");
         }
         sntl_admin::DogProvider needed;
-        if (!TryResolveExplicitProviderFromStream(file, needed)) {
-            return Instance();
+        if (TryResolveExplicitProviderFromStream(file, needed)) {
+            EnsureProviderAvailable(needed);
         }
-        DllLoader& selectedLoader = GetOrCreateForProvider(needed);
-        SetDefaultLoader(selectedLoader);
-        return selectedLoader;
+        return Instance();
     }
 
     static json ReadSharedIndexResult(DllLoader* loader, const char* resultPtr) {
         if (loader == nullptr || loader->GetFreeStringFunc() == nullptr || resultPtr == nullptr) {
             throw std::runtime_error("共享索引接口未返回结果");
         }
-        const std::string text(resultPtr);
-        loader->GetFreeStringFunc()(const_cast<char*>(resultPtr));
-        return json::parse(text);
+        json result;
+        try {
+            result = json::parse(resultPtr);
+        } catch (...) {
+            loader->GetFreeStringFunc()(resultPtr);
+            throw;
+        }
+        loader->GetFreeStringFunc()(resultPtr);
+        return result;
     }
 
     static bool HasSharedIndexFunctions(const DllLoader* loader) {
@@ -2275,7 +1993,7 @@ namespace dlcv_infer {
             }
             if (selectedLoader == nullptr) {
                 selectedLoader = childLoader;
-            } else if (selectedLoader != childLoader) {
+            } else if (selectedLoader->NativeModuleIdentity() != childLoader->NativeModuleIdentity()) {
                 throw std::runtime_error("同一流程不能混用不同推理 DLL");
             }
         }
@@ -2284,7 +2002,7 @@ namespace dlcv_infer {
             : &DllLoader::GetExistingOrDefaultSentinel();
     }
 
-    static bool CanLoadArchiveInMemory(const DvsArchiveData& archive) {
+    static void EnsureArchiveCanLoadInMemory(const DvsArchiveData& archive) {
         if (!archive.pipelineRoot.is_object() ||
             !archive.pipelineRoot.contains("nodes") ||
             !archive.pipelineRoot.at("nodes").is_array() ||
@@ -2292,7 +2010,7 @@ namespace dlcv_infer {
             throw std::runtime_error("流程归档信息不完整");
         }
 
-        DllLoader* selectedLoader = nullptr;
+        sntl_admin::DogProvider archiveProvider = sntl_admin::DogProvider::Unknown;
         for (const auto& node : archive.pipelineRoot.at("nodes")) {
             if (!node.is_object() || node.value("type", std::string()).rfind("model/", 0) != 0) continue;
             if (!node.contains("properties") || !node.at("properties").is_object()) {
@@ -2306,16 +2024,21 @@ namespace dlcv_infer {
                 throw std::runtime_error("流程模型节点缺少有效的子模型数据");
             }
 
+            sntl_admin::DogProvider modelProvider;
+            if (TryResolveExplicitProviderFromBuffer(
+                    bufferIt->second->data(), bufferIt->second->size(), modelProvider)) {
+                if (archiveProvider == sntl_admin::DogProvider::Unknown) {
+                    archiveProvider = modelProvider;
+                } else if (archiveProvider != modelProvider) {
+                    throw std::runtime_error("同一流程不能混用不同授权 provider 的子模型");
+                }
+            }
             DllLoader& loader = DllLoader::ForModelBuffer(
                 bufferIt->second->data(), bufferIt->second->size());
-            if (selectedLoader == nullptr) {
-                selectedLoader = &loader;
-            } else if (selectedLoader != &loader) {
-                throw std::runtime_error("同一流程不能混用不同推理 DLL");
+            if (loader.GetLoadModelBinaryFunc() == nullptr) {
+                throw std::runtime_error("当前推理 DLL 缺少 dlcv_load_model_binary，无法从内存加载流程子模型");
             }
-            if (loader.GetLoadModelBinaryFunc() == nullptr) return false;
         }
-        return true;
     }
 
     static bool CanRegisterSharedFlow(
@@ -2326,7 +2049,7 @@ namespace dlcv_infer {
             if (!childModel) return false;
             DllLoader* childLoader = childModel->LoadedDllLoader();
             if (childLoader == nullptr ||
-                childLoader != registrationLoader ||
+                childLoader->NativeModuleIdentity() != registrationLoader->NativeModuleIdentity() ||
                 !HasSharedIndexFunctions(childLoader)) {
                 return false;
             }
@@ -2402,21 +2125,12 @@ namespace dlcv_infer {
         _isFlowGraphMode = true;
         _flowModel = new flow::FlowGraphModel();
         DvsArchiveData archive = ReadDvsArchive(modelPath);
-        json originalPipelineRoot = archive.originalPipelineRoot;
-        json report;
-        if (CanLoadArchiveInMemory(archive)) {
-            report = _flowModel->LoadFromArchive(
-                archive.pipelineRoot,
-                archive.modelBinaryStore,
-                deviceId);
-        } else {
-            DvsUnpackResult unpack = UnpackDvsArchiveToTemp(modelPath);
-            _tempDir = unpack.tempDir;
-            originalPipelineRoot = unpack.originalPipelineRoot;
-            const std::string pipelinePath = JoinPath(unpack.tempDir, "pipeline.json");
-            WriteUtf8Text(pipelinePath, unpack.pipelineRoot.dump());
-            report = _flowModel->Load(pipelinePath, deviceId);
-        }
+        const json& originalPipelineRoot = archive.originalPipelineRoot;
+        EnsureArchiveCanLoadInMemory(archive);
+        const json report = _flowModel->LoadFromArchive(
+            archive.pipelineRoot,
+            archive.modelBinaryStore,
+            deviceId);
         if (report.value("code", 1) != 0) {
             throw std::runtime_error(report.dump());
         }
@@ -2545,7 +2259,20 @@ namespace dlcv_infer {
 
     void Model::EnsureBoundIndexReady() {
         std::lock_guard<std::mutex> lock(_indexStateMu);
-        if (modelIndex < 0 || _indexReady || _ownsNativeModelIndex || _ownsRegisteredFlowIndex) return;
+        if (modelIndex < 0) return;
+        if (_indexReady || _ownsNativeModelIndex || _ownsRegisteredFlowIndex) {
+            // 全局释放可能由另一语言发起，缓存信息不能证明底层资源仍然存在。
+            // 只检查已保存的所属模块，不按默认 DLL 或编号重新选择模块。
+            const bool isNativeIndex = _ownsNativeModelIndex || _ownsRegisteredFlowIndex || _indexBound;
+            if (isNativeIndex && _dllLoader != nullptr && _dllLoader->GetIndexTypeFunc() != nullptr) {
+                const int indexType = _dllLoader->GetIndexTypeFunc()(modelIndex);
+                const int expectedType = _isFlowGraphMode ? 2 : 1;
+                if (indexType != expectedType) {
+                    throw std::runtime_error("已保存的 index 在所属推理 DLL 中不可用");
+                }
+            }
+            return;
+        }
 
         try {
             int indexType = 0;
@@ -2593,10 +2320,6 @@ namespace dlcv_infer {
         } catch (...) {
             delete _flowModel;
             _flowModel = nullptr;
-            if (!_tempDir.empty()) {
-                DeleteDirectoryRecursive(_tempDir);
-                _tempDir.clear();
-            }
             _isFlowGraphMode = false;
             _hasCachedModelInfo = false;
             _cachedModelInfo = json();
@@ -2626,10 +2349,6 @@ namespace dlcv_infer {
             } catch (const std::exception& ex) {
                 delete _flowModel;
                 _flowModel = nullptr;
-                if (!_tempDir.empty()) {
-                    DeleteDirectoryRecursive(_tempDir);
-                    _tempDir.clear();
-                }
                 throw std::runtime_error(std::string("failed to load dvs model: ") + ex.what());
             }
         }
@@ -2661,10 +2380,6 @@ namespace dlcv_infer {
             } catch (const std::exception& ex) {
                 delete _flowModel;
                 _flowModel = nullptr;
-                if (!_tempDir.empty()) {
-                    DeleteDirectoryRecursive(_tempDir);
-                    _tempDir.clear();
-                }
                 throw std::runtime_error(std::string("failed to load dvs model: ") + ex.what());
             }
         }
@@ -2698,8 +2413,8 @@ namespace dlcv_infer {
         _loadedDogProvider = _dllLoader->GetDogProvider();
         _loadedNativeDllName = _dllLoader->GetLoadedNativeDllName();
         const auto loadModelBinary = _dllLoader->GetLoadModelBinaryFunc();
-        if (loadModelBinary == nullptr) {
-            throw std::runtime_error("当前 dlcv_infer 不支持二进制模型加载: " + displayName);
+        if (loadModelBinary == nullptr || _dllLoader->GetFreeResultFunc() == nullptr) {
+            throw std::runtime_error("当前 dlcv_infer 缺少二进制模型加载或结果释放接口: " + displayName);
         }
 
         json config;
@@ -2727,8 +2442,11 @@ namespace dlcv_infer {
             throw;
         }
         _dllLoader->GetFreeResultFunc()(resultPtr);
-        _ownsNativeModelIndex = modelIndex >= 0;
-        _indexReady = _ownsNativeModelIndex;
+        if (modelIndex < 0) {
+            throw std::runtime_error("二进制模型加载返回的 index 无效: " + displayName);
+        }
+        _ownsNativeModelIndex = true;
+        _indexReady = true;
     }
 
     Model::Model(Model&& other) noexcept {
@@ -2750,7 +2468,6 @@ namespace dlcv_infer {
         _indexReady = other._indexReady;
         _ownsNativeModelIndex = other._ownsNativeModelIndex;
         _ownsRegisteredFlowIndex = other._ownsRegisteredFlowIndex;
-        _tempDir = std::move(other._tempDir);
         other.modelIndex = -1;
         other.OwnModelIndex = true;
         other._isFlowGraphMode = false;
@@ -2763,7 +2480,6 @@ namespace dlcv_infer {
         other._indexReady = false;
         other._ownsNativeModelIndex = false;
         other._ownsRegisteredFlowIndex = false;
-        other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
         other._loadedNativeDllName.clear();
@@ -2794,7 +2510,6 @@ namespace dlcv_infer {
         _indexReady = other._indexReady;
         _ownsNativeModelIndex = other._ownsNativeModelIndex;
         _ownsRegisteredFlowIndex = other._ownsRegisteredFlowIndex;
-        _tempDir = std::move(other._tempDir);
         _dllLoader = other._dllLoader;
         _loadedDogProvider = other._loadedDogProvider;
         _loadedNativeDllName = std::move(other._loadedNativeDllName);
@@ -2811,7 +2526,6 @@ namespace dlcv_infer {
         other._indexReady = false;
         other._ownsNativeModelIndex = false;
         other._ownsRegisteredFlowIndex = false;
-        other._tempDir.clear();
         other._dllLoader = nullptr;
         other._loadedDogProvider = sntl_admin::DogProvider::Unknown;
         other._loadedNativeDllName.clear();
@@ -2849,13 +2563,9 @@ namespace dlcv_infer {
             }
 
             // 无论底层释放流程索引是否成功，都先完成本地清理，
-            // 避免析构或移动赋值吞掉异常后遗留 _flowModel 与临时目录。
+            // 避免析构或移动赋值忽略异常后遗留本地流程对象。
             delete _flowModel;
             _flowModel = nullptr;
-            if (!_tempDir.empty()) {
-                DeleteDirectoryRecursive(_tempDir);
-                _tempDir.clear();
-            }
             _isFlowGraphMode = false;
             _hasCachedModelInfo = false;
             _cachedModelInfo = json();
@@ -2881,10 +2591,6 @@ namespace dlcv_infer {
             // 与成功路径一致，先清理本地资源，失败信息在清理完成后上报。
             delete _flowModel;
             _flowModel = nullptr;
-            if (!_tempDir.empty()) {
-                DeleteDirectoryRecursive(_tempDir);
-                _tempDir.clear();
-            }
             _isFlowGraphMode = false;
             _hasCachedModelInfo = false;
             _cachedModelInfo = json();
@@ -2898,14 +2604,9 @@ namespace dlcv_infer {
         if (_isFlowGraphMode) {
             delete _flowModel;
             _flowModel = nullptr;
-            if (!_tempDir.empty()) {
-                DeleteDirectoryRecursive(_tempDir);
-                _tempDir.clear();
-            }
             _isFlowGraphMode = false;
             _indexReady = false;
             modelIndex = -1;
-            _isFlowGraphMode = false;
             return;
         }
 
@@ -3578,6 +3279,7 @@ namespace dlcv_infer {
 
     void Utils::FreeAllModels() {
         flow::ModelLifecycleWriteGuard lifecycleGuard;
+        ClearCApiModelsForFreeAllModels();
         // 底层模型表清空后，模型池中的对象将持有失效 index。
         // 先清空模型池，确保后续流程加载会重新创建子模型。
         flow::ModelPool::Instance().ClearForFreeAllModels();
@@ -3590,18 +3292,11 @@ namespace dlcv_infer {
         }
 
         std::vector<FreeAllModelsFuncType> freeAllModelsFunctions;
-        std::unordered_set<DllLoader*> seenLoaders;
         {
             std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());
+            // 注册表以真实模块句柄为键，同一个 DLL 的全局释放函数只收集一次。
             for (const auto& item : DllLoaderRegistry()) {
-                if (item.second && seenLoaders.insert(item.second.get()).second &&
-                    item.second->GetFreeAllModelsFunc()) {
-                    freeAllModelsFunctions.push_back(item.second->GetFreeAllModelsFunc());
-                }
-            }
-            for (const auto& item : ExistingModuleLoaderRegistry()) {
-                if (item.second && seenLoaders.insert(item.second.get()).second &&
-                    item.second->GetFreeAllModelsFunc()) {
+                if (item.first != nullptr && item.second->GetFreeAllModelsFunc() != nullptr) {
                     freeAllModelsFunctions.push_back(item.second->GetFreeAllModelsFunc());
                 }
             }
@@ -3832,10 +3527,7 @@ namespace dlcv_infer {
     }
 
     void NativeApi::FreeAllModels() {
-        flow::ModelLifecycleWriteGuard lifecycleGuard;
-        flow::ModelPool::Instance().Clear();
-        auto& loader = DllLoader::Instance();
-        RequireNativeApiFunction(loader.GetFreeAllModelsFunc(), "dlcv_free_all_models")();
+        Utils::FreeAllModels();
     }
 
     const char* NativeApi::GetDeviceInfo() {
@@ -4267,26 +3959,24 @@ extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_index_rules_c() {
 
     int sentinelTag = 0;
     int virboxTag = 0;
-    auto* sentinelLoader = reinterpret_cast<dlcv_infer::DllLoader*>(&sentinelTag);
-    auto* virboxLoader = reinterpret_cast<dlcv_infer::DllLoader*>(&virboxTag);
 
     const std::vector<dlcv_infer::SharedIndexCandidate> oppositeBitCandidates = {
-        {&sentinelTag, sentinelLoader, [](int value) { return value == 256 ? 1 : 0; }},
-        {&virboxTag, virboxLoader, [](int) { return 0; }}
+        {&sentinelTag, nullptr, [](int value) { return value == 256 ? 1 : 0; }},
+        {&virboxTag, nullptr, [](int) { return 0; }}
     };
     int selectedType = 0;
     if (dlcv_infer::SelectSharedIndexCandidate(
-            256, oppositeBitCandidates, selectedType) != sentinelLoader ||
+            256, oppositeBitCandidates, selectedType).Module != &sentinelTag ||
         selectedType != 1) {
         return -2;
     }
 
     const std::vector<dlcv_infer::SharedIndexCandidate> secondOppositeBitCandidates = {
-        {&sentinelTag, sentinelLoader, [](int) { return 0; }},
-        {&virboxTag, virboxLoader, [](int value) { return value == 0 ? 2 : 0; }}
+        {&sentinelTag, nullptr, [](int) { return 0; }},
+        {&virboxTag, nullptr, [](int value) { return value == 0 ? 2 : 0; }}
     };
     if (dlcv_infer::SelectSharedIndexCandidate(
-            0, secondOppositeBitCandidates, selectedType) != virboxLoader ||
+            0, secondOppositeBitCandidates, selectedType).Module != &virboxTag ||
         selectedType != 2) {
         return -3;
     }
@@ -4307,43 +3997,43 @@ extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_index_rules_c() {
     };
 
     const std::vector<dlcv_infer::SharedIndexCandidate> noResultCandidates = {
-        {&sentinelTag, sentinelLoader, [](int) { return 0; }}
+        {&sentinelTag, nullptr, [](int) { return 0; }}
     };
     if (!expectFailure(noResultCandidates, 0, typeid(std::invalid_argument))) return -4;
     if (!expectFailure(noResultCandidates, -1, typeid(std::invalid_argument))) return -9;
 
     const std::vector<dlcv_infer::SharedIndexCandidate> ambiguousCandidates = {
-        {&sentinelTag, sentinelLoader, [](int) { return 1; }},
-        {&virboxTag, virboxLoader, [](int) { return 2; }}
+        {&sentinelTag, nullptr, [](int) { return 1; }},
+        {&virboxTag, nullptr, [](int) { return 2; }}
     };
     if (!expectFailure(ambiguousCandidates, 0, typeid(std::runtime_error))) return -5;
 
     const std::vector<dlcv_infer::SharedIndexCandidate> unknownCandidates = {
-        {&sentinelTag, sentinelLoader, [](int) { return -1; }}
+        {&sentinelTag, nullptr, [](int) { return -1; }}
     };
     if (!expectFailure(unknownCandidates, 0, typeid(std::runtime_error))) return -6;
 
     const std::vector<dlcv_infer::SharedIndexCandidate> throwingCandidates = {
-        {&sentinelTag, sentinelLoader, [](int) -> int {
+        {&sentinelTag, nullptr, [](int) -> int {
             throw std::runtime_error("query failed");
         }}
     };
     if (!expectFailure(throwingCandidates, 0, typeid(std::runtime_error))) return -7;
 
     const std::vector<dlcv_infer::SharedIndexCandidate> domainErrorCandidates = {
-        {&sentinelTag, sentinelLoader, [](int) { return 1; }},
-        {&virboxTag, virboxLoader, [](int) -> int {
+        {&sentinelTag, nullptr, [](int) { return 1; }},
+        {&virboxTag, nullptr, [](int) -> int {
             throw std::domain_error("query failure is not missing capability");
         }}
     };
     if (!expectFailure(domainErrorCandidates, 0, typeid(std::runtime_error))) return -10;
     const std::vector<dlcv_infer::SharedIndexCandidate> nonstandardErrorCandidates = {
-        {&sentinelTag, sentinelLoader, [](int) -> int { throw 7; }}
+        {&sentinelTag, nullptr, [](int) -> int { throw 7; }}
     };
     if (!expectFailure(nonstandardErrorCandidates, 0, typeid(std::runtime_error))) return -11;
 
     const std::vector<dlcv_infer::SharedIndexCandidate> noInterfaceCandidates = {
-        {&sentinelTag, sentinelLoader, {}}
+        {&sentinelTag, nullptr, {}}
     };
     if (!expectFailure(noInterfaceCandidates, 0, typeid(std::domain_error))) return -8;
 

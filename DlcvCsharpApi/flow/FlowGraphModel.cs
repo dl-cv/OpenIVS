@@ -36,8 +36,8 @@ namespace DlcvModules
         private int _deviceId = 0;
         private string _flowJsonPath;
         private JArray _loadedModelMeta = new JArray();
-        private Dictionary<int, Model> _modelsByIndex = new Dictionary<int, Model>();
-        private JArray _modelBindings = new JArray();
+        private Dictionary<int, Model> _boundModelsByIndex;
+        private Dictionary<int, Model> _loadedModelsByNode = new Dictionary<int, Model>();
         private JObject _registrationPipeline = new JObject();
         private Dictionary<int, FlowModelSource> _modelSources = new Dictionary<int, FlowModelSource>();
 
@@ -63,11 +63,16 @@ namespace DlcvModules
         /// <param name="root">包含 nodes 的流程配置根 JSON 对象</param>
         /// <param name="deviceId">设备 ID</param>
         /// <returns>模型加载报告</returns>
+        protected JObject LoadFromRoot(JObject root, int deviceId)
+        {
+            return LoadFromRootInternal(root, deviceId, null, null, null);
+        }
+
         protected JObject LoadFromRoot(
             JObject root,
             int deviceId,
-            Dictionary<int, Model> modelsByIndex = null,
-            JObject registrationPipeline = null)
+            Dictionary<int, Model> modelsByIndex,
+            JObject registrationPipeline)
         {
             return LoadFromRootInternal(root, deviceId, modelsByIndex, registrationPipeline, null);
         }
@@ -84,105 +89,116 @@ namespace DlcvModules
             JObject registrationPipeline,
             Dictionary<int, FlowModelSource> modelSources)
         {
+            if (_disposed) throw new ObjectDisposedException(GetType().Name);
             if (root == null) throw new ArgumentNullException("root");
 
             var nodesToken = root["nodes"] as JArray;
             if (nodesToken == null) throw new InvalidOperationException("流程 JSON 缺少 nodes 数组");
+            var nodes = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(nodesToken.ToString());
 
-            if (_modelSources != null && _modelSources.Count > 0)
-            {
-                BaseModelModule.ReleaseBinaryModels(_modelSources, _deviceId);
-            }
-            _nodes = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(nodesToken.ToString());
+            ReleaseLoadedModels();
+            _nodes = nodes;
             _root = root;
-            _registrationPipeline = registrationPipeline != null
-                ? (JObject)registrationPipeline.DeepClone()
-                : (JObject)root.DeepClone();
+            _registrationPipeline = (JObject)(registrationPipeline ?? root).DeepClone();
             _deviceId = deviceId;
-            ReplaceOwnedModels(modelsByIndex);
-            RefreshModelBindings();
+            // 接管恢复流程使用的借用对象；本地加载只使用归档内存或原有路径缓存。
+            _boundModelsByIndex = modelsByIndex;
             _modelSources = modelSources != null
                 ? new Dictionary<int, FlowModelSource>(modelSources)
                 : new Dictionary<int, FlowModelSource>();
 
-            var ctx = CreateExecutionContext();
-            ctx.Set("device_id", deviceId);
-            SetModelSources(ctx);
-            var exec = new GraphExecutor(_nodes, ctx);
-            var report = exec.LoadModels();
-            RefreshModelBindings();
+            JObject report;
+            int code;
             try
             {
-                var loadedMeta = ctx.Get<List<Dictionary<string, object>>>("loaded_model_meta", null);
-                if (loadedMeta != null && loadedMeta.Count > 0)
+                var ctx = CreateExecutionContext();
+                ctx.Set("device_id", deviceId);
+                SetModelSources(ctx);
+                var exec = new GraphExecutor(_nodes, ctx);
+                _loadedModelsByNode = exec.LoadedModelsByNode;
+                report = exec.LoadModels();
+                try
                 {
-                    _loadedModelMeta = JArray.FromObject(loadedMeta);
+                    var loadedMeta = ctx.Get<List<Dictionary<string, object>>>("loaded_model_meta", null);
+                    if (loadedMeta != null && loadedMeta.Count > 0)
+                    {
+                        _loadedModelMeta = JArray.FromObject(loadedMeta);
+                    }
+                    else
+                    {
+                        _loadedModelMeta = new JArray();
+                    }
                 }
-                else
+                catch
                 {
                     _loadedModelMeta = new JArray();
                 }
-            }
-            catch
-            {
-                _loadedModelMeta = new JArray();
-            }
-            RefreshModelBindings();
-            int code = report != null && report["code"] != null ? (int)report["code"] : 1;
-            if (code != 0)
-            {
-                string simpleMessage = null;
-                JToken modelsToken = report != null ? report["models"] : null;
-                var models = modelsToken as JArray;
-                if (models != null)
+                code = report != null && report["code"] != null ? (int)report["code"] : 1;
+                if (code != 0)
                 {
-                    for (int mi = 0; mi < models.Count; mi++)
+                    string simpleMessage = null;
+                    JToken modelsToken = report != null ? report["models"] : null;
+                    var models = modelsToken as JArray;
+                    if (models != null)
                     {
-                        var m = models[mi] as JObject;
-                        if (m == null) continue;
-                        int sc = m["status_code"] != null ? (int)m["status_code"] : 0;
-                        if (sc != 0)
+                        for (int mi = 0; mi < models.Count; mi++)
                         {
-                            string statusMsg = m["status_message"] != null ? m["status_message"].ToString() : null;
-                            if (!string.IsNullOrEmpty(statusMsg))
+                            var m = models[mi] as JObject;
+                            if (m == null) continue;
+                            int sc = m["status_code"] != null ? (int)m["status_code"] : 0;
+                            if (sc != 0)
                             {
-                                int jsonStart = statusMsg.IndexOf('{');
-                                if (jsonStart >= 0)
+                                string statusMsg = m["status_message"] != null ? m["status_message"].ToString() : null;
+                                if (!string.IsNullOrEmpty(statusMsg))
                                 {
-                                    string innerJson = statusMsg.Substring(jsonStart);
-                                    try
+                                    int jsonStart = statusMsg.IndexOf('{');
+                                    if (jsonStart >= 0)
                                     {
-                                        var innerObj = JObject.Parse(innerJson);
-                                        string innerMsg = innerObj["message"] != null ? innerObj["message"].ToString() : null;
-                                        if (!string.IsNullOrEmpty(innerMsg))
+                                        string innerJson = statusMsg.Substring(jsonStart);
+                                        try
                                         {
-                                            simpleMessage = innerMsg;
-                                            break;
+                                            var innerObj = JObject.Parse(innerJson);
+                                            string innerMsg = innerObj["message"] != null ? innerObj["message"].ToString() : null;
+                                            if (!string.IsNullOrEmpty(innerMsg))
+                                            {
+                                                simpleMessage = innerMsg;
+                                                break;
+                                            }
                                         }
+                                        catch { }
                                     }
-                                    catch { }
-                                }
-                                else
-                                {
-                                    simpleMessage = statusMsg;
-                                    break;
+                                    else
+                                    {
+                                        simpleMessage = statusMsg;
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                if (string.IsNullOrEmpty(simpleMessage))
-                {
-                    simpleMessage = report != null && report["message"] != null ? report["message"].ToString() : "unknown error";
-                }
+                    if (string.IsNullOrEmpty(simpleMessage))
+                    {
+                        simpleMessage = report != null && report["message"] != null ? report["message"].ToString() : "unknown error";
+                    }
 
-                var simpleObj = new JObject();
-                simpleObj["code"] = 1;
-                simpleObj["message"] = simpleMessage;
-                report = simpleObj;
+                    var simpleObj = new JObject();
+                    simpleObj["code"] = 1;
+                    simpleObj["message"] = simpleMessage;
+                    report = simpleObj;
+                }
             }
-            _loaded = true;
+            catch (Exception loadError)
+            {
+                try { ReleaseLoadedModels(); }
+                catch (Exception disposeError)
+                {
+                    throw new AggregateException("加载流程及释放子模型失败", loadError, disposeError);
+                }
+                throw;
+            }
+            _loaded = code == 0;
+            if (!_loaded) ReleaseLoadedModels();
             return report;
         }
 
@@ -208,35 +224,33 @@ namespace DlcvModules
 
         public JArray GetModelBindings()
         {
-            return _modelBindings != null ? (JArray)_modelBindings.DeepClone() : new JArray();
+            var bindings = new JArray();
+            if (!_loaded) return bindings;
+            foreach (var item in _loadedModelsByNode)
+            {
+                bindings.Add(new JObject
+                {
+                    ["node_id"] = item.Key,
+                    ["model_index"] = item.Value.modelIndex
+                });
+            }
+            return bindings;
         }
 
         internal DllLoader GetLoadedModelLoader(int modelIndex)
         {
-            Model model;
-            if (_modelsByIndex != null && _modelsByIndex.TryGetValue(modelIndex, out model) && model != null)
-                return model.Loader;
-
-            if (_loadedModelMeta != null && _modelSources != null)
+            DllLoader selectedLoader = null;
+            foreach (Model model in _loadedModelsByNode.Values)
             {
-                foreach (JObject item in _loadedModelMeta.OfType<JObject>())
-                {
-                    if (item["model_index"] == null || item["node_id"] == null ||
-                        item["model_index"].Value<int>() != modelIndex)
-                        continue;
-                    FlowModelSource source;
-                    if (_modelSources.TryGetValue(item["node_id"].Value<int>(), out source) && source != null)
-                        return DllLoader.ForModel(source.Data, source.ModelName);
-                }
+                if (model.modelIndex != modelIndex) continue;
+                DllLoader loader = model.Loader;
+                if (loader == null)
+                    throw new InvalidDataException("流程子模型缺少加载 DLL: " + modelIndex);
+                if (selectedLoader != null && !ReferenceEquals(selectedLoader, loader))
+                    throw new InvalidDataException("相同子模型索引来自不同推理 DLL: " + modelIndex);
+                selectedLoader = loader;
             }
-            return null;
-        }
-
-        protected void SetModelBindings(JArray modelBindings)
-        {
-            _modelBindings = modelBindings != null
-                ? (JArray)modelBindings.DeepClone()
-                : new JArray();
+            return selectedLoader;
         }
 
         private static string ResolveModelInfoKey(JObject item)
@@ -835,123 +849,55 @@ namespace DlcvModules
 
         protected virtual void Dispose(bool disposing)
         {
-            if (!_disposed)
-            {
-                if (disposing)
-                {
-                    DisposeOwnedModels();
-                    BaseModelModule.ReleaseBinaryModels(_modelSources, _deviceId);
-                }
-                _modelSources = new Dictionary<int, FlowModelSource>();
-                _disposed = true;
-            }
+            if (_disposed) return;
+            if (disposing) ReleaseLoadedModels();
+            _loaded = false;
+            _disposed = true;
         }
 
         private ExecutionContext CreateExecutionContext()
         {
             var ctx = new ExecutionContext();
-            ctx.Set("flow_models", _modelsByIndex);
+            if (_boundModelsByIndex != null)
+                ctx.Set("flow_models", _boundModelsByIndex);
             return ctx;
         }
 
-        private void ReplaceOwnedModels(Dictionary<int, Model> modelsByIndex)
+        private void ReleaseLoadedModels()
         {
-            DisposeOwnedModels();
-            _modelsByIndex = modelsByIndex != null
-                ? new Dictionary<int, Model>(modelsByIndex)
-                : new Dictionary<int, Model>();
-        }
-
-        private void DisposeOwnedModels()
-        {
-            if (_modelsByIndex == null) return;
-            var disposedModels = new HashSet<Model>();
-            Exception firstError = null;
-            foreach (var item in _modelsByIndex)
+            _loaded = false;
+            var errors = new List<Exception>();
+            if (_boundModelsByIndex != null)
             {
-                if (item.Value == null || !disposedModels.Add(item.Value)) continue;
-                try
+                var releasedModels = new HashSet<Model>();
+                foreach (Model model in _boundModelsByIndex.Values.Distinct())
                 {
-                    item.Value.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    if (firstError == null) firstError = ex;
-                }
-            }
-            if (firstError != null)
-                throw new Exception("释放流程子模型失败", firstError);
-            _modelsByIndex.Clear();
-        }
-
-        private void RefreshModelBindings()
-        {
-            var bindings = new JArray();
-            var loadedIndicesByNode = new Dictionary<int, int>();
-            if (_loadedModelMeta != null)
-            {
-                foreach (JObject item in _loadedModelMeta.OfType<JObject>())
-                {
-                    int nodeId;
-                    int modelIndex;
+                    if (model == null) continue;
                     try
                     {
-                        nodeId = item["node_id"].Value<int>();
-                        modelIndex = item["model_index"].Value<int>();
+                        model.Dispose();
+                        releasedModels.Add(model);
                     }
-                    catch
-                    {
-                        continue;
-                    }
-                    if (nodeId >= 0 && modelIndex >= 0)
-                    {
-                        loadedIndicesByNode[nodeId] = modelIndex;
-                    }
+                    catch (Exception ex) { errors.Add(ex); }
                 }
-            }
-
-            if (_nodes != null)
-            {
-                for (int i = 0; i < _nodes.Count; i++)
+                foreach (int index in _boundModelsByIndex.Keys.ToArray())
                 {
-                    var node = _nodes[i];
-                    if (node == null) continue;
-                    string type = node.TryGetValue("type", out object typeValue) && typeValue != null
-                        ? typeValue.ToString() : null;
-                    if (string.IsNullOrEmpty(type) || !type.StartsWith("model/", StringComparison.Ordinal)) continue;
-
-                    int nodeId;
-                    if (!node.TryGetValue("id", out object nodeValue) || !TryGetInt(nodeValue, out nodeId)) continue;
-                    int modelIndex;
-                    if (!loadedIndicesByNode.TryGetValue(nodeId, out modelIndex))
-                    {
-                        if (!node.TryGetValue("properties", out object propertiesValue)) continue;
-                        var properties = propertiesValue as Dictionary<string, object>;
-                        if (properties == null || !properties.TryGetValue("model_index", out object indexValue)) continue;
-                        if (!TryGetInt(indexValue, out modelIndex) || modelIndex < 0) continue;
-                    }
-                    bindings.Add(new JObject
-                    {
-                        ["node_id"] = nodeId,
-                        ["model_index"] = modelIndex
-                    });
+                    Model model = _boundModelsByIndex[index];
+                    if (model == null || releasedModels.Contains(model))
+                        _boundModelsByIndex.Remove(index);
                 }
+                if (_boundModelsByIndex.Count == 0) _boundModelsByIndex = null;
             }
-            _modelBindings = bindings;
-        }
-
-        private static bool TryGetInt(object value, out int result)
-        {
             try
             {
-                result = Convert.ToInt32(value);
-                return true;
+                BaseModelModule.ReleaseBinaryModels(_modelSources, _deviceId, _loadedModelsByNode);
+                _modelSources.Clear();
             }
-            catch
-            {
-                result = -1;
-                return false;
-            }
+            catch (Exception ex) { errors.Add(ex); }
+            if (errors.Count > 0)
+                throw new AggregateException("释放流程子模型失败", errors);
+            _loadedModelsByNode.Clear();
+            _loadedModelMeta = new JArray();
         }
 
         ~FlowGraphModel()

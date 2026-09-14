@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Runtime.ExceptionServices;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -65,13 +66,7 @@ namespace dlcv_infer_csharp
         };
 
         // 模型缓存（按模型路径+设备+模式区分）
-        private sealed class ModelCacheEntry
-        {
-            public int ModelIndex;
-            public DllLoader Loader;
-        }
-
-        private static readonly Dictionary<string, ModelCacheEntry> _modelCache = new Dictionary<string, ModelCacheEntry>();
+        private static readonly Dictionary<string, int> _modelCache = new Dictionary<string, int>();
         private static readonly HashSet<string> _loadingModels = new HashSet<string>();
         private static readonly object _cacheLock = new object();
         // 当前实例对应的缓存键；仅用于 owner 释放时移除缓存条目。
@@ -88,16 +83,8 @@ namespace dlcv_infer_csharp
         private readonly object _sharedIndexLock = new object();
         private bool _sharedIndexBound;
         private string _sharedIndexType;
-        private bool _sharedIndexRouteResolved;
         private bool _ownsRegisteredFlowIndex;
-        private SharedIndexAttachState _sharedIndexState = SharedIndexAttachState.NotStarted;
-
-        private enum SharedIndexAttachState
-        {
-            NotStarted,
-            Initializing,
-            Ready
-        }
+        private bool _sharedIndexReady;
 
         public Model()
         {
@@ -139,15 +126,15 @@ namespace dlcv_infer_csharp
                 {
                     lock (_cacheLock)
                     {
-                        ModelCacheEntry cachedEntry;
-                        if (_modelCache.TryGetValue(cacheKey, out cachedEntry))
+                        int cachedIndex;
+                        if (_modelCache.TryGetValue(cacheKey, out cachedIndex))
                         {
-                            modelIndex = cachedEntry.ModelIndex;
+                            modelIndex = cachedIndex;
                             _cacheKey = cacheKey;
                             _cacheEnabled = true;
                             // 缓存命中只借用已加载底层模型，不能再拥有释放权。
                             OwnModelIndex = false;
-                            _dllLoader = cachedEntry.Loader;
+                            _dllLoader = DllLoader.Instance;
                             TryCacheModelInfo();
                             return;
                         }
@@ -193,11 +180,7 @@ namespace dlcv_infer_csharp
                 {
                     lock (_cacheLock)
                     {
-                        _modelCache[cacheKey] = new ModelCacheEntry
-                        {
-                            ModelIndex = modelIndex,
-                            Loader = _dllLoader
-                        };
+                        _modelCache[cacheKey] = modelIndex;
                         _loadingModels.Remove(cacheKey);
                     }
                     _cacheKey = cacheKey;
@@ -376,22 +359,28 @@ namespace dlcv_infer_csharp
                 modelIndex = index,
                 OwnModelIndex = false,
                 _dllLoader = loader,
-                _sharedIndexType = "model",
-                _sharedIndexRouteResolved = true
+                _sharedIndexType = "model"
             };
         }
 
         private void EnsureExternalIndexReady()
         {
-            if (_sharedIndexState == SharedIndexAttachState.Ready || !IsExternalIndexCandidate())
+            // 全量释放可以来自另一语言；本地流程与元信息缓存不能证明原生 index 仍有效。
+            if (_sharedIndexReady || _ownsRegisteredFlowIndex)
+            {
+                int expectedType = _isDvsMode ? 2 : 1;
+                if (_dllLoader == null || _dllLoader.GetIndexType(modelIndex) != expectedType)
+                    throw new InvalidOperationException("共享 index 已释放或类型不一致: " + modelIndex);
+                return;
+            }
+            if (!IsExternalIndexCandidate())
                 return;
 
             lock (_sharedIndexLock)
             {
-                if (_sharedIndexState == SharedIndexAttachState.Ready || !IsExternalIndexCandidate())
+                if (_sharedIndexReady || !IsExternalIndexCandidate())
                     return;
 
-                _sharedIndexState = SharedIndexAttachState.Initializing;
                 int externalIndex = modelIndex;
                 DllLoader loader = _dllLoader;
                 DlcvModules.DvsModel restoredFlow = null;
@@ -399,17 +388,11 @@ namespace dlcv_infer_csharp
                 string indexType = _sharedIndexType;
                 try
                 {
-                    if (!_sharedIndexBound && !_sharedIndexRouteResolved)
+                    if (loader == null)
                     {
                         loader = DllLoader.ResolveSharedIndexLoader(externalIndex, out indexType);
                         _dllLoader = loader;
                         _sharedIndexType = indexType.ToLowerInvariant();
-                        _sharedIndexRouteResolved = true;
-                    }
-                    else if (!_sharedIndexBound)
-                    {
-                        loader = _dllLoader;
-                        indexType = _sharedIndexType;
                     }
                     if (!string.Equals(indexType, "model", StringComparison.OrdinalIgnoreCase) &&
                         !string.Equals(indexType, "flow", StringComparison.OrdinalIgnoreCase))
@@ -482,7 +465,7 @@ namespace dlcv_infer_csharp
                         _isDvsMode = true;
                     }
 
-                    _sharedIndexState = SharedIndexAttachState.Ready;
+                    _sharedIndexReady = true;
                     TryCacheModelInfo();
                 }
                 catch
@@ -495,7 +478,7 @@ namespace dlcv_infer_csharp
                     }
                     if (bindingRemoved)
                         _sharedIndexBound = false;
-                    _sharedIndexState = SharedIndexAttachState.NotStarted;
+                    _sharedIndexReady = false;
                     _dvsModel = null;
                     _isDvsMode = false;
                     throw;
@@ -604,8 +587,8 @@ namespace dlcv_infer_csharp
 
         protected void LoadDvtModel(string modelPath, JObject config, string failureMessagePrefix)
         {
-                lock (s_dvtModelLoadLock)
-                {
+            lock (s_dvtModelLoadLock)
+            {
                 _dllLoader = DllLoader.GetForModel(modelPath);
                 if (_dllLoader == null || _dllLoader.dlcv_load_model == null)
                 {
@@ -640,8 +623,7 @@ namespace dlcv_infer_csharp
                     }
                 }
             }
-            }
-
+        }
 
         private void LoadDvtModel(byte[] modelData, string modelName, JObject config, string failureMessagePrefix)
         {
@@ -943,46 +925,41 @@ namespace dlcv_infer_csharp
             {
                 lock (_sharedIndexLock)
                 {
+                    Exception childDisposeError = null;
+                    try
+                    {
+                        _dvsModel?.Dispose();
+                        _dvsModel = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        childDisposeError = ex;
+                    }
+
                     if (_sharedIndexBound)
                     {
-                        if (_dllLoader == null || modelIndex < 0)
-                            throw new InvalidOperationException("共享 index 状态不完整");
-
-                        Exception childDisposeError = null;
                         try
                         {
-                            _dvsModel?.Dispose();
-                        }
-                        catch (Exception ex)
-                        {
-                            childDisposeError = ex;
-                        }
-
-                        Exception unbindError = null;
-                        try
-                        {
+                            if (_dllLoader == null || modelIndex < 0)
+                                throw new InvalidOperationException("共享 index 状态不完整");
                             EnsureIndexStatusSucceeded(_dllLoader.UnbindIndex(modelIndex), "解绑 index");
+                            _sharedIndexBound = false;
                         }
                         catch (Exception ex)
                         {
-                            unbindError = ex;
+                            // 失败时保留 index 和 loader，后续 Dispose 可以继续释放。
+                            if (childDisposeError != null)
+                                throw new AggregateException("释放共享流程失败", childDisposeError, ex);
+                            throw;
                         }
-
-                        _dvsModel = null;
-                        _sharedIndexBound = false;
-                        _sharedIndexType = null;
-                        _sharedIndexRouteResolved = false;
-                        _sharedIndexState = SharedIndexAttachState.NotStarted;
-                        _isDvsMode = false;
-                        modelIndex = -1;
-
-                        if (childDisposeError != null) throw childDisposeError;
-                        if (unbindError != null) throw unbindError;
                     }
-                    _sharedIndexBound = false;
+
+                    if (childDisposeError != null)
+                        ExceptionDispatchInfo.Capture(childDisposeError).Throw();
+
                     _sharedIndexType = null;
-                    _sharedIndexRouteResolved = false;
-                    _sharedIndexState = SharedIndexAttachState.NotStarted;
+                    _dllLoader = null;
+                    _sharedIndexReady = false;
                     _isDvsMode = false;
                     modelIndex = -1;
                 }
@@ -1022,36 +999,39 @@ namespace dlcv_infer_csharp
                     Log("[FreeModel][DVS] 已Disposed或modelIndex为-1，无需释放");
                     return;
                 }
-                int flowIndex = modelIndex;
                 Exception childDisposeError = null;
                 try
                 {
                     _dvsModel?.Dispose();
+                    _dvsModel = null;
                 }
                 catch (Exception ex)
                 {
                     childDisposeError = ex;
                 }
 
-                Exception freeFlowError = null;
-                if (_ownsRegisteredFlowIndex && _dllLoader != null)
+                if (_ownsRegisteredFlowIndex)
                 {
                     try
                     {
-                        EnsureIndexStatusSucceeded(_dllLoader.FreeFlow(flowIndex), "释放流程 index");
+                        if (_dllLoader == null)
+                            throw new InvalidOperationException("流程 index 缺少所属 DLL");
+                        EnsureIndexStatusSucceeded(_dllLoader.FreeFlow(modelIndex), "释放流程 index");
+                        _ownsRegisteredFlowIndex = false;
                     }
                     catch (Exception ex)
                     {
-                        freeFlowError = ex;
+                        if (childDisposeError != null)
+                            throw new AggregateException("释放流程失败", childDisposeError, ex);
+                        throw;
                     }
                 }
-                _dvsModel = null;
-                _ownsRegisteredFlowIndex = false;
+
+                if (childDisposeError != null)
+                    ExceptionDispatchInfo.Capture(childDisposeError).Throw();
+
                 modelIndex = -1;
                 Log("[FreeModel][DVS] FlowGraph已释放");
-
-                if (childDisposeError != null) throw childDisposeError;
-                if (freeFlowError != null) throw freeFlowError;
             }
             else if (_isRpcMode)
             {
@@ -1938,6 +1918,7 @@ namespace dlcv_infer_csharp
         /// </summary>
         public JObject GetDvsModelInfo()
         {
+            EnsureExternalIndexReady();
             if (!_isDvsMode)
             {
                 throw new InvalidOperationException("GetDvsModelInfo 仅支持 DVST 或 DVSO 模型");
@@ -3029,8 +3010,8 @@ namespace dlcv_infer_csharp
             _dvsModel = null;
             _sharedIndexBound = false;
             _sharedIndexType = null;
-            _sharedIndexRouteResolved = false;
-            _sharedIndexState = SharedIndexAttachState.NotStarted;
+            _dllLoader = null;
+            _sharedIndexReady = false;
             _isDvsMode = false;
             modelIndex = -1;
         }
@@ -3058,9 +3039,8 @@ namespace dlcv_infer_csharp
                 return;
             lock (_cacheLock)
             {
-                ModelCacheEntry cachedEntry;
-                if (_modelCache.TryGetValue(_cacheKey, out cachedEntry) &&
-                    cachedEntry.ModelIndex == modelIndex)
+                int cachedIndex;
+                if (_modelCache.TryGetValue(_cacheKey, out cachedIndex) && cachedIndex == modelIndex)
                 {
                     _modelCache.Remove(_cacheKey);
                 }
