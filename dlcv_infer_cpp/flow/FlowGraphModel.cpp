@@ -495,8 +495,6 @@ FlowGraphModel::~FlowGraphModel() {
     _loaded = false;
     _deviceId = 0;
     _flowJsonPath.clear();
-    _boundModelsByIndex.reset();
-    _acquiredModelLeases.clear();
 }
 
 FlowGraphModel::FlowGraphModel(FlowGraphModel&& other) noexcept {
@@ -569,7 +567,9 @@ Json FlowGraphModel::LoadFromArchive(
     ModelLifecycleReadGuard lifecycleGuard;
     if (!modelBinaryStore) throw std::invalid_argument("流程模型字节存储为空");
     _flowJsonPath.clear();
-    return LoadFromRoot(root, deviceId, std::move(modelBinaryStore));
+    Json archiveRoot = root;
+    detail::RemoveArchiveModelIndexes(archiveRoot);
+    return LoadFromRoot(archiveRoot, deviceId, std::move(modelBinaryStore));
 }
 
 Json FlowGraphModel::LoadFromRoot(
@@ -609,15 +609,8 @@ Json FlowGraphModel::LoadFromRoot(
             if (type.rfind("model/", 0) != 0) continue;
 
             int modelIndex = -1;
-            try {
-                if (node.contains("properties") && node.at("properties").is_object()) {
-                    const auto& props = node.at("properties");
-                    if (props.contains("model_index") && props.at("model_index").is_number_integer()) {
-                        modelIndex = props.at("model_index").get<int>();
-                    }
-                }
-            } catch (...) {
-                modelIndex = -1;
+            if (node.contains("properties") && node.at("properties").is_object()) {
+                modelIndex = detail::ReadModelIndexProperty(node.at("properties"));
             }
             if (modelIndex < 0 || _boundModelsByIndex->find(modelIndex) != _boundModelsByIndex->end()) {
                 continue;

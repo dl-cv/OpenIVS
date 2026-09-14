@@ -94,6 +94,7 @@ namespace DlcvModules
 
             var nodesToken = root["nodes"] as JArray;
             if (nodesToken == null) throw new InvalidOperationException("流程 JSON 缺少 nodes 数组");
+            ValidateModelIndexes(nodesToken);
             var nodes = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(nodesToken.ToString());
 
             ReleaseLoadedModels();
@@ -188,13 +189,9 @@ namespace DlcvModules
                     report = simpleObj;
                 }
             }
-            catch (Exception loadError)
+            catch
             {
-                try { ReleaseLoadedModels(); }
-                catch (Exception disposeError)
-                {
-                    throw new AggregateException("加载流程及释放子模型失败", loadError, disposeError);
-                }
+                ReleaseLoadedModels();
                 throw;
             }
             _loaded = code == 0;
@@ -202,9 +199,25 @@ namespace DlcvModules
             return report;
         }
 
+        private static void ValidateModelIndexes(JArray nodes)
+        {
+            foreach (JObject node in nodes.OfType<JObject>())
+            {
+                string type = node["type"]?.ToString() ?? string.Empty;
+                if (!type.StartsWith("model/", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                JToken modelIndexToken = node["properties"]?["model_index"];
+                if (modelIndexToken == null)
+                    continue;
+
+                BaseModelModule.ReadModelIndex(modelIndexToken);
+            }
+        }
+
         private void SetModelSources(ExecutionContext context)
         {
-            if (context != null && _modelSources != null && _modelSources.Count > 0)
+            if (context != null && _modelSources.Count > 0)
             {
                 context.Set("flow_model_sources", _modelSources);
             }
@@ -219,7 +232,7 @@ namespace DlcvModules
 
         public JObject GetRegistrationPipeline()
         {
-            return _registrationPipeline != null ? (JObject)_registrationPipeline.DeepClone() : new JObject();
+            return (JObject)_registrationPipeline.DeepClone();
         }
 
         public JArray GetModelBindings()
@@ -850,9 +863,29 @@ namespace DlcvModules
         protected virtual void Dispose(bool disposing)
         {
             if (_disposed) return;
-            if (disposing) ReleaseLoadedModels();
-            _loaded = false;
-            _disposed = true;
+            try
+            {
+                if (disposing) ReleaseLoadedModels();
+            }
+            catch (Exception ex)
+            {
+                if (Model.EnableConsoleLog)
+                    Console.WriteLine("释放流程模型失败: " + ex);
+            }
+            finally
+            {
+                _nodes = null;
+                _root = null;
+                _flowJsonPath = null;
+                _registrationPipeline = new JObject();
+                _modelSources = new Dictionary<int, FlowModelSource>();
+                _boundModelsByIndex = null;
+                _loadedModelsByNode = new Dictionary<int, Model>();
+                _loadedModelMeta = new JArray();
+                _deviceId = 0;
+                _loaded = false;
+                _disposed = true;
+            }
         }
 
         private ExecutionContext CreateExecutionContext()
@@ -866,38 +899,48 @@ namespace DlcvModules
         private void ReleaseLoadedModels()
         {
             _loaded = false;
-            var errors = new List<Exception>();
-            if (_boundModelsByIndex != null)
+            Dictionary<int, Model> boundModels = _boundModelsByIndex;
+            Dictionary<int, FlowModelSource> modelSources = _modelSources;
+            Dictionary<int, Model> loadedModelsByNode = _loadedModelsByNode;
+
+            // 释放调用开始后立即解除本地持有，不保留再次释放所需的状态。
+            _boundModelsByIndex = null;
+            _modelSources = new Dictionary<int, FlowModelSource>();
+            _loadedModelsByNode = new Dictionary<int, Model>();
+            _loadedModelMeta = new JArray();
+
+            if (boundModels != null)
             {
-                var releasedModels = new HashSet<Model>();
-                foreach (Model model in _boundModelsByIndex.Values.Distinct())
+                foreach (Model model in boundModels.Values.Distinct())
                 {
                     if (model == null) continue;
                     try
                     {
                         model.Dispose();
-                        releasedModels.Add(model);
                     }
-                    catch (Exception ex) { errors.Add(ex); }
+                    catch (Exception ex)
+                    {
+                        if (Model.EnableConsoleLog)
+                            Console.WriteLine("释放流程共享子模型失败: " + ex);
+                    }
                 }
-                foreach (int index in _boundModelsByIndex.Keys.ToArray())
-                {
-                    Model model = _boundModelsByIndex[index];
-                    if (model == null || releasedModels.Contains(model))
-                        _boundModelsByIndex.Remove(index);
-                }
-                if (_boundModelsByIndex.Count == 0) _boundModelsByIndex = null;
+                boundModels.Clear();
             }
+
             try
             {
-                BaseModelModule.ReleaseBinaryModels(_modelSources, _deviceId, _loadedModelsByNode);
-                _modelSources.Clear();
+                BaseModelModule.ReleaseBinaryModels(modelSources, _deviceId, loadedModelsByNode);
             }
-            catch (Exception ex) { errors.Add(ex); }
-            if (errors.Count > 0)
-                throw new AggregateException("释放流程子模型失败", errors);
-            _loadedModelsByNode.Clear();
-            _loadedModelMeta = new JArray();
+            catch (Exception ex)
+            {
+                if (Model.EnableConsoleLog)
+                    Console.WriteLine("释放流程内存模型失败: " + ex);
+            }
+            finally
+            {
+                modelSources?.Clear();
+                loadedModelsByNode?.Clear();
+            }
         }
 
         ~FlowGraphModel()

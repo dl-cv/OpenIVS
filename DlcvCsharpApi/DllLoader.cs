@@ -152,9 +152,9 @@ namespace dlcv_infer_csharp
                     throw new Exception($"当前使用的是 {FormatProviderNames(available)}，加载的模型是 {ProviderToDisplayName(needed.Value)} 格式，类型错误");
                 }
 
-                // 模型头只检查授权；普通模型始终复用进程首次选定的 DLL。
+                // 首次模型加载按模型头选定默认 DLL；默认 DLL 一旦创建，后续模型不再切换。
                 if (_instance == null)
-                    _instance = CreateLoader(SelectPreferredProvider(available));
+                    _instance = CreateLoader(needed ?? SelectPreferredProvider(available));
                 return _instance;
             }
         }
@@ -215,11 +215,6 @@ namespace dlcv_infer_csharp
             DllLoader loader = ResolveSharedIndexLoader(index, out indexType);
             loader.EnsureSharedIndexSupport(indexType);
             return loader;
-        }
-
-        public static DogProvider GetSharedIndexRoute(int index, out string indexType)
-        {
-            return ResolveSharedIndexLoader(index, out indexType).LoadedDogProvider;
         }
 
         internal static DllLoader ResolveSharedIndexLoader(int index, out string indexType)
@@ -432,9 +427,7 @@ namespace dlcv_infer_csharp
         private static DllLoader AttachLoadedModuleLocked(IntPtr moduleHandle)
         {
             string modulePath = GetModulePath(moduleHandle);
-            string moduleName = string.IsNullOrEmpty(modulePath)
-                ? null
-                : Path.GetFileName(modulePath);
+            string moduleName = Path.GetFileName(modulePath);
             DogProvider provider;
             if (string.Equals(moduleName, "dlcv_infer.dll", StringComparison.OrdinalIgnoreCase))
                 provider = DogProvider.Sentinel;
@@ -445,7 +438,7 @@ namespace dlcv_infer_csharp
 
             IntPtr protectedHandle;
             if (!ProtectLoadedModule(modulePath, moduleHandle, out protectedHandle))
-                throw new InvalidOperationException("无法保护已加载推理 DLL: " + (modulePath ?? moduleName));
+                throw new InvalidOperationException("无法保护已加载推理 DLL: " + modulePath);
 
             var loader = new DllLoader();
             loader.LoadedDogProvider = provider;

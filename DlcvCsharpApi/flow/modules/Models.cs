@@ -31,7 +31,10 @@ namespace DlcvModules
 			: base(nodeId, title, properties, context)
 		{
 			_modelPath = ReadStringOrDefault("model_path", null);
-			_modelIndex = ReadInt("model_index", -1);
+			object modelIndexValue;
+			_modelIndex = Properties != null && Properties.TryGetValue("model_index", out modelIndexValue)
+				? ReadModelIndex(modelIndexValue)
+				: -1;
 			_deviceId = ReadInt("device_id", 0);
 			// 简化：初始化在首次推理时完成
 		}
@@ -72,9 +75,9 @@ namespace DlcvModules
 
 				var boundModels = Context != null
 					? Context.Get<Dictionary<int, Model>>("flow_models", null) : null;
-				if (boundModels != null)
+				if (_modelIndex >= 0)
 				{
-					if (!boundModels.TryGetValue(_modelIndex, out _model) || _model == null ||
+					if (boundModels == null || !boundModels.TryGetValue(_modelIndex, out _model) || _model == null ||
 						_model.modelIndex != _modelIndex)
 						throw new InvalidOperationException("流程模型索引未加载: " + _modelIndex);
 					// 共享子模型必须完成绑定，不能把绑定异常当作缺少可选元信息。
@@ -126,47 +129,37 @@ namespace DlcvModules
 			if (modelSources == null || modelSources.Count == 0)
 				return;
 
-			var errors = new List<Exception>();
 			lock (_modelCacheLock)
 			{
-				// 全量释放可能已清空缓存，所属流程仍须保留并释放实际加载的对象。
-				var modelsToRelease = new HashSet<Model>(loadedModelsByNode.Values);
+				var modelsToRelease = new HashSet<Model>();
+				if (loadedModelsByNode != null)
+				{
+					foreach (Model model in loadedModelsByNode.Values)
+						if (model != null) modelsToRelease.Add(model);
+				}
 				foreach (FlowModelSource source in modelSources.Values)
 				{
 					if (source == null) continue;
 					string cacheKey = BuildBinaryCacheKey(source.CacheKey, deviceId);
 					if (_modelCache.TryGetValue(cacheKey, out Model model) && model != null)
 						modelsToRelease.Add(model);
+					_modelCache.Remove(cacheKey);
 				}
 
-				var releasedModels = new HashSet<Model>();
 				foreach (Model model in modelsToRelease)
 				{
-					if (model == null) continue;
 					try
 					{
 						model.Dispose();
-						releasedModels.Add(model);
 					}
-					catch (Exception ex) { errors.Add(ex); }
+					catch (Exception ex)
+					{
+						if (Model.EnableConsoleLog)
+							Console.WriteLine("释放流程内存模型失败: " + ex);
+					}
 				}
-
-				// 只移除释放成功的对象，失败对象和内存来源保留到下次释放。
-				foreach (FlowModelSource source in modelSources.Values)
-				{
-					if (source == null) continue;
-					string cacheKey = BuildBinaryCacheKey(source.CacheKey, deviceId);
-					if (_modelCache.TryGetValue(cacheKey, out Model model) && releasedModels.Contains(model))
-						_modelCache.Remove(cacheKey);
-				}
-				foreach (int nodeId in new List<int>(loadedModelsByNode.Keys))
-				{
-					if (releasedModels.Contains(loadedModelsByNode[nodeId]))
-						loadedModelsByNode.Remove(nodeId);
-				}
+				loadedModelsByNode?.Clear();
 			}
-			if (errors.Count > 0)
-				throw new AggregateException("释放流程内存模型失败", errors);
 		}
 
 		private static string BuildBinaryCacheKey(string sourceKey, int deviceId)
@@ -241,6 +234,28 @@ namespace DlcvModules
 			catch { cfg = 0; }
 			if (cfg <= 0) return modelLimit;
 			return Math.Max(1, Math.Min(modelLimit, cfg));
+		}
+
+		internal static int ReadModelIndex(object value)
+		{
+			if (value is JToken token)
+			{
+				if (token.Type != JTokenType.Integer || !(token is JValue integerValue))
+					throw new InvalidDataException("model_index 必须是 int 范围内的非负 JSON 整数");
+				value = integerValue.Value;
+			}
+
+			long modelIndex;
+			if (value is long longValue)
+				modelIndex = longValue;
+			else if (value is int intValue)
+				modelIndex = intValue;
+			else
+				throw new InvalidDataException("model_index 必须是 int 范围内的非负 JSON 整数");
+
+			if (modelIndex < 0 || modelIndex > int.MaxValue)
+				throw new InvalidDataException("model_index 必须是 int 范围内的非负 JSON 整数");
+			return (int)modelIndex;
 		}
 
 		protected int ReadInt(string key, int dv)

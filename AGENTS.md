@@ -68,7 +68,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | C++ 图像输入 | `dlcv_infer_cpp/ImageInputUtils.h` | 图像预处理与格式转换 |
 | C++ 测试程序 | `dlcv_infer_cpp_qt_demo/MainWindow.cpp` | 模型加载、推理、压力测试、加密狗检测 |
 | C 测试程序 | `dlcv_infer_c_qt_demo/MainWindow.cpp` | 通过 C ABI 执行模型加载、推理、压力测试和加密狗检测 |
-| 纯 C 控制台 Demo | `dlcv_infer_c_demo/main.cpp` | 动态解析 34 个 C 导出中的所需函数，执行普通模型、流程模型和多线程结果比较 |
+| 纯 C 控制台 Demo | `dlcv_infer_c_demo/main.cpp` | 动态解析现有 C 导出中的所需函数，执行普通模型、流程模型和多线程结果比较 |
 | C# 测试程序 | `DlcvDemo/MainWindow.cs` | WinForms 测试程序主窗口 |
 | C# 压力测试 | `PressureTestRunner/PressureTestRunner.cs` | 多线程/一致性测试框架 |
 
@@ -77,10 +77,12 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - **API 层修改**：
   - 新增结果字段 → 同步修改 `C++ API文档.md`、`C# API文档.md`
   - 修改图像预处理逻辑 → 同步检查 C++ `dlcv_infer.cpp` 与 C# `Model.cs` 的 `PrepareInferImages`
-  - 新增模型格式支持 → 同步更新 `DllLoader`（C++ 与 C#）的 `ResolveProviderFromHeader`
+  - 新增模型格式支持 → 同步更新格式识别、解析逻辑和 API 文档；DLL 选择仍遵循首次普通模型的模型头
+  - 接口审查以模型加速器实际可生成的产物为范围，不使用生成流程无法产生的输入要求新增支持或扩大接口
 - **测试程序修改**：
   - 新增推理参数 → 同步更新 C++ `MainWindow.cpp` 与 C# `MainWindow.cs` 的参数 JSON 构建
   - 修改可视化规则 → 同步检查 C++ `ImageViewerWidget` 与 C# `ImageViewer`
+  - 测试代码放在测试工程，生产头文件和生产 DLL 不增加测试导出，也不另设测试 DLL 导出方案
 
 ## 关键依赖路径
 
@@ -107,16 +109,16 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 需要滑窗处理时，使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 
-同一个 `.dvst/.dvso` 内的全部模型节点必须由同一推理 DLL 持有；该限制针对实际模块，不是模型文件的加密 provider。无模型节点流程优先复用当前 loader；没有当前 loader 时直接使用 Sentinel，不执行双 provider 探测。
+实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
 
 调用端不需要为这两类模型准备两套完全不同的调用方式。传入模型路径、设备和请求参数后，入口对象会完成对应的加载与执行。
 
 **model_index 分配规则**：
 
-- 对外仍使用 `int model_index`，不改变现有接口签名，不增加导出函数。
+- 对外仍使用 `int model_index`，不改变现有接口签名，不增加导出函数。JSON 中的编号只接受 `0` 到 `Int32.MaxValue` 范围内的整数，不接受字符串、浮点数、布尔值、空值或溢出值。
 - 每个推理 DLL 使用模型与流程共用的递增序号；编号编码跳过 `bit8`（数值 `256`）。`bit8` 对应发号 DLL 的 `DogProvider` 标记，但不表示模型内容的加密 provider 或资源类型。
 - 每个 DLL 可分配 `2^30` 个序号；编号不回绕、不重发。释放资源和 `FreeAllModels()` 均不重置计数器，序号耗尽时返回错误。
-- 新版编号用于避免重复，但恢复旧资源不依赖 `bit8`。具备完整共享接口的旧四段编号 DLL 使用相同的查询方式；缺少共享接口的更旧 DLL 保留普通加载和本地流程处理，不支持跨语言索引恢复。
+- 编号用于避免重复，恢复资源不依赖 `bit8`、编号区段或模型头；共享 index 始终通过进程内实际加载 DLL 查询。
 
 **按查询恢复共享索引**：
 
@@ -125,7 +127,9 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - 选定 DLL 后由 Model 恢复调用已有绑定接口并保存该 DLL 的 loader；无结果、多个结果、查询异常或绑定失败均报错，不改选其他 DLL。
 - 绑定完成后后续操作固定使用已保存的 loader；资源失效时不重新搜索其他 DLL。
 
-普通模型索引由底层 `dlcv_infer` 加载接口返回。流程由 C# 或 C++ 完成解析和子模型加载；推理 DLL 提供完整共享接口时，向底层注册流程 JSON 并使用底层返回的流程索引；旧 DLL 缺少共享接口时使用本地流程索引，原有加载和推理行为保持不变。
+普通模型索引由底层 `dlcv_infer` 加载接口返回。流程由 C# 或 C++ 完成解析和子模型加载，并使用本次加载和注册返回的编号。归档直接加载先清除 `pipeline.json` 中遗留的 `model_index`，只使用包内流程数据和子模型数据；只有共享恢复入口才使用已登记的 index 和绑定信息。
+
+**释放规则**：按 index 释放时，参数格式无效或编号超出非负 `int` 范围仍可返回参数错误；参数是有效编号时，即使编号已不存在或底层释放返回错误，也返回成功并完成本地清理，重复释放同样成功。底层错误最多附在日志或 `message` 的错误详情中，不保留等待重试状态。
 
 
 ## API 速查表
@@ -197,7 +201,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | None / Unknown | 不加载 | — |
 
 
-普通模型的文件与内存入口只用模型头 `dog_provider` 检查授权，不据此切换 DLL。默认 DLL 按进程首次检测到的加密狗选择，优先级为 Sentinel、Virbox；均未检测到则返回 `None`/`Unknown`，不加载推理 DLL。每个 `Model` 实例在加载时保存自己的 loader，后续所有操作都走该 loader。共享 index 恢复不按四段范围、资源类型、模型内容的加密 provider 或 `bit8` 选 DLL，而是查询进程内实际已加载的目标 DLL；`-1`、未知返回值、无有效结果、歧义或绑定失败直接报错，不修改默认 loader。`bit8` 仍对应发号 DLL 的 `DogProvider` 标记。C# 普通模型缓存保存 index，并复用固定的默认 loader；外部共享 index 单独保存查询确定的所属 loader。
+首次普通模型加载时根据模型头 `dog_provider` 选择进程默认 DLL，并检查该模型授权。默认 DLL 确定后保持不变，后续普通模型继续使用该 DLL，但每个模型仍按自己的模型头逐个检查授权。每个 `Model` 实例保存实际 loader，后续操作均使用该 loader。共享 index 不按编号范围、资源类型、模型头或 `bit8` 选择 DLL，而是查询进程内实际加载的 DLL；唯一确认所属 DLL 后保存对应 loader，查询失败、无结果、多个有效结果或绑定失败均返回错误，且不修改默认 DLL。
 
 
 ## 输入图像处理约定
@@ -325,9 +329,9 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 2. 读取第二行 JSON 头。
 3. 从头信息中读取 `file_list` 和 `file_size`。
 4. 在内存中读取 `pipeline.json` 和子模型字节，校验归档长度和名称。
-5. 按流程节点关联只读子模型数据，保留 `model_path_original` 和 `model_name` 作为来源信息。
+5. 清除流程节点中遗留的 `model_index`，按流程节点关联只读子模型数据，保留 `model_path_original` 和 `model_name` 作为来源信息。
 6. 使用内存加载接口完成子模型预加载，不创建加载目录、不写出模型文件；缺少内存加载接口时明确返回不支持。
-7. 释放流程时清理模型持有及内存数据。
+7. 释放流程时清理模型持有及内存数据。共享恢复才按已登记的绑定信息写入 `model_index`。
 
 ### Flow 模块分类
 
@@ -479,12 +483,12 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 - **底层推理引擎**：`dlcv_infer` 是 OpenIVS API 层的底层依赖。OpenIVS 的 C++/C API（`dlcv_infer_cpp`）和 C# API（`DlcvCsharpApi`）均通过加载 `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）调用推理能力；C++/C API 对外产物为 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 - **加密模型文件**：`dlcv_deploy` 产出的 `.dvt`/`.dvo`/`.dvst`/`.dvso` 等文件是 OpenIVS 测试程序与 WPF 框架的输入。
-- **接口范围**：OpenIVS 的 C++、C 和 C# API 不根据模型包内的 `dlcv.json` 或 `header_json.dog_provider` 选择底层 DLL。`DllLoader` 按当前进程检测到的加密狗选择一次底层 DLL，后续不因模型类型切换；模型头字段只用于加载前授权检查。
+- **接口范围**：OpenIVS 的 C++、C 和 C# API 在首次普通模型加载时根据模型头 `dog_provider` 选择默认 DLL；后续普通模型继续使用已选默认 DLL，并逐个检查模型授权。共享 index 始终按进程内实际加载的 DLL 查询，不按模型头重新选择。
 
 ### 双 DLL 运行事实
 
-- `dlcv_infer.dll` 与 `dlcv_infer_v.dll` 来自同一套推理实现，推理能力相同。两个对应加密狗同时存在时，任一 DLL 均可加载两种加密模型，不得把“选到另一 provider DLL”表述为模型不兼容或加载错误。
-- 模型头用于加载前授权检查；缺少模型所需加密狗时，在调用推理 DLL 前返回错误，不通过切换默认 DLL 处理。
+- `dlcv_infer.dll` 与 `dlcv_infer_v.dll` 是普通模型运行使用的实际 DLL。默认 DLL 由首次普通模型的模型头确定，此后不因后续模型切换。
+- 每个普通模型加载前都按模型头检查授权；缺少所需授权时，在调用推理 DLL 前返回错误。实际产品输入遵循上述单一加密狗格式规则。
 - 两个文件名不同的 DLL 同时加载后处于同一进程地址空间，但属于两个独立 Windows 模块实例，各自保存模块静态数据和模型表。相同实现不代表模型表共享。
 - `FreeAllModels()` 需要处理进程内实际已加载的目标模块；释放不会重置各 DLL 的编号计数器，已释放编号不再次发放。
 
@@ -494,5 +498,3 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - 自动验证：无界面功能验证使用两个实际测试程序的 `infer` 命令行模式（模型、图片与阈值通过已定义参数传入）；C# GUI 自动验证使用 `DlcvDemo` 的 `ui-test --interactive-dialogs false`，判断规则见“统一运行与验证输入规则”。
 - 使用 `Test/DlcvCSharpTest` 或 `Test/dlcv_infer_cpp_test` 执行自动化控制台测试（模型加载、推理、速度、内存）。
 - C# 测试支持 `demo2-rgb-selftest` 验证 Demo2 入口 RGB 数据流一致性。
-
-

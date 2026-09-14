@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.IO;
 using System.Reflection;
@@ -19,7 +19,8 @@ namespace DlcvCSharpTest
                 VerifyDifferentModelDataIsRejected();
                 VerifyIdenticalPipelineDataIsReused();
                 VerifyDifferentPipelineDataIsRejected();
-                Console.WriteLine("DVS 同名模型内容检查通过");
+                VerifyLegacyIndexDoesNotOverrideArchiveSource();
+                Console.WriteLine("DVS 归档内容与内存来源检查通过");
                 return 0;
             }
             catch (Exception ex)
@@ -94,6 +95,68 @@ namespace DlcvCSharpTest
                 throw;
             }
             throw new InvalidOperationException("同名但内容不同的流程文件未报错");
+        }
+
+
+        private static void VerifyLegacyIndexDoesNotOverrideArchiveSource()
+        {
+            var pipeline = new JObject
+            {
+                ["nodes"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["id"] = 7,
+                        ["type"] = "model/det",
+                        ["properties"] = new JObject
+                        {
+                            ["model_path"] = "models/model.dvt",
+                            ["model_index"] = 123
+                        }
+                    }
+                }
+            };
+            byte[] archive = BuildArchive(
+                new[] { "pipeline.json", "models/model.dvt" },
+                new[]
+                {
+                    Encoding.UTF8.GetBytes(pipeline.ToString(Formatting.None)),
+                    Encoding.ASCII.GetBytes("archived-model-data")
+                });
+
+            MethodInfo readArchive = typeof(DvsModel).GetMethod(
+                "ReadArchive",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            MethodInfo buildModelSources = typeof(DvsModel).GetMethod(
+                "BuildModelSources",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            if (readArchive == null || buildModelSources == null)
+                throw new MissingMethodException(typeof(DvsModel).FullName, "ReadArchive/BuildModelSources");
+
+            using (var stream = new MemoryStream(archive, false))
+            {
+                object[] readArguments = { stream, null, null };
+                try
+                {
+                    readArchive.Invoke(null, readArguments);
+                    var parsedPipeline = (JObject)readArguments[1];
+                    object sources = buildModelSources.Invoke(
+                        null,
+                        new[] { parsedPipeline, readArguments[2], "archive-source-selftest" });
+                    var sourceMap = sources as IDictionary;
+                    var properties = (JObject)parsedPipeline["nodes"]?[0]?["properties"];
+                    if (sourceMap == null || !sourceMap.Contains(7))
+                        throw new InvalidOperationException("归档模型数据未登记为节点内存来源");
+                    if (properties == null || properties["model_index"] != null)
+                        throw new InvalidOperationException("归档遗留 model_index 未被移除");
+                    if (!string.Equals(properties.Value<string>("model_name"), "model.dvt", StringComparison.Ordinal))
+                        throw new InvalidOperationException("归档模型名称未保留");
+                }
+                catch (TargetInvocationException ex) when (ex.InnerException != null)
+                {
+                    throw ex.InnerException;
+                }
+            }
         }
 
         private static byte[] BuildArchive(string[] fileNames, byte[][] fileData)

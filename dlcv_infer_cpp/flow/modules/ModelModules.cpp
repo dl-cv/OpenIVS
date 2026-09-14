@@ -231,13 +231,9 @@ void ModelPool::ReleaseByKey(const std::string& key, std::uint64_t entryIdentity
     }
 }
 
-void ModelPool::ClearForFreeAllModels() {
+void ModelPool::Clear() {
     std::lock_guard<std::mutex> lk(_mu);
     _cache.clear();
-}
-
-void ModelPool::Clear() {
-    ClearForFreeAllModels();
 }
 
 ModelPoolStats ModelPool::GetStats() {
@@ -276,7 +272,7 @@ void BaseModelModule::LoadModel() {
     } catch (...) {}
 
     _resolvedDeviceId = deviceId;
-    if (_usesModelIndex) {
+    if (_modelIndex >= 0) {
         if (Context != nullptr) {
             const auto boundModels = Context->Get<std::shared_ptr<const BoundModelMap>>(
                 "bound_models_by_index", std::shared_ptr<const BoundModelMap>());

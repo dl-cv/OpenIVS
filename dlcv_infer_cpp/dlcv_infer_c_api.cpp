@@ -383,6 +383,10 @@ static const char* InvokeTrackedNativeJson(
     if (func == nullptr) {
         throw std::domain_error("dlcv_infer 缺少原生 JSON 接口");
     }
+    if ((releaseKind == NativeJsonReleaseKind::ModelResult && loader.GetFreeModelResultFunc() == nullptr) ||
+        (releaseKind == NativeJsonReleaseKind::Result && loader.GetFreeResultFunc() == nullptr)) {
+        throw std::domain_error("dlcv_infer 缺少对应的 JSON 释放接口");
+    }
     const char* result = func(configStr);
     TrackNativeJsonResult(result, loader, releaseKind);
     return result;
@@ -398,29 +402,40 @@ static bool IsNativeSuccessResult(const char* result) {
     }
 }
 
-static bool ReleaseModelEntry(int modelIndex, const char* configStr, const char*& nativeResult) {
-    nativeResult = nullptr;
+static std::string ReleaseModelEntry(int modelIndex, const char* configStr) {
     std::shared_ptr<CApiModelEntry> releasedEntry;
+    std::string detail;
     {
-        // 选择、释放和移除同一持有在同一临界区完成，防止并发释放重复消耗底层持有。
         std::lock_guard<std::mutex> lock(g_modelsMutex);
         const auto it = g_models.find(modelIndex);
-        if (it == g_models.end()) return false;
+        if (it == g_models.end()) return {};
         releasedEntry = it->second.back();
-        if (releasedEntry->nativeOwner) {
-            if (releasedEntry->loader == nullptr) throw std::runtime_error("本地模型缺少所属 DLL");
-            nativeResult = InvokeTrackedNativeJson(
-                *releasedEntry->loader,
-                releasedEntry->loader->GetFreeModelFunc(),
-                configStr,
-                NativeJsonReleaseKind::Result);
-            if (!IsNativeSuccessResult(nativeResult)) return false;
-        }
+        // 先移除本次持有，底层释放失败也不再保留重复释放入口。
         it->second.pop_back();
         if (it->second.empty()) g_models.erase(it);
+        if (releasedEntry->nativeOwner) {
+            const char* result = nullptr;
+            try {
+                if (releasedEntry->loader == nullptr) throw std::runtime_error("本地模型缺少所属 DLL");
+                result = InvokeTrackedNativeJson(
+                    *releasedEntry->loader,
+                    releasedEntry->loader->GetFreeModelFunc(),
+                    configStr,
+                    NativeJsonReleaseKind::Result);
+                if (!IsNativeSuccessResult(result)) {
+                    detail = result != nullptr ? result : "底层模型释放未返回结果";
+                }
+            } catch (const std::exception& ex) {
+                detail = ex.what();
+            } catch (...) {
+                detail = "底层模型释放发生未知异常";
+            }
+            ReleaseNativeJsonResult(result, true);
+        }
     }
-    // 在模型表解锁后销毁实例；进行中的调用仍通过 shared_ptr 保留其使用权。
-    return true;
+    // 进行中的调用仍通过 shared_ptr 持有对象，最后一次使用结束后销毁。
+    if (!detail.empty()) RecordNativeApiFailure("dlcv_free_model", detail.c_str());
+    return detail;
 }
 
 static std::shared_ptr<CApiModelEntry> CreateSharedModelEntry(
@@ -447,11 +462,20 @@ static std::shared_ptr<CApiModelEntry> FindOrRestoreSharedModelEntry(
             entry = it->second.back();
         } else {
             int indexType = 0;
-            auto* loader = &dlcv_infer::DllLoader::ResolveForIndex(modelIndex, indexType);
+            dlcv_infer::DllLoader* loader = nullptr;
+            try {
+                loader = &dlcv_infer::DllLoader::ResolveForIndex(modelIndex, indexType);
+            } catch (const std::invalid_argument&) {
+                throw std::out_of_range("Model not found.");
+            }
             entry = CreateSharedModelEntry(modelIndex, *loader, indexType);
             // 先保存唯一选定的 DLL，再建立共享持有；失败时保留记录。
             g_models.emplace(modelIndex, CApiModelStack{entry});
         }
+    }
+    if (entry->loader != nullptr && entry->loader->GetIndexTypeFunc() != nullptr &&
+        entry->loader->GetIndexTypeFunc()(modelIndex) == 0) {
+        throw std::out_of_range("Model not found.");
     }
     // 本地原生加载已知所属 DLL；缺少共享接口的旧 SDK 保留原 JSON 调用。
     if (requireStructuredModel || !entry->nativeOwner || entry->HasSharedIndexFunctions()) {
@@ -461,7 +485,7 @@ static std::shared_ptr<CApiModelEntry> FindOrRestoreSharedModelEntry(
 }
 
 static std::shared_ptr<CApiModelEntry> GetStructuredModelEntry(int modelIndex) {
-    if (modelIndex < 0) throw std::runtime_error("model not found");
+    if (modelIndex < 0) throw std::out_of_range("Model not found.");
     return FindOrRestoreSharedModelEntry(modelIndex, true);
 }
 
@@ -690,7 +714,9 @@ static void NormalizeNativeCompatibleResult(DlcvCResult& result) {
         return;
     }
 
-    if (result.message != nullptr && std::strcmp(result.message, "model not found") == 0) {
+    if (result.message != nullptr &&
+        (std::strcmp(result.message, "model not found") == 0 ||
+         std::strcmp(result.message, "Model not found.") == 0)) {
         result.code = 2;
         ReplaceResultMessage(result, "Model not found.");
     } else if (result.message != nullptr && std::strcmp(result.message, "invalid image list") == 0) {
@@ -835,20 +861,13 @@ const char* dlcv_infer_cpp_get_last_error_c() {
 }
 
 int dlcv_infer_cpp_free_model_c(int model_index) {
-    try {
+    ClearLastErrorMessage();
+    CallNativeVoid("dlcv_free_model", [model_index]() {
         dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
         const std::string config = dlcv_infer::json{ { "model_index", model_index } }.dump();
-        const char* nativeResult = nullptr;
-        const bool success = ReleaseModelEntry(model_index, config.c_str(), nativeResult);
-        ReleaseNativeJsonResult(nativeResult, true);
-        if (success) return 0;
-        SetLastErrorMessage("模型不存在或底层模型释放失败");
-    } catch (const std::exception& ex) {
-        SetLastErrorMessage(ex.what());
-    } catch (...) {
-        SetLastErrorMessage("unknown error");
-    }
-    return -1;
+        (void)ReleaseModelEntry(model_index, config.c_str());
+    });
+    return 0;
 }
 
 DlcvCResult dlcv_infer_cpp_infer_c(int model_index, const DlcvCImageList* image_list) {
@@ -1183,14 +1202,17 @@ const char* DLCV_NATIVE_C_CALL dlcv_free_model(const char* config_str) {
     return CallNativeString("dlcv_free_model", [config_str, modelIndex]() {
         try {
             dlcv_infer::flow::ModelLifecycleReadGuard lifecycleGuard;
-            const char* nativeResult = nullptr;
-            const bool success = ReleaseModelEntry(modelIndex, config_str, nativeResult);
-            if (nativeResult != nullptr) return nativeResult;
-            return AllocateNativeJsonResult(success
-                ? MakeNativeStatus(0, "Successfully freed model.")
-                : MakeNativeStatus(2, "Model not found."));
+            const std::string detail = ReleaseModelEntry(modelIndex, config_str);
+            return AllocateNativeJsonResult(MakeNativeStatus(0,
+                detail.empty() ? "Successfully freed model." : "Model released locally. Native release: " + detail));
         } catch (const std::exception& ex) {
-            return AllocateNativeJsonResult(MakeNativeStatus(1, ex.what()));
+            RecordNativeApiFailure("dlcv_free_model", ex.what());
+            return AllocateNativeJsonResult(MakeNativeStatus(0,
+                std::string("Model released locally. Native release: ") + ex.what()));
+        } catch (...) {
+            RecordNativeApiFailure("dlcv_free_model", "unknown exception");
+            return AllocateNativeJsonResult(MakeNativeStatus(0,
+                "Model released locally. Native release: unknown exception"));
         }
     });
 }
@@ -1241,6 +1263,8 @@ const char* DLCV_NATIVE_C_CALL dlcv_get_model_info(const char* config_str) {
                     NativeJsonReleaseKind::Result);
             }
             return AllocateNativeJsonResult(AddNativeModelInfoStatus(entry->model->GetModelInfo()));
+        } catch (const std::out_of_range& ex) {
+            return AllocateNativeJsonResult(MakeNativeStatus(2, ex.what()));
         } catch (const std::exception& ex) {
             return AllocateNativeJsonResult(MakeNativeStatus(1, ex.what()));
         }
@@ -1284,6 +1308,8 @@ extern "C" const char* DLCV_NATIVE_C_CALL dlcv_infer_json_impl(const char* confi
 
             const dlcv_infer::json config = dlcv_infer::json::parse(config_str);
             return InferFlowModelWithNativeJson(entry, config);
+        } catch (const std::out_of_range& ex) {
+            return AllocateNativeJsonResult(MakeNativeStatus(2, ex.what()));
         } catch (const std::exception& ex) {
             return AllocateNativeJsonResult(MakeNativeStatus(1, ex.what()));
         }

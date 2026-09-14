@@ -304,7 +304,7 @@ def run_invalid_input_checks(api):
         raise TestFailure("C ABI 扩展释放", "扩展释放函数未清空结果")
 
     image_list = DlcvCImageList(ctypes.pointer(valid_image), 1)
-    result = library.dlcv_infer_c(-1, ctypes.byref(image_list))
+    result = library.dlcv_infer_c(2**31 - 1, ctypes.byref(image_list))
     actual_message = decode_c_text(result.message)
     if result.code != 2 or actual_message != "Model not found." or result.sample_results or result.n != 0:
         library.dlcv_free_model_result_c(ctypes.byref(result))
@@ -760,9 +760,9 @@ def run_model(api, model_path, image_path, device_id, params):
         row["错误"] = str(exc)
     finally:
         if model_index >= 0:
-            row["释放"] = (
-                api.library.dlcv_infer_cpp_free_model_c(model_index) == 0
-            )
+            first_free = api.library.dlcv_infer_cpp_free_model_c(model_index)
+            repeated_free = api.library.dlcv_infer_cpp_free_model_c(model_index)
+            row["释放"] = first_free == 0 and repeated_free == 0
             if not row["释放"] and not row["错误阶段"]:
                 row["错误阶段"] = "模型释放"
                 row["错误"] = "模型释放返回失败"

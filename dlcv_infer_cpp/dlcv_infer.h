@@ -175,6 +175,9 @@ namespace dlcv_infer {
             sntl_admin::DogProvider provider,
             void* module,
             const std::string& loadedPath);
+        static DllLoader& GetOrSelectDefaultForModelProvider(
+            sntl_admin::DogProvider provider,
+            bool hasExplicitProvider);
 
         DllLoader(sntl_admin::DogProvider provider);
         DllLoader(
@@ -507,21 +510,4 @@ namespace dlcv_infer {
         static DlcvCResult InferC(int modelIndex, const DlcvCImageList& imageList);
         static void FreeModelResultC(DlcvCResult& result);
     };
-}
-
-extern "C" {
-    DLCV_INFER_CPP_API int dlcv_shared_index_test_load_c(const wchar_t* model_path, int device_id);
-    DLCV_INFER_CPP_API const char* dlcv_shared_index_test_infer_c(int index, const wchar_t* image_path);
-    DLCV_INFER_CPP_API int dlcv_shared_index_test_free_c(int index);
-    DLCV_INFER_CPP_API int dlcv_shared_index_test_resolve_c(int index);
-    DLCV_INFER_CPP_API int dlcv_shared_index_test_register_flow_c(int model_index);
-    DLCV_INFER_CPP_API int dlcv_shared_index_test_index_rules_c();
-    DLCV_INFER_CPP_API int dlcv_shared_index_test_double_load_free_c(const wchar_t* model_path, int device_id);
-    DLCV_INFER_CPP_API int dlcv_shared_index_test_double_flow_load_free_c(const wchar_t* model_path, int device_id);
-    DLCV_INFER_CPP_API int dlcv_shared_index_test_empty_flow_after_provider_c(
-        const wchar_t* provider_model_path,
-        const wchar_t* flow_path,
-        int device_id);
-    DLCV_INFER_CPP_API const char* dlcv_shared_index_test_info_c(int index);
-    DLCV_INFER_CPP_API void dlcv_shared_index_test_free_string_c(const char* result);
 }

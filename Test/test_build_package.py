@@ -124,5 +124,53 @@ class CompleteTestRunnerOptionsTest(unittest.TestCase):
         self.assertNotIn("$env:PATH", runner)
 
 
+class NativeCAbiTestProjectTest(unittest.TestCase):
+    def test_formal_c_abi_tests_are_compiled_without_test_exports(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        project_path = repo_root / "Test" / "DlcvCSharpTest" / "DlcvCSharpTest.csproj"
+        project = ET.parse(project_path)
+        namespace = {"msbuild": "http://schemas.microsoft.com/developer/msbuild/2003"}
+        compile_files = {item.attrib["Include"] for item in project.findall(".//msbuild:Compile", namespace)}
+        self.assertIn("NativeCAbiSelfTests.cs", compile_files)
+        source = "\n".join(path.read_text(encoding="utf-8-sig") for path in project_path.parent.glob("*.cs"))
+        self.assertNotIn("dlcv_shared_index_test_", source)
+        for export_name in ("dlcv_infer_cpp_load_model_c", "dlcv_infer_cpp_get_model_info_c", "dlcv_infer_cpp_infer_json_c", "dlcv_infer_cpp_free_model_c", "dlcv_infer_cpp_free_all_models_c"):
+            self.assertIn(export_name, source)
+
+    def test_production_sources_do_not_expose_shared_index_test_hooks(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        for name in ("dlcv_infer.h", "dlcv_infer.cpp", "dlcv_infer_c_api.h", "dlcv_infer_c_api.cpp"):
+            with self.subTest(source=name):
+                source = (repo_root / "dlcv_infer_cpp" / name).read_text(encoding="utf-8-sig")
+                self.assertNotIn("dlcv_shared_index_test_", source)
+        header = (repo_root / "dlcv_infer_cpp/flow/modules/ModelModules.h").read_text(encoding="utf-8-sig")
+        self.assertNotIn("ClearForFreeAllModels", header)
+
+    def test_native_rules_use_existing_release_executable_and_exit_code(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        program = (repo_root / "Test" / "DlcvCSharpTest" / "Program.cs").read_text(encoding="utf-8-sig")
+        self.assertIn('ResolveRepoRoot(), "Release", "dlcv_infer_cpp_test.exe"', program)
+        self.assertIn('Arguments = "shared-index-rules-selftest"', program)
+        self.assertIn("process.ExitCode != 0", program)
+        self.assertNotIn("CppSharedIndexTestIndexRules", program)
+
+    def test_unified_test_count_remains_27(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        program = (repo_root / "Test" / "DlcvCSharpTest" / "Program.cs").read_text(encoding="utf-8-sig")
+        start = program.index("var tests = new List<UnifiedTestCase>")
+        end = program.index("var results = new List<UnifiedTestResult>", start)
+        self.assertEqual(27, program[start:end].count("new UnifiedTestCase("))
+        self.assertIn("C++ 共享规则与正式 C ABI", program[start:end])
+
+    def test_runner_uses_temp_logs_and_strict_utf8(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        runner = (repo_root / "Test" / "DlcvCSharpTest" / "RunAllTests.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("GetFullPath([IO.Path]::GetTempPath())", runner)
+        self.assertIn("日志路径必须位于系统临时目录", runner)
+        self.assertIn("UTF8Encoding(", runner)
+        self.assertIn("Read-Utf8Text", runner)
+        self.assertNotIn("bin\\x64\\Release\\DlcvCSharpTest-all-tests.log", runner)
+
+
 if __name__ == "__main__":
     unittest.main()

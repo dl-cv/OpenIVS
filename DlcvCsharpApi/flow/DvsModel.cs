@@ -133,16 +133,20 @@ namespace DlcvModules
                         : new Model { modelIndex = modelIndex, OwnModelIndex = false });
                 }
             }
-            catch (Exception loadError)
+            catch
             {
-                var errors = new List<Exception> { loadError };
                 foreach (Model model in modelsByIndex.Values)
                 {
-                    try { model.Dispose(); }
-                    catch (Exception disposeError) { errors.Add(disposeError); }
+                    try
+                    {
+                        model.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        if (Model.EnableConsoleLog)
+                            Console.WriteLine("恢复流程时释放子模型失败: " + ex);
+                    }
                 }
-                if (errors.Count > 1)
-                    throw new AggregateException("恢复流程及释放子模型失败", errors);
                 throw;
             }
             return LoadFromRoot(root, deviceId, modelsByIndex, savedPipeline);
@@ -318,7 +322,9 @@ namespace DlcvModules
                     continue;
 
                 JObject properties = node["properties"] as JObject;
-                string originalPath = properties?["model_path"]?.ToString();
+                if (properties == null)
+                    throw new InvalidDataException("模型节点缺少 properties");
+                string originalPath = properties["model_path"]?.ToString();
                 int nodeId = ReadNodeId(node, i);
                 node["id"] = nodeId;
                 if (string.IsNullOrWhiteSpace(originalPath))
@@ -326,6 +332,7 @@ namespace DlcvModules
 
                 ArchiveEntry entry = FindArchiveEntry(originalPath, entries, entriesByFileName, nodeId);
                 string modelName = GetArchiveFileName(entry.NormalizedName);
+                properties.Remove("model_index");
                 properties["model_path_original"] = originalPath;
                 properties["model_name"] = modelName;
 

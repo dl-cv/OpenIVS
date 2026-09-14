@@ -1,4 +1,5 @@
 ﻿#include "dlcv_infer.h"
+#include "SharedIndexResolver.h"
 #include "dlcv_sntl_admin.h"
 #include "ImageInputUtils.h"
 #include "MaskUtils.h"
@@ -482,6 +483,7 @@ DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
         }
 
         if (!gotPipeline) throw std::runtime_error("流程模型中未找到 pipeline.json");
+        dlcv_infer::flow::detail::RemoveArchiveModelIndexes(out.pipelineRoot);
         out.originalPipelineRoot = out.pipelineRoot;
         BindPipelineModelBuffers(out.pipelineRoot, *out.modelBinaryStore);
     } catch (...) {
@@ -1148,63 +1150,6 @@ namespace dlcv_infer {
             std::string Path;
         };
 
-        struct SharedIndexCandidate final {
-            void* Module = nullptr;
-            DllLoader* Loader = nullptr;
-            std::function<int(int)> Query;
-        };
-
-        static const SharedIndexCandidate& SelectSharedIndexCandidate(
-            int index,
-            const std::vector<SharedIndexCandidate>& candidates,
-            int& indexType) {
-            if (index < 0) {
-                throw std::invalid_argument("共享 index 无效");
-            }
-
-            bool hasSharedIndexCandidate = false;
-            struct Match final {
-                const SharedIndexCandidate* Candidate = nullptr;
-                int Type = 0;
-            };
-            std::vector<Match> matches;
-            std::unordered_set<void*> seenModules;
-            for (const auto& candidate : candidates) {
-                if (!candidate.Query) continue;
-                if (candidate.Module != nullptr &&
-                    !seenModules.insert(candidate.Module).second) {
-                    continue;
-                }
-                hasSharedIndexCandidate = true;
-                int candidateType = 0;
-                try {
-                    candidateType = candidate.Query(index);
-                } catch (const std::exception& ex) {
-                    throw std::runtime_error(std::string("查询共享 index 失败: ") + ex.what());
-                } catch (...) {
-                    throw std::runtime_error("查询共享 index 发生异常");
-                }
-                if (candidateType == 0) continue;
-                if (candidateType != 1 && candidateType != 2) {
-                    throw std::runtime_error("共享 index 类型查询返回未知值");
-                }
-                matches.push_back({&candidate, candidateType});
-            }
-
-            if (!hasSharedIndexCandidate) {
-                throw std::domain_error(
-                    "dlcv_infer 不支持共享模型索引接口；仅可使用加载时返回的本地模型 index");
-            }
-            if (matches.empty()) {
-                throw std::invalid_argument("共享 index 不可用");
-            }
-            if (matches.size() != 1) {
-                throw std::runtime_error("共享 index 在多个推理 DLL 中有效，无法确定所属模块");
-            }
-            indexType = matches.front().Type;
-            return *matches.front().Candidate;
-        }
-
         static std::string LowerAscii(std::string value) {
             for (char& ch : value) {
                 ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
@@ -1395,7 +1340,6 @@ namespace dlcv_infer {
     static std::mutex g_flowModelIndexMu;
     static int g_nextSentinelFlowModelIndex = 10000;
     static int g_nextVirboxFlowModelIndex = 30000;
-    static constexpr int kProviderBit = 0x100;
 
     static int AllocateFlowModelIndex(sntl_admin::DogProvider provider) {
         std::lock_guard<std::mutex> lock(g_flowModelIndexMu);
@@ -1412,18 +1356,6 @@ namespace dlcv_infer {
         }
         if (*nextIndex > lastIndex) return -1;
         return (*nextIndex)++;
-    }
-
-    static bool ClassifySharedIndex(
-        int index,
-        sntl_admin::DogProvider& provider,
-        int& indexType) {
-        if (index < 0) return false;
-        provider = (index & kProviderBit) != 0
-            ? sntl_admin::DogProvider::Virbox
-            : sntl_admin::DogProvider::Sentinel;
-        indexType = 0;
-        return true;
     }
 
 #ifdef _WIN32
@@ -1805,7 +1737,7 @@ namespace dlcv_infer {
             throw std::invalid_argument("共享 index 无效");
         }
 
-        std::vector<SharedIndexCandidate> candidates;
+        std::vector<detail::SharedIndexCandidate> candidates;
         std::unordered_set<void*> seenModules;
         for (const auto& module : EnumerateLoadedInferModules()) {
             if (module.Module == nullptr || !seenModules.insert(module.Module).second) {
@@ -1815,18 +1747,15 @@ namespace dlcv_infer {
                 module.Provider,
                 module.Module,
                 module.Path);
-            const GetIndexTypeFuncType getIndexType = loader.GetIndexTypeFunc();
-            if (getIndexType == nullptr) {
-                continue;
-            }
             candidates.push_back({
                 module.Module,
                 &loader,
-                getIndexType
+                loader.GetIndexTypeFunc()
             });
         }
 
-        const SharedIndexCandidate& selected = SelectSharedIndexCandidate(index, candidates, indexType);
+        const detail::SharedIndexCandidate& selected =
+            detail::SelectSharedIndexCandidate(index, candidates, indexType);
         if (selected.Loader == nullptr) {
             throw std::runtime_error("共享 index 没有关联推理 DLL");
         }
@@ -1912,13 +1841,28 @@ namespace dlcv_infer {
 #endif
     }
 
-    DllLoader& DllLoader::ForModelBuffer(const unsigned char* modelData, size_t modelSize) {
-        sntl_admin::DogProvider needed;
-        if (TryResolveExplicitProviderFromBuffer(modelData, modelSize, needed)) {
-            EnsureProviderAvailable(needed);
+    DllLoader& DllLoader::GetOrSelectDefaultForModelProvider(
+        sntl_admin::DogProvider provider,
+        bool hasExplicitProvider) {
+        {
+            std::lock_guard<std::mutex> lock(DefaultLoaderMutex());
+            if (DefaultLoaderSlot() != nullptr) return *DefaultLoaderSlot();
         }
-        // 模型内容的授权来源不决定承载模型的 DLL；普通加载始终使用默认模块。
-        return Instance();
+        if (!hasExplicitProvider) return Instance();
+
+        DllLoader& modelLoader = GetOrCreateForProvider(provider);
+        std::lock_guard<std::mutex> lock(DefaultLoaderMutex());
+        DllLoader*& defaultLoader = DefaultLoaderSlot();
+        if (defaultLoader == nullptr) defaultLoader = &modelLoader;
+        return *defaultLoader;
+    }
+
+    DllLoader& DllLoader::ForModelBuffer(const unsigned char* modelData, size_t modelSize) {
+        sntl_admin::DogProvider needed = sntl_admin::DogProvider::Unknown;
+        const bool hasExplicitProvider =
+            TryResolveExplicitProviderFromBuffer(modelData, modelSize, needed);
+        if (hasExplicitProvider) EnsureProviderAvailable(needed);
+        return GetOrSelectDefaultForModelProvider(needed, hasExplicitProvider);
     }
 
     DllLoader& DllLoader::EnsureForModel(const std::string& modelPath) {
@@ -1934,11 +1878,10 @@ namespace dlcv_infer {
         if (!file) {
             throw std::runtime_error("failed to open model file");
         }
-        sntl_admin::DogProvider needed;
-        if (TryResolveExplicitProviderFromStream(file, needed)) {
-            EnsureProviderAvailable(needed);
-        }
-        return Instance();
+        sntl_admin::DogProvider needed = sntl_admin::DogProvider::Unknown;
+        const bool hasExplicitProvider = TryResolveExplicitProviderFromStream(file, needed);
+        if (hasExplicitProvider) EnsureProviderAvailable(needed);
+        return GetOrSelectDefaultForModelProvider(needed, hasExplicitProvider);
     }
 
     static json ReadSharedIndexResult(DllLoader* loader, const char* resultPtr) {
@@ -2537,9 +2480,15 @@ namespace dlcv_infer {
     }
 
     void Model::FreeModel() {
-        flow::ModelLifecycleReadGuard lifecycleGuard;
-        std::unique_lock<std::shared_mutex> stateLock(_stateMutex);
-        freeModelLocked();
+        try {
+            flow::ModelLifecycleReadGuard lifecycleGuard;
+            std::unique_lock<std::shared_mutex> stateLock(_stateMutex);
+            freeModelLocked();
+        } catch (const std::exception& ex) {
+            try { std::cerr << "模型本地释放发生异常：" << ex.what() << std::endl; } catch (...) {}
+        } catch (...) {
+            try { std::cerr << "模型本地释放发生未知异常" << std::endl; } catch (...) {}
+        }
     }
 
     void Model::freeModelLocked() {
@@ -2550,130 +2499,119 @@ namespace dlcv_infer {
             _cachedModelInfo = json();
         }
         std::lock_guard<std::mutex> indexLock(_indexStateMu);
-        _expectedChCache = -2;
-        if (_ownsRegisteredFlowIndex) {
-            bool freeFlowFailed = false;
-            try {
-                if (modelIndex < 0 || _dllLoader == nullptr || _dllLoader->GetFreeFlowFunc() == nullptr ||
-                    _dllLoader->GetFreeFlowFunc()(modelIndex) != 0) {
-                    freeFlowFailed = true;
-                }
-            } catch (...) {
-                freeFlowFailed = true;
-            }
 
-            // 无论底层释放流程索引是否成功，都先完成本地清理，
-            // 避免析构或移动赋值忽略异常后遗留本地流程对象。
-            delete _flowModel;
+        const auto clearLocalState = [this]() noexcept {
+            try { delete _flowModel; } catch (...) {}
             _flowModel = nullptr;
             _isFlowGraphMode = false;
-            _hasCachedModelInfo = false;
-            _cachedModelInfo = json();
-            _indexReady = false;
-            _ownsRegisteredFlowIndex = false;
             modelIndex = -1;
+            OwnModelIndex = true;
+            _indexBound = false;
+            _indexReady = false;
+            _ownsNativeModelIndex = false;
+            _ownsRegisteredFlowIndex = false;
+            _dllLoader = nullptr;
+            _loadedDogProvider = sntl_admin::DogProvider::Unknown;
+            _loadedNativeDllName.clear();
+        };
+        const auto logFailure = [](const std::string& message) noexcept {
+            try { std::cerr << message << std::endl; } catch (...) {}
+        };
 
-            // 底层失败信息在本地清理完成后继续上报，显式调用方仍能收到异常。
-            if (freeFlowFailed) {
-                throw std::runtime_error("释放流程索引失败");
+        if (_ownsRegisteredFlowIndex) {
+            try {
+                if (modelIndex >= 0 && _dllLoader != nullptr &&
+                    _dllLoader->GetFreeFlowFunc() != nullptr) {
+                    if (_dllLoader->GetFreeFlowFunc()(modelIndex) != 0) {
+                        logFailure("释放流程索引失败");
+                    }
+                } else {
+                    logFailure("释放流程索引失败：缺少有效索引或释放接口");
+                }
+            } catch (const std::exception& ex) {
+                logFailure(std::string("释放流程索引失败：") + ex.what());
+            } catch (...) {
+                logFailure("释放流程索引发生异常");
             }
+            clearLocalState();
             return;
         }
 
         if (_indexBound) {
-            const bool unbindFailed = !UnbindCurrentIndexNoexcept();
-            if (unbindFailed) {
-                // 解绑失败时 UnbindCurrentIndexNoexcept 不会改动这两个标记，
-                // 这里补做复位，使失败后的本地状态与成功解绑后一致。
-                _indexBound = false;
-                _indexReady = false;
+            if (!UnbindCurrentIndexNoexcept()) {
+                logFailure("解绑共享索引失败");
             }
-            // 与成功路径一致，先清理本地资源，失败信息在清理完成后上报。
-            delete _flowModel;
-            _flowModel = nullptr;
-            _isFlowGraphMode = false;
-            _hasCachedModelInfo = false;
-            _cachedModelInfo = json();
-            modelIndex = -1;
-
-            if (unbindFailed) {
-                throw std::runtime_error("解绑共享索引失败");
-            }
-            return;
-        }
-        if (_isFlowGraphMode) {
-            delete _flowModel;
-            _flowModel = nullptr;
-            _isFlowGraphMode = false;
-            _indexReady = false;
-            modelIndex = -1;
+            clearLocalState();
             return;
         }
 
-        if (modelIndex == -1) {
-            _isFlowGraphMode = false;
-            return;
-        }
-        if (!_ownsNativeModelIndex) {
-            modelIndex = -1;
-            return;
-        }
-        // 仅“借用”modelIndex 时，不释放底层模型；只把本对象标记为无效。
-        if (!OwnModelIndex) {
-            _ownsNativeModelIndex = false;
-            _indexReady = false;
-            modelIndex = -1;
-            _isFlowGraphMode = false;
+        if (_isFlowGraphMode || modelIndex < 0 || !_ownsNativeModelIndex || !OwnModelIndex) {
+            clearLocalState();
             return;
         }
 
-        if (!_dllLoader || !_dllLoader->GetFreeModelFunc() || !_dllLoader->GetFreeResultFunc()) {
-            throw std::runtime_error("DVT模型释放失败：推理DLL缺少释放接口");
+        DllLoader* loader = _dllLoader;
+        const int releasedIndex = modelIndex;
+        if (loader == nullptr || loader->GetFreeModelFunc() == nullptr ||
+            loader->GetFreeResultFunc() == nullptr) {
+            logFailure("DVT模型释放失败：推理DLL缺少释放接口");
+            clearLocalState();
+            return;
         }
 
-        json config;
-        config["model_index"] = modelIndex;
-        const std::string jsonStr = config.dump();
-        const auto freeModel = _dllLoader->GetFreeModelFunc();
-        const auto freeResult = _dllLoader->GetFreeResultFunc();
+        const auto freeModel = loader->GetFreeModelFunc();
+        const auto freeResult = loader->GetFreeResultFunc();
         const char* resultPtr = nullptr;
         try {
+            json config;
+            config["model_index"] = releasedIndex;
+            const std::string jsonStr = config.dump();
             resultPtr = freeModel(jsonStr.c_str());
             if (resultPtr == nullptr) {
-                throw std::runtime_error("DVT模型释放未返回结果");
+                logFailure("DVT模型释放未返回结果");
+            } else {
+                try {
+                    const json resultObject = json::parse(resultPtr);
+                    int code = -1;
+                    if (resultObject.is_object() && resultObject.contains("code") &&
+                        resultObject.at("code").is_number_integer()) {
+                        code = resultObject.at("code").get<int>();
+                    }
+                    if (code != 0) {
+                        std::string detail;
+                        if (resultObject.is_object() && resultObject.contains("message")) {
+                            const json& value = resultObject.at("message");
+                            detail = value.is_string() ? value.get<std::string>() : value.dump();
+                        }
+                        if (resultObject.is_object() && resultObject.contains("traceback")) {
+                            const json& value = resultObject.at("traceback");
+                            const std::string traceback = value.is_string()
+                                ? value.get<std::string>()
+                                : value.dump();
+                            if (!traceback.empty()) {
+                                if (!detail.empty()) detail += "；";
+                                detail += traceback;
+                            }
+                        }
+                        logFailure(detail.empty()
+                            ? "DVT模型释放失败"
+                            : "DVT模型释放失败：" + detail);
+                    }
+                } catch (const std::exception& ex) {
+                    logFailure(std::string("DVT模型释放结果无效：") + ex.what());
+                } catch (...) {
+                    logFailure("DVT模型释放结果解析发生异常");
+                }
             }
-            const std::string resultJson(static_cast<const char*>(resultPtr));
-            const json resultObject = json::parse(resultJson);
-            std::string message = "底层未返回错误说明";
-            if (resultObject.is_object() && resultObject.contains("message")) {
-                const json& messageToken = resultObject.at("message");
-                message = messageToken.is_string() ? messageToken.get<std::string>() : messageToken.dump();
-            }
-
-            if (!resultObject.is_object() || !resultObject.contains("code")) {
-                throw std::runtime_error("DVT模型释放失败：" + message);
-            }
-
-            int code = 0;
-            try {
-                code = resultObject.at("code").get<int>();
-            } catch (...) {
-                throw std::runtime_error("DVT模型释放失败：" + message);
-            }
-            if (code != 0) {
-                throw std::runtime_error("DVT模型释放失败：" + message);
-            }
+        } catch (const std::exception& ex) {
+            logFailure(std::string("DVT模型释放失败：") + ex.what());
         } catch (...) {
-            if (resultPtr != nullptr) {
-                freeResult(resultPtr);
-            }
-            throw;
+            logFailure("DVT模型释放发生异常");
         }
-        freeResult(resultPtr);
-        _ownsNativeModelIndex = false;
-        _indexReady = false;
-        modelIndex = -1;
-        _isFlowGraphMode = false;
+        if (resultPtr != nullptr) {
+            try { freeResult(resultPtr); } catch (...) {}
+        }
+        clearLocalState();
     }
 
     json Model::getModelInfoLocked() {
@@ -3278,32 +3216,87 @@ namespace dlcv_infer {
     }
 
     void Utils::FreeAllModels() {
-        flow::ModelLifecycleWriteGuard lifecycleGuard;
-        ClearCApiModelsForFreeAllModels();
-        // 底层模型表清空后，模型池中的对象将持有失效 index。
-        // 先清空模型池，确保后续流程加载会重新创建子模型。
-        flow::ModelPool::Instance().ClearForFreeAllModels();
+        const auto providerName = [](sntl_admin::DogProvider provider) {
+            if (provider == sntl_admin::DogProvider::Sentinel) return std::string("sentinel");
+            if (provider == sntl_admin::DogProvider::Virbox) return std::string("virbox");
+            return std::string("unknown");
+        };
+        const auto logFailure = [](const std::string& stage,
+                                   const std::string& module,
+                                   const std::string& detail) noexcept {
+            try {
+                std::cerr << "全量释放模型失败：阶段=" << stage
+                          << "，模块=" << (module.empty() ? "unknown" : module)
+                          << "，详情=" << detail << std::endl;
+            } catch (...) {}
+        };
 
-        for (const auto& module : EnumerateLoadedInferModules()) {
-            (void)DllLoader::GetOrCreateForExistingModule(
-                module.Provider,
-                module.Module,
-                module.Path);
-        }
+        try {
+            flow::ModelLifecycleWriteGuard lifecycleGuard;
+            try {
+                ClearCApiModelsForFreeAllModels();
+            } catch (const std::exception& ex) {
+                logFailure("清理 C API 模型", "dlcv_infer_cpp", ex.what());
+            } catch (...) {
+                logFailure("清理 C API 模型", "dlcv_infer_cpp", "未知异常");
+            }
 
-        std::vector<FreeAllModelsFuncType> freeAllModelsFunctions;
-        {
-            std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());
-            // 注册表以真实模块句柄为键，同一个 DLL 的全局释放函数只收集一次。
-            for (const auto& item : DllLoaderRegistry()) {
-                if (item.first != nullptr && item.second->GetFreeAllModelsFunc() != nullptr) {
-                    freeAllModelsFunctions.push_back(item.second->GetFreeAllModelsFunc());
+            // 底层模型表清空后，模型池中的对象将持有失效 index。
+            // 先清空模型池，确保后续流程加载会重新创建子模型。
+            try {
+                flow::ModelPool::Instance().Clear();
+            } catch (const std::exception& ex) {
+                logFailure("清理流程模型池", "dlcv_infer_cpp", ex.what());
+            } catch (...) {
+                logFailure("清理流程模型池", "dlcv_infer_cpp", "未知异常");
+            }
+
+            for (const auto& module : EnumerateLoadedInferModules()) {
+                try {
+                    (void)DllLoader::GetOrCreateForExistingModule(
+                        module.Provider,
+                        module.Module,
+                        module.Path);
+                } catch (const std::exception& ex) {
+                    logFailure("读取已加载模块", GetFileNameOnly(module.Path), ex.what());
+                } catch (...) {
+                    logFailure("读取已加载模块", GetFileNameOnly(module.Path), "未知异常");
                 }
             }
-        }
 
-        for (const auto freeAllModels : freeAllModelsFunctions) {
-            freeAllModels();
+            struct FreeAllModelsTarget final {
+                FreeAllModelsFuncType Function = nullptr;
+                std::string Module;
+            };
+            std::vector<FreeAllModelsTarget> targets;
+            {
+                std::lock_guard<std::mutex> lock(DllLoaderRegistryMutex());
+                // 注册表以真实模块句柄为键，同一个 DLL 只处理一次。
+                for (const auto& item : DllLoaderRegistry()) {
+                    if (item.first == nullptr || !item.second) continue;
+                    const std::string module = item.second->GetLoadedNativeDllName()
+                        + "[" + providerName(item.second->GetDogProvider()) + "]";
+                    targets.push_back({item.second->GetFreeAllModelsFunc(), module});
+                }
+            }
+
+            for (const auto& target : targets) {
+                if (target.Function == nullptr) {
+                    logFailure("调用底层释放", target.Module, "缺少 dlcv_free_all_models 接口");
+                    continue;
+                }
+                try {
+                    target.Function();
+                } catch (const std::exception& ex) {
+                    logFailure("调用底层释放", target.Module, ex.what());
+                } catch (...) {
+                    logFailure("调用底层释放", target.Module, "未知异常");
+                }
+            }
+        } catch (const std::exception& ex) {
+            logFailure("执行全量释放", "dlcv_infer_cpp", ex.what());
+        } catch (...) {
+            logFailure("执行全量释放", "dlcv_infer_cpp", "未知异常");
         }
     }
 
@@ -3630,416 +3623,4 @@ namespace dlcv_infer {
         RequireNativeApiFunction(loader.GetFreeModelResultCFunc(), "dlcv_free_model_result_c")(&result);
     }
 
-}
-
-namespace {
-    std::mutex g_sharedIndexTestOwnersMu;
-    std::map<int, std::shared_ptr<dlcv_infer::Model>> g_sharedIndexTestOwners;
-
-    std::string ConvertTestCategoryNameToUtf8(const std::string& value) {
-        try {
-            return dlcv_infer::convertGbkToUtf8(value);
-        } catch (...) {
-            return value;
-        }
-    }
-
-    cv::Mat ReadSharedIndexTestImage(const wchar_t* imagePath) {
-        if (imagePath == nullptr || *imagePath == L'\0') {
-            throw std::invalid_argument("图片路径为空");
-        }
-#ifdef _WIN32
-        std::ifstream input(std::wstring(imagePath), std::ios::binary);
-#else
-        std::ifstream input(dlcv_infer::convertWstringToUtf8(std::wstring(imagePath)), std::ios::binary);
-#endif
-        if (!input) throw std::runtime_error("读取图片失败");
-        const std::vector<unsigned char> data(
-            (std::istreambuf_iterator<char>(input)),
-            std::istreambuf_iterator<char>());
-        const cv::Mat bgr = cv::imdecode(data, cv::IMREAD_COLOR);
-        if (bgr.empty()) throw std::runtime_error("图片解码失败");
-        cv::Mat rgb;
-        cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
-        return rgb;
-    }
-
-    dlcv_infer::json BuildSharedIndexStructuredResult(const dlcv_infer::Result& result) {
-        dlcv_infer::json samples = dlcv_infer::json::array();
-        for (const auto& sample : result.sampleResults) {
-            dlcv_infer::json objects = dlcv_infer::json::array();
-            for (const auto& object : sample.results) {
-                objects.push_back({
-                    {"category_id", object.categoryId},
-                    {"category_name", ConvertTestCategoryNameToUtf8(object.categoryName)},
-                    {"score", object.score},
-                    {"bbox", object.bbox},
-                    {"with_bbox", object.withBbox},
-                    {"with_mask", object.withMask},
-                    {"mask_width", object.mask.cols},
-                    {"mask_height", object.mask.rows}
-                });
-            }
-            samples.push_back({
-                {"object_count", objects.size()},
-                {"objects", std::move(objects)}
-            });
-        }
-        return {
-            {"sample_count", samples.size()},
-            {"samples", std::move(samples)}
-        };
-    }
-
-    const char* AllocateSharedIndexTestJson(const dlcv_infer::json& result) noexcept {
-        try {
-            const std::string text = result.dump();
-            char* output = new char[text.size() + 1];
-            std::memcpy(output, text.data(), text.size());
-            output[text.size()] = '\0';
-            return output;
-        } catch (...) {
-            return nullptr;
-        }
-    }
-}
-
-extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_load_c(
-    const wchar_t* model_path,
-    int device_id) {
-    if (model_path == nullptr || *model_path == L'\0') return -1;
-    try {
-        auto owner = std::make_shared<dlcv_infer::Model>(std::wstring(model_path), device_id);
-        const int index = owner->modelIndex;
-        if (index < 0) return -1;
-        std::lock_guard<std::mutex> lock(g_sharedIndexTestOwnersMu);
-        if (g_sharedIndexTestOwners.find(index) != g_sharedIndexTestOwners.end()) return -1;
-        g_sharedIndexTestOwners.emplace(index, std::move(owner));
-        return index;
-    } catch (const std::exception& ex) {
-        std::cerr << "共享索引测试加载失败: " << ex.what() << std::endl;
-        return -1;
-    } catch (...) {
-        std::cerr << "共享索引测试加载失败: 未知异常" << std::endl;
-        return -1;
-    }
-}
-
-extern "C" DLCV_INFER_CPP_API const char* dlcv_shared_index_test_infer_c(
-    int index,
-    const wchar_t* image_path) {
-    dlcv_infer::json response;
-    try {
-        dlcv_infer::Model model;
-        model.modelIndex = index;
-        model.OwnModelIndex = false;
-        const dlcv_infer::json modelInfo = model.GetModelInfo();
-        const cv::Mat rgb = ReadSharedIndexTestImage(image_path);
-        dlcv_infer::json params;
-        params["with_mask"] = true;
-        params["threshold"] = 0.05;
-        const dlcv_infer::Result structured = model.Infer(rgb, params);
-        dlcv_infer::json inferJson = model.InferOneOutJson(rgb, params);
-
-        response["code"] = 0;
-        response["index"] = index;
-        response["model_info"] = modelInfo;
-        response["structured"] = BuildSharedIndexStructuredResult(structured);
-        response["infer_json"] = std::move(inferJson);
-    } catch (const std::exception& ex) {
-        response["code"] = 1;
-        response["message"] = ex.what();
-    } catch (...) {
-        response["code"] = 1;
-        response["message"] = "shared index test failed";
-    }
-    return AllocateSharedIndexTestJson(response);
-}
-
-extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_free_c(int index) {
-    std::shared_ptr<dlcv_infer::Model> owner;
-    {
-        std::lock_guard<std::mutex> lock(g_sharedIndexTestOwnersMu);
-        const auto it = g_sharedIndexTestOwners.find(index);
-        if (it == g_sharedIndexTestOwners.end()) return -1;
-        owner = it->second;
-    }
-    try {
-        owner->FreeModel();
-    } catch (...) {
-        return -1;
-    }
-    {
-        std::lock_guard<std::mutex> lock(g_sharedIndexTestOwnersMu);
-        const auto it = g_sharedIndexTestOwners.find(index);
-        if (it != g_sharedIndexTestOwners.end() && it->second == owner) {
-            g_sharedIndexTestOwners.erase(it);
-        }
-    }
-    return 0;
-}
-
-extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_resolve_c(int index) {
-    try {
-        int indexType = 0;
-        dlcv_infer::DllLoader::ResolveForIndex(index, indexType);
-        return indexType;
-    } catch (...) {
-        return 0;
-    }
-}
-
-extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_double_load_free_c(
-    const wchar_t* model_path,
-    int device_id) {
-    if (model_path == nullptr || *model_path == L'\0') return -1;
-    try {
-        dlcv_infer::Model first(std::wstring(model_path), device_id);
-        dlcv_infer::Model second(std::wstring(model_path), device_id);
-        const int firstIndex = first.modelIndex;
-        const int secondIndex = second.modelIndex;
-        if (firstIndex < 0 || secondIndex < 0) return -1;
-        if (firstIndex != secondIndex) return -2;
-        int indexType = 0;
-        dlcv_infer::DllLoader& loader =
-            dlcv_infer::DllLoader::ResolveForIndex(firstIndex, indexType);
-        if (indexType != 1 || loader.GetIndexTypeFunc() == nullptr) return -3;
-        first.FreeModel();
-        second.FreeModel();
-        return loader.GetIndexTypeFunc()(firstIndex);
-    } catch (const std::exception& ex) {
-        std::cerr << "共享索引双加载释放检查失败: " << ex.what() << std::endl;
-        return -1;
-    } catch (...) {
-        std::cerr << "共享索引双加载释放检查失败: 未知异常" << std::endl;
-        return -1;
-    }
-}
-
-extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_double_flow_load_free_c(
-    const wchar_t* model_path,
-    int device_id) {
-    if (model_path == nullptr || *model_path == L'\0') return -1;
-    try {
-        dlcv_infer::Model first(std::wstring(model_path), device_id);
-        dlcv_infer::Model second(std::wstring(model_path), device_id);
-        if (first.modelIndex < 0 || second.modelIndex < 0) return -1;
-        if (first.modelIndex == second.modelIndex) return -2;
-
-        int firstType = 0;
-        dlcv_infer::DllLoader& firstLoader =
-            dlcv_infer::DllLoader::ResolveForIndex(first.modelIndex, firstType);
-        int secondType = 0;
-        dlcv_infer::DllLoader& secondLoader =
-            dlcv_infer::DllLoader::ResolveForIndex(second.modelIndex, secondType);
-        if (firstType != 2 || secondType != 2 || &firstLoader != &secondLoader) return -3;
-
-        const dlcv_infer::json firstInfo = dlcv_infer::ReadSharedIndexResult(
-            &firstLoader, firstLoader.GetFlowInfoFunc()(first.modelIndex));
-        const dlcv_infer::json secondInfo = dlcv_infer::ReadSharedIndexResult(
-            &secondLoader, secondLoader.GetFlowInfoFunc()(second.modelIndex));
-        if (!firstInfo.contains("model_bindings") || !firstInfo.at("model_bindings").is_array() ||
-            !secondInfo.contains("model_bindings") || !secondInfo.at("model_bindings").is_array() ||
-            firstInfo.at("model_bindings").empty() || secondInfo.at("model_bindings").empty()) {
-            return -4;
-        }
-
-        const int firstChildIndex = firstInfo.at("model_bindings").front().value("model_index", -1);
-        const int secondChildIndex = secondInfo.at("model_bindings").front().value("model_index", -1);
-        if (firstChildIndex < 0 || firstChildIndex != secondChildIndex) return -5;
-
-        first.FreeModel();
-        second.FreeModel();
-        if (firstLoader.GetIndexTypeFunc() == nullptr) return -6;
-        return firstLoader.GetIndexTypeFunc()(firstChildIndex);
-    } catch (const std::exception& ex) {
-        std::cerr << "共享流程双加载释放检查失败: " << ex.what() << std::endl;
-        return -1;
-    } catch (...) {
-        std::cerr << "共享流程双加载释放检查失败: 未知异常" << std::endl;
-        return -1;
-    }
-}
-
-extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_empty_flow_after_provider_c(
-    const wchar_t* provider_model_path,
-    const wchar_t* flow_path,
-    int device_id) {
-    if (provider_model_path == nullptr || *provider_model_path == L'\0' ||
-        flow_path == nullptr || *flow_path == L'\0') {
-        return -1;
-    }
-    try {
-        (void)dlcv_infer::DllLoader::EnsureForModel(std::wstring(provider_model_path));
-        dlcv_infer::Model flow(std::wstring(flow_path), device_id);
-        const int index = flow.modelIndex;
-        flow.FreeModel();
-        return index;
-    } catch (const std::exception& ex) {
-        std::cerr << "空流程默认 provider 检查失败: " << ex.what() << std::endl;
-        return -1;
-    } catch (...) {
-        std::cerr << "空流程默认 provider 检查失败: 未知异常" << std::endl;
-        return -1;
-    }
-}
-
-extern "C" DLCV_INFER_CPP_API const char* dlcv_shared_index_test_info_c(int index) {
-    dlcv_infer::json response;
-    try {
-        dlcv_infer::Model model;
-        model.modelIndex = index;
-        model.OwnModelIndex = false;
-        response["code"] = 0;
-        response["index"] = index;
-        response["model_info"] = model.GetModelInfo();
-    } catch (const std::exception& ex) {
-        response["code"] = 1;
-        response["message"] = ex.what();
-    } catch (...) {
-        response["code"] = 1;
-        response["message"] = "shared index info failed";
-    }
-    return AllocateSharedIndexTestJson(response);
-}
-
-extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_register_flow_c(int model_index) {
-    try {
-        dlcv_infer::json modelBindings = dlcv_infer::json::array({
-            {{"node_id", 1}, {"model_index", model_index}}
-        });
-        int indexType = 0;
-        dlcv_infer::DllLoader* loader = &dlcv_infer::DllLoader::ResolveForIndex(model_index, indexType);
-        if (indexType != 1) return -1;
-        dlcv_infer::EnsureSharedIndexFunctions(loader);
-        dlcv_infer::json flowRegistration = {
-            {"schema_version", 1},
-            {"flow_type", "dvst"},
-            {"provider", dlcv_infer::ProviderToRegistryName(loader->GetDogProvider())},
-            {"source_path", "shared_index_test.dvst"},
-            {"device_id", 0},
-            {"pipeline", dlcv_infer::json::object()},
-            {"model_bindings", std::move(modelBindings)}
-        };
-        const std::string registrationText = flowRegistration.dump();
-        return loader->GetRegisterFlowFunc()(registrationText.c_str());
-    } catch (...) {
-        return -1;
-    }
-}
-
-extern "C" DLCV_INFER_CPP_API int dlcv_shared_index_test_index_rules_c() {
-    struct Case final {
-        int Index;
-        sntl_admin::DogProvider Provider;
-    };
-    const Case cases[] = {
-        {0, sntl_admin::DogProvider::Sentinel},
-        {1, sntl_admin::DogProvider::Sentinel},
-        {255, sntl_admin::DogProvider::Sentinel},
-        {512, sntl_admin::DogProvider::Sentinel},
-        {256, sntl_admin::DogProvider::Virbox},
-        {257, sntl_admin::DogProvider::Virbox},
-        {511, sntl_admin::DogProvider::Virbox},
-        {768, sntl_admin::DogProvider::Virbox},
-        {std::numeric_limits<int>::max(), sntl_admin::DogProvider::Virbox}
-    };
-    for (const auto& item : cases) {
-        sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
-        int indexType = 0;
-        if (!dlcv_infer::ClassifySharedIndex(item.Index, provider, indexType) ||
-            provider != item.Provider || indexType != 0) {
-            return -1;
-        }
-    }
-
-    sntl_admin::DogProvider provider = sntl_admin::DogProvider::Unknown;
-    int indexType = 0;
-    if (dlcv_infer::ClassifySharedIndex(-1, provider, indexType)) return -1;
-
-    int sentinelTag = 0;
-    int virboxTag = 0;
-
-    const std::vector<dlcv_infer::SharedIndexCandidate> oppositeBitCandidates = {
-        {&sentinelTag, nullptr, [](int value) { return value == 256 ? 1 : 0; }},
-        {&virboxTag, nullptr, [](int) { return 0; }}
-    };
-    int selectedType = 0;
-    if (dlcv_infer::SelectSharedIndexCandidate(
-            256, oppositeBitCandidates, selectedType).Module != &sentinelTag ||
-        selectedType != 1) {
-        return -2;
-    }
-
-    const std::vector<dlcv_infer::SharedIndexCandidate> secondOppositeBitCandidates = {
-        {&sentinelTag, nullptr, [](int) { return 0; }},
-        {&virboxTag, nullptr, [](int value) { return value == 0 ? 2 : 0; }}
-    };
-    if (dlcv_infer::SelectSharedIndexCandidate(
-            0, secondOppositeBitCandidates, selectedType).Module != &virboxTag ||
-        selectedType != 2) {
-        return -3;
-    }
-
-    const auto expectFailure = [](
-        const std::vector<dlcv_infer::SharedIndexCandidate>& candidates,
-        int index,
-        const std::type_info& expectedType) {
-        int type = 0;
-        try {
-            (void)dlcv_infer::SelectSharedIndexCandidate(index, candidates, type);
-        } catch (const std::exception& ex) {
-            return typeid(ex) == expectedType;
-        } catch (...) {
-            return false;
-        }
-        return false;
-    };
-
-    const std::vector<dlcv_infer::SharedIndexCandidate> noResultCandidates = {
-        {&sentinelTag, nullptr, [](int) { return 0; }}
-    };
-    if (!expectFailure(noResultCandidates, 0, typeid(std::invalid_argument))) return -4;
-    if (!expectFailure(noResultCandidates, -1, typeid(std::invalid_argument))) return -9;
-
-    const std::vector<dlcv_infer::SharedIndexCandidate> ambiguousCandidates = {
-        {&sentinelTag, nullptr, [](int) { return 1; }},
-        {&virboxTag, nullptr, [](int) { return 2; }}
-    };
-    if (!expectFailure(ambiguousCandidates, 0, typeid(std::runtime_error))) return -5;
-
-    const std::vector<dlcv_infer::SharedIndexCandidate> unknownCandidates = {
-        {&sentinelTag, nullptr, [](int) { return -1; }}
-    };
-    if (!expectFailure(unknownCandidates, 0, typeid(std::runtime_error))) return -6;
-
-    const std::vector<dlcv_infer::SharedIndexCandidate> throwingCandidates = {
-        {&sentinelTag, nullptr, [](int) -> int {
-            throw std::runtime_error("query failed");
-        }}
-    };
-    if (!expectFailure(throwingCandidates, 0, typeid(std::runtime_error))) return -7;
-
-    const std::vector<dlcv_infer::SharedIndexCandidate> domainErrorCandidates = {
-        {&sentinelTag, nullptr, [](int) { return 1; }},
-        {&virboxTag, nullptr, [](int) -> int {
-            throw std::domain_error("query failure is not missing capability");
-        }}
-    };
-    if (!expectFailure(domainErrorCandidates, 0, typeid(std::runtime_error))) return -10;
-    const std::vector<dlcv_infer::SharedIndexCandidate> nonstandardErrorCandidates = {
-        {&sentinelTag, nullptr, [](int) -> int { throw 7; }}
-    };
-    if (!expectFailure(nonstandardErrorCandidates, 0, typeid(std::runtime_error))) return -11;
-
-    const std::vector<dlcv_infer::SharedIndexCandidate> noInterfaceCandidates = {
-        {&sentinelTag, nullptr, {}}
-    };
-    if (!expectFailure(noInterfaceCandidates, 0, typeid(std::domain_error))) return -8;
-
-    return 0;
-}
-
-extern "C" DLCV_INFER_CPP_API void dlcv_shared_index_test_free_string_c(const char* result) {
-    delete[] result;
 }

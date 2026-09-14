@@ -38,9 +38,9 @@
 
 > 这些依赖用于保证“加载模型/推理/设备枚举/加密狗检查”行为可用。若缺失，会导致对应功能失败或降级（必须与本文档描述一致）。
 
-- **DLCV 推理 DLL（按加密狗加载）**
-  - `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）：仅在检测到对应加密狗后由 `DllLoader` 加载
-  - 都未检测到加密狗时：不加载上述 DLL；启动界面提示「未检测到加密狗」
+- **DLCV 推理 DLL**
+  - `dlcv_infer.dll`（Sentinel）与 `dlcv_infer_v.dll`（Virbox）是普通模型运行使用的实际 DLL
+  - 首次普通模型加载根据模型头选择默认 DLL，后续普通模型继续使用该 DLL，并逐个检查授权；缺少所需授权时返回错误
 - **OpenCvSharp 运行时（必须）**
   - `OpenCvSharpExtern.dll` + OpenCV 相关运行时 DLL（由 `OpenCvSharp4.runtime.win` 提供）
 - **GPU 枚举（可选）**
@@ -48,7 +48,7 @@
 - **加密狗检查（可选）**
   - `sntl_adminapi_windows_x64.dll` / `slm_control.dll`：用于读取加密狗信息
   - 缺失时：`检查加密狗` 输出为空数组（`[]`），不应崩溃
-  - 启动时先调用一次 `GetAllDogInfo()`；仅当都未检测到时写界面并停止加载推理 DLL
+  - 启动时可调用 `GetAllDogInfo()` 显示授权信息；默认 DLL 只在首次普通模型加载时根据模型头确定
 - **RPC 模式（按需）**
   - `AIModelRPC.exe`：优先从 `DlcvDemo` 输出目录启动；若不存在，可使用 SDK 固定路径（如 `C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`）
 - **DVP 模式（按需，加载 `.dvp` 时启用）**
@@ -299,7 +299,8 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
     - 模型后缀为 `.dvp`：走 DVP 模式（HTTP 后端服务），`RPC模式` 勾选不影响行为
     - 模型后缀为 `.dvst/.dvso`：走 DVS 模式，`RPC模式` 勾选不影响行为
     - 模型后缀为 `.dvsp`：显示不支持错误，不保存为最近模型
-    - 其他（如 `.dvt/.dvo`）：默认走本地 DLL 推理；若勾选 `RPC模式`，则使用本地 RPC 服务（依赖 `AIModelRPC.exe`）
+    - 其他（如 `.dvt/.dvo`）：默认走本地 DLL 推理；首次普通模型根据模型头选择默认 DLL，后续普通模型沿用并逐个检查授权；若勾选 `RPC模式`，则使用本地 RPC 服务（依赖 `AIModelRPC.exe`）
+  - 实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
   - 加载成功后自动执行一次“获取模型信息”（同 7.4）
 - **异常**：
   - 捕获异常后：`richTextBox1.Text = ex.Message`（不弹窗）
@@ -439,15 +440,16 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 #### 7.10 释放模型（按钮：`释放模型`）
 
 - 若测试运行中，先停止测试
-- 将 `model=null`，触发一次 GC
+- 释放当前模型并清理本地引用
+- 按 index 释放时，参数格式无效或编号超出非负 `int` 范围仍可返回参数错误；参数是有效编号时，即使编号已不存在或底层释放返回错误，也返回成功并完成本地清理，重复释放同样成功。底层错误最多附在日志或 `message` 的错误详情中，不保留等待重试状态。界面对象已释放后再次释放也显示成功。
 - `richTextBox1.Text="模型已释放"`
 
 #### 7.11 释放所有模型（按钮：`释放所有模型`）
 
 - 若测试运行中，先停止测试
 - 若 model 可 Dispose：Dispose
-- `model=null`
-- 调用 `Utils.FreeAllModels()`
+- 清理本地模型引用并调用 `Utils.FreeAllModels()`
+- 按 index 释放时，参数格式无效或编号超出非负 `int` 范围仍可返回参数错误；参数是有效编号时，即使编号已不存在或底层释放返回错误，也返回成功并完成本地清理，重复释放同样成功。底层错误最多附在日志或 `message` 的错误详情中，不保留等待重试状态。`Utils.FreeAllModels()` 重复调用显示成功。
 - `richTextBox1.Text="所有模型已释放"`
 
 #### 7.12 检查加密狗（按钮：`检查加密狗`）
@@ -457,7 +459,7 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 - 输出到 `richTextBox1`（格式必须一致）：
   - `Sentinel加密狗ID：\n{sentinelDeviceList}\n\nSentinel加密狗特性：\n{sentinelFeatureList}\n\nVirbox加密狗ID：\n{virboxDeviceList}\n\nVirbox加密狗特性：\n{virboxFeatureList}`
 - 若 Sentinel/Virbox 的 devices 与 features 均为空：在上述内容前追加一行 `未检测到加密狗\n\n`
-- 启动流程：先做一次 `GetAllDogInfo()`；**仅当都未检测到时**把结果写到界面并停止（不加载推理 DLL）；检测到加密狗时不自动写界面，继续原逻辑加载推理 DLL
+- 启动流程可先做一次 `GetAllDogInfo()` 并显示授权状态；推理 DLL 不在此步骤选择，首次普通模型加载时才根据模型头确定默认 DLL
 
 #### 7.13 文档（按钮：`文档`）
 
@@ -554,4 +556,3 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 - **ImageViewer交互**
   - 滚轮缩放、左键拖拽、右键重置均有效
   - 聚焦后按 `V` 可切换显示/隐藏可视化结果
-

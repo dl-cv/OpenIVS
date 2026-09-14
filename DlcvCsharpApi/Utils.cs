@@ -389,18 +389,48 @@ namespace dlcv_infer_csharp
 
         public static void FreeAllModels()
         {
-            var errors = new List<Exception>();
-            foreach (DllLoader loader in DllLoader.GetLoadedLoaders())
+            try
             {
-                try { loader.dlcv_free_all_models?.Invoke(); }
-                catch (Exception ex) { errors.Add(ex); }
+                foreach (DllLoader loader in DllLoader.GetLoadedLoaders())
+                {
+                    try
+                    {
+                        loader.dlcv_free_all_models?.Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        if (Model.EnableConsoleLog)
+                            Console.WriteLine("释放全部模型失败，DLL=" + loader.LoadedNativeDllName + ": " + ex);
+                    }
+                }
             }
-
-            // 即使某个 DLL 释放失败，其余 DLL 的旧索引也可能失效，不能继续复用缓存。
-            Model.ClearModelCache();
-            DlcvModules.BaseModelModule.ClearModelCache();
-            if (errors.Count > 0)
-                throw new AggregateException("释放全部模型失败", errors);
+            catch (Exception ex)
+            {
+                if (Model.EnableConsoleLog)
+                    Console.WriteLine("枚举推理 DLL 失败: " + ex);
+            }
+            finally
+            {
+                // 全量释放调用结束后，所有托管缓存均视为失效，不保留重试状态。
+                try
+                {
+                    Model.ClearModelCache();
+                }
+                catch (Exception ex)
+                {
+                    if (Model.EnableConsoleLog)
+                        Console.WriteLine("清理模型缓存失败: " + ex);
+                }
+                try
+                {
+                    DlcvModules.BaseModelModule.ClearModelCache();
+                }
+                catch (Exception ex)
+                {
+                    if (Model.EnableConsoleLog)
+                        Console.WriteLine("清理流程模型缓存失败: " + ex);
+                }
+            }
         }
 
         public static JObject GetDeviceInfo()

@@ -44,7 +44,7 @@
 - 直接构建项目时，Release 输出为 `dlcv_infer_cpp_qt_demo/Release/dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.exe`。
 - 通过 `OpenIVS.sln` 构建时，EXE 输出位于解决方案根目录的 `Debug/dlcv_infer_cpp_qt_demo/` 或 `Release/dlcv_infer_cpp_qt_demo/`。
 - `DlcvNativeRuntime.targets` 从工程引用取得本次 DLL 并复制至 EXE 目录；必需 Qt DLL 和平台插件复制失败会使构建失败，样式插件存在时复制。
-- 底层 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 仍按模型授权类型由 C++ API 从 SDK 路径加载。
+- 底层 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 由首次普通模型的模型头确定为默认 DLL；后续普通模型沿用该 DLL并逐个检查授权。
 
 ---
 
@@ -84,7 +84,6 @@ dlcv_infer_cpp_qt_demo.exe --help
 - 图片按 BGR 转 RGB 后传入 `Model::InferBatch()`；阈值为 `0.05`，输出结构化结果摘要。
 - 默认运行校验一张样本、一个“开裂”目标、分数接近 `0.9717`、有效 bbox 与非空 mask；任一检查失败时以非零退出码结束。
 - `--case` 与 `--pressure` 参数模式仍可用于指定模型和图片。
-- `dlcv_infer_cpp_dll.dll` 另有同进程共享索引测试导出，供 `Test/DlcvCSharpTest` 验证 C++ 加载模型后由另一端按索引执行模型信息、结构化推理和 JSON 推理。
 
 ### 3.4 UI 布局
 
@@ -192,11 +191,11 @@ dlcv_infer_cpp_qt_demo.exe --help
 1. 点击 **检查加密狗**。
 2. 文本区显示 Sentinel 和 Virbox 的设备和特性列表。
    - Virbox 查询同时覆盖实体设备描述和离线本地软锁描述；授权码软锁显示唯一锁号与许可 ID。
-3. 若两者均为空，表示未检测到加密狗；此时 `DllLoader` 不加载推理 DLL。
+3. 若两者均为空，表示当前未检测到加密狗；检查动作只显示授权信息，不选择推理 DLL。
 
 **代码路径**：`MainWindow::onCheckDog()`
 - 调用 `dlcv_infer::GetAllDogInfo()`。
-- 底层 `AutoDetectProvider()`：Sentinel 优先、Virbox 第二；都没有返回 `Unknown`，不加载 `dlcv_infer.dll` / `dlcv_infer_v.dll`。
+- 默认 DLL 在首次普通模型加载时根据模型头选择；后续普通模型继续使用该 DLL，并逐个检查授权。
 
 ## 5. C++ 控制台 Demo 组合命令
 
@@ -207,9 +206,9 @@ dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> [--device N] --th
 dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> --then benchmark <名称> <图片路径> [--threads N] [--runs N]
 ```
 
-组合命令包括 `load-model`、`list-models`、`model-info`、`dvs-model-info`、`infer`、`benchmark`、`free-model` 和 `free-all-models`。`benchmark` 使用同一模型和图片建立基准结果，再由多个线程重复推理并比较批量数量、目标数量、类别、框、分数、角度、面积、mask 和均值；线程数范围为 1～32。流程模型使用从 10000 开始的模型索引，普通模型使用底层索引。
+组合命令包括 `load-model`、`list-models`、`model-info`、`dvs-model-info`、`infer`、`benchmark`、`free-model` 和 `free-all-models`。`benchmark` 使用同一模型和图片建立基准结果，再由多个线程重复推理并比较批量数量、目标数量、类别、框、分数、角度、面积、mask 和均值；线程数范围为 1～32。模型编号由实际加载或注册接口返回，不按数值区段推断资源类型或 DLL。
 
-程序退出时释放当前模型和全部模型。运行目录需要 `dlcv_infer_cpp.dll`、OpenCV、Visual C++ 运行库及模型对应的底层 provider DLL。
+程序退出时释放当前模型和全部模型。按 index 释放时，无效参数可返回参数错误；有效编号即使已不存在或底层报错也返回成功并完成本地清理，重复释放同样成功，错误详情最多写入日志或消息。运行目录需要 `dlcv_infer_cpp.dll`、OpenCV、Visual C++ 运行库及首次普通模型头对应的底层 DLL。
 
 ## 6. C API 动态导出检查
 
@@ -307,10 +306,11 @@ Debug\dlcv_infer_cpp_test.exe dvsp-reject-selftest <dvsp路径> [设备编号]
 | 命令 | 输入与检查范围 |
 |---|---|
 | `dvs-archive-duplicate-selftest` | 在系统临时目录生成测试归档；检查模型成员和 `pipeline.json` 的规范化同名处理，相同字节允许读取，不同字节明确报错。模型差异用例使用等长数据且仅末字节不同；不执行模型推理 |
-| `dvs-model-pool-selftest` | 读取现有普通 `.dvt`，生成包含两个相同模型节点的测试归档；通过公开 `Model` 和导出的模型池统计函数检查实例内复用、独立归档分别持有引用、逐个释放后数量变化以及全部释放后无空闲项。不在测试程序中另建模型池，不执行推理 |
+| `provider-loader-selftest <Virbox模型路径> <另一模型路径> [轮数]` | 首个模型必须是 Virbox 格式；检查按模型头选择默认 DLL，后续文件及内存加载保持该 DLL |
+| `dvs-model-pool-selftest` | 读取现有普通 `.dvt`，生成包含两个相同模型节点的测试归档；只通过现有产品接口检查实例内复用和释放行为，不依赖生产 DLL 的测试导出。测试代码及检查状态全部保留在测试工程内 |
 | `dvs-memory-loading-selftest` | 使用 `.dvst/.dvso` 及对应图片执行加载、推理、释放，并监测解包临时文件；参数为 `threshold=0.5`、`with_mask=true`、`batch_size=1`，不进行 mask 数值比较 |
 | `dvsp-reject-selftest` | 检查 `.dvsp` 返回明确的不支持错误，且不生成归档临时文件；不执行推理 |
 
-设备编号默认 `0`。模型池检查中的两个归档内容相同，但每次读取使用独立的 `StoreId`；包装层不额外进行整包内容缓存。临时测试归档由测试程序创建并在结束时删除，这与运行库解包产生临时文件不同。
+设备编号默认 `0`。模型池检查中的两个归档内容相同，但每次读取使用独立的 `StoreId`；包装层不额外进行整包内容缓存。临时测试归档由测试程序创建并在结束时删除。实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
 
 命令退出码 `0` 表示检查通过，非零表示失败或参数无效。这些命令不验证源模型转换、多设备运行、完整路径优先或短文件名多候选处理，也不代表 C++ 与 C# 的全部功能已经一致。
