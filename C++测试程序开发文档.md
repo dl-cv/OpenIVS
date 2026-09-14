@@ -71,11 +71,26 @@ dlcv_infer_cpp_qt_demo.exe --help
 - 图片由 `QFile` 读取字节并通过 `cv::imdecode` 解码；BGR/BGRA 转为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，输出字段与 C# 测试程序一致；开启均值计算时同时检查两种结果的均值字段。
 - 输出中的 `inspection` 包含最近一次流程判定的 `present`、`ok`、`reason`，`inspection_consistent` 检查结构化与 JSON 两条路径的判定一致性。
-- C++ 结构化结果的本地 GBK 类别名在 CLI 边界转换为 UTF-8，再写入 JSON。
-- `infer --output` 使用 `QSaveFile` 原子写入 UTF-8 JSON；`render --output` 保存 `ImageViewerWidget` 的真实绘制结果，输出逻辑尺寸与原图一致。输出路径不得覆盖模型或图片，父目录必须存在。
+- C++ 结构化结果的本地 GBK 类别名在 CLI 输出时转换为 UTF-8，再写入 JSON。
+- `infer --output` 使用 `QSaveFile` 写入 UTF-8 JSON；`render --output` 保存 `ImageViewerWidget` 的真实绘制结果，输出逻辑尺寸与原图一致。输出路径不得覆盖模型或图片，父目录必须存在。
 - 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致、存在低于阈值的结果或均值检查失败。
 - `render` 使用原图作为底图，并把最终结果中的 ROI Mask 缩放到 bbox 后回贴到原图坐标；完整图 Mask 则从 `(0,0)` 绘制。
-- `mask-visualization-selftest` 使用一个完整图 Mask 合成用例，检查其未被重复叠加 bbox 偏移；渲染结果写入系统临时目录的 `dlcv_mask_visualization_selftest.png`。
+- `mask-visualization-selftest` 使用一个完整图 Mask 合成用例，检查其未被重复叠加 bbox 偏移；绘制断言位于 `Test/qt_demo/MaskVisualizationSelfTest.h`，结果默认写入系统临时目录的 `dlcv_mask_visualization_selftest.png`，也可由 `--output <pngPath>` 指定。控件在内存图像上绘制，不显示窗口。
+
+### 两个 Qt Demo 的自动回归
+
+`Test/run_qt_demo_regression.py` 直接运行 C 和 C++ Qt Demo EXE，使用 `Test/qt_demo_regression_cases.json` 中的固定模型清单，不用控制台 API 工程替代 Demo。构建使用各自项目的 `build.py` 入口，两个项目串行执行。
+
+```text
+python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.exe> --dll <本次构建的dlcv_infer_cpp.dll> --model-root <测试模型目录> --core-dll-directory <推理DLL目录> --output <系统临时目录/report.json>
+```
+
+- 核对 EXE 所在目录的包装 DLL 与指定构建 DLL 的 SHA-256。
+- 运行普通分类 DVT/DVO、分割 DVT 和流程 DVST，分别读取结构化和 JSON 结果，检查固定数量、类别、分数及两条路径一致性；固定分数容差为 `1e-6`。
+- 检查帮助、缺少参数、阈值错误、缺少文件、拒绝 dvsp 和防止输出覆盖输入。
+- `infer` 清理模型后连续释放仍须成功；结果中的 `release_check_passed` 记录该检查。C++ 检查本地编号清理，C 检查释放返回码及释放后信息接口拒绝旧编号。
+- 两个 Demo 分别执行真实绘制控件的掩码像素断言，PNG 只保存在系统临时目录。
+- 超时、崩溃、非零退出码、缺少结果、无效 JSON、非有限数值或基准不符均不计为通过。此测试不覆盖主窗口文件对话框、交互操作或压力测试按钮。
 
 ### 3.3 C++ DLL 控制台示例
 

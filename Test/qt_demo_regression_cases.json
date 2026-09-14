@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "threshold": 0.5,
+  "score_tolerance": 1e-06,
+  "inference_cases": [
+    {
+      "id": "classification_dvt",
+      "model": "猫狗-分类_120_50_s.dvt",
+      "image": "猫狗-狗.jpg",
+      "with_mask": true,
+      "expected": {
+        "count": 1,
+        "categories": [
+          "狗"
+        ],
+        "scores": [
+          0.9951171875
+        ]
+      },
+      "compare_between_demos": true
+    },
+    {
+      "id": "classification_dvo",
+      "model": "猫狗-分类_s.dvo",
+      "image": "猫狗-狗.jpg",
+      "with_mask": true,
+      "expected": {
+        "count": 1,
+        "categories": [
+          "狗"
+        ],
+        "scores": [
+          0.9949498176574707
+        ]
+      },
+      "compare_between_demos": true,
+      "baseline_source": "本轮 C++ Qt Demo strict UTF-8 JSON 实际校对"
+    },
+    {
+      "id": "segmentation_dvt",
+      "model": "气球-实例分割_120_50_s.dvt",
+      "image": "气球.jpg",
+      "with_mask": true,
+      "expected": {
+        "count": 1,
+        "categories": [
+          "气球"
+        ],
+        "scores": [
+          0.9892578125
+        ]
+      },
+      "compare_between_demos": true
+    },
+    {
+      "id": "flow_dvst",
+      "model": "AOI_120_50_s.dvst",
+      "image": "AOI-测试.jpg",
+      "with_mask": true,
+      "expected": {
+        "count": 22,
+        "categories": [
+          "二极管0",
+          "字符0",
+          "字符90",
+          "字符0",
+          "电容90",
+          "电容90",
+          "二极管0",
+          "字符270",
+          "电容0",
+          "电容90",
+          "二极管90",
+          "字符90",
+          "字符0",
+          "电阻270",
+          "字符90",
+          "二极管180",
+          "电阻0",
+          "电容0",
+          "IC90",
+          "字符0",
+          "字符90",
+          "电阻270"
+        ],
+        "scores": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.9970703125,
+          1.0,
+          0.6064453125,
+          1.0,
+          1.0,
+          0.998046875,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.94970703125,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.9990234375,
+          1.0
+        ]
+      },
+      "compare_between_demos": true
+    }
+  ]
+}

@@ -1,17 +1,13 @@
-#include <QApplication>
+#include "CliRunner.h"
+
 #include <QByteArray>
-#include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFont>
-#include <QImage>
-#include <QPixmap>
 #include <QSaveFile>
-#include <QStringList>
 
 #include <cmath>
-#include <cstdio>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -19,60 +15,15 @@
 #include <string>
 #include <vector>
 
-#include "ImageViewerWidget.h"
-#include "../Test/qt_demo/MaskVisualizationSelfTest.h"
-#include "MainWindow.h"
-#include "dlcv_infer.h"
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
-#ifdef _WIN32
-#include <Windows.h>
-#else
-#include <dlfcn.h>
-#endif
+#include "DlcvInferApi.h"
+#include "json/json.hpp"
 
 namespace {
 
 using json = nlohmann::json;
-
-#ifdef _WIN32
-bool IsUsableStandardHandle(DWORD standardHandle) {
-    const HANDLE handle = GetStdHandle(standardHandle);
-    if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-
-    SetLastError(ERROR_SUCCESS);
-    const DWORD fileType = GetFileType(handle);
-    return fileType != FILE_TYPE_UNKNOWN || GetLastError() == ERROR_SUCCESS;
-}
-
-void InitializeConsoleForCommandLine() {
-    const bool hasStdout = IsUsableStandardHandle(STD_OUTPUT_HANDLE);
-    const bool hasStderr = IsUsableStandardHandle(STD_ERROR_HANDLE);
-    if (hasStdout && hasStderr) {
-        return;
-    }
-
-    if (!AttachConsole(ATTACH_PARENT_PROCESS) && GetLastError() != ERROR_ACCESS_DENIED) {
-        return;
-    }
-
-    FILE* stream = nullptr;
-    if (!hasStdout) {
-        freopen_s(&stream, "CONOUT$", "w", stdout);
-    }
-    if (!hasStderr) {
-        freopen_s(&stream, "CONOUT$", "w", stderr);
-    }
-    std::ios::sync_with_stdio(true);
-
-    DWORD consoleMode = 0;
-    if (GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &consoleMode) ||
-        GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &consoleMode)) {
-        SetConsoleOutputCP(CP_UTF8);
-    }
-}
-#endif
 
 struct InferOptions {
     QString modelPath;
@@ -106,23 +57,63 @@ struct PathSummary {
     std::vector<double> comparableBackgroundMeans;
 };
 
-class FreeAllModelsGuard {
+class ApiCleanupGuard {
 public:
-    ~FreeAllModelsGuard() {
+    explicit ApiCleanupGuard(DlcvInferApi& api) : api_(api) {}
+    ~ApiCleanupGuard() {
+        if (!api_.isLoaded()) {
+            return;
+        }
+        std::ostringstream buffer;
+        std::streambuf* previous = std::cout.rdbuf(buffer.rdbuf());
         try {
-            dlcv_infer::Utils::FreeAllModels();
+            api_.freeAllModels();
         } catch (...) {
         }
+        std::cout.rdbuf(previous);
     }
+
+    ApiCleanupGuard(const ApiCleanupGuard&) = delete;
+    ApiCleanupGuard& operator=(const ApiCleanupGuard&) = delete;
+
+private:
+    DlcvInferApi& api_;
+};
+
+class CResultGuard {
+public:
+    CResultGuard(DlcvInferApi& api, DlcvCResult value) : api_(api), value_(value) {}
+    ~CResultGuard() { api_.freeModelResult(&value_); }
+
+    CResultGuard(const CResultGuard&) = delete;
+    CResultGuard& operator=(const CResultGuard&) = delete;
+
+    const DlcvCResult& get() const { return value_; }
+
+private:
+    DlcvInferApi& api_;
+    DlcvCResult value_{};
+};
+
+class CStringGuard {
+public:
+    CStringGuard(DlcvInferApi& api, const char* value) : api_(api), value_(value) {}
+    ~CStringGuard() { api_.freeString(value_); }
+
+    CStringGuard(const CStringGuard&) = delete;
+    CStringGuard& operator=(const CStringGuard&) = delete;
+
+    const char* get() const { return value_; }
+
+private:
+    DlcvInferApi& api_;
+    const char* value_ = nullptr;
 };
 
 class CoutSilencer {
 public:
     CoutSilencer() : previous_(std::cout.rdbuf(buffer_.rdbuf())) {}
-
-    ~CoutSilencer() {
-        std::cout.rdbuf(previous_);
-    }
+    ~CoutSilencer() { std::cout.rdbuf(previous_); }
 
     CoutSilencer(const CoutSilencer&) = delete;
     CoutSilencer& operator=(const CoutSilencer&) = delete;
@@ -137,11 +128,11 @@ std::string ToUtf8(const QString& value) {
     return std::string(bytes.constData(), static_cast<size_t>(bytes.size()));
 }
 
-QString FromExceptionMessage(const char* message) {
-    if (message == nullptr) {
+QString DecodeApiText(const char* value) {
+    if (value == nullptr) {
         return QStringLiteral("unknown error");
     }
-    const QByteArray bytes(message);
+    const QByteArray bytes(value);
     const QString utf8 = QString::fromUtf8(bytes);
     if (utf8.toUtf8() == bytes) {
         return utf8;
@@ -149,20 +140,11 @@ QString FromExceptionMessage(const char* message) {
     return QString::fromLocal8Bit(bytes);
 }
 
-void PrintHelp(const QString& programPath) {
-    const std::string program = ToUtf8(programPath);
-    std::cout
-        << "Usage:\n"
-        << "  " << program << "\n"
-        << "  " << program
-        << " infer --model <path> --image <path> --threshold <0..1>"
-           " [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]\n"
-        << "  " << program
-        << " render --model <path> --image <path> --threshold <0..1> --output <pngPath>"
-           " [--device <int>] [--with-mask <true|false>]\n"
-        << "  " << program << " mask-visualization-selftest [--output <pngPath>]\n"
-        << "  " << program << " --help\n\n"
-        << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
+std::string CategoryToUtf8(const char* value) {
+    if (value == nullptr) {
+        return {};
+    }
+    return ToUtf8(QString::fromLocal8Bit(value));
 }
 
 bool ParseBool(const QString& value, bool& parsed) {
@@ -178,7 +160,7 @@ bool ParseBool(const QString& value, bool& parsed) {
 }
 
 bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& error) {
-    for (int i = 2; i < args.size(); i++) {
+    for (int i = 2; i < args.size(); ++i) {
         const QString option = args.at(i);
         if (i + 1 >= args.size()) {
             error = QStringLiteral("missing value for %1").arg(option);
@@ -240,12 +222,12 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             options.hasWithMask = true;
         } else if (option == QStringLiteral("--calc-mean")) {
             if (options.hasCalcMean) {
-                error = QStringLiteral("参数重复：--calc-mean");
+                error = QStringLiteral("duplicate option: --calc-mean");
                 return false;
             }
             bool parsed = false;
             if (!ParseBool(value, parsed)) {
-                error = QStringLiteral("--calc-mean 必须是 true 或 false");
+                error = QStringLiteral("--calc-mean must be true or false");
                 return false;
             }
             options.calcMean = parsed;
@@ -282,7 +264,7 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
 
     const QFileInfo modelInfo(options.modelPath);
     if (modelInfo.suffix().compare(QStringLiteral("dvsp"), Qt::CaseInsensitive) == 0) {
-        error = QStringLiteral("不支持 .dvsp 模型推理");
+        error = QStringLiteral(".dvsp models are not supported by infer");
         return false;
     }
     if (!modelInfo.exists() || !modelInfo.isFile()) {
@@ -359,17 +341,28 @@ cv::Mat PrepareImageForInference(const cv::Mat& decodedImage) {
     if (decodedImage.empty()) {
         return {};
     }
+
+    cv::Mat output;
     if (decodedImage.channels() == 3) {
-        cv::Mat rgb;
-        cv::cvtColor(decodedImage, rgb, cv::COLOR_BGR2RGB);
-        return rgb;
+        cv::cvtColor(decodedImage, output, cv::COLOR_BGR2RGB);
+    } else if (decodedImage.channels() == 4) {
+        cv::cvtColor(decodedImage, output, cv::COLOR_BGRA2RGB);
+    } else {
+        output = decodedImage.clone();
     }
-    if (decodedImage.channels() == 4) {
-        cv::Mat rgb;
-        cv::cvtColor(decodedImage, rgb, cv::COLOR_BGRA2RGB);
-        return rgb;
+    if (!output.empty() && !output.isContinuous()) {
+        output = output.clone();
     }
-    return decodedImage.clone();
+    return output;
+}
+
+DlcvCImage MakeCImage(const cv::Mat& image) {
+    DlcvCImage result{};
+    result.data_ptr = static_cast<long long>(reinterpret_cast<uintptr_t>(image.data));
+    result.height = image.rows;
+    result.width = image.cols;
+    result.channel = image.channels();
+    return result;
 }
 
 void AddSummaryItem(
@@ -381,7 +374,7 @@ void AddSummaryItem(
     double backgroundMean,
     double threshold) {
     const int index = summary.count;
-    summary.count += 1;
+    ++summary.count;
     summary.categories.push_back(category);
     summary.comparableCategories.push_back(category);
     summary.comparableScores.push_back(score);
@@ -417,17 +410,25 @@ void AddSummaryItem(
     }
 }
 
-PathSummary SummarizeStructured(const dlcv_infer::Result& result, double threshold) {
+PathSummary SummarizeStructured(const DlcvCResult& result, double threshold) {
     PathSummary summary;
-    for (const auto& sample : result.sampleResults) {
-        for (const auto& object : sample.results) {
+    if (result.sample_results == nullptr || result.n <= 0) {
+        return summary;
+    }
+    for (int sampleIndex = 0; sampleIndex < result.n; ++sampleIndex) {
+        const DlcvCSampleResult& sample = result.sample_results[sampleIndex];
+        if (sample.results == nullptr || sample.n <= 0) {
+            continue;
+        }
+        for (int objectIndex = 0; objectIndex < sample.n; ++objectIndex) {
+            const DlcvCObjectResult& object = sample.results[objectIndex];
             AddSummaryItem(
                 summary,
                 static_cast<double>(object.score),
-                dlcv_infer::convertGbkToUtf8(object.categoryName),
-                object.withMean,
-                static_cast<double>(object.foregroundMean),
-                static_cast<double>(object.backgroundMean),
+                CategoryToUtf8(object.category_name),
+                object.with_mean,
+                static_cast<double>(object.foreground_mean),
+                static_cast<double>(object.background_mean),
                 threshold);
         }
     }
@@ -461,34 +462,13 @@ bool TryReadJsonNumber(const json& token, const char* key, double& value) {
     return false;
 }
 
-bool TryReadJsonScore(const json& token, double& score) {
-    try {
-        if (!token.is_object() || !token.contains("score")) {
-            return false;
-        }
-        const json& value = token.at("score");
-        if (value.is_number()) {
-            score = value.get<double>();
-            return std::isfinite(score);
-        }
-        if (value.is_string()) {
-            size_t consumed = 0;
-            const std::string text = value.get<std::string>();
-            score = std::stod(text, &consumed);
-            return consumed == text.size() && std::isfinite(score);
-        }
-    } catch (...) {
-    }
-    return false;
-}
-
 PathSummary SummarizeJson(const json& result, double threshold) {
     const json* resultList = &result;
     if (result.is_object() && result.contains("result_list") && result.at("result_list").is_array()) {
         resultList = &result.at("result_list");
     }
     if (!resultList->is_array()) {
-        throw std::runtime_error("InferOneOutJson did not return a JSON array or result_list wrapper");
+        throw std::runtime_error("C JSON inference did not return an array or result_list wrapper");
     }
 
     PathSummary summary;
@@ -514,7 +494,7 @@ PathSummary SummarizeJson(const json& result, double threshold) {
         }
 
         double score = std::numeric_limits<double>::quiet_NaN();
-        (void)TryReadJsonScore(token, score);
+        (void)TryReadJsonNumber(token, "score", score);
         bool withMean = false;
         double foregroundMean = 0.0;
         double backgroundMean = 0.0;
@@ -543,30 +523,25 @@ json PathSummaryToJson(const PathSummary& summary) {
 }
 
 bool AreConsistent(const PathSummary& left, const PathSummary& right) {
-    if (left.count != right.count) {
-        return false;
-    }
-    if (left.comparableScores.size() != right.comparableScores.size() ||
+    if (left.count != right.count ||
+        left.comparableScores.size() != right.comparableScores.size() ||
         left.comparableCategories != right.comparableCategories ||
         left.comparableWithMeans != right.comparableWithMeans) {
         return false;
     }
-    for (size_t i = 0; i < left.comparableScores.size(); i++) {
-        if (!std::isfinite(left.comparableScores[i]) || !std::isfinite(right.comparableScores[i])) {
+    for (size_t i = 0; i < left.comparableScores.size(); ++i) {
+        if (!std::isfinite(left.comparableScores[i]) || !std::isfinite(right.comparableScores[i]) ||
+            std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) {
             return false;
         }
-        if (std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) {
+        if (left.comparableWithMeans[i] &&
+            (!std::isfinite(left.comparableForegroundMeans[i]) ||
+             !std::isfinite(right.comparableForegroundMeans[i]) ||
+             !std::isfinite(left.comparableBackgroundMeans[i]) ||
+             !std::isfinite(right.comparableBackgroundMeans[i]) ||
+             std::abs(left.comparableForegroundMeans[i] - right.comparableForegroundMeans[i]) > 1e-6 ||
+             std::abs(left.comparableBackgroundMeans[i] - right.comparableBackgroundMeans[i]) > 1e-6)) {
             return false;
-        }
-        if (left.comparableWithMeans[i]) {
-            if (!std::isfinite(left.comparableForegroundMeans[i]) ||
-                !std::isfinite(right.comparableForegroundMeans[i]) ||
-                !std::isfinite(left.comparableBackgroundMeans[i]) ||
-                !std::isfinite(right.comparableBackgroundMeans[i]) ||
-                std::abs(left.comparableForegroundMeans[i] - right.comparableForegroundMeans[i]) > 1e-6 ||
-                std::abs(left.comparableBackgroundMeans[i] - right.comparableBackgroundMeans[i]) > 1e-6) {
-                return false;
-            }
         }
     }
     return true;
@@ -589,7 +564,6 @@ void WriteJsonFile(const QString& outputPath, const std::string& jsonText) {
         throw std::runtime_error(ToUtf8(
             QStringLiteral("failed to open output: %1").arg(file.errorString())));
     }
-
     const QByteArray bytes(jsonText.data(), static_cast<int>(jsonText.size()));
     if (file.write(bytes) != bytes.size()) {
         throw std::runtime_error(ToUtf8(
@@ -601,42 +575,70 @@ void WriteJsonFile(const QString& outputPath, const std::string& jsonText) {
     }
 }
 
+std::string LastApiError(DlcvInferApi& api) {
+    return ToUtf8(DecodeApiText(api.getLastError()));
+}
+
 int RunInferCommand(const InferOptions& options) {
-    FreeAllModelsGuard cleanup;
+    DlcvInferApi api;
+    if (!api.load()) {
+        throw std::runtime_error(ToUtf8(QString::fromStdWString(api.lastError())));
+    }
+    ApiCleanupGuard cleanup(api);
+
     PathSummary structuredSummary;
     PathSummary jsonSummary;
-    bool structuredHasInspection = false;
-    bool structuredOk = false;
-    std::vector<std::string> structuredReasons;
-    bool jsonHasInspection = false;
-    bool jsonOk = false;
     bool releaseCheckPassed = false;
-    std::vector<std::string> jsonReasons;
     {
         CoutSilencer silenceApiLogs;
-        dlcv_infer::Model model(options.modelPath.toStdWString(), options.device);
+        const QByteArray modelPath = options.modelPath.toLocal8Bit();
+        const int modelIndex = api.loadModel(modelPath.constData(), options.device);
+        if (modelIndex < 0) {
+            throw std::runtime_error(LastApiError(api));
+        }
+
         const cv::Mat decoded = LoadImageUnicode(options.imagePath);
+        if (decoded.depth() != CV_8U) {
+            throw std::runtime_error("the formal C image API requires 8-bit input");
+        }
         const cv::Mat inferImage = PrepareImageForInference(decoded);
         if (inferImage.empty()) {
             throw std::runtime_error("input image channel conversion failed");
         }
-
-        json params = {
+        DlcvCImage image = MakeCImage(inferImage);
+        DlcvCImageList imageList{};
+        imageList.images = &image;
+        imageList.n = 1;
+        const json params = {
             {"threshold", options.threshold},
             {"with_mask", options.withMask},
             {"calc_mean", options.calcMean}
         };
+        const std::string paramsText = params.dump();
 
-        const dlcv_infer::Result structuredResult = model.Infer(inferImage, params);
-        structuredHasInspection = dlcv_infer::Model::GetLastInspectionStatus(
-            structuredOk, structuredReasons, 0);
-        const json jsonResult = model.InferOneOutJson(inferImage, params);
-        jsonHasInspection = dlcv_infer::Model::GetLastInspectionStatus(jsonOk, jsonReasons, 0);
-        structuredSummary = SummarizeStructured(structuredResult, options.threshold);
-        jsonSummary = SummarizeJson(jsonResult, options.threshold);
-        model.FreeModel();
-        model.FreeModel();
-        releaseCheckPassed = model.modelIndex == -1;
+        {
+            CResultGuard structuredResult(
+                api,
+                api.inferWithParams(modelIndex, &imageList, paramsText.c_str()));
+            if (structuredResult.get().code != 0) {
+                throw std::runtime_error(ToUtf8(DecodeApiText(structuredResult.get().message)));
+            }
+            structuredSummary = SummarizeStructured(structuredResult.get(), options.threshold);
+
+            CStringGuard jsonResult(api, api.inferJson(modelIndex, &image, paramsText.c_str()));
+            if (jsonResult.get() == nullptr) {
+                throw std::runtime_error(LastApiError(api));
+            }
+            jsonSummary = SummarizeJson(json::parse(jsonResult.get()), options.threshold);
+        }
+
+        const int firstFreeResult = api.freeModel(modelIndex);
+        const std::string firstFreeError = api.getLastError() == nullptr ? std::string{} : api.getLastError();
+        const int secondFreeResult = api.freeModel(modelIndex);
+        const std::string secondFreeError = api.getLastError() == nullptr ? std::string{} : api.getLastError();
+        CStringGuard modelInfoAfterFree(api, api.getModelInfo(modelIndex));
+        releaseCheckPassed = firstFreeResult == 0 && firstFreeError.empty() &&
+            secondFreeResult == 0 && secondFreeError.empty() && modelInfoAfterFree.get() == nullptr;
     }
 
     const bool consistent = AreConsistent(structuredSummary, jsonSummary);
@@ -644,13 +646,8 @@ int RunInferCommand(const InferOptions& options) {
         structuredSummary.belowThreshold.empty() && jsonSummary.belowThreshold.empty();
     const bool meanCheckPassed =
         !options.calcMean || (HasCompleteMeans(structuredSummary) && HasCompleteMeans(jsonSummary));
-    const bool inspectionConsistent =
-        structuredHasInspection == jsonHasInspection &&
-        (!structuredHasInspection ||
-         (structuredOk == jsonOk && structuredReasons == jsonReasons));
-
     const json summary = {
-        {"language", "cpp"},
+        {"language", "c"},
         {"model", ToUtf8(options.modelPath)},
         {"image", ToUtf8(options.imagePath)},
         {"threshold", options.threshold},
@@ -660,12 +657,13 @@ int RunInferCommand(const InferOptions& options) {
         {"structured", PathSummaryToJson(structuredSummary)},
         {"json", PathSummaryToJson(jsonSummary)},
         {"inspection", json::object({
-            {"present", jsonHasInspection},
-            {"ok", jsonHasInspection ? json(jsonOk) : json()},
-            {"reason", jsonHasInspection && !jsonReasons.empty() ? json(jsonReasons) : json()}
+            {"present", false},
+            {"ok", nullptr},
+            {"reason", nullptr}
         })},
+        {"inspection_supported", false},
         {"consistent", consistent},
-        {"inspection_consistent", inspectionConsistent},
+        {"inspection_consistent", nullptr},
         {"release_check_passed", releaseCheckPassed},
         {"threshold_check_passed", thresholdCheckPassed},
         {"mean_check_passed", meanCheckPassed}
@@ -677,178 +675,84 @@ int RunInferCommand(const InferOptions& options) {
     if (options.hasOutput) {
         WriteJsonFile(options.outputPath, output);
     }
-    return consistent && inspectionConsistent && thresholdCheckPassed && meanCheckPassed && releaseCheckPassed ? 0 : 3;
+    return consistent && releaseCheckPassed && thresholdCheckPassed && meanCheckPassed ? 0 : 3;
 }
 
-int RunRenderCommand(const InferOptions& options) {
-    if (!options.hasOutput) {
-        std::cerr << "render failed: --output is required\n";
-        return 2;
-    }
-
-    FreeAllModelsGuard cleanup;
-    dlcv_infer::Model model(options.modelPath.toStdWString(), options.device);
-    const cv::Mat decoded = LoadImageUnicode(options.imagePath);
-    const cv::Mat inferImage = PrepareImageForInference(decoded);
-    if (inferImage.empty()) {
-        throw std::runtime_error("input image channel conversion failed");
-    }
-
-    const json params = {
+json MakeRuntimeError(const InferOptions& options, const QString& error) {
+    return json{
+        {"language", "c"},
+        {"model", ToUtf8(options.modelPath)},
+        {"image", ToUtf8(options.imagePath)},
         {"threshold", options.threshold},
-        {"with_mask", options.withMask},
-        {"batch_size", 1}
+        {"calc_mean", options.calcMean},
+        {"error", ToUtf8(error)}
     };
-    const dlcv_infer::Result result = model.InferBatch({inferImage}, params);
-    if (result.sampleResults.empty() || result.sampleResults.front().results.empty()) {
-        std::cerr << "render failed: DVS flow returned an empty result\n";
-        return 3;
-    }
-
-    const auto& results = result.sampleResults.front().results;
-    ImageViewerWidget viewer;
-    viewer.resize(decoded.cols, decoded.rows);
-    viewer.setShowStatusText(false);
-    viewer.setImageAndResults(decoded, results);
-    viewer.show();
-    QApplication::processEvents();
-
-    QImage rendered = viewer.grab().toImage();
-    if (rendered.width() != decoded.cols || rendered.height() != decoded.rows) {
-        rendered = rendered.scaled(decoded.cols, decoded.rows, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    }
-    if (rendered.isNull() || !rendered.save(options.outputPath)) {
-        std::cerr << "render failed: could not save output image\n";
-        return 1;
-    }
-
-    std::cout << "rendered: " << ToUtf8(options.outputPath)
-        << ", source=" << decoded.cols << "x" << decoded.rows
-        << ", output=" << rendered.width() << "x" << rendered.height()
-        << ", objects=" << results.size() << "\n";
-    for (size_t i = 0; i < results.size(); ++i) {
-        const auto& object = results[i];
-        std::cout << "object[" << i << "]: category_name=" << dlcv_infer::convertGbkToUtf8(object.categoryName)
-            << ", score=" << object.score << ", bbox=";
-        for (size_t j = 0; j < object.bbox.size(); ++j) {
-            if (j > 0) std::cout << ",";
-            std::cout << object.bbox[j];
-        }
-        if (object.withMask && !object.mask.empty()) {
-            const bool fullImageMask = object.mask.cols == decoded.cols && object.mask.rows == decoded.rows;
-            std::cout << ", mask=" << object.mask.cols << "x" << object.mask.rows
-                << ", mask_space=" << (fullImageMask ? "full-image" : "roi");
-        } else {
-            std::cout << ", mask=none";
-        }
-        std::cout << "\n";
-    }
-    return 0;
 }
 
-
-std::string GetCppDllPath() {
-#ifdef _WIN32
-    char path[MAX_PATH];
-    HMODULE hModule = nullptr;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           reinterpret_cast<LPCSTR>(&dlcv_infer::Utils::FreeAllModels), &hModule)) {
-        if (GetModuleFileNameA(hModule, path, MAX_PATH) > 0) {
-            return path;
-        }
+int CheckCApiExports() {
+    DlcvInferApi api;
+    if (api.load()) {
+        std::cout << "C API export check passed\n";
+        return 0;
     }
-#else
-    Dl_info info;
-    if (dladdr(reinterpret_cast<void*>(&dlcv_infer::Utils::FreeAllModels), &info) && info.dli_fname) {
-        return info.dli_fname;
-    }
-#endif
-    return "";
+    std::cerr << ToUtf8(QString::fromStdWString(api.lastError())) << "\n";
+    return 1;
 }
 
 }  // namespace
 
-int main(int argc, char* argv[]) {
-#ifdef _WIN32
-    if (argc > 1) {
-        InitializeConsoleForCommandLine();
+void PrintCliHelp(const QString& programPath) {
+    const std::string program = ToUtf8(programPath);
+    std::cout
+        << "Usage:\n"
+        << "  " << program << "\n"
+        << "  " << program
+        << " infer --model <path> --image <path> --threshold <0..1>"
+           " [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]\n"
+        << "  " << program << " mask-visualization-selftest --output <pngPath>\n"
+        << "  " << program << " --check-c-api-exports\n"
+        << "  " << program << " --help\n\n"
+        << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
+}
+
+int RunCliCommand(const QStringList& args) {
+    if (args.size() <= 1) {
+        return 2;
     }
-#endif
-
-    QApplication app(argc, argv);
-    app.setApplicationName("C++测试程序");
-    app.setOrganizationName("dlcv");
-    app.setFont(QFont("Microsoft YaHei", 9));
-
-    const QStringList args = app.arguments();
-    if (args.size() > 1) {
-        if (args.at(1) == QStringLiteral("--help") ||
-            ((args.at(1) == QStringLiteral("infer") || args.at(1) == QStringLiteral("render"))
-             && args.contains(QStringLiteral("--help")))) {
-            PrintHelp(args.at(0));
-            return 0;
-        }
-        if (args.at(1) == QStringLiteral("mask-visualization-selftest")) {
-            QString output = QDir(QDir::tempPath()).filePath("dlcv_mask_visualization_selftest.png");
-            if (args.size() == 4 && args.at(2) == QStringLiteral("--output")) {
-                output = args.at(3);
-            } else if (args.size() != 2) {
-                std::cerr << "mask-visualization-selftest [--output <pngPath>]\n";
-                return 2;
-            }
-            return RunQtMaskVisualizationSelfTest(output,
-                dlcv_infer::ObjectResult(0, "", 0.99f, 0.0f, {}, false, cv::Mat()));
-        }
-        const bool isInferCommand = args.at(1) == QStringLiteral("infer");
-        const bool isRenderCommand = args.at(1) == QStringLiteral("render");
-        if (!isInferCommand && !isRenderCommand) {
-            std::cerr << "error: expected 'infer', 'render', 'mask-visualization-selftest', or '--help'\n";
-            PrintHelp(args.at(0));
+    if (args.at(1) == QStringLiteral("--help") ||
+        (args.at(1) == QStringLiteral("infer") && args.contains(QStringLiteral("--help")))) {
+        PrintCliHelp(args.at(0));
+        return 0;
+    }
+    if (args.at(1) == QStringLiteral("--check-c-api-exports")) {
+        if (args.size() != 2) {
+            std::cerr << "error: --check-c-api-exports does not accept arguments\n";
+            PrintCliHelp(args.at(0));
             return 2;
         }
-
-        InferOptions options;
-        QString error;
-        if (!ParseInferOptions(args, options, error)) {
-            std::cerr << "error: " << ToUtf8(error) << "\n";
-            PrintHelp(args.at(0));
-            return 2;
-        }
-
-        try {
-            return isRenderCommand ? RunRenderCommand(options) : RunInferCommand(options);
-        } catch (const std::exception& ex) {
-            const json errorJson = {
-                {"language", "cpp"},
-                {"model", ToUtf8(options.modelPath)},
-                {"image", ToUtf8(options.imagePath)},
-                {"threshold", options.threshold},
-                {"calc_mean", options.calcMean},
-                {"error", ToUtf8(FromExceptionMessage(ex.what()))}
-            };
-            std::cerr << errorJson.dump(2) << "\n";
-            return 1;
-        } catch (...) {
-            const json errorJson = {
-                {"language", "cpp"},
-                {"model", ToUtf8(options.modelPath)},
-                {"image", ToUtf8(options.imagePath)},
-                {"threshold", options.threshold},
-                {"calc_mean", options.calcMean},
-                {"error", "unknown error"}
-            };
-            std::cerr << errorJson.dump(2) << "\n";
-            return 1;
-        }
+        return CheckCApiExports();
+    }
+    if (args.at(1) != QStringLiteral("infer")) {
+        std::cerr << "error: expected 'infer', 'mask-visualization-selftest', '--check-c-api-exports', or '--help'\n";
+        PrintCliHelp(args.at(0));
+        return 2;
     }
 
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
-        dlcv_infer::Utils::FreeAllModels();
-    });
+    InferOptions options;
+    QString error;
+    if (!ParseInferOptions(args, options, error)) {
+        std::cerr << "error: " << ToUtf8(error) << "\n";
+        PrintCliHelp(args.at(0));
+        return 2;
+    }
 
-    std::cout << "[dlcv_infer_cpp] " << GetCppDllPath() << std::endl;
-
-    MainWindow w;
-    w.show();
-    return app.exec();
+    try {
+        return RunInferCommand(options);
+    } catch (const std::exception& ex) {
+        std::cerr << MakeRuntimeError(options, DecodeApiText(ex.what())).dump(2) << "\n";
+        return 1;
+    } catch (...) {
+        std::cerr << MakeRuntimeError(options, QStringLiteral("unknown error")).dump(2) << "\n";
+        return 1;
+    }
 }

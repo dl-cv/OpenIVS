@@ -179,6 +179,19 @@ C 调用端只需包含 `dlcv_infer_c_api.h`，不需要链接 `dlcv_infer_cpp.l
 
 C API 的异常输入、模型加载、共享 index、归档和释放检查均放在 `Test` 下的测试工程中，通过现有产品接口执行。生产头文件和 `dlcv_infer_cpp.dll` 不增加测试导出，也不通过替换推理 DLL或另设测试 DLL 构造测试入口。实际产品输入遵循单一加密狗格式规则。测试状态、模型清单和具体数量由实际执行记录更新。
 
+### 6.4 C Qt Demo 非交互验证
+
+`dlcv_infer_c_qt_demo` 无参数时仍启动主窗口，`--check-c-api-exports` 检查正式 C 导出。新增推理命令复用该 Demo 的 `DlcvInferApi`，不调用 C++ Model：
+
+```text
+dlcv_infer_c_qt_demo.exe infer --model <模型> --image <图片> --threshold 0.5 --device 0 --with-mask true --calc-mean false --output <结果.json>
+dlcv_infer_c_qt_demo.exe mask-visualization-selftest --output <系统临时目录/mask.png>
+```
+
+`--model`、`--image`、`--threshold` 必填；其余默认值如示例，`--output` 可选。图片从文件字节解码后转换为 RGB。两条推理路径分别调用正式结构化 C ABI 和 JSON C ABI，结果包含 `structured`、`json`、一致性、阈值、均值及重复释放检查。返回码 `0` 表示通过，`1` 为运行错误，`2` 为参数错误，`3` 为结果检查失败。非法参数不启动主窗口，dvsp 明确拒绝，输出不能覆盖模型或图片。
+
+C ABI 没有流程判定状态查询能力，输出 `inspection_supported=false`、`inspection_consistent=null`，不将其伪装成通过。两个实际 Qt Demo 的执行脚本与固定模型清单位于 `Test`，使用方式见 `C++测试程序开发文档.md`；测试不增加生产 DLL 导出。
+
 ## 7. 验证范围
 
 下表保留历史验证记录，不作为当前 bit8 编号兼容回归的结果。
