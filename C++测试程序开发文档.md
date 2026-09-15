@@ -94,13 +94,13 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 ### 3.3 C++ DLL 控制台示例
 
 - 工程：`dlcv_infer_cpp_dll_demo`。
-- 无参数、`-h`、`--help` 或 `help` 仅显示帮助并返回 0，不执行推理或初始化推理运行库，不搜索本地数据目录。
+- 无参数时保留原有 `ModelRoot`、10 组 `DefaultCases` 和 `RunDefaultCases`，执行通用测试模型清单并输出汇总；缺失输入按原逻辑跳过。`-h`、`--help` 或 `help` 仅显示帮助并返回 0，不初始化推理运行库。
 - 单次推理显式使用 `--case <model.dvst> <image.png>` 或 `--model <model.dvst> --image <image.png>`；多组输入重复添加 `--case`。
 - 缺少成对的模型与图片参数返回 1；加载或推理异常返回 2。
-- 图片按 BGR 转 RGB 后传入 `Model::InferBatch()`；阈值为 `0.05`，输出结构化结果摘要。源码不内置业务数据名称、目录或固定预期结果。
+- 图片按 BGR 转 RGB 后传入 `Model::InferBatch()`；阈值为 `0.05`，输出结构化结果摘要。原有通用测试清单保留；专用业务模型不加入默认清单，仅通过命令行显式传入，不内置业务名称或固定预期结果。
 - `--pressure` 与组合命令入口保留；压力测试同样显式提供模型和图片。
 - 推理输出可能包含输入路径、模型类别及运行库日志，仅保存在系统临时目录；PR 仅记录脱敏后的检查结果，不上传原始输出。
-- 回归入口：`python -B -m unittest discover -s Test -p test_cpp_dll_demo_cli.py -v`；环境变量 `DLCV_CPP_DLL_DEMO_EXE` 指定本次构建的 EXE。未设置时，仅运行源码检查，实际 EXE 检查明确跳过。另设 `DLCV_CPP_DLL_DEMO_MODEL_ROOT` 后，复用既有测试清单验证普通模型和流程模型的两种显式输入形式；未设置时推理检查明确跳过。
+- 回归入口：`python -B -m unittest discover -s Test -p test_cpp_dll_demo_cli.py -v`；环境变量 `DLCV_CPP_DLL_DEMO_EXE` 指定本次构建的 EXE。未设置时，仅运行源码检查，实际 EXE 检查明确跳过。另设 `DLCV_CPP_DLL_DEMO_MODEL_ROOT` 后，验证原有无参数默认测试，并复用既有测试清单验证普通模型和流程模型的两种显式输入形式；未设置时推理检查明确跳过。
 
 ### 3.4 UI 布局
 

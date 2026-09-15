@@ -13,15 +13,14 @@ SOURCE = ROOT / "dlcv_infer_cpp_dll_demo" / "main.cpp"
 
 
 class CliSourceTest(unittest.TestCase):
-    def test_no_fixed_model_or_image_paths(self):
+    def test_default_test_list_is_preserved(self):
         source = SOURCE.read_text(encoding="utf-8")
-        literals = re.findall(r'"([^"\n]*)"', source)
-        for literal in literals:
-            literal = re.sub(r"<[^<>]+>", "", literal)
-            self.assertNotRegex(literal, r"(?i)\.(?:dvt|dvo|dvst|dvso|bmp|jpg|png)\b")
+        self.assertIn('const std::string ModelRoot = R"(Y:\\测试模型)";', source)
+        cases = re.search(r"const std::vector<InferCase> DefaultCases = \{(.*?)\n\};", source, re.S)
+        self.assertIsNotNone(cases)
+        self.assertEqual(len(re.findall(r'\{ "[^"]+", "[^"]+" \}', cases.group(1))), 10)
+        self.assertIn("return RunDefaultCases(opt.DeviceId);", source)
         self.assertNotIn("GetModuleFileName", source)
-        self.assertNotIn("DefaultCases", source)
-        self.assertNotIn("ModelRoot", source)
 
     def test_help_precedes_runtime_initialization(self):
         main = SOURCE.read_text(encoding="utf-8").split("int main(", 1)[1]
@@ -45,9 +44,25 @@ class CliExecutableTest(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [])
             return output
 
-    def test_no_arguments(self):
-        output = self.run_cli([], 0)
-        self.assertIn("无参数仅显示帮助", output)
+    @unittest.skipUnless(os.environ.get("DLCV_CPP_DLL_DEMO_MODEL_ROOT"), "未指定推理测试数据目录")
+    def test_no_arguments_runs_default_cases(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        data = Path(re.search(r'ModelRoot = R"\((.*?)\)";', source).group(1))
+        cases = re.search(r"DefaultCases = \{(.*?)\n\};", source, re.S).group(1)
+        inputs = re.findall(r'\{ "([^"]+)", "([^"]+)" \}', cases)
+        expected = sum((data / model).is_file() and (data / image).is_file() for model, image in inputs)
+        self.assertGreater(expected, 0, "默认测试目录没有可用输入")
+        exe = Path(os.environ["DLCV_CPP_DLL_DEMO_EXE"]).resolve(strict=True)
+        with tempfile.TemporaryDirectory(prefix="cpp_default_test_") as directory:
+            result = subprocess.run([str(exe)], cwd=directory, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, timeout=180)
+            self.assertEqual(result.returncode, 0)
+            summary = [line.decode("gb18030", errors="strict") for line in result.stdout.splitlines()
+                       if line.startswith("| 汇总 |".encode("gb18030"))]
+            self.assertEqual(len(summary), 1)
+            self.assertIn(f"总数={expected}", summary[0])
+            self.assertIn(f"成功={expected}", summary[0])
+            self.assertIn("失败=0", summary[0])
 
     def test_help_aliases(self):
         for alias in ("-h", "--help", "help"):
@@ -94,7 +109,7 @@ class CliExecutableTest(unittest.TestCase):
 
     def test_missing_inputs(self):
         cases = [
-            ["--device", "0"], ["--pressure"], ["--case"],
+            ["--device", "invalid"], ["--pressure"], ["--case"],
             ["--case", "model.dvst"], ["--model", "model.dvst"],
             ["--image", "image.png"],
             ["--case", "model.dvst", "image.png", "--model", "other.dvst"],
