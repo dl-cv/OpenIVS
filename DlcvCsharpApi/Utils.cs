@@ -389,10 +389,48 @@ namespace dlcv_infer_csharp
 
         public static void FreeAllModels()
         {
-            DllLoader.Instance.dlcv_free_all_models?.Invoke();
-            // 底层模型已全部释放，同步清空路径缓存，避免同路径再次命中失效 index。
-            Model.ClearModelCache();
-            DlcvModules.BaseModelModule.ClearModelCache();
+            try
+            {
+                foreach (DllLoader loader in DllLoader.GetLoadedLoaders())
+                {
+                    try
+                    {
+                        loader.dlcv_free_all_models?.Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        if (Model.EnableConsoleLog)
+                            Console.WriteLine("释放全部模型失败，DLL=" + loader.LoadedNativeDllName + ": " + ex);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Model.EnableConsoleLog)
+                    Console.WriteLine("枚举推理 DLL 失败: " + ex);
+            }
+            finally
+            {
+                // 全量释放调用结束后，所有托管缓存均视为失效，不保留重试状态。
+                try
+                {
+                    Model.ClearModelCache();
+                }
+                catch (Exception ex)
+                {
+                    if (Model.EnableConsoleLog)
+                        Console.WriteLine("清理模型缓存失败: " + ex);
+                }
+                try
+                {
+                    DlcvModules.BaseModelModule.ClearModelCache();
+                }
+                catch (Exception ex)
+                {
+                    if (Model.EnableConsoleLog)
+                        Console.WriteLine("清理流程模型缓存失败: " + ex);
+                }
+            }
         }
 
         public static JObject GetDeviceInfo()

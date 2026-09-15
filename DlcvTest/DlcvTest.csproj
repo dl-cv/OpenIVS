@@ -177,5 +177,10 @@
   <ItemGroup>
     <Resource Include="Image\cat.png" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Test\desktop_projects\DlcvTestSelfTest.cs">
+      <Link>Test\DlcvTestSelfTest.cs</Link>
+    </Compile>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

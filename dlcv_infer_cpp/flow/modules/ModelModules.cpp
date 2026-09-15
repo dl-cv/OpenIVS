@@ -1,4 +1,4 @@
-﻿#include "flow/modules/ModelModules.h"
+#include "flow/modules/ModelModules.h"
 
 #include <algorithm>
 #include <cmath>
@@ -108,6 +108,14 @@ void ModelPoolLease::Reset() noexcept {
         _key.clear();
         _model.reset();
     }
+}
+
+bool ModelPoolLease::IsCurrent() const {
+    if (!_model || _key.empty() || _entryIdentity == 0) return false;
+    auto& pool = ModelPool::Instance();
+    std::lock_guard<std::mutex> lock(pool._mu);
+    const auto it = pool._cache.find(_key);
+    return it != pool._cache.end() && it->second.identity == _entryIdentity;
 }
 
 std::string ModelPool::MakeKey(const std::string& modelIdentityUtf8, int deviceId) {
@@ -254,7 +262,7 @@ static std::string GetFileNameOnlyLocal(const std::string& path) {
 }
 
 void BaseModelModule::LoadModel() {
-    if (_modelLease) return;
+    if (_model || _modelLease) return;
 
     int deviceId = _deviceId;
     try {
@@ -264,6 +272,26 @@ void BaseModelModule::LoadModel() {
     } catch (...) {}
 
     _resolvedDeviceId = deviceId;
+    if (_modelIndex >= 0) {
+        if (Context != nullptr) {
+            const auto boundModels = Context->Get<std::shared_ptr<const BoundModelMap>>(
+                "bound_models_by_index", std::shared_ptr<const BoundModelMap>());
+            if (boundModels) {
+                const auto it = boundModels->find(_modelIndex);
+                if (it != boundModels->end() && it->second) {
+                    _model = it->second;
+                    return;
+                }
+            }
+        }
+
+        auto model = std::make_shared<dlcv_infer::Model>();
+        model->modelIndex = _modelIndex;
+        model->OwnModelIndex = false;
+        (void)model->GetModelInfo();
+        _model = std::move(model);
+        return;
+    }
     if (!_modelBufferKey.empty()) {
         if (Context == nullptr) {
             throw std::runtime_error("流程模型缺少执行上下文");
@@ -583,7 +611,7 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     const bool emitMaskRle = includeMask;
     const bool emitMaskDerivedMeta = false;
 
-    const int effectiveBatch = ResolveEffectiveBatchLimit(_modelLease.Model(), this->Properties);
+    const int effectiveBatch = ResolveEffectiveBatchLimit(LoadedModel(), this->Properties);
     p["batch_size"] = effectiveBatch;
 
     std::vector<cv::Mat> rgbInputs;
@@ -646,7 +674,7 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
                 chunkMats.push_back(rgbInputs[static_cast<size_t>(localIdx)]);
             }
 
-            dlcv_infer::Result res = _modelLease.Model()->InferBatch(chunkMats, paramsToPass);
+            dlcv_infer::Result res = LoadedModel()->InferBatch(chunkMats, paramsToPass);
             try {
                 if (Context != nullptr) {
                     double prev = Context->Get<double>("flow_dlcv_infer_ms_acc", 0.0);

@@ -36,8 +36,6 @@ namespace dlcv_infer_csharp
         /// </summary>
         public bool OwnModelIndex { get; set; } = true;
 
-        // dvst（流程模型，DVS 模式）的 modelIndex 由本层自管理，从 10000 起递增，
-        // 与 dvt 从底层 DLL 返回的 model_index（0 起递增）分区，避免上层按 modelIndex 索引时 dvst 与 dvt 撞键。
         private static int s_nextFlowModelIndex = 10000;
         private static readonly object s_flowModelIndexLock = new object();
         private static readonly object s_dvtModelLoadLock = new object();
@@ -81,6 +79,11 @@ namespace dlcv_infer_csharp
         private int _expectedChCache = -2;
         private readonly object _batchMetaLock = new object();
         private List<JObject> _cachedSubModelBatchItems = new List<JObject>();
+        private readonly object _sharedIndexLock = new object();
+        private bool _sharedIndexBound;
+        private string _sharedIndexType;
+        private bool _ownsRegisteredFlowIndex;
+        private bool _sharedIndexReady;
 
         public Model()
         {
@@ -89,6 +92,7 @@ namespace dlcv_infer_csharp
 
         public DogProvider LoadedDogProvider => _dllLoader?.LoadedDogProvider ?? DogProvider.None;
         public string LoadedNativeDllName => _dllLoader?.LoadedNativeDllName;
+        internal DllLoader Loader => _dllLoader;
 
         public Model(string modelPath, int device_id, bool rpc_mode = false, bool enableCache = false)
         {
@@ -105,10 +109,14 @@ namespace dlcv_infer_csharp
             {
                 throw new NotSupportedException("当前不支持 .dvsp 模型，请使用 .dvst 或 .dvso");
             }
-
             _isDvpMode = extension == ".dvp";
             _isDvsMode = extension == ".dvst" || extension == ".dvso";
             _isRpcMode = rpc_mode;
+            // 流程对象还持有执行图和子模型，不能只缓存整体 index。
+            if (_isDvsMode)
+            {
+                enableCache = false;
+            }
             string cacheKey = BuildModelCacheKey(modelPath, device_id, _isDvpMode, _isDvsMode, _isRpcMode);
 
             if (enableCache)
@@ -296,6 +304,187 @@ namespace dlcv_infer_csharp
             }
         }
 
+        private bool IsExternalIndexCandidate()
+        {
+            return !_disposed &&
+                   !OwnModelIndex &&
+                   modelIndex >= 0 &&
+                   _dvsModel == null &&
+                   !_isDvpMode &&
+                   !_isDvsMode &&
+                   !_isRpcMode &&
+                   string.IsNullOrEmpty(_modelPath);
+        }
+
+        private static void EnsureIndexCallSucceeded(JObject result, string operation)
+        {
+            if (result == null)
+                throw new Exception(operation + "失败：返回结果为空");
+
+            int code = result["code"] != null ? result["code"].Value<int>() : 1;
+            if (code != 0)
+            {
+                string message = result["message"] != null ? result["message"].ToString() : "未知错误";
+                throw new Exception(operation + "失败：" + message);
+            }
+        }
+
+        private static void EnsureIndexStatusSucceeded(int status, string operation)
+        {
+            if (status != 0)
+                throw new Exception(operation + "失败，status=" + status);
+        }
+
+        private static string GetProviderName(DogProvider provider)
+        {
+            switch (provider)
+            {
+                case DogProvider.Sentinel:
+                    return "sentinel";
+                case DogProvider.Virbox:
+                    return "virbox";
+                default:
+                    return "none";
+            }
+        }
+
+        internal static Model CreateFromKnownLoader(int index, DllLoader loader)
+        {
+            if (loader == null) throw new ArgumentNullException(nameof(loader));
+            if (index < 0 || loader.GetIndexType(index) != 1)
+                throw new InvalidDataException("流程子模型在所属 DLL 中无效：" + index);
+            return new Model
+            {
+                modelIndex = index,
+                OwnModelIndex = false,
+                _dllLoader = loader,
+                _sharedIndexType = "model"
+            };
+        }
+
+        private void EnsureExternalIndexReady()
+        {
+            // 全量释放可以来自另一语言；本地流程与元信息缓存不能证明原生 index 仍有效。
+            if (_sharedIndexReady || _ownsRegisteredFlowIndex)
+            {
+                int expectedType = _isDvsMode ? 2 : 1;
+                if (_dllLoader == null || _dllLoader.GetIndexType(modelIndex) != expectedType)
+                    throw new InvalidOperationException("共享 index 已释放或类型不一致: " + modelIndex);
+                return;
+            }
+            if (!IsExternalIndexCandidate())
+                return;
+
+            lock (_sharedIndexLock)
+            {
+                if (_sharedIndexReady || !IsExternalIndexCandidate())
+                    return;
+
+                int externalIndex = modelIndex;
+                DllLoader loader = _dllLoader;
+                DlcvModules.DvsModel restoredFlow = null;
+                bool bindingAdded = false;
+                string indexType = _sharedIndexType;
+                try
+                {
+                    if (loader == null)
+                    {
+                        loader = DllLoader.ResolveSharedIndexLoader(externalIndex, out indexType);
+                        _dllLoader = loader;
+                        _sharedIndexType = indexType.ToLowerInvariant();
+                    }
+                    if (!string.Equals(indexType, "model", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(indexType, "flow", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new Exception("不支持的 index 类型: " + (indexType ?? "空"));
+                    }
+
+                    loader.EnsureSharedIndexSupport(indexType);
+                    if (!_sharedIndexBound)
+                    {
+                        EnsureIndexStatusSucceeded(loader.BindIndex(externalIndex), "绑定 index");
+                        bindingAdded = true;
+                        _sharedIndexBound = true;
+                    }
+
+                    if (string.Equals(indexType, "flow", StringComparison.OrdinalIgnoreCase))
+                    {
+                        JObject flowInfo = loader.GetFlowInfo(externalIndex);
+                        EnsureIndexCallSucceeded(flowInfo, "获取流程信息");
+                        string sourcePath = flowInfo["source_path"] != null
+                            ? flowInfo["source_path"].ToString()
+                            : null;
+                        JArray modelBindings = flowInfo["model_bindings"] as JArray;
+                        JObject savedPipeline = flowInfo["pipeline"] as JObject;
+                        string savedProvider = flowInfo["provider"] != null
+                            ? flowInfo["provider"].ToString().Trim().ToLowerInvariant()
+                            : null;
+                        string flowType = flowInfo["flow_type"] != null
+                            ? flowInfo["flow_type"].ToString().Trim().TrimStart('.').ToLowerInvariant()
+                            : null;
+                        int deviceId = flowInfo["device_id"] != null
+                            ? flowInfo["device_id"].Value<int>()
+                            : 0;
+                        if (string.IsNullOrWhiteSpace(sourcePath))
+                            throw new Exception("流程信息缺少 source_path");
+                        if (!Path.IsPathRooted(sourcePath))
+                            throw new Exception("流程信息中 source_path 不是绝对路径");
+                        if (modelBindings == null)
+                            throw new Exception("流程信息缺少 model_bindings");
+                        if (savedPipeline == null)
+                            throw new Exception("流程信息缺少 pipeline");
+                        if (string.IsNullOrWhiteSpace(savedProvider))
+                            throw new Exception("流程信息缺少 provider");
+                        string sourceFlowType = Path.GetExtension(sourcePath).TrimStart('.').ToLowerInvariant();
+                        if (string.IsNullOrWhiteSpace(flowType) ||
+                            !string.Equals(flowType, sourceFlowType, StringComparison.OrdinalIgnoreCase))
+                            throw new Exception("流程信息中 flow_type 与 source_path 不一致");
+                        string actualProvider = GetProviderName(loader.LoadedDogProvider);
+                        if (!string.Equals(savedProvider, actualProvider, StringComparison.OrdinalIgnoreCase))
+                            throw new Exception("流程 provider 与 index 所在 DLL 不一致");
+
+                        restoredFlow = new DlcvModules.DvsModel();
+                        JObject report = restoredFlow.LoadFromModelBindings(
+                            sourcePath,
+                            (JObject)savedPipeline.DeepClone(),
+                            (JArray)modelBindings.DeepClone(),
+                            deviceId, loader);
+                        int code = report != null && report["code"] != null ? report["code"].Value<int>() : 1;
+                        if (code != 0)
+                        {
+                            string message = report != null && report["message"] != null
+                                ? report["message"].ToString()
+                                : "未知错误";
+                            throw new Exception("恢复流程失败：" + message);
+                        }
+
+                        _dvsModel = restoredFlow;
+                        restoredFlow = null;
+                        _modelPath = sourcePath;
+                        _isDvsMode = true;
+                    }
+
+                    _sharedIndexReady = true;
+                    TryCacheModelInfo();
+                }
+                catch
+                {
+                    try { restoredFlow?.Dispose(); } catch { }
+                    bool bindingRemoved = !_sharedIndexBound;
+                    if (bindingAdded && loader != null)
+                    {
+                        try { bindingRemoved = loader.UnbindIndex(externalIndex) == 0; } catch { bindingRemoved = false; }
+                    }
+                    if (bindingRemoved)
+                        _sharedIndexBound = false;
+                    _sharedIndexReady = false;
+                    _dvsModel = null;
+                    _isDvsMode = false;
+                    throw;
+                }
+            }
+        }
+
         private void InitializeDvsMode(string modelPath, int device_id)
         {
             _dvsModel = new DlcvModules.DvsModel();
@@ -308,14 +497,70 @@ namespace dlcv_infer_csharp
                     string msg = report != null ? report.ToString() : "Unknown error";
                     throw new Exception("DVS模型加载失败:\n" + msg);
                 }
-                modelIndex = AllocateFlowModelIndex();
+
+                string sourcePath = Path.GetFullPath(modelPath);
+                string extension = Path.GetExtension(sourcePath).ToLowerInvariant();
+                JObject registrationPipeline = _dvsModel.GetRegistrationPipeline();
+                JArray modelBindings = _dvsModel.GetModelBindings();
+                if (modelBindings == null)
+                    throw new Exception("注册流程 index 失败：缺少模型绑定数组");
+
+                _dllLoader = ResolveFlowRegistrationLoader(_dvsModel, modelBindings);
+                if (_dllLoader != null && _dllLoader.SupportsSharedFlowIndex)
+                {
+                    var flowJson = new JObject
+                    {
+                        ["schema_version"] = 1,
+                        ["flow_type"] = extension.StartsWith(".") ? extension.Substring(1) : extension,
+                        ["source_path"] = sourcePath,
+                        ["device_id"] = device_id,
+                        ["provider"] = GetProviderName(_dllLoader.LoadedDogProvider),
+                        ["pipeline"] = registrationPipeline,
+                        ["model_bindings"] = modelBindings
+                    };
+                    modelIndex = _dllLoader.RegisterFlow(flowJson.ToString(Formatting.None));
+                    if (modelIndex < 0)
+                        throw new Exception("注册流程 index 失败");
+                    _ownsRegisteredFlowIndex = true;
+                }
+                else
+                {
+                    modelIndex = AllocateFlowModelIndex();
+                }
             }
             catch (Exception ex)
             {
+                if (_ownsRegisteredFlowIndex && modelIndex >= 0 && _dllLoader != null)
+                {
+                    try { _dllLoader.FreeFlow(modelIndex); } catch { }
+                }
+                _ownsRegisteredFlowIndex = false;
+                modelIndex = -1;
                 _dvsModel.Dispose();
                 _dvsModel = null;
                 throw new Exception($"加载 DVS 模型失败: {ex.Message}", ex);
             }
+        }
+
+        private static DllLoader ResolveFlowRegistrationLoader(DlcvModules.DvsModel dvsModel, JArray modelBindings)
+        {
+            if (dvsModel == null) throw new ArgumentNullException(nameof(dvsModel));
+            DllLoader selectedLoader = null;
+            foreach (JToken token in modelBindings)
+            {
+                JObject binding = token as JObject;
+                if (binding == null || binding["model_index"] == null)
+                    throw new InvalidDataException("流程模型绑定格式无效");
+
+                int childModelIndex = binding["model_index"].Value<int>();
+                DllLoader childLoader = dvsModel.GetLoadedModelLoader(childModelIndex);
+                if (childLoader == null)
+                    throw new InvalidDataException("流程模型节点缺少加载 DLL: " + childModelIndex);
+                if (selectedLoader != null && !object.ReferenceEquals(selectedLoader, childLoader))
+                    throw new InvalidDataException("流程中的模型节点不能混用推理 DLL");
+                selectedLoader = childLoader;
+            }
+            return selectedLoader ?? DllLoader.GetExistingOrDefaultSentinel();
         }
 
         private void InitializeDvtMode(string modelPath, int device_id)
@@ -343,8 +588,7 @@ namespace dlcv_infer_csharp
         {
             lock (s_dvtModelLoadLock)
             {
-                DllLoader.EnsureForModel(modelPath);
-                _dllLoader = DllLoader.Instance;
+                _dllLoader = DllLoader.GetForModel(modelPath);
                 if (_dllLoader == null || _dllLoader.dlcv_load_model == null)
                 {
                     throw new Exception("未检测到授权");
@@ -675,108 +919,215 @@ namespace dlcv_infer_csharp
         {
             _expectedChCache = -2;
 
-            // 仅借用/共享模式，不释放底层模型，只标记无效
             if (!OwnModelIndex)
             {
-                Log("[FreeModel] 共享/借用, 不释放，仅置为-1");
-                modelIndex = -1;
+                lock (_sharedIndexLock)
+                {
+                    int index = modelIndex;
+                    DllLoader loader = _dllLoader;
+                    DlcvModules.DvsModel dvsModel = _dvsModel;
+                    try
+                    {
+                        try
+                        {
+                            dvsModel?.Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+                            LogReleaseFailure("[FreeModel][Shared] 释放流程子模型失败", ex);
+                        }
+
+                        if (_sharedIndexBound && index >= 0)
+                        {
+                            try
+                            {
+                                if (loader == null)
+                                    throw new InvalidOperationException("共享 index 缺少所属 DLL");
+                                int status = loader.UnbindIndex(index);
+                                if (status != 0)
+                                    Log($"[FreeModel][Shared] 解绑 index 失败，status={status}");
+                            }
+                            catch (Exception ex)
+                            {
+                                LogReleaseFailure("[FreeModel][Shared] 解绑 index 失败", ex);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        ClearReleasedModelState();
+                    }
+                }
                 return;
             }
 
-            // owner 释放前先摘掉缓存，避免后续同路径命中已释放的 model_index。
-            RemoveFromModelCache();
+            int ownedIndex = modelIndex;
+            DllLoader ownedLoader = _dllLoader;
+            DlcvModules.DvsModel ownedDvsModel = _dvsModel;
+            try
+            {
+                try
+                {
+                    RemoveFromModelCache();
+                }
+                catch (Exception ex)
+                {
+                    LogReleaseFailure("[FreeModel] 清理模型缓存失败", ex);
+                }
 
-            if (_isDvpMode)
-            {
-                if (_disposed || modelIndex == -1)
+                if (_isDvsMode)
                 {
-                    Log("[FreeModel][DVP] 已Disposed或modelIndex为-1，无需释放");
-                    return;
-                }
-                try
-                {
-                    EnsureDvpHttpClient();
-                    var request = new { model_index = modelIndex };
-                    var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
-                    var response = _httpClient.PostAsync($"{_serverUrl}/free_model", content).Result;
-                    response.EnsureSuccessStatusCode();
-                    Log($"[FreeModel][DVP] HTTP释放，状态: {response.StatusCode}");
-                    modelIndex = -1;
-                }
-                catch (Exception ex)
-                {
-                    Log($"[FreeModel][DVP] 释放失败: {ex.Message}");
-                    throw;
-                }
-            }
-            else if (_isDvsMode)
-            {
-                if (_disposed || modelIndex == -1)
-                {
-                    Log("[FreeModel][DVS] 已Disposed或modelIndex为-1，无需释放");
-                    return;
-                }
-                _dvsModel?.Dispose();
-                _dvsModel = null;
-                modelIndex = -1;
-                Log("[FreeModel][DVS] FlowGraph已释放");
-            }
-            else if (_isRpcMode)
-            {
-                if (_disposed || modelIndex == -1)
-                {
-                    Log("[FreeModel][RPC] 已Disposed或modelIndex为-1，无需释放");
-                    return;
-                }
-                try
-                {
-                    var req = new JObject { ["action"] = "free_model", ["model_path"] = _modelPath };
-                    var response = SendRpc(req);
-                    if (response == null || !(response["ok"]?.Value<bool>() ?? false))
+                    try
                     {
-                        string error = response != null ? response["error"]?.ToString() : "rpc_no_response";
-                        throw new Exception("RPC模型释放失败: " + error);
+                        ownedDvsModel?.Dispose();
                     }
-                    modelIndex = -1;
-                    Log("[FreeModel][RPC] RPC模型已释放");
-                }
-                catch (Exception ex)
-                {
-                    Log($"[FreeModel][RPC] 释放失败: {ex.Message}");
-                    throw;
-                }
-            }
-            else
-            {
-                if (modelIndex == -1)
-                {
-                    Log("[FreeModel][DVT] modelIndex为-1，无需释放");
-                    return;
-                }
-                var config = new JObject { ["model_index"] = modelIndex };
-                IntPtr resultPtr = _dllLoader.dlcv_free_model(config.ToString());
-                if (resultPtr == IntPtr.Zero)
-                {
-                    throw new Exception("DVT模型释放未返回结果");
-                }
-                string resultText;
-                try
-                {
-                    resultText = Marshal.PtrToStringAnsi(resultPtr);
-                    var result = JObject.Parse(resultText);
-                    if (result["code"] == null || result["code"].Value<int>() != 0)
+                    catch (Exception ex)
                     {
-                        string message = result["message"]?.ToString() ?? "底层未返回错误说明";
-                        throw new Exception("DVT模型释放失败: " + message);
+                        LogReleaseFailure("[FreeModel][DVS] 释放流程子模型失败", ex);
+                    }
+
+                    if (_ownsRegisteredFlowIndex && ownedIndex >= 0)
+                    {
+                        try
+                        {
+                            if (ownedLoader == null)
+                                throw new InvalidOperationException("流程 index 缺少所属 DLL");
+                            int status = ownedLoader.FreeFlow(ownedIndex);
+                            if (status != 0)
+                                Log($"[FreeModel][DVS] 释放流程 index 失败，status={status}");
+                        }
+                        catch (Exception ex)
+                        {
+                            LogReleaseFailure("[FreeModel][DVS] 释放流程 index 失败", ex);
+                        }
+                    }
+                    Log("[FreeModel][DVS] FlowGraph本地状态已清理");
+                }
+                else if (ownedIndex < 0)
+                {
+                    Log("[FreeModel] modelIndex为-1，无需释放");
+                }
+                else if (_isDvpMode)
+                {
+                    try
+                    {
+                        EnsureDvpHttpClient();
+                        var request = new { model_index = ownedIndex };
+                        var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
+                        var response = _httpClient.PostAsync($"{_serverUrl}/free_model", content).Result;
+                        response.EnsureSuccessStatusCode();
+                        Log($"[FreeModel][DVP] HTTP释放，状态: {response.StatusCode}");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogReleaseFailure("[FreeModel][DVP] 释放失败", ex);
                     }
                 }
-                finally
+                else if (_isRpcMode)
                 {
-                    _dllLoader.dlcv_free_result(resultPtr);
+                    try
+                    {
+                        var req = new JObject { ["action"] = "free_model", ["model_path"] = _modelPath };
+                        var response = SendRpc(req);
+                        if (response == null || !(response["ok"]?.Value<bool>() ?? false))
+                        {
+                            string error = response != null ? response["error"]?.ToString() : "rpc_no_response";
+                            Log("[FreeModel][RPC] 释放失败: " + error);
+                        }
+                        else
+                        {
+                            Log("[FreeModel][RPC] RPC模型已释放");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogReleaseFailure("[FreeModel][RPC] 释放失败", ex);
+                    }
                 }
-                Log($"[FreeModel][DVT] DVT模型释放结果: {resultText}");
-                modelIndex = -1;
+                else
+                {
+                    IntPtr resultPtr = IntPtr.Zero;
+                    try
+                    {
+                        if (ownedLoader == null || ownedLoader.dlcv_free_model == null)
+                            throw new InvalidOperationException("模型缺少所属 DLL 或释放接口");
+
+                        var config = new JObject { ["model_index"] = ownedIndex };
+                        resultPtr = ownedLoader.dlcv_free_model(config.ToString());
+                        if (resultPtr == IntPtr.Zero)
+                        {
+                            Log("[FreeModel][DVT] 底层未返回释放结果");
+                        }
+                        else
+                        {
+                            string resultText = Marshal.PtrToStringAnsi(resultPtr);
+                            JObject result = JObject.Parse(resultText);
+                            if (result["code"] == null || result["code"].Value<int>() != 0)
+                            {
+                                string message = result["message"]?.ToString() ?? "底层未返回错误说明";
+                                Log("[FreeModel][DVT] 释放失败: " + message + "；返回=" + resultText);
+                            }
+                            else
+                            {
+                                Log($"[FreeModel][DVT] DVT模型释放结果: {resultText}");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogReleaseFailure("[FreeModel][DVT] 释放失败", ex);
+                    }
+                    finally
+                    {
+                        if (resultPtr != IntPtr.Zero && ownedLoader?.dlcv_free_result != null)
+                        {
+                            try
+                            {
+                                ownedLoader.dlcv_free_result(resultPtr);
+                            }
+                            catch (Exception ex)
+                            {
+                                LogReleaseFailure("[FreeModel][DVT] 释放返回结果失败", ex);
+                            }
+                        }
+                    }
+                }
             }
+            finally
+            {
+                ClearReleasedModelState();
+            }
+        }
+
+        private static void LogReleaseFailure(string operation, Exception ex)
+        {
+            Log(operation + ": " + ex);
+        }
+
+        private void ClearReleasedModelState()
+        {
+            modelIndex = -1;
+            OwnModelIndex = true;
+            _expectedChCache = -2;
+            _dvsModel = null;
+            _sharedIndexBound = false;
+            _sharedIndexType = null;
+            _ownsRegisteredFlowIndex = false;
+            _sharedIndexReady = false;
+            _dllLoader = null;
+            _cachedModelInfo = null;
+            _cachedMaxShape = null;
+            _cachedMaxBatchSize = 1;
+            lock (_batchMetaLock)
+            {
+                _cachedSubModelBatchItems.Clear();
+            }
+            _cacheKey = null;
+            _cacheEnabled = false;
+            _modelPath = null;
+            _isDvpMode = false;
+            _isDvsMode = false;
+            _isRpcMode = false;
         }
 
         protected void TryCacheModelInfo()
@@ -1533,8 +1884,14 @@ namespace dlcv_infer_csharp
 
         public JObject GetModelInfo()
         {
+            EnsureExternalIndexReady();
             JObject modelInfo = null;
-            if (_isDvpMode)
+            if (_sharedIndexBound && string.Equals(_sharedIndexType, "model", StringComparison.Ordinal))
+            {
+                modelInfo = _dllLoader.GetModelInfoByIndex(modelIndex);
+                EnsureIndexCallSucceeded(modelInfo, "获取模型信息");
+            }
+            else if (_isDvpMode)
             {
                 modelInfo = GetModelInfoDvp();
             }
@@ -1600,6 +1957,7 @@ namespace dlcv_infer_csharp
         /// </summary>
         public JObject GetDvsModelInfo()
         {
+            EnsureExternalIndexReady();
             if (!_isDvsMode)
             {
                 throw new InvalidOperationException("GetDvsModelInfo 仅支持 DVST 或 DVSO 模型");
@@ -1671,6 +2029,7 @@ namespace dlcv_infer_csharp
         // 内部通用推理方法，处理单张或多张图像
         public Tuple<JObject, IntPtr> InferInternal(List<Mat> images, JObject params_json)
         {
+            EnsureExternalIndexReady();
             if (images == null)
                 throw new ArgumentNullException(nameof(images));
 
@@ -2244,6 +2603,7 @@ namespace dlcv_infer_csharp
 
         public Utils.CSharpResult Infer(Mat image, JObject params_json = null)
         {
+            EnsureExternalIndexReady();
             Utils.CSharpResult result = default(Utils.CSharpResult);
             if (_isDvsMode)
             {
@@ -2297,6 +2657,7 @@ namespace dlcv_infer_csharp
 
         public Utils.CSharpResult InferBatch(List<Mat> image_list, JObject params_json = null)
         {
+            EnsureExternalIndexReady();
             if (_isDvsMode)
             {
                 List<Mat> disposables = null;
@@ -2321,7 +2682,7 @@ namespace dlcv_infer_csharp
                 // 处理完后释放结果，DVP模式下指针为空，不需要释放
                 if (resultTuple.Item2 != IntPtr.Zero)
                 {
-                    _dllLoader.dlcv_free_model_result(resultTuple.Item2);
+                    _dllLoader?.dlcv_free_model_result(resultTuple.Item2);
                 }
             }
         }
@@ -2350,6 +2711,7 @@ namespace dlcv_infer_csharp
         /// </returns>
         public dynamic InferOneOutJson(Mat image, JObject params_json = null)
         {
+            EnsureExternalIndexReady();
             JArray rawResults = null;
 
             if (_isDvsMode)
@@ -2436,7 +2798,7 @@ namespace dlcv_infer_csharp
                 // 处理完后释放结果
                 if (resultTuple.Item2 != IntPtr.Zero)
                 {
-                    _dllLoader.dlcv_free_model_result(resultTuple.Item2);
+                    _dllLoader?.dlcv_free_model_result(resultTuple.Item2);
                 }
             }
         }
@@ -2636,18 +2998,66 @@ namespace dlcv_infer_csharp
 
         protected virtual void Dispose(bool disposing)
         {
-            if (!_disposed)
+            if (_disposed)
+            {
+                return;
+            }
+
+            try
             {
                 if (disposing)
                 {
-                    // 释放托管资源
                     FreeModel();
-                    _httpClient?.Dispose();
+                    try
+                    {
+                        _httpClient?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        LogReleaseFailure("[Dispose] 释放 HTTP 客户端失败", ex);
+                    }
                 }
-
-                // 设置处置标志
+                else
+                {
+                    // 终结器仅撤销外部共享 index 的使用记录。
+                    ReleaseSharedIndexForFinalize();
+                }
+            }
+            finally
+            {
+                _httpClient = null;
                 _disposed = true;
             }
+        }
+
+        /// <summary>
+        /// 终结器专用：撤销外部共享 index 的外层绑定并复位本地字段。
+        /// 终结器内不能向外抛异常，也不能调用可能已被终结的复杂托管对象，
+        /// 因此只执行必要的原生解绑，不触碰 DvsModel、HttpClient 等托管对象。
+        /// </summary>
+        private void ReleaseSharedIndexForFinalize()
+        {
+            // 仅处理共享/借用且已成功绑定外部 index 的实例
+            if (OwnModelIndex || !_sharedIndexBound)
+            {
+                return;
+            }
+
+            DllLoader loader = _dllLoader;
+            int index = modelIndex;
+            if (loader != null && index >= 0)
+            {
+                try
+                {
+                    loader.UnbindIndex(index);
+                }
+                catch
+                {
+                    // 终结器内释放失败时不向外抛异常，仅放弃本次释放
+                }
+            }
+
+            ClearReleasedModelState();
         }
 
         /// <summary>
@@ -2674,12 +3084,55 @@ namespace dlcv_infer_csharp
             lock (_cacheLock)
             {
                 int cachedIndex;
-                if (_modelCache.TryGetValue(_cacheKey, out cachedIndex) &&
-                    cachedIndex == modelIndex)
+                if (_modelCache.TryGetValue(_cacheKey, out cachedIndex) && cachedIndex == modelIndex)
                 {
                     _modelCache.Remove(_cacheKey);
                 }
                 _loadingModels.Remove(_cacheKey);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 从已登记的共享 index 创建借用模型实例。
+    /// </summary>
+    public static class ModelFactory
+    {
+        /// <summary>
+        /// 创建并初始化一个借用已有 index 的模型实例。
+        /// </summary>
+        /// <param name="index">已登记的普通模型或流程模型 index。</param>
+        /// <returns>已完成 index 绑定的借用模型实例。</returns>
+        /// <exception cref="ArgumentOutOfRangeException">index 不在支持范围内。</exception>
+        public static Model CreateFromIndex(int index)
+        {
+            Model model = null;
+            try
+            {
+                model = new Model
+                {
+                    modelIndex = index,
+                    OwnModelIndex = false
+                };
+
+                if (model.GetModelInfo() == null)
+                    throw new InvalidOperationException("获取共享 index 模型信息失败：返回结果为空");
+
+                return model;
+            }
+            catch
+            {
+                if (model != null)
+                {
+                    try
+                    {
+                        model.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                }
+                throw;
             }
         }
     }

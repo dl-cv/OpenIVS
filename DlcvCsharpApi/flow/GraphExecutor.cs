@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json.Linq;
+using dlcv_infer_csharp;
 
 namespace DlcvModules
 {
@@ -15,6 +16,7 @@ namespace DlcvModules
 	{
 		private readonly List<Dictionary<string, object>> _nodes;
 		private readonly ExecutionContext _context;
+		internal Dictionary<int, Model> LoadedModelsByNode { get; } = new Dictionary<int, Model>();
 		private readonly Dictionary<int, Dictionary<string, object>> _outputs = new Dictionary<int, Dictionary<string, object>>();
 		private readonly Dictionary<int, NodeExecOutput> _nodeExecMap = new Dictionary<int, NodeExecOutput>();
 
@@ -227,6 +229,7 @@ namespace DlcvModules
 
 		public JObject LoadModels()
 		{
+			LoadedModelsByNode.Clear();
 			var report = new JObject();
 			var items = new JArray();
 			var loadedMeta = new List<Dictionary<string, object>>();
@@ -301,6 +304,8 @@ namespace DlcvModules
 				try
 				{
 					modelModule.LoadModel();
+					LoadedModelsByNode.Add(nodeId, modelModule.LoadedModel);
+					item["model_index"] = modelModule.LoadedModel.modelIndex;
 					var modelInfo = modelModule.GetLoadedModelInfo();
 					if (modelInfo != null)
 					{
@@ -315,7 +320,7 @@ namespace DlcvModules
 					}
 					item["status_code"] = 0;
 					item["status_message"] = "ok";
-					}
+				}
 					catch (Exception ex)
 					{
 						failCount++;

@@ -64,6 +64,9 @@
     <ClCompile Include="main.cpp">
       <AdditionalIncludeDirectories>$(ProjectDir)..\..\dlcv_infer_cpp;$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <ClCompile Include="..\common\NativeSharedIndexTestHelper.cpp">
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\dlcv_infer_cpp;$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
     <ClCompile Include="pure_c_header_test.c">
       <CompileAs>CompileAsC</CompileAs>
       <AdditionalIncludeDirectories>$(IntDir)standalone_c_include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -72,6 +75,9 @@
       <CompileAs>CompileAsC</CompileAs>
       <AdditionalIncludeDirectories>$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\common\NativeSharedIndexTestHelper.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj"><Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project><LinkLibraryDependencies>true</LinkLibraryDependencies></ProjectReference>

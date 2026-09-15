@@ -967,7 +967,7 @@ void MainWindow::onBrowseExtractModel() {
         return;
     }
     QFileDialog dialog(this, "选择元件提取模型");
-    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso *.dvsp);;所有文件 (*.*)");
+    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso);;所有文件 (*.*)");
     dialog.setFileMode(QFileDialog::ExistingFile);
     applyDialogInitialPath(dialog, editExtractModelPath_->text().trimmed());
     if (dialog.exec() != QDialog::Accepted) {
@@ -983,7 +983,7 @@ void MainWindow::onBrowseComponentModel() {
         return;
     }
     QFileDialog dialog(this, "选择元件检测模型");
-    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso *.dvsp);;所有文件 (*.*)");
+    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso);;所有文件 (*.*)");
     dialog.setFileMode(QFileDialog::ExistingFile);
     applyDialogInitialPath(dialog, editComponentModelPath_->text().trimmed());
     if (dialog.exec() != QDialog::Accepted) {
@@ -999,7 +999,7 @@ void MainWindow::onBrowseIcModel() {
         return;
     }
     QFileDialog dialog(this, "选择IC检测模型");
-    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso *.dvsp);;所有文件 (*.*)");
+    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso);;所有文件 (*.*)");
     dialog.setFileMode(QFileDialog::ExistingFile);
     applyDialogInitialPath(dialog, editIcModelPath_->text().trimmed());
     if (dialog.exec() != QDialog::Accepted) {

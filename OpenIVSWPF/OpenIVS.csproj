@@ -152,5 +152,10 @@
   <ItemGroup>
     <Resource Include="logo.ico" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Test\desktop_projects\OpenIVSWPFSelfTest.cs">
+      <Link>Test\OpenIVSWPFSelfTest.cs</Link>
+    </Compile>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

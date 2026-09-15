@@ -1,9 +1,11 @@
-﻿#pragma once
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
@@ -15,6 +17,43 @@
 namespace dlcv_infer {
 namespace flow {
 
+using BoundModelMap = std::unordered_map<int, std::shared_ptr<dlcv_infer::Model>>;
+
+namespace detail {
+
+inline void RemoveArchiveModelIndexes(Json& pipelineRoot) {
+    if (!pipelineRoot.is_object() || !pipelineRoot.contains("nodes") ||
+        !pipelineRoot.at("nodes").is_array()) {
+        return;
+    }
+    for (auto& node : pipelineRoot.at("nodes")) {
+        if (!node.is_object() || node.value("type", std::string()).rfind("model/", 0) != 0 ||
+            !node.contains("properties") || !node.at("properties").is_object()) {
+            continue;
+        }
+        node.at("properties").erase("model_index");
+    }
+}
+
+inline int ReadModelIndexProperty(const Json& properties) {
+    if (!properties.is_object() || !properties.contains("model_index")) return -1;
+
+    const Json& value = properties.at("model_index");
+    if (value.is_number_unsigned()) {
+        const std::uint64_t index = value.get<std::uint64_t>();
+        if (index <= static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+            return static_cast<int>(index);
+        }
+    } else if (value.is_number_integer()) {
+        const std::int64_t index = value.get<std::int64_t>();
+        if (index >= 0 && index <= static_cast<std::int64_t>(std::numeric_limits<int>::max())) {
+            return static_cast<int>(index);
+        }
+    }
+    throw std::invalid_argument("model_index 必须是 int 范围内的非负 JSON 整数");
+}
+
+} // namespace detail
 class DLCV_INFER_CPP_API ModelLifecycleReadGuard final {
 public:
     ModelLifecycleReadGuard();
@@ -61,6 +100,8 @@ public:
 
 private:
     friend class ModelPool;
+    friend class FlowGraphModel;
+    bool IsCurrent() const;
     DLCV_INFER_CPP_API ModelPoolLease(
         std::shared_ptr<dlcv_infer::Model> model,
         std::string key,
@@ -99,9 +140,11 @@ public:
         const std::string& bufferKey,
         const std::string& modelName,
         int deviceId);
+
     ModelPoolLease RetainByKey(const std::string& key);
     static std::string MakeBinaryKey(uint64_t storeId, const std::string& bufferKey, int deviceId);
 
+    /// 清空缓存，后续加载会重新创建模型对象。
     void Clear();
     ModelPoolStats GetStats();
 
@@ -129,9 +172,11 @@ private:
 class BaseModelModule : public BaseModule {
 protected:
     std::string _modelPathUtf8;
+    int _modelIndex = -1;
+    std::string _modelBufferKey;
     int _deviceId = 0;
     int _resolvedDeviceId = 0;
-    std::string _modelBufferKey;
+    std::shared_ptr<dlcv_infer::Model> _model;
     ModelPoolLease _modelLease;
 
 public:
@@ -141,6 +186,7 @@ public:
                     ExecutionContext* context = nullptr)
         : BaseModule(nodeId, title, properties, context) {
         _modelPathUtf8 = ReadString("model_path", std::string());
+        _modelIndex = detail::ReadModelIndexProperty(Properties);
         _modelBufferKey = ReadString("model_buffer_key", std::string());
         _deviceId = ReadInt("device_id", 0);
         _resolvedDeviceId = _deviceId;
@@ -149,11 +195,12 @@ public:
     ~BaseModelModule() = default;
 
     void LoadModel() override;
-
     const std::string& ModelPathUtf8() const { return _modelPathUtf8; }
     const std::string& ModelPoolKey() const { return _modelLease.Key(); }
     int ResolvedDeviceId() const { return _resolvedDeviceId; }
-    const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const { return _modelLease.Model(); }
+    const std::shared_ptr<dlcv_infer::Model>& LoadedModel() const {
+        return _model ? _model : _modelLease.Model();
+    }
 };
 
 /// <summary>

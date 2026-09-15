@@ -1,27 +1,75 @@
 #include <QApplication>
 #include <QFont>
+#include <QStringList>
 
 #include <cstdio>
-#include <cstring>
+#include <iostream>
 
-#include "DlcvInferApi.h"
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+
+#include "CliRunner.h"
 #include "MainWindow.h"
 
-int main(int argc, char* argv[]) {
-    if (argc == 2 && std::strcmp(argv[1], "--check-c-api-exports") == 0) {
-        DlcvInferApi api;
-        if (api.load()) {
-            std::puts("C API 导出检查通过");
-            return 0;
-        }
-        std::fwprintf(stderr, L"C API 导出检查失败：%ls\n", api.lastError().c_str());
-        return 1;
+namespace {
+
+#ifdef _WIN32
+bool IsUsableStandardHandle(DWORD standardHandle) {
+    const HANDLE handle = GetStdHandle(standardHandle);
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
+        return false;
     }
+    SetLastError(ERROR_SUCCESS);
+    const DWORD fileType = GetFileType(handle);
+    return fileType != FILE_TYPE_UNKNOWN || GetLastError() == ERROR_SUCCESS;
+}
+
+void InitializeConsoleForCommandLine() {
+    const bool hasStdout = IsUsableStandardHandle(STD_OUTPUT_HANDLE);
+    const bool hasStderr = IsUsableStandardHandle(STD_ERROR_HANDLE);
+    if (hasStdout && hasStderr) {
+        return;
+    }
+    if (!AttachConsole(ATTACH_PARENT_PROCESS) && GetLastError() != ERROR_ACCESS_DENIED) {
+        return;
+    }
+
+    FILE* stream = nullptr;
+    if (!hasStdout) {
+        freopen_s(&stream, "CONOUT$", "w", stdout);
+    }
+    if (!hasStderr) {
+        freopen_s(&stream, "CONOUT$", "w", stderr);
+    }
+    std::ios::sync_with_stdio(true);
+
+    DWORD consoleMode = 0;
+    if (GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &consoleMode) ||
+        GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &consoleMode)) {
+        SetConsoleOutputCP(CP_UTF8);
+    }
+}
+#endif
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    if (argc > 1) {
+        InitializeConsoleForCommandLine();
+    }
+#endif
 
     QApplication app(argc, argv);
     app.setApplicationName("C测试程序");
     app.setOrganizationName("dlcv");
     app.setFont(QFont("Microsoft YaHei", 9));
+
+    const QStringList args = app.arguments();
+    if (args.size() > 1) {
+        return RunCliCommand(args);
+    }
 
     MainWindow window;
     window.show();

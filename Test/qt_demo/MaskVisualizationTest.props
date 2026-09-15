@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Qt6Dir Condition="'$(Qt6Dir)'==''">$(Qt6_DIR)</Qt6Dir>
+    <QtInstallDir Condition="'$(QtInstallDir)'==''">$([System.IO.Path]::GetFullPath('$(Qt6Dir)\..\..'))</QtInstallDir>
+    <QtBinDir>$(QtInstallDir)\bin</QtBinDir>
+    <QtIncludeDir>$(QtInstallDir)\include</QtIncludeDir>
+    <QtLibDir>$(QtInstallDir)\lib</QtLibDir>
+    <QtPluginsDir>$(QtInstallDir)\plugins</QtPluginsDir>
+    <OpenCvRoot Condition="'$(OpenCvRoot)'==''">C:\OpenCV\build</OpenCvRoot>
+    <DlcvSdkIncludeDir Condition="'$(DlcvSdkIncludeDir)'==''">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvSdkIncludeDir>
+    <QtDllSuffix Condition="'$(Configuration)'=='Debug'">d</QtDllSuffix>
+    <QtDllSuffix Condition="'$(Configuration)'=='Release'"></QtDllSuffix>
+    <OutDir>$(ProjectDir)$(Configuration)\$(ProjectName)\</OutDir>
+    <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IncludePath>$(DemoSourceDir);$(ProjectDir)..\..\dlcv_infer_cpp;$(OpenCvRoot)\include;$(DlcvSdkIncludeDir);$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
+    <LibraryPath>$(OpenCvRoot)\x64\vc16\lib;$(QtLibDir);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <PreprocessorDefinitions>NOMINMAX;$(MaskTestDefinition);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">_DEBUG;NOMINMAX;$(MaskTestDefinition);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='Release'">NDEBUG;NOMINMAX;$(MaskTestDefinition);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>opencv_world4100$(QtDllSuffix).lib;Qt6Widgets$(QtDllSuffix).lib;Qt6Gui$(QtDllSuffix).lib;Qt6Core$(QtDllSuffix).lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>

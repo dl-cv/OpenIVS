@@ -245,23 +245,27 @@ namespace DlcvTest
             options = new WpfVisualize.Options
             {
                 ConfidenceThreshold = threshold,
-                DisplayBbox = Settings.Default.ShowBBoxPane,
-                DisplayMask = Settings.Default.ShowMaskPane,
-                DisplayContours = Settings.Default.ShowContours,
-                DisplayText = Settings.Default.ShowTextPane,
-                DisplayScore = Settings.Default.ShowScorePane,
-                DisplayTextShadow = Settings.Default.ShowTextShadowPane,
-                TextOutOfBbox = Settings.Default.ShowTextOutOfBboxPane,
-                DisplayCenterPoint = Settings.Default.ShowCenterPoint,
-                BBoxFillEnabled = Settings.Default.BBoxFillEnabled,
-                BBoxFillOpacity = Settings.Default.BBoxFillOpacity
+                DisplayBbox = _selfTestMode || Settings.Default.ShowBBoxPane,
+                DisplayMask = _selfTestMode || Settings.Default.ShowMaskPane,
+                DisplayContours = !_selfTestMode && Settings.Default.ShowContours,
+                DisplayText = _selfTestMode || Settings.Default.ShowTextPane,
+                DisplayScore = _selfTestMode || Settings.Default.ShowScorePane,
+                DisplayTextShadow = !_selfTestMode && Settings.Default.ShowTextShadowPane,
+                TextOutOfBbox = !_selfTestMode && Settings.Default.ShowTextOutOfBboxPane,
+                DisplayCenterPoint = !_selfTestMode && Settings.Default.ShowCenterPoint,
+                BBoxFillEnabled = !_selfTestMode && Settings.Default.BBoxFillEnabled,
+                BBoxFillOpacity = _selfTestMode ? 0.0 : Settings.Default.BBoxFillOpacity
             };
 
-            var fixedColor = SafeParseColor(Settings.Default.BBoxBorderColor, System.Windows.Media.Colors.Red);
+            var fixedColor = _selfTestMode
+                ? System.Windows.Media.Colors.Red
+                : SafeParseColor(Settings.Default.BBoxBorderColor, System.Windows.Media.Colors.Red);
             options.BboxColorOk = fixedColor;
             options.BboxColorNg = fixedColor;
 
-            var fontColor = SafeParseColor(Settings.Default.FontColor, System.Windows.Media.Colors.White);
+            var fontColor = _selfTestMode
+                ? System.Windows.Media.Colors.White
+                : SafeParseColor(Settings.Default.FontColor, System.Windows.Media.Colors.White);
             options.FontColor = fontColor;
 
             options.MaskColor = System.Windows.Media.Colors.LimeGreen;
@@ -271,11 +275,17 @@ namespace DlcvTest
             options.HiddenCategories = hiddenCategories;
 
             double lineWidth = 2.0;
-            try { lineWidth = Settings.Default.BBoxBorderThickness; } catch { lineWidth = 2.0; }
+            if (!_selfTestMode)
+            {
+                try { lineWidth = Settings.Default.BBoxBorderThickness; } catch { lineWidth = 2.0; }
+            }
             screenLineWidth = Math.Max(1.0, Math.Min(20.0, lineWidth));
 
             double fontSize = 24.0;
-            try { fontSize = Settings.Default.FontSize; } catch { fontSize = 24.0; }
+            if (!_selfTestMode)
+            {
+                try { fontSize = Settings.Default.FontSize; } catch { fontSize = 24.0; }
+            }
             screenFontSize = Math.Max(10.0, Math.Min(48.0, fontSize));
         }
 

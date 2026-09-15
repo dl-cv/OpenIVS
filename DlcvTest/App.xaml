@@ -1,7 +1,6 @@
 ﻿<Application x:Class="DlcvTest.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="Views/MainWindow/MainWindow.xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <!-- 全局颜色资源 -->
         <SolidColorBrush x:Key="PrimaryPurple" Color="#7B4DFF"/>

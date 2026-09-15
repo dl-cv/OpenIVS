@@ -1,5 +1,6 @@
-﻿#pragma once
+#pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,11 @@ public:
     /// </summary>
     DLCV_INFER_CPP_API double Benchmark(const cv::Mat& image, int warmup = 1, int runs = 10);
 
+    /// <summary>
+    /// 获取流程加载期间实际创建的子模型。
+    /// </summary>
+    std::shared_ptr<dlcv_infer::Model> GetLoadedModelByIndex(int modelIndex) const;
+
 private:
     std::vector<Json> _nodes;
     Json _root = Json::object();
@@ -72,10 +78,14 @@ private:
     bool _loaded = false;
     int _deviceId = 0;
     std::string _flowJsonPath;
+    std::shared_ptr<BoundModelMap> _boundModelsByIndex;
     std::vector<ModelPoolLease> _acquiredModelLeases;
     std::shared_ptr<const ModelBinaryStore> _modelBinaryStore;
+    // 共享流程恢复期间暂存父索引所属的加载器，不拥有其生命周期。
+    DllLoader* _preferredDllLoader = nullptr;
 
     void ReleaseOwnedModelsNoexcept();
+    void SetPreferredDllLoader(DllLoader* loader) noexcept { _preferredDllLoader = loader; }
     friend class dlcv_infer::Model;
     Json LoadFromRoot(const Json& root, int deviceId,
                       std::shared_ptr<const ModelBinaryStore> modelBinaryStore);

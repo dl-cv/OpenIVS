@@ -25,7 +25,7 @@
 | `dlcv_bind_index_c` |
 | `dlcv_unbind_index_c` |
 
-全部 C 接口声明在 `dlcv_infer_c_api.h`。共享数据结构使用 `typedef struct`，C 模式下由该头文件引入 `<stdbool.h>`，结构化接口使用指针参数，头文件可由 C 或 C++ 编译器使用。
+全部 C 接口声明在 `dlcv_infer_c_api.h`。共享数据结构使用 `typedef struct`，C 模式下由该头文件引入 `<stdbool.h>`，结构化接口使用指针参数，头文件可由 C 或 C++ 编译器使用。公共索引接口继续使用现有 `int` 参数和返回值，保留现有签名和导出函数。
 
 ## 2. 两层封装关系
 
@@ -36,7 +36,7 @@
 | C 导出 | `dlcv_infer_cpp` | 将 19 个 JSON、设备和系统控制方法导出为 C 名称函数，并保留 4 个结构化兼容入口 |
 | 扩展接口 | `dlcv_infer_cpp` | 提供基于 C++ `Model` 的 11 个 `dlcv_infer_cpp_*_c` 入口 |
 
-23 个非公共索引接口均已增加 `NativeApi` 方法。JSON 模型接口对 `.dvt/.dvo` 请求继续直接转发 `NativeApi`；对 `.dvst/.dvso` 请求使用 `Model` 和同一模型表完成加载、推理、查询和释放；`.dvsp` 返回不支持的格式错误。设备与系统接口继续直接转发。第 20～23 项在同一工程中提供结构化 C 接口实现，11 个扩展入口复用同一模型表。
+23 个非公共索引接口均已增加 `NativeApi` 方法。JSON 模型接口对 `.dvt/.dvo` 请求继续直接转发 `NativeApi`；对 `.dvst/.dvso` 请求使用 `Model` 和同一模型表完成加载、推理、查询和释放；`.dvsp` 返回不支持的格式错误。实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。设备与系统接口继续直接转发。第 20～23 项在同一工程中提供结构化 C 接口实现，11 个扩展入口复用同一模型表。
 
 ## 3. 23 个非公共索引接口逐项对照
 
@@ -51,6 +51,8 @@
 | 5 | `void dlcv_free_model_result(const char* config_str)` | `NativeApi::FreeModelResult(const char*)` | `dlcv_free_model_result(const char*)` | `dlcv_infer` 返回的结果字符串 | 无 | 普通模型结果交给底层释放；流程模型结果释放登记的 mask 和外层字符串 | 两类结果按分配来源释放 |
 | 6 | `void dlcv_free_result(const char* config_str)` | `NativeApi::FreeResult(const char*)` | `dlcv_free_result(const char*)` | 由接口返回的字符串地址 | 无 | 释放外层字符串 | 只释放字符串，不处理推理结果内部资源 |
 | 7 | `void dlcv_free_all_models()` | `NativeApi::FreeAllModels()` | `dlcv_free_all_models()` | 无 | 无 | 无返回内存；清理统一模型表和底层模型表 | 活动调用结束后释放全部普通模型与流程模型 |
+
+所有输入 JSON 中的 `model_index` 只接受 `0` 到 `INT_MAX` 范围内的 JSON 整数，不接受字符串、浮点数、布尔值、空值或溢出值。按 index 释放时，参数格式无效或编号超出非负 `int` 范围仍可返回参数错误；参数是有效编号时，即使编号已不存在或底层释放返回错误，也返回成功并完成本地清理，重复释放同样成功。底层错误最多附在日志或 `message` 的错误详情中，不保留等待重试状态。
 
 JSON 接口返回的字符串由产生它的 DLL 使用 `new char[]` 分配，并由同一 DLL 的释放函数使用 `delete[]` 释放。推理结果字符串不能直接交给只释放外层字符串的 `dlcv_free_result`。
 
@@ -75,10 +77,12 @@ JSON 接口返回的字符串由产生它的 DLL 使用 `new char[]` 分配，�
 
 | # | 底层 `dlcv_infer` 接口 | C++ 封装方法 | C 导出 | 输入 | 输出 | 释放方式 | 一致性 |
 | ---: | --- | --- | --- | --- | --- | --- | --- |
-| 20 | `int dlcv_load_model_c(const char* model_path, int device_id)` | `NativeApi::LoadModelC(const char*, int)` | `dlcv_load_model_c(const char*, int)` | 当前路径规则支持的模型路径、设备编号 | 成功返回非负模型索引，失败返回 `-1` | 无返回字符串 | C++ 方法严格调用底层；同一工程中的 C 接口使用 `Model` 加载并支持 `.dvst/.dvso` |
+| 20 | `int dlcv_load_model_c(const char* model_path, int device_id)` | `NativeApi::LoadModelC(const char*, int)` | `dlcv_load_model_c(const char*, int)` | 当前路径规则支持的模型路径、设备编号 | 成功返回非负模型索引，失败返回 `-1` | 无返回字符串 | C++ 方法严格调用底层；同一工程中的 C 入口使用统一模型表加载并支持 `.dvst/.dvso`；旧版加载路径取得的索引可由结构化入口按需恢复 |
 | 21 | `int dlcv_free_model_c(int model_index)` | `NativeApi::FreeModelC(int)` | `dlcv_free_model_c(int)` | 模型索引 | 成功返回 `0`，失败返回负值 | 无 | C++ 方法严格调用底层；C 接口释放同一工程模型表中的对象 |
 | 22 | `DlcvCResult dlcv_infer_c(int, const DlcvCImageList*)` | `NativeApi::InferC(int, const DlcvCImageList&)` | `dlcv_infer_c(int, const DlcvCImageList*)` | 模型索引、图像列表指针；输入图像内存由调用方持有 | `DlcvCResult`，包含状态、消息、样本结果、目标、框、mask、角度和均值 | 用 `dlcv_free_model_result_c` 释放返回结构中的字符串、数组和 mask | C++ 方法通过地址调用底层；同一工程中的 C 接口通过 `Model::InferBatch` 生成结果并转换为底层结果语义 |
 | 23 | `void dlcv_free_model_result_c(DlcvCResult*)` | `NativeApi::FreeModelResultC(DlcvCResult&)` | `dlcv_free_model_result_c(DlcvCResult*)` | 当前 DLL 返回的 `DlcvCResult` 地址 | 无；释放后指针字段为空、数量为 `0`，兼容入口保留原 `code` | 只能使用生成结果的同一 DLL 释放 | C++ 方法通过地址释放底层结果；C 接口释放同一工程生成的结果，释放后字段一致 |
+
+兼容 C facade 的结构化入口先查询统一模型表。普通模型加载成功时登记 index、实际 loader 和原生持有状态，但不立即创建结构化对象；首次结构化查询或推理时，沿已保存的 loader 建立借用 Model。未在本包装登记的外部 index 才枚举已加载模块查询归属；唯一选定的 loader 先保存，再校验接口并绑定。校验、绑定、信息读取或流程恢复失败时不改选其他 DLL。
 
 ## 4. 结构化 C 数据类型
 
@@ -125,7 +129,7 @@ JSON 接口返回的字符串由产生它的 DLL 使用 `new char[]` 分配，�
 | ---: | --- | --- | --- | --- | --- | --- |
 | 1 | `dlcv_infer_cpp_load_model_c(const char*, int)` | 无；直接创建 `Model` | 模型路径、设备编号 | 成功返回模型索引，失败返回 `-1` | 无返回字符串 | 独立扩展；支持 C++ DLL 当前支持的普通模型和流程模型 |
 | 2 | `dlcv_infer_cpp_get_last_error_c()` | 无；读取当前线程错误 | 无 | 当前线程最近一次加载错误字符串 | 不由调用方释放；指针由当前线程错误存储维护 | 独立扩展 |
-| 3 | `dlcv_infer_cpp_free_model_c(int)` | 无；释放扩展入口保存的 `Model` | 模型索引 | 成功返回 `0`，未找到返回 `-1` | 无 | 独立扩展 |
+| 3 | `dlcv_infer_cpp_free_model_c(int)` | 无；释放扩展入口保存的 `Model` | 模型索引 | 参数无效返回 `-1`；有效非负 `int` 编号即使已不存在或底层报错也返回 `0` | 无 | 独立扩展；完成本地清理，重复释放成功 |
 | 4 | `dlcv_infer_cpp_infer_c(int, const DlcvCImageList*)` | 无；调用保存的 `Model::InferBatch` | 模型索引、图像列表指针 | `DlcvCResult` | 用 `dlcv_infer_cpp_free_model_result_c` 释放 | 独立扩展；缺省推理参数 |
 | 5 | `dlcv_infer_cpp_infer_with_params_c(int, const DlcvCImageList*, const char*)` | 无；调用保存的 `Model::InferBatch` | 模型索引、图像列表指针、参数 JSON | `DlcvCResult` | 用 `dlcv_infer_cpp_free_model_result_c` 释放 | 独立扩展；支持本次推理参数 |
 | 6 | `dlcv_infer_cpp_free_model_result_c(DlcvCResult*)` | 无；释放扩展入口生成的结构化结果 | 结果指针 | 无；释放后指针字段为空、数量为 `0`，`code` 置为 `0` | 建议用于扩展入口生成的结果 | 与兼容释放函数的内存处理相同，释放后的 `code` 行为不同 |
@@ -148,7 +152,7 @@ JSON 接口返回的字符串由产生它的 DLL 使用 `new char[]` 分配，�
 | C++ Model 扩展入口 | 11 | 第 5 节 |
 | 合计 | 34 | 已通过 Debug 导出检查，不含公共索引接口 |
 
-公共索引接口另行记录在“双语言 model index 互通”任务文档中。
+公共索引接口另行记录在“双语言 model index 互通”任务文档中。跨语言恢复时不按 `bit8`、资源类型或模型内容的加密 provider 推导 DLL；恢复方只枚举进程内实际已加载的 `dlcv_infer.dll` 与 `dlcv_infer_v.dll`，不为探测额外加载其他 infer DLL，把具备 `dlcv_get_index_type_c` 导出的 DLL 作为候选并查询。返回 `-1` 或未知值视为查询错误，不能当作不存在；恰有一个候选返回有效结果时先保存该 loader，再检查完成共享操作所需的导出是否齐全，缺少接口时报错且不改选其他 DLL。随后由恢复调用使用已有绑定接口；校验、绑定或后续恢复失败时仍使用已保存的 loader，不改选其他 DLL。无结果、歧义、查询异常或绑定失败均报错。`bit8` 对应发号 DLL 的 `DogProvider` 标记，但不表示模型内容的加密 provider 或资源类型。
 
 ### 6.1 动态调用方式
 
@@ -160,7 +164,7 @@ C 调用端只需包含 `dlcv_infer_c_api.h`，不需要链接 `dlcv_infer_cpp.l
 4. 使用同一动态库导出的释放函数释放字符串和结构化结果。
 5. 进程结束前调用 `dlcv_infer_cpp_free_all_models_c`，再调用 `FreeLibrary`。
 
-`dlcv_infer_cpp.dll` 内部按模型授权类型加载 `dlcv_infer.dll` 或 `dlcv_infer_v.dll`。调用端仍需准备 DLCV SDK、OpenCV、Visual C++ 运行库和对应授权组件；动态加载只取消了对 C 导入库的静态链接，不会取消这些运行依赖。
+`dlcv_infer_cpp.dll` 在首次普通模型加载时根据模型头选择 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 作为默认 DLL；后续普通模型继续使用该 DLL，并逐个检查授权。共享 index 按进程内实际加载 DLL 查询所属模块，不按模型头重新选择。调用端仍需准备 DLCV SDK、OpenCV、Visual C++ 运行库和对应授权组件；动态加载只取消了对 C 导入库的静态链接，不会取消这些运行依赖。
 
 ### 6.2 单头文件交付
 
@@ -171,76 +175,27 @@ C 调用端只需包含 `dlcv_infer_c_api.h`，不需要链接 `dlcv_infer_cpp.l
 
 调用端复制或安装这两个交付文件即可使用 C 接口声明和统一动态库；OpenCV、Visual C++ 运行库、底层推理 DLL 及模型授权环境仍按既有 SDK 环境提供。
 
-### 6.3 异常输入、完整 C 测试与正式模型测试
+### 6.3 测试代码位置
 
-构建完成后，纯 C 异常输入测试使用实际导出函数，不依赖源码文本检查：
+C API 的异常输入、模型加载、共享 index、归档和释放检查均放在 `Test` 下的测试工程中，通过现有产品接口执行。生产头文件和 `dlcv_infer_cpp.dll` 不增加测试导出，也不通过替换推理 DLL或另设测试 DLL 构造测试入口。实际产品输入遵循单一加密狗格式规则。测试状态、模型清单和具体数量由实际执行记录更新。
 
-```powershell
-& .\Debug\dlcv_infer_c_test.exe --c-api-invalid-input
+### 6.4 C Qt Demo 非交互验证
+
+`dlcv_infer_c_qt_demo` 无参数时仍启动主窗口，`--check-c-api-exports` 检查正式 C 导出。新增推理命令复用该 Demo 的 `DlcvInferApi`，不调用 C++ Model：
+
+```text
+dlcv_infer_c_qt_demo.exe infer --model <模型> --image <图片> --threshold 0.5 --device 0 --with-mask true --calc-mean false --output <结果.json>
 ```
 
-Release 构建将目录改为 `Release`。
+`--model`、`--image`、`--threshold` 必填；其余默认值如示例，`--output` 可选。图片从文件字节解码后转换为 RGB。两条推理路径分别调用正式结构化 C ABI 和 JSON C ABI，结果包含 `structured`、`json`、一致性、阈值、均值及重复释放检查。返回码 `0` 表示通过，`1` 为运行错误，`2` 为参数错误，`3` 为结果检查失败。非法参数不启动主窗口，dvsp 明确拒绝，输出不能覆盖模型或图片。
 
-默认完整 C 测试需要通过 `DLCV_TEST_CORE_DLL` 指定参照核心的绝对路径。配置缺失、文件不存在或加载失败时直接返回失败，不读取其他安装目录。三个原生接口加载位置均输出实际核心路径，原生接口和包装接口应使用同一正式加密核心。
+Mask 像素检查由独立工程 `Test/qt_demo/dlcv_infer_c_qt_mask_test.vcxproj` 执行，通过构建配置引用正式绘制控件；Demo 不编入合成数据和断言。独立测试命令为 `dlcv_infer_c_qt_mask_test.exe --output <系统临时目录/mask.png>`，`--output` 必填，采用 Qt offscreen 平台。编译入口为 `Test/qt_demo/1_编译测试.bat`。
 
-```powershell
-$repo = (Resolve-Path '.').Path
-$runtime = 'C:\path\to\正式加密包目录'
-$oldPath = $env:PATH
-$oldCore = $env:DLCV_TEST_CORE_DLL
-try {
-    $env:DLCV_TEST_CORE_DLL = Join-Path $runtime 'dlcv_infer.dll'
-    $env:PATH = "$runtime;$oldPath"
-    Push-Location -LiteralPath $runtime
-    & (Join-Path $repo 'Debug\dlcv_infer_c_test.exe')
-    if ($LASTEXITCODE -ne 0) { throw "完整 C 测试失败，退出码 $LASTEXITCODE" }
-} finally {
-    Pop-Location
-    $env:PATH = $oldPath
-    $env:DLCV_TEST_CORE_DLL = $oldCore
-}
-```
-
-`test_all_models.py` 没有固定模型数量参数，会测试 `--model-root` 一级目录中的全部 `.dvt`、`.dvo`、`.dvst` 和 `.dvso` 文件。模型目录内容会变化，执行前记录实际文件清单与数量；历史 25 模型结果不表示后续目录仍只有 25 个模型。
-
-测试使用的 `dlcv_infer_cpp.dll` 可位于工程构建目录，`dlcv_infer.dll`、`dlcv_infer_v.dll` 必须来自正式加密包，二者可以位于不同目录。执行时将正式加密包目录设为当前目录并置于 `PATH` 首位，使用 `--dll` 指定包装 DLL，使用 `--core-dll-dir` 指定并核对正式加密核心 DLL 目录。脚本会读取当前进程实际加载的核心 DLL 路径；未加载核心 DLL，或实际目录不是 `--core-dll-dir` 时，测试返回失败。该方式只调整测试进程的查找目录，不修改安装内容或系统环境。
-
-示例参数：
-
-```powershell
-$repo = (Resolve-Path '.').Path
-$wrapper = Join-Path $repo 'Release\dlcv_infer_cpp.dll'
-$runtime = 'C:\path\to\正式加密包目录'
-$models = Get-ChildItem -LiteralPath 'Y:\测试模型' -File |
-    Where-Object { $_.Extension.ToLowerInvariant() -in '.dvt', '.dvo', '.dvst', '.dvso' }
-Write-Output "支持格式模型数量：$($models.Count)"
-
-$oldPath = $env:PATH
-try {
-    $env:PATH = "$runtime;$oldPath"
-    Push-Location -LiteralPath $runtime
-    & 'C:\dlcv\python.exe' `
-        (Join-Path $repo 'Test\dlcv_infer_c_dll_test\test_all_models.py') `
-        --model-root 'Y:\测试模型' `
-        --dll $wrapper `
-        --core-dll-dir $runtime `
-        --configuration Release `
-        --device 0 `
-        --threshold 0.5 `
-        --expected-failures (Join-Path $repo 'Test\dlcv_infer_c_dll_test\expected_failures.json') `
-        --output (Join-Path $env:TEMP 'dlcv_infer_c_api_models_release.json')
-    if ($LASTEXITCODE -ne 0) { throw "C API 模型测试失败，退出码 $LASTEXITCODE" }
-} finally {
-    Pop-Location
-    $env:PATH = $oldPath
-}
-```
-
-不传 `--with-mask` 和 `--calc-mean` 时，两项均为关闭；脚本固定使用 `batch_size=1`。
+C ABI 没有流程判定状态查询能力，输出 `inspection_supported=false`、`inspection_consistent=null`，不将其伪装成通过。两个实际 Qt Demo 的执行脚本与固定模型清单位于 `Test`，使用方式见 `C++测试程序开发文档.md`；测试不增加生产 DLL 导出。
 
 ## 7. 验证范围
 
-下表保留累计验证记录。2026-09-05 本轮重新构建了 Debug/x64 的包装 DLL、C 测试、C Qt Demo、C# API 和 Halcon Demo；纯 C 异常输入及配置同一正式加密核心后的完整 C 测试通过。本轮未重新构建完整解决方案或 Release 配置。
+下表保留历史验证记录，不作为当前 bit8 编号兼容回归的结果。
 
 | 检查项 | 结果 |
 | --- | --- |

@@ -6,6 +6,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MODEL_HEADER = REPOSITORY_ROOT / "dlcv_infer_cpp" / "dlcv_infer.h"
 MODEL_SOURCE = REPOSITORY_ROOT / "dlcv_infer_cpp" / "dlcv_infer.cpp"
 C_API_SOURCE = REPOSITORY_ROOT / "dlcv_infer_cpp" / "dlcv_infer_c_api.cpp"
+MASK_UTILS_SOURCE = REPOSITORY_ROOT / "dlcv_infer_cpp" / "MaskUtils.h"
 
 
 def read_source(path):
@@ -33,15 +34,32 @@ class MaskSemanticsSourceTest(unittest.TestCase):
             r"Model::InferBatchPreservingOriginalMask\([^{}]+\)\s*\{\s*"
             r"return InferBatchInternal\(image_list, params_json, true\);",
         )
-        self.assertIn(
-            "if (!preserveOriginalMask && !mask_img.empty() && bbox.size() >= 4)",
+        self.assertRegex(
             source,
+            r"if \(!preserveOriginalMask\)\s*\{\s*"
+            r"mask_img = mask_utils::ResizeMaskToBboxGrid\(mask_img, bbox\);\s*\}",
         )
 
         c_api_source = read_source(C_API_SOURCE)
         self.assertIn(
             "entry->model->InferBatchPreservingOriginalMask(mats, params)",
             c_api_source,
+        )
+
+    def test_shared_mask_helper_keeps_input_checks_and_nearest_interpolation(self):
+        source = read_source(MASK_UTILS_SOURCE)
+        self.assertRegex(source, r"if \(mask\.empty\(\)\) return cv::Mat\(\);")
+        self.assertRegex(source, r"if \(bbox\.size\(\) < 4\) return mask;")
+        self.assertRegex(
+            source,
+            r"if \(bboxWidth <= 0 \|\| bboxHeight <= 0 \|\|\s*"
+            r"\(mask\.cols == bboxWidth && mask\.rows == bboxHeight\)\)\s*"
+            r"\{\s*return mask;\s*\}",
+        )
+        self.assertRegex(
+            source,
+            r"cv::resize\(mask, output, cv::Size\(bboxWidth, bboxHeight\), "
+            r"0, 0, cv::INTER_NEAREST\);",
         )
 
     def test_compatibility_alias_uses_the_structured_c_entry(self):

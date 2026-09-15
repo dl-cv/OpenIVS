@@ -16,7 +16,7 @@ namespace DlcvDemo3
 {
     public partial class Form1 : Form
     {
-        private const string ModelFileFilter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
+        private const string ModelFileFilter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*";
         private const string ImageFileFilter = "图片文件 (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif|所有文件 (*.*)|*.*";
         private const string UiStateFileName = "DlcvDemo3.ui-state.json";
         private const int DefaultModel2ThreadCount = 4;
