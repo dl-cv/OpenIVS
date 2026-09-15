@@ -26,6 +26,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - .NET 与 C++ 项目均受支持；C++/C API、Qt Demo 和控制台测试等 `.vcxproj` 的日常编译继续使用此入口。
 - **禁止直接调用** `msbuild`、`dotnet`、`devenv` 或其他本地 shell 编译命令
 - **默认构建参数**：`Debug`、`x64`、`Build`、`minimal`
+- 直接构建含 `PackageReference` 的 `.csproj` 时，`build.py` 对 `Build`/`Rebuild` 使用 MSBuild `/restore`，按同一配置还原依赖后再构建；不手改 `obj/project.assets.json`，`Clean`、原生工程和 `packages.config` 工程保持原行为。
 - 用户明确指定 `Release`、`Rebuild`、`Clean` 等参数时，按指定值执行
 - Qt 项目需配置 Qt 路径和 OpenCV 路径
 - 构建前需确保深度视觉 SDK 已正确安装（`dlcv_infer.dll` 可用）
@@ -48,6 +49,8 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 - 两个 Qt Demo 的自动回归使用 `Test/run_qt_demo_regression.py` 运行实际 EXE，读取退出码与严格 UTF-8 JSON；推理测试不打开主窗口。绘制检查调用 `Test/qt_demo/MaskVisualizationSelfTest.h` 中的共用断言，各自实例化实际 `ImageViewerWidget`，在内存图像绘制，不模拟鼠标键盘或控制桌面窗口。
 - C Qt Demo 只调用正式 C ABI；C ABI 未提供流程判定读取接口，因此 `inspection_supported=false`、`inspection_consistent=null`，不把该能力记为验证通过。C++ Qt Demo 继续检查已有流程判定接口。
+
+- `DlcvDemo`、`DlcvTest`、`OpenIVSWPF` 的实际 EXE 回归使用 `Test/run_desktop_project_regression.py`。两个 WPF selftest 只初始化推理与显示所需对象，不读取生产配置，不连接相机/PLC，不修改模型历史；具体参数和范围见开发文档。
 
 ## 核心模块与入口
 

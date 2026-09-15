@@ -19,6 +19,7 @@ namespace DlcvTest
         private dynamic model = null;
         private string _currentImagePath = null;
         private string _currentTaskType = "";
+        private bool _selfTestMode = false;
 
         /// <summary>
         /// 搜索功能：保存原始目录路径，用于恢复完整树形结构
