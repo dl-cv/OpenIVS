@@ -159,13 +159,13 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 以下示例在一个 C++ 进程内完成加载、信息查询、流程信息查询、结构化推理、释放：
 
 ```powershell
-.\Test\dlcv_infer_cpp_test\Debug\dlcv_infer_cpp_test.exe load-model m1 "C:\Users\Administrator\Desktop\旋转测试\螺丝头部外观_120_50_s.dvst" --device 0 --then model-info m1 --then dvs-model-info m1 --then infer m1 "C:\Users\Administrator\Desktop\旋转测试\CCD2.2026-07-22 10-07-16-2240.bmp" --threshold 0.5 --then free-model m1
+.\Test\dlcv_infer_cpp_test\Debug\dlcv_infer_cpp_test.exe load-model m1 ".\test-data\model.dvst" --device 0 --then model-info m1 --then dvs-model-info m1 --then infer m1 ".\test-data\image.bmp" --threshold 0.5 --then free-model m1
 ```
 
 以下示例使用 C# 程序执行相同生命周期：
 
 ```powershell
-.\Test\DlcvCSharpTest\bin\x64\Debug\DlcvCSharpTest.exe load-model m1 "C:\Users\Administrator\Desktop\旋转测试\螺丝头部外观_120_50_s.dvst" --device 0 --then model-info m1 --then dvs-model-info m1 --then infer m1 "C:\Users\Administrator\Desktop\旋转测试\CCD2.2026-07-22 10-07-16-2240.bmp" --threshold 0.5 --then free-model m1
+.\Test\DlcvCSharpTest\bin\x64\Debug\DlcvCSharpTest.exe load-model m1 ".\test-data\model.dvst" --device 0 --then model-info m1 --then dvs-model-info m1 --then infer m1 ".\test-data\image.bmp" --threshold 0.5 --then free-model m1
 ```
 
 ## 6. 构建与运行
