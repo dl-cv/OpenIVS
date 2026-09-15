@@ -1,6 +1,7 @@
 """验证双 Qt Demo 回归 runner。"""
 import argparse
 import binascii
+import io
 import json
 import os
 import struct
@@ -33,6 +34,8 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.c_exe = self._write("c/bin/c_demo.exe", b"c-exe")
         self.cpp_exe = self._write("cpp/bin/cpp_demo.exe", b"cpp-exe")
+        self.c_mask_test_exe = self._write("mask/c/c_mask_test.exe", b"c-mask-test-exe")
+        self.cpp_mask_test_exe = self._write("mask/cpp/cpp_mask_test.exe", b"cpp-mask-test-exe")
         self.dll = self._write("build/dlcv_infer_cpp.dll", b"wrapper")
         self._write("c/bin/dlcv_infer_cpp.dll", b"wrapper")
         self._write("cpp/bin/dlcv_infer_cpp.dll", b"wrapper")
@@ -60,6 +63,8 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         values = {
             "c_exe": self.c_exe,
             "cpp_exe": self.cpp_exe,
+            "c_mask_test_exe": self.c_mask_test_exe,
+            "cpp_mask_test_exe": self.cpp_mask_test_exe,
             "dll": self.dll,
             "model_root": self.model_root,
             "output": self.root / "report.json",
@@ -106,17 +111,32 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
             self.assertEqual(17.0, kwargs["timeout"])
             self.assertEqual(str(self.core_dir.resolve()), kwargs["cwd"])
             self.assertEqual(str(Path(kwargs["env"]["TEMP"])), kwargs["env"]["TMP"])
-            if "QT_QPA_PLATFORM" not in os.environ:
-                self.assertNotIn("QT_QPA_PLATFORM", kwargs["env"])
             exe = Path(command[0]).resolve()
+            if exe in (self.c_mask_test_exe.resolve(), self.cpp_mask_test_exe.resolve()):
+                self.assertEqual("offscreen", kwargs["env"]["QT_QPA_PLATFORM"])
+                self.assertEqual(3, len(command))
+                self.assertEqual("--output", command[1])
+                output = Path(command[2])
+                if mode == "mask_timeout":
+                    raise runner.subprocess.TimeoutExpired(command, 17.0)
+                if mode == "mask_launch_error":
+                    raise OSError("测试进程无法启动")
+                if mode != "mask_no_png":
+                    output.write_bytes(b"invalid" if mode == "mask_invalid_png" else _png())
+                code = 1 if mode == "mask_nonzero" else 0
+                return runner.subprocess.CompletedProcess(command, code)
+            self.assertIn(exe, (self.c_exe.resolve(), self.cpp_exe.resolve()))
+            self.assertEqual(os.environ.get("QT_QPA_PLATFORM"), kwargs["env"].get("QT_QPA_PLATFORM"))
             demo = "c" if exe == self.c_exe.resolve() else "cpp"
             if command[1] == "--help":
                 kwargs["stdout"].write("Usage: 测试\n".encode("utf-8"))
                 return runner.subprocess.CompletedProcess(command, 0)
             if command[1] == "mask-visualization-selftest":
-                output = Path(command[command.index("--output") + 1])
-                output.write_bytes(_png())
-                return runner.subprocess.CompletedProcess(command, 0)
+                if mode == "demo_accepts_mask":
+                    return runner.subprocess.CompletedProcess(command, 0)
+                if mode == "demo_writes_mask":
+                    Path(command[command.index("--output") + 1]).write_bytes(_png())
+                return runner.subprocess.CompletedProcess(command, 2)
             if len(command) == 2:
                 return runner.subprocess.CompletedProcess(command, 2)
             model = Path(command[command.index("--model") + 1])
@@ -170,23 +190,114 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         return report, calls
 
     def test_parser_defaults(self):
-        args = runner._parser().parse_args(["--c-exe", "c.exe", "--cpp-exe", "cpp.exe", "--dll", "x.dll", "--model-root", "models", "--output", str(self.root / "report.json")])
+        args = runner._parser().parse_args(["--c-exe", "c.exe", "--cpp-exe", "cpp.exe", "--c-mask-test-exe", "c_mask.exe", "--cpp-mask-test-exe", "cpp_mask.exe", "--dll", "x.dll", "--model-root", "models", "--output", str(self.root / "report.json")])
         self.assertEqual(120.0, args.timeout)
         self.assertIsNone(args.core_dll_directory)
+        self.assertEqual(Path("c_mask.exe"), args.c_mask_test_exe)
+        self.assertEqual(Path("cpp_mask.exe"), args.cpp_mask_test_exe)
 
     def test_success_runs_fixed_serial_scope(self):
         report, calls = self._run()
         self.assertTrue(report["passed"])
-        self.assertEqual(26, report["summary"]["case_total"])
+        self.assertEqual(28, report["summary"]["case_total"])
         self.assertEqual(4, report["summary"]["comparison_total"])
-        self.assertEqual(26, len(calls))
+        self.assertEqual(28, len(calls))
         self.assertEqual(["classification_dvt", "classification_dvo", "segmentation_dvt", "flow_dvst"], [case["id"] for case in report["cases"][:4]])
         masks = [case for case in report["cases"] if case["kind"] == "png-selftest"]
         self.assertEqual({"c", "cpp"}, {case["demo"] for case in masks})
         self.assertTrue(all(case["artifact"]["bytes"] > 0 for case in masks))
-        mask_commands = [command for command, _ in calls if len(command) > 1 and command[1] == "mask-visualization-selftest"]
-        self.assertEqual(2, len(mask_commands))
-        self.assertTrue(all("--output" in command for command in mask_commands))
+        mask_commands = [command for command, _ in calls if command[1] == "--output"]
+        self.assertEqual([self.c_mask_test_exe.resolve(), self.cpp_mask_test_exe.resolve()], [Path(command[0]) for command in mask_commands])
+        for demo, exe in (("c", self.c_mask_test_exe), ("cpp", self.cpp_mask_test_exe)):
+            self.assertEqual(runner._sha256(exe), report["executables"][f"{demo}_mask_test"]["sha256"])
+        removed = [case for case in report["cases"] if case["id"] == "removed_mask_selftest"]
+        self.assertEqual({"c", "cpp"}, {case["demo"] for case in removed})
+        self.assertTrue(all(case["passed"] and case["process"]["exit_code"] == 2 for case in removed))
+
+    def test_parser_requires_both_mask_executables(self):
+        base = ["--c-exe", "c.exe", "--cpp-exe", "cpp.exe", "--dll", "x.dll", "--model-root", "models", "--output", str(self.root / "report.json")]
+        for missing in ("--c-mask-test-exe", "--cpp-mask-test-exe"):
+            supplied = "--cpp-mask-test-exe" if missing == "--c-mask-test-exe" else "--c-mask-test-exe"
+            with self.subTest(missing=missing), patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with self.assertRaises(SystemExit) as error:
+                    runner._parser().parse_args(base + [supplied, "mask.exe"])
+                self.assertEqual(2, error.exception.code)
+                self.assertIn(missing, stderr.getvalue())
+
+    def test_mask_executable_missing_or_not_exe_stops_launch(self):
+        for name in ("c_mask_test_exe", "cpp_mask_test_exe"):
+            for invalid in (self.root / "missing.exe", self.root / "directory.exe", self._write("mask/not_exe.txt", b"test")):
+                if invalid.name == "directory.exe":
+                    invalid.mkdir(exist_ok=True)
+                with self.subTest(name=name, path=invalid), patch.object(runner.subprocess, "run") as process:
+                    report = runner.run_regression(self._args(**{name: invalid}))
+                process.assert_not_called()
+                self.assertFalse(report["passed"])
+                self.assertTrue(report["errors"])
+
+    def test_executable_paths_must_all_differ(self):
+        names = ("c_exe", "cpp_exe", "c_mask_test_exe", "cpp_mask_test_exe")
+        for index, name in enumerate(names):
+            for other in names[index + 1:]:
+                path = getattr(self, name)
+                alias = path.parent / ".." / path.parent.name / path.name
+                with self.subTest(name=name, other=other), patch.object(runner.subprocess, "run") as process:
+                    report = runner.run_regression(self._args(**{other: alias}))
+                process.assert_not_called()
+                self.assertFalse(report["passed"])
+                self.assertIn("必须指向不同文件", " ".join(report["errors"]))
+
+    def test_mask_offscreen_overrides_parent_without_affecting_demo(self):
+        for platform in (None, "windows"):
+            with self.subTest(platform=platform), patch.dict(os.environ):
+                if platform is None:
+                    os.environ.pop("QT_QPA_PLATFORM", None)
+                else:
+                    os.environ["QT_QPA_PLATFORM"] = platform
+                report, _ = self._run()
+                self.assertTrue(report["passed"])
+                self.assertEqual(platform, os.environ.get("QT_QPA_PLATFORM"))
+
+    def test_mask_uses_own_directory_without_core_directory(self):
+        calls, execute = self._process()
+
+        def execute_from_exe_directory(command, **kwargs):
+            self.assertEqual(str(Path(command[0]).parent), kwargs["cwd"])
+            return execute(command, **{**kwargs, "cwd": str(self.core_dir.resolve())})
+
+        with patch.object(runner.subprocess, "run", side_effect=execute_from_exe_directory):
+            report = runner.run_regression(self._args(core_dll_directory=None))
+        self.assertTrue(report["passed"])
+        self.assertEqual(28, len(calls))
+
+    def test_mask_process_and_png_failures(self):
+        for mode, message in (
+            ("mask_nonzero", "退出码与预期不符"),
+            ("mask_no_png", "PNG 未生成"),
+            ("mask_invalid_png", "有效非空 PNG"),
+            ("mask_timeout", "执行超时"),
+            ("mask_launch_error", "进程启动失败"),
+        ):
+            with self.subTest(mode=mode):
+                report, _ = self._run(mode)
+                self.assertFalse(report["passed"])
+                masks = [case for case in report["cases"] if case["kind"] == "png-selftest"]
+                self.assertEqual(2, len(masks))
+                for case in masks:
+                    self.assertFalse(case["passed"])
+                    self.assertIn(message, " ".join(case["errors"]))
+                self.assertTrue(all(case["passed"] for case in report["cases"] if case["kind"] != "png-selftest"))
+
+    def test_demo_must_reject_removed_mask_command_without_png(self):
+        for mode, message in (("demo_accepts_mask", "退出码与预期不符"), ("demo_writes_mask", "仍生成了输出文件")):
+            with self.subTest(mode=mode):
+                report, _ = self._run(mode)
+                self.assertFalse(report["passed"])
+                cases = [case for case in report["cases"] if case["id"] == "removed_mask_selftest"]
+                self.assertEqual(2, len(cases))
+                for case in cases:
+                    self.assertFalse(case["passed"])
+                    self.assertIn(message, " ".join(case["errors"]))
 
     def test_missing_fixture_fails_but_other_cases_continue(self):
         (self.model_root / "猫狗-分类_s.dvo").unlink()
@@ -253,6 +364,8 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         output = self.root / "输出" / "回归报告.json"
         argv = [
             "--c-exe", str(self.c_exe), "--cpp-exe", str(self.cpp_exe),
+            "--c-mask-test-exe", str(self.c_mask_test_exe),
+            "--cpp-mask-test-exe", str(self.cpp_mask_test_exe),
             "--dll", str(self.dll), "--model-root", str(self.model_root),
             "--output", str(output), "--timeout", "17",
             "--core-dll-directory", str(self.core_dir),
@@ -272,6 +385,8 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         try:
             code = runner.main([
                 "--c-exe", str(self.c_exe), "--cpp-exe", str(self.cpp_exe),
+                "--c-mask-test-exe", str(self.c_mask_test_exe),
+                "--cpp-mask-test-exe", str(self.cpp_mask_test_exe),
                 "--dll", str(self.dll), "--model-root", str(self.model_root),
                 "--output", str(outside),
             ])

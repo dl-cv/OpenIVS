@@ -33,6 +33,8 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - WPF 框架额外需要海康 MVS 安装
 - C# 测试程序 wheel 的编译打包入口为 `1_编译打包.bat`，仅构建发布所需项目。跨语言回归使用独立入口 `Test/1_编译测试.bat`，串行构建 C++、C、C# 控制台测试工程，不签名、不打包、不安装，也不执行测试。
 
+- Qt Demo 与独立 Mask 测试的回归编译入口为 `Test/qt_demo/1_编译测试.bat`，串行构建两个 Demo 和两个测试工程（Release x64），不签名、不打包、不安装；测试 EXE 不加入发布流程。
+
 ### 正式编译、打包与安装
 
 - 仓库级编译验证、正式打包和安装使用用户级 `dlcv-build-install-1.0.0`，按根目录编号脚本执行，不用 `vs-build-1.0.0` 替代正式流程。
@@ -47,7 +49,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - C# GUI 验证只使用 `DlcvDemo` 的 `ui-test` 命令行入口并固定 `--interactive-dialogs false`：程序自动加载参数中的模型与图片，完成或失败后自动关闭窗口，以进程退出码与 `--output` 的无 BOM UTF-8 JSON 结果文件为判断依据，输出写入系统临时目录；禁止通过桌面自动化、鼠标键盘或窗口控制验证，也不以无参数 GUI 启动代替测试。
 - `infer` 与 `ui-test` 用途不同：`infer` 是无界面功能测试，验证结构化与 JSON 双路径一致性、阈值过滤等，不创建窗口；`ui-test` 是界面自动验证，在真实窗口中复用模型加载、图片推理与绘制逻辑。
 
-- 两个 Qt Demo 的自动回归使用 `Test/run_qt_demo_regression.py` 运行实际 EXE，读取退出码与严格 UTF-8 JSON；推理测试不打开主窗口。绘制检查调用 `Test/qt_demo/MaskVisualizationSelfTest.h` 中的共用断言，各自实例化实际 `ImageViewerWidget`，在内存图像绘制，不模拟鼠标键盘或控制桌面窗口。
+- 两个 Qt Demo 的自动回归使用 `Test/run_qt_demo_regression.py` 运行实际 EXE，读取退出码与严格 UTF-8 JSON；推理测试不打开主窗口。Mask 合成数据和断言只编入 `Test/qt_demo/` 下两个独立测试 EXE，工程直接引用对应 Demo 的 `ImageViewerWidget.cpp`，不复制控件实现；测试采用 Qt offscreen 平台，不模拟鼠标键盘或控制桌面窗口。Demo 不包含 Mask 自测入口。
 - C Qt Demo 只调用正式 C ABI；C ABI 未提供流程判定读取接口，因此 `inspection_supported=false`、`inspection_consistent=null`，不把该能力记为验证通过。C++ Qt Demo 继续检查已有流程判定接口。
 
 - `DlcvDemo`、`DlcvTest`、`OpenIVSWPF` 的实际 EXE 回归使用 `Test/run_desktop_project_regression.py`。两个 WPF selftest 只初始化推理与显示所需对象，不读取生产配置，不连接相机/PLC，不修改模型历史；具体参数和范围见开发文档。

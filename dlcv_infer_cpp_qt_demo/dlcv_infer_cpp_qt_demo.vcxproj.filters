@@ -29,9 +29,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\Test\qt_demo\MaskVisualizationSelfTest.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
     <ClInclude Include="MainWindow.h">
       <Filter>头文件</Filter>
     </ClInclude>

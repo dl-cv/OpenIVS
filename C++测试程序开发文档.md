@@ -53,7 +53,7 @@
 ### 3.1 程序入口（main.cpp）
 
 - 无参数时按 Windows 图形界面子系统启动，初始化 `QApplication`、显示 `MainWindow`，不创建控制台窗口，退出前调用 `FreeAllModels()`。
-- 有参数时连接父控制台；没有父控制台时创建控制台，再解析 `infer`、`render`、`mask-visualization-selftest` 或 `--help`。命令行模式不进入主窗口事件循环，完成验证后直接返回退出码。
+- 有参数时连接父控制台；没有父控制台时创建控制台，再解析 `infer`、`render` 或 `--help`。命令行模式不进入主窗口事件循环，完成验证后直接返回退出码。
 - Windows 控制台输入输出使用 UTF-8；模型路径通过 `std::wstring` 传给 C++ API。
 
 ### 3.2 命令行推理模式
@@ -61,7 +61,6 @@
 ```text
 dlcv_infer_cpp_qt_demo.exe infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
 dlcv_infer_cpp_qt_demo.exe render --model <path> --image <path> --threshold <0..1> --output <pngPath> [--device <int>] [--with-mask <true|false>]
-dlcv_infer_cpp_qt_demo.exe mask-visualization-selftest
 dlcv_infer_cpp_qt_demo.exe --help
 ```
 
@@ -75,21 +74,21 @@ dlcv_infer_cpp_qt_demo.exe --help
 - `infer --output` 使用 `QSaveFile` 写入 UTF-8 JSON；`render --output` 保存 `ImageViewerWidget` 的真实绘制结果，输出逻辑尺寸与原图一致。输出路径不得覆盖模型或图片，父目录必须存在。
 - 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致、存在低于阈值的结果或均值检查失败。
 - `render` 使用原图作为底图，并把最终结果中的 ROI Mask 缩放到 bbox 后回贴到原图坐标；完整图 Mask 则从 `(0,0)` 绘制。
-- `mask-visualization-selftest` 使用一个完整图 Mask 合成用例，检查其未被重复叠加 bbox 偏移；绘制断言位于 `Test/qt_demo/MaskVisualizationSelfTest.h`，结果默认写入系统临时目录的 `dlcv_mask_visualization_selftest.png`，也可由 `--output <pngPath>` 指定。控件在内存图像上绘制，不显示窗口。
+- Mask 合成用例和像素断言独立编入 `Test/qt_demo/dlcv_infer_c_qt_mask_test.vcxproj` 与 `Test/qt_demo/dlcv_infer_cpp_qt_mask_test.vcxproj`。两个工程通过构建配置引用各自 Demo 的真实控件源文件，不复制实现，不调用推理运行库；Demo 不包含测试代码或 `mask-visualization-selftest` 入口。独立测试命令为 `<测试EXE> --output <系统临时目录/mask.png>`，使用 Qt offscreen 平台，不显示窗口。
 
 ### 两个 Qt Demo 的自动回归
 
-`Test/run_qt_demo_regression.py` 直接运行 C 和 C++ Qt Demo EXE，使用 `Test/qt_demo_regression_cases.json` 中的固定模型清单，不用控制台 API 工程替代 Demo。构建使用各自项目的 `build.py` 入口，两个项目串行执行。
+`Test/run_qt_demo_regression.py` 直接运行 C 和 C++ Qt Demo EXE，使用 `Test/qt_demo_regression_cases.json` 中的固定模型清单，不用控制台 API 工程替代 Demo。回归构建执行 `Test/qt_demo/1_编译测试.bat`，串行构建两个 Demo 和两个独立 Mask 测试（Release x64）。测试 EXE 输出到 `Test/qt_demo/Release/<工程名>/`，不加入 Demo 工程引用或发布流程。
 
 ```text
-python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.exe> --dll <本次构建的dlcv_infer_cpp.dll> --model-root <测试模型目录> --core-dll-directory <推理DLL目录> --output <系统临时目录/report.json>
+python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.exe> --c-mask-test-exe <C_Mask_Test.exe> --cpp-mask-test-exe <CPP_Mask_Test.exe> --dll <本次构建的dlcv_infer_cpp.dll> --model-root <测试模型目录> --core-dll-directory <推理DLL目录> --output <系统临时目录/report.json>
 ```
 
 - 核对 EXE 所在目录的包装 DLL 与指定构建 DLL 的 SHA-256。
 - 运行普通分类 DVT/DVO、分割 DVT 和流程 DVST，分别读取结构化和 JSON 结果，检查固定数量、类别、分数及两条路径一致性；固定分数容差为 `1e-6`。
 - 检查帮助、缺少参数、阈值错误、缺少文件、拒绝 dvsp 和防止输出覆盖输入。
 - `infer` 清理模型后连续释放仍须成功；结果中的 `release_check_passed` 记录该检查。C++ 检查本地编号清理，C 检查释放返回码及释放后信息接口拒绝旧编号。
-- 两个 Demo 分别执行真实绘制控件的掩码像素断言，PNG 只保存在系统临时目录。
+- 两个独立 Mask 测试分别执行真实绘制控件的掩码像素断言，检查退出码和 500 × 400 PNG；报告记录测试 EXE 的 SHA-256。旧自测命令传给 Demo 时返回参数错误。PNG 只保存在系统临时目录。
 - 超时、崩溃、非零退出码、缺少结果、无效 JSON、非有限数值或基准不符均不计为通过。此测试不覆盖主窗口文件对话框、交互操作或压力测试按钮。
 
 ### 3.3 C++ DLL 控制台示例

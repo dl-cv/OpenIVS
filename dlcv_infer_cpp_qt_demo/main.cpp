@@ -1,6 +1,5 @@
 #include <QApplication>
 #include <QByteArray>
-#include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -20,7 +19,6 @@
 #include <vector>
 
 #include "ImageViewerWidget.h"
-#include "../Test/qt_demo/MaskVisualizationSelfTest.h"
 #include "MainWindow.h"
 #include "dlcv_infer.h"
 
@@ -160,7 +158,6 @@ void PrintHelp(const QString& programPath) {
         << "  " << program
         << " render --model <path> --image <path> --threshold <0..1> --output <pngPath>"
            " [--device <int>] [--with-mask <true|false>]\n"
-        << "  " << program << " mask-visualization-selftest [--output <pngPath>]\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
 }
@@ -788,21 +785,10 @@ int main(int argc, char* argv[]) {
             PrintHelp(args.at(0));
             return 0;
         }
-        if (args.at(1) == QStringLiteral("mask-visualization-selftest")) {
-            QString output = QDir(QDir::tempPath()).filePath("dlcv_mask_visualization_selftest.png");
-            if (args.size() == 4 && args.at(2) == QStringLiteral("--output")) {
-                output = args.at(3);
-            } else if (args.size() != 2) {
-                std::cerr << "mask-visualization-selftest [--output <pngPath>]\n";
-                return 2;
-            }
-            return RunQtMaskVisualizationSelfTest(output,
-                dlcv_infer::ObjectResult(0, "", 0.99f, 0.0f, {}, false, cv::Mat()));
-        }
         const bool isInferCommand = args.at(1) == QStringLiteral("infer");
         const bool isRenderCommand = args.at(1) == QStringLiteral("render");
         if (!isInferCommand && !isRenderCommand) {
-            std::cerr << "error: expected 'infer', 'render', 'mask-visualization-selftest', or '--help'\n";
+            std::cerr << "error: expected 'infer', 'render', or '--help'\n";
             PrintHelp(args.at(0));
             return 2;
         }

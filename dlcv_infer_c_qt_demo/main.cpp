@@ -1,5 +1,4 @@
 #include <QApplication>
-#include <QFileInfo>
 #include <QFont>
 #include <QStringList>
 
@@ -11,9 +10,6 @@
 #endif
 
 #include "CliRunner.h"
-#include "DisplayResult.h"
-#include "ImageViewerWidget.h"
-#include "../Test/qt_demo/MaskVisualizationSelfTest.h"
 #include "MainWindow.h"
 
 namespace {
@@ -56,33 +52,6 @@ void InitializeConsoleForCommandLine() {
 }
 #endif
 
-bool ParseMaskSelfTestOutput(const QStringList& args, QString& outputPath, QString& error) {
-    bool hasOutput = false;
-    for (int i = 2; i < args.size(); ++i) {
-        const QString option = args.at(i);
-        if (i + 1 >= args.size()) {
-            error = QStringLiteral("missing value for %1").arg(option);
-            return false;
-        }
-        const QString value = args.at(++i);
-        if (option != QStringLiteral("--output")) {
-            error = QStringLiteral("unknown option: %1").arg(option);
-            return false;
-        }
-        if (hasOutput) {
-            error = QStringLiteral("duplicate option: --output");
-            return false;
-        }
-        outputPath = QFileInfo(value).absoluteFilePath();
-        hasOutput = true;
-    }
-    if (!hasOutput || outputPath.isEmpty()) {
-        error = QStringLiteral("--output is required");
-        return false;
-    }
-    return true;
-}
-
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -99,20 +68,6 @@ int main(int argc, char* argv[]) {
 
     const QStringList args = app.arguments();
     if (args.size() > 1) {
-        if (args.at(1) == QStringLiteral("mask-visualization-selftest")) {
-            if (args.contains(QStringLiteral("--help"))) {
-                PrintCliHelp(args.at(0));
-                return 0;
-            }
-            QString outputPath;
-            QString error;
-            if (!ParseMaskSelfTestOutput(args, outputPath, error)) {
-                std::cerr << "error: " << error.toUtf8().constData() << "\n";
-                PrintCliHelp(args.at(0));
-                return 2;
-            }
-            return RunQtMaskVisualizationSelfTest(outputPath, DisplayObjectResult{});
-        }
         return RunCliCommand(args);
     }
 

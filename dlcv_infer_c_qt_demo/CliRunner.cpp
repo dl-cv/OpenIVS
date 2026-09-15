@@ -709,7 +709,6 @@ void PrintCliHelp(const QString& programPath) {
         << "  " << program
         << " infer --model <path> --image <path> --threshold <0..1>"
            " [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]\n"
-        << "  " << program << " mask-visualization-selftest --output <pngPath>\n"
         << "  " << program << " --check-c-api-exports\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
@@ -733,7 +732,7 @@ int RunCliCommand(const QStringList& args) {
         return CheckCApiExports();
     }
     if (args.at(1) != QStringLiteral("infer")) {
-        std::cerr << "error: expected 'infer', 'mask-visualization-selftest', '--check-c-api-exports', or '--help'\n";
+        std::cerr << "error: expected 'infer', '--check-c-api-exports', or '--help'\n";
         PrintCliHelp(args.at(0));
         return 2;
     }

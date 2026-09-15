@@ -50,9 +50,6 @@
     <ClInclude Include="CliRunner.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="..\Test\qt_demo\MaskVisualizationSelfTest.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="app_icon.rc">

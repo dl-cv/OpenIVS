@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="CopyMaskTestRuntime" AfterTargets="Build">
+    <ItemGroup>
+      <_MaskTestRuntime Include="$(QtBinDir)\Qt6Core$(QtDllSuffix).dll;$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll;$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll;$(OpenCvRoot)\x64\vc16\bin\opencv_world4100$(QtDllSuffix).dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_MaskTestRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <MakeDir Directories="$(TargetDir)platforms" />
+    <Copy SourceFiles="$(QtPluginsDir)\platforms\qoffscreen$(QtDllSuffix).dll" DestinationFolder="$(TargetDir)platforms" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

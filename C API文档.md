@@ -185,10 +185,11 @@ C API 的异常输入、模型加载、共享 index、归档和释放检查均�
 
 ```text
 dlcv_infer_c_qt_demo.exe infer --model <模型> --image <图片> --threshold 0.5 --device 0 --with-mask true --calc-mean false --output <结果.json>
-dlcv_infer_c_qt_demo.exe mask-visualization-selftest --output <系统临时目录/mask.png>
 ```
 
 `--model`、`--image`、`--threshold` 必填；其余默认值如示例，`--output` 可选。图片从文件字节解码后转换为 RGB。两条推理路径分别调用正式结构化 C ABI 和 JSON C ABI，结果包含 `structured`、`json`、一致性、阈值、均值及重复释放检查。返回码 `0` 表示通过，`1` 为运行错误，`2` 为参数错误，`3` 为结果检查失败。非法参数不启动主窗口，dvsp 明确拒绝，输出不能覆盖模型或图片。
+
+Mask 像素检查由独立工程 `Test/qt_demo/dlcv_infer_c_qt_mask_test.vcxproj` 执行，通过构建配置引用正式绘制控件；Demo 不编入合成数据和断言。独立测试命令为 `dlcv_infer_c_qt_mask_test.exe --output <系统临时目录/mask.png>`，`--output` 必填，采用 Qt offscreen 平台。编译入口为 `Test/qt_demo/1_编译测试.bat`。
 
 C ABI 没有流程判定状态查询能力，输出 `inspection_supported=false`、`inspection_consistent=null`，不将其伪装成通过。两个实际 Qt Demo 的执行脚本与固定模型清单位于 `Test`，使用方式见 `C++测试程序开发文档.md`；测试不增加生产 DLL 导出。
 

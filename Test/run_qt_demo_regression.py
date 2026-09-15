@@ -161,9 +161,11 @@ def _artifact(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def _invoke(command: list[str], cwd: Path, timeout: float, work: Path) -> dict[str, Any]:
+def _invoke(command: list[str], cwd: Path, timeout: float, work: Path, *, offscreen: bool = False) -> dict[str, Any]:
     stdout_path, stderr_path = work / "stdout.bin", work / "stderr.bin"
     environment = os.environ.copy()
+    if offscreen:
+        environment["QT_QPA_PLATFORM"] = "offscreen"
     for name in ("TEMP", "TMP", "TMPDIR"):
         environment[name] = str(work)
     result: dict[str, Any] = {"launched": False, "timed_out": False, "exit_code": None, "errors": []}
@@ -321,6 +323,10 @@ def _cli_cases(demo: str, exe: Path, cwd: Path, timeout: float, root: Path) -> l
     results = [_expected_exit(demo, "help", exe, cwd, [str(exe), "--help"], 0, timeout, root / "help", help_check=True)]
     results.append(_expected_exit(demo, "missing_required_arguments", exe, cwd, [str(exe), "infer"], 2, timeout, root / "missing_required_arguments"))
 
+    work = root / "removed_mask_selftest"
+    output = work / "mask.png"
+    results.append(_expected_exit(demo, "removed_mask_selftest", exe, cwd, [str(exe), "mask-visualization-selftest", "--output", str(output)], 2, timeout, work, output=output))
+
     work = root / "invalid_threshold"
     model, image, output = _put(work / "model.dvt", b"model"), _put(work / "image.jpg", b"image"), work / "result.json"
     results.append(_expected_exit(demo, "invalid_threshold", exe, cwd, [str(exe), "infer", "--model", str(model), "--image", str(image), "--threshold", "1.1", "--output", str(output)], 2, timeout, work, output=output))
@@ -385,7 +391,7 @@ def _png_errors(path: Path) -> list[str]:
 def _mask_case(demo: str, exe: Path, cwd: Path, timeout: float, work: Path) -> dict[str, Any]:
     work.mkdir(parents=True)
     output = work / "mask.png"
-    process = _invoke([str(exe), "mask-visualization-selftest", "--output", str(output)], cwd, timeout, work)
+    process = _invoke([str(exe), "--output", str(output)], cwd, timeout, work, offscreen=True)
     errors = list(process["errors"])
     if process["exit_code"] != 0:
         errors.append(f"进程退出码与预期不符：{process['exit_code']} != 0")
@@ -430,15 +436,18 @@ def _hash(path: Path, label: str, errors: list[str]) -> str | None:
 
 def _preflight(args: argparse.Namespace) -> tuple[dict[str, Any], list[str], bool]:
     errors: list[str] = []
-    paths = {name: Path(getattr(args, name)).resolve() for name in ("c_exe", "cpp_exe", "dll", "model_root")}
+    exe_names = ("c_exe", "cpp_exe", "c_mask_test_exe", "cpp_mask_test_exe")
+    paths = {name: Path(getattr(args, name)).resolve() for name in (*exe_names, "dll", "model_root")}
     paths["core_dir"] = Path(args.core_dll_directory).resolve() if args.core_dll_directory is not None else None
-    hashes = {name: _hash(paths[name], name.replace("_", "-"), errors) for name in ("c_exe", "cpp_exe", "dll")}
+    hashes = {name: _hash(paths[name], name.replace("_", "-"), errors) for name in (*exe_names, "dll")}
     can_launch = all(hashes.values())
-    if paths["c_exe"] == paths["cpp_exe"]:
-        errors.append("--c-exe 与 --cpp-exe 必须指向不同文件")
-        can_launch = False
-    if any(paths[name].suffix.lower() != ".exe" for name in ("c_exe", "cpp_exe")):
-        errors.append("两个 Demo 路径都必须是 .exe 文件")
+    for index, name in enumerate(exe_names):
+        for other in exe_names[index + 1:]:
+            if paths[name] == paths[other]:
+                errors.append(f"--{name.replace('_', '-')} 与 --{other.replace('_', '-')} 必须指向不同文件")
+                can_launch = False
+    if any(paths[name].suffix.lower() != ".exe" for name in exe_names):
+        errors.append("两个 Demo 与两个 Mask 测试路径都必须是 .exe 文件")
         can_launch = False
     if not paths["model_root"].is_dir():
         errors.append("model-root 目录不存在")
@@ -485,7 +494,8 @@ def run_regression(args: argparse.Namespace, cases_path: Path = CASES_PATH) -> d
                     if summary is not None:
                         observed[demo][case["id"]] = summary
                 cases.extend(_cli_cases(demo, exe, cwd, args.timeout, demo_root / "cli"))
-                cases.append(_mask_case(demo, exe, cwd, args.timeout, demo_root / "mask"))
+                mask_exe = paths[f"{demo}_mask_test_exe"]
+                cases.append(_mask_case(demo, mask_exe, paths["core_dir"] or mask_exe.parent, args.timeout, demo_root / "mask"))
         comparisons = _comparisons(config, observed)
     else:
         comparisons = []
@@ -498,6 +508,8 @@ def run_regression(args: argparse.Namespace, cases_path: Path = CASES_PATH) -> d
         "executables": {
             "c": {"sha256": state["hashes"]["c_exe"], "wrapper_dll_sha256": state["deployed"]["c"]},
             "cpp": {"sha256": state["hashes"]["cpp_exe"], "wrapper_dll_sha256": state["deployed"]["cpp"]},
+            "c_mask_test": {"sha256": state["hashes"]["c_mask_test_exe"]},
+            "cpp_mask_test": {"sha256": state["hashes"]["cpp_mask_test_exe"]},
         },
         "specified_dll_sha256": state["hashes"]["dll"],
         "fixtures": _fixtures(config, paths["model_root"]) if config is not None else {},
@@ -508,7 +520,7 @@ def run_regression(args: argparse.Namespace, cases_path: Path = CASES_PATH) -> d
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="执行 C 与 C++ Qt Demo 真实进程回归检查")
-    for name in ("c-exe", "cpp-exe", "dll", "model-root", "output"):
+    for name in ("c-exe", "cpp-exe", "c-mask-test-exe", "cpp-mask-test-exe", "dll", "model-root", "output"):
         parser.add_argument(f"--{name}", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--core-dll-directory", type=Path)

@@ -190,7 +190,6 @@
   <ItemGroup>
     <ClInclude Include="MainWindow.h" />
     <ClInclude Include="ImageViewerWidget.h" />
-    <ClInclude Include="..\Test\qt_demo\MaskVisualizationSelfTest.h" />
   </ItemGroup>
 
   <ItemGroup>
