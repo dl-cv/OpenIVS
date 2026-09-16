@@ -24,6 +24,9 @@ namespace SentinelManagerTest
                 Case("JSON 数量、字段和状态验证", RecordValidation),
                 Case("仅保留本机普通硬件设备", HardwareFilter),
                 Case("HTML 属性与网络选项解析", NetworkParsing),
+                Case("无关重复 ID 不影响网络读取", UnrelatedDuplicateInputs),
+                Case("重复 checkbox 采用最后状态", DuplicateCheckboxInputs),
+                Case("重复 radio 采用最后状态", DuplicateRadioInputs),
                 Case("异常网络表单拒绝", InvalidNetworkForms),
                 Case("固定本机地址与请求方法限制", RejectedPaths),
                 Case("设备与 Feature 查询", InfoSuccess),
@@ -52,6 +55,7 @@ namespace SentinelManagerTest
                 Case("服务重启失败时保留配置及进度", PatchRestartFailure),
                 Case("重启等待超时不重复启动", PatchRestartTimeout),
                 Case("修复正常流程与读取重试", RepairSuccess),
+                Case("重复 ID 表单完成完整修复", RepairDuplicateInputs),
                 Case("修复预检查失败时无修改", RepairPrecheckFailure),
                 Case("修复 LMID 失败报告已完成步骤", RepairLmidFailure),
                 Case("修复补丁失败报告已完成步骤", RepairPatchFailure),
@@ -218,15 +222,41 @@ namespace SentinelManagerTest
             Equal(DisablePayload, SentinelProtocol.NetworkDisablePayload(), "提交正文必须精确匹配");
         }
 
+        private static void UnrelatedDuplicateInputs()
+        {
+            const string duplicates = "<input id='ini_timestamp' type='hidden' value='100'>"
+                + "<input id='ini_timestamp' type='hidden' value='200'>";
+            bool[] state = SentinelProtocol.ReadNetworkState(duplicates + Outgoing(true, false), Incoming(2) + duplicates);
+            Check(state[0] && !state[1] && state[2], "两个表单中的无关重复 ID 不影响三项网络状态");
+        }
+
+        private static void DuplicateCheckboxInputs()
+        {
+            bool[] state = SentinelProtocol.ReadNetworkState(Outgoing(true, false) + Outgoing(false, true), Incoming(0));
+            Check(!state[0] && state[1] && !state[2], "重复 checkbox 最后未选中时清除前次选中，最后选中时覆盖前次未选中");
+            state = SentinelProtocol.ReadNetworkState(Outgoing(false, true) + Outgoing(true, false), Incoming(0));
+            Check(state[0] && !state[1] && !state[2], "反向排列后两个目标 checkbox 仍采用各自最后状态");
+        }
+
+        private static void DuplicateRadioInputs()
+        {
+            bool[] state = SentinelProtocol.ReadNetworkState(Outgoing(false, false), Incoming(0) + Incoming(3));
+            Check(!state[0] && !state[1] && state[2], "重复 radio 以最后远程选中状态读取，前次本机选中状态不保留");
+            state = SentinelProtocol.ReadNetworkState(Outgoing(false, false), Incoming(3) + Incoming(0));
+            Check(!state[0] && !state[1] && !state[2], "重复 radio 以最后本机选中状态读取，前次远程选中状态不保留");
+        }
+
         private static void InvalidNetworkForms()
         {
             Reject(() => SentinelProtocol.ReadNetworkState("", Incoming(0)), "格式不受支持");
             Reject(() => SentinelProtocol.ReadNetworkState(Outgoing(false, false).Replace("checkbox", "text"), Incoming(0)), "格式不受支持");
             Reject(() => SentinelProtocol.ReadNetworkState(Outgoing(false, false), Incoming(-1)), "选项异常");
             Reject(() => SentinelProtocol.ReadNetworkState(Outgoing(false, false), Incoming(0).Replace("id='accessfromremote_secure'", "id='accessfromremote_secure' checked")), "选项异常");
-            Reject(() => SentinelProtocol.ReadNetworkState(Outgoing(false, false) + Outgoing(false, false), Incoming(0)), "重复 ID");
             Reject(() => SentinelProtocol.ReadNetworkState(Outgoing(false, false).Replace("id='accesstoremote'", "id='accesstoremote' id='other'"), Incoming(0)), "重复属性");
             Reject(() => SentinelProtocol.ReadNetworkState(Outgoing(false, false), Incoming(0).Replace("type=radio", "type=text")), "格式不受支持");
+            Reject(() => SentinelProtocol.ReadNetworkState(Outgoing(false, false), Incoming(0).Replace("id='accessfromremote_secure'", "id='other'")), "格式不受支持");
+            Reject(() => SentinelProtocol.ReadNetworkState(Outgoing(false, false) + "<input id='accesstoremote' type='text'>", Incoming(0)), "格式不受支持");
+            Reject(() => SentinelProtocol.ReadNetworkState(Outgoing(false, false), Incoming(0) + "<input id='accessfromremote_local' type='text' checked>"), "格式不受支持");
         }
 
         private static void RejectedPaths()
@@ -617,6 +647,44 @@ namespace SentinelManagerTest
             Equal(1, patch.EnsureCount, "修复启动次数");
             Equal(1, patch.ApplyCount, "补丁仅执行一次");
             Equal(1, transport.Calls.FindAll(call => call.Path == "action.html?Create_new_lmid").Count, "修复只提交一次 LMID");
+            transport.Done();
+        }
+
+        private static void RepairDuplicateInputs()
+        {
+            var transport = new ScriptTransport();
+            var patch = new FakePatch();
+            const string duplicates = "<input id='ini_timestamp' type='hidden' value='100'>"
+                + "<input id='ini_timestamp' type='hidden' value='200'>";
+            Action<bool> network = enabled =>
+            {
+                transport.Reply("_int_/conf_to.html", duplicates
+                    + Outgoing(!enabled, !enabled) + Outgoing(enabled, enabled));
+                transport.Reply("_int_/conf_from.html", duplicates
+                    + Incoming(enabled ? 0 : 3) + Incoming(enabled ? 3 : 0));
+            };
+            network(true);
+            network(true);
+            transport.Reply("action.html", "", payload: DisablePayload);
+            network(false);
+            transport.Reply("action.html?Create_new_lmid", "已返回");
+            network(false);
+            transport.Reply("tab_dev.html", EmptyDevices);
+            network(false);
+
+            string text = Client(transport, patch).Repair();
+            Contains(text, "修复流程完成");
+            Contains(text, "测试配置已完成");
+            Contains(text, "未检测到本机");
+            Contains(text, "  访问远程授权：关闭");
+            Contains(text, "  广播搜索远程授权：关闭");
+            Contains(text, "  远程客户端访问：关闭");
+            Check(!text.Contains("网络配置读取失败"), "最终查询含重复 ID 的表单仍应正常读取");
+            Equal(1, patch.PrepareCount, "重复 ID 不影响修复预检查");
+            Equal(1, patch.EnsureCount, "重复 ID 不影响修复启动步骤");
+            Equal(1, patch.ApplyCount, "重复 ID 不影响补丁且仅执行一次");
+            Equal(1, transport.PostCount, "网络关闭仅提交一次并校验完整正文");
+            Equal(1, transport.Calls.FindAll(call => call.Path == "action.html?Create_new_lmid").Count, "重复 ID 修复只提交一次 LMID");
             transport.Done();
         }
 

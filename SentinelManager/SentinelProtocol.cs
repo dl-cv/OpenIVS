@@ -163,9 +163,8 @@ namespace SentinelManager
             {
                 string id;
                 if (!attributes.TryGetValue("id", out id) || id.Length == 0) continue;
-                if (inputs.ContainsKey(id))
-                    throw new SentinelException("Sentinel 配置包含重复 ID，未提交修改。");
-                inputs.Add(id, attributes);
+                // 与原版解析行为一致，同名控件采用页面中最后出现的值。
+                inputs[id] = attributes;
             }
             return inputs;
         }
