@@ -16,7 +16,7 @@ dlcv_infer_cpp/dlcv_infer_c_api.h
 | --- | --- | --- |
 | `dlcv_infer_cpp_load_model_c` | 非负 index / `-1` | 加载普通模型或 `.dvst/.dvso` DVS |
 | `dlcv_infer_cpp_get_last_error_c` | UTF-8 借用字符串 | 返回当前线程最近一次扩展接口错误 |
-| `dlcv_infer_cpp_free_model_c` | `0` | 释放当前 C 包装持有；重复释放保持本地幂等 |
+| `dlcv_infer_cpp_free_model_c` | `0` | 释放一次 C 包装持有；没有本地持有时返回成功 |
 | `dlcv_infer_cpp_infer_c` | `DlcvCResult` | 使用默认参数执行结构化推理 |
 | `dlcv_infer_cpp_infer_with_params_c` | `DlcvCResult` | 使用 JSON 参数执行结构化推理 |
 | `dlcv_infer_cpp_free_model_result_c` | 无 | 释放 `DlcvCResult` 内部内存 |
@@ -26,6 +26,8 @@ dlcv_infer_cpp/dlcv_infer_c_api.h
 | `dlcv_infer_cpp_get_all_models_c` | UTF-8 JSON / `nullptr` | 返回当前进程已加载推理模块的资源快照 |
 | `dlcv_infer_cpp_free_string_c` | 无 | 释放扩展接口分配的字符串 |
 | `dlcv_infer_cpp_free_all_models_c` | 无 | 清理本地模型表、流程模型池及全部已加载推理模块 |
+
+每次成功加载或建立共享持有都应配对一次释放；相同索引可能对应多次持有，接口不识别调用者身份，不应把同一持有释放多次。
 
 `dlcv_infer_cpp_get_last_error_c()` 返回线程局部借用指针，不调用 `dlcv_infer_cpp_free_string_c()`。其余 `dlcv_infer_cpp_*` 字符串返回值由调用方使用 `dlcv_infer_cpp_free_string_c()` 释放。
 
