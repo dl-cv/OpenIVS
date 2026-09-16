@@ -31,9 +31,8 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - Qt 项目需配置 Qt 路径和 OpenCV 路径
 - 构建前需确保深度视觉 SDK 已正确安装（`dlcv_infer.dll` 可用）
 - WPF 框架额外需要海康 MVS 安装
-- C# 测试程序 wheel 的编译打包入口为 `1_编译打包.bat`，仅构建发布所需项目。跨语言回归使用独立入口 `Test/1_编译测试.bat`，串行构建 C++、C、C# 控制台测试工程，不签名、不打包、不安装，也不执行测试。
-
-- Qt Demo 与独立 Mask 测试的回归编译入口为 `Test/qt_demo/1_编译测试.bat`，串行构建两个 Demo 和两个测试工程（Release x64），不签名、不打包、不安装；测试 EXE 不加入发布流程。
+- C# 测试程序 wheel 的编译打包入口为 `1_编译打包.bat`，仅构建发布所需项目。
+- Demo 和 Test 工程在 Visual Studio 中构建、调试；自动化单项目编译使用上述 `build.py`，不另设测试编译批处理。
 
 ### 正式编译、打包与安装
 

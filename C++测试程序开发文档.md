@@ -78,7 +78,7 @@ dlcv_infer_cpp_qt_demo.exe --help
 
 ### 两个 Qt Demo 的自动回归
 
-`Test/run_qt_demo_regression.py` 直接运行 C 和 C++ Qt Demo EXE，使用 `Test/qt_demo_regression_cases.json` 中的固定模型清单，不用控制台 API 工程替代 Demo。回归构建执行 `Test/qt_demo/1_编译测试.bat`，串行构建两个 Demo 和两个独立 Mask 测试（Release x64）。测试 EXE 输出到 `Test/qt_demo/Release/<工程名>/`，不加入 Demo 工程引用或发布流程。
+`Test/run_qt_demo_regression.py` 直接运行 C 和 C++ Qt Demo EXE，使用 `Test/qt_demo_regression_cases.json` 中的固定模型清单，不用控制台 API 工程替代 Demo。在 Visual Studio 中构建所需 Demo 或独立 Mask 测试工程（Release x64）。测试 EXE 输出到 `Test/qt_demo/Release/<工程名>/`，不加入 Demo 工程引用或发布流程。
 
 ```text
 python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.exe> --c-mask-test-exe <C_Mask_Test.exe> --cpp-mask-test-exe <CPP_Mask_Test.exe> --dll <本次构建的dlcv_infer_cpp.dll> --model-root <测试模型目录> --core-dll-directory <推理DLL目录> --output <系统临时目录/report.json>

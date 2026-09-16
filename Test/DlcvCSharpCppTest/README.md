@@ -67,13 +67,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Test/DlcvCSharpCppTest/check
 
 ## 构建
 
-在仓库根目录使用日常构建入口：
+在 Visual Studio 的 `OpenIVS.sln` 中选择 Debug 或 Release、x64，右键 `DlcvCSharpCppTest` → **生成**；工程引用自动构建 C++/CLI 桥接和原生依赖。设为启动项目后可用 F5 调试或 Ctrl+F5 运行。
+
+自动化单项目编译使用仓库既有入口：
 
 ```powershell
 python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCSharpCppTest.csproj --configuration Debug --platform x64 --target Build --verbosity minimal
 ```
 
-输出：`Test/DlcvCSharpCppTest/bin/x64/Debug/DlcvCSharpCppTest.exe`。双击或不带参数运行进入界面。`Test/1_编译测试.bat` 同时包含本工程的 Release x64 构建。
+输出：`Test/DlcvCSharpCppTest/bin/x64/Debug/DlcvCSharpCppTest.exe`。双击或不带参数运行进入界面。
 
 ## 命令行模型验证
 

@@ -47,16 +47,6 @@ class MaskTestProjectTests(unittest.TestCase):
         self.assertNotIn("dlcv_infer", sources)
         self.assertIn('qputenv("QT_QPA_PLATFORM", "offscreen")', (TEST_ROOT / "main.cpp").read_text(encoding="utf-8"))
 
-    def test_build_script_builds_only_four_qt_projects_serially(self):
-        script = (TEST_ROOT / "1_编译测试.bat").read_text(encoding="ascii")
-        commands = [line for line in script.splitlines() if line.startswith("python ")]
-        self.assertEqual(len(commands), 4)
-        self.assertEqual(script.count("if errorlevel 1 exit /b %errorlevel%"), 4)
-        for kind in ("c", "cpp"):
-            self.assertTrue(any(f"dlcv_infer_{kind}_qt_demo.vcxproj" in x for x in commands))
-            self.assertTrue(any(f"dlcv_infer_{kind}_qt_mask_test.vcxproj" in x for x in commands))
-        self.assertTrue(all("--configuration Release --platform x64 --target Build" in x for x in commands))
-
 
 if __name__ == "__main__":
     unittest.main()

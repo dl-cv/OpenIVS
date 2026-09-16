@@ -76,19 +76,6 @@ class BuildScopeTest(unittest.TestCase):
                     built_projects.append(Path(argument))
         self.assertEqual([repo_root / "DlcvDemo" / "DlcvDemo.csproj"], built_projects)
 
-    def test_regression_build_has_a_separate_serial_entry(self):
-        repo_root = Path(__file__).resolve().parents[1]
-        script = (repo_root / "Test" / "1_编译测试.bat").read_text(encoding="ascii")
-        lines = script.splitlines()
-        commands = [line for line in lines if line.startswith("python ")]
-        projects = ("dlcv_infer_cpp_test", "dlcv_infer_c_test", "DlcvCSharpTest", "DlcvCSharpCppTest")
-        self.assertEqual(len(projects), len(commands))
-        for command, project in zip(commands, projects):
-            self.assertIn(project, command)
-            self.assertEqual("if errorlevel 1 exit /b %errorlevel%", lines[lines.index(command) + 1])
-        self.assertNotIn("build_package.py", script)
-        self.assertNotIn("start ", script.lower())
-
 
 class TestProjectDependenciesTest(unittest.TestCase):
     def test_reflection_demo_projects_are_build_dependencies(self):
