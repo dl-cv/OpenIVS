@@ -599,7 +599,7 @@ void MainWindow::onLoadModel() {
 
     const QByteArray pathBytes = selectedPath.toLocal8Bit();
     const int modelIndex = api_.loadModel(pathBytes.constData(), selectedDeviceId());
-    if (modelIndex == -1) {
+    if (modelIndex < 0) {
         outputText_->setPlainText(lastCError());
         return;
     }
