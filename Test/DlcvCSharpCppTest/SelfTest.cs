@@ -86,7 +86,7 @@ namespace DlcvCSharpCppTest
             }
         }
 
-        private static void WriteReport(string path, JObject result)
+        internal static void WriteReport(string path, JObject result)
         {
             string fullPath = Path.GetFullPath(path);
             string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) +
@@ -137,6 +137,7 @@ namespace DlcvCSharpCppTest
             string output = null;
             string model = null;
             int device = 0;
+            string screenshot = null;
             try
             {
                 if (args[0] != "ui-test" || args.Length % 2 != 1)
@@ -150,6 +151,7 @@ namespace DlcvCSharpCppTest
                         case "--output": output = Path.GetFullPath(args[i + 1]); break;
                         case "--model": model = Path.GetFullPath(args[i + 1]); break;
                         case "--device": device = int.Parse(args[i + 1], CultureInfo.InvariantCulture); break;
+                        case "--screenshot": screenshot = Path.GetFullPath(args[i + 1]); break;
                         default: throw new ArgumentException("未知参数：" + args[i]);
                     }
                 }
@@ -265,6 +267,9 @@ namespace DlcvCSharpCppTest
                         checks.Add("窗口关闭释放两侧模型通过");
                     }
                 }
+                result["ui"] = MainForm.RunUiTest(model, device, screenshot);
+                checks.Add(model == null ? "空界面状态与默认、最小窗口布局通过" :
+                    "实际按钮处理、两侧信息显示、状态变化、最小窗口布局及窗口释放通过");
                 result["scope"] = model == null ? "ui-and-invalid-input" : "ui-and-real-model-lifecycle";
                 result["status"] = "passed";
             }

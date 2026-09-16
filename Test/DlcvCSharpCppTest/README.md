@@ -9,7 +9,7 @@
 
 ## Visual Studio 界面编辑
 
-打开 `OpenIVS.sln`，在 Test 分组的 `DlcvCSharpCppTest` 项目中右键 `MainForm.cs` → 查看设计器，或选中文件按 Shift+F7。控件位置、大小、文本和事件可通过 .NET Framework Windows Forms 设计器编辑。
+打开本目录的 `DlcvCSharpCppTest.sln`，在 `DlcvCSharpCppTest` 项目中右键 `MainForm.cs` → 查看设计器，或选中文件按 Shift+F7。控件位置、大小、文本和事件可通过 .NET Framework Windows Forms 设计器编辑。
 
 - `MainForm.Designer.cs`：标准 `InitializeComponent()`、控件字段、布局和事件连接。
 - `MainForm.resx`：窗体资源，由设计器维护。
@@ -35,27 +35,51 @@
 
 运行环境须安装深度视觉 SDK，且实际加载的推理 DLL 提供共享索引查询、绑定、解绑和信息接口。旧 SDK 缺少这些接口时，加载与 C# 信息查询可以成功，但转换会明确报错，不改变已有 C# 模型。编译成功不表示已安装 SDK 具有共享能力。
 
+## Visual Studio 启动
+
+- 专用入口：`Test/DlcvCSharpCppTest/DlcvCSharpCppTest.sln`，只包含 C# 应用及三个必要依赖，第一项目是可运行的 C# 应用。
+- C# 工程明确设置 `OutputType=WinExe`、`StartupObject=DlcvCSharpCppTest.Program`、`StartAction=Project`，启用混合调试；启动配置为 Debug x64。
+- 两个解决方案的共享 `.slnLaunch` 均提供“C# 与 C++ 混编模型测试”配置，只启动 C# 应用，不启动 C++/CLI 或原生 DLL 工程。配置由 `python Test/DlcvCSharpCppTest/update_test_solution.py` 从项目引用生成。
+- 已有 Visual Studio 会话仍使用此前启动选择时，右键 **DlcvCSharpCppTest** → **设为启动项目**，或选择上述共享启动配置。`DlcvCSharpCppBridge` 和 `dlcv_infer_cpp` 是 DLL，不是独立程序。
+- F5 启动调试，Ctrl+F5 启动应用；独立 EXE 仍可直接启动。本工程不修改个人 `.suo` 或其他工程的调试设置。
+
 ## 构建
 
 在仓库根目录使用日常构建入口：
 
 ```powershell
-python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCSharpCppTest.csproj --configuration Debug --platform x64 --target Build --verbosity minimal
+python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCSharpCppTest.sln --configuration Debug --platform x64 --target Build --verbosity minimal
 ```
 
 输出：`Test/DlcvCSharpCppTest/bin/x64/Debug/DlcvCSharpCppTest.exe`。双击或不带参数运行进入界面。`Test/1_编译测试.bat` 同时包含本工程的 Release x64 构建。
 
-## 非交互验证
+## 命令行模型验证
+
+`model-test` 不创建 WinForms 对象，执行 C# 加载、C++ 共享、两侧信息读取、指定释放顺序和最终索引失效检查。`--release-order` 接受 `csharp-first`（默认）或 `cpp-first`；`--device` 默认为 0。
+
+```powershell
+& .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe model-test --model "<模型文件>" --release-order csharp-first --output "$env:TEMP\mixed-cli.json"
+```
+
+## 非交互 UI 验证
 
 ```powershell
 & .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe designer-test --output "$env:TEMP\mixed-designer.json"
 & .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe ui-test --output "$env:TEMP\mixed-ui.json"
-& .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe ui-test --model "<模型文件>" --device 0 --output "$env:TEMP\mixed-model.json"
+& .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe ui-test --model "<模型文件>" --device 0 --output "$env:TEMP\mixed-model.json" --screenshot "$env:TEMP\mixed-model.png"
 ```
 
 - `designer-test` 仅构造和释放未显示的窗体，检查六个模型操作按钮和浏览按钮，并检查进程未加载 C++/CLI 桥接或原生推理模块。
 - `ui-test` 无 `--model` 时检查浏览按钮和六个操作按钮的可用状态、选择即保存、取消不改变、重建窗体与设置对象恢复记录、上次目录与文件名、空模型操作、重复释放、无效模型、禁止的模型格式和负索引。
 - 指定模型时额外验证两侧索引一致、两侧信息、两种释放顺序、释放后再次转换、最终索引失效及窗口对象释放。
-- 测试仅创建未显示的 WinForms 对象，不执行桌面自动化、键鼠模拟、按钮点击或窗口控制；不验证人工文件选择和界面绘制。路径记忆测试使用系统临时文件设置提供器，仅改变设置存储位置，执行窗体实际读取、选择与保存方法，不读取或修改真实用户设置。
+- UI 测试创建未显示的真实 WinForms 对象，调用实际六个按钮处理方法，检查两侧 JSON 文本、状态编号、按钮可用状态、释放后清空和关闭清理；检查默认与最小窗口布局。可选 `--screenshot` 通过控件自身绘制生成 PNG，并检查文字像素。不执行桌面自动化、键鼠模拟、点击消息或窗口控制；不验证人工文件对话框和 VS 调试器交互。路径记忆测试使用系统临时文件设置提供器，仅改变设置存储位置，执行窗体实际读取、选择与保存方法，不读取或修改真实用户设置。
 - 两套信息保留原始 JSON。跨语言比较时单独检查 `model_index`：普通模型与实例索引一致，流程兼容信息中的编号属于子模型；`input_shapes`、`model_info.input_shapes`、`data_info.image_size` 的缺失和 null 视为相同，OCR 信息按 C# API 已有行为过滤 `character`、`dict`、`classes`，其余字段严格比较。
 - 退出码 0 表示通过，1 表示参数、运行或验证失败；结果写入 `--output` 指定的无 BOM 严格 UTF-8 JSON。模型文件只读；结果必须为系统临时目录中新建的 `.json`，已有文件不会被覆盖。
+
+## 串行回归入口
+
+```powershell
+python Test/DlcvCSharpCppTest/run_tests.py --exe Test/DlcvCSharpCppTest/bin/x64/Debug/DlcvCSharpCppTest.exe --model "<普通模型>" --model "<流程模型>" --output-dir "$env:TEMP\mixed-regression"
+```
+
+`--model` 可重复指定；输出目录必须是系统临时目录下的空目录。每个模型运行两种命令行释放顺序和非交互 UI，另测设计器、空界面、错误参数与报告覆盖保护。结果 JSON 严格 UTF-8 解析，PNG 检查格式和尺寸；进程实际模块路径须来自 `--sdk-directory`（默认 SDK 安装目录），包装 DLL 须来自本次 EXE 目录。不复制或更换推理 SDK，报告和图片不进入仓库。

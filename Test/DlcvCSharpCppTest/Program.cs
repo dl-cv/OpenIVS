@@ -8,6 +8,7 @@ namespace DlcvCSharpCppTest
         [STAThread]
         private static int Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "model-test") return CommandLineTest.Run(args);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             if (args.Length > 0 && args[0] == "designer-test") return SelfTest.RunDesigner(args);

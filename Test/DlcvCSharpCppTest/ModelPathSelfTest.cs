@@ -12,7 +12,7 @@ namespace DlcvCSharpCppTest
     internal static class ModelPathSelfTest
     {
         // 测试仅改变设置的存储位置，窗体继续使用相同的读取、选择和 Save 操作。
-        private sealed class TemporarySettingsProvider : SettingsProvider
+        internal sealed class TemporarySettingsProvider : SettingsProvider
         {
             private readonly string file;
             public override string ApplicationName { get; set; } = "DlcvCSharpCppTest";

@@ -1,0 +1,34 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCSharpCppTest", "DlcvCSharpCppTest.csproj", "{70004706-161E-4B41-9014-AB1DDB6027A6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCsharpApi", "..\..\DlcvCsharpApi\DlcvCsharpApi.csproj", "{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DlcvCSharpCppBridge", "Bridge\DlcvCSharpCppBridge.vcxproj", "{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dlcv_infer_cpp", "..\..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj", "{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{70004706-161E-4B41-9014-AB1DDB6027A6}.Debug|x64.ActiveCfg = Debug|x64
+		{70004706-161E-4B41-9014-AB1DDB6027A6}.Debug|x64.Build.0 = Debug|x64
+		{70004706-161E-4B41-9014-AB1DDB6027A6}.Release|x64.ActiveCfg = Release|x64
+		{70004706-161E-4B41-9014-AB1DDB6027A6}.Release|x64.Build.0 = Release|x64
+		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Debug|x64.ActiveCfg = Debug|x64
+		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Debug|x64.Build.0 = Debug|x64
+		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Release|x64.ActiveCfg = Release|x64
+		{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}.Release|x64.Build.0 = Release|x64
+		{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD}.Debug|x64.ActiveCfg = Debug|x64
+		{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD}.Debug|x64.Build.0 = Debug|x64
+		{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD}.Release|x64.ActiveCfg = Release|x64
+		{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD}.Release|x64.Build.0 = Release|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Debug|x64.ActiveCfg = Debug|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Debug|x64.Build.0 = Debug|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Release|x64.ActiveCfg = Release|x64
+		{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+EndGlobal

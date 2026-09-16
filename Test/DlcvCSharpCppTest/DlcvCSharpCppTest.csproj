@@ -6,6 +6,9 @@
     <Platform Condition="'$(Platform)'==''">x64</Platform>
     <ProjectGuid>{70004706-161E-4B41-9014-AB1DDB6027A6}</ProjectGuid>
     <OutputType>WinExe</OutputType>
+    <StartupObject>DlcvCSharpCppTest.Program</StartupObject>
+    <StartAction>Project</StartAction>
+    <EnableUnmanagedDebugging>true</EnableUnmanagedDebugging>
     <RootNamespace>DlcvCSharpCppTest</RootNamespace>
     <AssemblyName>DlcvCSharpCppTest</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
@@ -46,10 +49,14 @@
     <Compile Include="MainForm.cs"><SubType>Form</SubType></Compile>
     <Compile Include="MainForm.Designer.cs"><DependentUpon>MainForm.cs</DependentUpon></Compile>
     <Compile Include="SelfTest.cs" />
+    <Compile Include="CommandLineTest.cs" />
+    <Compile Include="MainForm.Testing.cs"><DependentUpon>MainForm.cs</DependentUpon></Compile>
     <Compile Include="ModelPathSelfTest.cs" />
     <Compile Include="Properties\Settings.cs" />
     <EmbeddedResource Include="MainForm.resx"><DependentUpon>MainForm.cs</DependentUpon></EmbeddedResource>
     <None Include="App.config" /><None Include="README.md" />
+    <None Include="run_tests.py" /><None Include="update_test_solution.py" />
+    <None Include="DlcvCSharpCppTest.slnLaunch" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="..\..\DlcvNativeRuntime.targets" />
