@@ -5,6 +5,7 @@ namespace DlcvCSharpCppBridge {
     public ref class CppModel sealed {
     public:
         CppModel(int modelIndex);
+        CppModel(System::String^ modelPath, int device);
         ~CppModel();
         !CppModel();
         property int ModelIndex { int get(); }

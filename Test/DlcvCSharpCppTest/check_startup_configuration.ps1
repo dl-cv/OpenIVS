@@ -46,6 +46,16 @@ try {
         $profile[0].Projects[0].Path -ne $relative -or $profile[0].Projects[0].Action -ne 'Start') {
         throw '共享启动配置必须只启动 C# 应用'
     }
+    [xml]$config = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'App.config'))
+    $dpi = $config.SelectSingleNode('/configuration/System.Windows.Forms.ApplicationConfigurationSection/add[@key="DpiAwareness"]')
+    if ($null -eq $dpi -or $dpi.value -ne 'PerMonitorV2') { throw '缺少 PerMonitorV2 配置' }
+    [xml]$manifest = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'app.manifest'))
+    $manager = New-Object System.Xml.XmlNamespaceManager($manifest.NameTable)
+    $manager.AddNamespace('c', 'urn:schemas-microsoft-com:compatibility.v1')
+    if ($null -eq $manifest.SelectSingleNode('//c:supportedOS[@Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"]', $manager)) {
+        throw '缺少 Windows 10 兼容性清单'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $root 'logo.ico'))) { throw '缺少共享应用图标' }
     $results = @()
     foreach ($configuration in @('Debug', 'Release')) {
         foreach ($suffix in @('ActiveCfg', 'Build.0')) {
@@ -61,6 +71,7 @@ try {
             OutputType = 'WinExe'; PlatformTarget = 'x64'; Prefer32Bit = 'false'
             StartAction = 'Project'; StartupObject = 'DlcvCSharpCppTest.Program'
             EnableUnmanagedDebugging = 'true'; TargetFrameworkVersion = 'v4.7.2'
+            ApplicationIcon = '..\..\logo.ico'; ApplicationManifest = 'app.manifest'
         }
         foreach ($name in $expected.Keys) {
             if ($project.GetPropertyValue($name) -ne $expected[$name]) { throw "$configuration 的 $name 不正确" }

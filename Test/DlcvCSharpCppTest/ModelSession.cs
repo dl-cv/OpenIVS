@@ -16,24 +16,16 @@ namespace DlcvCSharpCppTest
 
         public bool HasCSharpModel { get { return csharpModel != null; } }
         public bool HasCppModel { get { return cppModel != null; } }
+        public bool CppCreatedFromIndex { get; private set; }
         public int CSharpModelIndex { get { return csharpModel == null ? -1 : csharpModel.modelIndex; } }
         public int CppModelIndex { get { return cppModel == null ? -1 : cppModel.ModelIndex; } }
 
         public void LoadCSharp(string path, int device)
         {
             ThrowIfDisposed();
-            if (HasCSharpModel || HasCppModel)
-                throw new InvalidOperationException("请先释放 C# 和 C++ 模型，再加载模型。");
-            if (string.IsNullOrWhiteSpace(path))
-                throw new ArgumentException("模型路径不能为空。", nameof(path));
-            if (device < -1)
-                throw new ArgumentOutOfRangeException(nameof(device), "设备编号不能小于 -1。");
-
-            string extension = Path.GetExtension(path).ToLowerInvariant();
-            if (extension != ".dvt" && extension != ".dvo" && extension != ".dvst" && extension != ".dvso")
-                throw new NotSupportedException("仅支持本地 .dvt、.dvo、.dvst、.dvso 模型。");
-            if (!File.Exists(path))
-                throw new FileNotFoundException("模型文件不存在。", path);
+            if (HasCSharpModel)
+                throw new InvalidOperationException("C# 模型已存在，请先释放 C# 模型。");
+            ValidateModelInput(path, device);
 
             CSharpModel candidate = null;
             try
@@ -49,6 +41,42 @@ namespace DlcvCSharpCppTest
                 // 完成检查后才保存模型，失败时释放尚未保存的实例。
                 if (candidate != null)
                     candidate.Dispose();
+            }
+        }
+
+        private static void ValidateModelInput(string path, int device)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("模型路径不能为空。", nameof(path));
+            if (device < -1)
+                throw new ArgumentOutOfRangeException(nameof(device), "设备编号不能小于 -1。");
+
+            string extension = Path.GetExtension(path).ToLowerInvariant();
+            if (extension != ".dvt" && extension != ".dvo" && extension != ".dvst" && extension != ".dvso")
+                throw new NotSupportedException("仅支持本地 .dvt、.dvo、.dvst、.dvso 模型。");
+            if (!File.Exists(path))
+                throw new FileNotFoundException("模型文件不存在。", path);
+        }
+
+        public void LoadCpp(string path, int device)
+        {
+            ThrowIfDisposed();
+            if (HasCppModel)
+                throw new InvalidOperationException("C++ 模型已存在，请先释放 C++ 模型。");
+            ValidateModelInput(path, device);
+            CppModel candidate = null;
+            try
+            {
+                candidate = new CppModel(path, device);
+                if (candidate.ModelIndex < 0)
+                    throw new InvalidOperationException("加载失败：模型编号无效。");
+                cppModel = candidate;
+                CppCreatedFromIndex = false;
+                candidate = null;
+            }
+            finally
+            {
+                if (candidate != null) candidate.Dispose();
             }
         }
 
@@ -68,6 +96,7 @@ namespace DlcvCSharpCppTest
                 if (candidate.ModelIndex != csharpModel.modelIndex)
                     throw new InvalidOperationException("转换失败：C++ 模型编号与 C# 模型编号不一致。");
                 cppModel = candidate;
+                CppCreatedFromIndex = true;
                 candidate = null;
             }
             finally
@@ -108,6 +137,7 @@ namespace DlcvCSharpCppTest
         {
             CppModel model = cppModel;
             cppModel = null;
+            CppCreatedFromIndex = false;
             if (model != null)
                 model.Dispose();
         }

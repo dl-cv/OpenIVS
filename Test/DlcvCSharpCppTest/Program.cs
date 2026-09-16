@@ -11,6 +11,7 @@ namespace DlcvCSharpCppTest
             if (args.Length > 0 && args[0] == "model-test") return CommandLineTest.Run(args);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            if (args.Length > 0 && args[0] == "appearance-test") return AppearanceSelfTest.Run(args);
             if (args.Length > 0 && args[0] == "designer-test") return SelfTest.RunDesigner(args);
             if (args.Length > 0) return SelfTest.Run(args);
             Application.Run(new MainForm());

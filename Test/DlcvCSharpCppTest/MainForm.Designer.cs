@@ -25,6 +25,7 @@ namespace DlcvCSharpCppTest
 
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(MainForm));
             this.components = new System.ComponentModel.Container();
             this.mainLayoutPanel = new System.Windows.Forms.TableLayoutPanel();
             this.inputLayoutPanel = new System.Windows.Forms.TableLayoutPanel();
@@ -33,8 +34,10 @@ namespace DlcvCSharpCppTest
             this.browseModelButton = new System.Windows.Forms.Button();
             this.deviceLabel = new System.Windows.Forms.Label();
             this.deviceNumericUpDown = new System.Windows.Forms.NumericUpDown();
-            this.buttonsFlowLayoutPanel = new System.Windows.Forms.FlowLayoutPanel();
+            this.csharpButtonsPanel = new System.Windows.Forms.TableLayoutPanel();
+            this.cppButtonsPanel = new System.Windows.Forms.TableLayoutPanel();
             this.loadCSharpButton = new System.Windows.Forms.Button();
+            this.loadCppButton = new System.Windows.Forms.Button();
             this.convertToCppButton = new System.Windows.Forms.Button();
             this.getCSharpInfoButton = new System.Windows.Forms.Button();
             this.getCppInfoButton = new System.Windows.Forms.Button();
@@ -53,7 +56,8 @@ namespace DlcvCSharpCppTest
             this.mainLayoutPanel.SuspendLayout();
             this.inputLayoutPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.deviceNumericUpDown)).BeginInit();
-            this.buttonsFlowLayoutPanel.SuspendLayout();
+            this.csharpButtonsPanel.SuspendLayout();
+            this.cppButtonsPanel.SuspendLayout();
             this.modelsLayoutPanel.SuspendLayout();
             this.csharpModelGroupBox.SuspendLayout();
             this.csharpLayoutPanel.SuspendLayout();
@@ -66,15 +70,13 @@ namespace DlcvCSharpCppTest
             this.mainLayoutPanel.ColumnCount = 1;
             this.mainLayoutPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.mainLayoutPanel.Controls.Add(this.inputLayoutPanel, 0, 0);
-            this.mainLayoutPanel.Controls.Add(this.buttonsFlowLayoutPanel, 0, 1);
-            this.mainLayoutPanel.Controls.Add(this.modelsLayoutPanel, 0, 2);
-            this.mainLayoutPanel.Controls.Add(this.statusLabel, 0, 3);
+            this.mainLayoutPanel.Controls.Add(this.modelsLayoutPanel, 0, 1);
+            this.mainLayoutPanel.Controls.Add(this.statusLabel, 0, 2);
             this.mainLayoutPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.mainLayoutPanel.Location = new System.Drawing.Point(0, 0);
             this.mainLayoutPanel.Name = "mainLayoutPanel";
             this.mainLayoutPanel.Padding = new System.Windows.Forms.Padding(12);
-            this.mainLayoutPanel.RowCount = 4;
-            this.mainLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.mainLayoutPanel.RowCount = 3;
             this.mainLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.mainLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.mainLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
@@ -157,21 +159,45 @@ namespace DlcvCSharpCppTest
             this.deviceNumericUpDown.TabIndex = 4;
             this.deviceNumericUpDown.Value = new decimal(new int[] { 0, 0, 0, 0 });
             //
-            // buttonsFlowLayoutPanel
+            // csharpButtonsPanel
             //
-            this.buttonsFlowLayoutPanel.AutoSize = true;
-            this.buttonsFlowLayoutPanel.Controls.Add(this.loadCSharpButton);
-            this.buttonsFlowLayoutPanel.Controls.Add(this.convertToCppButton);
-            this.buttonsFlowLayoutPanel.Controls.Add(this.getCSharpInfoButton);
-            this.buttonsFlowLayoutPanel.Controls.Add(this.getCppInfoButton);
-            this.buttonsFlowLayoutPanel.Controls.Add(this.releaseCSharpButton);
-            this.buttonsFlowLayoutPanel.Controls.Add(this.releaseCppButton);
-            this.buttonsFlowLayoutPanel.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.buttonsFlowLayoutPanel.Location = new System.Drawing.Point(15, 50);
-            this.buttonsFlowLayoutPanel.Name = "buttonsFlowLayoutPanel";
-            this.buttonsFlowLayoutPanel.Size = new System.Drawing.Size(1030, 43);
-            this.buttonsFlowLayoutPanel.TabIndex = 1;
-            this.buttonsFlowLayoutPanel.WrapContents = true;
+            this.csharpButtonsPanel.AutoSize = true;
+            this.csharpButtonsPanel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+            this.csharpButtonsPanel.Size = new System.Drawing.Size(460, 44);
+            this.csharpButtonsPanel.ColumnCount = 3;
+            this.csharpButtonsPanel.RowCount = 1;
+            this.csharpButtonsPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.csharpButtonsPanel.Margin = new System.Windows.Forms.Padding(0, 4, 0, 8);
+            this.csharpButtonsPanel.Name = "csharpButtonsPanel";
+            this.csharpButtonsPanel.TabIndex = 0;
+            this.csharpButtonsPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
+            this.csharpButtonsPanel.Controls.Add(this.loadCSharpButton, 0, 0);
+            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
+            this.csharpButtonsPanel.Controls.Add(this.getCSharpInfoButton, 1, 0);
+            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
+            this.csharpButtonsPanel.Controls.Add(this.releaseCSharpButton, 2, 0);
+            //
+            // cppButtonsPanel
+            //
+            this.cppButtonsPanel.AutoSize = true;
+            this.cppButtonsPanel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+            this.cppButtonsPanel.Size = new System.Drawing.Size(460, 44);
+            this.cppButtonsPanel.ColumnCount = 4;
+            this.cppButtonsPanel.RowCount = 1;
+            this.cppButtonsPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.cppButtonsPanel.Margin = new System.Windows.Forms.Padding(0, 4, 0, 8);
+            this.cppButtonsPanel.Name = "cppButtonsPanel";
+            this.cppButtonsPanel.TabIndex = 0;
+            this.cppButtonsPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+            this.cppButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.00000F));
+            this.cppButtonsPanel.Controls.Add(this.loadCppButton, 0, 0);
+            this.cppButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.00000F));
+            this.cppButtonsPanel.Controls.Add(this.convertToCppButton, 1, 0);
+            this.cppButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.00000F));
+            this.cppButtonsPanel.Controls.Add(this.getCppInfoButton, 2, 0);
+            this.cppButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.00000F));
+            this.cppButtonsPanel.Controls.Add(this.releaseCppButton, 3, 0);
             //
             // loadCSharpButton
             //
@@ -179,12 +205,36 @@ namespace DlcvCSharpCppTest
             this.loadCSharpButton.Enabled = true;
             this.loadCSharpButton.Location = new System.Drawing.Point(3, 3);
             this.loadCSharpButton.Name = "loadCSharpButton";
-            this.loadCSharpButton.Padding = new System.Windows.Forms.Padding(6);
+            this.loadCSharpButton.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.loadCSharpButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.loadCSharpButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.loadCSharpButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
+            this.loadCSharpButton.Margin = new System.Windows.Forms.Padding(3);
             this.loadCSharpButton.Size = new System.Drawing.Size(110, 37);
             this.loadCSharpButton.TabIndex = 0;
-            this.loadCSharpButton.Text = "加载C#模型";
-            this.loadCSharpButton.UseVisualStyleBackColor = true;
+            this.loadCSharpButton.Text = "加载模型";
+            this.loadCSharpButton.UseVisualStyleBackColor = false;
+            this.loadCSharpButton.BackColor = System.Drawing.Color.FromArgb(37, 99, 235);
+            this.loadCSharpButton.ForeColor = System.Drawing.Color.White;
             this.loadCSharpButton.Click += new System.EventHandler(this.LoadCSharpButton_Click);
+            //
+            // loadCppButton
+            //
+            this.loadCppButton.AutoSize = true;
+            this.loadCppButton.Location = new System.Drawing.Point(119, 3);
+            this.loadCppButton.Name = "loadCppButton";
+            this.loadCppButton.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.loadCppButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.loadCppButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.loadCppButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
+            this.loadCppButton.Margin = new System.Windows.Forms.Padding(3);
+            this.loadCppButton.Size = new System.Drawing.Size(120, 37);
+            this.loadCppButton.TabIndex = 0;
+            this.loadCppButton.Text = "加载模型";
+            this.loadCppButton.UseVisualStyleBackColor = false;
+            this.loadCppButton.BackColor = System.Drawing.Color.FromArgb(37, 99, 235);
+            this.loadCppButton.ForeColor = System.Drawing.Color.White;
+            this.loadCppButton.Click += new System.EventHandler(this.LoadCppButton_Click);
             //
             // convertToCppButton
             //
@@ -192,11 +242,17 @@ namespace DlcvCSharpCppTest
             this.convertToCppButton.Enabled = false;
             this.convertToCppButton.Location = new System.Drawing.Point(119, 3);
             this.convertToCppButton.Name = "convertToCppButton";
-            this.convertToCppButton.Padding = new System.Windows.Forms.Padding(6);
+            this.convertToCppButton.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.convertToCppButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.convertToCppButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.convertToCppButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
+            this.convertToCppButton.Margin = new System.Windows.Forms.Padding(3);
             this.convertToCppButton.Size = new System.Drawing.Size(134, 37);
             this.convertToCppButton.TabIndex = 1;
-            this.convertToCppButton.Text = "转换为C++模型";
-            this.convertToCppButton.UseVisualStyleBackColor = true;
+            this.convertToCppButton.Text = "从C#共享";
+            this.convertToCppButton.UseVisualStyleBackColor = false;
+            this.convertToCppButton.BackColor = System.Drawing.Color.White;
+            this.convertToCppButton.ForeColor = System.Drawing.Color.FromArgb(45, 55, 72);
             this.convertToCppButton.Click += new System.EventHandler(this.ConvertToCppButton_Click);
             //
             // getCSharpInfoButton
@@ -205,11 +261,17 @@ namespace DlcvCSharpCppTest
             this.getCSharpInfoButton.Enabled = false;
             this.getCSharpInfoButton.Location = new System.Drawing.Point(259, 3);
             this.getCSharpInfoButton.Name = "getCSharpInfoButton";
-            this.getCSharpInfoButton.Padding = new System.Windows.Forms.Padding(6);
+            this.getCSharpInfoButton.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.getCSharpInfoButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.getCSharpInfoButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.getCSharpInfoButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
+            this.getCSharpInfoButton.Margin = new System.Windows.Forms.Padding(3);
             this.getCSharpInfoButton.Size = new System.Drawing.Size(134, 37);
-            this.getCSharpInfoButton.TabIndex = 2;
-            this.getCSharpInfoButton.Text = "获取C#模型信息";
-            this.getCSharpInfoButton.UseVisualStyleBackColor = true;
+            this.getCSharpInfoButton.TabIndex = 1;
+            this.getCSharpInfoButton.Text = "获取信息";
+            this.getCSharpInfoButton.UseVisualStyleBackColor = false;
+            this.getCSharpInfoButton.BackColor = System.Drawing.Color.White;
+            this.getCSharpInfoButton.ForeColor = System.Drawing.Color.FromArgb(45, 55, 72);
             this.getCSharpInfoButton.Click += new System.EventHandler(this.GetCSharpInfoButton_Click);
             //
             // getCppInfoButton
@@ -218,11 +280,17 @@ namespace DlcvCSharpCppTest
             this.getCppInfoButton.Enabled = false;
             this.getCppInfoButton.Location = new System.Drawing.Point(399, 3);
             this.getCppInfoButton.Name = "getCppInfoButton";
-            this.getCppInfoButton.Padding = new System.Windows.Forms.Padding(6);
+            this.getCppInfoButton.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.getCppInfoButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.getCppInfoButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.getCppInfoButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
+            this.getCppInfoButton.Margin = new System.Windows.Forms.Padding(3);
             this.getCppInfoButton.Size = new System.Drawing.Size(144, 37);
-            this.getCppInfoButton.TabIndex = 3;
-            this.getCppInfoButton.Text = "获取C++模型信息";
-            this.getCppInfoButton.UseVisualStyleBackColor = true;
+            this.getCppInfoButton.TabIndex = 2;
+            this.getCppInfoButton.Text = "获取信息";
+            this.getCppInfoButton.UseVisualStyleBackColor = false;
+            this.getCppInfoButton.BackColor = System.Drawing.Color.White;
+            this.getCppInfoButton.ForeColor = System.Drawing.Color.FromArgb(45, 55, 72);
             this.getCppInfoButton.Click += new System.EventHandler(this.GetCppInfoButton_Click);
             //
             // releaseCSharpButton
@@ -231,11 +299,17 @@ namespace DlcvCSharpCppTest
             this.releaseCSharpButton.Enabled = false;
             this.releaseCSharpButton.Location = new System.Drawing.Point(549, 3);
             this.releaseCSharpButton.Name = "releaseCSharpButton";
-            this.releaseCSharpButton.Padding = new System.Windows.Forms.Padding(6);
+            this.releaseCSharpButton.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.releaseCSharpButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.releaseCSharpButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.releaseCSharpButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
+            this.releaseCSharpButton.Margin = new System.Windows.Forms.Padding(3);
             this.releaseCSharpButton.Size = new System.Drawing.Size(110, 37);
-            this.releaseCSharpButton.TabIndex = 4;
-            this.releaseCSharpButton.Text = "释放C#模型";
-            this.releaseCSharpButton.UseVisualStyleBackColor = true;
+            this.releaseCSharpButton.TabIndex = 2;
+            this.releaseCSharpButton.Text = "释放模型";
+            this.releaseCSharpButton.UseVisualStyleBackColor = false;
+            this.releaseCSharpButton.BackColor = System.Drawing.Color.White;
+            this.releaseCSharpButton.ForeColor = System.Drawing.Color.FromArgb(45, 55, 72);
             this.releaseCSharpButton.Click += new System.EventHandler(this.ReleaseCSharpButton_Click);
             //
             // releaseCppButton
@@ -244,11 +318,17 @@ namespace DlcvCSharpCppTest
             this.releaseCppButton.Enabled = false;
             this.releaseCppButton.Location = new System.Drawing.Point(665, 3);
             this.releaseCppButton.Name = "releaseCppButton";
-            this.releaseCppButton.Padding = new System.Windows.Forms.Padding(6);
+            this.releaseCppButton.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.releaseCppButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.releaseCppButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.releaseCppButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
+            this.releaseCppButton.Margin = new System.Windows.Forms.Padding(3);
             this.releaseCppButton.Size = new System.Drawing.Size(122, 37);
-            this.releaseCppButton.TabIndex = 5;
-            this.releaseCppButton.Text = "释放C++模型";
-            this.releaseCppButton.UseVisualStyleBackColor = true;
+            this.releaseCppButton.TabIndex = 3;
+            this.releaseCppButton.Text = "释放模型";
+            this.releaseCppButton.UseVisualStyleBackColor = false;
+            this.releaseCppButton.BackColor = System.Drawing.Color.White;
+            this.releaseCppButton.ForeColor = System.Drawing.Color.FromArgb(45, 55, 72);
             this.releaseCppButton.Click += new System.EventHandler(this.ReleaseCppButton_Click);
             //
             // modelsLayoutPanel
@@ -272,7 +352,8 @@ namespace DlcvCSharpCppTest
             this.csharpModelGroupBox.Dock = System.Windows.Forms.DockStyle.Fill;
             this.csharpModelGroupBox.Location = new System.Drawing.Point(3, 3);
             this.csharpModelGroupBox.Name = "csharpModelGroupBox";
-            this.csharpModelGroupBox.Padding = new System.Windows.Forms.Padding(8);
+            this.csharpModelGroupBox.Padding = new System.Windows.Forms.Padding(12);
+            this.csharpModelGroupBox.BackColor = System.Drawing.Color.White;
             this.csharpModelGroupBox.Size = new System.Drawing.Size(509, 515);
             this.csharpModelGroupBox.TabIndex = 0;
             this.csharpModelGroupBox.TabStop = false;
@@ -282,12 +363,14 @@ namespace DlcvCSharpCppTest
             //
             this.csharpLayoutPanel.ColumnCount = 1;
             this.csharpLayoutPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.csharpLayoutPanel.Controls.Add(this.csharpStateLabel, 0, 0);
-            this.csharpLayoutPanel.Controls.Add(this.csharpInfoTextBox, 0, 1);
+            this.csharpLayoutPanel.Controls.Add(this.csharpButtonsPanel, 0, 0);
+            this.csharpLayoutPanel.Controls.Add(this.csharpStateLabel, 0, 1);
+            this.csharpLayoutPanel.Controls.Add(this.csharpInfoTextBox, 0, 2);
             this.csharpLayoutPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.csharpLayoutPanel.Location = new System.Drawing.Point(8, 24);
             this.csharpLayoutPanel.Name = "csharpLayoutPanel";
-            this.csharpLayoutPanel.RowCount = 2;
+            this.csharpLayoutPanel.RowCount = 3;
+            this.csharpLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.csharpLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.csharpLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.csharpLayoutPanel.Size = new System.Drawing.Size(493, 483);
@@ -296,6 +379,8 @@ namespace DlcvCSharpCppTest
             // csharpStateLabel
             //
             this.csharpStateLabel.AutoSize = true;
+            this.csharpStateLabel.ForeColor = System.Drawing.Color.FromArgb(100, 116, 139);
+            this.csharpStateLabel.Padding = new System.Windows.Forms.Padding(0, 0, 0, 8);
             this.csharpStateLabel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.csharpStateLabel.Location = new System.Drawing.Point(3, 0);
             this.csharpStateLabel.Name = "csharpStateLabel";
@@ -311,6 +396,8 @@ namespace DlcvCSharpCppTest
             this.csharpInfoTextBox.Multiline = true;
             this.csharpInfoTextBox.Name = "csharpInfoTextBox";
             this.csharpInfoTextBox.ReadOnly = true;
+            this.csharpInfoTextBox.BackColor = System.Drawing.Color.FromArgb(248, 250, 252);
+            this.csharpInfoTextBox.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.csharpInfoTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Both;
             this.csharpInfoTextBox.Size = new System.Drawing.Size(487, 460);
             this.csharpInfoTextBox.TabIndex = 1;
@@ -322,7 +409,8 @@ namespace DlcvCSharpCppTest
             this.cppModelGroupBox.Dock = System.Windows.Forms.DockStyle.Fill;
             this.cppModelGroupBox.Location = new System.Drawing.Point(518, 3);
             this.cppModelGroupBox.Name = "cppModelGroupBox";
-            this.cppModelGroupBox.Padding = new System.Windows.Forms.Padding(8);
+            this.cppModelGroupBox.Padding = new System.Windows.Forms.Padding(12);
+            this.cppModelGroupBox.BackColor = System.Drawing.Color.White;
             this.cppModelGroupBox.Size = new System.Drawing.Size(509, 515);
             this.cppModelGroupBox.TabIndex = 1;
             this.cppModelGroupBox.TabStop = false;
@@ -332,12 +420,14 @@ namespace DlcvCSharpCppTest
             //
             this.cppLayoutPanel.ColumnCount = 1;
             this.cppLayoutPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.cppLayoutPanel.Controls.Add(this.cppStateLabel, 0, 0);
-            this.cppLayoutPanel.Controls.Add(this.cppInfoTextBox, 0, 1);
+            this.cppLayoutPanel.Controls.Add(this.cppButtonsPanel, 0, 0);
+            this.cppLayoutPanel.Controls.Add(this.cppStateLabel, 0, 1);
+            this.cppLayoutPanel.Controls.Add(this.cppInfoTextBox, 0, 2);
             this.cppLayoutPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.cppLayoutPanel.Location = new System.Drawing.Point(8, 24);
             this.cppLayoutPanel.Name = "cppLayoutPanel";
-            this.cppLayoutPanel.RowCount = 2;
+            this.cppLayoutPanel.RowCount = 3;
+            this.cppLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.cppLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.cppLayoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.cppLayoutPanel.Size = new System.Drawing.Size(493, 483);
@@ -346,12 +436,14 @@ namespace DlcvCSharpCppTest
             // cppStateLabel
             //
             this.cppStateLabel.AutoSize = true;
+            this.cppStateLabel.ForeColor = System.Drawing.Color.FromArgb(100, 116, 139);
+            this.cppStateLabel.Padding = new System.Windows.Forms.Padding(0, 0, 0, 8);
             this.cppStateLabel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.cppStateLabel.Location = new System.Drawing.Point(3, 0);
             this.cppStateLabel.Name = "cppStateLabel";
             this.cppStateLabel.Size = new System.Drawing.Size(487, 17);
             this.cppStateLabel.TabIndex = 0;
-            this.cppStateLabel.Text = "未创建，编号：-1";
+            this.cppStateLabel.Text = "未加载，编号：-1";
             //
             // cppInfoTextBox
             //
@@ -361,6 +453,8 @@ namespace DlcvCSharpCppTest
             this.cppInfoTextBox.Multiline = true;
             this.cppInfoTextBox.Name = "cppInfoTextBox";
             this.cppInfoTextBox.ReadOnly = true;
+            this.cppInfoTextBox.BackColor = System.Drawing.Color.FromArgb(248, 250, 252);
+            this.cppInfoTextBox.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.cppInfoTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Both;
             this.cppInfoTextBox.Size = new System.Drawing.Size(487, 460);
             this.cppInfoTextBox.TabIndex = 1;
@@ -375,17 +469,20 @@ namespace DlcvCSharpCppTest
             this.statusLabel.Padding = new System.Windows.Forms.Padding(0, 8, 0, 0);
             this.statusLabel.Size = new System.Drawing.Size(1030, 25);
             this.statusLabel.TabIndex = 3;
-            this.statusLabel.Text = "点击浏览选择模型，或点击加载C#模型打开文件选择窗口。";
+            this.statusLabel.Text = "浏览选择模型后，可分别加载 C# / C++；转换按钮仅共享已有 C# 模型。";
             this.statusLabel.UseMnemonic = false;
             //
             // MainForm
             //
-            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 17F);
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.AutoScaleDimensions = new System.Drawing.SizeF(96F, 96F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
+            this.BackColor = System.Drawing.Color.FromArgb(241, 245, 249);
+            this.ForeColor = System.Drawing.Color.FromArgb(30, 41, 59);
             this.ClientSize = new System.Drawing.Size(1060, 660);
             this.Controls.Add(this.mainLayoutPanel);
             this.Font = new System.Drawing.Font("Microsoft YaHei", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.MinimumSize = new System.Drawing.Size(880, 480);
+            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
+            this.MinimumSize = new System.Drawing.Size(960, 540);
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "C# / C++ 模型共享测试";
@@ -394,8 +491,10 @@ namespace DlcvCSharpCppTest
             this.inputLayoutPanel.ResumeLayout(false);
             this.inputLayoutPanel.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.deviceNumericUpDown)).EndInit();
-            this.buttonsFlowLayoutPanel.ResumeLayout(false);
-            this.buttonsFlowLayoutPanel.PerformLayout();
+            this.csharpButtonsPanel.ResumeLayout(false);
+            this.csharpButtonsPanel.PerformLayout();
+            this.cppButtonsPanel.ResumeLayout(false);
+            this.cppButtonsPanel.PerformLayout();
             this.modelsLayoutPanel.ResumeLayout(false);
             this.csharpModelGroupBox.ResumeLayout(false);
             this.csharpLayoutPanel.ResumeLayout(false);
@@ -415,8 +514,10 @@ namespace DlcvCSharpCppTest
         private System.Windows.Forms.Button browseModelButton;
         private System.Windows.Forms.Label deviceLabel;
         private System.Windows.Forms.NumericUpDown deviceNumericUpDown;
-        private System.Windows.Forms.FlowLayoutPanel buttonsFlowLayoutPanel;
+        private System.Windows.Forms.TableLayoutPanel csharpButtonsPanel;
+        private System.Windows.Forms.TableLayoutPanel cppButtonsPanel;
         private System.Windows.Forms.Button loadCSharpButton;
+        private System.Windows.Forms.Button loadCppButton;
         private System.Windows.Forms.Button convertToCppButton;
         private System.Windows.Forms.Button getCSharpInfoButton;
         private System.Windows.Forms.Button getCppInfoButton;

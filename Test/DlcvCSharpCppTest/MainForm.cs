@@ -97,7 +97,7 @@ namespace DlcvCSharpCppTest
             {
                 PathSettings.LastModelPath = path;
                 PathSettings.Save();
-                statusLabel.Text = "已选择模型，可点击加载C#模型。";
+                statusLabel.Text = "已选择模型，可分别加载 C# 或 C++ 模型。";
             }
             catch (Exception ex)
             {
@@ -122,10 +122,14 @@ namespace DlcvCSharpCppTest
             bool hasCSharp = session != null && session.HasCSharpModel;
             bool hasCpp = session != null && session.HasCppModel;
             csharpStateLabel.Text = hasCSharp ? "已加载，编号：" + session.CSharpModelIndex : "未加载，编号：-1";
-            cppStateLabel.Text = hasCpp ? "已创建，编号：" + session.CppModelIndex : "未创建，编号：-1";
-            loadCSharpButton.Enabled = !hasCSharp && !hasCpp;
-            browseModelButton.Enabled = loadCSharpButton.Enabled;
-            deviceNumericUpDown.Enabled = loadCSharpButton.Enabled;
+            cppStateLabel.Text = hasCpp ? (session.CppCreatedFromIndex ? "共享模型，编号：" : "文件加载，编号：") + session.CppModelIndex : "未加载，编号：-1";
+            loadCSharpButton.Enabled = !hasCSharp;
+            loadCppButton.Enabled = !hasCpp;
+            browseModelButton.Enabled = !hasCSharp && !hasCpp;
+            deviceNumericUpDown.Enabled = browseModelButton.Enabled;
+            foreach (Button button in new[] { loadCSharpButton, loadCppButton })
+                button.BackColor = button.Enabled ? System.Drawing.Color.FromArgb(37, 99, 235) :
+                    System.Drawing.Color.FromArgb(226, 232, 240);
             convertToCppButton.Enabled = hasCSharp && !hasCpp;
             getCSharpInfoButton.Enabled = hasCSharp;
             getCppInfoButton.Enabled = hasCpp;
@@ -140,6 +144,11 @@ namespace DlcvCSharpCppTest
         private void LoadCSharpButton_Click(object sender, EventArgs e)
         {
             ExecuteOperation(LoadCSharp);
+        }
+
+        private void LoadCppButton_Click(object sender, EventArgs e)
+        {
+            ExecuteOperation(LoadCpp);
         }
 
         private void ConvertToCppButton_Click(object sender, EventArgs e)
@@ -174,6 +183,14 @@ namespace DlcvCSharpCppTest
             Session.LoadCSharp(path, Decimal.ToInt32(deviceNumericUpDown.Value));
             csharpInfoTextBox.Clear();
             statusLabel.Text = "已加载 C# 模型。";
+        }
+
+        private void LoadCpp()
+        {
+            if (string.IsNullOrWhiteSpace(pathTextBox.Text) && !BrowseModel()) return;
+            Session.LoadCpp(pathTextBox.Text, Decimal.ToInt32(deviceNumericUpDown.Value));
+            cppInfoTextBox.Clear();
+            statusLabel.Text = "已由 C++ 从文件加载模型。";
         }
 
         private void ConvertToCpp()

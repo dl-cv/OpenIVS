@@ -35,6 +35,64 @@ namespace DlcvCSharpCppTest
             return info;
         }
 
+        private static void CheckExpired(int index)
+        {
+            bool expired = false;
+            try { using (var stale = new CppModel(index)) { } }
+            catch (InvalidOperationException) { expired = true; }
+            Check(expired, "释放后模型编号仍有效");
+        }
+
+        private static void RunDirectLoad(ModelSession session, string model, int device,
+            string mode, string order, JObject report)
+        {
+            // 第一项必须直接进入原生文件构造，不先建立 C# 模型。
+            session.LoadCpp(model, device);
+            int cppIndex = session.CppModelIndex;
+            Check(cppIndex >= 0 && !session.HasCSharpModel && !session.CppCreatedFromIndex,
+                "C++ 独立加载状态错误");
+            report["cpp_info"] = Info(session.GetCppInfo());
+            report["cpp_index"] = cppIndex;
+            if (mode == "cpp")
+            {
+                session.ReleaseCpp(); session.ReleaseCpp();
+                CheckExpired(cppIndex);
+                session.LoadCpp(model, device);
+                report["reloaded_cpp_info"] = Info(session.GetCppInfo());
+                int reloadedIndex = session.CppModelIndex;
+                session.Dispose();
+                CheckExpired(reloadedIndex);
+            }
+            else
+            {
+                session.LoadCSharp(model, device);
+                int csIndex = session.CSharpModelIndex;
+                // SDK 对相同内容和设备复用编号，每次文件加载增加持有计数。
+                Check(csIndex >= 0 && !session.CppCreatedFromIndex, "分别加载的状态错误");
+                report["csharp_index"] = csIndex;
+                report["csharp_info"] = Info(session.GetCSharpInfo());
+                if (order == "csharp-first")
+                {
+                    session.ReleaseCSharp();
+                    report["retained_info"] = Info(session.GetCppInfo());
+                    using (var retained = new CppModel(cppIndex)) Info(retained.GetModelInfo());
+                    session.ReleaseCpp();
+                }
+                else
+                {
+                    session.ReleaseCpp();
+                    report["retained_info"] = Info(session.GetCSharpInfo());
+                    using (var retained = new CppModel(csIndex)) Info(retained.GetModelInfo());
+                    session.ReleaseCSharp();
+                }
+                CheckExpired(csIndex);
+                CheckExpired(cppIndex);
+            }
+            Check(!session.HasCSharpModel && !session.HasCppModel, "独立模型未释放");
+            report["native_modules"] = NativeModules();
+            report["final_index_expired"] = true;
+        }
+
         public static int Run(string[] args)
         {
             string output = null;
@@ -42,7 +100,7 @@ namespace DlcvCSharpCppTest
             try
             {
                 if (args.Length % 2 != 1) throw new ArgumentException("命令行参数必须成对提供");
-                string model = null, order = "csharp-first";
+                string model = null, order = "csharp-first", mode = "shared";
                 int device = 0;
                 var seen = new HashSet<string>();
                 for (int i = 1; i < args.Length; i += 2)
@@ -54,42 +112,50 @@ namespace DlcvCSharpCppTest
                         case "--model": model = Path.GetFullPath(args[i + 1]); break;
                         case "--device": device = int.Parse(args[i + 1], CultureInfo.InvariantCulture); break;
                         case "--release-order": order = args[i + 1]; break;
+                        case "--load-mode": mode = args[i + 1]; break;
                         default: throw new ArgumentException("未知参数：" + args[i]);
                     }
                 }
                 if (model == null || output == null) throw new ArgumentException("必须指定 --model 和 --output");
                 if (order != "csharp-first" && order != "cpp-first") throw new ArgumentException("释放顺序须为 csharp-first 或 cpp-first");
+                if (mode != "shared" && mode != "cpp" && mode != "independent")
+                    throw new ArgumentException("加载方式须为 shared、cpp 或 independent");
+                report["load_mode"] = mode;
                 report["release_order"] = order;
                 using (var session = new ModelSession())
                 {
-                    session.LoadCSharp(model, device);
-                    report["csharp_info"] = Info(session.GetCSharpInfo());
-                    session.ConvertToCpp();
-                    int index = session.CSharpModelIndex;
-                    Check(index >= 0 && session.CppModelIndex == index, "两侧模型编号不一致");
-                    report["model_index"] = index;
-                    report["cpp_info"] = Info(session.GetCppInfo());
-                    report["native_modules"] = NativeModules();
-                    if (order == "csharp-first")
+                    if (mode == "shared")
                     {
-                        session.ReleaseCSharp(); session.ReleaseCSharp();
-                        Check(!session.HasCSharpModel && session.HasCppModel, "释放 C# 后状态错误");
-                        using (var fresh = new CppModel(index)) report["retained_info"] = Info(fresh.GetModelInfo());
-                        session.ReleaseCpp(); session.ReleaseCpp();
+                        session.LoadCSharp(model, device);
+                        report["csharp_info"] = Info(session.GetCSharpInfo());
+                        session.ConvertToCpp();
+                        int index = session.CSharpModelIndex;
+                        Check(index >= 0 && session.CppModelIndex == index, "两侧模型编号不一致");
+                        report["model_index"] = index;
+                        report["cpp_info"] = Info(session.GetCppInfo());
+                        report["native_modules"] = NativeModules();
+                        if (order == "csharp-first")
+                        {
+                            session.ReleaseCSharp(); session.ReleaseCSharp();
+                            Check(!session.HasCSharpModel && session.HasCppModel, "释放 C# 后状态错误");
+                            using (var fresh = new CppModel(index)) report["retained_info"] = Info(fresh.GetModelInfo());
+                            session.ReleaseCpp(); session.ReleaseCpp();
+                        }
+                        else
+                        {
+                            session.ReleaseCpp(); session.ReleaseCpp();
+                            Check(session.HasCSharpModel && !session.HasCppModel, "释放 C++ 后状态错误");
+                            report["retained_info"] = Info(session.GetCSharpInfo());
+                            session.ConvertToCpp(); session.ReleaseCpp(); session.ReleaseCSharp();
+                        }
+                        Check(!session.HasCSharpModel && !session.HasCppModel, "两侧状态未清理");
+                        bool expired = false;
+                        try { using (var stale = new CppModel(index)) { } }
+                        catch (InvalidOperationException) { expired = true; }
+                        Check(expired, "最终释放后共享编号仍有效");
+                        report["final_index_expired"] = true;
                     }
-                    else
-                    {
-                        session.ReleaseCpp(); session.ReleaseCpp();
-                        Check(session.HasCSharpModel && !session.HasCppModel, "释放 C++ 后状态错误");
-                        report["retained_info"] = Info(session.GetCSharpInfo());
-                        session.ConvertToCpp(); session.ReleaseCpp(); session.ReleaseCSharp();
-                    }
-                    Check(!session.HasCSharpModel && !session.HasCppModel, "两侧状态未清理");
-                    bool expired = false;
-                    try { using (var stale = new CppModel(index)) { } }
-                    catch (InvalidOperationException) { expired = true; }
-                    Check(expired, "最终释放后共享编号仍有效");
-                    report["final_index_expired"] = true;
+                    else RunDirectLoad(session, model, device, mode, order, report);
                 }
                 report["status"] = "passed";
             }

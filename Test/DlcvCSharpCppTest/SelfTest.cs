@@ -39,7 +39,8 @@ namespace DlcvCSharpCppTest
             bool cs = form.Session.HasCSharpModel, cpp = form.Session.HasCppModel;
             var expected = new Dictionary<string, bool>
             {
-                ["loadCSharpButton"] = !cs && !cpp,
+                ["loadCSharpButton"] = !cs,
+                ["loadCppButton"] = !cpp,
                 ["browseModelButton"] = !cs && !cpp,
                 ["convertToCppButton"] = cs && !cpp,
                 ["getCSharpInfoButton"] = cs,
@@ -48,7 +49,7 @@ namespace DlcvCSharpCppTest
                 ["releaseCppButton"] = cpp
             };
             var buttons = Descendants(form).OfType<Button>().ToArray();
-            Require(buttons.Length == expected.Count, "六个模型操作按钮与浏览按钮数量不正确");
+            Require(buttons.Length == expected.Count, "七个模型操作按钮与浏览按钮数量不正确");
             foreach (var pair in expected)
                 Require(buttons.Single(button => button.Name == pair.Key).Enabled == pair.Value,
                     "按钮状态错误：" + pair.Key);
@@ -108,7 +109,7 @@ namespace DlcvCSharpCppTest
             {
                 using (var form = new MainForm())
                 {
-                    Require(Descendants(form).OfType<Button>().Count() == 7, "设计器控件数量错误");
+                    Require(Descendants(form).OfType<Button>().Count() == 8, "设计器控件数量错误");
                     Require(!form.Visible, "测试不应显示窗口");
                     using (var process = System.Diagnostics.Process.GetCurrentProcess())
                     {
@@ -167,7 +168,7 @@ namespace DlcvCSharpCppTest
                 {
                     var session = form.Session;
                     var buttons = Descendants(form).OfType<Button>().ToArray();
-                    Require(buttons.Length == 7, "六个模型操作按钮与浏览按钮数量不正确");
+                    Require(buttons.Length == 8, "七个模型操作按钮与浏览按钮数量不正确");
                     Require(!session.HasCSharpModel && !session.HasCppModel, "初始状态错误");
                     CheckButtons(form);
                     Reject<InvalidOperationException>(() => session.ConvertToCpp());
@@ -178,13 +179,18 @@ namespace DlcvCSharpCppTest
                     Reject<ArgumentOutOfRangeException>(() => new CppModel(-1));
                     Reject<NotSupportedException>(() => session.LoadCSharp("unsupported.dvsp", device));
                     Reject<NotSupportedException>(() => session.LoadCSharp("unsupported.dvp", device));
-                    checks.Add("六按钮、空模型操作、重复释放、负索引检查通过");
+                    Reject<NotSupportedException>(() => session.LoadCpp("unsupported.dvp", device));
+                    Reject<ArgumentException>(() => session.LoadCpp("", device));
+                    Reject<ArgumentOutOfRangeException>(() => session.LoadCpp("missing.dvt", -2));
+                    Reject<FileNotFoundException>(() => session.LoadCpp(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".dvt"), device));
+                    checks.Add("七按钮、空模型操作、重复释放、负索引检查通过");
 
                     string invalid = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".dvt");
                     try
                     {
                         File.WriteAllText(invalid, "invalid model", new UTF8Encoding(false));
                         Reject<Exception>(() => session.LoadCSharp(invalid, device));
+                        Reject<Exception>(() => session.LoadCpp(invalid, device));
                         Require(!session.HasCSharpModel && !session.HasCppModel, "加载失败后状态错误");
                     }
                     finally { if (File.Exists(invalid)) File.Delete(invalid); }

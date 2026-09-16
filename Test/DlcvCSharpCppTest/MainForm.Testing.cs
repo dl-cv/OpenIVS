@@ -15,13 +15,37 @@ namespace DlcvCSharpCppTest
             if (!condition) throw new InvalidOperationException(message);
         }
 
+        internal JObject CheckScaledLayout(int percent, string screenshot)
+        {
+            // 比例测试只验证布局，不模拟显示器切换或发送 DPI 窗口消息。
+            float factor = percent / 100F * 96F / DeviceDpi;
+            Size original = Size;
+            Size minimum = MinimumSize;
+            using (var font = new Font(Font.FontFamily, Font.Size * factor, Font.Style))
+            {
+                Scale(new SizeF(factor, factor));
+                Font = font;
+                MinimumSize = new Size((int)Math.Ceiling(minimum.Width * factor), (int)Math.Ceiling(minimum.Height * factor));
+                Size = new Size((int)Math.Ceiling(original.Width * factor), (int)Math.Ceiling(original.Height * factor));
+                CheckLayout();
+                if (screenshot != null) RenderUi(screenshot);
+                Size = MinimumSize;
+                CheckLayout();
+                if (screenshot != null) RenderUi(Path.Combine(Path.GetDirectoryName(screenshot),
+                    Path.GetFileNameWithoutExtension(screenshot) + "-minimum.png"));
+            }
+            return new JObject { ["percent"] = percent, ["layout"] = "passed", ["device_dpi"] = DeviceDpi,
+                ["minimum_width"] = MinimumSize.Width, ["minimum_height"] = MinimumSize.Height };
+        }
+
         private void CheckLayout()
         {
             PerformLayout();
             inputLayoutPanel.PerformLayout();
-            buttonsFlowLayoutPanel.PerformLayout();
+            csharpButtonsPanel.PerformLayout();
+            cppButtonsPanel.PerformLayout();
             modelsLayoutPanel.PerformLayout();
-            Button[] buttons = { browseModelButton, loadCSharpButton, convertToCppButton,
+            Button[] buttons = { browseModelButton, loadCSharpButton, loadCppButton, convertToCppButton,
                 getCSharpInfoButton, getCppInfoButton, releaseCSharpButton, releaseCppButton };
             foreach (Button button in buttons)
             {
@@ -30,6 +54,18 @@ namespace DlcvCSharpCppTest
                     "按钮超出容器：" + button.Name);
                 foreach (Button other in buttons.Where(item => item != button && item.Parent == button.Parent))
                     UiCheck(!button.Bounds.IntersectsWith(other.Bounds), "按钮位置重叠：" + button.Name);
+            }
+            foreach (Button button in buttons)
+            {
+                Size text = TextRenderer.MeasureText(button.Text, button.Font);
+                UiCheck(button.ClientSize.Width >= text.Width + button.Padding.Horizontal &&
+                    button.ClientSize.Height >= text.Height + button.Padding.Vertical, "按钮文字区域不足：" + button.Name);
+            }
+            foreach (var panel in new[] { csharpButtonsPanel, cppButtonsPanel })
+            {
+                var row = panel.Controls.OfType<Button>().ToArray();
+                UiCheck(row.Select(button => button.Top).Distinct().Count() == 1 &&
+                    row.Select(button => button.Height).Distinct().Count() == 1, "按钮未保持同一行与相同高度");
             }
             UiCheck(pathTextBox.Width > 80 && pathTextBox.ReadOnly, "模型路径显示区域无效");
             UiCheck(csharpInfoTextBox.Width > 100 && cppInfoTextBox.Width > 100 &&
@@ -79,6 +115,34 @@ namespace DlcvCSharpCppTest
             UiCheck(darkPixels > 25, "界面图片缺少控件文字：" + control.Name);
         }
 
+        private JObject CheckDirectCppLoading()
+        {
+            LoadCppButton_Click(loadCppButton, EventArgs.Empty);
+            UiCheck(Session.HasCppModel && !Session.HasCSharpModel && !Session.CppCreatedFromIndex &&
+                !loadCppButton.Enabled && loadCSharpButton.Enabled && !convertToCppButton.Enabled &&
+                !browseModelButton.Enabled, "C++ 独立加载按钮状态错误：" + statusLabel.Text);
+            int cppIndex = Session.CppModelIndex;
+            GetCppInfoButton_Click(getCppInfoButton, EventArgs.Empty);
+            UiCheck(JToken.DeepEquals(JObject.Parse(cppInfoTextBox.Text), JObject.Parse(Session.GetCppInfo())),
+                "C++ 独立加载信息未显示");
+            LoadCppButton_Click(loadCppButton, EventArgs.Empty);
+            UiCheck(statusLabel.Text.StartsWith("操作失败") && Session.CppModelIndex == cppIndex,
+                "重复加载应拒绝且保留现有 C++ 模型");
+            LoadCSharpButton_Click(loadCSharpButton, EventArgs.Empty);
+            UiCheck(Session.HasCSharpModel && Session.CSharpModelIndex >= 0 && !loadCSharpButton.Enabled,
+                "C++ 加载后 C# 独立加载失败：" + statusLabel.Text);
+            ConvertToCppButton_Click(convertToCppButton, EventArgs.Empty);
+            UiCheck(statusLabel.Text.StartsWith("操作失败") && Session.CppModelIndex == cppIndex,
+                "已有独立 C++ 模型不应被转换覆盖");
+            ReleaseCSharpButton_Click(releaseCSharpButton, EventArgs.Empty);
+            GetCppInfoButton_Click(getCppInfoButton, EventArgs.Empty);
+            UiCheck(cppInfoTextBox.TextLength > 0 && !statusLabel.Text.StartsWith("操作失败"), "C# 释放影响独立 C++ 模型");
+            ReleaseCppButton_Click(releaseCppButton, EventArgs.Empty);
+            UiCheck(browseModelButton.Enabled && loadCppButton.Enabled && loadCSharpButton.Enabled, "独立模型释放后按钮状态错误");
+            return new JObject { ["cpp_first"] = "passed", ["separate_load_calls"] = "passed",
+                ["repeated_load_rejected"] = "passed", ["retained_cpp_info"] = "passed" };
+        }
+
         internal static JObject RunUiTest(string model, int device, string screenshot)
         {
             string root = Path.Combine(Path.GetTempPath(), "dlcv_mixed_ui_" + Guid.NewGuid().ToString("N"));
@@ -106,6 +170,7 @@ namespace DlcvCSharpCppTest
                     {
                         UiCheck(form.ApplyModelSelection(DialogResult.OK, model), "模型选择失败");
                         form.deviceNumericUpDown.Value = device;
+                        result["direct_cpp"] = form.CheckDirectCppLoading();
                         form.LoadCSharpButton_Click(form.loadCSharpButton, EventArgs.Empty);
                         UiCheck(form.Session.HasCSharpModel && !form.browseModelButton.Enabled &&
                             form.convertToCppButton.Enabled, "加载按钮处理失败：" + form.statusLabel.Text);
@@ -144,8 +209,9 @@ namespace DlcvCSharpCppTest
                             form.browseModelButton.Enabled && form.loadCSharpButton.Enabled,
                             "释放 C++ 后界面状态错误");
                         form.LoadCSharpButton_Click(form.loadCSharpButton, EventArgs.Empty);
-                        form.ConvertToCppButton_Click(form.convertToCppButton, EventArgs.Empty);
-                        UiCheck(form.Session.HasCSharpModel && form.Session.HasCppModel, "再次加载失败");
+                        form.LoadCppButton_Click(form.loadCppButton, EventArgs.Empty);
+                        UiCheck(form.Session.HasCSharpModel && form.Session.HasCppModel &&
+                            !form.Session.CppCreatedFromIndex, "C# 先加载后 C++ 独立加载失败");
                         ModelSession session = form.Session;
                         form.Dispose();
                         UiCheck(!session.HasCSharpModel && !session.HasCppModel, "窗体释放仍持有模型");

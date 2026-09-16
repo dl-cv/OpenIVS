@@ -6,6 +6,7 @@ namespace dlcv_infer { class Model; }
 class NativeModel final {
 public:
     explicit NativeModel(int index);
+    NativeModel(const std::wstring& path, int device);
     ~NativeModel();
     NativeModel(const NativeModel&) = delete;
     NativeModel& operator=(const NativeModel&) = delete;

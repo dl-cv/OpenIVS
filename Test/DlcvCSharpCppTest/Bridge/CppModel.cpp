@@ -2,6 +2,7 @@
 #include "NativeModel.h"
 #include <exception>
 #include <msclr/lock.h>
+#include <msclr/marshal_cppstd.h>
 
 using namespace System;
 using namespace System::Runtime::InteropServices;
@@ -20,6 +21,15 @@ namespace DlcvCSharpCppBridge {
     CppModel::CppModel(int modelIndex) : model_(nullptr), sync_(gcnew Object()) {
         if (modelIndex < 0) throw gcnew ArgumentOutOfRangeException("modelIndex");
         try { model_ = new NativeModel(modelIndex); }
+        catch (const std::exception& ex) {
+            throw gcnew InvalidOperationException(FromUtf8(ex.what()));
+        }
+    }
+
+    CppModel::CppModel(String^ modelPath, int device) : model_(nullptr), sync_(gcnew Object()) {
+        if (String::IsNullOrWhiteSpace(modelPath)) throw gcnew ArgumentException("模型路径不能为空", "modelPath");
+        if (device < -1) throw gcnew ArgumentOutOfRangeException("device");
+        try { model_ = new NativeModel(msclr::interop::marshal_as<std::wstring>(modelPath), device); }
         catch (const std::exception& ex) {
             throw gcnew InvalidOperationException(FromUtf8(ex.what()));
         }

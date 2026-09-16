@@ -33,7 +33,7 @@ def main():
         if screenshot:
             command += ["--screenshot", str(image)]
         with (root / (name + ".log")).open("wb") as log:
-            process = subprocess.run(command, cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=240)
+            process = subprocess.run(command, cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=480)
         report = json.loads(output.read_text(encoding="utf-8"))
         if process.returncode != expected or report["status"] != ("passed" if expected == 0 else "failed"):
             raise AssertionError(f"{name}: exit={process.returncode}, {report.get('error')}")
@@ -76,14 +76,28 @@ def main():
         results.append({"case": "project-configuration", "exit_code": 0, "status": "passed"})
         print("project-configuration: passed", flush=True)
         run("designer", ["designer-test"])
+        run("appearance", ["appearance-test", "--screenshot", str(root / "appearance.png")])
+        appearance = json.loads((root / "appearance.json").read_text(encoding="utf-8"))
+        if appearance["dpi_awareness"] != "PerMonitorV2" or appearance["icon"] != "executable-and-form-match":
+            raise AssertionError("HiDPI 或图标检查失败")
+        for percent in (100, 125, 150, 200):
+            for suffix in ("", "-minimum"):
+                content = (root / f"appearance-{percent}{suffix}.png").read_bytes()
+                if content[:8] != b"\x89PNG\r\n\x1a\n":
+                    raise AssertionError("缩放布局图片无效")
         run("empty-ui", ["ui-test"], screenshot=True)
         run("missing-model", ["model-test"], expected=1)
         run("bad-order", ["model-test", "--model", str(models[0]), "--release-order", "invalid"], expected=1)
+        run("bad-mode", ["model-test", "--model", str(models[0]), "--load-mode", "invalid"], expected=1)
         run("bad-device", ["model-test", "--model", str(models[0]), "--device", "-2"], expected=1)
         run("bad-option", ["ui-test", "--unknown", "value"], expected=1)
         for index, model in enumerate(models):
             for order in ("csharp-first", "cpp-first"):
                 run(f"model-{index}-{order}", ["model-test", "--model", str(model), "--release-order", order], native=True)
+            run(f"model-{index}-cpp-direct", ["model-test", "--model", str(model), "--load-mode", "cpp"], native=True)
+            for order in ("csharp-first", "cpp-first"):
+                run(f"model-{index}-independent-{order}", ["model-test", "--model", str(model),
+                    "--load-mode", "independent", "--release-order", order], native=True)
             run(f"ui-{index}", ["ui-test", "--model", str(model)], native=True, screenshot=True)
         protected = root / "protected.json"
         protected.write_bytes(b"keep")
