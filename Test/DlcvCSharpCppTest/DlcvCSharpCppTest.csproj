@@ -23,7 +23,7 @@
     <Optimize>true</Optimize><DebugType>pdbonly</DebugType><DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="System" /><Reference Include="System.Core" />
+    <Reference Include="System" /><Reference Include="System.Configuration" /><Reference Include="System.Core" />
     <Reference Include="System.Drawing" /><Reference Include="System.Windows.Forms" />
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
@@ -46,6 +46,8 @@
     <Compile Include="MainForm.cs"><SubType>Form</SubType></Compile>
     <Compile Include="MainForm.Designer.cs"><DependentUpon>MainForm.cs</DependentUpon></Compile>
     <Compile Include="SelfTest.cs" />
+    <Compile Include="ModelPathSelfTest.cs" />
+    <Compile Include="Properties\Settings.cs" />
     <EmbeddedResource Include="MainForm.resx"><DependentUpon>MainForm.cs</DependentUpon></EmbeddedResource>
     <None Include="App.config" /><None Include="README.md" />
   </ItemGroup>

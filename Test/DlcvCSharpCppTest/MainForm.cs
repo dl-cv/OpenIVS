@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Windows.Forms;
 
 namespace DlcvCSharpCppTest
@@ -7,6 +8,12 @@ namespace DlcvCSharpCppTest
     public partial class MainForm : Form
     {
         private ModelSession session;
+        private Properties.Settings pathSettings;
+
+        private Properties.Settings PathSettings
+        {
+            get { return pathSettings ?? (pathSettings = Properties.Settings.Default); }
+        }
 
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -29,6 +36,87 @@ namespace DlcvCSharpCppTest
             InitializeComponent();
         }
 
+        internal MainForm(Properties.Settings settings) : this()
+        {
+            pathSettings = settings ?? throw new ArgumentNullException(nameof(settings));
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            if (!DesignMode && LicenseManager.UsageMode != LicenseUsageMode.Designtime)
+                RestoreModelPath();
+        }
+
+        internal void RestoreModelPath()
+        {
+            try { pathTextBox.Text = PathSettings.LastModelPath; }
+            catch (Exception ex) { statusLabel.Text = "读取上次模型路径失败：" + ex.Message; }
+        }
+
+        internal OpenFileDialog CreateModelDialog()
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = "选择模型",
+                Filter = "AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvo;*.dvst;*.dvso",
+                CheckFileExists = true,
+                Multiselect = false,
+                RestoreDirectory = true
+            };
+            try
+            {
+                string lastPath = PathSettings.LastModelPath;
+                if (!string.IsNullOrWhiteSpace(lastPath))
+                {
+                    string directory = Path.GetDirectoryName(lastPath);
+                    if (Directory.Exists(directory)) dialog.InitialDirectory = directory;
+                    dialog.FileName = Path.GetFileName(lastPath);
+                }
+            }
+            catch (Exception ex) { statusLabel.Text = "读取上次模型目录失败：" + ex.Message; }
+            return dialog;
+        }
+
+        internal bool ApplyModelSelection(DialogResult result, string selectedPath)
+        {
+            if (result != DialogResult.OK)
+            {
+                statusLabel.Text = "已取消模型选择。";
+                return false;
+            }
+            if (session != null && (session.HasCSharpModel || session.HasCppModel))
+                throw new InvalidOperationException("请先释放 C# 和 C++ 模型，再选择模型。");
+            string path = Path.GetFullPath(selectedPath);
+            string extension = Path.GetExtension(path).ToLowerInvariant();
+            if (extension != ".dvt" && extension != ".dvo" && extension != ".dvst" && extension != ".dvso")
+                throw new NotSupportedException("仅支持本地 .dvt、.dvo、.dvst、.dvso 模型。");
+            if (!File.Exists(path)) throw new FileNotFoundException("模型文件不存在。", path);
+            pathTextBox.Text = path;
+            try
+            {
+                PathSettings.LastModelPath = path;
+                PathSettings.Save();
+                statusLabel.Text = "已选择模型，可点击加载C#模型。";
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = "已选择模型，但保存路径失败：" + ex.Message;
+            }
+            return true;
+        }
+
+        private bool BrowseModel()
+        {
+            using (var dialog = CreateModelDialog())
+                return ApplyModelSelection(dialog.ShowDialog(this), dialog.FileName);
+        }
+
+        private void BrowseModelButton_Click(object sender, EventArgs e)
+        {
+            ExecuteOperation(() => BrowseModel());
+        }
+
         public void RefreshModelState()
         {
             bool hasCSharp = session != null && session.HasCSharpModel;
@@ -36,7 +124,7 @@ namespace DlcvCSharpCppTest
             csharpStateLabel.Text = hasCSharp ? "已加载，编号：" + session.CSharpModelIndex : "未加载，编号：-1";
             cppStateLabel.Text = hasCpp ? "已创建，编号：" + session.CppModelIndex : "未创建，编号：-1";
             loadCSharpButton.Enabled = !hasCSharp && !hasCpp;
-            pathTextBox.Enabled = loadCSharpButton.Enabled;
+            browseModelButton.Enabled = loadCSharpButton.Enabled;
             deviceNumericUpDown.Enabled = loadCSharpButton.Enabled;
             convertToCppButton.Enabled = hasCSharp && !hasCpp;
             getCSharpInfoButton.Enabled = hasCSharp;
@@ -81,27 +169,8 @@ namespace DlcvCSharpCppTest
 
         private void LoadCSharp()
         {
-            string path = pathTextBox.Text.Trim();
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                using (var dialog = new OpenFileDialog
-                {
-                    Title = "选择模型文件",
-                    Filter = "模型文件 (*.dvt;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvo;*.dvst;*.dvso",
-                    CheckFileExists = true,
-                    Multiselect = false,
-                    RestoreDirectory = true
-                })
-                {
-                    if (dialog.ShowDialog(this) != DialogResult.OK)
-                    {
-                        statusLabel.Text = "已取消模型加载。";
-                        return;
-                    }
-                    path = dialog.FileName;
-                    pathTextBox.Text = path;
-                }
-            }
+            if (string.IsNullOrWhiteSpace(pathTextBox.Text) && !BrowseModel()) return;
+            string path = pathTextBox.Text;
             Session.LoadCSharp(path, Decimal.ToInt32(deviceNumericUpDown.Value));
             csharpInfoTextBox.Clear();
             statusLabel.Text = "已加载 C# 模型。";

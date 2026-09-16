@@ -30,6 +30,7 @@ namespace DlcvCSharpCppTest
             this.inputLayoutPanel = new System.Windows.Forms.TableLayoutPanel();
             this.pathLabel = new System.Windows.Forms.Label();
             this.pathTextBox = new System.Windows.Forms.TextBox();
+            this.browseModelButton = new System.Windows.Forms.Button();
             this.deviceLabel = new System.Windows.Forms.Label();
             this.deviceNumericUpDown = new System.Windows.Forms.NumericUpDown();
             this.buttonsFlowLayoutPanel = new System.Windows.Forms.FlowLayoutPanel();
@@ -83,15 +84,17 @@ namespace DlcvCSharpCppTest
             // inputLayoutPanel
             //
             this.inputLayoutPanel.AutoSize = true;
-            this.inputLayoutPanel.ColumnCount = 4;
+            this.inputLayoutPanel.ColumnCount = 5;
             this.inputLayoutPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
             this.inputLayoutPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.inputLayoutPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 88F));
             this.inputLayoutPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
             this.inputLayoutPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 100F));
             this.inputLayoutPanel.Controls.Add(this.pathLabel, 0, 0);
             this.inputLayoutPanel.Controls.Add(this.pathTextBox, 1, 0);
-            this.inputLayoutPanel.Controls.Add(this.deviceLabel, 2, 0);
-            this.inputLayoutPanel.Controls.Add(this.deviceNumericUpDown, 3, 0);
+            this.inputLayoutPanel.Controls.Add(this.browseModelButton, 2, 0);
+            this.inputLayoutPanel.Controls.Add(this.deviceLabel, 3, 0);
+            this.inputLayoutPanel.Controls.Add(this.deviceNumericUpDown, 4, 0);
             this.inputLayoutPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.inputLayoutPanel.Location = new System.Drawing.Point(15, 15);
             this.inputLayoutPanel.Name = "inputLayoutPanel";
@@ -116,8 +119,20 @@ namespace DlcvCSharpCppTest
             this.pathTextBox.Enabled = true;
             this.pathTextBox.Location = new System.Drawing.Point(65, 3);
             this.pathTextBox.Name = "pathTextBox";
-            this.pathTextBox.Size = new System.Drawing.Size(748, 23);
+            this.pathTextBox.ReadOnly = true;
+            this.pathTextBox.Size = new System.Drawing.Size(660, 23);
             this.pathTextBox.TabIndex = 1;
+            //
+            // browseModelButton
+            //
+            this.browseModelButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.browseModelButton.Location = new System.Drawing.Point(731, 3);
+            this.browseModelButton.Name = "browseModelButton";
+            this.browseModelButton.Size = new System.Drawing.Size(82, 23);
+            this.browseModelButton.TabIndex = 2;
+            this.browseModelButton.Text = "浏览…";
+            this.browseModelButton.UseVisualStyleBackColor = true;
+            this.browseModelButton.Click += new System.EventHandler(this.BrowseModelButton_Click);
             //
             // deviceLabel
             //
@@ -126,7 +141,7 @@ namespace DlcvCSharpCppTest
             this.deviceLabel.Location = new System.Drawing.Point(819, 6);
             this.deviceLabel.Name = "deviceLabel";
             this.deviceLabel.Size = new System.Drawing.Size(108, 17);
-            this.deviceLabel.TabIndex = 2;
+            this.deviceLabel.TabIndex = 3;
             this.deviceLabel.Text = "设备（-1 为 CPU）";
             //
             // deviceNumericUpDown
@@ -139,7 +154,7 @@ namespace DlcvCSharpCppTest
             this.deviceNumericUpDown.Minimum = new decimal(new int[] { 1, 0, 0, -2147483648 });
             this.deviceNumericUpDown.Name = "deviceNumericUpDown";
             this.deviceNumericUpDown.Size = new System.Drawing.Size(94, 23);
-            this.deviceNumericUpDown.TabIndex = 3;
+            this.deviceNumericUpDown.TabIndex = 4;
             this.deviceNumericUpDown.Value = new decimal(new int[] { 0, 0, 0, 0 });
             //
             // buttonsFlowLayoutPanel
@@ -360,7 +375,7 @@ namespace DlcvCSharpCppTest
             this.statusLabel.Padding = new System.Windows.Forms.Padding(0, 8, 0, 0);
             this.statusLabel.Size = new System.Drawing.Size(1030, 25);
             this.statusLabel.TabIndex = 3;
-            this.statusLabel.Text = "就绪。路径为空时，加载按钮将打开文件选择窗口。";
+            this.statusLabel.Text = "点击浏览选择模型，或点击加载C#模型打开文件选择窗口。";
             this.statusLabel.UseMnemonic = false;
             //
             // MainForm
@@ -397,6 +412,7 @@ namespace DlcvCSharpCppTest
         private System.Windows.Forms.TableLayoutPanel inputLayoutPanel;
         private System.Windows.Forms.Label pathLabel;
         private System.Windows.Forms.TextBox pathTextBox;
+        private System.Windows.Forms.Button browseModelButton;
         private System.Windows.Forms.Label deviceLabel;
         private System.Windows.Forms.NumericUpDown deviceNumericUpDown;
         private System.Windows.Forms.FlowLayoutPanel buttonsFlowLayoutPanel;

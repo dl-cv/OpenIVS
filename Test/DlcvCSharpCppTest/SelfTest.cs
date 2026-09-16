@@ -40,6 +40,7 @@ namespace DlcvCSharpCppTest
             var expected = new Dictionary<string, bool>
             {
                 ["loadCSharpButton"] = !cs && !cpp,
+                ["browseModelButton"] = !cs && !cpp,
                 ["convertToCppButton"] = cs && !cpp,
                 ["getCSharpInfoButton"] = cs,
                 ["getCppInfoButton"] = cpp,
@@ -47,7 +48,7 @@ namespace DlcvCSharpCppTest
                 ["releaseCppButton"] = cpp
             };
             var buttons = Descendants(form).OfType<Button>().ToArray();
-            Require(buttons.Length == expected.Count, "操作按钮数量不是六个");
+            Require(buttons.Length == expected.Count, "六个模型操作按钮与浏览按钮数量不正确");
             foreach (var pair in expected)
                 Require(buttons.Single(button => button.Name == pair.Key).Enabled == pair.Value,
                     "按钮状态错误：" + pair.Key);
@@ -107,7 +108,7 @@ namespace DlcvCSharpCppTest
             {
                 using (var form = new MainForm())
                 {
-                    Require(Descendants(form).OfType<Button>().Count() == 6, "设计器控件数量错误");
+                    Require(Descendants(form).OfType<Button>().Count() == 7, "设计器控件数量错误");
                     Require(!form.Visible, "测试不应显示窗口");
                     using (var process = System.Diagnostics.Process.GetCurrentProcess())
                     {
@@ -158,11 +159,13 @@ namespace DlcvCSharpCppTest
                 if (model != null && string.Equals(model, output, StringComparison.OrdinalIgnoreCase))
                     throw new ArgumentException("结果文件不能覆盖模型文件");
 
+                ModelPathSelfTest.Run();
+                checks.Add("浏览配置、选择即保存、取消不修改、重新打开恢复、再次选择及缺失文件检查通过");
                 using (var form = new MainForm())
                 {
                     var session = form.Session;
                     var buttons = Descendants(form).OfType<Button>().ToArray();
-                    Require(buttons.Length == 6, "操作按钮数量不是六个");
+                    Require(buttons.Length == 7, "六个模型操作按钮与浏览按钮数量不正确");
                     Require(!session.HasCSharpModel && !session.HasCppModel, "初始状态错误");
                     CheckButtons(form);
                     Reject<InvalidOperationException>(() => session.ConvertToCpp());
