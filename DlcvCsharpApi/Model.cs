@@ -308,7 +308,7 @@ namespace dlcv_infer_csharp
         {
             return !_disposed &&
                    !OwnModelIndex &&
-                   modelIndex >= 0 &&
+                   modelIndex != -1 &&
                    _dvsModel == null &&
                    !_isDvpMode &&
                    !_isDvsMode &&
@@ -519,7 +519,7 @@ namespace dlcv_infer_csharp
                         ["model_bindings"] = modelBindings
                     };
                     modelIndex = _dllLoader.RegisterFlow(flowJson.ToString(Formatting.None));
-                    if (modelIndex < 0)
+                    if (modelIndex == -1)
                         throw new Exception("注册流程 index 失败");
                     _ownsRegisteredFlowIndex = true;
                 }
@@ -530,7 +530,7 @@ namespace dlcv_infer_csharp
             }
             catch (Exception ex)
             {
-                if (_ownsRegisteredFlowIndex && modelIndex >= 0 && _dllLoader != null)
+                if (_ownsRegisteredFlowIndex && modelIndex != -1 && _dllLoader != null)
                 {
                     try { _dllLoader.FreeFlow(modelIndex); } catch { }
                 }
@@ -937,7 +937,7 @@ namespace dlcv_infer_csharp
                             LogReleaseFailure("[FreeModel][Shared] 释放流程子模型失败", ex);
                         }
 
-                        if (_sharedIndexBound && index >= 0)
+                        if (_sharedIndexBound && index != -1)
                         {
                             try
                             {
@@ -986,7 +986,7 @@ namespace dlcv_infer_csharp
                         LogReleaseFailure("[FreeModel][DVS] 释放流程子模型失败", ex);
                     }
 
-                    if (_ownsRegisteredFlowIndex && ownedIndex >= 0)
+                    if (_ownsRegisteredFlowIndex && ownedIndex != -1)
                     {
                         try
                         {
@@ -3045,7 +3045,7 @@ namespace dlcv_infer_csharp
 
             DllLoader loader = _dllLoader;
             int index = modelIndex;
-            if (loader != null && index >= 0)
+            if (loader != null && index != -1)
             {
                 try
                 {

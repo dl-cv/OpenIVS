@@ -110,4 +110,4 @@ python Test/DlcvCSharpCppTest/run_tests.py --exe Test/DlcvCSharpCppTest/bin/x64/
 
 ## 流程层归属检查
 
-DVST/DVSO 的 model-test 额外检查：OpenIVS 查询结果为 flow，底层 dlcv_get_index_type_c 对同一编号返回 0，子模型编号在底层仍为普通模型。C# 和 C++ 共用 dlcv_infer_cpp.dll 的流程记录，保持两个共享方向和两种释放顺序。流程恢复不再次加载文件，流程所属 SDK 须提供 dlcv_allocate_index_c。
+DVST/DVSO 的 model-test 额外检查：OpenIVS 查询结果为 flow，底层 dlcv_get_index_type_c 对同一编号返回 0，子模型编号在底层仍为普通模型。C# 和 C++ 共用 dlcv_infer_cpp.dll 的流程记录，保持两个共享方向和两种释放顺序。流程恢复不再次加载文件。普通模型沿用底层 load_model 返回的非负 index；流程由 OpenIVS 自主分配小于 -1 的 handle，-1 表示失败。两类对象均通过 CreateFromIndex/CreateModelFromIndex 共享，流程不需要底层编号分配接口。

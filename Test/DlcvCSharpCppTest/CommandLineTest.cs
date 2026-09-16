@@ -50,6 +50,7 @@ namespace DlcvCSharpCppTest
                 Check(loader.dlcv_get_index_type_c(binding["model_index"].Value<int>()) == 1,
                     "子模型未保留在推理库中");
             report["flow_registry"] = "OpenIVS";
+            Check(index < -1, "流程 handle 未使用独立编号域");
             report["engine_flow_index_type"] = 0;
         }
 
@@ -68,7 +69,7 @@ namespace DlcvCSharpCppTest
             session.LoadCpp(model, device);
             int cppIndex = session.CppModelIndex;
             CheckFlowLayer(cppIndex, model, report);
-            Check(cppIndex >= 0 && !session.HasCSharpModel && !session.CppCreatedFromIndex,
+            Check(cppIndex != -1 && !session.HasCSharpModel && !session.CppCreatedFromIndex,
                 "C++ 独立加载状态错误");
             report["cpp_info"] = Info(session.GetCppInfo());
             report["cpp_index"] = cppIndex;
@@ -87,7 +88,7 @@ namespace DlcvCSharpCppTest
                 session.LoadCSharp(model, device);
                 int csIndex = session.CSharpModelIndex;
                 // SDK 对相同内容和设备复用编号，每次文件加载增加持有计数。
-                Check(csIndex >= 0 && !session.CppCreatedFromIndex, "分别加载的状态错误");
+                Check(csIndex != -1 && !session.CppCreatedFromIndex, "分别加载的状态错误");
                 report["csharp_index"] = csIndex;
                 report["csharp_info"] = Info(session.GetCSharpInfo());
                 if (order == "csharp-first")
@@ -202,7 +203,7 @@ namespace DlcvCSharpCppTest
                         session.ConvertToCpp();
                         int index = session.CSharpModelIndex;
                         CheckFlowLayer(index, model, report);
-                        Check(index >= 0 && session.CppModelIndex == index, "两侧模型编号不一致");
+                        Check(index != -1 && session.CppModelIndex == index, "两侧模型编号不一致");
                         report["model_index"] = index;
                         report["cpp_info"] = Info(session.GetCppInfo());
                         report["native_modules"] = NativeModules();

@@ -19,7 +19,7 @@ namespace {
 
 namespace DlcvCSharpCppBridge {
     CppModel::CppModel(int modelIndex) : model_(nullptr), sync_(gcnew Object()) {
-        if (modelIndex < 0) throw gcnew ArgumentOutOfRangeException("modelIndex");
+        if (modelIndex == -1) throw gcnew ArgumentOutOfRangeException("modelIndex");
         try { model_ = new NativeModel(modelIndex); }
         catch (const std::exception& ex) {
             throw gcnew InvalidOperationException(FromUtf8(ex.what()));

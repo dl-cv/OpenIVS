@@ -440,7 +440,7 @@ private:
             return ExitModelError;
         }
         const int modelIndex = api_.loadModel(localPath.c_str(), deviceId);
-        if (modelIndex < 0) {
+        if (modelIndex == -1) {
             std::cerr << "错误：模型加载失败：" << localText(api_.getLastError()) << "\n";
             return ExitModelError;
         }

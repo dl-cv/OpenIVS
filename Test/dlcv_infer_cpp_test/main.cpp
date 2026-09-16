@@ -3111,7 +3111,6 @@ HMODULE ModelModuleForSelfTest(const dlcv_infer::Model& model) {
 bool HasSharedFlowSdkForSelfTest(const dlcv_infer::Model& model) {
     const HMODULE module = ModelModuleForSelfTest(model);
     for (const char* name : {"dlcv_get_index_type_c", "dlcv_get_model_info_c",
-             "dlcv_allocate_index_c",
              "dlcv_bind_index_c", "dlcv_unbind_index_c", "dlcv_free_result"}) {
         if (!GetProcAddress(module, name)) return false;
     }
@@ -3421,7 +3420,7 @@ bool VerifyCreateModelFromIndexReference(
     try {
         owner = std::make_unique<dlcv_infer::Model>(modelPath, deviceId);
         const int index = owner->modelIndex;
-        if (index < 0) throw std::runtime_error("原始模型没有返回有效 index");
+        if (index == -1) throw std::runtime_error("原始模型没有返回有效 index");
 
         const int typeBefore = QueryNativeIndexTypeForSelfTest(index);
         const int expectedType = isFlowModel ? 2 : 1;

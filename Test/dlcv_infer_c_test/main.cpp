@@ -788,7 +788,7 @@ static bool RunCompatibilityFlowCheck(
 
     const std::string ansiPath = WideToAnsi(modelPath);
     const int modelIndex = dlcv_infer_cpp_load_model_c(ansiPath.c_str(), 0);
-    if (modelIndex < 0) {
+    if (modelIndex == -1) {
         std::cerr << "FAIL: 扩展 C 接口加载 dvst 失败\n";
         return false;
     }
@@ -892,7 +892,7 @@ static bool ParseSuccessfulModelIndex(const std::string& value, int& modelIndex)
             return false;
         }
         modelIndex = result.at("model_index").get<int>();
-        return modelIndex >= 0;
+        return modelIndex != -1;
     } catch (...) {
         return false;
     }
@@ -1324,7 +1324,7 @@ static bool RunConcurrentCapiReferenceReleaseCheck(
     dlcv_free_all_models();
     NativeJsonModelCleanup cleanup;
     const int ownerIndex = dlcv_test::LoadOwnedModel(modelPath, 0);
-    if (ownerIndex < 0) return false;
+    if (ownerIndex == -1) return false;
     constexpr int referenceCount = 4;
     constexpr int releaseThreadCount = referenceCount * 2;
     bool ok = true;
@@ -1368,7 +1368,7 @@ static bool RunNativeIndexRangeCheck(
     std::string error;
     if (!LoadWrapperNativeInfer(wrapper, error)) return false;
     const int modelIndex = LoadCapiReference(modelPath, false);
-    if (modelIndex < 0) return false;
+    if (modelIndex == -1) return false;
     const auto validConfig = dlcv_infer::json::parse(BuildNativeInferConfig(modelIndex, image));
     const dlcv_infer::json invalidIndices[] = {
         static_cast<uint64_t>(modelIndex) + (uint64_t{1} << 32),
@@ -1427,10 +1427,10 @@ static bool RunCapiFreeAllEntryPointsCheck(const std::wstring& modelPath, const 
         NativeJsonModelCleanup cleanup;
         const int modelIndex = LoadCapiReference(modelPath, true);
         const int repeatedIndex = LoadCapiReference(modelPath, false);
-        bool ok = modelIndex >= 0 && repeatedIndex == modelIndex;
-        if (modelIndex >= 0) ok = CheckStructuredSharedIndex(modelIndex, image) && ok;
+        bool ok = modelIndex != -1 && repeatedIndex == modelIndex;
+        if (modelIndex != -1) ok = CheckStructuredSharedIndex(modelIndex, image) && ok;
         entryPoint.clear();
-        if (modelIndex >= 0) ok = CheckCapiIndexReleased(modelIndex) && ok;
+        if (modelIndex != -1) ok = CheckCapiIndexReleased(modelIndex) && ok;
         const int reloaded = LoadCapiReference(modelPath, true);
         ok = reloaded >= 0 && reloaded != modelIndex && ok;
         if (reloaded >= 0) {
@@ -1622,7 +1622,7 @@ static bool RunExternalSharedIndexRecoveryCheck(
     const std::wstring& modelPath,
     const cv::Mat& image) {
     const int modelIndex = dlcv_test::LoadOwnedModel(modelPath, 0);
-    if (modelIndex < 0) {
+    if (modelIndex == -1) {
         std::cerr << "FAIL: " << label << "，C++ 外部模型加载失败\n";
         return false;
     }
@@ -1931,7 +1931,7 @@ static bool RunConcurrentModelInfoAndInference(
 static int LoadModel(const std::wstring& path) {
     const std::string utf8Path = WideToUtf8(path);
     const int modelIndex = dlcv_infer_cpp_load_model_c(utf8Path.c_str(), 0);
-    if (modelIndex < 0) {
+    if (modelIndex == -1) {
         const char* error = dlcv_infer_cpp_get_last_error_c();
         std::cerr << "模型加载失败: " << (error == nullptr ? "unknown" : error) << "\n";
     }
@@ -2059,7 +2059,7 @@ static bool RunModelMemoryGrowthCheck(
     std::string error;
 
     int stableIndex = LoadModel(modelPath);
-    if (stableIndex < 0) return false;
+    if (stableIndex == -1) return false;
     if (!InferFingerprint(stableIndex, image, baselineFingerprint, error)) {
         std::cerr << "FAIL: " << label << " 内存测试基准推理失败: " << error << "\n";
         dlcv_infer_cpp_free_model_c(stableIndex);
@@ -2100,7 +2100,7 @@ static bool RunModelMemoryGrowthCheck(
 
     for (int round = 1; round <= warmupRounds; ++round) {
         const int modelIndex = LoadModel(modelPath);
-        if (modelIndex < 0) return false;
+        if (modelIndex == -1) return false;
         std::string fingerprint;
         error.clear();
         const bool inferOk = InferFingerprint(modelIndex, image, fingerprint, error)
@@ -2118,7 +2118,7 @@ static bool RunModelMemoryGrowthCheck(
     PrintMemorySnapshot(label + " 新建实例测量起点", recreateBaseline, recreateBaseline);
     for (int round = 1; round <= measuredRounds; ++round) {
         const int modelIndex = LoadModel(modelPath);
-        if (modelIndex < 0) return false;
+        if (modelIndex == -1) return false;
         std::string fingerprint;
         error.clear();
         const bool inferOk = InferFingerprint(modelIndex, image, fingerprint, error)
@@ -2154,7 +2154,7 @@ static bool RunDvstPoolReleaseCheck(const std::wstring& modelPath, const cv::Mat
     std::string error;
 
     const int firstIndex = LoadModel(modelPath);
-    if (firstIndex < 0) return false;
+    if (firstIndex == -1) return false;
     const bool firstInferOk = InferFingerprint(firstIndex, image, baselineFingerprint, error);
     const bool firstFreeOk = dlcv_infer_cpp_free_model_c(firstIndex) == 0;
     const dlcv_infer::flow::ModelPoolStats afterFirstRelease = dlcv_infer::flow::GetModelPoolStats();
@@ -2167,7 +2167,7 @@ static bool RunDvstPoolReleaseCheck(const std::wstring& modelPath, const cv::Mat
     }
 
     const int secondIndex = LoadModel(modelPath);
-    if (secondIndex < 0) {
+    if (secondIndex == -1) {
         dlcv_infer_cpp_free_all_models_c();
         return false;
     }
@@ -2197,7 +2197,7 @@ static bool RunModelPoolGenerationCheck(const std::wstring& modelPath, const cv:
     std::string firstFingerprint;
     std::string error;
     const int oldIndex = LoadModel(modelPath);
-    if (oldIndex < 0 || !InferFingerprint(oldIndex, image, firstFingerprint, error)) {
+    if (oldIndex == -1 || !InferFingerprint(oldIndex, image, firstFingerprint, error)) {
         dlcv_infer_cpp_free_all_models_c();
         return false;
     }
@@ -2212,7 +2212,7 @@ static bool RunModelPoolGenerationCheck(const std::wstring& modelPath, const cv:
     }
 
     const int newIndex = LoadModel(modelPath);
-    if (newIndex < 0) {
+    if (newIndex == -1) {
         dlcv_infer_cpp_free_all_models_c();
         return false;
     }
@@ -2250,7 +2250,7 @@ static bool RunModelPoolGenerationCheck(const std::wstring& modelPath, const cv:
 static bool RunFreeAllDuringInferenceCheck(const std::wstring& modelPath, const cv::Mat& image) {
     dlcv_infer_cpp_free_all_models_c();
     const int modelIndex = LoadModel(modelPath);
-    if (modelIndex < 0) return false;
+    if (modelIndex == -1) return false;
 
     std::mutex stateMutex;
     std::condition_variable stateChanged;
@@ -2352,7 +2352,7 @@ static bool RunModelInfoConcurrencyChecks(
     ok = checkReleasedModelInfo("dvst", dvstPath) && ok;
 
     const int dvtIndex = LoadModel(dvtPath);
-    if (dvtIndex < 0) return false;
+    if (dvtIndex == -1) return false;
     ok = RunConcurrentModelInfoAndInference(
         "dvt 同一实例推理与模型信息并发", dvtIndex, dvtImage, 4, 10) && ok;
     const bool dvtReleaseOk = dlcv_infer_cpp_free_model_c(dvtIndex) == 0;
@@ -2360,7 +2360,7 @@ static bool RunModelInfoConcurrencyChecks(
     ok = dvtReleaseOk && ok;
 
     const int dvstIndex = LoadModel(dvstPath);
-    if (dvstIndex < 0) return false;
+    if (dvstIndex == -1) return false;
     ok = RunConcurrentModelInfoAndInference(
         "dvst 同一实例推理与模型信息并发", dvstIndex, dvstImage, 4, 10) && ok;
     const bool dvstReleaseOk = dlcv_infer_cpp_free_model_c(dvstIndex) == 0;

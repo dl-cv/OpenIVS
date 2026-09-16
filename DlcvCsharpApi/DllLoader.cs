@@ -79,7 +79,6 @@ namespace dlcv_infer_csharp
             new Dictionary<IntPtr, DllLoader>();
         private static readonly object _lock = new object();
 
-        private bool _supportsIndexAllocation;
         private IntPtr _moduleHandle;
         private string _modulePath;
 
@@ -90,7 +89,7 @@ namespace dlcv_infer_csharp
         {
             get
             {
-                return _supportsIndexAllocation && dlcv_get_index_type_c != null &&
+                return dlcv_get_index_type_c != null &&
                        dlcv_get_model_info_c != null &&
                        dlcv_bind_index_c != null &&
                        dlcv_unbind_index_c != null &&
@@ -205,8 +204,8 @@ namespace dlcv_infer_csharp
 
         internal static DllLoader ResolveSharedIndexLoader(int index, out string indexType)
         {
-            if (index < 0)
-                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 不能为负数: " + index);
+            if (index == -1)
+                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 无效: " + index);
 
             List<DllLoader> candidates;
             lock (_lock)
@@ -222,8 +221,8 @@ namespace dlcv_infer_csharp
             IList<DllLoader> candidates,
             out string indexType)
         {
-            if (index < 0)
-                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 不能为负数: " + index);
+            if (index == -1)
+                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 无效: " + index);
             if (candidates == null)
                 throw new ArgumentNullException(nameof(candidates));
 
@@ -286,8 +285,6 @@ namespace dlcv_infer_csharp
             if (dlcv_unbind_index_c == null) missing.Add("dlcv_unbind_index_c");
             if (dlcv_free_result == null) missing.Add("dlcv_free_result");
             if (dlcv_get_model_info_c == null) missing.Add("dlcv_get_model_info_c");
-            if (string.Equals(indexType, "flow", StringComparison.Ordinal) && !_supportsIndexAllocation)
-                missing.Add("dlcv_allocate_index_c");
             if (missing.Count > 0)
             {
                 throw new NotSupportedException(
@@ -298,8 +295,8 @@ namespace dlcv_infer_csharp
         public int GetIndexType(int index)
         {
             EnsureDelegate(dlcv_get_index_type_c, "dlcv_get_index_type_c");
-            int nativeType = dlcv_get_index_type_c(index);
-            if (nativeType != 0 || !_supportsIndexAllocation) return nativeType;
+            if (index >= 0) return dlcv_get_index_type_c(index);
+            if (index == -1) return 0;
             int flow = SharedFlowRegistry.Contains(_moduleHandle, index);
             if (flow < 0) throw new InvalidOperationException("流程索引查询失败");
             return flow == 1 ? 2 : 0;
@@ -332,7 +329,7 @@ namespace dlcv_infer_csharp
 
         public JObject GetFlowInfo(int index)
         {
-            if (!_supportsIndexAllocation || _moduleHandle == IntPtr.Zero)
+            if (_moduleHandle == IntPtr.Zero)
                 throw new NotSupportedException("缺少流程所属模型模块");
             IntPtr result = SharedFlowRegistry.GetInfo(_moduleHandle, index);
             if (result == IntPtr.Zero) throw new InvalidOperationException("获取流程信息失败");
@@ -355,14 +352,13 @@ namespace dlcv_infer_csharp
         public int UnbindIndex(int index)
         {
             EnsureDelegate(dlcv_unbind_index_c, "dlcv_unbind_index_c");
-            if (_supportsIndexAllocation && SharedFlowRegistry.Release(_moduleHandle, index, 0) == 0)
-                return 0;
-            return dlcv_unbind_index_c(index);
+            return index < -1 ? SharedFlowRegistry.Release(_moduleHandle, index, 0)
+                : dlcv_unbind_index_c(index);
         }
 
         internal void FreeAllModels()
         {
-            if (_supportsIndexAllocation) SharedFlowRegistry.FreeAllModels(_moduleHandle);
+            if (SupportsSharedFlowIndex) SharedFlowRegistry.FreeAllModels(_moduleHandle);
             else dlcv_free_all_models?.Invoke();
         }
 
@@ -606,7 +602,6 @@ namespace dlcv_infer_csharp
             dlcv_free_model_result = GetDelegate<FreeModelResultDelegate>(hModule, "dlcv_free_model_result");
             dlcv_free_result = GetDelegate<FreeResultDelegate>(hModule, "dlcv_free_result");
             dlcv_free_all_models = GetDelegate<FreeAllModelsDelegate>(hModule, "dlcv_free_all_models");
-            _supportsIndexAllocation = GetProcAddress(hModule, "dlcv_allocate_index_c") != IntPtr.Zero;
             dlcv_get_index_type_c = GetDelegate<GetIndexTypeDelegate>(hModule, "dlcv_get_index_type_c");
             dlcv_get_model_info_c = GetDelegate<GetModelInfoByIndexDelegate>(hModule, "dlcv_get_model_info_c");
             dlcv_bind_index_c = GetDelegate<BindIndexDelegate>(hModule, "dlcv_bind_index_c");

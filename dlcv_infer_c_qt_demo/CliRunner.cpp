@@ -593,7 +593,7 @@ int RunInferCommand(const InferOptions& options) {
         CoutSilencer silenceApiLogs;
         const QByteArray modelPath = options.modelPath.toLocal8Bit();
         const int modelIndex = api.loadModel(modelPath.constData(), options.device);
-        if (modelIndex < 0) {
+        if (modelIndex == -1) {
             throw std::runtime_error(LastApiError(api));
         }
 

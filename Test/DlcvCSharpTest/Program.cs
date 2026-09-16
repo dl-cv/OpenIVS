@@ -60,7 +60,6 @@ namespace DlcvCSharpTest
         {
             "dlcv_get_index_type_c",
             "dlcv_get_model_info_c",
-            "dlcv_allocate_index_c",
             "dlcv_bind_index_c",
             "dlcv_unbind_index_c",
             "dlcv_free_result"
@@ -1727,8 +1726,6 @@ namespace DlcvCSharpTest
                     dlcv_unbind_index_c = index => 0,
                     dlcv_free_result = ptr => { }
                 };
-                typeof(DllLoader).GetField("_supportsIndexAllocation", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(completeSharedFlow, true);
                 if (!completeSharedFlow.SupportsSharedFlowIndex)
                     throw new Exception("完整共享流程接口未被识别");
 
@@ -2032,7 +2029,7 @@ namespace DlcvCSharpTest
                         ["model_bindings"] = new JArray()
                     }.ToString(Formatting.None);
                     int index = loader.RegisterFlow(flowJson);
-                    if (index < 0) throw new Exception("流程登记失败: " + loader.LoadedNativeModulePath);
+                    if (index == -1) throw new Exception("流程登记失败: " + loader.LoadedNativeModulePath);
                     return index;
                 };
                 foreach (DllLoader loader in selectedLoaders)
@@ -2087,9 +2084,9 @@ namespace DlcvCSharpTest
                         throw new Exception("仅剩一个资源时未恢复唯一模块");
                 }
 
-                foreach (var item in registered.Where(item => item.Item2 >= 0))
+                foreach (var item in registered.Where(item => item.Item2 != -1))
                     if (item.Item1.FreeFlow(item.Item2) != 0) throw new Exception("测试资源释放失败");
-                var releasedIndices = registered.Where(item => item.Item2 >= 0).Select(item => item.Item2).ToList();
+                var releasedIndices = registered.Where(item => item.Item2 != -1).Select(item => item.Item2).ToList();
                 registered.Clear();
                 foreach (int index in releasedIndices)
                 {
@@ -2108,7 +2105,7 @@ namespace DlcvCSharpTest
             }
             finally
             {
-                foreach (var item in registered.Where(item => item.Item2 >= 0))
+                foreach (var item in registered.Where(item => item.Item2 != -1))
                     try { item.Item1.FreeFlow(item.Item2); } catch { }
             }
         }
@@ -2898,7 +2895,7 @@ namespace DlcvCSharpTest
 
         private static void EnsureIndexRemoved(DllLoader loader, int index, string label)
         {
-            if (loader == null || index < 0) return;
+            if (loader == null || index == -1) return;
             if (loader.GetIndexType(index) != 0)
                 throw new Exception(label + "释放后 index 仍然存在: " + index);
         }
@@ -6446,7 +6443,7 @@ namespace DlcvCSharpTest
             try
             {
                 index = NativeCLoadModel(modelPath, GpuDeviceId);
-                if (index < 0) throw new Exception("C++ 加载失败");
+                if (index == -1) throw new Exception("C++ 加载失败");
                 ownerActive = true;
                 DllLoader loader = ResolveAndValidateSharedIndex(index, expectedIndexType, label);
                 firstBorrower = CreateBoundCSharpBorrower(index, out JObject firstInfo);
@@ -6557,7 +6554,7 @@ namespace DlcvCSharpTest
                 System.Threading.Tasks.Parallel.For(0, 32, i =>
                 {
                     int index = RegisterEmptyFlow(loader, provider);
-                    if (index < 0) throw new Exception("并发登记失败");
+                    if (index == -1) throw new Exception("并发登记失败");
                     indices.Add(index);
                     if (loader.BindIndex(index) != 0 || loader.BindIndex(index) != 0 ||
                         loader.FreeFlow(index) != 0 || loader.GetIndexType(index) != 2 ||
@@ -6567,9 +6564,13 @@ namespace DlcvCSharpTest
                 });
                 if (indices.Distinct().Count() != 32) throw new Exception("并发编号重复");
                 int remaining = RegisterEmptyFlow(loader, provider);
-                if (remaining < 0) throw new Exception("空流程登记失败");
+                if (remaining == -1) throw new Exception("空流程登记失败");
                 loader.FreeAllModels();
                 if (loader.GetIndexType(remaining) != 0) throw new Exception("全量释放后空流程仍有效");
+                int next = RegisterEmptyFlow(loader, provider);
+                if (next >= -1 || next == remaining || indices.Contains(next))
+                    throw new Exception("全量释放后流程编号重复或无效");
+                if (loader.FreeFlow(next) != 0) throw new Exception("新流程释放失败");
                 check.Passed = true;
                 check.Actual = "32 个并发流程编号唯一，持有和最终释放正确，全量释放清除空流程";
             }
@@ -6617,7 +6618,7 @@ namespace DlcvCSharpTest
                 if (loader.RegisterFlow(partial.ToString(Formatting.None)) != -1)
                     throw new Exception("未拒绝不存在的子模型");
                 int flow = loader.RegisterFlow(data.ToString(Formatting.None));
-                if (flow < 0) throw new Exception("有效流程登记失败");
+                if (flow == -1) throw new Exception("有效流程登记失败");
                 if (loader.dlcv_get_index_type_c(flow) != 0 || loader.GetIndexType(flow) != 2)
                     throw new Exception("流程未限定在 OpenIVS 层");
                 if (loader.FreeFlow(flow) != 0) throw new Exception("流程释放失败");
@@ -6770,7 +6771,7 @@ namespace DlcvCSharpTest
             {
                 File.Copy(modelPath, tempPath, false);
                 owner = new Model(tempPath, GpuDeviceId, false, false);
-                if (owner.modelIndex < 0) throw new Exception("临时模型加载失败");
+                if (owner.modelIndex == -1) throw new Exception("临时模型加载失败");
                 File.Delete(tempPath);
                 try
                 {
@@ -6857,7 +6858,7 @@ namespace DlcvCSharpTest
             {
                 File.Copy(modelPath, tempPath, false);
                 cppIndex = NativeCLoadModel(tempPath, GpuDeviceId);
-                if (cppIndex < 0) throw new Exception("C++ 加载临时" + modelLabel + "失败");
+                if (cppIndex == -1) throw new Exception("C++ 加载临时" + modelLabel + "失败");
                 JObject originalInfo = CallCppSharedIndexInfo(cppIndex, "保存原资源信息");
                 if (isFlow)
                     File.Move(tempPath, movedPath);
@@ -6896,7 +6897,7 @@ namespace DlcvCSharpTest
             {
                 try { replacedCsharpBorrower?.Dispose(); } catch { }
                 try { csharpBorrower?.Dispose(); } catch { }
-                try { if (cppIndex >= 0) NativeCFreeModel(cppIndex); } catch { }
+                try { if (cppIndex != -1) NativeCFreeModel(cppIndex); } catch { }
                 try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
                 try { if (File.Exists(movedPath)) File.Delete(movedPath); } catch { }
             }
@@ -6983,7 +6984,7 @@ namespace DlcvCSharpTest
             }
             finally
             {
-                if (flowIndex >= 0) NativeCFreeModel(flowIndex);
+                if (flowIndex != -1) NativeCFreeModel(flowIndex);
                 if (providerIndex >= 0) NativeCFreeModel(providerIndex);
                 if (File.Exists(flowPath)) File.Delete(flowPath);
             }
@@ -7076,7 +7077,7 @@ namespace DlcvCSharpTest
                 csharpOwner = null;
 
                 cppIndex = NativeCLoadModel(flowPath, GpuDeviceId);
-                if (cppIndex < 0) throw new Exception("正式 C 空模型流程加载失败");
+                if (cppIndex == -1) throw new Exception("正式 C 空模型流程加载失败");
                 bool cppUsesSharedFlowIndex = QueryNativeIndexType(cppIndex) == 2;
                 if (csharpUsesSharedFlowIndex != cppUsesSharedFlowIndex)
                     throw new Exception("C# 与 正式 C 空模型流程索引模式不一致");
@@ -7105,7 +7106,7 @@ namespace DlcvCSharpTest
             finally
             {
                 try { if (csharpBorrower != null) csharpBorrower.Dispose(); } catch { }
-                try { if (cppIndex >= 0) NativeCFreeModel(cppIndex); } catch { }
+                try { if (cppIndex != -1) NativeCFreeModel(cppIndex); } catch { }
                 try { if (csharpOwner != null) csharpOwner.Dispose(); } catch { }
                 try { if (File.Exists(flowPath)) File.Delete(flowPath); } catch { }
             }
@@ -7164,7 +7165,7 @@ namespace DlcvCSharpTest
                 DllLoader sentinelLoader = ResolveAndValidateSharedIndex(sentinelModel, "model", "Sentinel 模型");
 
                 virboxFlow = RegisterVirboxEmptyFlow();
-                if (virboxFlow < 0)
+                if (virboxFlow == -1)
                     throw new Exception("Virbox 空流程登记失败: " + virboxFlow);
 
                 cachedOwner = new Model(args[1], GpuDeviceId, false, true);
@@ -7186,7 +7187,7 @@ namespace DlcvCSharpTest
                     throw new Exception("正式接口 Virbox 流程 index 解析失败");
 
                 sentinelFlow = RegisterEmptyFlow(sentinelLoader, "sentinel");
-                if (sentinelFlow < 0)
+                if (sentinelFlow == -1)
                     throw new Exception("provider 切换后的 Sentinel 流程登记失败");
                 ResolveAndValidateSharedIndex(sentinelFlow, "flow", "双 provider 下的 Sentinel 流程");
 
@@ -7204,14 +7205,14 @@ namespace DlcvCSharpTest
                 try { cachedOwner?.Dispose(); } catch { }
                 try
                 {
-                    if (sentinelFlow >= 0)
+                    if (sentinelFlow != -1)
                     {
                         string indexType;
                         DllLoader.ResolveForIndex(sentinelFlow, out indexType).FreeFlow(sentinelFlow);
                     }
                 }
                 catch { }
-                try { if (virboxFlow >= 0) ReleaseNativeFlow(LoadNativeModule("dlcv_infer_v.dll"), virboxFlow, 1); } catch { }
+                try { if (virboxFlow != -1) ReleaseNativeFlow(LoadNativeModule("dlcv_infer_v.dll"), virboxFlow, 1); } catch { }
                 try { if (sentinelModel >= 0) NativeCFreeModel(sentinelModel); } catch { }
             }
         }

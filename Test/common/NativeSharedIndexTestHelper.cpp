@@ -98,7 +98,7 @@ int LoadOwnedModel(const std::wstring& modelPath, int deviceId) {
     try {
         auto owner = std::make_shared<dlcv_infer::Model>(modelPath, deviceId);
         const int index = owner->modelIndex;
-        if (index < 0) return -1;
+        if (index == -1) return -1;
         std::lock_guard<std::mutex> lock(OwnedModelsMutex());
         const auto inserted = OwnedModels().emplace(index, std::move(owner));
         return inserted.second ? index : -1;
@@ -186,6 +186,14 @@ int RunSharedIndexResolverSelfTest() {
             0, secondCandidates, selectedType).Module != &secondTag ||
         selectedType != 2) {
         return -2;
+    }
+
+    for (int handle : {-2, std::numeric_limits<int>::min()}) {
+        const std::vector<dlcv_infer::detail::SharedIndexCandidate> flows = {
+            {&firstTag, nullptr, [handle](int value) { return value == handle ? 2 : 0; }}
+        };
+        if (dlcv_infer::detail::SelectSharedIndexCandidate(handle, flows, selectedType).Module != &firstTag ||
+            selectedType != 2) return -12;
     }
 
     const std::vector<dlcv_infer::detail::SharedIndexCandidate> noResultCandidates = {

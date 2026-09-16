@@ -323,7 +323,8 @@ static bool TryReadModelIndex(const dlcv_infer::json& config, int& modelIndex) n
             }
         } else {
             const auto index = value.get<dlcv_infer::json::number_integer_t>();
-            if (index < 0 || index > (std::numeric_limits<int>::max)()) return false;
+            if (index < (std::numeric_limits<int>::min)() || index == -1 ||
+                index > (std::numeric_limits<int>::max)()) return false;
         }
         modelIndex = value.get<int>();
         return true;
@@ -484,7 +485,7 @@ static std::shared_ptr<CApiModelEntry> FindOrRestoreSharedModelEntry(
 }
 
 static std::shared_ptr<CApiModelEntry> GetStructuredModelEntry(int modelIndex) {
-    if (modelIndex < 0) throw std::out_of_range("Model not found.");
+    if (modelIndex == -1) throw std::out_of_range("Model not found.");
     return FindOrRestoreSharedModelEntry(modelIndex, true);
 }
 
@@ -790,7 +791,7 @@ static void CallNativeVoid(const char* apiName, Invoke&& invoke) noexcept {
 
 static const char* InvalidNativeModelIndexResult(const char* apiName) noexcept {
     return CallNativeString(apiName, []() {
-        return AllocateNativeJsonResult(MakeNativeStatus(1, "model_index 必须是非负 int 范围内的整数"));
+        return AllocateNativeJsonResult(MakeNativeStatus(1, "model_index 必须是除 -1 外的 int 范围内整数"));
     });
 }
 
@@ -830,8 +831,8 @@ int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
         const bool isFlowModel = IsFlowModelPath(modelPath);
         auto model = std::make_shared<dlcv_infer::Model>(modelPath, device_id);
         int idx = model->modelIndex;
-        if (idx < 0) {
-            SetLastErrorMessage("load model returned negative modelIndex: " + std::to_string(idx) + "; " + pathDiagnostics);
+        if (idx == -1) {
+            SetLastErrorMessage("load model returned invalid modelIndex: " + std::to_string(idx) + "; " + pathDiagnostics);
             AppendCapiDebugLog("load_model failed: %s", g_lastError.c_str());
             return -1;
         }
@@ -1162,7 +1163,7 @@ const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str) {
             }
             const int deviceId = config.value("device_id", 0);
             const int modelIndex = dlcv_infer_cpp_load_model_c(modelPath.c_str(), deviceId);
-            if (modelIndex < 0) {
+            if (modelIndex == -1) {
                 const char* lastError = dlcv_infer_cpp_get_last_error_c();
                 const std::string message = lastError != nullptr && lastError[0] != '\0'
                     ? lastError

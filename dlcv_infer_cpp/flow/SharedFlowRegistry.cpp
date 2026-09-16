@@ -1,6 +1,7 @@
 #include "SharedFlowRegistry.h"
 #include "../dlcv_infer.h"
 #include <cstring>
+#include <cstdint>
 #include <algorithm>
 #include <cctype>
 #include <limits>
@@ -17,7 +18,6 @@
 namespace {
 using json = nlohmann::json;
 using IndexCall = int (OPENIVS_FLOW_CALL*)(int);
-using AllocateCall = int (OPENIVS_FLOW_CALL*)();
 template<class T> T symbol(void* module, const char* name) {
 #ifdef _WIN32
     return reinterpret_cast<T>(GetProcAddress(static_cast<HMODULE>(module), name));
@@ -45,16 +45,17 @@ struct FlowRecord {
 using Key = std::pair<void*, int>;
 std::mutex registryMutex;
 std::map<Key, std::unique_ptr<FlowRecord>> records;
+// 非负数属于底层模型，-1 表示失败；流程使用独立编号且不复用。
+std::int64_t nextFlowIndex = -2;
 }
 
 int OPENIVS_FLOW_CALL openivs_flow_register(void* module, const char* text) {
     try {
         if (!module || !text) return -1;
-        const auto allocate = symbol<AllocateCall>(module, "dlcv_allocate_index_c");
         const auto bind = symbol<IndexCall>(module, "dlcv_bind_index_c");
         const auto unbind = symbol<IndexCall>(module, "dlcv_unbind_index_c");
         const auto query = symbol<IndexCall>(module, "dlcv_get_index_type_c");
-        if (!allocate || !bind || !unbind || !query) return -1;
+        if (!bind || !unbind || !query) return -1;
         auto record = std::make_unique<FlowRecord>();
         record->data = json::parse(text);
         record->unbind = unbind;
@@ -90,9 +91,8 @@ int OPENIVS_FLOW_CALL openivs_flow_register(void* module, const char* text) {
             if (query(index) != 1 || bind(index) != 0) return -1;
             record->models.push_back(index);
         }
-        const int index = allocate();
-        if (index < 0) return -1;
-        if (provider != ((index & 0x100) ? "virbox" : "sentinel")) return -1;
+        if (nextFlowIndex < std::numeric_limits<int>::min()) return -1;
+        const int index = static_cast<int>(nextFlowIndex--);
         record->data["flow_index"] = index;
         if (!records.emplace(Key{module, index}, std::move(record)).second) return -1;
         return index;

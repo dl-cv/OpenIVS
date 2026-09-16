@@ -141,8 +141,6 @@ namespace dlcv_infer {
         FreeAllModelsFuncType dlcv_free_all_models = nullptr;
         GetDeviceInfoFuncType dlcv_get_device_info = nullptr;
         KeepMaxClockFuncType dlcv_keep_max_clock = nullptr;
-        using AllocateIndexFunc = int (DLCV_INFER_NATIVE_CALL*)();
-        AllocateIndexFunc allocateIndex = nullptr;
         GetIndexTypeFuncType dlcv_get_index_type_c = nullptr;
         GetModelInfoByIndexFuncType dlcv_get_model_info_c = nullptr;
         BindIndexFuncType dlcv_bind_index_c = nullptr;
@@ -227,7 +225,7 @@ namespace dlcv_infer {
         KeepMaxClockFuncType GetKeepMaxClockFunc() const {
             return dlcv_keep_max_clock;
         }
-        bool SupportsFlowRegistry() const { return allocateIndex != nullptr; }
+        bool SupportsFlowRegistry() const { return dlcv_get_index_type_c && dlcv_bind_index_c && dlcv_unbind_index_c; }
         int QueryIndexType(int index) const;
         int BindIndex(int index) const;
         int UnbindIndex(int index) const;
@@ -437,7 +435,7 @@ namespace dlcv_infer {
     /// 从已加载的共享索引创建模型对象，并在创建时绑定该索引。
     /// </summary>
     inline Model CreateModelFromIndex(int index) {
-        if (index < 0) {
+        if (index == -1) {
             throw std::invalid_argument("model index 无效");
         }
         Model model;

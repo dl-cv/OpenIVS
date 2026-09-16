@@ -13,6 +13,7 @@
 #endif
 
 // 流程记录仅保存在 OpenIVS，module 为已加载的推理模块句柄。
+// handle 小于 -1，-1 表示失败；进程内不复用已释放的 handle。
 extern "C" {
 OPENIVS_FLOW_API int OPENIVS_FLOW_CALL openivs_flow_register(void* module, const char* json);
 OPENIVS_FLOW_API int OPENIVS_FLOW_CALL openivs_flow_contains(void* module, int index);

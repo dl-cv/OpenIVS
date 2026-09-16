@@ -22,7 +22,7 @@ inline const SharedIndexCandidate& SelectSharedIndexCandidate(
     int index,
     const std::vector<SharedIndexCandidate>& candidates,
     int& indexType) {
-    if (index < 0) {
+    if (index == -1) {
         throw std::invalid_argument("共享 index 无效");
     }
     if (candidates.empty()) {

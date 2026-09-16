@@ -32,7 +32,7 @@ namespace DlcvCSharpCppTest
             try
             {
                 candidate = new CSharpModel(path, device, false, false);
-                if (candidate.modelIndex < 0)
+                if (candidate.modelIndex == -1)
                     throw new InvalidOperationException("加载失败：模型编号无效。");
                 csharpModel = candidate;
                 CSharpCreatedFromIndex = false;
@@ -70,7 +70,7 @@ namespace DlcvCSharpCppTest
             try
             {
                 candidate = new CppModel(path, device);
-                if (candidate.ModelIndex < 0)
+                if (candidate.ModelIndex == -1)
                     throw new InvalidOperationException("加载失败：模型编号无效。");
                 cppModel = candidate;
                 CppCreatedFromIndex = false;

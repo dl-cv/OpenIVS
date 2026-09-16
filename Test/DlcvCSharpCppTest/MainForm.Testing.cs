@@ -129,7 +129,7 @@ namespace DlcvCSharpCppTest
             UiCheck(statusLabel.Text.StartsWith("操作失败") && Session.CppModelIndex == cppIndex,
                 "重复加载应拒绝且保留现有 C++ 模型");
             LoadCSharpButton_Click(loadCSharpButton, EventArgs.Empty);
-            UiCheck(Session.HasCSharpModel && Session.CSharpModelIndex >= 0 && !loadCSharpButton.Enabled,
+            UiCheck(Session.HasCSharpModel && Session.CSharpModelIndex != -1 && !loadCSharpButton.Enabled,
                 "C++ 加载后 C# 独立加载失败：" + statusLabel.Text);
             ConvertToCppButton_Click(convertToCppButton, EventArgs.Empty);
             UiCheck(statusLabel.Text.StartsWith("操作失败") && Session.CppModelIndex == cppIndex,

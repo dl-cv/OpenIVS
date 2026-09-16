@@ -216,7 +216,7 @@ namespace DlcvCSharpCppTest
                                 throw;
                             }
                             CheckButtons(form);
-                            Require(index >= 0 && session.CppModelIndex == index, "共享模型索引不一致");
+                            Require(index != -1 && session.CppModelIndex == index, "共享模型索引不一致");
                             string cpp = session.GetCppInfo();
                             result["csharp_info"] = Info(csharp);
                             result["cpp_info"] = Info(cpp);

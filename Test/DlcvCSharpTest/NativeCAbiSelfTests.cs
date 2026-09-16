@@ -122,7 +122,7 @@ namespace DlcvCSharpTest
             using (var path = new Utf8NativeBuffer(modelPath))
             {
                 int index = NativeCLoadModelRaw(path.Pointer, deviceId);
-                if (index < 0)
+                if (index == -1)
                 {
                     throw new InvalidOperationException(
                         "正式 C 接口加载失败: " + ReadNativeLastError());

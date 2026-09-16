@@ -1604,7 +1604,6 @@ namespace dlcv_infer {
         dlcv_free_all_models = (FreeAllModelsFuncType)ResolveSymbol(hModule, "dlcv_free_all_models");
         dlcv_get_device_info = (GetDeviceInfoFuncType)ResolveSymbol(hModule, "dlcv_get_device_info");
         dlcv_keep_max_clock = (KeepMaxClockFuncType)ResolveSymbol(hModule, "dlcv_keep_max_clock");
-        allocateIndex = (AllocateIndexFunc)ResolveSymbol(hModule, "dlcv_allocate_index_c");
         dlcv_get_index_type_c = (GetIndexTypeFuncType)ResolveSymbol(hModule, "dlcv_get_index_type_c");
         dlcv_get_model_info_c = (GetModelInfoByIndexFuncType)ResolveSymbol(hModule, "dlcv_get_model_info_c");
         dlcv_bind_index_c = (BindIndexFuncType)ResolveSymbol(hModule, "dlcv_bind_index_c");
@@ -1733,8 +1732,8 @@ namespace dlcv_infer {
 
     int DllLoader::QueryIndexType(int index) const {
         if (!dlcv_get_index_type_c) throw std::runtime_error("缺少模型索引查询接口");
-        const int nativeType = dlcv_get_index_type_c(index);
-        if (nativeType != 0) return nativeType;
+        if (index >= 0) return dlcv_get_index_type_c(index);
+        if (index == -1) return 0;
         const int flow = openivs_flow_contains(hModule, index);
         if (flow < 0) throw std::runtime_error("流程索引查询失败");
         return flow ? 2 : 0;
@@ -1747,8 +1746,8 @@ namespace dlcv_infer {
 
     int DllLoader::UnbindIndex(int index) const {
         // 释放不依赖子模型是否仍有效，全量释放后也能清理流程记录。
-        const int result = openivs_flow_release(hModule, index, 0);
-        return result == 0 ? 0 : (dlcv_unbind_index_c ? dlcv_unbind_index_c(index) : -1);
+        if (index < -1) return openivs_flow_release(hModule, index, 0);
+        return dlcv_unbind_index_c ? dlcv_unbind_index_c(index) : -1;
     }
 
     int DllLoader::RegisterFlow(const char* text) const {
@@ -1767,7 +1766,7 @@ namespace dlcv_infer {
     }
 
     DllLoader& DllLoader::ResolveForIndex(int index, int& indexType) {
-        if (index < 0) {
+        if (index == -1) {
             throw std::invalid_argument("共享 index 无效");
         }
 
@@ -2082,7 +2081,7 @@ namespace dlcv_infer {
 
     bool Model::UnbindCurrentIndexNoexcept() {
         if (!_indexBound) return true;
-        if (modelIndex < 0 || _dllLoader == nullptr || _dllLoader->GetUnbindIndexFunc() == nullptr) {
+        if (modelIndex == -1 || _dllLoader == nullptr || _dllLoader->GetUnbindIndexFunc() == nullptr) {
             return false;
         }
         try {
@@ -2169,7 +2168,7 @@ namespace dlcv_infer {
 
         const std::string registrationText = flowRegistration.dump();
         const int flowIndex = _dllLoader->RegisterFlow(registrationText.c_str());
-        if (flowIndex < 0) {
+        if (flowIndex == -1) {
             throw std::runtime_error("注册流程失败");
         }
         modelIndex = flowIndex;
@@ -2233,7 +2232,7 @@ namespace dlcv_infer {
 
     void Model::EnsureBoundIndexReady() {
         std::lock_guard<std::mutex> lock(_indexStateMu);
-        if (modelIndex < 0) return;
+        if (modelIndex == -1) return;
         if (_indexReady || _ownsNativeModelIndex || _ownsRegisteredFlowIndex) {
             // 全局释放可能由另一语言发起，缓存信息不能证明底层资源仍然存在。
             // 只检查已保存的所属模块，不按默认 DLL 或编号重新选择模块。
@@ -2550,7 +2549,7 @@ namespace dlcv_infer {
 
         if (_ownsRegisteredFlowIndex) {
             try {
-                if (modelIndex >= 0 && _dllLoader != nullptr &&
+                if (modelIndex != -1 && _dllLoader != nullptr &&
                     _dllLoader->SupportsFlowRegistry()) {
                     if (_dllLoader->FreeFlow(modelIndex) != 0) {
                         logFailure("释放流程索引失败");
