@@ -9,7 +9,7 @@
 
 ## Visual Studio 界面编辑
 
-打开本目录的 `DlcvCSharpCppTest.sln`，在 `DlcvCSharpCppTest` 项目中右键 `MainForm.cs` → 查看设计器，或选中文件按 Shift+F7。控件位置、大小、文本和事件可通过 .NET Framework Windows Forms 设计器编辑。
+打开仓库根目录现有的 `OpenIVS.sln`，在 Test 分组的 `DlcvCSharpCppTest` 项目中右键 `MainForm.cs` → 查看设计器，或选中文件按 Shift+F7。控件位置、大小、文本和事件可通过 .NET Framework Windows Forms 设计器编辑。
 
 - `MainForm.Designer.cs`：标准 `InitializeComponent()`、控件字段、布局和事件连接。
 - `MainForm.resx`：窗体资源，由设计器维护。
@@ -37,9 +37,9 @@
 
 ## Visual Studio 启动
 
-- 专用入口：`Test/DlcvCSharpCppTest/DlcvCSharpCppTest.sln`，只包含 C# 应用及三个必要依赖，第一项目是可运行的 C# 应用。
+- 统一入口为仓库根目录现有的 `OpenIVS.sln`；Test 分组包含 `DlcvCSharpCppTest` 和 `DlcvCSharpCppBridge`，Debug/Release x64 配置均已登记，不另建解决方案。
 - C# 工程明确设置 `OutputType=WinExe`、`StartupObject=DlcvCSharpCppTest.Program`、`StartAction=Project`，启用混合调试；启动配置为 Debug x64。
-- 两个解决方案的共享 `.slnLaunch` 均提供“C# 与 C++ 混编模型测试”配置，只启动 C# 应用，不启动 C++/CLI 或原生 DLL 工程。配置由 `python Test/DlcvCSharpCppTest/update_test_solution.py` 从项目引用生成。
+- 根目录 `OpenIVS.slnLaunch` 提供“C# 与 C++ 混编模型测试”配置，只启动 C# 应用，不启动 C++/CLI 或原生 DLL 工程。`python Test/DlcvCSharpCppTest/update_launch_profile.py` 先确认应用已属于现有解决方案，再更新该启动配置；脚本不创建或改写 `.sln`。
 - 已有 Visual Studio 会话仍使用此前启动选择时，右键 **DlcvCSharpCppTest** → **设为启动项目**，或选择上述共享启动配置。`DlcvCSharpCppBridge` 和 `dlcv_infer_cpp` 是 DLL，不是独立程序。
 - F5 启动调试，Ctrl+F5 启动应用；独立 EXE 仍可直接启动。本工程不修改个人 `.suo` 或其他工程的调试设置。
 
@@ -48,7 +48,7 @@
 在仓库根目录使用日常构建入口：
 
 ```powershell
-python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCSharpCppTest.sln --configuration Debug --platform x64 --target Build --verbosity minimal
+python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCSharpCppTest.csproj --configuration Debug --platform x64 --target Build --verbosity minimal
 ```
 
 输出：`Test/DlcvCSharpCppTest/bin/x64/Debug/DlcvCSharpCppTest.exe`。双击或不带参数运行进入界面。`Test/1_编译测试.bat` 同时包含本工程的 Release x64 构建。

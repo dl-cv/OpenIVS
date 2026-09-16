@@ -55,8 +55,7 @@
     <Compile Include="Properties\Settings.cs" />
     <EmbeddedResource Include="MainForm.resx"><DependentUpon>MainForm.cs</DependentUpon></EmbeddedResource>
     <None Include="App.config" /><None Include="README.md" />
-    <None Include="run_tests.py" /><None Include="update_test_solution.py" />
-    <None Include="DlcvCSharpCppTest.slnLaunch" />
+    <None Include="run_tests.py" /><None Include="update_launch_profile.py" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="..\..\DlcvNativeRuntime.targets" />
