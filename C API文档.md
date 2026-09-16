@@ -11,21 +11,35 @@
 
 - `dlcv_infer` 的 23 个非公共索引接口；
 - `dlcv_infer_cpp` 的 11 个 `dlcv_infer_cpp_*_c` 扩展入口；
-- 当前导出总数为 34 个。
+- 上述业务入口共 34 个，流程层内部共享入口单独列示。
 
-以下 7 个公共索引接口归入“双语言 model index 互通”任务，本文件不把它们写成当前任务的缺失接口：
+以下 5 个模型共享及编号分配接口由底层 `dlcv_infer` 提供：
 
 | 接口 |
 | --- |
 | `dlcv_get_index_type_c` |
 | `dlcv_get_model_info_c` |
-| `dlcv_register_flow_c` |
-| `dlcv_get_flow_info_c` |
-| `dlcv_free_flow_c` |
+| `dlcv_allocate_index_c` |
 | `dlcv_bind_index_c` |
 | `dlcv_unbind_index_c` |
 
-全部 C 接口声明在 `dlcv_infer_c_api.h`。共享数据结构使用 `typedef struct`，C 模式下由该头文件引入 `<stdbool.h>`，结构化接口使用指针参数，头文件可由 C 或 C++ 编译器使用。公共索引接口继续使用现有 `int` 参数和返回值，保留现有签名和导出函数。
+业务 C 接口声明在 `dlcv_infer_c_api.h`。
+
+### 流程层共享
+
+DVST/DVSO 由 OpenIVS 解析。C# 与 C++ 共用既有 `dlcv_infer_cpp.dll` 内的流程记录，内容为 pipeline、子模型编号及创建方/共享方持有状态，不保存托管对象指针。
+
+- 流程编号使用底层通用编号分配入口取得；该入口不创建资源，底层类型查询对流程编号返回 0。
+- 每条流程记录通过普通模型 bind/unbind 保留不同子模型，底层不再区分流程持有。
+- C# 和 C++ 的 Model 包装继续接受同一个非负 int；加载器分别查询模型表和上层流程表，选定真实模块后不重新搜索。
+- 跨语言恢复使用已保存配置和子模型编号，不重新读取流程文件；任意一侧释放后，另一侧继续持有。
+- 上层 FreeAllModels 将流程清理与底层全部模型释放串行执行，空流程同样失效。
+- C# 工程引用原生包装工程并传递运行库；产品包包含 dlcv_infer_cpp.dll 与匹配的 OpenCV 运行库。
+
+内部 C 入口声明在 `dlcv_infer_cpp/flow/SharedFlowRegistry.h`：register、contains、get_info、retain、release、free_all_models、free_result，名称统一以 `openivs_flow_` 开头。get_info 返回的 UTF-8 JSON 只使用同模块的 free_result 释放。
+
+共享流程要求模型模块提供 `dlcv_allocate_index_c` 及模型共享接口。旧版 SDK 保留普通加载和本地流程操作，不通过旧底层 flow 接口恢复流程；跨语言双方须使用本次 OpenIVS 包装。
+共享数据结构使用 `typedef struct`，C 模式下由该头文件引入 `<stdbool.h>`，结构化接口使用指针参数，头文件可由 C 或 C++ 编译器使用。公共索引接口继续使用现有 `int` 参数和返回值，保留现有签名和导出函数。
 
 ## 2. 两层封装关系
 

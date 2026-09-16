@@ -1,5 +1,6 @@
 ﻿#include "dlcv_infer.h"
 #include "SharedIndexResolver.h"
+#include "flow/SharedFlowRegistry.h"
 #include "dlcv_sntl_admin.h"
 #include "ImageInputUtils.h"
 #include "MaskUtils.h"
@@ -1603,11 +1604,9 @@ namespace dlcv_infer {
         dlcv_free_all_models = (FreeAllModelsFuncType)ResolveSymbol(hModule, "dlcv_free_all_models");
         dlcv_get_device_info = (GetDeviceInfoFuncType)ResolveSymbol(hModule, "dlcv_get_device_info");
         dlcv_keep_max_clock = (KeepMaxClockFuncType)ResolveSymbol(hModule, "dlcv_keep_max_clock");
+        allocateIndex = (AllocateIndexFunc)ResolveSymbol(hModule, "dlcv_allocate_index_c");
         dlcv_get_index_type_c = (GetIndexTypeFuncType)ResolveSymbol(hModule, "dlcv_get_index_type_c");
         dlcv_get_model_info_c = (GetModelInfoByIndexFuncType)ResolveSymbol(hModule, "dlcv_get_model_info_c");
-        dlcv_register_flow_c = (RegisterFlowFuncType)ResolveSymbol(hModule, "dlcv_register_flow_c");
-        dlcv_get_flow_info_c = (GetFlowInfoFuncType)ResolveSymbol(hModule, "dlcv_get_flow_info_c");
-        dlcv_free_flow_c = (FreeFlowFuncType)ResolveSymbol(hModule, "dlcv_free_flow_c");
         dlcv_bind_index_c = (BindIndexFuncType)ResolveSymbol(hModule, "dlcv_bind_index_c");
         dlcv_unbind_index_c = (UnbindIndexFuncType)ResolveSymbol(hModule, "dlcv_unbind_index_c");
         dlcv_free_string = (FreeStringFuncType)ResolveSymbol(hModule, "dlcv_free_result");
@@ -1732,6 +1731,41 @@ namespace dlcv_infer {
         }
     }
 
+    int DllLoader::QueryIndexType(int index) const {
+        if (!dlcv_get_index_type_c) throw std::runtime_error("缺少模型索引查询接口");
+        const int nativeType = dlcv_get_index_type_c(index);
+        if (nativeType != 0) return nativeType;
+        const int flow = openivs_flow_contains(hModule, index);
+        if (flow < 0) throw std::runtime_error("流程索引查询失败");
+        return flow ? 2 : 0;
+    }
+
+    int DllLoader::BindIndex(int index) const {
+        if (QueryIndexType(index) == 2) return openivs_flow_retain(hModule, index);
+        return dlcv_bind_index_c ? dlcv_bind_index_c(index) : -1;
+    }
+
+    int DllLoader::UnbindIndex(int index) const {
+        // 释放不依赖子模型是否仍有效，全量释放后也能清理流程记录。
+        const int result = openivs_flow_release(hModule, index, 0);
+        return result == 0 ? 0 : (dlcv_unbind_index_c ? dlcv_unbind_index_c(index) : -1);
+    }
+
+    int DllLoader::RegisterFlow(const char* text) const {
+        return openivs_flow_register(hModule, text);
+    }
+
+    json DllLoader::GetFlowInfo(int index) const {
+        std::unique_ptr<const char, decltype(&openivs_flow_free_result)> result(
+            openivs_flow_get_info(hModule, index), openivs_flow_free_result);
+        if (!result) throw std::runtime_error("读取流程信息失败");
+        return json::parse(result.get());
+    }
+
+    int DllLoader::FreeFlow(int index) const {
+        return openivs_flow_release(hModule, index, 1);
+    }
+
     DllLoader& DllLoader::ResolveForIndex(int index, int& indexType) {
         if (index < 0) {
             throw std::invalid_argument("共享 index 无效");
@@ -1750,7 +1784,7 @@ namespace dlcv_infer {
             candidates.push_back({
                 module.Module,
                 &loader,
-                loader.GetIndexTypeFunc()
+                loader.GetIndexTypeFunc() ? std::function<int(int)>([p = &loader](int value) { return p->QueryIndexType(value); }) : nullptr
             });
         }
 
@@ -1903,9 +1937,6 @@ namespace dlcv_infer {
         return loader != nullptr &&
             loader->GetIndexTypeFunc() != nullptr &&
             loader->GetModelInfoByIndexFunc() != nullptr &&
-            loader->GetRegisterFlowFunc() != nullptr &&
-            loader->GetFlowInfoFunc() != nullptr &&
-            loader->GetFreeFlowFunc() != nullptr &&
             loader->GetBindIndexFunc() != nullptr &&
             loader->GetUnbindIndexFunc() != nullptr &&
             loader->GetFreeStringFunc() != nullptr;
@@ -1987,7 +2018,7 @@ namespace dlcv_infer {
     static bool CanRegisterSharedFlow(
         DllLoader* registrationLoader,
         const std::vector<std::shared_ptr<dlcv_infer::Model>>& childModels) {
-        if (!HasSharedIndexFunctions(registrationLoader)) return false;
+        if (!HasSharedIndexFunctions(registrationLoader) || !registrationLoader->SupportsFlowRegistry()) return false;
         for (const auto& childModel : childModels) {
             if (!childModel) return false;
             DllLoader* childLoader = childModel->LoadedDllLoader();
@@ -2055,7 +2086,7 @@ namespace dlcv_infer {
             return false;
         }
         try {
-            if (_dllLoader->GetUnbindIndexFunc()(modelIndex) != 0) return false;
+            if (_dllLoader->UnbindIndex(modelIndex) != 0) return false;
             _indexBound = false;
             _indexReady = false;
             return true;
@@ -2137,7 +2168,7 @@ namespace dlcv_infer {
         flowRegistration["model_bindings"] = std::move(modelBindings);
 
         const std::string registrationText = flowRegistration.dump();
-        const int flowIndex = _dllLoader->GetRegisterFlowFunc()(registrationText.c_str());
+        const int flowIndex = _dllLoader->RegisterFlow(registrationText.c_str());
         if (flowIndex < 0) {
             throw std::runtime_error("注册流程失败");
         }
@@ -2208,7 +2239,7 @@ namespace dlcv_infer {
             // 只检查已保存的所属模块，不按默认 DLL 或编号重新选择模块。
             const bool isNativeIndex = _ownsNativeModelIndex || _ownsRegisteredFlowIndex || _indexBound;
             if (isNativeIndex && _dllLoader != nullptr && _dllLoader->GetIndexTypeFunc() != nullptr) {
-                const int indexType = _dllLoader->GetIndexTypeFunc()(modelIndex);
+                const int indexType = _dllLoader->QueryIndexType(modelIndex);
                 const int expectedType = _isFlowGraphMode ? 2 : 1;
                 if (indexType != expectedType) {
                     throw std::runtime_error("已保存的 index 在所属推理 DLL 中不可用");
@@ -2227,14 +2258,14 @@ namespace dlcv_infer {
             } else {
                 if (_dllLoader == nullptr) throw std::runtime_error("共享索引没有关联推理 DLL");
                 EnsureSharedIndexFunctions(_dllLoader);
-                indexType = _dllLoader->GetIndexTypeFunc()(modelIndex);
+                indexType = _dllLoader->QueryIndexType(modelIndex);
                 if (indexType != 1 && indexType != 2) {
                     throw std::runtime_error("共享 index 不可用");
                 }
             }
 
             if (!_indexBound) {
-                if (_dllLoader->GetBindIndexFunc()(modelIndex) != 0) {
+                if (_dllLoader->BindIndex(modelIndex) != 0) {
                     throw std::runtime_error("绑定索引失败");
                 }
                 _indexBound = true;
@@ -2250,8 +2281,7 @@ namespace dlcv_infer {
                 }
                 _hasCachedModelInfo = true;
             } else if (indexType == 2) {
-                const json flowInfo = ReadSharedIndexResult(
-                    _dllLoader, _dllLoader->GetFlowInfoFunc()(modelIndex));
+                const json flowInfo = _dllLoader->GetFlowInfo(modelIndex);
                 if (flowInfo.value("code", 1) != 0) {
                     throw std::runtime_error("读取流程信息失败: " + flowInfo.dump());
                 }
@@ -2521,8 +2551,8 @@ namespace dlcv_infer {
         if (_ownsRegisteredFlowIndex) {
             try {
                 if (modelIndex >= 0 && _dllLoader != nullptr &&
-                    _dllLoader->GetFreeFlowFunc() != nullptr) {
-                    if (_dllLoader->GetFreeFlowFunc()(modelIndex) != 0) {
+                    _dllLoader->SupportsFlowRegistry()) {
+                    if (_dllLoader->FreeFlow(modelIndex) != 0) {
                         logFailure("释放流程索引失败");
                     }
                 } else {
@@ -3266,6 +3296,7 @@ namespace dlcv_infer {
 
             struct FreeAllModelsTarget final {
                 FreeAllModelsFuncType Function = nullptr;
+                void* Identity = nullptr;
                 std::string Module;
             };
             std::vector<FreeAllModelsTarget> targets;
@@ -3276,7 +3307,7 @@ namespace dlcv_infer {
                     if (item.first == nullptr || !item.second) continue;
                     const std::string module = item.second->GetLoadedNativeDllName()
                         + "[" + providerName(item.second->GetDogProvider()) + "]";
-                    targets.push_back({item.second->GetFreeAllModelsFunc(), module});
+                    targets.push_back({item.second->GetFreeAllModelsFunc(), item.first, module});
                 }
             }
 
@@ -3286,7 +3317,7 @@ namespace dlcv_infer {
                     continue;
                 }
                 try {
-                    target.Function();
+                    openivs_flow_free_all_models(target.Identity);
                 } catch (const std::exception& ex) {
                     logFailure("调用底层释放", target.Module, ex.what());
                 } catch (...) {

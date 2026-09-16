@@ -55,18 +55,6 @@ namespace dlcv_infer_csharp
         public GetModelInfoByIndexDelegate dlcv_get_model_info_c;
 
         [UnmanagedFunctionPointer(calling_method)]
-        public delegate int RegisterFlowDelegate(IntPtr flowJsonUtf8);
-        public RegisterFlowDelegate dlcv_register_flow_c;
-
-        [UnmanagedFunctionPointer(calling_method)]
-        public delegate IntPtr GetFlowInfoDelegate(int index);
-        public GetFlowInfoDelegate dlcv_get_flow_info_c;
-
-        [UnmanagedFunctionPointer(calling_method)]
-        public delegate int FreeFlowDelegate(int index);
-        public FreeFlowDelegate dlcv_free_flow_c;
-
-        [UnmanagedFunctionPointer(calling_method)]
         public delegate int BindIndexDelegate(int index);
         public BindIndexDelegate dlcv_bind_index_c;
 
@@ -91,6 +79,7 @@ namespace dlcv_infer_csharp
             new Dictionary<IntPtr, DllLoader>();
         private static readonly object _lock = new object();
 
+        private bool _supportsIndexAllocation;
         private IntPtr _moduleHandle;
         private string _modulePath;
 
@@ -101,11 +90,8 @@ namespace dlcv_infer_csharp
         {
             get
             {
-                return dlcv_get_index_type_c != null &&
+                return _supportsIndexAllocation && dlcv_get_index_type_c != null &&
                        dlcv_get_model_info_c != null &&
-                       dlcv_register_flow_c != null &&
-                       dlcv_get_flow_info_c != null &&
-                       dlcv_free_flow_c != null &&
                        dlcv_bind_index_c != null &&
                        dlcv_unbind_index_c != null &&
                        dlcv_free_result != null;
@@ -300,8 +286,8 @@ namespace dlcv_infer_csharp
             if (dlcv_unbind_index_c == null) missing.Add("dlcv_unbind_index_c");
             if (dlcv_free_result == null) missing.Add("dlcv_free_result");
             if (dlcv_get_model_info_c == null) missing.Add("dlcv_get_model_info_c");
-            if (string.Equals(indexType, "flow", StringComparison.Ordinal) && dlcv_get_flow_info_c == null)
-                missing.Add("dlcv_get_flow_info_c");
+            if (string.Equals(indexType, "flow", StringComparison.Ordinal) && !_supportsIndexAllocation)
+                missing.Add("dlcv_allocate_index_c");
             if (missing.Count > 0)
             {
                 throw new NotSupportedException(
@@ -312,7 +298,11 @@ namespace dlcv_infer_csharp
         public int GetIndexType(int index)
         {
             EnsureDelegate(dlcv_get_index_type_c, "dlcv_get_index_type_c");
-            return dlcv_get_index_type_c(index);
+            int nativeType = dlcv_get_index_type_c(index);
+            if (nativeType != 0 || !_supportsIndexAllocation) return nativeType;
+            int flow = SharedFlowRegistry.Contains(_moduleHandle, index);
+            if (flow < 0) throw new InvalidOperationException("流程索引查询失败");
+            return flow == 1 ? 2 : 0;
         }
 
         public JObject GetModelInfoByIndex(int index)
@@ -326,13 +316,13 @@ namespace dlcv_infer_csharp
         {
             if (flowJson == null)
                 throw new ArgumentNullException(nameof(flowJson));
-            EnsureDelegate(dlcv_register_flow_c, "dlcv_register_flow_c");
+            if (!SupportsSharedFlowIndex) throw new NotSupportedException("缺少上层流程共享所需的模型接口");
 
             byte[] bytes = Encoding.UTF8.GetBytes(flowJson + "\0");
             GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
             try
             {
-                return dlcv_register_flow_c(handle.AddrOfPinnedObject());
+                return SharedFlowRegistry.Register(_moduleHandle, handle.AddrOfPinnedObject());
             }
             finally
             {
@@ -342,27 +332,38 @@ namespace dlcv_infer_csharp
 
         public JObject GetFlowInfo(int index)
         {
-            EnsureDelegate(dlcv_get_flow_info_c, "dlcv_get_flow_info_c");
-            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
-            return ReadJsonResult(dlcv_get_flow_info_c(index), "获取流程信息");
+            if (!_supportsIndexAllocation || _moduleHandle == IntPtr.Zero)
+                throw new NotSupportedException("缺少流程所属模型模块");
+            IntPtr result = SharedFlowRegistry.GetInfo(_moduleHandle, index);
+            if (result == IntPtr.Zero) throw new InvalidOperationException("获取流程信息失败");
+            try { return JObject.Parse(ReadUtf8String(result)); }
+            finally { SharedFlowRegistry.FreeResult(result); }
         }
 
         public int FreeFlow(int index)
         {
-            EnsureDelegate(dlcv_free_flow_c, "dlcv_free_flow_c");
-            return dlcv_free_flow_c(index);
+            return SharedFlowRegistry.Release(_moduleHandle, index, 1);
         }
 
         public int BindIndex(int index)
         {
             EnsureDelegate(dlcv_bind_index_c, "dlcv_bind_index_c");
-            return dlcv_bind_index_c(index);
+            return GetIndexType(index) == 2
+                ? SharedFlowRegistry.Retain(_moduleHandle, index) : dlcv_bind_index_c(index);
         }
 
         public int UnbindIndex(int index)
         {
             EnsureDelegate(dlcv_unbind_index_c, "dlcv_unbind_index_c");
+            if (_supportsIndexAllocation && SharedFlowRegistry.Release(_moduleHandle, index, 0) == 0)
+                return 0;
             return dlcv_unbind_index_c(index);
+        }
+
+        internal void FreeAllModels()
+        {
+            if (_supportsIndexAllocation) SharedFlowRegistry.FreeAllModels(_moduleHandle);
+            else dlcv_free_all_models?.Invoke();
         }
 
         private JObject ReadJsonResult(IntPtr resultPtr, string operation)
@@ -605,11 +606,9 @@ namespace dlcv_infer_csharp
             dlcv_free_model_result = GetDelegate<FreeModelResultDelegate>(hModule, "dlcv_free_model_result");
             dlcv_free_result = GetDelegate<FreeResultDelegate>(hModule, "dlcv_free_result");
             dlcv_free_all_models = GetDelegate<FreeAllModelsDelegate>(hModule, "dlcv_free_all_models");
+            _supportsIndexAllocation = GetProcAddress(hModule, "dlcv_allocate_index_c") != IntPtr.Zero;
             dlcv_get_index_type_c = GetDelegate<GetIndexTypeDelegate>(hModule, "dlcv_get_index_type_c");
             dlcv_get_model_info_c = GetDelegate<GetModelInfoByIndexDelegate>(hModule, "dlcv_get_model_info_c");
-            dlcv_register_flow_c = GetDelegate<RegisterFlowDelegate>(hModule, "dlcv_register_flow_c");
-            dlcv_get_flow_info_c = GetDelegate<GetFlowInfoDelegate>(hModule, "dlcv_get_flow_info_c");
-            dlcv_free_flow_c = GetDelegate<FreeFlowDelegate>(hModule, "dlcv_free_flow_c");
             dlcv_bind_index_c = GetDelegate<BindIndexDelegate>(hModule, "dlcv_bind_index_c");
             dlcv_unbind_index_c = GetDelegate<UnbindIndexDelegate>(hModule, "dlcv_unbind_index_c");
             IntPtr gpuInfoPtr = GetProcAddress(hModule, "dlcv_get_gpu_info");

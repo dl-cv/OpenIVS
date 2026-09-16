@@ -29,6 +29,7 @@
     <ClCompile Include="dlcv_infer.cpp"><Filter>源文件</Filter></ClCompile>
     <ClCompile Include="dlcv_infer_c_api.cpp"><Filter>源文件</Filter></ClCompile>
     <ClCompile Include="dlcv_sntl_admin.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="flow\SharedFlowRegistry.cpp"><Filter>源文件\flow</Filter></ClCompile>
     <ClCompile Include="flow\GraphExecutor.cpp"><Filter>源文件\flow</Filter></ClCompile>
     <ClCompile Include="flow\FlowGraphModel.cpp"><Filter>源文件\flow</Filter></ClCompile>
     <ClCompile Include="flow\modules\ModelModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
@@ -46,6 +47,7 @@
     <ClInclude Include="dlcv_sntl_admin.h"><Filter>头文件</Filter></ClInclude>
     <ClInclude Include="ImageInputUtils.h"><Filter>头文件</Filter></ClInclude>
     <ClInclude Include="MaskUtils.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="flow\SharedFlowRegistry.h"><Filter>头文件\flow</Filter></ClInclude>
     <ClInclude Include="flow\BaseModule.h"><Filter>头文件\flow</Filter></ClInclude>
     <ClInclude Include="flow\ExecutionContext.h"><Filter>头文件\flow</Filter></ClInclude>
     <ClInclude Include="flow\FlowGraphModel.h"><Filter>头文件\flow</Filter></ClInclude>

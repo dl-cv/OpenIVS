@@ -395,7 +395,7 @@ namespace dlcv_infer_csharp
                 {
                     try
                     {
-                        loader.dlcv_free_all_models?.Invoke();
+                        loader.FreeAllModels();
                     }
                     catch (Exception ex)
                     {

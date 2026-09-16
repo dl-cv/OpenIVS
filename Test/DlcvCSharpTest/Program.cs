@@ -47,22 +47,20 @@ namespace DlcvCSharpTest
         [DllImport("kernel32.dll", EntryPoint = "GetProcAddress", ExactSpelling = true, SetLastError = true)]
         private static extern IntPtr GetNativeProcAddress(IntPtr moduleHandle, string procedureName);
 
-        [DllImport("dlcv_infer_v.dll", CallingConvention = CallingConvention.Cdecl,
-            ExactSpelling = true, EntryPoint = "dlcv_register_flow_c")]
-        private static extern int VirboxRegisterFlow(IntPtr flowJsonUtf8);
+        [DllImport("dlcv_infer_cpp.dll", CallingConvention = CallingConvention.StdCall,
+            ExactSpelling = true, EntryPoint = "openivs_flow_register")]
+        private static extern int RegisterNativeFlow(IntPtr module, IntPtr flowJsonUtf8);
 
-        [DllImport("dlcv_infer_v.dll", CallingConvention = CallingConvention.Cdecl,
-            ExactSpelling = true, EntryPoint = "dlcv_free_flow_c")]
-        private static extern int VirboxFreeFlow(int flowIndex);
+        [DllImport("dlcv_infer_cpp.dll", CallingConvention = CallingConvention.StdCall,
+            ExactSpelling = true, EntryPoint = "openivs_flow_release")]
+        private static extern int ReleaseNativeFlow(IntPtr module, int flowIndex, int owner);
 
         private static readonly List<ModelRegressionCase> DefaultCases = ModelRegressionCases.Cases;
         private static readonly string[] SharedIndexNativeExports =
         {
             "dlcv_get_index_type_c",
             "dlcv_get_model_info_c",
-            "dlcv_register_flow_c",
-            "dlcv_get_flow_info_c",
-            "dlcv_free_flow_c",
+            "dlcv_allocate_index_c",
             "dlcv_bind_index_c",
             "dlcv_unbind_index_c",
             "dlcv_free_result"
@@ -1712,8 +1710,6 @@ namespace DlcvCSharpTest
                 var incompleteSharedFlow = new DllLoader
                 {
                     dlcv_get_index_type_c = index => 2,
-                    dlcv_get_flow_info_c = index => IntPtr.Zero,
-                    dlcv_free_flow_c = index => 0,
                     dlcv_bind_index_c = index => 0,
                     dlcv_unbind_index_c = index => 0
                 };
@@ -1727,13 +1723,12 @@ namespace DlcvCSharpTest
                 {
                     dlcv_get_index_type_c = index => 2,
                     dlcv_get_model_info_c = index => IntPtr.Zero,
-                    dlcv_register_flow_c = ptr => 0,
-                    dlcv_get_flow_info_c = index => IntPtr.Zero,
-                    dlcv_free_flow_c = index => 0,
                     dlcv_bind_index_c = index => 0,
                     dlcv_unbind_index_c = index => 0,
                     dlcv_free_result = ptr => { }
                 };
+                typeof(DllLoader).GetField("_supportsIndexAllocation", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(completeSharedFlow, true);
                 if (!completeSharedFlow.SupportsSharedFlowIndex)
                     throw new Exception("完整共享流程接口未被识别");
 
@@ -1942,13 +1937,12 @@ namespace DlcvCSharpTest
             int getterCalls = 0;
             var loader = new DllLoader
             {
-                dlcv_get_model_info_c = index => { getterCalls++; return IntPtr.Zero; },
-                dlcv_get_flow_info_c = index => { getterCalls++; return IntPtr.Zero; }
+                dlcv_get_model_info_c = index => { getterCalls++; return IntPtr.Zero; }
             };
             EnsureThrows<MissingMethodException>(() => loader.GetModelInfoByIndex(0),
                 "模型信息读取没有拒绝缺少结果释放接口的 DLL");
-            EnsureThrows<MissingMethodException>(() => loader.GetFlowInfo(0),
-                "流程信息读取没有拒绝缺少结果释放接口的 DLL");
+            EnsureThrows<NotSupportedException>(() => loader.GetFlowInfo(0),
+                "未加载模型模块时不应读取流程信息");
             if (getterCalls != 0)
                 throw new Exception("结果释放接口缺失时仍调用 getter 分配了原生结果");
         }
@@ -5868,6 +5862,8 @@ namespace DlcvCSharpTest
             var checks = new List<ReviewCheck>();
             checks.Add(RunCsharpProviderConcurrencyAndFreeAllCheck(
                 sentinelModelPath, virboxModelPath));
+            checks.Add(RunFlowRegistryValidationCheck(dvoPath));
+            checks.Add(RunFlowRegistryConcurrencyCheck());
             checks.Add(RunCsharpDoubleLoadFreeCheck(dvoPath));
             checks.Add(RunCppDoubleLoadFreeCheck(dvoPath));
             checks.Add(RunCppDoubleFlowLoadFreeCheck(dvstPath));
@@ -5879,8 +5875,7 @@ namespace DlcvCSharpTest
             checks.Add(RunModelFactoryBorrowerDisposeCheck(sentinelModelPath));
             checks.Add(RunModelFactoryBorrowerFinalizeCheck(sentinelModelPath));
             checks.Add(RunEmptyFlowModelInfoCheck());
-            checks.Add(RunEmptyFlowReleaseCompletionCheck(false));
-            checks.Add(RunEmptyFlowReleaseCompletionCheck(true));
+            checks.Add(RunEmptyFlowReleaseCompletionCheck());
             checks.Add(RunFlowInvalidatedByCppFreeAllCheck());
             checks.Add(RunPathLoadAfterSourceRemovedCheck(dvoPath));
             checks.Add(RunPathLoadAfterSourceRemovedCheck(dvstPath));
@@ -6253,7 +6248,7 @@ namespace DlcvCSharpTest
                     DllLoader loader = ResolveAndValidateSharedIndex(flowIndex, "flow", check.Name);
                     flowLoaders.Add(flowIndex, loader);
                     JObject flowInfo = loader.GetFlowInfo(flowIndex);
-                    EnsureNativeJsonSuccess(flowInfo, "正式 dlcv_get_flow_info_c 流程信息");
+                    EnsureNativeJsonSuccess(flowInfo, "OpenIVS 流程信息");
                     JArray bindings = flowInfo["model_bindings"] as JArray;
                     if (bindings == null || bindings.Count == 0)
                         throw new Exception("流程信息缺少子模型绑定: " + flowIndex);
@@ -6550,69 +6545,124 @@ namespace DlcvCSharpTest
             }
         }
 
-        private static ReviewCheck RunEmptyFlowReleaseCompletionCheck(bool throwOnRelease)
+        private static ReviewCheck RunFlowRegistryConcurrencyCheck()
+        {
+            var check = new ReviewCheck { Name = "上层空流程并发共享和全量释放",
+                Expected = "并发登记编号不重复，最后持有释放后失效，全量释放清除空流程" };
+            try
+            {
+                var loader = DllLoader.GetExistingOrDefaultSentinel();
+                string provider = loader.LoadedDogProvider.ToString().ToLowerInvariant();
+                var indices = new System.Collections.Concurrent.ConcurrentBag<int>();
+                System.Threading.Tasks.Parallel.For(0, 32, i =>
+                {
+                    int index = RegisterEmptyFlow(loader, provider);
+                    if (index < 0) throw new Exception("并发登记失败");
+                    indices.Add(index);
+                    if (loader.BindIndex(index) != 0 || loader.BindIndex(index) != 0 ||
+                        loader.FreeFlow(index) != 0 || loader.GetIndexType(index) != 2 ||
+                        loader.UnbindIndex(index) != 0 || loader.GetIndexType(index) != 2 ||
+                        loader.UnbindIndex(index) != 0 || loader.GetIndexType(index) != 0)
+                        throw new Exception("流程持有或释放错误");
+                });
+                if (indices.Distinct().Count() != 32) throw new Exception("并发编号重复");
+                int remaining = RegisterEmptyFlow(loader, provider);
+                if (remaining < 0) throw new Exception("空流程登记失败");
+                loader.FreeAllModels();
+                if (loader.GetIndexType(remaining) != 0) throw new Exception("全量释放后空流程仍有效");
+                check.Passed = true;
+                check.Actual = "32 个并发流程编号唯一，持有和最终释放正确，全量释放清除空流程";
+            }
+            catch (Exception ex) { check.Actual = ex.ToString(); }
+            return check;
+        }
+
+        private static ReviewCheck RunFlowRegistryValidationCheck(string modelPath)
         {
             var check = new ReviewCheck
             {
-                Name = "C# 空流程释放底层" + (throwOnRelease ? "抛异常" : "返回失败") + "后本地完成",
-                Expected = "首次 Dispose 清理本地状态，后续 Dispose 不重复调用底层释放"
+                Name = "上层流程参数检查与失败后的子模型释放",
+                Expected = "拒绝无效绑定；登记失败不遗留子模型持有"
             };
-            string path = Path.Combine(Path.GetTempPath(), "dlcv_flow_release_completion_" + Guid.NewGuid().ToString("N") + ".dvst");
             Model owner = null;
-            DllLoader loader = null;
-            DllLoader.FreeFlowDelegate originalFree = null;
-            int flowIndex = -1;
-            int freeCount = 0;
+            try
+            {
+                owner = new Model(modelPath, GpuDeviceId);
+                DllLoader loader = owner.Loader;
+                int index = owner.modelIndex;
+                var data = new JObject
+                {
+                    ["schema_version"] = 1, ["flow_type"] = "dvst",
+                    ["provider"] = loader.LoadedDogProvider.ToString().ToLowerInvariant(),
+                    ["source_path"] = Path.GetFullPath(modelPath),
+                    ["pipeline"] = new JObject { ["nodes"] = new JArray() },
+                    ["model_bindings"] = new JArray(new JObject { ["node_id"] = 1, ["model_index"] = index })
+                };
+                foreach (JToken invalid in new JToken[] { -1, 0.5, "bad", long.MaxValue })
+                {
+                    foreach (string field in new[] { "node_id", "model_index" })
+                    {
+                        var broken = (JObject)data.DeepClone();
+                        broken["model_bindings"][0][field] = invalid.DeepClone();
+                        if (loader.RegisterFlow(broken.ToString(Formatting.None)) != -1)
+                            throw new Exception("未拒绝非法字段: " + field);
+                    }
+                }
+                var duplicate = (JObject)data.DeepClone();
+                ((JArray)duplicate["model_bindings"]).Add(duplicate["model_bindings"][0].DeepClone());
+                if (loader.RegisterFlow(duplicate.ToString(Formatting.None)) != -1)
+                    throw new Exception("未拒绝重复节点");
+                var partial = (JObject)data.DeepClone();
+                ((JArray)partial["model_bindings"]).Add(new JObject { ["node_id"] = 2, ["model_index"] = int.MaxValue });
+                if (loader.RegisterFlow(partial.ToString(Formatting.None)) != -1)
+                    throw new Exception("未拒绝不存在的子模型");
+                int flow = loader.RegisterFlow(data.ToString(Formatting.None));
+                if (flow < 0) throw new Exception("有效流程登记失败");
+                if (loader.dlcv_get_index_type_c(flow) != 0 || loader.GetIndexType(flow) != 2)
+                    throw new Exception("流程未限定在 OpenIVS 层");
+                if (loader.FreeFlow(flow) != 0) throw new Exception("流程释放失败");
+                owner.Dispose();
+                if (loader.GetIndexType(index) != 0) throw new Exception("失败登记遗留子模型持有");
+                check.Passed = true;
+                check.Actual = "非法编号和重复节点被拒绝，部分绑定失败后已释放子模型持有";
+            }
+            catch (Exception ex) { check.Actual = ex.ToString(); }
+            finally { owner?.Dispose(); }
+            return check;
+        }
+
+        private static ReviewCheck RunEmptyFlowReleaseCompletionCheck()
+        {
+            var check = new ReviewCheck
+            {
+                Name = "C# 空流程记录已释放后清理本地对象",
+                Expected = "Dispose 清理本地状态，重复 Dispose 不报错"
+            };
+            string path = Path.Combine(Path.GetTempPath(), "dlcv_flow_release_" + Guid.NewGuid().ToString("N") + ".dvst");
+            Model owner = null;
             try
             {
                 WriteEmptyFlowArchive(path);
                 owner = new Model(path, GpuDeviceId);
-                loader = owner.Loader;
+                DllLoader loader = owner.Loader;
                 if (loader == null || !loader.SupportsSharedFlowIndex)
-                    throw new NotSupportedException("此检查需要共享流程接口");
-                flowIndex = owner.modelIndex;
-                originalFree = loader.dlcv_free_flow_c;
-                loader.dlcv_free_flow_c = index =>
-                {
-                    if (index != flowIndex) throw new Exception("流程释放使用了不同 index");
-                    freeCount++;
-                    if (throwOnRelease) throw new InvalidOperationException("测试流程释放异常");
-                    return -7;
-                };
-
+                    throw new NotSupportedException("此检查需要上层流程共享接口");
+                int index = owner.modelIndex;
+                if (loader.FreeFlow(index) != 0) throw new Exception("释放流程记录失败");
                 owner.Dispose();
-                if (freeCount != 1 || owner.modelIndex != -1)
-                    throw new Exception("首次底层失败后未清理本地流程状态");
                 owner.Dispose();
-                if (freeCount != 1)
-                    throw new Exception("后续 Dispose 重复调用了 FreeFlow");
+                if (owner.modelIndex != -1 || loader.GetIndexType(index) != 0)
+                    throw new Exception("流程记录或本地对象未清理");
                 check.Passed = true;
-                check.Actual = "FreeFlow 调用 1 次，本地 index 已清理";
-                return check;
+                check.Actual = "流程记录已释放，本地状态已清理，重复 Dispose 完成";
             }
-            catch (Exception ex)
-            {
-                check.Actual = ex.ToString();
-                return check;
-            }
+            catch (Exception ex) { check.Actual = ex.ToString(); }
             finally
             {
-                if (loader != null && originalFree != null)
-                {
-                    loader.dlcv_free_flow_c = originalFree;
-                    if (flowIndex >= 0 && loader.GetIndexType(flowIndex) == 2)
-                    {
-                        int cleanupCode = originalFree(flowIndex);
-                        if (cleanupCode != 0 && check.Passed)
-                        {
-                            check.Passed = false;
-                            check.Actual = "测试后流程资源清理失败，code=" + cleanupCode;
-                        }
-                    }
-                }
                 owner?.Dispose();
                 if (File.Exists(path)) File.Delete(path);
             }
+            return check;
         }
 
         private static ReviewCheck RunFlowInvalidatedByCppFreeAllCheck()
@@ -7161,7 +7211,7 @@ namespace DlcvCSharpTest
                     }
                 }
                 catch { }
-                try { if (virboxFlow >= 0) VirboxFreeFlow(virboxFlow); } catch { }
+                try { if (virboxFlow >= 0) ReleaseNativeFlow(LoadNativeModule("dlcv_infer_v.dll"), virboxFlow, 1); } catch { }
                 try { if (sentinelModel >= 0) NativeCFreeModel(sentinelModel); } catch { }
             }
         }
@@ -7183,7 +7233,7 @@ namespace DlcvCSharpTest
             GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
             try
             {
-                return VirboxRegisterFlow(handle.AddrOfPinnedObject());
+                return RegisterNativeFlow(LoadNativeModule("dlcv_infer_v.dll"), handle.AddrOfPinnedObject());
             }
             finally
             {

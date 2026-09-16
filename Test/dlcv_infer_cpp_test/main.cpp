@@ -38,6 +38,7 @@
 
 #include "../../dlcv_infer_cpp/ImageInputUtils.h"
 #include "../../dlcv_infer_cpp/flow/FlowGraphModel.h"
+#include "../../dlcv_infer_cpp/flow/SharedFlowRegistry.h"
 #include "../../dlcv_infer_cpp/flow/ModuleRegistry.h"
 #include "../../dlcv_infer_cpp/flow/modules/ModelModules.h"
 #include "../../dlcv_infer_cpp/flow/utils/MaskRleUtils.h"
@@ -3110,7 +3111,7 @@ HMODULE ModelModuleForSelfTest(const dlcv_infer::Model& model) {
 bool HasSharedFlowSdkForSelfTest(const dlcv_infer::Model& model) {
     const HMODULE module = ModelModuleForSelfTest(model);
     for (const char* name : {"dlcv_get_index_type_c", "dlcv_get_model_info_c",
-             "dlcv_register_flow_c", "dlcv_get_flow_info_c", "dlcv_free_flow_c",
+             "dlcv_allocate_index_c",
              "dlcv_bind_index_c", "dlcv_unbind_index_c", "dlcv_free_result"}) {
         if (!GetProcAddress(module, name)) return false;
     }
@@ -3290,7 +3291,8 @@ int QueryNativeIndexTypeForSelfTest(int index) {
         const auto getIndexType = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
             GetProcAddress(module, "dlcv_get_index_type_c"));
         if (getIndexType == nullptr) continue;
-        const int indexType = getIndexType(index);
+        const int nativeType = getIndexType(index);
+        const int indexType = nativeType == 0 && openivs_flow_contains(module, index) == 1 ? 2 : nativeType;
         if (indexType == 0) continue;
         if (indexType != 1 && indexType != 2) {
             throw std::runtime_error("推理 DLL 返回未知 index 类型");

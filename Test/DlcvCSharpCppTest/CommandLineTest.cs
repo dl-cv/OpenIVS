@@ -35,6 +35,24 @@ namespace DlcvCSharpCppTest
             return info;
         }
 
+        private static void CheckFlowLayer(int index, string path, JObject report)
+        {
+            string extension = Path.GetExtension(path).ToLowerInvariant();
+            if (extension != ".dvst" && extension != ".dvso") return;
+            string type;
+            var loader = dlcv_infer_csharp.DllLoader.ResolveForIndex(index, out type);
+            Check(type == "flow", "OpenIVS 未识别流程编号");
+            Check(loader.dlcv_get_index_type_c(index) == 0, "推理库不应保存流程编号");
+            var info = loader.GetFlowInfo(index);
+            Check(info["code"].Value<int>() == 0 && info["pipeline"] is JObject,
+                "流程层未保留配置");
+            foreach (JObject binding in (JArray)info["model_bindings"])
+                Check(loader.dlcv_get_index_type_c(binding["model_index"].Value<int>()) == 1,
+                    "子模型未保留在推理库中");
+            report["flow_registry"] = "OpenIVS";
+            report["engine_flow_index_type"] = 0;
+        }
+
         private static void CheckExpired(int index)
         {
             bool expired = false;
@@ -49,6 +67,7 @@ namespace DlcvCSharpCppTest
             // 第一项必须直接进入原生文件构造，不先建立 C# 模型。
             session.LoadCpp(model, device);
             int cppIndex = session.CppModelIndex;
+            CheckFlowLayer(cppIndex, model, report);
             Check(cppIndex >= 0 && !session.HasCSharpModel && !session.CppCreatedFromIndex,
                 "C++ 独立加载状态错误");
             report["cpp_info"] = Info(session.GetCppInfo());
@@ -97,6 +116,7 @@ namespace DlcvCSharpCppTest
         {
             session.LoadCpp(model, device);
             int index = session.CppModelIndex;
+            CheckFlowLayer(index, model, report);
             Check(!session.HasCSharpModel, "反向共享前不应存在 C# 模型");
             report["cpp_info"] = Info(session.GetCppInfo());
             session.ConvertToCSharp();
@@ -181,6 +201,7 @@ namespace DlcvCSharpCppTest
                         report["csharp_info"] = Info(session.GetCSharpInfo());
                         session.ConvertToCpp();
                         int index = session.CSharpModelIndex;
+                        CheckFlowLayer(index, model, report);
                         Check(index >= 0 && session.CppModelIndex == index, "两侧模型编号不一致");
                         report["model_index"] = index;
                         report["cpp_info"] = Info(session.GetCppInfo());

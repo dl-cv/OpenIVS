@@ -107,3 +107,7 @@ python Test/DlcvCSharpCppTest/run_tests.py --exe Test/DlcvCSharpCppTest/bin/x64/
 ```
 
 `--model` 可重复指定；输出目录必须是系统临时目录下的空目录。每个模型运行两个共享方向各两种释放顺序、C++ 直接加载、分别加载的两种释放顺序，以及非交互 UI；另测启动配置、设计器、DPI 与图标、四档比例布局、空界面、错误参数与报告覆盖保护。UI 检查包括 C++ 先加载和 C# 先加载、重复加载拒绝及另一侧信息可继续读取。结果 JSON 严格 UTF-8 解析，PNG 检查格式和尺寸；进程实际模块路径须来自 `--sdk-directory`（默认 SDK 安装目录），包装 DLL 须来自本次 EXE 目录。不复制或更换推理 SDK，报告和图片不进入仓库。
+
+## 流程层归属检查
+
+DVST/DVSO 的 model-test 额外检查：OpenIVS 查询结果为 flow，底层 dlcv_get_index_type_c 对同一编号返回 0，子模型编号在底层仍为普通模型。C# 和 C++ 共用 dlcv_infer_cpp.dll 的流程记录，保持两个共享方向和两种释放顺序。流程恢复不再次加载文件，流程所属 SDK 须提供 dlcv_allocate_index_c。

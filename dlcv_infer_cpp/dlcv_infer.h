@@ -115,9 +115,6 @@ namespace dlcv_infer {
     typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultCFuncType)(DlcvCResult* result);
     typedef int (DLCV_INFER_NATIVE_CALL *GetIndexTypeFuncType)(int index);
     typedef const char* (DLCV_INFER_NATIVE_CALL *GetModelInfoByIndexFuncType)(int modelIndex);
-    typedef int (DLCV_INFER_NATIVE_CALL *RegisterFlowFuncType)(const char* flowJson);
-    typedef const char* (DLCV_INFER_NATIVE_CALL *GetFlowInfoFuncType)(int flowIndex);
-    typedef int (DLCV_INFER_NATIVE_CALL *FreeFlowFuncType)(int flowIndex);
     typedef int (DLCV_INFER_NATIVE_CALL *BindIndexFuncType)(int index);
     typedef int (DLCV_INFER_NATIVE_CALL *UnbindIndexFuncType)(int index);
     typedef FreeResultFuncType FreeStringFuncType;
@@ -144,11 +141,10 @@ namespace dlcv_infer {
         FreeAllModelsFuncType dlcv_free_all_models = nullptr;
         GetDeviceInfoFuncType dlcv_get_device_info = nullptr;
         KeepMaxClockFuncType dlcv_keep_max_clock = nullptr;
+        using AllocateIndexFunc = int (DLCV_INFER_NATIVE_CALL*)();
+        AllocateIndexFunc allocateIndex = nullptr;
         GetIndexTypeFuncType dlcv_get_index_type_c = nullptr;
         GetModelInfoByIndexFuncType dlcv_get_model_info_c = nullptr;
-        RegisterFlowFuncType dlcv_register_flow_c = nullptr;
-        GetFlowInfoFuncType dlcv_get_flow_info_c = nullptr;
-        FreeFlowFuncType dlcv_free_flow_c = nullptr;
         BindIndexFuncType dlcv_bind_index_c = nullptr;
         UnbindIndexFuncType dlcv_unbind_index_c = nullptr;
         FreeStringFuncType dlcv_free_string = nullptr;
@@ -231,11 +227,15 @@ namespace dlcv_infer {
         KeepMaxClockFuncType GetKeepMaxClockFunc() const {
             return dlcv_keep_max_clock;
         }
+        bool SupportsFlowRegistry() const { return allocateIndex != nullptr; }
+        int QueryIndexType(int index) const;
+        int BindIndex(int index) const;
+        int UnbindIndex(int index) const;
+        int RegisterFlow(const char* text) const;
+        json GetFlowInfo(int index) const;
+        int FreeFlow(int index) const;
         GetIndexTypeFuncType GetIndexTypeFunc() const { return dlcv_get_index_type_c; }
         GetModelInfoByIndexFuncType GetModelInfoByIndexFunc() const { return dlcv_get_model_info_c; }
-        RegisterFlowFuncType GetRegisterFlowFunc() const { return dlcv_register_flow_c; }
-        GetFlowInfoFuncType GetFlowInfoFunc() const { return dlcv_get_flow_info_c; }
-        FreeFlowFuncType GetFreeFlowFunc() const { return dlcv_free_flow_c; }
         BindIndexFuncType GetBindIndexFunc() const { return dlcv_bind_index_c; }
         UnbindIndexFuncType GetUnbindIndexFunc() const { return dlcv_unbind_index_c; }
         FreeStringFuncType GetFreeStringFunc() const { return dlcv_free_string; }

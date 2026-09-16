@@ -42,8 +42,7 @@ struct CApiModelEntry {
     bool HasSharedIndexFunctions() const {
         return loader != nullptr && loader->GetIndexTypeFunc() != nullptr &&
             loader->GetModelInfoByIndexFunc() != nullptr &&
-            loader->GetRegisterFlowFunc() != nullptr && loader->GetFlowInfoFunc() != nullptr &&
-            loader->GetFreeFlowFunc() != nullptr && loader->GetBindIndexFunc() != nullptr &&
+            loader->GetBindIndexFunc() != nullptr &&
             loader->GetUnbindIndexFunc() != nullptr && loader->GetFreeStringFunc() != nullptr;
     }
 
@@ -474,7 +473,7 @@ static std::shared_ptr<CApiModelEntry> FindOrRestoreSharedModelEntry(
         }
     }
     if (entry->loader != nullptr && entry->loader->GetIndexTypeFunc() != nullptr &&
-        entry->loader->GetIndexTypeFunc()(modelIndex) == 0) {
+        entry->loader->QueryIndexType(modelIndex) == 0) {
         throw std::out_of_range("Model not found.");
     }
     // 本地原生加载已知所属 DLL；缺少共享接口的旧 SDK 保留原 JSON 调用。

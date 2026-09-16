@@ -183,6 +183,7 @@
     <ClCompile Include="dlcv_infer.cpp" />
     <ClCompile Include="dlcv_infer_c_api.cpp" />
     <ClCompile Include="dlcv_sntl_admin.cpp" />
+    <ClCompile Include="flow\SharedFlowRegistry.cpp" />
     <ClCompile Include="flow\GraphExecutor.cpp" />
     <ClCompile Include="flow\FlowGraphModel.cpp" />
     <ClCompile Include="flow\modules\ModelModules.cpp" />
@@ -200,6 +201,7 @@
     <ClInclude Include="dlcv_sntl_admin.h" />
     <ClInclude Include="ImageInputUtils.h" />
     <ClInclude Include="MaskUtils.h" />
+    <ClInclude Include="flow\SharedFlowRegistry.h" />
     <ClInclude Include="flow\ExecutionContext.h" />
     <ClInclude Include="flow\FlowPayloadTypes.h" />
     <ClInclude Include="flow\FlowTypes.h" />
@@ -222,6 +224,14 @@
   </Target>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="GetFlowRuntimeFiles" Returns="@(_FlowRuntimeFiles)">
+    <PropertyGroup><_FlowOpenCvSuffix Condition="'$(Configuration)'=='Debug'">d</_FlowOpenCvSuffix></PropertyGroup>
+    <ItemGroup>
+      <_FlowRuntimeFiles Include="$(TargetPath)" />
+      <_FlowRuntimeFiles Include="$(OpenCvLibDir)\..\bin\opencv_world4100$(_FlowOpenCvSuffix).dll" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(_FlowRuntimeFiles.FullPath)')" Text="缺少流程运行库：%(_FlowRuntimeFiles.FullPath)" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
