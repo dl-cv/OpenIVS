@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -472,20 +472,5 @@ namespace DlcvCSharpTest
             return RunNativeCApiRegressionSelfTest();
         }
 
-        private static int RegisterEmptyFlow(DllLoader loader, string provider)
-        {
-            if (loader == null) throw new ArgumentNullException(nameof(loader));
-            string flowJson = new JObject
-            {
-                ["schema_version"] = 1,
-                ["flow_type"] = "dvst",
-                ["provider"] = provider,
-                ["source_path"] = Path.Combine(Path.GetTempPath(), provider + "_empty_flow.dvst"),
-                ["device_id"] = GpuDeviceId,
-                ["pipeline"] = new JObject { ["nodes"] = new JArray() },
-                ["model_bindings"] = new JArray()
-            }.ToString(Newtonsoft.Json.Formatting.None);
-            return loader.RegisterFlow(flowJson);
-        }
     }
 }

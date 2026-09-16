@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using sntl_admin_csharp;
 
@@ -51,16 +52,20 @@ namespace dlcv_infer_csharp
         public GetIndexTypeDelegate dlcv_get_index_type_c;
 
         [UnmanagedFunctionPointer(calling_method)]
-        public delegate IntPtr GetModelInfoByIndexDelegate(int index);
-        public GetModelInfoByIndexDelegate dlcv_get_model_info_c;
+        public delegate int RegisterDvsModelDelegate(IntPtr dvsJsonUtf8);
+        public RegisterDvsModelDelegate dlcv_register_dvs_model_c;
+
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate IntPtr GetDvsModelDelegate(int index);
+        public GetDvsModelDelegate dlcv_get_dvs_model_c;
 
         [UnmanagedFunctionPointer(calling_method)]
         public delegate int BindIndexDelegate(int index);
         public BindIndexDelegate dlcv_bind_index_c;
 
         [UnmanagedFunctionPointer(calling_method)]
-        public delegate int UnbindIndexDelegate(int index);
-        public UnbindIndexDelegate dlcv_unbind_index_c;
+        public delegate IntPtr GetAllModelsDelegate();
+        public GetAllModelsDelegate dlcv_get_all_models;
 
         [UnmanagedFunctionPointer(calling_method)]
         public delegate IntPtr GetDeviceInfo();
@@ -85,15 +90,25 @@ namespace dlcv_infer_csharp
         public DogProvider LoadedDogProvider { get; private set; }
         public string LoadedNativeDllName { get; private set; }
         internal string LoadedNativeModulePath { get { return _modulePath; } }
-        internal bool SupportsSharedFlowIndex
+        internal bool SupportsSharedIndex
         {
             get
             {
                 return dlcv_get_index_type_c != null &&
-                       dlcv_get_model_info_c != null &&
                        dlcv_bind_index_c != null &&
-                       dlcv_unbind_index_c != null &&
+                       dlcv_get_model_info != null &&
+                       dlcv_free_model != null &&
                        dlcv_free_result != null;
+            }
+        }
+
+        internal bool SupportsDvsRegistration
+        {
+            get
+            {
+                return SupportsSharedIndex &&
+                       dlcv_register_dvs_model_c != null &&
+                       dlcv_get_dvs_model_c != null;
             }
         }
 
@@ -144,14 +159,12 @@ namespace dlcv_infer_csharp
             }
         }
 
-        internal static DllLoader GetExistingOrDefaultSentinel()
+        internal static DllLoader GetSingleLoadedLoaderForDvsRegistration()
         {
             lock (_lock)
             {
-                if (_instance != null)
-                    return _instance;
-
-                _instance = CreateLoader(DogProvider.Sentinel);
+                if (_instance == null || _instance._moduleHandle == IntPtr.Zero)
+                    _instance = CreateLoader(DogProvider.Sentinel);
                 return _instance;
             }
         }
@@ -204,8 +217,8 @@ namespace dlcv_infer_csharp
 
         internal static DllLoader ResolveSharedIndexLoader(int index, out string indexType)
         {
-            if (index == -1)
-                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 无效: " + index);
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 必须是非负整数: " + index);
 
             List<DllLoader> candidates;
             lock (_lock)
@@ -221,8 +234,8 @@ namespace dlcv_infer_csharp
             IList<DllLoader> candidates,
             out string indexType)
         {
-            if (index == -1)
-                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 无效: " + index);
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 必须是非负整数: " + index);
             if (candidates == null)
                 throw new ArgumentNullException(nameof(candidates));
 
@@ -273,7 +286,7 @@ namespace dlcv_infer_csharp
                     "共享 index 同时存在于多个 DLL，无法确定所属模块: " + string.Join("、", matchingModuleNames));
             }
 
-            indexType = matchedType == 1 ? "model" : "flow";
+            indexType = matchedType == 1 ? "model" : "dvs";
             return matchedLoader;
         }
 
@@ -282,44 +295,55 @@ namespace dlcv_infer_csharp
             var missing = new List<string>();
             if (dlcv_get_index_type_c == null) missing.Add("dlcv_get_index_type_c");
             if (dlcv_bind_index_c == null) missing.Add("dlcv_bind_index_c");
-            if (dlcv_unbind_index_c == null) missing.Add("dlcv_unbind_index_c");
+            if (dlcv_get_model_info == null) missing.Add("dlcv_get_model_info");
+            if (dlcv_free_model == null) missing.Add("dlcv_free_model");
             if (dlcv_free_result == null) missing.Add("dlcv_free_result");
-            if (dlcv_get_model_info_c == null) missing.Add("dlcv_get_model_info_c");
+            if (string.Equals(indexType, "dvs", StringComparison.Ordinal) && dlcv_get_dvs_model_c == null)
+                missing.Add("dlcv_get_dvs_model_c");
             if (missing.Count > 0)
             {
                 throw new NotSupportedException(
-                    "当前 dlcv_infer 不支持外部共享 index，缺少接口: " + string.Join(", ", missing));
+                    "当前 dlcv_infer 不支持共享 index，缺少接口: " + string.Join(", ", missing));
             }
+        }
+
+        internal void EnsureDvsRegistrationSupport()
+        {
+            EnsureSharedIndexSupport("dvs");
+            if (dlcv_register_dvs_model_c == null)
+                throw new NotSupportedException("当前 dlcv_infer 不支持 DVS 登记，缺少接口: dlcv_register_dvs_model_c");
         }
 
         public int GetIndexType(int index)
         {
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
             EnsureDelegate(dlcv_get_index_type_c, "dlcv_get_index_type_c");
-            if (index >= 0) return dlcv_get_index_type_c(index);
-            if (index == -1) return 0;
-            int flow = SharedFlowRegistry.Contains(_moduleHandle, index);
-            if (flow < 0) throw new InvalidOperationException("流程索引查询失败");
-            return flow == 1 ? 2 : 0;
+            return dlcv_get_index_type_c(index);
         }
 
         public JObject GetModelInfoByIndex(int index)
         {
-            EnsureDelegate(dlcv_get_model_info_c, "dlcv_get_model_info_c");
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
+            EnsureDelegate(dlcv_get_model_info, "dlcv_get_model_info");
             EnsureDelegate(dlcv_free_result, "dlcv_free_result");
-            return ReadJsonResult(dlcv_get_model_info_c(index), "获取模型信息");
+            var config = new JObject { ["model_index"] = index };
+            return ReadLegacyJsonResult(
+                dlcv_get_model_info(config.ToString(Formatting.None)), "获取模型信息");
         }
 
-        public int RegisterFlow(string flowJson)
+        public int RegisterDvsModel(string dvsJson)
         {
-            if (flowJson == null)
-                throw new ArgumentNullException(nameof(flowJson));
-            if (!SupportsSharedFlowIndex) throw new NotSupportedException("缺少上层流程共享所需的模型接口");
+            if (dvsJson == null)
+                throw new ArgumentNullException(nameof(dvsJson));
+            EnsureDvsRegistrationSupport();
 
-            byte[] bytes = Encoding.UTF8.GetBytes(flowJson + "\0");
+            byte[] bytes = Encoding.UTF8.GetBytes(dvsJson + "\0");
             GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
             try
             {
-                return SharedFlowRegistry.Register(_moduleHandle, handle.AddrOfPinnedObject());
+                return dlcv_register_dvs_model_c(handle.AddrOfPinnedObject());
             }
             finally
             {
@@ -327,39 +351,46 @@ namespace dlcv_infer_csharp
             }
         }
 
-        public JObject GetFlowInfo(int index)
+        public JObject GetDvsModel(int index)
         {
-            if (_moduleHandle == IntPtr.Zero)
-                throw new NotSupportedException("缺少流程所属模型模块");
-            IntPtr result = SharedFlowRegistry.GetInfo(_moduleHandle, index);
-            if (result == IntPtr.Zero) throw new InvalidOperationException("获取流程信息失败");
-            try { return JObject.Parse(ReadUtf8String(result)); }
-            finally { SharedFlowRegistry.FreeResult(result); }
-        }
-
-        public int FreeFlow(int index)
-        {
-            return SharedFlowRegistry.Release(_moduleHandle, index, 1);
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
+            EnsureDelegate(dlcv_get_dvs_model_c, "dlcv_get_dvs_model_c");
+            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
+            return ReadJsonResult(dlcv_get_dvs_model_c(index), "获取 DVS 信息");
         }
 
         public int BindIndex(int index)
         {
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
             EnsureDelegate(dlcv_bind_index_c, "dlcv_bind_index_c");
-            return GetIndexType(index) == 2
-                ? SharedFlowRegistry.Retain(_moduleHandle, index) : dlcv_bind_index_c(index);
+            return dlcv_bind_index_c(index);
         }
 
-        public int UnbindIndex(int index)
+        internal JObject FreeModelIndex(int index)
         {
-            EnsureDelegate(dlcv_unbind_index_c, "dlcv_unbind_index_c");
-            return index < -1 ? SharedFlowRegistry.Release(_moduleHandle, index, 0)
-                : dlcv_unbind_index_c(index);
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
+            EnsureDelegate(dlcv_free_model, "dlcv_free_model");
+            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
+            var config = new JObject { ["model_index"] = index };
+            return ReadLegacyJsonResult(
+                dlcv_free_model(config.ToString(Formatting.None)), "释放模型");
+        }
+
+        internal JObject GetAllModelsSnapshot()
+        {
+            EnsureDelegate(dlcv_get_all_models, "dlcv_get_all_models");
+            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
+            JObject snapshot = ReadJsonResult(dlcv_get_all_models(), "获取模型列表");
+            snapshot["module_path"] = _modulePath ?? string.Empty;
+            return snapshot;
         }
 
         internal void FreeAllModels()
         {
-            if (SupportsSharedFlowIndex) SharedFlowRegistry.FreeAllModels(_moduleHandle);
-            else dlcv_free_all_models?.Invoke();
+            dlcv_free_all_models?.Invoke();
         }
 
         private JObject ReadJsonResult(IntPtr resultPtr, string operation)
@@ -370,6 +401,24 @@ namespace dlcv_infer_csharp
             try
             {
                 string json = ReadUtf8String(resultPtr);
+                if (string.IsNullOrWhiteSpace(json))
+                    throw new Exception(operation + "失败：返回 JSON 为空");
+                return JObject.Parse(json);
+            }
+            finally
+            {
+                dlcv_free_result(resultPtr);
+            }
+        }
+
+        private JObject ReadLegacyJsonResult(IntPtr resultPtr, string operation)
+        {
+            if (resultPtr == IntPtr.Zero)
+                throw new Exception(operation + "失败：返回结果为空");
+
+            try
+            {
+                string json = Marshal.PtrToStringAnsi(resultPtr);
                 if (string.IsNullOrWhiteSpace(json))
                     throw new Exception(operation + "失败：返回 JSON 为空");
                 return JObject.Parse(json);
@@ -603,9 +652,10 @@ namespace dlcv_infer_csharp
             dlcv_free_result = GetDelegate<FreeResultDelegate>(hModule, "dlcv_free_result");
             dlcv_free_all_models = GetDelegate<FreeAllModelsDelegate>(hModule, "dlcv_free_all_models");
             dlcv_get_index_type_c = GetDelegate<GetIndexTypeDelegate>(hModule, "dlcv_get_index_type_c");
-            dlcv_get_model_info_c = GetDelegate<GetModelInfoByIndexDelegate>(hModule, "dlcv_get_model_info_c");
+            dlcv_register_dvs_model_c = GetDelegate<RegisterDvsModelDelegate>(hModule, "dlcv_register_dvs_model_c");
+            dlcv_get_dvs_model_c = GetDelegate<GetDvsModelDelegate>(hModule, "dlcv_get_dvs_model_c");
             dlcv_bind_index_c = GetDelegate<BindIndexDelegate>(hModule, "dlcv_bind_index_c");
-            dlcv_unbind_index_c = GetDelegate<UnbindIndexDelegate>(hModule, "dlcv_unbind_index_c");
+            dlcv_get_all_models = GetDelegate<GetAllModelsDelegate>(hModule, "dlcv_get_all_models");
             IntPtr gpuInfoPtr = GetProcAddress(hModule, "dlcv_get_gpu_info");
             dlcv_get_gpu_info = gpuInfoPtr != IntPtr.Zero ? (GetGpuInfo)Marshal.GetDelegateForFunctionPointer(gpuInfoPtr, typeof(GetGpuInfo)) : null;
             IntPtr devInfoPtr = GetProcAddress(hModule, "dlcv_get_device_info");

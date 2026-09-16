@@ -108,6 +108,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - `help`
 - `load-model`
 - `list-models`
+- `all-models`（C#，输出按实际已加载模块分组的底层资源快照）
 - `model-info`
 - `dvs-model-info`
 - `infer`
@@ -130,7 +131,8 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 | --- | --- |
 | `help` | 无位置参数、无可选参数 |
 | `load-model` | `<名称> <模型路径>`；C# 支持 `--device N`、`--rpc true\|false`、`--replace true\|false`；C++ 支持 `--device N`、`--replace true\|false` |
-| `list-models` | 无参数 |
+| `list-models` | 无参数，显示当前工作流名称表 |
+| `all-models` | 无参数；C# 输出 `Utils.GetAllModels()` JSON，不额外加载其他推理模块 |
 | `model-info` | `<名称>` |
 | `dvs-model-info` | `<名称>` |
 | `infer` | `<名称> <图片>`；支持 `--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
@@ -198,7 +200,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `calc-mean-selftest`
   - `category-count-check-selftest`
   - `shared-index-csharp-selftest <model.dvo> <flow.dvst> <image> [deviceId]`
-  - `shared-index-review-selftest [model.dvo] [flow.dvst] [virbox-model.dvt]`
+  - `shared-index-review-selftest [model.dvo] [flow.dvst]`
   - `shared-index-format-selftest`
   - `shared-index-provider-model-selftest`
 
@@ -247,16 +249,12 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `all-tests` 已加入上述共享 index 测试；任一专项返回非零时，统一测试返回失败。
 - `DlcvCSharpTest.exe native-c-api-regression-selftest` 使用正式 C ABI 检查不存在模型的 `code=2` 和 `Model not found.`、有效编号重复释放成功，以及 JSON 编号范围和类型。
 - `DlcvCSharpTest.exe shared-index-native-rule-selftest` 调用编号脚本输出的 `Release/dlcv_infer_cpp_test.exe shared-index-rules-selftest`，检查退出码并按原生程序的 GBK 输出严格解码；跨语言模型加载与推理仍在同一进程使用正式 C ABI 验证。
-- `DlcvCSharpTest.exe shared-index-csharp-selftest` 依次执行以下检查：
-  - C# `Model(modelPath)` 加载普通模型，底层 `dlcv_get_model_info_c` 可按同一 index 查询；空构造 `Model` 借用后完成推理，借用实例释放后持有方继续推理。
-  - 同一空构造实例先使用不存在的 index 触发失败，再改为有效 index，确认恢复状态可重试并完成推理。
-  - 底层 `dlcv_load_model_c` 加载普通模型，C# 空构造 `Model` 按 index 查询和推理；C# 借用实例释放后底层模型仍可查询。
-  - C# `Model(flowPath)` 直接加载 DVST 时使用包内 `pipeline` 和子模型数据，并清除遗留 `model_index`；共享恢复时才使用已登记的 `pipeline` 和 `model_bindings`，不读取归档文件。绑定中的编号只接受非负 `int` 范围 JSON 整数。
-  - 每次恢复时查询进程内实际已加载的目标 DLL；普通模型按已加载 DLL 查询绑定，流程通过 OpenIVS 流程记录查询所属模块，歧义和异常均拒绝恢复。
-  - 流程恢复时所有子模型沿父流程选定的 loader 校验、绑定和复用，不为子模型重新搜索其他 DLL。
-  - `dvsp-disabled-selftest` 检查 C# API 对 `.dvsp` 直接返回不支持错误。
-  - `empty-flow-index-selftest` 检查无模型节点 DVST 可由 C#、C++ 分别登记，并检查 C# 可按 C++ flow index 恢复空绑定流程。
-  - 每种情况在最终持有方释放后检查 index 已从共享表移除；按 index 释放时，无效参数可返回参数错误；有效编号即使已不存在或底层报错也返回成功并完成本地清理，重复释放同样成功，错误详情只记录在日志或消息中。借用结果与持有方结果按类别、目标数量、分数和 bbox 容差比较。
+- `DlcvCSharpTest.exe shared-index-csharp-selftest` 依次验证普通模型与 DVST 的双向共享：C# 文件加载后供正式 C/C++ 入口按 index 使用，以及 C/C++ 文件加载后由 `ModelFactory.CreateFromIndex` 恢复。每个方向均检查创建方先释放后共享方仍可读取和推理、共享方先释放后创建方仍可使用、重复释放不重复消耗持有、最终释放后 index 消失。
+- `shared-index-route-selftest` 使用可控委托检查最终五接口、唯一模块选择、多模块同编号错误、查询错误不改选、负数 index 拒绝、DVS 登记字段、DVS 查询结果、统一普通释放和 DVS 子模型执行对象不重复 bind/free。
+- `shared-index-review-selftest` 使用实际普通模型与 DVST 检查两个共享方生命周期、DVS 子模型持有、最终释放、`Utils.GetAllModels()` 模块快照和列表查询不额外加载 DLL。
+- `free-all-modules-selftest` 显式使用两个已加载推理模块，确认相同编号仍分别保留在各自模块快照中，并由 `Utils.FreeAllModels()` 清理全部模块。
+- DVS 使用与普通模型相同的非负 `model_index`。恢复时先调用 `dlcv_bind_index_c`，再读取 `dlcv_get_dvs_model_c` 描述并创建 C# 执行对象；失败和正常释放均使用普通 `dlcv_free_model` 配对。`GetModelInfo()` 保持普通模型兼容结构，`GetDvsModelInfo()` 返回完整 DVS 信息。
+- `dvsp-disabled-selftest` 检查 C# API 对 `.dvsp` 直接返回不支持错误。
 - `dlcv_infer_cpp_test.exe calc-mean-selftest` 检查旧版 `ObjectResult` 构造函数的默认均值、新版构造函数的显式均值字段，以及结构化 JSON 结果的均值解析和缺失字段默认值。
 
 说明：
@@ -274,6 +272,6 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - 本文档不包含面向读者的操作指导、偏好表达或推断性表述
 - 本文档不引用交互过程中出现的指令性文本
 
-## 流程共享实现位置
+## C# 共享实现位置
 
-C# 经 flow/SharedFlowRegistry.cs 访问既有 dlcv_infer_cpp.dll 中的流程记录；底层推理模块只保存模型；流程 handle 由 OpenIVS 自主分配。流程查询返回 pipeline 和子模型绑定，恢复后两种语言分别持有自己的执行对象。子模型通过普通绑定接口复用，流程信息字符串由 OpenIVS 原生模块释放。工程引用会构建原生包装并复制其运行依赖，单独构建 C# Demo 也包含所需 DLL。
+C# 在 `DlcvCsharpApi/DllLoader.cs` 中直接解析实际已加载推理模块的最终五接口，不建立托管或 OpenIVS 原生流程记录表。`ModelFactory.CreateFromIndex` 负责模块查询、绑定、DVS 描述读取与失败配对释放；`DvsModel.LoadFromModelBindings` 根据描述建立 C# 执行对象。`Utils.GetAllModels()` 按模块保留底层快照并增加 `module_path`。`DlcvCsharpApi.csproj` 不引用 `dlcv_infer_cpp.vcxproj`，C# 发布清单不复制 `dlcv_infer_cpp.dll` 或其 OpenCV 运行库；混编测试工程仍保留自身所需的 C++/CLI 与包装 DLL 依赖。

@@ -20,8 +20,6 @@ PACKAGE_OUTPUT_FILE_NAMES = (
     DEMO_EXE_NAME,
     f"{DEMO_EXE_NAME}.config",
     "DlcvCsharpApi.dll",
-    "dlcv_infer_cpp.dll",
-    "opencv_world4100.dll",
     "DlcvCsharpApi.dll.config",
     "ImageViewer.dll",
     "ImageViewer.dll.config",

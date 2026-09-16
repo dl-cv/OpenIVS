@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -387,6 +388,83 @@ namespace dlcv_infer_csharp
             return output.ImageList.Select(m => m.ImageObject).ToList();
         }
 
+        /// <summary>
+        /// 汇总进程内已经加载的推理模块及各自模型快照，不为枚举加载其他模块。
+        /// </summary>
+        public static JObject GetAllModels()
+        {
+            var modules = new JArray();
+            try
+            {
+                foreach (DllLoader loader in DllLoader.GetLoadedLoaders())
+                {
+                    try
+                    {
+                        JObject snapshot = loader.GetAllModelsSnapshot();
+                        snapshot["module_path"] = loader.LoadedNativeModulePath ?? string.Empty;
+                        modules.Add(snapshot);
+
+                        if (snapshot["code"]?.Type != JTokenType.Integer ||
+                            snapshot["message"]?.Type != JTokenType.String)
+                        {
+                            return new JObject
+                            {
+                                ["code"] = 1,
+                                ["message"] = "底层模型快照缺少有效状态字段",
+                                ["modules"] = modules
+                            };
+                        }
+
+                        if (snapshot["code"].Value<int>() != 0)
+                        {
+                            return new JObject
+                            {
+                                ["code"] = 1,
+                                ["message"] = snapshot["message"].ToString(),
+                                ["modules"] = modules
+                            };
+                        }
+
+                        if (snapshot["provider"]?.Type != JTokenType.String ||
+                            !(snapshot["models"] is JArray))
+                        {
+                            return new JObject
+                            {
+                                ["code"] = 1,
+                                ["message"] = "底层模型快照结构无效",
+                                ["modules"] = modules
+                            };
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        return new JObject
+                        {
+                            ["code"] = 1,
+                            ["message"] = "获取模型列表失败: " + ex.Message,
+                            ["modules"] = modules
+                        };
+                    }
+                }
+
+                return new JObject
+                {
+                    ["code"] = 0,
+                    ["message"] = "success",
+                    ["modules"] = modules
+                };
+            }
+            catch (Exception ex)
+            {
+                return new JObject
+                {
+                    ["code"] = 1,
+                    ["message"] = "枚举已加载推理模块失败: " + ex.Message,
+                    ["modules"] = modules
+                };
+            }
+        }
+
         public static void FreeAllModels()
         {
             try
@@ -642,4 +720,3 @@ namespace dlcv_infer_csharp
         public static extern int nvmlDeviceGetHandleByIndex(uint index, out IntPtr device);
     }
 }
-

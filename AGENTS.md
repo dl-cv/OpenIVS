@@ -123,25 +123,23 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 调用端不需要为这两类模型准备两套完全不同的调用方式。传入模型路径、设备和请求参数后，入口对象会完成对应的加载与执行。
 
-**model_index 分配规则**：
+**model_index 与共享规则**：
 
-- 对外仍使用 `int model_index`，不改变既有模型接口签名。JSON 中的资源编号接受除 `-1` 外的有符号 `int` 整数，流程子模型编号仍只接受非负整数，不接受字符串、浮点数、布尔值、空值或溢出值。
-- 普通模型使用底层加载返回的非负编号。流程由 OpenIVS 从 `-2` 开始递减分配，`-1` 表示失败，不调用底层编号分配接口。模型编号编码跳过 `bit8`（数值 `256`）。`bit8` 对应发号 DLL 的 `DogProvider` 标记，但不表示模型内容的加密 provider 或资源类型。
-- 每个 DLL 可分配 `2^30` 个序号；编号不回绕、不重发。释放资源和 `FreeAllModels()` 均不重置计数器，序号耗尽时返回错误。
-- 编号用于避免重复，编号正负仅区分模型与流程，恢复资源不依赖 `bit8` 或模型头；共享 index 始终通过进程内实际加载 DLL 查询。
+- 普通模型与 DVS 统一使用非负 `int model_index`，`-1` 表示失败。编号由实际持有资源的 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 分配；释放与 `FreeAllModels()` 不重置编号计数器，已释放编号不再次发放。
+- 底层新增接口固定为五个：`dlcv_register_dvs_model_c`、`dlcv_get_dvs_model_c`、`dlcv_get_index_type_c`、`dlcv_bind_index_c`、`dlcv_get_all_models`。没有解绑、DVS 专用释放、`get_model_info_c` 或编号分配接口；普通模型信息沿用 `dlcv_get_model_info`，所有持有统一由 `dlcv_free_model` 释放。
+- DVS 登记输入字段全部必需：整数 `schema_version=1`、字符串 `dvs_type`（`dvst`/`dvso`）、字符串 `model_path`、整数 `device_id`、完整 `pipeline` 对象、`model_bindings` 数组。每个绑定包含整数 `node_id` 与非负整数 `model_index`；输入不得包含顶层 `model_index` 或 `provider`。
+- DVS 登记成功返回非负 index 并持有每个不同子模型一次。DVS 查询不增加持有，返回原描述并增加 `model_index`、`resource_type=dvs`、`code`、`message`，不重复子模型信息。DVS 最后释放时由底层减少每个不同子模型的一次持有。
+- 直接加载归档先清除 `pipeline.json` 中遗留的 `model_index`，只使用包内流程和子模型数据；共享恢复才使用已登记描述中的 `pipeline` 与 `model_bindings`。
 
 **按查询恢复共享索引**：
 
-- 恢复时枚举进程内实际已加载的目标 DLL，候选集合包含另一语言已经加载的模块，不为探测额外加载 provider DLL。
-- 非负编号通过候选 DLL 的 `dlcv_get_index_type_c` 查询模型表，小于 `-1` 的编号仅通过 OpenIVS 的 `SharedFlowRegistry` 查询该模块对应的流程记录；返回 `-1` 或未知值视为查询错误，不能当作不存在。恰有一个候选返回有效结果后，选定该 DLL 并检查完成共享操作所需的导出是否齐全；缺少接口时报错，不改选其他 DLL。
-- 选定 DLL 后由 Model 恢复调用已有绑定接口并保存该 DLL 的 loader；无结果、多个结果、查询异常或绑定失败均报错，不改选其他 DLL。
-- 绑定完成后后续操作固定使用已保存的 loader；资源失效时不重新搜索其他 DLL。
+- 恢复时仅枚举进程内实际已加载的目标 DLL，不为探测加载其他 provider 模块，也不按编号范围、模型头或查询顺序选择。
+- 对候选模块调用 `dlcv_get_index_type_c`：`0` 表示不存在、`1` 表示普通模型、`2` 表示 DVS、`-1` 或其他值表示查询错误。无结果、多模块命中或查询异常均报错。
+- 唯一确定所属模块后调用 `dlcv_bind_index_c` 增加一次持有；DVS 随后读取描述并创建当前语言自己的执行对象。绑定或恢复失败时使用普通 `dlcv_free_model` 配对，不改选其他模块。
+- C# `ModelFactory.CreateFromIndex` 与 C++ `CreateModelFromIndex` 均遵循上述顺序。两侧 `GetModelInfo()` 对 DVS 返回普通模型兼容信息，`GetDvsModelInfo()` 返回完整 DVS 信息。
+- `Utils.GetAllModels()` / `Utils::GetAllModels()` 只汇总当前实际已加载模块，不额外加载 DLL。C# 返回 `{code,message,modules:[...]}`，每个模块保留底层 `provider/models` 快照并增加 `module_path`；不同模块的相同编号不合并。
 
-流程记录仅由 OpenIVS 既有 `dlcv_infer_cpp.dll` 管理，C# 与 C++ 共用；底层不保存流程 JSON 或节点关系，也不区分流程持有。流程记录使用普通模型绑定接口保留子模型。
-
-普通模型索引由底层 `dlcv_infer` 加载接口返回。流程由 C# 或 C++ 完成解析和子模型加载，并使用本次加载和注册返回的编号。归档直接加载先清除 `pipeline.json` 中遗留的 `model_index`，只使用包内流程数据和子模型数据；只有共享恢复入口才使用已登记的 index 和绑定信息。
-
-**释放规则**：按 index 释放时，参数格式无效或编号为 `-1` 或超出有符号 `int` 范围仍可返回参数错误；参数是有效编号时，即使编号已不存在或底层释放返回错误，也返回成功并完成本地清理，重复释放同样成功。底层错误最多附在日志或 `message` 的错误详情中，不保留等待重试状态。
+**释放规则**：普通模型加载、DVS 登记和共享绑定成功后各持有一次。对象本地释放保持幂等，每次成功取得的持有只调用一次普通释放；全量释放清理进程内所有已加载目标模块。
 
 
 ## API 速查表
@@ -186,10 +184,10 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 | 能力 | 类/函数 | 关键接口 |
 |------|---------|----------|
-| 普通模型 | `DlcvModules.Model` | 构造（`string modelPath, int deviceId`）、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetModelInfo()`、`Dispose()` |
+| 普通模型与 DVS | `DlcvModules.Model` / `dlcv_infer_csharp.ModelFactory` | 构造、`CreateFromIndex()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetModelInfo()`、`GetDvsModelInfo()`、`Dispose()` |
 | 流程图模型 | `DlcvModules.FlowGraphModel` | `Load()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetModelInfo()`、`GetLoadedModelMeta()`、`Dispose()` |
 | DVS 归档模型 | `DlcvModules.DvsModel` | 继承 `FlowGraphModel`，`Load(string dvsPath, int deviceId)` |
-| 工具类 | `DlcvModules.Utils` | `FreeAllModels()`、`GetDeviceInfo()`、`GetGpuInfo()`、`KeepMaxClock()`、`GetAllDogInfo()`、JSON 格式化、可视化转换 |
+| 工具类 | `DlcvModules.Utils` | `GetAllModels()`、`FreeAllModels()`、`GetDeviceInfo()`、`GetGpuInfo()`、`KeepMaxClock()`、`GetAllDogInfo()`、JSON 格式化、可视化转换 |
 | DLL 加载器 | `dlcv_infer_csharp.DllLoader` | `Instance`、`EnsureForModel()`、`LoadedDogProvider` |
 | 推理计时 | `DlcvModules.InferTiming` | `GetLast(out double dlcvInferMs, out double flowInferMs)`、`GetLastFlowNodeTimings()` |
 | 加密狗查询 | `sntl_admin_csharp.DogUtils` | `GetSentinelInfo()`、`GetVirboxInfo()`、`GetAllDogInfo()` |
@@ -493,7 +491,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ## 项目间依赖
 
-- **底层推理引擎**：`dlcv_infer` 是 OpenIVS API 层的底层依赖。OpenIVS 的 C++/C API（`dlcv_infer_cpp`）和 C# API（`DlcvCsharpApi`）均通过加载 `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）调用推理能力；C++/C API 对外产物为 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
+- **底层推理引擎**：`dlcv_infer` 是 OpenIVS API 层的底层依赖。OpenIVS 的 C++/C API（`dlcv_infer_cpp`）和 C# API（`DlcvCsharpApi`）均通过加载 `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）调用推理能力；C# 共享索引不依赖 `dlcv_infer_cpp.dll`，C++/C API 对外产物仍为 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 - **加密模型文件**：`dlcv_deploy` 产出的 `.dvt`/`.dvo`/`.dvst`/`.dvso` 等文件是 OpenIVS 测试程序与 WPF 框架的输入。
 - **接口范围**：OpenIVS 的 C++、C 和 C# API 在首次普通模型加载时根据模型头 `dog_provider` 选择默认 DLL；后续普通模型继续使用已选默认 DLL，并逐个检查模型授权。共享 index 始终按进程内实际加载的 DLL 查询，不按模型头重新选择。
 

@@ -52,6 +52,8 @@ class CopyPackageFilesTest(unittest.TestCase):
             self.assertNotIn("DlcvDemo.exe", actual_names)
             self.assertNotIn("DlcvDemo.exe.config", actual_names)
             self.assertNotIn("old-runtime.dll", actual_names)
+            self.assertNotIn("dlcv_infer_cpp.dll", actual_names)
+            self.assertNotIn("opencv_world4100.dll", actual_names)
 
 
 class BuildScopeTest(unittest.TestCase):
