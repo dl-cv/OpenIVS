@@ -11,4 +11,7 @@ if errorlevel 1 exit /b %errorlevel%
 python "%BUILD_SCRIPT%" "%~dp0DlcvCSharpTest\DlcvCSharpTest.csproj" --configuration Release --platform x64 --target Build --verbosity minimal
 if errorlevel 1 exit /b %errorlevel%
 
+python "%BUILD_SCRIPT%" "%~dp0DlcvCSharpCppTest\DlcvCSharpCppTest.csproj" --configuration Release --platform x64 --target Build --verbosity minimal
+if errorlevel 1 exit /b %errorlevel%
+
 exit /b 0
