@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -114,10 +114,10 @@ namespace dlcv_infer {
         const DlcvCImageList* imageList);
     typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultCFuncType)(DlcvCResult* result);
     typedef int (DLCV_INFER_NATIVE_CALL *GetIndexTypeFuncType)(int index);
-    typedef const char* (DLCV_INFER_NATIVE_CALL *GetModelInfoByIndexFuncType)(int modelIndex);
+    typedef int (DLCV_INFER_NATIVE_CALL *RegisterDvsModelFuncType)(const char* dvsJson);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *GetDvsModelFuncType)(int modelIndex);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *GetAllModelsFuncType)();
     typedef int (DLCV_INFER_NATIVE_CALL *BindIndexFuncType)(int index);
-    typedef int (DLCV_INFER_NATIVE_CALL *UnbindIndexFuncType)(int index);
-    typedef FreeResultFuncType FreeStringFuncType;
 
 #ifdef DLCV_INFER_CPP_EXPORTS
     // DLL 加载器（内部使用）
@@ -142,10 +142,10 @@ namespace dlcv_infer {
         GetDeviceInfoFuncType dlcv_get_device_info = nullptr;
         KeepMaxClockFuncType dlcv_keep_max_clock = nullptr;
         GetIndexTypeFuncType dlcv_get_index_type_c = nullptr;
-        GetModelInfoByIndexFuncType dlcv_get_model_info_c = nullptr;
+        RegisterDvsModelFuncType dlcv_register_dvs_model_c = nullptr;
+        GetDvsModelFuncType dlcv_get_dvs_model_c = nullptr;
+        GetAllModelsFuncType dlcv_get_all_models = nullptr;
         BindIndexFuncType dlcv_bind_index_c = nullptr;
-        UnbindIndexFuncType dlcv_unbind_index_c = nullptr;
-        FreeStringFuncType dlcv_free_string = nullptr;
         GetGpuInfoFuncType dlcv_get_gpu_info = nullptr;
         ResetMaxClockFuncType dlcv_reset_max_clock = nullptr;
         SetGpuMaxClockFuncType dlcv_set_gpu_max_clock = nullptr;
@@ -225,18 +225,23 @@ namespace dlcv_infer {
         KeepMaxClockFuncType GetKeepMaxClockFunc() const {
             return dlcv_keep_max_clock;
         }
-        bool SupportsFlowRegistry() const { return dlcv_get_index_type_c && dlcv_bind_index_c && dlcv_unbind_index_c; }
+        bool SupportsSharedIndex() const {
+            return dlcv_get_index_type_c && dlcv_bind_index_c && dlcv_free_model_c;
+        }
+        bool SupportsDvsRegistry() const {
+            return SupportsSharedIndex() && dlcv_register_dvs_model_c && dlcv_get_dvs_model_c && dlcv_free_result;
+        }
         int QueryIndexType(int index) const;
         int BindIndex(int index) const;
-        int UnbindIndex(int index) const;
-        int RegisterFlow(const char* text) const;
-        json GetFlowInfo(int index) const;
-        int FreeFlow(int index) const;
+        int ReleaseIndex(int index) const;
+        int RegisterDvsModel(const char* text) const;
+        json GetDvsModel(int index) const;
+        json GetAllModelsSnapshot() const;
         GetIndexTypeFuncType GetIndexTypeFunc() const { return dlcv_get_index_type_c; }
-        GetModelInfoByIndexFuncType GetModelInfoByIndexFunc() const { return dlcv_get_model_info_c; }
+        RegisterDvsModelFuncType GetRegisterDvsModelFunc() const { return dlcv_register_dvs_model_c; }
+        GetDvsModelFuncType GetDvsModelFunc() const { return dlcv_get_dvs_model_c; }
+        GetAllModelsFuncType GetAllModelsFunc() const { return dlcv_get_all_models; }
         BindIndexFuncType GetBindIndexFunc() const { return dlcv_bind_index_c; }
-        UnbindIndexFuncType GetUnbindIndexFunc() const { return dlcv_unbind_index_c; }
-        FreeStringFuncType GetFreeStringFunc() const { return dlcv_free_string; }
         GetGpuInfoFuncType GetGpuInfoFunc() const { return dlcv_get_gpu_info; }
         ResetMaxClockFuncType GetResetMaxClockFunc() const { return dlcv_reset_max_clock; }
         SetGpuMaxClockFuncType GetSetGpuMaxClockFunc() const { return dlcv_set_gpu_max_clock; }
@@ -395,16 +400,18 @@ namespace dlcv_infer {
         bool _indexBound = false;
         bool _indexReady = false;
         bool _ownsNativeModelIndex = false;
-        bool _ownsRegisteredFlowIndex = false;
+        bool _ownsRegisteredDvsIndex = false;
+        bool _hasDvsDescription = false;
+        json _dvsDescription;
         std::mutex _indexStateMu;
-        // 保留现有类成员布局；全内存流程加载时该字符串保持为空。
+        // 全内存流程加载时该字符串保持为空。
         std::string _tempDir;
 
         void EnsureBoundIndexReady();
         void SetPreferredDllLoader(DllLoader* loader) noexcept;
         void LoadFlowArchiveAndRegister(const std::wstring& modelPath, int deviceId);
         void RestoreFlowFromSharedInfo(const json& flowInfo);
-        bool UnbindCurrentIndexNoexcept();
+        bool ReleaseBoundIndexNoexcept();
         mutable std::shared_mutex _stateMutex;
         std::mutex _modelInfoMutex;
 
@@ -435,8 +442,8 @@ namespace dlcv_infer {
     /// 从已加载的共享索引创建模型对象，并在创建时绑定该索引。
     /// </summary>
     inline Model CreateModelFromIndex(int index) {
-        if (index == -1) {
-            throw std::invalid_argument("model index 无效");
+        if (index < 0) {
+            throw std::invalid_argument("model index 必须是非负整数");
         }
         Model model;
         model.modelIndex = index;
@@ -447,16 +454,21 @@ namespace dlcv_infer {
 
     /// <summary>
     /// 工具类：静态方法集合。
-    /// 注意：FreeAllModels 会释放底层 dlcv_infer.dll 中的所有已加载模型，属于全局操作。
+    /// 注意：FreeAllModels 会释放当前进程已加载推理模块中的全部模型和 DVS，属于全局操作。
     /// </summary>
     class DLCV_INFER_CPP_API Utils {
     public:
         static std::string JsonToString(const json& j);
 
         /// <summary>
-        /// 释放底层推理 DLL 中的全部已加载模型（全局释放）。
+        /// 释放当前进程已加载的全部推理模块中的模型与 DVS（全局释放）。
         /// </summary>
         static void FreeAllModels();
+
+        /// <summary>
+        /// 获取当前进程已加载推理模块的模型与 DVS 快照，不主动加载模块。
+        /// </summary>
+        static json GetAllModels();
 
         static json GetDeviceInfo();
 

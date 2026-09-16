@@ -83,7 +83,7 @@ typedef struct DlcvCResult {
 extern "C" {
 #endif
 
-// 加载返回普通模型非负 index 或小于 -1 的流程 handle；仅 -1 表示失败。
+// 加载返回普通模型或 DVS 的非负 index；-1 表示失败。
 DLCV_C_API int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id);
 DLCV_C_API const char* dlcv_infer_cpp_get_last_error_c();
 DLCV_C_API int dlcv_infer_cpp_free_model_c(int model_index);
@@ -99,6 +99,7 @@ DLCV_C_API const char* dlcv_infer_cpp_infer_json_c(
     const DlcvCImage* image,
     const char* params_json);
 DLCV_C_API const char* dlcv_infer_cpp_get_all_dog_info_c();
+DLCV_C_API const char* dlcv_infer_cpp_get_all_models_c();
 DLCV_C_API void dlcv_infer_cpp_free_string_c(const char* value);
 DLCV_C_API void dlcv_infer_cpp_free_all_models_c();
 

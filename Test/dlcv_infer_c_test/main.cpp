@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -385,6 +385,7 @@ static bool RunCapiExportCompletenessCheck() {
         "dlcv_infer_cpp_get_model_info_c",
         "dlcv_infer_cpp_infer_json_c",
         "dlcv_infer_cpp_get_all_dog_info_c",
+        "dlcv_infer_cpp_get_all_models_c",
         "dlcv_infer_cpp_free_string_c",
         "dlcv_infer_cpp_free_all_models_c",
         "dlcv_load_model_c",
@@ -957,11 +958,42 @@ static bool RunNativeJsonDvtByteRegression(
     const std::string indexConfig = dlcv_infer::json{ { "model_index", modelIndex } }.dump();
     std::string nativeInfo;
     std::string wrapperInfo;
-    bool ok = CopyJsonCallResult(native.getModelInfo, native.freeResult, indexConfig,
-                  nativeInfo, error) &&
-        CopyJsonCallResult(dlcv_get_model_info, dlcv_free_result, indexConfig,
-                  wrapperInfo, error) &&
-        nativeInfo == wrapperInfo;
+    const bool nativeInfoRead = CopyJsonCallResult(
+        native.getModelInfo, native.freeResult, indexConfig, nativeInfo, error);
+    const bool wrapperInfoRead = CopyJsonCallResult(
+        dlcv_get_model_info, dlcv_free_result, indexConfig, wrapperInfo, error);
+    bool ok = nativeInfoRead && wrapperInfoRead && nativeInfo == wrapperInfo;
+    if (!ok) {
+        std::cerr << "FAIL: dvt 原生 JSON 模型信息逐字节比较，native_read="
+                  << nativeInfoRead << "，wrapper_read=" << wrapperInfoRead
+                  << "，bytes=" << nativeInfo.size() << "/" << wrapperInfo.size() << "\n";
+    }
+
+    bool structuredInfoOk = false;
+    const char* structuredInfo = dlcv_infer_cpp_get_model_info_c(modelIndex);
+    if (structuredInfo != nullptr) {
+        try {
+            const auto info = dlcv_infer::json::parse(structuredInfo);
+            structuredInfoOk = info.is_object() && info.value("code", 0) == 0 &&
+                info.contains("model_index") && info.at("model_index").is_number_integer() &&
+                info.at("model_index").get<int>() == modelIndex;
+        } catch (...) {
+            structuredInfoOk = false;
+        }
+        dlcv_infer_cpp_free_string_c(structuredInfo);
+    }
+    if (!structuredInfoOk) {
+        std::cerr << "FAIL: dvt 扩展 C 信息未保留当前 model_index\n";
+    }
+    ok = structuredInfoOk && ok;
+    std::string wrapperInfoAfterStructured;
+    const bool rereadInfo = CopyJsonCallResult(dlcv_get_model_info, dlcv_free_result,
+        indexConfig, wrapperInfoAfterStructured, error);
+    const bool unchangedInfo = rereadInfo && nativeInfo == wrapperInfoAfterStructured;
+    if (!unchangedInfo) {
+        std::cerr << "FAIL: dvt 扩展 C 信息查询后原生 JSON 字节发生变化\n";
+    }
+    ok = unchangedInfo && ok;
 
     // 掩码地址由每次调用单独分配，逐字节比较时关闭掩码返回。
     const std::string inferConfig = BuildNativeInferConfig(modelIndex, image, false);
@@ -971,6 +1003,10 @@ static bool RunNativeJsonDvtByteRegression(
              nativeInfer, error) && ok;
     ok = CopyJsonCallResult(wrapper.infer, dlcv_free_model_result, inferConfig,
              wrapperInfer, error) && ok;
+    if (nativeInfer != wrapperInfer) {
+        std::cerr << "FAIL: dvt 原生 JSON 推理逐字节比较，bytes="
+                  << nativeInfer.size() << "/" << wrapperInfer.size() << "\n";
+    }
     ok = nativeInfer == wrapperInfer && ok;
 
     const std::string missingIndexConfig = dlcv_infer::json{ { "model_index", -987654 } }.dump();
@@ -1374,7 +1410,8 @@ static bool RunNativeIndexRangeCheck(
         static_cast<uint64_t>(modelIndex) + (uint64_t{1} << 32),
         static_cast<int64_t>(modelIndex) - (int64_t{1} << 32),
         uint64_t{2147483648ULL}, uint64_t{18446744073709551615ULL},
-        int64_t{-1}, 1.5, "0", true, nullptr
+        int64_t{-1}, int64_t{-2}, static_cast<int64_t>((std::numeric_limits<int>::min)()),
+        1.5, "0", true, nullptr
     };
     struct Call {
         const char* name;
@@ -1410,7 +1447,8 @@ static bool RunNativeIndexRangeCheck(
     return ok;
 }
 
-static bool RunCapiFreeAllEntryPointsCheck(const std::wstring& modelPath, const cv::Mat& image) {
+static bool RunCapiFreeAllEntryPointsCheck(
+    const std::wstring& modelPath, const cv::Mat& image, int expectedIndexType) {
     struct EntryPoint {
         const char* label;
         void (*clear)();
@@ -1427,19 +1465,48 @@ static bool RunCapiFreeAllEntryPointsCheck(const std::wstring& modelPath, const 
         NativeJsonModelCleanup cleanup;
         const int modelIndex = LoadCapiReference(modelPath, true);
         const int repeatedIndex = LoadCapiReference(modelPath, false);
-        bool ok = modelIndex != -1 && repeatedIndex == modelIndex;
-        if (modelIndex != -1) ok = CheckStructuredSharedIndex(modelIndex, image) && ok;
+        bool ok = true;
+        const auto check = [&](bool passed, const char* stage) {
+            if (!passed) {
+                std::cerr << "FAIL: " << entryPoint.label << "，" << stage
+                          << "，resource_type=" << expectedIndexType
+                          << "，index=" << modelIndex << "/" << repeatedIndex << "\n";
+            }
+            ok = passed && ok;
+        };
+        check(modelIndex >= 0 && repeatedIndex >= 0, "两次加载成功");
+        // 普通模型重复加载复用资源；每次归档加载独立登记 DVS。
+        check(expectedIndexType == 1 ? repeatedIndex == modelIndex :
+            expectedIndexType == 2 && repeatedIndex != modelIndex, "重复加载编号规则");
+        for (const int index : { modelIndex, repeatedIndex }) {
+            if (index >= 0) {
+                check(dlcv_test::QueryLoadedSharedIndexType(index) == expectedIndexType,
+                    "释放前资源类型");
+                check(CheckStructuredSharedIndex(index, image), "释放前信息与推理");
+            }
+        }
         entryPoint.clear();
-        if (modelIndex != -1) ok = CheckCapiIndexReleased(modelIndex) && ok;
+        for (const int index : { modelIndex, repeatedIndex }) {
+            if (index >= 0) check(CheckCapiIndexReleased(index), "全量释放后旧编号失效");
+        }
         const int reloaded = LoadCapiReference(modelPath, true);
-        ok = reloaded >= 0 && reloaded != modelIndex && ok;
+        check(reloaded >= 0 && reloaded != modelIndex && reloaded != repeatedIndex,
+            "重新加载不复用任一旧编号");
+        for (const int index : { modelIndex, repeatedIndex }) {
+            if (index >= 0) check(CheckCapiIndexReleased(index), "重新加载后旧编号仍失效");
+        }
         if (reloaded >= 0) {
-            ok = CheckStructuredSharedIndex(reloaded, image) && ok;
-            ok = FreeCapiReference(reloaded, false) && ok;
-            ok = CheckCapiIndexReleased(reloaded) && ok;
+            check(dlcv_test::QueryLoadedSharedIndexType(reloaded) == expectedIndexType,
+                "重新加载资源类型");
+            check(CheckStructuredSharedIndex(reloaded, image), "重新加载信息与推理");
+            check(FreeCapiReference(reloaded, false), "重新加载持有释放");
+            check(CheckCapiIndexReleased(reloaded), "最后持有释放后失效");
         }
         std::cout << (ok ? "PASS: " : "FAIL: ") << entryPoint.label
-                  << " 全量释放清除 C ABI 持有及缓存，重新加载不复用 index\n";
+                  << " 全量释放清除 C ABI 持有及缓存，重新加载不复用 index"
+                  << "，resource_type=" << expectedIndexType
+                  << "，index=" << modelIndex << "/" << repeatedIndex
+                  << "，reloaded=" << reloaded << "\n";
         allOk = ok && allOk;
     }
     return allOk;
@@ -1553,6 +1620,22 @@ static bool RunUnknownIndexWithoutModuleCheck() {
     imageList.n = 1;
 
     bool ok = true;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        const char* allModelsText = dlcv_infer_cpp_get_all_models_c();
+        bool listOk = false;
+        if (allModelsText != nullptr) {
+            try {
+                const auto allModels = dlcv_infer::json::parse(allModelsText);
+                listOk = allModels.is_object() && allModels.value("code", 1) == 0 &&
+                    allModels.value("message", std::string()) == "success" &&
+                    allModels.contains("modules") && allModels.at("modules").is_array() &&
+                    allModels.at("modules").empty();
+            } catch (...) {}
+            dlcv_infer_cpp_free_string_c(allModelsText);
+        }
+        ok = listOk && !hasInferModule() && ok;
+    }
+
     DlcvCResult structuredMissing = dlcv_infer_c(missingIndex, &imageList);
     const bool structuredMissingOk = structuredMissing.code == 2 &&
         structuredMissing.message != nullptr &&
@@ -1587,6 +1670,7 @@ static bool RunUnknownIndexWithoutModuleCheck() {
         R"({"model_index":-4294967254})",
         R"({"model_index":18446744073709551615})",
         R"({"model_index":-1})",
+        R"({"model_index":-2})",
         R"({"model_index":0.5})",
         R"({"model_index":"42"})",
         R"({"model_index":true})",
@@ -1613,14 +1697,15 @@ static bool RunUnknownIndexWithoutModuleCheck() {
     ok = info == nullptr && !hasInferModule() && ok;
     if (info != nullptr) dlcv_infer_cpp_free_string_c(info);
     std::cout << (ok ? "PASS: " : "FAIL: ")
-              << "不存在的非负 index 返回精确模型缺失结果，释放重复成功，非法 JSON index 被拒绝且未加载推理 DLL\n";
+              << "模型列表查询未加载推理 DLL；不存在的 index 返回精确缺失结果，重复释放成功，非法 JSON index 被拒绝\n";
     return ok;
 }
 
-static bool RunExternalSharedIndexRecoveryCheck(
+static bool RunExternalSharedIndexRecoveryScenario(
     const char* label,
     const std::wstring& modelPath,
-    const cv::Mat& image) {
+    const cv::Mat& image,
+    bool releaseOwnerFirst) {
     const int modelIndex = dlcv_test::LoadOwnedModel(modelPath, 0);
     if (modelIndex == -1) {
         std::cerr << "FAIL: " << label << "，C++ 外部模型加载失败\n";
@@ -1629,24 +1714,27 @@ static bool RunExternalSharedIndexRecoveryCheck(
 
     bool ownerFreed = false;
     bool wrapperFreed = false;
+    const auto releaseWrapper = [&]() {
+        if (wrapperFreed) return true;
+        const std::string config = dlcv_infer::json{{"model_index", modelIndex}}.dump();
+        const char* result = dlcv_free_model(config.c_str());
+        if (result == nullptr) return false;
+        bool released = false;
+        try { released = dlcv_infer::json::parse(result).value("code", -1) == 0; } catch (...) {}
+        dlcv_free_result(result);
+        wrapperFreed = released;
+        return released;
+    };
     const auto cleanup = [&]() {
-        if (!wrapperFreed) {
-            const std::string config = dlcv_infer::json{ { "model_index", modelIndex } }.dump();
-            const char* result = dlcv_free_model(config.c_str());
-            if (result != nullptr) dlcv_free_result(result);
-        }
+        if (!wrapperFreed) (void)releaseWrapper();
         if (!ownerFreed) {
-            dlcv_test::ReleaseOwnedModel(modelIndex);
+            ownerFreed = dlcv_test::ReleaseOwnedModel(modelIndex);
         }
     };
 
-    const std::string indexConfig = dlcv_infer::json{ { "model_index", modelIndex } }.dump();
+    const std::string indexConfig = dlcv_infer::json{{"model_index", modelIndex}}.dump();
     const std::string inferConfig = BuildNativeInferConfig(modelIndex, image, false);
-    std::string info;
-    std::string infer;
-    std::string heldInfer;
-    std::string freeResult;
-    std::string releasedInfo;
+    std::string response;
     std::string error;
     NativeJsonApi wrapper;
     if (!LoadWrapperNativeInfer(wrapper, error)) {
@@ -1657,46 +1745,53 @@ static bool RunExternalSharedIndexRecoveryCheck(
 
     bool ok = CheckStructuredSharedIndex(modelIndex, image);
     ok = CopyJsonCallResult(
-        dlcv_get_model_info, dlcv_free_result, indexConfig, info, error) &&
-        IsSuccessfulNativeInfo(info) && ok;
+        dlcv_get_model_info, dlcv_free_result, indexConfig, response, error) &&
+        IsSuccessfulNativeInfo(response) && ok;
     ok = CopyJsonCallResult(
-        wrapper.infer, dlcv_free_model_result, inferConfig, infer, error) &&
-        IsSuccessfulNativeInfer(infer, true) && ok;
+        wrapper.infer, dlcv_free_model_result, inferConfig, response, error) &&
+        IsSuccessfulNativeInfer(response, true) && ok;
 
-    ownerFreed = dlcv_test::ReleaseOwnedModel(modelIndex);
-    ok = ownerFreed && ok;
-    ok = CheckStructuredSharedIndex(modelIndex, image) && ok;
-
-    ok = CopyJsonCallResult(
-        wrapper.infer, dlcv_free_model_result, inferConfig, heldInfer, error) &&
-        IsSuccessfulNativeInfer(heldInfer, true) && ok;
-
-    const bool freeCallOk = CopyJsonCallResult(
-        dlcv_free_model, dlcv_free_result, indexConfig, freeResult, error);
-    try {
-        wrapperFreed = freeCallOk && dlcv_infer::json::parse(freeResult).value("code", -1) == 0;
-    } catch (...) {
-        wrapperFreed = false;
+    if (releaseOwnerFirst) {
+        ownerFreed = dlcv_test::ReleaseOwnedModel(modelIndex);
+        ok = ownerFreed && CheckStructuredSharedIndex(modelIndex, image) && ok;
+        ok = CopyJsonCallResult(
+            wrapper.infer, dlcv_free_model_result, inferConfig, response, error) &&
+            IsSuccessfulNativeInfer(response, true) && ok;
+        ok = releaseWrapper() && ok;
+    } else {
+        ok = releaseWrapper() && ok;
+        try {
+            const auto ownerVisible = dlcv_infer::json::parse(
+                dlcv_test::GetBorrowedModelInfoResult(modelIndex));
+            ok = ownerVisible.value("code", 1) == 0 &&
+                dlcv_test::QueryLoadedSharedIndexType(modelIndex) != 0 && ok;
+        } catch (...) {
+            ok = false;
+        }
+        ownerFreed = dlcv_test::ReleaseOwnedModel(modelIndex);
+        ok = ownerFreed && ok;
     }
-    ok = wrapperFreed && ok;
 
-    bool releasedRejected = false;
-    if (CopyJsonCallResult(
-            dlcv_get_model_info, dlcv_free_result, indexConfig, releasedInfo, error)) {
-        releasedRejected = IsMissingModelNativeStatus(releasedInfo);
-    }
-    ok = releasedRejected && ok;
-
+    ok = CheckCapiIndexReleased(modelIndex) && ok;
     if (!ok) {
-        std::cerr << "FAIL: " << label << "，外部索引恢复或释放检查失败"
+        std::cerr << "FAIL: " << label << "，外部索引恢复或释放顺序检查失败"
                   << (error.empty() ? "" : ": " + error) << "\n";
         cleanup();
         return false;
     }
 
-    std::cout << "PASS: " << label
-              << "，C++ 外部索引的信息、推理、持有与释放检查通过\n";
+    std::cout << "PASS: " << label << "，"
+              << (releaseOwnerFirst ? "外部对象先释放" : "C 包装持有先释放")
+              << "时资源均在最后一次释放后失效\n";
     return true;
+}
+
+static bool RunExternalSharedIndexRecoveryCheck(
+    const char* label,
+    const std::wstring& modelPath,
+    const cv::Mat& image) {
+    return RunExternalSharedIndexRecoveryScenario(label, modelPath, image, true) &&
+        RunExternalSharedIndexRecoveryScenario(label, modelPath, image, false);
 }
 
 static std::string BuildResultFingerprint(const DlcvCResult& result) {
@@ -2451,7 +2546,8 @@ int main(int argc, char** argv) {
     ok = RunConcurrentCapiReferenceReleaseCheck(dvtPath, dvtImage) && ok;
     ok = RunNativeIndexRangeCheck("普通模型", dvtPath, dvtImage) && ok;
     ok = RunNativeIndexRangeCheck("流程模型", dvstPath, dvstImage) && ok;
-    ok = RunCapiFreeAllEntryPointsCheck(dvtPath, dvtImage) && ok;
+    ok = RunCapiFreeAllEntryPointsCheck(dvtPath, dvtImage, 1) && ok;
+    ok = RunCapiFreeAllEntryPointsCheck(dvstPath, dvstImage, 2) && ok;
     ok = RunNativeLoadLifecycleCheck() && ok;
     ok = RunNativeJsonStructuredRecoveryCheck("普通模型", dvtPath, dvtImage) && ok;
     ok = RunNativeJsonStructuredRecoveryCheck("流程模型", dvstPath, dvstImage) && ok;

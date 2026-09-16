@@ -183,7 +183,6 @@
     <ClCompile Include="dlcv_infer.cpp" />
     <ClCompile Include="dlcv_infer_c_api.cpp" />
     <ClCompile Include="dlcv_sntl_admin.cpp" />
-    <ClCompile Include="flow\SharedFlowRegistry.cpp" />
     <ClCompile Include="flow\GraphExecutor.cpp" />
     <ClCompile Include="flow\FlowGraphModel.cpp" />
     <ClCompile Include="flow\modules\ModelModules.cpp" />
@@ -201,7 +200,6 @@
     <ClInclude Include="dlcv_sntl_admin.h" />
     <ClInclude Include="ImageInputUtils.h" />
     <ClInclude Include="MaskUtils.h" />
-    <ClInclude Include="flow\SharedFlowRegistry.h" />
     <ClInclude Include="flow\ExecutionContext.h" />
     <ClInclude Include="flow\FlowPayloadTypes.h" />
     <ClInclude Include="flow\FlowTypes.h" />

@@ -188,19 +188,17 @@ int RunSharedIndexResolverSelfTest() {
         return -2;
     }
 
-    for (int handle : {-2, std::numeric_limits<int>::min()}) {
-        const std::vector<dlcv_infer::detail::SharedIndexCandidate> flows = {
-            {&firstTag, nullptr, [handle](int value) { return value == handle ? 2 : 0; }}
-        };
-        if (dlcv_infer::detail::SelectSharedIndexCandidate(handle, flows, selectedType).Module != &firstTag ||
-            selectedType != 2) return -12;
+    const std::vector<dlcv_infer::detail::SharedIndexCandidate> negativeCandidates = {
+        {&firstTag, nullptr, [](int) { return 2; }}
+    };
+    for (int invalidIndex : {-1, -2, std::numeric_limits<int>::min()}) {
+        if (!ExpectResolverFailure<std::invalid_argument>(negativeCandidates, invalidIndex)) return -12;
     }
 
     const std::vector<dlcv_infer::detail::SharedIndexCandidate> noResultCandidates = {
         {&firstTag, nullptr, [](int) { return 0; }}
     };
     if (!ExpectResolverFailure<std::invalid_argument>(noResultCandidates, 0)) return -3;
-    if (!ExpectResolverFailure<std::invalid_argument>(noResultCandidates, -1)) return -4;
 
     const std::vector<dlcv_infer::detail::SharedIndexCandidate> ambiguousCandidates = {
         {&firstTag, nullptr, [](int) { return 1; }},
