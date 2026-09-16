@@ -81,8 +81,9 @@ class BuildScopeTest(unittest.TestCase):
         script = (repo_root / "Test" / "1_编译测试.bat").read_text(encoding="ascii")
         lines = script.splitlines()
         commands = [line for line in lines if line.startswith("python ")]
-        self.assertEqual(3, len(commands))
-        for command, project in zip(commands, ("dlcv_infer_cpp_test", "dlcv_infer_c_test", "DlcvCSharpTest")):
+        projects = ("dlcv_infer_cpp_test", "dlcv_infer_c_test", "DlcvCSharpTest", "DlcvCSharpCppTest")
+        self.assertEqual(len(projects), len(commands))
+        for command, project in zip(commands, projects):
             self.assertIn(project, command)
             self.assertEqual("if errorlevel 1 exit /b %errorlevel%", lines[lines.index(command) + 1])
         self.assertNotIn("build_package.py", script)
