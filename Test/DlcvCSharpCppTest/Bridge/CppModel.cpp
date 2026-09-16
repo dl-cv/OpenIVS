@@ -1,4 +1,4 @@
-﻿#include "CppModel.h"
+#include "CppModel.h"
 #include "NativeModel.h"
 #include <exception>
 #include <msclr/lock.h>
@@ -19,7 +19,7 @@ namespace {
 
 namespace DlcvCSharpCppBridge {
     CppModel::CppModel(int modelIndex) : model_(nullptr), sync_(gcnew Object()) {
-        if (modelIndex == -1) throw gcnew ArgumentOutOfRangeException("modelIndex");
+        if (modelIndex < 0) throw gcnew ArgumentOutOfRangeException("modelIndex");
         try { model_ = new NativeModel(modelIndex); }
         catch (const std::exception& ex) {
             throw gcnew InvalidOperationException(FromUtf8(ex.what()));
@@ -60,6 +60,15 @@ namespace DlcvCSharpCppBridge {
         msclr::lock guard(sync_);
         CheckLoaded();
         try { return FromUtf8(model_->Info()); }
+        catch (const std::exception& ex) {
+            throw gcnew InvalidOperationException(FromUtf8(ex.what()));
+        }
+    }
+
+    String^ CppModel::GetDvsModelInfo() {
+        msclr::lock guard(sync_);
+        CheckLoaded();
+        try { return FromUtf8(model_->DvsInfo()); }
         catch (const std::exception& ex) {
             throw gcnew InvalidOperationException(FromUtf8(ex.what()));
         }

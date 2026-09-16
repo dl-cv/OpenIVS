@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using DlcvCSharpCppBridge;
@@ -32,7 +32,7 @@ namespace DlcvCSharpCppTest
             try
             {
                 candidate = new CSharpModel(path, device, false, false);
-                if (candidate.modelIndex == -1)
+                if (candidate.modelIndex < 0)
                     throw new InvalidOperationException("加载失败：模型编号无效。");
                 csharpModel = candidate;
                 CSharpCreatedFromIndex = false;
@@ -70,7 +70,7 @@ namespace DlcvCSharpCppTest
             try
             {
                 candidate = new CppModel(path, device);
-                if (candidate.ModelIndex == -1)
+                if (candidate.ModelIndex < 0)
                     throw new InvalidOperationException("加载失败：模型编号无效。");
                 cppModel = candidate;
                 CppCreatedFromIndex = false;
@@ -150,6 +150,22 @@ namespace DlcvCSharpCppTest
             if (!HasCppModel)
                 throw new InvalidOperationException("C++ 模型尚未创建。");
             return JObject.Parse(cppModel.GetModelInfo()).ToString(Formatting.Indented);
+        }
+
+        public string GetCSharpDvsInfo()
+        {
+            ThrowIfDisposed();
+            if (!HasCSharpModel)
+                throw new InvalidOperationException("C# 模型尚未加载。");
+            return csharpModel.GetDvsModelInfo().ToString(Formatting.Indented);
+        }
+
+        public string GetCppDvsInfo()
+        {
+            ThrowIfDisposed();
+            if (!HasCppModel)
+                throw new InvalidOperationException("C++ 模型尚未创建。");
+            return JObject.Parse(cppModel.GetDvsModelInfo()).ToString(Formatting.Indented);
         }
 
         public void ReleaseCSharp()

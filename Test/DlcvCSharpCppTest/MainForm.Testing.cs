@@ -129,7 +129,7 @@ namespace DlcvCSharpCppTest
             UiCheck(statusLabel.Text.StartsWith("操作失败") && Session.CppModelIndex == cppIndex,
                 "重复加载应拒绝且保留现有 C++ 模型");
             LoadCSharpButton_Click(loadCSharpButton, EventArgs.Empty);
-            UiCheck(Session.HasCSharpModel && Session.CSharpModelIndex != -1 && !loadCSharpButton.Enabled,
+            UiCheck(Session.HasCSharpModel && Session.CSharpModelIndex >= 0 && !loadCSharpButton.Enabled,
                 "C++ 加载后 C# 独立加载失败：" + statusLabel.Text);
             ConvertToCppButton_Click(convertToCppButton, EventArgs.Empty);
             UiCheck(statusLabel.Text.StartsWith("操作失败") && Session.CppModelIndex == cppIndex,
@@ -245,7 +245,45 @@ namespace DlcvCSharpCppTest
                         result["model_index"] = form.Session.CSharpModelIndex;
                         result["csharp_text_length"] = form.csharpInfoTextBox.TextLength;
                         result["cpp_text_length"] = form.cppInfoTextBox.TextLength;
-                        result["native_modules"] = CommandLineTest.NativeModules();
+                        string extension = Path.GetExtension(model).ToLowerInvariant();
+                        if (extension == ".dvst" || extension == ".dvso")
+                        {
+                            JObject csharpDvsInfo = JObject.Parse(form.Session.GetCSharpDvsInfo());
+                            JObject cppDvsInfo = JObject.Parse(form.Session.GetCppDvsInfo());
+                            result["csharp_dvs_info"] = csharpDvsInfo;
+                            result["cpp_dvs_info"] = cppDvsInfo;
+                            CommandLineTest.CheckDvsInfoShape(csharpDvsInfo, form.Session.CSharpModelIndex, "C#");
+                            CommandLineTest.CheckDvsInfoShape(cppDvsInfo, form.Session.CppModelIndex, "C++");
+                        }
+                        JArray modulesBefore = CommandLineTest.NativeModules();
+                        JObject allModels = dlcv_infer_csharp.Utils.GetAllModels();
+                        UiCheck(allModels["code"]?.Value<int>() == 0 && allModels["modules"] is JArray,
+                            "GetAllModels 返回失败");
+                        foreach (JObject module in ((JArray)allModels["modules"]).OfType<JObject>())
+                        {
+                            UiCheck(module["code"]?.Type == JTokenType.Integer && module["code"].Value<int>() == 0 &&
+                                module["message"]?.Type == JTokenType.String &&
+                                module["provider"]?.Type == JTokenType.String &&
+                                module["module_path"]?.Type == JTokenType.String && module["models"] is JArray,
+                                "GetAllModels 模块快照格式错误");
+                        }
+                        JArray modulesAfter = CommandLineTest.NativeModules();
+                        string[] engineBefore = modulesBefore.OfType<JObject>()
+                            .Where(item => (string)item["name"] == "dlcv_infer.dll" ||
+                                (string)item["name"] == "dlcv_infer_v.dll")
+                            .Select(item => (string)item["path"])
+                            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
+                        string[] engineAfter = modulesAfter.OfType<JObject>()
+                            .Where(item => (string)item["name"] == "dlcv_infer.dll" ||
+                                (string)item["name"] == "dlcv_infer_v.dll")
+                            .Select(item => (string)item["path"])
+                            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
+                        UiCheck(engineBefore.SequenceEqual(engineAfter, StringComparer.OrdinalIgnoreCase),
+                            "GetAllModels 额外加载了推理 DLL");
+                        result["all_models"] = allModels;
+                        result["native_modules"] = modulesAfter;
                     }
                     if (screenshot != null)
                     {

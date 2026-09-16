@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using DlcvCSharpCppBridge;
 using Newtonsoft.Json.Linq;
 
@@ -35,23 +36,93 @@ namespace DlcvCSharpCppTest
             return info;
         }
 
-        private static void CheckFlowLayer(int index, string path, JObject report)
+        private static bool IsDvsPath(string path)
         {
             string extension = Path.GetExtension(path).ToLowerInvariant();
-            if (extension != ".dvst" && extension != ".dvso") return;
+            return extension == ".dvst" || extension == ".dvso";
+        }
+
+        private static void CheckDvsLayer(int index, string path, JObject report)
+        {
+            if (!IsDvsPath(path)) return;
             string type;
             var loader = dlcv_infer_csharp.DllLoader.ResolveForIndex(index, out type);
-            Check(type == "flow", "OpenIVS 未识别流程编号");
-            Check(loader.dlcv_get_index_type_c(index) == 0, "推理库不应保存流程编号");
-            var info = loader.GetFlowInfo(index);
-            Check(info["code"].Value<int>() == 0 && info["pipeline"] is JObject,
-                "流程层未保留配置");
-            foreach (JObject binding in (JArray)info["model_bindings"])
-                Check(loader.dlcv_get_index_type_c(binding["model_index"].Value<int>()) == 1,
-                    "子模型未保留在推理库中");
-            report["flow_registry"] = "OpenIVS";
-            Check(index < -1, "流程 handle 未使用独立编号域");
-            report["engine_flow_index_type"] = 0;
+            Check(type == "dvs", "DVS 编号类型错误");
+            Check(loader.GetIndexType(index) == 2, "底层未保存 DVS 编号");
+            JObject info = loader.GetDvsModel(index);
+            Check(info["code"]?.Value<int>() == 0 && info["message"]?.Type == JTokenType.String &&
+                info["schema_version"]?.Value<int>() == 1 && info["dvs_type"]?.Type == JTokenType.String &&
+                (string)info["resource_type"] == "dvs" && info["model_index"]?.Value<int>() == index &&
+                info["pipeline"] is JObject && info["model_bindings"] is JArray &&
+                info["model_path"]?.Type == JTokenType.String && info["device_id"]?.Type == JTokenType.Integer,
+                "DVS 描述不完整");
+            Check(info["provider"] == null, "DVS 描述不应包含 provider");
+            Check(index >= 0, "DVS 未使用统一非负 model_index");
+            report["dvs_registry"] = "dlcv_infer";
+            report["engine_index_type"] = 2;
+            report["dvs_descriptor"] = info;
+        }
+
+        private static void CheckDvsInfo(ModelSession session, string path, JObject report)
+        {
+            if (!IsDvsPath(path)) return;
+            JObject csharp = JObject.Parse(session.GetCSharpDvsInfo());
+            JObject cpp = JObject.Parse(session.GetCppDvsInfo());
+            report["csharp_dvs_info"] = csharp;
+            report["cpp_dvs_info"] = cpp;
+            CheckDvsInfoShape(csharp, session.CSharpModelIndex, "C#");
+            CheckDvsInfoShape(cpp, session.CppModelIndex, "C++");
+        }
+
+        internal static void CheckDvsInfoShape(JObject info, int index, string side)
+        {
+            Check(info["code"]?.Value<int>() == 0 && info["message"]?.Type == JTokenType.String &&
+                info["schema_version"]?.Value<int>() == 1 && info["dvs_type"]?.Type == JTokenType.String &&
+                info["model_path"]?.Type == JTokenType.String && info["device_id"]?.Type == JTokenType.Integer &&
+                info["pipeline"] is JObject && info["model_bindings"] is JArray &&
+                info["model_index"]?.Value<int>() == index && (string)info["resource_type"] == "dvs" &&
+                info["loaded_model_meta"] is JArray && info["model_info"] is JObject &&
+                info["input_model_node_id"]?.Type == JTokenType.Integer &&
+                info["output_model_node_id"]?.Type == JTokenType.Integer,
+                side + " DVS 完整信息格式错误，期望 index=" + index +
+                "，实际 index=" + info["model_index"]);
+        }
+
+        private static void CheckAllModelsSnapshot(int index, string path, JObject report)
+        {
+            string[] before = NativeModules().OfType<JObject>()
+                .Where(item => (string)item["name"] == "dlcv_infer.dll" || (string)item["name"] == "dlcv_infer_v.dll")
+                .Select(item => (string)item["path"])
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            JObject allModels = dlcv_infer_csharp.Utils.GetAllModels();
+            Check(allModels["code"]?.Value<int>() == 0 && allModels["modules"] is JArray,
+                "GetAllModels 返回失败");
+            string expectedType = IsDvsPath(path) ? "dvs" : "model";
+            int matches = 0;
+            foreach (JObject module in (JArray)allModels["modules"])
+            {
+                Check(module["code"]?.Type == JTokenType.Integer && module["code"].Value<int>() == 0 &&
+                    module["message"]?.Type == JTokenType.String &&
+                    module["provider"]?.Type == JTokenType.String &&
+                    module["module_path"]?.Type == JTokenType.String && module["models"] is JArray,
+                    "模块快照字段不完整");
+                foreach (JObject model in (JArray)module["models"])
+                {
+                    if (model["model_index"]?.Value<int>() == index &&
+                        string.Equals((string)model["resource_type"], expectedType, StringComparison.Ordinal))
+                        matches++;
+                }
+            }
+            Check(matches == 1, "GetAllModels 未按模块保留当前资源");
+            string[] after = NativeModules().OfType<JObject>()
+                .Where(item => (string)item["name"] == "dlcv_infer.dll" || (string)item["name"] == "dlcv_infer_v.dll")
+                .Select(item => (string)item["path"])
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            Check(before.SequenceEqual(after, StringComparer.OrdinalIgnoreCase),
+                "GetAllModels 额外加载了推理 DLL");
+            report["all_models"] = allModels;
         }
 
         private static void CheckExpired(int index)
@@ -68,13 +139,14 @@ namespace DlcvCSharpCppTest
             // 第一项必须直接进入原生文件构造，不先建立 C# 模型。
             session.LoadCpp(model, device);
             int cppIndex = session.CppModelIndex;
-            CheckFlowLayer(cppIndex, model, report);
-            Check(cppIndex != -1 && !session.HasCSharpModel && !session.CppCreatedFromIndex,
+            CheckDvsLayer(cppIndex, model, report);
+            Check(cppIndex >= 0 && !session.HasCSharpModel && !session.CppCreatedFromIndex,
                 "C++ 独立加载状态错误");
             report["cpp_info"] = Info(session.GetCppInfo());
             report["cpp_index"] = cppIndex;
             if (mode == "cpp")
             {
+                CheckAllModelsSnapshot(cppIndex, model, report);
                 session.ReleaseCpp(); session.ReleaseCpp();
                 CheckExpired(cppIndex);
                 session.LoadCpp(model, device);
@@ -87,10 +159,12 @@ namespace DlcvCSharpCppTest
             {
                 session.LoadCSharp(model, device);
                 int csIndex = session.CSharpModelIndex;
-                // SDK 对相同内容和设备复用编号，每次文件加载增加持有计数。
-                Check(csIndex != -1 && !session.CppCreatedFromIndex, "分别加载的状态错误");
+                // 普通模型可复用编号；DVS 分别登记，各自信息按各自编号检查。
+                Check(csIndex >= 0 && !session.CppCreatedFromIndex, "分别加载的状态错误");
                 report["csharp_index"] = csIndex;
                 report["csharp_info"] = Info(session.GetCSharpInfo());
+                CheckDvsInfo(session, model, report);
+                CheckAllModelsSnapshot(csIndex, model, report);
                 if (order == "csharp-first")
                 {
                     session.ReleaseCSharp();
@@ -117,13 +191,15 @@ namespace DlcvCSharpCppTest
         {
             session.LoadCpp(model, device);
             int index = session.CppModelIndex;
-            CheckFlowLayer(index, model, report);
+            CheckDvsLayer(index, model, report);
             Check(!session.HasCSharpModel, "反向共享前不应存在 C# 模型");
             report["cpp_info"] = Info(session.GetCppInfo());
             session.ConvertToCSharp();
             Check(session.CSharpModelIndex == index && session.CSharpCreatedFromIndex, "反向共享编号或来源错误");
             report["model_index"] = index;
             report["csharp_info"] = Info(session.GetCSharpInfo());
+            CheckDvsInfo(session, model, report);
+            CheckAllModelsSnapshot(index, model, report);
             report["native_modules"] = NativeModules();
             bool rejected = false;
             try { session.ConvertToCSharp(); }
@@ -202,10 +278,12 @@ namespace DlcvCSharpCppTest
                         report["csharp_info"] = Info(session.GetCSharpInfo());
                         session.ConvertToCpp();
                         int index = session.CSharpModelIndex;
-                        CheckFlowLayer(index, model, report);
-                        Check(index != -1 && session.CppModelIndex == index, "两侧模型编号不一致");
+                        CheckDvsLayer(index, model, report);
+                        Check(index >= 0 && session.CppModelIndex == index, "两侧模型编号不一致");
                         report["model_index"] = index;
                         report["cpp_info"] = Info(session.GetCppInfo());
+                        CheckDvsInfo(session, model, report);
+                        CheckAllModelsSnapshot(index, model, report);
                         report["native_modules"] = NativeModules();
                         if (order == "csharp-first")
                         {

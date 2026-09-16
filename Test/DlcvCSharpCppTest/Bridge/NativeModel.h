@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <string>
 namespace dlcv_infer { class Model; }
 
@@ -12,6 +12,7 @@ public:
     NativeModel& operator=(const NativeModel&) = delete;
     int Index() const;
     std::string Info();
+    std::string DvsInfo();
 private:
     dlcv_infer::Model* model_;
 };
