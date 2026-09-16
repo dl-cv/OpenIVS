@@ -61,6 +61,20 @@ def main():
         print(name + ": passed", flush=True)
 
     try:
+        # 项目配置与实际 EXE 分别检查，编译成功不能替代 IDE 平台声明检查。
+        process = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                                  str(Path(__file__).with_name("check_startup_configuration.ps1"))],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        (root / "project-configuration.log").write_bytes(process.stderr)
+        if process.returncode != 0:
+            raise AssertionError("项目启动配置检查失败，详见 project-configuration.log")
+        report = json.loads(process.stdout.decode("utf-8-sig"))
+        if report["status"] != "passed" or "x64" not in report["platforms"]:
+            raise AssertionError("项目启动配置检查结果不正确")
+        (root / "project-configuration.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        results.append({"case": "project-configuration", "exit_code": 0, "status": "passed"})
+        print("project-configuration: passed", flush=True)
         run("designer", ["designer-test"])
         run("empty-ui", ["ui-test"], screenshot=True)
         run("missing-model", ["model-test"], expected=1)

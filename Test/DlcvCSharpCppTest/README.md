@@ -38,10 +38,20 @@
 ## Visual Studio 启动
 
 - 统一入口为仓库根目录现有的 `OpenIVS.sln`；Test 分组包含 `DlcvCSharpCppTest` 和 `DlcvCSharpCppBridge`，Debug/Release x64 配置均已登记，不另建解决方案。
+- C# 工程分别声明 `Debug|x64` 和 `Release|x64` 条件属性组，并分别设置平台与输出目录；只有默认 `Platform=x64` 而未声明配置组合时，MSBuild 可枚举平台列表为空，命令行指定平台的构建仍可能成功。
 - C# 工程明确设置 `OutputType=WinExe`、`StartupObject=DlcvCSharpCppTest.Program`、`StartAction=Project`，启用混合调试；启动配置为 Debug x64。
 - 根目录 `OpenIVS.slnLaunch` 提供“C# 与 C++ 混编模型测试”配置，只启动 C# 应用，不启动 C++/CLI 或原生 DLL 工程。`python Test/DlcvCSharpCppTest/update_launch_profile.py` 先确认应用已属于现有解决方案，再更新该启动配置；脚本不创建或改写 `.sln`。
 - 已有 Visual Studio 会话仍使用此前启动选择时，右键 **DlcvCSharpCppTest** → **设为启动项目**，或选择上述共享启动配置。`DlcvCSharpCppBridge` 和 `dlcv_infer_cpp` 是 DLL，不是独立程序。
-- F5 启动调试，Ctrl+F5 启动应用；独立 EXE 仍可直接启动。本工程不修改个人 `.suo` 或其他工程的调试设置。
+- 项目文件更新后，接受 Visual Studio 的重新加载提示；若当前会话仍保留旧配置，关闭并重新打开原 `OpenIVS.sln`。本工程不修改个人 `.suo` 或其他工程的调试设置。
+- F5 / Ctrl+F5 的实际 IDE 交互仍需人工验证；命令行、配置检查与非交互 UI 结果不代表调试器启动已验收。
+
+## 项目启动配置检查
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File Test/DlcvCSharpCppTest/check_startup_configuration.ps1
+```
+
+通过本机 Visual Studio 的 MSBuild API 只读求值，验证可枚举平台、Debug/Release 配置、原解决方案映射、共享启动配置、应用入口及各配置输出路径。不调用构建目标，不启动或控制 Visual Studio，不改安装文件或个人设置；JSON 明确标记 `ide_debugger_tested=false`。该检查在修正前会因缺少可枚举 x64 平台失败，并由串行回归入口在实际 EXE 测试之前执行。
 
 ## 构建
 
