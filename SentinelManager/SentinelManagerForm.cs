@@ -29,23 +29,28 @@ namespace SentinelManager
         private readonly TextBox raw = new TextBox();
         private readonly TabControl tabs = new TabControl();
         private bool? compact;
+        private int layoutDpi;
+        private bool layoutReady;
         public bool Busy { get; private set; }
 
         public SentinelManagerForm(ISentinelClient client, Func<string, string, bool> confirm = null)
         {
+            SuspendLayout();
             this.client = client ?? throw new ArgumentNullException(nameof(client));
             this.confirm = confirm ?? ((dialogTitle, text) => MessageBox.Show(this, text, dialogTitle,
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes);
             Text = "Sentinel 加密狗管理";
             Name = "SentinelManagerForm";
-            Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Regular, GraphicsUnit.Pixel);
+            Font = new Font("Microsoft YaHei UI", 12F, FontStyle.Regular, GraphicsUnit.Point);
             ForeColor = Ink;
             BackColor = Color.FromArgb(243, 246, 251);
-            AutoScaleMode = AutoScaleMode.None;
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
             MinimumSize = new Size(720, 480);
             ClientSize = new Size(1120, 860);
             StartPosition = FormStartPosition.CenterScreen;
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20, 16, 20, 16), RowCount = 2, ColumnCount = 1 };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             Controls.Add(root);
@@ -57,7 +62,7 @@ namespace SentinelManager
             heading.Controls.Add(buttons[4], 0, 0);
             var title = new Panel { Dock = DockStyle.Fill };
             title.Controls.Add(new Label { Text = "本机设备与服务管理", AutoSize = true, Location = new Point(0, 39), ForeColor = Color.SlateGray });
-            title.Controls.Add(new Label { Text = "Sentinel 加密狗管理", AutoSize = true, Font = new Font(Font.FontFamily, 26, FontStyle.Bold, GraphicsUnit.Pixel), Location = new Point(0, 0) });
+            title.Controls.Add(new Label { Text = "Sentinel 加密狗管理", AutoSize = true, Font = new Font(Font.FontFamily, 19.5F, FontStyle.Bold, GraphicsUnit.Point), Location = new Point(0, 0) });
             heading.Controls.Add(title, 1, 0);
             root.Controls.Add(heading, 0, 0);
             body.Dock = DockStyle.Fill;
@@ -95,6 +100,7 @@ namespace SentinelManager
             sidebar.Controls.Add(sideTitle);
             sidebar.Controls.Add(sideNote);
             var result = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(16), ColumnCount = 1, RowCount = 4, Margin = Padding.Empty };
+            result.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             result.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             result.RowStyles.Add(new RowStyle(SizeType.Absolute, 8));
             result.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -180,38 +186,78 @@ namespace SentinelManager
             Resize += (s, e) => ApplyResponsiveLayout();
             FormClosing += (s, e) => { if (Busy) { e.Cancel = true; SetStatus("正在处理，请等待完成后关闭", false); } };
             ShowDetails(raw.Text);
+            ResumeLayout(true);
+            PerformAutoScale();
+            layoutReady = true;
             ApplyResponsiveLayout();
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            ApplyResponsiveLayout();
+            FitToWorkingArea();
+        }
+
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            if (!layoutReady || IsDisposed) return;
+            // 等待框架完成控件缩放，再按逻辑尺寸重新计算动态布局。
+            BeginInvoke(new Action(() => {
+                if (IsDisposed) return;
+                compact = null;
+                ApplyResponsiveLayout();
+                FitToWorkingArea();
+            }));
+        }
+
+        private int Pixels(int logical)
+        {
+            return (int)Math.Round(logical * DeviceDpi / 96.0, MidpointRounding.AwayFromZero);
+        }
+
+        private void FitToWorkingArea()
+        {
             var area = Screen.FromControl(this).WorkingArea;
-            Size = new Size(Math.Min(Width, area.Width - 32), Math.Min(Height, area.Height - 32));
+            int margin = Pixels(16);
+            int availableWidth = Math.Max(1, area.Width - margin * 2);
+            int availableHeight = Math.Max(1, area.Height - margin * 2);
+            MinimumSize = new Size(Math.Min(Pixels(720), availableWidth), Math.Min(Pixels(480), availableHeight));
+            Size = new Size(Math.Min(Width, availableWidth), Math.Min(Height, availableHeight));
+            Location = new Point(Math.Max(area.Left + margin, Math.Min(Left, area.Right - margin - Width)),
+                Math.Max(area.Top + margin, Math.Min(Top, area.Bottom - margin - Height)));
         }
 
         private static Button MakeButton(string text, string name, bool primary)
         {
             var button = new Button { Name = name, Text = text, FlatStyle = FlatStyle.Flat,
                 BackColor = primary ? Blue : Color.White, ForeColor = primary ? Color.White : Ink,
-                Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold, GraphicsUnit.Pixel), Cursor = Cursors.Hand, Margin = new Padding(0, 0, 0, 4) };
+                Font = new Font("Microsoft YaHei UI", 11.25F, FontStyle.Bold, GraphicsUnit.Point), Cursor = Cursors.Hand, Margin = new Padding(0, 0, 0, 4) };
             button.FlatAppearance.BorderColor = primary ? Blue : Color.FromArgb(203, 215, 231);
             return button;
         }
 
         private void ApplyResponsiveLayout()
         {
-            bool next = ClientSize.Width < 960;
-            if (compact == next) return;
+            if (!layoutReady) return;
+            bool next = ClientSize.Width < Pixels(960);
+            if (compact == next && layoutDpi == DeviceDpi) return;
             compact = next;
+            layoutDpi = DeviceDpi;
             body.SuspendLayout();
             actions.SuspendLayout();
             body.ColumnStyles.Clear();
             body.RowStyles.Clear();
             body.ColumnCount = next ? 1 : 2;
             body.RowCount = next ? 2 : 1;
-            body.ColumnStyles.Add(new ColumnStyle(next ? SizeType.Percent : SizeType.Absolute, next ? 100 : 256));
+            body.ColumnStyles.Add(new ColumnStyle(next ? SizeType.Percent : SizeType.Absolute, next ? 100 : Pixels(256)));
             if (!next) body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            if (next) body.RowStyles.Add(new RowStyle(SizeType.Absolute, 128));
+            if (next) body.RowStyles.Add(new RowStyle(SizeType.Absolute, Pixels(128)));
             body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             body.SetCellPosition(body.Controls[1], next ? new TableLayoutPanelCellPosition(0, 1) : new TableLayoutPanelCellPosition(1, 0));
-            sidebar.Margin = next ? new Padding(0, 0, 0, 12) : new Padding(0, 0, 16, 0);
-            sidebar.Padding = new Padding(next ? 6 : 14);
+            sidebar.Margin = next ? new Padding(0, 0, 0, Pixels(12)) : new Padding(0, 0, Pixels(16), 0);
+            sidebar.Padding = new Padding(Pixels(next ? 6 : 14));
             sideTitle.Visible = sideNote.Visible = !next;
             actions.Controls.Clear();
             actions.ColumnStyles.Clear();
@@ -220,16 +266,23 @@ namespace SentinelManager
             actions.RowCount = next ? 2 : 5;
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, next ? 50 : 100));
             if (next) actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            for (int i = 0; i < (next ? 2 : 4); i++) actions.RowStyles.Add(new RowStyle(SizeType.Absolute, next ? 52 : 124));
+            for (int i = 0; i < (next ? 2 : 4); i++) actions.RowStyles.Add(new RowStyle(SizeType.Absolute, Pixels(next ? 52 : 124)));
             if (!next) actions.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             for (int i = 0; i < 4; i++)
             {
                 notes[i].Visible = !next;
-                cards[i].Padding = new Padding(next ? 4 : 10);
-                cards[i].Margin = next ? new Padding(0, 0, 6, 0) : new Padding(0, 0, 0, 12);
-                buttons[i].Height = next ? 40 : 42;
+                notes[i].Padding = new Padding(0, Pixels(8), 0, 0);
+                buttons[i].Margin = new Padding(0, 0, 0, Pixels(4));
+                cards[i].Padding = new Padding(Pixels(next ? 4 : 10));
+                cards[i].Margin = next ? new Padding(0, 0, Pixels(6), 0) : new Padding(0, 0, 0, Pixels(12));
+                buttons[i].Height = Pixels(next ? 40 : 42);
                 actions.Controls.Add(cards[i], next ? i % 2 : 0, next ? i / 2 : i);
             }
+            sideNote.Height = Pixels(50);
+            tabs.SizeMode = TabSizeMode.Fixed;
+            tabs.ItemSize = new Size(Pixels(110), Pixels(36));
+            details.ColumnHeadersHeight = Pixels(40);
+            details.DefaultCellStyle.Padding = new Padding(Pixels(9), Pixels(2), Pixels(9), Pixels(2));
             actions.ResumeLayout(true);
             body.ResumeLayout(true);
         }
@@ -307,6 +360,7 @@ namespace SentinelManager
             {
                 string timestamp = DateTimeOffset.Now.ToString("yyyy-MM-ddTHH:mm:sszzz");
                 raw.Text = "上次结果：\r\n" + result.Replace("\r\n", "\n").Replace("\n", "\r\n") + "\r\n\r\n时间：" + timestamp;
+                raw.Select(0, 0);
                 ShowDetails(result);
                 executed.Text = "最近执行：" + timestamp;
                 SetStatus(success ? "执行完成" : "执行失败", !success);

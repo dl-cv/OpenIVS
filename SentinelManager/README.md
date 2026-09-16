@@ -35,11 +35,11 @@
 
 `Properties/AssemblyInfo.cs` 是唯一版本来源。程序集版本与文件版本使用相同四段整数，信息版本可以追加 `aN`。打包前与安装前后均核验 EXE 的 `FileVersion` 和 `ProductVersion`，后者对应程序集信息版本。
 
-ZIP 必须且只含 `SentinelManager.exe`、`SentinelManager.exe.config`、`README.md` 三个非空文件。运行配置由 `App.config` 生成，用于启用 .NET Framework 4.7.2 的 `PerMonitorV2`；缺少配置或配置为空时拒绝打包和安装。不包含测试程序、PDB、源码、截图、JSON 结果、外部 DLL 或授权文件。不调用根目录 wheel、签名、上传流程，不修改密钥相关实现。
+ZIP 必须且只含 `SentinelManager.exe`、`SentinelManager.exe.config`、`README.md` 三个非空文件。运行配置由 `App.config` 生成；缺少配置或配置为空时拒绝打包和安装。不包含测试程序、PDB、源码、截图、JSON 结果、外部 DLL 或授权文件。不调用根目录 wheel、签名、上传流程，不修改密钥相关实现。
 
 ## DPI 适配
 
-界面采用 96 DPI 设计基准，使用 `PerMonitorV2`，字体与控件按显示器 DPI 适配。不得通过关闭自动缩放来满足截图检查。构建流程继续调用现有 `ui-test` 入口。
+界面采用 96 DPI 逻辑尺寸与点单位字体；窗口、按钮、页签及响应式布局按实际 DPI 缩放，初始窗口限制在当前屏幕工作区内。`App.config` 启用 PerMonitorV2，应用与测试使用同一来源配置。
 
 ## 非交互验证
 
@@ -50,6 +50,16 @@ ZIP 必须且只含 `SentinelManager.exe`、`SentinelManager.exe.config`、`READ
 - 打包脚本检查进程退出码、JSON 总结果与每项检查、隔离数据来源、时间、截图清单与 PNG 文件；任何检查失败均停止，不报告成功。后端和 UI 测试顺序执行，不并行构建。
 - 验证和安装中间文件使用 `tempfile.TemporaryDirectory` 写入系统临时目录，退出后清理。ZIP 保留在组件 `dist/`，不保留打包内部临时截图；用于 PR 的额外截图由独立验证流程保留在系统临时目录，不加入安装包。
 - 纯 Python 隔离测试：在仓库根目录执行 `python -B -m unittest discover -s Test -p test_sentinel_package.py -v`，不会调用真实构建、安装或客户端。
+
+### DPI 回归
+
+构建后可执行独立 DPI 回归，不更改系统显示设置：
+
+```powershell
+python -B Test/run_sentinel_dpi_regression.py --output-dir <系统临时空子目录> --expected-native-dpi 144
+```
+
+`--expected-native-dpi` 可省略；指定 144 时要求本机实际为 150%。脚本串行运行正常 PerMonitorV2 进程和 `DpiAwareness=false` 的独立临时测试进程。后者为 Windows 返回 96 DPI 的虚拟化测试环境，不代表真实 100% 显示器。两组均校验窗口、按钮、字体、文字裁切和操作显示，保存各自四张 PNG，并在 `dpi-regression-results.json` 比较控件尺寸与 DPI 比例。测试进程结束后清理二进制副本，报告与截图保留在输出目录；未验证物理显示器切换。
 
 ## 安装位置与安全限制
 
