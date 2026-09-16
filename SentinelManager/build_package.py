@@ -21,8 +21,8 @@ from pathlib import Path
 COMPONENT_DIR = Path(__file__).resolve().parent
 EXE_NAME = "SentinelManager.exe"
 CONFIG_NAME = EXE_NAME + ".config"
-REQUIRED_FILES = frozenset({EXE_NAME, "README.md"})
-ALLOWED_FILES = REQUIRED_FILES | {CONFIG_NAME}
+REQUIRED_FILES = frozenset({EXE_NAME, CONFIG_NAME, "README.md"})
+ALLOWED_FILES = REQUIRED_FILES
 MAX_FILE_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 SCREENSHOTS = ("initial.png", "result.png", "raw-result.png", "compact.png")
@@ -129,11 +129,8 @@ def verify_exe_version(path: Path, expected: Version) -> None:
 
 def package_files(component: Path) -> dict[str, Path]:
     output = component / "bin" / "Release"
-    files = {EXE_NAME: output / EXE_NAME, "README.md": component / "README.md"}
-    config = output / CONFIG_NAME
-    check_plain_path(config)
-    if config.exists():
-        files[CONFIG_NAME] = config
+    files = {EXE_NAME: output / EXE_NAME, CONFIG_NAME: output / CONFIG_NAME,
+             "README.md": component / "README.md"}
     for path in files.values():
         require_file(path)
     return files
@@ -146,7 +143,7 @@ def validate_archive(path: Path) -> dict[str, bytes]:
     try:
         with zipfile.ZipFile(path) as archive:
             members = archive.infolist()
-            if len(members) not in (2, 3):
+            if len(members) != len(REQUIRED_FILES):
                 raise PackageError("安装包文件数量不符合清单。")
             names = set()
             for member in members:
@@ -162,7 +159,7 @@ def validate_archive(path: Path) -> dict[str, bytes]:
                     raise PackageError(f"安装包包含非法文件或属性：{name!r}")
                 names.add(name)
             if not REQUIRED_FILES <= names:
-                raise PackageError("安装包缺少应用 EXE 或 README。")
+                raise PackageError("安装包缺少应用 EXE、运行配置或 README。")
             # 不调用 extract，ZIP 中的名称仅用于严格清单内的平面文件。
             return {member.filename: archive.read(member) for member in members}
     except PackageError:

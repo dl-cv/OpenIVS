@@ -69,6 +69,7 @@ class IsolatedTest(unittest.TestCase):
         self.output = self.component / "bin" / "Release"
         self.output.mkdir(parents=True)
         (self.output / package.EXE_NAME).write_bytes(b"isolated executable")
+        (self.output / package.CONFIG_NAME).write_bytes(b"<configuration />")
         (self.component / "README.md").write_text("隔离测试文档", encoding="utf-8")
         self.dist = self.component / "dist"
         self.dist.mkdir()
@@ -81,7 +82,8 @@ class IsolatedTest(unittest.TestCase):
 
     def write_archive(self, extra=None, entries=None):
         if entries is None:
-            entries = [(package.EXE_NAME, b"new executable"), ("README.md", b"new readme")]
+            entries = [(package.EXE_NAME, b"new executable"),
+                       (package.CONFIG_NAME, b"new config"), ("README.md", b"new readme")]
             if extra:
                 entries.extend(extra)
         with warnings.catch_warnings():
@@ -148,17 +150,47 @@ class ArchiveTest(IsolatedTest):
     def test_only_declared_files_are_packaged(self):
         for name in ("SentinelManagerTest.exe", "private.dll", "debug.pdb", "ui-test-results.json"):
             (self.output / name).write_bytes(b"not packaged")
-        (self.output / package.CONFIG_NAME).write_bytes(b"<configuration />")
         with patch.object(package, "verify_exe_version"):
             archive = package.create_archive(self.component, VERSION)
         self.assertEqual(self.archive, archive)
         contents = package.validate_archive(archive)
         self.assertEqual(package.ALLOWED_FILES, set(contents))
         self.assertEqual(b"isolated executable", contents[package.EXE_NAME])
+        self.assertEqual(b"<configuration />", contents[package.CONFIG_NAME])
 
-    def test_config_is_optional(self):
+    def test_config_is_required(self):
+        expected = {package.EXE_NAME, package.CONFIG_NAME, "README.md"}
+        self.assertEqual(expected, package.REQUIRED_FILES)
+        self.assertEqual(expected, package.ALLOWED_FILES)
         self.assertEqual(package.REQUIRED_FILES, set(package.package_files(self.component)))
         self.assertEqual(package.REQUIRED_FILES, set(package.validate_archive(self.write_archive())))
+
+    def test_missing_config_refuses_packaging_and_preserves_existing_archive(self):
+        (self.output / package.CONFIG_NAME).unlink()
+        self.archive.write_bytes(b"existing archive")
+        with patch.object(package, "verify_exe_version") as verify:
+            with self.assertRaisesRegex(package.PackageError, "缺少文件"):
+                package.create_archive(self.component, VERSION)
+        verify.assert_not_called()
+        self.assertEqual(b"existing archive", self.archive.read_bytes())
+
+    def test_empty_config_refuses_packaging(self):
+        (self.output / package.CONFIG_NAME).write_bytes(b"")
+        with patch.object(package, "verify_exe_version") as verify:
+            with self.assertRaisesRegex(package.PackageError, "文件类型或大小"):
+                package.create_archive(self.component, VERSION)
+        verify.assert_not_called()
+        self.assertFalse(self.archive.exists())
+
+    def test_missing_config_refuses_archive(self):
+        self.write_archive(entries=[(package.EXE_NAME, b"exe"), ("README.md", b"readme")])
+        with self.assertRaises(package.PackageError):
+            package.validate_archive(self.archive)
+
+    def test_extra_file_refuses_archive(self):
+        self.write_archive([("extra.dll", b"unexpected")])
+        with self.assertRaisesRegex(package.PackageError, "文件数量"):
+            package.validate_archive(self.archive)
 
     def test_required_source_is_checked(self):
         (self.component / "README.md").unlink()
@@ -169,7 +201,8 @@ class ArchiveTest(IsolatedTest):
         for name in ("../outside", "folder/README.md", "/README.md", "C:/README.md", "C:\\README.md",
                      "..\\README.md", "README.md:stream", "README.md ", "readme.md", "folder/", "extra.dll"):
             with self.subTest(name=name):
-                self.write_archive([(name, b"unexpected")])
+                self.write_archive(entries=[(package.EXE_NAME, b"exe"),
+                                            ("README.md", b"readme"), (name, b"unexpected")])
                 with self.assertRaises(package.PackageError):
                     package.validate_archive(self.archive)
 
@@ -177,7 +210,9 @@ class ArchiveTest(IsolatedTest):
         variants = [
             [(package.EXE_NAME, b"exe"), ("README.md", b"readme"), ("README.md", b"repeat")],
             [(package.EXE_NAME, b"exe")],
-            [(package.EXE_NAME, b""), ("README.md", b"readme")],
+            [(package.EXE_NAME, b""), (package.CONFIG_NAME, b"config"), ("README.md", b"readme")],
+            [(package.EXE_NAME, b"exe"), (package.CONFIG_NAME, b""), ("README.md", b"readme")],
+            [(package.EXE_NAME, b"exe"), (package.CONFIG_NAME, b"config"), ("README.md", b"")],
         ]
         for entries in variants:
             with self.subTest(entries=entries):
@@ -192,7 +227,8 @@ class ArchiveTest(IsolatedTest):
             member.external_attr = (mode << 16) | attributes
             with self.subTest(mode=mode, attributes=attributes):
                 with self.assertRaises(package.PackageError):
-                    package.validate_archive(self.write_archive([(member, b"target")]))
+                    package.validate_archive(self.write_archive(entries=[
+                        (package.EXE_NAME, b"exe"), ("README.md", b"readme"), (member, b"target")]))
 
     def test_rejects_corrupt_zip_and_crc(self):
         self.archive.write_bytes(b"not zip")
@@ -230,6 +266,7 @@ class ArchiveTest(IsolatedTest):
         with zipfile.ZipFile(self.archive, "w", compression=zipfile.ZIP_BZIP2) as archive:
             archive.writestr(package.EXE_NAME, b"exe")
             archive.writestr("README.md", b"readme")
+            archive.writestr(package.CONFIG_NAME, b"config")
         with self.assertRaises(package.PackageError):
             package.validate_archive(self.archive)
 
@@ -295,6 +332,7 @@ class InstallTest(IsolatedTest):
             self.assertEqual(self.target, package.install_package(self.component))
         self.assertEqual(b"keep", other.read_bytes())
         self.assertEqual(b"new executable", (self.target / package.EXE_NAME).read_bytes())
+        self.assertEqual(b"new config", (self.target / package.CONFIG_NAME).read_bytes())
         self.assertEqual(2, read.call_count)
         self.assertEqual(self.target / package.EXE_NAME, read.call_args.args[0])
         self.assertFalse(read.call_args_list[0].args[0].exists())
@@ -323,7 +361,7 @@ class InstallTest(IsolatedTest):
         self.assertFalse(self.target.exists())
 
     def test_failed_installed_version_restores_originals_and_removes_only_new_files(self):
-        self.write_archive([(package.CONFIG_NAME, b"new config")])
+        self.write_archive()
         self.target.mkdir(parents=True)
         (self.target / package.EXE_NAME).write_bytes(b"old exe")
         (self.target / "other.txt").write_bytes(b"keep")
@@ -391,14 +429,38 @@ class InstallTest(IsolatedTest):
                 package.install_package(self.component)
         self.assertNotIn("安装成功", output.getvalue())
 
+    def test_missing_config_refuses_fresh_installation(self):
+        self.write_archive(entries=[(package.EXE_NAME, b"exe"), ("README.md", b"readme")])
+        with patch.object(package, "read_exe_version") as read:
+            with self.assertRaises(package.PackageError):
+                package.install_package(self.component)
+        read.assert_not_called()
+        self.assertFalse(self.target.exists())
+
+    def test_empty_config_refuses_installation(self):
+        self.write_archive(entries=[(package.EXE_NAME, b"exe"),
+                                    (package.CONFIG_NAME, b""), ("README.md", b"readme")])
+        with patch.object(package, "read_exe_version") as read:
+            with self.assertRaises(package.PackageError):
+                package.install_package(self.component)
+        read.assert_not_called()
+        self.assertFalse(self.target.exists())
+
     def test_preserves_config_missing_from_package(self):
-        self.write_archive()
+        self.write_archive(entries=[(package.EXE_NAME, b"exe"), ("README.md", b"readme")])
         self.target.mkdir(parents=True)
         config = self.target / package.CONFIG_NAME
         config.write_bytes(b"existing config")
-        with self.assertRaises(package.PackageError):
-            package.install_package(self.component)
+        exe = self.target / package.EXE_NAME
+        exe.write_bytes(b"existing exe")
+        with patch.object(package, "read_exe_version") as read:
+            with self.assertRaises(package.PackageError):
+                package.install_package(self.component)
+        read.assert_not_called()
         self.assertEqual(b"existing config", config.read_bytes())
+        self.assertEqual(b"existing exe", exe.read_bytes())
+        self.assertEqual({package.EXE_NAME, package.CONFIG_NAME},
+                         {p.name for p in self.target.iterdir()})
 
     def test_rejects_hardlink_target(self):
         self.write_archive()
