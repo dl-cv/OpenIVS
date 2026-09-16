@@ -332,6 +332,6 @@ Debug\dlcv_infer_cpp_test.exe dvsp-reject-selftest <dvsp路径> [设备编号]
 
 命令退出码 `0` 表示检查通过，非零表示失败或参数无效。这些命令不验证源模型转换、多设备运行、完整路径优先或短文件名多候选处理，也不代表 C++ 与 C# 的全部功能已经一致。
 
-## 流程层共享
+## 已加载模型列表
 
-SharedFlowRegistry 位于既有 dlcv_infer_cpp 工程。C# 与 C++ 使用相同流程 index 读取已登记的 pipeline 和子模型编号，各自在流程层恢复执行对象，不重新读取归档。底层 dlcv_infer 仅管理子模型；流程登记、信息、持有、释放与全量清理由 OpenIVS 完成。流程内部字符串使用 openivs_flow_free_result 释放，不交给底层 dlcv_free_result。
+`dlcv_infer_cpp_dll_demo.exe list-sdk-models` 与 `dlcv_infer_c_demo.exe list-sdk-models` 返回已加载推理模块的模型快照。单独执行该命令不会初始化 GPU 时钟或加载底层推理模块；尚无模块时返回空 `modules` 数组。结果字段及释放方式参见 [C++ API文档.md](C++%20API文档.md) 和 [C API文档.md](C%20API文档.md)。
