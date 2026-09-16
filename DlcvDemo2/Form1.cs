@@ -16,7 +16,7 @@ namespace DlcvDemo2
 {
     public partial class Form1 : Form
     {
-        private const string ModelFileFilter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*";
+        private const string ModelFileFilter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*";
         private Model extractModel;
         private Model componentDetectModel;
         private Model icDetectModel;

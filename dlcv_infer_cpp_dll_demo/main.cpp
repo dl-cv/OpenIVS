@@ -49,7 +49,6 @@ struct CaseRow {
 
 struct Options {
     bool PressureMode = false;
-    bool DefaultCasesMode = false;
     int DeviceId = 0;
     int ThreadCount = 1;
     int BatchSize = 1;
@@ -171,9 +170,9 @@ void PrintUsage(const char* exeName) {
               << "    " << exeName << " --pressure --model <model.dvst> --image <image.jpg>\n"
               << "                [--threads 4] [--batch 2] [--seconds 30] [--device 0]\n\n"
               << "说明:\n"
-              << "  - 默认测试会按内置模型列表依次加载、推理并打印表格。\n"
+              << "  - 无参数时按原有测试模型清单依次加载、推理并打印表格。业务测试通过参数显式指定模型和图片。\n"
               << "  - Flow 模型入口按 RGB 语义执行，demo 会把读取到的 BGR 图像转换为 RGB。\n"
-              << "  - 压测统计口径对齐 C#：完成请求 = 完成批次数 * batch_size。\n";
+              << "  - 压测统计方式与 C# 相同：完成请求 = 完成批次数 * batch_size。\n";
 }
 
 bool ParseIntArg(const std::string& text, int& out) {
@@ -240,13 +239,12 @@ bool ParseArgs(int argc, char** argv, Options& opt) {
         return false;
     }
 
+    if (opt.SingleModelPath.empty() != opt.SingleImagePath.empty()) return false;
     if (!opt.SingleModelPath.empty() && !opt.SingleImagePath.empty()) {
         opt.Cases.push_back(InferCase{ opt.SingleModelPath, opt.SingleImagePath });
     }
 
-    if (!opt.PressureMode && opt.Cases.empty()) {
-        opt.DefaultCasesMode = true;
-    }
+    if (opt.PressureMode && opt.Cases.empty()) return false;
 
     opt.ThreadCount = std::max(1, opt.ThreadCount);
     opt.BatchSize = std::max(1, opt.BatchSize);
@@ -1087,23 +1085,31 @@ bool IsLegacyFirstArgument(const std::string& text) {
 
 int main(int argc, char** argv) {
     InitGbkConsole();
-    ProcessModelCleanup processModelCleanup;
-    dlcv_infer::Utils::KeepMaxClock();
+    if (argc == 2 && (std::string(argv[1]) == "-h"
+        || std::string(argv[1]) == "--help" || std::string(argv[1]) == "help")) {
+        PrintUsage("dlcv_infer_cpp_dll_demo");
+        PrintCommandHelp("dlcv_infer_cpp_dll_demo");
+        return 0;
+    }
 
     if (argc >= 2 && !IsLegacyFirstArgument(argv[1])) {
+        ProcessModelCleanup processModelCleanup;
+        dlcv_infer::Utils::KeepMaxClock();
         return RunCommandWorkflow(argc, argv);
     }
 
     Options opt;
     if (!ParseArgs(argc, argv, opt)) {
-        PrintUsage(argv[0]);
+        PrintUsage("dlcv_infer_cpp_dll_demo");
         return 1;
     }
 
+    ProcessModelCleanup processModelCleanup;
     try {
+        dlcv_infer::Utils::KeepMaxClock();
         if (opt.PressureMode) {
             RunPressureTest(opt);
-        } else if (opt.DefaultCasesMode) {
+        } else if (opt.Cases.empty()) {
             return RunDefaultCases(opt.DeviceId);
         } else {
             RunSingleCases(opt);

@@ -44,7 +44,7 @@
 - 直接构建项目时，Release 输出为 `dlcv_infer_cpp_qt_demo/Release/dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.exe`。
 - 通过 `OpenIVS.sln` 构建时，EXE 输出位于解决方案根目录的 `Debug/dlcv_infer_cpp_qt_demo/` 或 `Release/dlcv_infer_cpp_qt_demo/`。
 - `DlcvNativeRuntime.targets` 从工程引用取得本次 DLL 并复制至 EXE 目录；必需 Qt DLL 和平台插件复制失败会使构建失败，样式插件存在时复制。
-- 底层 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 仍按模型授权类型由 C++ API 从 SDK 路径加载。
+- 底层 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 由首次普通模型的模型头确定为默认 DLL；后续普通模型沿用该 DLL并逐个检查授权。
 
 ---
 
@@ -53,7 +53,7 @@
 ### 3.1 程序入口（main.cpp）
 
 - 无参数时按 Windows 图形界面子系统启动，初始化 `QApplication`、显示 `MainWindow`，不创建控制台窗口，退出前调用 `FreeAllModels()`。
-- 有参数时连接父控制台；没有父控制台时创建控制台，再解析 `infer`、`render`、`mask-visualization-selftest` 或 `--help`。命令行模式不进入主窗口事件循环，完成验证后直接返回退出码。
+- 有参数时连接父控制台；没有父控制台时创建控制台，再解析 `infer`、`render` 或 `--help`。命令行模式不进入主窗口事件循环，完成验证后直接返回退出码。
 - Windows 控制台输入输出使用 UTF-8；模型路径通过 `std::wstring` 传给 C++ API。
 
 ### 3.2 命令行推理模式
@@ -61,7 +61,6 @@
 ```text
 dlcv_infer_cpp_qt_demo.exe infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
 dlcv_infer_cpp_qt_demo.exe render --model <path> --image <path> --threshold <0..1> --output <pngPath> [--device <int>] [--with-mask <true|false>]
-dlcv_infer_cpp_qt_demo.exe mask-visualization-selftest
 dlcv_infer_cpp_qt_demo.exe --help
 ```
 
@@ -71,13 +70,39 @@ dlcv_infer_cpp_qt_demo.exe --help
 - 图片由 `QFile` 读取字节并通过 `cv::imdecode` 解码；BGR/BGRA 转为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，输出字段与 C# 测试程序一致；开启均值计算时同时检查两种结果的均值字段。
 - 输出中的 `inspection` 包含最近一次流程判定的 `present`、`ok`、`reason`，`inspection_consistent` 检查结构化与 JSON 两条路径的判定一致性。
-- C++ 结构化结果的本地 GBK 类别名在 CLI 边界转换为 UTF-8，再写入 JSON。
-- `infer --output` 使用 `QSaveFile` 原子写入 UTF-8 JSON；`render --output` 保存 `ImageViewerWidget` 的真实绘制结果，输出逻辑尺寸与原图一致。输出路径不得覆盖模型或图片，父目录必须存在。
+- C++ 结构化结果的本地 GBK 类别名在 CLI 输出时转换为 UTF-8，再写入 JSON。
+- `infer --output` 使用 `QSaveFile` 写入 UTF-8 JSON；`render --output` 保存 `ImageViewerWidget` 的真实绘制结果，输出逻辑尺寸与原图一致。输出路径不得覆盖模型或图片，父目录必须存在。
 - 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致、存在低于阈值的结果或均值检查失败。
 - `render` 使用原图作为底图，并把最终结果中的 ROI Mask 缩放到 bbox 后回贴到原图坐标；完整图 Mask 则从 `(0,0)` 绘制。
-- `mask-visualization-selftest` 使用一个完整图 Mask 合成用例，检查其未被重复叠加 bbox 偏移；渲染结果写入系统临时目录的 `dlcv_mask_visualization_selftest.png`。
+- Mask 合成用例和像素断言独立编入 `Test/qt_demo/dlcv_infer_c_qt_mask_test.vcxproj` 与 `Test/qt_demo/dlcv_infer_cpp_qt_mask_test.vcxproj`。两个工程通过构建配置引用各自 Demo 的真实控件源文件，不复制实现，不调用推理运行库；Demo 不包含测试代码或 `mask-visualization-selftest` 入口。独立测试命令为 `<测试EXE> --output <系统临时目录/mask.png>`，使用 Qt offscreen 平台，不显示窗口。
 
-### 3.3 UI 布局
+### 两个 Qt Demo 的自动回归
+
+`Test/run_qt_demo_regression.py` 直接运行 C 和 C++ Qt Demo EXE，使用 `Test/qt_demo_regression_cases.json` 中的固定模型清单，不用控制台 API 工程替代 Demo。在 Visual Studio 中构建所需 Demo 或独立 Mask 测试工程（Release x64）。测试 EXE 输出到 `Test/qt_demo/Release/<工程名>/`，不加入 Demo 工程引用或发布流程。
+
+```text
+python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.exe> --c-mask-test-exe <C_Mask_Test.exe> --cpp-mask-test-exe <CPP_Mask_Test.exe> --dll <本次构建的dlcv_infer_cpp.dll> --model-root <测试模型目录> --core-dll-directory <推理DLL目录> --output <系统临时目录/report.json>
+```
+
+- 核对 EXE 所在目录的包装 DLL 与指定构建 DLL 的 SHA-256。
+- 运行普通分类 DVT/DVO、分割 DVT 和流程 DVST，分别读取结构化和 JSON 结果，检查固定数量、类别、分数及两条路径一致性；固定分数容差为 `1e-6`。
+- 检查帮助、缺少参数、阈值错误、缺少文件、拒绝 dvsp 和防止输出覆盖输入。
+- `infer` 清理模型后连续释放仍须成功；结果中的 `release_check_passed` 记录该检查。C++ 检查本地编号清理，C 检查释放返回码及释放后信息接口拒绝旧编号。
+- 两个独立 Mask 测试分别执行真实绘制控件的掩码像素断言，检查退出码和 500 × 400 PNG；报告记录测试 EXE 的 SHA-256。旧自测命令传给 Demo 时返回参数错误。PNG 只保存在系统临时目录。
+- 超时、崩溃、非零退出码、缺少结果、无效 JSON、非有限数值或基准不符均不计为通过。此测试不覆盖主窗口文件对话框、交互操作或压力测试按钮。
+
+### 3.3 C++ DLL 控制台示例
+
+- 工程：`dlcv_infer_cpp_dll_demo`。
+- 无参数时保留原有 `ModelRoot`、10 组 `DefaultCases` 和 `RunDefaultCases`，执行通用测试模型清单并输出汇总；缺失输入按原逻辑跳过。`-h`、`--help` 或 `help` 仅显示帮助并返回 0，不初始化推理运行库。
+- 单次推理显式使用 `--case <model.dvst> <image.png>` 或 `--model <model.dvst> --image <image.png>`；多组输入重复添加 `--case`。
+- 缺少成对的模型与图片参数返回 1；加载或推理异常返回 2。
+- 图片按 BGR 转 RGB 后传入 `Model::InferBatch()`；阈值为 `0.05`，输出结构化结果摘要。原有通用测试清单保留；专用业务模型不加入默认清单，仅通过命令行显式传入，不内置业务名称或固定预期结果。
+- `--pressure` 与组合命令入口保留；压力测试同样显式提供模型和图片。
+- 推理输出可能包含输入路径、模型类别及运行库日志，仅保存在系统临时目录；PR 仅记录脱敏后的检查结果，不上传原始输出。
+- 回归入口：`python -B -m unittest discover -s Test -p test_cpp_dll_demo_cli.py -v`；环境变量 `DLCV_CPP_DLL_DEMO_EXE` 指定本次构建的 EXE。未设置时，仅运行源码检查，实际 EXE 检查明确跳过。另设 `DLCV_CPP_DLL_DEMO_MODEL_ROOT` 后，验证原有无参数默认测试，并复用既有测试清单验证普通模型和流程模型的两种显式输入形式；未设置时推理检查明确跳过。
+
+### 3.4 UI 布局
 
 主窗口分为上下两部分：
 - **上方控制栏**：按钮 + 参数调节控件
@@ -183,11 +208,11 @@ dlcv_infer_cpp_qt_demo.exe --help
 1. 点击 **检查加密狗**。
 2. 文本区显示 Sentinel 和 Virbox 的设备和特性列表。
    - Virbox 查询同时覆盖实体设备描述和离线本地软锁描述；授权码软锁显示唯一锁号与许可 ID。
-3. 若两者均为空，表示未检测到加密狗；此时 `DllLoader` 不加载推理 DLL。
+3. 若两者均为空，表示当前未检测到加密狗；检查动作只显示授权信息，不选择推理 DLL。
 
 **代码路径**：`MainWindow::onCheckDog()`
 - 调用 `dlcv_infer::GetAllDogInfo()`。
-- 底层 `AutoDetectProvider()`：Sentinel 优先、Virbox 第二；都没有返回 `Unknown`，不加载 `dlcv_infer.dll` / `dlcv_infer_v.dll`。
+- 默认 DLL 在首次普通模型加载时根据模型头选择；后续普通模型继续使用该 DLL，并逐个检查授权。
 
 ## 5. C++ 控制台 Demo 组合命令
 
@@ -198,9 +223,9 @@ dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> [--device N] --th
 dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> --then benchmark <名称> <图片路径> [--threads N] [--runs N]
 ```
 
-组合命令包括 `load-model`、`list-models`、`model-info`、`dvs-model-info`、`infer`、`benchmark`、`free-model` 和 `free-all-models`。`benchmark` 使用同一模型和图片建立基准结果，再由多个线程重复推理并比较批量数量、目标数量、类别、框、分数、角度、面积、mask 和均值；线程数范围为 1～32。流程模型使用从 10000 开始的模型索引，普通模型使用底层索引。
+组合命令包括 `load-model`、`list-models`、`model-info`、`dvs-model-info`、`infer`、`benchmark`、`free-model` 和 `free-all-models`。`benchmark` 使用同一模型和图片建立基准结果，再由多个线程重复推理并比较批量数量、目标数量、类别、框、分数、角度、面积、mask 和均值；线程数范围为 1～32。模型编号由实际加载或注册接口返回，不按数值区段推断资源类型或 DLL。
 
-程序退出时释放当前模型和全部模型。运行目录需要 `dlcv_infer_cpp.dll`、OpenCV、Visual C++ 运行库及模型对应的底层 provider DLL。
+程序退出时释放当前模型和全部模型。按 index 释放时，无效参数可返回参数错误；有效编号即使已不存在或底层报错也返回成功并完成本地清理，重复释放同样成功，错误详情最多写入日志或消息。运行目录需要 `dlcv_infer_cpp.dll`、OpenCV、Visual C++ 运行库及首次普通模型头对应的底层 DLL。
 
 ## 6. C API 动态导出检查
 
@@ -298,10 +323,11 @@ Debug\dlcv_infer_cpp_test.exe dvsp-reject-selftest <dvsp路径> [设备编号]
 | 命令 | 输入与检查范围 |
 |---|---|
 | `dvs-archive-duplicate-selftest` | 在系统临时目录生成测试归档；检查模型成员和 `pipeline.json` 的规范化同名处理，相同字节允许读取，不同字节明确报错。模型差异用例使用等长数据且仅末字节不同；不执行模型推理 |
-| `dvs-model-pool-selftest` | 读取现有普通 `.dvt`，生成包含两个相同模型节点的测试归档；通过公开 `Model` 和导出的模型池统计函数检查实例内复用、独立归档分别持有引用、逐个释放后数量变化以及全部释放后无空闲项。不在测试程序中另建模型池，不执行推理 |
+| `provider-loader-selftest <Virbox模型路径> <另一模型路径> [轮数]` | 首个模型必须是 Virbox 格式；检查按模型头选择默认 DLL，后续文件及内存加载保持该 DLL |
+| `dvs-model-pool-selftest` | 读取现有普通 `.dvt`，生成包含两个相同模型节点的测试归档；只通过现有产品接口检查实例内复用和释放行为，不依赖生产 DLL 的测试导出。测试代码及检查状态全部保留在测试工程内 |
 | `dvs-memory-loading-selftest` | 使用 `.dvst/.dvso` 及对应图片执行加载、推理、释放，并监测解包临时文件；参数为 `threshold=0.5`、`with_mask=true`、`batch_size=1`，不进行 mask 数值比较 |
 | `dvsp-reject-selftest` | 检查 `.dvsp` 返回明确的不支持错误，且不生成归档临时文件；不执行推理 |
 
-设备编号默认 `0`。模型池检查中的两个归档内容相同，但每次读取使用独立的 `StoreId`；包装层不额外进行整包内容缓存。临时测试归档由测试程序创建并在结束时删除，这与运行库解包产生临时文件不同。
+设备编号默认 `0`。模型池检查中的两个归档内容相同，但每次读取使用独立的 `StoreId`；包装层不额外进行整包内容缓存。临时测试归档由测试程序创建并在结束时删除。实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
 
 命令退出码 `0` 表示检查通过，非零表示失败或参数无效。这些命令不验证源模型转换、多设备运行、完整路径优先或短文件名多候选处理，也不代表 C++ 与 C# 的全部功能已经一致。

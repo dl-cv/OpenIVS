@@ -1,4 +1,5 @@
-#include <windows.h>
+﻿#include <windows.h>
+#include <TlHelp32.h>
 
 #include <algorithm>
 #include <atomic>
@@ -44,6 +45,7 @@
 #include "dlcv_infer.h"
 #include "RegionMaskSelfTest.h"
 #include "MaskAreaSelfTest.h"
+#include "../common/NativeSharedIndexTestHelper.h"
 
 namespace {
 using json = nlohmann::json;
@@ -336,6 +338,10 @@ int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
     }
 }
 
+bool HasSharedFlowSdkForSelfTest(const dlcv_infer::Model& model);
+void VerifyCachedModelInvalidationForSelfTest(const std::wstring& path, int deviceId,
+                                             bool isFlow, const cv::Mat& image);
+
 int RunDvsMemoryLoadingSelfTest(int argc, wchar_t* argv[]) {
     if (argc < 4 || argc > 5) {
         PrintUtf8Line("用法: dlcv_infer_cpp_test dvs-memory-loading-selftest <modelPath> <imagePath> [device]");
@@ -370,7 +376,19 @@ int RunDvsMemoryLoadingSelfTest(int argc, wchar_t* argv[]) {
             };
             dlcv_infer::Result result = model.Infer(rgb, params);
             DisposeResultMasks(result);
+            if (HasSharedFlowSdkForSelfTest(model)) {
+                auto restored = dlcv_infer::CreateModelFromIndex(model.modelIndex);
+                (void)restored.GetDvsModelInfo();
+                auto restoredResult = restored.Infer(rgb, params);
+                DisposeResultMasks(restoredResult);
+                restored.FreeModel();
+                PrintUtf8Line("共享流程恢复、信息查询及推理已执行，持续检查归档文件");
+            } else {
+                PrintUtf8Line("共享流程恢复未执行：当前 SDK 缺少完整共享接口");
+            }
+            const bool sharedSdk = HasSharedFlowSdkForSelfTest(model);
             model.FreeModel();
+            if (sharedSdk) VerifyCachedModelInvalidationForSelfTest(modelPath, deviceId, true, rgb);
         } catch (const std::exception& ex) {
             operationError = ex.what();
         } catch (...) {
@@ -378,14 +396,12 @@ int RunDvsMemoryLoadingSelfTest(int argc, wchar_t* argv[]) {
         }
         monitor.Stop();
 
-        if (!operationError.empty()) {
-            PrintUtf8ErrorLine(operationError);
-            return 1;
-        }
-        if (monitor.HasArtifacts()) {
-            PrintUtf8ErrorLine("系统临时目录出现流程归档文件: " + monitor.DescribeUtf8());
-            return 1;
-        }
+        const bool hasArtifacts = monitor.HasArtifacts();
+        PrintUtf8Line(hasArtifacts
+            ? "系统临时目录出现流程归档文件: " + monitor.DescribeUtf8()
+            : "系统临时目录未观察到流程归档文件");
+        if (!operationError.empty()) PrintUtf8ErrorLine(operationError);
+        if (!operationError.empty() || hasArtifacts) return 1;
         PrintUtf8Line("C++ 流程归档内存加载测试通过");
         return 0;
     } catch (const std::exception& ex) {
@@ -636,7 +652,10 @@ std::vector<unsigned char> BuildDvsModelPoolPipeline() {
         json node = json::object();
         node["id"] = item.first;
         node["type"] = "model/det";
-        node["properties"] = json::object({{"model_path", item.second}});
+        node["properties"] = json::object({
+            {"model_path", item.second},
+            {"model_index", INT_MAX}
+        });
         pipeline["nodes"].push_back(std::move(node));
     }
     const std::string text = pipeline.dump();
@@ -660,6 +679,10 @@ bool IsExpectedModelPoolStats(
 bool IsEmptyModelPoolStats(const dlcv_infer::flow::ModelPoolStats& stats) {
     return stats.totalEntries == 0 && stats.activeEntries == 0 && stats.idleEntries == 0;
 }
+
+int QueryNativeIndexTypeForSelfTest(int index);
+
+void VerifyFlowLoadCleanupForSelfTest(const std::wstring& modelPath, int deviceId);
 
 int RunDvsModelPoolSelfTest(int argc, wchar_t* argv[]) {
     if (argc < 3 || argc > 4) {
@@ -699,8 +722,28 @@ int RunDvsModelPoolSelfTest(int argc, wchar_t* argv[]) {
             return 1;
         }
 
+        const auto firstMeta = firstModel->GetDvsModelInfo().at("loaded_model_meta");
+        const auto secondMeta = secondModel->GetDvsModelInfo().at("loaded_model_meta");
+        const int sharedModelIndex = firstMeta.at(0).at("model_index").get<int>();
+        if (sharedModelIndex < 0 || sharedModelIndex == INT_MAX) {
+            PrintUtf8ErrorLine("归档中的遗留 model_index 覆盖了包内子模型");
+            return 1;
+        }
+        for (const auto& meta : { firstMeta, secondMeta }) {
+            for (const auto& item : meta) {
+                if (item.at("model_index").get<int>() != sharedModelIndex) {
+                    PrintUtf8ErrorLine("相同内容的归档子模型未复用底层 model_index");
+                    return 1;
+                }
+            }
+        }
+
         firstModel->FreeModel();
         firstModel.reset();
+        if (QueryNativeIndexTypeForSelfTest(sharedModelIndex) != 1) {
+            PrintUtf8ErrorLine("释放首个归档后仍被使用的底层 model_index 已失效");
+            return 1;
+        }
         const auto afterFirstRelease = dlcv_infer::flow::GetModelPoolStats();
         if (!IsExpectedModelPoolStats(afterFirstRelease, 1)) {
             PrintUtf8ErrorLine("释放第一个归档实例后第二个实例未保持有效");
@@ -715,8 +758,13 @@ int RunDvsModelPoolSelfTest(int argc, wchar_t* argv[]) {
             return 1;
         }
 
+        if (QueryNativeIndexTypeForSelfTest(sharedModelIndex) != 0) {
+            PrintUtf8ErrorLine("释放全部归档后底层 model_index 未清除");
+            return 1;
+        }
         dlcv_infer::NativeApi::FreeAllModels();
-        PrintUtf8Line("DVS 模型池复用、独立归档加载与释放检查通过");
+        VerifyFlowLoadCleanupForSelfTest(modelPath, deviceId);
+        PrintUtf8Line("DVS 模型池复用、独立归档加载、共享 model_index 与释放检查通过");
         return 0;
     } catch (const std::exception& ex) {
         dlcv_infer::NativeApi::FreeAllModels();
@@ -2570,6 +2618,20 @@ int RunCalcMeanSelfTest() {
     return 0;
 }
 
+int RunDvspDisabledSelfTest() {
+    try {
+        dlcv_infer::Model model(L"unsupported_model.dvsp", 0);
+        std::cout << "DVSP 禁用自测失败：接口未拒绝 .dvsp\n";
+        return 1;
+    } catch (const std::invalid_argument& ex) {
+        std::cout << "DVSP 禁用自测通过：" << ex.what() << "\n";
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cout << "DVSP 禁用自测失败：异常类型错误，" << ex.what() << "\n";
+        return 1;
+    }
+}
+
 struct WorkflowOptions {
     int deviceId = 0;
     double threshold = 0.5;
@@ -2951,6 +3013,793 @@ private:
     bool cancelled_ = false;
 };
 
+class ReusableWorkerGate {
+public:
+    explicit ReusableWorkerGate(int expectedWorkers)
+        : expectedWorkers_(expectedWorkers) {}
+
+    bool ArriveAndWait() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (cancelled_) return false;
+        const int generation = generation_;
+        ++arrivedWorkers_;
+        if (arrivedWorkers_ == expectedWorkers_) {
+            arrivedWorkers_ = 0;
+            ++generation_;
+            lock.unlock();
+            condition_.notify_all();
+            return true;
+        }
+        condition_.wait(lock, [this, generation]() {
+            return cancelled_ || generation_ != generation;
+        });
+        return !cancelled_;
+    }
+
+    void Cancel() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            cancelled_ = true;
+        }
+        condition_.notify_all();
+    }
+
+private:
+    const int expectedWorkers_;
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    int arrivedWorkers_ = 0;
+    int generation_ = 0;
+    bool cancelled_ = false;
+};
+
+struct ProviderLoadTestState {
+    std::unique_ptr<dlcv_infer::Model> model;
+    std::string error;
+};
+
+void ReleaseProviderLoadTestModel(std::unique_ptr<dlcv_infer::Model>& model) {
+    if (!model) return;
+    model->OwnModelIndex = false;
+    try {
+        model->FreeModel();
+    } catch (...) {
+    }
+    model.reset();
+}
+
+bool IsModelInfoUnavailable(
+    dlcv_infer::Model& model,
+    std::string& detail) {
+    try {
+        const json info = model.GetModelInfo();
+        if (!info.is_object() || info.empty()) {
+            detail = "返回为空";
+            return true;
+        }
+        if (info.contains("code") && info.at("code").is_number() &&
+            info.at("code").get<int>() != 0) {
+            return true;
+        }
+        detail = info.dump();
+        return false;
+    } catch (const std::exception& ex) {
+        detail = ex.what();
+        return true;
+    } catch (...) {
+        detail = "发生未知异常";
+        return true;
+    }
+}
+
+std::filesystem::path NativeModulePathForSelfTest(HMODULE module) {
+    wchar_t path[32768]{};
+    const DWORD length = GetModuleFileNameW(module, path, 32768);
+    if (!module || length == 0 || length >= 32768) {
+        throw std::runtime_error("无法读取已加载推理模块路径");
+    }
+    return std::filesystem::canonical(std::filesystem::path(path));
+}
+
+HMODULE ModelModuleForSelfTest(const dlcv_infer::Model& model) {
+    const HMODULE module = GetModuleHandleA(model.LoadedNativeDllName().c_str());
+    if (!module) throw std::runtime_error("未找到模型使用的默认推理模块");
+    return module;
+}
+
+bool HasSharedFlowSdkForSelfTest(const dlcv_infer::Model& model) {
+    const HMODULE module = ModelModuleForSelfTest(model);
+    for (const char* name : {"dlcv_get_index_type_c", "dlcv_get_model_info_c",
+             "dlcv_register_flow_c", "dlcv_get_flow_info_c", "dlcv_free_flow_c",
+             "dlcv_bind_index_c", "dlcv_unbind_index_c", "dlcv_free_result"}) {
+        if (!GetProcAddress(module, name)) return false;
+    }
+    return true;
+}
+
+template<class Operation>
+void RequireInvalidIndexFailureForSelfTest(const std::string& label, Operation operation) {
+    try {
+        operation();
+    } catch (const std::exception& ex) {
+        const std::string message = ex.what();
+        if (message.find("index") == std::string::npos && message.find("索引") == std::string::npos) {
+            throw std::runtime_error(label + " 未明确报告失效索引: " + message);
+        }
+        PrintUtf8Line(label + " 已拒绝失效索引: " + message);
+        return;
+    }
+    throw std::runtime_error(label + " 仍允许访问已释放索引");
+}
+
+void VerifyCachedModelInvalidationForSelfTest(const std::wstring& path, int deviceId,
+                                             bool isFlow, const cv::Mat& image) {
+    dlcv_infer::Model owner(path, deviceId);
+    if (!HasSharedFlowSdkForSelfTest(owner)) {
+        throw std::runtime_error("缓存失效测试需要完整共享 SDK");
+    }
+    auto borrowed = dlcv_infer::CreateModelFromIndex(owner.modelIndex);
+    const auto getIndex = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
+        GetProcAddress(ModelModuleForSelfTest(owner), "dlcv_get_index_type_c"));
+    const int index = owner.modelIndex;
+    // 先成功读取，确保后续访问经过已经填充的缓存和绑定状态。
+    for (auto* model : {&owner, &borrowed}) {
+        (void)model->GetModelInfo();
+        if (isFlow) (void)model->GetDvsModelInfo();
+        if (!image.empty()) {
+            auto result = model->Infer(image);
+            DisposeResultMasks(result);
+        }
+    }
+    dlcv_infer::Utils::FreeAllModels();
+    if (getIndex(index) != 0) throw std::runtime_error("全量释放后原生索引仍有效");
+    for (auto* model : {&owner, &borrowed}) {
+        const std::string label = model == &owner ? "原始对象" : "共享绑定对象";
+        RequireInvalidIndexFailureForSelfTest(label + " GetModelInfo", [&] { (void)model->GetModelInfo(); });
+        if (isFlow) {
+            RequireInvalidIndexFailureForSelfTest(label + " GetDvsModelInfo", [&] { (void)model->GetDvsModelInfo(); });
+        }
+        if (!image.empty()) {
+            RequireInvalidIndexFailureForSelfTest(label + " Infer", [&] {
+                auto result = model->Infer(image);
+                DisposeResultMasks(result);
+            });
+        }
+    }
+}
+
+struct NativeModuleForSelfTest final {
+    HMODULE module = nullptr;
+    dlcv_infer::LoadModelCFuncType load = nullptr;
+    dlcv_infer::GetIndexTypeFuncType getIndex = nullptr;
+    dlcv_infer::FreeAllModelsFuncType freeAll = nullptr;
+
+    explicit NativeModuleForSelfTest(const std::filesystem::path& path) {
+        module = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (!module) throw std::runtime_error("无法加载同目录推理 DLL: " + WideToUtf8(path.wstring()));
+        try {
+            if (_wcsicmp(NativeModulePathForSelfTest(module).c_str(),
+                         std::filesystem::canonical(path).c_str()) != 0) {
+                throw std::runtime_error("实际推理 DLL 路径与指定 SDK 不一致");
+            }
+            load = reinterpret_cast<dlcv_infer::LoadModelCFuncType>(GetProcAddress(module, "dlcv_load_model_c"));
+            getIndex = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(GetProcAddress(module, "dlcv_get_index_type_c"));
+            freeAll = reinterpret_cast<dlcv_infer::FreeAllModelsFuncType>(GetProcAddress(module, "dlcv_free_all_models"));
+            if (!load || !getIndex || !freeAll) throw std::runtime_error("真实推理 DLL 缺少双模块测试接口");
+        } catch (...) {
+            FreeLibrary(module);
+            module = nullptr;
+            throw;
+        }
+    }
+    NativeModuleForSelfTest(const NativeModuleForSelfTest&) = delete;
+    NativeModuleForSelfTest& operator=(const NativeModuleForSelfTest&) = delete;
+    ~NativeModuleForSelfTest() {
+        if (module) {
+            try { if (freeAll) freeAll(); } catch (...) {}
+            FreeLibrary(module);
+        }
+    }
+    int Load(const std::wstring& path) const {
+        // 原生 C 路径入口使用本地 ANSI 编码，不能把中文 UTF-8 字节直接传入。
+        const std::string modelPath = dlcv_infer::convertUtf8ToGbk(WideToUtf8(path));
+        const int index = load(modelPath.c_str(), 0);
+        if (index < 0 || getIndex(index) != 1)
+            throw std::runtime_error("原生接口未建立有效模型资源: " + WideToUtf8(path));
+        return index;
+    }
+};
+
+bool VerifyNativeModulesForSelfTest(
+    const std::wstring& sentinelModelPath,
+    const std::wstring& virboxModelPath,
+    bool useCppUtils) {
+    try {
+        // 普通加载只用于确定默认模块所在 SDK，不用于建立双模块测试资源。
+        dlcv_infer::Model seed(sentinelModelPath, 0);
+        const auto sdkDirectory = NativeModulePathForSelfTest(ModelModuleForSelfTest(seed)).parent_path();
+        seed.FreeModel();
+        NativeModuleForSelfTest sentinel(sdkDirectory / L"dlcv_infer.dll");
+        NativeModuleForSelfTest virbox(sdkDirectory / L"dlcv_infer_v.dll");
+        if (sentinel.module == virbox.module) throw std::runtime_error("两个 DLL 未形成独立模块实例");
+        const int sentinelIndex = sentinel.Load(sentinelModelPath);
+        const int virboxIndex = virbox.Load(virboxModelPath);
+        if (sentinel.getIndex(sentinelIndex) != 1 || virbox.getIndex(virboxIndex) != 1) {
+            throw std::runtime_error("全量释放前两个模块必须同时持有真实模型");
+        }
+        if (useCppUtils) {
+            dlcv_infer::Utils::FreeAllModels();
+            if (sentinel.getIndex(sentinelIndex) != 0 || virbox.getIndex(virboxIndex) != 0) {
+                throw std::runtime_error("Utils::FreeAllModels 未清除两个原生模型表");
+            }
+        } else {
+            sentinel.freeAll();
+            if (sentinel.getIndex(sentinelIndex) != 0 || virbox.getIndex(virboxIndex) != 1) {
+                throw std::runtime_error("单模块释放影响了另一模块的模型表");
+            }
+            virbox.freeAll();
+            if (virbox.getIndex(virboxIndex) != 0) throw std::runtime_error("Virbox 模型表未清除");
+        }
+        PrintUtf8Line(useCppUtils ? "真实双模块全部释放检查通过" : "真实双模块模型表隔离检查通过");
+        return true;
+    } catch (const std::exception& ex) {
+        PrintUtf8ErrorLine(std::string("真实双模块检查失败: ") + ex.what());
+        return false;
+    }
+}
+
+bool VerifyProviderModuleMemoryIsolation(const std::wstring& sentinel, const std::wstring& virbox) {
+    return VerifyNativeModulesForSelfTest(sentinel, virbox, false);
+}
+
+bool VerifyCppUtilsFreeAllModels(const std::wstring& sentinel, const std::wstring& virbox) {
+    return VerifyNativeModulesForSelfTest(sentinel, virbox, true);
+}
+
+int QueryNativeIndexTypeForSelfTest(int index) {
+    const HANDLE snapshot = CreateToolhelp32Snapshot(
+        TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
+        GetCurrentProcessId());
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("无法枚举当前进程模块");
+    }
+
+    std::vector<HMODULE> modules;
+    MODULEENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    BOOL hasEntry = Module32FirstW(snapshot, &entry);
+    while (hasEntry) {
+        const bool isTarget = _wcsicmp(entry.szModule, L"dlcv_infer.dll") == 0 ||
+            _wcsicmp(entry.szModule, L"dlcv_infer_v.dll") == 0;
+        if (isTarget && std::find(modules.begin(), modules.end(), entry.hModule) == modules.end()) {
+            modules.push_back(entry.hModule);
+        }
+        hasEntry = Module32NextW(snapshot, &entry);
+    }
+    if (!hasEntry) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_NO_MORE_FILES) {
+            CloseHandle(snapshot);
+            throw std::runtime_error("枚举当前进程模块失败: " + std::to_string(error));
+        }
+    }
+    CloseHandle(snapshot);
+
+    std::vector<int> validTypes;
+    for (const HMODULE module : modules) {
+        const auto getIndexType = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
+            GetProcAddress(module, "dlcv_get_index_type_c"));
+        if (getIndexType == nullptr) continue;
+        const int indexType = getIndexType(index);
+        if (indexType == 0) continue;
+        if (indexType != 1 && indexType != 2) {
+            throw std::runtime_error("推理 DLL 返回未知 index 类型");
+        }
+        validTypes.push_back(indexType);
+    }
+    if (validTypes.empty()) return 0;
+    if (validTypes.size() != 1) {
+        throw std::runtime_error("index 在多个推理 DLL 中有效");
+    }
+    return validTypes.front();
+}
+
+int ReadFirstFlowModelIndexForSelfTest(const json& info) {
+    if (!info.is_object() || !info.contains("loaded_model_meta") ||
+        !info.at("loaded_model_meta").is_array()) {
+        throw std::runtime_error("流程信息缺少 loaded_model_meta");
+    }
+    for (const auto& item : info.at("loaded_model_meta")) {
+        if (!item.is_object() || !item.contains("model_index")) continue;
+        const int modelIndex = item.at("model_index").get<int>();
+        if (modelIndex >= 0) return modelIndex;
+    }
+    throw std::runtime_error("流程信息没有有效的子模型 index");
+}
+
+void VerifyFlowLoadCleanupForSelfTest(const std::wstring& modelPath, int deviceId) {
+    using dlcv_infer::flow::FlowGraphModel;
+    const ScopedDvsSelfTestFile pipelineFile(BuildDvsSelfTestFilePath(L"load_cleanup") + L".json");
+    auto writePipeline = [&](const json& nodes) {
+        const std::string text = json({{"nodes", nodes}}).dump();
+        WriteDvsSelfTestFile(pipelineFile.path, std::vector<unsigned char>(text.begin(), text.end()));
+    };
+    auto node = [](int id, const json& properties) {
+        return json{{"id", id}, {"type", "model/det"}, {"properties", properties}};
+    };
+    dlcv_infer::Utils::FreeAllModels();
+    {
+        dlcv_infer::Model owner(modelPath, deviceId);
+        const int index = owner.modelIndex;
+        if (QueryNativeIndexTypeForSelfTest(INT_MAX) != 0) {
+            throw std::runtime_error("INT_MAX 已存在，无法建立无效索引测试条件");
+        }
+        writePipeline(json::array({node(1, {{"model_index", index}}),
+                                   node(2, {{"model_index", INT_MAX}})}));
+        FlowGraphModel flow;
+        RequireInvalidIndexFailureForSelfTest("预绑定有效索引后加载无效索引", [&] {
+            (void)flow.Load(WideToUtf8(pipelineFile.path), deviceId);
+        });
+        if (flow.IsLoaded()) throw std::runtime_error("加载异常后流程仍标记为已加载");
+        owner.FreeModel();
+        if (QueryNativeIndexTypeForSelfTest(index) != 0) {
+            throw std::runtime_error("加载异常后流程仍持有首个有效索引");
+        }
+        if (!IsEmptyModelPoolStats(dlcv_infer::flow::GetModelPoolStats())) {
+            throw std::runtime_error("预绑定失败后模型池未恢复");
+        }
+    }
+    const ScopedDvsSelfTestFile missingModel(BuildDvsSelfTestFilePath(L"missing") + L".dvt");
+    if (std::filesystem::exists(missingModel.path)) throw std::runtime_error("预期不存在的测试文件已经存在");
+    writePipeline(json::array({node(1, {{"model_path", WideToUtf8(modelPath)}}),
+                               node(2, {{"model_path", WideToUtf8(missingModel.path)}})}));
+    {
+        FlowGraphModel flow;
+        const auto report = flow.Load(WideToUtf8(pipelineFile.path), deviceId);
+        if (!report.contains("code") || report.at("code").get<int>() == 0 || flow.IsLoaded()) {
+            throw std::runtime_error("部分模型加载失败未返回失败报告及未加载状态");
+        }
+        if (!IsEmptyModelPoolStats(dlcv_infer::flow::GetModelPoolStats())) {
+            throw std::runtime_error("失败报告返回后模型池仍有资源");
+        }
+    }
+    // 两个不同路径产生两个 pool key，文件内容保持相同以复用 native index。
+    const ScopedDvsSelfTestFile firstFile(BuildDvsSelfTestFilePath(L"key_first") + L".dvt");
+    const ScopedDvsSelfTestFile secondFile(BuildDvsSelfTestFilePath(L"key_second") + L".dvt");
+    const auto bytes = ReadBinaryForDvsPoolSelfTest(modelPath);
+    if (bytes.empty()) throw std::runtime_error("模型内容读取失败");
+    WriteDvsSelfTestFile(firstFile.path, bytes);
+    WriteDvsSelfTestFile(secondFile.path, bytes);
+    writePipeline(json::array({node(1, {{"model_path", WideToUtf8(firstFile.path)}}),
+                               node(2, {{"model_path", WideToUtf8(secondFile.path)}})}));
+    int sharedIndex = -1;
+    {
+        FlowGraphModel flow;
+        const auto report = flow.Load(WideToUtf8(pipelineFile.path), deviceId);
+        if (report.at("code").get<int>() != 0 || !flow.IsLoaded()) {
+            throw std::runtime_error("不同 pool key 的流程未加载成功: " + report.dump());
+        }
+        const auto meta = flow.GetDvsModelInfo().at("loaded_model_meta");
+        if (meta.size() != 2) throw std::runtime_error("两个模型节点信息不完整");
+        sharedIndex = meta.at(0).at("model_index").get<int>();
+        if (sharedIndex != meta.at(1).at("model_index").get<int>() ||
+            !IsExpectedModelPoolStats(dlcv_infer::flow::GetModelPoolStats(), 2)) {
+            throw std::runtime_error("相同 native index 未保留两个独立 pool key");
+        }
+    }
+    if (QueryNativeIndexTypeForSelfTest(sharedIndex) != 0 ||
+        !IsEmptyModelPoolStats(dlcv_infer::flow::GetModelPoolStats())) {
+        throw std::runtime_error("流程释放后不同 pool key 的资源未全部清理");
+    }
+    {
+        FlowGraphModel flow;
+        const auto report = flow.Load(WideToUtf8(pipelineFile.path), deviceId);
+        if (report.at("code").get<int>() != 0) throw std::runtime_error("旧流程失效测试加载失败");
+        dlcv_infer::Utils::FreeAllModels();
+        bool rejected = false;
+        try {
+            (void)flow.InferInternal({cv::Mat(8, 8, CV_8UC3, cv::Scalar(0, 0, 0))});
+        } catch (const std::exception& ex) {
+            const std::string message = ex.what();
+            rejected = message.find("已释放") != std::string::npos;
+            if (!rejected) throw;
+        }
+        if (!rejected || !IsEmptyModelPoolStats(dlcv_infer::flow::GetModelPoolStats())) {
+            throw std::runtime_error("FreeAll 后旧流程未拒绝推理或重新创建了模型池资源");
+        }
+    }
+    PrintUtf8Line("流程异常清理、失败报告、同索引双 pool key 及旧流程失效检查通过");
+}
+
+bool VerifyCreateModelFromIndexReference(
+    const std::wstring& modelPath,
+    int deviceId,
+    bool isFlowModel) {
+    std::unique_ptr<dlcv_infer::Model> owner;
+    try {
+        owner = std::make_unique<dlcv_infer::Model>(modelPath, deviceId);
+        const int index = owner->modelIndex;
+        if (index < 0) throw std::runtime_error("原始模型没有返回有效 index");
+
+        const int typeBefore = QueryNativeIndexTypeForSelfTest(index);
+        const int expectedType = isFlowModel ? 2 : 1;
+        if (typeBefore != expectedType) {
+            throw std::runtime_error("原始模型 index 类型不符合预期");
+        }
+
+        dlcv_infer::Model borrowed = dlcv_infer::CreateModelFromIndex(index);
+        if (borrowed.modelIndex != index || borrowed.OwnModelIndex) {
+            throw std::runtime_error("工厂返回对象的共享索引状态不正确");
+        }
+        if (isFlowModel) {
+            (void)borrowed.GetDvsModelInfo();
+        } else {
+            (void)borrowed.GetModelInfo();
+        }
+
+        owner.reset();
+        if (isFlowModel) {
+            (void)borrowed.GetDvsModelInfo();
+        } else {
+            (void)borrowed.GetModelInfo();
+        }
+        const int typeWhileBorrowed = QueryNativeIndexTypeForSelfTest(index);
+        if (typeWhileBorrowed != expectedType) {
+            throw std::runtime_error("原始对象释放后共享索引不可用");
+        }
+        PrintUtf8Line(
+            "CreateModelFromIndex 引用保持: index=" + std::to_string(index) +
+            "，类型=" + std::to_string(typeWhileBorrowed));
+
+        borrowed.FreeModel();
+        const int typeAfterRelease = QueryNativeIndexTypeForSelfTest(index);
+        if (typeAfterRelease != 0) {
+            throw std::runtime_error("工厂对象释放后索引仍然可用");
+        }
+
+        bool invalidIndexRejected = false;
+        try {
+            auto invalidModel = dlcv_infer::CreateModelFromIndex(index);
+            (void)invalidModel;
+        } catch (const std::exception&) {
+            invalidIndexRejected = true;
+        }
+        if (!invalidIndexRejected) {
+            throw std::runtime_error("已释放索引未被工厂拒绝");
+        }
+        PrintUtf8Line(
+            "CreateModelFromIndex 引用释放: index=" + std::to_string(index) +
+            "，类型=" + std::to_string(typeAfterRelease));
+        return true;
+    } catch (const std::exception& ex) {
+        owner.reset();
+        PrintUtf8ErrorLine(std::string("CreateModelFromIndex 引用检查失败: ") + ex.what());
+        return false;
+    } catch (...) {
+        owner.reset();
+        PrintUtf8ErrorLine("CreateModelFromIndex 引用检查发生未知异常");
+        return false;
+    }
+}
+
+bool VerifyFlowModelPoolAfterFreeAll(
+    const std::wstring& flowPath,
+    int deviceId) {
+    std::unique_ptr<dlcv_infer::Model> firstFlow;
+    std::unique_ptr<dlcv_infer::Model> secondFlow;
+    try {
+        firstFlow = std::make_unique<dlcv_infer::Model>(flowPath, deviceId);
+        const json firstInfo = firstFlow->GetDvsModelInfo();
+        const int firstChildIndex = ReadFirstFlowModelIndexForSelfTest(firstInfo);
+        const int firstChildType = QueryNativeIndexTypeForSelfTest(firstChildIndex);
+        if (firstChildType != 1) {
+            throw std::runtime_error("首次流程加载后的子模型 index 不可用");
+        }
+        PrintUtf8Line(
+            "流程模型池检查：首次子模型 index=" + std::to_string(firstChildIndex) +
+            "，类型=" + std::to_string(firstChildType));
+
+        dlcv_infer::Utils::FreeAllModels();
+        const int childTypeAfterFreeAll = QueryNativeIndexTypeForSelfTest(firstChildIndex);
+        PrintUtf8Line(
+            "流程模型池检查：FreeAllModels 后子模型类型=" +
+            std::to_string(childTypeAfterFreeAll));
+        if (childTypeAfterFreeAll != 0) {
+            throw std::runtime_error("FreeAllModels 后子模型 index 仍然有效，未形成检查条件");
+        }
+
+        firstFlow->FreeModel();
+        if (firstFlow->modelIndex != -1) {
+            throw std::runtime_error("FreeAllModels 后旧流程对象未完成本地清理");
+        }
+        firstFlow->FreeModel();
+        if (firstFlow->modelIndex != -1) {
+            throw std::runtime_error("旧流程对象重复释放后本地状态异常");
+        }
+        PrintUtf8Line("流程释放检查：底层资源已清除时仍完成本地清理，重复释放成功");
+
+        try {
+            secondFlow = std::make_unique<dlcv_infer::Model>(flowPath, deviceId);
+            const json secondInfo = secondFlow->GetDvsModelInfo();
+            const int secondChildIndex = ReadFirstFlowModelIndexForSelfTest(secondInfo);
+            const int secondChildType = QueryNativeIndexTypeForSelfTest(secondChildIndex);
+            PrintUtf8Line(
+                "流程模型池检查：再次加载子模型 index=" +
+                std::to_string(secondChildIndex) + "，类型=" +
+                std::to_string(secondChildType));
+            if (secondChildIndex == firstChildIndex && secondChildType == 0) {
+                throw std::runtime_error("再次加载复用了 FreeAllModels 后失效的子模型 index");
+            }
+            if (secondChildType != 1) {
+                throw std::runtime_error("再次加载后的子模型 index 不可用");
+            }
+        } catch (const std::exception& ex) {
+            PrintUtf8ErrorLine(
+                std::string("流程模型池检查：FreeAllModels 后再次加载失败: ") + ex.what());
+            return false;
+        }
+        return true;
+    } catch (const std::exception& ex) {
+        try { dlcv_infer::Utils::FreeAllModels(); } catch (...) {}
+        firstFlow.reset();
+        secondFlow.reset();
+        PrintUtf8ErrorLine(std::string("流程模型池检查失败: ") + ex.what());
+        return false;
+    } catch (...) {
+        try { dlcv_infer::Utils::FreeAllModels(); } catch (...) {}
+        firstFlow.reset();
+        secondFlow.reset();
+        PrintUtf8ErrorLine("流程模型池检查发生未知异常");
+        return false;
+    }
+}
+
+int RunCreateModelFromIndexSelfTest(int argc, wchar_t* argv[]) {
+    if (argc < 3 || argc > 4) {
+        PrintUtf8ErrorLine(
+            "用法: dlcv_infer_cpp_test.exe create-model-from-index-selftest <模型路径> [device]");
+        return 2;
+    }
+
+    const std::wstring modelPath = argv[2];
+    const int deviceId = argc == 4 ? _wtoi(argv[3]) : 0;
+    const std::wstring extension = dvs_test::Lower(std::filesystem::path(modelPath).extension().wstring());
+    const bool isFlowModel = extension == L".dvst" || extension == L".dvso";
+    if (!isFlowModel && extension == L".dvsp") {
+        PrintUtf8ErrorLine("模型必须为普通模型、.dvst 或 .dvso，不能为 .dvsp");
+        return 2;
+    }
+
+    PrintUtf8Line("==== C++ CreateModelFromIndex 回归测试 ====");
+    PrintUtf8Line("模型: " + WideToUtf8(modelPath));
+    PrintUtf8Line(std::string("模型类型: ") + (isFlowModel ? "流程模型" : "普通模型"));
+
+    try {
+        bool invalidArgumentRejected = false;
+        try {
+            auto invalidModel = dlcv_infer::CreateModelFromIndex(-1);
+            (void)invalidModel;
+        } catch (const std::invalid_argument&) {
+            invalidArgumentRejected = true;
+        }
+        if (!invalidArgumentRejected) {
+            PrintUtf8ErrorLine("CreateModelFromIndex 未拒绝负数 index");
+            return 1;
+        }
+        PrintUtf8Line("CreateModelFromIndex 非法参数检查通过");
+
+        if (!VerifyCreateModelFromIndexReference(modelPath, deviceId, isFlowModel)) {
+            return 1;
+        }
+        if (isFlowModel && !VerifyFlowModelPoolAfterFreeAll(modelPath, deviceId)) {
+            return 1;
+        }
+        VerifyCachedModelInvalidationForSelfTest(modelPath, deviceId, isFlowModel, cv::Mat());
+        const ScopedDvsSelfTestFile emptyFlow(BuildDvsSelfTestFilePath(L"empty_shared"));
+        const std::string emptyPipeline = "{\"nodes\":[]}";
+        WriteDvsSelfTestFile(emptyFlow.path, BuildDvsSelfTestArchive(
+            {"pipeline.json"}, {std::vector<unsigned char>(emptyPipeline.begin(), emptyPipeline.end())}));
+        VerifyCachedModelInvalidationForSelfTest(emptyFlow.path, deviceId, true,
+                                                cv::Mat(8, 8, CV_8UC3, cv::Scalar(0, 0, 0)));
+        PrintUtf8Line("C++ CreateModelFromIndex 回归测试结束");
+        return 0;
+    } catch (const std::exception& ex) {
+        PrintUtf8ErrorLine(std::string("回归测试异常: ") + ex.what());
+        return 1;
+    } catch (...) {
+        PrintUtf8ErrorLine("回归测试发生未知异常");
+        return 1;
+    }
+}
+
+int RunFreeAllModulesSelfTest(int argc, wchar_t* argv[]) {
+    if (argc != 4) {
+        PrintUtf8ErrorLine(
+            "用法: dlcv_infer_cpp_test.exe free-all-modules-selftest <Sentinel模型路径> <Virbox模型路径>");
+        return 2;
+    }
+
+    const std::wstring sentinelModelPath = argv[2];
+    const std::wstring virboxModelPath = argv[3];
+    if (!VerifyProviderModuleMemoryIsolation(sentinelModelPath, virboxModelPath)) {
+        return 1;
+    }
+    if (!VerifyCppUtilsFreeAllModels(sentinelModelPath, virboxModelPath)) {
+        PrintUtf8ErrorLine("C++ FreeAllModels 全部模块检查失败");
+        return 1;
+    }
+    PrintUtf8Line("C++ FreeAllModels 全部模块检查通过");
+    return 0;
+}
+
+int RunProviderLoaderSelfTest(int argc, wchar_t* argv[]) {
+    if (argc != 4 && argc != 5) {
+        PrintUtf8ErrorLine(
+            "用法: dlcv_infer_cpp_test.exe provider-loader-selftest <Virbox模型路径> <另一模型路径> [轮数]");
+        return 2;
+    }
+
+    int rounds = 8;
+    if (argc == 5 && (!ParseInteger(argv[4], rounds) || rounds <= 0)) {
+        PrintUtf8ErrorLine("轮数必须是正整数");
+        return 2;
+    }
+
+    const std::wstring virboxModelPath = argv[2];
+    const std::wstring secondModelPath = argv[3];
+    std::unique_ptr<dlcv_infer::Model> baseline;
+    try { baseline = std::make_unique<dlcv_infer::Model>(virboxModelPath, 0); }
+    catch (const std::exception& ex) { PrintUtf8ErrorLine(ex.what()); return 1; }
+    const auto expectedProvider = baseline->LoadedDogProvider();
+    const HMODULE expectedModule = ModelModuleForSelfTest(*baseline);
+    const auto expectedPath = NativeModulePathForSelfTest(expectedModule);
+    if (expectedProvider != sntl_admin::DogProvider::Virbox || expectedModule == nullptr) {
+        PrintUtf8ErrorLine("首次 Virbox 模型未选定有效的默认推理 DLL");
+        return 1;
+    }
+    PrintUtf8Line("首次 Virbox 模型选定默认 provider: " + DogProviderText(expectedProvider) +
+        "，DLL: " + WideToUtf8(expectedPath.wstring()));
+    const ScopedDvsSelfTestFile firstArchive(BuildDvsSelfTestFilePath(L"stable_first"));
+    const ScopedDvsSelfTestFile secondArchive(BuildDvsSelfTestFilePath(L"stable_second"));
+    try {
+        const auto firstBytes = ReadBinaryForDvsPoolSelfTest(virboxModelPath);
+        const auto secondBytes = ReadBinaryForDvsPoolSelfTest(secondModelPath);
+        if (firstBytes.empty() || secondBytes.empty()) throw std::runtime_error("模型文件读取失败");
+        WriteDvsSelfTestFile(firstArchive.path, BuildDvsModelPoolArchive(firstBytes));
+        WriteDvsSelfTestFile(secondArchive.path, BuildDvsModelPoolArchive(secondBytes));
+    } catch (const std::exception& ex) { PrintUtf8ErrorLine(ex.what()); return 1; }
+    baseline.reset();
+    ProviderLoadTestState firstState;
+    ProviderLoadTestState secondState;
+    ReusableWorkerGate roundGate(2);
+
+    auto loadWorker = [&](const std::wstring& modelPath,
+                          const std::wstring& archivePath,
+                          ProviderLoadTestState& state) {
+        try {
+            for (int round = 0; round < rounds; ++round) {
+                if (!roundGate.ArriveAndWait()) return;
+                auto model = std::make_unique<dlcv_infer::Model>(modelPath, 0);
+                const auto actualProvider = model->LoadedDogProvider();
+                if (actualProvider != expectedProvider || ModelModuleForSelfTest(*model) != expectedModule ||
+                    NativeModulePathForSelfTest(ModelModuleForSelfTest(*model)) != expectedPath) {
+                    throw std::runtime_error("普通文件加载改变了默认推理 DLL");
+                }
+                (void)model->GetModelInfo();
+                {
+                    // 真实归档子模型通过产品内存加载入口创建，不访问内部 DllLoader。
+                    dlcv_infer::Model flow(archivePath, 0);
+                    if (flow.LoadedDogProvider() != expectedProvider || ModelModuleForSelfTest(flow) != expectedModule) {
+                        throw std::runtime_error("归档内存加载改变了默认推理 DLL");
+                    }
+                    const auto meta = flow.GetDvsModelInfo().at("loaded_model_meta");
+                    if (meta.empty()) throw std::runtime_error("归档未加载真实子模型");
+                    for (const auto& item : meta) {
+                        auto child = dlcv_infer::CreateModelFromIndex(item.at("model_index").get<int>());
+                        (void)child.GetModelInfo();
+                        if (ModelModuleForSelfTest(child) != expectedModule) {
+                            throw std::runtime_error("内存子模型未保存在默认模块");
+                        }
+                    }
+                }
+                // 再次走普通入口，检查内存加载未改变后续默认选择。
+                dlcv_infer::Model afterMemory(modelPath, 0);
+                if (ModelModuleForSelfTest(afterMemory) != expectedModule) {
+                    throw std::runtime_error("内存加载后默认模块发生变化");
+                }
+                if (round + 1 == rounds) {
+                    state.model = std::move(model);
+                } else {
+                    model->FreeModel();
+                }
+            }
+        } catch (const std::exception& ex) {
+            state.error = ex.what();
+            roundGate.Cancel();
+        } catch (...) {
+            state.error = "并发加载时发生未知异常";
+            roundGate.Cancel();
+        }
+    };
+
+    std::thread firstWorker;
+    std::thread secondWorker;
+    try {
+        firstWorker = std::thread(loadWorker, virboxModelPath, firstArchive.path, std::ref(firstState));
+        secondWorker = std::thread(loadWorker, secondModelPath, secondArchive.path, std::ref(secondState));
+    } catch (const std::exception& ex) {
+        roundGate.Cancel();
+        if (firstWorker.joinable()) firstWorker.join();
+        if (secondWorker.joinable()) secondWorker.join();
+        PrintUtf8ErrorLine(std::string("并发测试线程创建失败: ") + ex.what());
+        return 1;
+    }
+    firstWorker.join();
+    secondWorker.join();
+
+    if (!firstState.error.empty() || !secondState.error.empty() ||
+        !firstState.model || !secondState.model) {
+        ReleaseProviderLoadTestModel(firstState.model);
+        ReleaseProviderLoadTestModel(secondState.model);
+        if (!firstState.error.empty()) {
+            PrintUtf8ErrorLine("首个模型并发加载失败: " + firstState.error);
+        }
+        if (!secondState.error.empty()) {
+            PrintUtf8ErrorLine("另一模型并发加载失败: " + secondState.error);
+        }
+        return 1;
+    }
+
+    PrintUtf8Line(
+        "并发加载后的 provider: 首个模型=" +
+        DogProviderText(firstState.model->LoadedDogProvider()) +
+        "，另一模型=" + DogProviderText(secondState.model->LoadedDogProvider()));
+
+    const int firstIndex = firstState.model->modelIndex;
+    const int secondIndex = secondState.model->modelIndex;
+    firstState.model->OwnModelIndex = false;
+    secondState.model->OwnModelIndex = false;
+    try {
+        dlcv_infer::Utils::FreeAllModels();
+    } catch (const std::exception& ex) {
+        ReleaseProviderLoadTestModel(firstState.model);
+        ReleaseProviderLoadTestModel(secondState.model);
+        PrintUtf8ErrorLine(std::string("全量释放失败: ") + ex.what());
+        return 1;
+    } catch (...) {
+        ReleaseProviderLoadTestModel(firstState.model);
+        ReleaseProviderLoadTestModel(secondState.model);
+        PrintUtf8ErrorLine("全量释放时发生未知异常");
+        return 1;
+    }
+
+    std::string firstInfo;
+    std::string secondInfo;
+    const bool firstUnavailable = IsModelInfoUnavailable(*firstState.model, firstInfo);
+    const bool secondUnavailable = IsModelInfoUnavailable(*secondState.model, secondInfo);
+    const bool passed = firstUnavailable && secondUnavailable;
+    PrintUtf8Line(
+        "FreeAllModels 后 index 查询: 首个模型(" + std::to_string(firstIndex) + ")=" +
+        (firstUnavailable ? "不可查询" : "仍可查询") +
+        "，另一模型(" + std::to_string(secondIndex) + ")=" +
+        (secondUnavailable ? "不可查询" : "仍可查询"));
+    if (!firstUnavailable) {
+        PrintUtf8ErrorLine("首个模型 index 查询结果: " + firstInfo);
+    }
+    if (!secondUnavailable) {
+        PrintUtf8ErrorLine("另一模型 index 查询结果: " + secondInfo);
+    }
+
+    ReleaseProviderLoadTestModel(firstState.model);
+    ReleaseProviderLoadTestModel(secondState.model);
+    if (!passed) {
+        PrintUtf8ErrorLine("固定默认 DLL 并发加载与清理检查失败");
+        return 1;
+    }
+    PrintUtf8Line("固定默认 DLL 文件及内存并发加载与清理检查通过");
+    return 0;
+}
+
 double Percentile(std::vector<double> values, double percent) {
     if (values.empty()) return 0.0;
     std::sort(values.begin(), values.end());
@@ -2961,34 +3810,14 @@ double Percentile(std::vector<double> values, double percent) {
     return values[lower] + (values[upper] - values[lower]) * ratio;
 }
 
-bool ReleaseAfterFreeAll(WorkflowModelMap& models, std::string& error) {
-    std::vector<std::string> failedNames;
-    for (auto it = models.begin(); it != models.end();) {
-        try {
-            it->second.model->FreeModel();
-            it = models.erase(it);
-        } catch (...) {
-            failedNames.push_back(WideToUtf8(it->second.name));
-            ++it;
-        }
+bool ReleaseAfterFreeAll(WorkflowModelMap& models, std::string&) {
+    for (auto& item : models) {
+        item.second.model->FreeModel();
+        item.second.model->FreeModel();
     }
-    if (!failedNames.empty()) {
-        error = "释放模型失败：";
-        for (size_t i = 0; i < failedNames.size(); ++i) {
-            if (i > 0) error += "，";
-            error += failedNames[i];
-        }
-        return false;
-    }
-    try {
-        dlcv_infer::Utils::FreeAllModels();
-    } catch (const std::exception& ex) {
-        error = std::string("全局模型释放接口调用失败：") + ex.what();
-        return false;
-    } catch (...) {
-        error = "全局模型释放接口调用失败";
-        return false;
-    }
+    models.clear();
+    dlcv_infer::Utils::FreeAllModels();
+    dlcv_infer::Utils::FreeAllModels();
     return true;
 }
 
@@ -3547,6 +4376,36 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunCalcMeanSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"dvsp-disabled-selftest") {
+        return RunDvspDisabledSelfTest();
+    }
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"free-all-modules-selftest") {
+        return RunFreeAllModulesSelfTest(argc, argv);
+    }
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"create-model-from-index-selftest") {
+        return RunCreateModelFromIndexSelfTest(argc, argv);
+    }
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"provider-loader-selftest") {
+        return RunProviderLoaderSelfTest(argc, argv);
+    }
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"shared-index-rules-selftest") {
+        if (argc != 2) {
+            PrintUtf8ErrorLine("用法: dlcv_infer_cpp_test.exe shared-index-rules-selftest");
+            return 2;
+        }
+        const int resolverResult = dlcv_test::RunSharedIndexResolverSelfTest();
+        const int modelIndexResult = dlcv_test::RunFlowModelIndexRulesSelfTest();
+        const bool passed = resolverResult == 0 && modelIndexResult == 0;
+        PrintUtf8Line(passed
+            ? "共享索引选择、严格流程 model_index 与归档遗留 index 清理自测通过"
+            : "共享索引选择、严格流程 model_index 或归档遗留 index 清理自测失败");
+        return passed ? 0 : 1;
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"get-model-info") {
         return RunGetModelInfoCommand(argc, argv, false);
     }
@@ -3573,6 +4432,11 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
     std::cout << "  calc-mean-selftest\n";
+    std::cout << "  dvsp-disabled-selftest\n";
+    std::cout << "  free-all-modules-selftest <SentinelModelPath> <VirboxModelPath>\n";
+    std::cout << "  create-model-from-index-selftest <modelPath> [device]\n";
+    std::cout << "  provider-loader-selftest <VirboxModelPath> <OtherModelPath> [rounds]\n";
+    std::cout << "  shared-index-rules-selftest\n";
     std::cout << "  get-model-info <model>\n";
     std::cout << "  get-dvs-model-info <model>\n";
     PrintUtf8("\n工作流命令帮助:\n");

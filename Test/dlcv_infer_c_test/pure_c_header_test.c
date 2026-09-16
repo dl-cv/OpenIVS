@@ -130,8 +130,10 @@ int dlcv_infer_pure_c_header_test(void) {
     image.channel = 3;
     image_list.images = &image;
     image_list.n = 1;
-    result = api.infer_function(-1, &image_list);
-    result_code = result.code;
+    result = api.infer_function(INT_MAX, &image_list);
+    result_code = result.code == 2 && result.message != NULL &&
+        strcmp(result.message, "Model not found.") == 0 &&
+        result.sample_results == NULL && result.n == 0 ? 2 : -3;
     api.free_function(&result);
     close_pure_c_api(&api);
     return result_code;
@@ -245,7 +247,7 @@ int dlcv_infer_pure_c_invalid_input_test(void) {
     if (check_result != 0) goto done;
 
     image.channel = 3;
-    result = api.infer_function(-1, &image_list);
+    result = api.infer_function(INT_MAX, &image_list);
     check_result = check_result_and_release(
         &result, 2, "Model not found.", api.free_function, 2, -120);
 

@@ -366,7 +366,7 @@ void MainWindow::setControlsEnabled(bool enabled) {
 
 void MainWindow::onBrowseModel1() {
     QFileDialog dialog(this, "选择模型1");
-    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso *.dvsp);;所有文件 (*.*)");
+    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso);;所有文件 (*.*)");
     dialog.setFileMode(QFileDialog::ExistingFile);
     applyDialogInitialPath(dialog, editModel1Path_->text().trimmed());
     if (dialog.exec() != QDialog::Accepted) {
@@ -378,7 +378,7 @@ void MainWindow::onBrowseModel1() {
 
 void MainWindow::onBrowseModel2() {
     QFileDialog dialog(this, "选择模型2");
-    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso *.dvsp);;所有文件 (*.*)");
+    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvp *.dvst *.dvso);;所有文件 (*.*)");
     dialog.setFileMode(QFileDialog::ExistingFile);
     applyDialogInitialPath(dialog, editModel2Path_->text().trimmed());
     if (dialog.exec() != QDialog::Accepted) {

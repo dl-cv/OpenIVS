@@ -1,13 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Linq;
+using dlcv_infer_csharp;
 
 namespace DlcvModules
 {
     /// <summary>
-    /// 从 .dvst 或 .dvso 归档读取流程配置和子模型数据。
+    /// 在内存中解析 .dvst 或 .dvso 归档，子模型数据不写入文件。
     /// </summary>
     public class DvsModel : FlowGraphModel
     {
@@ -48,6 +50,106 @@ namespace DlcvModules
             string archiveCacheKey = Guid.NewGuid().ToString("N");
             Dictionary<int, FlowModelSource> modelSources = BuildModelSources(pipelineJson, entries, archiveCacheKey);
             return LoadFromRoot(pipelineJson, deviceId, modelSources);
+        }
+
+        public JObject LoadFromModelBindings(
+            string sourcePath,
+            JObject savedPipeline,
+            JArray modelBindings,
+            int deviceId)
+        {
+            return LoadFromModelBindings(sourcePath, savedPipeline, modelBindings, deviceId, null);
+        }
+
+        internal JObject LoadFromModelBindings(
+            string sourcePath, JObject savedPipeline, JArray modelBindings, int deviceId, DllLoader ownerLoader)
+        {
+            if (savedPipeline == null) throw new ArgumentNullException(nameof(savedPipeline));
+            if (modelBindings == null) throw new ArgumentNullException(nameof(modelBindings));
+
+            var bindingsByNode = new Dictionary<int, int>();
+            foreach (JToken token in modelBindings)
+            {
+                JObject binding = token as JObject;
+                if (binding == null || binding["node_id"]?.Type != JTokenType.Integer ||
+                    binding["model_index"]?.Type != JTokenType.Integer)
+                    throw new InvalidDataException("流程模型绑定格式无效");
+                int nodeId;
+                int modelIndex;
+                try
+                {
+                    nodeId = binding["node_id"].Value<int>();
+                    modelIndex = binding["model_index"].Value<int>();
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidDataException("流程模型绑定格式无效", ex);
+                }
+                if (nodeId < 0 || modelIndex < 0 || bindingsByNode.ContainsKey(nodeId))
+                    throw new InvalidDataException("流程模型绑定索引无效");
+                bindingsByNode[nodeId] = modelIndex;
+            }
+
+            JObject root = (JObject)savedPipeline.DeepClone();
+            JArray nodes = root["nodes"] as JArray;
+            if (nodes == null) throw new InvalidDataException("流程配置缺少 nodes 数组");
+            var foundNodeIds = new HashSet<int>();
+            foreach (JObject node in nodes.OfType<JObject>())
+            {
+                string nodeType = node["type"]?.ToString() ?? string.Empty;
+                if (!nodeType.StartsWith("model/", StringComparison.OrdinalIgnoreCase)) continue;
+
+                int nodeId = ReadNodeId(node, -1);
+                if (!foundNodeIds.Add(nodeId))
+                    throw new InvalidDataException("流程中存在重复模型节点编号：" + nodeId);
+                int modelIndex;
+                if (!bindingsByNode.TryGetValue(nodeId, out modelIndex))
+                    throw new InvalidDataException("流程模型节点缺少索引绑定：" + nodeId);
+                JObject properties = node["properties"] as JObject;
+                if (properties == null)
+                {
+                    properties = new JObject();
+                    node["properties"] = properties;
+                }
+                string modelPath = properties["model_path"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(modelPath))
+                    properties["model_name"] = GetArchiveFileName(modelPath);
+                properties["model_index"] = modelIndex;
+            }
+            foreach (int nodeId in bindingsByNode.Keys)
+            {
+                if (!foundNodeIds.Contains(nodeId))
+                    throw new InvalidDataException("流程模型绑定节点不存在：" + nodeId);
+            }
+            // 配置检查完成后再创建借用对象；同一子模型只增加一次使用记录。
+            var modelsByIndex = new Dictionary<int, Model>();
+            try
+            {
+                foreach (int modelIndex in bindingsByNode.Values)
+                {
+                    if (modelsByIndex.ContainsKey(modelIndex)) continue;
+                    modelsByIndex.Add(modelIndex, ownerLoader != null
+                        ? Model.CreateFromKnownLoader(modelIndex, ownerLoader)
+                        : new Model { modelIndex = modelIndex, OwnModelIndex = false });
+                }
+            }
+            catch
+            {
+                foreach (Model model in modelsByIndex.Values)
+                {
+                    try
+                    {
+                        model.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        if (Model.EnableConsoleLog)
+                            Console.WriteLine("恢复流程时释放子模型失败: " + ex);
+                    }
+                }
+                throw;
+            }
+            return LoadFromRoot(root, deviceId, modelsByIndex, savedPipeline);
         }
 
         private static void ReadArchive(Stream stream, out JObject pipelineJson, out Dictionary<string, ArchiveEntry> entries)
@@ -220,13 +322,17 @@ namespace DlcvModules
                     continue;
 
                 JObject properties = node["properties"] as JObject;
-                string originalPath = properties?["model_path"]?.ToString();
+                if (properties == null)
+                    throw new InvalidDataException("模型节点缺少 properties");
+                string originalPath = properties["model_path"]?.ToString();
                 int nodeId = ReadNodeId(node, i);
+                node["id"] = nodeId;
                 if (string.IsNullOrWhiteSpace(originalPath))
                     throw new InvalidDataException($"模型节点 {nodeId} 缺少 model_path");
 
                 ArchiveEntry entry = FindArchiveEntry(originalPath, entries, entriesByFileName, nodeId);
                 string modelName = GetArchiveFileName(entry.NormalizedName);
+                properties.Remove("model_index");
                 properties["model_path_original"] = originalPath;
                 properties["model_name"] = modelName;
 
@@ -267,11 +373,18 @@ namespace DlcvModules
         {
             try
             {
-                return node["id"] != null ? node["id"].Value<int>() : defaultValue;
+                int nodeId = node["id"] != null ? node["id"].Value<int>() : defaultValue;
+                if (nodeId < 0)
+                    throw new InvalidDataException("流程模型节点缺少有效 ID");
+                return nodeId;
             }
-            catch
+            catch (InvalidDataException)
             {
-                return defaultValue;
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidDataException("流程模型节点缺少有效 ID", ex);
             }
         }
 

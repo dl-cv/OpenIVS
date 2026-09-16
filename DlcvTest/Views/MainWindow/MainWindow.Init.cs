@@ -162,12 +162,12 @@ namespace DlcvTest
                 string fullPath = NormalizeModelPath(modelPath);
                 if (string.IsNullOrWhiteSpace(fullPath))
                 {
-                    MessageBox.Show("模型路径为空，无法加载。");
+                    if (!_selfTestMode) MessageBox.Show("模型路径为空，无法加载。");
                     return false;
                 }
                 if (!File.Exists(fullPath))
                 {
-                    MessageBox.Show("模型文件不存在: " + fullPath);
+                    if (!_selfTestMode) MessageBox.Show("模型文件不存在: " + fullPath);
                     return false;
                 }
 
@@ -223,18 +223,22 @@ namespace DlcvTest
                     UpdatePredictParamsVisibility(taskType);
                 });
 
-                // 4) 成功后更新设置 + MRU（最多3个）
-                try
+                // 4) 常规界面记录最近模型；非交互自测不读取或修改用户设置。
+                if (!_selfTestMode)
                 {
-                    Properties.Settings.Default.LastModelPath = fullPath;
-                    Properties.Settings.Default.SavedModelPath = fullPath;
-                    Properties.Settings.Default.RememberModelPath(fullPath, 3);
-                    Properties.Settings.Default.Save();
+                    try
+                    {
+                        Properties.Settings.Default.LastModelPath = fullPath;
+                        Properties.Settings.Default.SavedModelPath = fullPath;
+                        Properties.Settings.Default.RememberModelPath(fullPath, 3);
+                        Properties.Settings.Default.Save();
+                    }
+                    catch { }
+
+                    RefreshModelComboItems(fullPath);
                 }
-                catch { }
 
                 _loadedModelPath = fullPath;
-                RefreshModelComboItems(fullPath);
 
                 if (showSuccessPopup)
                 {
@@ -258,10 +262,11 @@ namespace DlcvTest
             }
             catch (Exception ex)
             {
-                MessageBox.Show("加载模型失败: " + ex.Message);
-
-                // 失败时恢复到当前已加载模型（或占位）
-                RefreshModelComboItems(_loadedModelPath);
+                if (!_selfTestMode)
+                {
+                    MessageBox.Show("加载模型失败: " + ex.Message);
+                    RefreshModelComboItems(_loadedModelPath);
+                }
                 return false;
             }
             finally

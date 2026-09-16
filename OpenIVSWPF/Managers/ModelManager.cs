@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.IO;
 using System.Text;
@@ -13,7 +13,7 @@ namespace OpenIVSWPF.Managers
     /// <summary>
     /// AI模型初始化和推理管理类
     /// </summary>
-    public class ModelManager
+    public partial class ModelManager
     {
         private Model _model;
         private bool _isModelLoaded = false;
@@ -200,15 +200,12 @@ namespace OpenIVSWPF.Managers
         /// </summary>
         public void Dispose()
         {
-            if (_isModelLoaded)
-            {
-                if (_model != null)
-                {
-                    _model = null;
-                }
-
-                _isModelLoaded = false;
-            }
+            Model model = _model;
+            _model = null;
+            _isModelLoaded = false;
+            _modelPath = null;
+            _modelType = null;
+            model?.Dispose();
         }
     }
 } 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -14,10 +14,11 @@ using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using DlcvModules;
 using dlcv_infer_csharp;
+using sntl_admin_csharp;
 
 namespace DlcvCSharpTest
 {
-    internal static class Program
+    internal static partial class Program
     {
         private const int SpeedWindowSeconds = 3;
         private const int LeakLoopCount = 10;
@@ -37,7 +38,35 @@ namespace DlcvCSharpTest
         private const string FlowInstanceSegFilterModelPath = @"Y:\zxc\模块化任务测试\实例分割筛选测试_120_50.dvst";
         private const string FlowInstanceSegFilterImagePath = @"Y:\zxc\模块化任务测试\实例分割\实例分割滑窗大图.png";
 
+        [DllImport("kernel32.dll", EntryPoint = "LoadLibraryW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadNativeModule(string fileName);
+
+        [DllImport("kernel32.dll", EntryPoint = "GetModuleFileNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetModuleFileNameW(IntPtr moduleHandle, StringBuilder fileName, uint size);
+
+        [DllImport("kernel32.dll", EntryPoint = "GetProcAddress", ExactSpelling = true, SetLastError = true)]
+        private static extern IntPtr GetNativeProcAddress(IntPtr moduleHandle, string procedureName);
+
+        [DllImport("dlcv_infer_v.dll", CallingConvention = CallingConvention.Cdecl,
+            ExactSpelling = true, EntryPoint = "dlcv_register_flow_c")]
+        private static extern int VirboxRegisterFlow(IntPtr flowJsonUtf8);
+
+        [DllImport("dlcv_infer_v.dll", CallingConvention = CallingConvention.Cdecl,
+            ExactSpelling = true, EntryPoint = "dlcv_free_flow_c")]
+        private static extern int VirboxFreeFlow(int flowIndex);
+
         private static readonly List<ModelRegressionCase> DefaultCases = ModelRegressionCases.Cases;
+        private static readonly string[] SharedIndexNativeExports =
+        {
+            "dlcv_get_index_type_c",
+            "dlcv_get_model_info_c",
+            "dlcv_register_flow_c",
+            "dlcv_get_flow_info_c",
+            "dlcv_free_flow_c",
+            "dlcv_bind_index_c",
+            "dlcv_unbind_index_c",
+            "dlcv_free_result"
+        };
 
         private sealed class UnifiedTestCase
         {
@@ -132,9 +161,24 @@ namespace DlcvCSharpTest
                     return RunDvspRejectSelfTest(args);
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-disabled-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunDvspDisabledSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-parity-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunDvspParitySelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "empty-flow-index-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunEmptyFlowIndexSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "provider-switch-flow-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunProviderSwitchFlowSelfTest(args);
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "maskrbox-selftest", StringComparison.OrdinalIgnoreCase))
@@ -240,6 +284,51 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvst-double-load-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunDvstDoubleLoadSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-csharp-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexCSharpSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "native-c-api-regression-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunNativeCApiRegressionSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-route-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexRouteSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-native-rule-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexNativeRuleSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-compat-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexCompatSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "free-all-modules-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunCsharpFreeAllModulesSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-review-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexReviewSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-format-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexFormatSelfTest();
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-provider-model-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunSharedIndexProviderModelSelfTest();
                 }
 
                 if (args != null && args.Length >= 2)
@@ -1030,18 +1119,18 @@ namespace DlcvCSharpTest
 
         private static int RunAllTests(string[] args)
         {
-            if (args == null || args.Length > 2)
+            if (args == null || (args.Length != 1 && args.Length != 2 && args.Length != 4))
             {
-                Console.WriteLine("用法: all-tests [日志路径]");
+                Console.WriteLine("用法: all-tests [日志路径] 或 all-tests <日志路径> <dlcv_infer.dll绝对路径> <dlcv_infer_v.dll绝对路径>");
                 return 2;
             }
 
             string logPath;
             try
             {
-                logPath = args.Length == 2
+                logPath = args.Length >= 2
                     ? Path.GetFullPath(args[1])
-                    : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DlcvCSharpTest-all-tests.log");
+                    : Path.Combine(Path.GetTempPath(), "OpenIVS-DlcvCSharpTest-" + Guid.NewGuid().ToString("N") + "-all-tests.log");
                 string logDirectory = Path.GetDirectoryName(logPath);
                 if (!string.IsNullOrEmpty(logDirectory)) Directory.CreateDirectory(logDirectory);
             }
@@ -1070,6 +1159,12 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("Demo2路由规则", RunDemo2RouteRuleSelfTest),
                 new UnifiedTestCase("掩膜输出开关", RunWithMaskSelfTest),
                 new UnifiedTestCase("均值计算", RunCalcMeanSelfTest),
+                new UnifiedTestCase("共享 index 审查检查", () => RunSharedIndexReviewSelfTest(new[] { "shared-index-review-selftest" })),
+                new UnifiedTestCase("共享 index 纯规则与查询选择", RunSharedIndexRouteSelfTest),
+                new UnifiedTestCase("C++ 共享规则与正式 C ABI", RunNativeRulesAndCApiRegressionSelfTest),
+                new UnifiedTestCase("C# 全部 DLL 模块释放", () => RunCsharpFreeAllModulesSelfTest(new[] { "free-all-modules-selftest" })),
+                new UnifiedTestCase("共享 index 格式覆盖", RunSharedIndexFormatSelfTest),
+                new UnifiedTestCase("共享 index 双 provider 普通模型", RunSharedIndexProviderModelSelfTest),
                 new UnifiedTestCase("环境提醒与 CLI 输出", RunEnvironmentCliCompatibilitySelfTest),
                 new UnifiedTestCase("ui-test 参数解析", RunUiTestOptionsSelfTest),
                 new UnifiedTestCase("WinForms 主窗口自测", RunWinFormsMainWindowSelfTest),
@@ -1079,6 +1174,10 @@ namespace DlcvCSharpTest
             var results = new List<UnifiedTestResult>(tests.Count);
             TextWriter consoleOutput = Console.Out;
             var totalWatch = Stopwatch.StartNew();
+            int setupExitCode = 0;
+            bool nativePathsValid = true;
+            string originalWorkingDirectory = Environment.CurrentDirectory;
+            Dictionary<string, string> selectedNativePaths = null;
             try
             {
                 using (var log = new StreamWriter(logPath, false, new UTF8Encoding(false)))
@@ -1088,41 +1187,90 @@ namespace DlcvCSharpTest
                     Console.WriteLine("==== C# 统一测试详细输出 ====");
                     Console.WriteLine("开始时间: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
                     Console.WriteLine("用例数量: " + tests.Count);
+                    Console.WriteLine("DLL选择模式: " + (args.Length == 4 ? "显式候选路径" : "默认 SDK"));
 
-                    foreach (var test in tests)
+                    if (args.Length == 4)
                     {
-                        Console.WriteLine();
-                        Console.WriteLine("==== 开始: " + test.Name + " ====");
-                        var watch = Stopwatch.StartNew();
-                        int exitCode = 1;
-                        string error = null;
                         try
                         {
-                            exitCode = test.Run();
+                            selectedNativePaths = PrepareExplicitNativeDlls(args[2], args[3]);
                         }
                         catch (Exception ex)
                         {
-                            error = ex.ToString();
-                            Console.WriteLine("测试异常: " + error);
+                            setupExitCode = 1;
+                            Console.WriteLine("显式 DLL 选择失败: " + ex.Message);
+                            Console.WriteLine("完整测试未开始。");
                         }
-                        finally
-                        {
-                            watch.Stop();
-                            try { Utils.FreeAllModels(); } catch (Exception ex) { Console.WriteLine("释放模型异常: " + ex.Message); }
-                            ForceGc();
-                        }
-
-                        results.Add(new UnifiedTestResult
-                        {
-                            Name = test.Name,
-                            ExitCode = exitCode,
-                            ElapsedMilliseconds = watch.ElapsedMilliseconds,
-                            Error = error
-                        });
-                        Console.WriteLine("==== 结束: " + test.Name + "，状态=" + (exitCode == 0 ? "通过" : "失败")
-                            + "，耗时=" + watch.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + "秒 ====");
                     }
 
+                    if (setupExitCode == 0)
+                    {
+                        foreach (var test in tests)
+                        {
+                            Console.WriteLine();
+                            Console.WriteLine("==== 开始: " + test.Name + " ====");
+                            var watch = Stopwatch.StartNew();
+                            int exitCode = 1;
+                            string error = null;
+                            try
+                            {
+                                exitCode = test.Run();
+                            }
+                            catch (Exception ex)
+                            {
+                                error = ex.ToString();
+                                Console.WriteLine("测试异常: " + error);
+                            }
+                            finally
+                            {
+                                watch.Stop();
+                                try
+                                {
+                                    Utils.FreeAllModels();
+                                }
+                                catch (Exception ex)
+                                {
+                                    exitCode = 1;
+                                    error = (error == null ? string.Empty : error + Environment.NewLine) + ex;
+                                    Console.WriteLine("释放模型异常: " + ex);
+                                }
+                                ForceGc();
+                            }
+
+                            results.Add(new UnifiedTestResult
+                            {
+                                Name = test.Name,
+                                ExitCode = exitCode,
+                                ElapsedMilliseconds = watch.ElapsedMilliseconds,
+                                Error = error
+                            });
+                            Console.WriteLine("==== 结束: " + test.Name + "，状态=" + (exitCode == 0 ? "通过" : "失败")
+                                + "，耗时=" + watch.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + "秒 ====");
+                        }
+                    }
+
+                    if (selectedNativePaths != null)
+                    {
+                        try
+                        {
+                            ValidateExplicitNativeModulePaths(selectedNativePaths);
+                        }
+                        catch (Exception ex)
+                        {
+                            nativePathsValid = false;
+                            Console.WriteLine("显式 DLL 路径检查失败: " + ex.Message);
+                        }
+                    }
+                    try
+                    {
+                        ValidateLoaderNativeModulePaths();
+                    }
+                    catch (Exception ex)
+                    {
+                        nativePathsValid = false;
+                        Console.WriteLine("Loader 实际路径检查失败: " + ex.Message);
+                    }
+                    WriteLoadedNativeModulePaths();
                     totalWatch.Stop();
                     Console.WriteLine();
                     Console.WriteLine("==== C# 统一测试详细输出结束 ====");
@@ -1138,6 +1286,13 @@ namespace DlcvCSharpTest
             finally
             {
                 Console.SetOut(consoleOutput);
+                Environment.CurrentDirectory = originalWorkingDirectory;
+            }
+
+            if (setupExitCode != 0)
+            {
+                Console.WriteLine("显式 DLL 选择失败，详细日志: " + logPath);
+                return setupExitCode;
             }
 
             int passed = results.Count(r => r.ExitCode == 0);
@@ -1151,7 +1306,1028 @@ namespace DlcvCSharpTest
             }
             Console.WriteLine("总耗时: " + totalWatch.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + "秒");
             Console.WriteLine("详细日志: " + logPath);
-            return passed == results.Count ? 0 : 1;
+            if (!nativePathsValid) Console.WriteLine("DLL 实际路径检查失败，本轮测试结果无效。");
+            return passed == results.Count && nativePathsValid ? 0 : 1;
+        }
+
+        private static Dictionary<string, string> PrepareExplicitNativeDlls(string sentinelPathArgument, string virboxPathArgument)
+        {
+            var requested = new[]
+            {
+                Tuple.Create(sentinelPathArgument, "dlcv_infer.dll"),
+                Tuple.Create(virboxPathArgument, "dlcv_infer_v.dll")
+            };
+            var paths = new List<Tuple<string, string>>(requested.Length);
+
+            foreach (Tuple<string, string> item in requested)
+            {
+                if (string.IsNullOrWhiteSpace(item.Item1))
+                    throw new InvalidOperationException("显式 DLL 路径不能为空: " + item.Item2);
+
+                string fullPath;
+                try
+                {
+                    fullPath = Path.GetFullPath(item.Item1);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException("显式 DLL 路径无效: " + item.Item1, ex);
+                }
+
+                if (!File.Exists(fullPath))
+                    throw new FileNotFoundException("显式 DLL 不存在: " + fullPath, fullPath);
+                if (!string.Equals(Path.GetFileName(fullPath), item.Item2, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "显式 DLL 文件名错误: 需要 " + item.Item2 + "，实际为 " + Path.GetFileName(fullPath));
+                }
+                paths.Add(Tuple.Create(fullPath, item.Item2));
+            }
+
+            string nativeDirectory = Path.GetDirectoryName(paths[0].Item1);
+            if (!string.Equals(nativeDirectory, Path.GetDirectoryName(paths[1].Item1), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("完整测试的两个推理 DLL 必须来自同一个 SDK 目录。");
+
+            // C++ 普通加载优先读取当前工作目录，显式测试保持两种语言使用同一套 SDK。
+            Environment.CurrentDirectory = nativeDirectory;
+            Console.WriteLine("显式 SDK 工作目录: " + nativeDirectory);
+
+            foreach (Tuple<string, string> item in paths)
+            {
+                IntPtr moduleHandle = LoadNativeModule(item.Item1);
+                if (moduleHandle == IntPtr.Zero)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    throw new InvalidOperationException(
+                        "无法加载显式 DLL " + item.Item1 + (error == 0 ? string.Empty : "，Win32错误=" + error));
+                }
+
+                string actualPath = GetActualNativeModulePath(moduleHandle);
+                if (!string.Equals(actualPath, item.Item1, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "显式 DLL 实际加载路径不一致: 选择=" + item.Item1 + "，实际=" + actualPath);
+                }
+
+                var missing = new List<string>();
+                foreach (string exportName in SharedIndexNativeExports)
+                {
+                    if (GetNativeProcAddress(moduleHandle, exportName) == IntPtr.Zero)
+                        missing.Add(exportName);
+                }
+                if (missing.Count > 0)
+                {
+                    throw new MissingMethodException(
+                        "显式 DLL 缺少完整共享接口: " + item.Item1 + "，缺少 " + string.Join("、", missing));
+                }
+
+                Console.WriteLine("显式选择 " + item.Item2 + " 实际路径: " + actualPath);
+            }
+
+            var selectedPaths = paths.ToDictionary(item => item.Item2, item => item.Item1, StringComparer.OrdinalIgnoreCase);
+            selectedPaths.Add("dlcv_infer_cpp.dll", Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "dlcv_infer_cpp.dll"));
+            ValidateExplicitNativeModulePaths(selectedPaths);
+            return selectedPaths;
+        }
+
+        private static void ValidateExplicitNativeModulePaths(IDictionary<string, string> selectedPaths)
+        {
+            using (Process process = Process.GetCurrentProcess())
+            {
+                foreach (ProcessModule module in process.Modules)
+                {
+                    string selectedPath;
+                    if (!selectedPaths.TryGetValue(module.ModuleName, out selectedPath)) continue;
+                    string actualPath = GetActualNativeModulePath(module.BaseAddress);
+                    if (!string.Equals(actualPath, selectedPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException(
+                            "进程加载了非本次选择的 DLL: " + actualPath + "，本次选择=" + selectedPath);
+                    }
+                }
+            }
+        }
+
+        private static string GetActualNativeModulePath(IntPtr moduleHandle)
+        {
+            var buffer = new StringBuilder(32768);
+            uint length = GetModuleFileNameW(moduleHandle, buffer, (uint)buffer.Capacity);
+            if (length == 0)
+            {
+                int error = Marshal.GetLastWin32Error();
+                throw new InvalidOperationException(
+                    "无法读取已加载 DLL 的实际路径" + (error == 0 ? string.Empty : "，Win32错误=" + error));
+            }
+            return buffer.ToString();
+        }
+
+        private static void ValidateLoaderNativeModulePaths()
+        {
+            using (Process process = Process.GetCurrentProcess())
+            {
+                var modules = process.Modules.Cast<ProcessModule>().ToList();
+                foreach (DllLoader loader in DllLoader.GetLoadedLoaders())
+                {
+                    ProcessModule module = modules.SingleOrDefault(candidate =>
+                        string.Equals(candidate.FileName, loader.LoadedNativeModulePath, StringComparison.OrdinalIgnoreCase));
+                    if (module == null || !string.Equals(GetActualNativeModulePath(module.BaseAddress),
+                        loader.LoadedNativeModulePath, StringComparison.OrdinalIgnoreCase))
+                        throw new Exception("Loader 记录的路径不是实际已加载模块：" + loader.LoadedNativeModulePath);
+                }
+            }
+        }
+
+        private static void WriteLoadedNativeModulePaths()
+        {
+            Console.WriteLine();
+            Console.WriteLine("==== 进程内实际已加载的推理 DLL ====");
+            var targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "dlcv_infer.dll",
+                "dlcv_infer_v.dll",
+                "dlcv_infer_cpp.dll"
+            };
+
+            try
+            {
+                var modules = Process.GetCurrentProcess().Modules.Cast<ProcessModule>()
+                    .Where(module => targetNames.Contains(module.ModuleName))
+                    .OrderBy(module => module.ModuleName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(module => module.FileName, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (modules.Count == 0)
+                {
+                    Console.WriteLine("未找到目标 DLL");
+                    return;
+                }
+
+                foreach (ProcessModule module in modules)
+                {
+                    string actualPath;
+                    try
+                    {
+                        actualPath = GetActualNativeModulePath(module.BaseAddress);
+                    }
+                    catch
+                    {
+                        actualPath = module.FileName;
+                    }
+                    Console.WriteLine(module.ModuleName + ": " + actualPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("读取进程内已加载 DLL 路径失败: " + ex.Message);
+            }
+        }
+
+        private static int RunSharedIndexCSharpSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 4)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest shared-index-csharp-selftest <model.dvo> <flow.dvst> <image> [deviceId]");
+                return 2;
+            }
+
+            string dvoPath = args[1];
+            string dvstPath = args[2];
+            string imagePath = args[3];
+            int deviceId = GpuDeviceId;
+            if (args.Length >= 5 && !int.TryParse(args[4], out deviceId))
+            {
+                Console.WriteLine("deviceId 必须是整数");
+                return 2;
+            }
+            if (!File.Exists(dvoPath) || !File.Exists(dvstPath) || !File.Exists(imagePath))
+            {
+                Console.WriteLine("模型或图片不存在");
+                return 2;
+            }
+
+            Mat bgr = null;
+            Mat rgb = null;
+            try
+            {
+                bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
+                if (bgr == null || bgr.Empty()) throw new Exception("图片解码失败");
+                rgb = new Mat();
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+                var inferParams = new JObject
+                {
+                    ["threshold"] = 0.05,
+                    ["with_mask"] = true
+                };
+
+                RunCSharpOwnerCppBorrowerCase(dvoPath, imagePath, rgb, inferParams, deviceId, "model", "C# owner DVO→C++");
+                RunCppOwnerCSharpBorrowerCase(dvoPath, imagePath, rgb, inferParams, deviceId, "model", "C++ owner DVO→C#");
+                RunCSharpOwnerCppBorrowerCase(dvstPath, imagePath, rgb, inferParams, deviceId, "flow", "C# owner DVST→C++");
+                RunCppOwnerCSharpBorrowerCase(dvstPath, imagePath, rgb, inferParams, deviceId, "flow", "C++ owner DVST→C#");
+
+                Console.WriteLine("shared-index-csharp-selftest 通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-csharp-selftest 失败: " + ex);
+                return 1;
+            }
+            finally
+            {
+                if (rgb != null) rgb.Dispose();
+                if (bgr != null) bgr.Dispose();
+            }
+        }
+
+        private static int RunSharedIndexFormatSelfTest()
+        {
+            string dvtPath = Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
+            string dvoPath = Path.Combine(ModelRoot, "猫狗-分类_s.dvo");
+            string dvstPath = Path.Combine(ModelRoot, "AOI_120_50_s.dvst");
+            string modelImagePath = Path.Combine(ModelRoot, "猫狗-猫.jpg");
+            string flowImagePath = Path.Combine(ModelRoot, "AOI-测试.jpg");
+            foreach (string path in new[] { dvtPath, dvoPath, dvstPath, modelImagePath, flowImagePath })
+            {
+                if (!File.Exists(path))
+                {
+                    Console.WriteLine("测试文件不存在: " + path);
+                    return 2;
+                }
+            }
+
+            try
+            {
+                RunSharedIndexFormatCase(dvtPath, modelImagePath, "model", "DVT 双向共享 index");
+                Utils.FreeAllModels();
+                RunSharedIndexFormatCase(dvoPath, modelImagePath, "model", "DVO 双向共享 index");
+                Utils.FreeAllModels();
+                RunSharedIndexFormatCase(dvstPath, flowImagePath, "flow", "DVST 双向共享 index");
+                Console.WriteLine("shared-index-format-selftest 通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-format-selftest 失败: " + ex);
+                return 1;
+            }
+            finally
+            {
+                Utils.FreeAllModels();
+            }
+        }
+
+        private static int RunSharedIndexProviderModelSelfTest()
+        {
+            string sentinelPath = Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
+            string virboxPath = Path.Combine(ModelRoot, "猫狗-分类_120_50_v.dvt");
+            string imagePath = Path.Combine(ModelRoot, "猫狗-猫.jpg");
+            foreach (string path in new[] { sentinelPath, virboxPath, imagePath })
+            {
+                if (!File.Exists(path))
+                {
+                    Console.WriteLine("测试文件不存在: " + path);
+                    return 2;
+                }
+            }
+
+            Model first = null;
+            Model second = null;
+            try
+            {
+                first = new Model(sentinelPath, GpuDeviceId, false, false);
+                DllLoader defaultLoader = first.Loader;
+                if (defaultLoader == null || defaultLoader.LoadedDogProvider != DogProvider.Sentinel)
+                    throw new Exception("首次 Sentinel 模型头未选定 Sentinel 默认 DLL");
+                first.GetModelInfo();
+                first.Dispose();
+                first = null;
+
+                second = new Model(virboxPath, GpuDeviceId, false, false);
+                if (!ReferenceEquals(second.Loader, defaultLoader) || !ReferenceEquals(DllLoader.Instance, defaultLoader))
+                    throw new Exception("后续 Virbox 模型改变了已选定的默认 DLL");
+                second.GetModelInfo();
+                second.Dispose();
+                second = null;
+
+                RunSharedIndexFormatCase(sentinelPath, imagePath, "model", "Sentinel 头普通模型双向共享 index");
+                Utils.FreeAllModels();
+                RunSharedIndexFormatCase(virboxPath, imagePath, "model", "Virbox 头普通模型授权与双向共享 index");
+                if (!ReferenceEquals(DllLoader.Instance, defaultLoader))
+                    throw new Exception("双 provider 模型加载后默认 DLL 发生变化");
+                Console.WriteLine("shared-index-provider-model-selftest 通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-provider-model-selftest 失败: " + ex);
+                return 1;
+            }
+            finally
+            {
+                second?.Dispose();
+                first?.Dispose();
+                Utils.FreeAllModels();
+            }
+        }
+
+        private static void RunSharedIndexFormatCase(
+            string modelPath,
+            string imagePath,
+            string expectedIndexType,
+            string label)
+        {
+            using (Mat bgr = Cv2.ImRead(imagePath, ImreadModes.Color))
+            using (var rgb = new Mat())
+            {
+                if (bgr == null || bgr.Empty()) throw new Exception(label + " 图片解码失败");
+                Cv2.CvtColor(bgr, rgb, ColorConversionCodes.BGR2RGB);
+                var inferParams = new JObject
+                {
+                    ["threshold"] = 0.05,
+                    ["with_mask"] = true
+                };
+                RunCSharpOwnerCppBorrowerCase(
+                    modelPath,
+                    imagePath,
+                    rgb,
+                    inferParams,
+                    GpuDeviceId,
+                    expectedIndexType,
+                    label + "，C# 持有");
+                RunCppOwnerCSharpBorrowerCase(
+                    modelPath,
+                    imagePath,
+                    rgb,
+                    inferParams,
+                    GpuDeviceId,
+                    expectedIndexType,
+                    label + "，C++ 持有");
+            }
+        }
+
+        private static int RunSharedIndexRouteSelfTest()
+        {
+            try
+            {
+                var oldSentinel = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => index == 256 ? 1 : 0,
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0
+                };
+                var newVirbox = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => index == 256 ? 1 : 0,
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0
+                };
+
+                var legacyWithoutQuery = new DllLoader
+                {
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0
+                };
+
+                string indexType;
+                DllLoader selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                    256,
+                    new List<DllLoader> { oldSentinel },
+                    out indexType);
+                if (!object.ReferenceEquals(selected, oldSentinel) || indexType != "model")
+                    throw new Exception("旧四段编号 256 的唯一资源选择错误");
+
+                selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                    256,
+                    new List<DllLoader> { newVirbox },
+                    out indexType);
+                if (!object.ReferenceEquals(selected, newVirbox) || indexType != "model")
+                    throw new Exception("新版编号 256 的唯一资源选择错误");
+
+                selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                    256,
+                    new List<DllLoader> { legacyWithoutQuery, oldSentinel },
+                    out indexType);
+                if (!object.ReferenceEquals(selected, oldSentinel) || indexType != "model")
+                    throw new Exception("缺少查询接口的旧 DLL 不应参与共享资源选择");
+
+                var incompleteSharedFlow = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => 2,
+                    dlcv_get_flow_info_c = index => IntPtr.Zero,
+                    dlcv_free_flow_c = index => 0,
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0
+                };
+                if (incompleteSharedFlow.SupportsSharedFlowIndex)
+                    throw new Exception("缺少模型信息或结果释放接口的旧 DLL 错误启用共享流程登记");
+                EnsureThrows<NotSupportedException>(
+                    () => incompleteSharedFlow.EnsureSharedIndexSupport("flow"),
+                    "缺少共享流程接口时未拒绝严格恢复");
+
+                var completeSharedFlow = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => 2,
+                    dlcv_get_model_info_c = index => IntPtr.Zero,
+                    dlcv_register_flow_c = ptr => 0,
+                    dlcv_get_flow_info_c = index => IntPtr.Zero,
+                    dlcv_free_flow_c = index => 0,
+                    dlcv_bind_index_c = index => 0,
+                    dlcv_unbind_index_c = index => 0,
+                    dlcv_free_result = ptr => { }
+                };
+                if (!completeSharedFlow.SupportsSharedFlowIndex)
+                    throw new Exception("完整共享流程接口未被识别");
+
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                        256,
+                        new List<DllLoader> { oldSentinel, newVirbox },
+                        out indexType),
+                    "双 DLL 同时有效时未报告歧义");
+
+                bool otherQueried = false;
+                var throwing = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => throw new InvalidOperationException("query failed")
+                };
+                var other = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => { otherQueried = true; return 1; }
+                };
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                        256,
+                        new List<DllLoader> { throwing, other },
+                        out indexType),
+                    "查询异常未直接返回");
+                if (otherQueried)
+                    throw new Exception("查询异常后错误切换到其他 DLL");
+
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                        256,
+                        new List<DllLoader>
+                        {
+                            new DllLoader { dlcv_get_index_type_c = index => -1 }
+                        },
+                        out indexType),
+                    "未知类型 -1 未拒绝");
+
+                EnsureThrows<NotSupportedException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                        256,
+                        new List<DllLoader> { new DllLoader() },
+                        out indexType),
+                    "缺少共享查询接口未拒绝");
+
+                int alternativeQueryCount = 0;
+                bool alternativeBound = false;
+                var bindingFailureLoader = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => 1,
+                    dlcv_bind_index_c = index => -7
+                };
+                var alternative = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => { alternativeQueryCount++; return 0; },
+                    dlcv_bind_index_c = index => { alternativeBound = true; return 0; }
+                };
+                selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(
+                    256,
+                    new List<DllLoader> { bindingFailureLoader, alternative },
+                    out indexType);
+                if (!object.ReferenceEquals(selected, bindingFailureLoader) || selected.BindIndex(256) == 0)
+                    throw new Exception("绑定失败测试未命中选定 DLL");
+                if (alternativeQueryCount != 1 || alternativeBound)
+                    throw new Exception("绑定失败后错误改选其他 DLL");
+
+                EnsureThrows<ArgumentOutOfRangeException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(-1, new List<DllLoader> { oldSentinel }, out indexType),
+                    "负数编号未拒绝");
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(7, new List<DllLoader> { oldSentinel }, out indexType),
+                    "不存在的编号未拒绝");
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(256,
+                        new List<DllLoader> { new DllLoader { dlcv_get_index_type_c = index => 7 } }, out indexType),
+                    "未知类型 7 未拒绝");
+                EnsureThrows<InvalidOperationException>(
+                    () => DllLoader.ResolveSharedIndexLoaderFromCandidates(256,
+                        new List<DllLoader> { oldSentinel, throwing }, out indexType),
+                    "已有有效结果时忽略了后续查询异常");
+                var flowOnly = new DllLoader { dlcv_get_index_type_c = index => 2 };
+                selected = DllLoader.ResolveSharedIndexLoaderFromCandidates(0,
+                    new List<DllLoader> { flowOnly }, out indexType);
+                if (!object.ReferenceEquals(selected, flowOnly) || indexType != "flow")
+                    throw new Exception("小编号流程没有按查询结果识别");
+
+                int bindAttempts = 0;
+                var fixedLoader = new DllLoader
+                {
+                    dlcv_get_index_type_c = index => 1,
+                    dlcv_get_model_info_c = index => IntPtr.Zero,
+                    dlcv_unbind_index_c = index => 0,
+                    dlcv_bind_index_c = index =>
+                    {
+                        if (index != 256) throw new Exception("绑定重试传入了不同 index");
+                        bindAttempts++;
+                        return -7;
+                    },
+                    dlcv_free_result = ptr => { }
+                };
+                using (var fixedModel = Model.CreateFromKnownLoader(256, fixedLoader))
+                {
+                    EnsureThrows<Exception>(() => fixedModel.GetModelInfo(), "首次绑定失败未返回错误");
+                    EnsureThrows<Exception>(() => fixedModel.GetModelInfo(), "再次绑定失败未返回错误");
+                    if (bindAttempts != 2 || fixedModel.modelIndex != 256)
+                        throw new Exception("绑定失败重试没有保持原 loader 和 index");
+                }
+
+                EnsureThrows<InvalidDataException>(
+                    () => Model.CreateFromKnownLoader(256, new DllLoader { dlcv_get_index_type_c = index => 0 }),
+                    "流程子模型失效后没有拒绝恢复");
+                EnsureThrows<InvalidDataException>(
+                    () => Model.CreateFromKnownLoader(256, new DllLoader { dlcv_get_index_type_c = index => 2 }),
+                    "流程子模型错误接受流程类型");
+
+                foreach (bool throwOnRelease in new[] { false, true })
+                {
+                    int bindCount = 0;
+                    int unbindCount = 0;
+                    var releaseLoader = new DllLoader
+                    {
+                        dlcv_get_index_type_c = value => value == 256 ? 1 : 0,
+                        dlcv_get_model_info_c = value => Marshal.StringToHGlobalAnsi("{\"code\":0,\"model_info\":{}}"),
+                        dlcv_free_result = Marshal.FreeHGlobal,
+                        dlcv_bind_index_c = value =>
+                        {
+                            if (value != 256) throw new Exception("绑定使用了不同 index");
+                            bindCount++;
+                            return 0;
+                        },
+                        dlcv_unbind_index_c = value =>
+                        {
+                            if (value != 256) throw new Exception("解绑使用了不同 index");
+                            unbindCount++;
+                            if (throwOnRelease) throw new InvalidOperationException("测试解绑异常");
+                            return -7;
+                        }
+                    };
+                    using (var borrowed = Model.CreateFromKnownLoader(256, releaseLoader))
+                    {
+                        borrowed.GetModelInfo();
+                        borrowed.Dispose();
+                        if (bindCount != 1 || unbindCount != 1 ||
+                            borrowed.modelIndex != -1 || borrowed.Loader != null)
+                            throw new Exception("首次底层失败后未清理本地共享 index 状态");
+                        // 释放后检查本地状态，不再调用依赖已释放 loader 的信息接口。
+                        borrowed.Dispose();
+                        if (bindCount != 1 || unbindCount != 1)
+                            throw new Exception("后续 Dispose 重复调用了底层绑定或解绑");
+                    }
+                    if (unbindCount != 1)
+                        throw new Exception("离开 using 后重复调用了底层解绑");
+                }
+                RunMissingResultFreeCheck();
+                RunSharedResultComparisonChecks();
+
+                Console.WriteLine("shared-index-route-selftest 通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-route-selftest 失败: " + ex.ToString());
+                return 1;
+            }
+        }
+
+        private static void RunSharedIndexReleaseCompletionCheck(bool throwOnRelease)
+        {
+            const int index = 256;
+            int bindCount = 0;
+            int unbindCount = 0;
+            var loader = new DllLoader
+            {
+                dlcv_get_index_type_c = value => value == index ? 1 : 0,
+                dlcv_get_model_info_c = value => Marshal.StringToHGlobalAnsi("{\"code\":0,\"model_info\":{}}"),
+                dlcv_free_result = Marshal.FreeHGlobal,
+                dlcv_bind_index_c = value =>
+                {
+                    if (value != index) throw new Exception("绑定使用了不同 index");
+                    bindCount++;
+                    return 0;
+                },
+                dlcv_unbind_index_c = value =>
+                {
+                    if (value != index) throw new Exception("解绑使用了不同 index");
+                    unbindCount++;
+                    if (throwOnRelease) throw new InvalidOperationException("测试解绑异常");
+                    return -7;
+                }
+            };
+            var borrowed = Model.CreateFromKnownLoader(index, loader);
+            borrowed.GetModelInfo();
+            borrowed.Dispose();
+            if (bindCount != 1 || unbindCount != 1 || borrowed.modelIndex != -1)
+                throw new Exception("首次底层失败后未清理本地共享 index 状态");
+            EnsureThrows<InvalidOperationException>(
+                () => borrowed.GetModelInfo(),
+                "释放完成后仍可读取模型信息");
+            borrowed.Dispose();
+            if (unbindCount != 1)
+                throw new Exception("后续 Dispose 重复调用了底层解绑");
+        }
+
+        private static void RunMissingResultFreeCheck()
+        {
+            int getterCalls = 0;
+            var loader = new DllLoader
+            {
+                dlcv_get_model_info_c = index => { getterCalls++; return IntPtr.Zero; },
+                dlcv_get_flow_info_c = index => { getterCalls++; return IntPtr.Zero; }
+            };
+            EnsureThrows<MissingMethodException>(() => loader.GetModelInfoByIndex(0),
+                "模型信息读取没有拒绝缺少结果释放接口的 DLL");
+            EnsureThrows<MissingMethodException>(() => loader.GetFlowInfo(0),
+                "流程信息读取没有拒绝缺少结果释放接口的 DLL");
+            if (getterCalls != 0)
+                throw new Exception("结果释放接口缺失时仍调用 getter 分配了原生结果");
+        }
+
+        private static int RunSharedIndexNativeRuleSelfTest()
+        {
+            string executablePath = Path.Combine(
+                ResolveRepoRoot(), "Release", "dlcv_infer_cpp_test.exe");
+            if (!File.Exists(executablePath))
+            {
+                Console.WriteLine("shared-index-native-rule-selftest 未执行：缺少编号脚本产出的 Release 测试程序：" + executablePath);
+                return 2;
+            }
+
+            try
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = executablePath,
+                    Arguments = "shared-index-rules-selftest",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    StandardOutputEncoding = Encoding.GetEncoding(936, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback),
+                    StandardErrorEncoding = Encoding.GetEncoding(936, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback)
+                };
+                using (Process process = Process.Start(startInfo))
+                {
+                    if (process == null) throw new InvalidOperationException("无法启动原生规则测试程序");
+                    string stdout = process.StandardOutput.ReadToEnd();
+                    string stderr = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    if (!string.IsNullOrWhiteSpace(stdout)) Console.Write(stdout);
+                    if (!string.IsNullOrWhiteSpace(stderr)) Console.Error.Write(stderr);
+                    if (process.ExitCode != 0)
+                    {
+                        Console.WriteLine("shared-index-native-rule-selftest 失败，原生程序退出码=" + process.ExitCode);
+                        return 1;
+                    }
+                }
+                Console.WriteLine("shared-index-native-rule-selftest 通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-native-rule-selftest 失败: " + ex.Message);
+                return 1;
+            }
+        }
+
+        private static int RunSharedIndexCompatSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 3 || args.Length > 4 ||
+                (args.Length == 4 && args[3] != "ambiguous"))
+            {
+                Console.WriteLine("用法: DlcvCSharpTest shared-index-compat-selftest <first_dll> <second_dll> [ambiguous]");
+                return 2;
+            }
+
+            string firstPath = Path.GetFullPath(args[1]);
+            string secondPath = Path.GetFullPath(args[2]);
+            bool requireAmbiguity = args.Length == 4;
+            var registered = new List<Tuple<DllLoader, int>>();
+            string sourcePath = Path.Combine(Path.GetTempPath(), "dlcv_shared_index_compat.dvst");
+            try
+            {
+                if (!File.Exists(firstPath) || !File.Exists(secondPath))
+                    throw new Exception("指定 DLL 不存在");
+                if (LoadNativeModule(firstPath) == IntPtr.Zero || LoadNativeModule(secondPath) == IntPtr.Zero)
+                    throw new Exception("无法按绝对路径加载两个目标 DLL");
+
+                var selectedLoaders = DllLoader.GetLoadedLoaders().Where(loader =>
+                    string.Equals(loader.LoadedNativeModulePath, firstPath, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(loader.LoadedNativeModulePath, secondPath, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (selectedLoaders.Count != 2 || selectedLoaders.Any(loader => !loader.SupportsSharedFlowIndex))
+                    throw new Exception("必须枚举到两个具备完整共享接口的指定 DLL");
+
+                Func<DllLoader, int> register = loader =>
+                {
+                    string provider = loader.LoadedDogProvider == DogProvider.Virbox ? "virbox" : "sentinel";
+                    string flowJson = new JObject
+                    {
+                        ["schema_version"] = 1, ["flow_type"] = "dvst", ["provider"] = provider,
+                        ["source_path"] = sourcePath, ["device_id"] = 0,
+                        ["pipeline"] = new JObject { ["nodes"] = new JArray(), ["edges"] = new JArray() },
+                        ["model_bindings"] = new JArray()
+                    }.ToString(Formatting.None);
+                    int index = loader.RegisterFlow(flowJson);
+                    if (index < 0) throw new Exception("流程登记失败: " + loader.LoadedNativeModulePath);
+                    return index;
+                };
+                foreach (DllLoader loader in selectedLoaders)
+                    registered.Add(Tuple.Create(loader, register(loader)));
+
+                if (registered[0].Item2 != registered[1].Item2)
+                {
+                    foreach (var item in registered)
+                    {
+                        string indexType;
+                        DllLoader resolved = DllLoader.ResolveForIndex(item.Item2, out indexType);
+                        if (indexType != "flow" || !object.ReferenceEquals(resolved, item.Item1) ||
+                            QueryNativeIndexType(item.Item2) != 2)
+                            throw new Exception("C# / C++ 未选择实际持有资源的模块");
+                        if (resolved.BindIndex(item.Item2) != 0 || resolved.UnbindIndex(item.Item2) != 0)
+                            throw new Exception("唯一资源的绑定或解绑失败");
+                        Console.WriteLine("唯一流程 index=" + item.Item2 + "，DLL=" + resolved.LoadedNativeModulePath);
+                    }
+                }
+
+                if (requireAmbiguity)
+                {
+                    for (int attempt = 0; registered[0].Item2 != registered[1].Item2 && attempt < 40000; attempt++)
+                    {
+                        int lower = registered[0].Item2 < registered[1].Item2 ? 0 : 1;
+                        var previous = registered[lower];
+                        if (previous.Item1.FreeFlow(previous.Item2) != 0)
+                            throw new Exception("推进编号时释放流程失败");
+                        registered[lower] = Tuple.Create(previous.Item1, -1);
+                        int next = register(previous.Item1);
+                        registered[lower] = Tuple.Create(previous.Item1, next);
+                        if (next <= previous.Item2) throw new Exception("DLL 重复发放了已释放编号");
+                    }
+                    if (registered[0].Item2 != registered[1].Item2)
+                        throw new Exception("测试要求真实编号歧义，但指定 DLL 未产生相同编号");
+                }
+
+                if (registered[0].Item2 == registered[1].Item2)
+                {
+                    int duplicate = registered[0].Item2;
+                    string indexType;
+                    EnsureThrows<InvalidOperationException>(
+                        () => DllLoader.ResolveForIndex(duplicate, out indexType), "C# 未拒绝编号歧义");
+                    if (QueryNativeIndexType(duplicate) != 0)
+                        throw new Exception("C++ 未拒绝编号歧义");
+                    Console.WriteLine("C# / C++ 同编号歧义检查通过: " + duplicate);
+                    if (registered[0].Item1.FreeFlow(duplicate) != 0)
+                        throw new Exception("释放第一个歧义资源失败");
+                    registered[0] = Tuple.Create(registered[0].Item1, -1);
+                    if (!object.ReferenceEquals(DllLoader.ResolveForIndex(duplicate, out indexType), registered[1].Item1) ||
+                        QueryNativeIndexType(duplicate) != 2)
+                        throw new Exception("仅剩一个资源时未恢复唯一模块");
+                }
+
+                foreach (var item in registered.Where(item => item.Item2 >= 0))
+                    if (item.Item1.FreeFlow(item.Item2) != 0) throw new Exception("测试资源释放失败");
+                var releasedIndices = registered.Where(item => item.Item2 >= 0).Select(item => item.Item2).ToList();
+                registered.Clear();
+                foreach (int index in releasedIndices)
+                {
+                    string indexType;
+                    EnsureThrows<InvalidOperationException>(
+                        () => DllLoader.ResolveForIndex(index, out indexType), "C# 接受了已释放编号");
+                    if (QueryNativeIndexType(index) != 0) throw new Exception("C++ 接受了已释放编号");
+                }
+                Console.WriteLine("shared-index-compat-selftest 通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("shared-index-compat-selftest 失败: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                foreach (var item in registered.Where(item => item.Item2 >= 0))
+                    try { item.Item1.FreeFlow(item.Item2); } catch { }
+            }
+        }
+
+        private static void EnsureThrows<TException>(Action action, string message)
+            where TException : Exception
+        {
+            try
+            {
+                action();
+            }
+            catch (TException)
+            {
+                return;
+            }
+            throw new Exception(message);
+        }
+
+        private static void RunCSharpOwnerCppBorrowerCase(
+            string modelPath,
+            string imagePath,
+            Mat image,
+            JObject inferParams,
+            int deviceId,
+            string expectedIndexType,
+            string label)
+        {
+            int index = -1;
+            DllLoader loader = null;
+            Model owner = null;
+            Model keeper = null;
+            bool nativeBorrowActive = false;
+            try
+            {
+                owner = new Model(modelPath, deviceId);
+                index = owner.modelIndex;
+                loader = ResolveAndValidateSharedIndex(index, expectedIndexType, label);
+                JObject ownerInfo = owner.GetModelInfo();
+                ValidateFlowInfoWhenNeeded(ownerInfo, loader, index, expectedIndexType, label);
+                JObject ownerSummary = InferAndSummarize(owner, image, inferParams);
+                JToken ownerJson = JToken.FromObject(owner.InferOneOutJson(image, inferParams));
+
+                // 正式 C 信息查询会在模型表中保留借用，直到显式释放。
+                nativeBorrowActive = true;
+                JObject nativeInfo = NativeCGetModelInfo(index, label + " 正式 C 模型信息");
+                EnsureModelInfosMatch(ownerInfo, nativeInfo, label + " 正式 C 模型信息");
+                JToken nativeJson = NativeCInferJson(index, image, inferParams, label + " 首次正式 C 推理");
+                EnsureNativeJsonResultsMatch(ownerJson, nativeJson, label + " 首次正式 C 推理");
+
+                keeper = CreateBoundCSharpBorrower(index, out JObject keeperInfo);
+                EnsureModelInfosMatch(ownerInfo, keeperInfo, label + " C# 持续借用信息");
+                JObject keeperBeforeFree = InferAndSummarize(keeper, image, inferParams);
+                EnsureResultsMatch(ownerSummary, keeperBeforeFree, label + " C# 持续借用结果");
+
+                owner.Dispose();
+                owner = null;
+                JObject keeperAfterFree = InferAndSummarize(keeper, image, inferParams);
+                EnsureResultsMatch(ownerSummary, keeperAfterFree, label + " 持有方释放后 C# 借用结果");
+                JToken nativeAfterOwnerFree = NativeCInferJson(
+                    index, image, inferParams, label + " 持有方释放后正式 C 推理");
+                EnsureNativeJsonResultsMatch(ownerJson, nativeAfterOwnerFree, label + " 持有方释放后正式 C 推理");
+
+                nativeBorrowActive = false;
+                if (NativeCFreeModel(index) != 0)
+                    throw new Exception(label + " 正式 C 借用释放失败");
+                EnsureResultsMatch(ownerSummary, InferAndSummarize(keeper, image, inferParams),
+                    label + " 正式 C 借用释放后 C# 推理");
+
+                keeper.Dispose();
+                keeper = null;
+                EnsureIndexRemoved(loader, index, label);
+            }
+            finally
+            {
+                try
+                {
+                    if (nativeBorrowActive)
+                    {
+                        nativeBorrowActive = false;
+                        if (NativeCFreeModel(index) != 0)
+                            throw new Exception(label + " 清理正式 C 借用失败");
+                    }
+                }
+                finally
+                {
+                    try { keeper?.Dispose(); }
+                    finally { owner?.Dispose(); }
+                }
+            }
+        }
+
+        private static void RunCppOwnerCSharpBorrowerCase(
+            string modelPath,
+            string imagePath,
+            Mat image,
+            JObject inferParams,
+            int deviceId,
+            string expectedIndexType,
+            string label)
+        {
+            int index = NativeCLoadModel(modelPath, deviceId);
+            bool ownerActive = true;
+            bool nativeBorrowActive = false;
+            DllLoader loader = null;
+            Model borrowed = null;
+            try
+            {
+                loader = ResolveAndValidateSharedIndex(index, expectedIndexType, label);
+                JObject nativeInfo = NativeCGetModelInfo(index, label + " 正式 C 持有方模型信息");
+                JToken nativeJson = NativeCInferJson(index, image, inferParams, label + " 正式 C 持有方推理");
+
+                borrowed = CreateBoundCSharpBorrower(index, out JObject borrowedInfo);
+                ValidateFlowInfoWhenNeeded(borrowedInfo, loader, index, expectedIndexType, label);
+                EnsureModelInfosMatch(nativeInfo, borrowedInfo, label + " 模型信息");
+                JObject borrowedSummary = InferAndSummarize(borrowed, image, inferParams);
+                JToken borrowedJson = JToken.FromObject(borrowed.InferOneOutJson(image, inferParams));
+                EnsureNativeJsonResultsMatch(nativeJson, borrowedJson, label + " 首次 C# 推理");
+                if (borrowedSummary.Value<int>("sample_count") <= 0)
+                    throw new Exception(label + " C# 结构化结果为空");
+
+                // 一次释放即结束本次持有，异常清理不能再次消耗同一持有。
+                ownerActive = false;
+                if (NativeCFreeModel(index) != 0)
+                    throw new Exception(label + " 正式 C 持有方释放失败");
+
+                JObject borrowedAfterFree = InferAndSummarize(borrowed, image, inferParams);
+                EnsureResultsMatch(borrowedSummary, borrowedAfterFree, label + " 持有方释放后 C# 推理");
+                // 持有方释放后，正式 C 推理会重新登记独立的借用。
+                nativeBorrowActive = true;
+                JToken nativeAfterOwnerFree = NativeCInferJson(
+                    index, image, inferParams, label + " 持有方释放后正式 C 推理");
+                EnsureNativeJsonResultsMatch(nativeJson, nativeAfterOwnerFree, label + " 持有方释放后正式 C 推理");
+
+                nativeBorrowActive = false;
+                if (NativeCFreeModel(index) != 0)
+                    throw new Exception(label + " 正式 C 借用释放失败");
+                EnsureResultsMatch(borrowedSummary, InferAndSummarize(borrowed, image, inferParams),
+                    label + " 正式 C 借用释放后 C# 推理");
+
+                borrowed.Dispose();
+                borrowed = null;
+                EnsureIndexRemoved(loader, index, label);
+            }
+            finally
+            {
+                try
+                {
+                    if (ownerActive || nativeBorrowActive)
+                    {
+                        ownerActive = false;
+                        nativeBorrowActive = false;
+                        if (NativeCFreeModel(index) != 0)
+                            throw new Exception(label + " 清理正式 C 持有或借用失败");
+                    }
+                }
+                finally
+                {
+                    borrowed?.Dispose();
+                }
+            }
+        }
+
+        private static DllLoader ResolveAndValidateSharedIndex(int index, string expectedIndexType, string label)
+        {
+            string indexType;
+            DllLoader loader = DllLoader.ResolveForIndex(index, out indexType);
+            if (!string.Equals(indexType, expectedIndexType, StringComparison.Ordinal))
+                throw new Exception(label + " index 类型错误: " + indexType);
+            Console.WriteLine(label + " index=" + index + ", type=" + indexType +
+                ", provider=" + loader.LoadedDogProvider);
+            return loader;
+        }
+
+        private static void ValidateFlowInfoWhenNeeded(
+            JObject modelInfo,
+            DllLoader loader,
+            int index,
+            string indexType,
+            string label)
+        {
+            if (modelInfo == null) throw new Exception(label + " 模型信息为空");
+            if (!string.Equals(indexType, "flow", StringComparison.Ordinal)) return;
+
+            JObject flowInfo = loader.GetFlowInfo(index);
+            EnsureNativeJsonSuccess(flowInfo, label + " 读取流程信息");
+            if (flowInfo["source_path"] == null || flowInfo["flow_type"] == null || flowInfo["device_id"] == null ||
+                flowInfo["provider"] == null || flowInfo["pipeline"] == null ||
+                !(flowInfo["model_bindings"] is JArray bindings) || bindings.Count == 0)
+            {
+                throw new Exception(label + " 流程信息不完整");
+            }
+            if (!Path.IsPathRooted(flowInfo["source_path"].ToString()))
+                throw new Exception(label + " source_path 不是绝对路径");
+        }
+
+        private static Model CreateBoundCSharpBorrower(int index, out JObject modelInfo)
+        {
+            var borrowed = new Model
+            {
+                modelIndex = index,
+                OwnModelIndex = false
+            };
+            try
+            {
+                modelInfo = borrowed.GetModelInfo();
+                if (modelInfo == null) throw new Exception("C# 借用模型信息为空");
+                return borrowed;
+            }
+            catch
+            {
+                borrowed.Dispose();
+                throw;
+            }
         }
 
         private static readonly HashSet<string> WorkflowCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1357,6 +2533,70 @@ namespace DlcvCSharpTest
             }
         }
 
+
+
+
+
+        private static string ReadUtf8String(IntPtr value)
+        {
+            int length = 0;
+            while (Marshal.ReadByte(value, length) != 0) length++;
+            byte[] bytes = new byte[length];
+            Marshal.Copy(value, bytes, 0, length);
+            return new UTF8Encoding(false, true).GetString(bytes);
+        }
+
+
+
+
+
+        private static void EnsureModelInfosMatch(JObject left, JObject right, string operation)
+        {
+            JToken leftCore = CanonicalizeModelInfo(left);
+            JToken rightCore = CanonicalizeModelInfo(right);
+            if (!JToken.DeepEquals(leftCore, rightCore))
+            {
+                Console.WriteLine(operation + "：预期归一化 JSON=" + leftCore.ToString(Formatting.None));
+                Console.WriteLine(operation + "：实际归一化 JSON=" + rightCore.ToString(Formatting.None));
+                throw new Exception(operation + "不一致");
+            }
+        }
+
+        private static JToken CanonicalizeModelInfo(JObject source)
+        {
+            if (source == null) throw new Exception("模型信息为空");
+            var pipeline = source["pipeline"] as JObject;
+            bool isFlow = pipeline != null || source["nodes"] is JArray;
+            if (isFlow)
+            {
+                var flow = (JObject)(pipeline ?? source).DeepClone();
+                flow.Remove("loaded_model_meta");
+                flow.Remove("model_info");
+                return flow;
+            }
+
+            var modelInfo = source["model_info"] as JObject;
+            var result = (JObject)(modelInfo ?? source).DeepClone();
+            if (result["input_shapes"]?.Type == JTokenType.Null)
+                result.Remove("input_shapes");
+            if (modelInfo != null) return result;
+            result.Remove("code");
+            result.Remove("message");
+            result.Remove("model_index");
+            return result;
+        }
+
+        private static void EnsureResultsMatch(JObject expected, JObject actual, string operation)
+        {
+            if (!ResultSummariesMatch(expected, actual))
+            {
+                throw new Exception(operation + "不一致\nexpected=" +
+                    expected.ToString(Formatting.None) + "\nactual=" + actual.ToString(Formatting.None));
+            }
+        }
+
+
+
         private static void RunWorkflowListModels(WorkflowContext context)
         {
             if (context.Models.Count == 0)
@@ -1443,6 +2683,230 @@ namespace DlcvCSharpTest
                 try { rgb?.Dispose(); } catch { }
                 try { bgr?.Dispose(); } catch { }
             }
+        }
+
+        private static JObject InferAndSummarize(Model model, Mat image, JObject inferParams)
+        {
+            Utils.CSharpResult result = model.Infer(image, inferParams);
+            try
+            {
+                return SummarizeResult(result);
+            }
+            finally
+            {
+                DisposeResultMasks(result);
+            }
+        }
+
+        private static JObject SummarizeResult(Utils.CSharpResult result)
+        {
+            int sampleCount = result.SampleResults != null ? result.SampleResults.Count : 0;
+            if (sampleCount <= 0)
+                throw new Exception("推理结果为空");
+
+            int objectCount = 0;
+            var samples = new JArray();
+            for (int sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+            {
+                var objects = new JArray();
+                List<Utils.CSharpObjectResult> sampleObjects = result.SampleResults[sampleIndex].Results;
+                if (sampleObjects != null)
+                {
+                    objectCount += sampleObjects.Count;
+                    for (int objectIndex = 0; objectIndex < sampleObjects.Count; objectIndex++)
+                    {
+                        Utils.CSharpObjectResult item = sampleObjects[objectIndex];
+                        bool hasMaskData = item.Mask != null && !item.Mask.Empty();
+                        objects.Add(new JObject
+                        {
+                            ["category_id"] = item.CategoryId,
+                            ["category_name"] = item.CategoryName,
+                            ["score"] = item.Score,
+                            ["bbox"] = item.Bbox != null ? JArray.FromObject(item.Bbox) : new JArray(),
+                            ["with_bbox"] = item.WithBbox,
+                            ["with_mask"] = item.WithMask,
+                            ["mask_width"] = hasMaskData ? item.Mask.Width : 0,
+                            ["mask_height"] = hasMaskData ? item.Mask.Height : 0
+                        });
+                    }
+                }
+                samples.Add(new JObject
+                {
+                    ["object_count"] = objects.Count,
+                    ["objects"] = objects
+                });
+            }
+            if (objectCount <= 0)
+                throw new Exception("推理结果为空");
+
+            return new JObject
+            {
+                ["sample_count"] = sampleCount,
+                ["object_count"] = objectCount,
+                ["samples"] = samples
+            };
+        }
+
+        private static bool ResultSummariesMatch(JObject left, JObject right)
+        {
+            if (!HasConsistentSummaryCounts(left) || !HasConsistentSummaryCounts(right)) return false;
+            if ((int)left["sample_count"] != (int)right["sample_count"])
+                return false;
+            if ((int)left["object_count"] != (int)right["object_count"])
+                return false;
+
+            var leftSamples = left["samples"] as JArray;
+            var rightSamples = right["samples"] as JArray;
+            if (leftSamples == null || rightSamples == null || leftSamples.Count != rightSamples.Count)
+                return false;
+            for (int sampleIndex = 0; sampleIndex < leftSamples.Count; sampleIndex++)
+            {
+                var leftSample = leftSamples[sampleIndex] as JObject;
+                var rightSample = rightSamples[sampleIndex] as JObject;
+                if (leftSample == null || rightSample == null)
+                    return false;
+                if (leftSample["object_count"].Value<int>() != rightSample["object_count"].Value<int>())
+                    return false;
+                var leftObjects = leftSample["objects"] as JArray;
+                var rightObjects = rightSample["objects"] as JArray;
+                if (leftObjects == null || rightObjects == null || leftObjects.Count != rightObjects.Count)
+                    return false;
+                for (int objectIndex = 0; objectIndex < leftObjects.Count; objectIndex++)
+                {
+                    var leftObject = leftObjects[objectIndex] as JObject;
+                    var rightObject = rightObjects[objectIndex] as JObject;
+                    if (leftObject == null || rightObject == null)
+                        return false;
+                    if ((int)leftObject["category_id"] != (int)rightObject["category_id"])
+                        return false;
+                    if (!string.Equals((string)leftObject["category_name"], (string)rightObject["category_name"], StringComparison.Ordinal))
+                        return false;
+                    if (!SharedResultNumbersMatch((double)leftObject["score"], (double)rightObject["score"], 1e-4))
+                        return false;
+
+                    var leftBbox = leftObject["bbox"] as JArray;
+                    var rightBbox = rightObject["bbox"] as JArray;
+                    if (leftBbox == null || rightBbox == null || leftBbox.Count != rightBbox.Count)
+                        return false;
+                    for (int bboxIndex = 0; bboxIndex < leftBbox.Count; bboxIndex++)
+                    {
+                        if (!SharedResultNumbersMatch(leftBbox[bboxIndex].Value<double>(), rightBbox[bboxIndex].Value<double>(), 1e-3))
+                            return false;
+                    }
+                    if ((bool)leftObject["with_bbox"] != (bool)rightObject["with_bbox"] ||
+                        (bool)leftObject["with_mask"] != (bool)rightObject["with_mask"] ||
+                        (int)leftObject["mask_width"] != (int)rightObject["mask_width"] ||
+                        (int)leftObject["mask_height"] != (int)rightObject["mask_height"])
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private static bool HasConsistentSummaryCounts(JObject summary)
+        {
+            var samples = summary?["samples"] as JArray;
+            if (samples == null || summary.Value<int?>("sample_count") != samples.Count)
+                return false;
+            int objectCount = 0;
+            foreach (JToken token in samples)
+            {
+                var sample = token as JObject;
+                var objects = sample?["objects"] as JArray;
+                if (objects == null || sample.Value<int?>("object_count") != objects.Count)
+                    return false;
+                objectCount += objects.Count;
+            }
+            return summary.Value<int?>("object_count") == objectCount;
+        }
+
+        private static bool SharedResultNumbersMatch(double left, double right, double tolerance)
+        {
+            return !double.IsNaN(left) && !double.IsInfinity(left) &&
+                !double.IsNaN(right) && !double.IsInfinity(right) && Math.Abs(left - right) <= tolerance;
+        }
+
+        private static void RunSharedResultComparisonChecks()
+        {
+            var expected = JObject.Parse(@"{
+                'sample_count': 1, 'object_count': 1,
+                'samples': [{ 'object_count': 1, 'objects': [{
+                    'category_id': 0, 'category_name': '测试类别', 'score': 0.75,
+                    'bbox': [10, 20, 30, 40], 'with_bbox': true, 'with_mask': false,
+                    'mask_width': 0, 'mask_height': 0
+                }] }]
+            }");
+            if (!ResultSummariesMatch(expected, (JObject)expected.DeepClone()))
+                throw new Exception("相同的有效结果被判为不同");
+            foreach (double invalid in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+            {
+                var actual = (JObject)expected.DeepClone();
+                actual["samples"][0]["objects"][0]["score"] = invalid;
+                if (ResultSummariesMatch(expected, actual))
+                    throw new Exception("无效分数被判为一致");
+                actual = (JObject)expected.DeepClone();
+                actual["samples"][0]["objects"][0]["bbox"][0] = invalid;
+                if (ResultSummariesMatch(expected, actual))
+                    throw new Exception("无效框坐标被判为一致");
+            }
+            var wrongCount = (JObject)expected.DeepClone();
+            wrongCount["sample_count"] = 2;
+            if (ResultSummariesMatch(wrongCount, (JObject)wrongCount.DeepClone()))
+                throw new Exception("声明样本数与数组长度不一致仍被接受");
+            wrongCount = (JObject)expected.DeepClone();
+            wrongCount["samples"][0]["object_count"] = 2;
+            if (ResultSummariesMatch(wrongCount, (JObject)wrongCount.DeepClone()))
+                throw new Exception("声明目标数与数组长度不一致仍被接受");
+            var flowInfo = JObject.Parse(@"{ 'nodes': [{ 'type': 'model/test',
+                'properties': { 'device_id': 0, 'model_name': 'model-a', 'provider': 'sentinel' } }] }");
+            foreach (string field in new[] { "device_id", "model_name", "provider" })
+            {
+                var changedFlow = (JObject)flowInfo.DeepClone();
+                changedFlow["nodes"][0]["properties"][field] = "changed";
+                if (JToken.DeepEquals(CanonicalizeModelInfo(flowInfo), CanonicalizeModelInfo(changedFlow)))
+                    throw new Exception("流程配置字段 " + field + " 的变化被忽略");
+            }
+            var missingShapes = new JObject { ["model_info"] = new JObject { ["task_type"] = "分类" } };
+            var nullShapes = (JObject)missingShapes.DeepClone();
+            nullShapes["model_info"]["input_shapes"] = JValue.CreateNull();
+            if (!JToken.DeepEquals(CanonicalizeModelInfo(missingShapes), CanonicalizeModelInfo(nullShapes)))
+                throw new Exception("模型信息根部的可选 input_shapes 为 null 时未视为缺失");
+
+            var firstShapes = (JObject)missingShapes.DeepClone();
+            firstShapes["model_info"]["input_shapes"] = new JObject { ["input"] = new JArray(1, 3, 64, 64) };
+            var differentShapes = (JObject)firstShapes.DeepClone();
+            differentShapes["model_info"]["input_shapes"]["input"][0] = 2;
+            if (JToken.DeepEquals(CanonicalizeModelInfo(firstShapes), CanonicalizeModelInfo(differentShapes)))
+                throw new Exception("非空 input_shapes 的形状差异被忽略");
+
+            var nestedNullShapes = (JObject)flowInfo.DeepClone();
+            nestedNullShapes["nodes"][0]["properties"]["input_shapes"] = JValue.CreateNull();
+            if (JToken.DeepEquals(CanonicalizeModelInfo(flowInfo), CanonicalizeModelInfo(nestedNullShapes)))
+                throw new Exception("嵌套业务 input_shapes 的 null 与缺失被错误视为相同");
+
+            EnsureThrows<Exception>(() => CanonicalizeModelInfo(null),
+                "空模型信息未被拒绝");
+        }
+
+        private static void EnsureNativeJsonSuccess(JObject result, string operation)
+        {
+            int code = result != null && result["code"] != null ? result["code"].Value<int>() : 1;
+            if (code != 0)
+            {
+                string message = result != null && result["message"] != null
+                    ? result["message"].ToString()
+                    : "未知错误";
+                throw new Exception(operation + "失败: " + message);
+            }
+        }
+
+        private static void EnsureIndexRemoved(DllLoader loader, int index, string label)
+        {
+            if (loader == null || index < 0) return;
+            if (loader.GetIndexType(index) != 0)
+                throw new Exception(label + "释放后 index 仍然存在: " + index);
         }
 
         private static void RunWorkflowBenchmark(WorkflowContext context, WorkflowArguments args)
@@ -3461,8 +4925,7 @@ namespace DlcvCSharpTest
         {
             string ext = Path.GetExtension(modelPath) ?? string.Empty;
             return ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase)
-                || ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase)
-                || ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase);
+                || ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase);
         }
 
         private static int ParsePositiveIntArg(string[] args, int index, int defaultValue)
@@ -4028,6 +5491,29 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static int RunDvspDisabledSelfTest()
+        {
+            string modelPath = Path.Combine(Path.GetTempPath(), "unsupported_model.dvsp");
+            try
+            {
+                using (var model = new Model(modelPath, GpuDeviceId, false, false))
+                {
+                }
+                Console.WriteLine("DVSP 禁用自测失败：接口未拒绝 .dvsp");
+                return 1;
+            }
+            catch (NotSupportedException ex)
+            {
+                Console.WriteLine("DVSP 禁用自测通过：" + ex.Message);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("DVSP 禁用自测失败：异常类型错误，" + ex.Message);
+                return 1;
+            }
+        }
+
         private static int RunGetModelInfoCommand(string[] args, bool dvsInfo)
         {
             string command = dvsInfo ? "get-dvs-model-info" : "get-model-info";
@@ -4277,7 +5763,8 @@ namespace DlcvCSharpTest
             try
             {
                 var expectedRoot = JObject.Parse(File.ReadAllText(expectedPath, Encoding.UTF8));
-                var expected = expectedRoot["results"] as JArray ?? new JArray();
+                var expected = expectedRoot["results"] as JArray;
+                if (expected == null) throw new Exception("基线 JSON 缺少 results 目标数组");
 
                 model = new Model(modelPath, GpuDeviceId, false, false);
                 bgr = Cv2.ImRead(imagePath, ImreadModes.Color);
@@ -4292,9 +5779,10 @@ namespace DlcvCSharpTest
                     ["batch_size"] = 1
                 };
                 result = model.InferBatch(new List<Mat> { rgb }, inferParams);
-                var actual = result.SampleResults != null && result.SampleResults.Count > 0
-                    ? result.SampleResults[0].Results ?? new List<Utils.CSharpObjectResult>()
-                    : new List<Utils.CSharpObjectResult>();
+                if (result.SampleResults == null || result.SampleResults.Count != 1 ||
+                    result.SampleResults[0].Results == null)
+                    throw new Exception("单图批量推理未返回一个有效样本");
+                var actual = result.SampleResults[0].Results;
 
                 Console.WriteLine("expected_count=" + expected.Count + ", actual_count=" + actual.Count);
                 bool ok = expected.Count == actual.Count;
@@ -4343,6 +5831,1363 @@ namespace DlcvCSharpTest
                 if (bgr != null) bgr.Dispose();
                 try { if (model != null) model.Dispose(); } catch { }
                 ForceGc();
+            }
+        }
+
+        private sealed class ReviewCheck
+        {
+            public string Name;
+            public string Expected;
+            public string Actual;
+            public bool Passed;
+        }
+
+        private static int RunSharedIndexReviewSelfTest(string[] args)
+        {
+            string dvoPath = args != null && args.Length >= 2
+                ? args[1]
+                : Path.Combine(ModelRoot, "猫狗-分类_s.dvo");
+            string dvstPath = args != null && args.Length >= 3
+                ? args[2]
+                : Path.Combine(ModelRoot, "AOI_120_50_s.dvst");
+            string virboxModelPath = args != null && args.Length >= 4
+                ? args[3]
+                : Path.Combine(ModelRoot, "猫狗-分类_120_50_v.dvt");
+            string sentinelModelPath = args != null && args.Length >= 5
+                ? args[4]
+                : Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
+            foreach (string path in new[] { dvoPath, dvstPath, virboxModelPath, sentinelModelPath })
+            {
+                if (!File.Exists(path))
+                {
+                    Console.WriteLine("测试文件不存在: " + path);
+                    return 2;
+                }
+            }
+
+            var checks = new List<ReviewCheck>();
+            checks.Add(RunCsharpProviderConcurrencyAndFreeAllCheck(
+                sentinelModelPath, virboxModelPath));
+            checks.Add(RunCsharpDoubleLoadFreeCheck(dvoPath));
+            checks.Add(RunCppDoubleLoadFreeCheck(dvoPath));
+            checks.Add(RunCppDoubleFlowLoadFreeCheck(dvstPath));
+            try { Utils.FreeAllModels(); } catch { }
+            checks.Add(RunMultipleBorrowersCheck(dvoPath, "model", "普通模型多借用方"));
+            checks.Add(RunMultipleBorrowersCheck(dvstPath, "flow", "流程多借用方"));
+            checks.Add(RunCsharpFlowDisposeFailureCheck(dvstPath));
+            try { Utils.FreeAllModels(); } catch { }
+            checks.Add(RunModelFactoryBorrowerDisposeCheck(sentinelModelPath));
+            checks.Add(RunModelFactoryBorrowerFinalizeCheck(sentinelModelPath));
+            checks.Add(RunEmptyFlowModelInfoCheck());
+            checks.Add(RunEmptyFlowReleaseCompletionCheck(false));
+            checks.Add(RunEmptyFlowReleaseCompletionCheck(true));
+            checks.Add(RunFlowInvalidatedByCppFreeAllCheck());
+            checks.Add(RunPathLoadAfterSourceRemovedCheck(dvoPath));
+            checks.Add(RunPathLoadAfterSourceRemovedCheck(dvstPath));
+            checks.Add(RunCppPathReplacementCheck(dvoPath, sentinelModelPath));
+            checks.Add(RunIndexReuseAfterSourceRemovedCheck(dvoPath, "普通模型"));
+            checks.Add(RunIndexReuseAfterSourceRemovedCheck(dvstPath, "流程"));
+            try { Utils.FreeAllModels(); } catch { }
+            checks.Add(RunCsharpEmptyFlowProviderCheck(virboxModelPath));
+            checks.Add(RunCppEmptyFlowProviderCheck(virboxModelPath));
+            try { Utils.FreeAllModels(); } catch { }
+            checks.Add(RunResolveUnusedIndexCheck());
+
+            int failed = 0;
+            Console.WriteLine();
+            Console.WriteLine("| 检查项 | 期望 | 实际 | 状态 |");
+            Console.WriteLine("|---|---|---|---|");
+            foreach (ReviewCheck check in checks)
+            {
+                string status = check.Passed ? "通过" : "失败";
+                if (!check.Passed) failed++;
+                Console.WriteLine("| " + check.Name + " | " + check.Expected + " | " + check.Actual + " | " + status + " |");
+            }
+            Console.WriteLine("共享索引审查自测: " + (failed == 0 ? "全部通过" : "失败 " + failed + " 项"));
+            return failed == 0 ? 0 : 1;
+        }
+
+        private static int RunCsharpFreeAllModulesSelfTest(string[] args)
+        {
+            if (args == null || (args.Length != 1 && args.Length != 3))
+            {
+                Console.WriteLine("用法: free-all-modules-selftest [Sentinel模型路径 Virbox模型路径]");
+                return 2;
+            }
+            string sentinelModelPath = args.Length == 3 ? args[1] : Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
+            string virboxModelPath = args.Length == 3 ? args[2] : Path.Combine(ModelRoot, "猫狗-分类_120_50_v.dvt");
+            int exitCode = 1;
+            try
+            {
+                DllLoader.EnsureForModel(sentinelModelPath);
+                DllLoader.EnsureForModel(virboxModelPath);
+                DllLoader defaultLoader = DllLoader.Instance;
+                DllLoader sentinelLoader = LoadExplicitTestModule("dlcv_infer.dll");
+                DllLoader virboxLoader = LoadExplicitTestModule("dlcv_infer_v.dll");
+                if (ReferenceEquals(sentinelLoader, virboxLoader) ||
+                    sentinelLoader.LoadedDogProvider != DogProvider.Sentinel ||
+                    virboxLoader.LoadedDogProvider != DogProvider.Virbox)
+                    throw new Exception("没有获得两个独立的指定 DLL 模块");
+                if (sentinelLoader.dlcv_free_all_models == null || virboxLoader.dlcv_free_all_models == null)
+                    throw new Exception("推理 DLL 缺少 FreeAllModels 接口");
+
+                int sentinelIndex = LoadNativeTestModel(sentinelLoader, sentinelModelPath);
+                int virboxIndex = LoadNativeTestModel(virboxLoader, virboxModelPath);
+                using (Model sentinelBorrower = CreateBoundCSharpBorrower(sentinelIndex, out JObject sentinelInfo))
+                using (Model virboxBorrower = CreateBoundCSharpBorrower(virboxIndex, out JObject virboxInfo))
+                {
+                    if (!ReferenceEquals(sentinelBorrower.Loader, sentinelLoader) ||
+                        !ReferenceEquals(virboxBorrower.Loader, virboxLoader) ||
+                        !ReferenceEquals(DllLoader.Instance, defaultLoader))
+                        throw new Exception("共享恢复未保留实际模块，或改变了默认 DLL");
+                }
+
+                sentinelLoader.dlcv_free_all_models();
+                if (sentinelLoader.GetIndexType(sentinelIndex) != 0 || virboxLoader.GetIndexType(virboxIndex) != 1)
+                    throw new Exception("释放 Sentinel 模块没有保持另一模块的模型");
+                virboxLoader.dlcv_free_all_models();
+                if (virboxLoader.GetIndexType(virboxIndex) != 0)
+                    throw new Exception("释放 Virbox 模块后模型仍然存在");
+                Console.WriteLine("两个显式 DLL 的模型表与单独释放相互独立");
+
+                sentinelIndex = LoadNativeTestModel(sentinelLoader, sentinelModelPath);
+                virboxIndex = LoadNativeTestModel(virboxLoader, virboxModelPath);
+                Utils.FreeAllModels();
+                if (sentinelLoader.GetIndexType(sentinelIndex) != 0 || virboxLoader.GetIndexType(virboxIndex) != 0)
+                    throw new Exception("C# FreeAllModels 未清理全部 DLL 模块");
+                if (!ReferenceEquals(DllLoader.Instance, defaultLoader))
+                    throw new Exception("显式模块操作改变了默认 DLL");
+                ValidateLoaderNativeModulePaths();
+                Console.WriteLine("C# FreeAllModels 全部模块检查通过");
+                exitCode = 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("C# FreeAllModels 全部模块检查失败：" + ex);
+            }
+            finally
+            {
+                try { Utils.FreeAllModels(); }
+                catch (Exception ex)
+                {
+                    exitCode = 1;
+                    Console.WriteLine("测试结束后的模型释放失败：" + ex);
+                }
+            }
+            return exitCode;
+        }
+
+        private static DllLoader LoadExplicitTestModule(string fileName)
+        {
+            string directory = Path.GetDirectoryName(DllLoader.Instance.LoadedNativeModulePath);
+            string fullPath = Path.Combine(directory, fileName);
+            if (!File.Exists(fullPath)) throw new FileNotFoundException("测试 DLL 不存在", fullPath);
+            DllLoader loader = DllLoader.GetLoadedLoaders().SingleOrDefault(candidate =>
+                string.Equals(candidate.LoadedNativeModulePath, fullPath, StringComparison.OrdinalIgnoreCase));
+            if (loader == null)
+            {
+                IntPtr module = LoadNativeModule(fullPath);
+                if (module == IntPtr.Zero)
+                    throw new Exception("无法加载测试 DLL：" + fullPath + "，Win32错误=" + Marshal.GetLastWin32Error());
+                if (!string.Equals(GetActualNativeModulePath(module), fullPath, StringComparison.OrdinalIgnoreCase))
+                    throw new Exception("测试 DLL 实际路径与指定路径不一致");
+                loader = DllLoader.GetLoadedLoaders().Single(candidate =>
+                    string.Equals(candidate.LoadedNativeModulePath, fullPath, StringComparison.OrdinalIgnoreCase));
+            }
+            return loader;
+        }
+
+        private static int LoadNativeTestModel(DllLoader loader, string modelPath)
+        {
+            if (loader.dlcv_load_model == null || loader.dlcv_free_result == null)
+                throw new NotSupportedException("测试 DLL 缺少加载或结果释放接口");
+            var config = new JObject { ["model_path"] = modelPath, ["device_id"] = GpuDeviceId };
+            string json = JsonConvert.SerializeObject(config,
+                new JsonSerializerSettings { StringEscapeHandling = StringEscapeHandling.EscapeNonAscii });
+            IntPtr result = loader.dlcv_load_model(json);
+            if (result == IntPtr.Zero) throw new Exception("指定 DLL 加载模型返回空结果");
+            try
+            {
+                JObject response = JObject.Parse(ReadUtf8String(result));
+                int? index = response.Value<int?>("model_index");
+                if (!index.HasValue || index.Value < 0 || loader.GetIndexType(index.Value) != 1)
+                    throw new Exception("指定 DLL 未创建有效模型：" + response.ToString(Formatting.None));
+                return index.Value;
+            }
+            finally
+            {
+                loader.dlcv_free_result(result);
+            }
+        }
+        private static ReviewCheck RunCsharpProviderConcurrencyAndFreeAllCheck(
+            string sentinelModelPath,
+            string virboxModelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "C# 不同模型头并发加载与默认 DLL",
+                Expected = "文件与内存加载均保留默认 DLL，共享恢复使用实际模块，全部释放后 index 类型为 0"
+            };
+            Model sentinelModel = null;
+            Model virboxModel = null;
+            Exception sentinelError = null;
+            Exception virboxError = null;
+            bool allModelsFreed = false;
+            DllLoader defaultLoader = DllLoader.Instance;
+            ManualResetEventSlim start = new ManualResetEventSlim(false);
+            Thread sentinelThread = new Thread(() =>
+            {
+                start.Wait();
+                try
+                {
+                    sentinelModel = new Model(sentinelModelPath, GpuDeviceId, false, false);
+                }
+                catch (Exception ex)
+                {
+                    sentinelError = ex;
+                }
+            });
+            Thread virboxThread = new Thread(() =>
+            {
+                start.Wait();
+                try
+                {
+                    virboxModel = new Model(virboxModelPath, GpuDeviceId, false, false);
+                }
+                catch (Exception ex)
+                {
+                    virboxError = ex;
+                }
+            });
+
+            try
+            {
+                sentinelThread.Start();
+                virboxThread.Start();
+                start.Set();
+                sentinelThread.Join();
+                virboxThread.Join();
+
+                if (sentinelError != null || virboxError != null)
+                {
+                    throw new Exception(
+                        "Sentinel=" + (sentinelError == null ? "成功" : sentinelError.Message) +
+                        "；Virbox=" + (virboxError == null ? "成功" : virboxError.Message));
+                }
+                if (sentinelModel == null || virboxModel == null)
+                    throw new Exception("并发加载未生成两个模型实例");
+
+                int sentinelIndex = sentinelModel.modelIndex;
+                int virboxIndex = virboxModel.modelIndex;
+                bool sentinelProviderOk = ReferenceEquals(sentinelModel.Loader, defaultLoader);
+                bool virboxProviderOk = ReferenceEquals(virboxModel.Loader, defaultLoader);
+                string sentinelType;
+                string virboxType;
+                DllLoader sentinelResolved = DllLoader.ResolveForIndex(sentinelIndex, out sentinelType);
+                DllLoader virboxResolved = DllLoader.ResolveForIndex(virboxIndex, out virboxType);
+                bool sentinelIndexOk = ReferenceEquals(sentinelResolved, defaultLoader) && sentinelType == "model";
+                bool virboxIndexOk = ReferenceEquals(virboxResolved, defaultLoader) && virboxType == "model";
+                if (!sentinelProviderOk || !virboxProviderOk || !sentinelIndexOk || !virboxIndexOk)
+                {
+                    throw new Exception(
+                        "Sentinel provider=" + sentinelModel.LoadedDogProvider +
+                        ", index=" + sentinelIndex +
+                        "；Virbox provider=" + virboxModel.LoadedDogProvider +
+                        ", index=" + virboxIndex);
+                }
+
+                foreach (string path in new[] { sentinelModelPath, virboxModelPath })
+                {
+                    using (var memoryModel = new Model(File.ReadAllBytes(path), Path.GetFileName(path), GpuDeviceId))
+                    {
+                        if (!ReferenceEquals(memoryModel.Loader, defaultLoader) ||
+                            !ReferenceEquals(DllLoader.Instance, defaultLoader))
+                            throw new Exception("内存模型加载改变了默认 DLL");
+                        string memoryType;
+                        if (!ReferenceEquals(DllLoader.ResolveForIndex(memoryModel.modelIndex, out memoryType), defaultLoader) ||
+                            memoryType != "model")
+                            throw new Exception("内存模型 index 未恢复到实际模块");
+                    }
+                }
+                if (!ReferenceEquals(DllLoader.Instance, defaultLoader))
+                    throw new Exception("不同模型头并发加载或共享恢复改变了默认 DLL");
+                Utils.FreeAllModels();
+                allModelsFreed = true;
+                int sentinelIndexType = QueryNativeIndexType(sentinelIndex);
+                int virboxIndexType = QueryNativeIndexType(virboxIndex);
+                check.Actual =
+                    "Sentinel provider=" + sentinelModel.LoadedDogProvider +
+                    ", index=" + sentinelIndex +
+                    ", 释放后类型=" + sentinelIndexType +
+                    "；Virbox provider=" + virboxModel.LoadedDogProvider +
+                    ", index=" + virboxIndex +
+                    ", 释放后类型=" + virboxIndexType;
+                check.Passed = sentinelIndexType == 0 && virboxIndexType == 0;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { start.Dispose(); } catch { }
+                if (!allModelsFreed)
+                {
+                    try { sentinelModel?.Dispose(); } catch { }
+                    try { virboxModel?.Dispose(); } catch { }
+                }
+                try { Utils.FreeAllModels(); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunCsharpDoubleLoadFreeCheck(string modelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "C# 两次加载同一模型后释放",
+                Expected = "index 类型为 0"
+            };
+            Model first = null;
+            Model second = null;
+            try
+            {
+                first = new Model(modelPath, GpuDeviceId, false, false);
+                second = new Model(modelPath, GpuDeviceId, false, false);
+                int firstIndex = first.modelIndex;
+                int secondIndex = second.modelIndex;
+                if (firstIndex < 0 || firstIndex != secondIndex)
+                {
+                    check.Actual = "未复用同一 index: " + firstIndex + "/" + secondIndex;
+                    check.Passed = false;
+                    return check;
+                }
+                first.Dispose();
+                first = null;
+                second.Dispose();
+                second = null;
+                int remain = QueryNativeIndexType(firstIndex);
+                check.Actual = "index 类型为 " + remain;
+                check.Passed = remain == 0;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { if (second != null) second.Dispose(); } catch { }
+                try { if (first != null) first.Dispose(); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunCppDoubleLoadFreeCheck(string modelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "正式 C 两次加载同一模型后释放",
+                Expected = "legacy free 首次成功，正式 free 重复成功，最终 index 类型为 0"
+            };
+            int firstIndex = -1;
+            int secondIndex = -1;
+            try
+            {
+                firstIndex = NativeCLoadModel(modelPath, GpuDeviceId);
+                secondIndex = NativeCLoadModel(modelPath, GpuDeviceId);
+                if (firstIndex != secondIndex)
+                    throw new Exception("两次加载未复用同一 index");
+                EnsureNativeStatus(
+                    NativeLegacyFreeModel(firstIndex),
+                    0,
+                    "Successfully freed model.",
+                    "legacy C 首次释放有效 index");
+                firstIndex = -1;
+                if (NativeCFreeModel(secondIndex) != 0 || NativeCFreeModel(secondIndex) != 0)
+                    throw new Exception("正式 C 重复释放未返回 0");
+                int releasedIndex = secondIndex;
+                secondIndex = -1;
+                int remain = QueryNativeIndexType(releasedIndex);
+                check.Actual = "最终 index 类型为 " + remain;
+                check.Passed = remain == 0;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.ToString();
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                if (secondIndex >= 0) NativeCFreeModel(secondIndex);
+                if (firstIndex >= 0) NativeCFreeModel(firstIndex);
+            }
+        }
+
+        private static ReviewCheck RunCppDoubleFlowLoadFreeCheck(string modelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "正式 C 两次加载同一流程后释放",
+                Expected = "分别登记与释放两份流程，最终两流程及全部子模型 index 类型为 0"
+            };
+            int firstIndex = -1;
+            int secondIndex = -1;
+            try
+            {
+                firstIndex = NativeCLoadModel(modelPath, GpuDeviceId);
+                secondIndex = NativeCLoadModel(modelPath, GpuDeviceId);
+                if (firstIndex == secondIndex)
+                    throw new Exception("两次加载未登记独立的流程 index");
+                int[] flowIndices = { firstIndex, secondIndex };
+                var childIndicesByFlow = new Dictionary<int, HashSet<int>>();
+                var childLoaders = new Dictionary<int, DllLoader>();
+                var flowLoaders = new Dictionary<int, DllLoader>();
+                foreach (int flowIndex in flowIndices)
+                {
+                    DllLoader loader = ResolveAndValidateSharedIndex(flowIndex, "flow", check.Name);
+                    flowLoaders.Add(flowIndex, loader);
+                    JObject flowInfo = loader.GetFlowInfo(flowIndex);
+                    EnsureNativeJsonSuccess(flowInfo, "正式 dlcv_get_flow_info_c 流程信息");
+                    JArray bindings = flowInfo["model_bindings"] as JArray;
+                    if (bindings == null || bindings.Count == 0)
+                        throw new Exception("流程信息缺少子模型绑定: " + flowIndex);
+                    var children = new HashSet<int>();
+                    var nodeIds = new HashSet<int>();
+                    foreach (JToken token in bindings)
+                    {
+                        JObject binding = token as JObject;
+                        if (binding == null || binding["node_id"]?.Type != JTokenType.Integer ||
+                            binding["model_index"]?.Type != JTokenType.Integer)
+                            throw new Exception("流程子模型绑定格式无效: " + flowIndex);
+                        int nodeId = BaseModelModule.ReadModelIndex(binding["node_id"]);
+                        int childIndex = BaseModelModule.ReadModelIndex(binding["model_index"]);
+                        if (!nodeIds.Add(nodeId))
+                            throw new Exception("流程子模型节点重复: " + nodeId);
+                        children.Add(childIndex);
+                        DllLoader childLoader = ResolveAndValidateSharedIndex(childIndex, "model", "流程子模型");
+                        if (childLoaders.TryGetValue(childIndex, out DllLoader previousLoader) &&
+                            !ReferenceEquals(previousLoader, childLoader))
+                            throw new Exception("两份流程子模型编号存在模块歧义: " + childIndex);
+                        childLoaders[childIndex] = childLoader;
+                    }
+                    childIndicesByFlow.Add(flowIndex, children);
+                }
+
+                int releasedFirstIndex = firstIndex;
+                if (NativeCFreeModel(firstIndex) != 0) throw new Exception("首份流程释放失败");
+                firstIndex = -1;
+                if (flowLoaders[releasedFirstIndex].GetIndexType(releasedFirstIndex) != 0)
+                    throw new Exception("首份流程释放后 index 仍存在");
+                if (flowLoaders[secondIndex].GetIndexType(secondIndex) != 2)
+                    throw new Exception("首份流程释放影响了第二份流程");
+                EnsureNativeJsonSuccess(flowLoaders[secondIndex].GetFlowInfo(secondIndex),
+                    "首份流程释放后读取第二份流程信息");
+                foreach (int childIndex in childIndicesByFlow[releasedFirstIndex])
+                {
+                    int expectedType = childIndicesByFlow[secondIndex].Contains(childIndex) ? 1 : 0;
+                    if (childLoaders[childIndex].GetIndexType(childIndex) != expectedType)
+                        throw new Exception("首份流程释放后的子模型状态错误: " + childIndex);
+                }
+                foreach (int childIndex in childIndicesByFlow[secondIndex])
+                    if (childLoaders[childIndex].GetIndexType(childIndex) != 1)
+                        throw new Exception("首份流程释放影响了第二份流程的子模型: " + childIndex);
+
+                if (NativeCFreeModel(secondIndex) != 0) throw new Exception("第二份流程释放失败");
+                secondIndex = -1;
+                foreach (int flowIndex in flowIndices)
+                    if (flowLoaders[flowIndex].GetIndexType(flowIndex) != 0)
+                        throw new Exception("最终流程 index 仍存在: " + flowIndex);
+                foreach (var child in childLoaders)
+                    if (child.Value.GetIndexType(child.Key) != 0)
+                        throw new Exception("最终子模型 index 仍存在: " + child.Key);
+
+                check.Actual = "两份流程分别释放，最终两流程及 " + childLoaders.Count + " 个子模型 index 均已删除";
+                check.Passed = true;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.ToString();
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                if (secondIndex >= 0 && NativeCFreeModel(secondIndex) != 0)
+                    throw new InvalidOperationException("清理第二份测试流程失败");
+                if (firstIndex >= 0 && NativeCFreeModel(firstIndex) != 0)
+                    throw new InvalidOperationException("清理首份测试流程失败");
+            }
+        }
+
+        private static ReviewCheck RunModelFactoryBorrowerDisposeCheck(string modelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "ModelFactory 普通模型借用释放",
+                Expected = "持有方释放后 index 仍存在，借用方 Dispose 后 index 删除"
+            };
+            int index = -1;
+            Model owner = null;
+            Model borrower = null;
+            DllLoader loader = null;
+            try
+            {
+                owner = new Model(modelPath, GpuDeviceId);
+                index = owner.modelIndex;
+                loader = ResolveAndValidateSharedIndex(index, "model", "ModelFactory 普通模型借用释放");
+                borrower = ModelFactory.CreateFromIndex(index);
+                if (borrower.modelIndex != index || borrower.OwnModelIndex)
+                    throw new Exception("工厂返回的模型实例状态错误");
+
+                owner.Dispose();
+                owner = null;
+                int typeAfterOwnerDispose = loader.GetIndexType(index);
+                if (typeAfterOwnerDispose == 0)
+                    throw new Exception("持有方释放后 index 已删除");
+                if (borrower.GetModelInfo() == null)
+                    throw new Exception("持有方释放后无法读取借用模型信息");
+
+                borrower.Dispose();
+                borrower = null;
+                EnsureIndexRemoved(loader, index, "ModelFactory 普通模型借用释放");
+                check.Actual = "持有方释放后类型为 " + typeAfterOwnerDispose + "，借用方释放后 index 已删除";
+                check.Passed = true;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { borrower?.Dispose(); } catch { }
+                try { owner?.Dispose(); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunModelFactoryBorrowerFinalizeCheck(string modelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "ModelFactory 普通模型借用终结器",
+                Expected = "不显式 Dispose，强制 GC 后撤销借用绑定并删除 index"
+            };
+            DllLoader loader = null;
+            WeakReference borrowerReference = null;
+            int index = -1;
+            try
+            {
+                index = CreateModelFactoryBorrowerForGc(modelPath, out loader, out borrowerReference);
+                ForceGc();
+                if (borrowerReference != null && borrowerReference.IsAlive)
+                    throw new Exception("工厂借用对象在强制 GC 后仍未回收");
+                EnsureIndexRemoved(loader, index, "ModelFactory 普通模型借用终结器");
+                check.Actual = "强制 GC 后借用对象已回收，index 已删除";
+                check.Passed = true;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static int CreateModelFactoryBorrowerForGc(
+            string modelPath,
+            out DllLoader loader,
+            out WeakReference borrowerReference)
+        {
+            Model owner = null;
+            loader = null;
+            borrowerReference = null;
+            try
+            {
+                owner = new Model(modelPath, GpuDeviceId);
+                int index = owner.modelIndex;
+                loader = ResolveAndValidateSharedIndex(index, "model", "ModelFactory 普通模型借用终结器");
+                Model borrower = ModelFactory.CreateFromIndex(index);
+                if (borrower.modelIndex != index || borrower.OwnModelIndex)
+                    throw new Exception("工厂返回的模型实例状态错误");
+                borrowerReference = new WeakReference(borrower);
+
+                owner.Dispose();
+                owner = null;
+                if (loader.GetIndexType(index) == 0)
+                    throw new Exception("持有方释放后 index 已删除");
+                return index;
+            }
+            finally
+            {
+                try { owner?.Dispose(); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunMultipleBorrowersCheck(
+            string modelPath,
+            string expectedIndexType,
+            string label)
+        {
+            var check = new ReviewCheck
+            {
+                Name = label,
+                Expected = "持有方与首个借用方释放后仍可读取，最终 index 类型为 0"
+            };
+            int index = -1;
+            bool ownerActive = false;
+            Model firstBorrower = null;
+            Model secondBorrower = null;
+            try
+            {
+                index = NativeCLoadModel(modelPath, GpuDeviceId);
+                if (index < 0) throw new Exception("C++ 加载失败");
+                ownerActive = true;
+                DllLoader loader = ResolveAndValidateSharedIndex(index, expectedIndexType, label);
+                firstBorrower = CreateBoundCSharpBorrower(index, out JObject firstInfo);
+                secondBorrower = CreateBoundCSharpBorrower(index, out JObject secondInfo);
+                EnsureModelInfosMatch(firstInfo, secondInfo, label + " 模型信息");
+
+                if (NativeCFreeModel(index) != 0)
+                    throw new Exception("C++ 持有方释放失败");
+                ownerActive = false;
+
+                firstBorrower.Dispose();
+                firstBorrower = null;
+                JObject remainingInfo = secondBorrower.GetModelInfo();
+                if (remainingInfo == null) throw new Exception("第二个借用方无法读取模型信息");
+                secondBorrower.Dispose();
+                secondBorrower = null;
+
+                int remain = loader.GetIndexType(index);
+                check.Actual = "最终 index 类型为 " + remain;
+                check.Passed = remain == 0;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { if (secondBorrower != null) secondBorrower.Dispose(); } catch { }
+                try { if (firstBorrower != null) firstBorrower.Dispose(); } catch { }
+                if (ownerActive)
+                {
+                    try { NativeCFreeModel(index); } catch { }
+                }
+            }
+        }
+
+        private static ReviewCheck RunCsharpFlowDisposeFailureCheck(string flowPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "C# 流程子模型释放异常时外层本地清理",
+                Expected = "首次 Dispose 成功并清理本地状态，后续 Dispose 不重复释放"
+            };
+            int flowIndex = -1;
+            bool ownerActive = false;
+            Model borrower = null;
+            DllLoader flowLoader = null;
+            try
+            {
+                flowIndex = NativeCLoadModel(flowPath, GpuDeviceId);
+                ownerActive = true;
+                flowLoader = ResolveAndValidateSharedIndex(flowIndex, "flow", check.Name);
+                borrower = CreateBoundCSharpBorrower(flowIndex, out JObject borrowerInfo);
+                if (borrowerInfo == null) throw new Exception("C# 流程恢复失败");
+
+                JObject flowInfo = flowLoader.GetFlowInfo(flowIndex);
+                EnsureNativeJsonSuccess(flowInfo, "读取流程登记信息");
+                JArray bindings = flowInfo["model_bindings"] as JArray;
+                if (bindings == null || bindings.Count == 0)
+                    throw new Exception("测试流程没有子模型");
+                int childIndex = bindings[0]["model_index"].Value<int>();
+                string childType;
+                DllLoader childLoader = DllLoader.ResolveForIndex(childIndex, out childType);
+                if (!string.Equals(childType, "model", StringComparison.Ordinal))
+                    throw new Exception("流程子模型 index 类型错误");
+                if (childLoader.UnbindIndex(childIndex) != 0)
+                    throw new Exception("无法构造子模型释放异常");
+
+                borrower.Dispose();
+                if (borrower.modelIndex != -1)
+                    throw new Exception("子模型释放异常后借用方未清理本地 index");
+                borrower.Dispose();
+
+                if (NativeCFreeModel(flowIndex) != 0)
+                    throw new Exception("正式 C 流程持有方释放失败");
+                ownerActive = false;
+                int remain = flowLoader.GetIndexType(flowIndex);
+                check.Actual = "持有方释放后 flow index 类型为 " + remain;
+                check.Passed = remain == 0;
+                borrower = null;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.ToString();
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                if (ownerActive) NativeCFreeModel(flowIndex);
+                borrower?.Dispose();
+            }
+        }
+
+        private static ReviewCheck RunEmptyFlowReleaseCompletionCheck(bool throwOnRelease)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "C# 空流程释放底层" + (throwOnRelease ? "抛异常" : "返回失败") + "后本地完成",
+                Expected = "首次 Dispose 清理本地状态，后续 Dispose 不重复调用底层释放"
+            };
+            string path = Path.Combine(Path.GetTempPath(), "dlcv_flow_release_completion_" + Guid.NewGuid().ToString("N") + ".dvst");
+            Model owner = null;
+            DllLoader loader = null;
+            DllLoader.FreeFlowDelegate originalFree = null;
+            int flowIndex = -1;
+            int freeCount = 0;
+            try
+            {
+                WriteEmptyFlowArchive(path);
+                owner = new Model(path, GpuDeviceId);
+                loader = owner.Loader;
+                if (loader == null || !loader.SupportsSharedFlowIndex)
+                    throw new NotSupportedException("此检查需要共享流程接口");
+                flowIndex = owner.modelIndex;
+                originalFree = loader.dlcv_free_flow_c;
+                loader.dlcv_free_flow_c = index =>
+                {
+                    if (index != flowIndex) throw new Exception("流程释放使用了不同 index");
+                    freeCount++;
+                    if (throwOnRelease) throw new InvalidOperationException("测试流程释放异常");
+                    return -7;
+                };
+
+                owner.Dispose();
+                if (freeCount != 1 || owner.modelIndex != -1)
+                    throw new Exception("首次底层失败后未清理本地流程状态");
+                owner.Dispose();
+                if (freeCount != 1)
+                    throw new Exception("后续 Dispose 重复调用了 FreeFlow");
+                check.Passed = true;
+                check.Actual = "FreeFlow 调用 1 次，本地 index 已清理";
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.ToString();
+                return check;
+            }
+            finally
+            {
+                if (loader != null && originalFree != null)
+                {
+                    loader.dlcv_free_flow_c = originalFree;
+                    if (flowIndex >= 0 && loader.GetIndexType(flowIndex) == 2)
+                    {
+                        int cleanupCode = originalFree(flowIndex);
+                        if (cleanupCode != 0 && check.Passed)
+                        {
+                            check.Passed = false;
+                            check.Actual = "测试后流程资源清理失败，code=" + cleanupCode;
+                        }
+                    }
+                }
+                owner?.Dispose();
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        private static ReviewCheck RunFlowInvalidatedByCppFreeAllCheck()
+        {
+            var check = new ReviewCheck
+            {
+                Name = "正式 C 全量释放后 C# 流程缓存失效",
+                Expected = "持有方和借用方拒绝已释放资源，随后 Dispose 均成功"
+            };
+            string path = Path.Combine(Path.GetTempPath(), "dlcv_flow_free_all_" + Guid.NewGuid().ToString("N") + ".dvst");
+            Model owner = null;
+            Model borrowed = null;
+            try
+            {
+                WriteEmptyFlowArchive(path);
+                owner = new Model(path, GpuDeviceId);
+                int index = owner.modelIndex;
+                DllLoader loader = ResolveAndValidateSharedIndex(index, "flow", check.Name);
+                borrowed = CreateBoundCSharpBorrower(index, out JObject borrowedInfo);
+                EnsureModelInfosMatch(owner.GetModelInfo(), borrowedInfo, "释放前流程信息");
+                NativeCFreeAllModels();
+                if (loader.GetIndexType(index) != 0)
+                    throw new Exception("正式 C 全量释放后 flow index 仍存在");
+                using (var image = new Mat(8, 8, MatType.CV_8UC3, Scalar.All(0)))
+                {
+                    foreach (Model model in new[] { owner, borrowed })
+                    {
+                        EnsureThrows<InvalidOperationException>(() => model.GetModelInfo(), "返回了已释放流程的模型缓存");
+                        EnsureThrows<InvalidOperationException>(() => model.GetDvsModelInfo(), "返回了已释放流程的配置缓存");
+                        EnsureThrows<InvalidOperationException>(() =>
+                        {
+                            Utils.CSharpResult result = model.Infer(image, new JObject());
+                            DisposeResultMasks(result);
+                        }, "已释放流程仍可推理");
+                    }
+                }
+                borrowed.Dispose();
+                borrowed = null;
+                owner.Dispose();
+                owner = null;
+                check.Passed = true;
+                check.Actual = "失效检查通过，FreeAllModels 后两份 Dispose 均成功";
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.ToString();
+                return check;
+            }
+            finally
+            {
+                borrowed?.Dispose();
+                owner?.Dispose();
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        private static ReviewCheck RunEmptyFlowModelInfoCheck()
+        {
+            var check = new ReviewCheck
+            {
+                Name = "空流程 GetModelInfo 调用稳定",
+                Expected = "结果含 nodes 且与 GetDvsModelInfo 相同"
+            };
+            string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_review_empty_" + Guid.NewGuid().ToString("N") + ".dvst");
+            Model owner = null;
+            try
+            {
+                WriteEmptyFlowArchive(flowPath);
+                owner = new Model(flowPath, GpuDeviceId, false, false);
+                JObject info = owner.GetModelInfo();
+                JObject dvsInfo = owner.GetDvsModelInfo();
+                bool hasNodes = info != null && info["nodes"] != null;
+                bool sameAsDvs = info != null && dvsInfo != null && JToken.DeepEquals(info, dvsInfo);
+                check.Actual = hasNodes
+                    ? "含 nodes，且与 GetDvsModelInfo 相同=" + sameAsDvs
+                    : "不含 nodes";
+                check.Passed = info != null && hasNodes && sameAsDvs;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { if (owner != null) owner.Dispose(); } catch { }
+                try { if (File.Exists(flowPath)) File.Delete(flowPath); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunPathLoadAfterSourceRemovedCheck(string modelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "源文件删除后按路径加载",
+                Expected = "加载失败"
+            };
+            string tempPath = Path.Combine(Path.GetTempPath(), "dlcv_review_path_" + Guid.NewGuid().ToString("N") + Path.GetExtension(modelPath));
+            Model owner = null;
+            Model reloaded = null;
+            try
+            {
+                File.Copy(modelPath, tempPath, false);
+                owner = new Model(tempPath, GpuDeviceId, false, false);
+                if (owner.modelIndex < 0) throw new Exception("临时模型加载失败");
+                File.Delete(tempPath);
+                try
+                {
+                    reloaded = new Model(tempPath, GpuDeviceId, false, false);
+                    check.Actual = "路径加载成功，index=" + reloaded.modelIndex;
+                    check.Passed = false;
+                    return check;
+                }
+                catch (Exception ex)
+                {
+                    check.Actual = "路径加载失败: " + ex.Message;
+                    check.Passed = true;
+                    return check;
+                }
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { if (reloaded != null) reloaded.Dispose(); } catch { }
+                try { if (owner != null) owner.Dispose(); } catch { }
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunCppPathReplacementCheck(string firstModelPath, string replacementModelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "C++ 路径加载读取替换后的模型",
+                Expected = "同一路径内容变化后返回新的 model index"
+            };
+            string tempPath = Path.Combine(Path.GetTempPath(), "dlcv_review_replace_" + Guid.NewGuid().ToString("N") + Path.GetExtension(firstModelPath));
+            int firstIndex = -1;
+            int secondIndex = -1;
+            try
+            {
+                File.Copy(firstModelPath, tempPath, false);
+                firstIndex = NativeCLoadModel(tempPath, GpuDeviceId);
+                if (firstIndex < 0) throw new Exception("C++ 首次路径加载失败");
+
+                File.Copy(replacementModelPath, tempPath, true);
+                secondIndex = NativeCLoadModel(tempPath, GpuDeviceId);
+                if (secondIndex < 0) throw new Exception("C++ 替换文件后的路径加载失败");
+
+                check.Actual = "首次 index=" + firstIndex + "，替换后 index=" + secondIndex;
+                check.Passed = firstIndex != secondIndex;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { if (secondIndex >= 0) NativeCFreeModel(secondIndex); } catch { }
+                try { if (firstIndex >= 0) NativeCFreeModel(firstIndex); } catch { }
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunIndexReuseAfterSourceRemovedCheck(string modelPath, string modelLabel)
+        {
+            bool isFlow = IsFlowModelPath(modelPath);
+            var check = new ReviewCheck
+            {
+                Name = isFlow
+                    ? modelLabel + "源文件移动或替换后按 index 复用"
+                    : modelLabel + "源文件删除后按 index 复用",
+                Expected = "C# 与 C++ 恢复的模型信息始终与原资源一致，不读取原路径内容"
+            };
+            string tempPath = Path.Combine(Path.GetTempPath(), "dlcv_review_index_" + Guid.NewGuid().ToString("N") + Path.GetExtension(modelPath));
+            string movedPath = Path.Combine(Path.GetTempPath(), "dlcv_review_moved_" + Guid.NewGuid().ToString("N") + Path.GetExtension(modelPath));
+            int cppIndex = -1;
+            Model csharpBorrower = null;
+            Model replacedCsharpBorrower = null;
+            try
+            {
+                File.Copy(modelPath, tempPath, false);
+                cppIndex = NativeCLoadModel(tempPath, GpuDeviceId);
+                if (cppIndex < 0) throw new Exception("C++ 加载临时" + modelLabel + "失败");
+                JObject originalInfo = CallCppSharedIndexInfo(cppIndex, "保存原资源信息");
+                if (isFlow)
+                    File.Move(tempPath, movedPath);
+                else
+                    File.Delete(tempPath);
+
+                csharpBorrower = CreateBoundCSharpBorrower(cppIndex, out JObject csharpInfo);
+                EnsureModelInfosMatch(originalInfo, csharpInfo, "原路径缺失后 C# 恢复信息");
+                EnsureModelInfosMatch(originalInfo, CallCppSharedIndexInfo(cppIndex, "原路径缺失后 C++ 恢复"),
+                    "原路径缺失后 C++ 恢复信息");
+
+                if (isFlow)
+                {
+                    JObject originalFlowInfo = csharpBorrower.GetDvsModelInfo();
+                    WriteEmptyFlowArchive(tempPath);
+                    replacedCsharpBorrower = CreateBoundCSharpBorrower(cppIndex, out JObject restoredInfo);
+                    EnsureModelInfosMatch(csharpInfo, restoredInfo, "替换原路径后 C# 恢复信息");
+                    EnsureModelInfosMatch(originalFlowInfo, replacedCsharpBorrower.GetDvsModelInfo(),
+                        "替换原路径后 C# 恢复流程配置");
+                    EnsureModelInfosMatch(originalInfo, CallCppSharedIndexInfo(cppIndex, "替换原路径后 C++ 恢复"),
+                        "替换原路径后 C++ 恢复信息");
+                }
+
+                check.Actual = "原路径缺失后两种语言均恢复原资源信息" +
+                    (isFlow ? "；替换为空流程后，恢复信息与原流程配置仍一致" : string.Empty);
+                check.Passed = true;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { replacedCsharpBorrower?.Dispose(); } catch { }
+                try { csharpBorrower?.Dispose(); } catch { }
+                try { if (cppIndex >= 0) NativeCFreeModel(cppIndex); } catch { }
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                try { if (File.Exists(movedPath)) File.Delete(movedPath); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunCsharpEmptyFlowProviderCheck(string virboxModelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "C# 空流程沿用当前 loader",
+                Expected = "流程登记使用当前 loader；共享接口存在时按类型查询恢复"
+            };
+            string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_review_empty_provider_cs_" + Guid.NewGuid().ToString("N") + ".dvst");
+            Model owner = null;
+            try
+            {
+                WriteEmptyFlowArchive(flowPath);
+                DllLoader.EnsureForModel(virboxModelPath);
+                DogProvider currentProvider = DllLoader.Instance.LoadedDogProvider;
+                owner = new Model(flowPath, GpuDeviceId, false, false);
+                int index = owner.modelIndex;
+                check.Actual = "当前 provider=" + currentProvider + "，flow index=" + index;
+                if (owner.Loader != null && owner.Loader.SupportsSharedFlowIndex)
+                {
+                    string indexType;
+                    DllLoader resolved = DllLoader.ResolveForIndex(index, out indexType);
+                    check.Passed = indexType == "flow" && resolved.LoadedDogProvider == currentProvider;
+                    check.Actual += "，查询类型=" + indexType + "，查询 provider=" + resolved.LoadedDogProvider;
+                }
+                else
+                {
+                    check.Passed = index >= 0 && owner.LoadedDogProvider == currentProvider;
+                    check.Actual += "，共享流程接口缺失，保留本地流程路径";
+                }
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                try { if (owner != null) owner.Dispose(); } catch { }
+                try { if (File.Exists(flowPath)) File.Delete(flowPath); } catch { }
+            }
+        }
+
+        private static ReviewCheck RunCppEmptyFlowProviderCheck(string providerModelPath)
+        {
+            var check = new ReviewCheck
+            {
+                Name = "正式 C 首次模型头与空流程加载",
+                Expected = "首次模型头选定默认 DLL，后续空流程仍使用该 DLL，释放后 index 不存在"
+            };
+            string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_review_empty_provider_c_" + Guid.NewGuid().ToString("N") + ".dvst");
+            int providerIndex = -1;
+            int flowIndex = -1;
+            try
+            {
+                WriteEmptyFlowArchive(flowPath);
+                providerIndex = NativeCLoadModel(providerModelPath, GpuDeviceId);
+                DllLoader providerLoader = ResolveAndValidateSharedIndex(providerIndex, "model", check.Name + " 模型");
+                flowIndex = NativeCLoadModel(flowPath, GpuDeviceId);
+                DllLoader flowLoader = ResolveAndValidateSharedIndex(flowIndex, "flow", check.Name + " 流程");
+                if (!ReferenceEquals(providerLoader, flowLoader))
+                    throw new Exception("后续空流程切换了默认 DLL");
+                int releasedFlowIndex = flowIndex;
+                if (NativeCFreeModel(flowIndex) != 0) throw new Exception("空流程释放失败");
+                flowIndex = -1;
+                if (NativeCFreeModel(providerIndex) != 0) throw new Exception("首次模型释放失败");
+                providerIndex = -1;
+                int remain = QueryNativeIndexType(releasedFlowIndex);
+                check.Actual = "释放后流程 index 类型为 " + remain;
+                check.Passed = remain == 0;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.ToString();
+                check.Passed = false;
+                return check;
+            }
+            finally
+            {
+                if (flowIndex >= 0) NativeCFreeModel(flowIndex);
+                if (providerIndex >= 0) NativeCFreeModel(providerIndex);
+                if (File.Exists(flowPath)) File.Delete(flowPath);
+            }
+        }
+
+        private static ReviewCheck RunResolveUnusedIndexCheck()
+        {
+            var check = new ReviewCheck
+            {
+                Name = "C# ResolveForIndex 对不存在的 index",
+                Expected = "查询返回 0 时拒绝不存在的 index；查询异常不转成不存在"
+            };
+            try
+            {
+                const int unusedIndex = int.MaxValue;
+                if (QueryNativeIndexType(unusedIndex) != 0)
+                    throw new Exception("测试要求的未使用 index 已存在");
+                string indexType;
+                DllLoader.ResolveForIndex(unusedIndex, out indexType);
+                check.Actual = "不存在的 index 被错误解析为 " + indexType;
+                check.Passed = false;
+                return check;
+            }
+            catch (InvalidOperationException ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = ex.Message.IndexOf("均未找到共享 index", StringComparison.Ordinal) >= 0;
+                return check;
+            }
+            catch (NotSupportedException ex)
+            {
+                check.Actual = "未执行：当前 DLL 缺少共享查询接口: " + ex.Message;
+                check.Passed = false;
+                return check;
+            }
+            catch (Exception ex)
+            {
+                check.Actual = ex.Message;
+                check.Passed = false;
+                return check;
+            }
+        }
+
+        private static int QueryNativeIndexType(int index)
+        {
+            bool queryable = false;
+            int foundType = 0;
+            foreach (DllLoader loader in DllLoader.GetLoadedLoaders())
+            {
+                if (loader == null || loader.dlcv_get_index_type_c == null)
+                    continue;
+                queryable = true;
+                int nativeType = loader.GetIndexType(index);
+                if (nativeType == 0)
+                    continue;
+                if (nativeType != 1 && nativeType != 2)
+                    throw new InvalidOperationException("共享 index 查询返回未知类型: " + nativeType);
+                if (foundType != 0)
+                    throw new InvalidOperationException("共享 index 同时存在于多个 DLL: " + index);
+                foundType = nativeType;
+            }
+            if (!queryable)
+                throw new NotSupportedException("进程内没有共享 index 查询接口");
+            return foundType;
+        }
+
+        private static JObject CallCppSharedIndexInfo(int index, string operation)
+        {
+            return NativeCGetModelInfo(index, operation);
+        }
+
+
+
+        private static int RunEmptyFlowIndexSelfTest()
+        {
+            string flowPath = Path.Combine(Path.GetTempPath(), "dlcv_empty_flow_" + Guid.NewGuid().ToString("N") + ".dvst");
+            Model csharpOwner = null;
+            Model csharpBorrower = null;
+            int cppIndex = -1;
+            try
+            {
+                WriteEmptyFlowArchive(flowPath);
+
+                csharpOwner = new Model(flowPath, GpuDeviceId, false, false);
+                bool csharpUsesSharedFlowIndex = TryValidateSharedFlowIndex(
+                    csharpOwner.modelIndex, "C# 空模型流程");
+                JObject csharpInfo = csharpOwner.GetModelInfo();
+                if (csharpInfo == null) throw new Exception("C# 空模型流程信息为空");
+                csharpOwner.Dispose();
+                csharpOwner = null;
+
+                cppIndex = NativeCLoadModel(flowPath, GpuDeviceId);
+                if (cppIndex < 0) throw new Exception("正式 C 空模型流程加载失败");
+                bool cppUsesSharedFlowIndex = QueryNativeIndexType(cppIndex) == 2;
+                if (csharpUsesSharedFlowIndex != cppUsesSharedFlowIndex)
+                    throw new Exception("C# 与 正式 C 空模型流程索引模式不一致");
+                if (cppUsesSharedFlowIndex)
+                {
+                    ResolveAndValidateSharedIndex(cppIndex, "flow", "正式 C 空模型流程");
+                    csharpBorrower = new Model { modelIndex = cppIndex, OwnModelIndex = false };
+                    JObject restoredInfo = csharpBorrower.GetModelInfo();
+                    if (restoredInfo == null) throw new Exception("C# 恢复空模型流程信息为空");
+                    csharpBorrower.Dispose();
+                    csharpBorrower = null;
+                }
+
+                if (NativeCFreeModel(cppIndex) != 0)
+                    throw new Exception("正式 C 空模型流程释放失败");
+                cppIndex = -1;
+
+                Console.WriteLine("空模型流程索引自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("空模型流程索引自测失败：" + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                try { if (csharpBorrower != null) csharpBorrower.Dispose(); } catch { }
+                try { if (cppIndex >= 0) NativeCFreeModel(cppIndex); } catch { }
+                try { if (csharpOwner != null) csharpOwner.Dispose(); } catch { }
+                try { if (File.Exists(flowPath)) File.Delete(flowPath); } catch { }
+            }
+        }
+
+        private static bool TryValidateSharedFlowIndex(int index, string label)
+        {
+            try
+            {
+                ResolveAndValidateSharedIndex(index, "flow", label);
+                return true;
+            }
+            catch (NotSupportedException)
+            {
+                return false;
+            }
+        }
+
+        private static void WriteEmptyFlowArchive(string path)
+        {
+            byte[] pipelineBytes = Encoding.UTF8.GetBytes(new JObject
+            {
+                ["nodes"] = new JArray()
+            }.ToString(Formatting.None));
+            string header = new JObject
+            {
+                ["file_list"] = new JArray("pipeline.json"),
+                ["file_size"] = new JArray(pipelineBytes.Length)
+            }.ToString(Formatting.None);
+            byte[] prefix = Encoding.UTF8.GetBytes("DV\n" + header + "\n");
+
+            using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(prefix, 0, prefix.Length);
+                stream.Write(pipelineBytes, 0, pipelineBytes.Length);
+            }
+        }
+
+        private static int RunProviderSwitchFlowSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 2)
+            {
+                Console.WriteLine("用法: DlcvCSharpTest provider-switch-flow-selftest <model.dvo>");
+                return 2;
+            }
+
+            int sentinelModel = -1;
+            int sentinelFlow = -1;
+            int virboxFlow = -1;
+            Model cachedOwner = null;
+            Model cachedBorrower = null;
+            try
+            {
+                sentinelModel = NativeCLoadModel(args[1], GpuDeviceId);
+                if (sentinelModel < 0) throw new Exception("Sentinel 模型加载失败");
+                DllLoader sentinelLoader = ResolveAndValidateSharedIndex(sentinelModel, "model", "Sentinel 模型");
+
+                virboxFlow = RegisterVirboxEmptyFlow();
+                if (virboxFlow < 0)
+                    throw new Exception("Virbox 空流程登记失败: " + virboxFlow);
+
+                cachedOwner = new Model(args[1], GpuDeviceId, false, true);
+                sntl_admin_csharp.DogProvider defaultProvider = DllLoader.Instance.LoadedDogProvider;
+                string virboxIndexType;
+                DllLoader virboxLoader = DllLoader.ResolveForIndex(virboxFlow, out virboxIndexType);
+                if (!string.Equals(virboxIndexType, "flow", StringComparison.Ordinal) ||
+                    virboxLoader.LoadedDogProvider != sntl_admin_csharp.DogProvider.Virbox)
+                    throw new Exception("C# Virbox 流程 index 解析失败");
+                if (DllLoader.Instance.LoadedDogProvider != defaultProvider)
+                    throw new Exception("共享 index 解析改写了默认 provider");
+
+                cachedBorrower = new Model(args[1], GpuDeviceId, false, true);
+                if (cachedBorrower.LoadedDogProvider != cachedOwner.LoadedDogProvider)
+                    throw new Exception("缓存模型使用了错误的 provider");
+                cachedBorrower.GetModelInfo();
+
+                if (QueryNativeIndexType(virboxFlow) != 2)
+                    throw new Exception("正式接口 Virbox 流程 index 解析失败");
+
+                sentinelFlow = RegisterEmptyFlow(sentinelLoader, "sentinel");
+                if (sentinelFlow < 0)
+                    throw new Exception("provider 切换后的 Sentinel 流程登记失败");
+                ResolveAndValidateSharedIndex(sentinelFlow, "flow", "双 provider 下的 Sentinel 流程");
+
+                Console.WriteLine("provider 切换流程自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("provider 切换流程自测失败：" + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                try { cachedBorrower?.Dispose(); } catch { }
+                try { cachedOwner?.Dispose(); } catch { }
+                try
+                {
+                    if (sentinelFlow >= 0)
+                    {
+                        string indexType;
+                        DllLoader.ResolveForIndex(sentinelFlow, out indexType).FreeFlow(sentinelFlow);
+                    }
+                }
+                catch { }
+                try { if (virboxFlow >= 0) VirboxFreeFlow(virboxFlow); } catch { }
+                try { if (sentinelModel >= 0) NativeCFreeModel(sentinelModel); } catch { }
+            }
+        }
+
+        private static int RegisterVirboxEmptyFlow()
+        {
+            string sourcePath = Path.Combine(Path.GetTempPath(), "virbox_empty_flow.dvst");
+            string flowJson = new JObject
+            {
+                ["schema_version"] = 1,
+                ["flow_type"] = "dvst",
+                ["provider"] = "virbox",
+                ["source_path"] = sourcePath,
+                ["device_id"] = GpuDeviceId,
+                ["pipeline"] = new JObject { ["nodes"] = new JArray() },
+                ["model_bindings"] = new JArray()
+            }.ToString(Formatting.None);
+            byte[] bytes = Encoding.UTF8.GetBytes(flowJson + "\0");
+            GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+            try
+            {
+                return VirboxRegisterFlow(handle.AddrOfPinnedObject());
+            }
+            finally
+            {
+                handle.Free();
             }
         }
 

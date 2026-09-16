@@ -7,6 +7,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -83,7 +84,7 @@ def find_msbuild(user_value: str | None) -> Path:
 
 
 def build_command(msbuild: Path, target: Path, args: argparse.Namespace) -> list[str]:
-    return [
+    command = [
         str(msbuild),
         str(target),
         f"/p:Configuration={args.configuration}",
@@ -91,6 +92,12 @@ def build_command(msbuild: Path, target: Path, args: argparse.Namespace) -> list
         f"/t:{args.target}",
         f"/v:{args.verbosity}",
     ]
+    # PackageReference 工程先还原，再由 MSBuild 重新求值并构建，避免读取旧平台的 assets。
+    if args.target.lower() in {"build", "rebuild"} and target.suffix.lower() == ".csproj":
+        project = ET.parse(target)
+        if any(node.tag.rsplit("}", 1)[-1] == "PackageReference" for node in project.iter()):
+            command.append("/restore")
+    return command
 
 
 def main() -> int:

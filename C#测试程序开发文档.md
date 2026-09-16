@@ -7,7 +7,7 @@
 - **软件名称**：`C# 测试程序`（主窗体标题与程序集名称一致）
 - **项目/模块**：`DlcvDemo`（WinForms Demo）
 - **DLCV SDK**：本 Demo 依赖的推理能力提供方（包含 `dlcv_infer_csharp`、`DlcvModules` 等）
-- **模型文件**：深度视觉模型，扩展名包含 `.dvt/.dvo/.dvp/.dvst/.dvso/.dvsp`
+- **模型文件**：深度视觉模型，扩展名包含 `.dvt/.dvo/.dvp/.dvst/.dvso`
 
 ### 2. 运行环境与依赖（必须满足）
 
@@ -38,9 +38,9 @@
 
 > 这些依赖用于保证“加载模型/推理/设备枚举/加密狗检查”行为可用。若缺失，会导致对应功能失败或降级（必须与本文档描述一致）。
 
-- **DLCV 推理 DLL（按加密狗加载）**
-  - `dlcv_infer.dll`（Sentinel）或 `dlcv_infer_v.dll`（Virbox）：仅在检测到对应加密狗后由 `DllLoader` 加载
-  - 都未检测到加密狗时：不加载上述 DLL；启动界面提示「未检测到加密狗」
+- **DLCV 推理 DLL**
+  - `dlcv_infer.dll`（Sentinel）与 `dlcv_infer_v.dll`（Virbox）是普通模型运行使用的实际 DLL
+  - 首次普通模型加载根据模型头选择默认 DLL，后续普通模型继续使用该 DLL，并逐个检查授权；缺少所需授权时返回错误
 - **OpenCvSharp 运行时（必须）**
   - `OpenCvSharpExtern.dll` + OpenCV 相关运行时 DLL（由 `OpenCvSharp4.runtime.win` 提供）
 - **GPU 枚举（可选）**
@@ -48,7 +48,7 @@
 - **加密狗检查（可选）**
   - `sntl_adminapi_windows_x64.dll` / `slm_control.dll`：用于读取加密狗信息
   - 缺失时：`检查加密狗` 输出为空数组（`[]`），不应崩溃
-  - 启动时先调用一次 `GetAllDogInfo()`；仅当都未检测到时写界面并停止加载推理 DLL
+  - 启动时可调用 `GetAllDogInfo()` 显示授权信息；默认 DLL 只在首次普通模型加载时根据模型头确定
 - **RPC 模式（按需）**
   - `AIModelRPC.exe`：优先从 `DlcvDemo` 输出目录启动；若不存在，可使用 SDK 固定路径（如 `C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`）
 - **DVP 模式（按需，加载 `.dvp` 时启用）**
@@ -84,7 +84,7 @@
 
 无参数启动时进入 WinForms GUI。首个参数为 `ui-test` 时执行同一个 `MainWindow` 的自动测试，其他带参数启动由 `CliRunner` 执行无界面模式。无参数启动缺少原生推理 DLL 时显示「需要先安装 dlcv_infer」；任何带参数启动均不显示该系统提示框，异常由 CLI 输出或写入自动测试结果文件。
 
-自动化执行 `ui-test` 时固定使用 `--interactive-dialogs false`，模型与图片按参数直接加载，测试完成或失败后自动关闭窗口。`--interactive-dialogs true` 为明确的人工交互模式，会依次打开模型和图片选择对话框，只有对话框返回后才继续执行并关闭窗口。
+`infer` 是无界面功能测试，不创建窗口；界面自动验证使用 2.6 的 `ui-test`。
 
 ```text
 "C# 测试程序.exe" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
@@ -94,7 +94,7 @@
 
 - `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`。省略 `--calc-mean` 时不发送该字段，流程模型继续使用节点中保存的配置。
 - `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
-- 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso`/`.dvsp` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
+- 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
 - `--calc-mean=true` 时，结构化与 JSON 摘要包含 `with_mean`、`foreground_mean`、`background_mean`，并通过 `mean_check_passed` 检查带掩码结果是否包含均值及两种结果的一致性；普通检测结果不参与均值检查，两条结果均为空时该检查通过。
 - 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
@@ -107,10 +107,17 @@
 
 #### 2.6 UI 自动测试与截图
 
-- `ui-test --model <模型路径> --image <图片路径> --output <JSON路径> [--screenshot <PNG路径>]` 使用正式 WinForms 主窗口，加载模型后打开图片并调用原推理事件。
-- `--screenshot` 为可选参数，通过 `Form.DrawToBitmap` 保存窗口截图，不模拟鼠标键盘，也不抓取整个桌面。
-- 截图路径必须使用 `.png` 后缀，截图、测试 JSON 及其中间文件不能覆盖模型、图片或彼此。结果 JSON 保留已有字段，补充 `ui_framework` 与 `screenshot`。
-- 自动测试使用 `--interactive-dialogs false`；测试输出和截图写入系统临时目录，不进入代码仓库。
+C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs false`：程序按参数自动加载模型与图片，在真实 WinForms 主窗口中执行模型加载、图片推理与结果文本逻辑，完成或失败后自动关闭窗口。完整命令示例（输出写入系统临时目录）：
+
+```text
+"C# 测试程序.exe" ui-test --model <模型路径> --image <图片路径> --output "%TEMP%\ui-test-result.json" --threshold 0.5 --device 0 --calc-mean false --interactive-dialogs false
+```
+
+- `--interactive-dialogs false` 时不弹出文件对话框且不激活窗口，模型与图片直接按参数加载；`true` 为人工交互模式，依次打开模型和图片选择对话框，对话框返回后才继续执行并关闭窗口。
+- 判断依据为进程退出码与 `--output` 指定的无 BOM UTF-8 JSON 文件（状态依次为 `started`、`model_loaded`、`passed`/`failed`，含模型、图片、阈值、设备、`ui_framework`、`screenshot`、窗口标题、结果文本与错误信息）；退出码 `0` 通过、`1` 失败、`2` 参数错误。
+- 禁止通过桌面自动化、鼠标键盘模拟或窗口控制验证界面，也不以无参数 GUI 启动代替测试；`infer` 是无界面功能测试，`ui-test` 是界面自动验证，两者用途不同，不互相替代。
+- `--screenshot` 为可选参数，路径必须为 `.png`，通过 `Form.DrawToBitmap` 保存窗口截图，不模拟鼠标键盘，也不抓取整个桌面。
+- 输出与截图写入系统临时目录，不进入代码仓库；各输出路径不得覆盖模型、图片或彼此。
 
 ### 3. 功能边界（必须严格一致）
 
@@ -275,7 +282,7 @@
 - **文件选择对话框**：
   - 标题：`选择模型`
   - 过滤器：
-    - `深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*`
+    - `深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*`
   - 初始目录/默认文件名：
     - 尝试从 `LastModelPath` 提取（异常忽略）
 - **路径与编码约定（避免中文路径踩坑）**：
@@ -290,8 +297,10 @@
   - 创建新模型实例（等价行为即可）：`new Model(path, deviceId, rpc_mode)`
   - **模式说明（需保持一致）**：
     - 模型后缀为 `.dvp`：走 DVP 模式（HTTP 后端服务），`RPC模式` 勾选不影响行为
-    - 模型后缀为 `.dvst/.dvso/.dvsp`：走 DVS 模式，`RPC模式` 勾选不影响行为
-    - 其他（如 `.dvt/.dvo`）：默认走本地 DLL 推理；若勾选 `RPC模式`，则使用本地 RPC 服务（依赖 `AIModelRPC.exe`）
+    - 模型后缀为 `.dvst/.dvso`：走 DVS 模式，`RPC模式` 勾选不影响行为
+    - 模型后缀为 `.dvsp`：显示不支持错误，不保存为最近模型
+    - 其他（如 `.dvt/.dvo`）：默认走本地 DLL 推理；首次普通模型根据模型头选择默认 DLL，后续普通模型沿用并逐个检查授权；若勾选 `RPC模式`，则使用本地 RPC 服务（依赖 `AIModelRPC.exe`）
+  - 实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
   - 加载成功后自动执行一次“获取模型信息”（同 7.4）
 - **异常**：
   - 捕获异常后：`richTextBox1.Text = ex.Message`（不弹窗）
@@ -431,15 +440,16 @@
 #### 7.10 释放模型（按钮：`释放模型`）
 
 - 若测试运行中，先停止测试
-- 将 `model=null`，触发一次 GC
+- 释放当前模型并清理本地引用
+- 按 index 释放时，参数格式无效或编号超出非负 `int` 范围仍可返回参数错误；参数是有效编号时，即使编号已不存在或底层释放返回错误，也返回成功并完成本地清理，重复释放同样成功。底层错误最多附在日志或 `message` 的错误详情中，不保留等待重试状态。界面对象已释放后再次释放也显示成功。
 - `richTextBox1.Text="模型已释放"`
 
 #### 7.11 释放所有模型（按钮：`释放所有模型`）
 
 - 若测试运行中，先停止测试
 - 若 model 可 Dispose：Dispose
-- `model=null`
-- 调用 `Utils.FreeAllModels()`
+- 清理本地模型引用并调用 `Utils.FreeAllModels()`
+- 按 index 释放时，参数格式无效或编号超出非负 `int` 范围仍可返回参数错误；参数是有效编号时，即使编号已不存在或底层释放返回错误，也返回成功并完成本地清理，重复释放同样成功。底层错误最多附在日志或 `message` 的错误详情中，不保留等待重试状态。`Utils.FreeAllModels()` 重复调用显示成功。
 - `richTextBox1.Text="所有模型已释放"`
 
 #### 7.12 检查加密狗（按钮：`检查加密狗`）
@@ -449,7 +459,7 @@
 - 输出到 `richTextBox1`（格式必须一致）：
   - `Sentinel加密狗ID：\n{sentinelDeviceList}\n\nSentinel加密狗特性：\n{sentinelFeatureList}\n\nVirbox加密狗ID：\n{virboxDeviceList}\n\nVirbox加密狗特性：\n{virboxFeatureList}`
 - 若 Sentinel/Virbox 的 devices 与 features 均为空：在上述内容前追加一行 `未检测到加密狗\n\n`
-- 启动流程：先做一次 `GetAllDogInfo()`；**仅当都未检测到时**把结果写到界面并停止（不加载推理 DLL）；检测到加密狗时不自动写界面，继续原逻辑加载推理 DLL
+- 启动流程可先做一次 `GetAllDogInfo()` 并显示授权状态；推理 DLL 不在此步骤选择，首次普通模型加载时才根据模型头确定默认 DLL
 
 #### 7.13 文档（按钮：`文档`）
 
@@ -506,7 +516,7 @@
   - 若 GPU 枚举失败，`richTextBox1` 必须出现 `GPU信息获取失败：`
 
 - **加载模型**
-  - 选择 `.dvt/.dvo/.dvp/.dvst/.dvso/.dvsp` 任一文件均可尝试加载
+  - 选择 `.dvt/.dvo/.dvp/.dvst/.dvso` 任一文件均可尝试加载
   - 加载完成后点击/自动触发“获取模型信息”可在文本框看到 JSON（或摘要）
 
 - **打开图片推理**
@@ -546,4 +556,3 @@
 - **ImageViewer交互**
   - 滚轮缩放、左键拖拽、右键重置均有效
   - 聚焦后按 `V` 可切换显示/隐藏可视化结果
-

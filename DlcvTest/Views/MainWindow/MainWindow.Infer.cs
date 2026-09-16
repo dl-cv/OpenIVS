@@ -1262,17 +1262,17 @@ namespace DlcvTest
                             Dispatcher.Invoke(() =>
                             {
                                 if (!IsImageProcessRequestCurrent(requestId, imagePath, token)) return;
-                                MessageBox.Show("无法读取图片: " + imagePath);
+                                if (!_selfTestMode) MessageBox.Show("无法读取图片: " + imagePath);
                             });
                             return;
                         }
 
                         // 功能 1：加载本地同名JSON并使用标准可视化模块 / 标注轮廓绘制
                         // 在后台线程中先读取设置值，避免在 Dispatcher.Invoke 内部读取时设置已被改动
-                        bool showOriginalPane = Settings.Default.ShowOriginalPane;
+                        bool showOriginalPane = !_selfTestMode && Settings.Default.ShowOriginalPane;
 
                         string jsonPath = Path.ChangeExtension(imagePath, ".json");
-                        if (File.Exists(jsonPath))
+                        if (!_selfTestMode && File.Exists(jsonPath))
                         {
                             try
                             {
@@ -1488,13 +1488,13 @@ namespace DlcvTest
                                     // 如果转换失败，退化为直接输入（避免因异常导致整条链路中断）
                                     original.CopyTo(rgb);
                                 }
-                                LogInferStart("single", imagePath, inferenceParams, rgb);
+                                if (!_selfTestMode) LogInferStart("single", imagePath, inferenceParams, rgb);
                                 var sw = Stopwatch.StartNew();
                                 result = model.Infer(rgb, inferenceParams);
                                 sw.Stop();
                                 inferMs = sw.Elapsed.TotalMilliseconds;
-                                LogInferEnd("single", imagePath, result, inferMs);
-                                RunDvpHttpDiagnostic(rgb, inferenceParams, imagePath, "single");
+                                if (!_selfTestMode) LogInferEnd("single", imagePath, result, inferMs);
+                                if (!_selfTestMode) RunDvpHttpDiagnostic(rgb, inferenceParams, imagePath, "single");
                             }
                             System.Diagnostics.Debug.WriteLine($"[模型推理] 推理完成，SampleResults.Count: {result.SampleResults?.Count ?? 0}");
 
@@ -1564,7 +1564,7 @@ namespace DlcvTest
                 Dispatcher.Invoke(() =>
                 {
                     if (!IsImageProcessRequestCurrent(requestId, imagePath, token)) return;
-                    MessageBox.Show("处理图片失败: " + ex.Message);
+                    if (!_selfTestMode) MessageBox.Show("处理图片失败: " + ex.Message);
                 });
             }
         }

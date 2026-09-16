@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD}</ProjectGuid>
+    <Keyword>ManagedCProj</Keyword><RootNamespace>DlcvCSharpCppBridge</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType><PlatformToolset>v143</PlatformToolset>
+    <CLRSupport>true</CLRSupport><CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)'!='Debug'">false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)obj\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>DlcvCSharpCppBridge</TargetName>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_INCLUDE_DIR)'!=''">$(OpenCV_INCLUDE_DIR)</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(OpenCV_DIR)\include\opencv2\core.hpp')">$(OpenCV_DIR)\include</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(ProjectDir)..\..\..\third_party\opencv\build\include\opencv2\core.hpp')">$(ProjectDir)..\..\..\third_party\opencv\build\include</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'==''">C:\OpenCV\build\include</OpenCvIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DLCVPRO_INFER_INCLUDE)'!=''">$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\..\..\third_party\dlcvpro_infer\include')">$(ProjectDir)..\..\..\third_party\dlcvpro_infer\include</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'==''">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
+    <OpenCvBinDir Condition="'$(OpenCvBinDir)'=='' and '$(OpenCV_BIN_DIR)'!=''">$(OpenCV_BIN_DIR)</OpenCvBinDir>
+    <OpenCvBinDir Condition="'$(OpenCvBinDir)'==''">$(OpenCvIncludeDir)\..\x64\vc16\bin</OpenCvBinDir>
+    <OpenCvSuffix Condition="'$(Configuration)'=='Debug'">d</OpenCvSuffix>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel><PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <LanguageStandard>stdcpp17</LanguageStandard><ExceptionHandling>Async</ExceptionHandling>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'!='Debug'">MultiThreadedDLL</RuntimeLibrary>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'!='Debug'">NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <Link><GenerateDebugInformation>true</GenerateDebugInformation></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup><Reference Include="System" /><Reference Include="System.Core" /></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="CppModel.cpp" />
+    <ClCompile Include="NativeModel.cpp"><CompileAsManaged>false</CompileAsManaged></ClCompile>
+    <ClInclude Include="CppModel.h" /><ClInclude Include="NativeModel.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
+      <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly><LinkLibraryDependencies>true</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="GetTestRuntimeFiles" Returns="@(_TestRuntimeFiles)">
+    <ItemGroup><_TestRuntimeFiles Include="$(OpenCvBinDir)\opencv_world4100$(OpenCvSuffix).dll" /></ItemGroup>
+    <Error Condition="!Exists('%(_TestRuntimeFiles.FullPath)')" Text="缺少 OpenCV 运行库：%(_TestRuntimeFiles.FullPath)" />
+  </Target>
+</Project>
