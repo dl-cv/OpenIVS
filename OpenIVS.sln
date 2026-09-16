@@ -81,6 +81,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCSharpCppTest", "Test\D
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DlcvCSharpCppBridge", "Test\DlcvCSharpCppTest\Bridge\DlcvCSharpCppBridge.vcxproj", "{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelManager", "SentinelManager\SentinelManager.csproj", "{06F95180-9A44-43C9-906F-252A0DA5D559}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelManagerTest", "Test\SentinelManagerTest\SentinelManagerTest.csproj", "{36E52E2D-BAAE-4CDE-8C9D-89A13AA8C035}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -217,11 +221,20 @@ Global
 		{6F5B6E83-2F42-4DA9-955D-DF2B7BC0D6A1}.Debug|x64.Build.0 = Debug|x64
 		{6F5B6E83-2F42-4DA9-955D-DF2B7BC0D6A1}.Release|x64.ActiveCfg = Release|x64
 		{6F5B6E83-2F42-4DA9-955D-DF2B7BC0D6A1}.Release|x64.Build.0 = Release|x64
+		{06F95180-9A44-43C9-906F-252A0DA5D559}.Debug|x64.ActiveCfg = Debug|x64
+		{06F95180-9A44-43C9-906F-252A0DA5D559}.Debug|x64.Build.0 = Debug|x64
+		{06F95180-9A44-43C9-906F-252A0DA5D559}.Release|x64.ActiveCfg = Release|x64
+		{06F95180-9A44-43C9-906F-252A0DA5D559}.Release|x64.Build.0 = Release|x64
+		{36E52E2D-BAAE-4CDE-8C9D-89A13AA8C035}.Debug|x64.ActiveCfg = Debug|x64
+		{36E52E2D-BAAE-4CDE-8C9D-89A13AA8C035}.Debug|x64.Build.0 = Debug|x64
+		{36E52E2D-BAAE-4CDE-8C9D-89A13AA8C035}.Release|x64.ActiveCfg = Release|x64
+		{36E52E2D-BAAE-4CDE-8C9D-89A13AA8C035}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{36E52E2D-BAAE-4CDE-8C9D-89A13AA8C035} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 		{70004706-161E-4B41-9014-AB1DDB6027A6} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 		{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD} = {E80043D7-0F8B-407E-86DF-F8789A514C45}
 		{6E1D4BEA-3D5B-4B3D-9C29-6776F948B6C1} = {BE12AF77-F4C0-4DAC-9DBF-06BB2D9F8F74}
