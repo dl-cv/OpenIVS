@@ -17,6 +17,7 @@ namespace DlcvCSharpCppTest
         public bool HasCSharpModel { get { return csharpModel != null; } }
         public bool HasCppModel { get { return cppModel != null; } }
         public bool CppCreatedFromIndex { get; private set; }
+        public bool CSharpCreatedFromIndex { get; private set; }
         public int CSharpModelIndex { get { return csharpModel == null ? -1 : csharpModel.modelIndex; } }
         public int CppModelIndex { get { return cppModel == null ? -1 : cppModel.ModelIndex; } }
 
@@ -34,6 +35,7 @@ namespace DlcvCSharpCppTest
                 if (candidate.modelIndex < 0)
                     throw new InvalidOperationException("加载失败：模型编号无效。");
                 csharpModel = candidate;
+                CSharpCreatedFromIndex = false;
                 candidate = null;
             }
             finally
@@ -72,6 +74,31 @@ namespace DlcvCSharpCppTest
                     throw new InvalidOperationException("加载失败：模型编号无效。");
                 cppModel = candidate;
                 CppCreatedFromIndex = false;
+                candidate = null;
+            }
+            finally
+            {
+                if (candidate != null) candidate.Dispose();
+            }
+        }
+
+        public void ConvertToCSharp()
+        {
+            ThrowIfDisposed();
+            if (HasCSharpModel)
+                throw new InvalidOperationException("C# 模型已存在，请先释放 C# 模型。");
+            if (!HasCppModel)
+                throw new InvalidOperationException("请先加载 C++ 模型。");
+
+            CSharpModel candidate = null;
+            try
+            {
+                int index = cppModel.ModelIndex;
+                candidate = dlcv_infer_csharp.ModelFactory.CreateFromIndex(index);
+                if (candidate.modelIndex != index)
+                    throw new InvalidOperationException("共享失败：C# 模型编号与 C++ 模型编号不一致。");
+                csharpModel = candidate;
+                CSharpCreatedFromIndex = true;
                 candidate = null;
             }
             finally
@@ -129,6 +156,7 @@ namespace DlcvCSharpCppTest
         {
             CSharpModel model = csharpModel;
             csharpModel = null;
+            CSharpCreatedFromIndex = false;
             if (model != null)
                 model.Dispose();
         }

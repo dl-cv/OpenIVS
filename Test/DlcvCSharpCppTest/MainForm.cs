@@ -121,7 +121,7 @@ namespace DlcvCSharpCppTest
         {
             bool hasCSharp = session != null && session.HasCSharpModel;
             bool hasCpp = session != null && session.HasCppModel;
-            csharpStateLabel.Text = hasCSharp ? "已加载，编号：" + session.CSharpModelIndex : "未加载，编号：-1";
+            csharpStateLabel.Text = hasCSharp ? (session.CSharpCreatedFromIndex ? "共享模型，编号：" : "文件加载，编号：") + session.CSharpModelIndex : "未加载，编号：-1";
             cppStateLabel.Text = hasCpp ? (session.CppCreatedFromIndex ? "共享模型，编号：" : "文件加载，编号：") + session.CppModelIndex : "未加载，编号：-1";
             loadCSharpButton.Enabled = !hasCSharp;
             loadCppButton.Enabled = !hasCpp;
@@ -131,6 +131,7 @@ namespace DlcvCSharpCppTest
                 button.BackColor = button.Enabled ? System.Drawing.Color.FromArgb(37, 99, 235) :
                     System.Drawing.Color.FromArgb(226, 232, 240);
             convertToCppButton.Enabled = hasCSharp && !hasCpp;
+            convertToCSharpButton.Enabled = hasCpp && !hasCSharp;
             getCSharpInfoButton.Enabled = hasCSharp;
             getCppInfoButton.Enabled = hasCpp;
             releaseCSharpButton.Enabled = hasCSharp;
@@ -149,6 +150,11 @@ namespace DlcvCSharpCppTest
         private void LoadCppButton_Click(object sender, EventArgs e)
         {
             ExecuteOperation(LoadCpp);
+        }
+
+        private void ConvertToCSharpButton_Click(object sender, EventArgs e)
+        {
+            ExecuteOperation(ConvertToCSharp);
         }
 
         private void ConvertToCppButton_Click(object sender, EventArgs e)
@@ -191,6 +197,13 @@ namespace DlcvCSharpCppTest
             Session.LoadCpp(pathTextBox.Text, Decimal.ToInt32(deviceNumericUpDown.Value));
             cppInfoTextBox.Clear();
             statusLabel.Text = "已由 C++ 从文件加载模型。";
+        }
+
+        private void ConvertToCSharp()
+        {
+            Session.ConvertToCSharp();
+            csharpInfoTextBox.Clear();
+            statusLabel.Text = "已通过 C++ 模型编号共享到 C#。";
         }
 
         private void ConvertToCpp()

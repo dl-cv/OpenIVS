@@ -45,7 +45,7 @@ namespace DlcvCSharpCppTest
             csharpButtonsPanel.PerformLayout();
             cppButtonsPanel.PerformLayout();
             modelsLayoutPanel.PerformLayout();
-            Button[] buttons = { browseModelButton, loadCSharpButton, loadCppButton, convertToCppButton,
+            Button[] buttons = { browseModelButton, loadCSharpButton, loadCppButton, convertToCppButton, convertToCSharpButton,
                 getCSharpInfoButton, getCppInfoButton, releaseCSharpButton, releaseCppButton };
             foreach (Button button in buttons)
             {
@@ -143,6 +143,62 @@ namespace DlcvCSharpCppTest
                 ["repeated_load_rejected"] = "passed", ["retained_cpp_info"] = "passed" };
         }
 
+        private JObject CheckCppToCSharpSharing(string screenshot)
+        {
+            var orders = new JArray();
+            foreach (bool cppFirst in new[] { true, false })
+            {
+                LoadCppButton_Click(loadCppButton, EventArgs.Empty);
+                UiCheck(Session.HasCppModel && !Session.HasCSharpModel && convertToCSharpButton.Enabled,
+                    "C++ 加载后反向共享按钮未启用");
+                int index = Session.CppModelIndex;
+                ConvertToCSharpButton_Click(convertToCSharpButton, EventArgs.Empty);
+                UiCheck(Session.HasCSharpModel && Session.CSharpCreatedFromIndex && Session.CSharpModelIndex == index &&
+                    !convertToCSharpButton.Enabled && !convertToCppButton.Enabled, "C++ 共享到 C# 失败：" + statusLabel.Text);
+                GetCSharpInfoButton_Click(getCSharpInfoButton, EventArgs.Empty);
+                GetCppInfoButton_Click(getCppInfoButton, EventArgs.Empty);
+                UiCheck(JObject.Parse(csharpInfoTextBox.Text)["model_info"] is JObject &&
+                    csharpStateLabel.Text.StartsWith("共享模型"), "反向共享信息或状态未显示");
+                ConvertToCSharpButton_Click(convertToCSharpButton, EventArgs.Empty);
+                UiCheck(statusLabel.Text.StartsWith("操作失败") && Session.CSharpModelIndex == index,
+                    "重复共享覆盖已有 C# 模型");
+                if (cppFirst)
+                {
+                    if (screenshot != null)
+                    {
+                        GetCSharpInfoButton_Click(getCSharpInfoButton, EventArgs.Empty);
+                        RenderUi(Path.Combine(Path.GetDirectoryName(screenshot),
+                            Path.GetFileNameWithoutExtension(screenshot) + "-cpp-to-csharp.png"));
+                    }
+                    ReleaseCppButton_Click(releaseCppButton, EventArgs.Empty);
+                    GetCSharpInfoButton_Click(getCSharpInfoButton, EventArgs.Empty);
+                    UiCheck(!statusLabel.Text.StartsWith("操作失败") && csharpInfoTextBox.TextLength > 0 &&
+                        convertToCppButton.Enabled, "C++ 释放后 C# 信息或再次共享不可用");
+                    ConvertToCppButton_Click(convertToCppButton, EventArgs.Empty);
+                    UiCheck(Session.HasCppModel && Session.CppModelIndex == index, "反向共享后重新共享到 C++ 失败");
+                    ReleaseCSharpButton_Click(releaseCSharpButton, EventArgs.Empty);
+                    GetCppInfoButton_Click(getCppInfoButton, EventArgs.Empty);
+                    UiCheck(!statusLabel.Text.StartsWith("操作失败"), "重新共享的 C++ 信息不可用");
+                    ReleaseCppButton_Click(releaseCppButton, EventArgs.Empty);
+                }
+                else
+                {
+                    ReleaseCSharpButton_Click(releaseCSharpButton, EventArgs.Empty);
+                    GetCppInfoButton_Click(getCppInfoButton, EventArgs.Empty);
+                    UiCheck(!statusLabel.Text.StartsWith("操作失败") && convertToCSharpButton.Enabled,
+                        "C# 释放后 C++ 不可用");
+                    ConvertToCSharpButton_Click(convertToCSharpButton, EventArgs.Empty);
+                    UiCheck(Session.HasCSharpModel && Session.CSharpModelIndex == index, "再次共享到 C# 失败");
+                    ReleaseCppButton_Click(releaseCppButton, EventArgs.Empty);
+                    ReleaseCSharpButton_Click(releaseCSharpButton, EventArgs.Empty);
+                }
+                UiCheck(!Session.HasCSharpModel && !Session.HasCppModel && !Session.CSharpCreatedFromIndex &&
+                    !convertToCSharpButton.Enabled && browseModelButton.Enabled, "反向共享释放后状态错误");
+                orders.Add(cppFirst ? "cpp-first" : "csharp-first");
+            }
+            return new JObject { ["release_orders"] = orders, ["duplicate_rejected"] = true, ["reshare"] = "passed" };
+        }
+
         internal static JObject RunUiTest(string model, int device, string screenshot)
         {
             string root = Path.Combine(Path.GetTempPath(), "dlcv_mixed_ui_" + Guid.NewGuid().ToString("N"));
@@ -171,6 +227,7 @@ namespace DlcvCSharpCppTest
                         UiCheck(form.ApplyModelSelection(DialogResult.OK, model), "模型选择失败");
                         form.deviceNumericUpDown.Value = device;
                         result["direct_cpp"] = form.CheckDirectCppLoading();
+                        result["cpp_to_csharp"] = form.CheckCppToCSharpSharing(screenshot);
                         form.LoadCSharpButton_Click(form.loadCSharpButton, EventArgs.Empty);
                         UiCheck(form.Session.HasCSharpModel && !form.browseModelButton.Enabled &&
                             form.convertToCppButton.Enabled, "加载按钮处理失败：" + form.statusLabel.Text);

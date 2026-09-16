@@ -93,6 +93,57 @@ namespace DlcvCSharpCppTest
             report["final_index_expired"] = true;
         }
 
+        private static void RunCppShared(ModelSession session, string model, int device, string order, JObject report)
+        {
+            session.LoadCpp(model, device);
+            int index = session.CppModelIndex;
+            Check(!session.HasCSharpModel, "反向共享前不应存在 C# 模型");
+            report["cpp_info"] = Info(session.GetCppInfo());
+            session.ConvertToCSharp();
+            Check(session.CSharpModelIndex == index && session.CSharpCreatedFromIndex, "反向共享编号或来源错误");
+            report["model_index"] = index;
+            report["csharp_info"] = Info(session.GetCSharpInfo());
+            report["native_modules"] = NativeModules();
+            bool rejected = false;
+            try { session.ConvertToCSharp(); }
+            catch (InvalidOperationException) { rejected = true; }
+            Check(rejected && session.CSharpModelIndex == index, "重复反向共享未拒绝");
+            if (order == "cpp-first")
+            {
+                session.ReleaseCpp(); session.ReleaseCpp();
+                Check(session.HasCSharpModel && !session.HasCppModel, "C++ 释放后 C# 状态错误");
+                report["retained_info"] = Info(session.GetCSharpInfo());
+                using (var fresh = dlcv_infer_csharp.ModelFactory.CreateFromIndex(index))
+                    Info(fresh.GetModelInfo().ToString());
+                session.ConvertToCpp();
+                session.ReleaseCSharp();
+                Info(session.GetCppInfo());
+                session.ReleaseCpp();
+            }
+            else
+            {
+                session.ReleaseCSharp(); session.ReleaseCSharp();
+                Check(!session.HasCSharpModel && session.HasCppModel && !session.CSharpCreatedFromIndex,
+                    "C# 释放后 C++ 状态错误");
+                report["retained_info"] = Info(session.GetCppInfo());
+                session.ConvertToCSharp();
+                session.ReleaseCpp();
+                Info(session.GetCSharpInfo());
+                session.ReleaseCSharp();
+            }
+            Check(!session.HasCSharpModel && !session.HasCppModel, "反向共享未释放");
+            CheckExpired(index);
+            report["final_index_expired"] = true;
+            // 同一入口同时验证窗口关闭所使用的会话释放路径。
+            session.LoadCpp(model, device);
+            session.ConvertToCSharp();
+            int closingIndex = session.CSharpModelIndex;
+            session.Dispose();
+            Check(!session.HasCSharpModel && !session.HasCppModel, "反向共享会话关闭仍持有模型");
+            CheckExpired(closingIndex);
+            report["dispose_index_expired"] = true;
+        }
+
         public static int Run(string[] args)
         {
             string output = null;
@@ -118,8 +169,8 @@ namespace DlcvCSharpCppTest
                 }
                 if (model == null || output == null) throw new ArgumentException("必须指定 --model 和 --output");
                 if (order != "csharp-first" && order != "cpp-first") throw new ArgumentException("释放顺序须为 csharp-first 或 cpp-first");
-                if (mode != "shared" && mode != "cpp" && mode != "independent")
-                    throw new ArgumentException("加载方式须为 shared、cpp 或 independent");
+                if (mode != "shared" && mode != "cpp-shared" && mode != "cpp" && mode != "independent")
+                    throw new ArgumentException("加载方式须为 shared、cpp-shared、cpp 或 independent");
                 report["load_mode"] = mode;
                 report["release_order"] = order;
                 using (var session = new ModelSession())
@@ -155,6 +206,7 @@ namespace DlcvCSharpCppTest
                         Check(expired, "最终释放后共享编号仍有效");
                         report["final_index_expired"] = true;
                     }
+                    else if (mode == "cpp-shared") RunCppShared(session, model, device, order, report);
                     else RunDirectLoad(session, model, device, mode, order, report);
                 }
                 report["status"] = "passed";

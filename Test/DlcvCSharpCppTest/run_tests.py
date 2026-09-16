@@ -94,6 +94,9 @@ def main():
         for index, model in enumerate(models):
             for order in ("csharp-first", "cpp-first"):
                 run(f"model-{index}-{order}", ["model-test", "--model", str(model), "--release-order", order], native=True)
+            for order in ("csharp-first", "cpp-first"):
+                run(f"model-{index}-cpp-shared-{order}", ["model-test", "--model", str(model),
+                    "--load-mode", "cpp-shared", "--release-order", order], native=True)
             run(f"model-{index}-cpp-direct", ["model-test", "--model", str(model), "--load-mode", "cpp"], native=True)
             for order in ("csharp-first", "cpp-first"):
                 run(f"model-{index}-independent-{order}", ["model-test", "--model", str(model),

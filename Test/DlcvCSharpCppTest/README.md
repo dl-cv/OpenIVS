@@ -18,17 +18,18 @@
 
 ## 模型选择与分组操作
 
-按钮不使用自动换行，左右模型区域各自保持一排：C# 为“加载模型、获取信息、释放模型”，C++ 为“加载模型、从C#共享、获取信息、释放模型”。分组内等高、等宽，加载为主操作色，其余为浅色按钮；最小窗口为设计尺寸 960×540，实际尺寸随 DPI 缩放。
+按钮不使用自动换行，左右模型区域各自保持一排：C# 为“加载模型、从C++共享、获取信息、释放模型”，C++ 为“加载模型、从C#共享、获取信息、释放模型”。分组内等高、等宽，加载为主操作色，其余为浅色按钮；最小窗口为设计尺寸 960×540，实际尺寸随 DPI 缩放。
 
 | 区域 / 按钮 | 行为 |
 |---|---|
 | C# / 加载模型 | 从已选文件建立 C# `Model`；没有选择文件时打开浏览窗口 |
 | C++ / 加载模型 | 经 C++/CLI 调用原生 `dlcv_infer::Model(std::wstring, device)`，不依赖 C# 模型；没有选择文件时打开浏览窗口 |
+| C# / 从C++共享 | 将已有 C++ `ModelIndex` 交给 C# `ModelFactory.CreateFromIndex`，不再次加载文件 |
 | C++ / 从C#共享 | 将已有 C# `modelIndex` 交给 `CreateModelFromIndex`，不再次加载文件 |
 | 两侧 / 获取信息 | 分别读取 C# 与 C++ 模型信息，保留原始 JSON，在各自区域显示 |
 | 两侧 / 释放模型 | 只释放该侧持有关系并清空该侧信息；另一侧仍可使用 |
 
-C# 和 C++ 均可先加载，也可分别从同一文件加载；已有该侧模型时禁止重复加载。C++ 模型存在时禁止共享转换覆盖。两侧均释放后才允许改变路径和设备。C++ 状态明确区分“文件加载”和“共享模型”。SDK 对相同内容和设备可能返回相同编号并分别增加持有计数，不能用编号相同判断是否通过共享按钮创建。
+C# 和 C++ 均可先加载，也可分别从同一文件加载；已有该侧模型时禁止重复加载。两侧均只在目标侧为空、来源侧存在时允许共享，禁止覆盖已有模型。两侧均释放后才允许改变路径和设备。两侧状态均明确区分“文件加载”和“共享模型”。SDK 对相同内容和设备可能返回相同编号并分别增加持有计数，不能用编号相同判断是否通过共享按钮创建。
 
 路径框旁提供独立的“浏览…”按钮，路径框只读，无需手填。浏览只选择文件，不加载模型。与 DlcvDemo 相同，使用 .NET 用户级 `LastModelPath` 设置，选择成功后立即 `Save()`；取消选择不改变原路径或记录。程序再次打开时恢复路径，文件窗口通过 `InitialDirectory` 和 `FileName` 定位上次目录与文件。记录属于本测试程序，不修改 DlcvDemo 的用户设置；设计器构造不读取设置。两侧模型全部释放后可以重新浏览选择。
 
@@ -76,7 +77,7 @@ python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCShar
 
 ## 命令行模型验证
 
-`model-test` 不创建 WinForms 对象，执行 C# 加载、C++ 共享、两侧信息读取、指定释放顺序和最终索引失效检查。`--release-order` 接受 `csharp-first`（默认）或 `cpp-first`；`--device` 默认为 0。`--load-mode shared` 为默认共享流程，`cpp` 只从 C++ 加载并验证释放、重载和最终编号失效，`independent` 分别从 C++、C# 文件构造并验证两种释放顺序。
+`model-test` 不创建 WinForms 对象，执行 C# 加载、C++ 共享、两侧信息读取、指定释放顺序和最终索引失效检查。`--release-order` 接受 `csharp-first`（默认）或 `cpp-first`；`--device` 默认为 0。`--load-mode shared` 为默认共享流程，`cpp-shared` 从 C++ 加载并共享到 C#，验证两种释放顺序、再次共享及关闭释放；`cpp` 只从 C++ 加载并验证释放、重载和最终编号失效，`independent` 分别从 C++、C# 文件构造并验证两种释放顺序。
 
 ```powershell
 & .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe model-test --model "<模型文件>" --release-order csharp-first --output "$env:TEMP\mixed-cli.json"
@@ -90,7 +91,7 @@ python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCShar
 & .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe ui-test --model "<模型文件>" --device 0 --output "$env:TEMP\mixed-model.json" --screenshot "$env:TEMP\mixed-model.png"
 ```
 
-- `designer-test` 仅构造和释放未显示的窗体，检查七个模型操作按钮和浏览按钮，并检查进程未加载 C++/CLI 桥接或原生推理模块。
+- `designer-test` 仅构造和释放未显示的窗体，检查八个模型操作按钮和浏览按钮，并检查进程未加载 C++/CLI 桥接或原生推理模块。
 - `ui-test` 无 `--model` 时检查浏览按钮和六个操作按钮的可用状态、选择即保存、取消不改变、重建窗体与设置对象恢复记录、上次目录与文件名、空模型操作、重复释放、无效模型、禁止的模型格式和负索引。
 - 指定模型时额外验证两侧索引一致、两侧信息、两种释放顺序、释放后再次转换、最终索引失效及窗口对象释放。
 - UI 测试创建未显示的真实 WinForms 对象，调用实际模型按钮处理方法，检查两侧 JSON 文本、状态编号、按钮可用状态、释放后清空和关闭清理；检查默认与最小窗口布局。可选 `--screenshot` 通过控件自身绘制生成 PNG，并检查文字像素。不执行桌面自动化、键鼠模拟、点击消息或窗口控制；不验证人工文件对话框和 VS 调试器交互。路径记忆测试使用系统临时文件设置提供器，仅改变设置存储位置，执行窗体实际读取、选择与保存方法，不读取或修改真实用户设置。
@@ -103,4 +104,4 @@ python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCShar
 python Test/DlcvCSharpCppTest/run_tests.py --exe Test/DlcvCSharpCppTest/bin/x64/Debug/DlcvCSharpCppTest.exe --model "<普通模型>" --model "<流程模型>" --output-dir "$env:TEMP\mixed-regression"
 ```
 
-`--model` 可重复指定；输出目录必须是系统临时目录下的空目录。每个模型运行共享模式两种释放顺序、C++ 直接加载、分别加载的两种释放顺序，以及非交互 UI；另测启动配置、设计器、DPI 与图标、四档比例布局、空界面、错误参数与报告覆盖保护。UI 检查包括 C++ 先加载和 C# 先加载、重复加载拒绝及另一侧信息可继续读取。结果 JSON 严格 UTF-8 解析，PNG 检查格式和尺寸；进程实际模块路径须来自 `--sdk-directory`（默认 SDK 安装目录），包装 DLL 须来自本次 EXE 目录。不复制或更换推理 SDK，报告和图片不进入仓库。
+`--model` 可重复指定；输出目录必须是系统临时目录下的空目录。每个模型运行两个共享方向各两种释放顺序、C++ 直接加载、分别加载的两种释放顺序，以及非交互 UI；另测启动配置、设计器、DPI 与图标、四档比例布局、空界面、错误参数与报告覆盖保护。UI 检查包括 C++ 先加载和 C# 先加载、重复加载拒绝及另一侧信息可继续读取。结果 JSON 严格 UTF-8 解析，PNG 检查格式和尺寸；进程实际模块路径须来自 `--sdk-directory`（默认 SDK 安装目录），包装 DLL 须来自本次 EXE 目录。不复制或更换推理 SDK，报告和图片不进入仓库。

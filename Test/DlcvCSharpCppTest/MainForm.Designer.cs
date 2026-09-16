@@ -39,6 +39,7 @@ namespace DlcvCSharpCppTest
             this.loadCSharpButton = new System.Windows.Forms.Button();
             this.loadCppButton = new System.Windows.Forms.Button();
             this.convertToCppButton = new System.Windows.Forms.Button();
+            this.convertToCSharpButton = new System.Windows.Forms.Button();
             this.getCSharpInfoButton = new System.Windows.Forms.Button();
             this.getCppInfoButton = new System.Windows.Forms.Button();
             this.releaseCSharpButton = new System.Windows.Forms.Button();
@@ -164,19 +165,21 @@ namespace DlcvCSharpCppTest
             this.csharpButtonsPanel.AutoSize = true;
             this.csharpButtonsPanel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
             this.csharpButtonsPanel.Size = new System.Drawing.Size(460, 44);
-            this.csharpButtonsPanel.ColumnCount = 3;
+            this.csharpButtonsPanel.ColumnCount = 4;
             this.csharpButtonsPanel.RowCount = 1;
             this.csharpButtonsPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.csharpButtonsPanel.Margin = new System.Windows.Forms.Padding(0, 4, 0, 8);
             this.csharpButtonsPanel.Name = "csharpButtonsPanel";
             this.csharpButtonsPanel.TabIndex = 0;
             this.csharpButtonsPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
+            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.00000F));
             this.csharpButtonsPanel.Controls.Add(this.loadCSharpButton, 0, 0);
-            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
-            this.csharpButtonsPanel.Controls.Add(this.getCSharpInfoButton, 1, 0);
-            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
-            this.csharpButtonsPanel.Controls.Add(this.releaseCSharpButton, 2, 0);
+            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.00000F));
+            this.csharpButtonsPanel.Controls.Add(this.convertToCSharpButton, 1, 0);
+            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.00000F));
+            this.csharpButtonsPanel.Controls.Add(this.getCSharpInfoButton, 2, 0);
+            this.csharpButtonsPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25.00000F));
+            this.csharpButtonsPanel.Controls.Add(this.releaseCSharpButton, 3, 0);
             //
             // cppButtonsPanel
             //
@@ -236,6 +239,25 @@ namespace DlcvCSharpCppTest
             this.loadCppButton.ForeColor = System.Drawing.Color.White;
             this.loadCppButton.Click += new System.EventHandler(this.LoadCppButton_Click);
             //
+            // convertToCSharpButton
+            //
+            this.convertToCSharpButton.AutoSize = true;
+            this.convertToCSharpButton.Enabled = false;
+            this.convertToCSharpButton.Location = new System.Drawing.Point(119, 3);
+            this.convertToCSharpButton.Name = "convertToCSharpButton";
+            this.convertToCSharpButton.Padding = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.convertToCSharpButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.convertToCSharpButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.convertToCSharpButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
+            this.convertToCSharpButton.Margin = new System.Windows.Forms.Padding(3);
+            this.convertToCSharpButton.Size = new System.Drawing.Size(134, 37);
+            this.convertToCSharpButton.TabIndex = 1;
+            this.convertToCSharpButton.Text = "从C++共享";
+            this.convertToCSharpButton.UseVisualStyleBackColor = false;
+            this.convertToCSharpButton.BackColor = System.Drawing.Color.White;
+            this.convertToCSharpButton.ForeColor = System.Drawing.Color.FromArgb(45, 55, 72);
+            this.convertToCSharpButton.Click += new System.EventHandler(this.ConvertToCSharpButton_Click);
+            //
             // convertToCppButton
             //
             this.convertToCppButton.AutoSize = true;
@@ -267,7 +289,7 @@ namespace DlcvCSharpCppTest
             this.getCSharpInfoButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
             this.getCSharpInfoButton.Margin = new System.Windows.Forms.Padding(3);
             this.getCSharpInfoButton.Size = new System.Drawing.Size(134, 37);
-            this.getCSharpInfoButton.TabIndex = 1;
+            this.getCSharpInfoButton.TabIndex = 2;
             this.getCSharpInfoButton.Text = "获取信息";
             this.getCSharpInfoButton.UseVisualStyleBackColor = false;
             this.getCSharpInfoButton.BackColor = System.Drawing.Color.White;
@@ -305,7 +327,7 @@ namespace DlcvCSharpCppTest
             this.releaseCSharpButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(210, 218, 228);
             this.releaseCSharpButton.Margin = new System.Windows.Forms.Padding(3);
             this.releaseCSharpButton.Size = new System.Drawing.Size(110, 37);
-            this.releaseCSharpButton.TabIndex = 2;
+            this.releaseCSharpButton.TabIndex = 3;
             this.releaseCSharpButton.Text = "释放模型";
             this.releaseCSharpButton.UseVisualStyleBackColor = false;
             this.releaseCSharpButton.BackColor = System.Drawing.Color.White;
@@ -469,7 +491,7 @@ namespace DlcvCSharpCppTest
             this.statusLabel.Padding = new System.Windows.Forms.Padding(0, 8, 0, 0);
             this.statusLabel.Size = new System.Drawing.Size(1030, 25);
             this.statusLabel.TabIndex = 3;
-            this.statusLabel.Text = "浏览选择模型后，可分别加载 C# / C++；转换按钮仅共享已有 C# 模型。";
+            this.statusLabel.Text = "浏览选择模型后，可分别加载 C# / C++；两侧均可从另一侧共享模型。";
             this.statusLabel.UseMnemonic = false;
             //
             // MainForm
@@ -519,6 +541,7 @@ namespace DlcvCSharpCppTest
         private System.Windows.Forms.Button loadCSharpButton;
         private System.Windows.Forms.Button loadCppButton;
         private System.Windows.Forms.Button convertToCppButton;
+        private System.Windows.Forms.Button convertToCSharpButton;
         private System.Windows.Forms.Button getCSharpInfoButton;
         private System.Windows.Forms.Button getCppInfoButton;
         private System.Windows.Forms.Button releaseCSharpButton;
