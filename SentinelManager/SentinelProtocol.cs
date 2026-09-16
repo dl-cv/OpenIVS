@@ -166,17 +166,27 @@ namespace SentinelManager
             {
                 var serializer = new JavaScriptSerializer { MaxJsonLength = MaximumResponseBytes, RecursionLimit = 64 };
                 int identifiers = 0;
+                int depth = 0;
+                int scanned = 0;
+                string body = trimmed.Substring(marker.Length);
                 // ACC 诊断对象使用裸字段名，完整保留字符串，只为字段名补充 JSON 引号。
-                var tokens = Pattern("(?<str>\"(?:\\\\.|[^\"\\\\\\r\\n])*\")(?<colon>\\s*:)?|(?<key>[A-Za-z_][A-Za-z0-9_]*)\\s*:");
-                string json = tokens.Replace(trimmed.Substring(marker.Length), match =>
+                var tokens = Pattern("(?<str>\"(?:\\\\.|[^\"\\\\\\r\\n])*\")(?<colon>\\s*:)?|(?<key>[A-Za-z_$][A-Za-z0-9_$]*)\\s*:");
+                string json = tokens.Replace(body, match =>
                 {
+                    // 字符串已完整分词，层级计算只检查字符串外的括号。
+                    for (int i = scanned; i < match.Index; i++)
+                    {
+                        if (body[i] == '{' || body[i] == '[') depth++;
+                        else if (body[i] == '}' || body[i] == ']') depth--;
+                    }
+                    scanned = match.Index + match.Length;
                     if (match.Groups["key"].Success)
                     {
                         string name = match.Groups["key"].Value;
-                        if (name == "srvguid") identifiers++;
+                        if (depth == 1 && name == "srvguid") identifiers++;
                         return serializer.Serialize(name) + ":";
                     }
-                    if (match.Groups["colon"].Success
+                    if (depth == 1 && match.Groups["colon"].Success
                         && serializer.Deserialize<string>(match.Groups["str"].Value) == "srvguid") identifiers++;
                     return match.Value;
                 });

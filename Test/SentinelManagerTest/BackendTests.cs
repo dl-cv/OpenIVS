@@ -390,6 +390,9 @@ namespace SentinelManagerTest
             Equal(NewLmid, SentinelProtocol.ReadLmid(" \r\n/*JSON:diagnostics*/\r\n"
                 + "{\"srvguid\":\"" + NewLmid + "\", version:12, enabled:true, optional:null, values:[1,\"文本\"]}"),
                 "双引号键与 JSON 值");
+            Equal(OldLmid, SentinelProtocol.ReadLmid("/*JSON:diagnostics*/{other:1,other:2,"
+                + "metadata:{srvguid:\"ignored\",srvguid:\"last\"},$extra:true,srvguid:\"" + OldLmid + "\"}"),
+                "无关重复字段及嵌套同名字段不影响顶层 LMID");
             string mixed = new string('a', 10) + new string('Z', 10) + new string('9', 18) + "+/";
             Equal(mixed, SentinelProtocol.ReadLmid(Diagnostics(mixed)), "合法字符保持大小写及加号斜线");
         }
