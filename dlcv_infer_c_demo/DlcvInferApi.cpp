@@ -19,6 +19,7 @@ bool DlcvInferApi::load() {
         !resolve("dlcv_infer_cpp_infer_with_params_c", inferWithParams_) ||
         !resolve("dlcv_infer_cpp_free_model_result_c", freeModelResult_) ||
         !resolve("dlcv_infer_cpp_get_model_info_c", getModelInfo_) ||
+        !resolve("dlcv_infer_cpp_get_all_models_c", getAllModels_) ||
         !resolve("dlcv_infer_cpp_free_string_c", freeString_) ||
         !resolve("dlcv_infer_cpp_free_all_models_c", freeAllModels_)) {
         FreeLibrary(module_);
@@ -70,6 +71,10 @@ const char* DlcvInferApi::getModelInfo(int modelIndex) const {
     return getModelInfo_(modelIndex);
 }
 
+const char* DlcvInferApi::getAllModels() const {
+    return getAllModels_();
+}
+
 void DlcvInferApi::freeString(const char* value) const {
     if (value != nullptr) {
         freeString_(value);
@@ -87,6 +92,7 @@ void DlcvInferApi::clearFunctions() {
     inferWithParams_ = nullptr;
     freeModelResult_ = nullptr;
     getModelInfo_ = nullptr;
+    getAllModels_ = nullptr;
     freeString_ = nullptr;
     freeAllModels_ = nullptr;
 }

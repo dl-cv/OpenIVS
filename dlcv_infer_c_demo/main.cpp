@@ -120,6 +120,7 @@ void printHelp() {
         << "命令：\n"
         << "  load-model <名称> <模型路径> [--device N]\n"
         << "  list-models\n"
+        << "  list-sdk-models\n"
         << "  model-info <名称>\n"
         << "  infer <名称> <图片路径> [--threshold F] [--with-mask true|false] [--calc-mean true|false]\n"
         << "  benchmark <名称> <图片路径> [--threads N] [--runs N]\n"
@@ -389,6 +390,7 @@ public:
         const std::wstring& name = command.front();
         if (name == L"load-model") return loadModel(command);
         if (name == L"list-models") return listModels(command);
+        if (name == L"list-sdk-models") return listSdkModels(command);
         if (name == L"model-info") return modelInfo(command);
         if (name == L"infer") return infer(command);
         if (name == L"benchmark") return benchmark(command);
@@ -440,7 +442,7 @@ private:
             return ExitModelError;
         }
         const int modelIndex = api_.loadModel(localPath.c_str(), deviceId);
-        if (modelIndex == -1) {
+        if (modelIndex < 0) {
             std::cerr << "错误：模型加载失败：" << localText(api_.getLastError()) << "\n";
             return ExitModelError;
         }
@@ -463,6 +465,21 @@ private:
         for (const auto& item : models_) {
             std::cout << "  名称=" << wideToUtf8(item.first) << "，index=" << item.second << "\n";
         }
+        return ExitSuccess;
+    }
+
+    int listSdkModels(const std::vector<std::wstring>& args) const {
+        if (args.size() != 1) {
+            std::cerr << "错误：list-sdk-models 不接受参数。\n";
+            return ExitCommandError;
+        }
+        const char* value = api_.getAllModels();
+        if (value == nullptr) {
+            std::cerr << "错误：读取 SDK 模型列表失败：" << localText(api_.getLastError()) << "\n";
+            return ExitModelError;
+        }
+        std::cout << value << "\n";
+        api_.freeString(value);
         return ExitSuccess;
     }
 
