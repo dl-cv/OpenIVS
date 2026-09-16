@@ -39,6 +39,10 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - 仓库级编译验证、正式打包和安装使用用户级 `dlcv-build-install-1.0.0`，按根目录编号脚本执行，不用 `vs-build-1.0.0` 替代正式流程。
 - 发布 C# 测试程序 wheel：`1_编译打包.bat`，需要安装时再执行 `2_安装新版.bat`。
 
+- Sentinel 管理工具为独立组件：`SentinelManager/1_编译打包.bat` 串行构建本组件及测试、执行隔离回归并生成 ZIP；`SentinelManager/2_安装新版.bat` 安装当前组件版本的 ZIP，不处理既有推理 wheel。
+- Sentinel 版本来源为 `SentinelManager/Properties/AssemblyInfo.cs`，与推理 wheel 分开维护；安装到 `%LocalAppData%/Programs/OpenIVS/SentinelManager`，安装流程核验版本与文件。
+- Sentinel 后端及界面测试使用 `Test/SentinelManagerTest`：无参数执行后端隔离测试，`ui-test --output-dir <系统临时子目录>` 使用固定数据执行界面回归并保存 PNG 与 UTF-8 JSON。验证不得连接真实 ACC、写真实授权配置或控制真实服务。
+
 ## 统一运行与验证输入规则
 
 - `DlcvDemo`、`dlcv_infer_cpp_qt_demo` 与 `dlcv_infer_c_qt_demo` 支持文档中定义的 `infer` 命令行模式，用于传入模型、图片、阈值、设备、mask 开关和均值计算开关并执行无界面自动验证。
