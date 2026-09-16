@@ -41,7 +41,7 @@ namespace SentinelManager
         public SentinelResponse Send(string path, byte[] body)
         {
             // 只接受已知 ACC 路径，传输地址不能由响应或调用参数更换。
-            bool readPath = path == "tab_dev.html" || path == "_int_/conf_to.html" || path == "_int_/conf_from.html"
+            bool readPath = path == "_int_/tab_diag2.html" || path == "tab_dev.html" || path == "_int_/conf_to.html" || path == "_int_/conf_from.html"
                 || (path != null && Regex.IsMatch(path, @"\Atab_feat\.html\?haspid=[0-9]+\z", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)));
             bool actionPath = path == "action.html?Create_new_lmid" && body == null;
             bool configurationPath = path == "action.html" && body != null;
@@ -233,19 +233,80 @@ namespace SentinelManager
             return string.Join("\n", lines);
         }
 
-        public string CreateLmid()
+        public string ReadLmid()
         {
-            string response;
-            // 超时或响应异常时不重新提交，防止重复生成。
-            try { response = Request("action.html?Create_new_lmid"); }
+            return SentinelProtocol.ReadLmid(Request("_int_/tab_diag2.html"));
+        }
+
+        private sealed class LmidChange
+        {
+            public string Before;
+            public string After;
+            public bool ResponseFailed;
+
+            public string Describe()
+            {
+                return "LMID 已更新并回读确认。\n原 LMID：" + Before + "\n新 LMID：" + After
+                    + (ResponseFailed ? "\n重置响应未完整确认，已通过回读核验，未重复发送请求。" : "");
+            }
+        }
+
+        private LmidChange ResetAndVerifyLmid()
+        {
+            string before;
+            try { before = ReadLmid(); }
             catch (SentinelException ex)
             {
-                throw new SentinelException("未确认 LMID 是否创建，请在 ACC 检查后再操作。\n" + ex.Message, ex);
+                throw new SentinelException("无法读取重置前 LMID，未发送重置请求。\n" + ex.Message, ex);
             }
-            string result = SentinelProtocol.PlainText(response);
-            int length = Math.Min(4000, result.Length);
-            if (length < result.Length && length > 0 && char.IsHighSurrogate(result[length - 1])) length--;
-            return "请求已返回（HTTP 200），未确认 LMID 是否变化。\n" + (result.Length == 0 ? "服务未返回内容。" : result.Substring(0, length));
+            SentinelException responseError = null;
+            // 修改请求仅发送一次，响应异常时也只回读实际状态。
+            try { Request("action.html?Create_new_lmid"); }
+            catch (SentinelException ex) { responseError = ex; }
+            SentinelException readError = null;
+            bool readSucceeded = false;
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                if (attempt > 0) sleep(TimeSpan.FromMilliseconds(500));
+                try
+                {
+                    string after = ReadLmid();
+                    readSucceeded = true;
+                    if (!string.Equals(before, after, StringComparison.Ordinal))
+                        return new LmidChange { Before = before, After = after, ResponseFailed = responseError != null };
+                }
+                catch (SentinelException ex) { readError = ex; }
+            }
+            string reason = readSucceeded ? "LMID 未变化，未确认重置成功。" : "LMID 回读失败，无法确认重置结果。";
+            reason += "已停止后续操作，未重复发送重置请求。";
+            if (responseError != null) reason += "\n重置响应：" + responseError.Message;
+            if (readError != null) reason += "\n回读：" + readError.Message;
+            throw new SentinelException(reason);
+        }
+
+        private void VerifyLmidAfterRestart(string expected)
+        {
+            bool readSucceeded = false;
+            SentinelException readError = null;
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                if (attempt > 0) sleep(TimeSpan.FromMilliseconds(500));
+                try
+                {
+                    string actual = ReadLmid();
+                    readSucceeded = true;
+                    if (string.Equals(actual, expected, StringComparison.Ordinal)) return;
+                }
+                catch (SentinelException ex) { readError = ex; }
+            }
+            string reason = readSucceeded ? "服务重启后 LMID 与已确认的新值不一致。" : "服务重启后 LMID 回读失败。";
+            if (readError != null) reason += "\n" + readError.Message;
+            throw new SentinelException(reason + "未重复发送重置请求。");
+        }
+
+        public string CreateLmid()
+        {
+            return ResetAndVerifyLmid().Describe();
         }
 
         public string DisableNetwork()
@@ -283,8 +344,11 @@ namespace SentinelManager
                 completed.Add("服务：运行中");
                 ReadyNetworkState();
                 completed.Add("网络设置：\n" + DisableNetwork());
-                completed.Add("LMID：" + CreateLmid());
+                LmidChange change = ResetAndVerifyLmid();
+                completed.Add(change.Describe());
                 completed.Add(ApplyLocalPatch());
+                VerifyLmidAfterRestart(change.After);
+                completed.Add("LMID：服务重启后回读一致。");
                 if (AnyEnabled(ReadyNetworkState()))
                     throw new SentinelException("服务重启后仍检测到开启的网络访问配置。");
                 completed.Add(GetInfo());
@@ -294,7 +358,7 @@ namespace SentinelManager
                 completed.Add("一键修复未完成：" + ex.Message);
                 throw new SentinelException(string.Join("\n\n", completed), ex);
             }
-            return "修复流程完成；LMID 是否变化仍需在 ACC 核实。\n\n" + string.Join("\n\n", completed);
+            return "修复流程完成：LMID 更新及重启后回读、网络设置和本地配置均已核验。\n\n" + string.Join("\n\n", completed);
         }
     }
 }

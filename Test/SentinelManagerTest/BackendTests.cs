@@ -14,6 +14,12 @@ namespace SentinelManagerTest
         private const string EmptyDevices = "/*JSON:devices*/{\"cnt\":0}";
         private const string Device = "{\"haspid\":\"123\",\"typ\":\"Sentinel HL Pro\",\"isloc\":\"1\",\"configuration\":\"sentinelhl\"}";
 
+        private const string LmidPath = "_int_/tab_diag2.html";
+        private const string ResetLmidPath = "action.html?Create_new_lmid";
+        private const string RepairCompleted = "修复流程完成：LMID 更新及重启后回读、网络设置和本地配置均已核验。";
+        private static readonly string OldLmid = new string('A', 40);
+        private static readonly string NewLmid = new string('B', 40);
+
         public static int Run()
         {
             var cases = new List<KeyValuePair<string, Action>>
@@ -34,8 +40,17 @@ namespace SentinelManagerTest
                 Case("服务不可用时不发送请求", InfoServiceFailure),
                 Case("启动服务后等待 ACC 就绪", InfoAfterStart),
                 Case("服务已运行时查询不重试", InfoNoRetry),
-                Case("LMID 仅报告已返回", LmidSuccess),
-                Case("LMID 失败不重复提交", LmidFailures),
+                Case("LMID 裸键与双引号键解析", LmidParsing),
+                Case("LMID 解析保留字符串内容", LmidStringContents),
+                Case("LMID 缺失、重复及非法字段拒绝", LmidInvalidFields),
+                Case("LMID 读取使用诊断 GET", LmidReadRequest),
+                Case("LMID 更新前读取失败不重置", LmidBeforeFailure),
+                Case("LMID 变化后回读确认", LmidSuccess),
+                Case("LMID 大小写变化与加号斜线", LmidCaseChange),
+                Case("LMID 延迟变化及读取错误后恢复", LmidDelayedChange),
+                Case("LMID 六次回读不变化", LmidUnchanged),
+                Case("LMID 六次回读全部失败", LmidReadbackFailures),
+                Case("LMID 重置异常后变化仍已核验", LmidResetFailures),
                 Case("网络已关闭时不提交", NetworkNoChange),
                 Case("网络修改后等待回读确认", NetworkChange),
                 Case("网络回读仍开启时报告失败", NetworkNotApplied),
@@ -59,6 +74,9 @@ namespace SentinelManagerTest
                 Case("修复预检查失败时无修改", RepairPrecheckFailure),
                 Case("修复 LMID 失败报告已完成步骤", RepairLmidFailure),
                 Case("修复补丁失败报告已完成步骤", RepairPatchFailure),
+                Case("修复重启后 LMID 延迟恢复", RepairLmidDelayedReadback),
+                Case("修复重启后 LMID 不一致", RepairLmidMismatch),
+                Case("修复重启后 LMID 读取失败", RepairLmidReadbackFailure),
                 Case("修复后网络重新开启时拒绝成功", RepairNetworkReopened),
                 Case("修复最终查询失败保留步骤", RepairFinalQueryFailure),
                 Case("临时目录完整修复流程", RepairWithTemporaryConfiguration)
@@ -266,6 +284,7 @@ namespace SentinelManagerTest
                 Reject(() => transport.Send(path, null), "请求路径或方法");
             Reject(() => transport.Send("tab_dev.html", new byte[0]), "请求路径或方法");
             Reject(() => transport.Send("action.html?Create_new_lmid", new byte[0]), "请求路径或方法");
+            Reject(() => transport.Send(LmidPath, new byte[0]), "请求路径或方法");
         }
 
         private static void InfoSuccess()
@@ -328,37 +347,239 @@ namespace SentinelManagerTest
             transport.Done();
         }
 
-        private static void LmidSuccess()
+        private static string Diagnostics(string lmid)
+        {
+            return "/*JSON:diagnostics*/{srvguid:\"" + lmid + "\"}";
+        }
+
+        private static void LmidRead(ScriptTransport transport, string lmid, Action check = null)
+        {
+            transport.Reply(LmidPath, Diagnostics(lmid), check: check);
+        }
+
+        private static void LmidUpdate(ScriptTransport transport)
+        {
+            LmidRead(transport, OldLmid);
+            transport.Reply(ResetLmidPath, "已返回");
+            LmidRead(transport, NewLmid);
+        }
+
+        private static string LmidVerified()
+        {
+            return "LMID 已更新并回读确认。\n原 LMID：" + OldLmid + "\n新 LMID：" + NewLmid;
+        }
+
+        private static void LmidCounts(ScriptTransport transport, int reads, int resets)
+        {
+            Equal(reads, transport.Calls.FindAll(call => call.Path == LmidPath).Count, "LMID 读取次数");
+            Equal(resets, transport.Calls.FindAll(call => call.Path == ResetLmidPath).Count, "LMID 重置次数");
+            Equal(0, transport.Calls.FindAll(call => (call.Path == LmidPath || call.Path == ResetLmidPath)
+                && call.Body != null).Count, "LMID 读取与重置均使用 GET");
+        }
+
+        private static void LmidWaits(FakeClock clock, int count)
+        {
+            Equal(count, clock.SleepCount, "LMID 回读等待次数");
+            foreach (TimeSpan duration in clock.Durations)
+                Equal(TimeSpan.FromMilliseconds(500), duration, "LMID 回读间隔");
+        }
+
+        private static void LmidParsing()
+        {
+            Equal(OldLmid, SentinelProtocol.ReadLmid(Diagnostics(OldLmid)), "实际诊断裸键");
+            Equal(NewLmid, SentinelProtocol.ReadLmid(" \r\n/*JSON:diagnostics*/\r\n"
+                + "{\"srvguid\":\"" + NewLmid + "\", version:12, enabled:true, optional:null, values:[1,\"文本\"]}"),
+                "双引号键与 JSON 值");
+            string mixed = new string('a', 10) + new string('Z', 10) + new string('9', 18) + "+/";
+            Equal(mixed, SentinelProtocol.ReadLmid(Diagnostics(mixed)), "合法字符保持大小写及加号斜线");
+        }
+
+        private static void LmidStringContents()
+        {
+            string note = "包含标点 {srvguid:其他内容}, path:C:\\temp 与转义引号 \"srvguid\":值";
+            var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            string text = "/*JSON:diagnostics*/{description:" + serializer.Serialize(note)
+                + ",srvguid:\"" + OldLmid + "\",tail:" + serializer.Serialize("}, srvguid:文本中的字段") + "}";
+            Equal(OldLmid, SentinelProtocol.ReadLmid(text), "字符串内的字段文本不能改写或作为重复字段");
+            Equal(OldLmid, SentinelProtocol.ReadLmid("/*JSON:diagnostics*/{\"srvguid\":\"\\u0041"
+                + OldLmid.Substring(1) + "\"}"), "LMID 字符串按 JSON 转义解码");
+        }
+
+        private static void LmidInvalidFields()
+        {
+            foreach (string text in new[]
+            {
+                "", "{srvguid:\"" + OldLmid + "\"}", "/*JSON:diagnostics*/{}",
+                "/*JSON:diagnostics*/{other:\"" + OldLmid + "\"}",
+                "/*JSON:diagnostics*/{description:\"srvguid:" + OldLmid + "\"}",
+                "/*JSON:diagnostics*/{srvguid:\"" + OldLmid + "\",srvguid:\"" + OldLmid + "\"}",
+                "/*JSON:diagnostics*/{srvguid:\"" + OldLmid + "\",\"srvguid\":\"" + NewLmid + "\"}",
+                "/*JSON:diagnostics*/{\"srvguid\":\"" + OldLmid + "\",\"srvg\\u0075id\":\"" + NewLmid + "\"}",
+                "/*JSON:diagnostics*/{srvguid:null}", "/*JSON:diagnostics*/{srvguid:123}",
+                "/*JSON:diagnostics*/{srvguid:true}", "/*JSON:diagnostics*/{srvguid:[\"" + OldLmid + "\"]}",
+                "/*JSON:diagnostics*/{srvguid:{value:\"" + OldLmid + "\"}}",
+                "/*JSON:diagnostics*/{srvguid:'" + OldLmid + "'}",
+                "/*JSON:diagnostics*/{srvguid:(function(){return \"" + OldLmid + "\";})()}",
+                "/*JSON:diagnostics*/{srvguid:unquoted}",
+                "/*JSON:diagnostics*/{srvguid:\"" + OldLmid + "\""
+            }) Reject(() => SentinelProtocol.ReadLmid(text), "");
+            foreach (string value in new[] { "", new string('A', 39), new string('A', 41),
+                new string('A', 39) + "=", new string('A', 39) + "-", new string('A', 39) + "_",
+                new string('A', 39) + " ", new string('A', 39) + "中", " " + OldLmid, OldLmid + "\n" })
+            {
+                string json = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(value);
+                Reject(() => SentinelProtocol.ReadLmid("/*JSON:diagnostics*/{srvguid:" + json + "}"), "");
+            }
+        }
+
+        private static void LmidReadRequest()
         {
             var transport = new ScriptTransport();
-            transport.Reply("action.html?Create_new_lmid", "<p>已返回</p>");
-            Contains(Client(transport).CreateLmid(), "未确认 LMID 是否变化");
-            Equal(1, transport.Calls.Count, "LMID 只提交一次");
+            LmidRead(transport, OldLmid);
+            Equal(OldLmid, Client(transport).ReadLmid(), "客户端读取 LMID");
+            LmidCounts(transport, 1, 0);
             transport.Done();
         }
 
-        private static void LmidFailures()
+        private static void LmidBeforeFailure()
         {
+            foreach (Action<ScriptTransport> failure in new Action<ScriptTransport>[]
+            {
+                transport => transport.Fail(LmidPath, new TimeoutException()),
+                transport => transport.Reply(LmidPath, "", 500),
+                transport => transport.Reply(LmidPath, "/*JSON:diagnostics*/{}"),
+                transport => transport.Reply(LmidPath, "<input type=password>")
+            })
+            {
+                var transport = new ScriptTransport();
+                var clock = new FakeClock();
+                failure(transport);
+                Reject(() => Client(transport, clock: clock).CreateLmid(), "未发送重置请求");
+                LmidCounts(transport, 1, 0);
+                Equal(1, transport.Calls.Count, "更新前读取失败不发送重置或后续请求");
+                LmidWaits(clock, 0);
+                transport.Done();
+            }
+        }
+
+        private static void LmidSuccess()
+        {
+            var transport = new ScriptTransport();
+            var clock = new FakeClock();
+            LmidUpdate(transport);
+            Equal(LmidVerified(), Client(transport, clock: clock).CreateLmid(), "LMID 更新成功文本");
+            LmidCounts(transport, 2, 1);
+            LmidWaits(clock, 0);
+            transport.Done();
+        }
+
+        private static void LmidCaseChange()
+        {
+            var transport = new ScriptTransport();
+            var clock = new FakeClock();
+            string before = new string('A', 38) + "+/";
+            string after = new string('a', 38) + "+/";
+            LmidRead(transport, before);
+            transport.Reply(ResetLmidPath, "");
+            LmidRead(transport, after);
+            Equal("LMID 已更新并回读确认。\n原 LMID：" + before + "\n新 LMID：" + after,
+                Client(transport, clock: clock).CreateLmid(), "仅大小写变化也是新 LMID，保留加号和斜线");
+            LmidCounts(transport, 2, 1);
+            LmidWaits(clock, 0);
+            transport.Done();
+        }
+
+        private static void LmidDelayedChange()
+        {
+            foreach (bool readError in new[] { false, true })
+            {
+                var transport = new ScriptTransport();
+                var clock = new FakeClock();
+                LmidRead(transport, OldLmid);
+                transport.Reply(ResetLmidPath, "");
+                for (int i = 0; i < 5; i++)
+                {
+                    if (readError && i % 2 == 0) transport.Fail(LmidPath, new TimeoutException());
+                    else LmidRead(transport, OldLmid);
+                }
+                LmidRead(transport, NewLmid);
+                Equal(LmidVerified(), Client(transport, clock: clock).CreateLmid(), "第六次回读变化仍成功");
+                LmidCounts(transport, 7, 1);
+                LmidWaits(clock, 5);
+                transport.Done();
+            }
+        }
+
+        private static void LmidUnchanged()
+        {
+            foreach (bool readError in new[] { false, true })
+            {
+                var transport = new ScriptTransport();
+                var clock = new FakeClock();
+                LmidRead(transport, OldLmid);
+                transport.Reply(ResetLmidPath, "");
+                for (int i = 0; i < 6; i++)
+                {
+                    if (readError && i > 0) transport.Fail(LmidPath, new TimeoutException());
+                    else LmidRead(transport, OldLmid);
+                }
+                Reject(() => Client(transport, clock: clock).CreateLmid(), "LMID 未变化");
+                LmidCounts(transport, 7, 1);
+                LmidWaits(clock, 5);
+                transport.Done();
+            }
+        }
+
+        private static void LmidReadbackFailures()
+        {
+            var transport = new ScriptTransport();
+            var clock = new FakeClock();
+            LmidRead(transport, OldLmid);
+            transport.Reply(ResetLmidPath, "");
+            for (int i = 0; i < 6; i++)
+            {
+                if (i % 3 == 0) transport.Fail(LmidPath, new TimeoutException());
+                else if (i % 3 == 1) transport.Reply(LmidPath, "", 503);
+                else transport.Reply(LmidPath, "/*JSON:diagnostics*/{}");
+            }
+            Reject(() => Client(transport, clock: clock).CreateLmid(), "LMID 回读失败");
+            LmidCounts(transport, 7, 1);
+            LmidWaits(clock, 5);
+            transport.Done();
+        }
+
+        private static void LmidResetFailures()
+        {
+            var failures = new List<Action<ScriptTransport>>
+            {
+                transport => transport.Fail(ResetLmidPath, new TimeoutException()),
+                transport => transport.Fail(ResetLmidPath, new IOException())
+            };
             foreach (int status in new[] { 302, 401, 403, 500 })
-            {
-                var transport = new ScriptTransport();
-                transport.Reply("action.html?Create_new_lmid", "", status);
-                Reject(() => Client(transport).CreateLmid(), "未确认 LMID 是否创建");
-                Equal(1, transport.Calls.Count, "HTTP 异常不重复提交");
-                transport.Done();
-            }
+                failures.Add(transport => transport.Reply(ResetLmidPath, "", status));
             foreach (string body in new[] { "<input type=password>", "<code>5</code>", "ERROR" })
+                failures.Add(transport => transport.Reply(ResetLmidPath, body));
+            foreach (Action<ScriptTransport> failure in failures)
             {
-                var transport = new ScriptTransport();
-                transport.Reply("action.html?Create_new_lmid", body);
-                Reject(() => Client(transport).CreateLmid(), "未确认 LMID 是否创建");
-                transport.Done();
+                foreach (bool changed in new[] { false, true })
+                {
+                    var transport = new ScriptTransport();
+                    var clock = new FakeClock();
+                    LmidRead(transport, OldLmid);
+                    failure(transport);
+                    for (int i = 0; i < 6; i++) LmidRead(transport, changed && i == 5 ? NewLmid : OldLmid);
+                    if (changed)
+                    {
+                        string text = Client(transport, clock: clock).CreateLmid();
+                        Contains(text, LmidVerified());
+                        Contains(text, "已通过回读核验，未重复发送请求。");
+                    }
+                    else Reject(() => Client(transport, clock: clock).CreateLmid(), "LMID 未变化");
+                    LmidCounts(transport, 7, 1);
+                    LmidWaits(clock, 5);
+                    transport.Done();
+                }
             }
-            var timeout = new ScriptTransport();
-            timeout.Fail("action.html?Create_new_lmid", new TimeoutException());
-            Reject(() => Client(timeout).CreateLmid(), "未确认 LMID 是否创建");
-            Equal(1, timeout.Calls.Count, "超时不重复提交");
-            timeout.Done();
         }
 
         private static void NetworkNoChange()
@@ -636,13 +857,16 @@ namespace SentinelManagerTest
             var patch = new FakePatch();
             transport.Fail("_int_/conf_to.html", new TimeoutException());
             RepairPrefix(transport);
-            transport.Reply("action.html?Create_new_lmid", "已返回");
+            LmidUpdate(transport);
+            LmidRead(transport, NewLmid, () => Equal(1, patch.ApplyCount, "补丁完成后核验重启 LMID"));
             Network(transport, false);
             transport.Reply("tab_dev.html", EmptyDevices);
             Network(transport, false);
             string text = Client(transport, patch).Repair();
-            Contains(text, "修复流程完成");
-            Contains(text, "LMID 是否变化仍需在 ACC 核实");
+            Contains(text, RepairCompleted);
+            Contains(text, LmidVerified());
+            Contains(text, "LMID：服务重启后回读一致。");
+            LmidCounts(transport, 3, 1);
             Equal(1, patch.PrepareCount, "修复预检查次数");
             Equal(1, patch.EnsureCount, "修复启动次数");
             Equal(1, patch.ApplyCount, "补丁仅执行一次");
@@ -667,13 +891,14 @@ namespace SentinelManagerTest
             network(true);
             transport.Reply("action.html", "", payload: DisablePayload);
             network(false);
-            transport.Reply("action.html?Create_new_lmid", "已返回");
+            LmidUpdate(transport);
+            LmidRead(transport, NewLmid, () => Equal(1, patch.ApplyCount, "重启后 LMID 必须在补丁完成后读取"));
             network(false);
             transport.Reply("tab_dev.html", EmptyDevices);
             network(false);
 
             string text = Client(transport, patch).Repair();
-            Contains(text, "修复流程完成");
+            Contains(text, RepairCompleted);
             Contains(text, "测试配置已完成");
             Contains(text, "未检测到本机");
             Contains(text, "  访问远程授权：关闭");
@@ -702,11 +927,14 @@ namespace SentinelManagerTest
             var transport = new ScriptTransport();
             var patch = new FakePatch();
             RepairPrefix(transport);
-            transport.Fail("action.html?Create_new_lmid", new TimeoutException());
+            LmidRead(transport, OldLmid);
+            transport.Fail(ResetLmidPath, new TimeoutException());
+            for (int i = 0; i < 6; i++) LmidRead(transport, OldLmid);
             var failure = Reject(() => Client(transport, patch).Repair(), "一键修复未完成");
             Contains(failure.Message, "服务：运行中");
             Contains(failure.Message, "网络设置：");
-            Contains(failure.Message, "未确认 LMID 是否创建");
+            Contains(failure.Message, "LMID 未变化");
+            LmidCounts(transport, 7, 1);
             Equal(0, patch.ApplyCount, "LMID 异常不能继续补丁");
             transport.Done();
         }
@@ -716,11 +944,86 @@ namespace SentinelManagerTest
             var transport = new ScriptTransport();
             var patch = new FakePatch { ApplyFailure = new SentinelException("配置已写入；服务重启未完成") };
             RepairPrefix(transport);
-            transport.Reply("action.html?Create_new_lmid", "");
+            LmidUpdate(transport);
             var failure = Reject(() => Client(transport, patch).Repair(), "配置已写入");
             Contains(failure.Message, "网络设置：");
-            Contains(failure.Message, "LMID：请求已返回");
+            Contains(failure.Message, LmidVerified());
             Check(!failure.Message.Contains("修复流程完成"), "失败不能报告修复成功");
+            transport.Done();
+        }
+
+        private static void RepairLmidDelayedReadback()
+        {
+            var transport = new ScriptTransport();
+            var patch = new FakePatch();
+            var clock = new FakeClock();
+            RepairPrefix(transport);
+            LmidRead(transport, OldLmid, () => Equal(0, patch.ApplyCount, "重置前读取早于补丁"));
+            transport.Fail(ResetLmidPath, new TimeoutException());
+            LmidRead(transport, NewLmid, () => Equal(0, patch.ApplyCount, "更新回读早于补丁"));
+            transport.Fail(LmidPath, new TimeoutException());
+            LmidRead(transport, OldLmid, () => Equal(1, patch.ApplyCount, "重启后 LMID 在补丁完成后读取"));
+            LmidRead(transport, new string('C', 40));
+            transport.Reply(LmidPath, "/*JSON:diagnostics*/{}");
+            LmidRead(transport, new string('b', 40));
+            LmidRead(transport, NewLmid);
+            Network(transport, false);
+            transport.Reply("tab_dev.html", EmptyDevices);
+            Network(transport, false);
+            string text = Client(transport, patch, clock).Repair();
+            Contains(text, RepairCompleted);
+            Contains(text, LmidVerified());
+            Contains(text, "已通过回读核验，未重复发送请求。");
+            Contains(text, "LMID：服务重启后回读一致。");
+            LmidCounts(transport, 8, 1);
+            LmidWaits(clock, 5);
+            Equal(1, patch.ApplyCount, "重启后重试不重复执行补丁");
+            transport.Done();
+        }
+
+        private static void RepairLmidMismatch()
+        {
+            foreach (string actual in new[] { OldLmid, new string('C', 40), new string('b', 40) })
+            {
+                var transport = new ScriptTransport();
+                var patch = new FakePatch();
+                var clock = new FakeClock();
+                RepairPrefix(transport);
+                LmidUpdate(transport);
+                for (int i = 0; i < 6; i++)
+                    LmidRead(transport, actual, () => Equal(1, patch.ApplyCount, "重启核验必须在补丁之后"));
+                var failure = Reject(() => Client(transport, patch, clock).Repair(), "服务重启后 LMID");
+                Contains(failure.Message, "不一致");
+                Contains(failure.Message, LmidVerified());
+                Contains(failure.Message, "测试配置已完成");
+                Check(!failure.Message.Contains(RepairCompleted), "重启后不一致不能报告完成");
+                Check(!failure.Message.Contains("LMID：服务重启后回读一致。"), "不一致不能记录核验成功");
+                LmidCounts(transport, 8, 1);
+                LmidWaits(clock, 5);
+                Equal(1, patch.ApplyCount, "不一致不重复修改服务或配置");
+                Equal(4, transport.Calls.FindAll(call => call.Path == "_int_/conf_to.html"
+                    || call.Path == "_int_/conf_from.html").Count, "LMID 未核验时不继续重启后网络读取");
+                Equal(0, transport.Calls.FindAll(call => call.Path == "tab_dev.html").Count, "失败时不执行最终设备查询");
+                transport.Done();
+            }
+        }
+
+        private static void RepairLmidReadbackFailure()
+        {
+            var transport = new ScriptTransport();
+            var patch = new FakePatch();
+            var clock = new FakeClock();
+            RepairPrefix(transport);
+            LmidUpdate(transport);
+            for (int i = 0; i < 6; i++) transport.Fail(LmidPath, new TimeoutException());
+            var failure = Reject(() => Client(transport, patch, clock).Repair(), "服务重启后 LMID 回读失败");
+            Contains(failure.Message, LmidVerified());
+            Contains(failure.Message, "测试配置已完成");
+            Check(!failure.Message.Contains(RepairCompleted), "重启后读取失败不能报告完成");
+            LmidCounts(transport, 8, 1);
+            LmidWaits(clock, 5);
+            Equal(1, patch.ApplyCount, "回读失败不重复执行补丁");
+            Equal(13, transport.Calls.Count, "重启后六次读取失败立即停止，不执行网络或设备查询");
             transport.Done();
         }
 
@@ -728,7 +1031,8 @@ namespace SentinelManagerTest
         {
             var transport = new ScriptTransport();
             RepairPrefix(transport);
-            transport.Reply("action.html?Create_new_lmid", "");
+            LmidUpdate(transport);
+            LmidRead(transport, NewLmid);
             Network(transport, true);
             Reject(() => Client(transport).Repair(), "服务重启后仍检测到开启");
             transport.Done();
@@ -738,12 +1042,13 @@ namespace SentinelManagerTest
         {
             var transport = new ScriptTransport();
             RepairPrefix(transport);
-            transport.Reply("action.html?Create_new_lmid", "");
+            LmidUpdate(transport);
+            LmidRead(transport, NewLmid);
             Network(transport, false);
             transport.Fail("tab_dev.html", new TimeoutException());
             var failure = Reject(() => Client(transport).Repair(), "一键修复未完成");
             Contains(failure.Message, "测试配置已完成");
-            Contains(failure.Message, "LMID：请求已返回");
+            Contains(failure.Message, LmidVerified());
             transport.Done();
         }
 
@@ -761,13 +1066,14 @@ namespace SentinelManagerTest
                 commands.State(4);
                 var transport = new ScriptTransport();
                 RepairPrefix(transport);
-                transport.Reply("action.html?Create_new_lmid", "");
+                LmidUpdate(transport);
+                LmidRead(transport, NewLmid);
                 Network(transport, false);
                 transport.Reply("tab_dev.html", EmptyDevices);
                 Network(transport, false);
                 var clock = new FakeClock();
                 var client = new SentinelClient(transport, Patch(temp, commands, clock: clock), clock.Sleep);
-                Contains(client.Repair(), "修复流程完成");
+                Contains(client.Repair(), RepairCompleted);
                 Equal(ConfigText, File.ReadAllText(temp.Target), "完整修复写入临时配置");
                 Equal(2, commands.Calls.FindAll(action => action == "start").Count, "首次启动和配置后重启各一次");
                 commands.Done();
@@ -779,7 +1085,8 @@ namespace SentinelManagerTest
         {
             public double Seconds;
             public int SleepCount;
-            public void Sleep(TimeSpan duration) { Seconds += duration.TotalSeconds; SleepCount++; }
+            public readonly List<TimeSpan> Durations = new List<TimeSpan>();
+            public void Sleep(TimeSpan duration) { Seconds += duration.TotalSeconds; SleepCount++; Durations.Add(duration); }
         }
 
         private sealed class FakePatch : ILocalServicePatch
@@ -814,11 +1121,12 @@ namespace SentinelManagerTest
             private readonly Queue<Func<string, byte[], SentinelResponse>> expected = new Queue<Func<string, byte[], SentinelResponse>>();
             public readonly List<RequestCall> Calls = new List<RequestCall>();
             public int PostCount { get { return Calls.FindAll(call => call.Body != null).Count; } }
-            public void Reply(string path, string text, int status = 200, string payload = null)
+            public void Reply(string path, string text, int status = 200, string payload = null, Action check = null)
             {
                 expected.Enqueue((actual, body) =>
                 {
                     MatchRequest(path, payload, actual, body);
+                    if (check != null) check();
                     return new SentinelResponse(status, Encoding.UTF8.GetBytes(text));
                 });
             }

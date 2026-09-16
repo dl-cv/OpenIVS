@@ -155,6 +155,47 @@ namespace SentinelManager
             }
         }
 
+        public static string ReadLmid(string text)
+        {
+            CheckResponse(text);
+            const string marker = "/*JSON:diagnostics*/";
+            string trimmed = text.TrimStart();
+            if (!trimmed.StartsWith(marker, StringComparison.Ordinal))
+                throw new SentinelException("Sentinel LMID 诊断响应格式不受支持。");
+            try
+            {
+                var serializer = new JavaScriptSerializer { MaxJsonLength = MaximumResponseBytes, RecursionLimit = 64 };
+                int identifiers = 0;
+                // ACC 诊断对象使用裸字段名，完整保留字符串，只为字段名补充 JSON 引号。
+                var tokens = Pattern("(?<str>\"(?:\\\\.|[^\"\\\\\\r\\n])*\")(?<colon>\\s*:)?|(?<key>[A-Za-z_][A-Za-z0-9_]*)\\s*:");
+                string json = tokens.Replace(trimmed.Substring(marker.Length), match =>
+                {
+                    if (match.Groups["key"].Success)
+                    {
+                        string name = match.Groups["key"].Value;
+                        if (name == "srvguid") identifiers++;
+                        return serializer.Serialize(name) + ":";
+                    }
+                    if (match.Groups["colon"].Success
+                        && serializer.Deserialize<string>(match.Groups["str"].Value) == "srvguid") identifiers++;
+                    return match.Value;
+                });
+                string structure = Pattern("\"(?:\\\\.|[^\"\\\\\\r\\n])*\"").Replace(json, "\"\"");
+                if (structure.IndexOf('\'') >= 0)
+                    throw new FormatException("诊断字符串必须使用 JSON 双引号");
+                var fields = serializer.DeserializeObject(json) as Dictionary<string, object>;
+                object value;
+                if (identifiers != 1 || fields == null || !fields.TryGetValue("srvguid", out value)
+                    || !(value is string) || !Pattern(@"\A[A-Za-z0-9+/]{40}\z").IsMatch((string)value))
+                    throw new FormatException("LMID 字段缺失、重复或格式不符");
+                return (string)value;
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is FormatException)
+            {
+                throw new SentinelException("Sentinel LMID 数据不完整或格式不符，无法核验。", ex);
+            }
+        }
+
         private static Dictionary<string, Dictionary<string, string>> ReadInputs(string text)
         {
             CheckResponse(text);

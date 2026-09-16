@@ -42,7 +42,7 @@ namespace SentinelManagerTest
                     + "\n网络访问配置：\n  访问远程授权：允许\n  广播搜索远程授权：允许\n  远程客户端访问：允许\n"
                     + "\n数据来源：固定测试数据，不连接真实服务";
             }
-            public string CreateLmid() { Calls.Add("CreateLmid"); return "测试请求已返回，未确认 LMID 是否变化。"; }
+            public string CreateLmid() { Calls.Add("CreateLmid"); return "LMID 已更新并回读确认。\n原 LMID：" + new string('A', 40) + "\n新 LMID：" + new string('B', 40); }
             public string DisableNetwork() { Calls.Add("DisableNetwork"); return "测试三项网络设置已关闭。"; }
             public string ApplyLocalPatch() { Calls.Add("ApplyLocalPatch"); return "测试配置已写入，未操作真实配置或服务。"; }
             public string Repair() { Calls.Add("Repair"); return "测试一键修复完成，未操作真实配置或服务。"; }
@@ -267,7 +267,14 @@ namespace SentinelManagerTest
                         check("取消四项修改不请求服务", confirmations == 4 && client.Calls.Count == 1);
                         accepted = true;
                         foreach (var operation in new[] { SentinelOperation.CreateLmid, SentinelOperation.DisableNetwork, SentinelOperation.ApplyLocalPatch, SentinelOperation.Repair })
+                        {
                             await form.RunOperationAsync(operation);
+                            if (operation == SentinelOperation.CreateLmid)
+                                check("LMID 显示自动核验及前后值", raw.Text.Contains("LMID 已更新并回读确认")
+                                    && raw.Text.Contains("原 LMID：" + new string('A', 40))
+                                    && raw.Text.Contains("新 LMID：" + new string('B', 40))
+                                    && !raw.Text.Contains("ACC 核实"));
+                        }
                         check("四项修改确认后分别执行一次", confirmations == 8 && client.Calls.SequenceEqual(new[] { "GetInfo", "CreateLmid", "DisableNetwork", "ApplyLocalPatch", "Repair" }));
                         client.Fail = true;
                         await form.RunOperationAsync(SentinelOperation.GetInfo);
