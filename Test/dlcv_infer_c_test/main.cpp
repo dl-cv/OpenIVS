@@ -829,11 +829,11 @@ static bool RunAllCompatibilityFlowChecks() {
         const wchar_t* imagePath;
     };
     const FlowCase cases[] = {
-        {L"Y:\\测试模型\\AOI_120_50_s.dvst", L"Y:\\测试模型\\AOI-1.jpg"},
-        {L"Y:\\测试模型\\AOI-无CAD检测-20260721_120_50_s.dvst", L"Y:\\测试模型\\OK1.png"},
-        {L"Y:\\测试模型\\模型1-元件提取-20260721_120_50_s.dvst", L"Y:\\测试模型\\OK1.png"},
-        {L"Y:\\测试模型\\模型2-元件检测-20260721_120_50_s.dvst", L"Y:\\测试模型\\OK1.png"},
-        {L"Y:\\测试模型\\模型3-IC检测-20260721_120_50_s.dvst", L"Y:\\测试模型\\OK1.png"},
+        {L"Y:\\测试模型\\AOI-元件提取_PLUS_s.dvst", L"Y:\\测试模型\\AOI-1.jpg"},
+        {L"Y:\\测试模型\\AOI-无CAD检测_PLUS_s.dvst", L"Y:\\测试模型\\OK1.png"},
+        {L"Y:\\测试模型\\模型1-元件提取_PLUS_s.dvst", L"Y:\\测试模型\\OK1.png"},
+        {L"Y:\\测试模型\\模型2-元件检测_PLUS_s.dvst", L"Y:\\测试模型\\OK1.png"},
+        {L"Y:\\测试模型\\模型3-IC检测_PLUS_s.dvst", L"Y:\\测试模型\\OK1.png"},
     };
 
     bool ok = true;
@@ -2495,9 +2495,9 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    const std::wstring dvtPath = L"Y:\\测试模型\\猫狗-分类_120_50_s.dvt";
+    const std::wstring dvtPath = L"Y:\\测试模型\\猫狗-分类_PLUS_s.dvt";
     const std::wstring dvtImagePath = L"Y:\\测试模型\\猫狗-狗.jpg";
-    const std::wstring dvstPath = L"Y:\\测试模型\\AOI_120_50_s.dvst";
+    const std::wstring dvstPath = L"Y:\\测试模型\\AOI-元件提取_PLUS_s.dvst";
     const std::wstring dvstImagePath = L"Y:\\测试模型\\AOI-1.jpg";
 
     const cv::Mat dvtImage = ReadImageRgb(dvtImagePath);

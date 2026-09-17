@@ -47,9 +47,9 @@ namespace OpenIVSWPF
                 var cases = new JArray
                 {
                     MainWindow.RunDesktopSelfTestCase(
-                        "classification", modelRoot, "猫狗-分类_120_50_s.dvt", "猫狗-狗.jpg", "狗", 0.9951171875),
+                        "classification", modelRoot, "猫狗-分类_PLUS_s.dvt", "猫狗-狗.jpg", "狗", 0.9951171875),
                     MainWindow.RunDesktopSelfTestCase(
-                        "segmentation", modelRoot, "气球-实例分割_120_50_s.dvt", "气球.jpg", "气球", 0.9892578125)
+                        "segmentation", modelRoot, "气球-实例分割_PLUS_s.dvt", "气球.jpg", "气球", 0.9892578125)
                 };
 
                 bool passed = cases.Cast<JObject>().All(item => item.Value<bool>("passed"));

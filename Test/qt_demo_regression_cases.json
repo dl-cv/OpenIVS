@@ -5,7 +5,7 @@
   "inference_cases": [
     {
       "id": "classification_dvt",
-      "model": "猫狗-分类_120_50_s.dvt",
+      "model": "猫狗-分类_PLUS_s.dvt",
       "image": "猫狗-狗.jpg",
       "with_mask": true,
       "expected": {
@@ -38,7 +38,7 @@
     },
     {
       "id": "segmentation_dvt",
-      "model": "气球-实例分割_120_50_s.dvt",
+      "model": "气球-实例分割_PLUS_s.dvt",
       "image": "气球.jpg",
       "with_mask": true,
       "expected": {
@@ -54,7 +54,7 @@
     },
     {
       "id": "flow_dvst",
-      "model": "AOI_120_50_s.dvst",
+      "model": "AOI-元件提取_PLUS_s.dvst",
       "image": "AOI-测试.jpg",
       "with_mask": true,
       "expected": {

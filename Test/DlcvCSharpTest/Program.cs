@@ -1598,9 +1598,9 @@ namespace DlcvCSharpTest
 
         private static int RunSharedIndexFormatSelfTest()
         {
-            string dvtPath = Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
+            string dvtPath = Path.Combine(ModelRoot, "猫狗-分类_PLUS_s.dvt");
             string dvoPath = Path.Combine(ModelRoot, "猫狗-分类_s.dvo");
-            string dvstPath = Path.Combine(ModelRoot, "AOI_120_50_s.dvst");
+            string dvstPath = Path.Combine(ModelRoot, "AOI-元件提取_PLUS_s.dvst");
             string modelImagePath = Path.Combine(ModelRoot, "猫狗-猫.jpg");
             string flowImagePath = Path.Combine(ModelRoot, "AOI-测试.jpg");
             foreach (string path in new[] { dvtPath, dvoPath, dvstPath, modelImagePath, flowImagePath })
@@ -1635,8 +1635,8 @@ namespace DlcvCSharpTest
 
         private static int RunSharedIndexProviderModelSelfTest()
         {
-            string sentinelPath = Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
-            string virboxPath = Path.Combine(ModelRoot, "猫狗-分类_120_50_v.dvt");
+            string sentinelPath = Path.Combine(ModelRoot, "猫狗-分类_PLUS_s.dvt");
+            string virboxPath = Path.Combine(ModelRoot, "猫狗-分类_PLUS_v.dvt");
             string imagePath = Path.Combine(ModelRoot, "猫狗-猫.jpg");
             foreach (string path in new[] { sentinelPath, virboxPath, imagePath })
             {
@@ -5855,7 +5855,7 @@ namespace DlcvCSharpTest
                 : Path.Combine(ModelRoot, "猫狗-分类_s.dvo");
             string dvsPath = args != null && args.Length >= 3
                 ? args[2]
-                : Path.Combine(ModelRoot, "AOI_120_50_s.dvst");
+                : Path.Combine(ModelRoot, "AOI-元件提取_PLUS_s.dvst");
             foreach (string path in new[] { modelPath, dvsPath })
             {
                 if (!File.Exists(path))
@@ -6085,8 +6085,8 @@ namespace DlcvCSharpTest
                 Console.WriteLine("用法: free-all-modules-selftest [Sentinel模型路径 Virbox模型路径]");
                 return 2;
             }
-            string sentinelModelPath = args.Length == 3 ? args[1] : Path.Combine(ModelRoot, "猫狗-分类_120_50_s.dvt");
-            string virboxModelPath = args.Length == 3 ? args[2] : Path.Combine(ModelRoot, "猫狗-分类_120_50_v.dvt");
+            string sentinelModelPath = args.Length == 3 ? args[1] : Path.Combine(ModelRoot, "猫狗-分类_PLUS_s.dvt");
+            string virboxModelPath = args.Length == 3 ? args[2] : Path.Combine(ModelRoot, "猫狗-分类_PLUS_v.dvt");
             try
             {
                 DllLoader.EnsureForModel(sentinelModelPath);
