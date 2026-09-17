@@ -265,6 +265,9 @@ namespace DlcvCSharpTest
                     return RunDvstDoubleLoadSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "flow-stage-compare", StringComparison.OrdinalIgnoreCase))
+                    return RunFlowStageComparison(args);
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "shared-index-csharp-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunSharedIndexCSharpSelfTest(args);

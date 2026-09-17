@@ -263,3 +263,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 ## C# 共享实现位置
 
 C# 在 `DlcvCsharpApi/DllLoader.cs` 中直接解析实际已加载推理模块的最终五接口，不建立托管或 OpenIVS 原生流程记录表。`ModelFactory.CreateFromIndex` 负责模块查询、绑定、DVS 描述读取与失败配对释放；`DvsModel.LoadFromModelBindings` 根据描述建立 C# 执行对象。`Utils.GetAllModels()` 按模块保留底层快照并增加 `module_path`。`DlcvCsharpApi.csproj` 不引用 `dlcv_infer_cpp.vcxproj`，C# 发布清单不复制 `dlcv_infer_cpp.dll` 或其 OpenCV 运行库；混编测试工程仍保留自身所需的 C++/CLI 与包装 DLL 依赖。
+
+### 流程阶段比较
+
+`flow-stage-compare <model> <image> <device> <output-dir> <node-ids>` 在同一进程加载一次 DVS，复用底层子模型索引，为指定节点的执行前缀登记独立测试流程，选择该节点第一个图像与结果输出端口，以同一 RGB 图像和参数分别执行 C# 与正式 C/C++ JSON 入口。节点编号以逗号分隔，输出目录必须尚不存在。结果为 UTF-8 JSON，保存两种语言的结果与差异、子模型索引、实际模块路径与摘要，并检查输入图像在两次调用前后不变；原归档不修改。退出 0 表示所选节点一致，1 表示存在差异。
