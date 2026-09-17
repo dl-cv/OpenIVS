@@ -323,7 +323,7 @@ namespace DlcvDemo
                 || virboxDevices.Count > 0 || virboxFeatures.Count > 0;
         }
 
-        private static string FormatDogInfoText(JObject allInfo, bool prependNoDogHint)
+        internal static string FormatDogInfoText(JObject allInfo, bool prependNoDogHint)
         {
             JObject sentinel = allInfo["sentinel"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
             JObject virbox = allInfo["virbox"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
@@ -332,17 +332,32 @@ namespace DlcvDemo
             JArray virboxDevices = virbox["devices"] as JArray ?? new JArray();
             JArray virboxFeatures = virbox["features"] as JArray ?? new JArray();
 
-            string text =
-                "Sentinel加密狗ID：\n" + sentinelDevices.ToString() + "\n\n" +
-                "Sentinel加密狗特性：\n" + sentinelFeatures.ToString() + "\n\n" +
-                "Virbox加密狗ID：\n" + virboxDevices.ToString() + "\n\n" +
-                "Virbox加密狗特性：\n" + virboxFeatures.ToString();
+            string text = string.Join(
+                "\r\n\r\n",
+                FormatDogListSection("Sentinel加密狗ID", sentinelDevices),
+                FormatDogListSection("Sentinel加密狗特性", sentinelFeatures),
+                FormatDogListSection("Virbox加密狗ID", virboxDevices),
+                FormatDogListSection("Virbox加密狗特性", virboxFeatures));
 
             if (prependNoDogHint)
             {
-                text = "未检测到加密狗\n\n" + text;
+                text = "未检测到加密狗\r\n\r\n" + text;
             }
             return text;
+        }
+
+        private static string FormatDogListSection(string title, JArray items)
+        {
+            JArray list = items ?? new JArray();
+            return title + "（" + list.Count + "个）：\r\n" + ToTextBoxNewlines(list.ToString(Formatting.Indented));
+        }
+
+        private static string ToTextBoxNewlines(string text)
+        {
+            return (text ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Replace("\r", "\n")
+                .Replace("\n", "\r\n");
         }
 
         /// <summary>
@@ -1356,7 +1371,7 @@ namespace DlcvDemo
             }
 
             return FormatDogInfoText(allInfo, prependNoDogHint: true)
-                + "\n\n"
+                + "\r\n\r\n"
                 + normalizedEnvironmentInfo;
         }
 
