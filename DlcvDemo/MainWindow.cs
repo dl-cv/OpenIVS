@@ -323,7 +323,7 @@ namespace DlcvDemo
                 || virboxDevices.Count > 0 || virboxFeatures.Count > 0;
         }
 
-        private static string FormatDogInfoText(JObject allInfo, bool prependNoDogHint)
+        internal static string FormatDogInfoText(JObject allInfo, bool prependNoDogHint)
         {
             JObject sentinel = allInfo["sentinel"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
             JObject virbox = allInfo["virbox"] as JObject ?? new JObject { ["devices"] = new JArray(), ["features"] = new JArray() };
@@ -333,16 +333,22 @@ namespace DlcvDemo
             JArray virboxFeatures = virbox["features"] as JArray ?? new JArray();
 
             string text =
-                "Sentinel加密狗ID：\n" + sentinelDevices.ToString() + "\n\n" +
-                "Sentinel加密狗特性：\n" + sentinelFeatures.ToString() + "\n\n" +
-                "Virbox加密狗ID：\n" + virboxDevices.ToString() + "\n\n" +
-                "Virbox加密狗特性：\n" + virboxFeatures.ToString();
+                FormatDogListSection("Sentinel加密狗ID", sentinelDevices) + "\n\n" +
+                FormatDogListSection("Sentinel加密狗特性", sentinelFeatures) + "\n\n" +
+                FormatDogListSection("Virbox加密狗ID", virboxDevices) + "\n\n" +
+                FormatDogListSection("Virbox加密狗特性", virboxFeatures);
 
             if (prependNoDogHint)
             {
                 text = "未检测到加密狗\n\n" + text;
             }
             return text;
+        }
+
+        private static string FormatDogListSection(string title, JArray items)
+        {
+            JArray list = items ?? new JArray();
+            return title + "（" + list.Count + "个）：\n" + list.ToString(Formatting.Indented);
         }
 
         /// <summary>

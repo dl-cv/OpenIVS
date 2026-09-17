@@ -47,7 +47,7 @@
   - `nvml.dll`（NVIDIA 驱动自带）：用于枚举 GPU 名称；失败/缺失时的 UI 表现见 **6.2**
 - **加密狗检查（可选）**
   - `sntl_adminapi_windows_x64.dll` / `slm_control.dll`：用于读取加密狗信息
-  - 缺失时：`检查加密狗` 输出为空数组（`[]`），不应崩溃
+  - 缺失时：`检查加密狗` 各列表数量为 0，内容为换行后的空数组 `[]`，不应崩溃
   - 启动时可调用 `GetAllDogInfo()` 显示授权信息；默认 DLL 只在首次普通模型加载时根据模型头确定
 - **RPC 模式（按需）**
   - `AIModelRPC.exe`：优先从 `DlcvDemo` 输出目录启动；若不存在，可使用 SDK 固定路径（如 `C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe`）
@@ -457,7 +457,9 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 - 调用：`DogUtils.GetAllDogInfo()`（`ShowDogInfo()`）
 - Virbox 查询同时覆盖实体设备描述和离线本地软锁描述；授权码软锁的设备列表显示唯一锁号，特性列表显示许可 ID。
 - 输出到 `richTextBox1`（格式必须一致）：
-  - `Sentinel加密狗ID：\n{sentinelDeviceList}\n\nSentinel加密狗特性：\n{sentinelFeatureList}\n\nVirbox加密狗ID：\n{virboxDeviceList}\n\nVirbox加密狗特性：\n{virboxFeatureList}`
+  - 标题为 `Sentinel加密狗ID（N个）：`、`Sentinel加密狗特性（N个）：`、`Virbox加密狗ID（N个）：`、`Virbox加密狗特性（N个）：`，其中 `N` 为对应列表元素数量
+  - 每个列表使用 JSON 缩进格式，元素各自单独一行；空列表显示 `[]`
+  - 四段之间以空行分隔
 - 若 Sentinel/Virbox 的 devices 与 features 均为空：在上述内容前追加一行 `未检测到加密狗\n\n`
 - 启动流程可先做一次 `GetAllDogInfo()` 并显示授权状态；推理 DLL 不在此步骤选择，首次普通模型加载时才根据模型头确定默认 DLL
 

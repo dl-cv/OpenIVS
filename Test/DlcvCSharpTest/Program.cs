@@ -484,11 +484,14 @@ namespace DlcvCSharpTest
                 MethodInfo environmentFormatter = mainWindowType.GetMethod(
                     "FormatEnvironmentInfoText",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                MethodInfo dogFormatter = mainWindowType.GetMethod(
+                    "FormatDogInfoText",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 Type cliRunnerType = demoAssembly.GetType("DlcvDemo.CliRunner", throwOnError: true);
                 MethodInfo writeExceptionMethod = cliRunnerType.GetMethod(
                     "WriteException",
                     BindingFlags.NonPublic | BindingFlags.Static);
-                if (environmentFormatter == null || writeExceptionMethod == null)
+                if (environmentFormatter == null || dogFormatter == null || writeExceptionMethod == null)
                 {
                     throw new InvalidOperationException("未找到兼容性验证方法");
                 }
@@ -503,8 +506,45 @@ namespace DlcvCSharpTest
                     new object[] { "环境检查结果", noDogInfo });
                 RequireCliThreshold(
                     noDogText.StartsWith("未检测到加密狗", StringComparison.Ordinal)
-                    && noDogText.Contains("环境检查结果"),
+                    && noDogText.Contains("环境检查结果")
+                    && noDogText.Contains("Sentinel加密狗ID（0个）："),
                     "无加密狗提醒未保留在环境检查结果前面");
+
+                string emptyDogText = (string)dogFormatter.Invoke(null, new object[] { noDogInfo, false });
+                RequireCliThreshold(
+                    emptyDogText.Contains("Sentinel加密狗ID（0个）：")
+                    && emptyDogText.Contains("Sentinel加密狗特性（0个）：")
+                    && emptyDogText.Contains("Virbox加密狗ID（0个）：")
+                    && emptyDogText.Contains("Virbox加密狗特性（0个）："),
+                    "空列表未显示数量");
+
+                var filledDogInfo = new JObject
+                {
+                    ["sentinel"] = new JObject
+                    {
+                        ["devices"] = new JArray { "id-1", "id-2" },
+                        ["features"] = new JArray { "1", "2", "3" }
+                    },
+                    ["virbox"] = new JObject
+                    {
+                        ["devices"] = new JArray { "vb-1" },
+                        ["features"] = new JArray { "10", "11" }
+                    }
+                };
+                string filledDogText = (string)dogFormatter.Invoke(null, new object[] { filledDogInfo, false });
+                string expectedFilled =
+                    "Sentinel加密狗ID（2个）：\n" +
+                    new JArray { "id-1", "id-2" }.ToString(Formatting.Indented) + "\n\n" +
+                    "Sentinel加密狗特性（3个）：\n" +
+                    new JArray { "1", "2", "3" }.ToString(Formatting.Indented) + "\n\n" +
+                    "Virbox加密狗ID（1个）：\n" +
+                    new JArray { "vb-1" }.ToString(Formatting.Indented) + "\n\n" +
+                    "Virbox加密狗特性（2个）：\n" +
+                    new JArray { "10", "11" }.ToString(Formatting.Indented);
+                RequireCliThreshold(
+                    string.Equals(filledDogText, expectedFilled, StringComparison.Ordinal)
+                    && filledDogText.IndexOf("  \"id-1\"," + Environment.NewLine + "  \"id-2\"", StringComparison.Ordinal) >= 0,
+                    "加密狗列表未按数量换行显示");
 
                 var dogInfo = new JObject
                 {
@@ -802,6 +842,9 @@ namespace DlcvCSharpTest
                 RequireWinFormsSelfTest(
                     mainWindowType.GetMethod("FormatEnvironmentInfoText", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static) != null,
                     "未找到 MainWindow.FormatEnvironmentInfoText 方法。");
+                RequireWinFormsSelfTest(
+                    mainWindowType.GetMethod("FormatDogInfoText", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static) != null,
+                    "未找到 MainWindow.FormatDogInfoText 方法。");
 
                 Type optionsType = demoAssembly.GetType("DlcvDemo.UiTestOptions", throwOnError: true);
                 object options = Activator.CreateInstance(optionsType, true);
