@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using DlcvCSharpCppBridge;
@@ -150,6 +150,22 @@ namespace DlcvCSharpCppTest
             if (!HasCppModel)
                 throw new InvalidOperationException("C++ 模型尚未创建。");
             return JObject.Parse(cppModel.GetModelInfo()).ToString(Formatting.Indented);
+        }
+
+        public string GetCSharpDvsInfo()
+        {
+            ThrowIfDisposed();
+            if (!HasCSharpModel)
+                throw new InvalidOperationException("C# 模型尚未加载。");
+            return csharpModel.GetDvsModelInfo().ToString(Formatting.Indented);
+        }
+
+        public string GetCppDvsInfo()
+        {
+            ThrowIfDisposed();
+            if (!HasCppModel)
+                throw new InvalidOperationException("C++ 模型尚未创建。");
+            return JObject.Parse(cppModel.GetDvsModelInfo()).ToString(Formatting.Indented);
         }
 
         public void ReleaseCSharp()

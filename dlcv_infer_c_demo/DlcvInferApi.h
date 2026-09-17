@@ -27,6 +27,7 @@ public:
         const char* paramsJson) const;
     void freeModelResult(DlcvCResult* result) const;
     const char* getModelInfo(int modelIndex) const;
+    const char* getAllModels() const;
     void freeString(const char* value) const;
     void freeAllModels() const;
 
@@ -37,6 +38,7 @@ private:
     using InferWithParamsFunction = DlcvCResult(__cdecl*)(int, const DlcvCImageList*, const char*);
     using FreeModelResultFunction = void(__cdecl*)(DlcvCResult*);
     using GetModelInfoFunction = const char* (__cdecl*)(int);
+    using GetAllModelsFunction = const char* (__cdecl*)();
     using FreeStringFunction = void(__cdecl*)(const char*);
     using FreeAllModelsFunction = void(__cdecl*)();
 
@@ -63,6 +65,7 @@ private:
     InferWithParamsFunction inferWithParams_ = nullptr;
     FreeModelResultFunction freeModelResult_ = nullptr;
     GetModelInfoFunction getModelInfo_ = nullptr;
+    GetAllModelsFunction getAllModels_ = nullptr;
     FreeStringFunction freeString_ = nullptr;
     FreeAllModelsFunction freeAllModels_ = nullptr;
 };

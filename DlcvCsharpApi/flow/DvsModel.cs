@@ -129,7 +129,7 @@ namespace DlcvModules
                 {
                     if (modelsByIndex.ContainsKey(modelIndex)) continue;
                     modelsByIndex.Add(modelIndex, ownerLoader != null
-                        ? Model.CreateFromKnownLoader(modelIndex, ownerLoader)
+                        ? Model.CreateBorrowedDvsChild(modelIndex, ownerLoader)
                         : new Model { modelIndex = modelIndex, OwnModelIndex = false });
                 }
             }

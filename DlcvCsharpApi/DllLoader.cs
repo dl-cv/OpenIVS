@@ -1,8 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using sntl_admin_csharp;
 
@@ -47,32 +49,15 @@ namespace dlcv_infer_csharp
         public FreeAllModelsDelegate dlcv_free_all_models;
 
         [UnmanagedFunctionPointer(calling_method)]
-        public delegate int GetIndexTypeDelegate(int index);
-        public GetIndexTypeDelegate dlcv_get_index_type_c;
+        public delegate IntPtr SharedIndexJsonDelegate(IntPtr configJsonUtf8);
+        public SharedIndexJsonDelegate dlcv_get_index_type;
+        public SharedIndexJsonDelegate dlcv_register_dvs_model;
+        public SharedIndexJsonDelegate dlcv_get_dvs_model;
+        public SharedIndexJsonDelegate dlcv_bind_index;
 
         [UnmanagedFunctionPointer(calling_method)]
-        public delegate IntPtr GetModelInfoByIndexDelegate(int index);
-        public GetModelInfoByIndexDelegate dlcv_get_model_info_c;
-
-        [UnmanagedFunctionPointer(calling_method)]
-        public delegate int RegisterFlowDelegate(IntPtr flowJsonUtf8);
-        public RegisterFlowDelegate dlcv_register_flow_c;
-
-        [UnmanagedFunctionPointer(calling_method)]
-        public delegate IntPtr GetFlowInfoDelegate(int index);
-        public GetFlowInfoDelegate dlcv_get_flow_info_c;
-
-        [UnmanagedFunctionPointer(calling_method)]
-        public delegate int FreeFlowDelegate(int index);
-        public FreeFlowDelegate dlcv_free_flow_c;
-
-        [UnmanagedFunctionPointer(calling_method)]
-        public delegate int BindIndexDelegate(int index);
-        public BindIndexDelegate dlcv_bind_index_c;
-
-        [UnmanagedFunctionPointer(calling_method)]
-        public delegate int UnbindIndexDelegate(int index);
-        public UnbindIndexDelegate dlcv_unbind_index_c;
+        public delegate IntPtr GetAllModelsDelegate();
+        public GetAllModelsDelegate dlcv_get_all_models;
 
         [UnmanagedFunctionPointer(calling_method)]
         public delegate IntPtr GetDeviceInfo();
@@ -97,18 +82,25 @@ namespace dlcv_infer_csharp
         public DogProvider LoadedDogProvider { get; private set; }
         public string LoadedNativeDllName { get; private set; }
         internal string LoadedNativeModulePath { get { return _modulePath; } }
-        internal bool SupportsSharedFlowIndex
+        internal bool SupportsSharedIndex
         {
             get
             {
-                return dlcv_get_index_type_c != null &&
-                       dlcv_get_model_info_c != null &&
-                       dlcv_register_flow_c != null &&
-                       dlcv_get_flow_info_c != null &&
-                       dlcv_free_flow_c != null &&
-                       dlcv_bind_index_c != null &&
-                       dlcv_unbind_index_c != null &&
+                return dlcv_get_index_type != null &&
+                       dlcv_bind_index != null &&
+                       dlcv_get_model_info != null &&
+                       dlcv_free_model != null &&
                        dlcv_free_result != null;
+            }
+        }
+
+        internal bool SupportsDvsRegistration
+        {
+            get
+            {
+                return SupportsSharedIndex &&
+                       dlcv_register_dvs_model != null &&
+                       dlcv_get_dvs_model != null;
             }
         }
 
@@ -159,14 +151,12 @@ namespace dlcv_infer_csharp
             }
         }
 
-        internal static DllLoader GetExistingOrDefaultSentinel()
+        internal static DllLoader GetSingleLoadedLoaderForDvsRegistration()
         {
             lock (_lock)
             {
-                if (_instance != null)
-                    return _instance;
-
-                _instance = CreateLoader(DogProvider.Sentinel);
+                if (_instance == null || _instance._moduleHandle == IntPtr.Zero)
+                    _instance = CreateLoader(DogProvider.Sentinel);
                 return _instance;
             }
         }
@@ -220,7 +210,7 @@ namespace dlcv_infer_csharp
         internal static DllLoader ResolveSharedIndexLoader(int index, out string indexType)
         {
             if (index < 0)
-                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 不能为负数: " + index);
+                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 必须是非负整数: " + index);
 
             List<DllLoader> candidates;
             lock (_lock)
@@ -237,7 +227,7 @@ namespace dlcv_infer_csharp
             out string indexType)
         {
             if (index < 0)
-                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 不能为负数: " + index);
+                throw new ArgumentOutOfRangeException(nameof(index), "外部共享 index 必须是非负整数: " + index);
             if (candidates == null)
                 throw new ArgumentNullException(nameof(candidates));
 
@@ -247,7 +237,7 @@ namespace dlcv_infer_csharp
             var matchingModuleNames = new List<string>();
             foreach (DllLoader candidate in candidates)
             {
-                if (candidate.dlcv_get_index_type_c == null)
+                if (candidate.dlcv_get_index_type == null)
                     continue;
                 hasTypeQuery = true;
 
@@ -278,7 +268,7 @@ namespace dlcv_infer_csharp
             if (!hasTypeQuery)
             {
                 throw new NotSupportedException(
-                    "进程内没有已加载且提供 dlcv_get_index_type_c 的推理 DLL，无法恢复共享 index");
+                    "进程内没有已加载且提供 dlcv_get_index_type 的推理 DLL，无法恢复共享 index");
             }
             if (matchedLoader == null)
                 throw new InvalidOperationException("进程内已加载的推理 DLL 均未找到共享 index: " + index);
@@ -288,51 +278,147 @@ namespace dlcv_infer_csharp
                     "共享 index 同时存在于多个 DLL，无法确定所属模块: " + string.Join("、", matchingModuleNames));
             }
 
-            indexType = matchedType == 1 ? "model" : "flow";
+            indexType = matchedType == 1 ? "model" : "dvs";
             return matchedLoader;
         }
 
         internal void EnsureSharedIndexSupport(string indexType)
         {
             var missing = new List<string>();
-            if (dlcv_get_index_type_c == null) missing.Add("dlcv_get_index_type_c");
-            if (dlcv_bind_index_c == null) missing.Add("dlcv_bind_index_c");
-            if (dlcv_unbind_index_c == null) missing.Add("dlcv_unbind_index_c");
+            if (dlcv_get_index_type == null) missing.Add("dlcv_get_index_type");
+            if (dlcv_bind_index == null) missing.Add("dlcv_bind_index");
+            if (dlcv_get_model_info == null) missing.Add("dlcv_get_model_info");
+            if (dlcv_free_model == null) missing.Add("dlcv_free_model");
             if (dlcv_free_result == null) missing.Add("dlcv_free_result");
-            if (dlcv_get_model_info_c == null) missing.Add("dlcv_get_model_info_c");
-            if (string.Equals(indexType, "flow", StringComparison.Ordinal) && dlcv_get_flow_info_c == null)
-                missing.Add("dlcv_get_flow_info_c");
+            if (string.Equals(indexType, "dvs", StringComparison.Ordinal) && dlcv_get_dvs_model == null)
+                missing.Add("dlcv_get_dvs_model");
             if (missing.Count > 0)
             {
                 throw new NotSupportedException(
-                    "当前 dlcv_infer 不支持外部共享 index，缺少接口: " + string.Join(", ", missing));
+                    "当前 dlcv_infer 不支持共享 index，缺少接口: " + string.Join(", ", missing));
             }
+        }
+
+        internal void EnsureDvsRegistrationSupport()
+        {
+            EnsureSharedIndexSupport("dvs");
+            if (dlcv_register_dvs_model == null)
+                throw new NotSupportedException("当前 dlcv_infer 不支持 DVS 登记，缺少接口: dlcv_register_dvs_model");
         }
 
         public int GetIndexType(int index)
         {
-            EnsureDelegate(dlcv_get_index_type_c, "dlcv_get_index_type_c");
-            return dlcv_get_index_type_c(index);
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
+            JObject result = InvokeSharedJson(
+                dlcv_get_index_type, new JObject { ["model_index"] = index }, "查询模型索引");
+            int code = ReadSharedResponseCode(result, "查询模型索引");
+            if (code == 2)
+                return 0;
+            if (code != 0)
+                throw new InvalidOperationException("查询模型索引失败：" + ReadSharedResponseMessage(result));
+            ValidateSharedResource(result, index, null, "查询模型索引");
+            return string.Equals(result["resource_type"].ToString(), "model", StringComparison.Ordinal) ? 1 : 2;
         }
 
         public JObject GetModelInfoByIndex(int index)
         {
-            EnsureDelegate(dlcv_get_model_info_c, "dlcv_get_model_info_c");
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
+            EnsureDelegate(dlcv_get_model_info, "dlcv_get_model_info");
             EnsureDelegate(dlcv_free_result, "dlcv_free_result");
-            return ReadJsonResult(dlcv_get_model_info_c(index), "获取模型信息");
+            var config = new JObject { ["model_index"] = index };
+            return ReadLegacyJsonResult(
+                dlcv_get_model_info(config.ToString(Formatting.None)), "获取模型信息");
         }
 
-        public int RegisterFlow(string flowJson)
+        public int RegisterDvsModel(string dvsJson)
         {
-            if (flowJson == null)
-                throw new ArgumentNullException(nameof(flowJson));
-            EnsureDelegate(dlcv_register_flow_c, "dlcv_register_flow_c");
+            if (dvsJson == null)
+                throw new ArgumentNullException(nameof(dvsJson));
+            EnsureDvsRegistrationSupport();
 
-            byte[] bytes = Encoding.UTF8.GetBytes(flowJson + "\0");
+            JObject descriptor;
+            try
+            {
+                descriptor = JObject.Parse(dvsJson);
+            }
+            catch (JsonException ex)
+            {
+                throw new ArgumentException("DVS 描述必须是 JSON 对象", nameof(dvsJson), ex);
+            }
+            JObject result = InvokeSharedJson(dlcv_register_dvs_model, descriptor, "登记 DVS");
+            int code = ReadSharedResponseCode(result, "登记 DVS");
+            if (code != 0)
+                throw new InvalidOperationException("登记 DVS 失败：" + ReadSharedResponseMessage(result));
+            int index = ReadNonNegativeModelIndex(result, "登记 DVS");
+            ValidateSharedResource(result, index, "dvs", "登记 DVS");
+            return index;
+        }
+
+        public JObject GetDvsModel(int index)
+        {
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
+            JObject result = InvokeSharedJson(
+                dlcv_get_dvs_model, new JObject { ["model_index"] = index }, "获取 DVS 信息");
+            int code = ReadSharedResponseCode(result, "获取 DVS 信息");
+            if (code != 0)
+                throw new InvalidOperationException("获取 DVS 信息失败：" + ReadSharedResponseMessage(result));
+            ValidateSharedResource(result, index, "dvs", "获取 DVS 信息");
+            return result;
+        }
+
+        public int BindIndex(int index)
+        {
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
+            JObject result = InvokeSharedJson(
+                dlcv_bind_index, new JObject { ["model_index"] = index }, "绑定模型索引");
+            int code = ReadSharedResponseCode(result, "绑定模型索引");
+            if (code != 0)
+                throw new InvalidOperationException("绑定模型索引失败：" + ReadSharedResponseMessage(result));
+            ValidateSharedResource(result, index, null, "绑定模型索引");
+            return 0;
+        }
+
+        internal JObject FreeModelIndex(int index)
+        {
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index), "index 必须是非负整数");
+            EnsureDelegate(dlcv_free_model, "dlcv_free_model");
+            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
+            var config = new JObject { ["model_index"] = index };
+            return ReadLegacyJsonResult(
+                dlcv_free_model(config.ToString(Formatting.None)), "释放模型");
+        }
+
+        internal JObject GetAllModelsSnapshot()
+        {
+            EnsureDelegate(dlcv_get_all_models, "dlcv_get_all_models");
+            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
+            JObject snapshot = ReadJsonResult(dlcv_get_all_models(), "获取模型列表");
+            snapshot["module_path"] = _modulePath ?? string.Empty;
+            return snapshot;
+        }
+
+        internal void FreeAllModels()
+        {
+            dlcv_free_all_models?.Invoke();
+        }
+
+        private JObject InvokeSharedJson(SharedIndexJsonDelegate function, JObject request, string operation)
+        {
+            if (request == null)
+                throw new ArgumentNullException(nameof(request));
+            EnsureDelegate(function, operation);
+            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
+
+            byte[] bytes = Encoding.UTF8.GetBytes(request.ToString(Formatting.None) + "\0");
             GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
             try
             {
-                return dlcv_register_flow_c(handle.AddrOfPinnedObject());
+                return ReadJsonResult(function(handle.AddrOfPinnedObject()), operation);
             }
             finally
             {
@@ -340,29 +426,67 @@ namespace dlcv_infer_csharp
             }
         }
 
-        public JObject GetFlowInfo(int index)
+        private static int ReadSharedResponseCode(JObject result, string operation)
         {
-            EnsureDelegate(dlcv_get_flow_info_c, "dlcv_get_flow_info_c");
-            EnsureDelegate(dlcv_free_result, "dlcv_free_result");
-            return ReadJsonResult(dlcv_get_flow_info_c(index), "获取流程信息");
+            if (result == null || result["code"] == null || result["code"].Type != JTokenType.Integer ||
+                result["message"] == null || result["message"].Type != JTokenType.String)
+            {
+                throw new InvalidDataException(operation + "返回结构无效");
+            }
+            int code;
+            if (!TryReadInt32(result["code"], out code))
+                throw new InvalidDataException(operation + "返回状态码无效");
+            if (code < 0 || code > 3)
+                throw new InvalidDataException(operation + "返回未知状态码: " + code);
+            return code;
         }
 
-        public int FreeFlow(int index)
+        private static string ReadSharedResponseMessage(JObject result)
         {
-            EnsureDelegate(dlcv_free_flow_c, "dlcv_free_flow_c");
-            return dlcv_free_flow_c(index);
+            return result != null && result["message"] != null && result["message"].Type == JTokenType.String
+                ? result["message"].ToString()
+                : "未返回错误说明";
         }
 
-        public int BindIndex(int index)
+        private static bool TryReadInt32(JToken value, out int result)
         {
-            EnsureDelegate(dlcv_bind_index_c, "dlcv_bind_index_c");
-            return dlcv_bind_index_c(index);
+            result = 0;
+            return value != null && value.Type == JTokenType.Integer &&
+                   int.TryParse(
+                       value.ToString(Formatting.None),
+                       NumberStyles.Integer,
+                       CultureInfo.InvariantCulture,
+                       out result);
         }
 
-        public int UnbindIndex(int index)
+        private static int ReadNonNegativeModelIndex(JObject result, string operation)
         {
-            EnsureDelegate(dlcv_unbind_index_c, "dlcv_unbind_index_c");
-            return dlcv_unbind_index_c(index);
+            int value;
+            if (result == null || !TryReadInt32(result["model_index"], out value) || value < 0)
+                throw new InvalidDataException(operation + "返回的 model_index 无效或超出范围");
+            return value;
+        }
+
+        private static void ValidateSharedResource(
+            JObject result, int expectedIndex, string expectedType, string operation)
+        {
+            int actualIndex = ReadNonNegativeModelIndex(result, operation);
+            if (actualIndex != expectedIndex || result["resource_type"] == null ||
+                result["resource_type"].Type != JTokenType.String)
+            {
+                throw new InvalidDataException(operation + "返回资源信息无效");
+            }
+            string resourceType = result["resource_type"].ToString();
+            if (expectedType != null)
+            {
+                if (!string.Equals(resourceType, expectedType, StringComparison.Ordinal))
+                    throw new InvalidDataException(operation + "返回资源类型不一致");
+            }
+            else if (!string.Equals(resourceType, "model", StringComparison.Ordinal) &&
+                     !string.Equals(resourceType, "dvs", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(operation + "返回未知资源类型");
+            }
         }
 
         private JObject ReadJsonResult(IntPtr resultPtr, string operation)
@@ -373,6 +497,24 @@ namespace dlcv_infer_csharp
             try
             {
                 string json = ReadUtf8String(resultPtr);
+                if (string.IsNullOrWhiteSpace(json))
+                    throw new Exception(operation + "失败：返回 JSON 为空");
+                return JObject.Parse(json);
+            }
+            finally
+            {
+                dlcv_free_result(resultPtr);
+            }
+        }
+
+        private JObject ReadLegacyJsonResult(IntPtr resultPtr, string operation)
+        {
+            if (resultPtr == IntPtr.Zero)
+                throw new Exception(operation + "失败：返回结果为空");
+
+            try
+            {
+                string json = Marshal.PtrToStringAnsi(resultPtr);
                 if (string.IsNullOrWhiteSpace(json))
                     throw new Exception(operation + "失败：返回 JSON 为空");
                 return JObject.Parse(json);
@@ -605,13 +747,11 @@ namespace dlcv_infer_csharp
             dlcv_free_model_result = GetDelegate<FreeModelResultDelegate>(hModule, "dlcv_free_model_result");
             dlcv_free_result = GetDelegate<FreeResultDelegate>(hModule, "dlcv_free_result");
             dlcv_free_all_models = GetDelegate<FreeAllModelsDelegate>(hModule, "dlcv_free_all_models");
-            dlcv_get_index_type_c = GetDelegate<GetIndexTypeDelegate>(hModule, "dlcv_get_index_type_c");
-            dlcv_get_model_info_c = GetDelegate<GetModelInfoByIndexDelegate>(hModule, "dlcv_get_model_info_c");
-            dlcv_register_flow_c = GetDelegate<RegisterFlowDelegate>(hModule, "dlcv_register_flow_c");
-            dlcv_get_flow_info_c = GetDelegate<GetFlowInfoDelegate>(hModule, "dlcv_get_flow_info_c");
-            dlcv_free_flow_c = GetDelegate<FreeFlowDelegate>(hModule, "dlcv_free_flow_c");
-            dlcv_bind_index_c = GetDelegate<BindIndexDelegate>(hModule, "dlcv_bind_index_c");
-            dlcv_unbind_index_c = GetDelegate<UnbindIndexDelegate>(hModule, "dlcv_unbind_index_c");
+            dlcv_get_index_type = GetDelegate<SharedIndexJsonDelegate>(hModule, "dlcv_get_index_type");
+            dlcv_register_dvs_model = GetDelegate<SharedIndexJsonDelegate>(hModule, "dlcv_register_dvs_model");
+            dlcv_get_dvs_model = GetDelegate<SharedIndexJsonDelegate>(hModule, "dlcv_get_dvs_model");
+            dlcv_bind_index = GetDelegate<SharedIndexJsonDelegate>(hModule, "dlcv_bind_index");
+            dlcv_get_all_models = GetDelegate<GetAllModelsDelegate>(hModule, "dlcv_get_all_models");
             IntPtr gpuInfoPtr = GetProcAddress(hModule, "dlcv_get_gpu_info");
             dlcv_get_gpu_info = gpuInfoPtr != IntPtr.Zero ? (GetGpuInfo)Marshal.GetDelegateForFunctionPointer(gpuInfoPtr, typeof(GetGpuInfo)) : null;
             IntPtr devInfoPtr = GetProcAddress(hModule, "dlcv_get_device_info");

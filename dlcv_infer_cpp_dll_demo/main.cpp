@@ -609,7 +609,7 @@ bool ParseBoolArg(const std::string& text, bool& out) {
 
 bool IsCommandName(const std::string& text) {
     return text == "help" || text == "--help" || text == "load-model" || text == "list-models"
-        || text == "model-info" || text == "dvs-model-info" || text == "infer"
+        || text == "list-sdk-models" || text == "model-info" || text == "dvs-model-info" || text == "infer"
         || text == "benchmark" || text == "free-model" || text == "free-all-models";
 }
 
@@ -701,6 +701,7 @@ void PrintCommandHelp(const char* exeName) {
               << "\n命令可用 --then 串联，模型名称只在本次进程内有效。\n"
               << "  load-model <名称> <模型> [--device N]\n"
               << "  list-models\n"
+              << "  list-sdk-models\n"
               << "  model-info <名称>\n"
               << "  dvs-model-info <名称>\n"
               << "  infer <名称> <图片> [--threshold F] [--with-mask true|false] [--calc-mean true|false]\n"
@@ -969,6 +970,11 @@ int RunCommandSegment(const std::vector<std::string>& segment, CommandModelMap& 
             }
             return 0;
         }
+        if (command == "list-sdk-models") {
+            if (!requireCount(0)) return 2;
+            std::cout << dlcv_infer::Utils::GetAllModels().dump(2) << std::endl;
+            return 0;
+        }
         if (command == "model-info" || command == "dvs-model-info") {
             if (!requireCount(1)) return 2;
             LoadedCommandModel* entry = nullptr;
@@ -1090,6 +1096,17 @@ int main(int argc, char** argv) {
         PrintUsage("dlcv_infer_cpp_dll_demo");
         PrintCommandHelp("dlcv_infer_cpp_dll_demo");
         return 0;
+    }
+
+    if (argc == 2 && std::string(argv[1]) == "list-sdk-models") {
+        // 独立枚举只读取已加载模块，不执行推理初始化或全量释放。
+        CommandModelMap models;
+        std::string error;
+        const int code = RunCommandSegment({ "list-sdk-models" }, models, error);
+        if (code != 0) {
+            std::cerr << (code == 2 ? "参数错误: " : "执行失败: ") << error << std::endl;
+        }
+        return code;
     }
 
     if (argc >= 2 && !IsLegacyFirstArgument(argv[1])) {

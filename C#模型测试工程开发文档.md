@@ -108,6 +108,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - `help`
 - `load-model`
 - `list-models`
+- `all-models`（C#，输出按实际已加载模块分组的底层资源快照）
 - `model-info`
 - `dvs-model-info`
 - `infer`
@@ -130,7 +131,8 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 | --- | --- |
 | `help` | 无位置参数、无可选参数 |
 | `load-model` | `<名称> <模型路径>`；C# 支持 `--device N`、`--rpc true\|false`、`--replace true\|false`；C++ 支持 `--device N`、`--replace true\|false` |
-| `list-models` | 无参数 |
+| `list-models` | 无参数，显示当前工作流名称表 |
+| `all-models` | 无参数；C# 输出 `Utils.GetAllModels()` JSON，不额外加载其他推理模块 |
 | `model-info` | `<名称>` |
 | `dvs-model-info` | `<名称>` |
 | `infer` | `<名称> <图片>`；支持 `--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
@@ -148,7 +150,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 ### 5.3 返回状态
 
 - `0`：命令或完整命令串执行成功。
-- `1`：模型加载、接口调用、图片读取、推理或释放参数无效。有效非负 `int` 编号的释放即使资源已不存在或底层报错也按成功处理。
+- `1`：模型加载、接口调用、图片读取、推理或释放参数无效。除 `-1` 外的有效 `int` 编号的释放即使资源已不存在或底层报错也按成功处理。
 - `2`：命令不存在、位置参数数量错误、参数值错误或命令不支持指定可选参数。
 - `3`：保留给程序启动阶段的未处理状态。
 
@@ -198,7 +200,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `calc-mean-selftest`
   - `category-count-check-selftest`
   - `shared-index-csharp-selftest <model.dvo> <flow.dvst> <image> [deviceId]`
-  - `shared-index-review-selftest [model.dvo] [flow.dvst] [virbox-model.dvt]`
+  - `shared-index-review-selftest [model.dvo] [flow.dvst]`
   - `shared-index-format-selftest`
   - `shared-index-provider-model-selftest`
 
@@ -219,6 +221,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `dvs-memory-loading-selftest <modelPath> <imagePath> [device]`
   - `dvsp-reject-selftest <modelPath> [device]`
   - `create-model-from-index-selftest <modelPath> [device]`
+- `dlcv_infer_cpp_test.exe sliding-merge-selftest` 为无模型回归，覆盖带滑窗元信息的单窗口小数框、正负半整数取整、多窗口合并框和分组首次出现顺序。
 - `create-model-from-index-selftest` 检查 C++ 头文件内联辅助函数创建时增加 index 使用次数、对象释放时减少使用次数；流程模型还会检查 `FreeAllModels()` 清空模型池、旧流程对象在底层释放失败后完成本地清理，以及相同流程能够重新加载。
 - `DlcvCSharpTest.exe category-count-check-selftest` 与 `dlcv_infer_cpp_test.exe category-count-check-selftest` 验证类型数量规则、同一原图局部结果聚合、粘性 `ok=false`、字符串或数组 `reason`、Flow 输出包装及旧流程兼容行为。
 - `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
@@ -228,35 +231,19 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - 流程模型加载期间保留已经加载成功的模型模块，流程对象取得模型池引用后再释放临时模块；每个不同的子模型只执行一次原生加载。
   - 成功返回 `0`，模型加载异常返回 `1`，参数数量错误返回 `2`。
 - `DlcvCSharpTest.exe calc-mean-selftest` 检查结果构造函数、均值字段，以及 Flow 节点默认值、入口显式覆盖和后续恢复。
-- `DlcvCSharpTest.exe shared-index-review-selftest` 检查以下事实：
-  - C#、C++ 对同一普通模型连续加载两次后释放，底层 index 应被清除。
-  - C++ 连续加载同一流程两次并释放后，共用的子模型 index 应被清除。
-  - 普通模型和流程各建立两个借用对象；持有方与首个借用对象释放后，第二个借用对象仍可读取模型信息，最后释放时 index 应被清除。
-  - `ModelFactory.CreateFromIndex` 创建时立即增加普通模型 index 的使用次数；持有方释放后借用对象仍可查询，借用对象显式释放后 index 被清除。
-  - `ModelFactory.CreateFromIndex` 创建的借用对象未显式释放时，强制 GC 会执行终结器并撤销 index 使用记录。
-  - 人为提前解绑一个流程子模型，使后续子模型释放返回失败；流程对象仍清除本地模型、来源和绑定状态，外层 flow index 被释放，连续 Dispose 不再重复调用底层释放。
-  - 空流程 `GetModelInfo()` 不应返回流程节点 JSON。
-  - 源文件删除后，按路径再次加载应失败；已经取得的普通模型 index 和流程 index 仍可读取模型信息。
-  - 恢复不按模型/流程类型、编号数值或 `bit8` 推导所属 DLL；只枚举进程内实际已加载且具备类型查询导出的目标 DLL，不加载其他 infer DLL，并由各 DLL 查询 index 类型。
-  - `dlcv_get_index_type_c` 返回 `-1` 或未知值时应报错，不能当作不存在；只有一个候选 DLL 返回有效结果时先保存该 loader，再检查所需导出并执行绑定，缺少接口、绑定失败或后续恢复失败时不改选其他 DLL。
-  - 无结果、多个结果、查询异常或绑定失败均应报错；失败重试继续使用已保存的 loader。
-  - `ResolveForIndex` 对不存在的 index 应失败，不能仅依据编号数值返回类型。
-  - 未传路径时，默认使用 `Y:\测试模型` 中的 Sentinel DVO、Sentinel DVST 和 Virbox DVT。
-- `DlcvCSharpTest.exe shared-index-format-selftest` 使用实际生成的 DVT、DVO 和 DVST 分别检查 C# 持有/C++ 借用、C++ 持有/C# 借用两种方向；当前未包含独立 DVSO 产物，不通过改后缀或拼接文件替代。
+- `DlcvCSharpTest.exe shared-index-format-selftest` 保持 DVT、DVO、DVST 的既有推理比较范围，分别检查 C# 持有/C++ 借用、C++ 持有/C# 借用两种方向。DVSO 的索引共享、描述恢复与释放由混编工程的四格式回归检查。
+- `shared-index-csharp-selftest <普通模型> <DVSO流程> <图片> <设备编号>` 可单独验证 DVSO。正式加速器从 AOI DVSP 生成的 ONNX Runtime DVSO，在 CPU -1 与 GPU 0 下均通过双向共享及逐目标推理比较。同一加速配置生成的无 CAD DVSO 在 C++ 滑窗合并按端点取整并保持分组输出顺序后，CPU -1、GPU 0 的最终输出均为两种语言各 34 个目标，完整结果数组及顺序一致；CPU 双向共享推理检查通过。
 - `DlcvCSharpTest.exe shared-index-provider-model-selftest` 使用两种加密狗格式各自独立生成的普通模型，验证实际加载 DLL 的索引归属、双向读取和推理结果；两个模型作为各自独立的实际产品输入，不组成混合格式流程，也不以编号数值推导资源类型。
   - `all-tests` 已加入上述共享 index 测试；任一专项返回非零时，统一测试返回失败。
 - `DlcvCSharpTest.exe native-c-api-regression-selftest` 使用正式 C ABI 检查不存在模型的 `code=2` 和 `Model not found.`、有效编号重复释放成功，以及 JSON 编号范围和类型。
 - `DlcvCSharpTest.exe shared-index-native-rule-selftest` 调用编号脚本输出的 `Release/dlcv_infer_cpp_test.exe shared-index-rules-selftest`，检查退出码并按原生程序的 GBK 输出严格解码；跨语言模型加载与推理仍在同一进程使用正式 C ABI 验证。
-- `DlcvCSharpTest.exe shared-index-csharp-selftest` 依次执行以下检查：
-  - C# `Model(modelPath)` 加载普通模型，底层 `dlcv_get_model_info_c` 可按同一 index 查询；空构造 `Model` 借用后完成推理，借用实例释放后持有方继续推理。
-  - 同一空构造实例先使用不存在的 index 触发失败，再改为有效 index，确认恢复状态可重试并完成推理。
-  - 底层 `dlcv_load_model_c` 加载普通模型，C# 空构造 `Model` 按 index 查询和推理；C# 借用实例释放后底层模型仍可查询。
-  - C# `Model(flowPath)` 直接加载 DVST 时使用包内 `pipeline` 和子模型数据，并清除遗留 `model_index`；共享恢复时才使用已登记的 `pipeline` 和 `model_bindings`，不读取归档文件。绑定中的编号只接受非负 `int` 范围 JSON 整数。
-  - 每次恢复时查询进程内实际已加载的目标 DLL；旧版共享接口完整的 DLL、新版 bit8 编号 DLL 以及新旧混用的唯一有效结果均按查询结果绑定，歧义和异常均拒绝恢复。
-  - 流程恢复时所有子模型沿父流程选定的 loader 校验、绑定和复用，不为子模型重新搜索其他 DLL。
-  - `dvsp-disabled-selftest` 检查 C# API 对 `.dvsp` 直接返回不支持错误。
-  - `empty-flow-index-selftest` 检查无模型节点 DVST 可由 C#、C++ 分别登记，并检查 C# 可按 C++ flow index 恢复空绑定流程。
-  - 每种情况在最终持有方释放后检查 index 已从共享表移除；按 index 释放时，无效参数可返回参数错误；有效编号即使已不存在或底层报错也返回成功并完成本地清理，重复释放同样成功，错误详情只记录在日志或消息中。借用结果与持有方结果按类别、目标数量、分数和 bbox 容差比较。
+- `DlcvCSharpTest.exe shared-index-csharp-selftest` 依次验证普通模型与传入 DVS 流程的双向共享：C# 文件加载后供正式 C/C++ 入口按 index 使用，以及 C/C++ 文件加载后由 `ModelFactory.CreateFromIndex` 恢复。每个方向均检查创建方先释放后共享方仍可读取和推理、共享方先释放后创建方仍可使用、重复释放不重复消耗持有、最终释放后 index 消失。
+- `empty-dvs-first-load-selftest` 在没有预先加载推理模块的进程中创建空 DVS，检查默认模块选择、完整 DVS 信息和释放后的索引失效。
+- `shared-index-route-selftest` 使用可控委托检查最终五接口、四个共享 JSON 接口的结果释放、唯一模块选择、多模块同编号错误、`code=2` 不存在结果、查询错误不改选、负数 index 拒绝、DVS 登记字段、DVS 查询结果、统一普通释放和 DVS 子模型执行对象不重复 bind/free。
+- `shared-index-review-selftest` 使用实际普通模型与 DVST 检查两个共享方生命周期、DVS 子模型持有、最终释放、`Utils.GetAllModels()` 模块快照和列表查询不额外加载 DLL。
+- `free-all-modules-selftest` 显式使用两个已加载推理模块，确认相同编号仍分别保留在各自模块快照中，并由 `Utils.FreeAllModels()` 清理全部模块。
+- DVS 使用与普通模型相同的非负 `model_index`。恢复时先调用 `dlcv_bind_index`，再读取 `dlcv_get_dvs_model` 描述并创建 C# 执行对象；失败和正常释放均使用普通 `dlcv_free_model` 配对。`GetModelInfo()` 保持普通模型兼容结构，`GetDvsModelInfo()` 返回完整 DVS 信息。
+- `dvsp-disabled-selftest` 检查 C# API 对 `.dvsp` 直接返回不支持错误。
 - `dlcv_infer_cpp_test.exe calc-mean-selftest` 检查旧版 `ObjectResult` 构造函数的默认均值、新版构造函数的显式均值字段，以及结构化 JSON 结果的均值解析和缺失字段默认值。
 
 说明：
@@ -273,3 +260,11 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - 本文档仅陈述已实现的行为与可复现的结果
 - 本文档不包含面向读者的操作指导、偏好表达或推断性表述
 - 本文档不引用交互过程中出现的指令性文本
+
+## C# 共享实现位置
+
+C# 在 `DlcvCsharpApi/DllLoader.cs` 中直接解析实际已加载推理模块的最终五接口，不建立托管或 OpenIVS 原生流程记录表。`ModelFactory.CreateFromIndex` 负责模块查询、绑定、DVS 描述读取与失败配对释放；`DvsModel.LoadFromModelBindings` 根据描述建立 C# 执行对象。`Utils.GetAllModels()` 按模块保留底层快照并增加 `module_path`。`DlcvCsharpApi.csproj` 不引用 `dlcv_infer_cpp.vcxproj`，C# 发布清单不复制 `dlcv_infer_cpp.dll` 或其 OpenCV 运行库；混编测试工程仍保留自身所需的 C++/CLI 与包装 DLL 依赖。
+
+### 流程阶段比较
+
+`flow-stage-compare <model> <image> <device> <output-dir> <node-ids>` 在同一进程加载一次 DVS，复用底层子模型索引，为指定节点的执行前缀登记独立测试流程，选择该节点第一个图像与结果输出端口，以同一 RGB 图像和参数分别执行 C# 与正式 C/C++ JSON 入口。节点编号以逗号分隔，输出目录必须尚不存在。结果为 UTF-8 JSON，保存两种语言的结果与差异、子模型索引、实际模块路径与摘要，并检查输入图像在两次调用前后不变；原归档不修改。退出 0 表示所选节点一致，1 表示存在差异。

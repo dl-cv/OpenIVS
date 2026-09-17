@@ -239,7 +239,7 @@ namespace DlcvModules
         {
             var bindings = new JArray();
             if (!_loaded) return bindings;
-            foreach (var item in _loadedModelsByNode)
+            foreach (var item in _loadedModelsByNode.OrderBy(pair => pair.Key))
             {
                 bindings.Add(new JObject
                 {

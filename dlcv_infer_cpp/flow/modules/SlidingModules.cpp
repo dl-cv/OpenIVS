@@ -76,6 +76,16 @@ static bool TryReadDoubleToken(const Json& token, double& outVal) {
     return false;
 }
 
+static int RoundMidpointToEvenInt(double value) {
+    const double lower = std::floor(value);
+    const double fraction = value - lower;
+    if (fraction < 0.5) return static_cast<int>(lower);
+    if (fraction > 0.5) return static_cast<int>(lower + 1.0);
+
+    const int64_t lowerInt = static_cast<int64_t>(lower);
+    return static_cast<int>((lowerInt % 2 == 0) ? lowerInt : (lowerInt + 1));
+}
+
 static std::vector<double> BuildTC2O(const TransformationState& st) {
     if (st.AffineMatrix2x3.size() != 6) return { 1,0,0, 0,1,0 };
     return TransformationState::Inverse2x3(st.AffineMatrix2x3);
@@ -570,10 +580,10 @@ static Json CloneDetForMergeOutput(const Json& det) {
 }
 
 static Json MappedAabbDetForMerge(const Json& seedDet, const std::array<double, 4>& unionAabb, bool setCombineFlag) {
-    const int x1 = static_cast<int>(std::llround(unionAabb[0]));
-    const int y1 = static_cast<int>(std::llround(unionAabb[1]));
-    const int x2 = static_cast<int>(std::llround(unionAabb[2]));
-    const int y2 = static_cast<int>(std::llround(unionAabb[3]));
+    const int x1 = RoundMidpointToEvenInt(unionAabb[0]);
+    const int y1 = RoundMidpointToEvenInt(unionAabb[1]);
+    const int x2 = RoundMidpointToEvenInt(unionAabb[2]);
+    const int y2 = RoundMidpointToEvenInt(unionAabb[3]);
     const int w = std::max(1, x2 - x1);
     const int h = std::max(1, y2 - y1);
 
@@ -652,11 +662,15 @@ static bool TryMapDetToGlobal(const Json& det, const ModuleImage& wrap, SlidingM
         TransformPoint2x3(T_c2o, cv::Point2f(static_cast<float>(x), static_cast<float>(y + h)))
     };
     const auto aabb = AabbFromPoints(pts);
+    const int x1 = RoundMidpointToEvenInt(aabb[0]);
+    const int y1 = RoundMidpointToEvenInt(aabb[1]);
+    const int x2 = RoundMidpointToEvenInt(aabb[2]);
+    const int y2 = RoundMidpointToEvenInt(aabb[3]);
     detOut["bbox"] = Json::array({
-        aabb[0],
-        aabb[1],
-        std::max(0.0, aabb[2] - aabb[0]),
-        std::max(0.0, aabb[3] - aabb[1])
+        x1,
+        y1,
+        std::max(1, x2 - x1),
+        std::max(1, y2 - y1)
     });
     detOut["with_bbox"] = true;
     detOut["with_angle"] = false;
@@ -1041,17 +1055,20 @@ public:
             }
 
             std::unordered_map<int64_t, std::vector<std::pair<int, int>>> rootToMembers;
+            std::vector<int64_t> rootsInFirstSeenOrder;
             for (const auto& uid : allUids) {
                 const Json& det = windowDets[static_cast<size_t>(uid.first)][static_cast<size_t>(uid.second)];
                 if (IsRotatedDetJson(det)) continue;
                 const int64_t key = PackWinDet(uid.first, uid.second);
                 uf.Add(key);
                 const int64_t root = uf.Find(key);
-                rootToMembers[root].push_back(uid);
+                auto inserted = rootToMembers.emplace(root, std::vector<std::pair<int, int>>());
+                if (inserted.second) rootsInFirstSeenOrder.push_back(root);
+                inserted.first->second.push_back(uid);
             }
 
-            for (auto& rm : rootToMembers) {
-                auto& members = rm.second;
+            for (const int64_t root : rootsInFirstSeenOrder) {
+                auto& members = rootToMembers.at(root);
                 std::array<double, 4> unionAabb{ 0, 0, 0, 0 };
                 bool hasUnion = false;
                 double mergedScore = 0.0;

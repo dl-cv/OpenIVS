@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -179,13 +179,14 @@ namespace DlcvCSharpCppTest
                     session.ReleaseCSharp(); session.ReleaseCpp();
                     session.ReleaseCSharp(); session.ReleaseCpp();
                     Reject<ArgumentOutOfRangeException>(() => new CppModel(-1));
+                    Reject<ArgumentOutOfRangeException>(() => new CppModel(-2));
                     Reject<NotSupportedException>(() => session.LoadCSharp("unsupported.dvsp", device));
                     Reject<NotSupportedException>(() => session.LoadCSharp("unsupported.dvp", device));
                     Reject<NotSupportedException>(() => session.LoadCpp("unsupported.dvp", device));
                     Reject<ArgumentException>(() => session.LoadCpp("", device));
                     Reject<ArgumentOutOfRangeException>(() => session.LoadCpp("missing.dvt", -2));
                     Reject<FileNotFoundException>(() => session.LoadCpp(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".dvt"), device));
-                    checks.Add("八按钮、空模型操作、重复释放、负索引检查通过");
+                    checks.Add("八按钮、空模型操作、重复释放、非负索引检查通过");
 
                     string invalid = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".dvt");
                     try
@@ -222,16 +223,19 @@ namespace DlcvCSharpCppTest
                             result["cpp_info"] = Info(cpp);
                             var csharpObject = Info(csharp);
                             var cppObject = Info(cpp);
-                            // C++ 共享恢复补充顶层 model_index，C# 文件加载结果没有该字段。
-                            Require(cppObject["model_index"]?.Type == JTokenType.Integer &&
-                                cppObject["model_index"].Value<int>() >= 0, "C++ 信息编号无效");
                             string extension = Path.GetExtension(model).ToLowerInvariant();
-                            // 流程兼容信息使用子模型编号，实例编号已在转换时比较。
-                            if (extension == ".dvt" || extension == ".dvo")
-                                Require(cppObject["model_index"].Value<int>() == index, "普通模型信息编号不一致");
                             NormalizeOptionalFields(cppObject);
                             NormalizeOptionalFields(csharpObject);
-                            Require(JToken.DeepEquals(csharpObject, cppObject), "两侧模型信息字段不一致");
+                            Require(JToken.DeepEquals(csharpObject, cppObject), "两侧普通模型兼容信息字段不一致");
+                            if (extension == ".dvst" || extension == ".dvso")
+                            {
+                                JObject csharpDvs = JObject.Parse(session.GetCSharpDvsInfo());
+                                JObject cppDvs = JObject.Parse(session.GetCppDvsInfo());
+                                result["csharp_dvs_info"] = csharpDvs;
+                                result["cpp_dvs_info"] = cppDvs;
+                                CommandLineTest.CheckDvsInfoShape(csharpDvs, session.CSharpModelIndex, "C#");
+                                CommandLineTest.CheckDvsInfoShape(cppDvs, session.CppModelIndex, "C++");
+                            }
                             Reject<InvalidOperationException>(() => session.ConvertToCpp());
                             Reject<InvalidOperationException>(() => session.LoadCSharp(model, device));
                             using (var extra = new CppModel(index))

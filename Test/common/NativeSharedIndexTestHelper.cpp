@@ -52,13 +52,45 @@ std::vector<dlcv_infer::detail::SharedIndexCandidate> CollectLoadedCandidates() 
                 candidates.begin(), candidates.end(),
                 [&](const auto& candidate) { return candidate.Module == entry.hModule; });
             if (duplicate == candidates.end()) {
-                using GetIndexTypeFunction = int (DLCV_INFER_NATIVE_CALL*)(int);
-                const auto query = reinterpret_cast<GetIndexTypeFunction>(
-                    GetProcAddress(entry.hModule, "dlcv_get_index_type_c"));
+                using SharedJsonFunction = const char* (DLCV_INFER_NATIVE_CALL*)(const char*);
+                using FreeResultFunction = void (DLCV_INFER_NATIVE_CALL*)(const char*);
+                const auto query = reinterpret_cast<SharedJsonFunction>(
+                    GetProcAddress(entry.hModule, "dlcv_get_index_type"));
+                const auto freeResult = reinterpret_cast<FreeResultFunction>(
+                    GetProcAddress(entry.hModule, "dlcv_free_result"));
                 dlcv_infer::detail::SharedIndexCandidate candidate;
                 candidate.Module = entry.hModule;
-                if (query != nullptr) {
-                    candidate.Query = [query](int index) { return query(index); };
+                if (query != nullptr && freeResult != nullptr) {
+                    candidate.Query = [query, freeResult](int index) {
+                        const std::string request = dlcv_infer::json{{"model_index", index}}.dump();
+                        const char* resultPtr = query(request.c_str());
+                        if (resultPtr == nullptr) throw std::runtime_error("索引类型查询未返回结果");
+                        dlcv_infer::json result;
+                        try {
+                            result = dlcv_infer::json::parse(resultPtr);
+                            freeResult(resultPtr);
+                        } catch (...) {
+                            freeResult(resultPtr);
+                            throw;
+                        }
+                        if (!result.is_object() || !result.contains("code") ||
+                            !result.at("code").is_number_integer()) {
+                            throw std::runtime_error("索引类型查询返回结构无效");
+                        }
+                        const int code = result.at("code").get<int>();
+                        if (code == 2) return 0;
+                        if (code != 0 || !result.contains("model_index") ||
+                            !result.at("model_index").is_number_integer() ||
+                            result.at("model_index").get<int>() != index ||
+                            !result.contains("resource_type") ||
+                            !result.at("resource_type").is_string()) {
+                            throw std::runtime_error("索引类型查询失败");
+                        }
+                        const std::string type = result.at("resource_type").get<std::string>();
+                        if (type == "model") return 1;
+                        if (type == "dvs") return 2;
+                        throw std::runtime_error("索引类型查询返回未知资源类型");
+                    };
                 }
                 candidates.push_back(std::move(candidate));
             }
@@ -98,7 +130,7 @@ int LoadOwnedModel(const std::wstring& modelPath, int deviceId) {
     try {
         auto owner = std::make_shared<dlcv_infer::Model>(modelPath, deviceId);
         const int index = owner->modelIndex;
-        if (index < 0) return -1;
+        if (index == -1) return -1;
         std::lock_guard<std::mutex> lock(OwnedModelsMutex());
         const auto inserted = OwnedModels().emplace(index, std::move(owner));
         return inserted.second ? index : -1;
@@ -188,11 +220,17 @@ int RunSharedIndexResolverSelfTest() {
         return -2;
     }
 
+    const std::vector<dlcv_infer::detail::SharedIndexCandidate> negativeCandidates = {
+        {&firstTag, nullptr, [](int) { return 2; }}
+    };
+    for (int invalidIndex : {-1, -2, std::numeric_limits<int>::min()}) {
+        if (!ExpectResolverFailure<std::invalid_argument>(negativeCandidates, invalidIndex)) return -12;
+    }
+
     const std::vector<dlcv_infer::detail::SharedIndexCandidate> noResultCandidates = {
         {&firstTag, nullptr, [](int) { return 0; }}
     };
     if (!ExpectResolverFailure<std::invalid_argument>(noResultCandidates, 0)) return -3;
-    if (!ExpectResolverFailure<std::invalid_argument>(noResultCandidates, -1)) return -4;
 
     const std::vector<dlcv_infer::detail::SharedIndexCandidate> ambiguousCandidates = {
         {&firstTag, nullptr, [](int) { return 1; }},

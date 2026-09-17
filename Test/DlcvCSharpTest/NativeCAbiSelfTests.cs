@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -122,7 +122,7 @@ namespace DlcvCSharpTest
             using (var path = new Utf8NativeBuffer(modelPath))
             {
                 int index = NativeCLoadModelRaw(path.Pointer, deviceId);
-                if (index < 0)
+                if (index == -1)
                 {
                     throw new InvalidOperationException(
                         "正式 C 接口加载失败: " + ReadNativeLastError());
@@ -278,12 +278,12 @@ namespace DlcvCSharpTest
                 EnsureNativeStatus(
                     NativeLegacyGetModelInfo(config),
                     1,
-                    "model_index 必须是非负 int 范围内的整数",
+                    "model_index 必须是 int 范围内的非负整数",
                     "legacy get_model_info model_index=" + value.ToString(Newtonsoft.Json.Formatting.None));
                 EnsureNativeStatus(
                     NativeLegacyInfer(config),
                     1,
-                    "model_index 必须是非负 int 范围内的整数",
+                    "model_index 必须是 int 范围内的非负整数",
                     "legacy infer model_index=" + value.ToString(Newtonsoft.Json.Formatting.None));
                 JObject freeResponse = CallNativeLegacyJson(
                     config,
@@ -293,7 +293,7 @@ namespace DlcvCSharpTest
                 EnsureNativeStatus(
                     freeResponse,
                     1,
-                    "model_index 必须是非负 int 范围内的整数",
+                    "model_index 必须是 int 范围内的非负整数",
                     "legacy free_model model_index=" + value.ToString(Newtonsoft.Json.Formatting.None));
             }
         }
@@ -472,20 +472,5 @@ namespace DlcvCSharpTest
             return RunNativeCApiRegressionSelfTest();
         }
 
-        private static int RegisterEmptyFlow(DllLoader loader, string provider)
-        {
-            if (loader == null) throw new ArgumentNullException(nameof(loader));
-            string flowJson = new JObject
-            {
-                ["schema_version"] = 1,
-                ["flow_type"] = "dvst",
-                ["provider"] = provider,
-                ["source_path"] = Path.Combine(Path.GetTempPath(), provider + "_empty_flow.dvst"),
-                ["device_id"] = GpuDeviceId,
-                ["pipeline"] = new JObject { ["nodes"] = new JArray() },
-                ["model_bindings"] = new JArray()
-            }.ToString(Newtonsoft.Json.Formatting.None);
-            return loader.RegisterFlow(flowJson);
-        }
     }
 }

@@ -72,7 +72,7 @@ struct FlowNodeTiming {
 
 **字段约束**：
 - `categoryName` 内部存储为 GBK 编码，便于 Windows UI 直接显示。
-- `bbox` 长度约定：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
+- `bbox` 长度规则：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 
 ### 2.2 流程图相关数据结构
@@ -106,45 +106,30 @@ struct FlowBatchResult {
 
 ## 3. DllLoader（DLL 加载器）
 
+`DllLoader` 只在构建 `dlcv_infer_cpp.dll` 时可见。与默认模块选择和共享 index 相关的当前签名如下：
+
 ```cpp
 class DllLoader {
 public:
-    // 获取全局单例；首次普通模型按模型头选择默认 DLL，后续保持不变
     static DllLoader& Instance();
-
-
-    // 根据共享 index 查询实际所属 DLL，不修改全局单例
+    static DllLoader& GetExistingOrDefaultSentinel();
     static DllLoader& ResolveForIndex(int index, int& indexType);
-
-    // 首次普通模型选择默认 DLL，后续模型复用并逐个检查授权
-
-    static void EnsureForModel(const std::string& modelPath);
-    static void EnsureForModel(const std::wstring& modelPath);
+    static DllLoader& EnsureForModel(const std::string& modelPath);
+    static DllLoader& EnsureForModel(const std::wstring& modelPath);
+    static DllLoader& ForModelBuffer(const unsigned char* modelData, size_t modelSize);
 
     sntl_admin::DogProvider GetDogProvider() const;
     std::string GetLoadedNativeDllName() const;
+    void* NativeModuleIdentity() const noexcept;
 
-    // 底层 C 函数代理（通过 GetProcAddress 获取）
-    LoadModelFuncType      GetLoadModelFunc();
-    FreeModelFuncType      GetFreeModelFunc();
-    GetModelInfoFuncType   GetModelInfoFunc();
-    InferFuncType          GetInferFunc();
-    FreeModelResultFuncType GetFreeModelResultFunc();
-    FreeResultFuncType     GetFreeResultFunc();
-    FreeAllModelsFuncType  GetFreeAllModelsFunc();
-    GetDeviceInfoFuncType  GetDeviceInfoFunc();
-    KeepMaxClockFuncType   GetKeepMaxClockFunc();
-
-private:
-    sntl_admin::DogProvider dogProvider;
-    std::string dllName;
-    std::string dllPath;
-    void* hModule;
-    static DllLoader* instance;
-
-    DllLoader(sntl_admin::DogProvider provider);
-    void LoadDll();
-    static sntl_admin::DogProvider AutoDetectProvider();
+    bool SupportsSharedIndex() const;
+    bool SupportsDvsRegistry() const;
+    int QueryIndexType(int index) const;
+    int BindIndex(int index) const;
+    int ReleaseIndex(int index) const;
+    int RegisterDvsModel(const char* text) const;
+    json GetDvsModel(int index) const;
+    json GetAllModelsSnapshot() const;
 };
 ```
 
@@ -171,16 +156,13 @@ private:
 ```cpp
 class Model {
 public:
-    Model();                                      // 默认构造（空模型）
-    Model(const std::string& modelPath, int device_id = 0);   // UTF-8 路径
-    Model(const std::wstring& modelPath, int device_id = 0);  // 宽字符路径
-    ~Model();
+    Model();
+    Model(const std::string& modelPath, int device_id);   // Windows 本地代码页路径
+    Model(const std::wstring& modelPath, int device_id);  // UTF-16 路径
+    virtual ~Model();
 
-    // 移动语义（支持移动构造和移动赋值）
     Model(Model&& other) noexcept;
     Model& operator=(Model&& other) noexcept;
-
-    // 禁止拷贝
     Model(const Model&) = delete;
     Model& operator=(const Model&) = delete;
 };
@@ -192,11 +174,11 @@ dlcv_infer::Model CreateModelFromIndex(int index);
 ```
 - 该函数定义在 `dlcv_infer.h` 中，为完全内联实现，不增加 DLL 导出符号，也不改变 `Model` 的数据布局。
 - 函数使用默认构造的 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，随后立即调用 `GetModelInfo()`，以绑定已有索引并完成模型信息读取。
-- `index` 必须为非负值；非法参数或索引不可用时抛出异常。
-- 创建成功时增加该索引的外部使用计数；返回对象析构或调用 `FreeModel()` 时撤销绑定并减少使用计数，不释放索引所属的底层模型。
+- `index` 必须是加载或 DVS 登记返回的非负整数；负数、索引不存在、查询错误或多个模块同时命中时抛出异常。
+- 创建时先调用所属模块的 `dlcv_bind_index` 增加一次持有，再读取普通模型信息或 DVS 描述。返回对象析构或调用 `FreeModel()` 时通过普通模型释放接口归还这一次持有。
 
 **构造函数行为**：
-1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，从归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；加载期间不写入模型文件。推理组件缺少该接口时明确返回不支持，不创建临时目录或写出模型文件。
+1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，从归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；加载期间不写入模型文件。推理组件缺少该接口时明确返回不支持；归档加载全程使用内存数据。
 2. 若路径以 `.dvsp` 结尾 → 抛出 `std::invalid_argument`，不加载文件。
 3. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 `dlcv_load_model`。首次普通模型根据模型头选择默认 DLL，后续普通模型沿用该 DLL 并逐个检查授权。实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
 4. 构造失败时抛出 `std::runtime_error`，错误信息包含底层返回的 JSON。
@@ -207,16 +189,15 @@ dlcv_infer::Model CreateModelFromIndex(int index);
 json GetModelInfo();
 json GetDvsModelInfo();
 ```
-- `GetModelInfo()` 对普通模型和流程模型返回相同层级。流程模型的输入通道和输入形状取首个模型，任务类型、类别列表和类别数量取最终输出可达的模型。
-- `GetDvsModelInfo()` 支持流程模型，返回完整流程 JSON、`loaded_model_meta`、按模型文件名组织的 `model_info`，以及首模型和最终输出模型的节点编号。
-- 普通模式下通过 `dlcv_get_model_info` 获取。
-- 空对象设置有效的 `modelIndex` 后，首次调用只枚举进程内实际已加载的目标 DLL，把具备 `dlcv_get_index_type_c` 导出的 DLL 作为候选并查询 index 类型，不为探测加载其他 infer DLL。返回 `-1` 或未知值视为查询错误，不能当作不存在。恰有一个候选返回有效结果时，先将该 loader 保存到本对象，再检查完成共享操作所需的导出并调用已有绑定接口；缺少接口、绑定失败或后续恢复失败时不改选其他 DLL。无结果、多个结果或查询异常均抛出异常，不改选其他 DLL。普通模型读取共享模型信息；流程模型读取共享流程 JSON，以保存的 `pipeline` 为流程定义，按 `model_bindings` 为模型节点设置 `model_index`，随后创建本对象的 `FlowGraphModel`；`source_path` 只保存原始来源信息，按 index 恢复时不读取该路径。该过程不按资源类型、模型内容的加密 provider、编号数值或 `bit8` 推导归属，也不修改 `DllLoader::Instance()`。
-- 共享流程加载时，父流程选定的 loader 传给每个不同的子模型 index；每个子模型只在该 loader 中校验并创建一次借用 `Model`，后续推理直接复用这些已绑定对象，流程释放时统一解绑。
+- `GetModelInfo()` 对普通模型返回底层兼容信息并补充 `model_index`。DVS 返回普通模型兼容信息：输入通道和输入形状取首个子模型，任务类型、类别列表和类别数量取最终输出可达的子模型；其中 `model_index` 保持子模型编号，不替换为 DVS 编号。
+- `GetDvsModelInfo()` 只支持 DVS，返回登记描述：`schema_version`、`dvs_type`、`model_path`、`device_id`、完整 `pipeline`、`model_bindings`，并包含查询字段 `model_index`、`resource_type:"dvs"`、`code`、`message`。运行时可附加 `loaded_model_meta`、`model_info`、`input_model_node_id` 和 `output_model_node_id`。
+- 共享恢复只枚举进程内实际已加载的目标 DLL，不为查询加载其他模块。`dlcv_get_index_type` 对严格的 `{"model_index":整数}` 请求返回 `code=0` 与 `resource_type=model|dvs` 时视为命中，返回 `code=2` 时视为该模块不存在此资源。恰有一个模块命中后固定保存该 loader，先调用 `dlcv_bind_index`，再读取普通模型信息或 DVS 描述。无结果、多个结果、输入错误、内部错误、缺少当前接口、绑定失败或恢复失败均明确报错，不切换其他模块；绑定后的恢复失败使用无后缀普通模型释放接口归还持有。
+- DVS 恢复把 `model_bindings` 写入完整 `pipeline` 的模型节点，并让每个不同的子模型 index 在父 DVS 所属模块中建立独立持有；恢复失败和对象释放都会逐一归还这些临时持有。
 
 ### 4.3 单图推理
 
 ```cpp
-Result Infer(const cv::Mat& image, const json& params_json = json::object());
+Result Infer(const cv::Mat& image, const json& params_json = nullptr);
 ```
 - `image`：输入图像，调用层需确保为 RGB 格式（8UC3）。
 - `params_json`：可选推理参数，常见字段见下表。
@@ -226,7 +207,10 @@ Result Infer(const cv::Mat& image, const json& params_json = json::object());
 ### 4.4 批量推理
 
 ```cpp
-Result InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json = json::object());
+Result InferBatch(const std::vector<cv::Mat>& image_list, const json& params_json = nullptr);
+Result InferBatchPreservingOriginalMask(
+    const std::vector<cv::Mat>& image_list,
+    const json& params_json = nullptr);
 ```
 - `image_list`：输入图像列表，长度即 batch size。
 - 返回结果中 `sampleResults` 长度与输入图像数量一致（Batch=1 时也为 1 个元素）。
@@ -234,7 +218,7 @@ Result InferBatch(const std::vector<cv::Mat>& image_list, const json& params_jso
 ### 4.5 JSON 单图输出
 
 ```cpp
-json InferOneOutJson(const cv::Mat& image, const json& params_json = json::object());
+json InferOneOutJson(const cv::Mat& image, const json& params_json = nullptr);
 ```
 - 返回 JSON 数组，每个元素为单个检测结果对象。
 - 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
@@ -245,23 +229,31 @@ json InferOneOutJson(const cv::Mat& image, const json& params_json = json::objec
 ```cpp
 void FreeModel();
 ```
-- 持有方释放当前对象创建的普通模型或流程登记；共享 index 恢复对象只解除当前对象的绑定。
+- 持有方释放当前对象创建的普通模型或 DVS 登记；共享恢复对象归还 `dlcv_bind_index` 增加的一次持有。
 - 当前对象释放会清理本地模型、流程对象、编号、loader 与缓存引用。
-- 按 index 释放时，参数格式无效或编号超出非负 `int` 范围仍可返回参数错误；参数是有效编号时，即使编号已不存在或底层释放返回错误，也返回成功并完成本地清理，重复释放同样成功。底层错误最多附在日志或 `message` 的错误详情中，不保留等待重试状态。无参数的 `FreeModel()` 在对象已释放时直接成功。
+- 共享编号只接受 `0` 到 `INT_MAX`。对象释放只使用已保存的所属模块，不因底层资源失效重新搜索其他模块；本地对象重复释放直接成功。C 包装层对已不存在的有效编号保持本地幂等，参数格式无效或负数返回参数错误。
 
 
-> **model_index 来源**：普通模型的 `modelIndex` 由底层加载接口返回。直接加载 `.dvst/.dvso` 时清除归档流程中的遗留 `model_index`，使用包内数据重新加载子模型，并使用本次实际返回的编号注册流程。
+> **model_index 来源**：普通模型的 `modelIndex` 由底层加载接口返回。直接加载 `.dvst/.dvso` 时清除归档流程中的遗留 `model_index`，使用包内数据重新加载子模型，再从 `dlcv_register_dvs_model` 的成功 JSON 中读取 DVS index。
 >
-> 共享恢复才使用已登记的流程 index 和 `model_bindings`。恢复时查询进程内实际加载的 DLL，确认所属 loader 后供全部子模型使用，不根据模型头、`bit8`、编号区段或流程类型重新选择 DLL。实际产品输入遵循单一加密狗格式规则。
+> 共享恢复使用底层登记的 DVS index 和 `model_bindings`。恢复时查询进程内实际加载的 DLL，确认所属 loader 后供全部子模型使用，不根据模型头、`bit8`、编号区段或流程类型重新选择 DLL。
 >
 > `.dvsp` 不支持推理。需要滑窗处理时使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 > 流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
 
-共享 index 仍使用 `int`，不改变现有公开签名，不新增公共 C 导出。JSON 中的编号只接受 `0` 到 `INT_MAX` 范围内的整数，不接受字符串、浮点数、布尔值、空值或溢出值。每个 DLL 使用模型与流程共用的递增序号，编码跳过 `bit8`（数值 `256`）；`bit8` 对应发号 DLL 的 `DogProvider` 标记，但不表示模型内容的加密 provider 或资源类型。每个 DLL 可分配 `2^30` 个序号，编号不回绕、不重发；释放和 `FreeAllModels()` 不重置计数器，耗尽时返回错误。
+共享 index 使用 `int` 非负整数，不按编号数值、`bit8`、模型头或资源类型推导所属模块。每个底层模块分别维护普通模型和 DVS 表；加载、DVS 登记及共享绑定成功各增加一次持有，共享持有通过无后缀 `dlcv_free_model` 归还，最后一次释放销毁资源。DVS 销毁时自动归还对每个不同子模型的一次登记持有。释放和 `FreeAllModels()` 不重置编号计数器。底层 `_c` 只保留普通模型加载、推理、释放及结果释放。
 
-旧版共享索引且具备完整共享接口时仍按各 DLL 的实际查询结果恢复，不按编号数值推导归属。更旧且缺少共享接口的 DLL 保留普通加载和本地流程处理，不支持跨语言索引恢复。恢复成功后后续查询、推理、绑定和解绑固定使用已保存的 loader；资源失效时不重新搜索。
+底层共享能力由以下五个接口提供：
 
-C 兼容层在 legacy 普通加载成功时登记 index、实际 loader 与原生持有状态；结构化入口首次查询或推理时才沿已登记的 loader 创建借用 `Model`。未登记的外部 index 通过实际模块查询唯一归属后先保存 loader，再校验和绑定；失败重试不改选其他 DLL。
+```cpp
+const char* dlcv_register_dvs_model(const char* config_json);
+const char* dlcv_get_dvs_model(const char* config_json);
+const char* dlcv_get_index_type(const char* config_json);
+const char* dlcv_bind_index(const char* config_json);
+const char* dlcv_get_all_models();
+```
+
+前四项返回 UTF-8 JSON，并由 `dlcv_free_result` 释放。登记接收完整 DVS 描述；查询 DVS、查询类型和绑定的请求严格为 `{"model_index":整数}`。成功统一返回 `code=0/message` 及对应资源字段；输入错误、不存在和内部错误分别返回 `code=1/2/3`。类型查询以 `resource_type=model|dvs` 表示类型，资源不存在时解析 `code=2`，不读取整数类型标量。
 
 ### 4.7 计时查询
 
@@ -284,8 +276,10 @@ static std::vector<FlowNodeTiming> GetLastFlowNodeTimings();
 
 ```cpp
 static void Utils::FreeAllModels();
+static json Utils::GetAllModels();
 ```
-- 调用底层 `dlcv_free_all_models`，释放当前进程加载的所有模型。
+- `FreeAllModels()` 枚举当前进程实际已加载的推理模块，清理本地 C 模型表和流程模型池后，分别调用各模块的 `dlcv_free_all_models`。
+- `GetAllModels()` 不主动加载推理模块，返回 `{code,message,modules}`。成功时 `code=0`；每个模块保留底层 `{code,message,provider,models}` 快照并增加实际 `module_path`。模块返回错误或结构无效时外层 `code` 非零，并保留此前已收集的模块结果，不合并跨模块同编号资源。
 
 ### 5.2 设备信息
 
@@ -333,21 +327,23 @@ static std::string Utils::JsonToString(const json& j);
 ```cpp
 namespace dlcv_infer::flow {
 
-class FlowGraphModel {
+class FlowGraphModel final {
 public:
     FlowGraphModel();
+    ~FlowGraphModel();
+    FlowGraphModel(FlowGraphModel&& other) noexcept;
+    FlowGraphModel& operator=(FlowGraphModel&& other) noexcept;
+    FlowGraphModel(const FlowGraphModel&) = delete;
+    FlowGraphModel& operator=(const FlowGraphModel&) = delete;
 
-    // 从 JSON 文件加载流程图
-    json Load(const std::string& flowJsonPath, int deviceId = 0);
-
-    // 内部推理，返回 JSON 根对象
-    json InferInternal(const std::vector<cv::Mat>& images, const json& params_json);
-
-    // 获取与普通模型相同结构的兼容模型信息
-    json GetModelInfo() const;
-
-    // 获取完整流程及全部子模型信息
-    json GetDvsModelInfo() const;
+    bool IsLoaded() const;
+    Json Load(const std::string& flowJsonPath, int deviceId = 0);
+    Json GetModelInfo() const;
+    Json GetDvsModelInfo() const;
+    Json InferOneOutJson(const cv::Mat& image, const Json& paramsJson = Json());
+    Json InferInternal(const std::vector<cv::Mat>& images, const Json& paramsJson = Json());
+    double Benchmark(const cv::Mat& image, int warmup = 1, int runs = 10);
+    std::shared_ptr<dlcv_infer::Model> GetLoadedModelByIndex(int modelIndex) const;
 };
 
 } // namespace dlcv_infer::flow
@@ -488,7 +484,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 ---
 
 
-## 12. 错误处理约定
+## 12. 错误处理
 
 
 - 所有错误通过 C++ 异常抛出（`std::runtime_error`、`std::invalid_argument` 等）。
@@ -545,7 +541,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 | 入口与外部绑定 | `dlcv_infer.cpp` | `Model`、`Utils`、底层 `dlcv_infer.dll` 绑定、DVS 归档解包、普通模型与 Flow 结果转换 |
 | 入口与外部绑定 | `dlcv_infer_c_api.cpp` | C 接口导出、C 结构转换、模型表管理与结果释放 |
 | 入口与外部绑定 | `dlcv_sntl_admin.cpp` | 加密狗管理 DLL 绑定、XML 转 JSON、设备与特性查询 |
-| Flow 执行框架 | `flow/GraphExecutor.cpp` | 节点排序、链路路由、属性覆盖、标量端口注入、节点计时 |
+| Flow 执行框架 | `flow/GraphExecutor.cpp` | 节点排序、连接路由、属性覆盖、标量端口写入、节点计时 |
 | Flow 执行框架 | `flow/FlowGraphModel.cpp` | Flow JSON 加载、`model/*` 预加载、执行上下文初始化、前端结果聚合 |
 | Flow 节点实现 | `flow/modules/InputModules.cpp` | 输入图像读取、前端图像接入、测试结果构造 |
 | Flow 节点实现 | `flow/modules/ModelModules.cpp` | `model/*` 节点、模型池、批量推理调用 |
@@ -618,11 +614,11 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 19.1 公开面
 
-`Model` 暴露字段 `modelIndex`、`OwnModelIndex`；公开构造为默认构造、`Model(const std::string&, int)`、`Model(const std::wstring&, int)`；禁用拷贝、支持移动；公开成员函数为 `FreeModel()`、`GetModelInfo()`、`GetDvsModelInfo()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`GetLastInferTiming()`、`GetLastFlowNodeTimings()`、`GetLastInspectionStatus()`。
+`Model` 暴露字段 `modelIndex`、`OwnModelIndex`；公开构造为默认构造、`Model(const std::string&, int)`、`Model(const std::wstring&, int)`；禁用拷贝、支持移动。公开成员函数包括 `FreeModel()`、`GetModelInfo()`、`GetDvsModelInfo()`、`Infer()`、`InferBatch()`、`InferBatchPreservingOriginalMask()`、`InferOneOutJson()`、`GetLastInferTiming()`、`GetLastFlowNodeTimings()`、`GetLastInspectionStatus()`、`LoadedDogProvider()` 和 `LoadedNativeDllName()`。
 
 ### 19.2 加载、释放与信息查询
 
-`.dvst/.dvso` 进入 FlowGraph 模式，`.dvsp` 当前直接返回不支持错误，其余走底层推理 DLL 普通模型模式。普通模型通过 `dlcv_load_model` 加载。首次普通模型由 `DllLoader::EnsureForModel` 根据模型头 `dog_provider` 选择默认 DLL 并检查授权；后续普通模型继续使用默认 DLL，同时逐个检查授权。FlowGraph 模式创建 `flow::FlowGraphModel`，直接加载归档时清除遗留 `model_index`，使用包内流程和子模型数据。共享恢复才按已登记的 index 绑定，并按进程内实际加载 DLL 查询所属 loader。`FreeModel()` 完成本地清理后即视为释放完成；按 index 的释放入口遵循有效编号成功、无效参数报错的规则。`GetModelInfo()` 在普通模式直接返回底层 JSON，在 FlowGraph 模式返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息。
+`.dvst/.dvso` 进入 FlowGraph 模式，`.dvsp` 直接返回不支持错误，其余走底层普通模型模式。DVS 直接加载先清除归档内遗留的 `model_index`，以内存方式加载子模型，再把规定描述登记到子模型所属底层模块。空 DVS 使用已有默认模块选择方式加载必要底层 DLL。共享恢复按实际已加载模块查询、绑定并读取描述。`GetModelInfo()` 返回普通兼容信息，DVS 的 `model_index` 保持子模型编号；`GetDvsModelInfo()` 返回完整 DVS 描述和运行时模型明细。
 
 ### 19.3 推理前图像规整
 
@@ -636,7 +632,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ## 20. `Utils`
 
-`Utils` 的公开静态函数包括 `JsonToString()`、`FreeAllModels()`、`GetDeviceInfo()`、`OcrInfer()`、`GetGpuInfo()`、`KeepMaxClock()` 和 5 个 NVML 包装函数。其行为分别是：`JsonToString()` 使用 `dump(4)`；`FreeAllModels()` 直接调用 `dlcv_free_all_models`；`GetDeviceInfo()` 直接调用 `dlcv_get_device_info`；`KeepMaxClock()` 仅在底层导出 `dlcv_keep_max_clock` 时调用；`OcrInfer()` 先用检测模型跑整图，再按 `bbox` 裁 ROI 给识别模型，若识别结果存在，则用第 1 条识别结果的 `categoryName` 覆盖检测结果的 `categoryName`；`GetGpuInfo()` 成功时返回 `{code:0,message:"Success",devices:[{device_id,device_name}]}`，NVML 初始化失败时返回 `code=1`，获取设备数量失败时返回 `code=2`。
+`Utils` 的公开静态函数包括 `JsonToString()`、`FreeAllModels()`、`GetAllModels()`、`GetDeviceInfo()`、`OcrInfer()`、`GetGpuInfo()`、`KeepMaxClock()` 和 5 个 NVML 包装函数。`GetAllModels()` 只枚举当前已加载模块并保留分模块快照；模块错误或结构无效时外层返回非零状态。`FreeAllModels()` 对当前已加载的全部推理模块执行全量释放。其余函数保持既有行为。
 
 ---
 
@@ -650,10 +646,10 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 22.1 DVS 归档加载
 
-共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧从 DVS 归档内存读取 `pipeline.json` 和子模型二进制，先清除流程节点中遗留的 `model_index`，再通过 `dlcv_load_model_binary` 加载；推理组件缺少该接口时明确返回不支持，不使用文件写出作为兼容方式。归档直接加载只使用包内数据，只有共享恢复才使用已登记的 index。
+共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧从 DVS 归档内存读取 `pipeline.json` 和子模型二进制，先清除流程节点中遗留的 `model_index`，再通过 `dlcv_load_model_binary` 加载；推理组件缺少该接口时明确返回不支持。归档直接加载全程使用包内数据，只有共享恢复使用已登记的 index。
 
 
-`Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。公开类布局已调整，调用方需使用匹配版本的头文件和库重新编译；公开方法签名虽未改变，旧 C++ 应用二进制不能直接替换 DLL 获得 ABI 兼容。旧 infer 兼容仅表示新版包装层可配合旧 infer DLL，不表示旧 C++ 应用二进制的 ABI 承诺。
+`Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。调用方使用匹配版本的头文件和库重新编译。
 
 - 流程归档使用既有 `ModelBinaryStore` 保存只读子模型字节，通过 `ModelPool::AcquireBinary` 调用内存加载接口，不计算整包摘要，不生成解包临时文件。
 - 每次读取归档分配新的 `StoreId`；模型池键由 `StoreId`、归档成员键与设备组成。同一次加载中引用同一成员的多个节点共享模型，不同加载实例分别持有模型池引用。
@@ -677,7 +673,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 22.4 `GraphExecutor`
 
-`GraphExecutor` 负责节点排序、链路路由、标量注入、`infer_params` 属性覆盖和 `model/*` 预加载。未注册普通节点会跳过，未注册模型节点会记录到加载报告；当前节点输出链路还会写入 `__graph_current_output_mask` 供部分模块读取。
+`GraphExecutor` 负责节点排序、连接路由、标量写入、`infer_params` 属性覆盖和 `model/*` 预加载。未注册普通节点会跳过，未注册模型节点会记录到加载报告；当前节点输出连接还会写入 `__graph_current_output_mask` 供部分模块读取。
 
 ### 22.5 Flow 结果聚合
 
@@ -685,7 +681,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 22.6 已注册 Flow 节点
 
-C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/ModelModules.cpp`、`flow/modules/OutputModules.cpp`、`flow/modules/SlidingModules.cpp`、`flow/modules/FeatureModules.cpp`、`flow/modules/PostProcessModules.cpp`、`flow/modules/RegionStrokeVisualizeTemplateModules.cpp`。当前注册集覆盖输入、模型、预处理/特征、后处理、输出与模板模块；`features/printed_template_match` 由 `features/template_match` 兼容实现，不包含 C# Flow 的 `defer_template_creation` 候选事务、`count_priority` 数量优先和相应扩展结果字段。当前实现中，`input/*` 从磁盘读图时会把三/四通道输入统一整理为 RGB 语义后再入 Flow，`model/*` 入口不再隐式执行 BGR→RGB 转换，但仍会按模型输入做最小必要的通道规整，`output/save_image` 按内部固定 RGB 语义把三通道/四通道图像转换回 OpenCV 写盘所需的 BGR 语义。
+C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/ModelModules.cpp`、`flow/modules/OutputModules.cpp`、`flow/modules/SlidingModules.cpp`、`flow/modules/FeatureModules.cpp`、`flow/modules/PostProcessModules.cpp`、`flow/modules/RegionStrokeVisualizeTemplateModules.cpp`。当前注册集覆盖输入、模型、预处理/特征、后处理、输出与模板模块；`features/printed_template_match` 由 `features/template_match` 兼容实现，不包含 C# Flow 的 `defer_template_creation` 候选处理、`count_priority` 数量优先和相应扩展结果字段。当前实现中，`input/*` 从磁盘读图时会把三/四通道输入统一整理为 RGB 语义后再入 Flow，`model/*` 入口不再隐式执行 BGR→RGB 转换，但仍会按模型输入做最小必要的通道规整，`output/save_image` 按内部固定 RGB 语义把三通道/四通道图像转换回 OpenCV 写盘所需的 BGR 语义。
 
 ---
 
@@ -699,3 +695,9 @@ C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/Mode
 ---
 
 生产头文件和生产 DLL 不保留测试导出。共享 index、归档和释放相关测试只放在测试工程中，并通过现有产品接口执行；不得新增测试导出，也不另设测试 DLL 导出方案。
+
+## 结构化 C 与 JSON C 的掩码面积
+
+`dlcv_infer_cpp_infer_c` 内部调用 `InferBatchPreservingOriginalMask`。普通模型的结构化 C 结果保留底层掩码的尺寸和像素内容，`area` 为该掩码的非零像素数。`dlcv_infer_cpp_infer_json_c` 使用 `InferOneOutJson`，普通模型掩码先按 bbox 宽高绝对值四舍五入后的尺寸进行最近邻缩放，再生成轮廓，`area` 为缩放后掩码的非零像素数。无掩码时保留原始面积，全零掩码面积为 0。
+
+这两个入口的面积不直接与底层 SDK 返回的轮廓面积等同。跨入口回归按各自掩码规则独立计算面积期望；类别、分数、bbox 和其他结果属性仍按相应接口规则比较。流程模型保持流程输出语义。

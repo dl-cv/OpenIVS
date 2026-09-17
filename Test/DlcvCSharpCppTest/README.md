@@ -37,7 +37,7 @@ C# 和 C++ 均可先加载，也可分别从同一文件加载；已有该侧模
 
 转换是同进程模型索引共享，不改变模型文件格式，不重复加载文件，也不保存新的模型文件。共享绑定成功后，可以先释放任一语言对象，再从另一语言获取信息；关闭窗口按 C++、C# 顺序释放。操作异常显示在底部状态区，不弹出错误对话框。程序不接收图片、不调用推理接口。
 
-运行环境须安装深度视觉 SDK，且实际加载的推理 DLL 提供共享索引查询、绑定、解绑和信息接口。旧 SDK 缺少这些接口时，加载与 C# 信息查询可以成功，但转换会明确报错，不改变已有 C# 模型。编译成功不表示已安装 SDK 具有共享能力。
+运行环境须安装提供最终共享接口的深度视觉 SDK。新增底层接口固定为 `dlcv_register_dvs_model`、`dlcv_get_dvs_model`、`dlcv_get_index_type`、`dlcv_bind_index`、`dlcv_get_all_models`；前四项均接收 UTF-8 JSON 并返回由 `dlcv_free_result` 释放的 UTF-8 JSON，不加载 `_c` 旧名称。共享持有使用无后缀普通模型释放接口，不使用解绑或 DVS 专用释放接口。编译成功不表示已安装 SDK 已更新到该接口版本。
 
 ## HiDPI 与应用图标
 
@@ -79,7 +79,7 @@ python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCShar
 
 ## 命令行模型验证
 
-`model-test` 不创建 WinForms 对象，执行 C# 加载、C++ 共享、两侧信息读取、指定释放顺序和最终索引失效检查。`--release-order` 接受 `csharp-first`（默认）或 `cpp-first`；`--device` 默认为 0。`--load-mode shared` 为默认共享流程，`cpp-shared` 从 C++ 加载并共享到 C#，验证两种释放顺序、再次共享及关闭释放；`cpp` 只从 C++ 加载并验证释放、重载和最终编号失效，`independent` 分别从 C++、C# 文件构造并验证两种释放顺序。
+`model-test` 不创建 WinForms 对象，执行 C# 加载、C++ 共享、两侧普通模型信息读取、指定释放顺序和最终索引失效检查；DVST/DVSO 还分别调用两侧 `GetDvsModelInfo()`。测试同时读取 `Utils.GetAllModels()`，确认当前资源位于实际已加载模块的独立快照中，且列表查询没有额外加载其他推理 DLL。`--release-order` 接受 `csharp-first`（默认）或 `cpp-first`；`--device` 默认为 0。`--load-mode shared` 为默认共享流程，`cpp-shared` 从 C++ 加载并共享到 C#，验证两种释放顺序、再次共享及关闭释放；`cpp` 只从 C++ 加载并验证释放、重载和最终编号失效，`independent` 分别从 C++、C# 文件构造并验证两种释放顺序。
 
 ```powershell
 & .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe model-test --model "<模型文件>" --release-order csharp-first --output "$env:TEMP\mixed-cli.json"
@@ -97,7 +97,7 @@ python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpCppTest/DlcvCShar
 - `ui-test` 无 `--model` 时检查浏览按钮和六个操作按钮的可用状态、选择即保存、取消不改变、重建窗体与设置对象恢复记录、上次目录与文件名、空模型操作、重复释放、无效模型、禁止的模型格式和负索引。
 - 指定模型时额外验证两侧索引一致、两侧信息、两种释放顺序、释放后再次转换、最终索引失效及窗口对象释放。
 - UI 测试创建未显示的真实 WinForms 对象，调用实际模型按钮处理方法，检查两侧 JSON 文本、状态编号、按钮可用状态、释放后清空和关闭清理；检查默认与最小窗口布局。可选 `--screenshot` 通过控件自身绘制生成 PNG，并检查文字像素。不执行桌面自动化、键鼠模拟、点击消息或窗口控制；不验证人工文件对话框和 VS 调试器交互。路径记忆测试使用系统临时文件设置提供器，仅改变设置存储位置，执行窗体实际读取、选择与保存方法，不读取或修改真实用户设置。
-- 两套信息保留原始 JSON。跨语言比较时单独检查 `model_index`：普通模型与实例索引一致，流程兼容信息中的编号属于子模型；`input_shapes`、`model_info.input_shapes`、`data_info.image_size` 的缺失和 null 视为相同，OCR 信息按 C# API 已有行为过滤 `character`、`dict`、`classes`，其余字段严格比较。
+- 两侧 `GetModelInfo()` 均比较普通模型兼容结构；DVST/DVSO 另检查两侧 `GetDvsModelInfo()` 包含完整 `nodes`。`input_shapes`、`model_info.input_shapes`、`data_info.image_size` 的缺失和 null 视为相同，OCR 信息按 C# API 已有行为过滤 `character`、`dict`、`classes`，其余字段严格比较。
 - 退出码 0 表示通过，1 表示参数、运行或验证失败；结果写入 `--output` 指定的无 BOM 严格 UTF-8 JSON。模型文件只读；结果必须为系统临时目录中新建的 `.json`，已有文件不会被覆盖。
 
 ## 串行回归入口
@@ -107,3 +107,7 @@ python Test/DlcvCSharpCppTest/run_tests.py --exe Test/DlcvCSharpCppTest/bin/x64/
 ```
 
 `--model` 可重复指定；输出目录必须是系统临时目录下的空目录。每个模型运行两个共享方向各两种释放顺序、C++ 直接加载、分别加载的两种释放顺序，以及非交互 UI；另测启动配置、设计器、DPI 与图标、四档比例布局、空界面、错误参数与报告覆盖保护。UI 检查包括 C++ 先加载和 C# 先加载、重复加载拒绝及另一侧信息可继续读取。结果 JSON 严格 UTF-8 解析，PNG 检查格式和尺寸；进程实际模块路径须来自 `--sdk-directory`（默认 SDK 安装目录），包装 DLL 须来自本次 EXE 目录。不复制或更换推理 SDK，报告和图片不进入仓库。
+
+## DVS 归属与持有检查
+
+DVST/DVSO 的 `model-test` 额外检查：`dlcv_get_index_type` 使用严格的 `{"model_index":整数}` 请求，并通过 `code=0`、同一 `model_index` 和 `resource_type=dvs` 返回类型；资源不存在时返回 `code=2`。`dlcv_get_dvs_model` 使用相同请求结构，返回原始 DVS 描述、`model_index`、`resource_type=dvs`、状态码和消息。恢复顺序为先调用 `dlcv_bind_index`，再读取描述并建立当前语言自己的执行对象；失败时使用无后缀普通模型释放接口配对。DVS 描述中的子模型编号仍为普通模型类型。C# 与 C++ 保持两个共享方向和两种释放顺序，恢复不再次读取归档文件；最后一次 DVS 释放由底层减少每个不同子模型的一次持有。

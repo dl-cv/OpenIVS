@@ -64,13 +64,13 @@ class ModelSelectionTest(unittest.TestCase):
 class ImageSelectionTest(unittest.TestCase):
     def test_aoi_without_cad_uses_ok_image(self):
         root = Path(r"Y:\测试模型")
-        model = root / "AOI-无CAD检测-20260721_120_50_s.dvst"
+        model = root / "AOI-无CAD检测_PLUS_s.dvst"
         selected = all_models.choose_image(model, root, {}, None)
         self.assertEqual(root / "OK1.png", selected)
 
     def test_common_aoi_uses_aoi_image(self):
         root = Path(r"Y:\测试模型")
-        model = root / "AOI_120_50_s.dvst"
+        model = root / "AOI-元件提取_PLUS_s.dvst"
         selected = all_models.choose_image(model, root, {}, None)
         self.assertEqual(root / "AOI-1.jpg", selected)
 

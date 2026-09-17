@@ -1,4 +1,4 @@
-﻿#define DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
+#define DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
 #define dlcv_infer dlcv_infer_json_impl
 #include "dlcv_infer_c_api.h"
 #undef dlcv_infer
@@ -40,11 +40,8 @@ struct CApiModelEntry {
     std::mutex inferMutex;
 
     bool HasSharedIndexFunctions() const {
-        return loader != nullptr && loader->GetIndexTypeFunc() != nullptr &&
-            loader->GetModelInfoByIndexFunc() != nullptr &&
-            loader->GetRegisterFlowFunc() != nullptr && loader->GetFlowInfoFunc() != nullptr &&
-            loader->GetFreeFlowFunc() != nullptr && loader->GetBindIndexFunc() != nullptr &&
-            loader->GetUnbindIndexFunc() != nullptr && loader->GetFreeStringFunc() != nullptr;
+        return loader != nullptr && loader->SupportsSharedIndex() &&
+            loader->GetModelInfoFunc() != nullptr && loader->GetFreeResultFunc() != nullptr;
     }
 
     std::shared_ptr<dlcv_infer::Model> GetModel() {
@@ -474,11 +471,13 @@ static std::shared_ptr<CApiModelEntry> FindOrRestoreSharedModelEntry(
         }
     }
     if (entry->loader != nullptr && entry->loader->GetIndexTypeFunc() != nullptr &&
-        entry->loader->GetIndexTypeFunc()(modelIndex) == 0) {
+        entry->loader->QueryIndexType(modelIndex) == 0) {
         throw std::out_of_range("Model not found.");
     }
-    // 本地原生加载已知所属 DLL；缺少共享接口的旧 SDK 保留原 JSON 调用。
-    if (requireStructuredModel || !entry->nativeOwner || entry->HasSharedIndexFunctions()) {
+    if (requireStructuredModel || !entry->nativeOwner || entry->serializeInfer) {
+        if (!entry->HasSharedIndexFunctions()) {
+            throw std::runtime_error("dlcv_infer 缺少共享索引接口");
+        }
         (void)entry->GetModel();
     }
     return entry;
@@ -791,7 +790,7 @@ static void CallNativeVoid(const char* apiName, Invoke&& invoke) noexcept {
 
 static const char* InvalidNativeModelIndexResult(const char* apiName) noexcept {
     return CallNativeString(apiName, []() {
-        return AllocateNativeJsonResult(MakeNativeStatus(1, "model_index 必须是非负 int 范围内的整数"));
+        return AllocateNativeJsonResult(MakeNativeStatus(1, "model_index 必须是 int 范围内的非负整数"));
     });
 }
 
@@ -831,8 +830,8 @@ int dlcv_infer_cpp_load_model_c(const char* model_path, int device_id) {
         const bool isFlowModel = IsFlowModelPath(modelPath);
         auto model = std::make_shared<dlcv_infer::Model>(modelPath, device_id);
         int idx = model->modelIndex;
-        if (idx < 0) {
-            SetLastErrorMessage("load model returned negative modelIndex: " + std::to_string(idx) + "; " + pathDiagnostics);
+        if (idx == -1) {
+            SetLastErrorMessage("load model returned invalid modelIndex: " + std::to_string(idx) + "; " + pathDiagnostics);
             AppendCapiDebugLog("load_model failed: %s", g_lastError.c_str());
             return -1;
         }
@@ -1053,6 +1052,21 @@ const char* dlcv_infer_cpp_get_all_dog_info_c() {
     return nullptr;
 }
 
+const char* dlcv_infer_cpp_get_all_models_c() {
+    ClearLastErrorMessage();
+    try {
+        const std::string value = dlcv_infer::Utils::GetAllModels().dump();
+        char* result = new char[value.size() + 1];
+        std::memcpy(result, value.c_str(), value.size() + 1);
+        return result;
+    } catch (const std::exception& ex) {
+        SetLastErrorMessage(ex.what());
+    } catch (...) {
+        SetLastErrorMessage("unknown error");
+    }
+    return nullptr;
+}
+
 void dlcv_infer_cpp_free_string_c(const char* value) {
     delete[] value;
 }
@@ -1124,7 +1138,7 @@ const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str) {
                 try {
                     const auto getIndexType = nativeLoader.GetIndexTypeFunc();
                     if (getIndexType != nullptr) {
-                        const int indexType = getIndexType(modelIndex);
+                        const int indexType = nativeLoader.QueryIndexType(modelIndex);
                         if (indexType != 1) {
                             throw std::runtime_error("普通模型加载后 index 类型无效");
                         }
@@ -1163,7 +1177,7 @@ const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str) {
             }
             const int deviceId = config.value("device_id", 0);
             const int modelIndex = dlcv_infer_cpp_load_model_c(modelPath.c_str(), deviceId);
-            if (modelIndex < 0) {
+            if (modelIndex == -1) {
                 const char* lastError = dlcv_infer_cpp_get_last_error_c();
                 const std::string message = lastError != nullptr && lastError[0] != '\0'
                     ? lastError
@@ -1256,11 +1270,16 @@ const char* DLCV_NATIVE_C_CALL dlcv_get_model_info(const char* config_str) {
                 const std::string nativeConfig = dlcv_infer::json{
                     { "model_index", modelIndex }
                 }.dump();
-                return InvokeTrackedNativeJson(
+                const char* nativeResult = InvokeTrackedNativeJson(
                     *entry->loader,
                     entry->loader->GetModelInfoFunc(),
                     nativeConfig.c_str(),
                     NativeJsonReleaseKind::Result);
+                if (nativeResult == nullptr) {
+                    return AllocateNativeJsonResult(MakeNativeStatus(1, "模型信息接口未返回结果"));
+                }
+                // 原生 JSON 信息保留底层字节格式，由调用方通过 dlcv_free_result 释放。
+                return nativeResult;
             }
             return AllocateNativeJsonResult(AddNativeModelInfoStatus(entry->model->GetModelInfo()));
         } catch (const std::out_of_range& ex) {

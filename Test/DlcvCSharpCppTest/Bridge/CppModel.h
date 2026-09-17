@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 class NativeModel;
 
 namespace DlcvCSharpCppBridge {
@@ -10,6 +10,7 @@ namespace DlcvCSharpCppBridge {
         !CppModel();
         property int ModelIndex { int get(); }
         System::String^ GetModelInfo();
+        System::String^ GetDvsModelInfo();
     private:
         NativeModel* model_;
         System::Object^ sync_;
