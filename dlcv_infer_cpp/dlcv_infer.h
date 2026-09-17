@@ -113,11 +113,8 @@ namespace dlcv_infer {
         int modelIndex,
         const DlcvCImageList* imageList);
     typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultCFuncType)(DlcvCResult* result);
-    typedef int (DLCV_INFER_NATIVE_CALL *GetIndexTypeFuncType)(int index);
-    typedef int (DLCV_INFER_NATIVE_CALL *RegisterDvsModelFuncType)(const char* dvsJson);
-    typedef const char* (DLCV_INFER_NATIVE_CALL *GetDvsModelFuncType)(int modelIndex);
+    typedef const char* (DLCV_INFER_NATIVE_CALL *SharedIndexJsonFuncType)(const char* configStr);
     typedef const char* (DLCV_INFER_NATIVE_CALL *GetAllModelsFuncType)();
-    typedef int (DLCV_INFER_NATIVE_CALL *BindIndexFuncType)(int index);
 
 #ifdef DLCV_INFER_CPP_EXPORTS
     // DLL 加载器（内部使用）
@@ -141,11 +138,11 @@ namespace dlcv_infer {
         FreeAllModelsFuncType dlcv_free_all_models = nullptr;
         GetDeviceInfoFuncType dlcv_get_device_info = nullptr;
         KeepMaxClockFuncType dlcv_keep_max_clock = nullptr;
-        GetIndexTypeFuncType dlcv_get_index_type_c = nullptr;
-        RegisterDvsModelFuncType dlcv_register_dvs_model_c = nullptr;
-        GetDvsModelFuncType dlcv_get_dvs_model_c = nullptr;
+        SharedIndexJsonFuncType dlcv_get_index_type = nullptr;
+        SharedIndexJsonFuncType dlcv_register_dvs_model = nullptr;
+        SharedIndexJsonFuncType dlcv_get_dvs_model = nullptr;
         GetAllModelsFuncType dlcv_get_all_models = nullptr;
-        BindIndexFuncType dlcv_bind_index_c = nullptr;
+        SharedIndexJsonFuncType dlcv_bind_index = nullptr;
         GetGpuInfoFuncType dlcv_get_gpu_info = nullptr;
         ResetMaxClockFuncType dlcv_reset_max_clock = nullptr;
         SetGpuMaxClockFuncType dlcv_set_gpu_max_clock = nullptr;
@@ -226,10 +223,10 @@ namespace dlcv_infer {
             return dlcv_keep_max_clock;
         }
         bool SupportsSharedIndex() const {
-            return dlcv_get_index_type_c && dlcv_bind_index_c && dlcv_free_model_c;
+            return dlcv_get_index_type && dlcv_bind_index && dlcv_free_model && dlcv_free_result;
         }
         bool SupportsDvsRegistry() const {
-            return SupportsSharedIndex() && dlcv_register_dvs_model_c && dlcv_get_dvs_model_c && dlcv_free_result;
+            return SupportsSharedIndex() && dlcv_register_dvs_model && dlcv_get_dvs_model;
         }
         int QueryIndexType(int index) const;
         int BindIndex(int index) const;
@@ -237,11 +234,11 @@ namespace dlcv_infer {
         int RegisterDvsModel(const char* text) const;
         json GetDvsModel(int index) const;
         json GetAllModelsSnapshot() const;
-        GetIndexTypeFuncType GetIndexTypeFunc() const { return dlcv_get_index_type_c; }
-        RegisterDvsModelFuncType GetRegisterDvsModelFunc() const { return dlcv_register_dvs_model_c; }
-        GetDvsModelFuncType GetDvsModelFunc() const { return dlcv_get_dvs_model_c; }
+        SharedIndexJsonFuncType GetIndexTypeFunc() const { return dlcv_get_index_type; }
+        SharedIndexJsonFuncType GetRegisterDvsModelFunc() const { return dlcv_register_dvs_model; }
+        SharedIndexJsonFuncType GetDvsModelFunc() const { return dlcv_get_dvs_model; }
         GetAllModelsFuncType GetAllModelsFunc() const { return dlcv_get_all_models; }
-        BindIndexFuncType GetBindIndexFunc() const { return dlcv_bind_index_c; }
+        SharedIndexJsonFuncType GetBindIndexFunc() const { return dlcv_bind_index; }
         GetGpuInfoFuncType GetGpuInfoFunc() const { return dlcv_get_gpu_info; }
         ResetMaxClockFuncType GetResetMaxClockFunc() const { return dlcv_reset_max_clock; }
         SetGpuMaxClockFuncType GetSetGpuMaxClockFunc() const { return dlcv_set_gpu_max_clock; }

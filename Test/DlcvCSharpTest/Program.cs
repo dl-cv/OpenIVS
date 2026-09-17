@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -50,10 +50,10 @@ namespace DlcvCSharpTest
         private static readonly List<ModelRegressionCase> DefaultCases = ModelRegressionCases.Cases;
         private static readonly string[] SharedIndexNativeExports =
         {
-            "dlcv_register_dvs_model_c",
-            "dlcv_get_dvs_model_c",
-            "dlcv_get_index_type_c",
-            "dlcv_bind_index_c",
+            "dlcv_register_dvs_model",
+            "dlcv_get_dvs_model",
+            "dlcv_get_index_type",
+            "dlcv_bind_index",
             "dlcv_get_all_models"
         };
 
@@ -1786,27 +1786,61 @@ namespace DlcvCSharpTest
                     Marshal.StringToHGlobalAnsi("{\"code\":0,\"message\":\"success\",\"model_info\":{}}");
                 Func<string, IntPtr> freeResult = json =>
                     Marshal.StringToHGlobalAnsi("{\"code\":0,\"message\":\"success\"}");
+                Func<IntPtr, int> readIndex = pointer =>
+                {
+                    JObject request = JObject.Parse(ReadUtf8String(pointer));
+                    if (request.Count != 1 || request["model_index"] == null ||
+                        request["model_index"].Type != JTokenType.Integer)
+                    {
+                        throw new InvalidDataException("共享索引请求必须只包含整数 model_index");
+                    }
+                    return request["model_index"].Value<int>();
+                };
+                Func<int, string, IntPtr> typeResult = (index, type) => allocUtf8(
+                    "{\"code\":0,\"message\":\"success\",\"model_index\":" + index +
+                    ",\"resource_type\":\"" + type + "\"}");
+                Func<int, IntPtr> missingResult = index => allocUtf8(
+                    "{\"code\":2,\"message\":\"not found\"}");
+                DllLoader.SharedIndexJsonDelegate modelQuery = pointer =>
+                {
+                    int index = readIndex(pointer);
+                    return index == 256 ? typeResult(index, "model") : missingResult(index);
+                };
+                DllLoader.SharedIndexJsonDelegate dvsQuery = pointer =>
+                {
+                    int index = readIndex(pointer);
+                    return index == 512 ? typeResult(index, "dvs") : missingResult(index);
+                };
+                DllLoader.SharedIndexJsonDelegate bindIndex = pointer =>
+                {
+                    int index = readIndex(pointer);
+                    return typeResult(index, index == 512 ? "dvs" : "model");
+                };
 
                 var modelLoader = new DllLoader
                 {
-                    dlcv_get_index_type_c = index => index == 256 ? 1 : 0,
-                    dlcv_bind_index_c = index => 0,
+                    dlcv_get_index_type = modelQuery,
+                    dlcv_bind_index = bindIndex,
                     dlcv_get_model_info = json => modelInfo(256),
                     dlcv_free_model = json => freeResult(json),
                     dlcv_free_result = Marshal.FreeHGlobal
                 };
                 var dvsLoader = new DllLoader
                 {
-                    dlcv_get_index_type_c = index => index == 512 ? 2 : 0,
-                    dlcv_bind_index_c = index => 0,
+                    dlcv_get_index_type = dvsQuery,
+                    dlcv_bind_index = bindIndex,
                     dlcv_get_model_info = json => modelInfo(512),
                     dlcv_free_model = json => freeResult(json),
-                    dlcv_register_dvs_model_c = json => 512,
-                    dlcv_get_dvs_model_c = index => allocUtf8(
-                        "{\"code\":0,\"message\":\"success\",\"schema_version\":1," +
-                        "\"dvs_type\":\"dvst\",\"model_path\":\"\",\"device_id\":0," +
-                        "\"pipeline\":{\"nodes\":[],\"edges\":[]},\"model_bindings\":[]," +
-                        "\"model_index\":512,\"resource_type\":\"dvs\"}"),
+                    dlcv_register_dvs_model = json => typeResult(512, "dvs"),
+                    dlcv_get_dvs_model = pointer =>
+                    {
+                        int index = readIndex(pointer);
+                        return allocUtf8(
+                            "{\"code\":0,\"message\":\"success\",\"schema_version\":1," +
+                            "\"dvs_type\":\"dvst\",\"model_path\":\"\",\"device_id\":0," +
+                            "\"pipeline\":{\"nodes\":[],\"edges\":[]},\"model_bindings\":[]," +
+                            "\"model_index\":" + index + ",\"resource_type\":\"dvs\"}");
+                    },
                     dlcv_get_all_models = () => allocUtf8(
                         "{\"code\":0,\"message\":\"success\",\"provider\":\"sentinel\"," +
                         "\"models\":[{\"model_index\":512,\"resource_type\":\"dvs\"," +
@@ -1833,7 +1867,7 @@ namespace DlcvCSharpTest
                         new List<DllLoader>
                         {
                             modelLoader,
-                            new DllLoader { dlcv_get_index_type_c = index => 1 }
+                            new DllLoader { dlcv_get_index_type = modelQuery, dlcv_free_result = Marshal.FreeHGlobal }
                         },
                         out indexType),
                     "多模块同编号未报告错误");
@@ -1844,8 +1878,20 @@ namespace DlcvCSharpTest
                         256,
                         new List<DllLoader>
                         {
-                            new DllLoader { dlcv_get_index_type_c = index => throw new InvalidOperationException("query failed") },
-                            new DllLoader { dlcv_get_index_type_c = index => { secondQueried = true; return 1; } }
+                            new DllLoader
+                            {
+                                dlcv_get_index_type = pointer => throw new InvalidOperationException("query failed"),
+                                dlcv_free_result = Marshal.FreeHGlobal
+                            },
+                            new DllLoader
+                            {
+                                dlcv_get_index_type = pointer =>
+                                {
+                                    secondQueried = true;
+                                    return typeResult(readIndex(pointer), "model");
+                                },
+                                dlcv_free_result = Marshal.FreeHGlobal
+                            }
                         },
                         out indexType),
                     "查询异常未直接返回");
@@ -1855,7 +1901,16 @@ namespace DlcvCSharpTest
                 EnsureThrows<InvalidOperationException>(
                     () => DllLoader.ResolveSharedIndexLoaderFromCandidates(
                         256,
-                        new List<DllLoader> { new DllLoader { dlcv_get_index_type_c = index => -1 } },
+                        new List<DllLoader>
+                        {
+                            new DllLoader
+                            {
+                                dlcv_get_index_type = pointer => allocUtf8(
+                                    "{\"code\":0,\"message\":\"success\",\"model_index\":256," +
+                                    "\"resource_type\":\"unknown\"}"),
+                                dlcv_free_result = Marshal.FreeHGlobal
+                            }
+                        },
                         out indexType),
                     "错误类型返回值未拒绝");
                 EnsureThrows<NotSupportedException>(
@@ -1869,8 +1924,8 @@ namespace DlcvCSharpTest
 
                 var incompleteDvs = new DllLoader
                 {
-                    dlcv_get_index_type_c = index => 2,
-                    dlcv_bind_index_c = index => 0,
+                    dlcv_get_index_type = dvsQuery,
+                    dlcv_bind_index = bindIndex,
                     dlcv_get_model_info = json => modelInfo(0),
                     dlcv_free_model = json => freeResult(json),
                     dlcv_free_result = Marshal.FreeHGlobal
@@ -1891,10 +1946,10 @@ namespace DlcvCSharpTest
                     ["model_bindings"] = new JArray()
                 };
                 string registeredJson = null;
-                dvsLoader.dlcv_register_dvs_model_c = pointer =>
+                dvsLoader.dlcv_register_dvs_model = pointer =>
                 {
                     registeredJson = ReadUtf8String(pointer);
-                    return 512;
+                    return typeResult(512, "dvs");
                 };
                 if (dvsLoader.RegisterDvsModel(descriptor.ToString(Formatting.None)) != 512)
                     throw new Exception("DVS 登记返回值错误");
@@ -1913,7 +1968,11 @@ namespace DlcvCSharpTest
 
                 int childBindCount = 0;
                 int childFreeCount = 0;
-                modelLoader.dlcv_bind_index_c = index => { childBindCount++; return 0; };
+                modelLoader.dlcv_bind_index = pointer =>
+                {
+                    childBindCount++;
+                    return typeResult(readIndex(pointer), "model");
+                };
                 modelLoader.dlcv_free_model = json =>
                 {
                     childFreeCount++;
@@ -1953,7 +2012,7 @@ namespace DlcvCSharpTest
                 int exceptionalFreeCount = 0;
                 var malformedDvs = new DllLoader
                 {
-                    dlcv_get_dvs_model_c = index => allocUtf8("{"),
+                    dlcv_get_dvs_model = pointer => allocUtf8("{"),
                     dlcv_free_result = pointer =>
                     {
                         exceptionalFreeCount++;
@@ -1965,6 +2024,23 @@ namespace DlcvCSharpTest
                     "DVS 查询格式异常未向上返回");
                 if (exceptionalFreeCount != 1)
                     throw new Exception("DVS 查询格式异常时未释放底层结果");
+
+                int sharedGetterCalls = 0;
+                var missingSharedResultFree = new DllLoader
+                {
+                    dlcv_get_index_type = pointer =>
+                    {
+                        sharedGetterCalls++;
+                        return IntPtr.Zero;
+                    }
+                };
+                EnsureThrows<MissingMethodException>(
+                    () => missingSharedResultFree.GetIndexType(0),
+                    "缺少结果释放接口时未拒绝共享索引查询");
+                if (sharedGetterCalls != 0)
+                    throw new Exception("缺少结果释放接口时仍调用了共享索引函数");
+                if (modelLoader.GetIndexType(999) != 0)
+                    throw new Exception("code=2 未解析为索引不存在");
 
                 RunSharedResultComparisonChecks();
                 Console.WriteLine("shared-index-route-selftest 通过");

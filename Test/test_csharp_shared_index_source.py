@@ -7,17 +7,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class CSharpSharedIndexSourceTest(unittest.TestCase):
-    def test_loader_uses_only_final_five_new_exports(self):
+    def test_loader_uses_final_json_shared_exports(self):
         source = (ROOT / "DlcvCsharpApi" / "DllLoader.cs").read_text(encoding="utf-8-sig")
         for name in (
-            "dlcv_register_dvs_model_c",
-            "dlcv_get_dvs_model_c",
-            "dlcv_get_index_type_c",
-            "dlcv_bind_index_c",
+            "dlcv_register_dvs_model",
+            "dlcv_get_dvs_model",
+            "dlcv_get_index_type",
+            "dlcv_bind_index",
             "dlcv_get_all_models",
         ):
             self.assertIn(name, source)
         for removed in (
+            "dlcv_register_dvs_model_c",
+            "dlcv_get_dvs_model_c",
+            "dlcv_get_index_type_c",
+            "dlcv_bind_index_c",
             "dlcv_unbind_index_c",
             "dlcv_get_model_info_c",
             "dlcv_register_flow_c",
@@ -33,6 +37,47 @@ class CSharpSharedIndexSourceTest(unittest.TestCase):
         self.assertIn("_instance._moduleHandle == IntPtr.Zero", selection)
         self.assertIn("CreateLoader(DogProvider.Sentinel)", selection)
         self.assertNotIn("无法登记不含子模型的 DVS", selection)
+        self.assertIn("SharedIndexJsonDelegate", source)
+        self.assertIn('new JObject { ["model_index"] = index }', source)
+        self.assertIn("if (code == 2)", source)
+
+    def test_cpp_loader_uses_json_shared_exports_and_safe_release(self):
+        header = (ROOT / "dlcv_infer_cpp" / "dlcv_infer.h").read_text(encoding="utf-8-sig")
+        source = (ROOT / "dlcv_infer_cpp" / "dlcv_infer.cpp").read_text(encoding="utf-8-sig")
+        self.assertIn(
+            "typedef const char* (DLCV_INFER_NATIVE_CALL *SharedIndexJsonFuncType)(const char* configStr);",
+            header,
+        )
+        for name in (
+            'ResolveSymbol(hModule, "dlcv_register_dvs_model")',
+            'ResolveSymbol(hModule, "dlcv_get_dvs_model")',
+            'ResolveSymbol(hModule, "dlcv_get_index_type")',
+            'ResolveSymbol(hModule, "dlcv_bind_index")',
+        ):
+            self.assertIn(name, source)
+        for removed in (
+            'ResolveSymbol(hModule, "dlcv_register_dvs_model_c")',
+            'ResolveSymbol(hModule, "dlcv_get_dvs_model_c")',
+            'ResolveSymbol(hModule, "dlcv_get_index_type_c")',
+            'ResolveSymbol(hModule, "dlcv_bind_index_c")',
+        ):
+            self.assertNotIn(removed, source)
+        invoke_start = source.index("json InvokeSharedJson(")
+        invoke_end = source.index("int ReadSharedResponseCode", invoke_start)
+        invoke = source[invoke_start:invoke_end]
+        self.assertLess(invoke.index("if (freeResult == nullptr)"), invoke.index("function(request.c_str())"))
+        self.assertIn("SharedResultDeleter", source)
+        self.assertIn("std::unique_ptr<const char, SharedResultDeleter>", source)
+        query_start = source.index("int DllLoader::QueryIndexType")
+        query_end = source.index("int DllLoader::BindIndex", query_start)
+        query = source[query_start:query_end]
+        self.assertIn("if (code == 2) return 0;", query)
+        self.assertIn('result.at("resource_type")', query)
+        release_start = source.index("int DllLoader::ReleaseIndex")
+        release_end = source.index("int DllLoader::RegisterDvsModel", release_start)
+        release = source[release_start:release_end]
+        self.assertIn("dlcv_free_model(request.c_str())", release)
+        self.assertNotIn("dlcv_free_model_c", release)
 
     def test_csharp_project_has_no_native_flow_registry_dependency(self):
         project_path = ROOT / "DlcvCsharpApi" / "DlcvCsharpApi.csproj"
@@ -109,10 +154,10 @@ class CSharpSharedIndexSourceTest(unittest.TestCase):
     def test_csharp_tests_target_final_shared_index_design(self):
         program = (ROOT / "Test" / "DlcvCSharpTest" / "Program.cs").read_text(encoding="utf-8-sig")
         for name in (
-            "dlcv_register_dvs_model_c",
-            "dlcv_get_dvs_model_c",
-            "dlcv_get_index_type_c",
-            "dlcv_bind_index_c",
+            "dlcv_register_dvs_model",
+            "dlcv_get_dvs_model",
+            "dlcv_get_index_type",
+            "dlcv_bind_index",
             "dlcv_get_all_models",
             '"all-models"',
             '"empty-dvs-first-load-selftest"',
@@ -125,11 +170,32 @@ class CSharpSharedIndexSourceTest(unittest.TestCase):
             "empty-flow-index-selftest",
             "provider-switch-flow-selftest",
             "openivs_flow_",
+            "dlcv_register_dvs_model_c",
+            "dlcv_get_dvs_model_c",
+            "dlcv_get_index_type_c",
+            "dlcv_bind_index_c",
             "dlcv_unbind_index_c",
             "dlcv_get_model_info_c",
             "SharedFlowRegistry",
         ):
             self.assertNotIn(removed, program)
+
+    def test_cpp_dual_module_checks_parse_json(self):
+        source = (ROOT / "Test/dlcv_infer_cpp_test/main.cpp").read_text(encoding="utf-8-sig")
+        for module, index in (("sentinel", "sentinelIndex"), ("virbox", "virboxIndex")):
+            self.assertIn(f"QueryIndexTypeFromModuleForSelfTest({module}.module, {index})", source)
+            self.assertNotIn(f"{module}.getIndex({index})", source)
+
+    def test_cpp_consumers_use_json_index_query(self):
+        cases = (
+            ("dlcv_infer_cpp/dlcv_infer_c_api.cpp", "nativeLoader.QueryIndexType(modelIndex)"),
+            ("dlcv_infer_cpp/flow/FlowGraphModel.cpp", "preferredDllLoader->QueryIndexType(modelIndex)"),
+        )
+        for filename, expected in cases:
+            source = (ROOT / filename).read_text(encoding="utf-8-sig")
+            self.assertIn(expected, source)
+            self.assertNotIn("getIndexType(modelIndex)", source)
+            self.assertNotIn("queryType(modelIndex)", source)
 
     def test_mixed_dvs_info_checks_each_owners_index(self):
         directory = ROOT / "Test" / "DlcvCSharpCppTest"

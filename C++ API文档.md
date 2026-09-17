@@ -175,7 +175,7 @@ dlcv_infer::Model CreateModelFromIndex(int index);
 - 该函数定义在 `dlcv_infer.h` 中，为完全内联实现，不增加 DLL 导出符号，也不改变 `Model` 的数据布局。
 - 函数使用默认构造的 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，随后立即调用 `GetModelInfo()`，以绑定已有索引并完成模型信息读取。
 - `index` 必须是加载或 DVS 登记返回的非负整数；负数、索引不存在、查询错误或多个模块同时命中时抛出异常。
-- 创建时先调用所属模块的 `dlcv_bind_index_c` 增加一次持有，再读取普通模型信息或 DVS 描述。返回对象析构或调用 `FreeModel()` 时通过普通模型释放接口归还这一次持有。
+- 创建时先调用所属模块的 `dlcv_bind_index` 增加一次持有，再读取普通模型信息或 DVS 描述。返回对象析构或调用 `FreeModel()` 时通过普通模型释放接口归还这一次持有。
 
 **构造函数行为**：
 1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，从归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；加载期间不写入模型文件。推理组件缺少该接口时明确返回不支持；归档加载全程使用内存数据。
@@ -191,7 +191,7 @@ json GetDvsModelInfo();
 ```
 - `GetModelInfo()` 对普通模型返回底层兼容信息并补充 `model_index`。DVS 返回普通模型兼容信息：输入通道和输入形状取首个子模型，任务类型、类别列表和类别数量取最终输出可达的子模型；其中 `model_index` 保持子模型编号，不替换为 DVS 编号。
 - `GetDvsModelInfo()` 只支持 DVS，返回登记描述：`schema_version`、`dvs_type`、`model_path`、`device_id`、完整 `pipeline`、`model_bindings`，并包含查询字段 `model_index`、`resource_type:"dvs"`、`code`、`message`。运行时可附加 `loaded_model_meta`、`model_info`、`input_model_node_id` 和 `output_model_node_id`。
-- 共享恢复只枚举进程内实际已加载的目标 DLL，不为查询加载其他模块。恰有一个模块查询到类型 `1` 或 `2` 后固定保存该 loader，先调用 `dlcv_bind_index_c`，再读取普通模型信息或 DVS 描述。无结果、多个结果、查询错误、缺少当前接口、绑定失败或恢复失败均明确报错，不切换其他模块；绑定后的恢复失败使用普通模型释放接口归还持有。
+- 共享恢复只枚举进程内实际已加载的目标 DLL，不为查询加载其他模块。`dlcv_get_index_type` 对严格的 `{"model_index":整数}` 请求返回 `code=0` 与 `resource_type=model|dvs` 时视为命中，返回 `code=2` 时视为该模块不存在此资源。恰有一个模块命中后固定保存该 loader，先调用 `dlcv_bind_index`，再读取普通模型信息或 DVS 描述。无结果、多个结果、输入错误、内部错误、缺少当前接口、绑定失败或恢复失败均明确报错，不切换其他模块；绑定后的恢复失败使用无后缀普通模型释放接口归还持有。
 - DVS 恢复把 `model_bindings` 写入完整 `pipeline` 的模型节点，并让每个不同的子模型 index 在父 DVS 所属模块中建立独立持有；恢复失败和对象释放都会逐一归还这些临时持有。
 
 ### 4.3 单图推理
@@ -229,29 +229,31 @@ json InferOneOutJson(const cv::Mat& image, const json& params_json = nullptr);
 ```cpp
 void FreeModel();
 ```
-- 持有方释放当前对象创建的普通模型或 DVS 登记；共享恢复对象归还 `dlcv_bind_index_c` 增加的一次持有。
+- 持有方释放当前对象创建的普通模型或 DVS 登记；共享恢复对象归还 `dlcv_bind_index` 增加的一次持有。
 - 当前对象释放会清理本地模型、流程对象、编号、loader 与缓存引用。
 - 共享编号只接受 `0` 到 `INT_MAX`。对象释放只使用已保存的所属模块，不因底层资源失效重新搜索其他模块；本地对象重复释放直接成功。C 包装层对已不存在的有效编号保持本地幂等，参数格式无效或负数返回参数错误。
 
 
-> **model_index 来源**：普通模型的 `modelIndex` 由底层加载接口返回。直接加载 `.dvst/.dvso` 时清除归档流程中的遗留 `model_index`，使用包内数据重新加载子模型，再由 `dlcv_register_dvs_model_c` 返回 DVS index。
+> **model_index 来源**：普通模型的 `modelIndex` 由底层加载接口返回。直接加载 `.dvst/.dvso` 时清除归档流程中的遗留 `model_index`，使用包内数据重新加载子模型，再从 `dlcv_register_dvs_model` 的成功 JSON 中读取 DVS index。
 >
 > 共享恢复使用底层登记的 DVS index 和 `model_bindings`。恢复时查询进程内实际加载的 DLL，确认所属 loader 后供全部子模型使用，不根据模型头、`bit8`、编号区段或流程类型重新选择 DLL。
 >
 > `.dvsp` 不支持推理。需要滑窗处理时使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 > 流程模型推理走 `_flowModel`，不使用 `modelIndex` 调底层。
 
-共享 index 使用 `int` 非负整数，不按编号数值、`bit8`、模型头或资源类型推导所属模块。每个底层模块分别维护普通模型和 DVS 表；加载、DVS 登记及共享绑定成功各增加一次持有，普通模型和 DVS 均通过 `dlcv_free_model` 或 `dlcv_free_model_c` 归还一次持有，最后一次释放销毁资源。DVS 销毁时自动归还对每个不同子模型的一次登记持有。释放和 `FreeAllModels()` 不重置编号计数器。
+共享 index 使用 `int` 非负整数，不按编号数值、`bit8`、模型头或资源类型推导所属模块。每个底层模块分别维护普通模型和 DVS 表；加载、DVS 登记及共享绑定成功各增加一次持有，共享持有通过无后缀 `dlcv_free_model` 归还，最后一次释放销毁资源。DVS 销毁时自动归还对每个不同子模型的一次登记持有。释放和 `FreeAllModels()` 不重置编号计数器。底层 `_c` 只保留普通模型加载、推理、释放及结果释放。
 
 底层共享能力由以下五个接口提供：
 
 ```cpp
-dlcv_register_dvs_model_c
-dlcv_get_dvs_model_c
-dlcv_get_index_type_c
-dlcv_bind_index_c
-dlcv_get_all_models
+const char* dlcv_register_dvs_model(const char* config_json);
+const char* dlcv_get_dvs_model(const char* config_json);
+const char* dlcv_get_index_type(const char* config_json);
+const char* dlcv_bind_index(const char* config_json);
+const char* dlcv_get_all_models();
 ```
+
+前四项返回 UTF-8 JSON，并由 `dlcv_free_result` 释放。登记接收完整 DVS 描述；查询 DVS、查询类型和绑定的请求严格为 `{"model_index":整数}`。成功统一返回 `code=0/message` 及对应资源字段；输入错误、不存在和内部错误分别返回 `code=1/2/3`。类型查询以 `resource_type=model|dvs` 表示类型，资源不存在时解析 `code=2`，不读取整数类型标量。
 
 ### 4.7 计时查询
 

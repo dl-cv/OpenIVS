@@ -278,12 +278,12 @@ namespace DlcvCSharpTest
                 EnsureNativeStatus(
                     NativeLegacyGetModelInfo(config),
                     1,
-                    "model_index 必须是非负 int 范围内的整数",
+                    "model_index 必须是 int 范围内的非负整数",
                     "legacy get_model_info model_index=" + value.ToString(Newtonsoft.Json.Formatting.None));
                 EnsureNativeStatus(
                     NativeLegacyInfer(config),
                     1,
-                    "model_index 必须是非负 int 范围内的整数",
+                    "model_index 必须是 int 范围内的非负整数",
                     "legacy infer model_index=" + value.ToString(Newtonsoft.Json.Formatting.None));
                 JObject freeResponse = CallNativeLegacyJson(
                     config,
@@ -293,7 +293,7 @@ namespace DlcvCSharpTest
                 EnsureNativeStatus(
                     freeResponse,
                     1,
-                    "model_index 必须是非负 int 范围内的整数",
+                    "model_index 必须是 int 范围内的非负整数",
                     "legacy free_model model_index=" + value.ToString(Newtonsoft.Json.Formatting.None));
             }
         }

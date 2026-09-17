@@ -63,14 +63,16 @@ dlcv_infer_cpp_free_model_result_c(&result);
 底层共享功能只使用以下五个接口：
 
 ```c
-dlcv_register_dvs_model_c
-dlcv_get_dvs_model_c
-dlcv_get_index_type_c
-dlcv_bind_index_c
-dlcv_get_all_models
+const char* dlcv_register_dvs_model(const char* config_json);
+const char* dlcv_get_dvs_model(const char* config_json);
+const char* dlcv_get_index_type(const char* config_json);
+const char* dlcv_bind_index(const char* config_json);
+const char* dlcv_get_all_models();
 ```
 
-加载、DVS 登记和共享绑定成功各增加一次持有。普通模型和 DVS 都使用 `dlcv_free_model` 或 `dlcv_free_model_c` 归还一次持有，最后一次释放销毁资源。
+前四项返回 UTF-8 JSON，结果统一使用 `dlcv_free_result` 释放。登记输入为完整 DVS 描述；其他三项的输入严格为 `{"model_index":整数}`，不得增加其他字段。成功结果均含 `code=0` 和 `message`：登记返回 `model_index/resource_type=dvs`，类型查询返回 `model_index/resource_type=model|dvs`，绑定返回 `model_index/resource_type`。输入错误返回 `code=1`，合法但不存在返回 `code=2`，内部错误返回 `code=3`。
+
+加载、DVS 登记和共享绑定成功各增加一次持有。共享持有只使用无后缀 `dlcv_free_model` 归还，最后一次释放销毁资源。底层 `_c` 接口只用于普通模型加载、推理、释放及结果释放，不提供 DVS 共享接口，也不保留旧名称兼容入口。
 
 DVS 登记 JSON 必须包含：
 
@@ -88,6 +90,20 @@ DVS 登记 JSON 必须包含：
 ```
 
 `dvs_type` 只接受 `dvst` 或 `dvso`；`device_id` 接受 `-1` 到 `INT_MAX`；子模型 index 必须是非负整数。登记数据不包含 `provider` 或外部分配的 `model_index`。
+
+登记成功结果：
+
+```json
+{"code":0,"message":"success","model_index":12,"resource_type":"dvs"}
+```
+
+类型查询和绑定请求均为：
+
+```json
+{"model_index":12}
+```
+
+类型查询成功结果中的 `resource_type` 为 `model` 或 `dvs`；绑定成功结果返回实际资源类型。合法编号不存在时返回 `{"code":2,"message":"..."}`，不返回整数类型标量。`dlcv_get_dvs_model` 使用同一请求结构，成功结果在完整登记描述上增加状态和资源字段。
 
 ## 5. 模型信息
 

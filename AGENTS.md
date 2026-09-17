@@ -126,16 +126,16 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 **model_index 与共享规则**：
 
 - 普通模型与 DVS 统一使用非负 `int model_index`，`-1` 表示失败。编号由实际持有资源的 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 分配；释放与 `FreeAllModels()` 不重置编号计数器，已释放编号不再次发放。
-- 底层新增接口固定为五个：`dlcv_register_dvs_model_c`、`dlcv_get_dvs_model_c`、`dlcv_get_index_type_c`、`dlcv_bind_index_c`、`dlcv_get_all_models`。没有解绑、DVS 专用释放、`get_model_info_c` 或编号分配接口；普通模型信息沿用 `dlcv_get_model_info`，所有持有统一由 `dlcv_free_model` 释放。
+- 底层新增接口固定为五个：`dlcv_register_dvs_model`、`dlcv_get_dvs_model`、`dlcv_get_index_type`、`dlcv_bind_index`、`dlcv_get_all_models`。前四项均为无后缀 `const char*` JSON 请求接口，返回 UTF-8 JSON 并由 `dlcv_free_result` 释放；`dlcv_get_all_models` 保持无参数 JSON 返回。没有名称兼容接口、解绑、DVS 专用释放、`get_model_info_c` 或编号分配接口。普通模型信息沿用 `dlcv_get_model_info`，共享持有统一由无后缀 `dlcv_free_model` 释放；`_c` 只用于普通模型加载、推理、释放及结果释放。
 - DVS 登记输入字段全部必需：整数 `schema_version=1`、字符串 `dvs_type`（`dvst`/`dvso`）、字符串 `model_path`、整数 `device_id`、完整 `pipeline` 对象、`model_bindings` 数组。每个绑定包含整数 `node_id` 与非负整数 `model_index`；输入不得包含顶层 `model_index` 或 `provider`。
-- DVS 登记成功返回非负 index 并持有每个不同子模型一次。DVS 查询不增加持有，返回原描述并增加 `model_index`、`resource_type=dvs`、`code`、`message`，不重复子模型信息。DVS 最后释放时由底层减少每个不同子模型的一次持有。
+- DVS 登记成功返回 `code=0`、`message`、非负 `model_index` 和 `resource_type=dvs`，并持有每个不同子模型一次。DVS 查询不增加持有，返回原描述并增加 `model_index`、`resource_type=dvs`、`code`、`message`，不重复子模型信息。DVS 最后释放时由底层减少每个不同子模型的一次持有。
 - 直接加载归档先清除 `pipeline.json` 中遗留的 `model_index`，只使用包内流程和子模型数据；共享恢复才使用已登记描述中的 `pipeline` 与 `model_bindings`。
 
 **按查询恢复共享索引**：
 
 - 恢复时仅枚举进程内实际已加载的目标 DLL，不为探测加载其他 provider 模块，也不按编号范围、模型头或查询顺序选择。
-- 对候选模块调用 `dlcv_get_index_type_c`：`0` 表示不存在、`1` 表示普通模型、`2` 表示 DVS、`-1` 或其他值表示查询错误。无结果、多模块命中或查询异常均报错。
-- 唯一确定所属模块后调用 `dlcv_bind_index_c` 增加一次持有；DVS 随后读取描述并创建当前语言自己的执行对象。绑定或恢复失败时使用普通 `dlcv_free_model` 配对，不改选其他模块。
+- 对候选模块调用 `dlcv_get_index_type`，请求严格为 `{"model_index":整数}`。成功时返回 `code=0`、`message`、同一 `model_index` 和 `resource_type=model|dvs`；合法但不存在返回 `code=2`，不再使用整数 `0` 表示不存在。负数或其他输入格式返回 `code=1`，内部异常返回 `code=3`。无结果、多模块命中或查询异常均报错。
+- 唯一确定所属模块后调用 `dlcv_bind_index` 增加一次持有，请求严格为 `{"model_index":整数}`，成功返回 `code=0`、`message`、同一 `model_index` 和实际 `resource_type`。DVS 随后以相同请求结构调用 `dlcv_get_dvs_model` 读取描述并创建当前语言自己的执行对象。绑定或恢复失败时使用无后缀 `dlcv_free_model` 配对，不改选其他模块。
 - C# `ModelFactory.CreateFromIndex` 与 C++ `CreateModelFromIndex` 均遵循上述顺序。两侧 `GetModelInfo()` 对 DVS 返回普通模型兼容信息，`GetDvsModelInfo()` 返回完整 DVS 信息。
 - `Utils.GetAllModels()` / `Utils::GetAllModels()` 只汇总当前实际已加载模块，不额外加载 DLL。C# 返回 `{code,message,modules:[...]}`，每个模块保留底层 `provider/models` 快照并增加 `module_path`；不同模块的相同编号不合并。
 

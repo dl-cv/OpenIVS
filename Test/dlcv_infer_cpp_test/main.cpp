@@ -3107,11 +3107,49 @@ HMODULE ModelModuleForSelfTest(const dlcv_infer::Model& model) {
     return module;
 }
 
+int QueryIndexTypeFromModuleForSelfTest(HMODULE module, int index) {
+    const auto query = reinterpret_cast<dlcv_infer::SharedIndexJsonFuncType>(
+        GetProcAddress(module, "dlcv_get_index_type"));
+    const auto freeResult = reinterpret_cast<dlcv_infer::FreeResultFuncType>(
+        GetProcAddress(module, "dlcv_free_result"));
+    if (query == nullptr || freeResult == nullptr) {
+        throw std::runtime_error("推理 DLL 缺少索引类型查询或结果释放接口");
+    }
+    const std::string request = json{{"model_index", index}}.dump();
+    const char* resultPtr = query(request.c_str());
+    if (resultPtr == nullptr) throw std::runtime_error("索引类型查询未返回结果");
+    json result;
+    try {
+        result = json::parse(resultPtr);
+        freeResult(resultPtr);
+    } catch (...) {
+        freeResult(resultPtr);
+        throw;
+    }
+    if (!result.is_object() || !result.contains("code") ||
+        !result.at("code").is_number_integer() ||
+        !result.contains("message") || !result.at("message").is_string()) {
+        throw std::runtime_error("索引类型查询返回结构无效");
+    }
+    const int code = result.at("code").get<int>();
+    if (code == 2) return 0;
+    if (code != 0 || !result.contains("model_index") ||
+        !result.at("model_index").is_number_integer() ||
+        result.at("model_index").get<int>() != index ||
+        !result.contains("resource_type") || !result.at("resource_type").is_string()) {
+        throw std::runtime_error("索引类型查询失败: " + result.dump());
+    }
+    const std::string resourceType = result.at("resource_type").get<std::string>();
+    if (resourceType == "model") return 1;
+    if (resourceType == "dvs") return 2;
+    throw std::runtime_error("索引类型查询返回未知资源类型");
+}
+
 bool HasSharedFlowSdkForSelfTest(const dlcv_infer::Model& model) {
     const HMODULE module = ModelModuleForSelfTest(model);
-    for (const char* name : {"dlcv_register_dvs_model_c", "dlcv_get_dvs_model_c",
-             "dlcv_get_index_type_c", "dlcv_bind_index_c", "dlcv_get_all_models",
-             "dlcv_free_model_c", "dlcv_free_result"}) {
+    for (const char* name : {"dlcv_register_dvs_model", "dlcv_get_dvs_model",
+             "dlcv_get_index_type", "dlcv_bind_index", "dlcv_get_all_models",
+             "dlcv_free_model", "dlcv_free_result"}) {
         if (!GetProcAddress(module, name)) return false;
     }
     return true;
@@ -3192,8 +3230,7 @@ void VerifyCachedModelInvalidationForSelfTest(const std::wstring& path, int devi
         throw std::runtime_error("缓存失效测试需要完整共享 SDK");
     }
     auto borrowed = dlcv_infer::CreateModelFromIndex(owner.modelIndex);
-    const auto getIndex = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
-        GetProcAddress(ModelModuleForSelfTest(owner), "dlcv_get_index_type_c"));
+    const HMODULE nativeModule = ModelModuleForSelfTest(owner);
     const int index = owner.modelIndex;
     // 先成功读取，确保后续访问经过已经填充的缓存和绑定状态。
     for (auto* model : {&owner, &borrowed}) {
@@ -3205,7 +3242,8 @@ void VerifyCachedModelInvalidationForSelfTest(const std::wstring& path, int devi
         }
     }
     dlcv_infer::Utils::FreeAllModels();
-    if (getIndex(index) != 0) throw std::runtime_error("全量释放后原生索引仍有效");
+    if (QueryIndexTypeFromModuleForSelfTest(nativeModule, index) != 0)
+        throw std::runtime_error("全量释放后原生索引仍有效");
     for (auto* model : {&owner, &borrowed}) {
         const std::string label = model == &owner ? "原始对象" : "共享绑定对象";
         RequireInvalidIndexFailureForSelfTest(label + " GetModelInfo", [&] { (void)model->GetModelInfo(); });
@@ -3224,7 +3262,8 @@ void VerifyCachedModelInvalidationForSelfTest(const std::wstring& path, int devi
 struct NativeModuleForSelfTest final {
     HMODULE module = nullptr;
     dlcv_infer::LoadModelCFuncType load = nullptr;
-    dlcv_infer::GetIndexTypeFuncType getIndex = nullptr;
+    dlcv_infer::SharedIndexJsonFuncType getIndex = nullptr;
+    dlcv_infer::FreeResultFuncType freeResult = nullptr;
     dlcv_infer::FreeModelCFuncType freeModel = nullptr;
     dlcv_infer::FreeAllModelsFuncType freeAll = nullptr;
 
@@ -3237,10 +3276,12 @@ struct NativeModuleForSelfTest final {
                 throw std::runtime_error("实际推理 DLL 路径与指定 SDK 不一致");
             }
             load = reinterpret_cast<dlcv_infer::LoadModelCFuncType>(GetProcAddress(module, "dlcv_load_model_c"));
-            getIndex = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(GetProcAddress(module, "dlcv_get_index_type_c"));
+            getIndex = reinterpret_cast<dlcv_infer::SharedIndexJsonFuncType>(GetProcAddress(module, "dlcv_get_index_type"));
+            freeResult = reinterpret_cast<dlcv_infer::FreeResultFuncType>(GetProcAddress(module, "dlcv_free_result"));
             freeModel = reinterpret_cast<dlcv_infer::FreeModelCFuncType>(GetProcAddress(module, "dlcv_free_model_c"));
             freeAll = reinterpret_cast<dlcv_infer::FreeAllModelsFuncType>(GetProcAddress(module, "dlcv_free_all_models"));
-            if (!load || !getIndex || !freeModel || !freeAll) throw std::runtime_error("真实推理 DLL 缺少双模块测试接口");
+            if (!load || !getIndex || !freeResult || !freeModel || !freeAll)
+                throw std::runtime_error("真实推理 DLL 缺少双模块测试接口");
         } catch (...) {
             FreeLibrary(module);
             module = nullptr;
@@ -3259,7 +3300,7 @@ struct NativeModuleForSelfTest final {
         // 原生 C 路径入口使用本地 ANSI 编码，不能把中文 UTF-8 字节直接传入。
         const std::string modelPath = dlcv_infer::convertUtf8ToGbk(WideToUtf8(path));
         const int index = load(modelPath.c_str(), 0);
-        if (index < 0 || getIndex(index) != 1)
+        if (index < 0 || QueryIndexTypeFromModuleForSelfTest(module, index) != 1)
             throw std::runtime_error("原生接口未建立有效模型资源: " + WideToUtf8(path));
         return index;
     }
@@ -3279,7 +3320,7 @@ bool VerifyNativeModulesForSelfTest(
         if (sentinel.module == virbox.module) throw std::runtime_error("两个 DLL 未形成独立模块实例");
         const int sentinelIndex = sentinel.Load(sentinelModelPath);
         const int virboxIndex = virbox.Load(virboxModelPath);
-        if (sentinel.getIndex(sentinelIndex) != 1 || virbox.getIndex(virboxIndex) != 1) {
+        if (QueryIndexTypeFromModuleForSelfTest(sentinel.module, sentinelIndex) != 1 || QueryIndexTypeFromModuleForSelfTest(virbox.module, virboxIndex) != 1) {
             throw std::runtime_error("全量释放前两个模块必须同时持有真实模型");
         }
         const json beforeRelease = dlcv_infer::Utils::GetAllModels();
@@ -3297,17 +3338,17 @@ bool VerifyNativeModulesForSelfTest(
 
         if (useCppUtils) {
             dlcv_infer::Utils::FreeAllModels();
-            if (sentinel.getIndex(sentinelIndex) != 0 || virbox.getIndex(virboxIndex) != 0) {
+            if (QueryIndexTypeFromModuleForSelfTest(sentinel.module, sentinelIndex) != 0 || QueryIndexTypeFromModuleForSelfTest(virbox.module, virboxIndex) != 0) {
                 throw std::runtime_error("Utils::FreeAllModels 未清除两个原生模型表");
             }
         } else {
             sentinel.freeAll();
-            if (sentinel.getIndex(sentinelIndex) != 0 || virbox.getIndex(virboxIndex) != 1) {
+            if (QueryIndexTypeFromModuleForSelfTest(sentinel.module, sentinelIndex) != 0 || QueryIndexTypeFromModuleForSelfTest(virbox.module, virboxIndex) != 1) {
                 throw std::runtime_error("单模块释放影响了另一模块的模型表");
             }
             (void)virboxBorrowed.GetModelInfo();
             virbox.freeAll();
-            if (virbox.getIndex(virboxIndex) != 0) throw std::runtime_error("Virbox 模型表未清除");
+            if (QueryIndexTypeFromModuleForSelfTest(virbox.module, virboxIndex) != 0) throw std::runtime_error("Virbox 模型表未清除");
         }
         const json afterRelease = dlcv_infer::Utils::GetAllModels();
         if (GetAllModelsContainsForSelfTest(afterRelease, sentinel.module, sentinelIndex, "model") ||
@@ -3361,10 +3402,12 @@ int QueryNativeIndexTypeForSelfTest(int index) {
 
     std::vector<int> validTypes;
     for (const HMODULE module : modules) {
-        const auto getIndexType = reinterpret_cast<dlcv_infer::GetIndexTypeFuncType>(
-            GetProcAddress(module, "dlcv_get_index_type_c"));
-        if (getIndexType == nullptr) continue;
-        const int indexType = getIndexType(index);
+        const auto getIndexType = reinterpret_cast<dlcv_infer::SharedIndexJsonFuncType>(
+            GetProcAddress(module, "dlcv_get_index_type"));
+        const auto freeResult = reinterpret_cast<dlcv_infer::FreeResultFuncType>(
+            GetProcAddress(module, "dlcv_free_result"));
+        if (getIndexType == nullptr || freeResult == nullptr) continue;
+        const int indexType = QueryIndexTypeFromModuleForSelfTest(module, index);
         if (indexType == 0) continue;
         if (indexType != 1 && indexType != 2) {
             throw std::runtime_error("推理 DLL 返回未知 index 类型");

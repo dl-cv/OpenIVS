@@ -621,7 +621,7 @@ Json FlowGraphModel::LoadFromRoot(
             model->OwnModelIndex = false;
             if (preferredDllLoader != nullptr) {
                 const auto queryType = preferredDllLoader->GetIndexTypeFunc();
-                if (queryType == nullptr || queryType(modelIndex) != 1) {
+                if (queryType == nullptr || preferredDllLoader->QueryIndexType(modelIndex) != 1) {
                     throw std::runtime_error("流程子模型在所属 DLL 中无效");
                 }
                 model->SetPreferredDllLoader(preferredDllLoader);

@@ -1582,11 +1582,11 @@ namespace dlcv_infer {
         dlcv_free_all_models = (FreeAllModelsFuncType)ResolveSymbol(hModule, "dlcv_free_all_models");
         dlcv_get_device_info = (GetDeviceInfoFuncType)ResolveSymbol(hModule, "dlcv_get_device_info");
         dlcv_keep_max_clock = (KeepMaxClockFuncType)ResolveSymbol(hModule, "dlcv_keep_max_clock");
-        dlcv_get_index_type_c = (GetIndexTypeFuncType)ResolveSymbol(hModule, "dlcv_get_index_type_c");
-        dlcv_register_dvs_model_c = (RegisterDvsModelFuncType)ResolveSymbol(hModule, "dlcv_register_dvs_model_c");
-        dlcv_get_dvs_model_c = (GetDvsModelFuncType)ResolveSymbol(hModule, "dlcv_get_dvs_model_c");
+        dlcv_get_index_type = (SharedIndexJsonFuncType)ResolveSymbol(hModule, "dlcv_get_index_type");
+        dlcv_register_dvs_model = (SharedIndexJsonFuncType)ResolveSymbol(hModule, "dlcv_register_dvs_model");
+        dlcv_get_dvs_model = (SharedIndexJsonFuncType)ResolveSymbol(hModule, "dlcv_get_dvs_model");
         dlcv_get_all_models = (GetAllModelsFuncType)ResolveSymbol(hModule, "dlcv_get_all_models");
-        dlcv_bind_index_c = (BindIndexFuncType)ResolveSymbol(hModule, "dlcv_bind_index_c");
+        dlcv_bind_index = (SharedIndexJsonFuncType)ResolveSymbol(hModule, "dlcv_bind_index");
         dlcv_get_gpu_info = (GetGpuInfoFuncType)ResolveSymbol(hModule, "dlcv_get_gpu_info");
         dlcv_reset_max_clock = (ResetMaxClockFuncType)ResolveSymbol(hModule, "dlcv_reset_max_clock");
         dlcv_set_gpu_max_clock = (SetGpuMaxClockFuncType)ResolveSymbol(hModule, "dlcv_set_gpu_max_clock");
@@ -1708,58 +1708,193 @@ namespace dlcv_infer {
         }
     }
 
-    int DllLoader::QueryIndexType(int index) const {
-        if (!dlcv_get_index_type_c) throw std::runtime_error("缺少模型索引查询接口");
-        const int type = dlcv_get_index_type_c(index);
-        if (type == -1) throw std::runtime_error("模型索引查询失败");
-        if (type != 0 && type != 1 && type != 2) {
-            throw std::runtime_error("模型索引查询返回未知类型");
+    namespace {
+        struct SharedResultDeleter final {
+            FreeResultFuncType FreeResult = nullptr;
+
+            void operator()(const char* value) const noexcept {
+                if (value == nullptr || FreeResult == nullptr) return;
+                try { FreeResult(value); } catch (...) {}
+            }
+        };
+
+        bool TryReadInt32(const json& value, int& output) {
+            if (value.is_number_unsigned()) {
+                const std::uint64_t number = value.get<std::uint64_t>();
+                if (number > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) return false;
+                output = static_cast<int>(number);
+                return true;
+            }
+            if (value.is_number_integer()) {
+                const std::int64_t number = value.get<std::int64_t>();
+                if (number < std::numeric_limits<int>::min() ||
+                    number > std::numeric_limits<int>::max()) return false;
+                output = static_cast<int>(number);
+                return true;
+            }
+            return false;
         }
-        return type;
+
+        json ReadSharedJsonResult(
+            FreeResultFuncType freeResult,
+            const char* resultPtr,
+            const char* operation) {
+            if (freeResult == nullptr) {
+                throw std::runtime_error(std::string(operation) + "失败：缺少 dlcv_free_result");
+            }
+            if (resultPtr == nullptr) {
+                throw std::runtime_error(std::string(operation) + "失败：返回结果为空");
+            }
+            const std::unique_ptr<const char, SharedResultDeleter> resultHolder(
+                resultPtr, SharedResultDeleter{freeResult});
+            return json::parse(resultHolder.get());
+        }
+
+        json InvokeSharedJson(
+            SharedIndexJsonFuncType function,
+            FreeResultFuncType freeResult,
+            const std::string& request,
+            const char* operation) {
+            if (function == nullptr) {
+                throw std::runtime_error(std::string("缺少") + operation + "接口");
+            }
+            if (freeResult == nullptr) {
+                throw std::runtime_error(std::string(operation) + "失败：缺少 dlcv_free_result");
+            }
+            return ReadSharedJsonResult(freeResult, function(request.c_str()), operation);
+        }
+
+        int ReadSharedResponseCode(const json& result, const char* operation) {
+            if (!result.is_object() || !result.contains("code") ||
+                !result.contains("message") || !result.at("message").is_string()) {
+                throw std::runtime_error(std::string(operation) + "返回结构无效");
+            }
+            int code = -1;
+            if (!TryReadInt32(result.at("code"), code)) {
+                throw std::runtime_error(std::string(operation) + "返回状态码无效");
+            }
+            if (code < 0 || code > 3) {
+                throw std::runtime_error(std::string(operation) + "返回未知状态码");
+            }
+            return code;
+        }
+
+        std::string SharedResponseMessage(const json& result) {
+            return result.contains("message") && result.at("message").is_string()
+                ? result.at("message").get<std::string>()
+                : std::string("未返回错误说明");
+        }
+
+        int ReadSharedModelIndex(const json& result, const char* operation) {
+            if (!result.contains("model_index")) {
+                throw std::runtime_error(std::string(operation) + "返回的模型索引无效");
+            }
+            int index = -1;
+            if (!TryReadInt32(result.at("model_index"), index) || index < 0) {
+                throw std::runtime_error(std::string(operation) + "返回的模型索引无效");
+            }
+            return index;
+        }
+
+        void ValidateSharedResource(
+            const json& result,
+            int expectedIndex,
+            const char* expectedType,
+            const char* operation) {
+            if (ReadSharedModelIndex(result, operation) != expectedIndex ||
+                !result.contains("resource_type") || !result.at("resource_type").is_string()) {
+                throw std::runtime_error(std::string(operation) + "返回资源信息无效");
+            }
+            const std::string resourceType = result.at("resource_type").get<std::string>();
+            if (expectedType != nullptr) {
+                if (resourceType != expectedType) {
+                    throw std::runtime_error(std::string(operation) + "返回资源类型不一致");
+                }
+            } else if (resourceType != "model" && resourceType != "dvs") {
+                throw std::runtime_error(std::string(operation) + "返回未知资源类型");
+            }
+        }
+    }
+
+    int DllLoader::QueryIndexType(int index) const {
+        if (index < 0) throw std::invalid_argument("模型索引必须是非负整数");
+        const std::string request = json{{"model_index", index}}.dump();
+        const json result = InvokeSharedJson(
+            dlcv_get_index_type, dlcv_free_result, request, "模型索引查询");
+        const int code = ReadSharedResponseCode(result, "模型索引查询");
+        if (code == 2) return 0;
+        if (code != 0) {
+            throw std::runtime_error("模型索引查询失败：" + SharedResponseMessage(result));
+        }
+        ValidateSharedResource(result, index, nullptr, "模型索引查询");
+        return result.at("resource_type").get<std::string>() == "model" ? 1 : 2;
     }
 
     int DllLoader::BindIndex(int index) const {
-        return dlcv_bind_index_c ? dlcv_bind_index_c(index) : -1;
+        if (index < 0) throw std::invalid_argument("模型索引必须是非负整数");
+        const std::string request = json{{"model_index", index}}.dump();
+        const json result = InvokeSharedJson(
+            dlcv_bind_index, dlcv_free_result, request, "绑定模型索引");
+        const int code = ReadSharedResponseCode(result, "绑定模型索引");
+        if (code != 0) {
+            throw std::runtime_error("绑定模型索引失败：" + SharedResponseMessage(result));
+        }
+        ValidateSharedResource(result, index, nullptr, "绑定模型索引");
+        return 0;
     }
 
     int DllLoader::ReleaseIndex(int index) const {
-        return dlcv_free_model_c ? dlcv_free_model_c(index) : -1;
+        if (index < 0) throw std::invalid_argument("模型索引必须是非负整数");
+        if (dlcv_free_model == nullptr) throw std::runtime_error("缺少模型释放接口");
+        if (dlcv_free_result == nullptr) throw std::runtime_error("缺少 dlcv_free_result");
+        const std::string request = json{{"model_index", index}}.dump();
+        const json result = ReadSharedJsonResult(
+            dlcv_free_result, dlcv_free_model(request.c_str()), "释放模型索引");
+        if (!result.is_object() || !result.contains("code")) {
+            throw std::runtime_error("释放模型索引返回结构无效");
+        }
+        int code = -1;
+        if (!TryReadInt32(result.at("code"), code)) {
+            throw std::runtime_error("释放模型索引返回状态码无效");
+        }
+        if (code != 0) {
+            throw std::runtime_error("释放模型索引失败：" + SharedResponseMessage(result));
+        }
+        return 0;
     }
 
     int DllLoader::RegisterDvsModel(const char* text) const {
-        return dlcv_register_dvs_model_c ? dlcv_register_dvs_model_c(text) : -1;
+        if (text == nullptr) throw std::invalid_argument("DVS 描述不能为空");
+        const json result = InvokeSharedJson(
+            dlcv_register_dvs_model, dlcv_free_result, text, "登记 DVS");
+        const int code = ReadSharedResponseCode(result, "登记 DVS");
+        if (code != 0) {
+            throw std::runtime_error("登记 DVS 失败：" + SharedResponseMessage(result));
+        }
+        const int index = ReadSharedModelIndex(result, "登记 DVS");
+        ValidateSharedResource(result, index, "dvs", "登记 DVS");
+        return index;
     }
 
     json DllLoader::GetDvsModel(int index) const {
-        if (!dlcv_get_dvs_model_c || !dlcv_free_result) {
-            throw std::runtime_error("缺少 DVS 查询接口");
+        if (index < 0) throw std::invalid_argument("模型索引必须是非负整数");
+        const std::string request = json{{"model_index", index}}.dump();
+        const json result = InvokeSharedJson(
+            dlcv_get_dvs_model, dlcv_free_result, request, "读取 DVS 信息");
+        const int code = ReadSharedResponseCode(result, "读取 DVS 信息");
+        if (code != 0) {
+            throw std::runtime_error("读取 DVS 信息失败：" + SharedResponseMessage(result));
         }
-        const char* result = dlcv_get_dvs_model_c(index);
-        if (result == nullptr) throw std::runtime_error("读取 DVS 信息失败");
-        try {
-            json value = json::parse(result);
-            dlcv_free_result(result);
-            return value;
-        } catch (...) {
-            dlcv_free_result(result);
-            throw;
-        }
+        ValidateSharedResource(result, index, "dvs", "读取 DVS 信息");
+        return result;
     }
 
     json DllLoader::GetAllModelsSnapshot() const {
         if (!dlcv_get_all_models || !dlcv_free_result) {
             throw std::runtime_error("缺少模型列表接口");
         }
-        const char* result = dlcv_get_all_models();
-        if (result == nullptr) throw std::runtime_error("读取模型列表失败");
-        try {
-            json value = json::parse(result);
-            dlcv_free_result(result);
-            return value;
-        } catch (...) {
-            dlcv_free_result(result);
-            throw;
-        }
+        return ReadSharedJsonResult(
+            dlcv_free_result, dlcv_get_all_models(), "读取模型列表");
     }
 
     DllLoader& DllLoader::ResolveForIndex(int index, int& indexType) {
@@ -1915,17 +2050,11 @@ namespace dlcv_infer {
     }
 
     static json ReadNativeJsonResult(DllLoader* loader, const char* resultPtr) {
-        if (loader == nullptr || loader->GetFreeResultFunc() == nullptr || resultPtr == nullptr) {
-            throw std::runtime_error("底层 JSON 接口未返回结果");
+        if (loader == nullptr) {
+            throw std::runtime_error("底层 JSON 接口缺少所属 DLL");
         }
-        try {
-            json result = json::parse(resultPtr);
-            loader->GetFreeResultFunc()(resultPtr);
-            return result;
-        } catch (...) {
-            loader->GetFreeResultFunc()(resultPtr);
-            throw;
-        }
+        return ReadSharedJsonResult(
+            loader->GetFreeResultFunc(), resultPtr, "读取底层 JSON 结果");
     }
 
     static bool HasSharedIndexFunctions(const DllLoader* loader) {

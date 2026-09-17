@@ -133,7 +133,7 @@ public static class ModelFactory
 5. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
 6. 加载完成后可通过 `Loaded` 属性判断状态。
 7. 普通模型与 DVS 统一使用非负 `model_index`。`ModelFactory.CreateFromIndex(index)` 仅接受非负整数，通过进程内实际已加载的推理 DLL 查询资源所属模块，不按编号范围、模型头或 provider 推断。
-8. 恢复对象在选定模块后先调用 `dlcv_bind_index_c` 增加一次持有。普通模型继续使用既有 `dlcv_get_model_info`；DVS 再通过 `dlcv_get_dvs_model_c` 读取描述，并按 `pipeline` 与 `model_bindings` 创建 C# 执行对象。初始化失败时使用普通 `dlcv_free_model` 配对释放，不切换到其他模块。
+8. 恢复对象在选定模块后以严格的 `{"model_index":整数}` 请求调用 `dlcv_bind_index` 增加一次持有。普通模型继续使用既有 `dlcv_get_model_info`；DVS 再以相同请求结构通过 `dlcv_get_dvs_model` 读取描述，并按 `pipeline` 与 `model_bindings` 创建 C# 执行对象。初始化失败时使用无后缀 `dlcv_free_model` 配对释放，不切换到其他模块。
 
 ### 3.2 属性
 
@@ -189,7 +189,7 @@ public JObject GetDvsModelInfo();
 ```
 - `GetModelInfo()` 沿用既有普通模型 JSON 格式。DVT/DVO 直接读取底层普通模型信息；DVST/DVSO 返回普通模型兼容结构，输入通道和输入形状取首个模型，任务类型、类别列表和类别数量取最终输出可达模型。
 - `GetDvsModelInfo()` 仅支持 DVST/DVSO，返回完整流程 JSON、`loaded_model_meta`、按模型文件名组织的 `model_info`，以及首模型和最终输出模型的节点编号；普通模型调用时抛出 `InvalidOperationException`。
-- `dlcv_get_dvs_model_c` 只提供恢复所需的 DVS 描述，不改变 `GetModelInfo()` 的格式。
+- `dlcv_get_dvs_model` 只提供恢复所需的 DVS 描述，不改变 `GetModelInfo()` 的格式。
 
 ### 3.8 释放
 
@@ -322,10 +322,11 @@ public class DllLoader
     public FreeModelResultDelegate dlcv_free_model_result;
     public FreeResultDelegate     dlcv_free_result;
     public FreeAllModelsDelegate  dlcv_free_all_models;
-    public RegisterDvsModelDelegate dlcv_register_dvs_model_c;
-    public GetDvsModelDelegate    dlcv_get_dvs_model_c;
-    public GetIndexTypeDelegate   dlcv_get_index_type_c;
-    public BindIndexDelegate      dlcv_bind_index_c;
+    public delegate IntPtr SharedIndexJsonDelegate(IntPtr configJsonUtf8);
+    public SharedIndexJsonDelegate dlcv_register_dvs_model;
+    public SharedIndexJsonDelegate dlcv_get_dvs_model;
+    public SharedIndexJsonDelegate dlcv_get_index_type;
+    public SharedIndexJsonDelegate dlcv_bind_index;
     public GetAllModelsDelegate   dlcv_get_all_models;
     public GetDeviceInfoDelegate  dlcv_get_device_info;
     public GetGpuInfoDelegate     dlcv_get_gpu_info;
@@ -356,10 +357,10 @@ public class DllLoader
 - 滑窗处理使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 
 **共享 index 接口**：
-- 底层新增接口固定为五个：`dlcv_register_dvs_model_c(json)`、`dlcv_get_dvs_model_c(index)`、`dlcv_get_index_type_c(index)`、`dlcv_bind_index_c(index)`、`dlcv_get_all_models()`。普通模型信息、推理和释放继续使用既有接口。
-- 普通模型与 DVS 统一使用 `0` 到 `Int32.MaxValue` 范围内的 `model_index`；`dlcv_get_index_type_c` 返回 `0` 表示不存在、`1` 表示普通模型、`2` 表示 DVS、`-1` 表示查询错误。
+- 底层新增接口固定为五个：`dlcv_register_dvs_model(json)`、`dlcv_get_dvs_model(json)`、`dlcv_get_index_type(json)`、`dlcv_bind_index(json)`、`dlcv_get_all_models()`。前四项使用同一 `const char* -> const char*` JSON 委托，结果由 `dlcv_free_result` 释放；不加载旧名称。普通模型信息、推理和释放继续使用既有无后缀接口，`_c` 只用于普通模型加载、推理、释放及结果释放。
+- 普通模型与 DVS 统一使用 `0` 到 `Int32.MaxValue` 范围内的 `model_index`。登记输入为完整 DVS 描述；其余三项严格发送 `{"model_index":整数}`。成功结果含 `code=0/message` 与对应资源字段；输入错误、不存在、内部错误分别使用 `code=1/2/3`。`dlcv_get_index_type` 成功时通过 `resource_type=model|dvs` 返回类型，不存在时解析 `code=2`。
 - `ResolveForIndex` 只枚举进程内实际已加载的 `dlcv_infer.dll` / `dlcv_infer_v.dll`，不为探测加载其他模块。无结果、多模块命中、查询错误或绑定失败均返回错误，选定模块后不改选。
-- DVS 恢复顺序为先绑定，再读取描述。`dlcv_get_dvs_model_c` 返回原描述并增加 `model_index`、`resource_type=dvs`、`code`、`message`；查询本身不增加持有。
+- DVS 恢复顺序为先绑定，再读取描述。`dlcv_get_dvs_model` 返回原描述并增加 `model_index`、`resource_type=dvs`、`code`、`message`；查询本身不增加持有。
 - DVS 登记输入必须包含 `schema_version=1`、`dvs_type`（`dvst` 或 `dvso`）、字符串 `model_path`、整数 `device_id`、完整 `pipeline` 对象和 `model_bindings` 数组。每个绑定包含整数 `node_id` 与非负整数 `model_index`。输入不得包含顶层 `model_index` 或 `provider`。
 - 底层负责检查子模型是否存在、`node_id` 是否重复及数值范围，不解析执行图。C# 根据描述创建自己的执行对象，不复用 C++ 执行对象。
 - `dlcv_get_all_models()` 的单模块快照结构为 `{code,message,provider,models:[{model_index,resource_type,model_paths,device_id}]}`。`Utils.GetAllModels()` 按模块原样保留快照并增加 `module_path`，不同模块的相同编号不合并。
@@ -513,7 +514,7 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 }
 ```
 
-`CreateFromIndex` 校验非负 index，查询唯一所属模块并调用 `dlcv_bind_index_c` 增加一次持有。普通模型立即读取既有普通模型信息；DVS 在绑定后读取描述并创建 C# 执行对象。`Dispose` 使用普通 `dlcv_free_model` 配对释放该实例的一次持有，其他持有方可继续查询与推理。
+`CreateFromIndex` 校验非负 index，查询唯一所属模块并调用 `dlcv_bind_index` 增加一次持有。普通模型立即读取既有普通模型信息；DVS 在绑定后读取描述并创建 C# 执行对象。`Dispose` 使用普通 `dlcv_free_model` 配对释放该实例的一次持有，其他持有方可继续查询与推理。
 
 ---
 

@@ -1138,7 +1138,7 @@ const char* DLCV_NATIVE_C_CALL dlcv_load_model(const char* config_str) {
                 try {
                     const auto getIndexType = nativeLoader.GetIndexTypeFunc();
                     if (getIndexType != nullptr) {
-                        const int indexType = getIndexType(modelIndex);
+                        const int indexType = nativeLoader.QueryIndexType(modelIndex);
                         if (indexType != 1) {
                             throw std::runtime_error("普通模型加载后 index 类型无效");
                         }

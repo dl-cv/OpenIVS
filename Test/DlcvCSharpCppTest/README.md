@@ -37,7 +37,7 @@ C# 和 C++ 均可先加载，也可分别从同一文件加载；已有该侧模
 
 转换是同进程模型索引共享，不改变模型文件格式，不重复加载文件，也不保存新的模型文件。共享绑定成功后，可以先释放任一语言对象，再从另一语言获取信息；关闭窗口按 C++、C# 顺序释放。操作异常显示在底部状态区，不弹出错误对话框。程序不接收图片、不调用推理接口。
 
-运行环境须安装提供最终共享接口的深度视觉 SDK。新增底层接口固定为 `dlcv_register_dvs_model_c`、`dlcv_get_dvs_model_c`、`dlcv_get_index_type_c`、`dlcv_bind_index_c`、`dlcv_get_all_models`；释放统一使用已有普通模型释放接口，不使用解绑或 DVS 专用释放接口。编译成功不表示已安装 SDK 已更新到该接口版本。
+运行环境须安装提供最终共享接口的深度视觉 SDK。新增底层接口固定为 `dlcv_register_dvs_model`、`dlcv_get_dvs_model`、`dlcv_get_index_type`、`dlcv_bind_index`、`dlcv_get_all_models`；前四项均接收 UTF-8 JSON 并返回由 `dlcv_free_result` 释放的 UTF-8 JSON，不加载 `_c` 旧名称。共享持有使用无后缀普通模型释放接口，不使用解绑或 DVS 专用释放接口。编译成功不表示已安装 SDK 已更新到该接口版本。
 
 ## HiDPI 与应用图标
 
@@ -110,4 +110,4 @@ python Test/DlcvCSharpCppTest/run_tests.py --exe Test/DlcvCSharpCppTest/bin/x64/
 
 ## DVS 归属与持有检查
 
-DVST/DVSO 的 `model-test` 额外检查：`dlcv_get_index_type_c` 对统一非负 `model_index` 返回 2，`dlcv_get_dvs_model_c` 返回原始 DVS 描述、`model_index`、`resource_type=dvs`、状态码和消息。恢复顺序为先调用 `dlcv_bind_index_c`，再读取描述并建立当前语言自己的执行对象；失败时使用普通模型释放接口配对。DVS 描述中的子模型编号仍为普通模型类型。C# 与 C++ 保持两个共享方向和两种释放顺序，恢复不再次读取归档文件；最后一次 DVS 释放由底层减少每个不同子模型的一次持有。
+DVST/DVSO 的 `model-test` 额外检查：`dlcv_get_index_type` 使用严格的 `{"model_index":整数}` 请求，并通过 `code=0`、同一 `model_index` 和 `resource_type=dvs` 返回类型；资源不存在时返回 `code=2`。`dlcv_get_dvs_model` 使用相同请求结构，返回原始 DVS 描述、`model_index`、`resource_type=dvs`、状态码和消息。恢复顺序为先调用 `dlcv_bind_index`，再读取描述并建立当前语言自己的执行对象；失败时使用无后缀普通模型释放接口配对。DVS 描述中的子模型编号仍为普通模型类型。C# 与 C++ 保持两个共享方向和两种释放顺序，恢复不再次读取归档文件；最后一次 DVS 释放由底层减少每个不同子模型的一次持有。
