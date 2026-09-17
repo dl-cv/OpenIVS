@@ -221,6 +221,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `dvs-memory-loading-selftest <modelPath> <imagePath> [device]`
   - `dvsp-reject-selftest <modelPath> [device]`
   - `create-model-from-index-selftest <modelPath> [device]`
+- `dlcv_infer_cpp_test.exe sliding-merge-selftest` 为无模型回归，覆盖带滑窗元信息的单窗口小数框、正负半整数取整、多窗口合并框和分组首次出现顺序。
 - `create-model-from-index-selftest` 检查 C++ 头文件内联辅助函数创建时增加 index 使用次数、对象释放时减少使用次数；流程模型还会检查 `FreeAllModels()` 清空模型池、旧流程对象在底层释放失败后完成本地清理，以及相同流程能够重新加载。
 - `DlcvCSharpTest.exe category-count-check-selftest` 与 `dlcv_infer_cpp_test.exe category-count-check-selftest` 验证类型数量规则、同一原图局部结果聚合、粘性 `ok=false`、字符串或数组 `reason`、Flow 输出包装及旧流程兼容行为。
 - `dlcv_infer_cpp_test.exe` 支持三模型加载计时子命令：
@@ -231,7 +232,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - 成功返回 `0`，模型加载异常返回 `1`，参数数量错误返回 `2`。
 - `DlcvCSharpTest.exe calc-mean-selftest` 检查结果构造函数、均值字段，以及 Flow 节点默认值、入口显式覆盖和后续恢复。
 - `DlcvCSharpTest.exe shared-index-format-selftest` 保持 DVT、DVO、DVST 的既有推理比较范围，分别检查 C# 持有/C++ 借用、C++ 持有/C# 借用两种方向。DVSO 的索引共享、描述恢复与释放由混编工程的四格式回归检查。
-- `shared-index-csharp-selftest <普通模型> <DVSO流程> <图片> <设备编号>` 可单独验证 DVSO。正式加速器从 AOI DVSP 生成的 ONNX Runtime DVSO，在 CPU -1 与 GPU 0 下均通过双向共享及逐目标推理比较。无 CAD 流程存在目标数量和属性差异，重新加速后仍可复现，不将该流程记录为通过。
+- `shared-index-csharp-selftest <普通模型> <DVSO流程> <图片> <设备编号>` 可单独验证 DVSO。正式加速器从 AOI DVSP 生成的 ONNX Runtime DVSO，在 CPU -1 与 GPU 0 下均通过双向共享及逐目标推理比较。同一加速配置生成的无 CAD DVSO 在 C++ 滑窗合并按端点取整并保持分组输出顺序后，CPU -1、GPU 0 的最终输出均为两种语言各 34 个目标，完整结果数组及顺序一致；CPU 双向共享推理检查通过。
 - `DlcvCSharpTest.exe shared-index-provider-model-selftest` 使用两种加密狗格式各自独立生成的普通模型，验证实际加载 DLL 的索引归属、双向读取和推理结果；两个模型作为各自独立的实际产品输入，不组成混合格式流程，也不以编号数值推导资源类型。
   - `all-tests` 已加入上述共享 index 测试；任一专项返回非零时，统一测试返回失败。
 - `DlcvCSharpTest.exe native-c-api-regression-selftest` 使用正式 C ABI 检查不存在模型的 `code=2` 和 `Model not found.`、有效编号重复释放成功，以及 JSON 编号范围和类型。

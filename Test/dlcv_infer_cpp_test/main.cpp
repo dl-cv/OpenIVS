@@ -45,6 +45,7 @@
 #include "dlcv_infer.h"
 #include "RegionMaskSelfTest.h"
 #include "MaskAreaSelfTest.h"
+#include "SlidingMergeSelfTest.h"
 #include "../common/NativeSharedIndexTestHelper.h"
 
 namespace {
@@ -4529,6 +4530,9 @@ int wmain(int argc, wchar_t* argv[]) {
     if (argc >= 2 && std::wstring(argv[1]) == L"region-mask-selftest") {
         return RunRegionMaskSelfTest();
     }
+    if (argc >= 2 && std::wstring(argv[1]) == L"sliding-merge-selftest") {
+        return RunSlidingMergeSelfTest();
+    }
     if (argc >= 2 && std::wstring(argv[1]) == L"bbox-iou-dedup-selftest") {
         return RunBBoxIoUDedupSelfTest();
     }
@@ -4608,6 +4612,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  ai-orientation-affine-selftest\n";
     std::cout << "  imageprepcheck\n";
     std::cout << "  rect-image-correction-selftest\n";
+    std::cout << "  sliding-merge-selftest\n";
     std::cout << "  bbox-iou-dedup-selftest\n";
     std::cout << "  count-results-selftest\n";
     std::cout << "  category-count-check-selftest\n";
