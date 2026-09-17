@@ -532,19 +532,37 @@ namespace DlcvCSharpTest
                     }
                 };
                 string filledDogText = (string)dogFormatter.Invoke(null, new object[] { filledDogInfo, false });
-                string expectedFilled =
-                    "Sentinel加密狗ID（2个）：\n" +
-                    new JArray { "id-1", "id-2" }.ToString(Formatting.Indented) + "\n\n" +
-                    "Sentinel加密狗特性（3个）：\n" +
-                    new JArray { "1", "2", "3" }.ToString(Formatting.Indented) + "\n\n" +
-                    "Virbox加密狗ID（1个）：\n" +
-                    new JArray { "vb-1" }.ToString(Formatting.Indented) + "\n\n" +
-                    "Virbox加密狗特性（2个）：\n" +
-                    new JArray { "10", "11" }.ToString(Formatting.Indented);
+                string expectedFilled = JoinTextBoxLines(
+                    "Sentinel加密狗ID（2个）：",
+                    "[",
+                    "  \"id-1\",",
+                    "  \"id-2\"",
+                    "]",
+                    "",
+                    "Sentinel加密狗特性（3个）：",
+                    "[",
+                    "  \"1\",",
+                    "  \"2\",",
+                    "  \"3\"",
+                    "]",
+                    "",
+                    "Virbox加密狗ID（1个）：",
+                    "[",
+                    "  \"vb-1\"",
+                    "]",
+                    "",
+                    "Virbox加密狗特性（2个）：",
+                    "[",
+                    "  \"10\",",
+                    "  \"11\"",
+                    "]");
                 RequireCliThreshold(
                     string.Equals(filledDogText, expectedFilled, StringComparison.Ordinal)
-                    && filledDogText.IndexOf("  \"id-1\"," + Environment.NewLine + "  \"id-2\"", StringComparison.Ordinal) >= 0,
-                    "加密狗列表未按数量换行显示");
+                    && filledDogText.IndexOf('\n') >= 0
+                    && filledDogText.Replace("\r\n", string.Empty).IndexOf('\n') < 0,
+                    "加密狗列表未使用界面换行");
+                RequireTextBoxLineCount(filledDogText, 23, "加密狗列表未在文本框中按行显示");
+                RequireTextBoxLineCount(emptyDogText, 11, "空加密狗列表未在文本框中按行显示");
 
                 var dogInfo = new JObject
                 {
@@ -1157,6 +1175,21 @@ namespace DlcvCSharpTest
             if (!condition)
             {
                 throw new InvalidOperationException(message);
+            }
+        }
+
+        private static string JoinTextBoxLines(params string[] lines)
+        {
+            return string.Join("\r\n", lines);
+        }
+
+        private static void RequireTextBoxLineCount(string text, int expectedLineCount, string message)
+        {
+            using (var box = new TextBox())
+            {
+                box.Multiline = true;
+                box.Text = text;
+                RequireCliThreshold(box.Lines.Length == expectedLineCount, message);
             }
         }
 

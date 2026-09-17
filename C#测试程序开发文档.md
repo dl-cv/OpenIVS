@@ -460,7 +460,8 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
   - 标题为 `Sentinel加密狗ID（N个）：`、`Sentinel加密狗特性（N个）：`、`Virbox加密狗ID（N个）：`、`Virbox加密狗特性（N个）：`，其中 `N` 为对应列表元素数量
   - 每个列表使用 JSON 缩进格式，元素各自单独一行；空列表显示 `[]`
   - 四段之间以空行分隔
-- 若 Sentinel/Virbox 的 devices 与 features 均为空：在上述内容前追加一行 `未检测到加密狗\n\n`
+  - 全部换行使用 `\r\n`，写入左侧多行文本框后按行显示
+- 若 Sentinel/Virbox 的 devices 与 features 均为空：在上述内容前追加 `未检测到加密狗` 及空行
 - 启动流程可先做一次 `GetAllDogInfo()` 并显示授权状态；推理 DLL 不在此步骤选择，首次普通模型加载时才根据模型头确定默认 DLL
 
 #### 7.13 文档（按钮：`文档`）

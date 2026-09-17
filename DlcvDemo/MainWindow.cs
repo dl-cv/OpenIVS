@@ -332,15 +332,16 @@ namespace DlcvDemo
             JArray virboxDevices = virbox["devices"] as JArray ?? new JArray();
             JArray virboxFeatures = virbox["features"] as JArray ?? new JArray();
 
-            string text =
-                FormatDogListSection("Sentinel加密狗ID", sentinelDevices) + "\n\n" +
-                FormatDogListSection("Sentinel加密狗特性", sentinelFeatures) + "\n\n" +
-                FormatDogListSection("Virbox加密狗ID", virboxDevices) + "\n\n" +
-                FormatDogListSection("Virbox加密狗特性", virboxFeatures);
+            string text = string.Join(
+                "\r\n\r\n",
+                FormatDogListSection("Sentinel加密狗ID", sentinelDevices),
+                FormatDogListSection("Sentinel加密狗特性", sentinelFeatures),
+                FormatDogListSection("Virbox加密狗ID", virboxDevices),
+                FormatDogListSection("Virbox加密狗特性", virboxFeatures));
 
             if (prependNoDogHint)
             {
-                text = "未检测到加密狗\n\n" + text;
+                text = "未检测到加密狗\r\n\r\n" + text;
             }
             return text;
         }
@@ -348,7 +349,15 @@ namespace DlcvDemo
         private static string FormatDogListSection(string title, JArray items)
         {
             JArray list = items ?? new JArray();
-            return title + "（" + list.Count + "个）：\n" + list.ToString(Formatting.Indented);
+            return title + "（" + list.Count + "个）：\r\n" + ToTextBoxNewlines(list.ToString(Formatting.Indented));
+        }
+
+        private static string ToTextBoxNewlines(string text)
+        {
+            return (text ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Replace("\r", "\n")
+                .Replace("\n", "\r\n");
         }
 
         /// <summary>
@@ -1362,7 +1371,7 @@ namespace DlcvDemo
             }
 
             return FormatDogInfoText(allInfo, prependNoDogHint: true)
-                + "\n\n"
+                + "\r\n\r\n"
                 + normalizedEnvironmentInfo;
         }
 
