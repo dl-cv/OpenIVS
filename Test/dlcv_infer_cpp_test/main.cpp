@@ -3109,9 +3109,9 @@ HMODULE ModelModuleForSelfTest(const dlcv_infer::Model& model) {
 }
 
 int QueryIndexTypeFromModuleForSelfTest(HMODULE module, int index) {
-    const auto query = reinterpret_cast<dlcv_infer::SharedIndexJsonFuncType>(
+    const auto query = reinterpret_cast<dlcv_infer::JsonRequestFuncType>(
         GetProcAddress(module, "dlcv_get_index_type"));
-    const auto freeResult = reinterpret_cast<dlcv_infer::FreeResultFuncType>(
+    const auto freeResult = reinterpret_cast<dlcv_infer::JsonFreeFuncType>(
         GetProcAddress(module, "dlcv_free_result"));
     if (query == nullptr || freeResult == nullptr) {
         throw std::runtime_error("推理 DLL 缺少索引类型查询或结果释放接口");
@@ -3263,8 +3263,8 @@ void VerifyCachedModelInvalidationForSelfTest(const std::wstring& path, int devi
 struct NativeModuleForSelfTest final {
     HMODULE module = nullptr;
     dlcv_infer::LoadModelCFuncType load = nullptr;
-    dlcv_infer::SharedIndexJsonFuncType getIndex = nullptr;
-    dlcv_infer::FreeResultFuncType freeResult = nullptr;
+    dlcv_infer::JsonRequestFuncType getIndex = nullptr;
+    dlcv_infer::JsonFreeFuncType freeResult = nullptr;
     dlcv_infer::FreeModelCFuncType freeModel = nullptr;
     dlcv_infer::FreeAllModelsFuncType freeAll = nullptr;
 
@@ -3277,8 +3277,8 @@ struct NativeModuleForSelfTest final {
                 throw std::runtime_error("实际推理 DLL 路径与指定 SDK 不一致");
             }
             load = reinterpret_cast<dlcv_infer::LoadModelCFuncType>(GetProcAddress(module, "dlcv_load_model_c"));
-            getIndex = reinterpret_cast<dlcv_infer::SharedIndexJsonFuncType>(GetProcAddress(module, "dlcv_get_index_type"));
-            freeResult = reinterpret_cast<dlcv_infer::FreeResultFuncType>(GetProcAddress(module, "dlcv_free_result"));
+            getIndex = reinterpret_cast<dlcv_infer::JsonRequestFuncType>(GetProcAddress(module, "dlcv_get_index_type"));
+            freeResult = reinterpret_cast<dlcv_infer::JsonFreeFuncType>(GetProcAddress(module, "dlcv_free_result"));
             freeModel = reinterpret_cast<dlcv_infer::FreeModelCFuncType>(GetProcAddress(module, "dlcv_free_model_c"));
             freeAll = reinterpret_cast<dlcv_infer::FreeAllModelsFuncType>(GetProcAddress(module, "dlcv_free_all_models"));
             if (!load || !getIndex || !freeResult || !freeModel || !freeAll)
@@ -3403,9 +3403,9 @@ int QueryNativeIndexTypeForSelfTest(int index) {
 
     std::vector<int> validTypes;
     for (const HMODULE module : modules) {
-        const auto getIndexType = reinterpret_cast<dlcv_infer::SharedIndexJsonFuncType>(
+        const auto getIndexType = reinterpret_cast<dlcv_infer::JsonRequestFuncType>(
             GetProcAddress(module, "dlcv_get_index_type"));
-        const auto freeResult = reinterpret_cast<dlcv_infer::FreeResultFuncType>(
+        const auto freeResult = reinterpret_cast<dlcv_infer::JsonFreeFuncType>(
             GetProcAddress(module, "dlcv_free_result"));
         if (getIndexType == nullptr || freeResult == nullptr) continue;
         const int indexType = QueryIndexTypeFromModuleForSelfTest(module, index);

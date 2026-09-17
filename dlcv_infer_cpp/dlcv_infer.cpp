@@ -1572,21 +1572,21 @@ namespace dlcv_infer {
     }
 
     void DllLoader::ResolveSymbols() {
-        dlcv_load_model = (LoadModelFuncType)ResolveSymbol(hModule, "dlcv_load_model");
+        dlcv_load_model = (JsonRequestFuncType)ResolveSymbol(hModule, "dlcv_load_model");
         dlcv_load_model_binary = (LoadModelBinaryFuncType)ResolveSymbol(hModule, "dlcv_load_model_binary");
-        dlcv_free_model = (FreeModelFuncType)ResolveSymbol(hModule, "dlcv_free_model");
-        dlcv_get_model_info = (GetModelInfoFuncType)ResolveSymbol(hModule, "dlcv_get_model_info");
-        dlcv_infer = (InferFuncType)ResolveSymbol(hModule, "dlcv_infer");
-        dlcv_free_model_result = (FreeModelResultFuncType)ResolveSymbol(hModule, "dlcv_free_model_result");
-        dlcv_free_result = (FreeResultFuncType)ResolveSymbol(hModule, "dlcv_free_result");
+        dlcv_free_model = (JsonRequestFuncType)ResolveSymbol(hModule, "dlcv_free_model");
+        dlcv_get_model_info = (JsonRequestFuncType)ResolveSymbol(hModule, "dlcv_get_model_info");
+        dlcv_infer = (JsonRequestFuncType)ResolveSymbol(hModule, "dlcv_infer");
+        dlcv_free_model_result = (JsonFreeFuncType)ResolveSymbol(hModule, "dlcv_free_model_result");
+        dlcv_free_result = (JsonFreeFuncType)ResolveSymbol(hModule, "dlcv_free_result");
         dlcv_free_all_models = (FreeAllModelsFuncType)ResolveSymbol(hModule, "dlcv_free_all_models");
         dlcv_get_device_info = (GetDeviceInfoFuncType)ResolveSymbol(hModule, "dlcv_get_device_info");
         dlcv_keep_max_clock = (KeepMaxClockFuncType)ResolveSymbol(hModule, "dlcv_keep_max_clock");
-        dlcv_get_index_type = (SharedIndexJsonFuncType)ResolveSymbol(hModule, "dlcv_get_index_type");
-        dlcv_register_dvs_model = (SharedIndexJsonFuncType)ResolveSymbol(hModule, "dlcv_register_dvs_model");
-        dlcv_get_dvs_model = (SharedIndexJsonFuncType)ResolveSymbol(hModule, "dlcv_get_dvs_model");
+        dlcv_get_index_type = (JsonRequestFuncType)ResolveSymbol(hModule, "dlcv_get_index_type");
+        dlcv_register_dvs_model = (JsonRequestFuncType)ResolveSymbol(hModule, "dlcv_register_dvs_model");
+        dlcv_get_dvs_model = (JsonRequestFuncType)ResolveSymbol(hModule, "dlcv_get_dvs_model");
         dlcv_get_all_models = (GetAllModelsFuncType)ResolveSymbol(hModule, "dlcv_get_all_models");
-        dlcv_bind_index = (SharedIndexJsonFuncType)ResolveSymbol(hModule, "dlcv_bind_index");
+        dlcv_bind_index = (JsonRequestFuncType)ResolveSymbol(hModule, "dlcv_bind_index");
         dlcv_get_gpu_info = (GetGpuInfoFuncType)ResolveSymbol(hModule, "dlcv_get_gpu_info");
         dlcv_reset_max_clock = (ResetMaxClockFuncType)ResolveSymbol(hModule, "dlcv_reset_max_clock");
         dlcv_set_gpu_max_clock = (SetGpuMaxClockFuncType)ResolveSymbol(hModule, "dlcv_set_gpu_max_clock");
@@ -1710,7 +1710,7 @@ namespace dlcv_infer {
 
     namespace {
         struct SharedResultDeleter final {
-            FreeResultFuncType FreeResult = nullptr;
+            JsonFreeFuncType FreeResult = nullptr;
 
             void operator()(const char* value) const noexcept {
                 if (value == nullptr || FreeResult == nullptr) return;
@@ -1736,7 +1736,7 @@ namespace dlcv_infer {
         }
 
         json ReadSharedJsonResult(
-            FreeResultFuncType freeResult,
+            JsonFreeFuncType freeResult,
             const char* resultPtr,
             const char* operation) {
             if (freeResult == nullptr) {
@@ -1751,8 +1751,8 @@ namespace dlcv_infer {
         }
 
         json InvokeSharedJson(
-            SharedIndexJsonFuncType function,
-            FreeResultFuncType freeResult,
+            JsonRequestFuncType function,
+            JsonFreeFuncType freeResult,
             const std::string& request,
             const char* operation) {
             if (function == nullptr) {

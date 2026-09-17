@@ -45,9 +45,23 @@ class CSharpSharedIndexSourceTest(unittest.TestCase):
         header = (ROOT / "dlcv_infer_cpp" / "dlcv_infer.h").read_text(encoding="utf-8-sig")
         source = (ROOT / "dlcv_infer_cpp" / "dlcv_infer.cpp").read_text(encoding="utf-8-sig")
         self.assertIn(
-            "typedef const char* (DLCV_INFER_NATIVE_CALL *SharedIndexJsonFuncType)(const char* configStr);",
+            "typedef const char* (DLCV_INFER_NATIVE_CALL *JsonRequestFuncType)(const char* config_str);",
             header,
         )
+        self.assertIn(
+            "typedef void (DLCV_INFER_NATIVE_CALL *JsonFreeFuncType)(const char* result_ptr);",
+            header,
+        )
+        for removed_type in (
+            "SharedIndexJsonFuncType",
+            "FreeModelResultFuncType",
+            "FreeResultFuncType",
+            "LoadModelFuncType",
+            "FreeModelFuncType",
+            "GetModelInfoFuncType",
+            "InferFuncType",
+        ):
+            self.assertNotIn(removed_type, header)
         for name in (
             'ResolveSymbol(hModule, "dlcv_register_dvs_model")',
             'ResolveSymbol(hModule, "dlcv_get_dvs_model")',
