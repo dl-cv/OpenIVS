@@ -231,12 +231,12 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - 成功返回 `0`，模型加载异常返回 `1`，参数数量错误返回 `2`。
 - `DlcvCSharpTest.exe calc-mean-selftest` 检查结果构造函数、均值字段，以及 Flow 节点默认值、入口显式覆盖和后续恢复。
 - `DlcvCSharpTest.exe shared-index-format-selftest` 保持 DVT、DVO、DVST 的既有推理比较范围，分别检查 C# 持有/C++ 借用、C++ 持有/C# 借用两种方向。DVSO 的索引共享、描述恢复与释放由混编工程的四格式回归检查。
-- 额外 DVSO 逐目标推理比较未通过：实际流程在 GPU 0 与 CPU -1 下均观察到 C# 与 C/C++ 输出差异，含目标数量和目标属性；不将该项记录为通过。可使用 `shared-index-csharp-selftest <普通模型> <DVSO流程> <图片> <设备编号>` 单独复查。
+- `shared-index-csharp-selftest <普通模型> <DVSO流程> <图片> <设备编号>` 可单独验证 DVSO。正式加速器从 AOI DVSP 生成的 ONNX Runtime DVSO，在 CPU -1 与 GPU 0 下均通过双向共享及逐目标推理比较。无 CAD 流程存在目标数量和属性差异，重新加速后仍可复现，不将该流程记录为通过。
 - `DlcvCSharpTest.exe shared-index-provider-model-selftest` 使用两种加密狗格式各自独立生成的普通模型，验证实际加载 DLL 的索引归属、双向读取和推理结果；两个模型作为各自独立的实际产品输入，不组成混合格式流程，也不以编号数值推导资源类型。
   - `all-tests` 已加入上述共享 index 测试；任一专项返回非零时，统一测试返回失败。
 - `DlcvCSharpTest.exe native-c-api-regression-selftest` 使用正式 C ABI 检查不存在模型的 `code=2` 和 `Model not found.`、有效编号重复释放成功，以及 JSON 编号范围和类型。
 - `DlcvCSharpTest.exe shared-index-native-rule-selftest` 调用编号脚本输出的 `Release/dlcv_infer_cpp_test.exe shared-index-rules-selftest`，检查退出码并按原生程序的 GBK 输出严格解码；跨语言模型加载与推理仍在同一进程使用正式 C ABI 验证。
-- `DlcvCSharpTest.exe shared-index-csharp-selftest` 依次验证普通模型与 DVST 的双向共享：C# 文件加载后供正式 C/C++ 入口按 index 使用，以及 C/C++ 文件加载后由 `ModelFactory.CreateFromIndex` 恢复。每个方向均检查创建方先释放后共享方仍可读取和推理、共享方先释放后创建方仍可使用、重复释放不重复消耗持有、最终释放后 index 消失。
+- `DlcvCSharpTest.exe shared-index-csharp-selftest` 依次验证普通模型与传入 DVS 流程的双向共享：C# 文件加载后供正式 C/C++ 入口按 index 使用，以及 C/C++ 文件加载后由 `ModelFactory.CreateFromIndex` 恢复。每个方向均检查创建方先释放后共享方仍可读取和推理、共享方先释放后创建方仍可使用、重复释放不重复消耗持有、最终释放后 index 消失。
 - `empty-dvs-first-load-selftest` 在没有预先加载推理模块的进程中创建空 DVS，检查默认模块选择、完整 DVS 信息和释放后的索引失效。
 - `shared-index-route-selftest` 使用可控委托检查最终五接口、四个共享 JSON 接口的结果释放、唯一模块选择、多模块同编号错误、`code=2` 不存在结果、查询错误不改选、负数 index 拒绝、DVS 登记字段、DVS 查询结果、统一普通释放和 DVS 子模型执行对象不重复 bind/free。
 - `shared-index-review-selftest` 使用实际普通模型与 DVST 检查两个共享方生命周期、DVS 子模型持有、最终释放、`Utils.GetAllModels()` 模块快照和列表查询不额外加载 DLL。
