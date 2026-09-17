@@ -695,3 +695,9 @@ C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/Mode
 ---
 
 生产头文件和生产 DLL 不保留测试导出。共享 index、归档和释放相关测试只放在测试工程中，并通过现有产品接口执行；不得新增测试导出，也不另设测试 DLL 导出方案。
+
+## 结构化 C 与 JSON C 的掩码面积
+
+`dlcv_infer_cpp_infer_c` 内部调用 `InferBatchPreservingOriginalMask`。普通模型的结构化 C 结果保留底层掩码的尺寸和像素内容，`area` 为该掩码的非零像素数。`dlcv_infer_cpp_infer_json_c` 使用 `InferOneOutJson`，普通模型掩码先按 bbox 宽高绝对值四舍五入后的尺寸进行最近邻缩放，再生成轮廓，`area` 为缩放后掩码的非零像素数。无掩码时保留原始面积，全零掩码面积为 0。
+
+这两个入口的面积不直接与底层 SDK 返回的轮廓面积等同。跨入口回归按各自掩码规则独立计算面积期望；类别、分数、bbox 和其他结果属性仍按相应接口规则比较。流程模型保持流程输出语义。
