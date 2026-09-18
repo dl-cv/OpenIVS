@@ -47,17 +47,6 @@ QString jsonToQStringPretty(const json& obj, int indent = 2) {
     return QString::fromUtf8(obj.dump(indent).c_str());
 }
 
-QString ReadModelTaskType(const json& modelInfo) {
-    const json* node = &modelInfo;
-    if (modelInfo.is_object() && modelInfo.contains("model_info") && modelInfo.at("model_info").is_object()) {
-        node = &modelInfo.at("model_info");
-    }
-    if (node->is_object() && node->contains("task_type") && node->at("task_type").is_string()) {
-        return QString::fromUtf8(node->at("task_type").get<std::string>().c_str());
-    }
-    return QString();
-}
-
 QString describeOpenCvImageForUi(const cv::Mat& m, bool threeChannelIsRgb = false) {
     if (m.empty()) {
         return QStringLiteral("(空)");
@@ -534,7 +523,12 @@ void MainWindow::onLoadModel() {
     }
 
     onGetModelInfo();
-    applyViewerLabelModeFromModel();
+    try {
+        json info = model_->GetModelInfo();
+        std::string task = info.contains("model_info") ? info["model_info"].value("task_type", "") : info.value("task_type", "");
+        imageViewer_->setLabelDisplayMode(task == "OCR" ? ImageViewerWidget::LabelTextMode::CategoryOnly : ImageViewerWidget::LabelTextMode::CategoryAndScore);
+    } catch (...) {
+    }
 }
 
 void MainWindow::onOpenImageInfer() {
@@ -1023,21 +1017,6 @@ void MainWindow::setUiEnabledForPressureTest(bool enabled) {
     spinThreshold_->setEnabled(enabled);
     spinThreadCount_->setEnabled(enabled);
     checkCalcMean_->setEnabled(enabled);
-}
-
-void MainWindow::applyViewerLabelModeFromModel() {
-    if (imageViewer_ == nullptr) {
-        return;
-    }
-    QString taskType;
-    if (model_) {
-        try {
-            taskType = ReadModelTaskType(model_->GetModelInfo());
-        } catch (...) {
-            taskType.clear();
-        }
-    }
-    imageViewer_->applyDefaultLabelModeForTask(taskType);
 }
 
 void MainWindow::onGetModelInfo() {

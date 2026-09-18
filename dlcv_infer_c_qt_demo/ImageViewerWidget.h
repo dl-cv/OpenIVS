@@ -49,9 +49,6 @@ public:
     void setShowLabelText(bool enabled);
     bool showLabelText() const { return labelDisplayMode_ != LabelTextMode::None; }
 
-    void applyDefaultLabelModeForTask(const QString& taskType);
-    static bool isOcrTaskType(const QString& taskType);
-
     void setLabelFontScale(float scale);
     float labelFontScale() const { return labelFontScale_; }
 

@@ -96,20 +96,6 @@ namespace DLCV
             set => LabelDisplayMode = value ? LabelTextMode.CategoryAndScore : LabelTextMode.None;
         }
 
-        public static bool IsOcrTaskType(string taskType)
-        {
-            return !string.IsNullOrWhiteSpace(taskType)
-                && string.Equals(taskType.Trim(), "OCR", StringComparison.OrdinalIgnoreCase);
-        }
-
-        public void ApplyDefaultLabelModeForTask(string taskType)
-        {
-            LabelDisplayMode = IsOcrTaskType(taskType)
-                ? LabelTextMode.CategoryOnly
-                : LabelTextMode.CategoryAndScore;
-            Invalidate();
-        }
-
         // 标签字体缩放倍率（默认 1.0），支持运行时通过快捷键调整。
         private float _labelFontScale = 1.0f;
         public float LabelFontScale

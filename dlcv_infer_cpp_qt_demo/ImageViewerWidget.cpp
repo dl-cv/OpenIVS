@@ -78,14 +78,6 @@ void ImageViewerWidget::setShowLabelText(bool enabled) {
     setLabelDisplayMode(enabled ? LabelTextMode::CategoryAndScore : LabelTextMode::None);
 }
 
-bool ImageViewerWidget::isOcrTaskType(const QString& taskType) {
-    return taskType.trimmed().compare(QLatin1String("OCR"), Qt::CaseInsensitive) == 0;
-}
-
-void ImageViewerWidget::applyDefaultLabelModeForTask(const QString& taskType) {
-    setLabelDisplayMode(isOcrTaskType(taskType) ? LabelTextMode::CategoryOnly : LabelTextMode::CategoryAndScore);
-}
-
 void ImageViewerWidget::setLabelFontScale(float scale) {
     const float clamped = std::max(minLabelFontScale_, std::min(maxLabelFontScale_, scale));
     if (std::abs(clamped - labelFontScale_) < 1e-4f) {
