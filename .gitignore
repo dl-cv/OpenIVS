@@ -12,6 +12,8 @@ enc_temp_folder
 dlcvpro_infer
 packages
 
+temp/
+
 *.exe
 *.dll
 dlcvpro_infer_csharp
@@ -417,5 +419,7 @@ FodyWeavers.xsd
 MiniAreaDemo/ExternalCallExample.cs
 
 # Release packages
+
+temp/
 *.zip
 OpenIVS2/设计不应该上传.md

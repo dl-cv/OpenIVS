@@ -116,6 +116,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 2. **流程模型文件**：`.dvst`、`.dvso`。由 `FlowGraphModel` 或 `DvsModel` 加载，适合把多步处理组织成一条完整流程。
 
 `.dvsp` 不进入 C# 或 C++ 推理模式，模型接口直接返回不支持错误，测试程序的模型选择窗口不显示该后缀。
+文件路径加载时，若模型文件存在且小于 1MB，C# / C++ `Model` 在进入 native/HTTP/DVS 解包前直接报损坏或不完整；内存加载子模型不受此规则约束。
 
 需要滑窗处理时，使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 

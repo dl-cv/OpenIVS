@@ -456,6 +456,83 @@ int RunDvspRejectSelfTest(int argc, wchar_t* argv[]) {
     }
 }
 
+bool HasUndersizedModelMessage(const std::string& message) {
+    return message.find("小于 1MB") != std::string::npos;
+}
+
+std::wstring BuildUndersizedSelfTestPath(const wchar_t* suffix) {
+    wchar_t tempPath[MAX_PATH] = {0};
+    const DWORD length = GetTempPathW(static_cast<DWORD>(sizeof(tempPath) / sizeof(tempPath[0])), tempPath);
+    if (length == 0 || length >= sizeof(tempPath) / sizeof(tempPath[0])) {
+        throw std::runtime_error("cannot get temp path");
+    }
+    static std::atomic<std::uint64_t> undersizedSequence{0};
+    std::wstring path(tempPath, length);
+    path += L"dlcv_cpp_undersized_";
+    path += std::to_wstring(GetCurrentProcessId());
+    path += L"_";
+    path += std::to_wstring(undersizedSequence.fetch_add(1, std::memory_order_relaxed));
+    path += suffix;
+    return path;
+}
+
+void WriteUndersizedSelfTestFile(const std::wstring& path, size_t size) {
+    std::ofstream ofs(path, std::ios::binary);
+    if (!ofs) {
+        throw std::runtime_error("cannot write temp model file");
+    }
+    std::vector<char> bytes(size, 'A');
+    ofs.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    if (!ofs) {
+        throw std::runtime_error("cannot finish temp model file");
+    }
+}
+
+std::string LoadUndersizedModelExpectingError(const std::wstring& path) {
+    try {
+        dlcv_infer::Model model(path, 0);
+        model.FreeModel();
+        return std::string();
+    } catch (const std::exception& ex) {
+        return ex.what();
+    }
+}
+
+int RunUndersizedModelSelfTest() {
+    try {
+        const wchar_t* suffixes[] = { L".dvt", L".dvo", L".dvp", L".dvst", L".dvso" };
+        std::vector<std::wstring> files;
+        for (const wchar_t* suffix : suffixes) {
+            std::wstring path = BuildUndersizedSelfTestPath(suffix);
+            files.push_back(path);
+            WriteUndersizedSelfTestFile(path, 512);
+            const std::string error = LoadUndersizedModelExpectingError(path);
+            if (!HasUndersizedModelMessage(error)) {
+                PrintUtf8ErrorLine(std::string(WideToUtf8(suffix)) + " did not return undersized error: " + (error.empty() ? "loaded" : error));
+                for (const auto& file : files) DeleteFileW(file.c_str());
+                return 1;
+            }
+        }
+
+        std::wstring dvspPath = BuildUndersizedSelfTestPath(L".dvsp");
+        files.push_back(dvspPath);
+        WriteUndersizedSelfTestFile(dvspPath, 512);
+        const std::string dvspError = LoadUndersizedModelExpectingError(dvspPath);
+        if (!dvs_test::HasExplicitDvspUnsupportedMessage(dvspError) || HasUndersizedModelMessage(dvspError)) {
+            PrintUtf8ErrorLine(std::string(".dvsp undersized file should be unsupported: ") + (dvspError.empty() ? "loaded" : dvspError));
+            for (const auto& file : files) DeleteFileW(file.c_str());
+            return 1;
+        }
+
+        for (const auto& file : files) DeleteFileW(file.c_str());
+        PrintUtf8Line("C++ 过小模型文件拒绝测试通过");
+        return 0;
+    } catch (const std::exception& ex) {
+        PrintUtf8ErrorLine(ex.what());
+        return 1;
+    }
+}
+
 struct ScopedDvsSelfTestFile final {
     std::wstring path;
 
@@ -4508,6 +4585,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunDvspRejectSelfTest(argc, argv);
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"undersized-model-selftest") {
+        return RunUndersizedModelSelfTest();
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"curve-text-affine-selftest") {
         return RunCurveTextAffineSelfTest();
     }
@@ -4608,6 +4689,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  dvs-model-pool-selftest <modelPath> [device]\n";
     std::cout << "  dvs-memory-loading-selftest <modelPath> <imagePath> [device]\n";
     std::cout << "  dvsp-reject-selftest <modelPath> [device]\n";
+    std::cout << "  undersized-model-selftest\n";
     std::cout << "  curve-text-affine-selftest\n";
     std::cout << "  ai-orientation-affine-selftest\n";
     std::cout << "  imageprepcheck\n";

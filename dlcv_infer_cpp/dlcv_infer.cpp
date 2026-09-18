@@ -2446,6 +2446,25 @@ namespace dlcv_infer {
         }
     }
 
+    void RejectUndersizedModelFile(const std::wstring& modelPathW) {
+#ifdef _WIN32
+        WIN32_FILE_ATTRIBUTE_DATA data;
+        if (!GetFileAttributesExW(modelPathW.c_str(), GetFileExInfoStandard, &data)) {
+            return;
+        }
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            return;
+        }
+        ULARGE_INTEGER size;
+        size.HighPart = data.nFileSizeHigh;
+        size.LowPart = data.nFileSizeLow;
+        if (size.QuadPart < 1024ull * 1024ull) {
+            throw std::runtime_error(
+                "模型文件可能已损坏或不完整（文件小于 1MB）: " + convertWstringToUtf8(modelPathW));
+        }
+#endif
+    }
+
     // Model类实现
     Model::Model() {}
 
@@ -2457,6 +2476,7 @@ namespace dlcv_infer {
         if (IsUnsupportedDvspPath(modelPathUtf8)) {
             throw std::invalid_argument("不支持 .dvsp 模型推理");
         }
+        RejectUndersizedModelFile(modelPathW);
         if (IsFlowArchivePath(modelPathUtf8)) {
             try {
                 LoadFlowArchiveAndRegister(modelPathW, device_id);
@@ -2488,6 +2508,7 @@ namespace dlcv_infer {
         if (IsUnsupportedDvspPath(modelPathUtf8)) {
             throw std::invalid_argument("不支持 .dvsp 模型推理");
         }
+        RejectUndersizedModelFile(modelPath);
         if (IsFlowArchivePath(modelPathUtf8)) {
             try {
                 LoadFlowArchiveAndRegister(modelPath, device_id);

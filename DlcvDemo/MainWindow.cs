@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
@@ -381,6 +381,15 @@ namespace DlcvDemo
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
         private bool isCurrentFlowModel = false; // 当前是否为流程模型(dvst/dvso)
 
+        private string WithLoadedModelPath(string infoText)
+        {
+            if (string.IsNullOrWhiteSpace(model_path))
+            {
+                return infoText;
+            }
+            return "模型: " + model_path + Environment.NewLine + infoText;
+        }
+
         private void DisposeCurrentModel()
         {
             try
@@ -424,7 +433,7 @@ namespace DlcvDemo
                 }
                 catch (Exception ex)
                 {
-                    richTextBox1.Text = ex.Message;
+                    ReportError("加载模型失败", ex);
                 }
             }
         }
@@ -518,15 +527,10 @@ namespace DlcvDemo
                 return;
             }
             JObject result = model.GetModelInfo();
-            if (result.ContainsKey("model_info"))
-            {
-                richTextBox1.Text = result["model_info"].ToString();
-            }
-            else
-            {
-                // 未知格式，直接显示原始 JSON
-                richTextBox1.Text = result.ToString();
-            }
+            string infoText = result.ContainsKey("model_info")
+                ? result["model_info"].ToString()
+                : result.ToString();
+            richTextBox1.Text = WithLoadedModelPath(infoText);
         }
 
         private void button_openimage_Click(object sender, EventArgs e)
@@ -1279,6 +1283,7 @@ namespace DlcvDemo
             // 如果存在正在运行的压力测试，先停止它
             StopPressureTest();
             DisposeCurrentModel();
+            model_path = null;
             richTextBox1.Text = "模型已释放";
         }
 
@@ -1393,6 +1398,7 @@ namespace DlcvDemo
                 disposable.Dispose();
             }
             model = null;
+            model_path = null;
             Utils.FreeAllModels();
             richTextBox1.Text = "所有模型已释放";
         }

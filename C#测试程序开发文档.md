@@ -303,7 +303,7 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
   - 实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
   - 加载成功后自动执行一次“获取模型信息”（同 7.4）
 - **异常**：
-  - 捕获异常后：`richTextBox1.Text = ex.Message`（不弹窗）
+  - 加载失败走 `ReportError("加载模型失败", ex)`：文本框写入错误，GUI 弹窗；`ui-test` 不弹窗。文件小于 1MB 时 API 直接报损坏/不完整。
 - **副作用**：
   - 保存 `LastModelPath=所选路径`
 
@@ -311,7 +311,9 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 
 - 前置条件：已加载模型，否则弹窗 `请先加载模型文件！`
 - 调用 `model.GetModelInfo()` 返回 JSON（可能格式多样），显示规则如下：
-  - 若包含 `model_info`：显示 `model_info` 对象（`richTextBox1.Text = result["model_info"].ToString()`）
+  - 第一行与单次推理一致，显示 `模型: ` + 完整模型路径
+  - 若包含 `model_info`：第一行之后显示 `model_info` 对象
+  - 否则：第一行之后显示原始 JSON
 
 #### 7.5 打开图片推理（按钮：`打开图片推理`）
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -148,6 +148,11 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-reject-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunDvspRejectSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "undersized-model-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunUndersizedModelSelfTest();
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-disabled-selftest", StringComparison.OrdinalIgnoreCase))
@@ -1202,6 +1207,7 @@ namespace DlcvCSharpTest
             {
                 new UnifiedTestCase("模型通道顺序", RunModelChannelOrderSelfTest),
                 new UnifiedTestCase("DVS 同名成员内容", DvsArchiveDuplicateSelfTest.Run),
+                new UnifiedTestCase("过小模型文件拒绝", RunUndersizedModelSelfTest),
                 new UnifiedTestCase("掩膜旋转框", RunMaskToRBoxSelfTest),
                 new UnifiedTestCase("掩码面积与 JSON 输出", MaskAreaSelfTest.Run),
                 new UnifiedTestCase("区域掩码筛选", RegionMaskSelfTest.Run),
@@ -5743,6 +5749,71 @@ namespace DlcvCSharpTest
                 && (message.IndexOf("不支持", StringComparison.Ordinal) >= 0
                     || message.IndexOf("unsupported", StringComparison.OrdinalIgnoreCase) >= 0
                     || message.IndexOf("not support", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private static bool HasUndersizedModelMessage(string message)
+        {
+            return !string.IsNullOrWhiteSpace(message)
+                && message.IndexOf("小于 1MB", StringComparison.Ordinal) >= 0;
+        }
+
+        private static string LoadModelExpectingError(string path)
+        {
+            Model model = null;
+            try
+            {
+                model = new Model(path, GpuDeviceId, false, false);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return ex.Message;
+            }
+            finally
+            {
+                try { if (model != null) model.Dispose(); } catch { }
+            }
+        }
+
+        private static int RunUndersizedModelSelfTest()
+        {
+            var files = new List<string>();
+            try
+            {
+                string[] extensions = { ".dvt", ".dvo", ".dvp", ".dvst", ".dvso" };
+                foreach (string ext in extensions)
+                {
+                    string path = Path.Combine(Path.GetTempPath(), "dlcv_undersized_" + Guid.NewGuid().ToString("N") + ext);
+                    File.WriteAllBytes(path, new byte[512]);
+                    files.Add(path);
+                    string error = LoadModelExpectingError(path);
+                    if (!HasUndersizedModelMessage(error))
+                    {
+                        Console.Error.WriteLine(ext + " 未返回过小文件错误: " + (error ?? "加载成功"));
+                        return 1;
+                    }
+                }
+
+                string dvspPath = Path.Combine(Path.GetTempPath(), "dlcv_undersized_" + Guid.NewGuid().ToString("N") + ".dvsp");
+                File.WriteAllBytes(dvspPath, new byte[512]);
+                files.Add(dvspPath);
+                string dvspError = LoadModelExpectingError(dvspPath);
+                if (!HasExplicitDvspUnsupportedMessage(dvspError) || HasUndersizedModelMessage(dvspError))
+                {
+                    Console.Error.WriteLine(".dvsp 过小文件应返回不支持错误: " + (dvspError ?? "加载成功"));
+                    return 1;
+                }
+
+                Console.WriteLine("C# 过小模型文件拒绝测试通过");
+                return 0;
+            }
+            finally
+            {
+                foreach (string path in files)
+                {
+                    try { if (File.Exists(path)) File.Delete(path); } catch { }
+                }
+            }
         }
 
         private static int RunDvspParitySelfTest(string[] args)

@@ -518,7 +518,7 @@ void MainWindow::onLoadModel() {
     catch (const std::exception& e)
     {
         model_.reset();
-        outputText_->setPlainText(QString::fromLocal8Bit(e.what()));
+        reportError("加载模型失败", QString::fromUtf8(e.what()));
         return;
     }
 
