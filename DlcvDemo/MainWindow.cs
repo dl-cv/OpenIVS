@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Drawing;
 using System.Threading;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
@@ -54,7 +53,6 @@ namespace DlcvDemo
             uiTestOptions = options;
             UiTestExitCode = options == null ? 0 : 1;
             InitializeComponent();
-            ConfigureDeviceComboModelNameDisplay();
             using (var iconStream = typeof(MainWindow).Assembly.GetManifestResourceStream("DlcvDemo.MainWindow.ico"))
             {
                 Icon = new System.Drawing.Icon(iconStream);
@@ -374,7 +372,6 @@ namespace DlcvDemo
 
         private dynamic model;
         private string model_path;
-        private string loadedModelFileName = "";
         private string image_path;
         private int batch_size = 1;
         private PressureTestRunner pressureTestRunner;
@@ -384,80 +381,13 @@ namespace DlcvDemo
         private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
         private bool isCurrentFlowModel = false; // 当前是否为流程模型(dvst/dvso)
 
-        private void ConfigureDeviceComboModelNameDisplay()
+        private string WithLoadedModelPath(string infoText)
         {
-            comboBox1.DrawMode = DrawMode.OwnerDrawFixed;
-            comboBox1.DrawItem -= comboBox1_DrawItem;
-            comboBox1.DrawItem += comboBox1_DrawItem;
-        }
-
-        private static string GetModelFileName(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return "";
-            }
-            return Path.GetFileName(path);
-        }
-
-        private void SetLoadedModelFileName(string path)
-        {
-            loadedModelFileName = GetModelFileName(path);
-            comboBox1.Invalidate();
-        }
-
-        private string WithLoadedModelFileName(string infoText)
-        {
-            string name = GetModelFileName(model_path);
-            if (string.IsNullOrEmpty(name))
+            if (string.IsNullOrWhiteSpace(model_path))
             {
                 return infoText;
             }
-            return name + Environment.NewLine + infoText;
-        }
-
-        private void comboBox1_DrawItem(object sender, DrawItemEventArgs e)
-        {
-            e.DrawBackground();
-            if (e.Index >= 0)
-            {
-                string deviceName = comboBox1.Items[e.Index].ToString();
-                bool isEdit = (e.State & DrawItemState.ComboBoxEdit) != 0;
-                if (!isEdit || string.IsNullOrEmpty(loadedModelFileName))
-                {
-                    TextRenderer.DrawText(
-                        e.Graphics,
-                        deviceName,
-                        comboBox1.Font,
-                        e.Bounds,
-                        e.ForeColor,
-                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-                }
-                else
-                {
-                    int split = Math.Max(e.Bounds.Width / 2, e.Bounds.Width - 200);
-                    var deviceBounds = new Rectangle(e.Bounds.X, e.Bounds.Y, Math.Max(1, split - 6), e.Bounds.Height);
-                    var nameBounds = new Rectangle(e.Bounds.X + split, e.Bounds.Y, Math.Max(1, e.Bounds.Width - split - 2), e.Bounds.Height);
-                    TextRenderer.DrawText(
-                        e.Graphics,
-                        deviceName,
-                        comboBox1.Font,
-                        deviceBounds,
-                        e.ForeColor,
-                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-                    using (var smallFont = new Font(comboBox1.Font.FontFamily, Math.Max(8f, comboBox1.Font.Size - 2.5f)))
-                    {
-                        TextRenderer.DrawText(
-                            e.Graphics,
-                            loadedModelFileName,
-                            smallFont,
-                            nameBounds,
-                            Color.FromArgb(120, 130, 140),
-                            TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-                    }
-                }
-            }
-            e.DrawFocusRectangle();
+            return "模型: " + model_path + Environment.NewLine + infoText;
         }
 
         private void DisposeCurrentModel()
@@ -525,7 +455,6 @@ namespace DlcvDemo
             {
                 DisposeCurrentModel();
             }
-            SetLoadedModelFileName(null);
             bool rpc_mode = false;
             try
             {
@@ -535,7 +464,6 @@ namespace DlcvDemo
 
             model = new Model(selectedFilePath, deviceOverride ?? GetSelectedDeviceId(), rpc_mode);
             model_path = selectedFilePath;
-            SetLoadedModelFileName(selectedFilePath);
             button_getmodelinfo_Click(this, EventArgs.Empty);
         }
 
@@ -596,7 +524,7 @@ namespace DlcvDemo
             string infoText = result.ContainsKey("model_info")
                 ? result["model_info"].ToString()
                 : result.ToString();
-            richTextBox1.Text = WithLoadedModelFileName(infoText);
+            richTextBox1.Text = WithLoadedModelPath(infoText);
         }
 
         private void button_openimage_Click(object sender, EventArgs e)
@@ -1350,7 +1278,6 @@ namespace DlcvDemo
             StopPressureTest();
             DisposeCurrentModel();
             model_path = null;
-            SetLoadedModelFileName(null);
             richTextBox1.Text = "模型已释放";
         }
 
@@ -1466,7 +1393,6 @@ namespace DlcvDemo
             }
             model = null;
             model_path = null;
-            SetLoadedModelFileName(null);
             Utils.FreeAllModels();
             richTextBox1.Text = "所有模型已释放";
         }
