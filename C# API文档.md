@@ -128,12 +128,13 @@ public static class ModelFactory
 **构造函数行为**：
 1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，实例化 `FlowGraphModel` 或 `DvsModel`。
 2. 若路径以 `.dvsp` 结尾 → 抛出 `NotSupportedException`，不加载文件。
-3. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
-4. 首次普通模型加载根据模型头 `dog_provider` 选择进程默认 DLL，并检查该模型授权；后续普通模型沿用默认 DLL，同时逐个检查授权。实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
-5. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
-6. 加载完成后可通过 `Loaded` 属性判断状态。
-7. 普通模型与 DVS 统一使用非负 `model_index`。`ModelFactory.CreateFromIndex(index)` 仅接受非负整数，通过进程内实际已加载的推理 DLL 查询资源所属模块，不按编号范围、模型头或 provider 推断。
-8. 恢复对象在选定模块后以严格的 `{"model_index":整数}` 请求调用 `dlcv_bind_index` 增加一次持有。普通模型继续使用既有 `dlcv_get_model_info`；DVS 再以相同请求结构通过 `dlcv_get_dvs_model` 读取描述，并按 `pipeline` 与 `model_bindings` 创建 C# 执行对象。初始化失败时使用无后缀 `dlcv_free_model` 配对释放，不切换到其他模块。
+3. 若文件存在且体积小于 1MB → 抛出 `InvalidDataException`，消息为模型文件可能已损坏或不完整（文件小于 1MB），不进入 DVT/DVP/DVS/RPC 加载。内存加载子模型不受此规则约束。
+4. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
+5. 首次普通模型加载根据模型头 `dog_provider` 选择进程默认 DLL，并检查该模型授权；后续普通模型沿用默认 DLL，同时逐个检查授权。实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
+6. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
+7. 加载完成后可通过 `Loaded` 属性判断状态。
+8. 普通模型与 DVS 统一使用非负 `model_index`。`ModelFactory.CreateFromIndex(index)` 仅接受非负整数，通过进程内实际已加载的推理 DLL 查询资源所属模块，不按编号范围、模型头或 provider 推断。
+9. 恢复对象在选定模块后以严格的 `{"model_index":整数}` 请求调用 `dlcv_bind_index` 增加一次持有。普通模型继续使用既有 `dlcv_get_model_info`；DVS 再以相同请求结构通过 `dlcv_get_dvs_model` 读取描述，并按 `pipeline` 与 `model_bindings` 创建 C# 执行对象。初始化失败时使用无后缀 `dlcv_free_model` 配对释放，不切换到其他模块。
 
 ### 3.2 属性
 
