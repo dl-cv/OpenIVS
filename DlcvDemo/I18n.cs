@@ -135,6 +135,7 @@ namespace DlcvDemo
 
         // 首次应用语言时记录控件/菜单项的原始中文文本，保证中英往返切换正确。
         private static readonly ConditionalWeakTable<Control, TextSnapshot> ControlTexts = new ConditionalWeakTable<Control, TextSnapshot>();
+        private static readonly ConditionalWeakTable<Control, TextSnapshot> AccessibleNames = new ConditionalWeakTable<Control, TextSnapshot>();
         private static readonly ConditionalWeakTable<ToolStripItem, TextSnapshot> MenuTexts = new ConditionalWeakTable<ToolStripItem, TextSnapshot>();
 
         internal static string CurrentLanguage { get; private set; } = Chinese;
@@ -165,7 +166,8 @@ namespace DlcvDemo
             return EnTranslations.TryGetValue(zhText, out enText) ? enText : zhText;
         }
 
-        // 递归应用语言到控件树与右键菜单项；窗体标题由窗体代码单独维护，此处跳过 Form 自身。
+        // 递归应用语言到控件树与右键菜单项。窗体标题由窗体代码单独维护；
+        // 下拉框、文本框、数值框的 Text 是运行期内容，不按设计器原文覆盖。
         internal static void ApplyTo(Control root)
         {
             if (root == null)
@@ -175,12 +177,25 @@ namespace DlcvDemo
             ApplyToControl(root);
         }
 
+        private static bool ShouldTranslateText(Control control)
+        {
+            return !(control is Form
+                || control is ComboBox
+                || control is TextBoxBase
+                || control is NumericUpDown);
+        }
+
         private static void ApplyToControl(Control control)
         {
-            if (!(control is Form))
+            if (ShouldTranslateText(control))
             {
                 TextSnapshot snapshot = ControlTexts.GetValue(control, c => new TextSnapshot(c.Text));
                 control.Text = T(snapshot.Text);
+            }
+            if (!string.IsNullOrEmpty(control.AccessibleName))
+            {
+                TextSnapshot accessible = AccessibleNames.GetValue(control, c => new TextSnapshot(c.AccessibleName));
+                control.AccessibleName = T(accessible.Text);
             }
             ContextMenuStrip menu = control.ContextMenuStrip;
             if (menu != null)
