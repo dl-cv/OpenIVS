@@ -17,10 +17,10 @@ namespace DlcvDemo
         {
             // 界面控件（设计器文本）
             { "加载模型", "Load Model" },
-            { "单次推理", "Single Inference" },
+            { "单次推理", "Infer" },
             { "推理 JSON", "Infer JSON" },
-            { "多线程测试", "Multi-thread Test" },
-            { "一致性测试", "Consistency Test" },
+            { "多线程测试", "Thread Test" },
+            { "一致性测试", "Consistency" },
             { "选择显卡", "Select GPU" },
             { "线程数", "Threads" },
             { "计算均值：默认", "Calc Mean: Default" },
@@ -28,11 +28,11 @@ namespace DlcvDemo
             { "打开图片推理", "Open Image to Infer" },
             { "保存图像", "Save Image" },
             { "释放模型", "Free Model" },
-            { "释放所有模型", "Free All Models" },
-            { "检查环境", "Check Environment" },
+            { "释放所有模型", "Free All" },
+            { "检查环境", "Check Env" },
             { "检查加密狗", "Check Dongle" },
             { "文档", "Docs" },
-            { "获取模型信息", "Get Model Info" },
+            { "获取模型信息", "Model Info" },
             { "运行结果", "Result" },
             { "C# 测试程序", "C# Test Program" },
 

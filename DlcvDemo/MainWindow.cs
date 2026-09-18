@@ -173,72 +173,34 @@ namespace DlcvDemo
             }
             float scale = DeviceDpi / 96F;
             bool compact = topCard.ClientSize.Width < 1160 * scale;
-            int minButtonWidth = (int)Math.Round((compact ? 90 : 104) * scale);
+            int buttonWidth = (int)Math.Round((compact ? 90 : 104) * scale);
             int numericWidth = (int)Math.Round((compact ? 80 : 110) * scale);
             int margin = (int)Math.Round(8 * scale);
             topLayout.SuspendLayout();
-            ApplyFittedButtonWidths(leftOpsTable, button_load_model, minButtonWidth, scale, 2, margin);
-            ApplyFittedButtonWidths(rightOpsTable, button_open_image, minButtonWidth, scale, 4, margin);
-            int languageWidth = (int)Math.Round(96 * scale);
-            comboBox_language.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            comboBox_language.Width = languageWidth;
-            comboBox_language.MinimumSize = new System.Drawing.Size(languageWidth, 0);
-            paramsTable.ColumnStyles[4].SizeType = SizeType.Absolute;
-            paramsTable.ColumnStyles[4].Width = languageWidth;
+            foreach (Control control in leftOpsTable.Controls)
+            {
+                if (control is Button && control != button_load_model)
+                {
+                    control.Width = buttonWidth;
+                }
+            }
+            foreach (Control control in rightOpsTable.Controls)
+            {
+                if (control is Button && control != button_open_image)
+                {
+                    control.Width = control == button_free_all_model || control == button_get_model_info
+                        ? (int)Math.Round(104 * scale)
+                        : buttonWidth;
+                }
+            }
+            leftOpsTable.Width = 2 * (buttonWidth + margin);
+            rightOpsTable.Width = 3 * (buttonWidth + margin) + (int)Math.Round(104 * scale) + margin;
             numericUpDown_batch_size.Width = numericWidth;
             numericUpDown_threshold.Width = numericWidth;
             numericUpDown_num_thread.Width = numericWidth;
             topLayout.ColumnStyles[1].Width = (compact ? 8 : 16) * scale;
             topLayout.ColumnStyles[3].Width = (compact ? 8 : 16) * scale;
             topLayout.ResumeLayout(true);
-        }
-
-        private static void ApplyFittedButtonWidths(TableLayoutPanel table, Button skip, int minWidth, float scale, int columns, int margin)
-        {
-            int[] colWidths = new int[columns];
-            for (int i = 0; i < columns; i++)
-            {
-                colWidths[i] = minWidth;
-            }
-            foreach (Control control in table.Controls)
-            {
-                if (!(control is Button) || control == skip || table.GetColumnSpan(control) > 1)
-                {
-                    continue;
-                }
-                int col = table.GetColumn(control);
-                if (col < 0 || col >= columns)
-                {
-                    continue;
-                }
-                colWidths[col] = Math.Max(colWidths[col], MeasureFittedButtonWidth(control, minWidth, scale));
-            }
-            foreach (Control control in table.Controls)
-            {
-                if (!(control is Button) || control == skip || table.GetColumnSpan(control) > 1)
-                {
-                    continue;
-                }
-                int col = table.GetColumn(control);
-                if (col < 0 || col >= columns)
-                {
-                    continue;
-                }
-                control.Width = colWidths[col];
-            }
-            int total = 0;
-            for (int i = 0; i < columns; i++)
-            {
-                total += colWidths[i] + margin;
-            }
-            table.Width = total;
-        }
-
-        private static int MeasureFittedButtonWidth(Control control, int minWidth, float scale)
-        {
-            int textWidth = TextRenderer.MeasureText(control.Text ?? string.Empty, control.Font).Width;
-            int padding = (int)Math.Round(12 * scale);
-            return Math.Max(minWidth, textWidth + padding);
         }
 
         private void MainWindow_Shown(object sender, EventArgs e)
