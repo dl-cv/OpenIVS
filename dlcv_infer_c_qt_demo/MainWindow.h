@@ -57,6 +57,7 @@ private:
     void onInferJson();
     void onPressureTest();
     void onGetModelInfo();
+    void applyViewerLabelModeFromModel();
     void onFreeModel();
     void onFreeAllModels();
     void onOpenDoc();

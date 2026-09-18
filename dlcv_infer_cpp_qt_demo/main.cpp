@@ -7,6 +7,7 @@
 #include <QImage>
 #include <QPixmap>
 #include <QSaveFile>
+#include <QString>
 #include <QStringList>
 
 #include <cmath>
@@ -31,6 +32,17 @@
 namespace {
 
 using json = nlohmann::json;
+
+QString ReadModelTaskType(const json& modelInfo) {
+    const json* node = &modelInfo;
+    if (modelInfo.is_object() && modelInfo.contains("model_info") && modelInfo.at("model_info").is_object()) {
+        node = &modelInfo.at("model_info");
+    }
+    if (node->is_object() && node->contains("task_type") && node->at("task_type").is_string()) {
+        return QString::fromUtf8(node->at("task_type").get<std::string>().c_str());
+    }
+    return QString();
+}
 
 #ifdef _WIN32
 bool IsUsableStandardHandle(DWORD standardHandle) {
@@ -706,6 +718,13 @@ int RunRenderCommand(const InferOptions& options) {
     ImageViewerWidget viewer;
     viewer.resize(decoded.cols, decoded.rows);
     viewer.setShowStatusText(false);
+    QString taskType;
+    try {
+        taskType = ReadModelTaskType(model.GetModelInfo());
+    } catch (...) {
+        taskType.clear();
+    }
+    viewer.applyDefaultLabelModeForTask(taskType);
     viewer.setImageAndResults(decoded, results);
     viewer.show();
     QApplication::processEvents();

@@ -38,6 +38,17 @@
 namespace {
 using json = nlohmann::json;
 
+QString ReadModelTaskType(const json& modelInfo) {
+    const json* node = &modelInfo;
+    if (modelInfo.is_object() && modelInfo.contains("model_info") && modelInfo.at("model_info").is_object()) {
+        node = &modelInfo.at("model_info");
+    }
+    if (node->is_object() && node->contains("task_type") && node->at("task_type").is_string()) {
+        return QString::fromUtf8(node->at("task_type").get<std::string>().c_str());
+    }
+    return QString();
+}
+
 class CResultGuard {
 public:
     CResultGuard(DlcvInferApi& api, DlcvCResult value) : api_(api), value_(value) {}
@@ -607,6 +618,7 @@ void MainWindow::onLoadModel() {
     modelIndex_ = modelIndex;
     modelPath_ = selectedPath;
     onGetModelInfo();
+    applyViewerLabelModeFromModel();
 }
 
 void MainWindow::onOpenImageInfer() {
@@ -920,6 +932,24 @@ void MainWindow::setUiEnabledForPressureTest(bool enabled) {
     spinThreshold_->setEnabled(enabled);
     spinThreadCount_->setEnabled(enabled);
     checkCalcMean_->setEnabled(enabled);
+}
+
+void MainWindow::applyViewerLabelModeFromModel() {
+    if (imageViewer_ == nullptr) {
+        return;
+    }
+    QString taskType;
+    if (modelIndex_ >= 0) {
+        CStringGuard modelInfo(api_, api_.getModelInfo(modelIndex_));
+        if (modelInfo.get() != nullptr) {
+            try {
+                taskType = ReadModelTaskType(json::parse(modelInfo.get()));
+            } catch (...) {
+                taskType.clear();
+            }
+        }
+    }
+    imageViewer_->applyDefaultLabelModeForTask(taskType);
 }
 
 void MainWindow::onGetModelInfo() {

@@ -210,7 +210,7 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 
   - 字体倍率由控件属性 `LabelFontScale` 承载，屏幕渲染字号先按 `clamp(24 * scale, 24, 128) * LabelFontScale` 计算，再除以当前图像缩放 `scale` 换算为图像空间字号，最终不小于 `VisualizationMinFontSize = 8`。
   - 标签字体倍率**只影响类别名与分数文字**的渲染大小；**不影响**边界框线宽，也**不影响**左上角状态文本（`OK` / `NG` / `No Result`）的大小。
-  - 标签文字显示由控件属性 `LabelDisplayMode` 承载（默认 `CategoryAndScore`）；`ShowLabelText` 仅作为兼容旧调用的布尔属性。关闭时仍然绘制框、Mask、polyline 与状态文本。
+  - 标签文字显示由控件属性 `LabelDisplayMode` 承载；非 OCR 模型默认 `CategoryAndScore`，OCR 模型在加载后默认 `CategoryOnly`。加载新模型时按 `model_info.task_type` 重新设置默认值，仍可用 `C` 键循环切换。`ShowLabelText` 仅作为兼容旧调用的布尔属性。关闭时仍然绘制框、Mask、polyline 与状态文本。
 
 #### 5.2 绘制规则（框/文字/Mask）
 

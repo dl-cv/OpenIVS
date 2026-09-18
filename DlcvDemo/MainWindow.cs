@@ -456,6 +456,7 @@ namespace DlcvDemo
             model = new Model(selectedFilePath, deviceOverride ?? GetSelectedDeviceId(), rpc_mode);
             model_path = selectedFilePath;
             button_getmodelinfo_Click(this, EventArgs.Empty);
+            imagePanel1.ApplyDefaultLabelModeForTask(ReadModelTaskType(model.GetCachedModelInfo()));
         }
 
 		private void button_infer_json_Click(object sender, EventArgs e)
@@ -503,6 +504,16 @@ namespace DlcvDemo
 				ReportError("推理JSON失败", ex);
 			}
 		}
+
+        private static string ReadModelTaskType(JObject modelInfo)
+        {
+            if (modelInfo == null)
+            {
+                return null;
+            }
+            JObject node = modelInfo["model_info"] as JObject ?? modelInfo;
+            return node["task_type"]?.ToString();
+        }
 
         private void button_getmodelinfo_Click(object sender, EventArgs e)
         {
