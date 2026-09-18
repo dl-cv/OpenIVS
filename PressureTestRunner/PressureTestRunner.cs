@@ -96,6 +96,16 @@ namespace DLCV
 
         #endregion
 
+        /// <summary>
+        /// 界面文本本地化委托，由调用方注入；默认原样返回，不影响其他调用方。
+        /// </summary>
+        public static Func<string, string> LocalizeText = text => text;
+
+        private static string L(string text)
+        {
+            return LocalizeText(text) ?? text;
+        }
+
         #region 构造函数
 
         /// <summary>
@@ -231,12 +241,12 @@ namespace DLCV
             }
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("压力测试统计:");
-            sb.AppendLine($"线程数: {_threadCount}");
-            sb.AppendLine($"批量大小: {_batchSize}");
-            if (target_rate) sb.AppendLine($"目标速率: {_targetRate} 请求/秒");
-            sb.AppendLine($"运行时间: {elapsed.TotalSeconds:F2} 秒");
-            sb.AppendLine($"完成请求: {_completedRequests * _batchSize}");
+            sb.AppendLine(L("压力测试统计:"));
+            sb.AppendLine(string.Format(L("线程数: {0}"), _threadCount));
+            sb.AppendLine(string.Format(L("批量大小: {0}"), _batchSize));
+            if (target_rate) sb.AppendLine(string.Format(L("目标速率: {0} 请求/秒"), _targetRate));
+            sb.AppendLine(string.Format(L("运行时间: {0:F2} 秒"), elapsed.TotalSeconds));
+            sb.AppendLine(string.Format(L("完成请求: {0}"), _completedRequests * _batchSize));
             
             // 计算最近请求的平均延迟（毫秒）
             double averageLatency = 0;
@@ -284,25 +294,25 @@ namespace DLCV
             }
             if (averageLatency > 0)
             {
-                sb.AppendLine($"平均延迟: {averageLatency:F2}ms");
+                sb.AppendLine(string.Format(L("平均延迟: {0:F2}ms"), averageLatency));
             }
             if (averageDlcvInferLatency > 0)
             {
-                sb.AppendLine($"平均延迟(SDK): {averageDlcvInferLatency:F2}ms");
+                sb.AppendLine(string.Format(L("平均延迟(SDK): {0:F2}ms"), averageDlcvInferLatency));
             }
             // if (_isFlowModelTiming && averageTotalInferLatency > 0)
             // {
             //     sb.AppendLine($"平均延迟(总时间): {averageTotalInferLatency:F2}ms");
             // }
-            sb.AppendLine($"实时速率: {recentRate:F2} 请求/秒");
+            sb.AppendLine(string.Format(L("实时速率: {0:F2} 请求/秒"), recentRate));
             if (_isFlowModelTiming && averageNodeTimings != null && averageNodeTimings.Count > 0)
             {
-                sb.AppendLine("模块平均耗时:");
+                sb.AppendLine(L("模块平均耗时:"));
                 foreach (var item in averageNodeTimings)
                 {
                     string title = string.IsNullOrWhiteSpace(item.NodeTitle) ? "-" : item.NodeTitle;
                     double share = averageTotalInferLatency > 0 ? item.AverageMs * 100.0 / averageTotalInferLatency : 0.0;
-                    sb.AppendLine($"#{item.NodeId} [{item.NodeType}] {title}: {item.AverageMs:F2}ms ({share:F1}%)");
+                    sb.AppendLine(string.Format(L("#{0} [{1}] {2}: {3:F2}ms ({4:F1}%)"), item.NodeId, item.NodeType, title, item.AverageMs, share));
                 }
             }
 

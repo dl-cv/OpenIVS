@@ -57,6 +57,7 @@ namespace DlcvDemo
             this.label_num_thread = new System.Windows.Forms.Label();
             this.numericUpDown_num_thread = new System.Windows.Forms.NumericUpDown();
             this.checkBox_calc_mean = new System.Windows.Forms.CheckBox();
+            this.comboBox_language = new System.Windows.Forms.ComboBox();
             this.rightOpsTable = new System.Windows.Forms.TableLayoutPanel();
             this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
             this.button_open_image = new System.Windows.Forms.Button();
@@ -329,6 +330,15 @@ namespace DlcvDemo
             this.checkBox_calc_mean.Text = "计算均值：默认";
             this.checkBox_calc_mean.UseVisualStyleBackColor = false;
             //
+            // comboBox_language
+            //
+            this.comboBox_language.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.comboBox_language.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.comboBox_language.Margin = new System.Windows.Forms.Padding(0, 6, 0, 6);
+            this.comboBox_language.Name = "comboBox_language";
+            this.comboBox_language.Size = new System.Drawing.Size(96, 34);
+            this.comboBox_language.TabIndex = 23;
+            //
             // rightOpsTable
             //
             this.rightOpsTable.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
@@ -579,6 +589,8 @@ namespace DlcvDemo
             this.paramsTable.Controls.Add(this.numericUpDown_num_thread, 1, 2);
             this.paramsTable.Controls.Add(this.checkBox_calc_mean, 2, 2);
             this.paramsTable.SetColumnSpan(this.checkBox_calc_mean, 2);
+            this.paramsTable.Controls.Add(this.comboBox_language, 4, 1);
+            this.paramsTable.SetRowSpan(this.comboBox_language, 2);
             //
             // 右侧操作区
             //
@@ -655,6 +667,7 @@ namespace DlcvDemo
             this.button_get_model_info.Click += new System.EventHandler(this.button_getmodelinfo_Click);
             this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
             this.checkBox_calc_mean.CheckStateChanged += new System.EventHandler(this.checkBox_calc_mean_StateChanged);
+            this.comboBox_language.SelectedIndexChanged += new System.EventHandler(this.comboBox_language_SelectedIndexChanged);
             this.resultLayout.ResumeLayout(false);
             this.resultLayout.PerformLayout();
             this.imageCard.ResumeLayout(false);
@@ -803,6 +816,7 @@ namespace DlcvDemo
         private System.Windows.Forms.Label label_num_thread;
         private System.Windows.Forms.NumericUpDown numericUpDown_num_thread;
         private System.Windows.Forms.CheckBox checkBox_calc_mean;
+        private System.Windows.Forms.ComboBox comboBox_language;
         private System.Windows.Forms.TableLayoutPanel rightOpsTable;
         private System.Windows.Forms.CheckBox checkBox_rpc_mode;
         private System.Windows.Forms.Button button_open_image;
