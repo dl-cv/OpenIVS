@@ -465,6 +465,12 @@ namespace DlcvDemo
             model = new Model(selectedFilePath, deviceOverride ?? GetSelectedDeviceId(), rpc_mode);
             model_path = selectedFilePath;
             button_getmodelinfo_Click(this, EventArgs.Empty);
+            JObject cachedInfo = model.GetCachedModelInfo();
+            JObject infoNode = cachedInfo != null ? (cachedInfo["model_info"] as JObject ?? cachedInfo) : null;
+            string taskType = infoNode != null ? infoNode["task_type"]?.ToString() : null;
+            imagePanel1.LabelDisplayMode = string.Equals(taskType, "OCR", StringComparison.OrdinalIgnoreCase)
+                ? ImageViewer.LabelTextMode.CategoryOnly
+                : ImageViewer.LabelTextMode.CategoryAndScore;
         }
 
 		private void button_infer_json_Click(object sender, EventArgs e)

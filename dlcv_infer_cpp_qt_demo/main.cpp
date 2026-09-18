@@ -706,6 +706,12 @@ int RunRenderCommand(const InferOptions& options) {
     ImageViewerWidget viewer;
     viewer.resize(decoded.cols, decoded.rows);
     viewer.setShowStatusText(false);
+    try {
+        json info = model.GetModelInfo();
+        std::string task = info.contains("model_info") ? info["model_info"].value("task_type", "") : info.value("task_type", "");
+        viewer.setLabelDisplayMode(task == "OCR" ? ImageViewerWidget::LabelTextMode::CategoryOnly : ImageViewerWidget::LabelTextMode::CategoryAndScore);
+    } catch (...) {
+    }
     viewer.setImageAndResults(decoded, results);
     viewer.show();
     QApplication::processEvents();

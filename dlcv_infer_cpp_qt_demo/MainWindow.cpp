@@ -523,6 +523,12 @@ void MainWindow::onLoadModel() {
     }
 
     onGetModelInfo();
+    try {
+        json info = model_->GetModelInfo();
+        std::string task = info.contains("model_info") ? info["model_info"].value("task_type", "") : info.value("task_type", "");
+        imageViewer_->setLabelDisplayMode(task == "OCR" ? ImageViewerWidget::LabelTextMode::CategoryOnly : ImageViewerWidget::LabelTextMode::CategoryAndScore);
+    } catch (...) {
+    }
 }
 
 void MainWindow::onOpenImageInfer() {

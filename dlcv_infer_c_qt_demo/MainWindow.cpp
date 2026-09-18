@@ -607,6 +607,17 @@ void MainWindow::onLoadModel() {
     modelIndex_ = modelIndex;
     modelPath_ = selectedPath;
     onGetModelInfo();
+    if (imageViewer_ != nullptr && modelIndex_ >= 0) {
+        CStringGuard infoGuard(api_, api_.getModelInfo(modelIndex_));
+        if (infoGuard.get() != nullptr) {
+            try {
+                json info = json::parse(infoGuard.get());
+                std::string task = info.contains("model_info") ? info["model_info"].value("task_type", "") : info.value("task_type", "");
+                imageViewer_->setLabelDisplayMode(task == "OCR" ? ImageViewerWidget::LabelTextMode::CategoryOnly : ImageViewerWidget::LabelTextMode::CategoryAndScore);
+            } catch (...) {
+            }
+        }
+    }
 }
 
 void MainWindow::onOpenImageInfer() {
