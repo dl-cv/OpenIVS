@@ -220,6 +220,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]`
   - `dvs-memory-loading-selftest <modelPath> <imagePath> [device]`
   - `dvsp-reject-selftest <modelPath> [device]`
+  - `undersized-model-selftest`：在临时目录生成小于 1MB 的 `.dvt/.dvo/.dvp/.dvst/.dvso`，检查返回损坏/不完整错误；`.dvsp` 仍返回不支持
   - `create-model-from-index-selftest <modelPath> [device]`
 - `dlcv_infer_cpp_test.exe sliding-merge-selftest` 为无模型回归，覆盖带滑窗元信息的单窗口小数框、正负半整数取整、多窗口合并框和分组首次出现顺序。
 - `create-model-from-index-selftest` 检查 C++ 头文件内联辅助函数创建时增加 index 使用次数、对象释放时减少使用次数；流程模型还会检查 `FreeAllModels()` 清空模型池、旧流程对象在底层释放失败后完成本地清理，以及相同流程能够重新加载。

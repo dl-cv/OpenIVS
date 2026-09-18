@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
@@ -424,7 +424,7 @@ namespace DlcvDemo
                 }
                 catch (Exception ex)
                 {
-                    richTextBox1.Text = ex.Message;
+                    ReportError("加载模型失败", ex);
                 }
             }
         }

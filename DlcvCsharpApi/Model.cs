@@ -98,6 +98,7 @@ namespace dlcv_infer_csharp
             {
                 throw new NotSupportedException("当前不支持 .dvsp 模型，请使用 .dvst 或 .dvso");
             }
+            EnsureModelFileNotUndersized(modelPath);
             _isDvpMode = extension == ".dvp";
             _isDvsMode = extension == ".dvst" || extension == ".dvso";
             _isRpcMode = rpc_mode;
@@ -187,6 +188,21 @@ namespace dlcv_infer_csharp
                     }
                 }
                 throw;
+            }
+        }
+
+        private const long MinModelFileBytes = 1024L * 1024L;
+
+        private static void EnsureModelFileNotUndersized(string modelPath)
+        {
+            if (!File.Exists(modelPath))
+            {
+                return;
+            }
+            long length = new FileInfo(modelPath).Length;
+            if (length < MinModelFileBytes)
+            {
+                throw new InvalidDataException("模型文件可能已损坏或不完整（文件小于 1MB）: " + modelPath);
             }
         }
 

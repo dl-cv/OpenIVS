@@ -141,7 +141,7 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 
 1. 点击 **加载模型**，选择 `.dvt`（普通模型）或 `.dvst`（流程图归档）。
 2. 加载成功后自动调用 **获取模型信息**，在文本区显示模型元信息。
-3. 若加载失败，文本区显示异常消息（如加密狗不匹配、文件格式错误等）。
+3. 若加载失败，弹窗并在文本区显示异常消息（如加密狗不匹配、文件格式错误、文件小于 1MB 等）。
 
 **代码路径**：`MainWindow::onLoadModel()`
 - 使用 `QFileDialog` 选择文件，支持 `"AI模型 (*.dvt *.dvo *.dvr *.dvst);;所有文件 (*.*)"`。
@@ -318,6 +318,7 @@ Debug\dlcv_infer_cpp_test.exe dvs-archive-duplicate-selftest
 Debug\dlcv_infer_cpp_test.exe dvs-model-pool-selftest <普通模型路径> [设备编号]
 Debug\dlcv_infer_cpp_test.exe dvs-memory-loading-selftest <流程模型路径> <图片路径> [设备编号]
 Debug\dlcv_infer_cpp_test.exe dvsp-reject-selftest <dvsp路径> [设备编号]
+Debug\dlcv_infer_cpp_test.exe undersized-model-selftest
 ```
 
 | 命令 | 输入与检查范围 |
@@ -327,6 +328,7 @@ Debug\dlcv_infer_cpp_test.exe dvsp-reject-selftest <dvsp路径> [设备编号]
 | `dvs-model-pool-selftest` | 读取现有普通 `.dvt`，生成包含两个相同模型节点的测试归档；只通过现有产品接口检查实例内复用和释放行为，不依赖生产 DLL 的测试导出。测试代码及检查状态全部保留在测试工程内 |
 | `dvs-memory-loading-selftest` | 使用 `.dvst/.dvso` 及对应图片执行加载、推理、释放，并监测解包临时文件；参数为 `threshold=0.5`、`with_mask=true`、`batch_size=1`，不进行 mask 数值比较 |
 | `dvsp-reject-selftest` | 检查 `.dvsp` 返回明确的不支持错误，且不生成归档临时文件；不执行推理 |
+| `undersized-model-selftest` | 在系统临时目录生成小于 1MB 的 `.dvt/.dvo/.dvp/.dvst/.dvso`，检查返回损坏/不完整错误；`.dvsp` 仍返回不支持；不执行推理 |
 
 设备编号默认 `0`。模型池检查中的两个归档内容相同，但每次读取使用独立的 `StoreId`；包装层不额外进行整包内容缓存。临时测试归档由测试程序创建并在结束时删除。实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
 
