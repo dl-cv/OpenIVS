@@ -263,6 +263,7 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 - **设备选择生效规则（必须一致）**：
   - 主窗体下拉框的 device_id **只在加载时读取**（`加载模型`）
   - 加载完成后再切换下拉框，不会影响当前已加载模型的运行设备
+  - 模型加载成功后，显卡下拉框内以小字显示当前模型完整文件名（含后缀）；释放模型后清除
 
 #### 6.3 窗口关闭行为（FormClosing，必须一致）
 
@@ -311,7 +312,9 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 
 - 前置条件：已加载模型，否则弹窗 `请先加载模型文件！`
 - 调用 `model.GetModelInfo()` 返回 JSON（可能格式多样），显示规则如下：
-  - 若包含 `model_info`：显示 `model_info` 对象（`richTextBox1.Text = result["model_info"].ToString()`）
+  - 第一行显示当前模型完整文件名（含后缀，不含路径）
+  - 若包含 `model_info`：第一行之后显示 `model_info` 对象
+  - 否则：第一行之后显示原始 JSON
 
 #### 7.5 打开图片推理（按钮：`打开图片推理`）
 
