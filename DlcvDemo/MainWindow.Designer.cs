@@ -117,12 +117,11 @@ namespace DlcvDemo
             // topLayout
             //
             this.topLayout.BackColor = Color.White;
-            this.topLayout.ColumnCount = 6;
+            this.topLayout.ColumnCount = 5;
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 16F));
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 16F));
-            this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.topLayout.Dock = System.Windows.Forms.DockStyle.Fill;
             this.topLayout.Name = "topLayout";
@@ -333,8 +332,7 @@ namespace DlcvDemo
             //
             // button_language
             //
-            this.button_language.Anchor = System.Windows.Forms.AnchorStyles.Top;
-            this.button_language.AutoSize = true;
+            this.button_language.Anchor = System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.button_language.BackColor = Color.FromArgb(231, 235, 239);
             this.button_language.FlatAppearance.BorderSize = 0;
             this.button_language.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
@@ -342,9 +340,8 @@ namespace DlcvDemo
             this.button_language.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.button_language.ForeColor = Color.FromArgb(38, 50, 56);
             this.button_language.Margin = new System.Windows.Forms.Padding(4);
-            this.button_language.MinimumSize = new System.Drawing.Size(56, 38);
             this.button_language.Name = "button_language";
-            this.button_language.Size = new System.Drawing.Size(56, 38);
+            this.button_language.Size = new System.Drawing.Size(104, 38);
             this.button_language.TabIndex = 23;
             this.button_language.Tag = "no-i18n";
             this.button_language.Text = "En";
@@ -606,6 +603,7 @@ namespace DlcvDemo
             this.rightOpsTable.Controls.Add(this.checkBox_rpc_mode, 0, 0);
             this.rightOpsTable.Controls.Add(this.button_open_image, 1, 0);
             this.rightOpsTable.SetColumnSpan(this.button_open_image, 3);
+            this.rightOpsTable.Controls.Add(this.button_language, 0, 1);
             this.rightOpsTable.Controls.Add(this.button_save_img, 1, 1);
             this.rightOpsTable.Controls.Add(this.button_free_model, 2, 1);
             this.rightOpsTable.Controls.Add(this.button_free_all_model, 3, 1);
@@ -619,7 +617,6 @@ namespace DlcvDemo
             this.topLayout.Controls.Add(this.leftOpsTable, 0, 0);
             this.topLayout.Controls.Add(this.paramsTable, 2, 0);
             this.topLayout.Controls.Add(this.rightOpsTable, 4, 0);
-            this.topLayout.Controls.Add(this.button_language, 5, 0);
             //
             // topCard
             //
