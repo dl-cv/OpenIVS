@@ -213,9 +213,20 @@ namespace dlcv_infer_csharp
             /// </summary>
             public List<CSharpSampleResult> SampleResults { get; set; }
 
+            /// <summary>
+            /// 推理返回的 JSON 原始文本，便于解析和打印。
+            /// </summary>
+            public string JsonText { get; set; }
+
             public CSharpResult(List<CSharpSampleResult> sampleResults)
+                : this(sampleResults, null)
+            {
+            }
+
+            public CSharpResult(List<CSharpSampleResult> sampleResults, string jsonText)
             {
                 SampleResults = sampleResults;
+                JsonText = jsonText;
             }
         }
     }

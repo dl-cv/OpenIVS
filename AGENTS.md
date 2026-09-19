@@ -48,7 +48,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - 上述 Demo 无命令行参数时仍启动原 GUI，不改变桌面交互行为。
 - 其他程序、自测入口和临时排查入口仅使用各自文档中已经定义的参数；未记录的业务输入通过源码固定变量或配置对象字段设置。
 - 命令行推理模式输出结构化与 JSON 两条 API 路径的结果摘要，并以退出码区分成功、运行错误、参数错误和验证失败。
-- C# GUI 验证只使用 `DlcvDemo` 的 `ui-test` 命令行入口并固定 `--interactive-dialogs false`：程序自动加载参数中的模型与图片，完成或失败后自动关闭窗口，以进程退出码与 `--output` 的无 BOM UTF-8 JSON 结果文件为判断依据，输出写入系统临时目录；禁止通过桌面自动化、鼠标键盘或窗口控制验证，也不以无参数 GUI 启动代替测试。可选 `--language zh-CN|en-US` 指定界面语言（默认中文，不持久化）。
+- C# GUI 验证只使用 `DlcvDemo` 的 `ui-test` 命令行入口并固定 `--interactive-dialogs false`：程序自动加载参数中的模型与图片，完成或失败后自动关闭窗口，以进程退出码与 `--output` 的无 BOM UTF-8 JSON 结果文件为判断依据，输出写入系统临时目录；禁止通过桌面自动化、鼠标键盘或窗口控制验证，也不以无参数 GUI 启动代替测试。可选 `--language zh-CN|en-US` 指定界面语言（默认中文，不持久化）。可选 `--result-view summary|json` 指定结果区显示汇总或 JSON（默认汇总，不持久化，不重新推理）。
 - `infer` 与 `ui-test` 用途不同：`infer` 是无界面功能测试，验证结构化与 JSON 双路径一致性、阈值过滤等，不创建窗口；`ui-test` 是界面自动验证，在真实窗口中复用模型加载、图片推理与绘制逻辑。
 
 - 两个 Qt Demo 的自动回归使用 `Test/run_qt_demo_regression.py` 运行实际 EXE，读取退出码与严格 UTF-8 JSON；推理测试不打开主窗口。Mask 合成数据和断言只编入 `Test/qt_demo/` 下两个独立测试 EXE，工程直接引用对应 Demo 的 `ImageViewerWidget.cpp`，不复制控件实现；测试采用 Qt offscreen 平台，不模拟鼠标键盘或控制桌面窗口。Demo 不包含 Mask 自测入口。

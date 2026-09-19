@@ -35,6 +35,11 @@ namespace DlcvDemo
             { "文档", "Docs" },
             { "获取模型信息", "Model Info" },
             { "运行结果", "Result" },
+            { "汇总", "Summary" },
+            { "切换汇总与 JSON 显示", "Toggle summary and JSON view" },
+            { "暂无 JSON 数据", "No JSON data" },
+            { "暂无汇总数据", "No summary data" },
+            { "界面未生成 JSON 结果: ", "No JSON result in UI: " },
             { "C# 测试程序", "C# Test Program" },
 
             // 可访问性名称与右键菜单项

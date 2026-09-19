@@ -102,10 +102,44 @@ namespace DlcvDemo
             button_language.Text = I18n.CurrentLanguage == I18n.English ? "中" : "En";
         }
 
+        private void UpdateResultViewButton()
+        {
+            button_result_view.Text = showJsonResult ? I18n.T("汇总") : "JSON";
+            button_result_view.Enabled = !string.IsNullOrEmpty(lastSummaryText) || !string.IsNullOrEmpty(lastJsonText);
+        }
+
+        private void button_result_view_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(lastSummaryText) && string.IsNullOrEmpty(lastJsonText))
+            {
+                return;
+            }
+            showJsonResult = !showJsonResult;
+            ApplyResultView();
+        }
+
+        private void ApplyResultView()
+        {
+            if (showJsonResult)
+            {
+                richTextBox1.Text = string.IsNullOrEmpty(lastJsonText)
+                    ? I18n.T("暂无 JSON 数据")
+                    : lastJsonText;
+            }
+            else
+            {
+                richTextBox1.Text = string.IsNullOrEmpty(lastSummaryText)
+                    ? I18n.T("暂无汇总数据")
+                    : lastSummaryText;
+            }
+            UpdateResultViewButton();
+        }
+
         // 语言切换后重算不受字典快照控制的动态文本。
         private void RefreshDynamicTexts()
         {
             UpdateLanguageButton();
+            UpdateResultViewButton();
             checkBox_calc_mean_StateChanged(checkBox_calc_mean, EventArgs.Empty);
             if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
@@ -426,6 +460,9 @@ namespace DlcvDemo
         private string model_path;
         private string image_path;
         private int batch_size = 1;
+        private string lastSummaryText;
+        private string lastJsonText;
+        private bool showJsonResult;
         private PressureTestRunner pressureTestRunner;
         private System.Windows.Forms.Timer updateTimer;
         private dynamic baselineJsonResult = null;
@@ -555,7 +592,9 @@ namespace DlcvDemo
 				try
 				{
 					var json = model.InferOneOutJson(inferImage, data);
-					richTextBox1.Text = JsonConvert.SerializeObject(json, Formatting.Indented);
+					lastJsonText = JsonConvert.SerializeObject(json, Formatting.Indented);
+					showJsonResult = true;
+					ApplyResultView();
 				}
 				finally
 				{
@@ -667,10 +706,19 @@ namespace DlcvDemo
                 {
                     throw new InvalidOperationException(I18n.T("文件对话框选择的图片与预期不一致: ") + image_path);
                 }
-                if (string.IsNullOrWhiteSpace(richTextBox1.Text)
-                    || !richTextBox1.Text.Contains(I18n.T("推理结果: ")))
+                if (string.IsNullOrWhiteSpace(lastSummaryText)
+                    || !lastSummaryText.Contains(I18n.T("推理结果: ")))
                 {
                     throw new InvalidOperationException(I18n.T("界面未生成推理结果: ") + richTextBox1.Text);
+                }
+                if (string.IsNullOrWhiteSpace(lastJsonText))
+                {
+                    throw new InvalidOperationException(I18n.T("界面未生成 JSON 结果: ") + richTextBox1.Text);
+                }
+                if (string.Equals(uiTestOptions.ResultView, "json", StringComparison.OrdinalIgnoreCase))
+                {
+                    showJsonResult = true;
+                    ApplyResultView();
                 }
 
                 await Task.Yield();
@@ -748,6 +796,7 @@ namespace DlcvDemo
                 ["window_title"] = Text,
                 ["ui_framework"] = "WinForms",
                 ["screenshot"] = uiTestOptions.ScreenshotPath,
+                ["result_view"] = uiTestOptions.ResultView,
                 ["result_text"] = richTextBox1.Text ?? string.Empty,
                 ["error"] = error == null ? null : error.ToString()
             };
@@ -907,7 +956,9 @@ namespace DlcvDemo
                         sb.AppendLine(BuildObjectResultText(i + 1, objects[i]));
                     }
                 }
-                richTextBox1.Text = sb.ToString();
+                lastSummaryText = sb.ToString();
+                lastJsonText = result.JsonText;
+                ApplyResultView();
             }
             catch (Exception ex)
             {
