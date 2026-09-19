@@ -57,6 +57,7 @@ namespace DlcvDemo
             this.label_num_thread = new System.Windows.Forms.Label();
             this.numericUpDown_num_thread = new System.Windows.Forms.NumericUpDown();
             this.checkBox_calc_mean = new System.Windows.Forms.CheckBox();
+            this.button_language = new System.Windows.Forms.Button();
             this.rightOpsTable = new System.Windows.Forms.TableLayoutPanel();
             this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
             this.button_open_image = new System.Windows.Forms.Button();
@@ -329,6 +330,23 @@ namespace DlcvDemo
             this.checkBox_calc_mean.Text = "计算均值：默认";
             this.checkBox_calc_mean.UseVisualStyleBackColor = false;
             //
+            // button_language
+            //
+            this.button_language.Anchor = System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
+            this.button_language.BackColor = Color.FromArgb(231, 235, 239);
+            this.button_language.FlatAppearance.BorderSize = 0;
+            this.button_language.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
+            this.button_language.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
+            this.button_language.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.button_language.ForeColor = Color.FromArgb(38, 50, 56);
+            this.button_language.Margin = new System.Windows.Forms.Padding(4);
+            this.button_language.Name = "button_language";
+            this.button_language.Size = new System.Drawing.Size(104, 38);
+            this.button_language.TabIndex = 23;
+            this.button_language.Tag = "no-i18n";
+            this.button_language.Text = "En";
+            this.button_language.UseVisualStyleBackColor = false;
+            //
             // rightOpsTable
             //
             this.rightOpsTable.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
@@ -585,6 +603,7 @@ namespace DlcvDemo
             this.rightOpsTable.Controls.Add(this.checkBox_rpc_mode, 0, 0);
             this.rightOpsTable.Controls.Add(this.button_open_image, 1, 0);
             this.rightOpsTable.SetColumnSpan(this.button_open_image, 3);
+            this.rightOpsTable.Controls.Add(this.button_language, 0, 1);
             this.rightOpsTable.Controls.Add(this.button_save_img, 1, 1);
             this.rightOpsTable.Controls.Add(this.button_free_model, 2, 1);
             this.rightOpsTable.Controls.Add(this.button_free_all_model, 3, 1);
@@ -655,6 +674,7 @@ namespace DlcvDemo
             this.button_get_model_info.Click += new System.EventHandler(this.button_getmodelinfo_Click);
             this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
             this.checkBox_calc_mean.CheckStateChanged += new System.EventHandler(this.checkBox_calc_mean_StateChanged);
+            this.button_language.Click += new System.EventHandler(this.button_language_Click);
             this.resultLayout.ResumeLayout(false);
             this.resultLayout.PerformLayout();
             this.imageCard.ResumeLayout(false);
@@ -803,6 +823,7 @@ namespace DlcvDemo
         private System.Windows.Forms.Label label_num_thread;
         private System.Windows.Forms.NumericUpDown numericUpDown_num_thread;
         private System.Windows.Forms.CheckBox checkBox_calc_mean;
+        private System.Windows.Forms.Button button_language;
         private System.Windows.Forms.TableLayoutPanel rightOpsTable;
         private System.Windows.Forms.CheckBox checkBox_rpc_mode;
         private System.Windows.Forms.Button button_open_image;

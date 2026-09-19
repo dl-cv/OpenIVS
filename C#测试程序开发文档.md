@@ -110,13 +110,14 @@
 C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs false`：程序按参数自动加载模型与图片，在真实 WinForms 主窗口中执行模型加载、图片推理与结果文本逻辑，完成或失败后自动关闭窗口。完整命令示例（输出写入系统临时目录）：
 
 ```text
-"C# 测试程序.exe" ui-test --model <模型路径> --image <图片路径> --output "%TEMP%\ui-test-result.json" --threshold 0.5 --device 0 --calc-mean false --interactive-dialogs false
+"C# 测试程序.exe" ui-test --model <模型路径> --image <图片路径> --output "%TEMP%\ui-test-result.json" --threshold 0.5 --device 0 --calc-mean false --interactive-dialogs false [--language <zh-CN|en-US>] [--screenshot <pngPath>]
 ```
 
 - `--interactive-dialogs false` 时不弹出文件对话框且不激活窗口，模型与图片直接按参数加载；`true` 为人工交互模式，依次打开模型和图片选择对话框，对话框返回后才继续执行并关闭窗口。
 - 判断依据为进程退出码与 `--output` 指定的无 BOM UTF-8 JSON 文件（状态依次为 `started`、`model_loaded`、`passed`/`failed`，含模型、图片、阈值、设备、`ui_framework`、`screenshot`、窗口标题、结果文本与错误信息）；退出码 `0` 通过、`1` 失败、`2` 参数错误。
 - 禁止通过桌面自动化、鼠标键盘模拟或窗口控制验证界面，也不以无参数 GUI 启动代替测试；`infer` 是无界面功能测试，`ui-test` 是界面自动验证，两者用途不同，不互相替代。
 - `--screenshot` 为可选参数，路径必须为 `.png`，通过 `Form.DrawToBitmap` 保存窗口截图，不模拟鼠标键盘，也不抓取整个桌面。
+- `--language` 为可选参数，取值 `zh-CN` 或 `en-US`，指定本次运行界面语言；省略时为中文，且本次运行不写入用户设置。
 - 输出与截图写入系统临时目录，不进入代码仓库；各输出路径不得覆盖模型、图片或彼此。
 
 ### 3. 功能边界（必须严格一致）
@@ -148,20 +149,21 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 
 #### 4.1 主窗体 `MainWindow`
 
-- **窗口标题**：`C# 测试程序`
+- **窗口标题**：中文模式 `C# 测试程序`，英文模式 `C# Test Program`，其后接 ` v` 与程序集版本号
+- **界面语言**：右侧操作区空位 `En` / `中` 按钮切换，中文模式显示 `En`、英文模式显示 `中`，即时生效并写入用户设置 `UiLanguage`（默认中文）；`ui-test --language` 只影响本次运行
 - **启动位置**：屏幕居中
 - **默认尺寸**：1280 × 820 逻辑像素；最小尺寸为 1040 × 500 逻辑像素
 - **默认字体**：Microsoft YaHei UI，9.75pt
 - **窗口图标**：`c_sharp.ico`
 - **DPI 感知**：PerMonitorV2（多显示器不同缩放下保持清晰；配置在 `App.config`）
 - **布局原则**：
-  - 顶部：三行操作区，左侧为加载、推理和测试，中间为设备与数值参数，右侧为图片、释放和信息操作。
+  - 顶部：三行操作区，左侧为加载、推理和测试，中间为设备与数值参数，右侧为图片、释放和信息操作。语言切换使用右侧空位的 `En` / `中` 按钮。
   - 下方：左侧为只读多行 TextBox，右侧为现有 ImageViewer，使用 SplitContainer 调整宽度。
   - 控件使用标准 WinForms API，保留蓝色主按钮、红色释放按钮、灰色辅助按钮及浅灰背景；不增加自绘圆角控件。
 
 ##### 4.1.1 控件清单与默认值（文本必须一致）
 
-- **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`推理JSON`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`检查环境`、`文档`、`获取模型信息`。
+- **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`推理JSON`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`检查环境`、`文档`、`获取模型信息`、语言切换（中文模式 `En`，英文模式 `中`）。
 - **下拉框**：设备选择。
 - **Label**：`选择显卡`、`线程数`、`batch_size`、`threshold`。
 - **三态复选框**：右侧文字按状态显示 `计算均值：默认`、`计算均值：是`、`计算均值：否`。`默认` 时不发送 `calc_mean`，`是` 时发送 `true`，`否` 时发送 `false`。

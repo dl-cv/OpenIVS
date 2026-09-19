@@ -137,6 +137,7 @@
   <ItemGroup>
     <Compile Include="CliRunner.cs" />
     <Compile Include="EnvironmentInfoCollector.cs" />
+    <Compile Include="I18n.cs" />
     <Compile Include="UiTestOptions.cs" />
     <Compile Include="MainWindow.cs">
       <SubType>Form</SubType>

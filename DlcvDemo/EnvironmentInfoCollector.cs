@@ -41,7 +41,7 @@ namespace DlcvDemo
             Dictionary<string, LoadedModule> modules = GetLoadedModules();
             var results = new List<ComponentInfo>
             {
-                CheckSafely("NVIDIA 驱动", () => CheckNvidiaDriver(modules)),
+                CheckSafely(I18n.T("NVIDIA 驱动"), () => CheckNvidiaDriver(modules)),
                 CheckSafely("dlcv_infer", () => CheckInferenceLibrary(modules)),
                 CheckSafely("ONNX Runtime", () => CheckOnnxRuntime(modules)),
                 CheckSafely("TensorRT", () => CheckTensorRt(modules)),
@@ -52,13 +52,13 @@ namespace DlcvDemo
             };
 
             var text = new StringBuilder();
-            text.AppendLine("类型 | 版本 | 路径");
+            text.AppendLine(I18n.T("类型 | 版本 | 路径"));
             for (int i = 0; i < results.Count; i++)
             {
                 ComponentInfo result = results[i];
                 text.Append(result.Type);
                 text.Append(" | ");
-                text.Append(string.IsNullOrWhiteSpace(result.Version) ? "版本未知" : result.Version);
+                text.Append(string.IsNullOrWhiteSpace(result.Version) ? I18n.T("版本未知") : result.Version);
                 text.Append(" | ");
                 text.AppendLine(string.IsNullOrWhiteSpace(result.Path) ? "-" : FormatPathForDisplay(result.Path));
             }
@@ -87,11 +87,11 @@ namespace DlcvDemo
         {
             try
             {
-                return check() ?? new ComponentInfo(type, "未加载", null);
+                return check() ?? new ComponentInfo(type, I18n.T("未加载"), null);
             }
             catch
             {
-                return new ComponentInfo(type, "版本未知", null);
+                return new ComponentInfo(type, I18n.T("版本未知"), null);
             }
         }
 
@@ -108,27 +108,27 @@ namespace DlcvDemo
                 }
                 if (nvmlModule == null)
                 {
-                    return new ComponentInfo("NVIDIA 驱动", "未加载", null);
+                    return new ComponentInfo(I18n.T("NVIDIA 驱动"), I18n.T("未加载"), null);
                 }
                 if (!initialized)
                 {
-                    return CreateLoadedComponent("NVIDIA 驱动", nvmlModule, null);
+                    return CreateLoadedComponent(I18n.T("NVIDIA 驱动"), nvmlModule, null);
                 }
 
                 var version = new StringBuilder(96);
                 int result = nvmlSystemGetDriverVersion(version, (uint)version.Capacity);
                 return CreateLoadedComponent(
-                    "NVIDIA 驱动",
+                    I18n.T("NVIDIA 驱动"),
                     nvmlModule,
                     result == NvmlSuccess ? NormalizeDriverVersion(version.ToString()) : null);
             }
             catch (DllNotFoundException)
             {
-                return new ComponentInfo("NVIDIA 驱动", "未加载", null);
+                return new ComponentInfo(I18n.T("NVIDIA 驱动"), I18n.T("未加载"), null);
             }
             catch
             {
-                return CreateLoadedComponent("NVIDIA 驱动", nvmlModule, null);
+                return CreateLoadedComponent(I18n.T("NVIDIA 驱动"), nvmlModule, null);
             }
             finally
             {
@@ -375,11 +375,11 @@ namespace DlcvDemo
         {
             if (module == null)
             {
-                return new ComponentInfo(type, "未加载", null);
+                return new ComponentInfo(type, I18n.T("未加载"), null);
             }
             return new ComponentInfo(
                 type,
-                string.IsNullOrWhiteSpace(version) ? "版本未知" : version,
+                string.IsNullOrWhiteSpace(version) ? I18n.T("版本未知") : version,
                 module.Path);
         }
 

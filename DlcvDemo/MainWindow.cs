@@ -53,6 +53,7 @@ namespace DlcvDemo
             uiTestOptions = options;
             UiTestExitCode = options == null ? 0 : 1;
             InitializeComponent();
+            PressureTestRunner.LocalizeText = I18n.T;
             using (var iconStream = typeof(MainWindow).Assembly.GetManifestResourceStream("DlcvDemo.MainWindow.ico"))
             {
                 Icon = new System.Drawing.Icon(iconStream);
@@ -66,11 +67,62 @@ namespace DlcvDemo
 
         private void Form1_Load(object sender, EventArgs e)
         {
+            I18n.Initialize();
+            if (uiTestOptions?.Language != null)
+            {
+                I18n.SetLanguage(uiTestOptions.Language, persist: false);
+            }
             UpdateWindowSizeLimits(DeviceDpi, Screen.FromControl(this).WorkingArea);
             ConfigureResultPanel((int)Math.Round(380 * DeviceDpi / 96.0));
-            UpdateResponsiveLayout();
             TopMost = false;
-            Text = "C# 测试程序 v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+            UpdateWindowTitle();
+            I18n.ApplyTo(this);
+            RefreshDynamicTexts();
+            UpdateResponsiveLayout();
+        }
+
+        private void UpdateWindowTitle()
+        {
+            Text = I18n.T("C# 测试程序") + " v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+        }
+
+        private void button_language_Click(object sender, EventArgs e)
+        {
+            I18n.SetLanguage(
+                I18n.CurrentLanguage == I18n.English ? I18n.Chinese : I18n.English,
+                persist: true);
+            I18n.ApplyTo(this);
+            UpdateWindowTitle();
+            RefreshDynamicTexts();
+            UpdateResponsiveLayout();
+        }
+
+        private void UpdateLanguageButton()
+        {
+            button_language.Text = I18n.CurrentLanguage == I18n.English ? "中" : "En";
+        }
+
+        // 语言切换后重算不受字典快照控制的动态文本。
+        private void RefreshDynamicTexts()
+        {
+            UpdateLanguageButton();
+            checkBox_calc_mean_StateChanged(checkBox_calc_mean, EventArgs.Empty);
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
+            {
+                if (isConsistencyTestMode)
+                {
+                    button_consistency_test.Text = I18n.T("停止");
+                }
+                else
+                {
+                    button_thread_test.Text = I18n.T("停止");
+                }
+            }
+            else
+            {
+                button_thread_test.Text = I18n.T("多线程测试");
+                button_consistency_test.Text = I18n.T("一致性测试");
+            }
         }
 
         private void ConfigureResultPanel(int desiredWidth)
@@ -205,7 +257,7 @@ namespace DlcvDemo
                     }
                     if (deviceInfoError != null)
                     {
-                        richTextBox1.Text += "\n设备信息读取失败：" + deviceInfoError.Message;
+                        richTextBox1.Text += "\n" + I18n.T("设备信息读取失败：") + deviceInfoError.Message;
                     }
                     if (uiTestOptions != null)
                     {
@@ -257,7 +309,7 @@ namespace DlcvDemo
                 else
                 {
                     // 如果获取GPU信息失败，在richTextBox1中显示错误信息
-                    richTextBox1.Text = "GPU信息获取失败：\n" + device_info.ToString();
+                    richTextBox1.Text = I18n.T("GPU信息获取失败：") + "\n" + device_info.ToString();
                 }
 
                 // 默认选择第一个显卡，如果没有显卡则选择CPU
@@ -334,14 +386,14 @@ namespace DlcvDemo
 
             string text = string.Join(
                 "\r\n\r\n",
-                FormatDogListSection("Sentinel加密狗ID", sentinelDevices),
-                FormatDogListSection("Sentinel加密狗特性", sentinelFeatures),
-                FormatDogListSection("Virbox加密狗ID", virboxDevices),
-                FormatDogListSection("Virbox加密狗特性", virboxFeatures));
+                FormatDogListSection(I18n.T("Sentinel加密狗ID"), sentinelDevices),
+                FormatDogListSection(I18n.T("Sentinel加密狗特性"), sentinelFeatures),
+                FormatDogListSection(I18n.T("Virbox加密狗ID"), virboxDevices),
+                FormatDogListSection(I18n.T("Virbox加密狗特性"), virboxFeatures));
 
             if (prependNoDogHint)
             {
-                text = "未检测到加密狗\r\n\r\n" + text;
+                text = I18n.T("未检测到加密狗") + "\r\n\r\n" + text;
             }
             return text;
         }
@@ -349,7 +401,7 @@ namespace DlcvDemo
         private static string FormatDogListSection(string title, JArray items)
         {
             JArray list = items ?? new JArray();
-            return title + "（" + list.Count + "个）：\r\n" + ToTextBoxNewlines(list.ToString(Formatting.Indented));
+            return title + string.Format(I18n.T("（{0}个）："), list.Count) + "\r\n" + ToTextBoxNewlines(list.ToString(Formatting.Indented));
         }
 
         private static string ToTextBoxNewlines(string text)
@@ -387,7 +439,7 @@ namespace DlcvDemo
             {
                 return infoText;
             }
-            return "模型: " + model_path + Environment.NewLine + infoText;
+            return I18n.T("模型: ") + model_path + Environment.NewLine + infoText;
         }
 
         private void DisposeCurrentModel()
@@ -413,8 +465,8 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*";
-            openFileDialog.Title = "选择模型";
+            openFileDialog.Filter = I18n.T("AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)") + "|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|" + I18n.T("所有文件 (*.*)") + "|*.*";
+            openFileDialog.Title = I18n.T("选择模型");
             try
             {
                 openFileDialog.InitialDirectory = Path.GetDirectoryName(Properties.Settings.Default.LastModelPath);
@@ -433,7 +485,7 @@ namespace DlcvDemo
                 }
                 catch (Exception ex)
                 {
-                    ReportError("加载模型失败", ex);
+                    ReportError(I18n.T("加载模型失败"), ex);
                 }
             }
         }
@@ -442,7 +494,7 @@ namespace DlcvDemo
         {
             string ext = Path.GetExtension(selectedFilePath) ?? "";
             if (ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
-                throw new NotSupportedException("不支持 .dvsp 模型推理");
+                throw new NotSupportedException(I18n.T("不支持 .dvsp 模型推理"));
             if (saveLastPath)
             {
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
@@ -479,12 +531,12 @@ namespace DlcvDemo
 			{
 				if (model == null)
 				{
-					MessageBox.Show("请先加载模型文件！");
+					MessageBox.Show(I18n.T("请先加载模型文件！"));
 					return;
 				}
 				if (image_path == null)
 				{
-					MessageBox.Show("请先选择图片文件！");
+					MessageBox.Show(I18n.T("请先选择图片文件！"));
 					return;
 				}
 
@@ -515,7 +567,7 @@ namespace DlcvDemo
 			}
 			catch (Exception ex)
 			{
-				ReportError("推理JSON失败", ex);
+				ReportError(I18n.T("推理JSON失败"), ex);
 			}
 		}
 
@@ -523,7 +575,7 @@ namespace DlcvDemo
         {
             if (model == null)
             {
-                MessageBox.Show("请先加载模型文件！");
+                MessageBox.Show(I18n.T("请先加载模型文件！"));
                 return;
             }
             JObject result = model.GetModelInfo();
@@ -537,13 +589,13 @@ namespace DlcvDemo
         {
             if (model == null)
             {
-                MessageBox.Show("请先加载模型文件！");
+                MessageBox.Show(I18n.T("请先加载模型文件！"));
                 return;
             }
             OpenFileDialog openFileDialog = new OpenFileDialog();
 
-            openFileDialog.Filter = "图片文件 (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif|所有文件 (*.*)|*.*";
-            openFileDialog.Title = "选择图片文件";
+            openFileDialog.Filter = I18n.T("图片文件 (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)") + "|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif|" + I18n.T("所有文件 (*.*)") + "|*.*";
+            openFileDialog.Title = I18n.T("选择图片文件");
 
             try
             {
@@ -591,12 +643,12 @@ namespace DlcvDemo
                 }
                 if (model == null)
                 {
-                    throw new InvalidOperationException("模型加载失败: " + richTextBox1.Text);
+                    throw new InvalidOperationException(I18n.T("模型加载失败: ") + richTextBox1.Text);
                 }
                 if (uiTestOptions.InteractiveDialogs
                     && !PathsEqual(model_path, uiTestOptions.ModelPath))
                 {
-                    throw new InvalidOperationException("文件对话框选择的模型与预期不一致: " + model_path);
+                    throw new InvalidOperationException(I18n.T("文件对话框选择的模型与预期不一致: ") + model_path);
                 }
 
                 WriteUiTestResult("model_loaded", null);
@@ -613,12 +665,12 @@ namespace DlcvDemo
                 if (uiTestOptions.InteractiveDialogs
                     && !PathsEqual(image_path, uiTestOptions.ImagePath))
                 {
-                    throw new InvalidOperationException("文件对话框选择的图片与预期不一致: " + image_path);
+                    throw new InvalidOperationException(I18n.T("文件对话框选择的图片与预期不一致: ") + image_path);
                 }
                 if (string.IsNullOrWhiteSpace(richTextBox1.Text)
-                    || !richTextBox1.Text.Contains("推理结果:"))
+                    || !richTextBox1.Text.Contains(I18n.T("推理结果: ")))
                 {
-                    throw new InvalidOperationException("界面未生成推理结果: " + richTextBox1.Text);
+                    throw new InvalidOperationException(I18n.T("界面未生成推理结果: ") + richTextBox1.Text);
                 }
 
                 await Task.Yield();
@@ -630,7 +682,7 @@ namespace DlcvDemo
             catch (Exception ex)
             {
                 UiTestExitCode = 1;
-                richTextBox1.Text = "自动 UI 测试失败\n" + ex;
+                richTextBox1.Text = I18n.T("自动 UI 测试失败") + "\n" + ex;
                 try
                 {
                     WriteUiTestResult("failed", ex);
@@ -741,9 +793,9 @@ namespace DlcvDemo
             }
 
             string stateText = checkBox_calc_mean.CheckState == CheckState.Indeterminate
-                ? "默认"
-                : (checkBox_calc_mean.Checked ? "是" : "否");
-            checkBox_calc_mean.Text = $"计算均值：{stateText}";
+                ? I18n.T("默认")
+                : (checkBox_calc_mean.Checked ? I18n.T("是") : I18n.T("否"));
+            checkBox_calc_mean.Text = string.Format(I18n.T("计算均值：{0}"), stateText);
         }
 
         private void resultTextWordWrapMenuItem_Click(object sender, EventArgs e)
@@ -765,19 +817,19 @@ namespace DlcvDemo
             {
                 if (model == null)
                 {
-                    MessageBox.Show("请先加载模型文件！");
+                    MessageBox.Show(I18n.T("请先加载模型文件！"));
                     return;
                 }
                 if (image_path == null)
                 {
-                    MessageBox.Show("请先选择图片文件！");
+                    MessageBox.Show(I18n.T("请先选择图片文件！"));
                     return;
                 }
 
                 Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
                 if (image.Empty())
                 {
-                    throw new Exception("图像解码失败！");
+                    throw new Exception(I18n.T("图像解码失败！"));
                 }
                 batch_size = (int)numericUpDown_batch_size.Value;
                 JObject data = new JObject();
@@ -814,11 +866,11 @@ namespace DlcvDemo
                 imagePanel1.UpdateImageAndResult(image, result);
 
                 StringBuilder sb = new StringBuilder();
-                sb.AppendLine("模型: " + model_path);
-                sb.AppendLine("图片: " + image_path);
+                sb.AppendLine(I18n.T("模型: ") + model_path);
+                sb.AppendLine(I18n.T("图片: ") + image_path);
                 sb.AppendLine($"batch_size: {batch_size}");
                 sb.AppendLine($"threshold: {(float)numericUpDown_threshold.Value:F2}");
-                sb.AppendLine($"推理时间: {delay_ms:F2}ms");
+                sb.AppendLine(string.Format(I18n.T("推理时间: {0:F2}ms"), delay_ms));
 
                 List<CSharpObjectResult> objects = null;
                 bool? inspectionOk = null;
@@ -834,18 +886,18 @@ namespace DlcvDemo
                     objects = new List<CSharpObjectResult>();
                 }
 
-                sb.AppendLine($"推理结果: {objects.Count}个");
+                sb.AppendLine(string.Format(I18n.T("推理结果: {0}个"), objects.Count));
                 if (inspectionOk.HasValue)
                 {
-                    sb.AppendLine(inspectionOk.Value ? "流程输出结果：OK" : "流程输出结果：NG");
+                    sb.AppendLine(inspectionOk.Value ? I18n.T("流程输出结果：OK") : I18n.T("流程输出结果：NG"));
                 }
                 if (!string.IsNullOrWhiteSpace(reason))
                 {
-                    sb.AppendLine("流程输出原因：" + reason);
+                    sb.AppendLine(I18n.T("流程输出原因：") + reason);
                 }
                 if (objects.Count == 0)
                 {
-                    sb.AppendLine("未检测到目标。");
+                    sb.AppendLine(I18n.T("未检测到目标。"));
                 }
                 else
                 {
@@ -859,7 +911,7 @@ namespace DlcvDemo
             }
             catch (Exception ex)
             {
-                ReportError("推理失败", ex);
+                ReportError(I18n.T("推理失败"), ex);
             }
         }
 
@@ -1072,15 +1124,15 @@ namespace DlcvDemo
                                     StopPressureTest();
 
                                     StringBuilder sb = new StringBuilder();
-                                    sb.AppendLine("发现推理结果不一致！测试已停止。");
-                                    sb.AppendLine("=== 基准结果 ===");
+                                    sb.AppendLine(I18n.T("发现推理结果不一致！测试已停止。"));
+                                    sb.AppendLine(I18n.T("=== 基准结果 ==="));
                                     sb.AppendLine(JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented));
-                                    sb.AppendLine("\n=== 当前结果 ===");
+                                    sb.AppendLine(I18n.T("\n=== 当前结果 ==="));
                                     sb.AppendLine(JsonConvert.SerializeObject(resultTuple.Item1, Formatting.Indented));
                                     string s = sb.ToString();
 
                                     richTextBox1.Text = s;
-                                    MessageBox.Show(this, "检测到推理结果不一致，测试已停止！", "结果不一致", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                    MessageBox.Show(this, I18n.T("检测到推理结果不一致，测试已停止！"), I18n.T("结果不一致"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
                                     baselineJsonResult = null;
                                 });
@@ -1107,9 +1159,9 @@ namespace DlcvDemo
                 RunOnUiThread(delegate
                 {
                     StopPressureTest();
-                    string testType = isConsistencyTestMode ? "一致性测试" : "压力测试";
-                    MessageBox.Show(this, $"{testType}过程中发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    richTextBox1.Text = $"推理错误: {ex.Message}";
+                    string testType = I18n.T(isConsistencyTestMode ? "一致性测试" : "压力测试");
+                    MessageBox.Show(this, string.Format(I18n.T("{0}过程中发生错误: {1}"), testType, ex.Message), I18n.T("错误"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    richTextBox1.Text = I18n.T("推理错误: ") + ex.Message;
                 });
             }
         }
@@ -1128,7 +1180,7 @@ namespace DlcvDemo
                     if (isConsistencyTestMode && baselineJsonResult != null)
                     {
                         stats = stats + "\n\n" +
-                                "基准结果:\n" +
+                                I18n.T("基准结果:") + "\n" +
                                 JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented);
                     }
                     richTextBox1.Text = stats;
@@ -1140,12 +1192,12 @@ namespace DlcvDemo
         {
             if (model == null)
             {
-                MessageBox.Show("请先加载模型文件！");
+                MessageBox.Show(I18n.T("请先加载模型文件！"));
                 return;
             }
             if (image_path == null)
             {
-                MessageBox.Show("请先选择图片文件！");
+                MessageBox.Show(I18n.T("请先选择图片文件！"));
                 return;
             }
 
@@ -1205,17 +1257,17 @@ namespace DlcvDemo
                 // 根据模式设置按钮文本
                 if (consistencyTestMode)
                 {
-                    button_consistency_test.Text = "停止";
+                    button_consistency_test.Text = I18n.T("停止");
                 }
                 else
                 {
-                    button_thread_test.Text = "停止";
+                    button_thread_test.Text = I18n.T("停止");
                 }
             }
             catch (Exception ex)
             {
-                string testType = consistencyTestMode ? "一致性测试" : "压力测试";
-                MessageBox.Show(this, $"启动{testType}失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                string testType = I18n.T(consistencyTestMode ? "一致性测试" : "压力测试");
+                MessageBox.Show(this, string.Format(I18n.T("启动{0}失败: {1}"), testType, ex.Message), I18n.T("错误"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -1240,11 +1292,11 @@ namespace DlcvDemo
                 // 根据模式重置按钮文本
                 if (isConsistencyTestMode)
                 {
-                    button_consistency_test.Text = "一致性测试";
+                    button_consistency_test.Text = I18n.T("一致性测试");
                 }
                 else
                 {
-                    button_thread_test.Text = "多线程测试";
+                    button_thread_test.Text = I18n.T("多线程测试");
                 }
 
                 // 重置测试模式
@@ -1259,12 +1311,12 @@ namespace DlcvDemo
         {
             if (model == null)
             {
-                MessageBox.Show("请先加载模型文件！");
+                MessageBox.Show(I18n.T("请先加载模型文件！"));
                 return;
             }
             if (image_path == null)
             {
-                MessageBox.Show("请先选择图片文件！");
+                MessageBox.Show(I18n.T("请先选择图片文件！"));
                 return;
             }
 
@@ -1284,7 +1336,7 @@ namespace DlcvDemo
             StopPressureTest();
             DisposeCurrentModel();
             model_path = null;
-            richTextBox1.Text = "模型已释放";
+            richTextBox1.Text = I18n.T("模型已释放");
         }
 
         private void button_github_Click(object sender, EventArgs e)
@@ -1346,7 +1398,7 @@ namespace DlcvDemo
 
             environmentCheckRunning = true;
             button_check_environment.Enabled = false;
-            richTextBox1.Text = "正在检查环境，请稍候...";
+            richTextBox1.Text = I18n.T("正在检查环境，请稍候...");
             try
             {
                 string environmentInfo = await Task.Run(() => EnvironmentInfoCollector.Collect());
@@ -1360,7 +1412,7 @@ namespace DlcvDemo
             {
                 if (!IsDisposed && !Disposing)
                 {
-                    richTextBox1.Text = FormatEnvironmentInfoText("环境检查失败：\n" + ex.Message, QueryAllDogInfo());
+                    richTextBox1.Text = FormatEnvironmentInfoText(I18n.T("环境检查失败：") + "\n" + ex.Message, QueryAllDogInfo());
                 }
             }
             finally
@@ -1400,7 +1452,7 @@ namespace DlcvDemo
             model = null;
             model_path = null;
             Utils.FreeAllModels();
-            richTextBox1.Text = "所有模型已释放";
+            richTextBox1.Text = I18n.T("所有模型已释放");
         }
 
 		/// <summary>
@@ -1415,7 +1467,7 @@ namespace DlcvDemo
 			catch { }
 			if (uiTestOptions == null)
 			{
-				MessageBox.Show(this, title + ": " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				MessageBox.Show(this, title + ": " + ex.Message, I18n.T("错误"), MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
 
@@ -1425,19 +1477,19 @@ namespace DlcvDemo
             {
                 if (string.IsNullOrWhiteSpace(image_path))
                 {
-                    MessageBox.Show("请先选择图片文件！");
+                    MessageBox.Show(I18n.T("请先选择图片文件！"));
                     return;
                 }
 
                 if (imagePanel1.image == null)
                 {
-                    MessageBox.Show("当前没有可保存的图像！");
+                    MessageBox.Show(I18n.T("当前没有可保存的图像！"));
                     return;
                 }
 
                 SaveFileDialog saveFileDialog = new SaveFileDialog();
-                saveFileDialog.Filter = "JPEG 图像 (*.jpg)|*.jpg";
-                saveFileDialog.Title = "保存可视化图像";
+                saveFileDialog.Filter = I18n.T("JPEG 图像 (*.jpg)") + "|*.jpg";
+                saveFileDialog.Title = I18n.T("保存可视化图像");
                 saveFileDialog.DefaultExt = "jpg";
                 saveFileDialog.AddExtension = true;
                 saveFileDialog.OverwritePrompt = true;
@@ -1463,11 +1515,11 @@ namespace DlcvDemo
                     bitmap.Save(saveFileDialog.FileName, System.Drawing.Imaging.ImageFormat.Jpeg);
                 }
 
-                richTextBox1.Text = "图像已保存：\n" + saveFileDialog.FileName;
+                richTextBox1.Text = I18n.T("图像已保存：") + "\n" + saveFileDialog.FileName;
             }
             catch (Exception ex)
             {
-                ReportError("保存图像失败", ex);
+                ReportError(I18n.T("保存图像失败"), ex);
             }
         }
     }
