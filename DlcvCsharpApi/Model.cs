@@ -2509,7 +2509,7 @@ namespace dlcv_infer_csharp
                 sampleResults.Add(sampleResultObj);
             }
 
-            return new Utils.CSharpResult(sampleResults);
+            return new Utils.CSharpResult(sampleResults, resultObject.ToString(Formatting.Indented));
         }
 
         /// <summary>

@@ -16,6 +16,7 @@ namespace DlcvDemo
         internal bool? CalcMean { get; private set; }
         internal bool InteractiveDialogs { get; private set; }
         internal string Language { get; private set; }
+        internal string ResultView { get; private set; } = "summary";
 
         internal static bool TryParse(string[] args, out UiTestOptions options, out string error)
         {
@@ -99,6 +100,15 @@ namespace DlcvDemo
                         }
                         options.Language = string.Equals(value, "en-US", StringComparison.OrdinalIgnoreCase) ? "en-US" : "zh-CN";
                         break;
+                    case "--result-view":
+                        if (!string.Equals(value, "summary", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(value, "json", StringComparison.OrdinalIgnoreCase))
+                        {
+                            error = "--result-view 必须是 summary 或 json。";
+                            return false;
+                        }
+                        options.ResultView = string.Equals(value, "json", StringComparison.OrdinalIgnoreCase) ? "json" : "summary";
+                        break;
                     default:
                         error = "未知参数: " + key;
                         return false;
@@ -165,11 +175,12 @@ namespace DlcvDemo
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");
             Console.Out.WriteLine("--language 指定界面语言（zh-CN 或 en-US）；未指定时跟随系统语言，本次运行不持久化。");
+            Console.Out.WriteLine("--result-view 指定结果区显示汇总或 JSON，默认 summary；切换不重新推理。");
         }
     }
 }

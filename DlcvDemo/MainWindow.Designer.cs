@@ -72,6 +72,7 @@ namespace DlcvDemo
             this.resultCard = new System.Windows.Forms.Panel();
             this.resultLayout = new System.Windows.Forms.TableLayoutPanel();
             this.label_result = new System.Windows.Forms.Label();
+            this.button_result_view = new System.Windows.Forms.Button();
             this.richTextBox1 = new System.Windows.Forms.TextBox();
             this.imageCard = new System.Windows.Forms.Panel();
             this.imagePanel1 = new DLCV.ImageViewer();
@@ -522,8 +523,9 @@ namespace DlcvDemo
             // resultLayout
             //
             this.resultLayout.BackColor = Color.White;
-            this.resultLayout.ColumnCount = 1;
+            this.resultLayout.ColumnCount = 2;
             this.resultLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.resultLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.resultLayout.Dock = System.Windows.Forms.DockStyle.Fill;
             this.resultLayout.Name = "resultLayout";
             this.resultLayout.RowCount = 2;
@@ -534,11 +536,31 @@ namespace DlcvDemo
             //
             this.label_result.AutoSize = true;
             this.label_result.BackColor = Color.White;
+            this.label_result.Dock = System.Windows.Forms.DockStyle.Fill;
             this.label_result.Font = new System.Drawing.Font("Microsoft YaHei UI", 11.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.label_result.ForeColor = Color.FromArgb(55, 71, 79);
-            this.label_result.Margin = new System.Windows.Forms.Padding(2, 0, 0, 8);
+            this.label_result.Margin = new System.Windows.Forms.Padding(2, 4, 0, 8);
             this.label_result.Name = "label_result";
             this.label_result.Text = "运行结果";
+            this.label_result.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            //
+            // button_result_view
+            //
+            this.button_result_view.AccessibleName = "切换汇总与 JSON 显示";
+            this.button_result_view.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.button_result_view.BackColor = Color.FromArgb(231, 235, 239);
+            this.button_result_view.FlatAppearance.BorderSize = 0;
+            this.button_result_view.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
+            this.button_result_view.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
+            this.button_result_view.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.button_result_view.ForeColor = Color.FromArgb(38, 50, 56);
+            this.button_result_view.Margin = new System.Windows.Forms.Padding(0, 0, 0, 8);
+            this.button_result_view.Name = "button_result_view";
+            this.button_result_view.Size = new System.Drawing.Size(64, 28);
+            this.button_result_view.TabIndex = 24;
+            this.button_result_view.Tag = "no-i18n";
+            this.button_result_view.Text = "JSON";
+            this.button_result_view.UseVisualStyleBackColor = false;
             //
             // richTextBox1
             //
@@ -625,7 +647,9 @@ namespace DlcvDemo
             // resultLayout
             //
             this.resultLayout.Controls.Add(this.label_result, 0, 0);
+            this.resultLayout.Controls.Add(this.button_result_view, 1, 0);
             this.resultLayout.Controls.Add(this.richTextBox1, 0, 1);
+            this.resultLayout.SetColumnSpan(this.richTextBox1, 2);
             //
             // resultCard
             //
@@ -675,6 +699,7 @@ namespace DlcvDemo
             this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
             this.checkBox_calc_mean.CheckStateChanged += new System.EventHandler(this.checkBox_calc_mean_StateChanged);
             this.button_language.Click += new System.EventHandler(this.button_language_Click);
+            this.button_result_view.Click += new System.EventHandler(this.button_result_view_Click);
             this.resultLayout.ResumeLayout(false);
             this.resultLayout.PerformLayout();
             this.imageCard.ResumeLayout(false);
@@ -838,6 +863,7 @@ namespace DlcvDemo
         private System.Windows.Forms.Panel resultCard;
         private System.Windows.Forms.TableLayoutPanel resultLayout;
         private System.Windows.Forms.Label label_result;
+        private System.Windows.Forms.Button button_result_view;
         private System.Windows.Forms.TextBox richTextBox1;
         private System.Windows.Forms.Panel imageCard;
         private DLCV.ImageViewer imagePanel1;

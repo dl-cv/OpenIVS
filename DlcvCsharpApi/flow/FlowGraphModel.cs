@@ -738,7 +738,7 @@ namespace DlcvModules
             {
                 single.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
             }
-            return new Utils.CSharpResult(single);
+            return new Utils.CSharpResult(single, batch.JsonText);
         }
 
         public Utils.CSharpResult InferBatch(List<Mat> imageList, JObject paramsJson = null)
@@ -1371,7 +1371,7 @@ namespace DlcvModules
                     new List<Utils.CSharpObjectResult>(),
                     ReadStatusOk(rootStatus != null ? rootStatus["ok"] : null),
                     ReadStatusReason(rootStatus != null ? rootStatus["reason"] : null)));
-                return new Utils.CSharpResult(samples);
+                return new Utils.CSharpResult(samples, JsonTextFromToken(rootStatus));
             }
 
             // 判断是否是 Batch 容器格式
@@ -1397,7 +1397,12 @@ namespace DlcvModules
                 samples.Add(ParseSingleImageResults(resultList, includeMask, rootStatus));
             }
 
-            return new Utils.CSharpResult(samples);
+            return new Utils.CSharpResult(samples, JsonTextFromToken(rootStatus) ?? JsonTextFromToken(resultList));
+        }
+
+        private static string JsonTextFromToken(JToken token)
+        {
+            return token == null ? null : token.ToString(Formatting.Indented);
         }
 
         private Utils.CSharpSampleResult ParseSingleImageResults(
