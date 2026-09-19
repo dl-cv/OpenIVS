@@ -169,7 +169,7 @@ namespace DlcvDemo
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");
-            Console.Out.WriteLine("--language 指定界面语言（zh-CN 或 en-US），默认中文且本次运行不持久化。");
+            Console.Out.WriteLine("--language 指定界面语言（zh-CN 或 en-US）；未指定时跟随系统语言，本次运行不持久化。");
         }
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows.Forms;
 
@@ -140,10 +141,17 @@ namespace DlcvDemo
 
         internal static string CurrentLanguage { get; private set; } = Chinese;
 
-        // 启动时读取持久化语言（默认中文）。
+        // 启动时读取已保存语言；未保存时系统界面语言以 en 开头为英文，否则中文。
         internal static void Initialize()
         {
-            SetLanguage(Properties.Settings.Default.UiLanguage, persist: false);
+            string saved = Properties.Settings.Default.UiLanguage;
+            if (string.IsNullOrWhiteSpace(saved))
+            {
+                bool english = CultureInfo.CurrentUICulture.Name.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+                SetLanguage(english ? English : Chinese, persist: false);
+                return;
+            }
+            SetLanguage(saved, persist: false);
         }
 
         internal static void SetLanguage(string language, bool persist)
