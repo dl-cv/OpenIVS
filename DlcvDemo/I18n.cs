@@ -182,7 +182,8 @@ namespace DlcvDemo
             return !(control is Form
                 || control is ComboBox
                 || control is TextBoxBase
-                || control is NumericUpDown);
+                || control is NumericUpDown
+                || Equals(control.Tag, "no-i18n"));
         }
 
         private static void ApplyToControl(Control control)

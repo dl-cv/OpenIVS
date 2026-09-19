@@ -75,7 +75,6 @@ namespace DlcvDemo
             UpdateWindowSizeLimits(DeviceDpi, Screen.FromControl(this).WorkingArea);
             ConfigureResultPanel((int)Math.Round(380 * DeviceDpi / 96.0));
             TopMost = false;
-            InitLanguageCombo();
             UpdateWindowTitle();
             I18n.ApplyTo(this);
             RefreshDynamicTexts();
@@ -87,34 +86,26 @@ namespace DlcvDemo
             Text = I18n.T("C# 测试程序") + " v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
         }
 
-        private bool languageComboUpdating;
-
-        private void InitLanguageCombo()
+        private void button_language_Click(object sender, EventArgs e)
         {
-            languageComboUpdating = true;
-            comboBox_language.Items.Clear();
-            comboBox_language.Items.Add("中文");
-            comboBox_language.Items.Add("English");
-            comboBox_language.SelectedIndex = I18n.CurrentLanguage == I18n.English ? 1 : 0;
-            languageComboUpdating = false;
-        }
-
-        private void comboBox_language_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (languageComboUpdating)
-            {
-                return;
-            }
-            I18n.SetLanguage(comboBox_language.SelectedIndex == 1 ? I18n.English : I18n.Chinese, persist: true);
+            I18n.SetLanguage(
+                I18n.CurrentLanguage == I18n.English ? I18n.Chinese : I18n.English,
+                persist: true);
             I18n.ApplyTo(this);
             UpdateWindowTitle();
             RefreshDynamicTexts();
             UpdateResponsiveLayout();
         }
 
+        private void UpdateLanguageButton()
+        {
+            button_language.Text = I18n.CurrentLanguage == I18n.English ? "中" : "En";
+        }
+
         // 语言切换后重算不受字典快照控制的动态文本。
         private void RefreshDynamicTexts()
         {
+            UpdateLanguageButton();
             checkBox_calc_mean_StateChanged(checkBox_calc_mean, EventArgs.Empty);
             if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {

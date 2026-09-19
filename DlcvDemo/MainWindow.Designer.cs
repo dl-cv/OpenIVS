@@ -57,7 +57,7 @@ namespace DlcvDemo
             this.label_num_thread = new System.Windows.Forms.Label();
             this.numericUpDown_num_thread = new System.Windows.Forms.NumericUpDown();
             this.checkBox_calc_mean = new System.Windows.Forms.CheckBox();
-            this.comboBox_language = new System.Windows.Forms.ComboBox();
+            this.button_language = new System.Windows.Forms.Button();
             this.rightOpsTable = new System.Windows.Forms.TableLayoutPanel();
             this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
             this.button_open_image = new System.Windows.Forms.Button();
@@ -117,11 +117,12 @@ namespace DlcvDemo
             // topLayout
             //
             this.topLayout.BackColor = Color.White;
-            this.topLayout.ColumnCount = 5;
+            this.topLayout.ColumnCount = 6;
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 16F));
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 16F));
+            this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.topLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.topLayout.Dock = System.Windows.Forms.DockStyle.Fill;
             this.topLayout.Name = "topLayout";
@@ -330,14 +331,24 @@ namespace DlcvDemo
             this.checkBox_calc_mean.Text = "计算均值：默认";
             this.checkBox_calc_mean.UseVisualStyleBackColor = false;
             //
-            // comboBox_language
+            // button_language
             //
-            this.comboBox_language.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.comboBox_language.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.comboBox_language.Margin = new System.Windows.Forms.Padding(0, 6, 0, 6);
-            this.comboBox_language.Name = "comboBox_language";
-            this.comboBox_language.Size = new System.Drawing.Size(96, 34);
-            this.comboBox_language.TabIndex = 23;
+            this.button_language.Anchor = System.Windows.Forms.AnchorStyles.Top;
+            this.button_language.AutoSize = true;
+            this.button_language.BackColor = Color.FromArgb(231, 235, 239);
+            this.button_language.FlatAppearance.BorderSize = 0;
+            this.button_language.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
+            this.button_language.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
+            this.button_language.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.button_language.ForeColor = Color.FromArgb(38, 50, 56);
+            this.button_language.Margin = new System.Windows.Forms.Padding(4);
+            this.button_language.MinimumSize = new System.Drawing.Size(56, 38);
+            this.button_language.Name = "button_language";
+            this.button_language.Size = new System.Drawing.Size(56, 38);
+            this.button_language.TabIndex = 23;
+            this.button_language.Tag = "no-i18n";
+            this.button_language.Text = "En";
+            this.button_language.UseVisualStyleBackColor = false;
             //
             // rightOpsTable
             //
@@ -589,8 +600,6 @@ namespace DlcvDemo
             this.paramsTable.Controls.Add(this.numericUpDown_num_thread, 1, 2);
             this.paramsTable.Controls.Add(this.checkBox_calc_mean, 2, 2);
             this.paramsTable.SetColumnSpan(this.checkBox_calc_mean, 2);
-            this.paramsTable.Controls.Add(this.comboBox_language, 4, 1);
-            this.paramsTable.SetRowSpan(this.comboBox_language, 2);
             //
             // 右侧操作区
             //
@@ -610,6 +619,7 @@ namespace DlcvDemo
             this.topLayout.Controls.Add(this.leftOpsTable, 0, 0);
             this.topLayout.Controls.Add(this.paramsTable, 2, 0);
             this.topLayout.Controls.Add(this.rightOpsTable, 4, 0);
+            this.topLayout.Controls.Add(this.button_language, 5, 0);
             //
             // topCard
             //
@@ -667,7 +677,7 @@ namespace DlcvDemo
             this.button_get_model_info.Click += new System.EventHandler(this.button_getmodelinfo_Click);
             this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
             this.checkBox_calc_mean.CheckStateChanged += new System.EventHandler(this.checkBox_calc_mean_StateChanged);
-            this.comboBox_language.SelectedIndexChanged += new System.EventHandler(this.comboBox_language_SelectedIndexChanged);
+            this.button_language.Click += new System.EventHandler(this.button_language_Click);
             this.resultLayout.ResumeLayout(false);
             this.resultLayout.PerformLayout();
             this.imageCard.ResumeLayout(false);
@@ -816,7 +826,7 @@ namespace DlcvDemo
         private System.Windows.Forms.Label label_num_thread;
         private System.Windows.Forms.NumericUpDown numericUpDown_num_thread;
         private System.Windows.Forms.CheckBox checkBox_calc_mean;
-        private System.Windows.Forms.ComboBox comboBox_language;
+        private System.Windows.Forms.Button button_language;
         private System.Windows.Forms.TableLayoutPanel rightOpsTable;
         private System.Windows.Forms.CheckBox checkBox_rpc_mode;
         private System.Windows.Forms.Button button_open_image;
