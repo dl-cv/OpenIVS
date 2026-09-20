@@ -93,6 +93,11 @@ namespace DlcvCSharpTest
                     return RunModelChannelOrderSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "flow-infer-params-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunFlowInferParamsSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "cli-anomaly-threshold-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunCliAnomalyThresholdSelfTest();
@@ -1206,6 +1211,7 @@ namespace DlcvCSharpTest
             var tests = new List<UnifiedTestCase>
             {
                 new UnifiedTestCase("模型通道顺序", RunModelChannelOrderSelfTest),
+                new UnifiedTestCase("流程推理参数类型", RunFlowInferParamsSelfTest),
                 new UnifiedTestCase("DVS 同名成员内容", DvsArchiveDuplicateSelfTest.Run),
                 new UnifiedTestCase("过小模型文件拒绝", RunUndersizedModelSelfTest),
                 new UnifiedTestCase("掩膜旋转框", RunMaskToRBoxSelfTest),

@@ -528,27 +528,23 @@ namespace DlcvModules
 			{
 				try
 				{
-					// 按照原样塞入，保持与后端期望的类型兼容
-					if (v is bool)
+					// JSON 整数反序列化后通常为 Int64，保留数值类型传给底层推理库。
+					if (v is JToken token)
 					{
-						p[key] = (bool)v;
+						p[key] = token.DeepClone();
 					}
-					else if (v is int)
+					else if (v is bool ||
+						v is sbyte || v is byte || v is short || v is ushort ||
+						v is int || v is uint || v is long || v is ulong ||
+						v is float || v is double || v is decimal)
 					{
-						p[key] = (int)v;
-					}
-					else if (v is float)
-					{
-						p[key] = (float)v;
-					}
-					else if (v is double)
-					{
-						p[key] = (double)v;
+						p[key] = JToken.FromObject(v);
 					}
 					else if (v is string)
 					{
-						// 尝试数字/布尔解析，失败则作为字符串
-						if (double.TryParse((string)v, out double dv)) p[key] = dv;
+						// 优先识别整数，避免 top_k 等参数被转为浮点数。
+						if (long.TryParse((string)v, out long iv)) p[key] = iv;
+						else if (double.TryParse((string)v, out double dv)) p[key] = dv;
 						else if (bool.TryParse((string)v, out bool bv)) p[key] = bv;
 						else p[key] = (string)v;
 					}
