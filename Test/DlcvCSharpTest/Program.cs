@@ -93,6 +93,11 @@ namespace DlcvCSharpTest
                     return RunModelChannelOrderSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "flow-infer-params-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunFlowInferParamsSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "cli-anomaly-threshold-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunCliAnomalyThresholdSelfTest();
@@ -863,6 +868,20 @@ namespace DlcvCSharpTest
                 var window = (Form)optionsConstructor.Invoke(new object[] { options });
                 RequireWinFormsSelfTest(window != null, "MainWindow(UiTestOptions) 创建失败。");
 
+                MethodInfo updateWindowTitleMethod = mainWindowType.GetMethod(
+                    "UpdateWindowTitle",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                RequireWinFormsSelfTest(updateWindowTitleMethod != null, "未找到 MainWindow.UpdateWindowTitle 方法。");
+                updateWindowTitleMethod.Invoke(window, null);
+
+                var versionAttribute = demoAssembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+                string expectedVersion = versionAttribute != null
+                    ? versionAttribute.InformationalVersion
+                    : demoAssembly.GetName().Version.ToString();
+                RequireWinFormsSelfTest(
+                    window.Text.EndsWith(" v" + expectedVersion, StringComparison.Ordinal),
+                    "MainWindow 标题未显示完整版本: " + window.Text);
+
                 try
                 {
                     // 不显示窗口：设备初始化只挂接在 Shown 之后，未显示则不应启用设备线程。
@@ -1206,6 +1225,7 @@ namespace DlcvCSharpTest
             var tests = new List<UnifiedTestCase>
             {
                 new UnifiedTestCase("模型通道顺序", RunModelChannelOrderSelfTest),
+                new UnifiedTestCase("流程推理参数类型", RunFlowInferParamsSelfTest),
                 new UnifiedTestCase("DVS 同名成员内容", DvsArchiveDuplicateSelfTest.Run),
                 new UnifiedTestCase("过小模型文件拒绝", RunUndersizedModelSelfTest),
                 new UnifiedTestCase("掩膜旋转框", RunMaskToRBoxSelfTest),
