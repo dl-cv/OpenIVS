@@ -152,6 +152,11 @@ namespace DlcvCSharpTest
                     return RunModelLoadFreeMemorySelfTest(args);
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "model-load-free-stage-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunModelLoadFreeStageSelfTest(args);
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvs-duplicate-entry-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return DvsArchiveDuplicateSelfTest.Run();
@@ -5583,6 +5588,113 @@ namespace DlcvCSharpTest
 
             Console.Out.WriteLine(resultJson);
             return 0;
+        }
+
+        private static int RunModelLoadFreeStageSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 2 || args.Length > 4)
+            {
+                Console.Error.WriteLine("用法: DlcvCSharpTest model-load-free-stage-selftest <modelPath> [device] [loopCount]");
+                return 2;
+            }
+
+            if (!TryNormalizeSelfTestPath(args[1], "模型", out string modelPath))
+            {
+                return 2;
+            }
+            if (!File.Exists(modelPath))
+            {
+                Console.Error.WriteLine("模型不存在: " + modelPath);
+                return 2;
+            }
+
+            int deviceId = GpuDeviceId;
+            int loopCount = 3;
+            if (args.Length >= 3 && !int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceId))
+            {
+                Console.Error.WriteLine("device 必须为整数");
+                return 2;
+            }
+            if (args.Length >= 4 && (!int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out loopCount) || loopCount <= 0))
+            {
+                Console.Error.WriteLine("loopCount 必须为正整数");
+                return 2;
+            }
+
+            Console.WriteLine("==== 模型加载释放分阶段内存专项 ====");
+            Console.WriteLine("模型: " + modelPath);
+            Console.WriteLine("设备: " + deviceId.ToString(CultureInfo.InvariantCulture));
+            Console.WriteLine("循环次数: " + loopCount.ToString(CultureInfo.InvariantCulture));
+
+            ForceGc();
+            if (!WriteMemoryStage("程序启动", 0))
+            {
+                return 1;
+            }
+
+            for (int i = 1; i <= loopCount; i++)
+            {
+                Model model = null;
+                string releaseError = null;
+                try
+                {
+                    model = new Model(modelPath, deviceId, false, false);
+                    ForceGc();
+                    if (!WriteMemoryStage("第" + i.ToString(CultureInfo.InvariantCulture) + "次加载完成", 1))
+                    {
+                        return 1;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("第" + i.ToString(CultureInfo.InvariantCulture) + "次加载失败: " + ex.Message);
+                    return 1;
+                }
+                finally
+                {
+                    try { if (model != null) model.Dispose(); }
+                    catch (Exception ex) { releaseError = ex.Message; }
+                    ForceGc();
+                }
+                if (!string.IsNullOrEmpty(releaseError))
+                {
+                    Console.Error.WriteLine("第" + i.ToString(CultureInfo.InvariantCulture) + "次释放失败: " + releaseError);
+                    return 1;
+                }
+
+                if (!WriteMemoryStage("第" + i.ToString(CultureInfo.InvariantCulture) + "次释放完成", 0))
+                {
+                    return 1;
+                }
+            }
+
+            Console.WriteLine("模型加载释放分阶段内存专项完成");
+            return 0;
+        }
+
+        private static bool WriteMemoryStage(string stage, int expectedActiveModelCount)
+        {
+            MemorySnapshot snapshot = MemorySnapshot.Capture();
+            if (!TryGetActiveModelCount(out int activeModelCount, out string snapshotError))
+            {
+                Console.Error.WriteLine("读取活动模型数失败: " + snapshotError);
+                return false;
+            }
+
+            Console.WriteLine(
+                "阶段=" + stage +
+                ", 私有内存=" + snapshot.PrivateMb.ToString("F2", CultureInfo.InvariantCulture) + "MB" +
+                ", 工作集=" + snapshot.WorkingSetMb.ToString("F2", CultureInfo.InvariantCulture) + "MB" +
+                ", 活动模型=" + activeModelCount.ToString(CultureInfo.InvariantCulture));
+            if (activeModelCount != expectedActiveModelCount)
+            {
+                Console.Error.WriteLine(
+                    stage + "活动模型数不符合预期，期望=" +
+                    expectedActiveModelCount.ToString(CultureInfo.InvariantCulture) +
+                    "，实际=" + activeModelCount.ToString(CultureInfo.InvariantCulture));
+                return false;
+            }
+            return true;
         }
 
         private static int RunModelLoadFreeMemorySelfTest(string[] args)

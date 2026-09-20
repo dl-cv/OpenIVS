@@ -20,6 +20,7 @@
 - 内存泄露专项：仅对 1 个实例分割模型执行
   - 统一回归加载/释放循环 10 次的内存增量
   - `model-load-free-memory-selftest <modelPath> [device] [loopCount] [sampleInterval]` 独立执行指定次数，默认 100 次、每 10 次输出私有内存、工作集、相对增量和活动模型数，并计算排除第 1 次后的线性变化
+  - `model-load-free-stage-selftest <modelPath> [device] [loopCount]` 分别输出程序启动、每次加载完成和每次释放完成时的私有内存、工作集与活动模型数，默认循环 3 次
   - 推理 3 秒内存增量
 
 默认模型目录：`Y:\测试模型`
