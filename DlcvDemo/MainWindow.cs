@@ -75,15 +75,15 @@ namespace DlcvDemo
             UpdateWindowSizeLimits(DeviceDpi, Screen.FromControl(this).WorkingArea);
             ConfigureResultPanel((int)Math.Round(380 * DeviceDpi / 96.0));
             TopMost = false;
-            UpdateWindowTitle();
             I18n.ApplyTo(this);
+            UpdateWindowTitle();
             RefreshDynamicTexts();
             UpdateResponsiveLayout();
         }
 
         private void UpdateWindowTitle()
         {
-            Text = I18n.T("C# 测试程序") + " v" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+            Text = I18n.T("C# 测试程序") + " v" + CliRunner.GetVersion();
         }
 
         private void button_language_Click(object sender, EventArgs e)

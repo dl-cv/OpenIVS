@@ -555,9 +555,9 @@ namespace DlcvDemo
                 || string.Equals(value, "version", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string GetVersion()
+        internal static string GetVersion()
         {
-            Assembly assembly = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
+            Assembly assembly = typeof(CliRunner).Assembly;
             object[] attributes = assembly.GetCustomAttributes(typeof(AssemblyInformationalVersionAttribute), false);
             if (attributes.Length > 0)
             {
