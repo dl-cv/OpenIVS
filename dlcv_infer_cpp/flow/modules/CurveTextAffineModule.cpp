@@ -216,23 +216,58 @@ static std::vector<cv::Point2f> LongestSkeletonPath(const cv::Mat& skeleton) {
     return reversePath;
 }
 
-static std::vector<cv::Point2f> SmoothPath(const std::vector<cv::Point2f>& input) {
+static std::vector<cv::Point2f> ResamplePathByCount(
+    const std::vector<cv::Point2f>& points,
+    size_t count) {
+    if (points.size() < 2 || count <= 2) return points;
+    std::vector<double> cumulative(points.size(), 0.0);
+    for (size_t i = 1; i < points.size(); i++) {
+        cumulative[i] = cumulative[i - 1] + cv::norm(points[i] - points[i - 1]);
+    }
+    const double total = cumulative.back();
+    if (total <= 1e-6) return {points.front()};
+
+    std::vector<cv::Point2f> output;
+    output.reserve(count);
+    size_t segment = 0;
+    for (size_t i = 0; i < count; i++) {
+        const double distance = total * static_cast<double>(i) / static_cast<double>(count - 1);
+        while (segment + 1 < cumulative.size() && cumulative[segment + 1] < distance) segment++;
+        if (segment + 1 >= points.size()) {
+            output.push_back(points.back());
+            continue;
+        }
+        const double length = cumulative[segment + 1] - cumulative[segment];
+        const float alpha = length <= 1e-6
+            ? 0.0f
+            : static_cast<float>((distance - cumulative[segment]) / length);
+        output.push_back(points[segment] * (1.0f - alpha) + points[segment + 1] * alpha);
+    }
+    return output;
+}
+
+static std::vector<cv::Point2f> SmoothPath(
+    const std::vector<cv::Point2f>& input,
+    double smoothS) {
     if (input.size() < 3) return input;
     std::vector<cv::Point2f> current = input;
-    for (int pass = 0; pass < 2; pass++) {
-        std::vector<cv::Point2f> smoothed(current.size());
-        smoothed.front() = current.front();
-        smoothed.back() = current.back();
-        for (size_t i = 1; i + 1 < current.size(); i++) {
-            const int begin = std::max<int>(0, static_cast<int>(i) - 4);
-            const int end = std::min<int>(static_cast<int>(current.size()) - 1, static_cast<int>(i) + 4);
-            cv::Point2f sum(0.0f, 0.0f);
-            for (int j = begin; j <= end; j++) sum += current[static_cast<size_t>(j)];
-            smoothed[i] = sum * (1.0f / static_cast<float>(end - begin + 1));
+    if (smoothS > 0.0) {
+        for (int pass = 0; pass < 2; pass++) {
+            std::vector<cv::Point2f> smoothed(current.size());
+            smoothed.front() = current.front();
+            smoothed.back() = current.back();
+            for (size_t i = 1; i + 1 < current.size(); i++) {
+                const int begin = std::max<int>(0, static_cast<int>(i) - 4);
+                const int end = std::min<int>(static_cast<int>(current.size()) - 1, static_cast<int>(i) + 4);
+                cv::Point2f sum(0.0f, 0.0f);
+                for (int j = begin; j <= end; j++) sum += current[static_cast<size_t>(j)];
+                smoothed[i] = sum * (1.0f / static_cast<float>(end - begin + 1));
+            }
+            current.swap(smoothed);
         }
-        current.swap(smoothed);
     }
-    return current;
+    // 固定为 100 个中心线点，使端部方向估计与流程模型生成端保持一致。
+    return ResamplePathByCount(current, 100);
 }
 
 static cv::Point2f ExtendToMask(const cv::Point2f& start, const cv::Point2f& direction, const cv::Mat& mask) {
@@ -253,7 +288,8 @@ static cv::Point2f ExtendToMask(const cv::Point2f& start, const cv::Point2f& dir
 static std::vector<cv::Point2f> ComputeCenterCurve(
     const std::vector<cv::Point2f>& polygon,
     int imageWidth,
-    int imageHeight) {
+    int imageHeight,
+    double smoothS) {
     std::vector<cv::Point> polygonInt;
     polygonInt.reserve(polygon.size());
     for (const cv::Point2f& point : polygon) {
@@ -275,10 +311,10 @@ static std::vector<cv::Point2f> ComputeCenterCurve(
     cv::fillPoly(mask, std::vector<std::vector<cv::Point>>{localPolygon}, cv::Scalar::all(255));
     cv::Mat skeleton = mask.clone();
     ZhangSuenThin(skeleton);
-    std::vector<cv::Point2f> curve = SmoothPath(LongestSkeletonPath(skeleton));
+    std::vector<cv::Point2f> curve = SmoothPath(LongestSkeletonPath(skeleton), smoothS);
     if (curve.size() < 2) return {};
 
-    const size_t directionIndex = std::min<size_t>(9, curve.size() - 1);
+    const size_t directionIndex = std::min<size_t>(10, std::max<size_t>(1, curve.size() / 4));
     const cv::Point2f headDirection = curve.front() - curve[directionIndex];
     const cv::Point2f tailDirection = curve.back() - curve[curve.size() - 1 - directionIndex];
     curve.front() = ExtendToMask(curve.front(), headDirection, mask);
@@ -301,12 +337,16 @@ static std::vector<cv::Point2f> ResamplePath(const std::vector<cv::Point2f>& poi
     }
     const double total = cumulative.back();
     if (total <= 1e-6) return {points.front()};
-    const int count = std::max(2, static_cast<int>(std::floor(total / std::max(1e-6, step))) + 1);
+
+    const double safeStep = std::max(1e-6, step);
+    std::vector<double> distances;
+    for (double distance = 0.0; distance < total; distance += safeStep) distances.push_back(distance);
+    if (distances.empty() || total - distances.back() > 1e-6) distances.push_back(total);
+
     std::vector<cv::Point2f> output;
-    output.reserve(static_cast<size_t>(count));
+    output.reserve(distances.size());
     size_t segment = 0;
-    for (int i = 0; i < count; i++) {
-        const double distance = total * static_cast<double>(i) / static_cast<double>(count - 1);
+    for (const double distance : distances) {
         while (segment + 1 < cumulative.size() && cumulative[segment + 1] < distance) segment++;
         if (segment + 1 >= points.size()) {
             output.push_back(points.back());
@@ -343,7 +383,7 @@ static bool PullInside(
     const std::vector<cv::Point2f>& polygon,
     const cv::Point2f& center,
     cv::Point2f& point) {
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 3; i++) {
         if (PointInside(polygon, point)) return true;
         point = (point + center) * 0.5f;
     }
@@ -472,6 +512,7 @@ public:
         if (!ReadBool("enable", true)) return ModuleIO(imageList, resultList, Json::array());
         const int outputHeight = std::max(2, ReadInt("out_height", 80));
         const double sampleStep = std::max(1.0, ReadDouble("sample_step", 10.0));
+        const double smoothS = std::max(0.0, ReadDouble("smooth_s", 10000.0));
         const double shrinkInside = std::max(0.0, ReadDouble("shrink_inside", 1.5));
         const int maxWidth = std::max(0, ReadInt("max_unwrap_width", 0));
         const std::string borderName = ReadString("border_mode", "reflect101");
@@ -489,7 +530,8 @@ public:
                 if (!detection.is_object()) continue;
                 std::vector<cv::Point2f> polygon = ExtractPolygon(detection, base.ImageObject.cols, base.ImageObject.rows);
                 if (polygon.size() < 3 || std::abs(cv::contourArea(polygon)) <= 0.0) continue;
-                std::vector<cv::Point2f> centerCurve = ComputeCenterCurve(polygon, base.ImageObject.cols, base.ImageObject.rows);
+                std::vector<cv::Point2f> centerCurve = ComputeCenterCurve(
+                    polygon, base.ImageObject.cols, base.ImageObject.rows, smoothS);
                 if (centerCurve.size() < 2) continue;
                 std::vector<cv::Point2f> centers;
                 std::vector<cv::Point2f> lefts;

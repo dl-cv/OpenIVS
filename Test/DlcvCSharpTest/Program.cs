@@ -6484,6 +6484,28 @@ namespace DlcvCSharpTest
                 return 1;
             }
 
+            MethodInfo smoothPathMethod = moduleType.GetMethod(
+                "SmoothPath",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            if (smoothPathMethod == null)
+            {
+                Console.WriteLine("曲线拉直缺少中心线平滑方法");
+                return 1;
+            }
+            var denseCurve = new List<Point2f>();
+            for (int i = 0; i < 1000; i++)
+            {
+                denseCurve.Add(new Point2f(i, (float)(60.0 + 20.0 * Math.Sin(i / 120.0))));
+            }
+            var normalizedCurve = smoothPathMethod.Invoke(
+                null,
+                new object[] { denseCurve, 10000.0 }) as List<Point2f>;
+            if (normalizedCurve == null || normalizedCurve.Count != 100)
+            {
+                Console.WriteLine("曲线拉直中心线未规范为 100 个采样点");
+                return 1;
+            }
+
             using (var image = new Mat(180, 360, MatType.CV_8UC3, Scalar.Black))
             using (var mask = new Mat(180, 360, MatType.CV_8UC1, Scalar.Black))
             {
@@ -6529,6 +6551,7 @@ namespace DlcvCSharpTest
                         {
                             ["out_height"] = 80,
                             ["sample_step"] = 10.0,
+                            ["smooth_s"] = 10000.0,
                             ["shrink_inside"] = 1.5,
                             ["method"] = "auto"
                         },
