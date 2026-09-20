@@ -22,6 +22,8 @@ namespace DlcvCSharpTest
     {
         private const int SpeedWindowSeconds = 3;
         private const int LeakLoopCount = 10;
+        private const int DefaultLoadFreeMemoryLoopCount = 100;
+        private const int DefaultLoadFreeMemorySampleInterval = 10;
         private const int GpuDeviceId = 0;
         private const int FixedBatchSize = 1;
         private const bool TestSpeed = false;
@@ -143,6 +145,16 @@ namespace DlcvCSharpTest
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvs-memory-loading-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunDvsMemoryLoadingSelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "model-load-free-memory-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunModelLoadFreeMemorySelfTest(args);
+                }
+
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "model-load-free-stage-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunModelLoadFreeStageSelfTest(args);
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvs-duplicate-entry-selftest", StringComparison.OrdinalIgnoreCase))
@@ -5578,6 +5590,300 @@ namespace DlcvCSharpTest
             return 0;
         }
 
+        private static int RunModelLoadFreeStageSelfTest(string[] args)
+        {
+            if (args == null || args.Length < 2 || args.Length > 4)
+            {
+                Console.Error.WriteLine("用法: DlcvCSharpTest model-load-free-stage-selftest <modelPath> [device] [loopCount]");
+                return 2;
+            }
+
+            if (!TryNormalizeSelfTestPath(args[1], "模型", out string modelPath))
+            {
+                return 2;
+            }
+            if (!File.Exists(modelPath))
+            {
+                Console.Error.WriteLine("模型不存在: " + modelPath);
+                return 2;
+            }
+
+            int deviceId = GpuDeviceId;
+            int loopCount = 3;
+            if (args.Length >= 3 && !int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceId))
+            {
+                Console.Error.WriteLine("device 必须为整数");
+                return 2;
+            }
+            if (args.Length >= 4 && (!int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out loopCount) || loopCount <= 0))
+            {
+                Console.Error.WriteLine("loopCount 必须为正整数");
+                return 2;
+            }
+
+            Console.WriteLine("==== 模型加载释放分阶段内存专项 ====");
+            Console.WriteLine("模型: " + modelPath);
+            Console.WriteLine("设备: " + deviceId.ToString(CultureInfo.InvariantCulture));
+            Console.WriteLine("循环次数: " + loopCount.ToString(CultureInfo.InvariantCulture));
+
+            ForceGc();
+            if (!WriteMemoryStage("程序启动", 0))
+            {
+                return 1;
+            }
+
+            for (int i = 1; i <= loopCount; i++)
+            {
+                Model model = null;
+                string releaseError = null;
+                try
+                {
+                    model = new Model(modelPath, deviceId, false, false);
+                    ForceGc();
+                    if (!WriteMemoryStage("第" + i.ToString(CultureInfo.InvariantCulture) + "次加载完成", 1))
+                    {
+                        return 1;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("第" + i.ToString(CultureInfo.InvariantCulture) + "次加载失败: " + ex.Message);
+                    return 1;
+                }
+                finally
+                {
+                    try { if (model != null) model.Dispose(); }
+                    catch (Exception ex) { releaseError = ex.Message; }
+                    ForceGc();
+                }
+                if (!string.IsNullOrEmpty(releaseError))
+                {
+                    Console.Error.WriteLine("第" + i.ToString(CultureInfo.InvariantCulture) + "次释放失败: " + releaseError);
+                    return 1;
+                }
+
+                if (!WriteMemoryStage("第" + i.ToString(CultureInfo.InvariantCulture) + "次释放完成", 0))
+                {
+                    return 1;
+                }
+            }
+
+            Console.WriteLine("模型加载释放分阶段内存专项完成");
+            return 0;
+        }
+
+        private static bool WriteMemoryStage(string stage, int expectedActiveModelCount)
+        {
+            MemorySnapshot snapshot = MemorySnapshot.Capture();
+            if (!TryGetActiveModelCount(out int activeModelCount, out string snapshotError))
+            {
+                Console.Error.WriteLine("读取活动模型数失败: " + snapshotError);
+                return false;
+            }
+
+            Console.WriteLine(
+                "阶段=" + stage +
+                ", 私有内存=" + snapshot.PrivateMb.ToString("F2", CultureInfo.InvariantCulture) + "MB" +
+                ", 工作集=" + snapshot.WorkingSetMb.ToString("F2", CultureInfo.InvariantCulture) + "MB" +
+                ", 活动模型=" + activeModelCount.ToString(CultureInfo.InvariantCulture));
+            if (activeModelCount != expectedActiveModelCount)
+            {
+                Console.Error.WriteLine(
+                    stage + "活动模型数不符合预期，期望=" +
+                    expectedActiveModelCount.ToString(CultureInfo.InvariantCulture) +
+                    "，实际=" + activeModelCount.ToString(CultureInfo.InvariantCulture));
+                return false;
+            }
+            return true;
+        }
+
+        private static int RunModelLoadFreeMemorySelfTest(string[] args)
+        {
+            if (args == null || args.Length < 2 || args.Length > 5)
+            {
+                Console.Error.WriteLine("用法: DlcvCSharpTest model-load-free-memory-selftest <modelPath> [device] [loopCount] [sampleInterval]");
+                return 2;
+            }
+
+            if (!TryNormalizeSelfTestPath(args[1], "模型", out string modelPath))
+            {
+                return 2;
+            }
+            if (!File.Exists(modelPath))
+            {
+                Console.Error.WriteLine("模型不存在: " + modelPath);
+                return 2;
+            }
+
+            int deviceId = GpuDeviceId;
+            int loopCount = DefaultLoadFreeMemoryLoopCount;
+            int sampleInterval = DefaultLoadFreeMemorySampleInterval;
+            if (args.Length >= 3 && !int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceId))
+            {
+                Console.Error.WriteLine("device 必须为整数");
+                return 2;
+            }
+            if (args.Length >= 4 && (!int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out loopCount) || loopCount <= 0))
+            {
+                Console.Error.WriteLine("loopCount 必须为正整数");
+                return 2;
+            }
+            if (args.Length >= 5 && (!int.TryParse(args[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out sampleInterval) || sampleInterval <= 0))
+            {
+                Console.Error.WriteLine("sampleInterval 必须为正整数");
+                return 2;
+            }
+
+            Console.WriteLine("==== 模型加载释放内存专项 ====");
+            Console.WriteLine("模型: " + modelPath);
+            Console.WriteLine("设备: " + deviceId.ToString(CultureInfo.InvariantCulture));
+            Console.WriteLine("循环次数: " + loopCount.ToString(CultureInfo.InvariantCulture));
+            Console.WriteLine("采样间隔: " + sampleInterval.ToString(CultureInfo.InvariantCulture));
+
+            ForceGc();
+            MemorySnapshot baseline = MemorySnapshot.Capture();
+            MemorySnapshot firstReleased = baseline;
+            var privateMemorySamples = new List<double>(loopCount);
+            bool activeModelFailure = false;
+
+            for (int i = 1; i <= loopCount; i++)
+            {
+                Model model = null;
+                string releaseError = null;
+                try
+                {
+                    model = new Model(modelPath, deviceId, false, false);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("第" + i.ToString(CultureInfo.InvariantCulture) + "次加载失败: " + ex.Message);
+                    return 1;
+                }
+                finally
+                {
+                    try { if (model != null) model.Dispose(); }
+                    catch (Exception ex) { releaseError = ex.Message; }
+                    ForceGc();
+                }
+                if (!string.IsNullOrEmpty(releaseError))
+                {
+                    Console.Error.WriteLine("第" + i.ToString(CultureInfo.InvariantCulture) + "次释放失败: " + releaseError);
+                    return 1;
+                }
+
+                MemorySnapshot current = MemorySnapshot.Capture();
+                privateMemorySamples.Add(current.PrivateMb);
+                if (i == 1)
+                {
+                    firstReleased = current;
+                }
+
+                if (i == 1 || i % sampleInterval == 0 || i == loopCount)
+                {
+                    if (!TryGetActiveModelCount(out int activeModelCount, out string snapshotError))
+                    {
+                        Console.Error.WriteLine("读取活动模型数失败: " + snapshotError);
+                        return 1;
+                    }
+                    if (activeModelCount != 0)
+                    {
+                        activeModelFailure = true;
+                    }
+                    Console.WriteLine(
+                        "循环=" + i.ToString(CultureInfo.InvariantCulture) +
+                        ", 私有内存=" + current.PrivateMb.ToString("F2", CultureInfo.InvariantCulture) + "MB" +
+                        ", 相对起点=" + (current.PrivateMb - baseline.PrivateMb).ToString("F2", CultureInfo.InvariantCulture) + "MB" +
+                        ", 相对第1次=" + (current.PrivateMb - firstReleased.PrivateMb).ToString("F2", CultureInfo.InvariantCulture) + "MB" +
+                        ", 工作集=" + current.WorkingSetMb.ToString("F2", CultureInfo.InvariantCulture) + "MB" +
+                        ", 活动模型=" + activeModelCount.ToString(CultureInfo.InvariantCulture));
+                }
+            }
+
+            MemorySnapshot finalSnapshot = MemorySnapshot.Capture();
+            double slopeAfterFirst = CalculateMemorySlope(privateMemorySamples, 1);
+            double slopeLastHalf = CalculateMemorySlope(privateMemorySamples, Math.Max(1, privateMemorySamples.Count / 2));
+            Console.WriteLine("起点私有内存: " + baseline.PrivateMb.ToString("F2", CultureInfo.InvariantCulture) + "MB");
+            Console.WriteLine("第1次释放后私有内存: " + firstReleased.PrivateMb.ToString("F2", CultureInfo.InvariantCulture) + "MB");
+            Console.WriteLine("最终私有内存: " + finalSnapshot.PrivateMb.ToString("F2", CultureInfo.InvariantCulture) + "MB");
+            Console.WriteLine("总增量: " + (finalSnapshot.PrivateMb - baseline.PrivateMb).ToString("F2", CultureInfo.InvariantCulture) + "MB");
+            Console.WriteLine("排除第1次后的增量: " + (finalSnapshot.PrivateMb - firstReleased.PrivateMb).ToString("F2", CultureInfo.InvariantCulture) + "MB");
+            Console.WriteLine("排除第1次后的线性变化: " + slopeAfterFirst.ToString("F4", CultureInfo.InvariantCulture) + "MB/次");
+            Console.WriteLine("后半程线性变化: " + slopeLastHalf.ToString("F4", CultureInfo.InvariantCulture) + "MB/次");
+
+            if (activeModelFailure)
+            {
+                Console.Error.WriteLine("释放后仍存在活动模型");
+                return 1;
+            }
+            Console.WriteLine("模型加载释放内存专项完成");
+            return 0;
+        }
+
+        private static bool TryGetActiveModelCount(out int count, out string error)
+        {
+            count = 0;
+            error = null;
+            try
+            {
+                JObject snapshot = Utils.GetAllModels();
+                if (snapshot == null || snapshot["code"] == null || snapshot["code"].Value<int>() != 0)
+                {
+                    error = snapshot != null && snapshot["message"] != null
+                        ? snapshot["message"].ToString()
+                        : "模型快照无效";
+                    return false;
+                }
+
+                JArray modules = snapshot["modules"] as JArray;
+                if (modules == null)
+                {
+                    error = "模型快照缺少 modules";
+                    return false;
+                }
+                foreach (JToken module in modules)
+                {
+                    JArray models = module["models"] as JArray;
+                    if (models != null)
+                    {
+                        count += models.Count;
+                    }
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        private static double CalculateMemorySlope(IList<double> values, int startIndex)
+        {
+            if (values == null || values.Count - startIndex < 2)
+            {
+                return 0.0;
+            }
+
+            int count = values.Count - startIndex;
+            double sumX = 0.0;
+            double sumY = 0.0;
+            double sumXY = 0.0;
+            double sumXX = 0.0;
+            for (int i = startIndex; i < values.Count; i++)
+            {
+                double x = i + 1;
+                double y = values[i];
+                sumX += x;
+                sumY += y;
+                sumXY += x * y;
+                sumXX += x * x;
+            }
+            double denominator = count * sumXX - sumX * sumX;
+            return Math.Abs(denominator) < double.Epsilon
+                ? 0.0
+                : (count * sumXY - sumX * sumY) / denominator;
+        }
+
         private static int RunDvsMemoryLoadingSelfTest(string[] args)
         {
             if (args == null || args.Length < 3 || args.Length > 4)
@@ -8863,17 +9169,23 @@ namespace DlcvCSharpTest
         private struct MemorySnapshot
         {
             public readonly double PrivateMb;
-            public MemorySnapshot(double privateMb) { PrivateMb = privateMb; }
+            public readonly double WorkingSetMb;
+            public MemorySnapshot(double privateMb, double workingSetMb)
+            {
+                PrivateMb = privateMb;
+                WorkingSetMb = workingSetMb;
+            }
             public static MemorySnapshot Capture()
             {
                 var proc = Process.GetCurrentProcess();
                 PROCESS_MEMORY_COUNTERS_EX counters;
                 if (!GetProcessMemoryInfo(proc.Handle, out counters, (uint)Marshal.SizeOf(typeof(PROCESS_MEMORY_COUNTERS_EX))))
                 {
-                    return new MemorySnapshot(0);
+                    return new MemorySnapshot(0, 0);
                 }
                 double pv = counters.PrivateUsage.ToInt64() / 1024.0 / 1024.0;
-                return new MemorySnapshot(pv);
+                double ws = counters.WorkingSetSize.ToInt64() / 1024.0 / 1024.0;
+                return new MemorySnapshot(pv, ws);
             }
         }
 
