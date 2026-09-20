@@ -475,7 +475,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 - **C#**：`Test/DlcvCSharpTest`，入口 `Program.cs`
 - **C++**：`Test/dlcv_infer_cpp_test`，入口 `main.cpp`
-- **测试范围**：模型加载成功/失败、推理成功/失败、推理结果类别列表、3 秒平均推理速度、Batch 推理速度、内存泄露专项（仅对 1 个实例分割模型执行加载/释放循环 10 次 + 推理 3 秒内存增量）
+- **测试范围**：模型加载成功/失败、推理成功/失败、推理结果类别列表、3 秒平均推理速度、Batch 推理速度、内存泄露专项（统一回归仅对 1 个实例分割模型执行加载/释放循环 10 次 + 推理 3 秒内存增量；`model-load-free-memory-selftest` 可指定循环次数并输出分段内存与活动模型数）
 - **默认模型目录**：`Y:\测试模型`
 - **C++ 中文路径**：推荐调用 `dlcv_infer::Model(const std::wstring& modelPath, ...)`；若传 `std::string` 则必须是 GBK/本地 ANSI，不要传 UTF-8
 - **C# 自测子命令**：`model-channel-order-selftest`、`dvs-rgb-selftest`、`demo2-rgb-selftest`

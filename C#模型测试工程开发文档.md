@@ -18,7 +18,8 @@
 - 普通模型与流程模型的共享 index 查询、恢复推理和绑定生命周期
 - 实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
 - 内存泄露专项：仅对 1 个实例分割模型执行
-  - 加载/释放循环 10 次的内存增量
+  - 统一回归加载/释放循环 10 次的内存增量
+  - `model-load-free-memory-selftest <modelPath> [device] [loopCount] [sampleInterval]` 独立执行指定次数，默认 100 次、每 10 次输出私有内存、工作集、相对增量和活动模型数，并计算排除第 1 次后的线性变化
   - 推理 3 秒内存增量
 
 默认模型目录：`Y:\测试模型`
@@ -252,7 +253,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - 固定使用 GPU 设备（`device_id=0`）。
 - 默认批量测试的模型目录固定为 `Y:\测试模型`；`load-three-models` 的三个模型路径由命令行参数提供。
 - 为避免日志打断阅读：表格在所有测试执行完成后一次性输出（总表）；并在表格末尾追加“汇总”一行。
-- 内存泄露专项在表格输出后自动执行并单独输出结果；专项仅对 1 个实例分割模型执行。
+- 统一回归的内存泄露专项在表格输出后自动执行并单独输出结果，仅对 1 个实例分割模型执行。独立命令 `model-load-free-memory-selftest` 用于较长循环和分段趋势核对。
 - `demo2-rgb-selftest` 会输出 `entry_rgb_signature`、`manual_rgb_signature` 与 `raw_bgr_signature`；当 `entry_rgb_signature == manual_rgb_signature` 且与 `raw_bgr_signature` 不同时，判定 Demo2 当前入口保持 RGB 数据流。
 - `flow-batch-selftest` 输出每个模型节点的输入数、batch 上限、底层调用次数与最大实际子批；存在多张二阶段输入且最大实际子批大于 1 时通过。
 
