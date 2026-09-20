@@ -32,6 +32,7 @@ namespace DlcvModules
 
             int outputHeight = Math.Max(2, ReadInt("out_height", 80));
             double sampleStep = Math.Max(1.0, ReadDouble("sample_step", 10.0));
+            double smoothS = Math.Max(0.0, ReadDouble("smooth_s", 10000.0));
             double shrinkInside = Math.Max(0.0, ReadDouble("shrink_inside", 1.5));
             int maxWidth = Math.Max(0, ReadInt("max_unwrap_width", 0));
             string borderName = ReadStringOrDefault("border_mode", "reflect101");
@@ -56,7 +57,7 @@ namespace DlcvModules
                     if (detection == null) continue;
                     List<Point2f> polygon = ExtractPolygon(detection, sourceImage.ImageObject.Width, sourceImage.ImageObject.Height);
                     if (polygon.Count < 3 || PolygonArea(polygon) <= 0.0) continue;
-                    List<Point2f> centerCurve = ComputeCenterCurve(polygon, sourceImage.ImageObject.Width, sourceImage.ImageObject.Height);
+                    List<Point2f> centerCurve = ComputeCenterCurve(polygon, sourceImage.ImageObject.Width, sourceImage.ImageObject.Height, smoothS);
                     if (centerCurve.Count < 2) continue;
 
                     List<Point2f> centers;
@@ -241,7 +242,7 @@ namespace DlcvModules
             return Math.Abs(sum * 0.5);
         }
 
-        private static List<Point2f> ComputeCenterCurve(List<Point2f> polygon, int imageWidth, int imageHeight)
+        private static List<Point2f> ComputeCenterCurve(List<Point2f> polygon, int imageWidth, int imageHeight, double smoothS)
         {
             int minX = imageWidth - 1;
             int minY = imageHeight - 1;
@@ -272,9 +273,9 @@ namespace DlcvModules
             {
                 Cv2.FillPoly(mask, new[] { local }, Scalar.White);
                 byte[] skeleton = ZhangSuenThin(mask);
-                List<Point2f> curve = SmoothPath(LongestSkeletonPath(skeleton, width, height));
+                List<Point2f> curve = SmoothPath(LongestSkeletonPath(skeleton, width, height), smoothS);
                 if (curve.Count < 2) return curve;
-                int directionIndex = Math.Min(9, curve.Count - 1);
+                int directionIndex = Math.Min(10, Math.Max(1, curve.Count / 4));
                 curve[0] = ExtendToMask(curve[0], Subtract(curve[0], curve[directionIndex]), skeleton, width, height, mask);
                 curve[curve.Count - 1] = ExtendToMask(
                     curve[curve.Count - 1],
@@ -424,32 +425,62 @@ namespace DlcvModules
             return reverse;
         }
 
-        private static List<Point2f> SmoothPath(List<Point2f> input)
+        private static List<Point2f> SmoothPath(List<Point2f> input, double smoothS)
         {
             if (input.Count < 3) return input;
             var current = new List<Point2f>(input);
-            for (int pass = 0; pass < 2; pass++)
+            if (smoothS > 0.0)
             {
-                var smoothed = new List<Point2f>(new Point2f[current.Count]);
-                smoothed[0] = current[0];
-                smoothed[current.Count - 1] = current[current.Count - 1];
-                for (int i = 1; i + 1 < current.Count; i++)
+                for (int pass = 0; pass < 2; pass++)
                 {
-                    int begin = Math.Max(0, i - 4);
-                    int end = Math.Min(current.Count - 1, i + 4);
-                    float sx = 0.0f;
-                    float sy = 0.0f;
-                    for (int j = begin; j <= end; j++)
+                    var smoothed = new List<Point2f>(new Point2f[current.Count]);
+                    smoothed[0] = current[0];
+                    smoothed[current.Count - 1] = current[current.Count - 1];
+                    for (int i = 1; i + 1 < current.Count; i++)
                     {
-                        sx += current[j].X;
-                        sy += current[j].Y;
+                        int begin = Math.Max(0, i - 4);
+                        int end = Math.Min(current.Count - 1, i + 4);
+                        float sx = 0.0f;
+                        float sy = 0.0f;
+                        for (int j = begin; j <= end; j++)
+                        {
+                            sx += current[j].X;
+                            sy += current[j].Y;
+                        }
+                        float scale = 1.0f / (end - begin + 1);
+                        smoothed[i] = new Point2f(sx * scale, sy * scale);
                     }
-                    float scale = 1.0f / (end - begin + 1);
-                    smoothed[i] = new Point2f(sx * scale, sy * scale);
+                    current = smoothed;
                 }
-                current = smoothed;
             }
-            return current;
+            // 固定为 100 个中心线点，使端部方向估计与流程模型生成端保持一致。
+            return ResamplePathByCount(current, 100);
+        }
+
+        private static List<Point2f> ResamplePathByCount(List<Point2f> points, int count)
+        {
+            if (points.Count < 2 || count <= 2) return points;
+            var cumulative = new double[points.Count];
+            for (int i = 1; i < points.Count; i++) cumulative[i] = cumulative[i - 1] + Distance(points[i], points[i - 1]);
+            double total = cumulative[cumulative.Length - 1];
+            if (total <= 1e-6) return new List<Point2f> { points[0] };
+
+            var output = new List<Point2f>(count);
+            int segment = 0;
+            for (int i = 0; i < count; i++)
+            {
+                double distance = total * i / (count - 1.0);
+                while (segment + 1 < cumulative.Length && cumulative[segment + 1] < distance) segment++;
+                if (segment + 1 >= points.Count)
+                {
+                    output.Add(points[points.Count - 1]);
+                    continue;
+                }
+                double length = cumulative[segment + 1] - cumulative[segment];
+                float alpha = length <= 1e-6 ? 0.0f : (float)((distance - cumulative[segment]) / length);
+                output.Add(Lerp(points[segment], points[segment + 1], alpha));
+            }
+            return output;
         }
 
         private static Point2f ExtendToMask(Point2f start, Point2f direction, byte[] skeleton, int width, int height, Mat mask)
@@ -477,12 +508,16 @@ namespace DlcvModules
             for (int i = 1; i < points.Count; i++) cumulative[i] = cumulative[i - 1] + Distance(points[i], points[i - 1]);
             double total = cumulative[cumulative.Length - 1];
             if (total <= 1e-6) return new List<Point2f> { points[0] };
-            int count = Math.Max(2, (int)Math.Floor(total / Math.Max(1e-6, step)) + 1);
-            var output = new List<Point2f>(count);
+
+            double safeStep = Math.Max(1e-6, step);
+            var distances = new List<double>();
+            for (double distance = 0.0; distance < total; distance += safeStep) distances.Add(distance);
+            if (distances.Count == 0 || total - distances[distances.Count - 1] > 1e-6) distances.Add(total);
+
+            var output = new List<Point2f>(distances.Count);
             int segment = 0;
-            for (int i = 0; i < count; i++)
+            foreach (double distance in distances)
             {
-                double distance = total * i / (count - 1.0);
                 while (segment + 1 < cumulative.Length && cumulative[segment + 1] < distance) segment++;
                 if (segment + 1 >= points.Count)
                 {
@@ -557,7 +592,7 @@ namespace DlcvModules
 
         private static bool PullInside(List<Point2f> polygon, Point2f center, ref Point2f point)
         {
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 3; i++)
             {
                 if (PointInside(polygon, point)) return true;
                 point = Lerp(point, center, 0.5f);

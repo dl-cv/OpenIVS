@@ -963,7 +963,8 @@ int RunCurveTextAffineSelfTest() {
     });
     const auto factory = dlcv_infer::flow::ModuleRegistry::Get("pre_process/curve_text_affine");
     auto module = factory(401, std::string(), json::object({
-        {"out_height", 80}, {"sample_step", 10.0}, {"shrink_inside", 1.5}, {"method", "auto"}
+        {"out_height", 80}, {"sample_step", 10.0}, {"smooth_s", 10000.0},
+        {"shrink_inside", 1.5}, {"method", "auto"}
     }), nullptr);
     const dlcv_infer::flow::ModuleIO output = module->Process(images, results);
     if (output.ImageList.size() != 1 || !output.ResultList.is_array() || output.ResultList.size() != 1) {
