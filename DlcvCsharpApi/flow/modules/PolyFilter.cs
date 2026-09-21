@@ -342,32 +342,25 @@ namespace DlcvModules
                         : new Point2d(edgeValues[i], primaryValues[i]));
                 }
 
-                var simplified = SimplifyPolyline(allPoints);
-                if (simplified.Count == 0) return null;
-
                 if (leftClip > 0 || rightClip > 0)
                 {
-                    int start = Math.Min(Math.Max(0, leftClip), simplified.Count);
-                    int endExclusive = Math.Max(start, simplified.Count - Math.Max(0, rightClip));
-                    simplified = simplified.GetRange(start, endExclusive - start);
-                }
-                if (simplified.Count < 2) return null;
+                    double low = primaryValues[0] + Math.Max(0, leftClip);
+                    double high = primaryValues[primaryValues.Count - 1] - Math.Max(0, rightClip);
+                    if (low > high) return null;
 
-                fitPoints = allPoints;
-                if (leftClip > 0 || rightClip > 0)
-                {
-                    double startValue = verticalBoundary ? simplified[0].X : simplified[0].Y;
-                    double endValue = verticalBoundary ? simplified[simplified.Count - 1].X : simplified[simplified.Count - 1].Y;
-                    double low = Math.Min(startValue, endValue);
-                    double high = Math.Max(startValue, endValue);
-                    var clippedFitPoints = new List<Point2d>();
+                    var clippedPoints = new List<Point2d>();
                     for (int i = 0; i < allPoints.Count; i++)
                     {
                         double value = verticalBoundary ? allPoints[i].X : allPoints[i].Y;
-                        if (value >= low && value <= high) clippedFitPoints.Add(allPoints[i]);
+                        if (value >= low && value <= high) clippedPoints.Add(allPoints[i]);
                     }
-                    fitPoints = clippedFitPoints.Count >= 2 ? clippedFitPoints : simplified;
+                    allPoints = clippedPoints;
                 }
+                if (allPoints.Count < 2) return null;
+
+                fitPoints = allPoints;
+                var simplified = SimplifyPolyline(allPoints);
+                if (simplified.Count < 2) return null;
 
                 double bboxMinX = double.MaxValue;
                 double bboxMinY = double.MaxValue;

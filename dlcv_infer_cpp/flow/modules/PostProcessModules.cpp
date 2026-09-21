@@ -1872,29 +1872,24 @@ private:
             allPoints.emplace_back(verticalBoundary ? primary[i] : edge[i],
                                    verticalBoundary ? edge[i] : primary[i]);
         }
-        polyline = SimplifyPolyline(allPoints);
-        if (polyline.empty()) return false;
-        const size_t start = std::min(static_cast<size_t>(std::max(0, leftClip)), polyline.size());
-        const size_t end = std::max(start, polyline.size() - std::min(polyline.size(), static_cast<size_t>(std::max(0, rightClip))));
-        if (start > 0 || end < polyline.size()) {
-            polyline = std::vector<cv::Point2d>(polyline.begin() + static_cast<std::ptrdiff_t>(start),
-                                                polyline.begin() + static_cast<std::ptrdiff_t>(end));
-        }
-        if (polyline.size() < 2) return false;
-
-        fitPoints = allPoints;
         if (leftClip > 0 || rightClip > 0) {
-            const double first = verticalBoundary ? polyline.front().x : polyline.front().y;
-            const double last = verticalBoundary ? polyline.back().x : polyline.back().y;
-            const double low = std::min(first, last);
-            const double high = std::max(first, last);
-            fitPoints.clear();
+            const double low = primary.front() + std::max(0, leftClip);
+            const double high = primary.back() - std::max(0, rightClip);
+            if (low > high) return false;
+
+            std::vector<cv::Point2d> clippedPoints;
+            clippedPoints.reserve(allPoints.size());
             for (const auto& point : allPoints) {
                 const double value = verticalBoundary ? point.x : point.y;
-                if (value >= low && value <= high) fitPoints.push_back(point);
+                if (value >= low && value <= high) clippedPoints.push_back(point);
             }
-            if (fitPoints.size() < 2) fitPoints = polyline;
+            allPoints = std::move(clippedPoints);
         }
+        if (allPoints.size() < 2) return false;
+
+        fitPoints = allPoints;
+        polyline = SimplifyPolyline(allPoints);
+        if (polyline.size() < 2) return false;
 
         double minX = polyline.front().x, minY = polyline.front().y;
         double maxX = minX, maxY = minY;

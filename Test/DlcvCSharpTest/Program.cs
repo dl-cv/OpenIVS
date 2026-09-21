@@ -7024,6 +7024,48 @@ namespace DlcvCSharpTest
                     }
                 }
 
+                using (var clipMask = new Mat(120, 100, MatType.CV_8UC1, Scalar.White))
+                {
+                    var clipMaskInfo = MaskRleUtils.MatToMaskInfo(clipMask);
+                    foreach (string direction in new[] { "up", "down", "left", "right" })
+                    {
+                        var clippedOutput = RunPolyFilterCase(
+                            clipMaskInfo, direction, false, 25, 10, 0.0, 0.0, 100.0, 120.0);
+                        var clipped = GetFirstPolyFilterDetection(clippedOutput.ResultList);
+                        var clippedPolyline = Utils.GetExtraInfoPolyline(clipped?["extra_info"] as JObject);
+                        if (clippedPolyline == null || clippedPolyline.Count < 2)
+                        {
+                            return FailPolyFilter("固定像素裁剪后输出为空: " + direction);
+                        }
+
+                        bool horizontalBoundary = direction == "up" || direction == "down";
+                        double actualMin = horizontalBoundary
+                            ? clippedPolyline.Min(point => point.X)
+                            : clippedPolyline.Min(point => point.Y);
+                        double actualMax = horizontalBoundary
+                            ? clippedPolyline.Max(point => point.X)
+                            : clippedPolyline.Max(point => point.Y);
+                        double expectedMax = horizontalBoundary ? 89.0 : 109.0;
+                        if (Math.Abs(actualMin - 25.0) > 1e-6 || Math.Abs(actualMax - expectedMax) > 1e-6)
+                        {
+                            return FailPolyFilter(
+                                "固定像素裁剪范围错误: " + direction +
+                                ", actual=[" + actualMin + ", " + actualMax + "]");
+                        }
+                    }
+
+                    var clippedFittedOutput = RunPolyFilterCase(
+                        clipMaskInfo, "right", true, 25, 10, 0.0, 0.0, 100.0, 120.0);
+                    var clippedFitted = GetFirstPolyFilterDetection(clippedFittedOutput.ResultList);
+                    var clippedFittedBbox = clippedFitted?["bbox"] as JArray;
+                    if (clippedFittedBbox == null || clippedFittedBbox.Count != 5 ||
+                        Math.Abs(clippedFittedBbox[2].Value<double>() - 84.0) > 1e-5 ||
+                        Math.Abs(clippedFittedBbox[3].Value<double>() - 3.0) > 1e-6)
+                    {
+                        return FailPolyFilter("拟合未使用固定像素裁剪后的连续边缘点");
+                    }
+                }
+
                 var fittedOutput = RunPolyFilterCase(maskInfo, "right", true);
                 var fitted = GetFirstPolyFilterDetection(fittedOutput.ResultList);
                 if (fitted == null) return FailPolyFilter("拟合输出为空");
@@ -7055,7 +7097,16 @@ namespace DlcvCSharpTest
             return 0;
         }
 
-        private static ModuleIO RunPolyFilterCase(JObject maskInfo, string direction, bool fitLine)
+        private static ModuleIO RunPolyFilterCase(
+            JObject maskInfo,
+            string direction,
+            bool fitLine,
+            int leftClip = 0,
+            int rightClip = 0,
+            double bboxX = 100.0,
+            double bboxY = 200.0,
+            double bboxWidth = 9.0,
+            double bboxHeight = 8.0)
         {
             var module = new PolyFilter(
                 40,
@@ -7063,7 +7114,9 @@ namespace DlcvCSharpTest
                 {
                     ["direction"] = direction,
                     ["fit_line"] = fitLine,
-                    ["mask_threshold"] = 127
+                    ["mask_threshold"] = 127,
+                    ["left_clip"] = leftClip,
+                    ["right_clip"] = rightClip
                 });
             var resultList = new JArray
             {
@@ -7076,7 +7129,7 @@ namespace DlcvCSharpTest
                     {
                         new JObject
                         {
-                            ["bbox"] = new JArray(100.0, 200.0, 9.0, 8.0),
+                            ["bbox"] = new JArray(bboxX, bboxY, bboxWidth, bboxHeight),
                             ["score"] = 0.99,
                             ["category_name"] = "demo",
                             ["mask"] = "legacy",

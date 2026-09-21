@@ -1672,11 +1672,16 @@ int RunPolyFilterSelfTest() {
     cv::fillPoly(mask, std::vector<std::vector<cv::Point>>{contour}, cv::Scalar(255));
     const json maskInfo = dlcv_infer::flow::MatToMaskInfo(mask);
 
-    auto runCase = [&](const std::string& direction, bool fitLine) -> json {
+    auto runCase = [&](const json& caseMaskInfo, const std::string& direction, bool fitLine,
+                       int leftClip = 0, int rightClip = 0,
+                       double bboxX = 100.0, double bboxY = 200.0,
+                       double bboxWidth = 9.0, double bboxHeight = 8.0) -> json {
         const json properties = json::object({
             {"direction", direction},
             {"fit_line", fitLine},
-            {"mask_threshold", 127}
+            {"mask_threshold", 127},
+            {"left_clip", leftClip},
+            {"right_clip", rightClip}
         });
         auto module = factory(40, "poly_filter", properties, nullptr);
         const json input = json::array({
@@ -1686,12 +1691,12 @@ int RunPolyFilterSelfTest() {
                 {"origin_index", 0},
                 {"sample_results", json::array({
                     json::object({
-                        {"bbox", json::array({100.0, 200.0, 9.0, 8.0})},
+                        {"bbox", json::array({bboxX, bboxY, bboxWidth, bboxHeight})},
                         {"score", 0.99},
                         {"category_name", "demo"},
                         {"mask", "legacy"},
                         {"mask_array", json::array({json::array({255})})},
-                        {"mask_rle", maskInfo},
+                        {"mask_rle", caseMaskInfo},
                         {"with_mask", true}
                     })
                 })}
@@ -1708,7 +1713,7 @@ int RunPolyFilterSelfTest() {
     };
 
     for (const std::string direction : {"up", "down", "left", "right"}) {
-        const json det = runCase(direction, false);
+        const json det = runCase(maskInfo, direction, false);
         if (!det.is_object()) return fail("empty output for " + direction);
         if (!det.contains("bbox") || !det.at("bbox").is_array() || det.at("bbox").size() != 4) {
             return fail("boundary output must keep a four-value bbox for " + direction);
@@ -1731,7 +1736,43 @@ int RunPolyFilterSelfTest() {
         }
     }
 
-    const json fitted = runCase("right", true);
+    const cv::Mat clipMask(120, 100, CV_8UC1, cv::Scalar(255));
+    const json clipMaskInfo = dlcv_infer::flow::MatToMaskInfo(clipMask);
+    for (const std::string direction : {"up", "down", "left", "right"}) {
+        const json clipped = runCase(clipMaskInfo, direction, false, 25, 10, 0.0, 0.0, 100.0, 120.0);
+        if (!clipped.is_object() || !clipped.contains("extra_info") ||
+            !clipped.at("extra_info").is_object() ||
+            !clipped.at("extra_info").contains("polyline") ||
+            !clipped.at("extra_info").at("polyline").is_array() ||
+            clipped.at("extra_info").at("polyline").size() < 2) {
+            return fail("fixed-pixel clip produced empty output for " + direction);
+        }
+
+        const auto& points = clipped.at("extra_info").at("polyline");
+        const size_t primaryAxis = direction == "up" || direction == "down" ? 0 : 1;
+        double actualMin = std::numeric_limits<double>::max();
+        double actualMax = std::numeric_limits<double>::lowest();
+        for (const auto& point : points) {
+            if (!point.is_array() || point.size() < 2) continue;
+            const double value = point.at(primaryAxis).get<double>();
+            actualMin = std::min(actualMin, value);
+            actualMax = std::max(actualMax, value);
+        }
+        const double expectedMax = primaryAxis == 0 ? 89.0 : 109.0;
+        if (std::abs(actualMin - 25.0) > 1e-6 || std::abs(actualMax - expectedMax) > 1e-6) {
+            return fail("fixed-pixel clip range mismatch for " + direction);
+        }
+    }
+
+    const json clippedFitted = runCase(clipMaskInfo, "right", true, 25, 10, 0.0, 0.0, 100.0, 120.0);
+    if (!clippedFitted.is_object() || !clippedFitted.contains("bbox") ||
+        !clippedFitted.at("bbox").is_array() || clippedFitted.at("bbox").size() != 5 ||
+        std::abs(clippedFitted.at("bbox").at(2).get<double>() - 84.0) > 1e-5 ||
+        std::abs(clippedFitted.at("bbox").at(3).get<double>() - 3.0) > 1e-6) {
+        return fail("line fit did not use fixed-pixel clipped edge samples");
+    }
+
+    const json fitted = runCase(maskInfo, "right", true);
     if (!fitted.is_object() || !fitted.contains("bbox") ||
         !fitted.at("bbox").is_array() || fitted.at("bbox").size() != 5) {
         return fail("line fit must output only a five-value bbox");
