@@ -238,7 +238,7 @@ std::string BuildResultSignature(const dlcv_infer::Result& result, const json& j
 
 int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
     if (argc < 4) {
-        PrintUtf8Line("Usage: dlcv_infer_cpp_test dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]");
+        PrintUtf8Line("Usage: dlcv_infer_cpp_test dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask|require-polyline]");
         return 2;
     }
 
@@ -267,9 +267,33 @@ int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
             PrintUtf8Line("selftest failed: DVS flow returned an empty result");
             return 1;
         }
-        const bool requirePreservedMask = argc >= 5 &&
-            (std::wstring(argv[4]) == L"require-preserved-mask" ||
-             std::wstring(argv[4]) == L"require-original-mask");
+        const std::wstring validationMode = argc >= 5 ? std::wstring(argv[4]) : std::wstring();
+        const bool requirePreservedMask = validationMode == L"require-preserved-mask" ||
+            validationMode == L"require-original-mask";
+        const bool requirePolyline = validationMode == L"require-polyline";
+        if (requirePolyline) {
+            const json jsonResult = model.InferOneOutJson(rgb, params);
+            std::cout << "json_signature: " << BuildResultSignature(result, jsonResult) << "\n";
+            if (!jsonResult.is_array() || jsonResult.empty() || !jsonResult.front().is_object()) {
+                PrintUtf8Line("selftest failed: JSON result is empty");
+                DisposeResultMasks(result);
+                return 1;
+            }
+            const json& object = jsonResult.front();
+            const bool hasPolyline = object.contains("extra_info") && object.at("extra_info").is_object() &&
+                object.at("extra_info").contains("polyline") && object.at("extra_info").at("polyline").is_array() &&
+                object.at("extra_info").at("polyline").size() >= 2;
+            const bool hasAxisAlignedBbox = object.contains("bbox") && object.at("bbox").is_array() &&
+                object.at("bbox").size() == 4;
+            const bool hasOldGeometry = object.contains("polygon") || object.contains("poly") ||
+                object.contains("mask_array") || object.contains("mask_rle") || object.contains("polyline");
+            if (!hasPolyline || !hasAxisAlignedBbox || hasOldGeometry || object.value("with_mask", true)) {
+                PrintUtf8Line(std::string("selftest failed: poly_filter JSON contract mismatch: ") + object.dump());
+                DisposeResultMasks(result);
+                return 1;
+            }
+            PrintUtf8Line("poly_filter JSON polyline preserved");
+        }
         if (requirePreservedMask) {
             const auto& object = result.sampleResults.front().results.front();
             if (!object.withMask || object.mask.empty()) {
@@ -1628,6 +1652,145 @@ int RunBBoxIoUDedupSelfTest() {
     if (!RunBBoxIoUDedupNoneVsIdentityCase(error)) return fail(error);
 
     PrintUtf8Line("bbox_iou_dedup selftest passed");
+    return 0;
+}
+
+
+int RunPolyFilterSelfTest() {
+    auto fail = [](const std::string& message) -> int {
+        PrintUtf8Line("poly_filter selftest failed: " + message);
+        return 1;
+    };
+
+    const auto factory = dlcv_infer::flow::ModuleRegistry::Get("post_process/poly_filter");
+    if (!factory) return fail("module is not registered");
+
+    cv::Mat mask = cv::Mat::zeros(8, 9, CV_8UC1);
+    const std::vector<cv::Point> contour = {
+        cv::Point(1, 1), cv::Point(6, 1), cv::Point(7, 3),
+        cv::Point(6, 6), cv::Point(2, 6), cv::Point(1, 4)
+    };
+    cv::fillPoly(mask, std::vector<std::vector<cv::Point>>{contour}, cv::Scalar(255));
+    const json maskInfo = dlcv_infer::flow::MatToMaskInfo(mask);
+
+    auto runCase = [&](const json& caseMaskInfo, const std::string& direction, bool fitLine,
+                       int leftClip = 0, int rightClip = 0,
+                       double bboxX = 100.0, double bboxY = 200.0,
+                       double bboxWidth = 9.0, double bboxHeight = 8.0) -> json {
+        const json properties = json::object({
+            {"direction", direction},
+            {"fit_line", fitLine},
+            {"mask_threshold", 127},
+            {"left_clip", leftClip},
+            {"right_clip", rightClip}
+        });
+        auto module = factory(40, "poly_filter", properties, nullptr);
+        const json input = json::array({
+            json::object({
+                {"type", "local"},
+                {"index", 0},
+                {"origin_index", 0},
+                {"sample_results", json::array({
+                    json::object({
+                        {"bbox", json::array({bboxX, bboxY, bboxWidth, bboxHeight})},
+                        {"score", 0.99},
+                        {"category_name", "demo"},
+                        {"mask", "legacy"},
+                        {"mask_array", json::array({json::array({255})})},
+                        {"mask_rle", caseMaskInfo},
+                        {"with_mask", true}
+                    })
+                })}
+            })
+        });
+        const auto output = module->Process({}, input);
+        if (!output.ResultList.is_array() || output.ResultList.empty()) return json();
+        const auto& entry = output.ResultList.at(0);
+        if (!entry.is_object() || !entry.contains("sample_results") ||
+            !entry.at("sample_results").is_array() || entry.at("sample_results").empty()) {
+            return json();
+        }
+        return entry.at("sample_results").at(0);
+    };
+
+    for (const std::string direction : {"up", "down", "left", "right"}) {
+        const json det = runCase(maskInfo, direction, false);
+        if (!det.is_object()) return fail("empty output for " + direction);
+        if (!det.contains("bbox") || !det.at("bbox").is_array() || det.at("bbox").size() != 4) {
+            return fail("boundary output must keep a four-value bbox for " + direction);
+        }
+        if (!det.contains("extra_info") || !det.at("extra_info").is_object() ||
+            !det.at("extra_info").contains("polyline") ||
+            !det.at("extra_info").at("polyline").is_array() ||
+            det.at("extra_info").at("polyline").size() < 2) {
+            return fail("boundary output is missing extra_info.polyline for " + direction);
+        }
+        for (const char* key : {"polygon", "poly", "mask", "mask_array", "mask_rle"}) {
+            if (det.contains(key)) return fail(std::string("stale geometry remains: ") + key);
+        }
+        if (!det.contains("with_mask") || det.at("with_mask") != false) {
+            return fail("with_mask was not disabled for " + direction);
+        }
+        if (det.value("metadata", json::object()).value("poly_filter_direction", "") != direction ||
+            det.value("metadata", json::object()).value("poly_filter_mode", "") != "boundary_line") {
+            return fail("metadata mismatch for " + direction);
+        }
+    }
+
+    const cv::Mat clipMask(120, 100, CV_8UC1, cv::Scalar(255));
+    const json clipMaskInfo = dlcv_infer::flow::MatToMaskInfo(clipMask);
+    for (const std::string direction : {"up", "down", "left", "right"}) {
+        const json clipped = runCase(clipMaskInfo, direction, false, 25, 10, 0.0, 0.0, 100.0, 120.0);
+        if (!clipped.is_object() || !clipped.contains("extra_info") ||
+            !clipped.at("extra_info").is_object() ||
+            !clipped.at("extra_info").contains("polyline") ||
+            !clipped.at("extra_info").at("polyline").is_array() ||
+            clipped.at("extra_info").at("polyline").size() < 2) {
+            return fail("fixed-pixel clip produced empty output for " + direction);
+        }
+
+        const auto& points = clipped.at("extra_info").at("polyline");
+        const size_t primaryAxis = direction == "up" || direction == "down" ? 0 : 1;
+        double actualMin = std::numeric_limits<double>::max();
+        double actualMax = std::numeric_limits<double>::lowest();
+        for (const auto& point : points) {
+            if (!point.is_array() || point.size() < 2) continue;
+            const double value = point.at(primaryAxis).get<double>();
+            actualMin = std::min(actualMin, value);
+            actualMax = std::max(actualMax, value);
+        }
+        const double expectedMax = primaryAxis == 0 ? 89.0 : 109.0;
+        if (std::abs(actualMin - 25.0) > 1e-6 || std::abs(actualMax - expectedMax) > 1e-6) {
+            return fail("fixed-pixel clip range mismatch for " + direction);
+        }
+    }
+
+    const json clippedFitted = runCase(clipMaskInfo, "right", true, 25, 10, 0.0, 0.0, 100.0, 120.0);
+    if (!clippedFitted.is_object() || !clippedFitted.contains("bbox") ||
+        !clippedFitted.at("bbox").is_array() || clippedFitted.at("bbox").size() != 5 ||
+        std::abs(clippedFitted.at("bbox").at(2).get<double>() - 84.0) > 1e-5 ||
+        std::abs(clippedFitted.at("bbox").at(3).get<double>() - 3.0) > 1e-6) {
+        return fail("line fit did not use fixed-pixel clipped edge samples");
+    }
+
+    const json fitted = runCase(maskInfo, "right", true);
+    if (!fitted.is_object() || !fitted.contains("bbox") ||
+        !fitted.at("bbox").is_array() || fitted.at("bbox").size() != 5) {
+        return fail("line fit must output only a five-value bbox");
+    }
+    if (std::abs(fitted.at("bbox").at(3).get<double>() - 3.0) > 1e-6) {
+        return fail("line-fit RBox height is not 3 pixels");
+    }
+    if (fitted.contains("polyline") ||
+        (fitted.contains("extra_info") && fitted.at("extra_info").is_object() &&
+         fitted.at("extra_info").contains("polyline"))) {
+        return fail("line fit still contains a polyline");
+    }
+    if (fitted.value("metadata", json::object()).value("poly_filter_mode", "") != "line_fit_rbox") {
+        return fail("line-fit metadata mismatch");
+    }
+
+    PrintUtf8Line("poly_filter selftest passed");
     return 0;
 }
 
@@ -4618,6 +4781,9 @@ int wmain(int argc, wchar_t* argv[]) {
     if (argc >= 2 && std::wstring(argv[1]) == L"bbox-iou-dedup-selftest") {
         return RunBBoxIoUDedupSelfTest();
     }
+    if (argc >= 2 && std::wstring(argv[1]) == L"poly-filter-selftest") {
+        return RunPolyFilterSelfTest();
+    }
 
 
     if (argc >= 2 && std::wstring(argv[1]) == L"count-results-selftest") {
@@ -4685,7 +4851,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
     PrintUtf8Line("Usage: " + (argc >= 1 ? WideToUtf8(argv[0]) : std::string("dlcv_infer_cpp_test")) + " <subcommand>");
     std::cout << "Available subcommands:\n";
-    std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]\n";
+    std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask|require-polyline]\n";
     std::cout << "  dvs-archive-duplicate-selftest\n";
     std::cout << "  dvs-model-pool-selftest <modelPath> [device]\n";
     std::cout << "  dvs-memory-loading-selftest <modelPath> <imagePath> [device]\n";
@@ -4697,6 +4863,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  rect-image-correction-selftest\n";
     std::cout << "  sliding-merge-selftest\n";
     std::cout << "  bbox-iou-dedup-selftest\n";
+    std::cout << "  poly-filter-selftest\n";
     std::cout << "  count-results-selftest\n";
     std::cout << "  category-count-check-selftest\n";
     std::cout << "  image-generation-expand-selftest\n";

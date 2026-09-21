@@ -8,8 +8,8 @@ namespace DlcvModules
 {
     /// <summary>
     /// 对齐 Python: post_process/poly_filter, features/poly_filter。
-    /// 从 polygon/poly 或 mask 相关字段（优先 mask_rle）提取上沿/下沿折线。
-    /// 结果写回 extra_info.polyline，同时更新 polygon/poly 对应的 bbox。
+    /// 从 polygon/poly 或 mask 相关字段（优先 mask_rle）提取上、下、左、右边缘；可选拟合为高度固定 3 像素的 RBox。
+    /// 非拟合结果写回 extra_info.polyline 与轴对齐 bbox；拟合结果仅保留五元素 bbox。
     /// </summary>
     public class PolyFilter : BaseModule
     {
@@ -29,7 +29,8 @@ namespace DlcvModules
             var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
             string direction = NormalizeDirection(GetStringProperty("direction", "up"));
-            double maskThreshold = GetDoubleProperty("mask_threshold", 0.5);
+            double maskThreshold = GetDoubleProperty("mask_threshold", 127);
+            bool fitLine = GetBoolProperty("fit_line", false);
             int leftClip = GetNonNegativeIntProperty("left_clip", "left_crop", "left_trim", "左裁剪");
             int rightClip = GetNonNegativeIntProperty("right_clip", "right_crop", "right_trim", "右裁剪");
 
@@ -61,7 +62,7 @@ namespace DlcvModules
                         continue;
                     }
 
-                    if (TryApplyPolyFilterToDetection(detObj, direction, maskThreshold, leftClip, rightClip, out JObject detOut))
+                    if (TryApplyPolyFilterToDetection(detObj, direction, fitLine, maskThreshold, leftClip, rightClip, out JObject detOut))
                     {
                         anyDetChanged = true;
                         newDets.Add(detOut);
@@ -90,6 +91,7 @@ namespace DlcvModules
         private static bool TryApplyPolyFilterToDetection(
             JObject detObj,
             string direction,
+            bool fitLine,
             double maskThreshold,
             int leftClip,
             int rightClip,
@@ -106,30 +108,46 @@ namespace DlcvModules
                 }
 
                 List<double> bboxNewXywh;
-                var polyline = MaskToPolyline(sourceMask, bboxXyxy, direction, leftClip, rightClip, out bboxNewXywh);
+                List<Point2d> fitPoints;
+                var polyline = MaskToPolyline(sourceMask, bboxXyxy, direction, leftClip, rightClip, out bboxNewXywh, out fitPoints);
                 if (polyline == null || polyline.Count < 2 || bboxNewXywh == null || bboxNewXywh.Count < 4)
                 {
                     return false;
                 }
 
                 detOut = (JObject)detObj.DeepClone();
-                var extraInfo = detOut["extra_info"] as JObject ?? new JObject();
-                Utils.SetExtraInfoPolyline(extraInfo, polyline);
-                if (extraInfo.HasValues)
+                detOut.Remove("polygon");
+                detOut.Remove("poly");
+                detOut.Remove("mask_array");
+                detOut.Remove("mask_rle");
+                detOut.Remove("mask");
+                if (detOut["with_mask"] != null) detOut["with_mask"] = false;
+
+                string mode = "boundary_line";
+                if (fitLine && TryFitPolylineToRBox(fitPoints, out List<double> fittedRbox))
                 {
-                    detOut["extra_info"] = extraInfo;
+                    detOut.Remove("polyline");
+                    var extraInfo = detOut["extra_info"] as JObject;
+                    if (extraInfo != null)
+                    {
+                        extraInfo.Remove("polyline");
+                        if (!extraInfo.HasValues) detOut.Remove("extra_info");
+                    }
+                    detOut["bbox"] = new JArray(fittedRbox[0], fittedRbox[1], fittedRbox[2], fittedRbox[3], fittedRbox[4]);
+                    mode = "line_fit_rbox";
                 }
                 else
                 {
-                    detOut.Remove("extra_info");
+                    var extraInfo = detOut["extra_info"] as JObject ?? new JObject();
+                    Utils.SetExtraInfoPolyline(extraInfo, polyline);
+                    detOut["extra_info"] = extraInfo;
+                    detOut["bbox"] = new JArray(bboxNewXywh[0], bboxNewXywh[1], bboxNewXywh[2], bboxNewXywh[3]);
                 }
-
-                detOut["bbox"] = new JArray(bboxNewXywh[0], bboxNewXywh[1], bboxNewXywh[2], bboxNewXywh[3]);
 
                 var metadata = detOut["metadata"] as JObject ?? new JObject();
                 metadata["poly_filter_direction"] = direction;
                 metadata["poly_filter_source"] = sourceType;
-                metadata["poly_filter_mode"] = "boundary_line";
+                metadata["poly_filter_mode"] = mode;
                 detOut["metadata"] = metadata;
                 return true;
             }
@@ -139,6 +157,14 @@ namespace DlcvModules
         {
             if (Properties == null || !Properties.TryGetValue(key, out object value) || value == null) return defaultValue;
             try { return value.ToString(); } catch { return defaultValue; }
+        }
+
+        private bool GetBoolProperty(string key, bool defaultValue)
+        {
+            if (Properties == null || !Properties.TryGetValue(key, out object value) || value == null) return defaultValue;
+            if (value is bool boolValue) return boolValue;
+            string text = value.ToString().Trim().ToLowerInvariant();
+            return text == "1" || text == "true" || text == "yes" || text == "on" || text == "开启" || text == "是";
         }
 
         private double GetDoubleProperty(string key, double defaultValue)
@@ -163,6 +189,8 @@ namespace DlcvModules
         {
             var s = (value ?? "up").Trim().ToLowerInvariant();
             if (s == "down" || s == "bottom" || s == "lower" || s == "下" || s == "lower_half") return "down";
+            if (s == "left" || s == "左") return "left";
+            if (s == "right" || s == "右") return "right";
             return "up";
         }
 
@@ -243,9 +271,11 @@ namespace DlcvModules
             string direction,
             int leftClip,
             int rightClip,
-            out List<double> bboxOutXywh)
+            out List<double> bboxOutXywh,
+            out List<Point2d> fitPoints)
         {
             bboxOutXywh = null;
+            fitPoints = null;
             if (maskInput == null || maskInput.Empty() || bboxXyxy == null || bboxXyxy.Count < 4) return null;
 
             using (var largest = KeepLargestComponent(maskInput))
@@ -258,46 +288,78 @@ namespace DlcvModules
 
                 double x1 = bboxXyxy[0];
                 double y1 = bboxXyxy[1];
+                bool verticalBoundary = direction == "up" || direction == "down";
+                var primaryValues = new List<double>(verticalBoundary ? w : h);
+                var edgeValues = new List<double>(verticalBoundary ? w : h);
 
-                var xVals = new List<double>(w);
-                var yVals = new List<double>(w);
-
-                for (int x = 0; x < w; x++)
+                if (verticalBoundary)
                 {
-                    int minY = int.MaxValue;
-                    int maxY = int.MinValue;
-                    bool found = false;
-                    for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++)
                     {
-                        if (largest.At<byte>(y, x) > 0)
+                        int minY = int.MaxValue;
+                        int maxY = int.MinValue;
+                        for (int y = 0; y < h; y++)
                         {
-                            found = true;
+                            if (largest.At<byte>(y, x) == 0) continue;
                             if (y < minY) minY = y;
                             if (y > maxY) maxY = y;
                         }
+                        if (minY == int.MaxValue) continue;
+                        primaryValues.Add(x1 + x);
+                        edgeValues.Add(y1 + (direction == "down" ? maxY : minY));
                     }
-                    if (!found) continue;
-                    int edgeY = direction == "down" ? maxY : minY;
-                    xVals.Add(x1 + x);
-                    yVals.Add(y1 + edgeY);
+                }
+                else
+                {
+                    for (int y = 0; y < h; y++)
+                    {
+                        int minX = int.MaxValue;
+                        int maxX = int.MinValue;
+                        for (int x = 0; x < w; x++)
+                        {
+                            if (largest.At<byte>(y, x) == 0) continue;
+                            if (x < minX) minX = x;
+                            if (x > maxX) maxX = x;
+                        }
+                        if (minX == int.MaxValue) continue;
+                        primaryValues.Add(y1 + y);
+                        edgeValues.Add(x1 + (direction == "right" ? maxX : minX));
+                    }
                 }
 
-                if (xVals.Count < 2) return null;
+                if (primaryValues.Count < 2) return null;
 
-                double maxJump = Math.Max(3.0, h * 0.18);
-                TrimEdgeOutliers(xVals, yVals, maxJump);
-                if (xVals.Count < 2) return null;
+                double maxJump = Math.Max(3.0, (verticalBoundary ? h : w) * 0.18);
+                TrimEdgeOutliers(primaryValues, edgeValues, maxJump);
+                if (primaryValues.Count < 2) return null;
 
-                MedianDeSpike(yVals, maxJump, 2);
-                var simplified = SimplifyPolyline(xVals, yVals);
-                if (simplified.Count == 0) return null;
+                MedianDeSpike(edgeValues, maxJump, 2);
+                var allPoints = new List<Point2d>(primaryValues.Count);
+                for (int i = 0; i < primaryValues.Count; i++)
+                {
+                    allPoints.Add(verticalBoundary
+                        ? new Point2d(primaryValues[i], edgeValues[i])
+                        : new Point2d(edgeValues[i], primaryValues[i]));
+                }
 
                 if (leftClip > 0 || rightClip > 0)
                 {
-                    int start = Math.Min(Math.Max(0, leftClip), simplified.Count);
-                    int endExclusive = Math.Max(start, simplified.Count - Math.Max(0, rightClip));
-                    simplified = simplified.GetRange(start, endExclusive - start);
+                    double low = primaryValues[0] + Math.Max(0, leftClip);
+                    double high = primaryValues[primaryValues.Count - 1] - Math.Max(0, rightClip);
+                    if (low > high) return null;
+
+                    var clippedPoints = new List<Point2d>();
+                    for (int i = 0; i < allPoints.Count; i++)
+                    {
+                        double value = verticalBoundary ? allPoints[i].X : allPoints[i].Y;
+                        if (value >= low && value <= high) clippedPoints.Add(allPoints[i]);
+                    }
+                    allPoints = clippedPoints;
                 }
+                if (allPoints.Count < 2) return null;
+
+                fitPoints = allPoints;
+                var simplified = SimplifyPolyline(allPoints);
                 if (simplified.Count < 2) return null;
 
                 double bboxMinX = double.MaxValue;
@@ -317,6 +379,58 @@ namespace DlcvModules
                 double bboxH = Math.Max(1.0, bboxMaxY - bboxMinY + 1.0);
                 bboxOutXywh = new List<double> { bboxMinX, bboxMinY, bboxW, bboxH };
                 return simplified;
+            }
+        }
+
+        private static bool TryFitPolylineToRBox(List<Point2d> points, out List<double> rbox)
+        {
+            rbox = null;
+            if (points == null || points.Count < 2) return false;
+
+            try
+            {
+                var fitInput = new List<Point2f>(points.Count);
+                for (int i = 0; i < points.Count; i++)
+                {
+                    fitInput.Add(new Point2f((float)points[i].X, (float)points[i].Y));
+                }
+                Line2D line = Cv2.FitLine(fitInput, DistanceTypes.L2, 0, 0.01, 0.01);
+                double vx = line.Vx;
+                double vy = line.Vy;
+                double norm = Math.Sqrt(vx * vx + vy * vy);
+                if (norm <= 1e-9) return false;
+                vx /= norm;
+                vy /= norm;
+                if (vx < 0.0 || (Math.Abs(vx) <= 1e-9 && vy < 0.0))
+                {
+                    vx = -vx;
+                    vy = -vy;
+                }
+
+                double x0 = line.X1;
+                double y0 = line.Y1;
+                double minProjection = double.MaxValue;
+                double maxProjection = double.MinValue;
+                for (int i = 0; i < points.Count; i++)
+                {
+                    double projection = (points[i].X - x0) * vx + (points[i].Y - y0) * vy;
+                    if (projection < minProjection) minProjection = projection;
+                    if (projection > maxProjection) maxProjection = projection;
+                }
+
+                double middle = (minProjection + maxProjection) * 0.5;
+                double centerX = x0 + vx * middle;
+                double centerY = y0 + vy * middle;
+                double width = Math.Max(1.0, maxProjection - minProjection);
+                double angle = Math.Atan2(vy, vx);
+                while (angle < -Math.PI / 2.0) angle += Math.PI;
+                while (angle >= Math.PI / 2.0) angle -= Math.PI;
+                rbox = new List<double> { centerX, centerY, width, 3.0, angle };
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -520,22 +634,18 @@ namespace DlcvModules
             }
         }
 
-        private static List<Point2d> SimplifyPolyline(List<double> xs, List<double> ys)
+        private static List<Point2d> SimplifyPolyline(List<Point2d> source)
         {
             var points = new List<Point2d>();
-            if (xs == null || ys == null || xs.Count != ys.Count || xs.Count == 0) return points;
-            if (xs.Count <= 2)
-            {
-                for (int i = 0; i < xs.Count; i++) points.Add(new Point2d(xs[i], ys[i]));
-                return points;
-            }
+            if (source == null || source.Count == 0) return points;
+            if (source.Count <= 2) return new List<Point2d>(source);
 
-            points.Add(new Point2d(xs[0], ys[0]));
-            for (int i = 1; i < xs.Count - 1; i++)
+            points.Add(source[0]);
+            for (int i = 1; i < source.Count - 1; i++)
             {
                 var prev = points[points.Count - 1];
-                var cur = new Point2d(xs[i], ys[i]);
-                var next = new Point2d(xs[i + 1], ys[i + 1]);
+                var cur = source[i];
+                var next = source[i + 1];
 
                 double v1x = cur.X - prev.X;
                 double v1y = cur.Y - prev.Y;
@@ -545,7 +655,7 @@ namespace DlcvModules
                 if (Math.Abs(cross) <= 1e-6) continue;
                 points.Add(cur);
             }
-            points.Add(new Point2d(xs[xs.Count - 1], ys[ys.Count - 1]));
+            points.Add(source[source.Count - 1]);
             return points;
         }
 

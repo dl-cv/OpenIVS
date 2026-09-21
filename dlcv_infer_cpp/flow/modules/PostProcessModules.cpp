@@ -1453,6 +1453,496 @@ private:
 };
 
 /// post_process/mask_to_rbox, features/mask_to_rbox
+class PolyFilterModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        const Json results = resultList.is_array() ? resultList : Json::array();
+        const std::string direction = NormalizeDirection(ReadString("direction", "up"));
+        const bool fitLine = ReadBool("fit_line", false);
+        const double maskThreshold = ReadDouble("mask_threshold", 127.0);
+        const int leftClip = ReadNonNegativeInt({"left_clip", "left_crop", "left_trim"});
+        const int rightClip = ReadNonNegativeInt({"right_clip", "right_crop", "right_trim"});
+
+        Json outResults = Json::array();
+        for (const auto& token : results) {
+            if (!token.is_object() || token.value("type", "") != "local" ||
+                !token.contains("sample_results") || !token.at("sample_results").is_array()) {
+                outResults.push_back(token);
+                continue;
+            }
+
+            Json entry = token;
+            Json detections = Json::array();
+            for (const auto& detToken : token.at("sample_results")) {
+                if (!detToken.is_object()) {
+                    detections.push_back(detToken);
+                    continue;
+                }
+
+                Json det = detToken;
+                cv::Mat sourceMask;
+                std::array<double, 4> bboxXyxy{};
+                std::string sourceType;
+                if (!BuildSourceMask(detToken, maskThreshold, sourceMask, bboxXyxy, sourceType)) {
+                    detections.push_back(detToken);
+                    continue;
+                }
+
+                std::vector<cv::Point2d> polyline;
+                std::vector<cv::Point2d> fitPoints;
+                std::array<double, 4> bboxXywh{};
+                if (!MaskToPolyline(sourceMask, bboxXyxy, direction, leftClip, rightClip,
+                                    polyline, fitPoints, bboxXywh)) {
+                    detections.push_back(detToken);
+                    continue;
+                }
+
+                for (const char* key : {"polygon", "poly", "mask_array", "mask_rle", "mask"}) {
+                    det.erase(key);
+                }
+                if (det.contains("with_mask")) det["with_mask"] = false;
+
+                std::string mode = "boundary_line";
+                std::array<double, 5> rbox{};
+                if (fitLine && FitPolylineToRBox(fitPoints, rbox)) {
+                    det.erase("polyline");
+                    if (det.contains("extra_info") && det.at("extra_info").is_object()) {
+                        det["extra_info"].erase("polyline");
+                        if (det["extra_info"].empty()) det.erase("extra_info");
+                    }
+                    det["bbox"] = Json::array({rbox[0], rbox[1], rbox[2], rbox[3], rbox[4]});
+                    mode = "line_fit_rbox";
+                } else {
+                    Json extraInfo = det.contains("extra_info") && det.at("extra_info").is_object()
+                        ? det.at("extra_info") : Json::object();
+                    Json points = Json::array();
+                    for (const auto& point : polyline) points.push_back(Json::array({point.x, point.y}));
+                    extraInfo["polyline"] = std::move(points);
+                    det["extra_info"] = std::move(extraInfo);
+                    det["bbox"] = Json::array({bboxXywh[0], bboxXywh[1], bboxXywh[2], bboxXywh[3]});
+                }
+
+                Json metadata = det.contains("metadata") && det.at("metadata").is_object()
+                    ? det.at("metadata") : Json::object();
+                metadata["poly_filter_direction"] = direction;
+                metadata["poly_filter_source"] = sourceType;
+                metadata["poly_filter_mode"] = mode;
+                det["metadata"] = std::move(metadata);
+                detections.push_back(std::move(det));
+            }
+            entry["sample_results"] = std::move(detections);
+            outResults.push_back(std::move(entry));
+        }
+        return ModuleIO(imageList, std::move(outResults), Json::array());
+    }
+
+private:
+    static std::string NormalizeDirection(std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (value == "down" || value == "bottom" || value == "lower" || value == "lower_half") return "down";
+        if (value == "left") return "left";
+        if (value == "right") return "right";
+        return "up";
+    }
+
+    int ReadNonNegativeInt(std::initializer_list<const char*> keys) const {
+        if (!Properties.is_object()) return 0;
+        for (const char* key : keys) {
+            if (!Properties.contains(key)) continue;
+            const double value = SafeDoubleFromJson(Properties.at(key), 0.0);
+            if (!std::isfinite(value) || value <= 0.0) return 0;
+            return value >= static_cast<double>(std::numeric_limits<int>::max())
+                ? std::numeric_limits<int>::max() : static_cast<int>(value);
+        }
+        return 0;
+    }
+
+    static bool ParseRing(const Json& token, std::vector<cv::Point2f>& ring) {
+        ring.clear();
+        if (!token.is_array()) return false;
+        for (const auto& point : token) {
+            try {
+                if (point.is_array() && point.size() >= 2) {
+                    ring.emplace_back(point.at(0).get<float>(), point.at(1).get<float>());
+                } else if (point.is_object() && point.contains("x") && point.contains("y")) {
+                    ring.emplace_back(point.at("x").get<float>(), point.at("y").get<float>());
+                }
+            } catch (...) {}
+        }
+        return ring.size() >= 3;
+    }
+
+    static std::vector<std::vector<cv::Point2f>> ExtractPolygonRings(const Json& det) {
+        std::vector<std::vector<cv::Point2f>> rings;
+        std::vector<cv::Point2f> ring;
+        if (det.contains("polygon") && ParseRing(det.at("polygon"), ring)) rings.push_back(ring);
+        if (det.contains("poly") && det.at("poly").is_array()) {
+            if (ParseRing(det.at("poly"), ring)) {
+                rings.push_back(ring);
+            } else {
+                for (const auto& item : det.at("poly")) {
+                    if (ParseRing(item, ring)) rings.push_back(ring);
+                }
+            }
+        }
+        return rings;
+    }
+
+    static bool ParseBboxToXyxy(const Json& token, std::array<double, 4>& bbox) {
+        if (!token.is_array()) return false;
+        try {
+            if (token.size() == 4) {
+                const double x = token.at(0).get<double>();
+                const double y = token.at(1).get<double>();
+                const double width = token.at(2).get<double>();
+                const double height = token.at(3).get<double>();
+                if (width <= 0.0 || height <= 0.0) return false;
+                bbox = {x, y, x + width, y + height};
+                return true;
+            }
+            if (token.size() >= 5) {
+                const cv::RotatedRect rect(
+                    cv::Point2f(token.at(0).get<float>(), token.at(1).get<float>()),
+                    cv::Size2f(std::max(1.0f, token.at(2).get<float>()),
+                               std::max(1.0f, token.at(3).get<float>())),
+                    token.at(4).get<float>() * 180.0f / static_cast<float>(kPi));
+                cv::Point2f points[4];
+                rect.points(points);
+                double minX = points[0].x, minY = points[0].y;
+                double maxX = points[0].x, maxY = points[0].y;
+                for (int i = 1; i < 4; i++) {
+                    minX = std::min(minX, static_cast<double>(points[i].x));
+                    minY = std::min(minY, static_cast<double>(points[i].y));
+                    maxX = std::max(maxX, static_cast<double>(points[i].x));
+                    maxY = std::max(maxY, static_cast<double>(points[i].y));
+                }
+                bbox = {minX, minY, maxX, maxY};
+                return true;
+            }
+        } catch (...) {}
+        return false;
+    }
+
+    static cv::Mat EnsureMaskSizeAndBinary(const cv::Mat& source, int width, int height, double threshold) {
+        if (source.empty() || width <= 0 || height <= 0) return cv::Mat();
+        cv::Mat gray;
+        if (source.channels() == 1) gray = source;
+        else if (source.channels() == 3) cv::cvtColor(source, gray, cv::COLOR_BGR2GRAY);
+        else if (source.channels() == 4) cv::cvtColor(source, gray, cv::COLOR_BGRA2GRAY);
+        else return cv::Mat();
+
+        cv::Mat resized;
+        if (gray.cols != width || gray.rows != height) {
+            cv::resize(gray, resized, cv::Size(width, height), 0.0, 0.0, cv::INTER_LINEAR);
+        } else {
+            resized = gray;
+        }
+
+        const double appliedThreshold = resized.depth() == CV_8U && threshold <= 1.0
+            ? std::max(0.0, std::min(255.0, threshold * 255.0)) : threshold;
+        cv::Mat binary;
+        cv::threshold(resized, binary, appliedThreshold, 255.0, cv::THRESH_BINARY);
+        if (binary.type() != CV_8UC1) binary.convertTo(binary, CV_8UC1);
+        return binary;
+    }
+
+    static bool BuildMaskFromPolygon(const std::vector<cv::Point2f>& ring, cv::Mat& mask,
+                                     std::array<double, 4>& bbox) {
+        if (ring.size() < 3) return false;
+        float minX = ring[0].x, minY = ring[0].y, maxX = ring[0].x, maxY = ring[0].y;
+        for (const auto& point : ring) {
+            minX = std::min(minX, point.x);
+            minY = std::min(minY, point.y);
+            maxX = std::max(maxX, point.x);
+            maxY = std::max(maxY, point.y);
+        }
+        const int x1 = static_cast<int>(std::floor(minX));
+        const int y1 = static_cast<int>(std::floor(minY));
+        const int x2 = static_cast<int>(std::ceil(maxX));
+        const int y2 = static_cast<int>(std::ceil(maxY));
+        if (x2 <= x1 || y2 <= y1) return false;
+
+        std::vector<cv::Point> local;
+        local.reserve(ring.size());
+        for (const auto& point : ring) {
+            local.emplace_back(cvRound(point.x - static_cast<float>(x1)),
+                               cvRound(point.y - static_cast<float>(y1)));
+        }
+        mask = cv::Mat::zeros(y2 - y1, x2 - x1, CV_8UC1);
+        cv::fillPoly(mask, std::vector<std::vector<cv::Point>>{local}, cv::Scalar(255));
+        bbox = {static_cast<double>(x1), static_cast<double>(y1),
+                static_cast<double>(x2), static_cast<double>(y2)};
+        return !mask.empty();
+    }
+
+    static bool BuildMaskFromArray(const Json& token, int width, int height, double threshold, cv::Mat& mask) {
+        if (!token.is_array() || token.empty() || !token.at(0).is_array() || token.at(0).empty()) return false;
+        const int sourceHeight = static_cast<int>(token.size());
+        const int sourceWidth = static_cast<int>(token.at(0).size());
+        cv::Mat source = cv::Mat::zeros(sourceHeight, sourceWidth, CV_32FC1);
+        for (int y = 0; y < sourceHeight; y++) {
+            if (!token.at(static_cast<size_t>(y)).is_array()) continue;
+            const auto& row = token.at(static_cast<size_t>(y));
+            const int rowWidth = std::min(sourceWidth, static_cast<int>(row.size()));
+            for (int x = 0; x < rowWidth; x++) {
+                source.at<float>(y, x) = static_cast<float>(SafeDoubleFromJson(row.at(static_cast<size_t>(x)), 0.0));
+            }
+        }
+        mask = EnsureMaskSizeAndBinary(source, width, height, threshold);
+        return !mask.empty();
+    }
+
+    static bool BuildSourceMask(const Json& det, double threshold, cv::Mat& mask,
+                                std::array<double, 4>& bbox, std::string& sourceType) {
+        auto rings = ExtractPolygonRings(det);
+        if (!rings.empty()) {
+            auto largest = std::max_element(rings.begin(), rings.end(), [](const auto& lhs, const auto& rhs) {
+                return std::abs(cv::contourArea(lhs)) < std::abs(cv::contourArea(rhs));
+            });
+            if (largest != rings.end() && BuildMaskFromPolygon(*largest, mask, bbox)) {
+                sourceType = "polygon";
+                return true;
+            }
+        }
+
+        if (!det.contains("bbox") || !ParseBboxToXyxy(det.at("bbox"), bbox)) return false;
+        const int width = std::max(1, cvRound(bbox[2] - bbox[0]));
+        const int height = std::max(1, cvRound(bbox[3] - bbox[1]));
+        if (det.contains("mask_rle")) {
+            try {
+                cv::Mat decoded = MaskInfoToMat(det.at("mask_rle"));
+                mask = EnsureMaskSizeAndBinary(decoded, width, height, threshold);
+                if (!mask.empty()) {
+                    sourceType = "mask_rle";
+                    return true;
+                }
+            } catch (...) {}
+        }
+        if (det.contains("mask_array") && BuildMaskFromArray(det.at("mask_array"), width, height, threshold, mask)) {
+            sourceType = "mask_array";
+            return true;
+        }
+        return false;
+    }
+
+    static cv::Mat KeepLargestComponent(const cv::Mat& input) {
+        if (input.empty()) return cv::Mat();
+        cv::Mat binary;
+        cv::threshold(input, binary, 0.0, 255.0, cv::THRESH_BINARY);
+        cv::Mat labels, stats, centroids;
+        const int count = cv::connectedComponentsWithStats(binary, labels, stats, centroids, 8, CV_32S);
+        if (count <= 2) return binary;
+
+        int bestLabel = 1;
+        int bestArea = 0;
+        for (int label = 1; label < count; label++) {
+            const int area = stats.at<int>(label, cv::CC_STAT_AREA);
+            if (area > bestArea) {
+                bestArea = area;
+                bestLabel = label;
+            }
+        }
+        cv::Mat output = cv::Mat::zeros(binary.size(), CV_8UC1);
+        output.setTo(255, labels == bestLabel);
+        return output;
+    }
+
+    static double Median(std::vector<double> values) {
+        if (values.empty()) return 0.0;
+        std::sort(values.begin(), values.end());
+        const size_t middle = values.size() / 2;
+        return values.size() % 2 == 0 ? (values[middle - 1] + values[middle]) * 0.5 : values[middle];
+    }
+
+    static void TrimEdgeOutliers(std::vector<double>& primary, std::vector<double>& edge, double maxJump) {
+        if (primary.size() != edge.size() || edge.size() <= 2) return;
+        size_t start = 0;
+        size_t end = edge.size() - 1;
+        while (end - start + 1 >= 3) {
+            bool changed = false;
+            const size_t leftEnd = std::min(end, start + 5);
+            if (leftEnd >= start + 1) {
+                std::vector<double> reference(edge.begin() + static_cast<std::ptrdiff_t>(start + 1),
+                                              edge.begin() + static_cast<std::ptrdiff_t>(leftEnd + 1));
+                if (std::abs(edge[start] - Median(reference)) > maxJump) {
+                    ++start;
+                    changed = true;
+                }
+            }
+            if (end - start + 1 < 3) break;
+            const size_t rightStart = end > 5 ? std::max(start, end - 5) : start;
+            if (rightStart <= end - 1) {
+                std::vector<double> reference(edge.begin() + static_cast<std::ptrdiff_t>(rightStart),
+                                              edge.begin() + static_cast<std::ptrdiff_t>(end));
+                if (std::abs(edge[end] - Median(reference)) > maxJump) {
+                    --end;
+                    changed = true;
+                }
+            }
+            if (!changed) break;
+        }
+        if (start == 0 && end + 1 == edge.size()) return;
+        primary = std::vector<double>(primary.begin() + static_cast<std::ptrdiff_t>(start),
+                                      primary.begin() + static_cast<std::ptrdiff_t>(end + 1));
+        edge = std::vector<double>(edge.begin() + static_cast<std::ptrdiff_t>(start),
+                                   edge.begin() + static_cast<std::ptrdiff_t>(end + 1));
+    }
+
+    static void MedianDeSpike(std::vector<double>& values, double maxJump) {
+        if (values.size() <= 2) return;
+        const std::vector<double> original = values;
+        for (size_t i = 0; i < values.size(); i++) {
+            const size_t low = i > 2 ? i - 2 : 0;
+            const size_t high = std::min(values.size() - 1, i + 2);
+            std::vector<double> reference;
+            for (size_t j = low; j <= high; j++) if (j != i) reference.push_back(original[j]);
+            if (!reference.empty() && std::abs(original[i] - Median(reference)) > maxJump) {
+                values[i] = Median(reference);
+            }
+        }
+    }
+
+    static std::vector<cv::Point2d> SimplifyPolyline(const std::vector<cv::Point2d>& source) {
+        if (source.size() <= 2) return source;
+        std::vector<cv::Point2d> output;
+        output.reserve(source.size());
+        output.push_back(source.front());
+        for (size_t i = 1; i + 1 < source.size(); i++) {
+            const auto& previous = output.back();
+            const auto& current = source[i];
+            const auto& next = source[i + 1];
+            const double cross = (current.x - previous.x) * (next.y - current.y) -
+                                 (current.y - previous.y) * (next.x - current.x);
+            if (std::abs(cross) > 1e-6) output.push_back(current);
+        }
+        output.push_back(source.back());
+        return output;
+    }
+
+    static bool MaskToPolyline(const cv::Mat& input, const std::array<double, 4>& bbox,
+                               const std::string& direction, int leftClip, int rightClip,
+                               std::vector<cv::Point2d>& polyline, std::vector<cv::Point2d>& fitPoints,
+                               std::array<double, 4>& bboxXywh) {
+        const cv::Mat mask = KeepLargestComponent(input);
+        if (mask.empty()) return false;
+        const bool verticalBoundary = direction == "up" || direction == "down";
+        std::vector<double> primary;
+        std::vector<double> edge;
+        if (verticalBoundary) {
+            for (int x = 0; x < mask.cols; x++) {
+                int minY = mask.rows;
+                int maxY = -1;
+                for (int y = 0; y < mask.rows; y++) {
+                    if (mask.at<uint8_t>(y, x) == 0) continue;
+                    minY = std::min(minY, y);
+                    maxY = std::max(maxY, y);
+                }
+                if (maxY < 0) continue;
+                primary.push_back(bbox[0] + x);
+                edge.push_back(bbox[1] + (direction == "down" ? maxY : minY));
+            }
+        } else {
+            for (int y = 0; y < mask.rows; y++) {
+                int minX = mask.cols;
+                int maxX = -1;
+                for (int x = 0; x < mask.cols; x++) {
+                    if (mask.at<uint8_t>(y, x) == 0) continue;
+                    minX = std::min(minX, x);
+                    maxX = std::max(maxX, x);
+                }
+                if (maxX < 0) continue;
+                primary.push_back(bbox[1] + y);
+                edge.push_back(bbox[0] + (direction == "right" ? maxX : minX));
+            }
+        }
+        if (primary.size() < 2) return false;
+
+        const double maxJump = std::max(3.0, (verticalBoundary ? mask.rows : mask.cols) * 0.18);
+        TrimEdgeOutliers(primary, edge, maxJump);
+        if (primary.size() < 2) return false;
+        MedianDeSpike(edge, maxJump);
+
+        std::vector<cv::Point2d> allPoints;
+        allPoints.reserve(primary.size());
+        for (size_t i = 0; i < primary.size(); i++) {
+            allPoints.emplace_back(verticalBoundary ? primary[i] : edge[i],
+                                   verticalBoundary ? edge[i] : primary[i]);
+        }
+        if (leftClip > 0 || rightClip > 0) {
+            const double low = primary.front() + std::max(0, leftClip);
+            const double high = primary.back() - std::max(0, rightClip);
+            if (low > high) return false;
+
+            std::vector<cv::Point2d> clippedPoints;
+            clippedPoints.reserve(allPoints.size());
+            for (const auto& point : allPoints) {
+                const double value = verticalBoundary ? point.x : point.y;
+                if (value >= low && value <= high) clippedPoints.push_back(point);
+            }
+            allPoints = std::move(clippedPoints);
+        }
+        if (allPoints.size() < 2) return false;
+
+        fitPoints = allPoints;
+        polyline = SimplifyPolyline(allPoints);
+        if (polyline.size() < 2) return false;
+
+        double minX = polyline.front().x, minY = polyline.front().y;
+        double maxX = minX, maxY = minY;
+        for (const auto& point : polyline) {
+            minX = std::min(minX, point.x);
+            minY = std::min(minY, point.y);
+            maxX = std::max(maxX, point.x);
+            maxY = std::max(maxY, point.y);
+        }
+        bboxXywh = {minX, minY, std::max(1.0, maxX - minX + 1.0), std::max(1.0, maxY - minY + 1.0)};
+        return true;
+    }
+
+    static bool FitPolylineToRBox(const std::vector<cv::Point2d>& points, std::array<double, 5>& rbox) {
+        if (points.size() < 2) return false;
+        std::vector<cv::Point2f> input;
+        input.reserve(points.size());
+        for (const auto& point : points) input.emplace_back(static_cast<float>(point.x), static_cast<float>(point.y));
+        cv::Vec4f line;
+        try {
+            cv::fitLine(input, line, cv::DIST_L2, 0.0, 0.01, 0.01);
+        } catch (...) {
+            return false;
+        }
+        double vx = line[0];
+        double vy = line[1];
+        const double norm = std::sqrt(vx * vx + vy * vy);
+        if (norm <= 1e-9) return false;
+        vx /= norm;
+        vy /= norm;
+        if (vx < 0.0 || (std::abs(vx) <= 1e-9 && vy < 0.0)) {
+            vx = -vx;
+            vy = -vy;
+        }
+        const double x0 = line[2];
+        const double y0 = line[3];
+        double minProjection = std::numeric_limits<double>::max();
+        double maxProjection = std::numeric_limits<double>::lowest();
+        for (const auto& point : points) {
+            const double projection = (point.x - x0) * vx + (point.y - y0) * vy;
+            minProjection = std::min(minProjection, projection);
+            maxProjection = std::max(maxProjection, projection);
+        }
+        const double middle = (minProjection + maxProjection) * 0.5;
+        double angle = std::atan2(vy, vx);
+        while (angle < -kPi / 2.0) angle += kPi;
+        while (angle >= kPi / 2.0) angle -= kPi;
+        rbox = {x0 + vx * middle, y0 + vy * middle,
+                std::max(1.0, maxProjection - minProjection), 3.0, angle};
+        return true;
+    }
+};
+
 class MaskToRBoxModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
@@ -2850,6 +3340,8 @@ DLCV_FLOW_REGISTER_MODULE("post_process/text_replacement", TextReplacementModule
 DLCV_FLOW_REGISTER_MODULE("features/text_replacement", TextReplacementModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/result_category_override", ResultCategoryOverrideModule)
 DLCV_FLOW_REGISTER_MODULE("features/result_category_override", ResultCategoryOverrideModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/poly_filter", PolyFilterModule)
+DLCV_FLOW_REGISTER_MODULE("features/poly_filter", PolyFilterModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/mask_to_rbox", MaskToRBoxModule)
 DLCV_FLOW_REGISTER_MODULE("features/mask_to_rbox", MaskToRBoxModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/rbox_correction", RBoxCorrectionModule)

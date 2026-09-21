@@ -1461,6 +1461,26 @@ static cv::Point2f Apply2x3(const std::vector<double>& A, const cv::Point2f& p) 
                        static_cast<float>(c * p.x + d * p.y + ty));
 }
 
+static std::vector<cv::Point2f> ReadExtraInfoPolyline(const Json& detection) {
+    std::vector<cv::Point2f> points;
+    if (!detection.is_object() || !detection.contains("extra_info") ||
+        !detection.at("extra_info").is_object() ||
+        !detection.at("extra_info").contains("polyline") ||
+        !detection.at("extra_info").at("polyline").is_array()) {
+        return points;
+    }
+    for (const auto& point : detection.at("extra_info").at("polyline")) {
+        try {
+            if (point.is_array() && point.size() >= 2) {
+                points.emplace_back(point.at(0).get<float>(), point.at(1).get<float>());
+            } else if (point.is_object() && point.contains("x") && point.contains("y")) {
+                points.emplace_back(point.at("x").get<float>(), point.at("y").get<float>());
+            }
+        } catch (...) {}
+    }
+    return points;
+}
+
 class VisualizeOnOriginalModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
@@ -1547,6 +1567,18 @@ public:
                     cv::polylines(target, pts, true, bboxColor, 2, cv::LINE_AA);
                 }
 
+                const auto polyline = ReadExtraInfoPolyline(s);
+                if (polyline.size() >= 2) {
+                    std::vector<cv::Point> mapped;
+                    mapped.reserve(polyline.size());
+                    for (const auto& point : polyline) {
+                        const cv::Point2f global = Apply2x3(inv2x3, point);
+                        mapped.emplace_back(static_cast<int>(std::llround(global.x)),
+                                            static_cast<int>(std::llround(global.y)));
+                    }
+                    cv::polylines(target, mapped, false, bboxColor, 2, cv::LINE_AA);
+                }
+
                 if (displayText) {
                     std::string label = s.value("category_name", "");
                     if (displayScore) {
@@ -1589,6 +1621,7 @@ public:
         const std::vector<ModuleImage>& images = imageList;
         const Json results = resultList.is_array() ? resultList : Json::array();
         const cv::Scalar bboxColor = ReadColorBgr(Properties, "bbox_color", cv::Scalar(0, 255, 0));
+        const cv::Scalar bboxColorRot = ReadColorBgr(Properties, "bbox_color_rot", cv::Scalar(0, 128, 255));
         const double fontScale = ReadDouble("font_scale", 0.5);
         const int fontThickness = std::max(1, ReadInt("font_thickness", 1));
 
@@ -1607,13 +1640,50 @@ public:
                     if (!s.is_object()) continue;
                     if (!s.contains("bbox") || !s.at("bbox").is_array() || s.at("bbox").size() < 4) continue;
                     const Json& bb = s.at("bbox");
-                    const int x = (int)std::llround(bb.at(0).get<double>());
-                    const int y = (int)std::llround(bb.at(1).get<double>());
-                    const int w = (int)std::llround(bb.at(2).get<double>());
-                    const int h = (int)std::llround(bb.at(3).get<double>());
-                    cv::rectangle(canvas, cv::Rect(x, y, w, h), bboxColor, 2);
+                    std::vector<cv::Point> bboxPoints;
+                    if (bb.size() >= 5) {
+                        const double cx = bb.at(0).get<double>();
+                        const double cy = bb.at(1).get<double>();
+                        const double halfW = std::max(1.0, std::abs(bb.at(2).get<double>())) / 2.0;
+                        const double halfH = std::max(1.0, std::abs(bb.at(3).get<double>())) / 2.0;
+                        const double angle = bb.at(4).get<double>();
+                        const double c = std::cos(angle), sn = std::sin(angle);
+                        const double dx[4] = {-halfW, halfW, halfW, -halfW};
+                        const double dy[4] = {-halfH, -halfH, halfH, halfH};
+                        for (int k = 0; k < 4; k++) {
+                            bboxPoints.emplace_back(
+                                static_cast<int>(std::llround(cx + c * dx[k] - sn * dy[k])),
+                                static_cast<int>(std::llround(cy + sn * dx[k] + c * dy[k])));
+                        }
+                        cv::polylines(canvas, bboxPoints, true, bboxColorRot, 2, cv::LINE_AA);
+                    } else {
+                        const int x = static_cast<int>(std::llround(bb.at(0).get<double>()));
+                        const int y = static_cast<int>(std::llround(bb.at(1).get<double>()));
+                        const int w = std::max(1, static_cast<int>(std::llround(bb.at(2).get<double>())));
+                        const int h = std::max(1, static_cast<int>(std::llround(bb.at(3).get<double>())));
+                        cv::rectangle(canvas, cv::Rect(x, y, w, h), bboxColor, 2);
+                        bboxPoints.emplace_back(x, y);
+                    }
+
+                    const auto polyline = ReadExtraInfoPolyline(s);
+                    if (polyline.size() >= 2) {
+                        std::vector<cv::Point> points;
+                        points.reserve(polyline.size());
+                        for (const auto& point : polyline) {
+                            points.emplace_back(static_cast<int>(std::llround(point.x)),
+                                                static_cast<int>(std::llround(point.y)));
+                        }
+                        cv::polylines(canvas, points, false, bboxColor, 2, cv::LINE_AA);
+                    }
+
                     const std::string label = s.value("category_name", "");
-                    if (!label.empty()) {
+                    if (!label.empty() && !bboxPoints.empty()) {
+                        int x = bboxPoints.front().x;
+                        int y = bboxPoints.front().y;
+                        for (const auto& point : bboxPoints) {
+                            x = std::min(x, point.x);
+                            y = std::min(y, point.y);
+                        }
                         cv::putText(canvas, label, cv::Point(x, std::max(0, y - 4)),
                                     cv::FONT_HERSHEY_SIMPLEX, fontScale, cv::Scalar(0,0,0), fontThickness + 1, cv::LINE_AA);
                         cv::putText(canvas, label, cv::Point(x, std::max(0, y - 4)),
