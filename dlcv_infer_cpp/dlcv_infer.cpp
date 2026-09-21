@@ -772,6 +772,17 @@ Json NormalizeFlowOneOutJson(const Json& flowResultList, bool emitMaskOutput) {
             entry.contains("foreground_mean") ? entry.at("foreground_mean") : Json(), 0.0);
         out["background_mean"] = ReadJsonNumber(
             entry.contains("background_mean") ? entry.at("background_mean") : Json(), 0.0);
+        if (entry.contains("metadata") && entry.at("metadata").is_object()) {
+            const Json& metadata = entry.at("metadata");
+            const size_t internalFieldCount = metadata.contains("is_rotated") ? 1u : 0u;
+            if (metadata.size() > internalFieldCount) {
+                out["metadata"] = metadata;
+            }
+        }
+        if (entry.contains("extra_info") && entry.at("extra_info").is_object() &&
+            !entry.at("extra_info").empty()) {
+            out["extra_info"] = entry.at("extra_info");
+        }
         normalized.push_back(out);
     }
     return normalized;

@@ -333,6 +333,36 @@ static void InitializeByImageEntry(const ModuleImage& wrap, FlowByImageEntry& ou
     outEntry.OriginalHeight = ori.empty() ? 0 : ori.rows;
 }
 
+static Json MapExtraInfoToGlobal(const Json& detection, const std::vector<double>& T_c2o) {
+    if (!detection.contains("extra_info") || !detection.at("extra_info").is_object()) {
+        return Json();
+    }
+
+    Json extraInfo = detection.at("extra_info");
+    if (!extraInfo.contains("polyline") || !extraInfo.at("polyline").is_array()) {
+        return extraInfo;
+    }
+
+    std::vector<cv::Point2f> localPoints;
+    try {
+        for (const auto& point : extraInfo.at("polyline")) {
+            if (!point.is_array() || point.size() < 2) return extraInfo;
+            localPoints.emplace_back(point.at(0).get<float>(), point.at(1).get<float>());
+        }
+    } catch (...) {
+        return extraInfo;
+    }
+    if (localPoints.size() < 2) return extraInfo;
+
+    const std::vector<cv::Point2f> globalPoints = TransformPoints2x3(T_c2o, localPoints);
+    Json polyline = Json::array();
+    for (const auto& point : globalPoints) {
+        polyline.push_back(Json::array({ point.x, point.y }));
+    }
+    extraInfo["polyline"] = std::move(polyline);
+    return extraInfo;
+}
+
 static void AppendOutResultItemTyped(
     const Json& d,
     const std::vector<double>& T_c2o,
@@ -344,6 +374,9 @@ static void AppendOutResultItemTyped(
     item.CategoryId = d.value("category_id", 0);
     item.CategoryName = d.value("category_name", std::string());
     item.Score = d.value("score", 0.0);
+    if (d.contains("metadata") && d.at("metadata").is_object()) {
+        item.Metadata = d.at("metadata");
+    }
 
     if (d.contains("bbox") && d.at("bbox").is_array()) {
         const Json& bboxLocal = d.at("bbox");
@@ -352,13 +385,13 @@ static void AppendOutResultItemTyped(
             Json rboxG = RBoxLocalToGlobal(bboxLocal, T_c2o);
             if (!rboxG.is_null()) {
                 item.Bbox = std::move(rboxG);
-                item.Metadata = Json::object({ {"is_rotated", true} });
+                item.Metadata["is_rotated"] = true;
             }
         } else if (bboxLocal.size() >= 4) {
             Json bboxGlobal = AABBFromLocalBboxFast(bboxLocal, T_c2o, isAxisAlignedTransform);
             if (!bboxGlobal.is_null()) {
                 item.Bbox = std::move(bboxGlobal);
-                item.Metadata = Json::object({ {"is_rotated", false} });
+                item.Metadata["is_rotated"] = false;
             }
         }
     }
@@ -369,6 +402,10 @@ static void AppendOutResultItemTyped(
 
     if (d.contains("area")) {
         item.Extra["area"] = d.at("area");
+    }
+    const Json extraInfo = MapExtraInfoToGlobal(d, T_c2o);
+    if (extraInfo.is_object() && !extraInfo.empty()) {
+        item.Extra["extra_info"] = extraInfo;
     }
     item.Extra["with_mean"] = d.value("with_mean", false);
     item.Extra["foreground_mean"] = d.value("foreground_mean", 0.0);

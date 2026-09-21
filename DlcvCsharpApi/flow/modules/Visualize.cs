@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Linq;
+using dlcv_infer_csharp;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using Point = OpenCvSharp.Point;
@@ -106,8 +107,11 @@ namespace DlcvModules
 
                     // 若存在角度信息，则先在局部坐标系内生成四角点；否则使用轴对齐矩形四角
                     var ptsLocal = new List<Point2d>();
-                    bool withAngle = so["with_angle"]?.Value<bool>() ?? false;
-                    double angle = so["angle"]?.Value<double?>() ?? -100.0;
+                    var bboxArray = so["bbox"] as JArray;
+                    bool withAngle = (bboxArray != null && bboxArray.Count >= 5) || (so["with_angle"]?.Value<bool>() ?? false);
+                    double angle = bboxArray != null && bboxArray.Count >= 5
+                        ? bboxArray[4].Value<double>()
+                        : (so["angle"]?.Value<double?>() ?? -100.0);
                     if (withAngle && angle != -100.0)
                     {
                         double cx = so["bbox"][0].Value<double>();
@@ -197,6 +201,25 @@ namespace DlcvModules
                         var pts = ptsGlobal.Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray();
                         var color = (withAngle && angle != -100.0) ? vis.BboxColorRot : vis.BboxColor;
                         Cv2.Polylines(target, new Point[][] { pts }, true, color, vis.BboxLineWidth, LineTypes.AntiAlias);
+
+                        var polyline = Utils.GetExtraInfoPolyline(so["extra_info"] as JObject);
+                        if (polyline.Count >= 2)
+                        {
+                            var points = new List<Point>(polyline.Count);
+                            foreach (var p in polyline)
+                            {
+                                double x = p.X, y = p.Y;
+                                if (inv2x3 != null)
+                                {
+                                    double mappedX = inv2x3[0] * x + inv2x3[1] * y + inv2x3[2];
+                                    double mappedY = inv2x3[3] * x + inv2x3[4] * y + inv2x3[5];
+                                    x = mappedX;
+                                    y = mappedY;
+                                }
+                                points.Add(new Point((int)Math.Round(x), (int)Math.Round(y)));
+                            }
+                            Cv2.Polylines(target, new Point[][] { points.ToArray() }, false, vis.BboxColor, vis.BboxLineWidth, LineTypes.AntiAlias);
+                        }
                     }
 
                     // 文本与分数
@@ -497,8 +520,35 @@ namespace DlcvModules
                 foreach (var s in samples)
                 {
                     if (!(s is JObject so)) continue;
-                    if (!TryReadBbox(so, out int x, out int y, out int w, out int h)) continue;
-                    Cv2.Rectangle(bmp, new OpenCvSharp.Rect(Math.Max(0, x), Math.Max(0, y), Math.Max(1, w), Math.Max(1, h)), new Scalar(0, 255, 0), 2);
+                    var bbox = so["bbox"] as JArray;
+                    if (bbox != null && bbox.Count >= 5)
+                    {
+                        double cx = bbox[0].Value<double>();
+                        double cy = bbox[1].Value<double>();
+                        double halfW = Math.Max(1.0, bbox[2].Value<double>()) / 2.0;
+                        double halfH = Math.Max(1.0, bbox[3].Value<double>()) / 2.0;
+                        double angle = bbox[4].Value<double>();
+                        double c = Math.Cos(angle), sn = Math.Sin(angle);
+                        double[,] offsets = new double[,] { { -halfW, -halfH }, { halfW, -halfH }, { halfW, halfH }, { -halfW, halfH } };
+                        var corners = new Point[4];
+                        for (int k = 0; k < 4; k++)
+                        {
+                            double dx = offsets[k, 0], dy = offsets[k, 1];
+                            corners[k] = new Point((int)Math.Round(cx + c * dx - sn * dy), (int)Math.Round(cy + sn * dx + c * dy));
+                        }
+                        Cv2.Polylines(bmp, new Point[][] { corners }, true, new Scalar(0, 128, 255), 2, LineTypes.AntiAlias);
+                    }
+                    else if (TryReadBbox(so, out int x, out int y, out int w, out int h))
+                    {
+                        Cv2.Rectangle(bmp, new OpenCvSharp.Rect(Math.Max(0, x), Math.Max(0, y), Math.Max(1, w), Math.Max(1, h)), new Scalar(0, 255, 0), 2);
+                    }
+
+                    var polyline = Utils.GetExtraInfoPolyline(so["extra_info"] as JObject);
+                    if (polyline.Count >= 2)
+                    {
+                        var points = polyline.Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray();
+                        Cv2.Polylines(bmp, new Point[][] { points }, false, new Scalar(0, 255, 0), 2, LineTypes.AntiAlias);
+                    }
                 }
 			}
 

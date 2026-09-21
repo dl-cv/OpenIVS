@@ -174,6 +174,10 @@ namespace DlcvCSharpTest
                 {
                     return RunMaskToRBoxSelfTest();
                 }
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "poly-filter-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunPolyFilterSelfTest();
+                }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "curve-text-affine-selftest", StringComparison.OrdinalIgnoreCase))
                 {
@@ -1229,6 +1233,7 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("DVS 同名成员内容", DvsArchiveDuplicateSelfTest.Run),
                 new UnifiedTestCase("过小模型文件拒绝", RunUndersizedModelSelfTest),
                 new UnifiedTestCase("掩膜旋转框", RunMaskToRBoxSelfTest),
+                new UnifiedTestCase("边缘提取", RunPolyFilterSelfTest),
                 new UnifiedTestCase("掩码面积与 JSON 输出", MaskAreaSelfTest.Run),
                 new UnifiedTestCase("区域掩码筛选", RegionMaskSelfTest.Run),
                 new UnifiedTestCase("曲线文字仿射变换", RunCurveTextAffineSelfTest),
@@ -6974,6 +6979,127 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static int RunPolyFilterSelfTest()
+        {
+            Console.WriteLine("==== poly_filter 自测 ====");
+
+            using (var mask = new Mat(8, 9, MatType.CV_8UC1, Scalar.Black))
+            {
+                Cv2.Rectangle(mask, new Rect(1, 2, 6, 4), Scalar.White, -1);
+                Cv2.Rectangle(mask, new Rect(3, 1, 3, 1), Scalar.White, -1);
+                Cv2.Rectangle(mask, new Rect(2, 6, 4, 1), Scalar.White, -1);
+                var maskInfo = MaskRleUtils.MatToMaskInfo(mask);
+
+                foreach (string direction in new[] { "up", "down", "left", "right" })
+                {
+                    var output = RunPolyFilterCase(maskInfo, direction, false);
+                    var det = GetFirstPolyFilterDetection(output.ResultList);
+                    if (det == null) return FailPolyFilter("方向 " + direction + " 输出为空");
+                    if ((string)det.SelectToken("metadata.poly_filter_direction") != direction)
+                    {
+                        return FailPolyFilter("方向未正确保留: " + direction);
+                    }
+                    if ((string)det.SelectToken("metadata.poly_filter_mode") != "boundary_line")
+                    {
+                        return FailPolyFilter("非拟合模式标记错误: " + direction);
+                    }
+                    var bbox = det["bbox"] as JArray;
+                    if (bbox == null || bbox.Count != 4)
+                    {
+                        return FailPolyFilter("非拟合输出应保留四元素 bbox: " + direction);
+                    }
+                    var polyline = Utils.GetExtraInfoPolyline(det["extra_info"] as JObject);
+                    if (polyline == null || polyline.Count < 2)
+                    {
+                        return FailPolyFilter("非拟合输出缺少开放 polyline: " + direction);
+                    }
+                    if (det["polygon"] != null || det["poly"] != null || det["mask"] != null ||
+                        det["mask_array"] != null || det["mask_rle"] != null)
+                    {
+                        return FailPolyFilter("转换后仍残留旧几何字段: " + direction);
+                    }
+                    if (det["with_mask"]?.Value<bool?>() != false)
+                    {
+                        return FailPolyFilter("转换后 with_mask 未关闭: " + direction);
+                    }
+                }
+
+                var fittedOutput = RunPolyFilterCase(maskInfo, "right", true);
+                var fitted = GetFirstPolyFilterDetection(fittedOutput.ResultList);
+                if (fitted == null) return FailPolyFilter("拟合输出为空");
+                var fittedBbox = fitted["bbox"] as JArray;
+                if (fittedBbox == null || fittedBbox.Count != 5)
+                {
+                    return FailPolyFilter("拟合后应仅以五元素 bbox 输出 RBox");
+                }
+                if (Math.Abs(fittedBbox[3].Value<double>() - 3.0) > 1e-6)
+                {
+                    return FailPolyFilter("拟合 RBox 高度不是 3 像素");
+                }
+                if (Utils.GetExtraInfoPolyline(fitted["extra_info"] as JObject).Count != 0 || fitted["polyline"] != null)
+                {
+                    return FailPolyFilter("拟合后仍保留 polyline");
+                }
+                if ((string)fitted.SelectToken("metadata.poly_filter_mode") != "line_fit_rbox")
+                {
+                    return FailPolyFilter("拟合模式标记错误");
+                }
+                if (fitted["polygon"] != null || fitted["poly"] != null || fitted["mask"] != null ||
+                    fitted["mask_array"] != null || fitted["mask_rle"] != null)
+                {
+                    return FailPolyFilter("拟合后仍残留旧几何字段");
+                }
+            }
+
+            Console.WriteLine("poly_filter 自测通过");
+            return 0;
+        }
+
+        private static ModuleIO RunPolyFilterCase(JObject maskInfo, string direction, bool fitLine)
+        {
+            var module = new PolyFilter(
+                40,
+                properties: new Dictionary<string, object>
+                {
+                    ["direction"] = direction,
+                    ["fit_line"] = fitLine,
+                    ["mask_threshold"] = 127
+                });
+            var resultList = new JArray
+            {
+                new JObject
+                {
+                    ["type"] = "local",
+                    ["index"] = 0,
+                    ["origin_index"] = 0,
+                    ["sample_results"] = new JArray
+                    {
+                        new JObject
+                        {
+                            ["bbox"] = new JArray(100.0, 200.0, 9.0, 8.0),
+                            ["score"] = 0.99,
+                            ["category_name"] = "demo",
+                            ["mask"] = "legacy",
+                            ["mask_array"] = new JArray(new JArray(255)),
+                            ["mask_rle"] = maskInfo.DeepClone(),
+                            ["with_mask"] = true
+                        }
+                    }
+                }
+            };
+            return module.Process(new List<ModuleImage>(), resultList);
+        }
+
+        private static JObject GetFirstPolyFilterDetection(JArray resultList)
+        {
+            return (((resultList?[0] as JObject)?["sample_results"] as JArray)?[0]) as JObject;
+        }
+
+        private static int FailPolyFilter(string message)
+        {
+            Console.WriteLine(message);
+            return 1;
+        }
         private static int RunBBoxIoUDedupSelfTest()
         {
             Console.WriteLine("==== BBOX IoU 去重自测 ====");
