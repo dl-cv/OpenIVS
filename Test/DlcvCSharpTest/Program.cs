@@ -4469,6 +4469,55 @@ namespace DlcvCSharpTest
                     }
                 }
 
+                foreach (var size in new[] { new Size(2, 3), new Size(3, 2), new Size(3, 3) })
+                {
+                    foreach (int setting in new[] { 0, -1, 90, 180, 270 })
+                    {
+                        using (var image = CreateIndexedMat(size.Width, size.Height))
+                        using (var affine = CreateIndexedMat(2, 4))
+                        {
+                            var state = new TransformationState(size.Width + 4, size.Height + 3,
+                                affine2x3: new double[] { 1, 0, -4, 0, 1, -3 });
+                            var wrap = new ModuleImage(image, image, state, 7) { AffineImage = affine };
+                            var properties = new Dictionary<string, object> {
+                                { "correction_mode", setting > 0 ? "direction" : "long_edge" },
+                                { "long_edge_orientation", setting == -1 ? "vertical" : "horizontal" },
+                                { "rotation_angle", setting > 0 ? setting : 90 },
+                            };
+                            int angle = setting > 0 ? setting :
+                                ((setting == -1 ? size.Width > size.Height : size.Height > size.Width) ? 90 : 0);
+                            var output = new RectImageCorrection(44, properties: properties).Process(new List<ModuleImage> { wrap });
+                            var child = output.ImageList[0];
+                            if (output.ResultList.Count != 0 || child.OriginalIndex != 7 || child.UniqueId != wrap.UniqueId) return 1;
+                            if (angle == 0)
+                            {
+                                if (!object.ReferenceEquals(child, wrap)) return 1;
+                                continue;
+                            }
+                            var flag = angle == 90 ? RotateFlags.Rotate90Clockwise : angle == 180 ? RotateFlags.Rotate180 : RotateFlags.Rotate90Counterclockwise;
+                            using (var expected = new Mat())
+                            using (var expectedAffine = new Mat())
+                            {
+                                Cv2.Rotate(image, expected, flag);
+                                Cv2.Rotate(affine, expectedAffine, flag);
+                                if (!AssertMatShape(child.ImageObject, expected.Width, expected.Height, "升级尺寸")) return 1;
+                                if (Cv2.Norm(child.ImageObject, expected) != 0) return 1;
+                                if (child.AffineImage == null || Cv2.Norm(child.AffineImage, expectedAffine) != 0) return 1;
+                                var a = child.TransformState.AffineMatrix2x3;
+                                for (int y = 0; y < size.Height; y++)
+                                    for (int x = 0; x < size.Width; x++)
+                                    {
+                                        int xx = (int)Math.Round(a[0] * (x + 4) + a[1] * (y + 3) + a[2]);
+                                        int yy = (int)Math.Round(a[3] * (x + 4) + a[4] * (y + 3) + a[5]);
+                                        if (child.ImageObject.At<byte>(yy, xx) != image.At<byte>(y, x)) return 1;
+                                    }
+                            }
+                            child.ImageObject.Dispose();
+                            child.AffineImage.Dispose();
+                        }
+                    }
+                }
+
                 Console.WriteLine("矩形图像矫正自测通过");
                 return 0;
             }
