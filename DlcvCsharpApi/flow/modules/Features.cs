@@ -2174,10 +2174,13 @@ namespace DlcvModules
 
     /// <summary>
     /// 模块名称：矩形图像矫正
-    /// 将竖向矩形图像旋转为横向；横图原样透传，不透传 results。
+    /// 按长边水平/垂直矫正，或按固定角度顺时针旋转；不透传 results。
     /// 注册名：pre_process/rect_image_correction
     /// properties:
-    /// - rotate_direction(string): clockwise/counterclockwise，默认 clockwise
+    /// - correction_mode(string): long_edge/direction，默认 long_edge
+    /// - long_edge_orientation(string): horizontal/vertical，默认 horizontal
+    /// - rotation_angle(int): 90/180/270，默认 90，方向模式下始终顺时针
+    /// - rotate_direction(string): clockwise/counterclockwise，仅长边模式兼容旧流程
     /// </summary>
     public class RectImageCorrection : BaseModule
     {
@@ -2200,6 +2203,15 @@ namespace DlcvModules
             }
 
             string direction = NormalizeRotateDirection(ReadStringOrDefault("rotate_direction", "clockwise"));
+            bool fixedRotation = ReadStringOrDefault("correction_mode", "long_edge") == "direction";
+            bool vertical = ReadStringOrDefault("long_edge_orientation", "horizontal") == "vertical";
+            int angle = direction == "counterclockwise" ? 270 : 90;
+            if (fixedRotation)
+            {
+                angle = Convert.ToInt32(ReadStringOrDefault("rotation_angle", "90"));
+                if (angle != 90 && angle != 180 && angle != 270)
+                    throw new ArgumentException("rotation_angle must be 90, 180 or 270");
+            }
             var outImages = new List<ModuleImage>();
 
             for (int i = 0; i < images.Count; i++)
@@ -2219,7 +2231,7 @@ namespace DlcvModules
 
                 int w = baseMat.Width;
                 int h = baseMat.Height;
-                if (w >= h)
+                if (!fixedRotation && (vertical ? h >= w : w >= h))
                 {
                     outImages.Add(wrap);
                     continue;
@@ -2228,9 +2240,9 @@ namespace DlcvModules
                 double[] A;
                 int newW;
                 int newH;
-                GetRotationAffine(direction, w, h, out A, out newW, out newH);
+                GetRotationAffine(angle, w, h, out A, out newW, out newH);
 
-                var rotated = RotateView(baseMat, direction, A, newW, newH);
+                var rotated = RotateView(baseMat, angle);
                 if (rotated == null || rotated.Empty())
                 {
                     rotated?.Dispose();
@@ -2242,6 +2254,8 @@ namespace DlcvModules
                 var childState = parentState.DeriveChild(A, newW, newH);
                 var child = new ModuleImage(rotated, wrap.OriginalImage ?? baseMat, childState, wrap.OriginalIndex);
                 child.UniqueId = wrap.UniqueId;
+                if (wrap.AffineImage != null && !wrap.AffineImage.Empty())
+                    child.AffineImage = RotateView(wrap.AffineImage, angle);
                 outImages.Add(child);
             }
 
@@ -2268,16 +2282,24 @@ namespace DlcvModules
             return "clockwise";
         }
 
-        private static void GetRotationAffine(string direction, int width, int height, out double[] A, out int newWidth, out int newHeight)
+        private static void GetRotationAffine(int angle, int width, int height, out double[] A, out int newWidth, out int newHeight)
         {
             int w = Math.Max(1, width);
             int h = Math.Max(1, height);
-            if (direction == "counterclockwise")
+            if (angle == 270)
             {
                 // 90 deg counterclockwise: x' = y, y' = w - 1 - x
                 A = new double[] { 0.0, 1.0, 0.0, -1.0, 0.0, w - 1.0 };
                 newWidth = h;
                 newHeight = w;
+                return;
+            }
+
+            if (angle == 180)
+            {
+                A = new double[] { -1.0, 0.0, w - 1.0, 0.0, -1.0, h - 1.0 };
+                newWidth = w;
+                newHeight = h;
                 return;
             }
 
@@ -2287,33 +2309,13 @@ namespace DlcvModules
             newHeight = w;
         }
 
-        private static Mat RotateView(Mat image, string direction, double[] affine, int newWidth, int newHeight)
+        private static Mat RotateView(Mat image, int angle)
         {
-            try
-            {
-                using (var matA = new Mat(2, 3, MatType.CV_64FC1))
-                {
-                    matA.Set(0, 0, affine[0]);
-                    matA.Set(0, 1, affine[1]);
-                    matA.Set(0, 2, affine[2]);
-                    matA.Set(1, 0, affine[3]);
-                    matA.Set(1, 1, affine[4]);
-                    matA.Set(1, 2, affine[5]);
-
-                    var rotated = new Mat();
-                    Cv2.WarpAffine(image, rotated, matA, new Size(newWidth, newHeight));
-                    return rotated;
-                }
-            }
-            catch
-            {
-                var rotated = new Mat();
-                var flag = direction == "counterclockwise"
-                    ? RotateFlags.Rotate90Counterclockwise
-                    : RotateFlags.Rotate90Clockwise;
-                Cv2.Rotate(image, rotated, flag);
-                return rotated;
-            }
+            var rotated = new Mat();
+            var flag = angle == 270 ? RotateFlags.Rotate90Counterclockwise
+                : angle == 180 ? RotateFlags.Rotate180 : RotateFlags.Rotate90Clockwise;
+            Cv2.Rotate(image, rotated, flag);
+            return rotated;
         }
     }
 

@@ -227,7 +227,7 @@ static std::string NormalizeRectRotateDirection(const std::string& value) {
 }
 
 static void GetRectRotationAffine(
-    const std::string& direction,
+    int angle,
     int width,
     int height,
     std::vector<double>& A,
@@ -236,10 +236,17 @@ static void GetRectRotationAffine(
 
     const int w = std::max(1, width);
     const int h = std::max(1, height);
-    if (direction == "counterclockwise") {
+    if (angle == 270) {
         A = { 0.0, 1.0, 0.0, -1.0, 0.0, static_cast<double>(w - 1) };
         newWidth = h;
         newHeight = w;
+        return;
+    }
+
+    if (angle == 180) {
+        A = { -1.0, 0.0, static_cast<double>(w - 1), 0.0, -1.0, static_cast<double>(h - 1) };
+        newWidth = w;
+        newHeight = h;
         return;
     }
 
@@ -248,33 +255,12 @@ static void GetRectRotationAffine(
     newHeight = w;
 }
 
-static cv::Mat RotateRectView(
-    const cv::Mat& image,
-    const std::string& direction,
-    const std::vector<double>& affine,
-    int newWidth,
-    int newHeight) {
-
-    try {
-        cv::Mat matA(2, 3, CV_64FC1);
-        matA.at<double>(0,0) = affine[0];
-        matA.at<double>(0,1) = affine[1];
-        matA.at<double>(0,2) = affine[2];
-        matA.at<double>(1,0) = affine[3];
-        matA.at<double>(1,1) = affine[4];
-        matA.at<double>(1,2) = affine[5];
-
-        cv::Mat rotated;
-        cv::warpAffine(image, rotated, matA, cv::Size(newWidth, newHeight));
-        return rotated;
-    } catch (...) {
-        cv::Mat rotated;
-        const int flag = (direction == "counterclockwise")
-            ? cv::ROTATE_90_COUNTERCLOCKWISE
-            : cv::ROTATE_90_CLOCKWISE;
-        cv::rotate(image, rotated, flag);
-        return rotated;
-    }
+static cv::Mat RotateRectView(const cv::Mat& image, int angle) {
+    cv::Mat rotated;
+    const int flag = angle == 270 ? cv::ROTATE_90_COUNTERCLOCKWISE
+        : angle == 180 ? cv::ROTATE_180 : cv::ROTATE_90_CLOCKWISE;
+    cv::rotate(image, rotated, flag);
+    return rotated;
 }
 
 static double SafeScore(const Json& v) {
@@ -713,6 +699,14 @@ public:
         }
 
         const std::string direction = NormalizeRectRotateDirection(ReadString("rotate_direction", "clockwise"));
+        const bool fixedRotation = ReadString("correction_mode", "long_edge") == "direction";
+        const bool vertical = ReadString("long_edge_orientation", "horizontal") == "vertical";
+        int angle = direction == "counterclockwise" ? 270 : 90;
+        if (fixedRotation) {
+            angle = GetIntProp(Properties, "rotation_angle", 90);
+            if (angle != 90 && angle != 180 && angle != 270)
+                throw std::invalid_argument("rotation_angle must be 90, 180 or 270");
+        }
         std::vector<ModuleImage> outImages;
         outImages.reserve(images.size());
 
@@ -725,7 +719,7 @@ public:
 
             const int w = baseMat.cols;
             const int h = baseMat.rows;
-            if (w >= h) {
+            if (!fixedRotation && (vertical ? h >= w : w >= h)) {
                 outImages.push_back(wrap);
                 continue;
             }
@@ -733,9 +727,9 @@ public:
             std::vector<double> A;
             int newW = w;
             int newH = h;
-            GetRectRotationAffine(direction, w, h, A, newW, newH);
+            GetRectRotationAffine(angle, w, h, A, newW, newH);
 
-            cv::Mat rotated = RotateRectView(baseMat, direction, A, newW, newH);
+            cv::Mat rotated = RotateRectView(baseMat, angle);
             if (rotated.empty()) {
                 outImages.push_back(wrap);
                 continue;
@@ -751,6 +745,8 @@ public:
                                   childState,
                                   wrap.OriginalIndex);
                 child.UniqueId = wrap.UniqueId;
+                if (!wrap.AffineImage.empty())
+                    child.AffineImage = RotateRectView(wrap.AffineImage, angle);
                 outImages.push_back(child);
             }
         }

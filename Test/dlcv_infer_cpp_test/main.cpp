@@ -1224,6 +1224,50 @@ int RunRectImageCorrectionSelfTest() {
         return 1;
     };
 
+    using namespace dlcv_infer::flow;
+    const auto factory = ModuleRegistry::Get("pre_process/rect_image_correction");
+    if (!factory) return fail("module not registered");
+    for (const auto& size : { cv::Size(2, 3), cv::Size(3, 2), cv::Size(3, 3) }) {
+        for (int setting : { 0, -1, 90, 180, 270 }) {
+            cv::Mat image(size, CV_8UC1);
+            for (int y = 0; y < size.height; ++y)
+                for (int x = 0; x < size.width; ++x) image.at<uchar>(y, x) = static_cast<uchar>(y * 10 + x);
+            TransformationState state(size.width + 4, size.height + 3);
+            state.AffineMatrix2x3 = { 1,0,-4, 0,1,-3 };
+            ModuleImage wrap(image, image, state, 7);
+            wrap.AffineImage = image.clone();
+            const json properties = {
+                {"correction_mode", setting > 0 ? "direction" : "long_edge"},
+                {"long_edge_orientation", setting == -1 ? "vertical" : "horizontal"},
+                {"rotation_angle", setting > 0 ? setting : 90}
+            };
+            auto module = factory(1, "", properties, nullptr);
+            auto output = module->Process({wrap}, json::array());
+            if (output.ImageList.size() != 1 || !output.ResultList.empty()) return fail("channels");
+            const auto& child = output.ImageList[0];
+            if (child.OriginalIndex != 7 || child.UniqueId != wrap.UniqueId) return fail("identity");
+            const int angle = setting > 0 ? setting :
+                ((setting == -1 ? size.width > size.height : size.height > size.width) ? 90 : 0);
+            if (angle == 0) {
+                if (child.ImageObject.data != image.data) return fail("pass-through");
+                continue;
+            }
+            const int flag = angle == 90 ? cv::ROTATE_90_CLOCKWISE : angle == 180 ? cv::ROTATE_180 : cv::ROTATE_90_COUNTERCLOCKWISE;
+            cv::Mat expected;
+            cv::rotate(image, expected, flag);
+            if (child.ImageObject.size() != expected.size() || cv::norm(child.ImageObject, expected, cv::NORM_INF) != 0) return fail("pixels");
+            if (child.AffineImage.empty() || cv::norm(child.AffineImage, expected, cv::NORM_INF) != 0) return fail("affine image");
+            const auto& a = child.TransformState.AffineMatrix2x3;
+            for (int y = 0; y < size.height; ++y) {
+                for (int x = 0; x < size.width; ++x) {
+                    int xx = static_cast<int>(std::round(a[0]*(x+4) + a[1]*(y+3) + a[2]));
+                    int yy = static_cast<int>(std::round(a[3]*(x+4) + a[4]*(y+3) + a[5]));
+                    if (child.ImageObject.at<uchar>(yy, xx) != image.at<uchar>(y, x)) return fail("transform");
+                }
+            }
+        }
+    }
+
     const std::string saveDir = BuildTempRectCorrectionDir();
     const std::string suffix = "_rect_image_correction_test";
     DeleteFilesWithSuffix(saveDir, suffix + ".png");
