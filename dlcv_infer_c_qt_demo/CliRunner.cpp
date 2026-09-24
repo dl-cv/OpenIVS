@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QSaveFile>
 
 #include <cmath>
@@ -19,6 +20,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "DlcvInferApi.h"
+#include "MainWindow.h"
 #include "json/json.hpp"
 
 namespace {
@@ -29,6 +31,7 @@ struct InferOptions {
     QString modelPath;
     QString imagePath;
     QString outputPath;
+    QString screenshotPath;
     double threshold = 0.0;
     int device = 0;
     bool withMask = true;
@@ -40,6 +43,7 @@ struct InferOptions {
     bool hasWithMask = false;
     bool hasCalcMean = false;
     bool hasOutput = false;
+    bool hasScreenshot = false;
 };
 
 struct PathSummary {
@@ -232,6 +236,13 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             }
             options.calcMean = parsed;
             options.hasCalcMean = true;
+        } else if (option == QStringLiteral("--screenshot")) {
+            if (options.hasScreenshot) {
+                error = QStringLiteral("duplicate option: --screenshot");
+                return false;
+            }
+            options.screenshotPath = value;
+            options.hasScreenshot = true;
         } else if (option == QStringLiteral("--output")) {
             if (options.hasOutput) {
                 error = QStringLiteral("duplicate option: --output");
@@ -709,6 +720,9 @@ void PrintCliHelp(const QString& programPath) {
         << "  " << program
         << " infer --model <path> --image <path> --threshold <0..1>"
            " [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]\n"
+        << "  " << program
+        << " ui-test --model <path> --image <path> --threshold <0..1>"
+           " [--device <int>] --screenshot <tempPngPath> (QT_QPA_PLATFORM=offscreen)\n"
         << "  " << program << " --check-c-api-exports\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
@@ -719,7 +733,8 @@ int RunCliCommand(const QStringList& args) {
         return 2;
     }
     if (args.at(1) == QStringLiteral("--help") ||
-        (args.at(1) == QStringLiteral("infer") && args.contains(QStringLiteral("--help")))) {
+        ((args.at(1) == QStringLiteral("infer") || args.at(1) == QStringLiteral("ui-test")) &&
+         args.contains(QStringLiteral("--help")))) {
         PrintCliHelp(args.at(0));
         return 0;
     }
@@ -731,8 +746,9 @@ int RunCliCommand(const QStringList& args) {
         }
         return CheckCApiExports();
     }
-    if (args.at(1) != QStringLiteral("infer")) {
-        std::cerr << "error: expected 'infer', '--check-c-api-exports', or '--help'\n";
+    const bool uiTest = args.at(1) == QStringLiteral("ui-test");
+    if (!uiTest && args.at(1) != QStringLiteral("infer")) {
+        std::cerr << "error: expected 'infer', 'ui-test', '--check-c-api-exports', or '--help'\n";
         PrintCliHelp(args.at(0));
         return 2;
     }
@@ -745,6 +761,39 @@ int RunCliCommand(const QStringList& args) {
         return 2;
     }
 
+    if (uiTest) {
+        const QFileInfo screenshot(options.screenshotPath);
+        const QFileInfo tempRoot(QDir::tempPath());
+        const QString directory = QDir::fromNativeSeparators(
+            QFileInfo(screenshot.absolutePath()).canonicalFilePath());
+        const QString temp = QDir::fromNativeSeparators(tempRoot.canonicalFilePath());
+        if (QGuiApplication::platformName() != QStringLiteral("offscreen") ||
+            !options.hasScreenshot || options.screenshotPath.isEmpty() ||
+            screenshot.suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) != 0 ||
+            directory.isEmpty() || temp.isEmpty() ||
+            !(directory.compare(temp, Qt::CaseInsensitive) == 0 ||
+              directory.startsWith(temp + QLatin1Char('/'), Qt::CaseInsensitive)) ||
+            screenshot.exists() || options.hasOutput || options.hasWithMask || options.hasCalcMean) {
+            std::cerr << "error: ui-test requires a new PNG in the system temp directory "
+                         "and supports only model, image, threshold and device\n";
+            return 2;
+        }
+        MainWindow window(nullptr, true);
+        QString runError;
+        const bool passed = window.runOffscreenInference(options.modelPath, options.imagePath,
+            options.threshold, options.device, screenshot.absoluteFilePath(), runError);
+        window.close();
+        if (!passed) {
+            std::cerr << "error: " << ToUtf8(runError) << "\n";
+            return 1;
+        }
+        std::cout << "offscreen inference rendered to " << ToUtf8(screenshot.absoluteFilePath()) << "\n";
+        return 0;
+    }
+    if (options.hasScreenshot) {
+        std::cerr << "error: --screenshot is only supported by ui-test\n";
+        return 2;
+    }
     try {
         return RunInferCommand(options);
     } catch (const std::exception& ex) {

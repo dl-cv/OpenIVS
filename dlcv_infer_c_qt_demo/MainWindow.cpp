@@ -11,6 +11,9 @@
 #include <QDesktopServices>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFile>
+#include <QSaveFile>
+#include <QApplication>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -160,19 +163,63 @@ std::string resultMessage(const DlcvCResult& result) {
 
 }  // namespace
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget* parent, bool offscreen) : QMainWindow(parent), offscreen_(offscreen) {
     setupUi();
     bindSignals();
     if (!api_.load()) {
         reportError("加载推理库失败", QString::fromStdWString(api_.lastError()));
         return;
     }
-    initializeDevicesAsync();
+    if (!offscreen_) {
+        initializeDevicesAsync();
+    }
+}
+
+bool MainWindow::runOffscreenInference(const QString& modelPath, const QString& imagePath,
+    double threshold, int device, const QString& screenshotPath, QString& error) {
+    if (!offscreen_ || !api_.isLoaded()) {
+        error = QStringLiteral("推理库未加载");
+        return false;
+    }
+    modelIndex_ = api_.loadModel(modelPath.toLocal8Bit().constData(), device);
+    if (modelIndex_ < 0) {
+        error = lastCError();
+        return false;
+    }
+    modelPath_ = modelPath;
+    spinThreshold_->setValue(threshold);
+    imagePath_ = imagePath;
+    resize(1280, 800);
+    show();
+    QApplication::processEvents();
+    if (!inferCurrentImage()) {
+        error = outputText_->toPlainText();
+        return false;
+    }
+    if (offscreenResultCount_ == 0) {
+        error = QStringLiteral("真实推理未检测到目标，未生成截图");
+        return false;
+    }
+    QApplication::processEvents();
+    const QPixmap snapshot = grab();
+    if (snapshot.isNull()) {
+        error = QStringLiteral("离屏窗口绘制失败");
+        return false;
+    }
+    QSaveFile file(screenshotPath);
+    if (!file.open(QIODevice::WriteOnly) || !snapshot.save(&file, "PNG") || !file.commit()) {
+        error = QStringLiteral("PNG 写入失败");
+        file.cancelWriting();
+        return false;
+    }
+    return true;
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    settings_.setValue("Geometry", saveGeometry());
-    settings_.setValue("WindowState", saveState());
+    if (!offscreen_) {
+        settings_.setValue("Geometry", saveGeometry());
+        settings_.setValue("WindowState", saveState());
+    }
     stopPressureTest();
     if (deviceInitializationThread_.joinable()) {
         deviceInitializationThread_.join();
@@ -323,7 +370,7 @@ void MainWindow::setupUi() {
     rootLayout->addWidget(splitter, 1);
     setCentralWidget(centralWidget);
 
-    if (settings_.contains("Geometry")) {
+    if (!offscreen_ && settings_.contains("Geometry")) {
         restoreGeometry(settings_.value("Geometry").toByteArray());
         restoreState(settings_.value("WindowState").toByteArray());
 
@@ -341,9 +388,11 @@ void MainWindow::setupUi() {
                 move(available.center() - rect().center());
             }
         }
-    } else if (QScreen* screen = QGuiApplication::primaryScreen()) {
-        const QRect available = screen->availableGeometry();
-        move(available.center() - rect().center());
+    } else if (!offscreen_) {
+        if (QScreen* screen = QGuiApplication::primaryScreen()) {
+            const QRect available = screen->availableGeometry();
+            move(available.center() - rect().center());
+        }
     }
 }
 
@@ -454,8 +503,13 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
     if (imagePath_.isEmpty()) {
         return false;
     }
-    image = cv::imread(imagePath_.toLocal8Bit().toStdString(), cv::IMREAD_UNCHANGED);
-    if (image.empty() && !silentOnDecodeFail) {
+    QFile input(imagePath_);
+    if (input.open(QIODevice::ReadOnly)) {
+        const QByteArray bytes = input.readAll();
+        const std::vector<uchar> encoded(bytes.begin(), bytes.end());
+        image = cv::imdecode(encoded, cv::IMREAD_UNCHANGED);
+    }
+    if (image.empty() && !silentOnDecodeFail && !offscreen_) {
         QMessageBox::warning(
             const_cast<MainWindow*>(this),
             "错误",
@@ -473,7 +527,9 @@ void MainWindow::freeCurrentModel() {
 
 void MainWindow::reportError(const QString& title, const QString& detail) {
     outputText_->setPlainText(title + "\n" + detail);
-    QMessageBox::critical(this, "错误", title + ": " + detail);
+    if (!offscreen_) {
+        QMessageBox::critical(this, "错误", title + ": " + detail);
+    }
 }
 
 QString MainWindow::lastCError() const {
@@ -647,24 +703,28 @@ void MainWindow::onOpenImageInfer() {
 }
 
 void MainWindow::onInfer() {
+    inferCurrentImage();
+}
+
+bool MainWindow::inferCurrentImage() {
     if (pressureTestRunning_) {
-        return;
+        return false;
     }
     imageViewer_->clearInspectionStatus();
 
     if (!ensureModelLoaded() || !ensureImageSelected()) {
-        return;
+        return false;
     }
 
     cv::Mat decodedImage;
     if (!loadCurrentImage(decodedImage, false)) {
-        return;
+        return false;
     }
 
     const cv::Mat inferImage = prepareImageForInference(decodedImage);
     if (inferImage.empty()) {
         reportError("推理失败", "输入图像通道转换失败！");
-        return;
+        return false;
     }
 
     const int batchSize = spinBatchSize_->value();
@@ -690,17 +750,18 @@ void MainWindow::onInfer() {
 
     if (result.get().code != 0) {
         reportError("推理失败", QString::fromLocal8Bit(resultMessage(result.get()).c_str()));
-        return;
+        return false;
     }
 
     const double elapsedMs = std::chrono::duration<double, std::milli>(end - start).count();
     const std::vector<DisplayObjectResult> firstResults = copyFirstSample(result.get());
+    offscreenResultCount_ = static_cast<int>(firstResults.size());
     currentBgrImage_ = decodedImage;
     imageViewer_->setImageAndResults(currentBgrImage_, firstResults);
 
     QString text;
-    text += QString("模型: %1\n").arg(modelPath_);
-    text += QString("图片: %1\n").arg(imagePath_);
+    text += QString("模型: %1\n").arg(offscreen_ ? QFileInfo(modelPath_).fileName() : modelPath_);
+    text += QString("图片: %1\n").arg(offscreen_ ? QFileInfo(imagePath_).fileName() : imagePath_);
     text += QString("输入图像: %1\n").arg(describeOpenCvImageForUi(inferImage, true));
     text += QString("batch_size: %1\n").arg(batchSize);
     text += QString("threshold: %1\n").arg(spinThreshold_->value(), 0, 'f', 2);
@@ -709,6 +770,7 @@ void MainWindow::onInfer() {
     text += "\n";
     text += formatResultText(firstResults);
     outputText_->setPlainText(text);
+    return true;
 }
 
 void MainWindow::onInferJson() {
