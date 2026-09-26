@@ -29,7 +29,9 @@ class ImageViewerWidget;
 
 class MainWindow : public QMainWindow {
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(QWidget* parent = nullptr, bool offscreen = false);
+    bool runOffscreenInference(const QString& modelPath, const QString& imagePath,
+        double threshold, int device, const QString& screenshotPath, QString& error);
     ~MainWindow() override = default;
 
 protected:
@@ -54,6 +56,7 @@ private:
     void onLoadModel();
     void onOpenImageInfer();
     void onInfer();
+    bool inferCurrentImage();
     void onInferJson();
     void onPressureTest();
     void onGetModelInfo();
@@ -67,6 +70,8 @@ private:
     void updatePressureTestStatistics();
     void setUiEnabledForPressureTest(bool enabled);
 
+    bool offscreen_ = false;
+    int offscreenResultCount_ = -1;
     int modelIndex_ = -1;
     DlcvInferApi api_;
     QSettings settings_{"dlcv", "DlcvDemoCQt"};

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -22,19 +23,32 @@ namespace DlcvTest
 
         internal static async Task<int> RunAsync(string[] args)
         {
-            string outputPath = args != null && args.Length >= 5 ? args[4] : null;
-            if (args == null || args.Length != 5 ||
-                !string.Equals(args[0], "selftest", StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(args[1], "--model-root", StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(args[3], "--output", StringComparison.OrdinalIgnoreCase) ||
-                string.IsNullOrWhiteSpace(args[2]) || string.IsNullOrWhiteSpace(outputPath))
+            bool balloonWithThreshold = args != null && args.Length == 9 &&
+                string.Equals(args[5], "--threshold", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(args[7], "--output", StringComparison.OrdinalIgnoreCase);
+            bool balloonOnly = args != null && (args.Length == 7 || balloonWithThreshold) &&
+                string.Equals(args[1], "--model", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(args[3], "--image", StringComparison.OrdinalIgnoreCase) &&
+                (balloonWithThreshold || string.Equals(args[5], "--output", StringComparison.OrdinalIgnoreCase));
+            bool baseline = args != null && args.Length == 5 &&
+                string.Equals(args[1], "--model-root", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(args[3], "--output", StringComparison.OrdinalIgnoreCase);
+            string outputPath = balloonWithThreshold ? args[8] : balloonOnly ? args[6] : baseline ? args[4] : null;
+            if (args == null || !IsRequested(args) || (!balloonOnly && !baseline) ||
+                string.IsNullOrWhiteSpace(args[2]) || string.IsNullOrWhiteSpace(outputPath) ||
+                (balloonOnly && string.IsNullOrWhiteSpace(args[4])))
             {
                 return 2;
             }
 
             try
             {
-                string modelRoot = Path.GetFullPath(args[2]);
+                double threshold = 0.5;
+                if (balloonWithThreshold &&
+                    (!double.TryParse(args[6], NumberStyles.Float, CultureInfo.InvariantCulture, out threshold) ||
+                     double.IsNaN(threshold) || double.IsInfinity(threshold) || threshold < 0 || threshold > 1))
+                    return 2;
+                string modelRoot = baseline ? Path.GetFullPath(args[2]) : null;
                 string fullOutput = Path.GetFullPath(outputPath);
                 string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
                 if (!fullOutput.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase) ||
@@ -42,12 +56,16 @@ namespace DlcvTest
                     throw new ArgumentException("自测输出必须是系统临时目录内的 JSON 文件");
                 ArtifactDirectory = Path.GetDirectoryName(fullOutput);
                 Directory.CreateDirectory(ArtifactDirectory);
-                var cases = new JArray
+                var cases = balloonOnly ? new JArray
                 {
                     await MainWindow.RunDesktopSelfTestCaseAsync(
-                        "classification", modelRoot, "猫狗-分类_PLUS_s.dvt", "猫狗-狗.jpg", "狗", 0.9951171875),
+                        "balloon", Path.GetFullPath(args[2]), Path.GetFullPath(args[4]), null, null, threshold)
+                } : new JArray
+                {
                     await MainWindow.RunDesktopSelfTestCaseAsync(
-                        "segmentation", modelRoot, "气球-实例分割_PLUS_s.dvt", "气球.jpg", "气球", 0.9892578125)
+                        "classification", Path.Combine(modelRoot, "猫狗-分类_PLUS_s.dvt"), Path.Combine(modelRoot, "猫狗-狗.jpg"), "狗", 0.9951171875),
+                    await MainWindow.RunDesktopSelfTestCaseAsync(
+                        "segmentation", Path.Combine(modelRoot, "气球-实例分割_PLUS_s.dvt"), Path.Combine(modelRoot, "气球.jpg"), "气球", 0.9892578125)
                 };
 
                 bool passed = cases.Cast<JObject>().All(item => item.Value<bool>("passed"));
@@ -115,8 +133,8 @@ namespace DlcvTest
             TopKVal.Text = "1";
         }
 
-        internal static async Task<JObject> RunDesktopSelfTestCaseAsync(string name, string modelRoot,
-            string modelFile, string imageFile, string expectedCategory, double expectedScore)
+        internal static async Task<JObject> RunDesktopSelfTestCaseAsync(string name, string modelFile,
+            string imageFile, string expectedCategory, double? expectedScore, double threshold = 0.5)
         {
             MainWindow window = null;
             Utils.CSharpResult? result = null;
@@ -126,34 +144,42 @@ namespace DlcvTest
             bool renderPassed = false;
             bool releasePassed = false;
             string error = null;
+            string stagedImagePath = null;
 
             try
             {
-                string modelPath = Path.Combine(modelRoot, modelFile);
-                string imagePath = Path.Combine(modelRoot, imageFile);
+                string modelPath = modelFile;
+                string imagePath = imageFile;
                 if (!File.Exists(modelPath)) throw new FileNotFoundException("模型文件不存在", modelPath);
                 if (!File.Exists(imagePath)) throw new FileNotFoundException("图片文件不存在", imagePath);
 
                 window = new MainWindow(new SelfTestWindowMarker());
                 if (!await window.LoadModelAsync(modelPath, false)) throw new InvalidOperationException("实际程序模型加载失败");
+                window.ConfidenceVal.Text = threshold.ToString("0.00", CultureInfo.InvariantCulture);
 
-                window._currentImagePath = imagePath;
-                await window.ProcessSelectedImageAsync(imagePath);
+                // OpenCvSharp 在 Windows 下通过原生文件名读取图片；临时副本保持输入字节不变。
+                stagedImagePath = Path.Combine(DesktopSelfTest.ArtifactDirectory,
+                    Guid.NewGuid().ToString("N") + Path.GetExtension(imagePath));
+                File.Copy(imagePath, stagedImagePath);
+                window._currentImagePath = stagedImagePath;
+                await window.ProcessSelectedImageAsync(stagedImagePath);
                 result = window.wpfViewer2.Result;
                 var viewer = window.wpfViewer2;
-                viewer.Width = 500;
-                viewer.Height = 400;
-                viewer.Measure(new System.Windows.Size(500, 400));
-                viewer.Arrange(new System.Windows.Rect(0, 0, 500, 400));
+                int renderWidth = expectedScore.HasValue ? 500 : 1000;
+                int renderHeight = expectedScore.HasValue ? 400 : 750;
+                viewer.Width = renderWidth;
+                viewer.Height = renderHeight;
+                viewer.Measure(new System.Windows.Size(renderWidth, renderHeight));
+                viewer.Arrange(new System.Windows.Rect(0, 0, renderWidth, renderHeight));
                 viewer.UpdateLayout();
                 viewer.ResetViewToFit();
                 await viewer.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                 viewer.UpdateLayout();
                 var rendered = new System.Windows.Media.Imaging.RenderTargetBitmap(
-                    500, 400, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                    renderWidth, renderHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
                 rendered.Render(viewer);
-                byte[] pixels = new byte[500 * 400 * 4];
-                rendered.CopyPixels(pixels, 500 * 4, 0);
+                byte[] pixels = new byte[renderWidth * renderHeight * 4];
+                rendered.CopyPixels(pixels, renderWidth * 4, 0);
                 var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
                 encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rendered));
                 using (var stream = File.Create(Path.Combine(DesktopSelfTest.ArtifactDirectory, name + ".png")))
@@ -168,10 +194,12 @@ namespace DlcvTest
                     scores.AddRange(objects.Select(item => (double)item.Score));
                 }
 
-                bool baselinePassed = count == 1 && categories.Count == 1 && scores.Count == 1 &&
-                    string.Equals(categories[0], expectedCategory, StringComparison.Ordinal) &&
-                    DesktopSelfTest.ScoreMatches(scores[0], expectedScore);
-                if (!baselinePassed) error = "推理结果与固定基准不符";
+                bool resultPassed = expectedScore.HasValue
+                    ? count == 1 && categories.Count == 1 && scores.Count == 1 &&
+                      string.Equals(categories[0], expectedCategory, StringComparison.Ordinal) &&
+                      DesktopSelfTest.ScoreMatches(scores[0], expectedScore.Value)
+                    : count > 0 && categories.Count == count && scores.Count == count;
+                if (!resultPassed) error = expectedScore.HasValue ? "推理结果与固定基准不符" : "推理未返回有效目标";
             }
             catch (Exception ex)
             {
@@ -202,9 +230,11 @@ namespace DlcvTest
                         error = error ?? ("释放失败: " + ex.Message);
                     }
                 }
+                if (stagedImagePath != null && File.Exists(stagedImagePath))
+                    File.Delete(stagedImagePath);
             }
 
-            bool passed = error == null && count == 1 && renderPassed && releasePassed;
+            bool passed = error == null && renderPassed && releasePassed;
             return DesktopSelfTest.CreateCase(name, passed, count, categories, scores, releasePassed, renderPassed, error);
         }
     }

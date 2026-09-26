@@ -211,6 +211,10 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <PropertyGroup><DlcvCopyQtRuntime>true</DlcvCopyQtRuntime></PropertyGroup>
   <Import Project="$(ProjectDir)..\DlcvNativeRuntime.targets" />
+  <Target Name="CopyCQtOffscreenRuntime" AfterTargets="CopyDlcvQtRuntime" Condition="'$(Platform)'=='x64'">
+    <Error Condition="!Exists('$(QtPluginsDir)\platforms\qoffscreen$(QtDllSuffix).dll')" Text="Qt offscreen 平台插件不存在。" />
+    <Copy SourceFiles="$(QtPluginsDir)\platforms\qoffscreen$(QtDllSuffix).dll" DestinationFolder="$(TargetDir)platforms" SkipUnchangedFiles="true" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
