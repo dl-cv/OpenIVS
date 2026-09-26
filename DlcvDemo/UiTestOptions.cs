@@ -17,6 +17,10 @@ namespace DlcvDemo
         internal bool InteractiveDialogs { get; private set; }
         internal string Language { get; private set; }
         internal string ResultView { get; private set; } = "summary";
+        internal string TestMode { get; private set; } = "infer";
+        internal int BatchSize { get; private set; } = 1;
+        internal int ThreadCount { get; private set; } = 1;
+        internal int PressureDurationMs { get; private set; } = 2000;
 
         internal static bool TryParse(string[] args, out UiTestOptions options, out string error)
         {
@@ -109,6 +113,42 @@ namespace DlcvDemo
                         }
                         options.ResultView = string.Equals(value, "json", StringComparison.OrdinalIgnoreCase) ? "json" : "summary";
                         break;
+                    case "--test-mode":
+                        if (!string.Equals(value, "infer", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase))
+                        {
+                            error = "--test-mode 必须是 infer 或 pressure。";
+                            return false;
+                        }
+                        options.TestMode = string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase) ? "pressure" : "infer";
+                        break;
+                    case "--batch-size":
+                        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int batchSize)
+                            || batchSize < 1 || batchSize > 1024)
+                        {
+                            error = "--batch-size 必须是 1 到 1024 之间的整数。";
+                            return false;
+                        }
+                        options.BatchSize = batchSize;
+                        break;
+                    case "--thread-count":
+                        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int threadCount)
+                            || threadCount < 1 || threadCount > 32)
+                        {
+                            error = "--thread-count 必须是 1 到 32 之间的整数。";
+                            return false;
+                        }
+                        options.ThreadCount = threadCount;
+                        break;
+                    case "--pressure-duration-ms":
+                        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int pressureDurationMs)
+                            || pressureDurationMs < 500 || pressureDurationMs > 60000)
+                        {
+                            error = "--pressure-duration-ms 必须是 500 到 60000 之间的整数。";
+                            return false;
+                        }
+                        options.PressureDurationMs = pressureDurationMs;
+                        break;
                     default:
                         error = "未知参数: " + key;
                         return false;
@@ -175,12 +215,13 @@ namespace DlcvDemo
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");
             Console.Out.WriteLine("--language 指定界面语言（zh-CN 或 en-US）；未指定时跟随系统语言，本次运行不持久化。");
             Console.Out.WriteLine("--result-view 指定结果区显示汇总或 JSON，默认 summary；切换不重新推理。");
+            Console.Out.WriteLine("--test-mode=pressure 时运行压力测试并保存统计界面，时长默认 2000ms。");
         }
     }
 }

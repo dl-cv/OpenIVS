@@ -479,6 +479,21 @@ namespace DlcvDemo
             return I18n.T("模型: ") + model_path + Environment.NewLine + infoText;
         }
 
+        private string BuildPressureTestText(string statistics)
+        {
+            int threadCount = pressureTestRunner == null
+                ? (int)numericUpDown_num_thread.Value
+                : pressureTestRunner.ThreadCount;
+            var sb = new StringBuilder();
+            sb.AppendLine(I18n.T("模型: ") + model_path);
+            sb.AppendLine(I18n.T("图片: ") + image_path);
+            sb.AppendLine(string.Format(I18n.T("线程数: {0}"), threadCount));
+            sb.AppendLine(string.Format(I18n.T("批量大小: {0}"), batch_size));
+            sb.AppendLine();
+            sb.Append(statistics);
+            return sb.ToString();
+        }
+
         private void DisposeCurrentModel()
         {
             try
@@ -667,6 +682,8 @@ namespace DlcvDemo
             try
             {
                 numericUpDown_threshold.Value = uiTestOptions.Threshold;
+                numericUpDown_batch_size.Value = uiTestOptions.BatchSize;
+                numericUpDown_num_thread.Value = uiTestOptions.ThreadCount;
                 checkBox_calc_mean.CheckState = !uiTestOptions.CalcMean.HasValue
                     ? CheckState.Indeterminate
                     : (uiTestOptions.CalcMean.Value ? CheckState.Checked : CheckState.Unchecked);
@@ -706,19 +723,61 @@ namespace DlcvDemo
                 {
                     throw new InvalidOperationException(I18n.T("文件对话框选择的图片与预期不一致: ") + image_path);
                 }
-                if (string.IsNullOrWhiteSpace(lastSummaryText)
-                    || !lastSummaryText.Contains(I18n.T("推理结果: ")))
+                if (string.Equals(uiTestOptions.TestMode, "pressure", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException(I18n.T("界面未生成推理结果: ") + richTextBox1.Text);
+                    StartPressureTest(false);
+                    if (pressureTestRunner == null || !pressureTestRunner.IsRunning)
+                    {
+                        throw new InvalidOperationException(I18n.T("压力测试未启动。"));
+                    }
+                    await Task.Delay(uiTestOptions.PressureDurationMs);
+                    StopPressureTest();
+                    UpdatePressureStatisticsText();
+                    string pressureText = richTextBox1.Text ?? string.Empty;
+                    string modelPrefix = I18n.T("模型: ");
+                    string imagePrefix = I18n.T("图片: ");
+                    string threadLine = string.Format(I18n.T("线程数: {0}"), uiTestOptions.ThreadCount);
+                    string batchLine = string.Format(I18n.T("批量大小: {0}"), uiTestOptions.BatchSize);
+                    string statisticsTitle = I18n.T("压力测试统计:");
+                    string maximumLatencyPrefix = I18n.T("最大延迟: {0:F2}ms").Split('{')[0];
+                    int modelIndex = pressureText.IndexOf(modelPrefix, StringComparison.Ordinal);
+                    int imageIndex = pressureText.IndexOf(imagePrefix, StringComparison.Ordinal);
+                    int threadIndex = pressureText.IndexOf(threadLine, StringComparison.Ordinal);
+                    int batchIndex = pressureText.IndexOf(batchLine, StringComparison.Ordinal);
+                    int statisticsIndex = pressureText.IndexOf(statisticsTitle, StringComparison.Ordinal);
+                    int maximumLatencyIndex = pressureText.IndexOf(maximumLatencyPrefix, StringComparison.Ordinal);
+                    if (!(modelIndex >= 0
+                        && imageIndex > modelIndex
+                        && threadIndex > imageIndex
+                        && batchIndex > threadIndex
+                        && statisticsIndex > batchIndex
+                        && maximumLatencyIndex > statisticsIndex))
+                    {
+                        throw new InvalidOperationException(I18n.T("界面未生成压力测试统计: ") + pressureText);
+                    }
                 }
-                if (string.IsNullOrWhiteSpace(lastJsonText))
+                else
                 {
-                    throw new InvalidOperationException(I18n.T("界面未生成 JSON 结果: ") + richTextBox1.Text);
-                }
-                if (string.Equals(uiTestOptions.ResultView, "json", StringComparison.OrdinalIgnoreCase))
-                {
-                    showJsonResult = true;
-                    ApplyResultView();
+                    if (string.IsNullOrWhiteSpace(lastSummaryText)
+                        || !lastSummaryText.Contains(I18n.T("推理结果: ")))
+                    {
+                        throw new InvalidOperationException(I18n.T("界面未生成推理结果: ") + richTextBox1.Text);
+                    }
+                    string batchLine = string.Format(I18n.T("批量大小: {0}"), uiTestOptions.BatchSize);
+                    if (!lastSummaryText.Contains(batchLine)
+                        || lastSummaryText.Contains("batch_size:"))
+                    {
+                        throw new InvalidOperationException(I18n.T("界面未生成批量大小提示: ") + lastSummaryText);
+                    }
+                    if (string.IsNullOrWhiteSpace(lastJsonText))
+                    {
+                        throw new InvalidOperationException(I18n.T("界面未生成 JSON 结果: ") + richTextBox1.Text);
+                    }
+                    if (string.Equals(uiTestOptions.ResultView, "json", StringComparison.OrdinalIgnoreCase))
+                    {
+                        showJsonResult = true;
+                        ApplyResultView();
+                    }
                 }
 
                 await Task.Yield();
@@ -797,6 +856,10 @@ namespace DlcvDemo
                 ["ui_framework"] = "WinForms",
                 ["screenshot"] = uiTestOptions.ScreenshotPath,
                 ["result_view"] = uiTestOptions.ResultView,
+                ["test_mode"] = uiTestOptions.TestMode,
+                ["batch_size"] = uiTestOptions.BatchSize,
+                ["thread_count"] = uiTestOptions.ThreadCount,
+                ["pressure_duration_ms"] = uiTestOptions.PressureDurationMs,
                 ["result_text"] = richTextBox1.Text ?? string.Empty,
                 ["error"] = error == null ? null : error.ToString()
             };
@@ -917,7 +980,7 @@ namespace DlcvDemo
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine(I18n.T("模型: ") + model_path);
                 sb.AppendLine(I18n.T("图片: ") + image_path);
-                sb.AppendLine($"batch_size: {batch_size}");
+                sb.AppendLine(string.Format(I18n.T("批量大小: {0}"), batch_size));
                 sb.AppendLine($"threshold: {(float)numericUpDown_threshold.Value:F2}");
                 sb.AppendLine(string.Format(I18n.T("推理时间: {0:F2}ms"), delay_ms));
 
@@ -1224,19 +1287,24 @@ namespace DlcvDemo
         {
             if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
-                // 在UI上显示统计信息
-                RunOnUiThread(delegate
-                {
-                    string stats = pressureTestRunner.GetStatistics(false);
-                    if (isConsistencyTestMode && baselineJsonResult != null)
-                    {
-                        stats = stats + "\n\n" +
-                                I18n.T("基准结果:") + "\n" +
-                                JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented);
-                    }
-                    richTextBox1.Text = stats;
-                });
+                RunOnUiThread(UpdatePressureStatisticsText);
             }
+        }
+
+        private void UpdatePressureStatisticsText()
+        {
+            if (pressureTestRunner == null)
+            {
+                return;
+            }
+            string stats = BuildPressureTestText(pressureTestRunner.GetStatistics(false, false));
+            if (isConsistencyTestMode && baselineJsonResult != null)
+            {
+                stats = stats + "\n\n" +
+                        I18n.T("基准结果:") + "\n" +
+                        JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented);
+            }
+            richTextBox1.Text = stats;
         }
 
         private void button_threadtest_Click(object sender, EventArgs e)

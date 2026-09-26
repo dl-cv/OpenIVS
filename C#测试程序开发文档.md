@@ -342,7 +342,7 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
   - Threshold 变化：在模型与图片均已就绪且没有测试运行时，调整 Threshold 控件应等价触发本功能。
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
-  - **文本**：按 `模型:`、`图片:`、`batch_size:`、`threshold:`、`推理时间:`、`推理结果:` 的顺序输出模型路径、图片路径、批量大小、阈值、推理耗时及结果详情；且 `richTextBox1` 文本中必须包含字段名 `推理时间:` 与 `推理结果:`。
+  - **文本**：按 `模型:`、`图片:`、`批量大小:`、`threshold:`、`推理时间:`、`推理结果:` 的顺序输出模型路径、图片路径、批量大小、阈值、推理耗时及结果详情；且 `richTextBox1` 文本中必须包含字段名 `推理时间:` 与 `推理结果:`。
   - **结果详情**：每条结果固定输出类别、`category_id`、分数、面积、框信息、角度信息和 mask 信息；当 `ExtraInfo` 非空时，在同行追加 `extra_info={ ... }`，内容使用 `Utils.FormatExtraInfoForDisplay()` 生成。
   - **无监督实例结果**：无异常区域时显示 `推理结果: 0个` 与 `未检测到目标。`；有异常区域时按实例输出 `bbox` 与 `mask=宽x高`。
 - **异常处理**：若图片无效或推理失败，弹窗提示错误。
@@ -377,8 +377,8 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
   - 创建 `PressureTestRunner(threadCount, targetRate=1000000, batchSize=batch_size)`
   - 设置 action 为 `ModelInferAction(image_list)`
   - 启动 500ms 定时器刷新统计：
-    - 调用 `pressureTestRunner.GetStatistics(false)`
-    - 写入 `richTextBox1`
+    - 调用 `pressureTestRunner.GetStatistics(false, false)`
+    - 在统计内容前增加模型、图片、线程数与批量大小，写入 `richTextBox1`
   - 启动 runner
   - 按钮文字切为 `停止`
   - **说明**：测试过程中只刷新统计文本，不更新 `imagePanel1`
@@ -389,20 +389,26 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
     - 弹窗：`压力测试过程中发生错误: {ex.Message}`（标题 `错误`，Error）
     - `richTextBox1.Text = "推理错误: {ex.Message}"`
 
-`pressureTestRunner.GetStatistics(false)` 输出模板（必须一致，含空格/单位/换行）：
+DlcvDemo 压力测试输出模板（必须一致，含空格、单位与换行）：
 
 ```text
-压力测试统计:
+模型: {modelPath}
+图片: {imagePath}
 线程数: {threadCount}
 批量大小: {batchSize}
+
+压力测试统计:
 运行时间: {elapsedSeconds:F2} 秒
 完成请求: {completedRequestsTimesBatchSize}
 平均延迟: {averageLatencyMs:F2}ms
+平均延迟(SDK): {averageSdkLatencyMs:F2}ms
+最大延迟: {maximumLatencyMs:F2}ms
 实时速率: {recentRate:F2} 请求/秒
 ```
 
 说明：模板中的 `完成请求` 为内部完成次数 × batch_size（即处理的图片数）；但字段名仍为“完成请求”。  
 说明：模板中的 `实时速率` 同样按（最近窗口内完成次数 × batch_size）/ 时间窗口计算，但字段名仍显示为“请求/秒”。
+说明：模板中的 `最大延迟` 为本次运行期间所有已完成请求的最大端到端延迟。
 - 停止逻辑：
   - `pressureTestRunner.Stop()`
   - 停止定时器
