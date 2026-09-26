@@ -129,6 +129,7 @@ namespace DlcvDemo
             { "完成请求: {0}", "Completed Requests: {0}" },
             { "平均延迟: {0:F2}ms", "Average Latency: {0:F2}ms" },
             { "平均延迟(SDK): {0:F2}ms", "Average Latency (SDK): {0:F2}ms" },
+            { "最大延迟: {0:F2}ms", "Maximum Latency: {0:F2}ms" },
             { "实时速率: {0:F2} 请求/秒", "Recent Rate: {0:F2} req/s" },
             { "模块平均耗时:", "Average Module Time:" },
         };

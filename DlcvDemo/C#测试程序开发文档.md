@@ -1,6 +1,6 @@
 # C# 测试程序自动化入口
 
-当前正式界面是 WPF `MainWindow`。自动测试入口在保持原有无参数启动和 `infer` CLI 行为不变的前提下，增加：
+当前正式界面是 WinForms `MainWindow`。自动测试入口在保持原有无参数启动和 `infer` CLI 行为不变的前提下，增加：
 
 ```text
 C# 测试程序.exe ui-test
@@ -10,13 +10,19 @@ C# 测试程序.exe ui-test
   [--threshold <0..1>]
   [--device <int>]
   [--interactive-dialogs <true|false>]
+  [--test-mode <infer|pressure>]
+  [--batch-size <1..1024>]
+  [--thread-count <1..32>]
+  [--pressure-duration-ms <500..60000>]
 ```
 
-`interactive-dialogs=false` 是默认自动化主路径：启动真实 WPF 窗口但不激活，直接复用产品内部的模型加载、单图推理、可视化和结果文本逻辑，不打开文件选择框。
+`interactive-dialogs=false` 是默认自动化主路径：启动真实 WinForms 窗口但不激活，直接复用产品内部的模型加载、单图推理、可视化和结果文本逻辑，不打开文件选择框。
 
 `interactive-dialogs=true` 只用于空闲时的真实文件框专项。外部探针只操作本次进程拥有的对话框，并只清理本次启动的进程。
 
-状态 JSON 依次写入 `started`、`model_loaded`、`passed` 或 `failed`，包含模型、图片、阈值、设备、窗口标题、结果文本和错误信息。自动测试模式下产品错误写入界面和 JSON，不弹错误 MessageBox。
+`--test-mode pressure` 使用界面中的多线程测试流程，按 `--pressure-duration-ms` 运行后停止并保存统计文本与截图；默认时长为 2000ms。
+
+状态 JSON 依次写入 `started`、`model_loaded`、`passed` 或 `failed`，包含模型、图片、阈值、设备、测试模式、批量大小、线程数、窗口标题、结果文本和错误信息。自动测试模式下产品错误写入界面和 JSON，不弹错误 MessageBox。
 
 构建必须使用仓库的 VS Build skill：
 

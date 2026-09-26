@@ -48,6 +48,7 @@ namespace DLCV
         private DateTime _startTime;
         private TimeSpan _duration;
         private Queue<double> _recentLatencies;
+        private double _maximumLatency;
         private Queue<double> _recentDlcvInferLatencies;
         private Queue<double> _recentTotalInferLatencies;
         private Queue<List<PressureNodeTiming>> _recentFlowNodeTimings;
@@ -164,6 +165,7 @@ namespace DLCV
             lock (_lockObject)
             {
                 _recentLatencies.Clear();
+                _maximumLatency = 0.0;
                 _recentDlcvInferLatencies.Clear();
                 _recentTotalInferLatencies.Clear();
                 _recentFlowNodeTimings.Clear();
@@ -207,6 +209,11 @@ namespace DLCV
         /// <returns>包含测试统计数据的字符串</returns>
         public string GetStatistics(bool target_rate = true)
         {
+            return GetStatistics(target_rate, true);
+        }
+
+        public string GetStatistics(bool target_rate, bool includeTestParameters)
+        {
             TimeSpan elapsed = _isRunning ? (DateTime.Now - _startTime) : _duration;
             
             // 计算最近3秒的速率
@@ -242,14 +249,18 @@ namespace DLCV
 
             StringBuilder sb = new StringBuilder();
             sb.AppendLine(L("压力测试统计:"));
-            sb.AppendLine(string.Format(L("线程数: {0}"), _threadCount));
-            sb.AppendLine(string.Format(L("批量大小: {0}"), _batchSize));
+            if (includeTestParameters)
+            {
+                sb.AppendLine(string.Format(L("线程数: {0}"), _threadCount));
+                sb.AppendLine(string.Format(L("批量大小: {0}"), _batchSize));
+            }
             if (target_rate) sb.AppendLine(string.Format(L("目标速率: {0} 请求/秒"), _targetRate));
             sb.AppendLine(string.Format(L("运行时间: {0:F2} 秒"), elapsed.TotalSeconds));
             sb.AppendLine(string.Format(L("完成请求: {0}"), _completedRequests * _batchSize));
             
             // 计算最近请求的平均延迟（毫秒）
             double averageLatency = 0;
+            double maximumLatency = 0;
             double averageDlcvInferLatency = 0;
             double averageTotalInferLatency = 0;
             List<NodeTimingAggregate> averageNodeTimings = null;
@@ -259,6 +270,7 @@ namespace DLCV
                 {
                     averageLatency = _recentLatencies.Average();
                 }
+                maximumLatency = _maximumLatency;
                 if (_recentDlcvInferLatencies.Count > 0)
                 {
                     averageDlcvInferLatency = _recentDlcvInferLatencies.Average();
@@ -299,6 +311,10 @@ namespace DLCV
             if (averageDlcvInferLatency > 0)
             {
                 sb.AppendLine(string.Format(L("平均延迟(SDK): {0:F2}ms"), averageDlcvInferLatency));
+            }
+            if (maximumLatency > 0)
+            {
+                sb.AppendLine(string.Format(L("最大延迟: {0:F2}ms"), maximumLatency));
             }
             // if (_isFlowModelTiming && averageTotalInferLatency > 0)
             // {
@@ -401,6 +417,10 @@ namespace DLCV
                                 _recentLatencies.Dequeue(); // 移除最早的样本
                             }
                             _recentLatencies.Enqueue(latency);
+                            if (latency > _maximumLatency)
+                            {
+                                _maximumLatency = latency;
+                            }
                             
                             // 记录请求完成时间戳
                             _requestTimestamps.Enqueue(requestCompletionTime);
