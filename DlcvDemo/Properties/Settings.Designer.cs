@@ -57,19 +57,5 @@ namespace DlcvDemo.Properties
             }
         }
 
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string UiLanguage
-        {
-            get
-            {
-                return ((string)(this["UiLanguage"]));
-            }
-            set
-            {
-                this["UiLanguage"] = value;
-            }
-        }
     }
 }
