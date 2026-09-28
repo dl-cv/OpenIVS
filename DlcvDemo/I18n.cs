@@ -166,8 +166,16 @@ namespace DlcvDemo
                 if (File.Exists(path))
                 {
                     string value = File.ReadAllText(path).Trim();
-                    if (string.Equals(value, "en", StringComparison.OrdinalIgnoreCase)) return English;
-                    if (string.Equals(value, "zh", StringComparison.OrdinalIgnoreCase)) return Chinese;
+                    if (string.Equals(value, "en", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.Equals(value, "en", StringComparison.Ordinal)) WriteLanguage(English);
+                        return English;
+                    }
+                    if (string.Equals(value, "zh-Hans", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.Equals(value, "zh-Hans", StringComparison.Ordinal)) WriteLanguage(Chinese);
+                        return Chinese;
+                    }
                 }
             }
             catch (IOException)
@@ -185,7 +193,7 @@ namespace DlcvDemo
             string path = GetLanguageFilePath();
             string directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-            string value = string.Equals(language, English, StringComparison.OrdinalIgnoreCase) ? "en" : "zh";
+            string value = string.Equals(language, English, StringComparison.OrdinalIgnoreCase) ? "en" : "zh-Hans";
             File.WriteAllText(path, value, new UTF8Encoding(false));
         }
 

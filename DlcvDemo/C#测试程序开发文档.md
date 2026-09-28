@@ -38,7 +38,7 @@ python ".cursor\skills\vs-build\scripts\build.py" "DlcvDemo\DlcvDemo.csproj" --c
 
 ## 界面语言
 
-- 右侧操作区空位提供 `En` / `中` 切换按钮：中文模式显示 `En`，英文模式显示 `中`，点击后界面即时刷新；选择持久化到 `%APPDATA%\dlcv\language.txt`；文件内容为 `zh` 或 `en`，缺失或无效时写入中文。
+- 右侧操作区空位提供 `En` / `中` 切换按钮：中文模式显示 `En`，英文模式显示 `中`，点击后界面即时刷新；选择持久化到 `%APPDATA%\dlcv\language.txt`；文件内容遵循 RFC 5646，仅保存 `zh-Hans` 或 `en`；缺失、旧 `zh` 或其他无效内容会直接写为 `zh-Hans`。
 - 运行结果标题右侧提供汇总 / JSON 切换按钮：汇总模式显示 `JSON`，JSON 模式显示 `汇总`，点击后直接切换已缓存文本，不重新推理。`CSharpResult.JsonText` 保存推理返回的 JSON 原始字符串。
 - `ui-test --interactive-dialogs false` 支持可选 `--result-view summary|json` 指定结果区显示（默认汇总，不持久化），非法值退出码 2。
 - 实现位于 `DlcvDemo/I18n.cs`：以中文原文为键查英文字典，首次应用时用 `ConditionalWeakTable` 记录按钮/标签/菜单项的原始中文文本，保证中英往返切换正确；窗体标题由 `MainWindow.UpdateWindowTitle` 单独维护。下拉框、结果文本框和数值框的运行期内容不按设计器原文覆盖。
