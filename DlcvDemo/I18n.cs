@@ -190,11 +190,28 @@ namespace DlcvDemo
 
         private static void WriteLanguage(string language)
         {
+            // 语言文件不可写（目录被占用、只读或被拦截）时跳过写入，
+            // 由调用方在本次运行内使用内存中的语言，用户再次切换语言时重试。
             string path = GetLanguageFilePath();
             string directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-            string value = string.Equals(language, English, StringComparison.OrdinalIgnoreCase) ? "en" : "zh-Hans";
-            File.WriteAllText(path, value, new UTF8Encoding(false));
+            try
+            {
+                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                string value = string.Equals(language, English, StringComparison.OrdinalIgnoreCase) ? "en" : "zh-Hans";
+                File.WriteAllText(path, value, new UTF8Encoding(false));
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (ArgumentException)
+            {
+            }
+            catch (NotSupportedException)
+            {
+            }
         }
 
         internal static void Initialize()
