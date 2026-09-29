@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Windows.Forms;
 
 namespace DlcvDemo
@@ -147,17 +148,75 @@ namespace DlcvDemo
 
         internal static string CurrentLanguage { get; private set; } = Chinese;
 
-        // 启动时读取已保存语言；未保存时系统界面语言以 en 开头为英文，否则中文。
+        private static string GetLanguageFilePath()
+        {
+            string appData = Environment.GetEnvironmentVariable("APPDATA");
+            if (string.IsNullOrWhiteSpace(appData))
+            {
+                appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            }
+            return Path.Combine(appData, "dlcv", "language.txt");
+        }
+
+        private static string ReadLanguage()
+        {
+            string path = GetLanguageFilePath();
+            try
+            {
+                if (File.Exists(path))
+                {
+                    string value = File.ReadAllText(path).Trim();
+                    if (string.Equals(value, "en", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.Equals(value, "en", StringComparison.Ordinal)) WriteLanguage(English);
+                        return English;
+                    }
+                    if (string.Equals(value, "zh-Hans", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.Equals(value, "zh-Hans", StringComparison.Ordinal)) WriteLanguage(Chinese);
+                        return Chinese;
+                    }
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            WriteLanguage(Chinese);
+            return Chinese;
+        }
+
+        private static void WriteLanguage(string language)
+        {
+            // 语言文件不可写（目录被占用、只读或被拦截）时跳过写入，
+            // 由调用方在本次运行内使用内存中的语言，用户再次切换语言时重试。
+            string path = GetLanguageFilePath();
+            string directory = Path.GetDirectoryName(path);
+            try
+            {
+                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                string value = string.Equals(language, English, StringComparison.OrdinalIgnoreCase) ? "en" : "zh-Hans";
+                File.WriteAllText(path, value, new UTF8Encoding(false));
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (ArgumentException)
+            {
+            }
+            catch (NotSupportedException)
+            {
+            }
+        }
+
         internal static void Initialize()
         {
-            string saved = Properties.Settings.Default.UiLanguage;
-            if (string.IsNullOrWhiteSpace(saved))
-            {
-                bool english = CultureInfo.CurrentUICulture.Name.StartsWith("en", StringComparison.OrdinalIgnoreCase);
-                SetLanguage(english ? English : Chinese, persist: false);
-                return;
-            }
-            SetLanguage(saved, persist: false);
+            SetLanguage(ReadLanguage(), persist: false);
         }
 
         internal static void SetLanguage(string language, bool persist)
@@ -165,8 +224,7 @@ namespace DlcvDemo
             CurrentLanguage = string.Equals(language, English, StringComparison.OrdinalIgnoreCase) ? English : Chinese;
             if (persist)
             {
-                Properties.Settings.Default.UiLanguage = CurrentLanguage;
-                Properties.Settings.Default.Save();
+                WriteLanguage(CurrentLanguage);
             }
         }
 
