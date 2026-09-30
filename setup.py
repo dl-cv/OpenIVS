@@ -1,10 +1,13 @@
+import json
+from pathlib import Path
 import os
 import re
 import shutil
 
 from setuptools import setup
 
-version = '2026.9.29.0'
+version = '2026.9.30.0a0'
+feature = '测试按钮'
 
 package_name = "dlcvpro_infer_csharp"  # 包名
 packages: list = [package_name]  # 需要打包的包
@@ -12,6 +15,12 @@ package_data: dict[str:list] = {package_name: ["*"]}  # 哪个包需要打包哪
 
 
 def main():
+    # 功能说明随 wheel 分发，安装后的软件中心直接读取。
+    if Path(package_name).is_dir():
+        (Path(package_name) / 'dlcv_test_release.json').write_text(json.dumps({
+            'schema_version': 1, 'package': package_name.replace('_', '-'),
+            'version': version, 'feature': feature,
+        }, ensure_ascii=False), encoding='utf-8')
     setup(
         name=package_name,
         version=version,

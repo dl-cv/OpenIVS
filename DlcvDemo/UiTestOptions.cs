@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -115,12 +115,13 @@ namespace DlcvDemo
                         break;
                     case "--test-mode":
                         if (!string.Equals(value, "infer", StringComparison.OrdinalIgnoreCase)
-                            && !string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase))
+                            && !string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(value, "test-button", StringComparison.OrdinalIgnoreCase))
                         {
-                            error = "--test-mode 必须是 infer 或 pressure。";
+                            error = "--test-mode 必须是 infer、pressure 或 test-button。";
                             return false;
                         }
-                        options.TestMode = string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase) ? "pressure" : "infer";
+                        options.TestMode = value.ToLowerInvariant();
                         break;
                     case "--batch-size":
                         if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int batchSize)
@@ -155,12 +156,12 @@ namespace DlcvDemo
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(options.ModelPath))
+            if (options.TestMode != "test-button" && string.IsNullOrWhiteSpace(options.ModelPath))
             {
                 error = "缺少必需参数: --model";
                 return false;
             }
-            if (string.IsNullOrWhiteSpace(options.ImagePath))
+            if (options.TestMode != "test-button" && string.IsNullOrWhiteSpace(options.ImagePath))
             {
                 error = "缺少必需参数: --image";
                 return false;
@@ -170,20 +171,20 @@ namespace DlcvDemo
                 error = "缺少必需参数: --output";
                 return false;
             }
-            if (!File.Exists(options.ModelPath))
+            if (options.TestMode != "test-button" && !File.Exists(options.ModelPath))
             {
                 error = "模型文件不存在: " + options.ModelPath;
                 return false;
             }
-            if (!File.Exists(options.ImagePath))
+            if (options.TestMode != "test-button" && !File.Exists(options.ImagePath))
             {
                 error = "图片文件不存在: " + options.ImagePath;
                 return false;
             }
             try
             {
-                string model = Path.GetFullPath(options.ModelPath);
-                string image = Path.GetFullPath(options.ImagePath);
+                string model = options.ModelPath == null ? null : Path.GetFullPath(options.ModelPath);
+                string image = options.ImagePath == null ? null : Path.GetFullPath(options.ImagePath);
                 string output = Path.GetFullPath(options.OutputPath);
                 string screenshot = options.ScreenshotPath == null ? null : Path.GetFullPath(options.ScreenshotPath);
                 if (string.Equals(output, model, StringComparison.OrdinalIgnoreCase)
@@ -215,12 +216,13 @@ namespace DlcvDemo
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|pressure|test-button>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");
             Console.Out.WriteLine("--language 指定界面语言（zh-CN 或 en-US）；未指定时跟随系统语言，本次运行不持久化。");
             Console.Out.WriteLine("--result-view 指定结果区显示汇总或 JSON，默认 summary；切换不重新推理。");
+            Console.Out.WriteLine("--test-mode=test-button 仅验证测试按钮，无需模型或图片，不初始化设备。");
             Console.Out.WriteLine("--test-mode=pressure 时运行压力测试并保存统计界面，时长默认 2000ms。");
         }
     }

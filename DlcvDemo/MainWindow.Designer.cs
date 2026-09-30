@@ -73,6 +73,7 @@ namespace DlcvDemo
             this.resultLayout = new System.Windows.Forms.TableLayoutPanel();
             this.label_result = new System.Windows.Forms.Label();
             this.button_result_view = new System.Windows.Forms.Button();
+            this.button_test_release = new System.Windows.Forms.Button();
             this.richTextBox1 = new System.Windows.Forms.TextBox();
             this.imageCard = new System.Windows.Forms.Panel();
             this.imagePanel1 = new DLCV.ImageViewer();
@@ -523,8 +524,9 @@ namespace DlcvDemo
             // resultLayout
             //
             this.resultLayout.BackColor = Color.White;
-            this.resultLayout.ColumnCount = 2;
+            this.resultLayout.ColumnCount = 3;
             this.resultLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.resultLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.resultLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.resultLayout.Dock = System.Windows.Forms.DockStyle.Fill;
             this.resultLayout.Name = "resultLayout";
@@ -561,6 +563,19 @@ namespace DlcvDemo
             this.button_result_view.Tag = "no-i18n";
             this.button_result_view.Text = "JSON";
             this.button_result_view.UseVisualStyleBackColor = false;
+            //
+            // button_test_release
+            //
+            this.button_test_release.BackColor = Color.FromArgb(115, 83, 232);
+            this.button_test_release.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.button_test_release.FlatAppearance.BorderSize = 0;
+            this.button_test_release.ForeColor = Color.White;
+            this.button_test_release.Margin = new System.Windows.Forms.Padding(8, 0, 0, 8);
+            this.button_test_release.Name = "button_test_release";
+            this.button_test_release.Size = new System.Drawing.Size(88, 28);
+            this.button_test_release.Text = "测试按钮";
+            this.button_test_release.TabIndex = 25;
+            this.button_test_release.Click += new System.EventHandler(this.button_test_release_Click);
             //
             // richTextBox1
             //
@@ -648,8 +663,9 @@ namespace DlcvDemo
             //
             this.resultLayout.Controls.Add(this.label_result, 0, 0);
             this.resultLayout.Controls.Add(this.button_result_view, 1, 0);
+            this.resultLayout.Controls.Add(this.button_test_release, 2, 0);
             this.resultLayout.Controls.Add(this.richTextBox1, 0, 1);
-            this.resultLayout.SetColumnSpan(this.richTextBox1, 2);
+            this.resultLayout.SetColumnSpan(this.richTextBox1, 3);
             //
             // resultCard
             //
@@ -864,6 +880,7 @@ namespace DlcvDemo
         private System.Windows.Forms.TableLayoutPanel resultLayout;
         private System.Windows.Forms.Label label_result;
         private System.Windows.Forms.Button button_result_view;
+        private System.Windows.Forms.Button button_test_release;
         private System.Windows.Forms.TextBox richTextBox1;
         private System.Windows.Forms.Panel imageCard;
         private DLCV.ImageViewer imagePanel1;

@@ -81,6 +81,12 @@ namespace DlcvDemo
             UpdateResponsiveLayout();
         }
 
+        private void button_test_release_Click(object sender, EventArgs e)
+        {
+            label_result.Text = I18n.T("测试成功");
+            label_result.ForeColor = System.Drawing.Color.FromArgb(21, 128, 61);
+        }
+
         private void UpdateWindowTitle()
         {
             Text = I18n.T("C# 测试程序") + " v" + CliRunner.GetVersion();
@@ -230,6 +236,11 @@ namespace DlcvDemo
 
         private void MainWindow_Shown(object sender, EventArgs e)
         {
+            if (uiTestOptions?.TestMode == "test-button")
+            {
+                BeginInvoke(new Action(RunUiTest));
+                return;
+            }
             Thread thread = new Thread(InitializeDeviceAndUiTest);
             thread.IsBackground = true;
             thread.Start();
@@ -681,6 +692,21 @@ namespace DlcvDemo
         {
             try
             {
+                if (uiTestOptions.TestMode == "test-button")
+                {
+                    button_test_release.PerformClick();
+                    if (label_result.Text != I18n.T("测试成功") || !button_test_release.Visible
+                        || button_test_release.Left <= button_result_view.Left)
+                    {
+                        throw new InvalidOperationException("测试按钮或成功提示未通过检查。");
+                    }
+                    await Task.Yield();
+                    Refresh();
+                    SaveUiTestScreenshot();
+                    UiTestExitCode = 0;
+                    WriteUiTestResult("passed", null);
+                    return;
+                }
                 numericUpDown_threshold.Value = uiTestOptions.Threshold;
                 numericUpDown_batch_size.Value = uiTestOptions.BatchSize;
                 numericUpDown_num_thread.Value = uiTestOptions.ThreadCount;
@@ -843,6 +869,7 @@ namespace DlcvDemo
             var result = new JObject
             {
                 ["status"] = status,
+                ["test_button_message"] = label_result.Text,
                 ["ok"] = status == "passed",
                 ["model"] = model_path ?? uiTestOptions.ModelPath,
                 ["image"] = image_path ?? uiTestOptions.ImagePath,

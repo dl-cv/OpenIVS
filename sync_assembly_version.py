@@ -108,13 +108,19 @@ def main() -> int:
 
     version, numeric_version = _extract_version_from_setup_py(setup_py)
 
+    setup_text, _ = _read_text_preserve_bom(setup_py)
+    feature_match = re.search(r"(?m)^feature\s*=\s*['\"]([^'\"]*)['\"]", setup_text)
+    feature = feature_match.group(1) if feature_match else ''
+    display_version = numeric_version + '_' + feature if feature else version
+
     all_changed = False
     for assembly_info in assembly_infos:
         if not os.path.exists(assembly_info):
             print(f"[sync_assembly_version] 未找到目标文件: {assembly_info}", file=sys.stderr)
             return 2
 
-        changed = _sync_assembly_info(assembly_info, version, numeric_version)
+        info_version = display_version if 'DlcvDemo' in assembly_info else version
+        changed = _sync_assembly_info(assembly_info, info_version, numeric_version)
         all_changed = all_changed or changed
         print(
             f"[sync_assembly_version] {os.path.basename(os.path.dirname(assembly_info))} AssemblyInfo 版本已{'更新' if changed else '确认一致'} -> {version} (numeric: {numeric_version})"
