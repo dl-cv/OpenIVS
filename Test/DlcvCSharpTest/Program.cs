@@ -722,6 +722,45 @@ namespace DlcvCSharpTest
                     "--output", outputPath
                 });
                 RequireWinFormsSelfTest(noScreenshotResult.Ok, "省略 --screenshot 时参数被拒绝: " + noScreenshotResult.Error);
+                PropertyInfo hasThreshold = optionsType.GetProperty("HasThreshold", BindingFlags.NonPublic | BindingFlags.Instance);
+                PropertyInfo thresholdProperty = optionsType.GetProperty("Threshold", BindingFlags.NonPublic | BindingFlags.Instance);
+                RequireWinFormsSelfTest(!(bool)hasThreshold.GetValue(noScreenshotResult.Options), "未指定阈值时不应标记为显式值");
+                foreach (string value in new[] { "0", "0.3", "0.5", "0.99", "1" })
+                {
+                    var explicitResult = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                    {
+                        "ui-test", "--model", modelPath, "--image", imagePath,
+                        "--output", outputPath, "--threshold", value
+                    });
+                    RequireWinFormsSelfTest(explicitResult.Ok
+                        && (bool)hasThreshold.GetValue(explicitResult.Options)
+                        && (decimal)thresholdProperty.GetValue(explicitResult.Options) == decimal.Parse(value, CultureInfo.InvariantCulture),
+                        "显式阈值未保留: " + value);
+                }
+                Type cliType = demoAssembly.GetType("DlcvDemo.CliRunner", true);
+                MethodInfo resolveThreshold = cliType.GetMethod("ResolveModelThreshold", BindingFlags.NonPublic | BindingFlags.Static);
+                foreach (double value in new[] { 0.0, 0.3, 0.5, 0.99, 1.0 })
+                {
+                    var info = new JObject { ["threshold"] = value };
+                    foreach (JObject input in new[] { info, new JObject { ["model_info"] = info } })
+                    {
+                        RequireWinFormsSelfTest((double)resolveThreshold.Invoke(null, new object[] { input }) == value,
+                            "模型保存阈值未读取: " + value);
+                    }
+                }
+                foreach (JObject input in new[]
+                {
+                    null, new JObject(), new JObject { ["threshold"] = -1 },
+                    new JObject { ["threshold"] = 2 }, new JObject { ["threshold"] = "0.3" },
+                    new JObject { ["threshold"] = double.NaN }, new JObject { ["threshold"] = double.PositiveInfinity }
+                })
+                {
+                    RequireWinFormsSelfTest((double)resolveThreshold.Invoke(null, new object[] { input }) == 0.5,
+                        "无有效模型阈值时未使用默认值");
+                }
+                MethodInfo cliParse = cliType.GetMethod("TryParseInferOptions", BindingFlags.NonPublic | BindingFlags.Static);
+                var defaultCli = InvokeUiTestOptionsParse(cliParse, new[] { "infer", "--model", modelPath, "--image", imagePath, "--output", outputPath });
+                RequireWinFormsSelfTest(defaultCli.Ok, "CLI 省略阈值时参数被拒绝: " + defaultCli.Error);
                 RequireWinFormsSelfTest(
                     screenshotPathProperty.GetValue(noScreenshotResult.Options, null) == null,
                     "省略 --screenshot 时 ScreenshotPath 应为空");

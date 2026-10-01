@@ -571,6 +571,16 @@ namespace DlcvDemo
             button_getmodelinfo_Click(this, EventArgs.Empty);
             JObject cachedInfo = model.GetCachedModelInfo();
             JObject infoNode = cachedInfo != null ? (cachedInfo["model_info"] as JObject ?? cachedInfo) : null;
+            // 加载新模型时恢复保存阈值，避免沿用上一个模型或控件的初始值。
+            numericUpDown_threshold.ValueChanged -= numericUpDown_threshold_ValueChanged;
+            try
+            {
+                numericUpDown_threshold.Value = (decimal)CliRunner.ResolveModelThreshold(cachedInfo);
+            }
+            finally
+            {
+                numericUpDown_threshold.ValueChanged += numericUpDown_threshold_ValueChanged;
+            }
             string taskType = infoNode != null ? infoNode["task_type"]?.ToString() : null;
             imagePanel1.LabelDisplayMode = string.Equals(taskType, "OCR", StringComparison.OrdinalIgnoreCase)
                 ? ImageViewer.LabelTextMode.CategoryOnly
@@ -681,7 +691,14 @@ namespace DlcvDemo
         {
             try
             {
-                numericUpDown_threshold.Value = uiTestOptions.Threshold;
+                foreach (string deviceName in comboBox1.Items)
+                {
+                    if (deviceNameToIdMap.TryGetValue(deviceName, out int deviceId) && deviceId == uiTestOptions.DeviceId)
+                    {
+                        comboBox1.SelectedItem = deviceName;
+                        break;
+                    }
+                }
                 numericUpDown_batch_size.Value = uiTestOptions.BatchSize;
                 numericUpDown_num_thread.Value = uiTestOptions.ThreadCount;
                 checkBox_calc_mean.CheckState = !uiTestOptions.CalcMean.HasValue
@@ -707,6 +724,10 @@ namespace DlcvDemo
                     throw new InvalidOperationException(I18n.T("文件对话框选择的模型与预期不一致: ") + model_path);
                 }
 
+                if (uiTestOptions.HasThreshold)
+                {
+                    numericUpDown_threshold.Value = uiTestOptions.Threshold;
+                }
                 WriteUiTestResult("model_loaded", null);
                 await Task.Delay(600);
 
@@ -846,7 +867,9 @@ namespace DlcvDemo
                 ["ok"] = status == "passed",
                 ["model"] = model_path ?? uiTestOptions.ModelPath,
                 ["image"] = image_path ?? uiTestOptions.ImagePath,
-                ["threshold"] = uiTestOptions.Threshold,
+                ["threshold"] = numericUpDown_threshold.Value,
+                ["model_info"] = model?.GetCachedModelInfo(),
+                ["threshold_explicit"] = uiTestOptions.HasThreshold,
                 ["calc_mean"] = uiTestOptions.CalcMean.HasValue
                     ? new JValue(uiTestOptions.CalcMean.Value)
                     : JValue.CreateNull(),

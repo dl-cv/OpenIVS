@@ -135,6 +135,11 @@ namespace DlcvDemo
                 Model.EnableConsoleLog = false;
                 GlobalDebug.PrintDebug = false;
                 model = new Model(options.ModelPath, options.DeviceId, false, false);
+                JObject modelInfo = model.GetCachedModelInfo();
+                if (!options.HasThreshold)
+                {
+                    options.Threshold = ResolveModelThreshold(modelInfo);
+                }
 
                 byte[] imageBytes = File.ReadAllBytes(options.ImagePath);
                 decodedImage = Cv2.ImDecode(imageBytes, ImreadModes.Unchanged);
@@ -208,6 +213,8 @@ namespace DlcvDemo
                     ["image"] = options.ImagePath,
                     ["device"] = options.DeviceId,
                     ["threshold"] = options.Threshold,
+                    ["model_info"] = modelInfo,
+                    ["threshold_explicit"] = options.HasThreshold,
                     ["with_mask"] = options.WithMask,
                     ["calc_mean"] = options.CalcMean.HasValue
                         ? new JValue(options.CalcMean.Value)
@@ -493,11 +500,6 @@ namespace DlcvDemo
                 error = "缺少必填参数 --image。";
                 return false;
             }
-            if (!options.HasThreshold)
-            {
-                error = "缺少必填参数 --threshold。";
-                return false;
-            }
             if (!File.Exists(options.ModelPath))
             {
                 error = "模型文件不存在。";
@@ -574,11 +576,12 @@ namespace DlcvDemo
         private static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" infer --model <path> --image <path> [--threshold <0..1>] [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>]");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --help");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --version");
             Console.Out.WriteLine();
+            Console.Out.WriteLine("Omitted --threshold uses the saved model value; explicit values take priority.");
             Console.Out.WriteLine("Flow archives: --threshold filters final output only; model-node thresholds come from the flow.");
             Console.Out.WriteLine("Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed");
         }
@@ -599,6 +602,18 @@ namespace DlcvDemo
             };
             string errorText = error.ToString(Formatting.Indented);
             Console.Error.WriteLine(errorText);
+        }
+
+        internal static double ResolveModelThreshold(JObject modelInfo)
+        {
+            JObject info = modelInfo?["model_info"] as JObject ?? modelInfo;
+            JToken token = info?["threshold"];
+            if (token == null || (token.Type != JTokenType.Float && token.Type != JTokenType.Integer))
+            {
+                return 0.5;
+            }
+            double threshold = token.Value<double>();
+            return IsFinite(threshold) && threshold >= 0 && threshold <= 1 ? threshold : 0.5;
         }
 
         private static bool IsFinite(double value)

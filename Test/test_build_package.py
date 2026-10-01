@@ -144,12 +144,12 @@ class NativeCAbiTestProjectTest(unittest.TestCase):
         self.assertIn("process.ExitCode != 0", program)
         self.assertNotIn("CppSharedIndexTestIndexRules", program)
 
-    def test_unified_test_count_remains_27(self):
+    def test_unified_test_count_remains_30(self):
         repo_root = Path(__file__).resolve().parents[1]
         program = (repo_root / "Test" / "DlcvCSharpTest" / "Program.cs").read_text(encoding="utf-8-sig")
         start = program.index("var tests = new List<UnifiedTestCase>")
         end = program.index("var results = new List<UnifiedTestResult>", start)
-        self.assertEqual(27, program[start:end].count("new UnifiedTestCase("))
+        self.assertEqual(30, program[start:end].count("new UnifiedTestCase("))
         self.assertIn("C++ 共享规则与正式 C ABI", program[start:end])
 
     def test_runner_uses_temp_logs_and_strict_utf8(self):
