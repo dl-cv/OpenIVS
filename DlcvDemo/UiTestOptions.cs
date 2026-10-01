@@ -12,6 +12,7 @@ namespace DlcvDemo
         internal string OutputPath { get; private set; }
         internal string ScreenshotPath { get; private set; }
         internal decimal Threshold { get; private set; } = 0.5m;
+        internal bool HasThreshold { get; private set; }
         internal int DeviceId { get; private set; } = 0;
         internal bool? CalcMean { get; private set; }
         internal bool InteractiveDialogs { get; private set; }
@@ -69,6 +70,7 @@ namespace DlcvDemo
                             return false;
                         }
                         options.Threshold = threshold;
+                        options.HasThreshold = true;
                         break;
                     case "--device":
                         if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int deviceId)
@@ -220,6 +222,7 @@ namespace DlcvDemo
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");
             Console.Out.WriteLine("--language 指定界面语言（zh-CN 或 en-US）；未指定时跟随系统语言，本次运行不持久化。");
+            Console.Out.WriteLine("--threshold 未指定时读取模型保存值，模型未提供有效值时使用 0.5；显式参数优先。");
             Console.Out.WriteLine("--result-view 指定结果区显示汇总或 JSON，默认 summary；切换不重新推理。");
             Console.Out.WriteLine("--test-mode=pressure 时运行压力测试并保存统计界面，时长默认 2000ms。");
         }
