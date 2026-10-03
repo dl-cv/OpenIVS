@@ -240,7 +240,7 @@ def main() -> int:
         wheels_before_build = snapshot_wheels()
         run_step(
             "构建 wheel",
-            [sys.executable, "-m", "build", "--wheel", "--outdir", str(REPO_ROOT / "dist")],
+            [sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", str(REPO_ROOT / "dist")],
         )
 
         wheel_path = find_generated_wheel(wheels_before_build)
