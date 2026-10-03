@@ -933,6 +933,41 @@ cv::Mat LoadSingleFileWithSuffix(const std::string& dir, const std::string& suff
     return matchCount == 1 ? loaded : cv::Mat();
 }
 
+int RunCurveTextAffineSample(int argc, wchar_t* argv[]) {
+    if (argc != 5) throw std::invalid_argument("curve-text-affine-selftest <image> <polygons-json> <output-dir>");
+    const std::filesystem::path directory(argv[4]);
+    if (std::filesystem::exists(directory)) throw std::runtime_error("结果目录已存在");
+    std::ifstream imageStream(std::filesystem::path(argv[2]), std::ios::binary);
+    const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(imageStream)), {});
+    const cv::Mat image = cv::imdecode(bytes, cv::IMREAD_COLOR);
+    if (image.empty()) throw std::runtime_error("测试图片读取失败");
+    std::ifstream jsonStream{std::filesystem::path(argv[3])};
+    const json detections = json::parse(jsonStream);
+    if (!detections.is_array()) throw std::invalid_argument("polygon 数据应为检测结果数组");
+    dlcv_infer::flow::TransformationState state(image.cols, image.rows);
+    std::vector<dlcv_infer::flow::ModuleImage> images = {
+        dlcv_infer::flow::ModuleImage(image, image, state, 0)};
+    const json results = json::array({{{"type", "local"}, {"index", 0}, {"sample_results", detections}}});
+    const auto factory = dlcv_infer::flow::ModuleRegistry::Get("pre_process/curve_text_affine");
+    auto module = factory(401, std::string(), json::object(), nullptr);
+    const auto output = module->Process(images, results);
+    if (output.ImageList.size() != detections.size()) throw std::runtime_error("展开区域数量错误");
+    std::filesystem::create_directories(directory);
+    for (size_t i = 0; i < output.ImageList.size(); i++) {
+        const auto& affine = output.ImageList[i].AffineImage;
+        std::vector<unsigned char> encoded;
+        if (affine.empty() || !cv::imencode(".png", affine, encoded)) throw std::runtime_error("展开图为空或编码失败");
+        std::ofstream file(directory / ("region-" + std::to_string(i) + ".png"), std::ios::binary);
+        file.write(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+        if (!file) throw std::runtime_error("展开图保存失败");
+    }
+    std::ofstream report(directory / "result.json");
+    report << output.ResultList.dump(2);
+    if (!report) throw std::runtime_error("展开结果保存失败");
+    PrintUtf8Line("实际图片展开完成，区域数: " + std::to_string(output.ImageList.size()));
+    return 0;
+}
+
 int RunCurveTextAffineSelfTest() {
     auto fail = [](const std::string& message) -> int {
         PrintUtf8Line("curve_text_affine selftest failed: " + message);
@@ -956,6 +991,43 @@ int RunCurveTextAffineSelfTest() {
     if (!dlcv_infer::flow::ModuleRegistry::Has("pre_process/curve_text_affine")) {
         return fail("pre_process/curve_text_affine is not registered");
     }
+
+    // 坐标渐变图检查映射方向，不以输出数量和尺寸代替镜像检查。
+    cv::Mat coordinates(256, 256, CV_8UC3);
+    for (int y = 0; y < coordinates.rows; y++)
+        for (int x = 0; x < coordinates.cols; x++)
+            coordinates.at<cv::Vec3b>(y, x) = cv::Vec3b(static_cast<uchar>(x), static_cast<uchar>(y), 0);
+    for (double angle : {0.0, 30.0, 89.9, 90.0, 90.1, 135.0, 180.0, 225.0, 269.9, 270.0, 270.1, 315.0})
+    for (bool curved : {false, true}) {
+        const double radians = angle * CV_PI / 180.0;
+        json polygon = json::array();
+        for (int i = 0; i < 16; i++) {
+            const double x = -70 + (i < 8 ? i : 15 - i) * 20.0;
+            const double y = (i < 8 ? -15 : 15) + (curved ? 20 * std::cos(x * CV_PI / 140) : 0);
+            polygon.push_back({128 + x * std::cos(radians) - y * std::sin(radians),
+                128 + x * std::sin(radians) + y * std::cos(radians)});
+        }
+        dlcv_infer::flow::TransformationState state(256, 256);
+        std::vector<dlcv_infer::flow::ModuleImage> images = {
+            dlcv_infer::flow::ModuleImage(coordinates, coordinates, state, 0)};
+        json results = json::array({{{"type", "local"}, {"index", 0},
+            {"sample_results", json::array({{{"polygon", polygon}}})}}});
+        const auto factory = dlcv_infer::flow::ModuleRegistry::Get("pre_process/curve_text_affine");
+        auto module = factory(401, std::string(), {{"out_height", 31}, {"sample_step", 10.0}}, nullptr);
+        const auto output = module->Process(images, results);
+        if (output.ImageList.size() != 1 || output.ImageList[0].AffineImage.empty())
+            return fail("方向测试没有生成展开图: " + std::to_string(angle));
+        const cv::Mat& affine = output.ImageList[0].AffineImage;
+        for (int column : {affine.cols / 4, affine.cols / 2, affine.cols * 3 / 4}) {
+            const cv::Vec3b left = affine.at<cv::Vec3b>(15, column - 2), right = affine.at<cv::Vec3b>(15, column + 2);
+            const cv::Vec3b top = affine.at<cv::Vec3b>(4, column), bottom = affine.at<cv::Vec3b>(26, column);
+            const int determinant = (right[0] - left[0]) * (bottom[1] - top[1])
+                - (right[1] - left[1]) * (bottom[0] - top[0]);
+            if (determinant <= 0) return fail("曲线展开发生镜像: angle=" + std::to_string(angle)
+                + ", curved=" + std::to_string(curved) + ", determinant=" + std::to_string(determinant));
+        }
+    }
+    PrintUtf8Line("曲线展开 24 组方向检查通过，每组检查三处局部方向");
 
     cv::Mat image(180, 360, CV_8UC3, cv::Scalar::all(0));
     cv::Mat mask(180, 360, CV_8UC1, cv::Scalar::all(0));
@@ -4798,7 +4870,7 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     if (argc >= 2 && std::wstring(argv[1]) == L"curve-text-affine-selftest") {
-        return RunCurveTextAffineSelfTest();
+        return argc == 2 ? RunCurveTextAffineSelfTest() : RunCurveTextAffineSample(argc, argv);
     }
 
     if (argc >= 2 && std::wstring(argv[1]) == L"ai-orientation-affine-selftest") {

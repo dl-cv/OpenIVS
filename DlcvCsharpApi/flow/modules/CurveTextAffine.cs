@@ -641,15 +641,9 @@ namespace DlcvModules
         {
             if (centers.Count < 2 || centers.Count != lefts.Count || centers.Count != rights.Count) return new Mat();
             int height = Math.Max(2, outputHeight);
-            double meanLeftY = 0.0;
-            double meanRightY = 0.0;
-            for (int i = 0; i < lefts.Count; i++)
-            {
-                meanLeftY += lefts[i].Y;
-                meanRightY += rights[i].Y;
-            }
-            List<Point2f> tops = meanLeftY <= meanRightY ? lefts : rights;
-            List<Point2f> bottoms = meanLeftY <= meanRightY ? rights : lefts;
+            // 正法线侧映射到下方，保持展开方向，避免竖直文字被镜像。
+            List<Point2f> tops = rights;
+            List<Point2f> bottoms = lefts;
             var cumulative = new double[centers.Count];
             for (int i = 1; i < centers.Count; i++) cumulative[i] = cumulative[i - 1] + Distance(centers[i], centers[i - 1]);
             double total = cumulative[cumulative.Length - 1];

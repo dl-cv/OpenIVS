@@ -271,3 +271,10 @@ C# 在 `DlcvCsharpApi/DllLoader.cs` 中直接解析实际已加载推理模块�
 ### 流程阶段比较
 
 `flow-stage-compare <model> <image> <device> <output-dir> <node-ids>` 在同一进程加载一次 DVS，复用底层子模型索引，为指定节点的执行前缀登记独立测试流程，选择该节点第一个图像与结果输出端口，以同一 RGB 图像和参数分别执行 C# 与正式 C/C++ JSON 入口。节点编号以逗号分隔，输出目录必须尚不存在。结果为 UTF-8 JSON，保存两种语言的结果与差异、子模型索引、实际模块路径与摘要，并检查输入图像在两次调用前后不变；原归档不修改。退出 0 表示所选节点一致，1 表示存在差异。
+
+### 曲线展开方向与实际图片回归
+
+C# 的 `DlcvCSharpTest.exe` 与 C++ 的 `dlcv_infer_cpp_test.exe` 均支持：
+
+- `curve-text-affine-selftest`：24 组直线和弯曲区域，每组检查三处局部映射方向，覆盖水平、斜向、竖直附近和反向；同时执行原有数量、尺寸等检查。
+- `curve-text-affine-selftest <image> <polygons-json> <output-dir>`：读取同一实际图片与区域数组，经正式曲线节点输出每个区域的 `region-N.png` 和 UTF-8 `result.json`。区域文件为 `[{"polygon": [[x, y], ...]}, ...]`，坐标采用原图像素；输出目录必须尚不存在。参数使用原默认值：高度 80、采样间距 10、平滑参数 10000、向内缩进 1.5、reflect101。退出 0 表示展开成功，镜像与像素变化由前后结果另行比较。
