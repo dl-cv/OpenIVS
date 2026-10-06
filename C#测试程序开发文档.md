@@ -87,12 +87,12 @@
 `infer` 是无界面功能测试，不创建窗口；界面自动验证使用 2.6 的 `ui-test`。
 
 ```text
-"C# 测试程序.exe" infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
+"C# 测试程序.exe" infer --model <path> --image <path> [--threshold <0..1>] [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
 "C# 测试程序.exe" --help
 "C# 测试程序.exe" --version
 ```
 
-- `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`。省略 `--calc-mean` 时不发送该字段，流程模型继续使用节点中保存的配置。
+- `--model`、`--image` 为必填参数；`--threshold` 省略时读取模型保存值，无有效值时使用 0.5，显式值优先；`--device` 默认 `0`，`--with-mask` 默认 `true`。省略 `--calc-mean` 时不发送该字段，流程模型继续使用节点中保存的配置。
 - `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
 - 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
 - `--calc-mean=true` 时，结构化与 JSON 摘要包含 `with_mean`、`foreground_mean`、`background_mean`，并通过 `mean_check_passed` 检查带掩码结果是否包含均值及两种结果的一致性；普通检测结果不参与均值检查，两条结果均为空时该检查通过。
@@ -531,6 +531,7 @@ DlcvDemo 压力测试输出模板（必须一致，含空格、单位与换行�
 - **加载模型**
   - 选择 `.dvt/.dvo/.dvp/.dvst/.dvso` 任一文件均可尝试加载
   - 加载完成后点击/自动触发“获取模型信息”可在文本框看到 JSON（或摘要）
+- 加载或重新加载模型时，将模型保存的 `threshold` 回填到控件；缺少有效值时使用 0.5。`ui-test` 未指定 `--threshold` 时沿用保存值，显式参数优先，输出 JSON 记录实际使用值。
 
 - **打开图片推理**
   - 选择图片后必须立即执行一次推理，并在图像区域看到框/Mask/标签（若模型有结果）
