@@ -77,6 +77,9 @@ class BuildScopeTest(unittest.TestCase):
                 if argument.endswith((".csproj", ".vcxproj", ".sln")):
                     built_projects.append(Path(argument))
         self.assertEqual([repo_root / "DlcvDemo" / "DlcvDemo.csproj"], built_projects)
+        wheel_command = next(call.args[1] for call in run_step.call_args_list
+                             if call.args[1][1:3] == ["-m", "build"])
+        self.assertIn("--no-isolation", wheel_command)
 
 
 class TestProjectDependenciesTest(unittest.TestCase):
