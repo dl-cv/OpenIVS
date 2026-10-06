@@ -193,7 +193,7 @@ namespace DlcvCSharpTest
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "curve-text-affine-selftest", StringComparison.OrdinalIgnoreCase))
                 {
-                    return RunCurveTextAffineSelfTest();
+                    return args.Length == 1 ? RunCurveTextAffineSelfTest() : RunCurveTextAffineSample(args);
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "ai-orientation-affine-selftest", StringComparison.OrdinalIgnoreCase))
@@ -6851,6 +6851,35 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static int RunCurveTextAffineSample(string[] args)
+        {
+            if (args.Length != 4)
+                throw new ArgumentException("curve-text-affine-selftest <image> <polygons-json> <output-dir>");
+            if (Directory.Exists(args[3])) throw new IOException("结果目录已存在");
+            JArray detections = JArray.Parse(File.ReadAllText(args[2]));
+            Directory.CreateDirectory(args[3]);
+            using (Mat image = Cv2.ImDecode(File.ReadAllBytes(args[1]), ImreadModes.Color))
+            {
+                if (image.Empty()) throw new IOException("测试图片读取失败");
+                var state = new TransformationState(image.Width, image.Height);
+                var images = new List<ModuleImage> { new ModuleImage(image, image, state, 0) };
+                var results = new JArray(new JObject { ["type"] = "local", ["index"] = 0,
+                    ["sample_results"] = detections });
+                var module = new CurveTextAffine(401);
+                ModuleIO output = module.Process(images, results);
+                if (output.ImageList.Count != detections.Count) throw new InvalidOperationException("展开区域数量错误");
+                for (int i = 0; i < output.ImageList.Count; i++)
+                    using (Mat affine = output.ImageList[i].AffineImage)
+                    {
+                        if (affine == null || affine.Empty()) throw new InvalidOperationException("展开图为空");
+                        File.WriteAllBytes(Path.Combine(args[3], "region-" + i + ".png"), affine.ImEncode(".png"));
+                    }
+                File.WriteAllText(Path.Combine(args[3], "result.json"), output.ResultList.ToString());
+                Console.WriteLine("实际图片展开完成，区域数: " + output.ImageList.Count);
+            }
+            return 0;
+        }
+
         private static int RunCurveTextAffineSelfTest()
         {
             Console.WriteLine("==== curve_text_affine 自测 ====");
@@ -6881,6 +6910,55 @@ namespace DlcvCSharpTest
             {
                 Console.WriteLine("pre_process/curve_text_affine 未注册");
                 return 1;
+            }
+
+            // 坐标渐变图直接检查展开方向，避免只有尺寸正确但文字已经镜像。
+            using (var coordinates = new Mat(256, 256, MatType.CV_8UC3))
+            {
+                for (int y = 0; y < 256; y++)
+                    for (int x = 0; x < 256; x++)
+                        coordinates.Set(y, x, new Vec3b((byte)x, (byte)y, 0));
+                foreach (double angle in new[] { 0.0, 30, 89.9, 90, 90.1, 135, 180, 225, 269.9, 270, 270.1, 315 })
+                foreach (bool curved in new[] { false, true })
+                {
+                    double radians = angle * Math.PI / 180.0;
+                    var polygon = new JArray();
+                    for (int i = 0; i < 16; i++)
+                    {
+                        double x = -70 + (i < 8 ? i : 15 - i) * 20.0;
+                        double y = (i < 8 ? -15 : 15) + (curved ? 20 * Math.Cos(x * Math.PI / 140) : 0);
+                        polygon.Add(new JArray(128 + x * Math.Cos(radians) - y * Math.Sin(radians),
+                            128 + x * Math.Sin(radians) + y * Math.Cos(radians)));
+                    }
+                    var state = new TransformationState(256, 256);
+                    var images = new List<ModuleImage> { new ModuleImage(coordinates, coordinates, state, 0) };
+                    var results = new JArray(new JObject { ["type"] = "local", ["index"] = 0,
+                        ["sample_results"] = new JArray(new JObject { ["polygon"] = polygon }) });
+                    var module = (BaseModule)Activator.CreateInstance(moduleType, new object[] { 401, null,
+                        new Dictionary<string, object> { ["out_height"] = 31, ["sample_step"] = 10.0 }, null });
+                    ModuleIO output = module.Process(images, results);
+                    if (output.ImageList.Count != 1 || output.ImageList[0].AffineImage == null)
+                    {
+                        Console.WriteLine("方向测试没有生成展开图: " + angle);
+                        return 1;
+                    }
+                    using (Mat affine = output.ImageList[0].AffineImage)
+                    {
+                        foreach (int column in new[] { affine.Width / 4, affine.Width / 2, affine.Width * 3 / 4 })
+                        {
+                            Vec3b left = affine.At<Vec3b>(15, column - 2), right = affine.At<Vec3b>(15, column + 2);
+                            Vec3b top = affine.At<Vec3b>(4, column), bottom = affine.At<Vec3b>(26, column);
+                            int determinant = (right.Item0 - left.Item0) * (bottom.Item1 - top.Item1)
+                                - (right.Item1 - left.Item1) * (bottom.Item0 - top.Item0);
+                            if (determinant <= 0)
+                            {
+                                Console.WriteLine("曲线展开发生镜像: angle=" + angle + ", curved=" + curved + ", determinant=" + determinant);
+                                return 1;
+                            }
+                        }
+                    }
+                }
+                Console.WriteLine("曲线展开 24 组方向检查通过，每组检查三处局部方向");
             }
 
             MethodInfo smoothPathMethod = moduleType.GetMethod(

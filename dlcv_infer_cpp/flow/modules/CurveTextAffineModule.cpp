@@ -439,15 +439,9 @@ static cv::Mat UnwrapByRemap(
     int borderMode) {
     if (centers.size() < 2 || centers.size() != lefts.size() || centers.size() != rights.size()) return cv::Mat();
     const int height = std::max(2, outputHeight);
-    double meanLeftY = 0.0;
-    double meanRightY = 0.0;
-    for (size_t i = 0; i < lefts.size(); i++) {
-        meanLeftY += lefts[i].y;
-        meanRightY += rights[i].y;
-    }
-    const bool topIsLeft = meanLeftY <= meanRightY;
-    const std::vector<cv::Point2f>& tops = topIsLeft ? lefts : rights;
-    const std::vector<cv::Point2f>& bottoms = topIsLeft ? rights : lefts;
+    // 正法线侧映射到下方，保持展开方向，避免竖直文字被镜像。
+    const std::vector<cv::Point2f>& tops = rights;
+    const std::vector<cv::Point2f>& bottoms = lefts;
 
     std::vector<double> cumulative(centers.size(), 0.0);
     for (size_t i = 1; i < centers.size(); i++) cumulative[i] = cumulative[i - 1] + cv::norm(centers[i] - centers[i - 1]);
