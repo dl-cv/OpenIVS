@@ -32,5 +32,5 @@ using System.Runtime.InteropServices;
 //
 [assembly: AssemblyVersion("2026.10.6.0")]
 [assembly: AssemblyFileVersion("2026.10.6.0")]
-[assembly: AssemblyInformationalVersion("2026.10.6.0")]
+[assembly: AssemblyInformationalVersion("2026.10.6.0a1")]
 [assembly: NeutralResourcesLanguage("zh-CN")]
