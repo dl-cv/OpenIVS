@@ -157,8 +157,8 @@ public:
 class Model {
 public:
     Model();
-    Model(const std::string& modelPath, int device_id);   // Windows 本地代码页路径
-    Model(const std::wstring& modelPath, int device_id);  // UTF-16 路径
+    Model(const std::string& modelPath, int device_id = 0);   // Windows 本地代码页路径
+    Model(const std::wstring& modelPath, int device_id = 0);  // UTF-16 路径
     virtual ~Model();
 
     Model(Model&& other) noexcept;
@@ -176,6 +176,8 @@ dlcv_infer::Model CreateModelFromIndex(int index);
 - 函数使用默认构造的 `Model`，设置 `modelIndex` 和 `OwnModelIndex=false`，随后立即调用 `GetModelInfo()`，以绑定已有索引并完成模型信息读取。
 - `index` 必须是加载或 DVS 登记返回的非负整数；负数、索引不存在、查询错误或多个模块同时命中时抛出异常。
 - 创建时先调用所属模块的 `dlcv_bind_index` 增加一次持有，再读取普通模型信息或 DVS 描述。返回对象析构或调用 `FreeModel()` 时通过普通模型释放接口归还这一次持有。
+
+路径构造函数默认使用第一张显卡（`device_id = 0`），可直接传入路径；使用其他设备时显式指定 `device_id`。
 
 **构造函数行为**：
 1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，从归档内存读取 `pipeline.json` 和子模型二进制，并通过 `dlcv_load_model_binary` 加载；加载期间不写入模型文件。推理组件缺少该接口时明确返回不支持；归档加载全程使用内存数据。

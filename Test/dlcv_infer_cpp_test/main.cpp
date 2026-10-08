@@ -28,6 +28,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,6 +52,13 @@
 namespace {
 using json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
+
+static_assert(std::is_constructible_v<dlcv_infer::Model, const char*>);
+static_assert(std::is_constructible_v<dlcv_infer::Model, const wchar_t*>);
+static_assert(std::is_constructible_v<dlcv_infer::Model, const std::string&>);
+static_assert(std::is_constructible_v<dlcv_infer::Model, const std::wstring&>);
+static_assert(std::is_constructible_v<dlcv_infer::Model, const std::string&, int>);
+static_assert(std::is_constructible_v<dlcv_infer::Model, const std::wstring&, int>);
 
 std::string Safe(const std::string& s) {
     std::string out = s.empty() ? "-" : s;
@@ -234,6 +242,46 @@ std::string BuildResultSignature(const dlcv_infer::Result& result, const json& j
         AppendJsonExtraSignature(oss, jsonResult);
     }
     return oss.str();
+}
+
+int RunDefaultDeviceSelfTest(int argc, wchar_t* argv[]) {
+    if (argc != 5) {
+        PrintUtf8ErrorLine("用法：default-device-selftest <模型路径> <图片路径> <预期对象数>");
+        return 2;
+    }
+    try {
+        const cv::Mat image = ReadImageRgb(argv[3]);
+        if (image.empty()) throw std::runtime_error("测试图片读取失败");
+        const size_t expectedCount = std::stoull(WideToUtf8(argv[4]));
+        const std::string localPath = dlcv_infer::convertWstringToString(argv[2]);
+        std::string expectedSignature;
+        for (int pathType = 0; pathType < 3; ++pathType) {
+            std::unique_ptr<dlcv_infer::Model> model;
+            if (pathType == 0) {
+                model = std::make_unique<dlcv_infer::Model>(std::wstring(argv[2]), 0);
+            } else if (pathType == 1) {
+                model = std::make_unique<dlcv_infer::Model>(argv[2]);
+            } else {
+                model = std::make_unique<dlcv_infer::Model>(localPath.c_str());
+            }
+            const dlcv_infer::Result result = model->InferBatch({image});
+            if (result.sampleResults.size() != 1 ||
+                result.sampleResults.front().results.size() != expectedCount) {
+                throw std::runtime_error("默认设备推理的图片数或对象数不符合预期");
+            }
+            const std::string signature = BuildResultSignature(result);
+            if (pathType == 0) expectedSignature = signature;
+            else if (signature != expectedSignature) {
+                throw std::runtime_error("省略设备参数的结果与显式设备 0 不一致");
+            }
+        }
+        std::cout << "DEFAULT_DEVICE_SELFTEST|PASS|device_id=0|path_types=2|object_count="
+                  << expectedCount << std::endl;
+        return 0;
+    } catch (const std::exception& e) {
+        PrintUtf8ErrorLine(e.what());
+        return 1;
+    }
 }
 
 int RunDvsRgbSelfTest(int argc, wchar_t* argv[]) {
@@ -4841,6 +4889,10 @@ int RunGetModelInfoCommand(int argc, wchar_t* argv[], bool dvsInfo) {
 }  // namespace
 
 int wmain(int argc, wchar_t* argv[]) {
+    if (argc >= 2 && std::wstring(argv[1]) == L"default-device-selftest") {
+        return RunDefaultDeviceSelfTest(argc, argv);
+    }
+
     if (argc >= 2 && IsWorkflowCommand(std::wstring(argv[1]))) {
         return RunWorkflow(argc, argv);
     }
@@ -4967,6 +5019,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
     PrintUtf8Line("Usage: " + (argc >= 1 ? WideToUtf8(argv[0]) : std::string("dlcv_infer_cpp_test")) + " <subcommand>");
     std::cout << "Available subcommands:\n";
+    std::cout << "  default-device-selftest <modelPath> <imagePath> <expectedObjectCount>\n";
     std::cout << "  dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask|require-polyline]\n";
     std::cout << "  dvs-archive-duplicate-selftest\n";
     std::cout << "  dvs-model-pool-selftest <modelPath> [device]\n";

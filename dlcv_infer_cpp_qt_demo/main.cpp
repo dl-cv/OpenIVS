@@ -166,7 +166,7 @@ void PrintHelp(const QString& programPath) {
            " [--device <int>] [--with-mask <true|false>]\n"
         << "  " << program
         << " ui-test --model <path> --image <path> --output <jsonPath>"
-           " [--label-font-scale <0.3..5>] [--result-view <summary|json|model>]\n"
+           " [--label-font-scale <0.3..5>] [--result-view <summary|json|model|release>]\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
 }
@@ -266,8 +266,8 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             options.labelFontScale = scale;
             options.hasLabelFontScale = true;
         } else if (args.at(1) == "ui-test" && option == "--result-view") {
-            if (options.hasResultView || (value != "summary" && value != "json" && value != "model")) {
-                error = "--result-view 必须为 summary、json 或 model，且不能重复";
+            if (options.hasResultView || (value != "summary" && value != "json" && value != "model" && value != "release")) {
+                error = "--result-view 必须为 summary、json、model 或 release，且不能重复";
                 return false;
             }
             options.resultView = value;

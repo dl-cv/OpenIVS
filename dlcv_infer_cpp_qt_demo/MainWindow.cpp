@@ -566,8 +566,10 @@ dlcv_infer::json MainWindow::runUiTest(const QString& modelPath, const QString& 
     }
     if (resultView == "json") onInferJson();
     if (resultView == "model") onGetModelInfo();
+    if (resultView == "release") onFreeModel();
+    uiTestResult_["model_loaded"] = static_cast<bool>(model_);
     uiTestResult_["result_text"] = outputText_->toPlainText().toUtf8().toStdString();
-    if (resultView != "summary") {
+    if (resultView == "json" || resultView == "model") {
         uiTestResult_["result_json"] = json::parse(uiTestResult_["result_text"].get<std::string>());
     }
     uiTestResult_["label_font_scale"] = imageViewer_->labelFontScale();
