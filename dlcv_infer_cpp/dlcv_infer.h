@@ -334,11 +334,11 @@ namespace dlcv_infer {
 
         Model();
 
-        Model(const std::string& modelPath, int device_id);
+        Model(const std::string& modelPath, int device_id = 0);
 
         // Windows 下推荐直接传 UTF-16 路径（std::wstring），内部会按本地代码页(GBK/936)转换后再加载，
         // 以避免调用侧手动做字符串编码转换导致路径乱码。
-        Model(const std::wstring& modelPath, int device_id);
+        Model(const std::wstring& modelPath, int device_id = 0);
 
         Model(const Model&) = delete;
         Model& operator=(const Model&) = delete;
