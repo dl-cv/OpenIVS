@@ -4,6 +4,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QSettings>
+#include <QTimer>
 #include <QImage>
 #include <QPixmap>
 #include <QSaveFile>
@@ -73,6 +75,10 @@ void InitializeConsoleForCommandLine() {
 #endif
 
 struct InferOptions {
+    float labelFontScale = 1.0f;
+    QString resultView = "summary";
+    bool hasLabelFontScale = false;
+    bool hasResultView = false;
     QString modelPath;
     QString imagePath;
     QString outputPath;
@@ -158,6 +164,9 @@ void PrintHelp(const QString& programPath) {
         << "  " << program
         << " render --model <path> --image <path> --threshold <0..1> --output <pngPath>"
            " [--device <int>] [--with-mask <true|false>]\n"
+        << "  " << program
+        << " ui-test --model <path> --image <path> --output <jsonPath>"
+           " [--label-font-scale <0.3..5>] [--result-view <summary|json|model>]\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
 }
@@ -247,6 +256,22 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             }
             options.calcMean = parsed;
             options.hasCalcMean = true;
+        } else if (args.at(1) == "ui-test" && option == "--label-font-scale") {
+            bool ok = false;
+            const float scale = value.toFloat(&ok);
+            if (options.hasLabelFontScale || !ok || !std::isfinite(scale) || scale < 0.3f || scale > 5.0f) {
+                error = "--label-font-scale 必须为 0.3 到 5 的数值，且不能重复";
+                return false;
+            }
+            options.labelFontScale = scale;
+            options.hasLabelFontScale = true;
+        } else if (args.at(1) == "ui-test" && option == "--result-view") {
+            if (options.hasResultView || (value != "summary" && value != "json" && value != "model")) {
+                error = "--result-view 必须为 summary、json 或 model，且不能重复";
+                return false;
+            }
+            options.resultView = value;
+            options.hasResultView = true;
         } else if (option == QStringLiteral("--output")) {
             if (options.hasOutput) {
                 error = QStringLiteral("duplicate option: --output");
@@ -783,8 +808,25 @@ int main(int argc, char* argv[]) {
     app.setOrganizationName("dlcv");
     app.setFont(QFont("Microsoft YaHei", 9));
 
-    const QStringList args = app.arguments();
-    if (args.size() > 1) {
+    QStringList args = app.arguments();
+    const bool uiTestMode = args.size() > 1 && args.at(1) == "ui-test";
+    InferOptions uiOptions;
+    if (uiTestMode && args.contains("--help")) {
+        PrintHelp(args.at(0));
+        return 0;
+    }
+    if (uiTestMode) {
+        if (!args.contains("--threshold")) args << "--threshold" << "0.5";
+        QString error;
+        if (!ParseInferOptions(args, uiOptions, error) || !uiOptions.hasOutput || !uiOptions.withMask) {
+            std::cerr << "ui-test 参数错误：" << ToUtf8(error.isEmpty()
+                ? QStringLiteral("需要 --output，且 --with-mask 必须为 true") : error) << "\n";
+            return 2;
+        }
+        const QString settingsPath = QFileInfo(uiOptions.outputPath).absolutePath() + "/settings";
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsPath);
+        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, settingsPath);
+    } else if (args.size() > 1) {
         if (args.at(1) == QStringLiteral("--help") ||
             ((args.at(1) == QStringLiteral("infer") || args.at(1) == QStringLiteral("render"))
              && args.contains(QStringLiteral("--help")))) {
@@ -840,7 +882,33 @@ int main(int argc, char* argv[]) {
 
     std::cout << "[dlcv_infer_cpp] " << GetCppDllPath() << std::endl;
 
-    MainWindow w;
+    MainWindow w(nullptr, uiTestMode);
+    if (uiTestMode) {
+        w.resize(1280, 930);
+        QTimer timer;
+        QObject::connect(&timer, &QTimer::timeout, &w, [&]() {
+            if (!w.devicesReadyForUiTest()) return;
+            timer.stop();
+            try {
+                json report = w.runUiTest(uiOptions.modelPath, uiOptions.imagePath, uiOptions.device,
+                    uiOptions.threshold, uiOptions.calcMean, uiOptions.labelFontScale, uiOptions.resultView);
+                report["passed"] = true;
+                WriteJsonFile(uiOptions.outputPath, report.dump(2));
+                w.show();
+                QTimer::singleShot(15000, &app, &QCoreApplication::quit);
+            } catch (const std::exception& error) {
+                try { WriteJsonFile(uiOptions.outputPath,
+                    json({{"passed", false}, {"error", ToUtf8(FromExceptionMessage(error.what()))}}).dump(2)); }
+                catch (...) {}
+                app.exit(1);
+            }
+        });
+        QTimer::singleShot(60000, &app, [&]() {
+            if (timer.isActive()) app.exit(1);
+        });
+        timer.start(100);
+        return app.exec();
+    }
     w.show();
     return app.exec();
 }
