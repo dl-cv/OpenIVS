@@ -67,6 +67,11 @@ class QtUiTest(unittest.TestCase):
         self.assertGreater(result["input_width"], 0)
         self.assertGreater(result["input_height"], 0)
 
+    def test_release_model_view(self):
+        result = self.run_case(["--result-view", "release"], 0)
+        self.assertFalse(result["model_loaded"])
+        self.assertEqual(result["result_text"], "模型已释放")
+
     def test_aoi_model_info_view(self):
         result = self.run_case(["--result-view", "model"], 0)
         self.assertTrue(result["passed"])
