@@ -30,7 +30,10 @@ class ImageViewerWidget;
 
 class MainWindow : public QMainWindow {
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(QWidget* parent = nullptr, bool uiTestMode = false);
+    bool devicesReadyForUiTest() const { return devicesReady_; }
+    dlcv_infer::json runUiTest(const QString& modelPath, const QString& imagePath,
+        int deviceId, double threshold, bool calcMean, float labelFontScale, const QString& resultView);
     ~MainWindow() override = default;
 
 protected:
@@ -58,6 +61,7 @@ private:
     void reportError(const QString& title, const QString& detail);
     QString formatResultText(const dlcv_infer::Result& output) const;
 
+    bool loadModelFromPath(const QString& selectedModelPath);
     void onLoadModel();
     void onOpenImageInfer();
     void onInfer();
@@ -75,7 +79,11 @@ private:
     void setUiEnabledForPressureTest(bool enabled);
 
     std::unique_ptr<dlcv_infer::Model> model_;
-    QSettings settings_{"dlcv", "DlcvDemoQt"};
+    QSettings settings_;
+    bool uiTestMode_ = false;
+    bool devicesReady_ = false;
+    bool lastInferSucceeded_ = false;
+    dlcv_infer::json uiTestResult_;
     QHash<QString, int> deviceNameToId_;
 
     QString imagePath_;

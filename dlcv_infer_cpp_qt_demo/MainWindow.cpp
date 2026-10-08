@@ -7,6 +7,7 @@
 #include <atomic>
 #include <thread>
 #include <vector>
+#include <stdexcept>
 
 #include <QComboBox>
 #include <QCheckBox>
@@ -112,7 +113,11 @@ cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
 
 }  // namespace
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget* parent, bool uiTestMode)
+    : QMainWindow(parent),
+      settings_(uiTestMode ? QSettings::IniFormat : QSettings::NativeFormat,
+                QSettings::UserScope, "dlcv", "DlcvDemoQt"),
+      uiTestMode_(uiTestMode) {
     setupUi();
     bindSignals();
     initializeDevicesAsync();
@@ -314,7 +319,7 @@ void MainWindow::bindSignals() {
 
 void MainWindow::initializeDevicesAsync() {
     const QPointer<MainWindow> self(this);
-    std::thread([self]() {
+    std::thread([self, uiTestMode = uiTestMode_]() {
         struct GpuDeviceItem {
             QString name;
             int id = -1;
@@ -322,7 +327,7 @@ void MainWindow::initializeDevicesAsync() {
 
         std::vector<GpuDeviceItem> gpuDevices;
         QString warning;
-        dlcv_infer::Utils::KeepMaxClock();
+        if (!uiTestMode) dlcv_infer::Utils::KeepMaxClock();
         try
         {
             const json gpuInfo = dlcv_infer::Utils::GetGpuInfo();
@@ -366,6 +371,7 @@ void MainWindow::initializeDevicesAsync() {
                 }
 
                 self->comboDevice_->setCurrentIndex(gpuDevices.empty() ? 0 : 1);
+                self->devicesReady_ = true;
                 if (!warning.isEmpty()) {
                     self->outputText_->setPlainText("GPU信息获取失败：\n" + warning);
                 }
@@ -416,7 +422,7 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
 
 void MainWindow::reportError(const QString& title, const QString& detail) {
     outputText_->setPlainText(title + "\n" + detail);
-    QMessageBox::critical(this, "错误", title + ": " + detail);
+    if (!uiTestMode_) QMessageBox::critical(this, "错误", title + ": " + detail);
 }
 
 QString MainWindow::formatResultText(const dlcv_infer::Result& output) const {
@@ -506,7 +512,10 @@ void MainWindow::onLoadModel() {
 
     settings_.setValue("LastModelPath", selectedModelPath);
 
-    // 用户确认选择后，再释放旧模型并加载新模型
+    loadModelFromPath(selectedModelPath);
+}
+
+bool MainWindow::loadModelFromPath(const QString& selectedModelPath) {
     model_.reset();
 
     try
@@ -519,7 +528,7 @@ void MainWindow::onLoadModel() {
     {
         model_.reset();
         reportError("加载模型失败", QString::fromUtf8(e.what()));
-        return;
+        return false;
     }
 
     onGetModelInfo();
@@ -529,6 +538,44 @@ void MainWindow::onLoadModel() {
         imageViewer_->setLabelDisplayMode(task == "OCR" ? ImageViewerWidget::LabelTextMode::CategoryOnly : ImageViewerWidget::LabelTextMode::CategoryAndScore);
     } catch (...) {
     }
+    return true;
+}
+
+dlcv_infer::json MainWindow::runUiTest(const QString& modelPath, const QString& imagePath,
+    int deviceId, double threshold, bool calcMean, float labelFontScale, const QString& resultView) {
+    if (!uiTestMode_) throw std::runtime_error("仅在 ui-test 模式下执行界面验证");
+    int deviceIndex = -1;
+    for (int i = 0; i < comboDevice_->count(); ++i) {
+        if (deviceNameToId_.value(comboDevice_->itemText(i), -2) == deviceId) {
+            deviceIndex = i;
+            break;
+        }
+    }
+    if (deviceIndex < 0) throw std::runtime_error("指定设备不可用");
+    comboDevice_->setCurrentIndex(deviceIndex);
+    spinThreshold_->setValue(threshold);
+    checkCalcMean_->setChecked(calcMean);
+    if (!loadModelFromPath(modelPath)) {
+        throw std::runtime_error(outputText_->toPlainText().toUtf8().constData());
+    }
+    imagePath_ = imagePath;
+    imageViewer_->setLabelFontScale(labelFontScale);
+    onInfer();
+    if (!lastInferSucceeded_) {
+        throw std::runtime_error(outputText_->toPlainText().toUtf8().constData());
+    }
+    if (resultView == "json") onInferJson();
+    if (resultView == "model") onGetModelInfo();
+    uiTestResult_["result_text"] = outputText_->toPlainText().toUtf8().toStdString();
+    if (resultView != "summary") {
+        uiTestResult_["result_json"] = json::parse(uiTestResult_["result_text"].get<std::string>());
+    }
+    uiTestResult_["label_font_scale"] = imageViewer_->labelFontScale();
+    // 完整窗口显示后按最终图像区尺寸适配图片，保留已有结果。
+    QTimer::singleShot(0, imageViewer_, [this]() {
+        imageViewer_->setImage(currentBgrImage_);
+    });
+    return uiTestResult_;
 }
 
 void MainWindow::onOpenImageInfer() {
@@ -559,6 +606,7 @@ void MainWindow::onOpenImageInfer() {
 }
 
 void MainWindow::onInfer() {
+    lastInferSucceeded_ = false;
     if (pressureTestRunning_) {
         return;
     }
@@ -638,6 +686,14 @@ void MainWindow::onInfer() {
         text += formatResultText(output);
     }
     outputText_->setPlainText(text);
+    lastInferSucceeded_ = true;
+    if (uiTestMode_) {
+        uiTestResult_ = {{"input_width", bgrImage.cols}, {"input_height", bgrImage.rows},
+            {"object_count", firstResults.size()}, {"categories", json::array()}};
+        for (const auto& object : firstResults) {
+            uiTestResult_["categories"].push_back(dlcv_infer::convertGbkToUtf8(object.categoryName));
+        }
+    }
 }
 
 void MainWindow::onInferJson() {

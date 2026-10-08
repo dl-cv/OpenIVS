@@ -52,6 +52,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - `infer` 与 `ui-test` 用途不同：`infer` 是无界面功能测试，验证结构化与 JSON 双路径一致性、阈值过滤等，不创建窗口；`ui-test` 是界面自动验证，在真实窗口中复用模型加载、图片推理与绘制逻辑。
 
 - 两个 Qt Demo 的自动回归使用 `Test/run_qt_demo_regression.py` 运行实际 EXE，读取退出码与严格 UTF-8 JSON；推理测试不打开主窗口。Mask 合成数据和断言只编入 `Test/qt_demo/` 下两个独立测试 EXE，工程直接引用对应 Demo 的 `ImageViewerWidget.cpp`，不复制控件实现；测试采用 Qt offscreen 平台，不模拟鼠标键盘或控制桌面窗口。Demo 不包含 Mask 自测入口。
+- C++ Qt Demo 的真实窗口验证使用 `ui-test --model <模型> --image <图片> --output <临时JSON>`。`--label-font-scale` 接受 0.3 到 5；`--result-view` 接受 summary、json、model。默认使用窗口的阈值与均值开关初始值，也可通过原推理参数指定。程序等待设备初始化，复用实际按钮逻辑和绘制组件，成功后保存 UTF-8 JSON 并自动关闭；失败返回 1，参数错误返回 2。设置只写输出目录内的 INI，不读取或修改正常窗口的注册表配置，不启用显卡锁频。截图时由不可见 Desktop 采集正式完整窗口，不用控件导出替代。
 - C Qt Demo 只调用正式 C ABI；C ABI 未提供流程判定读取接口，因此 `inspection_supported=false`、`inspection_consistent=null`，不把该能力记为验证通过。C++ Qt Demo 继续检查已有流程判定接口。
 
 - `DlcvDemo`、`DlcvTest`、`OpenIVSWPF` 的实际 EXE 回归使用 `Test/run_desktop_project_regression.py`。两个 WPF selftest 只初始化推理与显示所需对象，不读取生产配置，不连接相机/PLC，不修改模型历史；具体参数和范围见开发文档。
