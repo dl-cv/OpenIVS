@@ -18,6 +18,7 @@ namespace DlcvDemo
     public partial class MainWindow : Form
     {
         private readonly UiTestOptions uiTestOptions;
+        private readonly ToolTip statisticsToolTip;
         private bool environmentCheckRunning;
         internal int UiTestExitCode { get; private set; }
 
@@ -53,6 +54,7 @@ namespace DlcvDemo
             uiTestOptions = options;
             UiTestExitCode = options == null ? 0 : 1;
             InitializeComponent();
+            statisticsToolTip = new ToolTip(components ?? (components = new System.ComponentModel.Container()));
             PressureTestRunner.LocalizeText = I18n.T;
             using (var iconStream = typeof(MainWindow).Assembly.GetManifestResourceStream("DlcvDemo.MainWindow.ico"))
             {
@@ -135,12 +137,37 @@ namespace DlcvDemo
             UpdateResultViewButton();
         }
 
+        private void UpdateStatisticsToolTip(string summary)
+        {
+            var text = new StringBuilder();
+            int count = 0;
+            foreach (string line in (summary ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!line.StartsWith("[", StringComparison.Ordinal)) continue;
+                int start = line.IndexOf("前景均值:", StringComparison.Ordinal);
+                if (start < 0) start = line.IndexOf("前景中值:", StringComparison.Ordinal);
+                if (start < 0) continue;
+                if (++count > 5)
+                {
+                    text.Append("完整统计见汇总");
+                    break;
+                }
+                int prefixEnd = line.IndexOf(']');
+                string detail = line.Substring(start);
+                int trailing = detail.IndexOf("  angle=", StringComparison.Ordinal);
+                if (trailing >= 0) detail = detail.Substring(0, trailing);
+                trailing = detail.IndexOf("  extra_info=", StringComparison.Ordinal);
+                if (trailing >= 0) detail = detail.Substring(0, trailing);
+                text.AppendLine((prefixEnd >= 0 ? line.Substring(0, prefixEnd + 1) + " " : string.Empty) + detail);
+            }
+            statisticsToolTip.SetToolTip(richTextBox1, text.ToString().TrimEnd());
+        }
+
         // 语言切换后重算不受字典快照控制的动态文本。
         private void RefreshDynamicTexts()
         {
             UpdateLanguageButton();
             UpdateResultViewButton();
-            checkBox_calc_mean_StateChanged(checkBox_calc_mean, EventArgs.Empty);
             if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
                 if (isConsistencyTestMode)
@@ -509,6 +536,7 @@ namespace DlcvDemo
             finally
             {
                 model = null;
+                UpdateStatisticsToolTip(string.Empty);
             }
         }
 
@@ -611,13 +639,26 @@ namespace DlcvDemo
 				JObject data = new JObject();
 				data["threshold"] = (float)numericUpDown_threshold.Value;
 				data["with_mask"] = true;
-				AddCalcMeanOverride(data);
 
 				Mat inferImage = PrepareImageForModelInput(image);
 				try
 				{
 					var json = model.InferOneOutJson(inferImage, data);
 					lastJsonText = JsonConvert.SerializeObject(json, Formatting.Indented);
+                    var statistics = new StringBuilder();
+                    int index = 0;
+                    JToken jsonToken = json;
+                    var items = jsonToken as JArray ?? ((jsonToken as JObject)?["result_list"] as JArray);
+                    if (items != null)
+                    {
+                        foreach (JObject item in items)
+                        {
+                            var obj = new CSharpObjectResult();
+                            obj.ReadStatistics(item);
+                            statistics.AppendLine($"[{++index}] {obj.StatisticsToString()}");
+                        }
+                    }
+                    UpdateStatisticsToolTip(statistics.ToString());
 					showJsonResult = true;
 					ApplyResultView();
 				}
@@ -646,6 +687,7 @@ namespace DlcvDemo
             string infoText = result.ContainsKey("model_info")
                 ? result["model_info"].ToString()
                 : result.ToString();
+            UpdateStatisticsToolTip(string.Empty);
             richTextBox1.Text = WithLoadedModelPath(infoText);
         }
 
@@ -701,9 +743,6 @@ namespace DlcvDemo
                 }
                 numericUpDown_batch_size.Value = uiTestOptions.BatchSize;
                 numericUpDown_num_thread.Value = uiTestOptions.ThreadCount;
-                checkBox_calc_mean.CheckState = !uiTestOptions.CalcMean.HasValue
-                    ? CheckState.Indeterminate
-                    : (uiTestOptions.CalcMean.Value ? CheckState.Checked : CheckState.Unchecked);
                 WriteUiTestResult("started", null);
 
                 if (uiTestOptions.InteractiveDialogs)
@@ -870,9 +909,6 @@ namespace DlcvDemo
                 ["threshold"] = numericUpDown_threshold.Value,
                 ["model_info"] = model?.GetCachedModelInfo(),
                 ["threshold_explicit"] = uiTestOptions.HasThreshold,
-                ["calc_mean"] = uiTestOptions.CalcMean.HasValue
-                    ? new JValue(uiTestOptions.CalcMean.Value)
-                    : JValue.CreateNull(),
                 ["device"] = uiTestOptions.DeviceId,
                 ["interactive_dialogs"] = uiTestOptions.InteractiveDialogs,
                 ["window_title"] = Text,
@@ -907,30 +943,6 @@ namespace DlcvDemo
             }
 
             button_infer_Click(sender, e);
-        }
-
-        private void AddCalcMeanOverride(JObject data)
-        {
-            bool? calcMean = checkBox_calc_mean.CheckState == CheckState.Indeterminate
-                ? (bool?)null
-                : checkBox_calc_mean.Checked;
-            if (calcMean.HasValue)
-            {
-                data["calc_mean"] = calcMean.Value;
-            }
-        }
-
-        private void checkBox_calc_mean_StateChanged(object sender, EventArgs e)
-        {
-            if (checkBox_calc_mean == null)
-            {
-                return;
-            }
-
-            string stateText = checkBox_calc_mean.CheckState == CheckState.Indeterminate
-                ? I18n.T("默认")
-                : (checkBox_calc_mean.Checked ? I18n.T("是") : I18n.T("否"));
-            checkBox_calc_mean.Text = string.Format(I18n.T("计算均值：{0}"), stateText);
         }
 
         private void resultTextWordWrapMenuItem_Click(object sender, EventArgs e)
@@ -970,7 +982,6 @@ namespace DlcvDemo
                 JObject data = new JObject();
                 data["threshold"] = (float)numericUpDown_threshold.Value;
                 data["with_mask"] = true;
-                AddCalcMeanOverride(data);
 
                 Stopwatch stopwatch = new Stopwatch();
                 stopwatch.Start();
@@ -1043,6 +1054,7 @@ namespace DlcvDemo
                     }
                 }
                 lastSummaryText = sb.ToString();
+                UpdateStatisticsToolTip(lastSummaryText);
                 lastJsonText = result.JsonText;
                 ApplyResultView();
             }
@@ -1060,11 +1072,8 @@ namespace DlcvDemo
             line.Append("  ");
             line.Append(BuildResultLocationText(obj));
             line.AppendFormat("  area={0:F1}", obj.Area);
-            if (obj.WithMean)
-            {
-                line.AppendFormat("  foreground_mean={0:F4}", obj.ForegroundMean);
-                line.AppendFormat("  background_mean={0:F4}", obj.BackgroundMean);
-            }
+            string statistics = obj.StatisticsToString();
+            if (!string.IsNullOrEmpty(statistics)) line.Append("  ").Append(statistics);
             string angleText = BuildResultAngleText(obj);
             if (!string.IsNullOrWhiteSpace(angleText))
             {
@@ -1592,6 +1601,7 @@ namespace DlcvDemo
                 disposable.Dispose();
             }
             model = null;
+            UpdateStatisticsToolTip(string.Empty);
             model_path = null;
             Utils.FreeAllModels();
             richTextBox1.Text = I18n.T("所有模型已释放");
@@ -1604,6 +1614,7 @@ namespace DlcvDemo
 		{
 			try
 			{
+				UpdateStatisticsToolTip(string.Empty);
 				richTextBox1.Text = title + "\n" + ex.ToString();
 			}
 			catch { }

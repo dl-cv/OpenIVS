@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <optional>
+#include <limits>
 #include <cstddef>
 #include <mutex>
 #include <shared_mutex>
@@ -272,6 +274,45 @@ namespace dlcv_infer {
         bool withMean;
         double foregroundMean;
         double backgroundMean;
+        // 仅包装结果保存字段存在性和空值，不改变原生 C 结构。
+        bool meanFieldsPresent = true;
+        bool foregroundMeanValid = true;
+        bool backgroundMeanValid = true;
+        bool medianFieldsPresent = false;
+        bool withMedian = false;
+        std::optional<double> foregroundMedian;
+        std::optional<double> backgroundMedian;
+
+        // 2026-10-09：关闭统计后的缺失键不能当作已有默认值；分别保存存在性和数值有效性，null 不转0。
+        void ReadStatistics(const json& source) {
+            meanFieldsPresent = source.contains("with_mean");
+            withMean = meanFieldsPresent && source.at("with_mean").get<bool>();
+            foregroundMeanValid = source.contains("foreground_mean") && source.at("foreground_mean").is_number();
+            backgroundMeanValid = source.contains("background_mean") && source.at("background_mean").is_number();
+            foregroundMean = foregroundMeanValid ? source.at("foreground_mean").get<double>() : std::numeric_limits<double>::quiet_NaN();
+            backgroundMean = backgroundMeanValid ? source.at("background_mean").get<double>() : std::numeric_limits<double>::quiet_NaN();
+            medianFieldsPresent = source.contains("with_median");
+            withMedian = medianFieldsPresent && source.at("with_median").get<bool>();
+            foregroundMedian = source.contains("foreground_median") && source.at("foreground_median").is_number()
+                ? std::optional<double>(source.at("foreground_median").get<double>()) : std::nullopt;
+            backgroundMedian = source.contains("background_median") && source.at("background_median").is_number()
+                ? std::optional<double>(source.at("background_median").get<double>()) : std::nullopt;
+        }
+
+        void WriteStatistics(json& target) const {
+            for (const char* key : { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
+                target.erase(key);
+            if (meanFieldsPresent) {
+                target["with_mean"] = withMean;
+                target["foreground_mean"] = foregroundMeanValid ? json(foregroundMean) : json(nullptr);
+                target["background_mean"] = backgroundMeanValid ? json(backgroundMean) : json(nullptr);
+            }
+            if (medianFieldsPresent) {
+                target["with_median"] = withMedian;
+                target["foreground_median"] = foregroundMedian ? json(*foregroundMedian) : json(nullptr);
+                target["background_median"] = backgroundMedian ? json(*backgroundMedian) : json(nullptr);
+            }
+        }
 
         ObjectResult(int id, const std::string& name, float s, float a,
             const std::vector<double>& b, bool wm, const cv::Mat& m,

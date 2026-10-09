@@ -38,7 +38,6 @@ enum ExitCode {
 struct InferOptions {
     double threshold = 0.5;
     bool withMask = true;
-    bool calcMean = false;
 };
 
 struct StableObjectResult {
@@ -122,7 +121,7 @@ void printHelp() {
         << "  list-models\n"
         << "  list-sdk-models\n"
         << "  model-info <名称>\n"
-        << "  infer <名称> <图片路径> [--threshold F] [--with-mask true|false] [--calc-mean true|false]\n"
+        << "  infer <名称> <图片路径> [--threshold F] [--with-mask true|false]\n"
         << "  benchmark <名称> <图片路径> [--threads N] [--runs N]\n"
         << "  free-model <名称>\n"
         << "  free-all-models\n\n"
@@ -223,7 +222,6 @@ std::string makeParamsJson(const InferOptions& options) {
     stream << std::setprecision(8)
         << "{\"threshold\":" << options.threshold
         << ",\"with_mask\":" << (options.withMask ? "true" : "false")
-        << ",\"calc_mean\":" << (options.calcMean ? "true" : "false")
         << "}";
     return stream.str();
 }
@@ -277,10 +275,15 @@ bool nearlyEqual(double left, double right, double tolerance) {
     return std::fabs(left - right) <= tolerance;
 }
 
+// 2026-10-09：全前景/全背景的空侧均值为NaN，直接差值比较会把稳定结果判为变化；统计值单独比较空态，不能等同于0。
 bool compareStableSummary(
     const StableResultSummary& baseline,
     const StableResultSummary& current,
     std::string& error) {
+    const auto sameMean = [](double left, double right) {
+        if (std::isnan(left) || std::isnan(right)) return std::isnan(left) && std::isnan(right);
+        return std::isfinite(left) && std::isfinite(right) && nearlyEqual(left, right, 0.000001);
+    };
     if (baseline.samples.size() != current.samples.size()) {
         error = "样本数量变化，基线=" + std::to_string(baseline.samples.size()) +
             "，当前=" + std::to_string(current.samples.size());
@@ -336,8 +339,8 @@ bool compareStableSummary(
                 return false;
             }
             if (expected.withMean &&
-                (!nearlyEqual(expected.foregroundMean, actual.foregroundMean, 0.000001) ||
-                 !nearlyEqual(expected.backgroundMean, actual.backgroundMean, 0.000001))) {
+                (!sameMean(expected.foregroundMean, actual.foregroundMean) ||
+                 !sameMean(expected.backgroundMean, actual.backgroundMean))) {
                 error = location + "的均值变化";
                 return false;
             }
@@ -526,11 +529,6 @@ private:
             } else if (args[i] == L"--with-mask") {
                 if (!parseBool(args[i + 1], options.withMask)) {
                     std::cerr << "错误：--with-mask 必须是 true 或 false。\n";
-                    return ExitCommandError;
-                }
-            } else if (args[i] == L"--calc-mean") {
-                if (!parseBool(args[i + 1], options.calcMean)) {
-                    std::cerr << "错误：--calc-mean 必须是 true 或 false。\n";
                     return ExitCommandError;
                 }
             } else {
@@ -813,9 +811,32 @@ bool splitCommands(
 
 }
 
+int runMeanNullComparisonSelfTest() {
+    const double missing = std::numeric_limits<double>::quiet_NaN();
+    for (bool emptyForeground : {false, true}) {
+        StableObjectResult object;
+        object.withMean = true;
+        object.foregroundMean = emptyForeground ? missing : 7;
+        object.backgroundMean = emptyForeground ? 7 : missing;
+        StableResultSummary baseline;
+        baseline.samples = {{object}};
+        StableResultSummary current = baseline;
+        std::string error;
+        if (!compareStableSummary(baseline, current, error)) return ExitBenchmarkError;
+        if (emptyForeground) current.samples[0][0].foregroundMean = 0;
+        else current.samples[0][0].backgroundMean = 0;
+        if (compareStableSummary(baseline, current, error)) return ExitBenchmarkError;
+        if (compareStableSummary(current, baseline, error)) return ExitBenchmarkError;
+    }
+    std::cout << "全前景、全背景及空值不等于0的比较自测通过\n";
+    return ExitSuccess;
+}
+
 int wmain(int argc, wchar_t* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+
+    if (argc == 2 && std::wstring(argv[1]) == L"mean-null-comparison-selftest") return runMeanNullComparisonSelfTest();
 
     if (argc <= 1) {
         printHelp();

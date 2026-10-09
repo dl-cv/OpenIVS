@@ -45,6 +45,8 @@ FLOAT_TOLERANCES = {
     "angle": 1e-3,
     "foreground_mean": 1e-6,
     "background_mean": 1e-6,
+    "foreground_median": 1e-6,
+    "background_median": 1e-6,
 }
 FLOAT_RELATIVE_TOLERANCE = 1e-6
 
@@ -464,8 +466,7 @@ def normalize_prediction_object(value):
 
     with_bbox = bool(value.get("with_bbox", False))
     with_angle = bool(value.get("with_angle", False))
-    with_mean = bool(value.get("with_mean", False))
-    return {
+    result = {
         "category_id": int(value.get("category_id", 0)),
         "category_name": str(value.get("category_name", "")),
         "score": normalize_number(value.get("score", 0.0), "score"),
@@ -479,18 +480,87 @@ def normalize_prediction_object(value):
             if with_angle
             else -100.0
         ),
-        "with_mean": with_mean,
-        "foreground_mean": (
-            normalize_number(value.get("foreground_mean", 0.0), "foreground_mean")
-            if with_mean
-            else 0.0
-        ),
-        "background_mean": (
-            normalize_number(value.get("background_mean", 0.0), "background_mean")
-            if with_mean
-            else 0.0
-        ),
     }
+    for kind in ("mean", "median"):
+        flag = f"with_{kind}"
+        if flag not in value:
+            continue
+        result[flag] = bool(value[flag])
+        for side in ("foreground", "background"):
+            key = f"{side}_{kind}"
+            number = value[key]
+            result[key] = None if number is None else normalize_number(number, key)
+    return result
+
+
+def test_statistics_json_presence_and_null():
+    disabled = normalize_prediction_object({"score": 0.9})
+    assert all(key not in disabled for key in (
+        "with_mean", "foreground_mean", "background_mean",
+        "with_median", "foreground_median", "background_median"))
+    fields = {"with_mean": True, "foreground_mean": 12.5, "background_mean": None,
+              "with_median": True, "foreground_median": 10.0, "background_median": None}
+    actual = normalize_prediction_object({"score": 0.9, **fields})
+    assert {key: actual[key] for key in fields} == fields
+    assert json.loads(json.dumps(actual))["background_median"] is None
+    empty = normalize_prediction_object({"score": 0.9, "with_mean": False,
+        "foreground_mean": None, "background_mean": None, "with_median": False,
+        "foreground_median": None, "background_median": None})
+    assert empty["with_mean"] is False and empty["with_median"] is False
+    assert empty["foreground_mean"] is None and empty["foreground_median"] is None
+    legacy = normalize_prediction_object({"score": 0.9, "with_mean": False,
+        "foreground_mean": 0.0, "background_mean": 0.0})
+    assert legacy["foreground_mean"] == 0.0 and "with_median" not in legacy
+
+
+def test_c_statistics_projection_keeps_json_median():
+    c_fields = {"score": 0.9, "with_mean": True, "foreground_mean": None, "background_mean": 8.0}
+    json_fields = {**c_fields, "with_median": True, "foreground_median": None, "background_median": 7.0}
+    left = [normalize_sample([c_fields])]
+    right = [normalize_sample([json_fields])]
+    assert compare_predictions(left, right) == []
+    assert right[0][0]["background_median"] == 7.0
+    wrong = [normalize_sample([{**json_fields, "foreground_mean": 0.0}])]
+    assert compare_predictions(left, wrong)
+    assert compare_predictions(left, [normalize_sample([{"score": 0.9}])])
+    assert compare_predictions([normalize_sample([{"score": 0.9, "with_mean": False,
+        "foreground_mean": None, "background_mean": None}])], [normalize_sample([{"score": 0.9}])]) == []
+
+
+def test_statistics_writers_clear_reused_targets_before_writing():
+    root = Path(__file__).resolve().parents[2]
+    fields = ("with_mean", "foreground_mean", "background_mean",
+              "with_median", "foreground_median", "background_median")
+    for path, signature, remove, condition in (
+        ("DlcvCsharpApi/DataTypes.cs", "public void WriteStatistics(JObject target)",
+         "target.Remove(key)", "if (MeanFieldsPresent)"),
+        ("dlcv_infer_cpp/dlcv_infer.h", "void WriteStatistics(json& target) const",
+         "target.erase(key)", "if (meanFieldsPresent)"),
+    ):
+        text = (root / path).read_text(encoding="utf-8-sig")
+        writer = text[text.index(signature):]
+        cleanup = writer[:writer.index(condition)]
+        assert remove in cleanup, path
+        for field in fields:
+            assert f'"{field}"' in cleanup, (path, field)
+        assert "target.Clear(" not in cleanup and "target.clear(" not in cleanup
+
+
+def test_c_structured_nan_means_are_not_zero():
+    objects = (DlcvCObjectResult * 1)()
+    objects[0].score = 0.9
+    objects[0].with_mean = False
+    objects[0].foreground_mean = math.nan
+    objects[0].background_mean = math.nan
+    samples = (DlcvCSampleResult * 1)()
+    samples[0].n = 1
+    samples[0].results = objects
+    result = DlcvCResult()
+    result.n = 1
+    result.sample_results = samples
+    fields = copy_structured_result(result)[0][0]
+    assert fields["foreground_mean"] is None and fields["background_mean"] is None
+    assert "with_median" not in fields
 
 
 def prediction_sort_key(value):
@@ -502,7 +572,7 @@ def prediction_sort_key(value):
         round(value["score"], 6),
         value["with_angle"],
         round(value["angle"], 6),
-        value["with_mean"],
+        bool(value.get("with_mean")),
     )
 
 
@@ -546,8 +616,8 @@ def copy_structured_result(result):
                     "with_angle": bool(value.with_angle),
                     "angle": float(value.angle),
                     "with_mean": bool(value.with_mean),
-                    "foreground_mean": float(value.foreground_mean),
-                    "background_mean": float(value.background_mean),
+                    "foreground_mean": float(value.foreground_mean) if not math.isnan(value.foreground_mean) else None,
+                    "background_mean": float(value.background_mean) if not math.isnan(value.background_mean) else None,
                 }
             )
         samples.append(normalize_sample(objects))
@@ -587,14 +657,11 @@ def compare_predictions(structured_samples, json_samples):
         "with_bbox",
         "with_mask",
         "with_angle",
-        "with_mean",
     )
     number_fields = (
         "score",
         "area",
         "angle",
-        "foreground_mean",
-        "background_mean",
     )
     for sample_index, (structured, json_values) in enumerate(
         zip(structured_samples, json_samples)
@@ -626,6 +693,21 @@ def compare_predictions(structured_samples, json_samples):
                         f"结构化={left[field_name]!r} JSON={right[field_name]!r} "
                         f"容差={FLOAT_TOLERANCES[field_name]}"
                     )
+            # C 结构只校验可表达的均值；完整统计保留在 JSON 结果中。
+            if "with_mean" in right:
+                if left.get("with_mean") != right["with_mean"]:
+                    differences.append(f"{prefix} with_mean 不一致")
+                for field_name in ("foreground_mean", "background_mean"):
+                    left_value, right_value = left.get(field_name), right[field_name]
+                    if left_value is None or right_value is None:
+                        equal = left_value is None and right_value is None
+                    else:
+                        equal = math.isclose(left_value, right_value, rel_tol=FLOAT_RELATIVE_TOLERANCE,
+                                             abs_tol=FLOAT_TOLERANCES[field_name])
+                    if not equal:
+                        differences.append(f"{prefix} {field_name} 不一致: 结构化={left_value!r} JSON={right_value!r}")
+            elif left.get("with_mean", False):
+                differences.append(f"{prefix} C 均值标志与 JSON 关闭选项不一致")
             for coordinate_index, (left_value, right_value) in enumerate(
                 zip(left["bbox"], right["bbox"])
             ):
@@ -751,7 +833,9 @@ def run_model(api, model_path, image_path, device_id, params):
         row["结果一致"] = not row["一致性差异"]
         if not row["结果一致"]:
             raise TestFailure("结果一致性", "; ".join(row["一致性差异"][:10]))
-        row["统一预测"] = structured_predictions
+        row["结构化C支持完整统计"] = False
+        row["完整统计一致"] = None
+        row["统一预测"] = json_predictions
     except TestFailure as exc:
         row["错误阶段"] = exc.stage
         row["错误"] = str(exc)
@@ -815,9 +899,6 @@ def build_parser():
     )
     parser.add_argument(
         "--with-mask", action="store_true", help="返回 mask，默认关闭"
-    )
-    parser.add_argument(
-        "--calc-mean", action="store_true", help="计算前景和背景均值，默认关闭"
     )
     parser.add_argument(
         "--image-map",
@@ -888,7 +969,6 @@ def main():
         {
             "threshold": args.threshold,
             "with_mask": args.with_mask,
-            "calc_mean": args.calc_mean,
             "batch_size": 1,
         },
         ensure_ascii=False,

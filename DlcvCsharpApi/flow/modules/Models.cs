@@ -300,7 +300,7 @@ namespace DlcvModules
 			var outResults = new JArray();
 			LoadModel();
 
-			// 入口阈值在最终结果层处理；calc_mean 显式传入时只影响本次推理。
+			// 入口阈值在最终结果层处理。
 			var p = BuildInferParams();
 			// 注意：with_mask 仅控制最终返回格式，不在这里传给子模型。
 			// 流程内部需要始终保留 mask_rle，否则 mask_to_rbox 等后处理节点会丢失结果。
@@ -446,12 +446,10 @@ namespace DlcvModules
 					["bbox"] = obj.Bbox != null ? JArray.FromObject(obj.Bbox) : null,
 					["with_bbox"] = obj.WithBbox,
 					["with_mask"] = obj.WithMask,
-					["with_mean"] = obj.WithMean,
-					["foreground_mean"] = obj.ForegroundMean,
-					["background_mean"] = obj.BackgroundMean,
 					["with_angle"] = obj.WithAngle,
 					["angle"] = obj.Angle
 				};
+				obj.WriteStatistics(o);
 				// 将 mask 以 RLE 的形式存储到 JSON（mask_rle），避免直接写入原始像素或多边形点集
 				if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
 				{
@@ -513,8 +511,6 @@ namespace DlcvModules
 			var p = new JObject();
 			TryAddParam(p, "threshold");
 			TryAddParam(p, "iou_threshold");
-			TryAddParam(p, "calc_mean");
-			TryOverrideInferParam(p, "calc_mean");
 			TryAddParam(p, "top_k");
 			TryAddParam(p, "return_polygon");
 			TryAddParam(p, "epsilon");
@@ -555,21 +551,6 @@ namespace DlcvModules
 				}
 				catch { }
 			}
-		}
-
-		private void TryOverrideInferParam(JObject p, string key)
-		{
-			if (Context == null) return;
-			try
-			{
-				var inferParams = Context.Get<JObject>("infer_params", null);
-				var value = inferParams != null ? inferParams[key] : null;
-				if (value != null && value.Type != JTokenType.Null)
-				{
-					p[key] = value.DeepClone();
-				}
-			}
-			catch { }
 		}
 	}
 

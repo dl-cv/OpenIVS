@@ -95,6 +95,11 @@ namespace DlcvCSharpTest
                     return RunModelChannelOrderSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "foreground-background-statistics-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ForegroundBackgroundStatisticsSelfTest.Run();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "flow-infer-params-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunFlowInferParamsSelfTest();
@@ -271,11 +276,6 @@ namespace DlcvCSharpTest
                     return RunWithMaskSelfTest();
                 }
 
-                if (args != null && args.Length >= 1 && string.Equals(args[0], "calc-mean-selftest", StringComparison.OrdinalIgnoreCase))
-                {
-                    return RunCalcMeanSelfTest();
-                }
-
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "us-lag-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunUsLagSelfTest();
@@ -402,7 +402,7 @@ namespace DlcvCSharpTest
                     new List<double> { 0.035134196281433105 },
                     1);
                 RequireCliThreshold(
-                    anomalyThresholdPassed && InvokeCliValidation(validationMethod, true, anomalyThresholdPassed, true),
+                    anomalyThresholdPassed && InvokeCliValidation(validationMethod, true, anomalyThresholdPassed),
                     "异常分数低于阈值时未通过验证");
 
                 bool classificationThresholdPassed = InvokeCliThresholdCheck(
@@ -414,11 +414,12 @@ namespace DlcvCSharpTest
                     new List<double> { 0.1 },
                     1);
                 RequireCliThreshold(
-                    !classificationThresholdPassed && !InvokeCliValidation(validationMethod, true, classificationThresholdPassed, true),
+                    !classificationThresholdPassed && !InvokeCliValidation(validationMethod, true, classificationThresholdPassed),
                     "普通分类低分未判定为失败");
 
                 object structuredSummary = Activator.CreateInstance(pathSummaryType);
                 object jsonSummary = Activator.CreateInstance(pathSummaryType);
+                // 2026-10-09：统计摘要新增中值参数，旧反射实参不足会使CLI异常检查无法执行；补齐未启用中值的三个null。
                 addSummaryItemMethod.Invoke(structuredSummary, new object[]
                 {
                     0.035134196281433105,
@@ -427,6 +428,9 @@ namespace DlcvCSharpTest
                     false,
                     0.0,
                     0.0,
+                    null,
+                    null,
+                    null,
                     0.5
                 });
                 addSummaryItemMethod.Invoke(jsonSummary, new object[]
@@ -437,6 +441,9 @@ namespace DlcvCSharpTest
                     false,
                     0.0,
                     0.0,
+                    null,
+                    null,
+                    null,
                     0.5
                 });
                 bool mismatchConsistent = (bool)consistencyMethod.Invoke(
@@ -453,7 +460,7 @@ namespace DlcvCSharpTest
                 RequireCliThreshold(
                     !mismatchConsistent
                     && mismatchThresholdPassed
-                    && !InvokeCliValidation(validationMethod, mismatchConsistent, mismatchThresholdPassed, true),
+                    && !InvokeCliValidation(validationMethod, mismatchConsistent, mismatchThresholdPassed),
                     "两路结果不一致时未判定为失败");
 
                 bool nonFiniteThresholdPassed = InvokeCliThresholdCheck(
@@ -969,15 +976,6 @@ namespace DlcvCSharpTest
                         RgbArgb(198, 40, 40),
                         RgbArgb(255, 255, 255));
 
-                    CheckBox calcMeanCheckBox = RequireWindowCheckBox(window);
-                    RequireWinFormsSelfTest(calcMeanCheckBox.ThreeState, "checkBox_calc_mean 应为标准三态 CheckBox。");
-                    RequireWinFormsSelfTest(
-                        calcMeanCheckBox.CheckState == CheckState.Indeterminate,
-                        "checkBox_calc_mean 默认应为 Indeterminate。");
-                    RequireWinFormsSelfTest(
-                        string.Equals(calcMeanCheckBox.Text, "计算均值：默认", StringComparison.Ordinal),
-                        "checkBox_calc_mean 默认文本异常: " + calcMeanCheckBox.Text);
-
                     var deviceComboBox = RequireWindowControl(window, "comboBox1") as ComboBox;
                     RequireWinFormsSelfTest(deviceComboBox != null, "comboBox1 不是 ComboBox。");
                     RequireWinFormsSelfTest(deviceComboBox.Items.Count == 0, "未显示窗口时设备列表应保持为空（设备线程未启用）。");
@@ -989,25 +987,12 @@ namespace DlcvCSharpTest
                     RequireWindowNumericUpDown(window, "numericUpDown_threshold", 0m, 1m, 0.5m, 2, 0.05m);
                     RequireWindowNumericUpDown(window, "numericUpDown_num_thread", 1m, 32m, 1m, 0, 1m);
 
-                    // 三态计算均值映射：Indeterminate 不写 calc_mean，Checked 写 true，Unchecked 写 false。
-                    MethodInfo overrideMethod = mainWindowType.GetMethod("AddCalcMeanOverride", BindingFlags.NonPublic | BindingFlags.Instance);
-                    RequireWinFormsSelfTest(overrideMethod != null, "未找到 MainWindow.AddCalcMeanOverride 方法。");
-                    RequireWinFormsSelfTest(
-                        !ApplyCalcMeanOverride(overrideMethod, window, CheckState.Indeterminate).ContainsKey("calc_mean"),
-                        "三态默认 Indeterminate 不应写入 calc_mean。");
-                    RequireWinFormsSelfTest(
-                        ApplyCalcMeanOverride(overrideMethod, window, CheckState.Checked).Value<bool>("calc_mean") == true,
-                        "Checked 状态应映射 calc_mean=true。");
-                    RequireWinFormsSelfTest(
-                        ApplyCalcMeanOverride(overrideMethod, window, CheckState.Unchecked).Value<bool>("calc_mean") == false,
-                        "Unchecked 状态应映射 calc_mean=false。");
-
                     // 环境按钮可操作：按钮默认可用且点击处理方法保留即可，不执行真实环境检查。
                     RequireWinFormsSelfTest(
                         mainWindowType.GetMethod("button_check_environment_Click", BindingFlags.NonPublic | BindingFlags.Instance) != null,
                         "未找到环境按钮点击处理 button_check_environment_Click。");
 
-                    // 最小窗口布局：创建句柄但不显示，threshold 与 calc_mean 应完整位于父容器 ClientRectangle 内。
+                    // 最小窗口布局：创建句柄但不显示，threshold 应完整位于父容器 ClientRectangle 内。
                     RequireWinFormsSelfTest(window.Handle != IntPtr.Zero, "MainWindow 句柄创建失败。");
                     RequireWinFormsSelfTest(!window.Visible, "创建句柄后窗口仍不应显示。");
                     RequireWinFormsSelfTest(
@@ -1017,7 +1002,6 @@ namespace DlcvCSharpTest
                     window.Size = window.MinimumSize;
                     window.PerformLayout();
                     RequireControlInsideParent(window, "numericUpDown_threshold");
-                    RequireControlInsideParent(window, "checkBox_calc_mean");
 
                     // 尺寸计算方法：显式按 96/144 DPI 更新最小窗口与目标工作区上限，不显示窗口。
                     RequireWindowSizeLimits(window, 96, 0, 0, 1920, 1040, 1040, 500);
@@ -1172,29 +1156,12 @@ namespace DlcvCSharpTest
             return button;
         }
 
-        private static CheckBox RequireWindowCheckBox(Form window)
-        {
-            const string fieldName = "checkBox_calc_mean";
-            var checkBox = RequireWindowControl(window, fieldName) as CheckBox;
-            RequireWinFormsSelfTest(checkBox != null, "MainWindow 控件字段 " + fieldName + " 不是 CheckBox。");
-            return checkBox;
-        }
-
         private static void RequireWindowDeviceMapEmpty(Form window)
         {
             FieldInfo mapField = window.GetType().GetField("deviceNameToIdMap", BindingFlags.NonPublic | BindingFlags.Instance);
             RequireWinFormsSelfTest(mapField != null, "MainWindow 缺少 deviceNameToIdMap 字段。");
             var map = mapField.GetValue(window) as System.Collections.IDictionary;
             RequireWinFormsSelfTest(map != null && map.Count == 0, "未显示窗口时设备映射应保持为空（设备线程未启用）。");
-        }
-
-        private static JObject ApplyCalcMeanOverride(MethodInfo method, Form window, CheckState state)
-        {
-            CheckBox checkBox = RequireWindowCheckBox(window);
-            checkBox.CheckState = state;
-            var data = new JObject();
-            method.Invoke(window, new object[] { data });
-            return data;
         }
 
         private static bool InvokeCliThresholdCheck(
@@ -1220,14 +1187,12 @@ namespace DlcvCSharpTest
         private static bool InvokeCliValidation(
             MethodInfo method,
             bool consistent,
-            bool thresholdCheckPassed,
-            bool meanCheckPassed)
+            bool thresholdCheckPassed)
         {
             return (bool)method.Invoke(null, new object[]
             {
                 consistent,
-                thresholdCheckPassed,
-                meanCheckPassed
+                thresholdCheckPassed
             });
         }
 
@@ -1281,6 +1246,7 @@ namespace DlcvCSharpTest
             {
                 new UnifiedTestCase("模型通道顺序", RunModelChannelOrderSelfTest),
                 new UnifiedTestCase("流程推理参数类型", RunFlowInferParamsSelfTest),
+                new UnifiedTestCase("前景背景均值与中值统计", ForegroundBackgroundStatisticsSelfTest.Run),
                 new UnifiedTestCase("DVS 同名成员内容", DvsArchiveDuplicateSelfTest.Run),
                 new UnifiedTestCase("过小模型文件拒绝", RunUndersizedModelSelfTest),
                 new UnifiedTestCase("掩膜旋转框", RunMaskToRBoxSelfTest),
@@ -1298,7 +1264,6 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("矩形图像矫正", RunRectImageCorrectionSelfTest),
                 new UnifiedTestCase("Demo2路由规则", RunDemo2RouteRuleSelfTest),
                 new UnifiedTestCase("掩膜输出开关", RunWithMaskSelfTest),
-                new UnifiedTestCase("均值计算", RunCalcMeanSelfTest),
                 new UnifiedTestCase("共享 index 审查检查", () => RunSharedIndexReviewSelfTest(new[] { "shared-index-review-selftest" })),
                 new UnifiedTestCase("共享 index 纯规则与查询选择", RunSharedIndexRouteSelfTest),
                 new UnifiedTestCase("C++ 共享规则与正式 C ABI", RunNativeRulesAndCApiRegressionSelfTest),
@@ -2573,11 +2538,11 @@ namespace DlcvCSharpTest
             Console.WriteLine("以下命令可用 --then 串联，模型名称在本进程内有效：");
             Console.WriteLine("  load-model <名称> <模型路径> [--device N] [--rpc true|false] [--replace true|false]");
             Console.WriteLine("  list-models | all-models | model-info <名称> | dvs-model-info <名称>");
-            Console.WriteLine("  infer <名称> <图片> [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
-            Console.WriteLine("  infer-json <名称> <图片> [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
-            Console.WriteLine("  infer-batch <名称> <图片> [--batch-size N] [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
-            Console.WriteLine("  benchmark <名称> <图片> [--batch-size N] [--warmup N] [--runs N] [--threads N] [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
-            Console.WriteLine("  consistency-test <名称> <图片> [--batch-size N] [--warmup N] [--runs N] [--threads N] [--threshold F] [--with-mask true|false] [--calc-mean default|true|false]");
+            Console.WriteLine("  infer <名称> <图片> [--threshold F] [--with-mask true|false]");
+            Console.WriteLine("  infer-json <名称> <图片> [--threshold F] [--with-mask true|false]");
+            Console.WriteLine("  infer-batch <名称> <图片> [--batch-size N] [--threshold F] [--with-mask true|false]");
+            Console.WriteLine("  benchmark <名称> <图片> [--batch-size N] [--warmup N] [--runs N] [--threads N] [--threshold F] [--with-mask true|false]");
+            Console.WriteLine("  consistency-test <名称> <图片> [--batch-size N] [--warmup N] [--runs N] [--threads N] [--threshold F] [--with-mask true|false]");
             Console.WriteLine("  free-model <名称> | free-all-models | device-info | gpu-info | dog-info | keep-max-clock | help");
         }
 
@@ -2717,8 +2682,8 @@ namespace DlcvCSharpTest
             string command = kind == WorkflowInferKind.Structured ? "infer" : kind == WorkflowInferKind.Json ? "infer-json" : "infer-batch";
             RequirePositionCount(args, command, 2);
             ValidateOptions(args, kind == WorkflowInferKind.Batch
-                ? new[] { "batch-size", "threshold", "with-mask", "calc-mean" }
-                : new[] { "threshold", "with-mask", "calc-mean" });
+                ? new[] { "batch-size", "threshold", "with-mask" }
+                : new[] { "threshold", "with-mask" });
             WorkflowModelEntry entry = context.Get(args.Positionals[0]);
             int batchSize = kind == WorkflowInferKind.Batch ? args.GetInt("batch-size", 1, true) : 1;
             JObject parameters = args.CreateInferParameters(batchSize);
@@ -3000,7 +2965,7 @@ namespace DlcvCSharpTest
         private static void RunWorkflowBenchmark(WorkflowContext context, WorkflowArguments args)
         {
             RequirePositionCount(args, "benchmark", 2);
-            ValidateOptions(args, "batch-size", "warmup", "runs", "threads", "threshold", "with-mask", "calc-mean");
+            ValidateOptions(args, "batch-size", "warmup", "runs", "threads", "threshold", "with-mask");
             WorkflowModelEntry entry = context.Get(args.Positionals[0]);
             int batchSize = args.GetInt("batch-size", 1, true);
             int warmup = args.GetInt("warmup", 1, false);
@@ -3137,7 +3102,7 @@ namespace DlcvCSharpTest
         private static void RunWorkflowConsistencyTest(WorkflowContext context, WorkflowArguments args)
         {
             RequirePositionCount(args, "consistency-test", 2);
-            ValidateOptions(args, "batch-size", "warmup", "runs", "threads", "threshold", "with-mask", "calc-mean");
+            ValidateOptions(args, "batch-size", "warmup", "runs", "threads", "threshold", "with-mask");
             WorkflowModelEntry entry = context.Get(args.Positionals[0]);
             int batchSize = args.GetInt("batch-size", 1, true);
             int warmup = args.GetInt("warmup", 1, false);
@@ -3384,9 +3349,12 @@ namespace DlcvCSharpTest
                 {
                     var item = sample.Results[objectIndex];
                     string bbox = item.Bbox == null ? string.Empty : string.Join(", ", item.Bbox.Select(x => x.ToString("F3", CultureInfo.InvariantCulture)));
+                    var statistics = new JObject();
+                    item.WriteStatistics(statistics);
+                    string statisticsText = statistics.HasValues ? ", statistics=" + statistics.ToString(Formatting.None) : string.Empty;
                     Console.WriteLine(string.Format(
                         CultureInfo.InvariantCulture,
-                        "  目标 {0}: category_id={1}, category_name={2}, score={3:F4}, area={4:F3}, bbox=[{5}], with_bbox={6}, with_angle={7}, angle={8:F4}, with_mask={9}, with_mean={10}",
+                        "  目标 {0}: category_id={1}, category_name={2}, score={3:F4}, area={4:F3}, bbox=[{5}], with_bbox={6}, with_angle={7}, angle={8:F4}, with_mask={9}{10}",
                         objectIndex,
                         item.CategoryId,
                         item.CategoryName ?? string.Empty,
@@ -3397,7 +3365,7 @@ namespace DlcvCSharpTest
                         item.WithAngle,
                         item.Angle,
                         item.WithMask,
-                        item.WithMean));
+                        statisticsText));
                 }
             }
         }
@@ -3628,16 +3596,6 @@ namespace DlcvCSharpTest
                     ["with_mask"] = GetBool("with-mask", true),
                     ["batch_size"] = batchSize
                 };
-                string calcMean;
-                if (Options.TryGetValue("calc-mean", out calcMean))
-                {
-                    if (string.Equals(calcMean, "true", StringComparison.OrdinalIgnoreCase)) result["calc_mean"] = true;
-                    else if (string.Equals(calcMean, "false", StringComparison.OrdinalIgnoreCase)) result["calc_mean"] = false;
-                    else if (!string.Equals(calcMean, "default", StringComparison.OrdinalIgnoreCase))
-                    {
-                        throw new WorkflowParameterException("--calc-mean 必须为 default、true 或 false");
-                    }
-                }
                 return result;
             }
         }
@@ -9286,7 +9244,7 @@ namespace DlcvCSharpTest
                     {
                         foreach (var item in sample.Results)
                         {
-                            ((JArray)normalizedSample["results"]).Add(new JObject
+                            var normalizedObject = new JObject
                             {
                                 ["category_id"] = item.CategoryId,
                                 ["category_name"] = item.CategoryName ?? string.Empty,
@@ -9297,12 +9255,11 @@ namespace DlcvCSharpTest
                                 ["with_bbox"] = item.WithBbox,
                                 ["with_angle"] = item.WithAngle,
                                 ["angle"] = item.Angle,
-                                ["with_mean"] = item.WithMean,
-                                ["foreground_mean"] = item.ForegroundMean,
-                                ["background_mean"] = item.BackgroundMean,
                                 ["extra_info"] = CanonicalizeSignatureToken(item.ExtraInfo),
                                 ["mask"] = BuildMaskSignature(item.Mask)
-                            });
+                            };
+                            item.WriteStatistics(normalizedObject);
+                            ((JArray)normalizedSample["results"]).Add(normalizedObject);
                         }
                     }
                     samples.Add(normalizedSample);
@@ -9665,96 +9622,6 @@ namespace DlcvCSharpTest
                 try { if (modelA != null) modelA.Dispose(); } catch { }
                 try { if (modelB != null) modelB.Dispose(); } catch { }
                 ForceGc();
-            }
-        }
-
-        private static int RunCalcMeanSelfTest()
-        {
-            try
-            {
-                Type resultType = typeof(Utils.CSharpObjectResult);
-                Type[] legacyConstructorTypes =
-                {
-                    typeof(int), typeof(string), typeof(float), typeof(float),
-                    typeof(List<double>), typeof(bool), typeof(Mat), typeof(bool),
-                    typeof(bool), typeof(float), typeof(JObject)
-                };
-                if (resultType.GetConstructor(legacyConstructorTypes) == null)
-                {
-                    throw new InvalidOperationException("未保留原有 CSharpObjectResult 构造函数签名。");
-                }
-
-                Type[] completeConstructorTypes =
-                {
-                    typeof(int), typeof(string), typeof(float), typeof(float),
-                    typeof(List<double>), typeof(bool), typeof(Mat), typeof(bool),
-                    typeof(bool), typeof(float), typeof(JObject), typeof(bool),
-                    typeof(double), typeof(double)
-                };
-                if (resultType.GetConstructor(completeConstructorTypes) == null)
-                {
-                    throw new InvalidOperationException("缺少包含均值字段的完整构造函数签名。");
-                }
-
-                var defaultResult = new Utils.CSharpObjectResult(
-                    1, "默认均值", 0.9f, 1.0f,
-                    new List<double> { 1.0, 2.0, 3.0, 4.0 }, false, null);
-                if (defaultResult.WithMean || defaultResult.ForegroundMean != 0.0 || defaultResult.BackgroundMean != 0.0)
-                {
-                    throw new InvalidOperationException("默认均值字段不符合 false/0.0 语义。");
-                }
-
-                var resultWithMean = new Utils.CSharpObjectResult(
-                    2, "显式均值", 0.8f, 2.0f,
-                    new List<double> { 5.0, 6.0, 7.0, 8.0 }, false, null,
-                    false, false, -100f, null, true, 12.5, 34.75);
-                if (!resultWithMean.WithMean
-                    || Math.Abs(resultWithMean.ForegroundMean - 12.5) > 1e-12
-                    || Math.Abs(resultWithMean.BackgroundMean - 34.75) > 1e-12)
-                {
-                    throw new InvalidOperationException("显式均值字段映射错误。");
-                }
-
-                MethodInfo buildParamsMethod = typeof(DetModel).GetMethod(
-                    "BuildInferParams", BindingFlags.Instance | BindingFlags.NonPublic);
-                if (buildParamsMethod == null)
-                {
-                    throw new InvalidOperationException("未找到 Flow 均值参数处理方法。");
-                }
-
-                var context = new DlcvModules.ExecutionContext();
-                var model = new DetModel(
-                    1, "均值参数测试",
-                    new Dictionary<string, object> { ["calc_mean"] = true },
-                    context);
-
-                var nodeParams = (JObject)buildParamsMethod.Invoke(model, null);
-                if (nodeParams.Value<bool?>("calc_mean") != true)
-                {
-                    throw new InvalidOperationException("Flow 节点均值参数未生效。");
-                }
-
-                context.Set("infer_params", new JObject { ["calc_mean"] = false });
-                var overriddenParams = (JObject)buildParamsMethod.Invoke(model, null);
-                if (overriddenParams.Value<bool?>("calc_mean") != false)
-                {
-                    throw new InvalidOperationException("Flow 入口均值参数未覆盖节点值。");
-                }
-
-                context.Set("infer_params", new JObject());
-                var restoredParams = (JObject)buildParamsMethod.Invoke(model, null);
-                if (restoredParams.Value<bool?>("calc_mean") != true)
-                {
-                    throw new InvalidOperationException("Flow 节点均值参数未恢复。");
-                }
-
-                Console.WriteLine("calc_mean 自测通过");
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("calc_mean 自测失败: " + ex.Message);
-                return 1;
             }
         }
 

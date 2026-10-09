@@ -529,9 +529,10 @@ namespace DlcvModules
             {
                 item["area"] = detObj["area"];
             }
-            item["with_mean"] = detObj["with_mean"]?.Value<bool>() ?? false;
-            item["foreground_mean"] = detObj["foreground_mean"]?.Value<double>() ?? 0.0;
-            item["background_mean"] = detObj["background_mean"]?.Value<double>() ?? 0.0;
+            foreach (string key in new[] { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
+            {
+                if (detObj[key] != null) item[key] = detObj[key].DeepClone();
+            }
 
             var bboxLocal = detObj["bbox"] as JArray;
             bool isRot = bboxLocal != null && bboxLocal.Count == 5;

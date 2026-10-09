@@ -56,17 +56,16 @@
 
 ## 3. 默认固定模型回归用例
 
-- `测试无监督-v5_120_50_s.dvt` -> `1786969663716.jpg`
-- `猫狗-分类_120_50_s.dvt` -> `猫狗-狗.jpg`
-- `猫狗-分类_120_50_v.dvt` -> `猫狗-狗.jpg`
-- `气球-大模型_20260830_010011_120_50_s.dvt` -> `气球.jpg`
-- `气球-实例分割_120_50_s.dvt` -> `气球.jpg`
-- `气球-实例分割_120_50_v.dvt` -> `气球.jpg`
-- `气球-语义分割_120_50_s.dvt` -> `气球.jpg`
-- `手机屏幕-实例分割_120_50_s.dvt` -> `手机屏幕.jpg`
-- `引脚定位-目标检测_120_50_s.dvt` -> `引脚定位-目标检测.jpg`
-- `AOI-旋转框检测_120_50_s.dvt` -> `AOI-测试.jpg`
-- `OCR_120_50_s.dvt` -> `OCR-472.jpg`
+- `测试-无监督检测_PLUS_s.dvt` -> `1786969663716.jpg`
+- `猫狗-分类_PLUS_s.dvt` -> `猫狗-狗.jpg`
+- `猫狗-分类_PLUS_v.dvt` -> `猫狗-狗.jpg`
+- `气球-大模型_PLUS_s.dvt` -> `气球.jpg`
+- `气球-实例分割_PLUS_s.dvt` -> `气球.jpg`
+- `气球-语义分割_PLUS_s.dvt` -> `气球.jpg`
+- `手机屏幕-实例分割_PLUS_s.dvt` -> `手机屏幕.jpg`
+- `引脚定位-目标检测_PLUS_s.dvt` -> `引脚定位-目标检测.jpg`
+- `AOI-旋转框检测_PLUS_s.dvt` -> `AOI-测试.jpg`
+- `文字-OCR_PLUS_s.dvt` -> `OCR-472.jpg`
 
 模型与图片从 `Y:\测试模型` 读取。模型或图片缺失时用例失败。
 
@@ -137,12 +136,12 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 | `all-models` | 无参数；C# 输出 `Utils.GetAllModels()` JSON，不额外加载其他推理模块 |
 | `model-info` | `<名称>` |
 | `dvs-model-info` | `<名称>` |
-| `infer` | `<名称> <图片>`；支持 `--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
-| `infer-json` | `<名称> <图片>`；支持 `--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
-| `infer-batch` | `<名称> <图片>`；支持 `--batch-size N`、`--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
-| `benchmark` | `<名称> <图片>`；支持 `--batch-size N`、`--warmup N`、`--runs N`、`--threads N`、`--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
-| `consistency-test`（C#） | `<名称> <图片>`；支持 `--batch-size N`、`--warmup N`、`--runs N`、`--threads N`、`--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
-| `consistency-test`（C++） | `<名称> <图片>`；支持 `--runs N`、`--threads N`、`--threshold F`、`--with-mask true\|false`、`--calc-mean default\|true\|false` |
+| `infer` | `<名称> <图片>`；支持 `--threshold F`、`--with-mask true\|false` |
+| `infer-json` | `<名称> <图片>`；支持 `--threshold F`、`--with-mask true\|false` |
+| `infer-batch` | `<名称> <图片>`；支持 `--batch-size N`、`--threshold F`、`--with-mask true\|false` |
+| `benchmark` | `<名称> <图片>`；支持 `--batch-size N`、`--warmup N`、`--runs N`、`--threads N`、`--threshold F`、`--with-mask true\|false` |
+| `consistency-test`（C#） | `<名称> <图片>`；支持 `--batch-size N`、`--warmup N`、`--runs N`、`--threads N`、`--threshold F`、`--with-mask true\|false` |
+| `consistency-test`（C++） | `<名称> <图片>`；支持 `--runs N`、`--threads N`、`--threshold F`、`--with-mask true\|false` |
 | `free-model` | `<名称>` |
 | `free-all-models` | 无参数 |
 | `device-info`、`gpu-info`、`dog-info`、`keep-max-clock` | 无参数 |
@@ -199,7 +198,6 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `dvs-rgb-selftest <modelPath> <imagePath>`
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
-  - `calc-mean-selftest`
   - `category-count-check-selftest`
   - `shared-index-csharp-selftest <model.dvo> <flow.dvst> <image> [deviceId]`
   - `shared-index-review-selftest [model.dvo] [flow.dvst]`
@@ -210,7 +208,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `winforms-mainwindow-selftest`
 - `cli-anomaly-threshold-selftest` 不读取模型和图片，检查 CLI 对异常分数、普通分类低分、两路结果不一致及非有限分数的验证结果；运行前需先构建 `DlcvDemo.csproj`。
 - `ui-test-options-selftest` 反射调用 `DlcvDemo.UiTestOptions.TryParse`，覆盖 `--screenshot` 的 `.png`/`.PNG` 与省略场景，非 `.png` 后缀拒绝，`--screenshot` 与 `--model`、`--image`、`--output`、`--output.tmp` 相同的输出碰撞拒绝，以及 `--output` 的中间 `.tmp` 路径与 `--model`、`--image` 重合拒绝；运行前需先构建 `DlcvDemo.csproj`。
-- `winforms-mainwindow-selftest` 在 STA 线程内反射创建真实 `DlcvDemo.MainWindow`（不显示、不启用设备线程），校验 Form 类型、控件 Name/文本与默认 Enabled、三个 NumericUpDown 的范围与默认值及 threshold 步进 `0.05`、原生 Flat 按钮蓝/灰/红配色及 MouseOver/MouseDown 差异、三态计算均值 Indeterminate/true/false 映射，并将窗口设为 MinimumSize 后校验 threshold 与 calc_mean 完整位于父容器 ClientRectangle 内；运行前需先构建 `DlcvDemo.csproj`。
+- `winforms-mainwindow-selftest` 在 STA 线程内反射创建真实 `DlcvDemo.MainWindow`（不显示、不启用设备线程），校验 Form 类型、控件 Name/文本与默认 Enabled、三个 NumericUpDown 的范围与默认值及 threshold 步进 `0.05`、原生 Flat 按钮蓝/灰/红配色及 MouseOver/MouseDown 差异，并将窗口设为 MinimumSize 后校验 threshold 完整位于父容器 ClientRectangle 内；运行前需先构建 `DlcvDemo.csproj`。
 - `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-model-info <model>`，构造指定模型并把 `GetModelInfo` 返回的完整 JSON 写入标准输出。
 - `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-dvs-model-info <model>`，构造指定模型并把 `GetDvsModelInfo` 返回的完整 JSON 写入标准输出；普通模型不支持该接口时，异常写入标准错误并返回非零状态。
 - `get-model-info` 接收单个普通模型或流程模型路径；`get-dvs-model-info` 按 C# 公共接口支持范围接收 `.dvst`、`.dvso` 流程模型路径。命令不包含针对指定模型内容的预期值。
@@ -233,7 +231,6 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - 命令行使用宽字符参数接收中文路径，固定使用 `device_id=0`，不加载单独的预热模型，也不执行额外推理。
   - 流程模型加载期间保留已经加载成功的模型模块，流程对象取得模型池引用后再释放临时模块；每个不同的子模型只执行一次原生加载。
   - 成功返回 `0`，模型加载异常返回 `1`，参数数量错误返回 `2`。
-- `DlcvCSharpTest.exe calc-mean-selftest` 检查结果构造函数、均值字段，以及 Flow 节点默认值、入口显式覆盖和后续恢复。
 - `DlcvCSharpTest.exe shared-index-format-selftest` 保持 DVT、DVO、DVST 的既有推理比较范围，分别检查 C# 持有/C++ 借用、C++ 持有/C# 借用两种方向。DVSO 的索引共享、描述恢复与释放由混编工程的四格式回归检查。
 - `shared-index-csharp-selftest <普通模型> <DVSO流程> <图片> <设备编号>` 可单独验证 DVSO。正式加速器从 AOI DVSP 生成的 ONNX Runtime DVSO，在 CPU -1 与 GPU 0 下均通过双向共享及逐目标推理比较。同一加速配置生成的无 CAD DVSO 在 C++ 滑窗合并按端点取整并保持分组输出顺序后，CPU -1、GPU 0 的最终输出均为两种语言各 34 个目标，完整结果数组及顺序一致；CPU 双向共享推理检查通过。
 - `DlcvCSharpTest.exe shared-index-provider-model-selftest` 使用两种加密狗格式各自独立生成的普通模型，验证实际加载 DLL 的索引归属、双向读取和推理结果；两个模型作为各自独立的实际产品输入，不组成混合格式流程，也不以编号数值推导资源类型。
@@ -247,7 +244,6 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - `free-all-modules-selftest` 显式使用两个已加载推理模块，确认相同编号仍分别保留在各自模块快照中，并由 `Utils.FreeAllModels()` 清理全部模块。
 - DVS 使用与普通模型相同的非负 `model_index`。恢复时先调用 `dlcv_bind_index`，再读取 `dlcv_get_dvs_model` 描述并创建 C# 执行对象；失败和正常释放均使用普通 `dlcv_free_model` 配对。`GetModelInfo()` 保持普通模型兼容结构，`GetDvsModelInfo()` 返回完整 DVS 信息。
 - `dvsp-disabled-selftest` 检查 C# API 对 `.dvsp` 直接返回不支持错误。
-- `dlcv_infer_cpp_test.exe calc-mean-selftest` 检查旧版 `ObjectResult` 构造函数的默认均值、新版构造函数的显式均值字段，以及结构化 JSON 结果的均值解析和缺失字段默认值。
 
 说明：
 
@@ -257,6 +253,17 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - 统一回归的内存泄露专项在表格输出后自动执行并单独输出结果，仅对 1 个实例分割模型执行。独立命令 `model-load-free-memory-selftest` 用于较长循环和分段趋势核对。
 - `demo2-rgb-selftest` 会输出 `entry_rgb_signature`、`manual_rgb_signature` 与 `raw_bgr_signature`；当 `entry_rgb_signature == manual_rgb_signature` 且与 `raw_bgr_signature` 不同时，判定 Demo2 当前入口保持 RGB 数据流。
 - `flow-batch-selftest` 输出每个模型节点的输入数、batch 上限、底层调用次数与最大实际子批；存在多张二阶段输入且最大实际子批大于 1 时通过。
+
+### 6.2 前景背景统计自测
+
+```text
+DlcvCSharpTest.exe foreground-background-statistics-selftest
+dlcv_infer_cpp_test.exe foreground-background-statistics-selftest
+```
+
+以上为 C# 与 C++ 独立 Flow 统计节点的测试入口，不使用旧 `calc-mean-selftest` 作为新节点的验证结果。C# 22 组检查包括公共解析缺字段、原生默认值、中值及 null 往返，以及测试平台 `image/list` 和既有通道类型的实际节点分支路由；C++ 同样通过正式 `FlowGraphModel` 执行两组端口回归。构建后执行以上入口，并另运行 `dlcv_infer_cpp_test.exe object-mean-parsing-selftest` 检查缺字段状态。
+
+验收范围包括默认仅均值、严格布尔值、均值与中值四种组合、逐目标统计值更新、重复执行删除旧值、无 mask 或无采样时的状态、空前景或空背景的 `null`、全部通道共同参与标量统计、偶数样本的中值、RLE mask 与区域 mapping、source affine 逆映射后的原图采样、前置图像处理及缩放插值不替换统计值来源、mask 最近邻缩放与选区映射、4 元素 XYWH 框和 5 元素弧度旋转框、旋转框候选 `floor(max)+1` 与 mask 缩放 `floor/ceil` 分离，以及图像与结果其他属性不变。还需确认普通推理旧均值 JSON 为 `false/0.0/0.0`，C ABI 成员顺序与布局不变。预期语义见 `模块、流程与模型推理标准文档.md` 6.4.1；实际覆盖与结果须在构建运行后核验。
 
 ## 7. 文档表述规则
 

@@ -14,7 +14,6 @@ namespace DlcvDemo
         internal decimal Threshold { get; private set; } = 0.5m;
         internal bool HasThreshold { get; private set; }
         internal int DeviceId { get; private set; } = 0;
-        internal bool? CalcMean { get; private set; }
         internal bool InteractiveDialogs { get; private set; }
         internal string Language { get; private set; }
         internal string ResultView { get; private set; } = "summary";
@@ -80,14 +79,6 @@ namespace DlcvDemo
                             return false;
                         }
                         options.DeviceId = deviceId;
-                        break;
-                    case "--calc-mean":
-                        if (!bool.TryParse(value, out bool calcMean))
-                        {
-                            error = "--calc-mean 必须是 true 或 false。";
-                            return false;
-                        }
-                        options.CalcMean = calcMean;
                         break;
                     case "--interactive-dialogs":
                         if (!bool.TryParse(value, out bool interactiveDialogs))
@@ -217,7 +208,7 @@ namespace DlcvDemo
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");

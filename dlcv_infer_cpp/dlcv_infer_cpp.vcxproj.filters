@@ -38,6 +38,7 @@
     <ClCompile Include="flow\modules\SlidingModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
     <ClCompile Include="flow\modules\FeatureModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
     <ClCompile Include="flow\modules\PostProcessModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
+    <ClCompile Include="flow\modules\ForegroundBackgroundStatisticsModule.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
     <ClCompile Include="flow\modules\RegionStrokeVisualizeTemplateModules.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>

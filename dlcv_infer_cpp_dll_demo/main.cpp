@@ -566,7 +566,6 @@ struct CommandOptions {
     int DeviceId = 0;
     double Threshold = 0.05;
     bool WithMask = true;
-    bool CalcMean = false;
     int Threads = 1;
     int Runs = 10;
     int BatchSize = 1;
@@ -616,7 +615,7 @@ bool IsCommandName(const std::string& text) {
 bool IsCommandOptionAllowed(const std::string& command, const std::string& option) {
     if (command == "load-model") return option == "--device";
     if (command == "infer") {
-        return option == "--threshold" || option == "--with-mask" || option == "--calc-mean";
+        return option == "--threshold" || option == "--with-mask";
     }
     if (command == "benchmark") {
         return option == "--threads" || option == "--runs" || option == "--batch-size";
@@ -660,11 +659,6 @@ bool ParseCommandArguments(
                 error = "--with-mask 只能为 true 或 false";
                 return false;
             }
-        } else if (token == "--calc-mean") {
-            if (!ParseBoolArg(value, options.CalcMean)) {
-                error = "--calc-mean 只能为 true 或 false";
-                return false;
-            }
         } else if (token == "--threads") {
             if (!ParseIntArg(value, options.Threads) || options.Threads <= 0 || options.Threads > MaxCommandThreads) {
                 error = "--threads 必须是 1 到 " + std::to_string(MaxCommandThreads) + " 之间的整数";
@@ -689,7 +683,6 @@ dlcv_infer::json BuildCommandInferParams(const CommandOptions& options, bool inc
     dlcv_infer::json params;
     params["threshold"] = options.Threshold;
     params["with_mask"] = options.WithMask;
-    params["calc_mean"] = options.CalcMean;
     if (includeBatchSize) params["batch_size"] = options.BatchSize;
     return params;
 }
@@ -704,7 +697,7 @@ void PrintCommandHelp(const char* exeName) {
               << "  list-sdk-models\n"
               << "  model-info <名称>\n"
               << "  dvs-model-info <名称>\n"
-              << "  infer <名称> <图片> [--threshold F] [--with-mask true|false] [--calc-mean true|false]\n"
+              << "  infer <名称> <图片> [--threshold F] [--with-mask true|false]\n"
               << "  benchmark <名称> <图片> [--threads N，范围 1-" << MaxCommandThreads
               << "] [--runs N] [--batch-size N]\n"
               << "  free-model <名称>\n"
@@ -758,7 +751,14 @@ bool IsSameBenchmarkResult(
                 || candidateObject.withBbox != baselineObject.withBbox
                 || candidateObject.withAngle != baselineObject.withAngle
                 || candidateObject.withMask != baselineObject.withMask
-                || candidateObject.withMean != baselineObject.withMean) {
+                || candidateObject.meanFieldsPresent != baselineObject.meanFieldsPresent
+                || (baselineObject.meanFieldsPresent && (candidateObject.withMean != baselineObject.withMean
+                    || candidateObject.foregroundMeanValid != baselineObject.foregroundMeanValid
+                    || candidateObject.backgroundMeanValid != baselineObject.backgroundMeanValid))
+                || candidateObject.medianFieldsPresent != baselineObject.medianFieldsPresent
+                || (baselineObject.medianFieldsPresent && (candidateObject.withMedian != baselineObject.withMedian
+                    || candidateObject.foregroundMedian.has_value() != baselineObject.foregroundMedian.has_value()
+                    || candidateObject.backgroundMedian.has_value() != baselineObject.backgroundMedian.has_value()))) {
                 difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
                     + "]稳定字段不一致";
                 return false;
@@ -790,11 +790,21 @@ bool IsSameBenchmarkResult(
             }
             if (std::abs(candidateObject.score - baselineObject.score) > 1e-4f
                 || std::abs(candidateObject.angle - baselineObject.angle) > 1e-4f
-                || std::abs(candidateObject.area - baselineObject.area) > 1e-3f
-                || std::abs(candidateObject.foregroundMean - baselineObject.foregroundMean) > 1e-4f
-                || std::abs(candidateObject.backgroundMean - baselineObject.backgroundMean) > 1e-4f) {
+                || std::abs(candidateObject.area - baselineObject.area) > 1e-3f) {
                 difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
                     + "]数值字段不一致";
+                return false;
+            }
+            auto sameStatistic = [](double left, double right) {
+                return std::isfinite(left) && std::isfinite(right) && std::abs(left - right) <= 1e-4;
+            };
+            if ((baselineObject.meanFieldsPresent &&
+                ((baselineObject.foregroundMeanValid && !sameStatistic(candidateObject.foregroundMean, baselineObject.foregroundMean)) ||
+                 (baselineObject.backgroundMeanValid && !sameStatistic(candidateObject.backgroundMean, baselineObject.backgroundMean)))) ||
+                (baselineObject.medianFieldsPresent &&
+                ((baselineObject.foregroundMedian && !sameStatistic(*candidateObject.foregroundMedian, *baselineObject.foregroundMedian)) ||
+                 (baselineObject.backgroundMedian && !sameStatistic(*candidateObject.backgroundMedian, *baselineObject.backgroundMedian))))) {
+                difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex) + "]统计数值不一致";
                 return false;
             }
         }

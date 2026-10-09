@@ -10,7 +10,6 @@
 #include <stdexcept>
 
 #include <QComboBox>
-#include <QCheckBox>
 #include <QCloseEvent>
 #include <QDebug>
 #include <QDesktopServices>
@@ -31,6 +30,7 @@
 #include <QScreen>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -46,6 +46,23 @@ using json = nlohmann::json;
 
 QString jsonToQStringPretty(const json& obj, int indent = 2) {
     return QString::fromUtf8(obj.dump(indent).c_str());
+}
+
+QString statisticsToolTip(const QString& summary) {
+    QStringList lines;
+    for (const QString& line : summary.split('\n')) {
+        if (!line.startsWith('[')) continue;
+        qsizetype start = line.indexOf(QStringLiteral("前景均值="));
+        if (start < 0) start = line.indexOf(QStringLiteral("前景中值="));
+        if (start < 0) continue;
+        if (lines.size() == 5) {
+            lines.append(QStringLiteral("完整统计见汇总"));
+            break;
+        }
+        const qsizetype prefixEnd = line.indexOf(']');
+        lines.append((prefixEnd >= 0 ? line.left(prefixEnd + 1) + " " : QString{}) + line.mid(start));
+    }
+    return lines.join('\n');
 }
 
 QString describeOpenCvImageForUi(const cv::Mat& m, bool threeChannelIsRgb = false) {
@@ -175,9 +192,6 @@ void MainWindow::setupUi() {
     spinThreshold_->setMaximum(1.0);
     spinThreshold_->setValue(0.5);
 
-    checkCalcMean_ = new QCheckBox("计算均值", this);
-    checkCalcMean_->setChecked(false);
-
     constexpr int kControlHeight = 36;
     constexpr int kButtonMinWidth = 120;
     const std::vector<QPushButton*> buttons = {
@@ -209,7 +223,6 @@ void MainWindow::setupUi() {
     spinBatchSize_->setFixedHeight(kControlHeight);
     spinThreshold_->setFixedHeight(kControlHeight);
     spinThreadCount_->setFixedHeight(kControlHeight);
-    checkCalcMean_->setFixedHeight(kControlHeight);
 
     auto* topControlsLayout = new QVBoxLayout();
     topControlsLayout->setContentsMargins(0, 0, 0, 0);
@@ -232,7 +245,6 @@ void MainWindow::setupUi() {
     row2Layout->addWidget(spinBatchSize_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(labelThreshold_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(spinThreshold_, 0, Qt::AlignVCenter);
-    row2Layout->addWidget(checkCalcMean_, 0, Qt::AlignVCenter);
     row2Layout->addStretch(1);
     row2Layout->addWidget(buttonFreeModel_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(buttonFreeAllModels_, 0, Qt::AlignVCenter);
@@ -422,6 +434,7 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
 
 void MainWindow::reportError(const QString& title, const QString& detail) {
     outputText_->setPlainText(title + "\n" + detail);
+    outputText_->setToolTip({});
     if (!uiTestMode_) QMessageBox::critical(this, "错误", title + ": " + detail);
 }
 
@@ -475,10 +488,15 @@ QString MainWindow::formatResultText(const dlcv_infer::Result& output) const {
                 .arg(angle, 0, 'f', 3)
                 .arg(degrees, 0, 'f', 1);
         }
-        if (obj.withMean) {
+        if (obj.meanFieldsPresent && (obj.withMean || !obj.foregroundMeanValid || !obj.backgroundMeanValid)) {
             text += QString("  前景均值=%1  背景均值=%2")
-                .arg(obj.foregroundMean, 0, 'f', 4)
-                .arg(obj.backgroundMean, 0, 'f', 4);
+                .arg(obj.foregroundMeanValid ? QString::number(obj.foregroundMean, 'f', 4) : QStringLiteral("无采样"))
+                .arg(obj.backgroundMeanValid ? QString::number(obj.backgroundMean, 'f', 4) : QStringLiteral("无采样"));
+        }
+        if (obj.medianFieldsPresent) {
+            text += QString("  前景中值=%1  背景中值=%2")
+                .arg(obj.foregroundMedian ? QString::number(*obj.foregroundMedian, 'f', 4) : QStringLiteral("无采样"))
+                .arg(obj.backgroundMedian ? QString::number(*obj.backgroundMedian, 'f', 4) : QStringLiteral("无采样"));
         }
         text += "\n";
     }
@@ -516,6 +534,7 @@ void MainWindow::onLoadModel() {
 }
 
 bool MainWindow::loadModelFromPath(const QString& selectedModelPath) {
+    outputText_->setToolTip({});
     model_.reset();
 
     try
@@ -542,7 +561,7 @@ bool MainWindow::loadModelFromPath(const QString& selectedModelPath) {
 }
 
 dlcv_infer::json MainWindow::runUiTest(const QString& modelPath, const QString& imagePath,
-    int deviceId, double threshold, bool calcMean, float labelFontScale, const QString& resultView) {
+    int deviceId, double threshold, float labelFontScale, const QString& resultView) {
     if (!uiTestMode_) throw std::runtime_error("仅在 ui-test 模式下执行界面验证");
     int deviceIndex = -1;
     for (int i = 0; i < comboDevice_->count(); ++i) {
@@ -554,7 +573,6 @@ dlcv_infer::json MainWindow::runUiTest(const QString& modelPath, const QString& 
     if (deviceIndex < 0) throw std::runtime_error("指定设备不可用");
     comboDevice_->setCurrentIndex(deviceIndex);
     spinThreshold_->setValue(threshold);
-    checkCalcMean_->setChecked(calcMean);
     if (!loadModelFromPath(modelPath)) {
         throw std::runtime_error(outputText_->toPlainText().toUtf8().constData());
     }
@@ -647,7 +665,6 @@ void MainWindow::onInfer() {
         params["threshold"] = spinThreshold_->value();
         params["with_mask"] = true;
         params["batch_size"] = batchSize;
-        params["calc_mean"] = checkCalcMean_->isChecked();
 
         const auto start = std::chrono::steady_clock::now();
         output = model_->InferBatch(imageList, params);
@@ -688,6 +705,7 @@ void MainWindow::onInfer() {
         text += formatResultText(output);
     }
     outputText_->setPlainText(text);
+    outputText_->setToolTip(statisticsToolTip(text));
     lastInferSucceeded_ = true;
     if (uiTestMode_) {
         uiTestResult_ = {{"input_width", bgrImage.cols}, {"input_height", bgrImage.rows},
@@ -702,6 +720,7 @@ void MainWindow::onInferJson() {
     if (pressureTestRunning_) {
         return;
     }
+    outputText_->setToolTip({});
     imageViewer_->clearInspectionStatus();
 
     if (!ensureModelLoaded() || !ensureImageSelected()) {
@@ -725,7 +744,6 @@ void MainWindow::onInferJson() {
         params["threshold"] = spinThreshold_->value();
         params["with_mask"] = true;
         params["batch_size"] = 1;
-        params["calc_mean"] = checkCalcMean_->isChecked();
 
         const json resultArray = model_->InferOneOutJson(inferImage, params);
         bool inspectionOk = false;
@@ -780,7 +798,6 @@ void MainWindow::startPressureTest() {
     pressureThreadCount_ = spinThreadCount_->value();
     pressureBatchSize_ = spinBatchSize_->value();
     pressureThreshold_ = spinThreshold_->value();
-    pressureCalcMean_ = checkCalcMean_->isChecked();
     pressureBaseImage_ = inferBaseImage;
 
     pressureStopRequested_.store(false, std::memory_order_relaxed);
@@ -819,13 +836,12 @@ void MainWindow::startPressureTest() {
 
     const int batchSize = pressureBatchSize_;
     const double threshold = pressureThreshold_;
-    const bool calcMean = pressureCalcMean_;
     const cv::Mat baseImage = pressureBaseImage_;
     const QString pressureInputDesc = describeOpenCvImageForUi(baseImage, true);
     dlcv_infer::Model* const modelPtr = model_.get();
 
     for (int t = 0; t < pressureThreadCount_; ++t) {
-        pressureThreads_.emplace_back([this, modelPtr, batchSize, threshold, calcMean, baseImage, pressureInputDesc]() {
+        pressureThreads_.emplace_back([this, modelPtr, batchSize, threshold, baseImage, pressureInputDesc]() {
             if (baseImage.empty()) {
                 const QString detail = "输入图像为空。";
                 if (!pressureError_.exchange(true)) {
@@ -884,7 +900,6 @@ void MainWindow::startPressureTest() {
             params["threshold"] = threshold;
             params["with_mask"] = false;
             params["batch_size"] = batchSize;
-            params["calc_mean"] = calcMean;
 
             std::vector<cv::Mat> images;
             images.reserve(batchSize);
@@ -1074,10 +1089,10 @@ void MainWindow::setUiEnabledForPressureTest(bool enabled) {
     spinBatchSize_->setEnabled(enabled);
     spinThreshold_->setEnabled(enabled);
     spinThreadCount_->setEnabled(enabled);
-    checkCalcMean_->setEnabled(enabled);
 }
 
 void MainWindow::onGetModelInfo() {
+    outputText_->setToolTip({});
     if (!ensureModelLoaded()) {
         return;
     }
@@ -1101,6 +1116,7 @@ void MainWindow::onGetModelInfo() {
 }
 
 void MainWindow::onFreeModel() {
+    outputText_->setToolTip({});
     stopPressureTest();
 
     model_.reset();
@@ -1108,6 +1124,7 @@ void MainWindow::onFreeModel() {
 }
 
 void MainWindow::onFreeAllModels() {
+    outputText_->setToolTip({});
     stopPressureTest();
 
     model_.reset();

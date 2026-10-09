@@ -50,7 +50,6 @@ C:\dlcv\python.exe Test\dlcv_infer_c_dll_test\test_all_models.py
 - 设备编号：`0`
 - 阈值：`0.5`
 - `with_mask=false`
-- `calc_mean=false`
 - 结果文件：`Test/dlcv_infer_c_dll_test/dlcv_infer_c_api_test_result.json`
 
 程序自动查找以下核心 DLL：

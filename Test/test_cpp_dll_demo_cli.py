@@ -28,6 +28,16 @@ class CliSourceTest(unittest.TestCase):
         self.assertLess(main.index("return 0;"), main.index("KeepMaxClock"))
 
 
+    def test_benchmark_compares_statistics_presence_and_nulls(self):
+        text = SOURCE.read_text(encoding="utf-8-sig")
+        comparison = text[text.index("bool IsSameBenchmarkResult("):text.index("bool RunCommandBenchmark(")]
+        for field in ("meanFieldsPresent", "foregroundMeanValid", "backgroundMeanValid",
+            "medianFieldsPresent", "withMedian", "foregroundMedian.has_value()", "backgroundMedian.has_value()"):
+            self.assertIn(field, comparison)
+        self.assertIn("std::isfinite(left) && std::isfinite(right)", comparison)
+        self.assertIn("sameStatistic(*candidateObject.foregroundMedian", comparison)
+
+
 @unittest.skipUnless(os.environ.get("DLCV_CPP_DLL_DEMO_EXE"), "未指定实际 EXE")
 class CliExecutableTest(unittest.TestCase):
     def run_cli(self, args, expected):

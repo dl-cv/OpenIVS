@@ -569,11 +569,9 @@ static dlcv_infer::json BuildNativeObjectResult(
         { "mask", std::move(mask) },
         { "with_bbox", object.withBbox },
         { "with_angle", object.withAngle },
-        { "angle", object.withAngle ? object.angle : -100.0f },
-        { "with_mean", object.withMean },
-        { "foreground_mean", object.foregroundMean },
-        { "background_mean", object.backgroundMean }
+        { "angle", object.withAngle ? object.angle : -100.0f }
     };
+    object.WriteStatistics(result);
     return result;
 }
 

@@ -59,20 +59,20 @@
 ### 3.2 命令行推理模式
 
 ```text
-dlcv_infer_cpp_qt_demo.exe infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
+dlcv_infer_cpp_qt_demo.exe infer --model <path> --image <path> --threshold <0..1> [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]
 dlcv_infer_cpp_qt_demo.exe render --model <path> --image <path> --threshold <0..1> --output <pngPath> [--device <int>] [--with-mask <true|false>]
 dlcv_infer_cpp_qt_demo.exe --help
 ```
 
-- `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`，`--calc-mean` 默认 `false`。
+- `--model`、`--image`、`--threshold` 为必填参数；`--device` 默认 `0`，`--with-mask` 默认 `true`。
 - `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
 - 普通模型使用 `--threshold` 作为推理阈值；流程模型保留各模型节点自身的阈值，`--threshold` 只对最终对外结果进行筛选。
 - 图片由 `QFile` 读取字节并通过 `cv::imdecode` 解码；BGR/BGRA 转为 RGB。
-- 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，输出字段与 C# 测试程序一致；开启均值计算时同时检查两种结果的均值字段。
+- 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，输出字段与 C# 测试程序一致。
 - 输出中的 `inspection` 包含最近一次流程判定的 `present`、`ok`、`reason`，`inspection_consistent` 检查结构化与 JSON 两条路径的判定一致性。
 - C++ 结构化结果的本地 GBK 类别名在 CLI 输出时转换为 UTF-8，再写入 JSON。
 - `infer --output` 使用 `QSaveFile` 写入 UTF-8 JSON；`render --output` 保存 `ImageViewerWidget` 的真实绘制结果，输出逻辑尺寸与原图一致。输出路径不得覆盖模型或图片，父目录必须存在。
-- 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致、存在低于阈值的结果或均值检查失败。
+- 退出码：`0` 为验证通过，`1` 为运行异常，`2` 为参数错误，`3` 为双路径不一致、存在低于阈值的结果。
 - `render` 使用原图作为底图，并把最终结果中的 ROI Mask 缩放到 bbox 后回贴到原图坐标；完整图 Mask 则从 `(0,0)` 绘制。
 - Mask 合成用例和像素断言独立编入 `Test/qt_demo/dlcv_infer_c_qt_mask_test.vcxproj` 与 `Test/qt_demo/dlcv_infer_cpp_qt_mask_test.vcxproj`。两个工程通过构建配置引用各自 Demo 的真实控件源文件，不复制实现，不调用推理运行库；Demo 不包含测试代码或 `mask-visualization-selftest` 入口。独立测试命令为 `<测试EXE> --output <系统临时目录/mask.png>`，使用 Qt offscreen 平台，不显示窗口。
 
@@ -130,7 +130,6 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 | 选择显卡（下拉框） | CPU + 检测到的 GPU | GPU 0 | 设备选择；模型加载成功后在框内以小字显示当前模型完整文件名（含后缀） |
 | batch_size（整数框） | 1~1024 | 1 | 批量推理大小 |
 | threshold（浮点框） | 0.0~1.0 | 0.5 | 置信度阈值 |
-| 计算均值（复选框） | 开启或关闭 | 关闭 | 是否计算实例分割目标的前景与背景均值 |
 | 线程数（整数框） | 1~32 | 1 | 压力测试线程数 |
 
 ---
@@ -159,7 +158,7 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 **代码路径**：`MainWindow::onInfer()`
 - `prepareImageForInference`：将 OpenCV 读到的 BGR/BGRA 转换为 RGB。
 - 若 `batchSize > 1`，将同一张图片复制为 batch。
-- 参数 JSON：`{"threshold": ..., "with_mask": true, "calc_mean": ..., "batch_size": ...}`。
+- 参数 JSON：`{"threshold": ..., "with_mask": true, "batch_size": ...}`。
 
 ### 4.3 JSON 输出测试
 
@@ -169,6 +168,8 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 
 **代码路径**：`MainWindow::onInferJson()`
 - 返回字段：`category_id`、`category_name`、`score`、`bbox`、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
+
+配置独立“前景背景统计”Flow 节点后，使用“推理JSON”查看启用项的均值、中值及空区域的 `null`。节点的 `mean/median` 独立配置，不使用推理开关；普通推理旧均值三字段仍为 `false/0.0/0.0`。配置与采样语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 
 ### 4.4 批量推理测试
 
@@ -291,7 +292,6 @@ cv::Mat prepareImageForInference(const cv::Mat& decodedImage) {
 json params;
 params["threshold"] = spinThreshold_->value();
 params["with_mask"] = true;
-params["calc_mean"] = checkCalcMean_->isChecked();
 params["batch_size"] = batchSize;
 
 dlcv_infer::Result output = model_->InferBatch(imageList, params);

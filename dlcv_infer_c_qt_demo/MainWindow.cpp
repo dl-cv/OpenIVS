@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <stdexcept>
 
-#include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -27,6 +27,7 @@
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -81,6 +82,31 @@ QString prettyJson(const char* value, int indent = 2) {
     } catch (...) {
         return QString::fromUtf8(value);
     }
+}
+
+QString formatStatisticsText(const json& result) {
+    const json& objects = result.is_object() ? result.at("result_list") : result;
+    if (!objects.is_array()) throw std::runtime_error("统计结果不是数组");
+    QString text;
+    for (size_t i = 0; i < objects.size(); ++i) {
+        const json& object = objects.at(i);
+        QString line;
+        for (const char* kind : { "mean", "median" }) {
+            const std::string flag = std::string("with_") + kind;
+            if (!object.contains(flag)) continue;
+            const std::string foreground = std::string("foreground_") + kind;
+            const std::string background = std::string("background_") + kind;
+            const json& fg = object.at(foreground);
+            const json& bg = object.at(background);
+            if (std::string(kind) == "mean" && !object.at(flag).get<bool>() && fg.is_number() && bg.is_number()) continue;
+            const QString label = std::string(kind) == "mean" ? QStringLiteral("均值") : QStringLiteral("中值");
+            line += QString("  前景%1=%2  背景%1=%3").arg(label)
+                .arg(fg.is_number() ? QString::number(fg.get<double>(), 'f', 4) : QStringLiteral("无采样"))
+                .arg(bg.is_number() ? QString::number(bg.get<double>(), 'f', 4) : QStringLiteral("无采样"));
+        }
+        if (!line.isEmpty()) text += QString("[%1]%2\n").arg(static_cast<int>(i + 1)).arg(line);
+    }
+    return text;
 }
 
 QString describeOpenCvImageForUi(const cv::Mat& image, bool threeChannelIsRgb = false) {
@@ -190,8 +216,6 @@ bool MainWindow::runOffscreenInference(const QString& modelPath, const QString& 
     spinThreshold_->setValue(threshold);
     imagePath_ = imagePath;
     resize(1280, 800);
-    show();
-    QApplication::processEvents();
     if (!inferCurrentImage()) {
         error = outputText_->toPlainText();
         return false;
@@ -200,6 +224,8 @@ bool MainWindow::runOffscreenInference(const QString& modelPath, const QString& 
         error = QStringLiteral("真实推理未检测到目标，未生成截图");
         return false;
     }
+    // 结果准备好后显示完整窗口，原生 ui-test 可由外部采集程序取得实图。
+    show();
     QApplication::processEvents();
     const QPixmap snapshot = grab();
     if (snapshot.isNull()) {
@@ -275,9 +301,6 @@ void MainWindow::setupUi() {
     spinThreshold_->setMaximum(1.0);
     spinThreshold_->setValue(0.5);
 
-    checkCalcMean_ = new QCheckBox("计算均值", this);
-    checkCalcMean_->setChecked(false);
-
     constexpr int kControlHeight = 36;
     constexpr int kButtonMinWidth = 120;
     const std::vector<QPushButton*> buttons = {
@@ -309,7 +332,6 @@ void MainWindow::setupUi() {
     spinBatchSize_->setFixedHeight(kControlHeight);
     spinThreshold_->setFixedHeight(kControlHeight);
     spinThreadCount_->setFixedHeight(kControlHeight);
-    checkCalcMean_->setFixedHeight(kControlHeight);
 
     auto* topControlsLayout = new QVBoxLayout();
     topControlsLayout->setContentsMargins(0, 0, 0, 0);
@@ -332,7 +354,6 @@ void MainWindow::setupUi() {
     row2Layout->addWidget(spinBatchSize_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(labelThreshold_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(spinThreshold_, 0, Qt::AlignVCenter);
-    row2Layout->addWidget(checkCalcMean_, 0, Qt::AlignVCenter);
     row2Layout->addStretch(1);
     row2Layout->addWidget(buttonFreeModel_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(buttonFreeAllModels_, 0, Qt::AlignVCenter);
@@ -519,6 +540,7 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
 }
 
 void MainWindow::freeCurrentModel() {
+    outputText_->setToolTip({});
     if (modelIndex_ >= 0 && api_.isLoaded()) {
         api_.freeModel(modelIndex_);
     }
@@ -527,6 +549,7 @@ void MainWindow::freeCurrentModel() {
 
 void MainWindow::reportError(const QString& title, const QString& detail) {
     outputText_->setPlainText(title + "\n" + detail);
+    outputText_->setToolTip({});
     if (!offscreen_) {
         QMessageBox::critical(this, "错误", title + ": " + detail);
     }
@@ -574,11 +597,6 @@ QString MainWindow::formatResultText(const std::vector<DisplayObjectResult>& res
             text += QString("  angle=%1rad(%2deg)")
                         .arg(object.angle, 0, 'f', 3)
                         .arg(degrees, 0, 'f', 1);
-        }
-        if (object.withMean) {
-            text += QString("  前景均值=%1  背景均值=%2")
-                        .arg(object.foregroundMean, 0, 'f', 4)
-                        .arg(object.backgroundMean, 0, 'f', 4);
         }
         text += "\n";
     }
@@ -740,7 +758,6 @@ bool MainWindow::inferCurrentImage() {
         {"threshold", spinThreshold_->value()},
         {"with_mask", true},
         {"batch_size", batchSize},
-        {"calc_mean", checkCalcMean_->isChecked()},
     };
     const std::string paramsText = params.dump();
 
@@ -769,6 +786,21 @@ bool MainWindow::inferCurrentImage() {
     text += QString("推理结果: %1个\n").arg(static_cast<int>(firstResults.size()));
     text += "\n";
     text += formatResultText(firstResults);
+    CStringGuard jsonResult(api_, api_.inferJson(modelIndex_, &images.front(), paramsText.c_str()));
+    if (jsonResult.get() == nullptr) {
+        reportError("读取统计结果失败", lastCError());
+        return false;
+    }
+    try {
+        const QString statistics = formatStatisticsText(json::parse(jsonResult.get()));
+        const QStringList lines = statistics.split('\n', Qt::SkipEmptyParts);
+        outputText_->setToolTip(lines.mid(0, 5).join('\n') +
+            (lines.size() > 5 ? QStringLiteral("\n完整统计见汇总") : QString{}));
+        if (!statistics.isEmpty()) text += "\n统计（JSON）\n" + statistics;
+    } catch (const std::exception& error) {
+        reportError("读取统计结果失败", QString::fromUtf8(error.what()));
+        return false;
+    }
     outputText_->setPlainText(text);
     return true;
 }
@@ -777,6 +809,7 @@ void MainWindow::onInferJson() {
     if (pressureTestRunning_) {
         return;
     }
+    outputText_->setToolTip({});
     imageViewer_->clearInspectionStatus();
 
     if (!ensureModelLoaded() || !ensureImageSelected()) {
@@ -798,7 +831,6 @@ void MainWindow::onInferJson() {
         {"threshold", spinThreshold_->value()},
         {"with_mask", true},
         {"batch_size", 1},
-        {"calc_mean", checkCalcMean_->isChecked()},
     };
     const std::string paramsText = params.dump();
     DlcvCImage image = makeCImage(inferImage);
@@ -839,7 +871,6 @@ void MainWindow::startPressureTest() {
     pressureThreadCount_ = spinThreadCount_->value();
     pressureBatchSize_ = spinBatchSize_->value();
     pressureThreshold_ = spinThreshold_->value();
-    pressureCalcMean_ = checkCalcMean_->isChecked();
     pressureModelIndex_ = modelIndex_;
     pressureBaseImage_ = inferImage.clone();
 
@@ -867,7 +898,6 @@ void MainWindow::startPressureTest() {
         {"threshold", pressureThreshold_},
         {"with_mask", true},
         {"batch_size", pressureBatchSize_},
-        {"calc_mean", pressureCalcMean_},
     };
     const std::string paramsText = params.dump();
 
@@ -992,10 +1022,10 @@ void MainWindow::setUiEnabledForPressureTest(bool enabled) {
     spinBatchSize_->setEnabled(enabled);
     spinThreshold_->setEnabled(enabled);
     spinThreadCount_->setEnabled(enabled);
-    checkCalcMean_->setEnabled(enabled);
 }
 
 void MainWindow::onGetModelInfo() {
+    outputText_->setToolTip({});
     if (!ensureModelLoaded()) {
         return;
     }
@@ -1025,6 +1055,7 @@ void MainWindow::onFreeModel() {
 }
 
 void MainWindow::onFreeAllModels() {
+    outputText_->setToolTip({});
     stopPressureTest();
     if (!api_.isLoaded()) {
         reportError("释放模型失败", QString::fromStdWString(api_.lastError()));

@@ -89,6 +89,49 @@ namespace dlcv_infer_csharp
             /// </summary>
             public double BackgroundMean { get; set; }
 
+            /// <summary>均值选项是否存在于结果中。</summary>
+            private bool meanFieldsAbsent;
+            public bool MeanFieldsPresent { get => !meanFieldsAbsent; set => meanFieldsAbsent = !value; }
+            public bool ForegroundMeanValid => !double.IsNaN(ForegroundMean) && !double.IsInfinity(ForegroundMean);
+            public bool BackgroundMeanValid => !double.IsNaN(BackgroundMean) && !double.IsInfinity(BackgroundMean);
+
+            /// <summary>中值选项，null 表示结果没有该选项。</summary>
+            public bool? WithMedian { get; set; }
+            public double? ForegroundMedian { get; set; }
+            public double? BackgroundMedian { get; set; }
+
+            // 2026-10-09：缺失统计键不能变成默认0，否则关闭选项与空采样混淆；存在性单独保存，null 用 NaN/可空中值往返。
+            public void ReadStatistics(JObject source)
+            {
+                MeanFieldsPresent = source["with_mean"] != null;
+                WithMean = MeanFieldsPresent && (source.Value<bool?>("with_mean") ?? false);
+                double? foregroundMean = MeanFieldsPresent ? source.Value<double?>("foreground_mean") : null;
+                double? backgroundMean = MeanFieldsPresent ? source.Value<double?>("background_mean") : null;
+                ForegroundMean = foregroundMean ?? double.NaN;
+                BackgroundMean = backgroundMean ?? double.NaN;
+                WithMedian = source.Value<bool?>("with_median");
+                ForegroundMedian = source.Value<double?>("foreground_median");
+                BackgroundMedian = source.Value<double?>("background_median");
+            }
+
+            public void WriteStatistics(JObject target)
+            {
+                foreach (string key in new[] { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
+                    target.Remove(key);
+                if (MeanFieldsPresent)
+                {
+                    target["with_mean"] = WithMean;
+                    target["foreground_mean"] = ForegroundMeanValid ? (double?)ForegroundMean : null;
+                    target["background_mean"] = BackgroundMeanValid ? (double?)BackgroundMean : null;
+                }
+                if (WithMedian.HasValue)
+                {
+                    target["with_median"] = WithMedian.Value;
+                    target["foreground_median"] = ForegroundMedian;
+                    target["background_median"] = BackgroundMedian;
+                }
+            }
+
             public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
                 List<double> bbox, bool withMask, Mat mask,
                 bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null)
@@ -116,6 +159,26 @@ namespace dlcv_infer_csharp
                 WithMean = withMean;
                 ForegroundMean = foregroundMean;
                 BackgroundMean = backgroundMean;
+                meanFieldsAbsent = false;
+                WithMedian = null;
+                ForegroundMedian = null;
+                BackgroundMedian = null;
+            }
+
+            private static string FormatStatistic(double? value) => value.HasValue ? value.Value.ToString("F4") : "无采样";
+
+            public string StatisticsToString()
+            {
+                var sb = new StringBuilder();
+                if (MeanFieldsPresent && (WithMean || !ForegroundMeanValid || !BackgroundMeanValid))
+                {
+                    sb.Append($"前景均值: {FormatStatistic(ForegroundMeanValid ? (double?)ForegroundMean : null)}, 背景均值: {FormatStatistic(BackgroundMeanValid ? (double?)BackgroundMean : null)}, ");
+                }
+                if (WithMedian.HasValue)
+                {
+                    sb.Append($"前景中值: {FormatStatistic(ForegroundMedian)}, 背景中值: {FormatStatistic(BackgroundMedian)}, ");
+                }
+                return sb.ToString().TrimEnd(',', ' ');
             }
 
             public override String ToString()
@@ -141,11 +204,8 @@ namespace dlcv_infer_csharp
                 {
                     sb.Append($"Mask size: {Mask.Width}x{Mask.Height}, ");
                 }
-                if (WithMean)
-                {
-                    sb.Append($"ForegroundMean: {ForegroundMean:F4}, ");
-                    sb.Append($"BackgroundMean: {BackgroundMean:F4}, ");
-                }
+                string statistics = StatisticsToString();
+                if (!string.IsNullOrEmpty(statistics)) sb.Append(statistics).Append(", ");
                 string extraInfoText = FormatExtraInfoForDisplay(ExtraInfo);
                 if (!string.IsNullOrWhiteSpace(extraInfoText))
                 {

@@ -226,7 +226,7 @@ def _summary_view(value: Any) -> dict[str, Any] | None:
     return {name: value.get(name) for name in ("count", "categories", "scores")}
 
 
-def _check_payload(demo: str, value: Any, case: dict[str, Any], threshold: float, tolerance: float) -> tuple[list[str], dict[str, Any] | None]:
+def check_payload(demo: str, value: Any, case: dict[str, Any], threshold: float, tolerance: float) -> tuple[list[str], dict[str, Any] | None]:
     if not isinstance(value, dict):
         return ["推理 JSON 顶层类型错误"], None
     errors: list[str] = []
@@ -240,14 +240,12 @@ def _check_payload(demo: str, value: Any, case: dict[str, Any], threshold: float
         errors.append("device 与调用参数不符")
     if value.get("with_mask") is not case["with_mask"]:
         errors.append("with_mask 与调用参数不符")
-    if value.get("calc_mean") is not False:
-        errors.append("calc_mean 与调用参数不符")
     for name in ("structured", "json"):
         errors.extend(_summary(name, value.get(name), case["expected"], tolerance))
     structured, json_value = _summary_view(value.get("structured")), _summary_view(value.get("json"))
     if structured != json_value:
         errors.append("structured 与 json 的类别、分数或数量不一致")
-    for name in ("consistent", "threshold_check_passed", "mean_check_passed", "release_check_passed"):
+    for name in ("consistent", "threshold_check_passed", "release_check_passed"):
         if value.get(name) is not True:
             errors.append(f"{name} 不为 true")
     if demo == "c":
@@ -260,7 +258,7 @@ def _check_payload(demo: str, value: Any, case: dict[str, Any], threshold: float
     return errors, {"structured": structured, "json": json_value}
 
 
-def _infer_case(demo: str, exe: Path, cwd: Path, root: Path, case: dict[str, Any], threshold: float, default_tolerance: float, timeout: float, work: Path) -> tuple[dict[str, Any], dict[str, Any] | None]:
+def infer_case(demo: str, exe: Path, cwd: Path, root: Path, case: dict[str, Any], threshold: float, default_tolerance: float, timeout: float, work: Path) -> tuple[dict[str, Any], dict[str, Any] | None]:
     work.mkdir(parents=True)
     model, image = _fixture(root, case["model"]), _fixture(root, case["image"])
     errors: list[str] = []
@@ -273,7 +271,7 @@ def _infer_case(demo: str, exe: Path, cwd: Path, root: Path, case: dict[str, Any
         base.update({"passed": False, "process": {"launched": False, "timed_out": False, "exit_code": None, "stdout": _stream(b""), "stderr": _stream(b"")}, "result_artifact": None, "observed": None, "errors": errors})
         return base, None
     output = work / "infer.json"
-    command = [str(exe), "infer", "--model", str(model), "--image", str(image), "--threshold", format(threshold, ".17g"), "--device", "0", "--with-mask", str(case["with_mask"]).lower(), "--calc-mean", "false", "--output", str(output)]
+    command = [str(exe), "infer", "--model", str(model), "--image", str(image), "--threshold", format(threshold, ".17g"), "--device", "0", "--with-mask", str(case["with_mask"]).lower(), "--output", str(output)]
     process = _invoke(command, cwd, timeout, work)
     errors.extend(process["errors"])
     if process["exit_code"] != 0:
@@ -283,7 +281,7 @@ def _infer_case(demo: str, exe: Path, cwd: Path, root: Path, case: dict[str, Any
     observed = None
     if not json_errors:
         tolerance = case.get("score_tolerance", default_tolerance)
-        checked, observed = _check_payload(demo, value, case, threshold, tolerance)
+        checked, observed = check_payload(demo, value, case, threshold, tolerance)
         errors.extend(checked)
     base.update({"passed": not errors, "process": _process_result(process), "result_artifact": _artifact(output), "observed": observed, "errors": errors})
     return base, observed if not errors else None
@@ -489,7 +487,7 @@ def run_regression(args: argparse.Namespace, cases_path: Path = CASES_PATH) -> d
             for demo, exe in (("c", paths["c_exe"]), ("cpp", paths["cpp_exe"])):
                 cwd, demo_root = paths["core_dir"] or exe.parent, temp_root / demo
                 for case in config["inference_cases"]:
-                    result, summary = _infer_case(demo, exe, cwd, paths["model_root"], case, config["threshold"], config["score_tolerance"], args.timeout, demo_root / case["id"])
+                    result, summary = infer_case(demo, exe, cwd, paths["model_root"], case, config["threshold"], config["score_tolerance"], args.timeout, demo_root / case["id"])
                     cases.append(result)
                     if summary is not None:
                         observed[demo][case["id"]] = summary

@@ -407,9 +407,9 @@ static void AppendOutResultItemTyped(
     if (extraInfo.is_object() && !extraInfo.empty()) {
         item.Extra["extra_info"] = extraInfo;
     }
-    item.Extra["with_mean"] = d.value("with_mean", false);
-    item.Extra["foreground_mean"] = d.value("foreground_mean", 0.0);
-    item.Extra["background_mean"] = d.value("background_mean", 0.0);
+    for (const char* key : { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" }) {
+        if (d.contains(key)) item.Extra[key] = d.at(key);
+    }
 
     outResults.push_back(std::move(item));
 }

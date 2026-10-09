@@ -682,12 +682,6 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
         }
         const bool withMask = emitMaskOutput && !mask.empty();
         const float area = static_cast<float>(ComputeFlowArea(entry, mask, bbox, emitMaskOutput));
-        const bool withMean = ReadJsonBool(
-            entry.contains("with_mean") ? entry.at("with_mean") : Json(), false);
-        const double foregroundMean = ReadJsonNumber(
-            entry.contains("foreground_mean") ? entry.at("foreground_mean") : Json(), 0.0);
-        const double backgroundMean = ReadJsonNumber(
-            entry.contains("background_mean") ? entry.at("background_mean") : Json(), 0.0);
 
         out.emplace_back(
             categoryId,
@@ -699,11 +693,9 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
             mask,
             withBbox,
             withAngle,
-            angle,
-            withMean,
-            foregroundMean,
-            backgroundMean
+            angle
         );
+        out.back().ReadStatistics(entry);
     }
     return out;
 }
@@ -766,12 +758,9 @@ Json NormalizeFlowOneOutJson(const Json& flowResultList, bool emitMaskOutput) {
         }
 
         out["area"] = ComputeFlowArea(entry, mask, bbox, emitMaskOutput);
-        out["with_mean"] = ReadJsonBool(
-            entry.contains("with_mean") ? entry.at("with_mean") : Json(), false);
-        out["foreground_mean"] = ReadJsonNumber(
-            entry.contains("foreground_mean") ? entry.at("foreground_mean") : Json(), 0.0);
-        out["background_mean"] = ReadJsonNumber(
-            entry.contains("background_mean") ? entry.at("background_mean") : Json(), 0.0);
+        for (const char* key : { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" }) {
+            if (entry.contains(key)) out[key] = entry.at(key);
+        }
         if (entry.contains("metadata") && entry.at("metadata").is_object()) {
             const Json& metadata = entry.at("metadata");
             const size_t internalFieldCount = metadata.contains("is_rotated") ? 1u : 0u;
@@ -2996,6 +2985,7 @@ namespace dlcv_infer {
         }
     }
 
+    // 2026-10-09：缺少均值键时跳过 ReadStatistics，公开解析自测未保留缺失状态；必须每目标读取存在性与空值，原生默认字段不变。
     Result Model::ParseToStructResult(const json& resultObject) {
         return ParseToStructResultInternal(resultObject, false);
     }
@@ -3070,40 +3060,6 @@ namespace dlcv_infer {
                     angle = -100.0f;
                 }
 
-                try
-                {
-                    if (result.contains("with_mean"))
-                    {
-                        withMean = result["with_mean"].get<bool>();
-                    }
-                }
-                catch (...)
-                {
-                    withMean = false;
-                }
-                try
-                {
-                    if (result.contains("foreground_mean"))
-                    {
-                        foregroundMean = result["foreground_mean"].get<double>();
-                    }
-                }
-                catch (...)
-                {
-                    foregroundMean = 0.0;
-                }
-                try
-                {
-                    if (result.contains("background_mean"))
-                    {
-                        backgroundMean = result["background_mean"].get<double>();
-                    }
-                }
-                catch (...)
-                {
-                    backgroundMean = 0.0;
-                }
-
                 // 兼容某些输出直接将 angle 放入 bbox[4]
                 if (!withAngle && bbox.size() >= 5)
                 {
@@ -3158,6 +3114,7 @@ namespace dlcv_infer {
 
                 results.emplace_back(categoryId, categoryName, score, area, bbox, withMask, mask_img,
                     withBbox, withAngle, angle, withMean, foregroundMean, backgroundMean);
+                results.back().ReadStatistics(result);
             }
 
             sampleResults.emplace_back(results);

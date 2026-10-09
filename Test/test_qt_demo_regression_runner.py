@@ -74,7 +74,7 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         values.update(changes)
         return argparse.Namespace(**values)
 
-    def _payload(self, demo, case):
+    def payload(self, demo, case):
         expected = case["expected"]
         summary = {
             "count": expected["count"],
@@ -90,12 +90,10 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
             "threshold": 0.5,
             "device": 0,
             "with_mask": case["with_mask"],
-            "calc_mean": False,
             "structured": json.loads(json.dumps(summary, ensure_ascii=False)),
             "json": json.loads(json.dumps(summary, ensure_ascii=False)),
             "consistent": True,
             "threshold_check_passed": True,
-            "mean_check_passed": True,
             "release_check_passed": True,
         }
         if demo == "c":
@@ -103,7 +101,7 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         else:
             value["inspection_consistent"] = True
         return value
-    def _process(self, mode=None):
+    def process(self, mode=None):
         calls = []
 
         def execute(command, **kwargs):
@@ -146,7 +144,7 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
             if threshold == "1.1" or not model.is_file() or not image.is_file() or model.suffix.lower() == ".dvsp" or output.resolve() in (model.resolve(), image.resolve()):
                 return runner.subprocess.CompletedProcess(command, 2)
             case = self.by_model[model.name]
-            payload = self._payload(demo, case)
+            payload = self.payload(demo, case)
             selected = demo == "c" and case["id"] == "classification_dvt"
             if selected and mode == "timeout":
                 raise runner.subprocess.TimeoutExpired(command, 17.0)
@@ -183,8 +181,8 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
 
         return calls, execute
 
-    def _run(self, mode=None, **changes):
-        calls, execute = self._process(mode)
+    def run_case(self, mode=None, **changes):
+        calls, execute = self.process(mode)
         with patch.object(runner.subprocess, "run", side_effect=execute):
             report = runner.run_regression(self._args(**changes))
         return report, calls
@@ -197,11 +195,13 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         self.assertEqual(Path("cpp_mask.exe"), args.cpp_mask_test_exe)
 
     def test_success_runs_fixed_serial_scope(self):
-        report, calls = self._run()
+        report, calls = self.run_case()
         self.assertTrue(report["passed"])
         self.assertEqual(28, report["summary"]["case_total"])
         self.assertEqual(4, report["summary"]["comparison_total"])
         self.assertEqual(28, len(calls))
+        for command, _ in calls:
+            self.assertNotIn("--calc-mean", command)
         self.assertEqual(["classification_dvt", "classification_dvo", "segmentation_dvt", "flow_dvst"], [case["id"] for case in report["cases"][:4]])
         masks = [case for case in report["cases"] if case["kind"] == "png-selftest"]
         self.assertEqual({"c", "cpp"}, {case["demo"] for case in masks})
@@ -254,12 +254,12 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
                     os.environ.pop("QT_QPA_PLATFORM", None)
                 else:
                     os.environ["QT_QPA_PLATFORM"] = platform
-                report, _ = self._run()
+                report, _ = self.run_case()
                 self.assertTrue(report["passed"])
                 self.assertEqual(platform, os.environ.get("QT_QPA_PLATFORM"))
 
     def test_mask_uses_own_directory_without_core_directory(self):
-        calls, execute = self._process()
+        calls, execute = self.process()
 
         def execute_from_exe_directory(command, **kwargs):
             self.assertEqual(str(Path(command[0]).parent), kwargs["cwd"])
@@ -279,7 +279,7 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
             ("mask_launch_error", "进程启动失败"),
         ):
             with self.subTest(mode=mode):
-                report, _ = self._run(mode)
+                report, _ = self.run_case(mode)
                 self.assertFalse(report["passed"])
                 masks = [case for case in report["cases"] if case["kind"] == "png-selftest"]
                 self.assertEqual(2, len(masks))
@@ -291,7 +291,7 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
     def test_demo_must_reject_removed_mask_command_without_png(self):
         for mode, message in (("demo_accepts_mask", "退出码与预期不符"), ("demo_writes_mask", "仍生成了输出文件")):
             with self.subTest(mode=mode):
-                report, _ = self._run(mode)
+                report, _ = self.run_case(mode)
                 self.assertFalse(report["passed"])
                 cases = [case for case in report["cases"] if case["id"] == "removed_mask_selftest"]
                 self.assertEqual(2, len(cases))
@@ -301,7 +301,7 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
 
     def test_missing_fixture_fails_but_other_cases_continue(self):
         (self.model_root / "猫狗-分类_s.dvo").unlink()
-        report, calls = self._run()
+        report, calls = self.run_case()
         self.assertFalse(report["passed"])
         missing = [case for case in report["cases"] if case["id"] == "classification_dvo"]
         self.assertEqual(2, len(missing))
@@ -329,16 +329,16 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         )
         for mode, message in cases:
             with self.subTest(mode=mode):
-                report, _ = self._run(mode)
+                report, _ = self.run_case(mode)
                 self.assertFalse(report["passed"])
                 text = " ".join(error for case in report["cases"] for error in case["errors"])
                 self.assertIn(message, text)
-        report, _ = self._run("crash")
+        report, _ = self.run_case("crash")
         failed = next(case for case in report["cases"] if case["demo"] == "c" and case["id"] == "classification_dvt")
         self.assertEqual(CRASH_CODE, failed["process"]["exit_code"])
 
     def test_count_and_device_require_json_integers(self):
-        report, _ = self._run("float_integer_fields")
+        report, _ = self.run_case("float_integer_fields")
         self.assertFalse(report["passed"])
         text = " ".join(error for case in report["cases"] for error in case["errors"])
         self.assertIn("structured.count", text)
@@ -351,7 +351,7 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
             ("release_false", "release_check_passed"),
         ):
             with self.subTest(mode=mode):
-                report, _ = self._run(mode)
+                report, _ = self.run_case(mode)
                 self.assertFalse(report["passed"])
                 text = " ".join(error for case in report["cases"] for error in case["errors"])
                 self.assertIn(message, text)
@@ -370,7 +370,7 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
             "--output", str(output), "--timeout", "17",
             "--core-dll-directory", str(self.core_dir),
         ]
-        _, execute = self._process()
+        _, execute = self.process()
         with patch.object(runner.subprocess, "run", side_effect=execute):
             code = runner.main(argv)
         self.assertEqual(0, code)

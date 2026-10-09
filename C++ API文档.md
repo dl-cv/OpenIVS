@@ -37,13 +37,24 @@ struct ObjectResult {
     bool withBbox;                // 是否含 bbox
     bool withAngle;               // 是否含旋转角度
     float angle;                  // 旋转角度（弧度），-100 表示无效
-    bool withMean;                // 是否含前景与背景均值
-    double foregroundMean;        // mask 前景区域的像素均值
-    double backgroundMean;        // mask 背景区域的像素均值
+    bool withMean;                // 均值采样状态，存在性见 meanFieldsPresent
+    double foregroundMean;        // 前景均值，读取空值时为 NaN
+    double backgroundMean;        // 背景均值，读取空值时为 NaN
+    bool meanFieldsPresent = true;
+    bool foregroundMeanValid = true;
+    bool backgroundMeanValid = true;
+    bool medianFieldsPresent = false;
+    bool withMedian = false;
+    std::optional<double> foregroundMedian;
+    std::optional<double> backgroundMedian;
+
+    void ReadStatistics(const json& source);
+    void WriteStatistics(json& target) const;
 
     ObjectResult(int categoryId, const std::string& categoryName, float score,
                  float area, const std::vector<double>& bbox, bool withMask,
-                 const cv::Mat& mask, bool withBbox, bool withAngle, float angle);
+                 const cv::Mat& mask, bool withBbox = true, bool withAngle = false,
+                 float angle = -100.0f);
     ObjectResult(int categoryId, const std::string& categoryName, float score,
                  float area, const std::vector<double>& bbox, bool withMask,
                  const cv::Mat& mask, bool withBbox, bool withAngle, float angle,
@@ -74,6 +85,13 @@ struct FlowNodeTiming {
 - `categoryName` 内部存储为 GBK 编码，便于 Windows UI 直接显示。
 - `bbox` 长度规则：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
+
+`ObjectResult` 是 OpenIVS 的 C++ 包装结果，不是 `DlcvCObjectResult` 原生 C ABI 结构。旧均值成员 `withMean`、`foregroundMean`、`backgroundMean` 分别保留 `bool`、`double`、`double` 类型，原构造函数继续可用。
+
+- `meanFieldsPresent`、`medianFieldsPresent` 表示对应组选项字段是否存在；`withMean`、`withMedian` 在字段存在时表示是否取得有效采样。
+- `foregroundMeanValid`、`backgroundMeanValid` 表示对应均值是否为数值。`ReadStatistics` 读取缺失或 JSON `null` 的侧值时，将有效性设为 `false`，并将旧 `double` 成员设为 `NaN`，不是 `0.0`。
+- `foregroundMedian`、`backgroundMedian` 为 `std::optional<double>`，无采样值时为 `std::nullopt`。
+- `ReadStatistics(const json&)` 读取字段存在性与空值；`WriteStatistics(json&) const` 先删除六个统计键，再按组选项存在性写入。均值有效性为 `false` 或中值 optional 为空时输出 JSON `null`，不存在的统计组不写入。
 
 ### 2.2 流程图相关数据结构
 
@@ -226,6 +244,7 @@ json InferOneOutJson(const cv::Mat& image, const json& params_json = nullptr);
 - 返回 JSON 数组，每个元素为单个检测结果对象。
 - 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
 - 普通模式下将底层返回的 `mask_ptr` mask 转换为点数组形式。
+- 既有 JSON 保留 `with_mean`、`foreground_mean`、`background_mean`，普通推理固定输出 `false`、`0.0`、`0.0`；普通推理不再计算统计值。C++ 包装结果的存在性与空值说明见 2.1，C ABI 布局另见 C API 文档。
 
 ### 4.6 释放模型
 
@@ -365,6 +384,12 @@ public:
 4. 按 `origin_index` 或位置索引映射回原始图像结果。
 5. 返回 `{"result_list": [...]}` 格式 JSON。
 
+**前景背景统计结果**
+
+`post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。均值组仍使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
+
+C++ 结构化包装结果通过 2.1 的存在性、均值有效性及 optional 中值保留统计语义，也可通过 `InferOneOutJson` 读取完整 JSON。普通模型旧均值 JSON 三字段仍固定为 `false/0.0/0.0`。
+
 ---
 
 ## 7. 加密狗查询
@@ -438,7 +463,6 @@ cv::cvtColor(image, rgb, cv::COLOR_BGR2RGB);
 nlohmann::json params;
 params["threshold"] = 0.5;
 params["with_mask"] = true;
-params["calc_mean"] = false;
 params["batch_size"] = 1;
 
 dlcv_infer::Result result = model.Infer(rgb, params);
@@ -480,9 +504,10 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 |--------|------|--------|------|
 | `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型中仅筛选最终对外结果，不覆盖节点自身阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
-| `calc_mean` | bool | false | 是否计算实例分割目标的前景与背景均值 |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
+
+`calc_mean` 不参与模型推理，也不读取模型或流程模型节点保存的旧均值配置。
 
 ---
 
@@ -600,7 +625,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 | 类型 | 当前字段 |
 | --- | --- |
-| `ObjectResult` | `categoryId`、`categoryName`、`score`、`area`、`bbox`、`withMask`、`mask`、`withBbox`、`withAngle`、`angle`、`withMean`、`foregroundMean`、`backgroundMean` |
+| `ObjectResult` | `categoryId`、`categoryName`、`score`、`area`、`bbox`、`withMask`、`mask`、`withBbox`、`withAngle`、`angle`、`withMean`、`foregroundMean`、`backgroundMean`、`meanFieldsPresent`、`foregroundMeanValid`、`backgroundMeanValid`、`medianFieldsPresent`、`withMedian`、`foregroundMedian`、`backgroundMedian` |
 | `SampleResult` | `results` |
 | `Result` | `sampleResults` |
 | `FlowNodeTiming` | `nodeId`、`nodeType`、`nodeTitle`、`elapsedMs` |

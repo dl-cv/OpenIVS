@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -204,6 +205,10 @@ static cv::Mat ReadImageRgb(const std::wstring& path) {
 
 static long long Quantize(double value, double scale) {
     return static_cast<long long>(std::llround(value * scale));
+}
+
+static long long QuantizeStatistic(double value, double scale) {
+    return std::isnan(value) ? (std::numeric_limits<long long>::min)() : Quantize(value, scale);
 }
 
 static bool LoadNativeCapi(NativeCapi& api, std::string& error) {
@@ -499,8 +504,8 @@ static std::string BuildCompleteFingerprint(const DlcvCResult& result) {
                 << (object.mask.mask_ptr == 0 ? 0 : 1) << ',' << object.mask.height << ',' << object.mask.width << '|'
                 << static_cast<int>(object.with_angle) << '|' << Quantize(object.angle, 1000.0) << '|'
                 << static_cast<int>(object.with_mean) << '|'
-                << Quantize(object.foreground_mean, 1000.0) << '|'
-                << Quantize(object.background_mean, 1000.0) << ']';
+                << QuantizeStatistic(object.foreground_mean, 1000.0) << '|'
+                << QuantizeStatistic(object.background_mean, 1000.0) << ']';
         }
     }
     return out.str();
@@ -513,6 +518,11 @@ static bool IsReleasedResult(const DlcvCResult& result, int expectedCode) {
 
 static bool NearlyEqual(double left, double right, double tolerance = 1e-5) {
     return std::abs(left - right) <= tolerance;
+}
+
+static bool StatisticsEqual(double left, double right) {
+    if (std::isnan(left) || std::isnan(right)) return std::isnan(left) && std::isnan(right);
+    return NearlyEqual(left, right);
 }
 
 static bool CompareMask(
@@ -596,8 +606,8 @@ static bool CompareCppAndCResult(
                 !NearlyEqual(cObject.w, cppW) ||
                 !NearlyEqual(cObject.h, cppH) ||
                 !NearlyEqual(cObject.angle, cppObject.angle) ||
-                !NearlyEqual(cObject.foreground_mean, cppObject.foregroundMean) ||
-                !NearlyEqual(cObject.background_mean, cppObject.backgroundMean)) {
+                !StatisticsEqual(cObject.foreground_mean, cppObject.foregroundMean) ||
+                !StatisticsEqual(cObject.background_mean, cppObject.backgroundMean)) {
                 std::ostringstream out;
                 out << "样本 " << sampleIndex << " 目标 " << objectIndex << " 字段不一致";
                 error = out.str();
@@ -662,8 +672,8 @@ static bool CompareCResults(
                 !NearlyEqual(leftObject.w, rightObject.w) ||
                 !NearlyEqual(leftObject.h, rightObject.h) ||
                 !NearlyEqual(leftObject.angle, rightObject.angle) ||
-                !NearlyEqual(leftObject.foreground_mean, rightObject.foreground_mean) ||
-                !NearlyEqual(leftObject.background_mean, rightObject.background_mean)) {
+                !StatisticsEqual(leftObject.foreground_mean, rightObject.foreground_mean) ||
+                !StatisticsEqual(leftObject.background_mean, rightObject.background_mean)) {
                 error = "目标字段不一致";
                 return false;
             }
@@ -1815,8 +1825,8 @@ static std::string BuildResultFingerprint(const DlcvCResult& result) {
                  << static_cast<int>(object.with_angle) << '|'
                  << Quantize(object.angle, 1000.0) << '|'
                  << static_cast<int>(object.with_mean) << '|'
-                 << Quantize(object.foreground_mean, 1000.0) << '|'
-                 << Quantize(object.background_mean, 1000.0);
+                 << QuantizeStatistic(object.foreground_mean, 1000.0) << '|'
+                 << QuantizeStatistic(object.background_mean, 1000.0);
             objects.push_back(item.str());
         }
         std::sort(objects.begin(), objects.end());

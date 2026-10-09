@@ -2309,6 +2309,7 @@ namespace dlcv_infer_csharp
         }
 
         // 处理推理结果到CSharpResult对象
+        // 2026-10-09：公开解析仅在均值键存在时读统计，关闭节点后仍留下默认均值存在状态；必须每目标调用 ReadStatistics，保留缺失与 null。
         public Utils.CSharpResult ParseToStructResult(JObject resultObject)
         {
             // 解析 json 结果
@@ -2495,13 +2496,9 @@ namespace dlcv_infer_csharp
                     }
 
                     var extraInfo = result["extra_info"] as JObject ?? new JObject();
-                    bool withMean = result["with_mean"]?.Value<bool>() ?? false;
-                    double foregroundMean = result["foreground_mean"]?.Value<double>() ?? 0.0;
-                    double backgroundMean = result["background_mean"]?.Value<double>() ?? 0.0;
-
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
-                        withMask, mask_img, withBbox, withAngle, angle, extraInfo,
-                        withMean, foregroundMean, backgroundMean);
+                        withMask, mask_img, withBbox, withAngle, angle, extraInfo);
+                    objectResult.ReadStatistics((JObject)result);
                     results.Add(objectResult);
                 }
 
@@ -2784,9 +2781,16 @@ namespace dlcv_infer_csharp
             result["category_id"] = item["category_id"] ?? 0;
             result["category_name"] = item["category_name"] ?? "";
             result["score"] = item["score"] ?? 0.0;
-            result["with_mean"] = item["with_mean"] ?? false;
-            result["foreground_mean"] = item["foreground_mean"] ?? 0.0;
-            result["background_mean"] = item["background_mean"] ?? 0.0;
+            foreach (string key in new[] { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
+            {
+                if (item[key] != null) result[key] = item[key].DeepClone();
+            }
+            if (!_isDvsMode && item["with_mean"] == null)
+            {
+                result["with_mean"] = false;
+                result["foreground_mean"] = 0.0;
+                result["background_mean"] = 0.0;
+            }
 
             // 2. Handle BBox
             var bbox = item["bbox"]?.ToObject<List<double>>() ?? new List<double>();

@@ -1,11 +1,13 @@
 #include "CliRunner.h"
 
+#include <QApplication>
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QSaveFile>
+#include <QTimer>
 
 #include <cmath>
 #include <cstdint>
@@ -35,13 +37,11 @@ struct InferOptions {
     double threshold = 0.0;
     int device = 0;
     bool withMask = true;
-    bool calcMean = false;
     bool hasModel = false;
     bool hasImage = false;
     bool hasThreshold = false;
     bool hasDevice = false;
     bool hasWithMask = false;
-    bool hasCalcMean = false;
     bool hasOutput = false;
     bool hasScreenshot = false;
 };
@@ -51,9 +51,7 @@ struct PathSummary {
     json scores = json::array();
     json categories = json::array();
     json belowThreshold = json::array();
-    json withMeans = json::array();
-    json foregroundMeans = json::array();
-    json backgroundMeans = json::array();
+    json statistics = json::array();
     std::vector<double> comparableScores;
     std::vector<std::string> comparableCategories;
     std::vector<bool> comparableWithMeans;
@@ -224,18 +222,6 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             }
             options.withMask = parsed;
             options.hasWithMask = true;
-        } else if (option == QStringLiteral("--calc-mean")) {
-            if (options.hasCalcMean) {
-                error = QStringLiteral("duplicate option: --calc-mean");
-                return false;
-            }
-            bool parsed = false;
-            if (!ParseBool(value, parsed)) {
-                error = QStringLiteral("--calc-mean must be true or false");
-                return false;
-            }
-            options.calcMean = parsed;
-            options.hasCalcMean = true;
         } else if (option == QStringLiteral("--screenshot")) {
             if (options.hasScreenshot) {
                 error = QStringLiteral("duplicate option: --screenshot");
@@ -376,6 +362,14 @@ DlcvCImage MakeCImage(const cv::Mat& image) {
     return result;
 }
 
+json ReadStatisticsFields(const json& source) {
+    json fields = json::object();
+    for (const char* key : { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" }) {
+        if (source.contains(key)) fields[key] = source.at(key);
+    }
+    return fields;
+}
+
 void AddSummaryItem(
     PathSummary& summary,
     double score,
@@ -383,23 +377,22 @@ void AddSummaryItem(
     bool withMean,
     double foregroundMean,
     double backgroundMean,
-    double threshold) {
+    double threshold,
+    json statistics = nullptr) {
     const int index = summary.count;
     ++summary.count;
     summary.categories.push_back(category);
     summary.comparableCategories.push_back(category);
     summary.comparableScores.push_back(score);
-    summary.withMeans.push_back(withMean);
+    if (statistics.is_null()) {
+        statistics = json{ {"with_mean", withMean},
+            {"foreground_mean", std::isfinite(foregroundMean) ? json(foregroundMean) : json(nullptr)},
+            {"background_mean", std::isfinite(backgroundMean) ? json(backgroundMean) : json(nullptr)} };
+    }
+    summary.statistics.push_back(statistics);
     summary.comparableWithMeans.push_back(withMean);
     summary.comparableForegroundMeans.push_back(foregroundMean);
     summary.comparableBackgroundMeans.push_back(backgroundMean);
-    if (std::isfinite(foregroundMean) && std::isfinite(backgroundMean)) {
-        summary.foregroundMeans.push_back(foregroundMean);
-        summary.backgroundMeans.push_back(backgroundMean);
-    } else {
-        summary.foregroundMeans.push_back(nullptr);
-        summary.backgroundMeans.push_back(nullptr);
-    }
 
     if (!std::isfinite(score)) {
         summary.scores.push_back(nullptr);
@@ -507,64 +500,57 @@ PathSummary SummarizeJson(const json& result, double threshold) {
         double score = std::numeric_limits<double>::quiet_NaN();
         (void)TryReadJsonNumber(token, "score", score);
         bool withMean = false;
-        double foregroundMean = 0.0;
-        double backgroundMean = 0.0;
+        double foregroundMean = std::numeric_limits<double>::quiet_NaN();
+        double backgroundMean = std::numeric_limits<double>::quiet_NaN();
         (void)TryReadJsonBool(token, "with_mean", withMean);
-        if (withMean) {
-            foregroundMean = std::numeric_limits<double>::quiet_NaN();
-            backgroundMean = std::numeric_limits<double>::quiet_NaN();
-            (void)TryReadJsonNumber(token, "foreground_mean", foregroundMean);
-            (void)TryReadJsonNumber(token, "background_mean", backgroundMean);
-        }
-        AddSummaryItem(summary, score, category, withMean, foregroundMean, backgroundMean, threshold);
+        (void)TryReadJsonNumber(token, "foreground_mean", foregroundMean);
+        (void)TryReadJsonNumber(token, "background_mean", backgroundMean);
+        AddSummaryItem(summary, score, category, withMean, foregroundMean, backgroundMean, threshold, ReadStatisticsFields(token));
     }
     return summary;
 }
 
 json PathSummaryToJson(const PathSummary& summary) {
-    return json{
-        {"count", summary.count},
-        {"scores", summary.scores},
-        {"categories", summary.categories},
-        {"below_threshold", summary.belowThreshold},
-        {"with_mean", summary.withMeans},
-        {"foreground_mean", summary.foregroundMeans},
-        {"background_mean", summary.backgroundMeans}
+    json result = {
+        {"count", summary.count}, {"scores", summary.scores}, {"categories", summary.categories},
+        {"below_threshold", summary.belowThreshold}, {"statistics", summary.statistics}
     };
+    for (const char* kind : { "mean", "median" }) {
+        const std::string flag = std::string("with_") + kind;
+        const std::string fg = std::string("foreground_") + kind;
+        const std::string bg = std::string("background_") + kind;
+        bool present = false;
+        json flags = json::array(), foreground = json::array(), background = json::array();
+        for (const auto& fields : summary.statistics) {
+            present = present || fields.contains(flag);
+            flags.push_back(fields.contains(flag) ? fields.at(flag) : json(nullptr));
+            foreground.push_back(fields.contains(fg) ? fields.at(fg) : json(nullptr));
+            background.push_back(fields.contains(bg) ? fields.at(bg) : json(nullptr));
+        }
+        if (present) {
+            result[flag] = flags; result[fg] = foreground; result[bg] = background;
+        }
+    }
+    return result;
 }
 
 bool AreConsistent(const PathSummary& left, const PathSummary& right) {
-    if (left.count != right.count ||
-        left.comparableScores.size() != right.comparableScores.size() ||
-        left.comparableCategories != right.comparableCategories ||
-        left.comparableWithMeans != right.comparableWithMeans) {
-        return false;
-    }
+    if (left.count != right.count || left.comparableScores.size() != right.comparableScores.size() ||
+        left.comparableCategories != right.comparableCategories) return false;
     for (size_t i = 0; i < left.comparableScores.size(); ++i) {
         if (!std::isfinite(left.comparableScores[i]) || !std::isfinite(right.comparableScores[i]) ||
-            std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) {
-            return false;
-        }
-        if (left.comparableWithMeans[i] &&
-            (!std::isfinite(left.comparableForegroundMeans[i]) ||
-             !std::isfinite(right.comparableForegroundMeans[i]) ||
-             !std::isfinite(left.comparableBackgroundMeans[i]) ||
-             !std::isfinite(right.comparableBackgroundMeans[i]) ||
-             std::abs(left.comparableForegroundMeans[i] - right.comparableForegroundMeans[i]) > 1e-6 ||
-             std::abs(left.comparableBackgroundMeans[i] - right.comparableBackgroundMeans[i]) > 1e-6)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool HasCompleteMeans(const PathSummary& summary) {
-    for (size_t i = 0; i < summary.comparableWithMeans.size(); ++i) {
-        if (!summary.comparableWithMeans[i] ||
-            !std::isfinite(summary.comparableForegroundMeans[i]) ||
-            !std::isfinite(summary.comparableBackgroundMeans[i])) {
-            return false;
-        }
+            std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) return false;
+        const auto& fields = right.statistics.at(i);
+        if (fields.contains("with_mean")) {
+            if (left.comparableWithMeans[i] != fields.at("with_mean").get<bool>()) return false;
+            for (const char* key : { "foreground_mean", "background_mean" }) {
+                const double number = std::string(key) == "foreground_mean" ? left.comparableForegroundMeans[i] : left.comparableBackgroundMeans[i];
+                const auto& value = fields.at(key);
+                if (value.is_null()) {
+                    if (!std::isnan(number)) return false;
+                } else if (!value.is_number() || !std::isfinite(number) || std::abs(number - value.get<double>()) > 1e-6) return false;
+            }
+        } else if (left.comparableWithMeans[i]) return false;
     }
     return true;
 }
@@ -622,8 +608,7 @@ int RunInferCommand(const InferOptions& options) {
         imageList.n = 1;
         const json params = {
             {"threshold", options.threshold},
-            {"with_mask", options.withMask},
-            {"calc_mean", options.calcMean}
+            {"with_mask", options.withMask}
         };
         const std::string paramsText = params.dump();
 
@@ -635,6 +620,7 @@ int RunInferCommand(const InferOptions& options) {
                 throw std::runtime_error(ToUtf8(DecodeApiText(structuredResult.get().message)));
             }
             structuredSummary = SummarizeStructured(structuredResult.get(), options.threshold);
+            for (auto& fields : structuredSummary.statistics) fields = json::object();
 
             CStringGuard jsonResult(api, api.inferJson(modelIndex, &image, paramsText.c_str()));
             if (jsonResult.get() == nullptr) {
@@ -655,8 +641,6 @@ int RunInferCommand(const InferOptions& options) {
     const bool consistent = AreConsistent(structuredSummary, jsonSummary);
     const bool thresholdCheckPassed =
         structuredSummary.belowThreshold.empty() && jsonSummary.belowThreshold.empty();
-    const bool meanCheckPassed =
-        !options.calcMean || (HasCompleteMeans(structuredSummary) && HasCompleteMeans(jsonSummary));
     const json summary = {
         {"language", "c"},
         {"model", ToUtf8(options.modelPath)},
@@ -664,7 +648,8 @@ int RunInferCommand(const InferOptions& options) {
         {"threshold", options.threshold},
         {"device", options.device},
         {"with_mask", options.withMask},
-        {"calc_mean", options.calcMean},
+        {"statistics_supported_by_structured", false},
+        {"statistics_consistent", nullptr},
         {"structured", PathSummaryToJson(structuredSummary)},
         {"json", PathSummaryToJson(jsonSummary)},
         {"inspection", json::object({
@@ -676,8 +661,7 @@ int RunInferCommand(const InferOptions& options) {
         {"consistent", consistent},
         {"inspection_consistent", nullptr},
         {"release_check_passed", releaseCheckPassed},
-        {"threshold_check_passed", thresholdCheckPassed},
-        {"mean_check_passed", meanCheckPassed}
+        {"threshold_check_passed", thresholdCheckPassed}
     };
 
     const std::string output = summary.dump(2) + "\n";
@@ -686,7 +670,7 @@ int RunInferCommand(const InferOptions& options) {
     if (options.hasOutput) {
         WriteJsonFile(options.outputPath, output);
     }
-    return consistent && releaseCheckPassed && thresholdCheckPassed && meanCheckPassed ? 0 : 3;
+    return consistent && releaseCheckPassed && thresholdCheckPassed ? 0 : 3;
 }
 
 json MakeRuntimeError(const InferOptions& options, const QString& error) {
@@ -695,7 +679,6 @@ json MakeRuntimeError(const InferOptions& options, const QString& error) {
         {"model", ToUtf8(options.modelPath)},
         {"image", ToUtf8(options.imagePath)},
         {"threshold", options.threshold},
-        {"calc_mean", options.calcMean},
         {"error", ToUtf8(error)}
     };
 }
@@ -719,10 +702,10 @@ void PrintCliHelp(const QString& programPath) {
         << "  " << program << "\n"
         << "  " << program
         << " infer --model <path> --image <path> --threshold <0..1>"
-           " [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]\n"
+           " [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]\n"
         << "  " << program
         << " ui-test --model <path> --image <path> --threshold <0..1>"
-           " [--device <int>] --screenshot <tempPngPath> (QT_QPA_PLATFORM=offscreen)\n"
+           " [--device <int>] --screenshot <tempPngPath> (QT_QPA_PLATFORM=offscreen|windows)\n"
         << "  " << program << " --check-c-api-exports\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
@@ -762,18 +745,19 @@ int RunCliCommand(const QStringList& args) {
     }
 
     if (uiTest) {
+        const bool offscreen = QGuiApplication::platformName() == QStringLiteral("offscreen");
         const QFileInfo screenshot(options.screenshotPath);
         const QFileInfo tempRoot(QDir::tempPath());
         const QString directory = QDir::fromNativeSeparators(
             QFileInfo(screenshot.absolutePath()).canonicalFilePath());
         const QString temp = QDir::fromNativeSeparators(tempRoot.canonicalFilePath());
-        if (QGuiApplication::platformName() != QStringLiteral("offscreen") ||
+        if ((!offscreen && QGuiApplication::platformName() != QStringLiteral("windows")) ||
             !options.hasScreenshot || options.screenshotPath.isEmpty() ||
             screenshot.suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) != 0 ||
             directory.isEmpty() || temp.isEmpty() ||
             !(directory.compare(temp, Qt::CaseInsensitive) == 0 ||
               directory.startsWith(temp + QLatin1Char('/'), Qt::CaseInsensitive)) ||
-            screenshot.exists() || options.hasOutput || options.hasWithMask || options.hasCalcMean) {
+            screenshot.exists() || options.hasOutput || options.hasWithMask) {
             std::cerr << "error: ui-test requires a new PNG in the system temp directory "
                          "and supports only model, image, threshold and device\n";
             return 2;
@@ -782,12 +766,17 @@ int RunCliCommand(const QStringList& args) {
         QString runError;
         const bool passed = window.runOffscreenInference(options.modelPath, options.imagePath,
             options.threshold, options.device, screenshot.absoluteFilePath(), runError);
-        window.close();
         if (!passed) {
+            window.close();
             std::cerr << "error: " << ToUtf8(runError) << "\n";
             return 1;
         }
-        std::cout << "offscreen inference rendered to " << ToUtf8(screenshot.absoluteFilePath()) << "\n";
+        std::cout << "ui-test inference rendered to " << ToUtf8(screenshot.absoluteFilePath()) << "\n";
+        if (!offscreen) {
+            QTimer::singleShot(15000, &window, &QWidget::close);
+            return QApplication::exec();
+        }
+        window.close();
         return 0;
     }
     if (options.hasScreenshot) {

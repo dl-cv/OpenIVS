@@ -23,7 +23,7 @@
 
 ---
 
-## 2. 核心结果类型（Utils.cs）
+## 2. 核心结果类型（DataTypes.cs）
 
 ### 2.1 CSharpObjectResult
 
@@ -42,9 +42,18 @@ public partial class Utils
         public bool WithBbox { get; set; }            // 是否含 bbox
         public bool WithAngle { get; set; }           // 是否含旋转角度
         public float Angle { get; set; }              // 旋转角度（弧度），-100 表示无效
-        public bool WithMean { get; set; }            // 是否含前景与背景均值
-        public double ForegroundMean { get; set; }    // mask 前景区域像素均值
-        public double BackgroundMean { get; set; }    // mask 背景区域像素均值
+        public bool WithMean { get; set; }            // 均值采样状态
+        public double ForegroundMean { get; set; }    // 缺失或无采样值时为 NaN
+        public double BackgroundMean { get; set; }    // 缺失或无采样值时为 NaN
+        public bool MeanFieldsPresent { get; set; }   // 均值选项字段是否存在
+        public bool ForegroundMeanValid { get; }      // 前景均值是否有限
+        public bool BackgroundMeanValid { get; }      // 背景均值是否有限
+        public bool? WithMedian { get; set; }         // null 表示中值选项字段缺失
+        public double? ForegroundMedian { get; set; } // null 表示前景无采样值
+        public double? BackgroundMedian { get; set; } // null 表示背景无采样值
+
+        public void ReadStatistics(JObject source);
+        public void WriteStatistics(JObject target);
         public JObject ExtraInfo { get; set; }        // 额外信息（polyline 等）
 
         public CSharpObjectResult(
@@ -65,8 +74,11 @@ public partial class Utils
 - `Bbox` 长度约定：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
-- `WithMean=false` 时，`ForegroundMean` 与 `BackgroundMean` 均为 `0.0`；`WithMean=true` 时，两个值分别表示 mask 前景区域和背景区域的像素均值。
-- 原有 11 参数构造函数保持不变；需要设置均值字段时使用 14 参数构造函数。
+- 均值属性保留原类型：`WithMean` 为 `bool`，`ForegroundMean`、`BackgroundMean` 为 `double`。`MeanFieldsPresent` 表示均值选项字段是否存在；`ReadStatistics` 读取缺失或 JSON `null` 的均值时写入 `NaN`，两个只读 `*MeanValid` 属性通过数值是否有限判断有效性。
+- 中值属性保持可空：`WithMedian` 为 `bool?`，`null` 表示中值选项字段缺失；`ForegroundMedian`、`BackgroundMedian` 为 `double?`，无采样值时为 `null`。状态字段存在时，`false` 表示没有有效采样，`true` 表示有有效采样。
+- 原有 11／14 参数构造函数继续可用：11 参数构造函数初始化均值为 `false/0.0/0.0`，14 参数构造函数接收显式均值；两者初始化中值组为 `null`。
+- 既有 JSON 保留 `with_mean`、`foreground_mean`、`background_mean`，普通推理固定输出 `false`、`0.0`、`0.0`；包装结果中的均值属性保留，普通模型推理不再计算统计值。
+- `ReadStatistics(JObject)` 从 JSON 读取两组字段；`WriteStatistics(JObject)` 先删除目标上已有的六个统计键，再按 `MeanFieldsPresent` 与 `WithMedian.HasValue` 写入对应组；无效均值写为 JSON `null`，保留字段缺失与空值的区别。
 - `ExtraInfo` 可包含 `polyline`（通过 `Utils.GetExtraInfoPolyline` / `Utils.SetExtraInfoPolyline` 读写）。
 
 ### 2.2 CSharpSampleResult
@@ -235,8 +247,14 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
 - `output/return_json` 产生按图 `ok/reason` 时，`Infer` / `InferBatch` 将其写入对应 `CSharpSampleResult.Ok/Reason`，`InferOneOutJson` 将其写入单图包装对象。
 - 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
-- 流程中的 `model/*` 节点默认从自身 `properties.calc_mean` 读取均值计算开关；入口 `paramsJson.calc_mean` 显式传入时仅覆盖本次推理，省略时继续使用节点属性。
 - 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
+
+
+**前景背景统计结果**
+
+`post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。均值组仍使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
+
+C# 结构化包装结果通过 2.1 的均值存在性／有效性标记与中值可空属性保留选项字段存在性及空值，也可通过 `InferOneOutJson` 读取完整 JSON。普通模型旧均值 JSON 三字段仍固定为 `false/0.0/0.0`。
 
 ### 4.3 内部推理方法
 
@@ -469,7 +487,6 @@ Cv2.CvtColor(image, rgb, ColorConversionCodes.BGR2RGB);
 var paramsJson = new JObject();
 paramsJson["threshold"] = 0.5;
 paramsJson["with_mask"] = true;
-paramsJson["calc_mean"] = true;
 paramsJson["batch_size"] = 1;
 
 CSharpResult result = model.Infer(rgb, paramsJson);
@@ -525,9 +542,10 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 |--------|------|--------|------|
 | `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型的最终对外结果阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
-| `calc_mean` | bool | false | 是否计算 mask 前景区域与背景区域的像素均值 |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
+
+`calc_mean` 不参与模型推理，也不读取模型或流程模型节点保存的旧均值配置。
 
 ---
 
