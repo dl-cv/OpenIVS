@@ -12,10 +12,10 @@ def source(path):
 
 
 class StatisticsModuleSourceTest(unittest.TestCase):
-    def test_exported_flow_port_types_are_routed(self):
+    def test_standard_flow_port_types_are_routed(self):
         csharp = source("DlcvCsharpApi/flow/GraphExecutor.cs")
         cpp = source("dlcv_infer_cpp/flow/GraphExecutor.cpp")
-        for name in ("image_chan", "image", "result_chan", "list"):
+        for name in ("image_chan", "result_chan"):
             self.assertIn('string.Equals(dtype, "' + name + '"', csharp)
             self.assertIn('dtypeLower == "' + name + '"', cpp)
         self.assertIn("TestFlowPortTypes", source("Test/DlcvCSharpTest/ForegroundBackgroundStatisticsSelfTest.cs"))
@@ -31,11 +31,12 @@ class StatisticsModuleSourceTest(unittest.TestCase):
             "bool with_mask; DlcvCMask mask; bool with_angle; float angle; "
             "bool with_mean; double foreground_mean; double background_mean;")
 
-    def test_flow_keeps_existing_mean_result_fields(self):
+    def test_flow_outputs_node_statistics(self):
         for path in ("DlcvCsharpApi/flow/modules/Outputs.cs",
             "dlcv_infer_cpp/flow/modules/OutputModules.cpp"):
             text = source(path)
-            for field in ("with_mean", "foreground_mean", "background_mean"):
+            for field in ("with_mean", "foreground_mean", "background_mean",
+                "with_median", "foreground_median", "background_median"):
                 with self.subTest(file=path, field=field):
                     self.assertIn('"' + field + '"', text)
 

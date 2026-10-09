@@ -356,11 +356,6 @@ static Json ConvertToLocalSamples(
         o["bbox"] = obj.bbox;
         o["with_bbox"] = obj.withBbox;
         obj.WriteStatistics(o);
-        if (!o.contains("with_mean")) {
-            o["with_mean"] = obj.withMean;
-            o["foreground_mean"] = obj.foregroundMean;
-            o["background_mean"] = obj.backgroundMean;
-        }
         const bool withMask = includeMask && obj.withMask;
         o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;
@@ -430,11 +425,6 @@ static Json ConvertSampleResultToLocalSamples(
         o["bbox"] = obj.bbox;
         o["with_bbox"] = obj.withBbox;
         obj.WriteStatistics(o);
-        if (!o.contains("with_mean")) {
-            o["with_mean"] = obj.withMean;
-            o["foreground_mean"] = obj.foregroundMean;
-            o["background_mean"] = obj.backgroundMean;
-        }
         const bool withMask = includeMask && obj.withMask;
         o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;

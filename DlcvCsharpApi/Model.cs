@@ -2780,8 +2780,11 @@ namespace dlcv_infer_csharp
             result["category_id"] = item["category_id"] ?? 0;
             result["category_name"] = item["category_name"] ?? "";
             result["score"] = item["score"] ?? 0.0;
-            foreach (string key in new[] { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
-                if (item[key] != null) result[key] = item[key].DeepClone();
+            if (_isDvsMode)
+            {
+                foreach (string key in new[] { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
+                    if (item[key] != null) result[key] = item[key].DeepClone();
+            }
 
             // 2. Handle BBox
             var bbox = item["bbox"]?.ToObject<List<double>>() ?? new List<double>();

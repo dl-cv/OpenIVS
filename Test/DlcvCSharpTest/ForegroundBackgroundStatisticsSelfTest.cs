@@ -29,7 +29,7 @@ namespace DlcvCSharpTest
             };
 
             check("四种独立开关与默认值", TestOptions);
-            check("测试平台 image/list 与既有通道路由", TestFlowPortTypes);
+            check("标准流程通道及分支路由", TestFlowPortTypes);
             check("严格布尔类型", TestPropertyTypes);
             check("非有限像素与采样域", TestNonFinite);
             check("有限极大通道值不溢出", TestLargeFinite);
@@ -37,6 +37,7 @@ namespace DlcvCSharpTest
             check("数组掩码阈值与非法数组", TestMaskArray);
             check("统计包装类型、独立开关与 null 往返", TestWrapperRoundTrip);
             check("公共解析入口保留默认值、中值及空侧", TestPublicParserRoundTrip);
+            check("普通模型结果不补统计字段", TestModelOutput);
             check("统计文字无采样与中值", TestWrapperText);
             check("彩色全部通道共同统计", TestColor);
             check("全前景、全背景与无采样域", TestEmptySides);
@@ -90,59 +91,57 @@ namespace DlcvCSharpTest
         {
             using (var image = Gray(new byte[,] { { 1, 3 } }))
             {
-                foreach (var ports in new[] { new[] { "image", "list" }, new[] { "image_chan", "result_chan" } })
+                var ports = new[] { "image_chan", "result_chan" };
+                var context = new DlcvModules.ExecutionContext();
+                context.Set("frontend_image_mat", image);
+                var nodes = new JArray
                 {
-                    var context = new DlcvModules.ExecutionContext();
-                    context.Set("frontend_image_mat", image);
-                    var nodes = new JArray
+                    new JObject { ["id"] = 1, ["type"] = "input/frontend_image", ["outputs"] = new JArray
                     {
-                        new JObject { ["id"] = 1, ["type"] = "input/frontend_image", ["outputs"] = new JArray
+                        new JObject { ["type"] = ports[0], ["links"] = new JArray(1) },
+                        new JObject { ["type"] = ports[1], ["links"] = new JArray(2) }
+                    } },
+                    new JObject { ["id"] = 2, ["type"] = "input/build_results",
+                        ["properties"] = new JObject { ["bbox_x"] = 0, ["bbox_y"] = 0, ["bbox_w"] = 2, ["bbox_h"] = 1 },
+                        ["inputs"] = new JArray
                         {
-                            new JObject { ["type"] = ports[0], ["links"] = new JArray(1) },
-                            new JObject { ["type"] = ports[1], ["links"] = new JArray(2) }
+                            new JObject { ["type"] = ports[0], ["link"] = 1 },
+                            new JObject { ["type"] = ports[1], ["link"] = 2 }
+                        }, ["outputs"] = new JArray
+                        {
+                            new JObject { ["type"] = ports[0], ["links"] = new JArray(7) },
+                            new JObject { ["type"] = ports[1], ["links"] = new JArray(8) }
                         } },
-                        new JObject { ["id"] = 2, ["type"] = "input/build_results",
-                            ["properties"] = new JObject { ["bbox_x"] = 0, ["bbox_y"] = 0, ["bbox_w"] = 2, ["bbox_h"] = 1 },
-                            ["inputs"] = new JArray
-                            {
-                                new JObject { ["type"] = ports[0], ["link"] = 1 },
-                                new JObject { ["type"] = ports[1], ["link"] = 2 }
-                            }, ["outputs"] = new JArray
-                            {
-                                new JObject { ["type"] = ports[0], ["links"] = new JArray(7) },
-                                new JObject { ["type"] = ports[1], ["links"] = new JArray(8) }
-                            } },
-                        new JObject { ["id"] = 3, ["type"] = "post_process/foreground_background_statistics",
-                            ["properties"] = new JObject { ["mean"] = true, ["median"] = true },
-                            ["inputs"] = new JArray
-                            {
-                                new JObject { ["type"] = ports[0], ["link"] = 7 },
-                                new JObject { ["type"] = ports[1], ["link"] = 8 }
-                            }, ["outputs"] = new JArray
-                            {
-                                new JObject { ["type"] = ports[0], ["links"] = new JArray(3, 5) },
-                                new JObject { ["type"] = ports[1], ["links"] = new JArray(4, 6) }
-                            } }
-                    };
-                    foreach (int id in new[] { 4, 5 })
-                        nodes.Add(new JObject { ["id"] = id,
-                            ["type"] = id == 4 ? "output/preview" : "output/return_json",
-                            ["inputs"] = new JArray
-                            {
-                                new JObject { ["type"] = ports[0], ["link"] = id == 4 ? 3 : 5 },
-                                new JObject { ["type"] = ports[1], ["link"] = id == 4 ? 4 : 6 }
-                            } });
-                    var output = new GraphExecutor(nodes.ToObject<List<Dictionary<string, object>>>(), context).Run();
-                    foreach (int id in new[] { 3, 4, 5 })
-                    {
-                        var images = (List<ModuleImage>)output[id]["image_list"];
-                        var results = (JArray)output[id]["result_list"];
-                        Require(images.Count == 1 && ReferenceEquals(images[0].OriginalImage, image), ports[0] + " 图像路由丢失");
-                        Require(results.Count == 1 && results[0].Value<string>("type") == "local"
-                            && ((JArray)results[0]["sample_results"]).Count == 1, ports[1] + " 结果路由丢失");
-                        Statistics(Target(results), "mean", true, false, null, null);
-                        Statistics(Target(results), "median", true, false, null, null);
-                    }
+                    new JObject { ["id"] = 3, ["type"] = "post_process/foreground_background_statistics",
+                        ["properties"] = new JObject { ["mean"] = true, ["median"] = true },
+                        ["inputs"] = new JArray
+                        {
+                            new JObject { ["type"] = ports[0], ["link"] = 7 },
+                            new JObject { ["type"] = ports[1], ["link"] = 8 }
+                        }, ["outputs"] = new JArray
+                        {
+                            new JObject { ["type"] = ports[0], ["links"] = new JArray(3, 5) },
+                            new JObject { ["type"] = ports[1], ["links"] = new JArray(4, 6) }
+                        } }
+                };
+                foreach (int id in new[] { 4, 5 })
+                    nodes.Add(new JObject { ["id"] = id,
+                        ["type"] = id == 4 ? "output/preview" : "output/return_json",
+                        ["inputs"] = new JArray
+                        {
+                            new JObject { ["type"] = ports[0], ["link"] = id == 4 ? 3 : 5 },
+                            new JObject { ["type"] = ports[1], ["link"] = id == 4 ? 4 : 6 }
+                        } });
+                var output = new GraphExecutor(nodes.ToObject<List<Dictionary<string, object>>>(), context).Run();
+                foreach (int id in new[] { 3, 4, 5 })
+                {
+                    var images = (List<ModuleImage>)output[id]["image_list"];
+                    var results = (JArray)output[id]["result_list"];
+                    Require(images.Count == 1 && ReferenceEquals(images[0].OriginalImage, image), ports[0] + " 图像路由丢失");
+                    Require(results.Count == 1 && results[0].Value<string>("type") == "local"
+                        && ((JArray)results[0]["sample_results"]).Count == 1, ports[1] + " 结果路由丢失");
+                    Statistics(Target(results), "mean", true, false, null, null);
+                    Statistics(Target(results), "median", true, false, null, null);
                 }
             }
         }
@@ -360,7 +359,11 @@ namespace DlcvCSharpTest
                         new JObject { ["results"] = new JArray(target) }) };
                     var parsed = model.ParseToStructResult(input).SampleResults[0].Results[0];
                     var normalize = typeof(Model).GetMethod("StandardizeJsonOutput", BindingFlags.NonPublic | BindingFlags.Instance);
-                    var normalized = (JObject)normalize.Invoke(model, new object[] { target, false });
+                    var flowMode = typeof(Model).GetField("_isDvsMode", BindingFlags.NonPublic | BindingFlags.Instance);
+                    JObject normalized;
+                    flowMode.SetValue(model, true);
+                    try { normalized = (JObject)normalize.Invoke(model, new object[] { target, false }); }
+                    finally { flowMode.SetValue(model, false); }
                     foreach (string key in Fields)
                         Require(JToken.DeepEquals(target[key], normalized[key]), "JSON 标准化改变原有统计字段");
                     try
@@ -384,6 +387,26 @@ namespace DlcvCSharpTest
                     finally { parsed.Mask?.Dispose(); }
                 }
             }
+        }
+
+        private static void TestModelOutput()
+        {
+            var target = new JObject
+            {
+                ["bbox"] = new JArray(0, 0, 1, 1), ["score"] = 0.75,
+                ["with_mean"] = false, ["foreground_mean"] = 0.0, ["background_mean"] = 0.0
+            };
+            using (var model = new Model())
+            {
+                var normalize = typeof(Model).GetMethod("StandardizeJsonOutput", BindingFlags.NonPublic | BindingFlags.Instance);
+                var result = (JObject)normalize.Invoke(model, new object[] { target, false });
+                foreach (string key in Fields) Require(result[key] == null, "普通模型 JSON 补入统计字段: " + key);
+                Require(result.Value<double>("score") == 0.75, "普通模型结果内容改变");
+            }
+            var sample = new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult> { new Utils.CSharpObjectResult() });
+            var convert = typeof(DetModel).GetMethod("ConvertToLocalSamples", BindingFlags.NonPublic | BindingFlags.Static);
+            var local = (JArray)convert.Invoke(null, new object[] { sample });
+            foreach (string key in Fields) Require(local[0][key] == null, "模型节点补入统计字段: " + key);
         }
 
         private static void TestWrapperText()

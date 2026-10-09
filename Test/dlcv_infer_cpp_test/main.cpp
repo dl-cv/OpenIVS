@@ -3027,45 +3027,42 @@ int RunForegroundBackgroundStatisticsSelfTest() {
             }
         }
         std::remove(flipPath.c_str());
-        // 测试平台导出 image/list，旧工程使用 image_chan/result_chan；两者均保留分支数据。
-        for (const auto& ports : {std::pair<std::string, std::string>{"image", "list"},
-                                  std::pair<std::string, std::string>{"image_chan", "result_chan"}}) {
-            json nodes = json::array({
-                {{"id", 1}, {"type", "input/frontend_image"}, {"outputs", {
-                    {{"type", ports.first}, {"links", {1}}},
-                    {{"type", ports.second}, {"links", {2}}}}}},
-                {{"id", 2}, {"type", "input/build_results"},
-                    {"properties", {{"bbox_x", 0}, {"bbox_y", 0}, {"bbox_w", 3}, {"bbox_h", 2}}},
-                    {"inputs", {{{"type", ports.first}, {"link", 1}}, {{"type", ports.second}, {"link", 2}}}},
-                    {"outputs", {{{"type", ports.first}, {"links", {7}}}, {{"type", ports.second}, {"links", {8}}}}}},
-                {{"id", 3}, {"type", "post_process/foreground_background_statistics"}, {"properties", both},
-                    {"inputs", {{{"type", ports.first}, {"link", 7}}, {{"type", ports.second}, {"link", 8}}}},
-                    {"outputs", {{{"type", ports.first}, {"links", {3, 5}}},
-                                 {{"type", ports.second}, {"links", {4, 6}}}}}}
-            });
-            for (int id : {4, 5}) {
-                nodes.push_back({{"id", id}, {"type", id == 4 ? "output/preview" : "output/return_json"},
-                    {"inputs", {{{"type", ports.first}, {"link", id == 4 ? 3 : 5}},
-                                {{"type", ports.second}, {"link", id == 4 ? 4 : 6}}}}});
-            }
-            const std::string path = JoinPathA(BuildTempRectCorrectionDir(), "statistics-port-" + ports.first + ".json");
-            {
-                std::ofstream file(path, std::ios::binary);
-                check(static_cast<bool>(file), "无法保存临时端口回归流程");
-                file << json{{"nodes", nodes}}.dump();
-            }
-            FlowGraphModel graph;
-            check(graph.Load(path, -1).value("code", 1) == 0, "端口回归流程加载失败");
-            const auto output = graph.InferInternal({gray});
-            const auto& targets = output.at("result_list");
-            check(targets.size() == 1, ports.second + " 结果路由丢失");
-            const auto& item = targets[0];
-            check(item.at("with_mean") == false && item.at("with_median") == false &&
-                item.at("foreground_mean").is_null() && item.at("background_mean").is_null() &&
-                item.at("foreground_median").is_null() && item.at("background_median").is_null(),
-                "缺掩码目标的统计路由或 null 输出错误");
-            std::remove(path.c_str());
+        const std::pair<std::string, std::string> ports{"image_chan", "result_chan"};
+        json nodes = json::array({
+            {{"id", 1}, {"type", "input/frontend_image"}, {"outputs", {
+                {{"type", ports.first}, {"links", {1}}},
+                {{"type", ports.second}, {"links", {2}}}}}},
+            {{"id", 2}, {"type", "input/build_results"},
+                {"properties", {{"bbox_x", 0}, {"bbox_y", 0}, {"bbox_w", 3}, {"bbox_h", 2}}},
+                {"inputs", {{{"type", ports.first}, {"link", 1}}, {{"type", ports.second}, {"link", 2}}}},
+                {"outputs", {{{"type", ports.first}, {"links", {7}}}, {{"type", ports.second}, {"links", {8}}}}}},
+            {{"id", 3}, {"type", "post_process/foreground_background_statistics"}, {"properties", both},
+                {"inputs", {{{"type", ports.first}, {"link", 7}}, {{"type", ports.second}, {"link", 8}}}},
+                {"outputs", {{{"type", ports.first}, {"links", {3, 5}}},
+                             {{"type", ports.second}, {"links", {4, 6}}}}}}
+        });
+        for (int id : {4, 5}) {
+            nodes.push_back({{"id", id}, {"type", id == 4 ? "output/preview" : "output/return_json"},
+                {"inputs", {{{"type", ports.first}, {"link", id == 4 ? 3 : 5}},
+                            {{"type", ports.second}, {"link", id == 4 ? 4 : 6}}}}});
         }
+        const std::string path = JoinPathA(BuildTempRectCorrectionDir(), "statistics-port-" + ports.first + ".json");
+        {
+            std::ofstream file(path, std::ios::binary);
+            check(static_cast<bool>(file), "无法保存临时端口回归流程");
+            file << json{{"nodes", nodes}}.dump();
+        }
+        FlowGraphModel graph;
+        check(graph.Load(path, -1).value("code", 1) == 0, "端口回归流程加载失败");
+        const auto output = graph.InferInternal({gray});
+        const auto& targets = output.at("result_list");
+        check(targets.size() == 1, ports.second + " 结果路由丢失");
+        const auto& item = targets[0];
+        check(item.at("with_mean") == false && item.at("with_median") == false &&
+            item.at("foreground_mean").is_null() && item.at("background_mean").is_null() &&
+            item.at("foreground_median").is_null() && item.at("background_median").is_null(),
+            "缺掩码目标的统计路由或 null 输出错误");
+        std::remove(path.c_str());
         const cv::Mat savedImage = gray.clone();
         std::vector<ModuleImage> images{makeImage(gray)};
         images[0].UniqueId = "statistics-image";

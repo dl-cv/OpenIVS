@@ -239,7 +239,7 @@ json InferOneOutJson(const cv::Mat& image, const json& params_json = nullptr);
 - 返回 JSON 数组，每个元素为单个检测结果对象。
 - 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
 - 普通模式下将底层返回的 `mask_ptr` mask 转换为点数组形式。
-- 既有 JSON 保留 `with_mean`、`foreground_mean`、`background_mean`，普通推理固定输出 `false`、`0.0`、`0.0`；普通推理不再计算统计值。C++ 包装结果的统计标志与空值说明见 2.1，C ABI 布局另见 C API 文档。
+- 普通模型不计算统计值，JSON 不输出均值与中值字段；统计字段由独立统计节点输出。C++ 包装结果的统计标志与空值说明见 2.1，C ABI 布局另见 C API 文档。
 
 ### 4.6 释放模型
 
@@ -383,7 +383,7 @@ public:
 
 `post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。均值组仍使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 
-C++ 结构化包装结果通过 `withMean`、`withMedian` 及对应 `double` 成员读取统计值，空侧使用 `NaN`，详见 2.1，也可通过 `InferOneOutJson` 读取完整 JSON。普通模型旧均值 JSON 三字段仍固定为 `false/0.0/0.0`。
+C++ 结构化包装结果通过 `withMean`、`withMedian` 及对应 `double` 成员读取统计值，空侧使用 `NaN`，详见 2.1，也可通过 `InferOneOutJson` 读取完整 JSON。普通模型 JSON 不输出统计字段。
 
 ---
 
@@ -649,7 +649,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 19.4 推理、结果与计时
 
-普通模型请求固定组装 `model_index + image_list` 后调用底层推理，`code!=0` 时抛异常。结构化包装阶段会自动补推断 `with_bbox`、`with_angle`，读取 `with_mean`、`foreground_mean`、`background_mean`，并对 `mask` 做 `clone()`、必要时缩放或反推框。`InferOneOutJson()` 只返回首张图结果；未产生流程判定时返回原结果数组，产生判定时返回 `{"result_list":[...],"ok":true|false,"reason":null|[...]}`。最近一次计时和流程判定状态保存在当前线程；`GetLastInspectionStatus(bool&, std::vector<std::string>&, size_t)` 按图片索引读取最近一次 `Infer`、`InferBatch` 或 `InferOneOutJson` 的状态，未产生状态时返回 `false`。FlowGraph 模式的计时优先使用流程返回的 `timing`。
+普通模型请求固定组装 `model_index + image_list` 后调用底层推理，`code!=0` 时抛异常。结构化包装阶段会自动补推断 `with_bbox`、`with_angle`，不读取普通模型的旧均值字段，并对 `mask` 做 `clone()`、必要时缩放或反推框。`InferOneOutJson()` 只返回首张图结果；未产生流程判定时返回原结果数组，产生判定时返回 `{"result_list":[...],"ok":true|false,"reason":null|[...]}`。最近一次计时和流程判定状态保存在当前线程；`GetLastInspectionStatus(bool&, std::vector<std::string>&, size_t)` 按图片索引读取最近一次 `Infer`、`InferBatch` 或 `InferOneOutJson` 的状态，未产生状态时返回 `false`。FlowGraph 模式的计时优先使用流程返回的 `timing`。
 
 ---
 

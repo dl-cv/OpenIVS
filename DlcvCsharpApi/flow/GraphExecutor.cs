@@ -495,14 +495,12 @@ namespace DlcvModules
                     }
                 }
                 if (picked == null) continue;
-                if (string.Equals(dtype, "image_chan", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(dtype, "image", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(dtype, "image_chan", StringComparison.OrdinalIgnoreCase))
                 {
                     // 覆盖为来自源的整个列表
                     ch = new ModuleChannel(new List<ModuleImage>(picked.ImageList ?? new List<ModuleImage>()), ch.ResultList ?? new JArray(), ch.TemplateList ?? new List<SimpleTemplate>());
                 }
-                else if (string.Equals(dtype, "result_chan", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(dtype, "list", StringComparison.OrdinalIgnoreCase))
+                else if (string.Equals(dtype, "result_chan", StringComparison.OrdinalIgnoreCase))
                 {
                     // 结果通道仅做路由，直接复用引用避免高频 JToken 逐项拷贝。
                     ch = new ModuleChannel(ch.ImageList ?? new List<ModuleImage>(), picked.ResultList ?? new JArray(), ch.TemplateList ?? new List<SimpleTemplate>());

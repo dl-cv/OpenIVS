@@ -3347,6 +3347,8 @@ namespace dlcv_infer {
         {
             json results = resultTuple.first["sample_results"][0]["results"];
             for (auto& result : results) {
+                for (const char* key : { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
+                    result.erase(key);
                 mask_utils::ConvertPointerMaskToContour(result);
             }
 

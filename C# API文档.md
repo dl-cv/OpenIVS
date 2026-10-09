@@ -76,7 +76,7 @@ public partial class Utils
 - 统计模块禁用某组统计时不输出该组三个键；启用但选区完全没有采样时输出 `with_mean=false` 或 `with_median=false`，对应两个数字为 JSON `null`。仅前景或背景为空时，开关为 `true`，空侧数字为 JSON `null`，另一侧保留实际数值。
 - `WriteStatistics(JObject)` 先清除目标上已有的六个统计键，再按每组开关为 `true` 或任一侧为 `NaN` 保留该组；开关仍输出原布尔值，非有限数值输出 JSON `null`。关闭且数字均为零的未计算结果不输出该组，不输出 `NaN` 字符串。
 - `StatisticsToString()` 使用相同的组显示条件，空侧显示“无采样”，有效零值仍显示数值。
-- 原有 11／14 参数构造函数继续可用：11 参数构造函数初始化均值为 `false/0.0/0.0`，14 参数构造函数接收显式均值；两者初始化中值为 `false/0.0/0.0`。普通模型推理不计算统计值，旧 `false/0.0/0.0` 结果可省略统计组。
+- 原有 11／14 参数构造函数继续可用：11 参数构造函数初始化均值为 `false/0.0/0.0`，14 参数构造函数接收显式均值；两者初始化中值为 `false/0.0/0.0`。普通模型不计算统计值，JSON 不输出统计字段。
 - `ExtraInfo` 可包含 `polyline`（通过 `Utils.GetExtraInfoPolyline` / `Utils.SetExtraInfoPolyline` 读写）。
 
 ### 2.2 CSharpSampleResult
@@ -252,7 +252,7 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 
 `post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。均值组仍使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 
-C# 结构化包装结果按 2.1 的布尔开关与 `double` 数值读取统计，JSON `null` 保存为 `double.NaN`；写回时保留无采样的 `false/null/null`，禁用组不输出。`InferOneOutJson` 返回对应 JSON，普通模型未计算的旧 `false/0.0/0.0` 均值组可省略。
+C# 结构化包装结果按 2.1 的布尔开关与 `double` 数值读取统计，JSON `null` 保存为 `double.NaN`；写回时保留无采样的 `false/null/null`，禁用组不输出。`InferOneOutJson` 返回对应 JSON，普通模型 JSON 不输出统计字段。
 
 ### 4.3 内部推理方法
 

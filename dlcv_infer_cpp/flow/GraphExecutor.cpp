@@ -331,13 +331,13 @@ std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
             }
         }
 
-        if (dtypeLower == "image_chan" || dtypeLower == "image") {
+        if (dtypeLower == "image_chan") {
             if (moveNow) {
                 ch.ImageList = std::move(picked->ImageList);
             } else {
                 ch.ImageList = picked->ImageList;
             }
-        } else if (dtypeLower == "result_chan" || dtypeLower == "list") {
+        } else if (dtypeLower == "result_chan") {
             if (moveNow) {
                 ch.ResultList = std::move(picked->ResultList);
             } else {

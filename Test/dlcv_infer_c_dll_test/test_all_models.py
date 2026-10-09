@@ -803,6 +803,11 @@ def run_model(api, model_path, image_path, device_id, params):
             json_predictions = normalize_json_result(
                 json.loads(decode_c_text(json_ptr))
             )
+            if model_path.suffix.lower() in (".dvt", ".dvo"):
+                fields = ("with_mean", "foreground_mean", "background_mean",
+                    "with_median", "foreground_median", "background_median")
+                if any(key in target for sample in json_predictions for target in sample for key in fields):
+                    raise TestFailure("JSON推理", "普通模型返回了统计字段")
             row["JSON推理"] = True
         finally:
             api.library.dlcv_infer_cpp_free_string_c(json_ptr)
