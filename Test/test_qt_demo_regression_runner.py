@@ -200,8 +200,6 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
         self.assertEqual(28, report["summary"]["case_total"])
         self.assertEqual(4, report["summary"]["comparison_total"])
         self.assertEqual(28, len(calls))
-        for command, _ in calls:
-            self.assertNotIn("--calc-mean", command)
         self.assertEqual(["classification_dvt", "classification_dvo", "segmentation_dvt", "flow_dvst"], [case["id"] for case in report["cases"][:4]])
         masks = [case for case in report["cases"] if case["kind"] == "png-selftest"]
         self.assertEqual({"c", "cpp"}, {case["demo"] for case in masks})

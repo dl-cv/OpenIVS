@@ -450,6 +450,12 @@ namespace DlcvModules
 					["angle"] = obj.Angle
 				};
 				obj.WriteStatistics(o);
+                if (o["with_mean"] == null)
+                {
+                    o["with_mean"] = obj.WithMean;
+                    o["foreground_mean"] = obj.ForegroundMean;
+                    o["background_mean"] = obj.BackgroundMean;
+                }
 				// 将 mask 以 RLE 的形式存储到 JSON（mask_rle），避免直接写入原始像素或多边形点集
 				if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
 				{

@@ -419,7 +419,6 @@ namespace DlcvCSharpTest
 
                 object structuredSummary = Activator.CreateInstance(pathSummaryType);
                 object jsonSummary = Activator.CreateInstance(pathSummaryType);
-                // 2026-10-09：统计摘要新增中值参数，旧反射实参不足会使CLI异常检查无法执行；补齐未启用中值的三个null。
                 addSummaryItemMethod.Invoke(structuredSummary, new object[]
                 {
                     0.035134196281433105,
@@ -428,9 +427,9 @@ namespace DlcvCSharpTest
                     false,
                     0.0,
                     0.0,
-                    null,
-                    null,
-                    null,
+                    false,
+                    0.0,
+                    0.0,
                     0.5
                 });
                 addSummaryItemMethod.Invoke(jsonSummary, new object[]
@@ -441,9 +440,9 @@ namespace DlcvCSharpTest
                     false,
                     0.0,
                     0.0,
-                    null,
-                    null,
-                    null,
+                    false,
+                    0.0,
+                    0.0,
                     0.5
                 });
                 bool mismatchConsistent = (bool)consistencyMethod.Invoke(

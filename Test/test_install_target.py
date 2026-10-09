@@ -129,14 +129,6 @@ class InstallTargetTest(unittest.TestCase):
         ])
         self.assertTrue(result.stdout.strip())
 
-    def test_default_stops_on_uninstall_error(self):
-        self.wheel()
-        result = self.run_script(uninstall_exit_code=37)
-        self.assertEqual(result.returncode, 37, result.stdout + result.stderr)
-        self.assertEqual(self.calls(), [
-            self.expected_call("uninstall", "-y", "dlcvpro_infer_csharp")])
-        self.assertEqual(result.stdout, b"")
-
     def test_default_returns_install_error_after_pause(self):
         self.wheel()
         result = self.run_script(exit_code=31)

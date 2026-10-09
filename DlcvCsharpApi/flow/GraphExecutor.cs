@@ -452,7 +452,6 @@ namespace DlcvModules
             return map;
         }
 
-        // 2026-10-09：前端实际 image/list 端口被忽略，同一 DVST 返回0目标；必须按已确认类型路由图像与结果，并保留原通道类型。
         private Dictionary<int, ModuleChannel> CollectInputPairs(Dictionary<string, object> node, Dictionary<int, Tuple<int, int>> linkToSource)
         {
             var pairs = new Dictionary<int, ModuleChannel>();

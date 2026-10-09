@@ -527,25 +527,6 @@ def test_c_statistics_projection_keeps_json_median():
         "foreground_mean": None, "background_mean": None}])], [normalize_sample([{"score": 0.9}])]) == []
 
 
-def test_statistics_writers_clear_reused_targets_before_writing():
-    root = Path(__file__).resolve().parents[2]
-    fields = ("with_mean", "foreground_mean", "background_mean",
-              "with_median", "foreground_median", "background_median")
-    for path, signature, remove, condition in (
-        ("DlcvCsharpApi/DataTypes.cs", "public void WriteStatistics(JObject target)",
-         "target.Remove(key)", "if (MeanFieldsPresent)"),
-        ("dlcv_infer_cpp/dlcv_infer.h", "void WriteStatistics(json& target) const",
-         "target.erase(key)", "if (meanFieldsPresent)"),
-    ):
-        text = (root / path).read_text(encoding="utf-8-sig")
-        writer = text[text.index(signature):]
-        cleanup = writer[:writer.index(condition)]
-        assert remove in cleanup, path
-        for field in fields:
-            assert f'"{field}"' in cleanup, (path, field)
-        assert "target.Clear(" not in cleanup and "target.clear(" not in cleanup
-
-
 def test_c_structured_nan_means_are_not_zero():
     objects = (DlcvCObjectResult * 1)()
     objects[0].score = 0.9

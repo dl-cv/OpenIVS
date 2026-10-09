@@ -2985,7 +2985,6 @@ namespace dlcv_infer {
         }
     }
 
-    // 2026-10-09：缺少均值键时跳过 ReadStatistics，公开解析自测未保留缺失状态；必须每目标读取存在性与空值，原生默认字段不变。
     Result Model::ParseToStructResult(const json& resultObject) {
         return ParseToStructResultInternal(resultObject, false);
     }

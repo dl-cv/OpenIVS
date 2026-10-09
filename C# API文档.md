@@ -43,14 +43,11 @@ public partial class Utils
         public bool WithAngle { get; set; }           // 是否含旋转角度
         public float Angle { get; set; }              // 旋转角度（弧度），-100 表示无效
         public bool WithMean { get; set; }            // 均值采样状态
-        public double ForegroundMean { get; set; }    // 缺失或无采样值时为 NaN
-        public double BackgroundMean { get; set; }    // 缺失或无采样值时为 NaN
-        public bool MeanFieldsPresent { get; set; }   // 均值选项字段是否存在
-        public bool ForegroundMeanValid { get; }      // 前景均值是否有限
-        public bool BackgroundMeanValid { get; }      // 背景均值是否有限
-        public bool? WithMedian { get; set; }         // null 表示中值选项字段缺失
-        public double? ForegroundMedian { get; set; } // null 表示前景无采样值
-        public double? BackgroundMedian { get; set; } // null 表示背景无采样值
+        public double ForegroundMean { get; set; }    // JSON null 为 NaN，缺失字段为 0
+        public double BackgroundMean { get; set; }    // JSON null 为 NaN，缺失字段为 0
+        public bool WithMedian { get; set; }          // 中值采样状态
+        public double ForegroundMedian { get; set; }  // JSON null 为 NaN，缺失字段为 0
+        public double BackgroundMedian { get; set; }  // JSON null 为 NaN，缺失字段为 0
 
         public void ReadStatistics(JObject source);
         public void WriteStatistics(JObject target);
@@ -74,11 +71,12 @@ public partial class Utils
 - `Bbox` 长度约定：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
-- 均值属性保留原类型：`WithMean` 为 `bool`，`ForegroundMean`、`BackgroundMean` 为 `double`。`MeanFieldsPresent` 表示均值选项字段是否存在；`ReadStatistics` 读取缺失或 JSON `null` 的均值时写入 `NaN`，两个只读 `*MeanValid` 属性通过数值是否有限判断有效性。
-- 中值属性保持可空：`WithMedian` 为 `bool?`，`null` 表示中值选项字段缺失；`ForegroundMedian`、`BackgroundMedian` 为 `double?`，无采样值时为 `null`。状态字段存在时，`false` 表示没有有效采样，`true` 表示有有效采样。
-- 原有 11／14 参数构造函数继续可用：11 参数构造函数初始化均值为 `false/0.0/0.0`，14 参数构造函数接收显式均值；两者初始化中值组为 `null`。
-- 既有 JSON 保留 `with_mean`、`foreground_mean`、`background_mean`，普通推理固定输出 `false`、`0.0`、`0.0`；包装结果中的均值属性保留，普通模型推理不再计算统计值。
-- `ReadStatistics(JObject)` 从 JSON 读取两组字段；`WriteStatistics(JObject)` 先删除目标上已有的六个统计键，再按 `MeanFieldsPresent` 与 `WithMedian.HasValue` 写入对应组；无效均值写为 JSON `null`，保留字段缺失与空值的区别。
+- 均值与中值分别使用 `WithMean`、`WithMedian`（均为 `bool`）和前景、背景数值（均为 `double`）。
+- `ReadStatistics(JObject)` 忠实读取 `with_mean`、`with_median`；开关缺失时为 `false`，数字键缺失时为 `0.0`，实际 JSON `null` 读取为 `double.NaN`。重复读取时不会保留上一次统计值。
+- 统计模块禁用某组统计时不输出该组三个键；启用但选区完全没有采样时输出 `with_mean=false` 或 `with_median=false`，对应两个数字为 JSON `null`。仅前景或背景为空时，开关为 `true`，空侧数字为 JSON `null`，另一侧保留实际数值。
+- `WriteStatistics(JObject)` 先清除目标上已有的六个统计键，再按每组开关为 `true` 或任一侧为 `NaN` 保留该组；开关仍输出原布尔值，非有限数值输出 JSON `null`。关闭且数字均为零的未计算结果不输出该组，不输出 `NaN` 字符串。
+- `StatisticsToString()` 使用相同的组显示条件，空侧显示“无采样”，有效零值仍显示数值。
+- 原有 11／14 参数构造函数继续可用：11 参数构造函数初始化均值为 `false/0.0/0.0`，14 参数构造函数接收显式均值；两者初始化中值为 `false/0.0/0.0`。普通模型推理不计算统计值，旧 `false/0.0/0.0` 结果可省略统计组。
 - `ExtraInfo` 可包含 `polyline`（通过 `Utils.GetExtraInfoPolyline` / `Utils.SetExtraInfoPolyline` 读写）。
 
 ### 2.2 CSharpSampleResult
@@ -254,7 +252,7 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 
 `post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。均值组仍使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 
-C# 结构化包装结果通过 2.1 的均值存在性／有效性标记与中值可空属性保留选项字段存在性及空值，也可通过 `InferOneOutJson` 读取完整 JSON。普通模型旧均值 JSON 三字段仍固定为 `false/0.0/0.0`。
+C# 结构化包装结果按 2.1 的布尔开关与 `double` 数值读取统计，JSON `null` 保存为 `double.NaN`；写回时保留无采样的 `false/null/null`，禁用组不输出。`InferOneOutJson` 返回对应 JSON，普通模型未计算的旧 `false/0.0/0.0` 均值组可省略。
 
 ### 4.3 内部推理方法
 

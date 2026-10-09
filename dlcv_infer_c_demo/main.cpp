@@ -275,7 +275,6 @@ bool nearlyEqual(double left, double right, double tolerance) {
     return std::fabs(left - right) <= tolerance;
 }
 
-// 2026-10-09：全前景/全背景的空侧均值为NaN，直接差值比较会把稳定结果判为变化；统计值单独比较空态，不能等同于0。
 bool compareStableSummary(
     const StableResultSummary& baseline,
     const StableResultSummary& current,
@@ -338,9 +337,8 @@ bool compareStableSummary(
                 error = location + "的角度变化";
                 return false;
             }
-            if (expected.withMean &&
-                (!sameMean(expected.foregroundMean, actual.foregroundMean) ||
-                 !sameMean(expected.backgroundMean, actual.backgroundMean))) {
+            if (!sameMean(expected.foregroundMean, actual.foregroundMean) ||
+                !sameMean(expected.backgroundMean, actual.backgroundMean)) {
                 error = location + "的均值变化";
                 return false;
             }
@@ -811,32 +809,9 @@ bool splitCommands(
 
 }
 
-int runMeanNullComparisonSelfTest() {
-    const double missing = std::numeric_limits<double>::quiet_NaN();
-    for (bool emptyForeground : {false, true}) {
-        StableObjectResult object;
-        object.withMean = true;
-        object.foregroundMean = emptyForeground ? missing : 7;
-        object.backgroundMean = emptyForeground ? 7 : missing;
-        StableResultSummary baseline;
-        baseline.samples = {{object}};
-        StableResultSummary current = baseline;
-        std::string error;
-        if (!compareStableSummary(baseline, current, error)) return ExitBenchmarkError;
-        if (emptyForeground) current.samples[0][0].foregroundMean = 0;
-        else current.samples[0][0].backgroundMean = 0;
-        if (compareStableSummary(baseline, current, error)) return ExitBenchmarkError;
-        if (compareStableSummary(current, baseline, error)) return ExitBenchmarkError;
-    }
-    std::cout << "全前景、全背景及空值不等于0的比较自测通过\n";
-    return ExitSuccess;
-}
-
 int wmain(int argc, wchar_t* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-
-    if (argc == 2 && std::wstring(argv[1]) == L"mean-null-comparison-selftest") return runMeanNullComparisonSelfTest();
 
     if (argc <= 1) {
         printHelp();

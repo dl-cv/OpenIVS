@@ -154,7 +154,7 @@ double StatisticsTrig(double value) {
     return value;
 }
 
-// 2026-10-09：直角旋转半开域可能包含最大整数坐标，候选上限ceil会漏像素；候选用floor(max)+1，mask定位仍保留floor/ceil。
+// 旋转框可能包含上限坐标处的像素，采样范围需包含该坐标。
 bool StatisticsBounds(const Json& detection, std::array<double, 4>& bounds, std::array<double, 4>& candidates,
     std::array<double, 5>& rotated, bool& hasRotation) {
     if (!detection.contains("bbox")) return false;
@@ -191,7 +191,7 @@ int StatisticsNearestIndex(double offset, double scale, int size) {
     return std::min(size - 1, static_cast<int>(std::floor(offset * scale)));
 }
 
-// 2026-10-09：当前变换图取样会改变原图统计；必须逆映射结果选区，读取 OriginalImage 全部通道，不生成延迟图像。
+// 将结果选区映射回原图，避免缩放或旋转改变统计值。
 std::array<std::vector<double>, 2> StatisticsPixels(const ModuleImage& wrap, const Json& entry,
     const Json& detection, const cv::Mat& mask) {
     const StatisticsTransform current = StatisticsState(wrap.TransformState);
@@ -336,7 +336,7 @@ public:
                             for (double value : values) scale = std::max(scale, std::abs(value));
                             double sum = 0;
                             if (scale > 0) for (double value : values) sum += value / scale;
-                            detection[prefix + "mean"] = std::clamp(sum / values.size(), -1.0, 1.0) * scale;
+                            detection[prefix + "mean"] = std::max(-1.0, std::min(1.0, sum / values.size())) * scale;
                         }
                     }
                     if (median) {

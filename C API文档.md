@@ -42,7 +42,7 @@ dlcv_infer_cpp/dlcv_infer_c_api.h
 - `DlcvCSampleResult`
 - `DlcvCResult`
 
-`DlcvCObjectResult` 的 `with_mean` 为 `bool`，`foreground_mean`、`background_mean` 为 `double`；成员顺序与 ABI 布局不变，不加入 C++ 包装层的存在性／有效性标记或中值成员。普通推理结构化结果及 JSON 的旧均值三字段仍固定为 `false/0.0/0.0`，不再计算统计值。
+`DlcvCObjectResult` 的 `with_mean` 为 `bool`，`foreground_mean`、`background_mean` 为 `double`；成员顺序与 ABI 布局不变，不加入中值成员。普通推理结构化结果及 JSON 的旧均值三字段仍固定为 `false/0.0/0.0`，不再计算统计值。
 
 独立 Flow 统计节点的均值经 C++ 包装结果转换到 C ABI 时，沿用上述三个成员。前景或背景无采样值时，对应 `double` 可为非有限值；调用方使用 `isfinite` 检查，不能把缺侧当作 `0.0`。C ABI 不完整表达统计组字段缺失、中值与空值，完整语义通过 `dlcv_infer_cpp_infer_json_c` 的 JSON 路径读取。节点公共格式见 `模块、流程与模型推理标准文档.md` 6.4.1。
 

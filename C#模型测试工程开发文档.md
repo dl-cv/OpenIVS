@@ -261,9 +261,11 @@ DlcvCSharpTest.exe foreground-background-statistics-selftest
 dlcv_infer_cpp_test.exe foreground-background-statistics-selftest
 ```
 
-以上为 C# 与 C++ 独立 Flow 统计节点的测试入口，不使用旧 `calc-mean-selftest` 作为新节点的验证结果。C# 22 组检查包括公共解析缺字段、原生默认值、中值及 null 往返，以及测试平台 `image/list` 和既有通道类型的实际节点分支路由；C++ 同样通过正式 `FlowGraphModel` 执行两组端口回归。构建后执行以上入口，并另运行 `dlcv_infer_cpp_test.exe object-mean-parsing-selftest` 检查缺字段状态。
+以上为 C# 与 C++ 独立 Flow 统计节点的测试入口。C# 23 组检查包括均值与中值独立开关、原有均值构造函数、公共解析入口、实际 PNG 裁剪／翻转，以及 JSON、可视化格式、结果签名、CLI 输出与两路摘要比较的统计回归；同时覆盖测试平台 `image/list` 与既有通道类型的实际节点分支路由。CLI 摘要回归反射调用 DlcvDemo 构建产物，执行前须构建 `DlcvDemo.csproj`。以上范围须在构建后执行自测核验。
 
-验收范围包括默认仅均值、严格布尔值、均值与中值四种组合、逐目标统计值更新、重复执行删除旧值、无 mask 或无采样时的状态、空前景或空背景的 `null`、全部通道共同参与标量统计、偶数样本的中值、RLE mask 与区域 mapping、source affine 逆映射后的原图采样、前置图像处理及缩放插值不替换统计值来源、mask 最近邻缩放与选区映射、4 元素 XYWH 框和 5 元素弧度旋转框、旋转框候选 `floor(max)+1` 与 mask 缩放 `floor/ceil` 分离，以及图像与结果其他属性不变。还需确认普通推理旧均值 JSON 为 `false/0.0/0.0`，C ABI 成员顺序与布局不变。预期语义见 `模块、流程与模型推理标准文档.md` 6.4.1；实际覆盖与结果须在构建运行后核验。
+包装结果的 `WithMean`、`WithMedian` 均为 `bool`，四个统计数值均为 `double`。数字键缺失时恢复为零，实际 JSON `null` 读取为 `double.NaN`；写回及文字显示按该组开关为 `true` 或任一侧为 `NaN` 决定是否保留。启用但选区完全无采样时必须保留 `false/null/null`，禁用后缺失键必须清除旧统计；旧 `false/0.0/0.0` 未计算结果允许省略该组。全前景、全背景和无采样域的实际节点输出均参加 JSON 往返检查，空侧不能变为零或 `NaN` 字符串。
+
+其他验收范围包括默认仅均值、严格布尔值、逐目标统计值更新、重复执行删除旧值、无 mask、全部通道共同参与标量统计、偶数样本的中值、RLE mask 与区域 mapping、source affine 逆映射后的原图采样、前置图像处理及缩放插值不替换统计值来源、mask 最近邻缩放与选区映射、4 元素 XYWH 框和 5 元素弧度旋转框、旋转框候选 `floor(max)+1` 与 mask 缩放 `floor/ceil` 分离，以及图像与结果其他属性不变。C ABI 成员顺序与布局不变。预期语义见 `模块、流程与模型推理标准文档.md` 6.4.1；实际覆盖与结果须在构建运行后核验。
 
 ## 7. 文档表述规则
 

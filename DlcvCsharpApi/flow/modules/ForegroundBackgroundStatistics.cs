@@ -193,8 +193,6 @@ namespace DlcvModules
             return new TransformationState(originalWidth, originalHeight, affine2x3: affine, outputSize: output);
         }
 
-        // 2026-10-09：当前变换图取样会让缩放/前置处理改变原图统计；必须逆映射选区，只读取 OriginalImage 全部通道。
-        // 同日直角旋转域发现最大整数坐标漏采样；候选上限用floor(max)+1，不能改变局部mask的floor/ceil定位范围。
         private static double?[] Measure(ModuleImage wrap, JObject entry, JObject det, Mat mask,
             bool mean, bool median, out bool sampled)
         {
@@ -234,6 +232,7 @@ namespace DlcvModules
                 left = box[0] - halfWidth; right = box[0] + halfWidth;
                 top = box[1] - halfHeight; bottom = box[1] + halfHeight;
             }
+            // 旋转选区的最大整数坐标仍可能在框内；候选范围多包含一个像素，不改变 mask 缩放范围。
             double candidateRight = box.Length == 5 ? Math.Floor(right) + 1 : Math.Ceiling(right);
             double candidateBottom = box.Length == 5 ? Math.Floor(bottom) + 1 : Math.Ceiling(bottom);
             left = Math.Floor(left); top = Math.Floor(top); right = Math.Ceiling(right); bottom = Math.Ceiling(bottom);

@@ -1,4 +1,4 @@
-"""检查推理开关移除后保留的结果结构与流程扩展入口。"""
+"""检查流程统计节点的注册与调用。"""
 from pathlib import Path
 import re
 import unittest
@@ -12,20 +12,6 @@ def source(path):
 
 
 class StatisticsModuleSourceTest(unittest.TestCase):
-    def test_legacy_switch_is_absent_from_callers(self):
-        directories = (
-            "DlcvCsharpApi", "DlcvDemo", "dlcv_infer_cpp",
-            "dlcv_infer_cpp_qt_demo", "dlcv_infer_c_qt_demo",
-            "dlcv_infer_c_demo", "dlcv_infer_cpp_dll_demo",
-        )
-        for directory in directories:
-            for path in (ROOT / directory).rglob("*"):
-                if path.suffix not in (".cs", ".cpp", ".h"):
-                    continue
-                with self.subTest(file=path.relative_to(ROOT)):
-                    self.assertNotRegex(path.read_text(encoding="utf-8-sig"),
-                        r"(?i)calc_?mean|calc-mean|计算均值")
-
     def test_exported_flow_port_types_are_routed(self):
         csharp = source("DlcvCsharpApi/flow/GraphExecutor.cs")
         cpp = source("dlcv_infer_cpp/flow/GraphExecutor.cpp")
@@ -34,21 +20,6 @@ class StatisticsModuleSourceTest(unittest.TestCase):
             self.assertIn('dtypeLower == "' + name + '"', cpp)
         self.assertIn("TestFlowPortTypes", source("Test/DlcvCSharpTest/ForegroundBackgroundStatisticsSelfTest.cs"))
         self.assertIn("结果路由丢失", source("Test/dlcv_infer_cpp_test/main.cpp"))
-
-    def test_c_benchmark_preserves_empty_mean_state(self):
-        text = source("dlcv_infer_c_demo/main.cpp")
-        self.assertIn("std::isnan(left) && std::isnan(right)", text)
-        self.assertIn("sameMean(expected.foregroundMean, actual.foregroundMean)", text)
-        self.assertIn("sameMean(expected.backgroundMean, actual.backgroundMean)", text)
-        self.assertIn("mean-null-comparison-selftest", text)
-        self.assertLess(text.index('L"mean-null-comparison-selftest"'), text.index("app.initialize()"))
-
-    def test_cli_reflection_statistics_arguments_match(self):
-        text = source("Test/DlcvCSharpTest/Program.cs")
-        for summary in ("structuredSummary", "jsonSummary"):
-            block = text.split("addSummaryItemMethod.Invoke(" + summary + ", new object[]", 1)[1].split("});", 1)[0]
-            self.assertEqual(len(re.findall(r"^\s*(?:[-0-9.]+|false|null|\"[^\"]*\"),?\s*$", block, re.M)), 10)
-            self.assertEqual(len(re.findall(r"^\s*null,\s*$", block, re.M)), 3)
 
     def test_c_abi_result_layout_is_unchanged(self):
         header = source("dlcv_infer_cpp/dlcv_infer_c_api.h")

@@ -266,7 +266,6 @@ static std::unordered_map<long long, int> BuildOutputConsumerCount(
     return counts;
 }
 
-// 2026-10-09：前端实际 image/list 端口被忽略，同一 DVST 返回0目标；必须识别两组类型，保留分支复制及最后消费者移动。
 std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
     const Json& node,
     const std::unordered_map<int, std::pair<int, int>>& linkToSource,

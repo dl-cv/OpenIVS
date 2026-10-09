@@ -37,16 +37,12 @@ struct ObjectResult {
     bool withBbox;                // 是否含 bbox
     bool withAngle;               // 是否含旋转角度
     float angle;                  // 旋转角度（弧度），-100 表示无效
-    bool withMean;                // 均值采样状态，存在性见 meanFieldsPresent
-    double foregroundMean;        // 前景均值，读取空值时为 NaN
-    double backgroundMean;        // 背景均值，读取空值时为 NaN
-    bool meanFieldsPresent = true;
-    bool foregroundMeanValid = true;
-    bool backgroundMeanValid = true;
-    bool medianFieldsPresent = false;
-    bool withMedian = false;
-    std::optional<double> foregroundMedian;
-    std::optional<double> backgroundMedian;
+    bool withMean;                // 是否有均值采样
+    double foregroundMean;        // 前景均值，无采样时为 NaN
+    double backgroundMean;        // 背景均值，无采样时为 NaN
+    bool withMedian = false;      // 是否有中值采样
+    double foregroundMedian = 0.0;
+    double backgroundMedian = 0.0;
 
     void ReadStatistics(const json& source);
     void WriteStatistics(json& target) const;
@@ -88,10 +84,9 @@ struct FlowNodeTiming {
 
 `ObjectResult` 是 OpenIVS 的 C++ 包装结果，不是 `DlcvCObjectResult` 原生 C ABI 结构。旧均值成员 `withMean`、`foregroundMean`、`backgroundMean` 分别保留 `bool`、`double`、`double` 类型，原构造函数继续可用。
 
-- `meanFieldsPresent`、`medianFieldsPresent` 表示对应组选项字段是否存在；`withMean`、`withMedian` 在字段存在时表示是否取得有效采样。
-- `foregroundMeanValid`、`backgroundMeanValid` 表示对应均值是否为数值。`ReadStatistics` 读取缺失或 JSON `null` 的侧值时，将有效性设为 `false`，并将旧 `double` 成员设为 `NaN`，不是 `0.0`。
-- `foregroundMedian`、`backgroundMedian` 为 `std::optional<double>`，无采样值时为 `std::nullopt`。
-- `ReadStatistics(const json&)` 读取字段存在性与空值；`WriteStatistics(json&) const` 先删除六个统计键，再按组选项存在性写入。均值有效性为 `false` 或中值 optional 为空时输出 JSON `null`，不存在的统计组不写入。
+- `withMean`、`withMedian` 表示是否取得对应统计项的有效采样；关闭的统计项保留 `false` 和数值默认值 `0.0`。
+- 已开启的统计项若某一侧没有像素，该侧值为 `NaN`；写入 JSON 时使用 `null`，不能当作数值 `0`。
+- `ReadStatistics(const json&)` 读取均值和中值；`WriteStatistics(json&) const` 清除旧统计键后写入本次结果。关闭的统计项不写入，无采样的统计项保留 `false/null/null`。
 
 ### 2.2 流程图相关数据结构
 
@@ -244,7 +239,7 @@ json InferOneOutJson(const cv::Mat& image, const json& params_json = nullptr);
 - 返回 JSON 数组，每个元素为单个检测结果对象。
 - 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
 - 普通模式下将底层返回的 `mask_ptr` mask 转换为点数组形式。
-- 既有 JSON 保留 `with_mean`、`foreground_mean`、`background_mean`，普通推理固定输出 `false`、`0.0`、`0.0`；普通推理不再计算统计值。C++ 包装结果的存在性与空值说明见 2.1，C ABI 布局另见 C API 文档。
+- 既有 JSON 保留 `with_mean`、`foreground_mean`、`background_mean`，普通推理固定输出 `false`、`0.0`、`0.0`；普通推理不再计算统计值。C++ 包装结果的统计标志与空值说明见 2.1，C ABI 布局另见 C API 文档。
 
 ### 4.6 释放模型
 
@@ -388,7 +383,7 @@ public:
 
 `post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。均值组仍使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 
-C++ 结构化包装结果通过 2.1 的存在性、均值有效性及 optional 中值保留统计语义，也可通过 `InferOneOutJson` 读取完整 JSON。普通模型旧均值 JSON 三字段仍固定为 `false/0.0/0.0`。
+C++ 结构化包装结果通过 `withMean`、`withMedian` 及对应 `double` 成员读取统计值，空侧使用 `NaN`，详见 2.1，也可通过 `InferOneOutJson` 读取完整 JSON。普通模型旧均值 JSON 三字段仍固定为 `false/0.0/0.0`。
 
 ---
 
@@ -625,7 +620,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 | 类型 | 当前字段 |
 | --- | --- |
-| `ObjectResult` | `categoryId`、`categoryName`、`score`、`area`、`bbox`、`withMask`、`mask`、`withBbox`、`withAngle`、`angle`、`withMean`、`foregroundMean`、`backgroundMean`、`meanFieldsPresent`、`foregroundMeanValid`、`backgroundMeanValid`、`medianFieldsPresent`、`withMedian`、`foregroundMedian`、`backgroundMedian` |
+| `ObjectResult` | `categoryId`、`categoryName`、`score`、`area`、`bbox`、`withMask`、`mask`、`withBbox`、`withAngle`、`angle`、`withMean`、`foregroundMean`、`backgroundMean`、`withMedian`、`foregroundMedian`、`backgroundMedian` |
 | `SampleResult` | `results` |
 | `Result` | `sampleResults` |
 | `FlowNodeTiming` | `nodeId`、`nodeType`、`nodeTitle`、`elapsedMs` |

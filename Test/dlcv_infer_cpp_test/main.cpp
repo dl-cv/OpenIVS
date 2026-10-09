@@ -3505,11 +3505,10 @@ int RunObjectMeanParsingSelfTest() {
     missingMeanObject.erase("background_mean");
     const dlcv_infer::Result parsedWithoutMean = probe.ParseToStructResult(missingMeanJson);
     const auto& objectWithoutMean = parsedWithoutMean.sampleResults[0].results[0];
-    if (objectWithoutMean.meanFieldsPresent || objectWithoutMean.withMean
-        || objectWithoutMean.foregroundMeanValid || objectWithoutMean.backgroundMeanValid
-        || !std::isnan(objectWithoutMean.foregroundMean)
-        || !std::isnan(objectWithoutMean.backgroundMean)) {
-        return fail("缺少均值字段时未保存缺失状态");
+    if (objectWithoutMean.withMean || objectWithoutMean.withMedian
+        || objectWithoutMean.foregroundMean != 0.0 || objectWithoutMean.backgroundMean != 0.0
+        || objectWithoutMean.foregroundMedian != 0.0 || objectWithoutMean.backgroundMedian != 0.0) {
+        return fail("未计算统计时未恢复默认值");
     }
 
     const std::vector<json> statisticsCases{
@@ -3527,31 +3526,36 @@ int RunObjectMeanParsingSelfTest() {
     dlcv_infer::ObjectResult typed = resultWithMean;
     for (const auto& statistics : statisticsCases) {
         typed.ReadStatistics(statistics);
-        const bool meanPresent = statistics.contains("with_mean"), medianPresent = statistics.contains("with_median");
-        const bool foregroundValid = statistics.contains("foreground_mean") && statistics.at("foreground_mean").is_number();
-        const bool backgroundValid = statistics.contains("background_mean") && statistics.at("background_mean").is_number();
-        if (typed.meanFieldsPresent != meanPresent || typed.medianFieldsPresent != medianPresent
-            || typed.foregroundMeanValid != foregroundValid || typed.backgroundMeanValid != backgroundValid
-            || typed.withMean != (meanPresent && statistics.at("with_mean").get<bool>())
-            || typed.withMedian != (medianPresent && statistics.at("with_median").get<bool>())) {
-            return fail("字段存在性、空值或采样标志解析错误");
+        if (typed.withMean != statistics.value("with_mean", false)
+            || typed.withMedian != statistics.value("with_median", false)) {
+            return fail("统计标志解析错误");
         }
-        if ((foregroundValid && typed.foregroundMean != statistics.at("foreground_mean").get<double>())
-            || (!foregroundValid && !std::isnan(typed.foregroundMean))
-            || (backgroundValid && typed.backgroundMean != statistics.at("background_mean").get<double>())
-            || (!backgroundValid && !std::isnan(typed.backgroundMean))) {
-            return fail("均值有效状态与数值不一致");
-        }
-        for (const auto& field : {std::make_pair("foreground_median", typed.foregroundMedian),
+        for (const auto& field : {std::make_pair("foreground_mean", typed.foregroundMean),
+            std::make_pair("background_mean", typed.backgroundMean),
+            std::make_pair("foreground_median", typed.foregroundMedian),
             std::make_pair("background_median", typed.backgroundMedian)}) {
-            const bool valid = statistics.contains(field.first) && statistics.at(field.first).is_number();
-            if (field.second.has_value() != valid || (valid && *field.second != statistics.at(field.first).get<double>())) {
-                return fail("中值 optional 解析错误或重复读取残留旧值");
+            if (!statistics.contains(field.first)) {
+                if (field.second != 0.0) return fail("未计算的统计值残留旧值");
+            } else if (statistics.at(field.first).is_null()) {
+                if (!std::isnan(field.second)) return fail("无采样值被转成了数值");
+            } else if (field.second != statistics.at(field.first).get<double>()) {
+                return fail("统计值解析错误");
             }
         }
         json fresh = {{"note", "保留"}};
         typed.WriteStatistics(fresh);
         json expected = statistics;
+        for (const std::string name : {"mean", "median"}) {
+            const std::string flag = "with_" + name;
+            const std::string foreground = "foreground_" + name, background = "background_" + name;
+            if (!statistics.value(flag, false)
+                && !statistics.value(foreground, json(0)).is_null()
+                && !statistics.value(background, json(0)).is_null()) {
+                expected.erase(flag);
+                expected.erase(foreground);
+                expected.erase(background);
+            }
+        }
         expected["note"] = "保留";
         if (fresh != expected) return fail("结果字段写入新对象后无法往返");
         json reused = {{"note", "保留"}, {"with_mean", true}, {"foreground_mean", -1}, {"background_mean", -1},
@@ -3568,7 +3572,8 @@ int RunObjectMeanParsingSelfTest() {
         const auto typedParsed = probe.ParseToStructResult(typedJson);
         json roundtrip = json::object();
         typedParsed.sampleResults[0].results[0].WriteStatistics(roundtrip);
-        if (roundtrip != statistics) return fail("ParseToStructResult 统计字段无法往返");
+        expected.erase("note");
+        if (roundtrip != expected) return fail("ParseToStructResult 统计字段解析或输出错误");
     }
     PrintUtf8Line("目标均值解析自测通过");
     return 0;

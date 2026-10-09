@@ -387,21 +387,13 @@ void AddSummaryItem(
     PathSummary& summary,
     double score,
     const std::string& category,
-    bool withMean,
-    double foregroundMean,
-    double backgroundMean,
     double threshold,
-    json statistics = nullptr) {
+    const json& statistics) {
     const int index = summary.count;
     summary.count += 1;
     summary.categories.push_back(category);
     summary.comparableCategories.push_back(category);
     summary.comparableScores.push_back(score);
-    if (statistics.is_null()) {
-        statistics = json{ {"with_mean", withMean},
-            {"foreground_mean", std::isfinite(foregroundMean) ? json(foregroundMean) : json(nullptr)},
-            {"background_mean", std::isfinite(backgroundMean) ? json(backgroundMean) : json(nullptr)} };
-    }
     summary.statistics.push_back(statistics);
 
     if (!std::isfinite(score)) {
@@ -434,40 +426,11 @@ PathSummary SummarizeStructured(const dlcv_infer::Result& result, double thresho
                 summary,
                 static_cast<double>(object.score),
                 dlcv_infer::convertGbkToUtf8(object.categoryName),
-                object.withMean,
-                static_cast<double>(object.foregroundMean),
-                static_cast<double>(object.backgroundMean),
-                threshold, statistics);
+                threshold,
+                statistics);
         }
     }
     return summary;
-}
-
-bool TryReadJsonBool(const json& token, const char* key, bool& value) {
-    try {
-        if (token.is_object() && token.contains(key) && token.at(key).is_boolean()) {
-            value = token.at(key).get<bool>();
-            return true;
-        }
-    } catch (...) {
-    }
-    return false;
-}
-
-bool TryReadJsonNumber(const json& token, const char* key, double& value) {
-    try {
-        if (!token.is_object() || !token.contains(key)) {
-            return false;
-        }
-        const json& jsonValue = token.at(key);
-        if (jsonValue.is_number()) {
-            value = jsonValue.get<double>();
-            return std::isfinite(value);
-        }
-
-    } catch (...) {
-    }
-    return false;
 }
 
 bool TryReadJsonScore(const json& token, double& score) {
@@ -507,10 +470,8 @@ PathSummary SummarizeJson(const json& result, double threshold) {
                 summary,
                 std::numeric_limits<double>::quiet_NaN(),
                 std::string(),
-                false,
-                std::numeric_limits<double>::quiet_NaN(),
-                std::numeric_limits<double>::quiet_NaN(),
-                threshold);
+                threshold,
+                json::object());
             continue;
         }
 
@@ -524,13 +485,7 @@ PathSummary SummarizeJson(const json& result, double threshold) {
 
         double score = std::numeric_limits<double>::quiet_NaN();
         (void)TryReadJsonScore(token, score);
-        bool withMean = false;
-        double foregroundMean = std::numeric_limits<double>::quiet_NaN();
-        double backgroundMean = std::numeric_limits<double>::quiet_NaN();
-        (void)TryReadJsonBool(token, "with_mean", withMean);
-        (void)TryReadJsonNumber(token, "foreground_mean", foregroundMean);
-        (void)TryReadJsonNumber(token, "background_mean", backgroundMean);
-        AddSummaryItem(summary, score, category, withMean, foregroundMean, backgroundMean, threshold, ReadStatisticsFields(token));
+        AddSummaryItem(summary, score, category, threshold, ReadStatisticsFields(token));
     }
     return summary;
 }
@@ -567,14 +522,16 @@ bool AreConsistent(const PathSummary& left, const PathSummary& right) {
             std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) return false;
         const auto& leftFields = left.statistics.at(i);
         const auto& rightFields = right.statistics.at(i);
-        if (leftFields.size() != rightFields.size()) return false;
-        for (auto field = leftFields.begin(); field != leftFields.end(); ++field) {
-            if (!rightFields.contains(field.key())) return false;
-            const auto& value = rightFields.at(field.key());
-            if (field.value().is_number() && value.is_number()) {
-                const double l = field.value().get<double>(), r = value.get<double>();
-                if (!std::isfinite(l) || !std::isfinite(r) || std::abs(l - r) > 1e-6) return false;
-            } else if (field.value() != value) return false;
+        if (leftFields.value("with_mean", false) != rightFields.value("with_mean", false) ||
+            leftFields.value("with_median", false) != rightFields.value("with_median", false)) return false;
+        for (const char* key : { "foreground_mean", "background_mean", "foreground_median", "background_median" }) {
+            const json leftValue = leftFields.value(key, json(0.0));
+            const json rightValue = rightFields.value(key, json(0.0));
+            if (leftValue.is_number() && rightValue.is_number()) {
+                const double leftNumber = leftValue.get<double>(), rightNumber = rightValue.get<double>();
+                if (!std::isfinite(leftNumber) || !std::isfinite(rightNumber) ||
+                    std::abs(leftNumber - rightNumber) > 1e-6) return false;
+            } else if (leftValue != rightValue) return false;
         }
     }
     return true;

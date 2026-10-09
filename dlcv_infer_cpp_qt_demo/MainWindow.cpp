@@ -488,15 +488,15 @@ QString MainWindow::formatResultText(const dlcv_infer::Result& output) const {
                 .arg(angle, 0, 'f', 3)
                 .arg(degrees, 0, 'f', 1);
         }
-        if (obj.meanFieldsPresent && (obj.withMean || !obj.foregroundMeanValid || !obj.backgroundMeanValid)) {
+        if (obj.withMean || std::isnan(obj.foregroundMean) || std::isnan(obj.backgroundMean)) {
             text += QString("  前景均值=%1  背景均值=%2")
-                .arg(obj.foregroundMeanValid ? QString::number(obj.foregroundMean, 'f', 4) : QStringLiteral("无采样"))
-                .arg(obj.backgroundMeanValid ? QString::number(obj.backgroundMean, 'f', 4) : QStringLiteral("无采样"));
+                .arg(std::isfinite(obj.foregroundMean) ? QString::number(obj.foregroundMean, 'f', 4) : QStringLiteral("无采样"))
+                .arg(std::isfinite(obj.backgroundMean) ? QString::number(obj.backgroundMean, 'f', 4) : QStringLiteral("无采样"));
         }
-        if (obj.medianFieldsPresent) {
+        if (obj.withMedian || std::isnan(obj.foregroundMedian) || std::isnan(obj.backgroundMedian)) {
             text += QString("  前景中值=%1  背景中值=%2")
-                .arg(obj.foregroundMedian ? QString::number(*obj.foregroundMedian, 'f', 4) : QStringLiteral("无采样"))
-                .arg(obj.backgroundMedian ? QString::number(*obj.backgroundMedian, 'f', 4) : QStringLiteral("无采样"));
+                .arg(std::isfinite(obj.foregroundMedian) ? QString::number(obj.foregroundMedian, 'f', 4) : QStringLiteral("无采样"))
+                .arg(std::isfinite(obj.backgroundMedian) ? QString::number(obj.backgroundMedian, 'f', 4) : QStringLiteral("无采样"));
         }
         text += "\n";
     }

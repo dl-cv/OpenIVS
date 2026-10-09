@@ -63,8 +63,6 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    // 2026-10-09：ui-test在此仅允许offscreen，导致已有Windows完整窗验证入口提前退出2；
-    // 同时允许windows，由CliRunner校验临时输出并自动关闭，普通GUI启动不变。
     const QByteArray uiTestPlatform = qgetenv("QT_QPA_PLATFORM").toLower();
     if (argc > 1 && QByteArray(argv[1]) == "ui-test" &&
         uiTestPlatform != "offscreen" && uiTestPlatform != "windows") {

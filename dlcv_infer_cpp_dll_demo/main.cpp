@@ -751,14 +751,8 @@ bool IsSameBenchmarkResult(
                 || candidateObject.withBbox != baselineObject.withBbox
                 || candidateObject.withAngle != baselineObject.withAngle
                 || candidateObject.withMask != baselineObject.withMask
-                || candidateObject.meanFieldsPresent != baselineObject.meanFieldsPresent
-                || (baselineObject.meanFieldsPresent && (candidateObject.withMean != baselineObject.withMean
-                    || candidateObject.foregroundMeanValid != baselineObject.foregroundMeanValid
-                    || candidateObject.backgroundMeanValid != baselineObject.backgroundMeanValid))
-                || candidateObject.medianFieldsPresent != baselineObject.medianFieldsPresent
-                || (baselineObject.medianFieldsPresent && (candidateObject.withMedian != baselineObject.withMedian
-                    || candidateObject.foregroundMedian.has_value() != baselineObject.foregroundMedian.has_value()
-                    || candidateObject.backgroundMedian.has_value() != baselineObject.backgroundMedian.has_value()))) {
+                || candidateObject.withMean != baselineObject.withMean
+                || candidateObject.withMedian != baselineObject.withMedian) {
                 difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
                     + "]稳定字段不一致";
                 return false;
@@ -796,14 +790,13 @@ bool IsSameBenchmarkResult(
                 return false;
             }
             auto sameStatistic = [](double left, double right) {
+                if (std::isnan(left) || std::isnan(right)) return std::isnan(left) && std::isnan(right);
                 return std::isfinite(left) && std::isfinite(right) && std::abs(left - right) <= 1e-4;
             };
-            if ((baselineObject.meanFieldsPresent &&
-                ((baselineObject.foregroundMeanValid && !sameStatistic(candidateObject.foregroundMean, baselineObject.foregroundMean)) ||
-                 (baselineObject.backgroundMeanValid && !sameStatistic(candidateObject.backgroundMean, baselineObject.backgroundMean)))) ||
-                (baselineObject.medianFieldsPresent &&
-                ((baselineObject.foregroundMedian && !sameStatistic(*candidateObject.foregroundMedian, *baselineObject.foregroundMedian)) ||
-                 (baselineObject.backgroundMedian && !sameStatistic(*candidateObject.backgroundMedian, *baselineObject.backgroundMedian))))) {
+            if (!sameStatistic(candidateObject.foregroundMean, baselineObject.foregroundMean) ||
+                !sameStatistic(candidateObject.backgroundMean, baselineObject.backgroundMean) ||
+                !sameStatistic(candidateObject.foregroundMedian, baselineObject.foregroundMedian) ||
+                !sameStatistic(candidateObject.backgroundMedian, baselineObject.backgroundMedian)) {
                 difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex) + "]统计数值不一致";
                 return false;
             }

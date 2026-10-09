@@ -89,46 +89,37 @@ namespace dlcv_infer_csharp
             /// </summary>
             public double BackgroundMean { get; set; }
 
-            /// <summary>均值选项是否存在于结果中。</summary>
-            private bool meanFieldsAbsent;
-            public bool MeanFieldsPresent { get => !meanFieldsAbsent; set => meanFieldsAbsent = !value; }
-            public bool ForegroundMeanValid => !double.IsNaN(ForegroundMean) && !double.IsInfinity(ForegroundMean);
-            public bool BackgroundMeanValid => !double.IsNaN(BackgroundMean) && !double.IsInfinity(BackgroundMean);
+            /// <summary>是否包含前景与背景中值。</summary>
+            public bool WithMedian { get; set; }
+            public double ForegroundMedian { get; set; }
+            public double BackgroundMedian { get; set; }
 
-            /// <summary>中值选项，null 表示结果没有该选项。</summary>
-            public bool? WithMedian { get; set; }
-            public double? ForegroundMedian { get; set; }
-            public double? BackgroundMedian { get; set; }
-
-            // 2026-10-09：缺失统计键不能变成默认0，否则关闭选项与空采样混淆；存在性单独保存，null 用 NaN/可空中值往返。
             public void ReadStatistics(JObject source)
             {
-                MeanFieldsPresent = source["with_mean"] != null;
-                WithMean = MeanFieldsPresent && (source.Value<bool?>("with_mean") ?? false);
-                double? foregroundMean = MeanFieldsPresent ? source.Value<double?>("foreground_mean") : null;
-                double? backgroundMean = MeanFieldsPresent ? source.Value<double?>("background_mean") : null;
-                ForegroundMean = foregroundMean ?? double.NaN;
-                BackgroundMean = backgroundMean ?? double.NaN;
-                WithMedian = source.Value<bool?>("with_median");
-                ForegroundMedian = source.Value<double?>("foreground_median");
-                BackgroundMedian = source.Value<double?>("background_median");
+                WithMean = source.Value<bool?>("with_mean") ?? false;
+                WithMedian = source.Value<bool?>("with_median") ?? false;
+                // 空侧用 NaN 保存，输出 JSON 时转为 null，避免与真实零值混淆。
+                ForegroundMean = source["foreground_mean"] == null ? 0.0 : source.Value<double?>("foreground_mean") ?? double.NaN;
+                BackgroundMean = source["background_mean"] == null ? 0.0 : source.Value<double?>("background_mean") ?? double.NaN;
+                ForegroundMedian = source["foreground_median"] == null ? 0.0 : source.Value<double?>("foreground_median") ?? double.NaN;
+                BackgroundMedian = source["background_median"] == null ? 0.0 : source.Value<double?>("background_median") ?? double.NaN;
             }
 
             public void WriteStatistics(JObject target)
             {
                 foreach (string key in new[] { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
                     target.Remove(key);
-                if (MeanFieldsPresent)
+                if (WithMean || double.IsNaN(ForegroundMean) || double.IsNaN(BackgroundMean))
                 {
                     target["with_mean"] = WithMean;
-                    target["foreground_mean"] = ForegroundMeanValid ? (double?)ForegroundMean : null;
-                    target["background_mean"] = BackgroundMeanValid ? (double?)BackgroundMean : null;
+                    target["foreground_mean"] = double.IsNaN(ForegroundMean) || double.IsInfinity(ForegroundMean) ? JValue.CreateNull() : new JValue(ForegroundMean);
+                    target["background_mean"] = double.IsNaN(BackgroundMean) || double.IsInfinity(BackgroundMean) ? JValue.CreateNull() : new JValue(BackgroundMean);
                 }
-                if (WithMedian.HasValue)
+                if (WithMedian || double.IsNaN(ForegroundMedian) || double.IsNaN(BackgroundMedian))
                 {
-                    target["with_median"] = WithMedian.Value;
-                    target["foreground_median"] = ForegroundMedian;
-                    target["background_median"] = BackgroundMedian;
+                    target["with_median"] = WithMedian;
+                    target["foreground_median"] = double.IsNaN(ForegroundMedian) || double.IsInfinity(ForegroundMedian) ? JValue.CreateNull() : new JValue(ForegroundMedian);
+                    target["background_median"] = double.IsNaN(BackgroundMedian) || double.IsInfinity(BackgroundMedian) ? JValue.CreateNull() : new JValue(BackgroundMedian);
                 }
             }
 
@@ -159,22 +150,21 @@ namespace dlcv_infer_csharp
                 WithMean = withMean;
                 ForegroundMean = foregroundMean;
                 BackgroundMean = backgroundMean;
-                meanFieldsAbsent = false;
-                WithMedian = null;
-                ForegroundMedian = null;
-                BackgroundMedian = null;
+                WithMedian = false;
+                ForegroundMedian = 0.0;
+                BackgroundMedian = 0.0;
             }
 
-            private static string FormatStatistic(double? value) => value.HasValue ? value.Value.ToString("F4") : "无采样";
+            private static string FormatStatistic(double value) => double.IsNaN(value) || double.IsInfinity(value) ? "无采样" : value.ToString("F4");
 
             public string StatisticsToString()
             {
                 var sb = new StringBuilder();
-                if (MeanFieldsPresent && (WithMean || !ForegroundMeanValid || !BackgroundMeanValid))
+                if (WithMean || double.IsNaN(ForegroundMean) || double.IsNaN(BackgroundMean))
                 {
-                    sb.Append($"前景均值: {FormatStatistic(ForegroundMeanValid ? (double?)ForegroundMean : null)}, 背景均值: {FormatStatistic(BackgroundMeanValid ? (double?)BackgroundMean : null)}, ");
+                    sb.Append($"前景均值: {FormatStatistic(ForegroundMean)}, 背景均值: {FormatStatistic(BackgroundMean)}, ");
                 }
-                if (WithMedian.HasValue)
+                if (WithMedian || double.IsNaN(ForegroundMedian) || double.IsNaN(BackgroundMedian))
                 {
                     sb.Append($"前景中值: {FormatStatistic(ForegroundMedian)}, 背景中值: {FormatStatistic(BackgroundMedian)}, ");
                 }
