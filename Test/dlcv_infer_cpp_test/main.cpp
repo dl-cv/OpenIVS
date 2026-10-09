@@ -2976,6 +2976,57 @@ int RunForegroundBackgroundStatisticsSelfTest() {
         const json both{{"mean", true}, {"median", true}};
         const cv::Mat gray = (cv::Mat_<unsigned char>(2, 3) << 2, 4, 20, 6, 8, 60);
         const cv::Mat mask = (cv::Mat_<unsigned char>(2, 3) << 255, 255, 0, 255, 255, 0);
+        const auto inputFactory = ModuleRegistry::Get("input/image");
+        const auto cropFactory = ModuleRegistry::Get("pre_process/coordinate_crop");
+        const auto flipFactory = ModuleRegistry::Get("pre_process/image_flip");
+        check(inputFactory && cropFactory && flipFactory, "真实输入、裁剪或翻转节点未注册");
+        const std::string flipPath = JoinPathA(BuildTempRectCorrectionDir(), "statistics-flip.png");
+        for (bool cropped : {false, true})
+        for (const auto& directions : std::vector<std::vector<std::string>>{{}, {"水平"}, {"竖直"}, {"水平", "竖直"}}) {
+            const cv::Mat source = (cv::Mat_<unsigned char>(2, 3) << 1, 10, 100, 2, 20, 200);
+            cv::Mat expected;
+            cv::cvtColor(source, expected, cv::COLOR_GRAY2RGB);
+            cv::Mat canvas(4, 5, CV_8UC3, cv::Scalar::all(240));
+            expected.copyTo(canvas(cv::Rect(1, 1, 3, 2)));
+            check(cv::imwrite(flipPath, cropped ? canvas : expected), "PNG 写入失败");
+            auto inputModule = inputFactory(1, "PNG", json{{"path", flipPath}}, nullptr);
+            auto* input = dynamic_cast<BaseInputModule*>(inputModule.get());
+            check(input != nullptr, "输入节点不是实际输入模块");
+            auto current = input->Generate();
+            check(current.ImageList.size() == 1 && current.ImageList[0].ImageObject.type() == CV_8UC3,
+                "PNG 未经过真实三通道输入模块");
+            if (cropped) {
+                auto crop = cropFactory(2, "裁剪", json{{"x", 1}, {"y", 1}, {"w", 3}, {"h", 2}}, nullptr);
+                current = crop->Process(current.ImageList, current.ResultList);
+            }
+            for (const auto& direction : directions) {
+                auto flip = flipFactory(3, "翻转", json{{"direction", direction}}, nullptr);
+                current = flip->Process(current.ImageList, current.ResultList);
+                cv::flip(expected, expected, direction == "水平" ? 1 : 0);
+            }
+            check(current.ImageList.size() == 1, "裁剪翻转丢失图像");
+            const auto& image = current.ImageList[0];
+            check(image.ImageObject.size() == expected.size() &&
+                cv::norm(image.ImageObject, expected, cv::NORM_INF) == 0, "实际裁剪翻转像素错误");
+            for (bool mixed : {false, true}) {
+                cv::Mat sampleMask(2, 3, CV_8UC1, cv::Scalar::all(255));
+                if (mixed) cv::inRange(image.ImageObject, cv::Scalar::all(0), cv::Scalar::all(20), sampleMask);
+                auto inputResults = entries(detection(sampleMask, json::array({0, 0, 3, 2})));
+                inputResults[0]["transform"] = image.TransformState.ToJson();
+                const auto output = run(current.ImageList, inputResults, both);
+                const auto& item = output.ResultList[0]["sample_results"][0];
+                number(item.at("foreground_mean"), mixed ? 8.25 : 55.5, "实际翻转前景均值错误");
+                number(item.at("foreground_median"), mixed ? 6 : 15, "实际翻转前景中值错误");
+                if (mixed) {
+                    number(item.at("background_mean"), 150, "实际翻转背景均值错误");
+                    number(item.at("background_median"), 150, "实际翻转背景中值错误");
+                } else {
+                    check(item.at("background_mean").is_null() && item.at("background_median").is_null(),
+                        "空背景未返回 null");
+                }
+            }
+        }
+        std::remove(flipPath.c_str());
         // 测试平台导出 image/list，旧工程使用 image_chan/result_chan；两者均保留分支数据。
         for (const auto& ports : {std::pair<std::string, std::string>{"image", "list"},
                                   std::pair<std::string, std::string>{"image_chan", "result_chan"}}) {

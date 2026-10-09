@@ -44,6 +44,7 @@ namespace DlcvCSharpTest
             check("图外 bbox 完整缩放逆比例取样", TestResizeRounding);
             check("整图 RLE 与目标局部域", TestFullImageMask);
             check("结果选区逆变换至原图", TestAffine);
+            check("PNG 实际裁剪和翻转链路", TestPngFlipChain);
             check("非均匀原图缩放及前置处理不影响统计", TestOriginalImageAfterResize);
             check("延迟图像仍采样原图且输入不变", TestDeferredImage);
             check("原图编号选择及错配拒绝", TestOriginIndex);
@@ -562,6 +563,62 @@ namespace DlcvCSharpTest
                 Statistics(target, "mean", true, true, 102, 103);
                 Statistics(target, "median", true, true, 102, 103);
             }
+        }
+
+        private static void TestPngFlipChain()
+        {
+            string temp = Path.GetFullPath(Path.GetTempPath());
+            string directory = Path.GetFullPath(Path.Combine(temp, "dlcv-statistics-flip-" + Guid.NewGuid().ToString("N")));
+            Require(directory.StartsWith(temp, StringComparison.OrdinalIgnoreCase), "测试目录必须位于系统临时目录");
+            Directory.CreateDirectory(directory);
+            try
+            {
+                foreach (bool cropped in new[] { false, true })
+                foreach (string[] directions in new[] { new string[0], new[] { "水平" }, new[] { "竖直" }, new[] { "水平", "竖直" } })
+                using (var source = Gray(new byte[,] { { 1, 10, 100 }, { 2, 20, 200 } }))
+                using (var canvas = new Mat(4, 5, MatType.CV_8UC3, Scalar.All(240)))
+                using (var expected = new Mat())
+                {
+                    Cv2.CvtColor(source, expected, ColorConversionCodes.GRAY2RGB);
+                    using (var region = new Mat(canvas, new Rect(1, 1, 3, 2))) expected.CopyTo(region);
+                    string path = Path.Combine(directory, "input.png");
+                    Require(Cv2.ImWrite(path, cropped ? canvas : expected), "PNG 写入失败");
+                    var owned = new HashSet<Mat>();
+                    try
+                    {
+                        ModuleIO current = new InputImage(1, properties: new Dictionary<string, object> { ["path"] = path }).Generate();
+                        Require(current.ImageList.Count == 1 && current.ImageList[0].ImageObject.Type() == MatType.CV_8UC3,
+                            "PNG 未经过真实三通道输入模块");
+                        owned.Add(current.ImageList[0].ImageObject);
+                        if (cropped)
+                        {
+                            current = new CoordinateCrop(2, properties: new Dictionary<string, object>
+                                { ["x"] = 1, ["y"] = 1, ["w"] = 3, ["h"] = 2 }).Process(current.ImageList, current.ResultList);
+                            owned.Add(current.ImageList[0].ImageObject);
+                        }
+                        foreach (string direction in directions)
+                        {
+                            current = new ImageFlip(3, properties: new Dictionary<string, object> { ["direction"] = direction })
+                                .Process(current.ImageList, current.ResultList);
+                            owned.Add(current.ImageList[0].ImageObject);
+                            Cv2.Flip(expected, expected, direction == "水平" ? FlipMode.Y : FlipMode.X);
+                        }
+                        var image = current.ImageList[0];
+                        Require(EqualBytes(Bytes(expected), Bytes(image.ImageObject)), "实际裁剪翻转像素错误");
+                        foreach (bool mixed in new[] { false, true })
+                        using (var mask = new Mat(2, 3, MatType.CV_8UC1, Scalar.All(255)))
+                        {
+                            if (mixed) Cv2.InRange(image.ImageObject, Scalar.All(0), Scalar.All(20), mask);
+                            var input = Entries(Detection(new JArray(0, 0, 3, 2), mask), state: image.TransformState);
+                            var target = Target(Execute(current.ImageList, input, Options(true, true)));
+                            Statistics(target, "mean", true, true, mixed ? 8.25 : 55.5, mixed ? (double?)150 : null);
+                            Statistics(target, "median", true, true, mixed ? 6 : 15, mixed ? (double?)150 : null);
+                        }
+                    }
+                    finally { foreach (var image in owned) image.Dispose(); }
+                }
+            }
+            finally { Directory.Delete(directory, true); }
         }
 
         private static void TestOriginalImageAfterResize()
